@@ -48,3 +48,13 @@
 **Date:** 2026-02-21
 **Decision:** The Python backend application is named `ontoforge-server`.
 **Reason:** Clear product identity. Distinguishes the server from frontend apps.
+
+### 007 — Supersedes 005: Two separate Neo4j instances, fully decoupled stores
+**Date:** 2026-02-21
+**Decision:** Model DB (multiple ontologies, schema only) and Instance DB (one ontology, copied schema + instance data) as separate Neo4j instances. Modeling store talks only to Model DB, runtime store talks only to Instance DB. No cross-database references. A deliberate provisioning step copies schema from Model DB to Instance DB.
+**Reason:** Full decoupling. Each module is self-contained at the database level. The Instance DB is portable and independent once provisioned.
+
+### 008 — Docker Compose for local infrastructure
+**Date:** 2026-02-21
+**Decision:** Neo4j instances managed via Docker Compose. The backend never starts containers — it connects to pre-configured instances and can bootstrap their schema (constraints, indexes). Phase 1 only needs `neo4j-model`.
+**Reason:** Explicit infrastructure control. The user decides what runs.

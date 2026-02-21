@@ -11,9 +11,10 @@ OntoForge consists of:
 - **modeling** (frontend) — React app for schema design
 - **runtime** (frontend) — React app for instance management
 - **MCP adapters** (deferred) — likely split into modeling-mcp and runtime-mcp, granularity TBD
-- **Neo4j** — single database holding both schema and instance data
+- **Neo4j Model DB** — holds all ontology schemas, multiple ontologies isolated by `ontologyId`
+- **Neo4j Instance DB** — holds a copied schema and instance data for one ontology
 
-The backend exposes two route trees (`/api/model`, `/api/runtime`) from one application. Frontends communicate with the backend via REST only. The MCP layer will wrap REST endpoints for AI-driven access.
+The backend exposes two route trees (`/api/model`, `/api/runtime`) from one application. Each module talks to its own Neo4j instance — no cross-database references at query time. Frontends communicate with the backend via REST only. The MCP layer will wrap REST endpoints for AI-driven access.
 
 ## 2. Naming Conventions
 
@@ -23,13 +24,15 @@ The backend exposes two route trees (`/api/model`, `/api/runtime`) from one appl
 | Backend module | Schema CRUD, validation, export/import | `modeling` |
 | Backend module | Instance CRUD, search, traversal | `runtime` |
 | Backend module | Shared infrastructure | `core` |
-| Store | Schema persistence | `modeling store` |
-| Store | Instance persistence (depends on modeling store) | `runtime store` |
+| Store | Schema persistence (Model DB) | `modeling store` |
+| Store | Instance persistence (Instance DB) | `runtime store` |
 | API route | Schema modeling | `/api/model` |
 | API route | Runtime operations | `/api/runtime` |
 | Frontend app | Schema design UI | `modeling` |
 | Frontend app | Instance management UI | `runtime` |
 | MCP | Adapter layer | TBD — likely `modeling-mcp`, `runtime-mcp` |
+| Infrastructure | Schema library database | `neo4j-model` |
+| Infrastructure | Runtime instance database | `neo4j-instance` |
 
 <!-- TODO: Neo4j label/relationship naming scheme (§4) -->
 
@@ -39,16 +42,18 @@ The backend exposes two route trees (`/api/model`, `/api/runtime`) from one appl
 
 The `ontoforge-server` is a modular monolith with three core modules:
 
-- **core** — shared infrastructure: Neo4j connection, configuration, middleware, error handling
-- **modeling** — schema management, depends only on `core`
-- **runtime** — instance management, depends on `core` and reads schema via the modeling store
+- **core** — shared infrastructure: Neo4j connections, configuration, middleware, error handling
+- **modeling** — schema management, talks only to the Model DB
+- **runtime** — instance management, talks only to the Instance DB
+
+The modules are fully decoupled at the database level. Each connects to its own Neo4j instance. The only bridge between them is a deliberate provisioning step that copies a schema from Model DB to Instance DB.
 
 <!-- TODO: Top-level Python package structure -->
 <!-- TODO: Web framework choice and rationale -->
 
 ### 3.2 Modeling Module
 
-Owns all schema operations. Standalone — no dependency on the runtime module.
+Owns all schema operations. Standalone — no dependency on the runtime module or Instance DB.
 
 - Ontology metadata CRUD
 - Entity type and relation type CRUD
@@ -56,19 +61,17 @@ Owns all schema operations. Standalone — no dependency on the runtime module.
 - Schema validation
 - Export/import via a Neo4j-independent JSON transfer format
 
-The modeling store provides read access to schema data that the runtime store depends on.
-
 ### 3.3 Runtime Module
 
 <!-- TODO (Phase 2): Detail when runtime implementation begins -->
 
-Owns all instance operations. Depends on the modeling store for schema reads (validation, generic persistence).
+Owns all instance operations. Talks only to the Instance DB, which contains its own copy of the schema.
 
 - Generic entity and relation instance CRUD
-- Instance validation against schema
+- Instance validation against the schema copy in the Instance DB
 - Search, filtering, neighborhood traversal
 
-Dependency direction: `runtime → modeling store` (read-only). Never the reverse.
+No dependency on the modeling module or Model DB at query time.
 
 ### 3.4 MCP Layer
 
@@ -79,12 +82,12 @@ Dependency direction: `runtime → modeling store` (read-only). Never the revers
 
 ## 4. Neo4j Storage Model
 
-One Neo4j database holds two layers of data:
+Two separate Neo4j instances serve different purposes:
 
-- **Schema layer** — the ontology definition (entity types, relation types, property definitions). Written and read by the modeling module.
-- **Instance layer** — concrete nodes and relationships conforming to the schema. Written and read by the runtime module.
+- **Model DB** — the schema library. Holds multiple ontologies, each isolated by `ontologyId`. Only the modeling module reads and writes here.
+- **Instance DB** — the working database. Holds a copied schema for exactly one ontology plus all its instance data. Only the runtime module reads and writes here.
 
-The schema layer describes the instance layer — it is a meta-schema within the same graph.
+A deliberate **provisioning step** copies an ontology schema from the Model DB into the Instance DB. After provisioning, the Instance DB is fully self-contained — no cross-database references.
 
 ### 4.1 Schema Representation
 
@@ -92,8 +95,9 @@ The schema layer describes the instance layer — it is a meta-schema within the
 <!-- - Node labels for ontology, entity types, relation types -->
 <!-- - Relationships between schema objects -->
 <!-- - Property definitions storage strategy -->
+<!-- - Same structure in both Model DB and Instance DB (copy is structural) -->
 
-**JSON transfer format:** The schema has a canonical JSON representation independent of Neo4j. This format is used for export/import and serves as the portability layer. It defines what a schema looks like regardless of storage backend.
+**JSON transfer format:** The schema has a canonical JSON representation independent of Neo4j. This format is used for export/import and serves as the portability layer. The provisioning step may use this same format internally.
 
 <!-- TODO: Define the JSON transfer format structure -->
 
@@ -102,11 +106,13 @@ The schema layer describes the instance layer — it is a meta-schema within the
 <!-- TODO (Phase 2): How instance data is stored -->
 <!-- - Node labels and relationship types for instances -->
 <!-- - UUID strategy for stable identifiers -->
-<!-- - How instances reference their schema types -->
+<!-- - How instances reference their schema types within the Instance DB -->
 
 ### 4.3 Ontology Isolation
 
-All schema and instance data is scoped by `ontologyId`. Both layers coexist in the same Neo4j database, isolated by this identifier.
+In the **Model DB**, multiple ontologies coexist, isolated by `ontologyId`.
+
+In the **Instance DB**, only one ontology exists. The `ontologyId` is still present for consistency but acts as an assertion rather than a filter.
 
 <!-- TODO: X-Ontology-Id header extraction (middleware or dependency injection) -->
 <!-- TODO: Scoping strategy for all queries -->
@@ -164,3 +170,19 @@ Full contract: see `api-contracts/runtime-api.md`
 <!-- - HTTP request → middleware (ontology extraction) → route → validation → service → repository → Neo4j → response -->
 <!-- - Layer responsibilities and boundaries -->
 <!-- - Error propagation strategy -->
+
+## 8. Local Development
+
+Dependencies are managed via Docker Compose. The backend never starts containers — it connects to pre-configured Neo4j instances.
+
+**Docker Compose services:**
+- `neo4j-model` — Model DB for schema storage
+- `neo4j-instance` — Instance DB for runtime data
+
+During Phase 1 (modeling only), only `neo4j-model` is needed.
+
+**Configuration:** The backend uses environment variables for each database connection:
+
+<!-- TODO: Define exact config variables (URI, credentials per DB) -->
+<!-- TODO: Define database bootstrap process (constraints, indexes, initial structure) -->
+<!-- TODO: Define the provisioning step (copy schema from Model DB → Instance DB) -->

@@ -233,8 +233,8 @@ Monorepo with a single Python backend (modular monolith) and React frontends. Th
 
 ## 9.2 Data Storage
 
-- A graph database is used as the persistence layer.
-- Schema and instance data may coexist in the same database.
+- Neo4j is used as the persistence layer.
+- Schema and instance data are stored in separate Neo4j instances. See `docs/architecture.md` §4 for details.
 - Each node and relationship includes an `ontologyId` for isolation.
 - Stable UUIDs are used for instance identifiers.
 - Internal database IDs are never exposed externally.

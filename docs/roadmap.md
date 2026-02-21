@@ -15,7 +15,7 @@ Define component boundaries, data flow, Neo4j schema conventions, and API contra
 - [ ] Establish naming conventions for all components (frontend app names TBD — "studio" rejected; runtime route naming TBD — "use" under review)
 - [ ] Project scaffolding (directory structure, pyproject.toml, initial deps)
 
-**Status:** NOT STARTED
+**Status:** IN PROGRESS — stub documents created, content to be filled
 
 ---
 

@@ -9,13 +9,13 @@
 Define component boundaries, data flow, Neo4j schema conventions, and API contracts before writing any implementation code.
 
 **Deliverables:**
-- [ ] `docs/architecture.md` — Component diagram, boundaries, data flow, Neo4j storage model
-- [ ] `docs/api-contracts/modeling-api.md` — Modeling REST endpoints, DTOs, error model (full contract)
+- [x] `docs/architecture.md` — Component diagram, boundaries, data flow, Neo4j storage model
+- [x] `docs/api-contracts/modeling-api.md` — Modeling REST endpoints, DTOs, error model (full contract)
 - [ ] `docs/api-contracts/runtime-api.md` — Lightweight sketch: route structure, boundary to modeling module, explicit TODOs for what must be detailed before Phase 2
 - [x] Establish naming conventions for all components — settled in `docs/architecture.md` §2
-- [ ] Project scaffolding (directory structure, pyproject.toml, initial deps)
+- [x] Project scaffolding (directory structure, pyproject.toml, initial deps)
 
-**Status:** IN PROGRESS — stub documents created, content to be filled
+**Status:** COMPLETE (modeling scope). Runtime API sketch deferred to Phase 2 prep.
 
 ---
 
@@ -23,17 +23,22 @@ Define component boundaries, data flow, Neo4j schema conventions, and API contra
 Implement the schema modeling service. This is the first functional milestone.
 
 **Scope:**
-- Ontology metadata CRUD
-- Entity type CRUD
-- Relation type CRUD
-- Property definitions CRUD
-- Schema validation endpoint
-- Schema export / import (JSON)
-- Neo4j persistence for all schema objects
+- [x] Ontology metadata CRUD
+- [x] Entity type CRUD
+- [x] Relation type CRUD
+- [x] Property definitions CRUD
+- [x] Schema validation endpoint
+- [x] Schema export / import (JSON)
+- [x] Neo4j persistence for all schema objects
+- [x] Unit tests (32 tests, all passing, mocked repository layer)
+- [x] Docker Compose with Neo4j Model DB + Instance DB
+- [x] Neo4j constraint bootstrap on startup
+- [x] Integration testing against real Neo4j (40/40 curl tests passing)
+- [x] 4 bugs found and fixed with regression tests
 
 **Depends on:** Phase 0
 
-**Status:** NOT STARTED
+**Status:** COMPLETE — 26 API endpoints implemented, 32 unit tests passing, integration tested.
 
 ---
 
@@ -57,11 +62,22 @@ Add the runtime module to the existing backend. Implements schema-driven instanc
 ### Phase 3 — Frontend UI
 Build the React-based frontend applications.
 
-**Scope:** TBD — will be scoped after backend phases complete.
+**Modeling UI scope (first draft complete):**
+- [x] Ontology list and creation
+- [x] Ontology detail with entity types and relation types
+- [x] Entity type editor with property management
+- [x] Relation type editor with source/target selection and property management
+- [x] Schema validation results display
+- [x] Schema export (JSON download)
+- [x] Frontend integration testing (15/15 Chrome tests passing)
+- [ ] Schema import UI (API client ready, no UI yet)
+- [ ] Property edit UI (currently create/delete only)
+
+**Runtime UI scope:** TBD — deferred until Phase 2 backend complete.
 
 **Depends on:** Phase 1 (modeling UI) / Phase 2 (runtime UI)
 
-**Status:** DEFERRED
+**Status:** IN PROGRESS — modeling UI first draft complete, builds and integration tested. Runtime UI deferred.
 
 ---
 
@@ -91,4 +107,11 @@ REST-to-MCP adapter layer for AI-driven interactions.
 
 ## Current Focus
 
-**Active phase:** Phase 0 — Architecture & Design
+**Active phase:** Phase 2 — Backend: Runtime API (next session)
+
+**What's ready to use:**
+- Backend modeling API: 26 endpoints, 32 unit tests, integration tested (40/40)
+- Frontend modeling UI: first draft, integration tested (15/15)
+- Docker Compose: Neo4j Model DB + Instance DB configured
+- Architecture docs: complete for modeling scope
+- Testing strategy: `docs/testing-strategy.md` for multi-agent test cycles

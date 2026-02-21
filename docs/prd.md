@@ -246,7 +246,7 @@ Monorepo with a single Python backend (modular monolith) and React frontends. Th
 Two base paths:
 
 - `/api/model` — Schema modeling
-- `/api/use` — Schema-driven runtime
+- `/api/runtime` — Schema-driven runtime
 
 Ontology is provided via header:
 

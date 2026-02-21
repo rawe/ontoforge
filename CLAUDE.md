@@ -50,6 +50,10 @@ Monorepo with two main parts:
 
 See: [docs/roadmap.md](docs/roadmap.md)
 
+## Testing with Agent Teams
+
+When running multi-agent test-and-bugfix cycles, follow the strategy in [docs/testing-strategy.md](docs/testing-strategy.md). It defines agent roles (tester, dev, team lead), sequential execution flow, fresh-state protocol, handover formats, and test plans for backend and frontend.
+
 ## Key Concepts
 
 - **Schema mode** — designing and managing ontology schemas

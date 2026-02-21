@@ -1,0 +1,38 @@
+services:
+  model-db:
+    image: neo4j:5
+    container_name: ontoforge-model-db
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/ontoforge_dev
+    volumes:
+      - neo4j-model-data:/data
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "ontoforge_dev", "RETURN 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  instance-db:
+    image: neo4j:5
+    container_name: ontoforge-instance-db
+    ports:
+      - "7475:7474"
+      - "7688:7687"
+    environment:
+      NEO4J_AUTH: neo4j/ontoforge_dev
+    volumes:
+      - neo4j-instance-data:/data
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "ontoforge_dev", "RETURN 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  neo4j-model-data:
+  neo4j-instance-data:

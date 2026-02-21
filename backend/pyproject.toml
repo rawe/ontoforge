@@ -1,0 +1,29 @@
+[project]
+name = "ontoforge-server"
+version = "0.1.0"
+description = "Neo4j-native ontology studio backend"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.34",
+    "neo4j>=5.27",
+    "pydantic>=2.10",
+    "pydantic-settings>=2.7",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "httpx>=0.28",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ontoforge_server"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

@@ -23,6 +23,12 @@ Monorepo with two main parts:
 
 - Use `npm install`, `npm run`, etc. for frontend tasks.
 
+## Design Principles
+
+- **KISS** — Keep it simple. Prefer the simplest solution that meets the requirement.
+- **YAGNI** — You ain't gonna need it. Don't build for hypothetical future requirements.
+- **Every architectural decision requires user approval.** Never settle a design or architectural choice silently — always ask the user first.
+
 ## Documentation Principles
 
 1. **Consistency first.** All docs, code, and architecture must be consistent with each other. If an inconsistency is detected, STOP and ask the user — never silently resolve or ignore it.

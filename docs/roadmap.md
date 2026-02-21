@@ -76,6 +76,13 @@ REST-to-MCP adapter layer for AI-driven interactions.
 
 ---
 
+## References
+
+- `docs/prd.md` — Product requirements (what and why)
+- `docs/decisions.md` — Settled decisions with rationale (append-only)
+- `docs/architecture.md` — Component boundaries, data flow, storage model (Phase 0 deliverable)
+- `docs/api-contracts/` — API endpoint contracts (Phase 0 deliverable)
+
 ## Session Protocol
 
 1. **Start of session:** Read this file and `docs/architecture.md` (once it exists) to re-establish context.

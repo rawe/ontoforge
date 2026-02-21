@@ -30,6 +30,7 @@ Monorepo with two main parts:
 3. **Progressive disclosure.** Layer documents from overview to detail. High-level docs link to deeper docs, not duplicate their content.
 4. **When redundancy exists, maintain consistency.** Brief summaries referencing detail docs are acceptable. But if two places state the same fact, both must stay in sync. When they diverge, flag it.
 5. **Don't document what the code makes obvious.** Reference code by semantic anchors (module names, class names, section names) — never by file:line numbers. Feature docs should weave code references into prose, not be bare reference lists. Avoid code blocks in docs unless needed to illustrate a major pattern.
+6. **Respect document lifecycle.** Documents form a directed chain: PRD → Roadmap → Architecture → Code. Later documents may reference earlier ones, never the reverse. Place information where it belongs in this lifecycle.
 
 ## Git Commits
 

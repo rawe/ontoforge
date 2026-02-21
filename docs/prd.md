@@ -211,39 +211,16 @@ Import behavior:
 
 ---
 
-## 9. Milestones
+## 9. Technical Architecture
 
-### M1 — Modeling Mode
-- Ontology metadata CRUD
-- Entity and relation type CRUD
-- Property definitions
-- Schema validation
-- Schema export/import
+## 9.1 Repository Structure (Monorepo)
 
-### M2 — Runtime Mode
-- Schema introspection endpoint
-- Generic entity instance CRUD
-- Generic relation instance CRUD
-- Basic search and filtering
-- UI for dynamic forms
-
-### M3 — Usability Enhancements
-- Graph visualization
-- Neighborhood exploration
-- Improved search and navigation
-
----
-
-## 10. Technical Architecture
-
-## 10.1 Repository Structure (Monorepo)
-
-Monorepo with a Python backend and React frontends. The exact package/module split will be defined in the architecture document and may evolve as the project grows.
+Monorepo with a single Python backend (modular monolith) and React frontends. The backend exposes both modeling and runtime capabilities as separate route modules within one application.
 
 **High-level layout:**
 
 ```
-/backend          — Python (uv-managed)
+/backend          — Python (uv-managed), modular monolith
 /frontend
   /model-ui       — React app for schema modeling
   /runtime-ui     — React app for instance management
@@ -251,13 +228,12 @@ Monorepo with a Python backend and React frontends. The exact package/module spl
 ```
 
 **Open decisions** (to be resolved during architecture phase):
-- Whether the runtime API is a separate backend application or a module within the same backend.
-- Which shared code (if any) gets extracted into internal packages.
 - Frontend app naming (TBD — "studio" rejected).
+- Runtime API route naming (TBD — "use" under review).
 
 ---
 
-## 10.2 Data Storage
+## 9.2 Data Storage
 
 - A graph database is used as the persistence layer.
 - Schema and instance data may coexist in the same database.
@@ -267,7 +243,7 @@ Monorepo with a Python backend and React frontends. The exact package/module spl
 
 ---
 
-## 10.3 API Design
+## 9.3 API Design
 
 Two base paths:
 
@@ -291,7 +267,7 @@ No domain-specific endpoints are allowed.
 
 ---
 
-## 10.4 Deployment Modes
+## 9.4 Deployment Modes
 
 - Development: All services and UIs run together.
 - Production (Full): Modeling + Runtime.
@@ -300,7 +276,7 @@ No domain-specific endpoints are allowed.
 
 ---
 
-## 10.5 Technology Stack
+## 9.5 Technology Stack
 
 - Backend: Python (managed with uv)
 - Frontend: React (managed with npm)
@@ -310,7 +286,7 @@ No domain-specific endpoints are allowed.
 
 ---
 
-## 10.6 Future Extensions
+## 9.6 Future Extensions
 
 - Authentication and authorization
 - Property type system expansion

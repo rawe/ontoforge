@@ -1,6 +1,6 @@
 # OntoForge — Development Roadmap
 
-> Single source of truth for phasing, status, and session continuity.
+> Single source of truth for phasing, status, and session continuity. Supersedes any milestone definitions in the PRD.
 > Every AI session MUST read this file first and update status after completing work.
 
 ## Phases
@@ -10,8 +10,9 @@ Define component boundaries, data flow, Neo4j schema conventions, and API contra
 
 **Deliverables:**
 - [ ] `docs/architecture.md` — Component diagram, boundaries, data flow, Neo4j storage model
-- [ ] `docs/api-contracts/modeling-api.md` — Modeling REST endpoints, DTOs, error model
-- [ ] `docs/api-contracts/runtime-api.md` — Runtime REST endpoints, DTOs, error model
+- [ ] `docs/api-contracts/modeling-api.md` — Modeling REST endpoints, DTOs, error model (full contract)
+- [ ] `docs/api-contracts/runtime-api.md` — Lightweight sketch: route structure, boundary to modeling module, explicit TODOs for what must be detailed before Phase 2
+- [ ] Establish naming conventions for all components (frontend app names TBD — "studio" rejected; runtime route naming TBD — "use" under review)
 - [ ] Project scaffolding (directory structure, pyproject.toml, initial deps)
 
 **Status:** NOT STARTED
@@ -37,7 +38,7 @@ Implement the schema modeling service. This is the first functional milestone.
 ---
 
 ### Phase 2 — Backend: Runtime API (REST)
-Implement the schema-driven instance CRUD service.
+Add the runtime module to the existing backend. Implements schema-driven instance CRUD as a separate route module within the modular monolith.
 
 **Scope:**
 - Schema introspection endpoint (read-only)
@@ -54,7 +55,7 @@ Implement the schema-driven instance CRUD service.
 ---
 
 ### Phase 3 — Frontend UI
-Build the React-based studio interfaces.
+Build the React-based frontend applications.
 
 **Scope:** TBD — will be scoped after backend phases complete.
 

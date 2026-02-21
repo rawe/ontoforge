@@ -227,9 +227,7 @@ Monorepo with a single Python backend (modular monolith) and React frontends. Th
 /docs
 ```
 
-**Open decisions** (to be resolved during architecture phase):
-- Frontend app naming (TBD — "studio" rejected).
-- Runtime API route naming (TBD — "use" under review).
+**Naming:** "modeling" and "runtime" used consistently across all layers. See `docs/architecture.md` §2 for the full naming table.
 
 ---
 

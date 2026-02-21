@@ -12,7 +12,7 @@ Define component boundaries, data flow, Neo4j schema conventions, and API contra
 - [ ] `docs/architecture.md` — Component diagram, boundaries, data flow, Neo4j storage model
 - [ ] `docs/api-contracts/modeling-api.md` — Modeling REST endpoints, DTOs, error model (full contract)
 - [ ] `docs/api-contracts/runtime-api.md` — Lightweight sketch: route structure, boundary to modeling module, explicit TODOs for what must be detailed before Phase 2
-- [ ] Establish naming conventions for all components (frontend app names TBD — "studio" rejected; runtime route naming TBD — "use" under review)
+- [x] Establish naming conventions for all components — settled in `docs/architecture.md` §2
 - [ ] Project scaffolding (directory structure, pyproject.toml, initial deps)
 
 **Status:** IN PROGRESS — stub documents created, content to be filled

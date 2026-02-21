@@ -29,7 +29,22 @@
 **Decision:** Do not use "studio" for naming frontend apps or the product. Alternative TBD in Phase 0.
 **Reason:** User preference.
 
-### 003 — "Use" under review as runtime route name
+### 003 — "Use" replaced by "runtime" as route name
 **Date:** 2026-02-21
-**Decision:** The current `/api/use` path name is under review. Alternative TBD in Phase 0.
-**Reason:** "Use" / "usage" sounds unclear. Candidates: runtime, data, knowledge.
+**Decision:** Runtime API route changed from `/api/use` to `/api/runtime`.
+**Reason:** "Use" was ambiguous. "Runtime" is consistent with the module and frontend naming.
+
+### 004 — Consistent naming: "modeling" and "runtime" across all layers
+**Date:** 2026-02-21
+**Decision:** Use "modeling" and "runtime" consistently for backend modules, API routes, frontend apps, and store layers. No synonyms (explorer, studio, use).
+**Reason:** Consistency reduces cognitive overhead. One name per concept across the entire project.
+
+### 005 — Store layer split with one-directional dependency
+**Date:** 2026-02-21
+**Decision:** Separate modeling store and runtime store. Runtime store depends on modeling store (read-only for schema access). Modeling store has no dependency on runtime.
+**Reason:** Clean separation of concerns. Runtime needs schema for validation and generic persistence but must never modify it.
+
+### 006 — Backend app named "ontoforge-server"
+**Date:** 2026-02-21
+**Decision:** The Python backend application is named `ontoforge-server`.
+**Reason:** Clear product identity. Distinguishes the server from frontend apps.

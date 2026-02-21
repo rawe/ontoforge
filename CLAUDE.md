@@ -23,11 +23,25 @@ Monorepo with two main parts:
 
 - Use `npm install`, `npm run`, etc. for frontend tasks.
 
+## Documentation Principles
+
+1. **Consistency first.** All docs, code, and architecture must be consistent with each other. If an inconsistency is detected, STOP and ask the user — never silently resolve or ignore it.
+2. **Single source of truth.** Each piece of information belongs in exactly one place. Avoid redundancy by default. When a fact is needed elsewhere, reference the source — don't copy it.
+3. **Progressive disclosure.** Layer documents from overview to detail. High-level docs link to deeper docs, not duplicate their content.
+4. **When redundancy exists, maintain consistency.** Brief summaries referencing detail docs are acceptable. But if two places state the same fact, both must stay in sync. When they diverge, flag it.
+5. **Don't document what the code makes obvious.** Reference code by semantic anchors (module names, class names, section names) — never by file:line numbers. Feature docs should weave code references into prose, not be bare reference lists. Avoid code blocks in docs unless needed to illustrate a major pattern.
+
 ## Git Commits
 
 - Do NOT add `Co-Authored-By` lines mentioning Claude or any AI model.
 - Do NOT reference the AI model in commit messages.
 - Write commit messages as if authored solely by the developer.
+
+## Roadmap & Session Continuity
+
+**Every session MUST start by reading `docs/roadmap.md`** to understand the current phase and pick up where the last session left off. Update status in the roadmap after completing work.
+
+See: [docs/roadmap.md](docs/roadmap.md)
 
 ## Key Concepts
 

@@ -1,8 +1,8 @@
-# PRD — GraphFoundry
+# PRD — OntoForge
 
 ## 1. Overview
 
-GraphFoundry is a system for designing graph-based ontologies and using them through schema-driven, generic APIs. It separates the concerns of **schema modeling** and **knowledge runtime usage**, while keeping both schema and data portable and self-contained. The system enables users to define entity and relation types, persist them, and then create and manage instance data based strictly on that schema.
+OntoForge is a system for designing graph-based ontologies and using them through schema-driven, generic APIs. It separates the concerns of **schema modeling** and **knowledge runtime usage**, while keeping both schema and data portable and self-contained. The system enables users to define entity and relation types, persist them, and then create and manage instance data based strictly on that schema.
 
 The product supports export and import of ontologies in a JSON-based format and is designed to evolve toward managing multiple ontologies within a single installation.
 
@@ -238,41 +238,22 @@ Import behavior:
 
 ## 10.1 Repository Structure (Monorepo)
 
+Monorepo with a Python backend and React frontends. The exact package/module split will be defined in the architecture document and may evolve as the project grows.
+
+**High-level layout:**
+
 ```
-/apps
-  /studio-model-ui
-  /studio-use-ui
-
-/services
-  /model-service
-  /use-service
-
-/packages
-  /schema
-  /schema-store
-  /runtime-store
-  /neo4j-adapter
-  /api-contracts
-  /ui-kit
-  /mcp-bridge
-
+/backend          — Python (uv-managed)
+/frontend
+  /model-ui       — React app for schema modeling
+  /runtime-ui     — React app for instance management
 /docs
-/tools
 ```
 
-### Responsibilities
-
-- **studio-model-ui**: Schema modeling interface.
-- **studio-use-ui**: Schema-driven instance management interface.
-- **model-service**: REST API + MCP for schema modeling.
-- **use-service**: REST API + MCP for runtime CRUD.
-- **schema**: Canonical schema definitions and validation logic.
-- **schema-store**: Schema persistence and export/import logic.
-- **runtime-store**: Instance CRUD and schema enforcement.
-- **neo4j-adapter**: Database connectivity and transaction abstraction.
-- **api-contracts**: Shared DTOs, OpenAPI specs, error models.
-- **ui-kit**: Shared UI components.
-- **mcp-bridge**: REST-to-MCP adapter layer.
+**Open decisions** (to be resolved during architecture phase):
+- Whether the runtime API is a separate backend application or a module within the same backend.
+- Which shared code (if any) gets extracted into internal packages.
+- Frontend app naming (TBD — "studio" rejected).
 
 ---
 
@@ -313,7 +294,7 @@ No domain-specific endpoints are allowed.
 ## 10.4 Deployment Modes
 
 - Development: All services and UIs run together.
-- Production (Full Studio): Modeling + Runtime.
+- Production (Full): Modeling + Runtime.
 - Production (Runtime Only): Runtime service and UI only.
 - MCP servers are bundled with their respective services.
 
@@ -321,12 +302,11 @@ No domain-specific endpoints are allowed.
 
 ## 10.5 Technology Stack
 
-- Backend: Node.js with TypeScript
-- Frontend: React
+- Backend: Python (managed with uv)
+- Frontend: React (managed with npm)
 - Database: Neo4j
 - Communication: REST (JSON)
 - MCP integration: Tool layer mapped 1:1 to REST endpoints
-- Package management: Workspace-based monorepo (e.g., pnpm or yarn workspaces)
 
 ---
 

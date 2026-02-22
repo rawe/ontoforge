@@ -116,21 +116,23 @@ Expose the modeling service layer as an MCP server embedded in the existing Fast
 Architecture: `docs/mcp-architecture.md`
 
 **Scope:**
-- [ ] `mcp/` module: modeling MCP server with 15 tools (see `docs/mcp-architecture.md` §3.1)
-- [ ] FastAPI mount at `/mcp/model/{ontologyKey}` (HTTP/SSE transport)
-- [ ] Ontology key extraction from URL, key → UUID resolution
-- [ ] Key-based addressing for all type references (no UUIDs exposed to LLM)
-- [ ] `create_ontology` bootstrap tool (creates ontology using key from connection URL)
-- [ ] Schema introspection (`get_schema`), entity type CRUD, relation type CRUD
-- [ ] Unified property tools (`add_property`, `update_property`, `delete_property`)
-- [ ] `validate_schema`, `export_schema`, `import_schema`
-- [ ] Unit tests (mocked service layer)
-- [ ] Integration testing against real Neo4j
-- [ ] `mcp[http]` dependency added to `pyproject.toml`
+- [x] `mcp/` module: modeling MCP server with 15 tools (see `docs/mcp-architecture.md` §3.1)
+- [x] FastAPI mount at `/mcp/model/{ontologyKey}` (streamable HTTP transport)
+- [x] Ontology key extraction from URL via ASGI middleware + contextvars, key → UUID resolution
+- [x] Key-based addressing for all type references (no UUIDs exposed to LLM)
+- [x] `create_ontology` bootstrap tool (creates ontology using key from connection URL)
+- [x] Schema introspection (`get_schema`), entity type CRUD, relation type CRUD
+- [x] Unified property tools (`add_property`, `update_property`, `delete_property`)
+- [x] `validate_schema`, `export_schema`, `import_schema`
+- [x] Unit tests (29 tests, mocked service layer)
+- [x] Integration testing via MCP client (43/43 tests passing against real Neo4j)
+- [x] `mcp[cli]>=1.9` dependency added to `pyproject.toml`
+- [ ] Polish: rewrite UUID-based error messages to use keys (import conflict, referential integrity)
+- [ ] Polish: relation type create response should return source/target keys, not UUIDs
 
 **Depends on:** Phase 1
 
-**Status:** NOT STARTED
+**Status:** COMPLETE — 15 tools implemented, 29 unit tests + 43 integration tests passing. Minor polish items remaining (UUID leakage in error messages and relation type create response).
 
 ---
 
@@ -152,6 +154,24 @@ Architecture: `docs/mcp-architecture.md`
 
 ---
 
+### Phase 5 — Production Docker Compose
+A separate `docker-compose.prod.yml` (not the development one) that runs the full stack — backend, frontend, and Neo4j — as containers, correctly networked together. This enables one-command deployment without local toolchains.
+
+**Scope:**
+- [ ] `Dockerfile` for the backend (Python/FastAPI, built with uv)
+- [ ] `Dockerfile` for the frontend (React, built with npm, served via static server or nginx)
+- [ ] `docker-compose.prod.yml` with all three services (neo4j, backend, frontend) wired together
+- [ ] Backend connects to Neo4j via Docker network (not localhost)
+- [ ] Frontend proxies or points to backend API within the Docker network
+- [ ] Environment configuration (DB credentials, ports) via env file or compose variables
+- [ ] Health checks and proper startup ordering (Neo4j ready before backend starts)
+
+**Depends on:** Phase 1 + Phase 2 (backend APIs), Phase 3 (frontend)
+
+**Status:** NOT STARTED
+
+---
+
 ## References
 
 - `docs/prd.md` — Product requirements (what and why)
@@ -168,11 +188,13 @@ Architecture: `docs/mcp-architecture.md`
 
 ## Current Focus
 
-**Active phase:** Phase 4a — MCP: Modeling Server
+**Active phase:** Phase 4a — MCP: Modeling Server (polish) / Phase 4b — MCP: Runtime Server
 
-**Next steps:** Implement the modeling MCP server (15 tools) embedded in the existing FastAPI app. Start with FastAPI mount infrastructure and `get_schema` + `create_ontology` tools, then add remaining CRUD and property tools.
+**Next steps:**
+- Optional polish for Phase 4a: rewrite UUID-based error messages to use keys, fix relation type create response
+- Phase 4b: implement the runtime MCP server (13 tools) reusing the shared mount infrastructure from Phase 4a
 
-**Deferred work (not blocking Phase 4a):**
+**Deferred work:**
 - Phase 2: formal integration test suite against real Neo4j
 - Phase 3: import dialog with overwrite option, runtime UI end-to-end testing
 
@@ -180,6 +202,7 @@ Architecture: `docs/mcp-architecture.md`
 - Unified server: single Neo4j, both routers always mounted, no mode switching
 - Backend modeling API: 26 endpoints, ontology key field, integration tested
 - Backend runtime API: 17 endpoints under `/api/runtime/{ontologyKey}/...`, 92 unit tests passing
+- MCP modeling server: 15 tools at `/mcp/model/{ontologyKey}`, streamable HTTP transport, 29 unit + 43 integration tests
 - Frontend modeling UI: ontology key in creation form and display, 7/7 integration tested
 - Frontend runtime UI: generic data management (entity/relation CRUD, search, sort, pagination), architecture doc at `docs/runtime-ui-architecture.md`
 - Docker Compose: single Neo4j service

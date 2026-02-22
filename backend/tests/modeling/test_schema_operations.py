@@ -8,6 +8,7 @@ NOW = datetime(2025, 1, 1, tzinfo=timezone.utc)
 
 ONTOLOGY_DATA = {
     "ontologyId": "ont-1",
+    "key": "test_ontology",
     "name": "Test",
     "description": None,
     "createdAt": NOW,
@@ -61,6 +62,7 @@ IMPORT_PAYLOAD = {
     "formatVersion": "1.0",
     "ontology": {
         "ontologyId": "ont-new",
+        "key": "test_ontology",
         "name": "Test",
         "description": None,
     },
@@ -72,6 +74,7 @@ IMPORT_PAYLOAD = {
 def _mock_repo(**overrides):
     defaults = {
         "get_ontology": AsyncMock(return_value=ONTOLOGY_DATA),
+        "get_ontology_by_key": AsyncMock(return_value=None),
         "get_ontology_by_name": AsyncMock(return_value=None),
         "get_full_schema": AsyncMock(return_value=FULL_SCHEMA),
         "create_ontology": AsyncMock(return_value=ONTOLOGY_DATA),
@@ -110,6 +113,7 @@ async def test_export_ontology_returns_payload(client, repo_patch):
     data = resp.json()
     assert data["formatVersion"] == "1.0"
     assert data["ontology"]["ontologyId"] == "ont-1"
+    assert data["ontology"]["key"] == "test_ontology"
     assert len(data["entityTypes"]) == 1
     assert data["entityTypes"][0]["key"] == "person"
     assert len(data["relationTypes"]) == 1
@@ -120,6 +124,7 @@ async def test_import_ontology_name_conflict_returns_409(client, repo_patch):
     """Regression: importing with a name that already exists returns 409, not 500."""
     existing_other = {
         "ontologyId": "ont-other",
+        "key": "other_key",
         "name": "Test",
         "description": None,
         "createdAt": NOW,
@@ -128,6 +133,25 @@ async def test_import_ontology_name_conflict_returns_409(client, repo_patch):
     with repo_patch(
         get_ontology=AsyncMock(return_value=None),
         get_ontology_by_name=AsyncMock(return_value=existing_other),
+    ):
+        resp = await client.post("/api/model/import", json=IMPORT_PAYLOAD)
+    assert resp.status_code == 409
+    assert "already exists" in resp.json()["error"]["message"]
+
+
+async def test_import_ontology_key_conflict_returns_409(client, repo_patch):
+    """Importing with a key that already exists on a different ontology returns 409."""
+    existing_other = {
+        "ontologyId": "ont-other",
+        "key": "test_ontology",
+        "name": "Other Name",
+        "description": None,
+        "createdAt": NOW,
+        "updatedAt": NOW,
+    }
+    with repo_patch(
+        get_ontology=AsyncMock(return_value=None),
+        get_ontology_by_key=AsyncMock(return_value=existing_other),
     ):
         resp = await client.post("/api/model/import", json=IMPORT_PAYLOAD)
     assert resp.status_code == 409

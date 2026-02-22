@@ -6,9 +6,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 import ontoforge_server.runtime.service as svc
+from tests.runtime.conftest import ONTOLOGY_KEY
 
 
 NOW = datetime(2025, 6, 1, tzinfo=timezone.utc)
+PREFIX = f"/api/runtime/{ONTOLOGY_KEY}"
 
 PERSON_ENTITY = {
     "_id": "ent-person-1",
@@ -80,7 +82,7 @@ async def test_create_relation_valid(client, repo_patch):
         get_entity_by_id=AsyncMock(side_effect=_entity_lookup(entity_map)),
     ):
         resp = await client.post(
-            "/api/relations/works_for",
+            f"{PREFIX}/relations/works_for",
             json={
                 "fromEntityId": "ent-person-1",
                 "toEntityId": "ent-company-1",
@@ -106,7 +108,7 @@ async def test_create_relation_source_type_mismatch(client, repo_patch):
         get_entity_by_id=AsyncMock(side_effect=_entity_lookup(entity_map)),
     ):
         resp = await client.post(
-            "/api/relations/works_for",
+            f"{PREFIX}/relations/works_for",
             json={
                 "fromEntityId": "ent-company-1",
                 "toEntityId": "ent-company-2",
@@ -126,7 +128,7 @@ async def test_create_relation_nonexistent_source_entity(client, repo_patch):
         get_entity_by_id=AsyncMock(side_effect=_entity_lookup(entity_map)),
     ):
         resp = await client.post(
-            "/api/relations/works_for",
+            f"{PREFIX}/relations/works_for",
             json={
                 "fromEntityId": "nonexistent-entity",
                 "toEntityId": "ent-company-1",
@@ -146,7 +148,7 @@ async def test_create_relation_nonexistent_target_entity(client, repo_patch):
         get_entity_by_id=AsyncMock(side_effect=_entity_lookup(entity_map)),
     ):
         resp = await client.post(
-            "/api/relations/works_for",
+            f"{PREFIX}/relations/works_for",
             json={
                 "fromEntityId": "ent-person-1",
                 "toEntityId": "nonexistent-entity",
@@ -161,7 +163,7 @@ async def test_create_relation_nonexistent_type(client, repo_patch):
     """POST /relations/{type_key} with unknown relation type returns 404."""
     with repo_patch():
         resp = await client.post(
-            "/api/relations/nonexistent",
+            f"{PREFIX}/relations/nonexistent",
             json={
                 "fromEntityId": "ent-1",
                 "toEntityId": "ent-2",
@@ -176,7 +178,7 @@ async def test_create_relation_nonexistent_type(client, repo_patch):
 async def test_list_relations(client, repo_patch):
     """GET /relations/{type_key} returns paginated response."""
     with repo_patch():
-        resp = await client.get("/api/relations/works_for")
+        resp = await client.get(f"{PREFIX}/relations/works_for")
     assert resp.status_code == 200
     data = resp.json()
     assert "items" in data
@@ -188,7 +190,7 @@ async def test_list_relations(client, repo_patch):
 async def test_list_relations_nonexistent_type(client, repo_patch):
     """GET /relations/{type_key} with unknown type returns 404."""
     with repo_patch():
-        resp = await client.get("/api/relations/nonexistent")
+        resp = await client.get(f"{PREFIX}/relations/nonexistent")
     assert resp.status_code == 404
 
 
@@ -198,7 +200,7 @@ async def test_list_relations_nonexistent_type(client, repo_patch):
 async def test_get_relation(client, repo_patch):
     """GET /relations/{type_key}/{id} returns the relation."""
     with repo_patch():
-        resp = await client.get("/api/relations/works_for/rel-1")
+        resp = await client.get(f"{PREFIX}/relations/works_for/rel-1")
     assert resp.status_code == 200
     data = resp.json()
     assert data["_id"] == "rel-1"
@@ -209,7 +211,7 @@ async def test_get_relation(client, repo_patch):
 async def test_get_relation_not_found(client, repo_patch):
     """GET /relations/{type_key}/{id} with unknown ID returns 404."""
     with repo_patch(get_relation=AsyncMock(return_value=None)):
-        resp = await client.get("/api/relations/works_for/missing-id")
+        resp = await client.get(f"{PREFIX}/relations/works_for/missing-id")
     assert resp.status_code == 404
 
 
@@ -221,7 +223,7 @@ async def test_update_relation(client, repo_patch):
     updated = {**RELATION_DATA, "role": "Senior Engineer"}
     with repo_patch(update_relation=AsyncMock(return_value=updated)):
         resp = await client.patch(
-            "/api/relations/works_for/rel-1",
+            f"{PREFIX}/relations/works_for/rel-1",
             json={"role": "Senior Engineer"},
         )
     assert resp.status_code == 200
@@ -241,7 +243,7 @@ async def test_update_relation_ignores_endpoint_ids(client, repo_patch):
 
     with repo_patch(update_relation=AsyncMock(side_effect=capture_update)):
         resp = await client.patch(
-            "/api/relations/works_for/rel-1",
+            f"{PREFIX}/relations/works_for/rel-1",
             json={
                 "fromEntityId": "changed-id",
                 "toEntityId": "changed-id",
@@ -259,7 +261,7 @@ async def test_update_relation_not_found(client, repo_patch):
     """PATCH on a nonexistent relation returns 404."""
     with repo_patch(update_relation=AsyncMock(return_value=None)):
         resp = await client.patch(
-            "/api/relations/works_for/missing-id",
+            f"{PREFIX}/relations/works_for/missing-id",
             json={"role": "Updated"},
         )
     assert resp.status_code == 404
@@ -271,19 +273,19 @@ async def test_update_relation_not_found(client, repo_patch):
 async def test_delete_relation(client, repo_patch):
     """DELETE /relations/{type_key}/{id} returns 204."""
     with repo_patch():
-        resp = await client.delete("/api/relations/works_for/rel-1")
+        resp = await client.delete(f"{PREFIX}/relations/works_for/rel-1")
     assert resp.status_code == 204
 
 
 async def test_delete_relation_not_found(client, repo_patch):
     """DELETE on a nonexistent relation returns 404."""
     with repo_patch(delete_relation=AsyncMock(return_value=False)):
-        resp = await client.delete("/api/relations/works_for/missing-id")
+        resp = await client.delete(f"{PREFIX}/relations/works_for/missing-id")
     assert resp.status_code == 404
 
 
 async def test_delete_relation_nonexistent_type(client, repo_patch):
     """DELETE with an unknown relation type returns 404."""
     with repo_patch():
-        resp = await client.delete("/api/relations/nonexistent/rel-1")
+        resp = await client.delete(f"{PREFIX}/relations/nonexistent/rel-1")
     assert resp.status_code == 404

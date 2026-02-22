@@ -54,12 +54,15 @@ async def create_ontology(
     driver: AsyncDriver = Depends(get_driver),
 ) -> OntologyResponse:
     async with driver.session() as session:
+        existing_key = await repository.get_ontology_by_key(session, body.key)
+        if existing_key:
+            raise ConflictError(f"Ontology with key '{body.key}' already exists")
         existing = await repository.get_ontology_by_name(session, body.name)
         if existing:
             raise ConflictError(f"Ontology with name '{body.name}' already exists")
         ontology_id = str(uuid4())
         data = await repository.create_ontology(
-            session, ontology_id, body.name, body.description
+            session, ontology_id, body.key, body.name, body.description
         )
         return _to_ontology_response(data)
 
@@ -597,6 +600,7 @@ async def export_ontology(
             formatVersion="1.0",
             ontology=ExportOntology(
                 ontologyId=ont["ontologyId"],
+                key=ont["key"],
                 name=ont["name"],
                 description=ont.get("description"),
             ),
@@ -620,6 +624,13 @@ async def import_ontology(
         if existing:
             await repository.delete_ontology(session, ont.ontology_id)
 
+        # Check for key conflict with a different ontology
+        by_key = await repository.get_ontology_by_key(session, ont.key)
+        if by_key and by_key["ontologyId"] != ont.ontology_id:
+            raise ConflictError(
+                f"Ontology with key '{ont.key}' already exists"
+            )
+
         # Check for name conflict with a different ontology
         by_name = await repository.get_ontology_by_name(session, ont.name)
         if by_name and by_name["ontologyId"] != ont.ontology_id:
@@ -629,7 +640,7 @@ async def import_ontology(
 
         # Create ontology
         ont_data = await repository.create_ontology(
-            session, ont.ontology_id, ont.name, ont.description
+            session, ont.ontology_id, ont.key, ont.name, ont.description
         )
 
         # Create entity types and track key->id mapping

@@ -8,6 +8,7 @@ NOW = datetime(2025, 1, 1, tzinfo=timezone.utc)
 
 ONTOLOGY_DATA = {
     "ontologyId": "ont-1",
+    "key": "test_ontology",
     "name": "Test Ontology",
     "description": "A test",
     "createdAt": NOW,
@@ -17,6 +18,7 @@ ONTOLOGY_DATA = {
 
 def _mock_repo(**overrides):
     defaults = {
+        "get_ontology_by_key": AsyncMock(return_value=None),
         "get_ontology_by_name": AsyncMock(return_value=None),
         "create_ontology": AsyncMock(return_value=ONTOLOGY_DATA),
         "list_ontologies": AsyncMock(return_value=[ONTOLOGY_DATA]),
@@ -43,21 +45,53 @@ async def test_create_ontology(client, repo_patch):
     with repo_patch():
         resp = await client.post(
             "/api/model/ontologies",
-            json={"name": "Test Ontology", "description": "A test"},
+            json={"key": "test_ontology", "name": "Test Ontology", "description": "A test"},
         )
     assert resp.status_code == 201
     data = resp.json()
     assert data["ontologyId"] == "ont-1"
+    assert data["key"] == "test_ontology"
     assert data["name"] == "Test Ontology"
+
+
+async def test_create_ontology_duplicate_key(client, repo_patch):
+    with repo_patch(get_ontology_by_key=AsyncMock(return_value=ONTOLOGY_DATA)):
+        resp = await client.post(
+            "/api/model/ontologies",
+            json={"key": "test_ontology", "name": "Test Ontology"},
+        )
+    assert resp.status_code == 409
 
 
 async def test_create_ontology_duplicate_name(client, repo_patch):
     with repo_patch(get_ontology_by_name=AsyncMock(return_value=ONTOLOGY_DATA)):
         resp = await client.post(
             "/api/model/ontologies",
-            json={"name": "Test Ontology"},
+            json={"key": "other_key", "name": "Test Ontology"},
         )
     assert resp.status_code == 409
+
+
+async def test_create_ontology_invalid_key(client, repo_patch):
+    with repo_patch():
+        resp = await client.post(
+            "/api/model/ontologies",
+            json={"key": "Invalid-Key!", "name": "Test"},
+        )
+    assert resp.status_code == 422
+
+
+async def test_update_ontology_does_not_accept_key(client, repo_patch):
+    """Key is immutable — update should ignore it (OntologyUpdate has no key field)."""
+    updated = {**ONTOLOGY_DATA, "name": "Updated"}
+    with repo_patch(update_ontology=AsyncMock(return_value=updated)):
+        resp = await client.put(
+            "/api/model/ontologies/ont-1",
+            json={"name": "Updated", "key": "new_key"},
+        )
+    assert resp.status_code == 200
+    # key should remain unchanged (from mock data)
+    assert resp.json()["key"] == "test_ontology"
 
 
 async def test_list_ontologies(client, repo_patch):

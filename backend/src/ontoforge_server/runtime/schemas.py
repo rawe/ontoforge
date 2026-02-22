@@ -7,11 +7,10 @@ from ontoforge_server.core.schemas import (
 )
 
 
-class ProvisionSummary(BaseModel):
-    ontology_id: str = Field(alias="ontologyId")
-    name: str
-    entity_type_count: int = Field(alias="entityTypeCount")
-    relation_type_count: int = Field(alias="relationTypeCount")
+class DataWipeResponse(BaseModel):
+    ontology_key: str = Field(alias="ontologyKey")
+    entities_deleted: int = Field(alias="entitiesDeleted")
+    relations_deleted: int = Field(alias="relationsDeleted")
 
     model_config = {"populate_by_name": True}
 

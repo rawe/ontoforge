@@ -8,6 +8,7 @@ NOW = datetime(2025, 1, 1, tzinfo=timezone.utc)
 
 ONTOLOGY_DATA = {
     "ontologyId": "ont-1",
+    "key": "test_ontology",
     "name": "Test",
     "description": None,
     "createdAt": NOW,

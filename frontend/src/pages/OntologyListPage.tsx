@@ -21,9 +21,10 @@ export default function OntologyListPage() {
 
   useEffect(() => { load(); }, []);
 
-  const handleCreate = async (data: { name: string; description?: string }) => {
+  const handleCreate = async (data: { name: string; key?: string; description?: string }) => {
+    if (!data.key) return;
     try {
-      await api.createOntology(data);
+      await api.createOntology({ name: data.name, key: data.key, description: data.description });
       setShowForm(false);
       load();
     } catch (e) {

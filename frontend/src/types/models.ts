@@ -1,6 +1,7 @@
 export interface Ontology {
   ontologyId: string;
   name: string;
+  key: string;
   description: string | null;
   createdAt: string;
   updatedAt: string;

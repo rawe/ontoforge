@@ -28,6 +28,7 @@ KEY_PATTERN = r"^[a-z][a-z0-9_]*$"
 
 
 class OntologyCreate(BaseModel):
+    key: str = Field(pattern=KEY_PATTERN)
     name: str
     description: str | None = None
 
@@ -39,6 +40,7 @@ class OntologyUpdate(BaseModel):
 
 class OntologyResponse(BaseModel):
     ontology_id: str = Field(alias="ontologyId")
+    key: str
     name: str
     description: str | None = None
     created_at: datetime = Field(alias="createdAt")

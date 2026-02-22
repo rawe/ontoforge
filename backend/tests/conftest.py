@@ -1,11 +1,15 @@
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from ontoforge_server.core.database import get_driver
-from ontoforge_server.main import create_app
+
+
+@asynccontextmanager
+async def _noop_lifespan(app):
+    yield
 
 
 @pytest.fixture
@@ -23,7 +27,10 @@ def mock_driver():
 
 @pytest.fixture
 def app(mock_driver):
-    application = create_app()
+    with patch("ontoforge_server.main.lifespan", _noop_lifespan):
+        from ontoforge_server.main import create_app
+
+        application = create_app()
     application.dependency_overrides[get_driver] = lambda: mock_driver
     return application
 

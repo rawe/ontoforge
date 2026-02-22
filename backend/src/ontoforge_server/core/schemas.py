@@ -45,6 +45,7 @@ class ExportRelationType(BaseModel):
 
 class ExportOntology(BaseModel):
     ontology_id: str = Field(alias="ontologyId")
+    key: str
     name: str
     description: str | None = None
 

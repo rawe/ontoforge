@@ -23,207 +23,17 @@ def _convert_neo4j_types(data: dict) -> dict:
     return result
 
 
-# --- Database Management ---
-
-
-async def wipe_database(session: AsyncSession) -> None:
-    """Delete all nodes and relationships."""
-    await session.run("MATCH (n) DETACH DELETE n")
-
-
-async def drop_all_constraints(session: AsyncSession) -> None:
-    """Drop all constraints and indexes (except system lookup indexes)."""
-    result = await session.run("SHOW CONSTRAINTS")
-    records = [record async for record in result]
-    for record in records:
-        name = record["name"]
-        await session.run(f"DROP CONSTRAINT {name} IF EXISTS")
-
-    result = await session.run("SHOW INDEXES")
-    records = [record async for record in result]
-    for record in records:
-        # Skip lookup indexes (system indexes that cannot be dropped)
-        if record.get("type") == "LOOKUP":
-            continue
-        name = record["name"]
-        await session.run(f"DROP INDEX {name} IF EXISTS")
-
-
-async def create_schema_constraints(session: AsyncSession) -> None:
-    """Create schema node constraints (same structure as Model DB)."""
-    constraints = [
-        "CREATE CONSTRAINT ontology_id_unique IF NOT EXISTS FOR (o:Ontology) REQUIRE o.ontologyId IS UNIQUE",
-        "CREATE CONSTRAINT entity_type_id_unique IF NOT EXISTS FOR (et:EntityType) REQUIRE et.entityTypeId IS UNIQUE",
-        "CREATE CONSTRAINT relation_type_id_unique IF NOT EXISTS FOR (rt:RelationType) REQUIRE rt.relationTypeId IS UNIQUE",
-        "CREATE CONSTRAINT property_id_unique IF NOT EXISTS FOR (pd:PropertyDefinition) REQUIRE pd.propertyId IS UNIQUE",
-    ]
-    for c in constraints:
-        await session.run(c)
-
-
-async def create_instance_constraints(session: AsyncSession) -> None:
-    """Create instance-specific constraints and indexes."""
-    await session.run(
-        "CREATE CONSTRAINT entity_instance_id_unique IF NOT EXISTS "
-        "FOR (n:_Entity) REQUIRE n._id IS UNIQUE"
-    )
-    await session.run(
-        "CREATE INDEX entity_type_key_index IF NOT EXISTS "
-        "FOR (n:_Entity) ON (n._entityTypeKey)"
-    )
-
-
-# --- Schema Import (for provisioning) ---
-
-
-async def create_ontology(
-    session: AsyncSession,
-    ontology_id: str,
-    name: str,
-    description: str | None,
-) -> dict:
-    result = await session.run(
-        """
-        CREATE (o:Ontology {
-            ontologyId: $ontology_id,
-            name: $name,
-            description: $description,
-            createdAt: datetime(),
-            updatedAt: datetime()
-        })
-        RETURN o {.*} AS ontology
-        """,
-        ontology_id=ontology_id,
-        name=name,
-        description=description,
-    )
-    record = await result.single()
-    return _convert_neo4j_types(record["ontology"])
-
-
-async def create_entity_type(
-    session: AsyncSession,
-    ontology_id: str,
-    entity_type_id: str,
-    key: str,
-    display_name: str,
-    description: str | None,
-) -> dict:
-    result = await session.run(
-        """
-        MATCH (o:Ontology {ontologyId: $ontology_id})
-        CREATE (o)-[:HAS_ENTITY_TYPE]->(et:EntityType {
-            entityTypeId: $entity_type_id,
-            key: $key,
-            displayName: $display_name,
-            description: $description,
-            createdAt: datetime(),
-            updatedAt: datetime()
-        })
-        RETURN et {.*} AS entity_type
-        """,
-        ontology_id=ontology_id,
-        entity_type_id=entity_type_id,
-        key=key,
-        display_name=display_name,
-        description=description,
-    )
-    record = await result.single()
-    return _convert_neo4j_types(record["entity_type"])
-
-
-async def create_relation_type(
-    session: AsyncSession,
-    ontology_id: str,
-    relation_type_id: str,
-    key: str,
-    display_name: str,
-    description: str | None,
-    source_entity_type_id: str,
-    target_entity_type_id: str,
-) -> dict:
-    result = await session.run(
-        """
-        MATCH (o:Ontology {ontologyId: $ontology_id})
-        MATCH (source:EntityType {entityTypeId: $source_entity_type_id})
-        MATCH (target:EntityType {entityTypeId: $target_entity_type_id})
-        CREATE (o)-[:HAS_RELATION_TYPE]->(rt:RelationType {
-            relationTypeId: $relation_type_id,
-            key: $key,
-            displayName: $display_name,
-            description: $description,
-            createdAt: datetime(),
-            updatedAt: datetime()
-        })
-        CREATE (rt)-[:RELATES_FROM]->(source)
-        CREATE (rt)-[:RELATES_TO]->(target)
-        RETURN rt {.*} AS relation_type
-        """,
-        ontology_id=ontology_id,
-        relation_type_id=relation_type_id,
-        key=key,
-        display_name=display_name,
-        description=description,
-        source_entity_type_id=source_entity_type_id,
-        target_entity_type_id=target_entity_type_id,
-    )
-    record = await result.single()
-    return _convert_neo4j_types(record["relation_type"])
-
-
-async def create_property(
-    session: AsyncSession,
-    owner_id: str,
-    owner_label: str,
-    property_id: str,
-    key: str,
-    display_name: str,
-    description: str | None,
-    data_type: str,
-    required: bool,
-    default_value: str | None,
-) -> dict:
-    id_field = "entityTypeId" if owner_label == "EntityType" else "relationTypeId"
-    result = await session.run(
-        f"""
-        MATCH (owner:{owner_label} {{{id_field}: $owner_id}})
-        CREATE (owner)-[:HAS_PROPERTY]->(p:PropertyDefinition {{
-            propertyId: $property_id,
-            key: $key,
-            displayName: $display_name,
-            description: $description,
-            dataType: $data_type,
-            required: $required,
-            defaultValue: $default_value,
-            createdAt: datetime(),
-            updatedAt: datetime()
-        }})
-        RETURN p {{.*}} AS property
-        """,
-        owner_id=owner_id,
-        property_id=property_id,
-        key=key,
-        display_name=display_name,
-        description=description,
-        data_type=data_type,
-        required=required,
-        default_value=default_value,
-    )
-    record = await result.single()
-    return _convert_neo4j_types(record["property"])
-
-
 # --- Schema Reading (for cache rebuild from DB) ---
 
 
-async def get_full_schema(session: AsyncSession) -> dict | None:
-    """Read the full provisioned schema from the Instance DB.
+async def get_full_schema(session: AsyncSession, ontology_key: str) -> dict | None:
+    """Read the full schema for a specific ontology by key.
 
-    Returns None if no Ontology node exists (not provisioned).
+    Returns None if no matching Ontology node exists.
     """
-    # Get ontology (there should be exactly one or zero)
     ont_result = await session.run(
-        "MATCH (o:Ontology) RETURN o {.*} AS ontology LIMIT 1"
+        "MATCH (o:Ontology {key: $key}) RETURN o {.*} AS ontology",
+        key=ontology_key,
     )
     ont_record = await ont_result.single()
     if not ont_record:
@@ -278,6 +88,50 @@ async def get_full_schema(session: AsyncSession) -> dict | None:
         "entityTypes": entity_types,
         "relationTypes": relation_types,
     }
+
+
+async def get_all_ontology_keys(session: AsyncSession) -> list[str]:
+    """Return all ontology keys in the database."""
+    result = await session.run("MATCH (o:Ontology) RETURN o.key AS key ORDER BY o.key")
+    return [record["key"] async for record in result]
+
+
+# --- Instance Data Wipe ---
+
+
+async def wipe_instance_data(
+    session: AsyncSession, entity_type_keys: list[str],
+) -> tuple[int, int]:
+    """Delete all entity instances (and their relationships) for the given entity type keys.
+
+    Returns (entities_deleted, relations_deleted).
+    """
+    # First count relationships that will be deleted
+    rel_result = await session.run(
+        """
+        MATCH (n:_Entity)-[r]-()
+        WHERE n._entityTypeKey IN $keys
+        RETURN count(DISTINCT r) AS rel_count
+        """,
+        keys=entity_type_keys,
+    )
+    rel_record = await rel_result.single()
+    relations_deleted = rel_record["rel_count"]
+
+    # Delete entities with DETACH DELETE (removes relationships too)
+    del_result = await session.run(
+        """
+        MATCH (n:_Entity)
+        WHERE n._entityTypeKey IN $keys
+        DETACH DELETE n
+        RETURN count(n) AS deleted
+        """,
+        keys=entity_type_keys,
+    )
+    del_record = await del_result.single()
+    entities_deleted = del_record["deleted"]
+
+    return entities_deleted, relations_deleted
 
 
 # --- Entity Instance CRUD ---

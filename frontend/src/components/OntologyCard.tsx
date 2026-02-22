@@ -10,7 +10,10 @@ export default function OntologyCard({ ontology, onDelete }: Props) {
   return (
     <div className="border border-gray-200 rounded-lg p-4 bg-white shadow-sm hover:shadow-md transition-shadow">
       <Link to={`/ontologies/${ontology.ontologyId}`} className="block">
-        <h3 className="text-lg font-semibold text-gray-900">{ontology.name}</h3>
+        <h3 className="text-lg font-semibold text-gray-900">
+          {ontology.name}
+          <span className="ml-2 text-sm text-gray-400 font-mono font-normal">{ontology.key}</span>
+        </h3>
         <p className="text-sm text-gray-500 mt-1">{ontology.description || 'No description'}</p>
         <p className="text-xs text-gray-400 mt-2">Updated {new Date(ontology.updatedAt).toLocaleDateString()}</p>
       </Link>

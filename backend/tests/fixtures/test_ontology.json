@@ -2,6 +2,7 @@
   "formatVersion": "1.0",
   "ontology": {
     "ontologyId": "test-ontology-001",
+    "key": "test_ontology",
     "name": "Test Ontology",
     "description": "Person/Company ontology for testing"
   },

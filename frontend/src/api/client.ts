@@ -23,7 +23,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 // Ontologies
 export const listOntologies = () => request<Ontology[]>('/ontologies');
-export const createOntology = (data: { name: string; description?: string }) =>
+export const createOntology = (data: { name: string; key: string; description?: string }) =>
   request<Ontology>('/ontologies', { method: 'POST', body: JSON.stringify(data) });
 export const getOntology = (id: string) => request<Ontology>(`/ontologies/${id}`);
 export const updateOntology = (id: string, data: { name?: string; description?: string }) =>

@@ -31,7 +31,7 @@ Implement the schema modeling service. This is the first functional milestone.
 - [x] Schema export / import (JSON)
 - [x] Neo4j persistence for all schema objects
 - [x] Unit tests (32 tests, all passing, mocked repository layer)
-- [x] Docker Compose with Neo4j Model DB + Instance DB
+- [x] Docker Compose with Neo4j
 - [x] Neo4j constraint bootstrap on startup
 - [x] Integration testing against real Neo4j (40/40 curl tests passing)
 - [x] 4 bugs found and fixed with regression tests
@@ -43,30 +43,30 @@ Implement the schema modeling service. This is the first functional milestone.
 ---
 
 ### Phase 2 — Backend: Runtime API (REST)
-Add the runtime module to the existing backend. The server runs in `runtime` mode against the Instance DB, serving schema-driven instance CRUD.
+Add the runtime module to the existing backend. All routes are scoped by ontology key (`/api/runtime/{ontologyKey}/...`), reading schema data from the same database as the modeling module.
 
 **Scope:**
-- [x] Server mode infrastructure (`SERVER_MODE` env var, mode-based route mounting, unified `DB_*` config)
 - [x] Move shared Pydantic models (export format) from `modeling/schemas.py` to `core/schemas.py`
-- [x] Runtime provision endpoint (`POST /api/provision` — resets Instance DB, imports ontology JSON)
-- [x] Provisioning script (`ontoforge-provision` CLI, HTTP client calling export + provision endpoints)
+- [ ] Ontology key field (snake_case, unique, immutable) on ontology model
 - [x] Schema introspection endpoints (5 endpoints, read-only from in-memory SchemaCache)
 - [x] Generic entity instance CRUD (5 endpoints with filtering, search, pagination)
 - [x] Generic relation instance CRUD (5 endpoints with source/target validation)
 - [x] Instance validation against schema (type coercion, required/unknown checks, collect-all-errors)
 - [x] Basic search and filtering (`filter.{key}`, `filter.{key}__{op}`, `q` text search)
 - [x] Neighborhood exploration (`GET .../neighbors` with direction and type filtering)
+- [ ] Instance data wipe endpoint (`DELETE /api/runtime/{ontologyKey}/data`)
+- [x] SchemaCache loaded from DB on server startup
 - [x] Unit tests (56 runtime tests, all passing, mocked repository layer)
 - [x] Test fixture (person/company/works_for ontology JSON)
 - [x] ValidationError enhanced with field-level details
 - [x] JSON parse error handler for consistent error format
-- [x] SchemaCache loaded from DB on server restart
+- [ ] Ontology-scoped runtime routes (`/api/runtime/{ontologyKey}/...`)
 - [ ] Integration testing against real Neo4j
-- [ ] Documentation for runtime usage and provisioning workflow
+- [ ] Documentation for runtime usage
 
 **Depends on:** Phase 1
 
-**Status:** IN PROGRESS — 17 endpoints implemented, 56 unit tests passing, code reviewed. Remaining: integration testing and documentation.
+**Status:** IN PROGRESS — Core runtime logic implemented (16 endpoints, 56 unit tests). Remaining: ontology key support, ontology-scoped route prefix, instance data wipe endpoint, integration testing, documentation.
 
 ---
 
@@ -120,17 +120,15 @@ REST-to-MCP adapter layer for AI-driven interactions.
 
 **Active phase:** Phase 2 — Backend: Runtime API
 
-**Next steps:** Integration testing against real Neo4j (start Docker, provision test fixture, run curl tests). Then write concise runtime usage docs.
+**Next steps:** Add ontology key to the modeling module, refactor runtime routes to use ontology-scoped prefix (`/api/runtime/{ontologyKey}/...`), replace provision endpoint with data wipe endpoint. Then integration testing against real Neo4j.
 
 **What's ready to use:**
 - Backend modeling API: 26 endpoints, 32 unit tests, integration tested (40/40)
-- Backend runtime API: 17 endpoints, 56 unit tests, code reviewed (88 total tests passing)
-- Provisioning script: `uv run ontoforge-provision --ontology <id>`
+- Backend runtime API: 16 endpoints, 56 unit tests, code reviewed (88 total tests passing)
 - Test fixture: `backend/tests/fixtures/test_ontology.json` (person/company/works_for)
 - Frontend modeling UI: first draft, integration tested (15/15)
-- Docker Compose: Neo4j Model DB + Instance DB configured
-- Server mode infrastructure: `SERVER_MODE` env var, mode-based route mounting, unified config
-- Shared Pydantic models in `core/schemas.py` (moved from modeling)
-- Architecture docs: complete for runtime scope
-- Runtime API contract: `docs/api-contracts/runtime-api.md` (17 endpoints fully specified)
+- Docker Compose: Neo4j configured
+- Shared Pydantic models in `core/schemas.py`
+- Architecture docs: complete for current scope
+- Runtime API contract: `docs/api-contracts/runtime-api.md` (16 endpoints fully specified)
 - Testing strategy: `docs/testing-strategy.md` for multi-agent test cycles

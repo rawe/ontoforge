@@ -133,6 +133,7 @@ export default function OntologyDetailPage() {
           <div>
             <div className="flex items-center gap-3">
               <h2 className="text-2xl font-bold text-gray-900">{ontology.name}</h2>
+              <span className="text-sm text-gray-400 font-mono">{ontology.key}</span>
               <button onClick={() => setEditing(true)} className="text-sm text-blue-600 hover:underline">Edit</button>
             </div>
             <p className="text-gray-500 mt-1">{ontology.description || 'No description'}</p>

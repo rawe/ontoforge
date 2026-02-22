@@ -6,9 +6,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 import ontoforge_server.runtime.service as svc
+from tests.runtime.conftest import ONTOLOGY_KEY
 
 
 NOW = datetime(2025, 6, 1, tzinfo=timezone.utc)
+PREFIX = f"/api/runtime/{ONTOLOGY_KEY}"
 
 PERSON_ENTITY = {
     "_id": "ent-1",
@@ -51,7 +53,7 @@ async def test_create_entity_valid(client, repo_patch):
     """POST /entities/{type_key} with valid props returns 201."""
     with repo_patch():
         resp = await client.post(
-            "/api/entities/person",
+            f"{PREFIX}/entities/person",
             json={"name": "Alice", "age": 30, "email": "alice@example.com"},
         )
     assert resp.status_code == 201
@@ -65,7 +67,7 @@ async def test_create_entity_missing_required_prop(client, repo_patch):
     with repo_patch():
         # 'name' is required for person, omitting it
         resp = await client.post(
-            "/api/entities/person",
+            f"{PREFIX}/entities/person",
             json={"age": 30},
         )
     assert resp.status_code == 422
@@ -77,7 +79,7 @@ async def test_create_entity_unknown_prop(client, repo_patch):
     """POST /entities/{type_key} with an unknown property returns 422."""
     with repo_patch():
         resp = await client.post(
-            "/api/entities/person",
+            f"{PREFIX}/entities/person",
             json={"name": "Alice", "nonexistent_field": "bad"},
         )
     assert resp.status_code == 422
@@ -89,7 +91,7 @@ async def test_create_entity_type_mismatch(client, repo_patch):
     """POST /entities/{type_key} with wrong data type returns 422."""
     with repo_patch():
         resp = await client.post(
-            "/api/entities/person",
+            f"{PREFIX}/entities/person",
             json={"name": "Alice", "age": "not-a-number"},
         )
     assert resp.status_code == 422
@@ -107,19 +109,11 @@ async def test_create_entity_default_value_injection(client, repo_patch):
 
     with repo_patch(create_entity=AsyncMock(side_effect=capture_create)):
         resp = await client.post(
-            "/api/entities/person",
+            f"{PREFIX}/entities/person",
             json={"name": "Alice"},
         )
     assert resp.status_code == 201
-    # 'active' has defaultValue "true" so it should be injected even when not provided
-    # But it's optional with default, so it's only injected if required.
-    # Actually, checking the service: on create, if not provided and not required,
-    # default is NOT injected (only required+default gets injected).
-    # 'active' is required=False with defaultValue="true" => not injected.
-    # Let's verify the service logic directly.
-    # From service.validate_properties: if prop_key not in properties and not partial:
-    #   if prop_def.required and prop_def.default_value is not None: inject
-    # So for optional props with defaults, they are NOT injected on create.
+    # 'active' is required=False with defaultValue="true" => not injected on create.
     # name is required with no default -> must be provided -> "Alice"
     assert "name" in captured_props
     assert captured_props["name"] == "Alice"
@@ -127,9 +121,7 @@ async def test_create_entity_default_value_injection(client, repo_patch):
 
 async def test_create_entity_required_with_default_injected(client, repo_patch):
     """A required property with a default value is injected when not provided."""
-    # We need a schema where a required prop has a default.
-    # Modify the cache temporarily.
-    cache = svc._schema_cache
+    cache = svc._schema_caches[ONTOLOGY_KEY]
     person_def = cache.entity_types["person"]
 
     # Temporarily make 'active' required with a default
@@ -145,7 +137,7 @@ async def test_create_entity_required_with_default_injected(client, repo_patch):
     try:
         with repo_patch(create_entity=AsyncMock(side_effect=capture_create)):
             resp = await client.post(
-                "/api/entities/person",
+                f"{PREFIX}/entities/person",
                 json={"name": "Alice"},
             )
         assert resp.status_code == 201
@@ -159,7 +151,7 @@ async def test_create_entity_nonexistent_type(client, repo_patch):
     """POST /entities/{type_key} with a nonexistent type returns 404."""
     with repo_patch():
         resp = await client.post(
-            "/api/entities/nonexistent",
+            f"{PREFIX}/entities/nonexistent",
             json={"name": "Alice"},
         )
     assert resp.status_code == 404
@@ -169,7 +161,7 @@ async def test_create_entity_boolean_type_check(client, repo_patch):
     """POST /entities/{type_key} rejects non-boolean for boolean field."""
     with repo_patch():
         resp = await client.post(
-            "/api/entities/person",
+            f"{PREFIX}/entities/person",
             json={"name": "Alice", "active": 42},
         )
     assert resp.status_code == 422
@@ -183,7 +175,7 @@ async def test_create_entity_boolean_type_check(client, repo_patch):
 async def test_list_entities(client, repo_patch):
     """GET /entities/{type_key} returns paginated response."""
     with repo_patch():
-        resp = await client.get("/api/entities/person")
+        resp = await client.get(f"{PREFIX}/entities/person")
     assert resp.status_code == 200
     data = resp.json()
     assert "items" in data
@@ -197,7 +189,7 @@ async def test_list_entities(client, repo_patch):
 async def test_list_entities_nonexistent_type(client, repo_patch):
     """GET /entities/{type_key} with unknown type returns 404."""
     with repo_patch():
-        resp = await client.get("/api/entities/nonexistent")
+        resp = await client.get(f"{PREFIX}/entities/nonexistent")
     assert resp.status_code == 404
 
 
@@ -207,7 +199,7 @@ async def test_list_entities_nonexistent_type(client, repo_patch):
 async def test_get_entity(client, repo_patch):
     """GET /entities/{type_key}/{id} returns the entity."""
     with repo_patch():
-        resp = await client.get("/api/entities/person/ent-1")
+        resp = await client.get(f"{PREFIX}/entities/person/ent-1")
     assert resp.status_code == 200
     data = resp.json()
     assert data["_id"] == "ent-1"
@@ -217,7 +209,7 @@ async def test_get_entity(client, repo_patch):
 async def test_get_entity_not_found(client, repo_patch):
     """GET /entities/{type_key}/{id} with unknown ID returns 404."""
     with repo_patch(get_entity=AsyncMock(return_value=None)):
-        resp = await client.get("/api/entities/person/missing-id")
+        resp = await client.get(f"{PREFIX}/entities/person/missing-id")
     assert resp.status_code == 404
 
 
@@ -229,7 +221,7 @@ async def test_update_entity(client, repo_patch):
     updated = {**PERSON_ENTITY, "name": "Alice Updated"}
     with repo_patch(update_entity=AsyncMock(return_value=updated)):
         resp = await client.patch(
-            "/api/entities/person/ent-1",
+            f"{PREFIX}/entities/person/ent-1",
             json={"name": "Alice Updated"},
         )
     assert resp.status_code == 200
@@ -247,7 +239,7 @@ async def test_update_entity_null_removes_optional(client, repo_patch):
 
     with repo_patch(update_entity=AsyncMock(side_effect=capture_update)):
         resp = await client.patch(
-            "/api/entities/person/ent-1",
+            f"{PREFIX}/entities/person/ent-1",
             json={"email": None},
         )
     assert resp.status_code == 200
@@ -258,7 +250,7 @@ async def test_update_entity_null_on_required_returns_422(client, repo_patch):
     """PATCH with null on a required prop returns 422."""
     with repo_patch():
         resp = await client.patch(
-            "/api/entities/person/ent-1",
+            f"{PREFIX}/entities/person/ent-1",
             json={"name": None},
         )
     assert resp.status_code == 422
@@ -270,7 +262,7 @@ async def test_update_entity_not_found(client, repo_patch):
     """PATCH on a nonexistent entity returns 404."""
     with repo_patch(update_entity=AsyncMock(return_value=None)):
         resp = await client.patch(
-            "/api/entities/person/missing-id",
+            f"{PREFIX}/entities/person/missing-id",
             json={"name": "Updated"},
         )
     assert resp.status_code == 404
@@ -280,7 +272,7 @@ async def test_update_entity_unknown_prop(client, repo_patch):
     """PATCH with an unknown property returns 422."""
     with repo_patch():
         resp = await client.patch(
-            "/api/entities/person/ent-1",
+            f"{PREFIX}/entities/person/ent-1",
             json={"nonexistent_field": "value"},
         )
     assert resp.status_code == 422
@@ -292,19 +284,19 @@ async def test_update_entity_unknown_prop(client, repo_patch):
 async def test_delete_entity(client, repo_patch):
     """DELETE /entities/{type_key}/{id} returns 204."""
     with repo_patch():
-        resp = await client.delete("/api/entities/person/ent-1")
+        resp = await client.delete(f"{PREFIX}/entities/person/ent-1")
     assert resp.status_code == 204
 
 
 async def test_delete_entity_not_found(client, repo_patch):
     """DELETE on a nonexistent entity returns 404."""
     with repo_patch(delete_entity=AsyncMock(return_value=False)):
-        resp = await client.delete("/api/entities/person/missing-id")
+        resp = await client.delete(f"{PREFIX}/entities/person/missing-id")
     assert resp.status_code == 404
 
 
 async def test_delete_entity_nonexistent_type(client, repo_patch):
     """DELETE with an unknown entity type returns 404."""
     with repo_patch():
-        resp = await client.delete("/api/entities/nonexistent/ent-1")
+        resp = await client.delete(f"{PREFIX}/entities/nonexistent/ent-1")
     assert resp.status_code == 404

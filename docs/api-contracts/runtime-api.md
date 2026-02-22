@@ -1,53 +1,45 @@
 # Runtime API Contract
 
 > Full contract for the runtime REST API.
-> Base path: `/api`
+> Base path: `/api/runtime/{ontologyKey}`
 >
-> The runtime server operates on the Instance DB, which holds exactly one provisioned ontology.
-> No ontology scoping in URLs — all endpoints operate on the single provisioned ontology.
+> All runtime endpoints are scoped to a specific ontology via the `ontologyKey` path parameter.
+> The ontology key is the ontology's unique `key` field (snake_case, pattern: `^[a-z][a-z0-9_]*$`).
+> The runtime module reads schema data from the same database as the modeling module.
 >
 > For storage model details, see `architecture.md` §4.2.
 
-## 1. Provision
+## 1. Instance Data Management
 
-### POST /api/provision
+### DELETE /api/runtime/{ontologyKey}/data
 
-Reset the Instance DB and import an ontology.
-
-**Request body:** `ExportPayload` JSON (same format as the modeling export endpoint).
+Wipe all instance data (entities and relations) for the specified ontology. Schema nodes are preserved.
 
 **Response:** `200 OK`
 ```json
 {
-  "ontologyId": "abc-123",
-  "name": "My Ontology",
-  "entityTypeCount": 5,
-  "relationTypeCount": 3
+  "ontologyKey": "acme",
+  "entitiesDeleted": 150,
+  "relationsDeleted": 42
 }
 ```
 
 **Behavior:**
-1. Delete all nodes and relationships in the Instance DB.
-2. Drop all constraints and indexes (except system ones).
-3. Import schema nodes (Ontology, EntityType, RelationType, PropertyDefinition) from the payload.
-4. Recreate constraints and indexes (both schema and instance).
-5. Rebuild the in-memory schema cache.
-6. Return a summary.
+1. Delete all entity instance nodes and relation instance relationships belonging to this ontology's entity types.
+2. Rebuild the in-memory schema cache for this ontology.
+3. Return a summary of deleted items.
 
-**Validation:**
-- Reject entity type keys that would collide with reserved schema labels (`Ontology`, `EntityType`, `RelationType`, `PropertyDefinition`) when converted to PascalCase.
-
-**Errors:** 422 if payload is invalid or contains reserved label collisions.
+**Errors:** 404 if ontology key not found.
 
 ---
 
 ## 2. Schema Introspection
 
-Read-only access to the provisioned ontology schema. Served from the in-memory schema cache.
+Read-only access to the ontology schema. Served from the in-memory schema cache.
 
-### GET /api/schema
+### GET /api/runtime/{ontologyKey}/schema
 
-Return the full provisioned schema. The response mirrors the `ExportPayload` structure (minus `formatVersion`).
+Return the full schema for the specified ontology.
 
 **Response:** `200 OK`
 ```json
@@ -55,6 +47,7 @@ Return the full provisioned schema. The response mirrors the `ExportPayload` str
   "ontology": {
     "ontologyId": "abc-123",
     "name": "My Ontology",
+    "key": "my_ontology",
     "description": "An example ontology"
   },
   "entityTypes": [
@@ -87,15 +80,15 @@ Return the full provisioned schema. The response mirrors the `ExportPayload` str
 }
 ```
 
-**Errors:** 404 if no ontology is provisioned (empty Instance DB).
+**Errors:** 404 if ontology key not found.
 
-### GET /api/schema/entity-types
+### GET /api/runtime/{ontologyKey}/schema/entity-types
 
 Return the `entityTypes` array. Useful for MCP tools that need to enumerate available types.
 
 **Response:** `200 OK` — array of entity type objects.
 
-### GET /api/schema/entity-types/{entityTypeKey}
+### GET /api/runtime/{ontologyKey}/schema/entity-types/{entityTypeKey}
 
 Return a single entity type with its property definitions.
 
@@ -103,13 +96,13 @@ Return a single entity type with its property definitions.
 
 **Errors:** 404 if entity type key not found.
 
-### GET /api/schema/relation-types
+### GET /api/runtime/{ontologyKey}/schema/relation-types
 
 Return the `relationTypes` array.
 
 **Response:** `200 OK` — array of relation type objects.
 
-### GET /api/schema/relation-types/{relationTypeKey}
+### GET /api/runtime/{ontologyKey}/schema/relation-types/{relationTypeKey}
 
 Return a single relation type with its property definitions, including `fromEntityTypeKey` and `toEntityTypeKey`.
 
@@ -121,7 +114,7 @@ Return a single relation type with its property definitions, including `fromEnti
 
 ## 3. Entity Instance CRUD
 
-### POST /api/entities/{entityTypeKey}
+### POST /api/runtime/{ontologyKey}/entities/{entityTypeKey}
 
 Create an entity instance.
 
@@ -155,7 +148,7 @@ Properties are provided as a flat JSON object. Keys must match property definiti
 - Default values are injected for required properties not in the request but with a `defaultValue` in the schema.
 - All validation errors are collected and returned at once (not fail-fast).
 
-### GET /api/entities/{entityTypeKey}
+### GET /api/runtime/{ontologyKey}/entities/{entityTypeKey}
 
 List entity instances of a type, with optional filtering, search, sorting, and pagination.
 
@@ -209,7 +202,7 @@ List entity instances of a type, with optional filtering, search, sorting, and p
 
 **Errors:** 404 if entity type key not found. 400 if filter parameter is neither a reserved name nor a schema property key.
 
-### GET /api/entities/{entityTypeKey}/{id}
+### GET /api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}
 
 Get a single entity instance.
 
@@ -217,7 +210,7 @@ Get a single entity instance.
 
 **Errors:** 404 if entity type key or instance ID not found.
 
-### PATCH /api/entities/{entityTypeKey}/{id}
+### PATCH /api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}
 
 Partial update of an entity instance. Only provided properties are updated; omitted properties are unchanged.
 
@@ -236,7 +229,7 @@ Partial update of an entity instance. Only provided properties are updated; omit
 
 **Errors:** 404 if not found. 422 if validation fails.
 
-### DELETE /api/entities/{entityTypeKey}/{id}
+### DELETE /api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}
 
 Delete an entity instance. Uses `DETACH DELETE` — all relationships connected to this entity are also deleted.
 
@@ -248,7 +241,7 @@ Delete an entity instance. Uses `DETACH DELETE` — all relationships connected 
 
 ## 4. Relation Instance CRUD
 
-### POST /api/relations/{relationTypeKey}
+### POST /api/runtime/{ontologyKey}/relations/{relationTypeKey}
 
 Create a relation instance between two entity instances.
 
@@ -282,7 +275,7 @@ Create a relation instance between two entity instances.
 - `toEntityId` must reference an existing entity instance whose `_entityTypeKey` matches the relation type's `toEntityTypeKey`. → 422 if mismatch or not found.
 - Property validation identical to entity instances (required, unknown, type coercion).
 
-### GET /api/relations/{relationTypeKey}
+### GET /api/runtime/{ontologyKey}/relations/{relationTypeKey}
 
 List relation instances of a type, with optional filtering and pagination.
 
@@ -318,7 +311,7 @@ List relation instances of a type, with optional filtering and pagination.
 }
 ```
 
-### GET /api/relations/{relationTypeKey}/{id}
+### GET /api/runtime/{ontologyKey}/relations/{relationTypeKey}/{id}
 
 Get a single relation instance.
 
@@ -326,7 +319,7 @@ Get a single relation instance.
 
 **Errors:** 404 if relation type key or instance ID not found.
 
-### PATCH /api/relations/{relationTypeKey}/{id}
+### PATCH /api/runtime/{ontologyKey}/relations/{relationTypeKey}/{id}
 
 Partial update of a relation instance. Same semantics as entity update (partial, null removal). Cannot change `fromEntityId` or `toEntityId` — delete and recreate instead.
 
@@ -339,7 +332,7 @@ Partial update of a relation instance. Same semantics as entity update (partial,
 
 **Response:** `200 OK` — full relation instance after update.
 
-### DELETE /api/relations/{relationTypeKey}/{id}
+### DELETE /api/runtime/{ontologyKey}/relations/{relationTypeKey}/{id}
 
 Delete a relation instance. Only the relationship is removed; the connected entity instances are unaffected.
 
@@ -351,7 +344,7 @@ Delete a relation instance. Only the relationship is removed; the connected enti
 
 ## 5. Graph Traversal
 
-### GET /api/entities/{entityTypeKey}/{id}/neighbors
+### GET /api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}/neighbors
 
 Get an entity's neighborhood — the connected entities and the relations between them.
 
@@ -426,20 +419,20 @@ The runtime API reuses the same error format as the modeling API (see `architect
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/provision` | Reset Instance DB and import ontology |
-| `GET` | `/api/schema` | Full schema introspection |
-| `GET` | `/api/schema/entity-types` | List entity types |
-| `GET` | `/api/schema/entity-types/{key}` | Get entity type with properties |
-| `GET` | `/api/schema/relation-types` | List relation types |
-| `GET` | `/api/schema/relation-types/{key}` | Get relation type with properties |
-| `POST` | `/api/entities/{entityTypeKey}` | Create entity instance |
-| `GET` | `/api/entities/{entityTypeKey}` | List/search entity instances |
-| `GET` | `/api/entities/{entityTypeKey}/{id}` | Get entity instance |
-| `PATCH` | `/api/entities/{entityTypeKey}/{id}` | Partial update entity instance |
-| `DELETE` | `/api/entities/{entityTypeKey}/{id}` | Delete entity instance |
-| `GET` | `/api/entities/{entityTypeKey}/{id}/neighbors` | Graph traversal |
-| `POST` | `/api/relations/{relationTypeKey}` | Create relation instance |
-| `GET` | `/api/relations/{relationTypeKey}` | List relation instances |
-| `GET` | `/api/relations/{relationTypeKey}/{id}` | Get relation instance |
-| `PATCH` | `/api/relations/{relationTypeKey}/{id}` | Partial update relation instance |
-| `DELETE` | `/api/relations/{relationTypeKey}/{id}` | Delete relation instance |
+| `DELETE` | `/api/runtime/{ontologyKey}/data` | Wipe instance data for this ontology |
+| `GET` | `/api/runtime/{ontologyKey}/schema` | Full schema introspection |
+| `GET` | `/api/runtime/{ontologyKey}/schema/entity-types` | List entity types |
+| `GET` | `/api/runtime/{ontologyKey}/schema/entity-types/{key}` | Get entity type with properties |
+| `GET` | `/api/runtime/{ontologyKey}/schema/relation-types` | List relation types |
+| `GET` | `/api/runtime/{ontologyKey}/schema/relation-types/{key}` | Get relation type with properties |
+| `POST` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}` | Create entity instance |
+| `GET` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}` | List/search entity instances |
+| `GET` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}` | Get entity instance |
+| `PATCH` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}` | Partial update entity instance |
+| `DELETE` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}` | Delete entity instance |
+| `GET` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}/neighbors` | Graph traversal |
+| `POST` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}` | Create relation instance |
+| `GET` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}` | List relation instances |
+| `GET` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}/{id}` | Get relation instance |
+| `PATCH` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}/{id}` | Partial update relation instance |
+| `DELETE` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}/{id}` | Delete relation instance |

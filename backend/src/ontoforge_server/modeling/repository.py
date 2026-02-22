@@ -26,6 +26,7 @@ def _convert_neo4j_types(data: dict) -> dict:
 async def create_ontology(
     session: AsyncSession,
     ontology_id: str,
+    key: str,
     name: str,
     description: str | None,
 ) -> dict:
@@ -33,6 +34,7 @@ async def create_ontology(
         """
         CREATE (o:Ontology {
             ontologyId: $ontology_id,
+            key: $key,
             name: $name,
             description: $description,
             createdAt: datetime(),
@@ -41,6 +43,7 @@ async def create_ontology(
         RETURN o {.*} AS ontology
         """,
         ontology_id=ontology_id,
+        key=key,
         name=name,
         description=description,
     )
@@ -68,6 +71,15 @@ async def get_ontology_by_name(session: AsyncSession, name: str) -> dict | None:
     result = await session.run(
         "MATCH (o:Ontology {name: $name}) RETURN o {.*} AS ontology",
         name=name,
+    )
+    record = await result.single()
+    return _convert_neo4j_types(record["ontology"]) if record else None
+
+
+async def get_ontology_by_key(session: AsyncSession, key: str) -> dict | None:
+    result = await session.run(
+        "MATCH (o:Ontology {key: $key}) RETURN o {.*} AS ontology",
+        key=key,
     )
     record = await result.single()
     return _convert_neo4j_types(record["ontology"]) if record else None

@@ -9,7 +9,6 @@ dependencies = [
     "neo4j>=5.27",
     "pydantic>=2.10",
     "pydantic-settings>=2.7",
-    "httpx>=0.28",
 ]
 
 [dependency-groups]
@@ -25,9 +24,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ontoforge_server"]
-
-[project.scripts]
-ontoforge-provision = "ontoforge_server.provision:main"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

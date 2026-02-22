@@ -13,22 +13,26 @@ Create a new ontology.
 ```json
 {
   "name": "string (required, unique)",
+  "key": "string (required, unique, immutable, pattern: ^[a-z][a-z0-9_]*$)",
   "description": "string (optional)"
 }
 ```
+
+The `key` field is a URL-safe identifier used in runtime API routes (`/api/runtime/{ontologyKey}/...`). It follows the same snake_case pattern as entity and relation type keys. Once created, the key cannot be changed.
 
 **Response:** `201 Created`
 ```json
 {
   "ontologyId": "uuid",
   "name": "string",
+  "key": "string",
   "description": "string",
   "createdAt": "datetime",
   "updatedAt": "datetime"
 }
 ```
 
-**Errors:** 409 if name already exists.
+**Errors:** 409 if name or key already exists.
 
 ### GET /api/model/ontologies
 
@@ -40,6 +44,7 @@ List all ontologies.
   {
     "ontologyId": "uuid",
     "name": "string",
+    "key": "string",
     "description": "string",
     "createdAt": "datetime",
     "updatedAt": "datetime"
@@ -57,7 +62,7 @@ Get a single ontology by ID.
 
 ### PUT /api/model/ontologies/{ontologyId}
 
-Update ontology metadata. `ontologyId` is immutable.
+Update ontology metadata. `ontologyId` and `key` are immutable.
 
 **Request body:**
 ```json
@@ -371,6 +376,7 @@ Import an ontology from a JSON payload.
 ### OntologyCreate
 ```
 name: string (required)
+key: string (required, pattern: ^[a-z][a-z0-9_]*$, unique, immutable)
 description: string (optional)
 ```
 
@@ -384,6 +390,7 @@ description: string (optional)
 ```
 ontologyId: string (uuid)
 name: string
+key: string
 description: string | null
 createdAt: datetime
 updatedAt: datetime

@@ -48,18 +48,25 @@ Add the runtime module to the existing backend. The server runs in `runtime` mod
 **Scope:**
 - [x] Server mode infrastructure (`SERVER_MODE` env var, mode-based route mounting, unified `DB_*` config)
 - [x] Move shared Pydantic models (export format) from `modeling/schemas.py` to `core/schemas.py`
-- [ ] Runtime provision endpoint (`POST /api/provision` — resets Instance DB, imports ontology JSON)
-- [ ] Provisioning script (HTTP client calling export + provision endpoints)
-- [ ] Schema introspection endpoints (read-only, reads embedded ontology)
-- [ ] Generic entity instance CRUD
-- [ ] Generic relation instance CRUD
-- [ ] Instance validation against schema
-- [ ] Basic search and filtering
-- [ ] Neighborhood exploration
+- [x] Runtime provision endpoint (`POST /api/provision` — resets Instance DB, imports ontology JSON)
+- [x] Provisioning script (`ontoforge-provision` CLI, HTTP client calling export + provision endpoints)
+- [x] Schema introspection endpoints (5 endpoints, read-only from in-memory SchemaCache)
+- [x] Generic entity instance CRUD (5 endpoints with filtering, search, pagination)
+- [x] Generic relation instance CRUD (5 endpoints with source/target validation)
+- [x] Instance validation against schema (type coercion, required/unknown checks, collect-all-errors)
+- [x] Basic search and filtering (`filter.{key}`, `filter.{key}__{op}`, `q` text search)
+- [x] Neighborhood exploration (`GET .../neighbors` with direction and type filtering)
+- [x] Unit tests (56 runtime tests, all passing, mocked repository layer)
+- [x] Test fixture (person/company/works_for ontology JSON)
+- [x] ValidationError enhanced with field-level details
+- [x] JSON parse error handler for consistent error format
+- [x] SchemaCache loaded from DB on server restart
+- [ ] Integration testing against real Neo4j
+- [ ] Documentation for runtime usage and provisioning workflow
 
 **Depends on:** Phase 1
 
-**Status:** IN PROGRESS — server mode infrastructure and shared models complete. Runtime design settled, full API contract written.
+**Status:** IN PROGRESS — 17 endpoints implemented, 56 unit tests passing, code reviewed. Remaining: integration testing and documentation.
 
 ---
 
@@ -113,14 +120,17 @@ REST-to-MCP adapter layer for AI-driven interactions.
 
 **Active phase:** Phase 2 — Backend: Runtime API
 
-**Next steps:** Implement runtime provision endpoint, then schema introspection, then entity/relation CRUD. Implementation spec: `docs/api-contracts/runtime-api.md`. Storage model: `docs/architecture.md` §4.2.
+**Next steps:** Integration testing against real Neo4j (start Docker, provision test fixture, run curl tests). Then write concise runtime usage docs.
 
 **What's ready to use:**
 - Backend modeling API: 26 endpoints, 32 unit tests, integration tested (40/40)
+- Backend runtime API: 17 endpoints, 56 unit tests, code reviewed (88 total tests passing)
+- Provisioning script: `uv run ontoforge-provision --ontology <id>`
+- Test fixture: `backend/tests/fixtures/test_ontology.json` (person/company/works_for)
 - Frontend modeling UI: first draft, integration tested (15/15)
 - Docker Compose: Neo4j Model DB + Instance DB configured
-- Server mode infrastructure: `SERVER_MODE` env var, mode-based route mounting, unified config (refactored and tested)
+- Server mode infrastructure: `SERVER_MODE` env var, mode-based route mounting, unified config
 - Shared Pydantic models in `core/schemas.py` (moved from modeling)
-- Architecture docs: complete for runtime scope (instance representation, API design, provisioning workflow)
+- Architecture docs: complete for runtime scope
 - Runtime API contract: `docs/api-contracts/runtime-api.md` (17 endpoints fully specified)
 - Testing strategy: `docs/testing-strategy.md` for multi-agent test cycles

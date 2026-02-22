@@ -1,22 +1,30 @@
+import json
 from contextlib import asynccontextmanager
 
-from fastapi import APIRouter, FastAPI, Request
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from ontoforge_server.config import settings
-from ontoforge_server.core.database import close_driver, init_driver
+from ontoforge_server.core.database import close_driver, get_driver, init_driver
 from ontoforge_server.core.exceptions import (
     ConflictError,
     NotFoundError,
     ValidationError,
 )
-from ontoforge_server.modeling.router import router as modeling_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_driver()
+    if settings.SERVER_MODE == "runtime":
+        from ontoforge_server.runtime import repository as runtime_repo
+        from ontoforge_server.runtime import service as runtime_service
+
+        driver = await get_driver()
+        async with driver.session() as session:
+            await runtime_repo.create_instance_constraints(session)
+        await runtime_service.load_schema_cache_from_db(driver)
     yield
     await close_driver()
 
@@ -49,13 +57,20 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(ValidationError)
     async def validation_handler(request: Request, exc: ValidationError):
-        return _error_response(422, "VALIDATION_ERROR", str(exc))
+        return _error_response(422, "VALIDATION_ERROR", str(exc), getattr(exc, "details", None))
+
+    @app.exception_handler(json.JSONDecodeError)
+    async def json_error_handler(request: Request, exc: json.JSONDecodeError):
+        return _error_response(400, "INVALID_JSON", "Request body is not valid JSON")
 
     if settings.SERVER_MODE == "model":
+        from ontoforge_server.modeling.router import router as modeling_router
+
         app.include_router(modeling_router, prefix="/api/model")
     else:
-        runtime_router = APIRouter(tags=["runtime"])
-        app.include_router(runtime_router, prefix="/api/runtime")
+        from ontoforge_server.runtime.router import router as runtime_router
+
+        app.include_router(runtime_router, prefix="/api")
 
     return app
 

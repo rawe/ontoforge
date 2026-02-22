@@ -1,0 +1,44 @@
+{
+  "formatVersion": "1.0",
+  "ontology": {
+    "ontologyId": "test-ontology-001",
+    "name": "Test Ontology",
+    "description": "Person/Company ontology for testing"
+  },
+  "entityTypes": [
+    {
+      "key": "person",
+      "displayName": "Person",
+      "description": "A human being",
+      "properties": [
+        {"key": "name", "displayName": "Name", "description": null, "dataType": "string", "required": true, "defaultValue": null},
+        {"key": "age", "displayName": "Age", "description": null, "dataType": "integer", "required": false, "defaultValue": null},
+        {"key": "email", "displayName": "Email", "description": null, "dataType": "string", "required": false, "defaultValue": null},
+        {"key": "active", "displayName": "Active", "description": null, "dataType": "boolean", "required": false, "defaultValue": "true"}
+      ]
+    },
+    {
+      "key": "company",
+      "displayName": "Company",
+      "description": "A business organization",
+      "properties": [
+        {"key": "name", "displayName": "Name", "description": null, "dataType": "string", "required": true, "defaultValue": null},
+        {"key": "founded", "displayName": "Founded", "description": "Date of founding", "dataType": "date", "required": false, "defaultValue": null},
+        {"key": "employee_count", "displayName": "Employee Count", "description": null, "dataType": "integer", "required": false, "defaultValue": null}
+      ]
+    }
+  ],
+  "relationTypes": [
+    {
+      "key": "works_for",
+      "displayName": "Works For",
+      "description": "Employment relationship",
+      "fromEntityTypeKey": "person",
+      "toEntityTypeKey": "company",
+      "properties": [
+        {"key": "since", "displayName": "Since", "description": null, "dataType": "date", "required": false, "defaultValue": null},
+        {"key": "role", "displayName": "Role", "description": null, "dataType": "string", "required": false, "defaultValue": null}
+      ]
+    }
+  ]
+}

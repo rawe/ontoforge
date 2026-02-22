@@ -26,8 +26,7 @@ async def init_driver() -> AsyncDriver:
         auth=(settings.DB_USER, settings.DB_PASSWORD),
     )
     await _driver.verify_connectivity()
-    if settings.SERVER_MODE == "model":
-        await _ensure_constraints(_driver)
+    await _ensure_constraints(_driver)
     return _driver
 
 

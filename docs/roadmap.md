@@ -63,7 +63,7 @@ Add the runtime module to the existing backend. All routes are scoped by ontolog
 - [x] Ontology-scoped runtime routes (`/api/runtime/{ontologyKey}/...`)
 - [x] Single-DB unified architecture (no dual-mode, no provisioning)
 - [ ] Integration testing against real Neo4j
-- [ ] Documentation for runtime usage
+- [x] Documentation for runtime usage (`docs/runtime-usage.md`)
 
 **Depends on:** Phase 1
 

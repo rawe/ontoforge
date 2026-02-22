@@ -11,11 +11,11 @@ Define component boundaries, data flow, Neo4j schema conventions, and API contra
 **Deliverables:**
 - [x] `docs/architecture.md` — Component diagram, boundaries, data flow, Neo4j storage model
 - [x] `docs/api-contracts/modeling-api.md` — Modeling REST endpoints, DTOs, error model (full contract)
-- [ ] `docs/api-contracts/runtime-api.md` — Lightweight sketch: route structure, boundary to modeling module, explicit TODOs for what must be detailed before Phase 2
+- [x] `docs/api-contracts/runtime-api.md` — Runtime REST endpoints, DTOs, filter syntax, error model (full contract)
 - [x] Establish naming conventions for all components — settled in `docs/architecture.md` §2
 - [x] Project scaffolding (directory structure, pyproject.toml, initial deps)
 
-**Status:** COMPLETE (modeling scope). Runtime API sketch deferred to Phase 2 prep.
+**Status:** COMPLETE
 
 ---
 
@@ -59,7 +59,7 @@ Add the runtime module to the existing backend. The server runs in `runtime` mod
 
 **Depends on:** Phase 1
 
-**Status:** IN PROGRESS — server mode infrastructure and shared models complete. Runtime design settled (decision 015).
+**Status:** IN PROGRESS — server mode infrastructure and shared models complete. Runtime design settled, full API contract written.
 
 ---
 
@@ -99,7 +99,7 @@ REST-to-MCP adapter layer for AI-driven interactions.
 ## References
 
 - `docs/prd.md` — Product requirements (what and why)
-- `docs/decisions.md` — Settled decisions with rationale (append-only)
+- `docs/decisions.md` — Settled decisions with rationale
 - `docs/architecture.md` — Component boundaries, data flow, storage model (Phase 0 deliverable)
 - `docs/api-contracts/` — API endpoint contracts (Phase 0 deliverable)
 
@@ -113,7 +113,7 @@ REST-to-MCP adapter layer for AI-driven interactions.
 
 **Active phase:** Phase 2 — Backend: Runtime API
 
-**Next steps:** Implement runtime provision endpoint, then schema introspection, then entity/relation CRUD.
+**Next steps:** Implement runtime provision endpoint, then schema introspection, then entity/relation CRUD. Implementation spec: `docs/api-contracts/runtime-api.md`. Storage model: `docs/architecture.md` §4.2.
 
 **What's ready to use:**
 - Backend modeling API: 26 endpoints, 32 unit tests, integration tested (40/40)

@@ -2,17 +2,25 @@
 
 ## 1. Overview
 
-OntoForge is a system for designing graph-based ontologies and using them through schema-driven, generic APIs. It separates the concerns of **schema modeling** and **knowledge runtime usage**, while keeping both schema and data portable and self-contained. The system enables users to define entity and relation types, persist them, and then create and manage instance data based strictly on that schema.
+OntoForge is a development tool for designing graph-based ontologies and enforcing them through schema-driven APIs. It serves as a companion tool when building applications that depend on structured domain knowledge — you design your ontology, test it with real data, and then integrate the runtime API into your application's backend as the schema-enforced persistence layer.
 
-The product supports export and import of ontologies in a JSON-based format and is designed to evolve toward managing multiple ontologies within a single installation.
+The system separates **schema modeling** (defining entity types, relation types, and their properties) from **runtime usage** (creating and querying instance data). Both schema and data live in a single Neo4j database for simplicity and portability. The runtime API validates every write against the ontology, ensuring that no data enters the graph without conforming to the schema.
+
+OntoForge supports export and import of ontologies in a JSON-based format and manages multiple ontologies within a single installation.
 
 ---
 
 ## 2. Vision
 
-Enable structured knowledge modeling without hardcoding domain-specific APIs.  
-Users define an ontology once and immediately gain a generic, schema-driven interface for creating and managing knowledge graphs.  
-The system abstracts the underlying graph database while remaining portable and self-contained.
+Applications that work with domain knowledge need a way to define and enforce the structure of that knowledge. Without schema enforcement, knowledge graphs drift into inconsistency — especially when multiple systems or AI agents write to them.
+
+OntoForge addresses this by providing:
+
+- **A modeling layer** where you define an ontology once — entity types, relation types, property constraints — through a UI or API.
+- **A runtime layer** that gives you a generic, schema-driven API for all CRUD operations, with validation on every write. No domain-specific endpoints needed.
+- **MCP integration** (planned) that gives AI coding assistants controlled access: one MCP server for modeling the ontology, one for structured read/write operations against it. Write access is always schema-enforced; read access can be broader.
+
+The intended workflow: design your ontology → test it with instance data → wire the runtime API into your app → optionally connect AI tools via MCP for schema-aware knowledge graph interaction.
 
 ---
 
@@ -127,12 +135,11 @@ The system enforces strict separation between:
 - **Instance usage (Runtime Mode)**
 
 Each mode:
-- Has its own API surface
-- Can be deployed independently
-- Exposes its own MCP interface
+- Has its own API surface (separate route prefix)
+- Exposes its own MCP interface (planned)
 - Operates on a single ontology per request
 
-The active ontology is provided through a request header and is not part of the URL structure.
+Both modes are served by a single server process. The modeling API addresses ontologies by UUID in the URL path. The runtime API addresses ontologies by their unique key in the URL path.
 
 ---
 
@@ -215,15 +222,13 @@ Import behavior:
 
 ## 9.1 Repository Structure (Monorepo)
 
-Monorepo with a single Python backend (modular monolith) and React frontends. The backend exposes both modeling and runtime capabilities as separate route modules within one application.
+Monorepo with a single Python backend (modular monolith) and a React frontend. The backend exposes both modeling and runtime capabilities as separate route modules within one application.
 
 **High-level layout:**
 
 ```
 /backend          — Python (uv-managed), modular monolith
-/frontend
-  /model-ui       — React app for schema modeling
-  /runtime-ui     — React app for instance management
+/frontend         — React app (modeling UI complete, runtime UI planned)
 /docs
 ```
 
@@ -234,8 +239,8 @@ Monorepo with a single Python backend (modular monolith) and React frontends. Th
 ## 9.2 Data Storage
 
 - Neo4j is used as the persistence layer.
-- Schema and instance data are stored in separate Neo4j instances. See `docs/architecture.md` §4 for details.
-- Each node and relationship includes an `ontologyId` for isolation.
+- A single Neo4j database holds both schema and instance data, separated by label conventions. See `docs/architecture.md` §4 for details.
+- Multiple ontologies coexist in the same database, isolated through graph structure.
 - Stable UUIDs are used for instance identifiers.
 - Internal database IDs are never exposed externally.
 
@@ -248,16 +253,12 @@ Two base paths:
 - `/api/model` — Schema modeling
 - `/api/runtime` — Schema-driven runtime
 
-Ontology is provided via header:
-
-```
-X-Ontology-Id: <uuid>
-```
+The modeling API nests resources under `/api/model/ontologies/{ontologyId}/...`. The runtime API scopes all routes under `/api/runtime/{ontologyKey}/...` using the ontology's unique key.
 
 Runtime API uses generic routes such as:
 
 ```
-/types/{entityTypeKey}/instances
+/entities/{entityTypeKey}
 /relations/{relationTypeKey}
 ```
 
@@ -265,12 +266,10 @@ No domain-specific endpoints are allowed.
 
 ---
 
-## 9.4 Deployment Modes
+## 9.4 Deployment
 
-- Development: All services and UIs run together.
-- Production (Full): Modeling + Runtime.
-- Production (Runtime Only): Runtime service and UI only.
-- MCP servers are bundled with their respective services.
+- A single server process serves both modeling and runtime routes.
+- MCP servers (planned) will be separate processes wrapping the REST API.
 
 ---
 

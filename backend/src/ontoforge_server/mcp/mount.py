@@ -38,29 +38,42 @@ class OntologyKeyMiddleware:
         await self.app(scope, receive, send)
 
 
+def _ensure_session_manager(mcp_instance) -> None:
+    """Ensure a FastMCP instance has its session manager initialized."""
+    if mcp_instance._session_manager is None:
+        from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+
+        mcp_instance._session_manager = StreamableHTTPSessionManager(
+            app=mcp_instance._mcp_server,
+            event_store=mcp_instance._event_store,
+            json_response=mcp_instance.settings.json_response,
+            stateless=mcp_instance.settings.stateless_http,
+        )
+
+
 def mount_mcp(app) -> None:
     """Mount MCP endpoints on the FastAPI app.
 
-    Instead of using ``modeling_mcp.streamable_http_app()`` (which creates a
-    full Starlette app with its own lifespan that would conflict with our main
+    Instead of using ``mcp.streamable_http_app()`` (which creates a full
+    Starlette app with its own lifespan that would conflict with our main
     lifespan), we mount the raw ASGI handler directly.  The session manager
     lifecycle is managed by the main FastAPI lifespan in ``main.py``.
     """
     from ontoforge_server.mcp.modeling import modeling_mcp
+    from ontoforge_server.mcp.runtime import runtime_mcp
 
-    # Ensure the session manager is created (lazy init inside FastMCP)
-    if modeling_mcp._session_manager is None:
-        from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+    # --- Modeling MCP ---
+    _ensure_session_manager(modeling_mcp)
 
-        modeling_mcp._session_manager = StreamableHTTPSessionManager(
-            app=modeling_mcp._mcp_server,
-            event_store=modeling_mcp._event_store,
-            json_response=modeling_mcp.settings.json_response,
-            stateless=modeling_mcp.settings.stateless_http,
-        )
-
-    # The raw ASGI callable that delegates to session_manager.handle_request
-    async def mcp_asgi_app(scope: Scope, receive: Receive, send: Send) -> None:
+    async def modeling_asgi_app(scope: Scope, receive: Receive, send: Send) -> None:
         await modeling_mcp.session_manager.handle_request(scope, receive, send)
 
-    app.mount("/mcp/model", OntologyKeyMiddleware(mcp_asgi_app))
+    app.mount("/mcp/model", OntologyKeyMiddleware(modeling_asgi_app))
+
+    # --- Runtime MCP ---
+    _ensure_session_manager(runtime_mcp)
+
+    async def runtime_asgi_app(scope: Scope, receive: Receive, send: Send) -> None:
+        await runtime_mcp.session_manager.handle_request(scope, receive, send)
+
+    app.mount("/mcp/runtime", OntologyKeyMiddleware(runtime_asgi_app))

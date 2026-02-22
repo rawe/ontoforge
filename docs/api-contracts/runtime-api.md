@@ -1,27 +1,445 @@
-# Runtime API Contract (Sketch)
+# Runtime API Contract
 
-> Lightweight sketch. Full contract to be detailed before Phase 2.
-> Base path: TBD (currently `/api/use`, under review — see `docs/architecture.md` §1)
+> Full contract for the runtime REST API.
+> Base path: `/api`
+>
+> The runtime server operates on the Instance DB, which holds exactly one provisioned ontology.
+> No ontology scoping in URLs — all endpoints operate on the single provisioned ontology.
+>
+> For storage model details, see `architecture.md` §4.2.
 
-## 1. Route Structure
+## 1. Provision
 
-<!-- TODO: Define the generic route layout -->
-<!-- - Entity instance routes: /types/{entityTypeKey}/instances -->
-<!-- - Relation instance routes: /relations/{relationTypeKey} -->
-<!-- - Schema introspection route (read-only) -->
+### POST /api/provision
 
-## 2. Boundary to Modeling Module
+Reset the Instance DB and import an ontology.
 
-<!-- TODO: Define what the runtime module can and cannot access -->
-<!-- - Runtime reads schema but never writes it -->
-<!-- - Shared infrastructure vs modeling-only logic -->
+**Request body:** `ExportPayload` JSON (same format as the modeling export endpoint).
 
-## 3. Open TODOs for Phase 2
+**Response:** `200 OK`
+```json
+{
+  "ontologyId": "abc-123",
+  "name": "My Ontology",
+  "entityTypeCount": 5,
+  "relationTypeCount": 3
+}
+```
 
-<!-- The following must be fully specified before implementation begins: -->
-<!-- - [ ] Entity instance CRUD: full endpoint spec, DTOs, validation rules -->
-<!-- - [ ] Relation instance CRUD: full endpoint spec, DTOs, endpoint compatibility checks -->
-<!-- - [ ] Search and filtering: query parameters, pagination -->
-<!-- - [ ] Neighborhood exploration: traversal depth, response shape -->
-<!-- - [ ] Error model: reuse from modeling or extend? -->
-<!-- - [ ] Route naming decision (replace "use") -->
+**Behavior:**
+1. Delete all nodes and relationships in the Instance DB.
+2. Drop all constraints and indexes (except system ones).
+3. Import schema nodes (Ontology, EntityType, RelationType, PropertyDefinition) from the payload.
+4. Recreate constraints and indexes (both schema and instance).
+5. Rebuild the in-memory schema cache.
+6. Return a summary.
+
+**Validation:**
+- Reject entity type keys that would collide with reserved schema labels (`Ontology`, `EntityType`, `RelationType`, `PropertyDefinition`) when converted to PascalCase.
+
+**Errors:** 422 if payload is invalid or contains reserved label collisions.
+
+---
+
+## 2. Schema Introspection
+
+Read-only access to the provisioned ontology schema. Served from the in-memory schema cache.
+
+### GET /api/schema
+
+Return the full provisioned schema. The response mirrors the `ExportPayload` structure (minus `formatVersion`).
+
+**Response:** `200 OK`
+```json
+{
+  "ontology": {
+    "ontologyId": "abc-123",
+    "name": "My Ontology",
+    "description": "An example ontology"
+  },
+  "entityTypes": [
+    {
+      "key": "person",
+      "displayName": "Person",
+      "description": "A human being",
+      "properties": [
+        {
+          "key": "name",
+          "displayName": "Name",
+          "description": null,
+          "dataType": "string",
+          "required": true,
+          "defaultValue": null
+        }
+      ]
+    }
+  ],
+  "relationTypes": [
+    {
+      "key": "works_for",
+      "displayName": "Works For",
+      "description": null,
+      "fromEntityTypeKey": "person",
+      "toEntityTypeKey": "company",
+      "properties": []
+    }
+  ]
+}
+```
+
+**Errors:** 404 if no ontology is provisioned (empty Instance DB).
+
+### GET /api/schema/entity-types
+
+Return the `entityTypes` array. Useful for MCP tools that need to enumerate available types.
+
+**Response:** `200 OK` — array of entity type objects.
+
+### GET /api/schema/entity-types/{entityTypeKey}
+
+Return a single entity type with its property definitions.
+
+**Response:** `200 OK` — single entity type object.
+
+**Errors:** 404 if entity type key not found.
+
+### GET /api/schema/relation-types
+
+Return the `relationTypes` array.
+
+**Response:** `200 OK` — array of relation type objects.
+
+### GET /api/schema/relation-types/{relationTypeKey}
+
+Return a single relation type with its property definitions, including `fromEntityTypeKey` and `toEntityTypeKey`.
+
+**Response:** `200 OK` — single relation type object.
+
+**Errors:** 404 if relation type key not found.
+
+---
+
+## 3. Entity Instance CRUD
+
+### POST /api/entities/{entityTypeKey}
+
+Create an entity instance.
+
+**Request body:**
+```json
+{
+  "name": "Alice",
+  "age": 30
+}
+```
+
+Properties are provided as a flat JSON object. Keys must match property definitions in the schema.
+
+**Response:** `201 Created`
+```json
+{
+  "_id": "b7e3f1a2-...",
+  "_entityTypeKey": "person",
+  "_createdAt": "2026-02-22T10:00:00Z",
+  "_updatedAt": "2026-02-22T10:00:00Z",
+  "name": "Alice",
+  "age": 30
+}
+```
+
+**Validation:**
+- `entityTypeKey` must exist in the schema cache. → 404 if not found.
+- All `required` properties must be present (or have a `defaultValue` in the schema). → 422 if missing.
+- No unknown property keys (not defined in the schema). → 422 if unknown.
+- Each value must be coercible to its schema `dataType`. → 422 if type mismatch.
+- Default values are injected for required properties not in the request but with a `defaultValue` in the schema.
+- All validation errors are collected and returned at once (not fail-fast).
+
+### GET /api/entities/{entityTypeKey}
+
+List entity instances of a type, with optional filtering, search, sorting, and pagination.
+
+**Query parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | integer | 50 | Page size (max 200) |
+| `offset` | integer | 0 | Pagination offset |
+| `sort` | string | `_createdAt` | Property key to sort by |
+| `order` | string | `asc` | `asc` or `desc` |
+| `q` | string | — | Text search across all string properties |
+| `filter.{key}` | any | — | Exact match on property |
+| `filter.{key}__{op}` | any | — | Operator match on property |
+
+**Filter syntax:** All property filters use the `filter.` prefix to avoid namespace collisions with reserved parameters. Operator suffixes use double-underscore:
+
+| Suffix | Meaning | Example |
+|--------|---------|---------|
+| (none) | equals | `filter.name=Alice` |
+| `__gt` | greater than | `filter.age__gt=25` |
+| `__gte` | greater than or equal | `filter.age__gte=25` |
+| `__lt` | less than | `filter.age__lt=40` |
+| `__lte` | less than or equal | `filter.age__lte=40` |
+| `__contains` | substring match (case-insensitive) | `filter.name__contains=ali` |
+
+**Text search (`q`):** Searches all string properties of the entity type using case-insensitive `CONTAINS`. Simple substring matching, not full-text indexing. Sufficient for the MVP; full-text indexes can be added later without API changes.
+
+**Sorting:** The `sort` parameter accepts any property key defined in the schema. System fields `createdAt` and `updatedAt` are also valid sort values (mapped to `_createdAt` and `_updatedAt` internally).
+
+**Response:** `200 OK`
+```json
+{
+  "items": [
+    {
+      "_id": "b7e3f1a2-...",
+      "_entityTypeKey": "person",
+      "_createdAt": "2026-02-22T10:00:00Z",
+      "_updatedAt": "2026-02-22T10:00:00Z",
+      "name": "Alice",
+      "age": 30
+    }
+  ],
+  "total": 42,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+**Pagination:** Offset-based with `limit` and `offset`. The response includes `total` (count of all matching entities, ignoring pagination). Two queries are executed: count first, data second. If total is 0, the data query is skipped.
+
+**Errors:** 404 if entity type key not found. 400 if filter parameter is neither a reserved name nor a schema property key.
+
+### GET /api/entities/{entityTypeKey}/{id}
+
+Get a single entity instance.
+
+**Response:** `200 OK` — entity instance object (same shape as creation response).
+
+**Errors:** 404 if entity type key or instance ID not found.
+
+### PATCH /api/entities/{entityTypeKey}/{id}
+
+Partial update of an entity instance. Only provided properties are updated; omitted properties are unchanged.
+
+**Request body:**
+```json
+{
+  "age": 31
+}
+```
+
+**Null removal:** Setting a property to `null` removes it from the node (using Cypher `REMOVE`). This is the only way to unset an optional property. Setting a `required` property to `null` is rejected with 422.
+
+**Response:** `200 OK` — full entity instance after update.
+
+**Validation:** Same type and unknown-property checks as creation, applied only to the provided properties.
+
+**Errors:** 404 if not found. 422 if validation fails.
+
+### DELETE /api/entities/{entityTypeKey}/{id}
+
+Delete an entity instance. Uses `DETACH DELETE` — all relationships connected to this entity are also deleted.
+
+**Response:** `204 No Content`
+
+**Errors:** 404 if not found.
+
+---
+
+## 4. Relation Instance CRUD
+
+### POST /api/relations/{relationTypeKey}
+
+Create a relation instance between two entity instances.
+
+**Request body:**
+```json
+{
+  "fromEntityId": "b7e3f1a2-...",
+  "toEntityId": "a1b2c3d4-...",
+  "since": "2024-03-15"
+}
+```
+
+`fromEntityId` and `toEntityId` are required. Properties are provided as additional flat fields.
+
+**Response:** `201 Created`
+```json
+{
+  "_id": "c4d5e6f7-...",
+  "_relationTypeKey": "works_for",
+  "_createdAt": "2026-02-22T10:00:00Z",
+  "_updatedAt": "2026-02-22T10:00:00Z",
+  "fromEntityId": "b7e3f1a2-...",
+  "toEntityId": "a1b2c3d4-...",
+  "since": "2024-03-15"
+}
+```
+
+**Validation:**
+- `relationTypeKey` must exist in the schema cache. → 404 if not found.
+- `fromEntityId` must reference an existing entity instance whose `_entityTypeKey` matches the relation type's `fromEntityTypeKey`. → 422 if mismatch or not found.
+- `toEntityId` must reference an existing entity instance whose `_entityTypeKey` matches the relation type's `toEntityTypeKey`. → 422 if mismatch or not found.
+- Property validation identical to entity instances (required, unknown, type coercion).
+
+### GET /api/relations/{relationTypeKey}
+
+List relation instances of a type, with optional filtering and pagination.
+
+**Query parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | integer | 50 | Page size (max 200) |
+| `offset` | integer | 0 | Pagination offset |
+| `sort` | string | `_createdAt` | Property key to sort by |
+| `order` | string | `asc` | `asc` or `desc` |
+| `fromEntityId` | string | — | Filter by source entity |
+| `toEntityId` | string | — | Filter by target entity |
+| `filter.{key}` | any | — | Property filter (same syntax as entities) |
+
+**Response:** `200 OK`
+```json
+{
+  "items": [
+    {
+      "_id": "c4d5e6f7-...",
+      "_relationTypeKey": "works_for",
+      "_createdAt": "2026-02-22T10:00:00Z",
+      "_updatedAt": "2026-02-22T10:00:00Z",
+      "fromEntityId": "b7e3f1a2-...",
+      "toEntityId": "a1b2c3d4-...",
+      "since": "2024-03-15"
+    }
+  ],
+  "total": 10,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+### GET /api/relations/{relationTypeKey}/{id}
+
+Get a single relation instance.
+
+**Response:** `200 OK` — relation instance object (same shape as creation response).
+
+**Errors:** 404 if relation type key or instance ID not found.
+
+### PATCH /api/relations/{relationTypeKey}/{id}
+
+Partial update of a relation instance. Same semantics as entity update (partial, null removal). Cannot change `fromEntityId` or `toEntityId` — delete and recreate instead.
+
+**Request body:**
+```json
+{
+  "since": "2025-06-01"
+}
+```
+
+**Response:** `200 OK` — full relation instance after update.
+
+### DELETE /api/relations/{relationTypeKey}/{id}
+
+Delete a relation instance. Only the relationship is removed; the connected entity instances are unaffected.
+
+**Response:** `204 No Content`
+
+**Errors:** 404 if not found.
+
+---
+
+## 5. Graph Traversal
+
+### GET /api/entities/{entityTypeKey}/{id}/neighbors
+
+Get an entity's neighborhood — the connected entities and the relations between them.
+
+**Query parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `relationTypeKey` | string | — | Filter by relation type |
+| `direction` | string | `both` | `outgoing`, `incoming`, or `both` |
+| `limit` | integer | 50 | Max neighbors to return |
+
+**Response:** `200 OK`
+```json
+{
+  "entity": {
+    "_id": "b7e3f1a2-...",
+    "_entityTypeKey": "person",
+    "_createdAt": "2026-02-22T10:00:00Z",
+    "_updatedAt": "2026-02-22T10:00:00Z",
+    "name": "Alice",
+    "age": 30
+  },
+  "neighbors": [
+    {
+      "relation": {
+        "_id": "c4d5e6f7-...",
+        "_relationTypeKey": "works_for",
+        "direction": "outgoing",
+        "since": "2024-03-15"
+      },
+      "entity": {
+        "_id": "a1b2c3d4-...",
+        "_entityTypeKey": "company",
+        "name": "Acme Corp"
+      }
+    }
+  ]
+}
+```
+
+This is the primary exploration endpoint for MCP clients. Given an entity, discover what it is connected to. The `direction` parameter controls whether to follow outgoing, incoming, or all relationships.
+
+**Errors:** 404 if entity type key or instance ID not found.
+
+---
+
+## 6. Error Responses
+
+The runtime API reuses the same error format as the modeling API (see `architecture.md` §5.1).
+
+**Validation errors** (422) collect all field errors:
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Instance validation failed",
+    "details": {
+      "fields": {
+        "age": "Expected integer, got string",
+        "email": "Unknown property: not defined in entity type 'person'",
+        "name": "Required property missing"
+      }
+    }
+  }
+}
+```
+
+---
+
+## 7. Endpoint Summary
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/provision` | Reset Instance DB and import ontology |
+| `GET` | `/api/schema` | Full schema introspection |
+| `GET` | `/api/schema/entity-types` | List entity types |
+| `GET` | `/api/schema/entity-types/{key}` | Get entity type with properties |
+| `GET` | `/api/schema/relation-types` | List relation types |
+| `GET` | `/api/schema/relation-types/{key}` | Get relation type with properties |
+| `POST` | `/api/entities/{entityTypeKey}` | Create entity instance |
+| `GET` | `/api/entities/{entityTypeKey}` | List/search entity instances |
+| `GET` | `/api/entities/{entityTypeKey}/{id}` | Get entity instance |
+| `PATCH` | `/api/entities/{entityTypeKey}/{id}` | Partial update entity instance |
+| `DELETE` | `/api/entities/{entityTypeKey}/{id}` | Delete entity instance |
+| `GET` | `/api/entities/{entityTypeKey}/{id}/neighbors` | Graph traversal |
+| `POST` | `/api/relations/{relationTypeKey}` | Create relation instance |
+| `GET` | `/api/relations/{relationTypeKey}` | List relation instances |
+| `GET` | `/api/relations/{relationTypeKey}/{id}` | Get relation instance |
+| `PATCH` | `/api/relations/{relationTypeKey}/{id}` | Partial update relation instance |
+| `DELETE` | `/api/relations/{relationTypeKey}/{id}` | Delete relation instance |

@@ -14,7 +14,7 @@ OntoForge consists of:
 - **Neo4j Model DB** — holds all ontology schemas, multiple ontologies isolated by `ontologyId`
 - **Neo4j Instance DB** — holds a copied schema and instance data for one ontology
 
-Each server process connects to exactly one Neo4j database. In `model` mode it serves `/api/model` against the Model DB. In `runtime` mode it serves `/api/runtime` against the Instance DB. The two modes never share a database connection. Frontends communicate with the backend via REST only. The MCP layer will wrap REST endpoints for AI-driven access.
+Each server process connects to exactly one Neo4j database. In `model` mode it serves `/api/model` against the Model DB. In `runtime` mode it serves `/api` against the Instance DB. The two modes never share a database connection. Frontends communicate with the backend via REST only. The MCP layer will wrap REST endpoints for AI-driven access.
 
 In production, these are separate deployments: one modeling server managing ontologies, one or more runtime servers each serving a single ontology. Locally, both can run simultaneously on different ports.
 
@@ -29,7 +29,7 @@ In production, these are separate deployments: one modeling server managing onto
 | Store | Schema persistence (Model DB) | `modeling store` |
 | Store | Instance persistence (Instance DB) | `runtime store` |
 | API route | Schema modeling | `/api/model` |
-| API route | Runtime operations | `/api/runtime` |
+| API route | Runtime operations | `/api` |
 | Frontend app | Schema design UI | `modeling` |
 | Frontend app | Instance management UI | `runtime` |
 | MCP | Adapter layer | TBD — likely `modeling-mcp`, `runtime-mcp` |
@@ -39,6 +39,8 @@ In production, these are separate deployments: one modeling server managing onto
 ### Neo4j Label and Relationship Naming
 
 All Neo4j labels use PascalCase. Relationships use UPPER_SNAKE_CASE.
+
+**Schema nodes (Model DB and Instance DB):**
 
 | Neo4j Element | Name |
 |---------------|------|
@@ -51,6 +53,16 @@ All Neo4j labels use PascalCase. Relationships use UPPER_SNAKE_CASE.
 | Relationship | `HAS_PROPERTY` (EntityType/RelationType → PropertyDefinition) |
 | Relationship | `RELATES_FROM` (RelationType → EntityType) |
 | Relationship | `RELATES_TO` (RelationType → EntityType) |
+
+**Instance nodes (Instance DB only):**
+
+| Neo4j Element | Name | Rule |
+|---------------|------|------|
+| Marker label | `_Entity` | Present on every entity instance node |
+| Type label | e.g. `Person`, `ResearchPaper` | Entity type key converted to PascalCase |
+| Relationship type | e.g. `WORKS_FOR`, `AUTHORED_BY` | Relation type key converted to UPPER_SNAKE_CASE |
+
+The underscore-prefixed `_Entity` label separates instance nodes from schema nodes. Entity type keys are converted from `snake_case` to `PascalCase` (split on underscores, capitalize segments). Relation type keys are converted to `UPPER_SNAKE_CASE`.
 
 ## 3. Backend
 
@@ -86,13 +98,13 @@ backend/src/ontoforge_server/
 │   └── schemas.py        # Modeling-specific request/response models
 └── runtime/              # Phase 2
     ├── __init__.py
-    ├── router.py         # FastAPI router, /api/runtime
-    ├── service.py        # Instance CRUD, schema introspection
+    ├── router.py         # FastAPI router, /api
+    ├── service.py        # Instance CRUD, validation, schema introspection
     ├── repository.py     # Neo4j Cypher queries (instance CRUD)
     └── schemas.py        # Runtime-specific request/response models
 ```
 
-**Shared code boundary:** The export/import Pydantic models (`ExportPayload`, `ExportOntology`, `ExportEntityType`, etc.) will move from `modeling/schemas.py` to `core/schemas.py` when the runtime module is implemented. Both modules use these models: the modeling module for its export/import endpoints, the runtime module for its provision endpoint and schema introspection.
+**Shared code boundary:** The export/import Pydantic models (`ExportPayload`, `ExportOntology`, `ExportEntityType`, etc.) live in `core/schemas.py`. Both modules use these models: the modeling module for its export/import endpoints, the runtime module for its provision endpoint and schema introspection.
 
 **Web framework:** FastAPI. Chosen for async support, Pydantic integration, and automatic OpenAPI docs.
 
@@ -122,12 +134,19 @@ The service layer raises domain exceptions (from `core/exceptions.py`). The exce
 Owns all instance operations. Runs against the Instance DB, which contains exactly one ontology (provisioned via import).
 
 - Schema introspection (read-only — reads the ontology already in the Instance DB)
-- Entity instance CRUD
-- Relation instance CRUD
+- Entity instance CRUD (create, read, update, delete, list with filtering)
+- Relation instance CRUD (create, read, update, delete, list with filtering)
+- Neighborhood exploration (graph traversal from a given entity)
 - Instance validation against the schema
-- Reset (wipe all data and schema from Instance DB)
+- Provision (reset Instance DB and import ontology JSON)
 
 The runtime module reads schema data using the same Pydantic models and Neo4j query patterns as the modeling module's import/export. These shared models live in `core/schemas.py`. The runtime module has **no dependency** on the modeling module — it only depends on `core/`.
+
+**Schema cache:** On startup, the runtime loads the full schema from the Instance DB into an in-memory dataclass structure (`SchemaCache`). This avoids per-request database reads for schema data. The cache is rebuilt atomically (pointer swap) whenever the provision endpoint is called. Since FastAPI runs on a single asyncio event loop, no locking is needed.
+
+**Validation:** Every write operation validates properties against the schema cache before executing Cypher. All validation errors are collected and returned at once (not fail-fast). The validation pipeline checks type existence, required properties, unknown properties, and data type coercion.
+
+**Dynamic Cypher safety:** Entity type keys become Neo4j labels and relation type keys become relationship types in generated Cypher. These values are never raw user input — they come from the schema cache, which was built from the provisioned ontology. Only property *values* are passed as Cypher parameters. This makes dynamic Cypher construction safe from injection.
 
 ### 3.4 MCP Layer
 
@@ -151,7 +170,7 @@ Provisioning is the one-time step that prepares an Instance DB for runtime use. 
 | Endpoint | Server | Purpose |
 |----------|--------|---------|
 | `GET /api/model/ontologies/{id}/export` | Modeling server | Exports ontology as JSON |
-| `POST /api/runtime/provision` | Runtime server | Resets Instance DB, imports the JSON |
+| `POST /api/provision` | Runtime server | Resets Instance DB, imports the JSON |
 
 The runtime provision endpoint wipes the Instance DB (all nodes, relationships, constraints) and then imports the received ontology JSON. This ensures a clean state. In future phases, this may evolve to support migration (non-destructive updates), but initially it is always a full reset.
 
@@ -167,7 +186,7 @@ uv run ontoforge-provision \
 
 The script does:
 1. `GET http://localhost:8000/api/model/ontologies/{id}/export` → receives JSON
-2. `POST http://localhost:8001/api/runtime/provision` with that JSON → runtime resets and imports
+2. `POST http://localhost:8001/api/provision` with that JSON → runtime resets and imports
 
 This is fully decoupled: each server only knows about its own database. The script only knows about HTTP endpoints.
 
@@ -262,7 +281,100 @@ Key uniqueness within an ontology (e.g., no two entity types with the same `key`
 
 ### 4.2 Instance Representation (Instance DB)
 
-The Instance DB contains the same schema node structure as the Model DB (Ontology, EntityType, RelationType, PropertyDefinition — created by the import step) plus instance data nodes and relationships. Instance representation details are defined in Phase 2.
+The Instance DB contains the same schema node structure as the Model DB (Ontology, EntityType, RelationType, PropertyDefinition — created by the provisioning step) plus entity instance nodes and relation instance relationships.
+
+#### Entity Instances
+
+Each entity instance is a Neo4j node with two labels:
+
+1. `_Entity` — shared marker label on every entity instance node
+2. The entity type key in PascalCase — e.g., entity type key `person` becomes label `Person`
+
+**System properties** (underscore-prefixed, never collide with user properties which must start lowercase):
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `_id` | String (UUID) | Stable instance identifier, generated on creation |
+| `_entityTypeKey` | String | Schema entity type key (e.g., `person`) |
+| `_createdAt` | DateTime | Creation timestamp |
+| `_updatedAt` | DateTime | Last-modified timestamp |
+
+**User-defined properties** are stored as direct node properties, keyed by their property definition key:
+
+```
+(:_Entity:Person {
+  _id: "b7e3f1a2-...",
+  _entityTypeKey: "person",
+  _createdAt: datetime("2026-02-22T10:00:00Z"),
+  _updatedAt: datetime("2026-02-22T10:00:00Z"),
+  name: "Alice",
+  age: 30
+})
+```
+
+Properties are stored using native Neo4j types, not serialized into a JSON blob. This enables Neo4j's native filtering, ordering, and indexing on property values.
+
+| Schema dataType | Neo4j Storage Type |
+|----------------|--------------------|
+| `string` | String |
+| `integer` | Integer (64-bit) |
+| `float` | Float (64-bit) |
+| `boolean` | Boolean |
+| `date` | Date |
+| `datetime` | DateTime |
+
+#### Relation Instances
+
+Each relation instance is a **native Neo4j relationship** between two entity instance nodes. The relationship type is the relation type key converted to UPPER_SNAKE_CASE (e.g., `works_for` becomes `WORKS_FOR`).
+
+**System properties** on the relationship:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `_id` | String (UUID) | Stable instance identifier |
+| `_relationTypeKey` | String | Schema relation type key (e.g., `works_for`) |
+| `_createdAt` | DateTime | Creation timestamp |
+| `_updatedAt` | DateTime | Last-modified timestamp |
+
+**User-defined properties** are stored directly on the relationship:
+
+```
+(:_Entity:Person {_id: "b7e3f1a2-...", name: "Alice"})
+  -[:WORKS_FOR {
+    _id: "c4d5e6f7-...",
+    _relationTypeKey: "works_for",
+    _createdAt: datetime("2026-02-22T10:00:00Z"),
+    _updatedAt: datetime("2026-02-22T10:00:00Z"),
+    since: date("2024-03-15")
+  }]->
+(:_Entity:Company {_id: "x9y8z7-...", name: "Acme Corp"})
+```
+
+Native relationships are used instead of intermediate nodes because they leverage Neo4j's core strengths: natural Cypher traversal patterns, optimized relationship storage engine, and compatibility with graph algorithms and visualization tools.
+
+**Trade-off:** Neo4j Community Edition does not support relationship property indexes. Relation instance lookup by `_id` scans relationships of the given type. This is acceptable at expected data volumes. If it becomes a bottleneck, a secondary lookup mechanism can be added later.
+
+#### Constraints and Indexes
+
+```cypher
+-- Entity instance uniqueness
+CREATE CONSTRAINT entity_instance_id_unique
+  FOR (n:_Entity) REQUIRE n._id IS UNIQUE;
+
+-- Index on entity type key for type-scoped queries
+CREATE INDEX entity_type_key_index
+  FOR (n:_Entity) ON (n._entityTypeKey);
+
+-- Schema constraints (same as Model DB, created during provision)
+CREATE CONSTRAINT ontology_id_unique FOR (o:Ontology) REQUIRE o.ontologyId IS UNIQUE;
+CREATE CONSTRAINT entity_type_id_unique FOR (et:EntityType) REQUIRE et.entityTypeId IS UNIQUE;
+CREATE CONSTRAINT relation_type_id_unique FOR (rt:RelationType) REQUIRE rt.relationTypeId IS UNIQUE;
+CREATE CONSTRAINT property_id_unique FOR (pd:PropertyDefinition) REQUIRE pd.propertyId IS UNIQUE;
+```
+
+#### Reserved Label Collision
+
+Entity type keys are converted to PascalCase labels. If an entity type key matches a schema label (e.g., `ontology` → `Ontology`), instance nodes would share a label with schema nodes. The provisioning step rejects entity type keys that would collide with reserved labels: `Ontology`, `EntityType`, `RelationType`, `PropertyDefinition`.
 
 ### 4.3 Ontology Isolation
 
@@ -320,6 +432,8 @@ UUIDs are not included in the export for entity types, relation types, or proper
 
 **Ontology scoping:** The modeling API nests resources under `/api/model/ontologies/{ontologyId}/...` — the ontology is explicit in the URL path. The runtime API has no ontology scoping — it always operates on the single ontology provisioned into the Instance DB.
 
+**Runtime URL pattern:** Since the server only serves one mode at a time, the runtime API uses `/api` directly without a mode prefix. When started in runtime mode, there is no modeling API on the server, so no ambiguity exists. The modeling API retains its `/api/model` prefix.
+
 **Error response format:**
 
 ```json
@@ -369,9 +483,33 @@ Full contract: see `api-contracts/modeling-api.md`
 
 ### 5.3 Runtime API
 
-Base path: `/api/runtime`
+Base path: `/api`
 
-Full contract: see `api-contracts/runtime-api.md` (deferred sketch)
+The runtime API is generic and schema-driven — endpoints use type keys from the provisioned ontology as path parameters. It covers provisioning, schema introspection, entity and relation instance CRUD, and graph traversal.
+
+**Endpoint summary:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/provision` | Reset Instance DB and import ontology |
+| `GET` | `/api/schema` | Full schema introspection |
+| `GET` | `/api/schema/entity-types` | List entity types |
+| `GET` | `/api/schema/entity-types/{key}` | Get entity type with properties |
+| `GET` | `/api/schema/relation-types` | List relation types |
+| `GET` | `/api/schema/relation-types/{key}` | Get relation type with properties |
+| `POST` | `/api/entities/{entityTypeKey}` | Create entity instance |
+| `GET` | `/api/entities/{entityTypeKey}` | List/search entity instances |
+| `GET` | `/api/entities/{entityTypeKey}/{id}` | Get entity instance |
+| `PATCH` | `/api/entities/{entityTypeKey}/{id}` | Partial update entity instance |
+| `DELETE` | `/api/entities/{entityTypeKey}/{id}` | Delete entity instance |
+| `GET` | `/api/entities/{entityTypeKey}/{id}/neighbors` | Graph traversal |
+| `POST` | `/api/relations/{relationTypeKey}` | Create relation instance |
+| `GET` | `/api/relations/{relationTypeKey}` | List relation instances |
+| `GET` | `/api/relations/{relationTypeKey}/{id}` | Get relation instance |
+| `PATCH` | `/api/relations/{relationTypeKey}/{id}` | Partial update relation instance |
+| `DELETE` | `/api/relations/{relationTypeKey}/{id}` | Delete relation instance |
+
+Full contract: see `api-contracts/runtime-api.md`
 
 ## 6. Frontend
 
@@ -452,10 +590,10 @@ DB_URI=bolt://localhost:7687 uv run ontoforge-server
 SERVER_MODE=runtime DB_URI=bolt://localhost:7688 PORT=8001 uv run ontoforge-server
 
 # One-time provisioning (transfers ontology from Model DB → Instance DB)
-uv run ontoforge-server provision \
-  --model-db bolt://localhost:7687 \
-  --instance-db bolt://localhost:7688 \
+uv run ontoforge-provision \
+  --model-url http://localhost:8000 \
+  --runtime-url http://localhost:8001 \
   --ontology <ontology-id>
 ```
 
-**Database bootstrap:** On startup, the backend ensures required constraints and indexes exist. In `model` mode this creates schema constraints (ontology, entity type, etc.). In `runtime` mode this creates instance-specific constraints (TBD in Phase 2).
+**Database bootstrap:** On startup, the backend ensures required constraints and indexes exist. In `model` mode this creates schema constraints (ontology, entity type, etc.). In `runtime` mode this creates both schema constraints (for the provisioned ontology nodes) and instance-specific constraints (`_Entity` uniqueness on `_id`, entity type key index).

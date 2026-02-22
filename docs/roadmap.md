@@ -46,11 +46,11 @@ Implement the schema modeling service. This is the first functional milestone.
 Add the runtime module to the existing backend. The server runs in `runtime` mode against the Instance DB, serving schema-driven instance CRUD.
 
 **Scope:**
-- [ ] Server mode infrastructure (`SERVER_MODE` env var, mode-based route mounting, unified `DB_*` config)
-- [ ] Move shared Pydantic models (export format) from `modeling/schemas.py` to `core/schemas.py`
-- [ ] Runtime provision endpoint (`POST /api/runtime/provision` — resets Instance DB, imports ontology JSON)
+- [x] Server mode infrastructure (`SERVER_MODE` env var, mode-based route mounting, unified `DB_*` config)
+- [x] Move shared Pydantic models (export format) from `modeling/schemas.py` to `core/schemas.py`
+- [ ] Runtime provision endpoint (`POST /api/provision` — resets Instance DB, imports ontology JSON)
 - [ ] Provisioning script (HTTP client calling export + provision endpoints)
-- [ ] Schema introspection endpoint (read-only, reads embedded ontology)
+- [ ] Schema introspection endpoints (read-only, reads embedded ontology)
 - [ ] Generic entity instance CRUD
 - [ ] Generic relation instance CRUD
 - [ ] Instance validation against schema
@@ -59,7 +59,7 @@ Add the runtime module to the existing backend. The server runs in `runtime` mod
 
 **Depends on:** Phase 1
 
-**Status:** NOT STARTED
+**Status:** IN PROGRESS — server mode infrastructure and shared models complete. Runtime design settled (decision 015).
 
 ---
 
@@ -113,11 +113,14 @@ REST-to-MCP adapter layer for AI-driven interactions.
 
 **Active phase:** Phase 2 — Backend: Runtime API
 
-**Next steps:** Server mode infrastructure and provisioning CLI, then runtime schema introspection endpoint.
+**Next steps:** Implement runtime provision endpoint, then schema introspection, then entity/relation CRUD.
 
 **What's ready to use:**
 - Backend modeling API: 26 endpoints, 32 unit tests, integration tested (40/40)
 - Frontend modeling UI: first draft, integration tested (15/15)
 - Docker Compose: Neo4j Model DB + Instance DB configured
-- Architecture docs: updated for runtime scope (server modes, provisioning workflow, shared code boundary)
+- Server mode infrastructure: `SERVER_MODE` env var, mode-based route mounting, unified config (refactored and tested)
+- Shared Pydantic models in `core/schemas.py` (moved from modeling)
+- Architecture docs: complete for runtime scope (instance representation, API design, provisioning workflow)
+- Runtime API contract: `docs/api-contracts/runtime-api.md` (17 endpoints fully specified)
 - Testing strategy: `docs/testing-strategy.md` for multi-agent test cycles

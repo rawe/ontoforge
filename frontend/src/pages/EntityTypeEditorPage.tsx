@@ -50,6 +50,16 @@ export default function EntityTypeEditorPage() {
     }
   };
 
+  const handleEditProperty = async (propertyId: string, data: { displayName?: string; description?: string; required?: boolean; defaultValue?: string | null }) => {
+    if (!ontologyId || !entityTypeId) return;
+    try {
+      await api.updateProperty(ontologyId, 'entity-types', entityTypeId, propertyId, data);
+      load();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to update property');
+    }
+  };
+
   const handleDeleteProperty = async (propertyId: string) => {
     if (!ontologyId || !entityTypeId) return;
     try {
@@ -89,6 +99,7 @@ export default function EntityTypeEditorPage() {
       <PropertyTable
         properties={properties}
         onAdd={handleAddProperty}
+        onEdit={handleEditProperty}
         onDelete={handleDeleteProperty}
       />
     </div>

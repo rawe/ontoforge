@@ -47,26 +47,27 @@ Add the runtime module to the existing backend. All routes are scoped by ontolog
 
 **Scope:**
 - [x] Move shared Pydantic models (export format) from `modeling/schemas.py` to `core/schemas.py`
-- [ ] Ontology key field (snake_case, unique, immutable) on ontology model
+- [x] Ontology key field (snake_case, unique, immutable) on ontology model
 - [x] Schema introspection endpoints (5 endpoints, read-only from in-memory SchemaCache)
 - [x] Generic entity instance CRUD (5 endpoints with filtering, search, pagination)
 - [x] Generic relation instance CRUD (5 endpoints with source/target validation)
 - [x] Instance validation against schema (type coercion, required/unknown checks, collect-all-errors)
 - [x] Basic search and filtering (`filter.{key}`, `filter.{key}__{op}`, `q` text search)
 - [x] Neighborhood exploration (`GET .../neighbors` with direction and type filtering)
-- [ ] Instance data wipe endpoint (`DELETE /api/runtime/{ontologyKey}/data`)
-- [x] SchemaCache loaded from DB on server startup
-- [x] Unit tests (56 runtime tests, all passing, mocked repository layer)
+- [x] Instance data wipe endpoint (`DELETE /api/runtime/{ontologyKey}/data`)
+- [x] SchemaCache loaded from DB on server startup (keyed by ontology key)
+- [x] Unit tests (92 tests, all passing — 36 modeling + 56 runtime)
 - [x] Test fixture (person/company/works_for ontology JSON)
 - [x] ValidationError enhanced with field-level details
 - [x] JSON parse error handler for consistent error format
-- [ ] Ontology-scoped runtime routes (`/api/runtime/{ontologyKey}/...`)
+- [x] Ontology-scoped runtime routes (`/api/runtime/{ontologyKey}/...`)
+- [x] Single-DB unified architecture (no dual-mode, no provisioning)
 - [ ] Integration testing against real Neo4j
 - [ ] Documentation for runtime usage
 
 **Depends on:** Phase 1
 
-**Status:** IN PROGRESS — Core runtime logic implemented (16 endpoints, 56 unit tests). Remaining: ontology key support, ontology-scoped route prefix, instance data wipe endpoint, integration testing, documentation.
+**Status:** IN PROGRESS — 17 runtime endpoints implemented, 92 unit tests passing, 7/7 integration tests passing. Remaining: formal integration test suite, runtime usage documentation.
 
 ---
 
@@ -80,15 +81,18 @@ Build the React-based frontend applications.
 - [x] Relation type editor with source/target selection and property management
 - [x] Schema validation results display
 - [x] Schema export (JSON download)
-- [x] Frontend integration testing (15/15 Chrome tests passing)
-- [ ] Schema import UI (API client ready, no UI yet)
-- [ ] Property edit UI (currently create/delete only)
+- [x] Ontology key field in creation form and display
+- [x] Frontend integration testing (7/7 Chrome tests passing)
+- [x] Schema import UI (file picker, conflict detection with structured error codes)
+- [x] Property edit UI (inline editing in PropertyTable for both entity and relation types)
+- [x] API client typed errors (ApiError class with status code and error code)
+- [ ] Import dialog with overwrite option (nice-to-have, current import shows conflict message)
 
 **Runtime UI scope:** TBD — deferred until Phase 2 backend complete.
 
 **Depends on:** Phase 1 (modeling UI) / Phase 2 (runtime UI)
 
-**Status:** IN PROGRESS — modeling UI first draft complete, builds and integration tested. Runtime UI deferred.
+**Status:** IN PROGRESS — modeling UI feature-complete (import, export, property CRUD with edit). Import dialog with overwrite toggle deferred. Runtime UI deferred.
 
 ---
 
@@ -120,15 +124,15 @@ REST-to-MCP adapter layer for AI-driven interactions.
 
 **Active phase:** Phase 2 — Backend: Runtime API
 
-**Next steps:** Add ontology key to the modeling module, refactor runtime routes to use ontology-scoped prefix (`/api/runtime/{ontologyKey}/...`), replace provision endpoint with data wipe endpoint. Then integration testing against real Neo4j.
+**Next steps:** Integration testing against real Neo4j (formal test suite). Runtime usage documentation.
 
 **What's ready to use:**
-- Backend modeling API: 26 endpoints, 32 unit tests, integration tested (40/40)
-- Backend runtime API: 16 endpoints, 56 unit tests, code reviewed (88 total tests passing)
+- Unified server: single Neo4j, both routers always mounted, no mode switching
+- Backend modeling API: 26 endpoints, ontology key field, integration tested
+- Backend runtime API: 17 endpoints under `/api/runtime/{ontologyKey}/...`, 92 unit tests passing
+- Frontend modeling UI: ontology key in creation form and display, 7/7 integration tested
+- Docker Compose: single Neo4j service
 - Test fixture: `backend/tests/fixtures/test_ontology.json` (person/company/works_for)
-- Frontend modeling UI: first draft, integration tested (15/15)
-- Docker Compose: Neo4j configured
-- Shared Pydantic models in `core/schemas.py`
-- Architecture docs: complete for current scope
-- Runtime API contract: `docs/api-contracts/runtime-api.md` (16 endpoints fully specified)
+- Architecture docs: complete for unified architecture
+- API contracts: modeling (26 endpoints) + runtime (17 endpoints) fully specified
 - Testing strategy: `docs/testing-strategy.md` for multi-agent test cycles

@@ -53,6 +53,16 @@ export default function RelationTypeEditorPage() {
     }
   };
 
+  const handleEditProperty = async (propertyId: string, data: { displayName?: string; description?: string; required?: boolean; defaultValue?: string | null }) => {
+    if (!ontologyId || !relationTypeId) return;
+    try {
+      await api.updateProperty(ontologyId, 'relation-types', relationTypeId, propertyId, data);
+      load();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to update property');
+    }
+  };
+
   const handleDeleteProperty = async (propertyId: string) => {
     if (!ontologyId || !relationTypeId) return;
     try {
@@ -107,6 +117,7 @@ export default function RelationTypeEditorPage() {
       <PropertyTable
         properties={properties}
         onAdd={handleAddProperty}
+        onEdit={handleEditProperty}
         onDelete={handleDeleteProperty}
       />
     </div>

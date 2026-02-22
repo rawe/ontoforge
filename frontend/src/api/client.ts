@@ -8,14 +8,29 @@ import type {
 
 const BASE_URL = 'http://localhost:8000/api/model';
 
+export class ApiError extends Error {
+  status: number;
+  code: string;
+
+  constructor(message: string, status: number, code: string) {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     ...options,
   });
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ error: { message: 'Request failed' } }));
-    throw new Error(error.error?.message || 'Request failed');
+    const body = await res.json().catch(() => ({ error: { message: 'Request failed', code: 'UNKNOWN' } }));
+    throw new ApiError(
+      body.error?.message || 'Request failed',
+      res.status,
+      body.error?.code || 'UNKNOWN',
+    );
   }
   if (res.status === 204) return undefined as T;
   return res.json();

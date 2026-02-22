@@ -46,3 +46,6 @@ npm-debug.log*
 # Neo4j local data
 neo4j/data/
 neo4j/logs/
+
+# Temporary working files (not committed)
+.tmp/

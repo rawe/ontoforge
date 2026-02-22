@@ -11,6 +11,8 @@ from ontoforge_server.core.exceptions import (
     NotFoundError,
     ValidationError,
 )
+from ontoforge_server.mcp.modeling import modeling_mcp
+from ontoforge_server.mcp.mount import mount_mcp
 from ontoforge_server.modeling.router import router as modeling_router
 from ontoforge_server.runtime.router import router as runtime_router
 from ontoforge_server.runtime import service as runtime_service
@@ -21,7 +23,8 @@ async def lifespan(app: FastAPI):
     await init_driver()
     driver = await get_driver()
     await runtime_service.load_schema_caches_from_db(driver)
-    yield
+    async with modeling_mcp.session_manager.run():
+        yield
     await close_driver()
 
 
@@ -61,6 +64,7 @@ def create_app() -> FastAPI:
 
     app.include_router(modeling_router, prefix="/api/model")
     app.include_router(runtime_router, prefix="/api/runtime/{ontology_key}")
+    mount_mcp(app)
 
     return app
 

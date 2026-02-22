@@ -9,6 +9,7 @@ dependencies = [
     "neo4j>=5.27",
     "pydantic>=2.10",
     "pydantic-settings>=2.7",
+    "mcp[cli]>=1.9",
 ]
 
 [dependency-groups]

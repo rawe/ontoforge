@@ -1,6 +1,9 @@
+import functools
+
 from mcp.server.fastmcp import FastMCP
 
 from ontoforge_server.core.database import get_driver
+from ontoforge_server.core.exceptions import ValidationError
 from ontoforge_server.mcp.mount import current_ontology_key
 from ontoforge_server.runtime import service
 from ontoforge_server.runtime.schemas import RelationInstanceCreate
@@ -28,6 +31,29 @@ def _get_ontology_key() -> str:
         )
 
 
+def _format_validation_error(exc: ValidationError) -> str:
+    """Format a ValidationError with field-level details for LLM consumption."""
+    msg = str(exc)
+    details = getattr(exc, "details", None)
+    if details and "fields" in details:
+        field_errors = "; ".join(f"{k}: {v}" for k, v in details["fields"].items())
+        msg = f"{msg} — {field_errors}"
+    return msg
+
+
+def _enrich_errors(fn):
+    """Decorator that enriches ValidationError messages with field-level details."""
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await fn(*args, **kwargs)
+        except ValidationError as exc:
+            raise ValidationError(
+                _format_validation_error(exc), details=exc.details
+            )
+    return wrapper
+
+
 # ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
@@ -44,6 +70,7 @@ def get_schema() -> dict:
 
 
 @runtime_mcp.tool()
+@_enrich_errors
 async def create_entity(
     entity_type_key: str,
     properties: dict,
@@ -60,6 +87,7 @@ async def create_entity(
 
 
 @runtime_mcp.tool()
+@_enrich_errors
 async def list_entities(
     entity_type_key: str,
     search: str | None = None,
@@ -102,6 +130,7 @@ async def get_entity(
 
 
 @runtime_mcp.tool()
+@_enrich_errors
 async def update_entity(
     entity_type_key: str,
     entity_id: str,
@@ -121,17 +150,18 @@ async def update_entity(
 async def delete_entity(
     entity_type_key: str,
     entity_id: str,
-) -> str:
+) -> dict:
     """Delete an entity and all its connected relations."""
     ontology_key = _get_ontology_key()
     driver = await get_driver()
     await service.delete_entity(
         ontology_key, entity_type_key, entity_id, driver
     )
-    return f"Entity '{entity_id}' deleted successfully."
+    return {"message": f"Entity '{entity_id}' deleted successfully."}
 
 
 @runtime_mcp.tool()
+@_enrich_errors
 async def create_relation(
     relation_type_key: str,
     from_entity_id: str,
@@ -154,6 +184,7 @@ async def create_relation(
 
 
 @runtime_mcp.tool()
+@_enrich_errors
 async def list_relations(
     relation_type_key: str,
     from_entity_id: str | None = None,
@@ -192,6 +223,7 @@ async def get_relation(
 
 
 @runtime_mcp.tool()
+@_enrich_errors
 async def update_relation(
     relation_type_key: str,
     relation_id: str,
@@ -211,14 +243,14 @@ async def update_relation(
 async def delete_relation(
     relation_type_key: str,
     relation_id: str,
-) -> str:
+) -> dict:
     """Delete a relation. Connected entities are unaffected."""
     ontology_key = _get_ontology_key()
     driver = await get_driver()
     await service.delete_relation(
         ontology_key, relation_type_key, relation_id, driver
     )
-    return f"Relation '{relation_id}' deleted successfully."
+    return {"message": f"Relation '{relation_id}' deleted successfully."}
 
 
 @runtime_mcp.tool()

@@ -669,6 +669,10 @@ async def update_entity(
     set_props = {k: v for k, v in coerced.items() if v is not None}
     remove_props = [k for k, v in coerced.items() if v is None]
 
+    # Short-circuit: no changes to apply
+    if not set_props and not remove_props:
+        return await get_entity(ontology_key, entity_type_key, entity_id, driver)
+
     pascal_label = to_pascal_case(entity_type_key)
     async with driver.session() as session:
         entity = await repository.update_entity(
@@ -937,6 +941,10 @@ async def update_relation(
     # Separate properties to set vs remove (null means remove)
     set_props = {k: v for k, v in coerced.items() if v is not None}
     remove_props = [k for k, v in coerced.items() if v is None]
+
+    # Short-circuit: no changes to apply
+    if not set_props and not remove_props:
+        return await get_relation(ontology_key, relation_type_key, relation_id, driver)
 
     rel_type_upper = to_upper_snake_case(relation_type_key)
     async with driver.session() as session:

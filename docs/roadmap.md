@@ -43,15 +43,19 @@ Implement the schema modeling service. This is the first functional milestone.
 ---
 
 ### Phase 2 — Backend: Runtime API (REST)
-Add the runtime module to the existing backend. Implements schema-driven instance CRUD as a separate route module within the modular monolith.
+Add the runtime module to the existing backend. The server runs in `runtime` mode against the Instance DB, serving schema-driven instance CRUD.
 
 **Scope:**
-- Schema introspection endpoint (read-only)
-- Generic entity instance CRUD
-- Generic relation instance CRUD
-- Instance validation against schema
-- Basic search and filtering
-- Neighborhood exploration
+- [ ] Server mode infrastructure (`SERVER_MODE` env var, mode-based route mounting, unified `DB_*` config)
+- [ ] Move shared Pydantic models (export format) from `modeling/schemas.py` to `core/schemas.py`
+- [ ] Runtime provision endpoint (`POST /api/runtime/provision` — resets Instance DB, imports ontology JSON)
+- [ ] Provisioning script (HTTP client calling export + provision endpoints)
+- [ ] Schema introspection endpoint (read-only, reads embedded ontology)
+- [ ] Generic entity instance CRUD
+- [ ] Generic relation instance CRUD
+- [ ] Instance validation against schema
+- [ ] Basic search and filtering
+- [ ] Neighborhood exploration
 
 **Depends on:** Phase 1
 
@@ -107,11 +111,13 @@ REST-to-MCP adapter layer for AI-driven interactions.
 
 ## Current Focus
 
-**Active phase:** Phase 2 — Backend: Runtime API (next session)
+**Active phase:** Phase 2 — Backend: Runtime API
+
+**Next steps:** Server mode infrastructure and provisioning CLI, then runtime schema introspection endpoint.
 
 **What's ready to use:**
 - Backend modeling API: 26 endpoints, 32 unit tests, integration tested (40/40)
 - Frontend modeling UI: first draft, integration tested (15/15)
 - Docker Compose: Neo4j Model DB + Instance DB configured
-- Architecture docs: complete for modeling scope
+- Architecture docs: updated for runtime scope (server modes, provisioning workflow, shared code boundary)
 - Testing strategy: `docs/testing-strategy.md` for multi-agent test cycles

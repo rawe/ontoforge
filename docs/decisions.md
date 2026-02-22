@@ -58,3 +58,25 @@
 **Date:** 2026-02-21
 **Decision:** Neo4j instances managed via Docker Compose. The backend never starts containers — it connects to pre-configured instances and can bootstrap their schema (constraints, indexes). Phase 1 only needs `neo4j-model`.
 **Reason:** Explicit infrastructure control. The user decides what runs.
+
+### 009 — No dynamic database provisioning; keep two static Neo4j containers
+**Date:** 2026-02-22
+**Decision:** Stay with the current docker-compose setup: one Model DB, one Instance DB. No multi-database features, no dynamic container provisioning, no label-based isolation. Locally, only one runtime ontology at a time. In production, one Instance DB per use case (a deployment concern, not a code concern).
+**Reason:** KISS. The research into multi-database (Enterprise-only), DozerDB, Docker SDK provisioning, and label isolation all add complexity disproportionate to the need. A single static Instance DB is sufficient for development and the immediate product scope.
+
+### 010 — Superseded by 013.
+
+### 013 — Supersedes 010: Provisioning via HTTP endpoints, not direct DB access
+**Date:** 2026-02-22
+**Decision:** Provisioning uses two HTTP endpoints: the modeling server's existing export endpoint and a new runtime provision endpoint (`POST /api/runtime/provision`). The provision endpoint resets the Instance DB and imports the ontology JSON. A convenience script orchestrates the two API calls — it is purely an HTTP client with no database dependencies. No CLI command with direct DB connections.
+**Reason:** Full decoupling. Each server only knows its own database. The provisioning script introduces no new low-level code — it reuses the existing API surface. The provision endpoint is also usable directly via API/MCP, not just through the script.
+
+### 011 — Supersedes 007: One server binary, two run modes (not two simultaneous connections)
+**Date:** 2026-02-22
+**Decision:** The server runs in either `model` or `runtime` mode (`SERVER_MODE` env var). Each mode connects to exactly one Neo4j database using unified `DB_URI`/`DB_USER`/`DB_PASSWORD` env vars. Model mode mounts `/api/model`, runtime mode mounts `/api/runtime`. No dual-driver code. In production these are separate deployments. Locally both run simultaneously on different ports.
+**Reason:** Clean separation of concerns. Each process has one DB connection, one responsibility. Avoids the complexity of managing two simultaneous database connections. Shared code lives in `core/`, not through cross-module imports.
+
+### 012 — Shared schema models in core/, runtime depends only on core/
+**Date:** 2026-02-22
+**Decision:** The Pydantic models for the ontology export format (ExportPayload, ExportOntology, etc.) move from `modeling/schemas.py` to `core/schemas.py`. The runtime module imports from `core/` to read its embedded ontology. The runtime module never imports from the modeling module.
+**Reason:** The runtime needs to read schema data (entity types, relation types, properties) to validate instances and serve schema introspection. This is shared domain knowledge, not modeling-specific logic. Placing it in `core/` keeps the dependency graph clean: both `modeling` and `runtime` depend on `core/`, neither depends on the other.

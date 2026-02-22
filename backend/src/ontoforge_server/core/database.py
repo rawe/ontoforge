@@ -22,11 +22,12 @@ async def _ensure_constraints(driver: AsyncDriver) -> None:
 async def init_driver() -> AsyncDriver:
     global _driver
     _driver = AsyncGraphDatabase.driver(
-        settings.MODEL_DB_URI,
-        auth=(settings.MODEL_DB_USER, settings.MODEL_DB_PASSWORD),
+        settings.DB_URI,
+        auth=(settings.DB_USER, settings.DB_PASSWORD),
     )
     await _driver.verify_connectivity()
-    await _ensure_constraints(_driver)
+    if settings.SERVER_MODE == "model":
+        await _ensure_constraints(_driver)
     return _driver
 
 

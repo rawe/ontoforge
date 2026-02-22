@@ -1,9 +1,10 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from ontoforge_server.config import settings
 from ontoforge_server.core.database import close_driver, init_driver
 from ontoforge_server.core.exceptions import (
     ConflictError,
@@ -50,7 +51,11 @@ def create_app() -> FastAPI:
     async def validation_handler(request: Request, exc: ValidationError):
         return _error_response(422, "VALIDATION_ERROR", str(exc))
 
-    app.include_router(modeling_router, prefix="/api/model")
+    if settings.SERVER_MODE == "model":
+        app.include_router(modeling_router, prefix="/api/model")
+    else:
+        runtime_router = APIRouter(tags=["runtime"])
+        app.include_router(runtime_router, prefix="/api/runtime")
 
     return app
 

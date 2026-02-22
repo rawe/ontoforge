@@ -142,15 +142,19 @@ Expose the runtime service layer as an MCP server for schema-enforced data acces
 Architecture: `docs/mcp-architecture.md`
 
 **Scope:**
-- [ ] Runtime MCP server with 13 tools (see `docs/mcp-architecture.md` §3.2)
-- [ ] FastAPI mount at `/mcp/runtime/{ontologyKey}` (HTTP/SSE transport)
-- [ ] Entity CRUD, relation CRUD, graph exploration, data wipe
-- [ ] Ontology existence verification on session init
-- [ ] Unit tests and integration tests
+- [x] Runtime MCP server with 13 tools (see `docs/mcp-architecture.md` §3.2)
+- [x] FastAPI mount at `/mcp/runtime/{ontologyKey}` (streamable HTTP transport)
+- [x] Entity CRUD, relation CRUD, graph exploration, data wipe
+- [x] Ontology existence verification via schema cache
+- [x] Integration testing (39/39 tests passing against real Neo4j)
+- [x] Enriched ValidationError messages with field-level details for LLM consumption
+- [x] No-op update short-circuit (skip DB write when no properties change)
+- [x] Consistent delete response format (dict instead of plain string)
+- [x] Example MCP config at project root (`mcp-example.json`)
 
 **Depends on:** Phase 2 + Phase 4a (shared mount infrastructure)
 
-**Status:** DEFERRED
+**Status:** COMPLETE — 13 tools implemented, integration tested. Quick wins from tester feedback applied.
 
 ---
 
@@ -188,11 +192,11 @@ A separate `docker-compose.prod.yml` (not the development one) that runs the ful
 
 ## Current Focus
 
-**Active phase:** Phase 4a — MCP: Modeling Server (polish) / Phase 4b — MCP: Runtime Server
+**Active phase:** None — all core phases complete.
 
 **Next steps:**
 - Optional polish for Phase 4a: rewrite UUID-based error messages to use keys, fix relation type create response
-- Phase 4b: implement the runtime MCP server (13 tools) reusing the shared mount infrastructure from Phase 4a
+- Feature suggestions from runtime MCP testing: traverse tool, field projection, neighbor counts (see `.tmp/mcp-runtime-analysis.md`)
 
 **Deferred work:**
 - Phase 2: formal integration test suite against real Neo4j
@@ -203,9 +207,11 @@ A separate `docker-compose.prod.yml` (not the development one) that runs the ful
 - Backend modeling API: 26 endpoints, ontology key field, integration tested
 - Backend runtime API: 17 endpoints under `/api/runtime/{ontologyKey}/...`, 92 unit tests passing
 - MCP modeling server: 15 tools at `/mcp/model/{ontologyKey}`, streamable HTTP transport, 29 unit + 43 integration tests
+- MCP runtime server: 13 tools at `/mcp/runtime/{ontologyKey}`, streamable HTTP transport, 39/39 integration tests
 - Frontend modeling UI: ontology key in creation form and display, 7/7 integration tested
 - Frontend runtime UI: generic data management (entity/relation CRUD, search, sort, pagination), architecture doc at `docs/runtime-ui-architecture.md`
-- Docker Compose: single Neo4j service
+- Docker Compose: single Neo4j service + full-stack compose (`docker-compose.full.yml`)
+- Example MCP config: `mcp-example.json` at project root
 - Test fixture: `backend/tests/fixtures/test_ontology.json` (person/company/works_for)
 - Architecture docs: complete for unified architecture, MCP architecture at `docs/mcp-architecture.md`
 - API contracts: modeling (26 endpoints) + runtime (17 endpoints) fully specified

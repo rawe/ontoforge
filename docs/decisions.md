@@ -28,3 +28,12 @@ One Neo4j instance holds all schema and instance data. The server always serves 
 
 ### 004 — Shared schema models in core/
 The Pydantic models for the ontology export format (`ExportPayload`, `ExportOntology`, etc.) live in `core/schemas.py`. Both modules import from `core/`. The runtime module never imports from the modeling module. This keeps the dependency graph clean: `modeling` → `core` ← `runtime`, with no cross-dependency.
+
+### 005 — MCP transport: HTTP/SSE, embedded in existing FastAPI server
+MCP endpoints are mounted inside the existing `ontoforge-server` process, not in a separate process. Three deployment shapes were evaluated: (A) embedded in FastAPI, (B) separate process wrapping the REST API, (C) separate process with own DB connection. Shape A was chosen because it avoids extra processes, enables direct service layer calls (no REST-to-REST hop), and reuses existing infrastructure (Neo4j connection, schema cache, error handling). The MCP handlers call `modeling/service.py` and `runtime/service.py` directly — same as the REST routers. HTTP/SSE transport is used because the user's AI framework requires HTTP-based MCP servers.
+
+### 006 — MCP ontology scoping via URL path
+The ontology key is embedded in the MCP endpoint URL (`/mcp/model/{ontologyKey}`, `/mcp/runtime/{ontologyKey}`). The LLM never sees multi-ontology complexity — all tools operate on the single ontology bound by the connection URL. The MCP layer resolves the key to the ontology UUID internally. All type references use human-readable keys, never UUIDs. This keeps the tool surface simple and avoids overwhelming the LLM with ontology selection.
+
+### 007 — Two MCP servers, modeling first
+Two separate MCP mount points within the same process: one for modeling (`/mcp/model/{key}`) and one for runtime (`/mcp/runtime/{key}`). This mirrors the REST API separation and the PRD requirement for no cross-mode access. Modeling MCP is implemented first (Phase 4a) because it depends only on the completed Phase 1. Runtime MCP is deferred to Phase 4b.

@@ -110,12 +110,43 @@ Build the React-based frontend applications.
 
 ---
 
-### Phase 4 — MCP Integration
-REST-to-MCP adapter layer for AI-driven interactions.
+### Phase 4a — MCP: Modeling Server
+Expose the modeling service layer as an MCP server embedded in the existing FastAPI application. Enables AI coding assistants to collaboratively design ontology schemas through conversational interaction.
 
-**Scope:** TBD — explicitly deferred.
+Architecture: `docs/mcp-architecture.md`
 
-**Depends on:** Phase 1 + Phase 2
+**Scope:**
+- [ ] `mcp/` module: modeling MCP server with 15 tools (see `docs/mcp-architecture.md` §3.1)
+- [ ] FastAPI mount at `/mcp/model/{ontologyKey}` (HTTP/SSE transport)
+- [ ] Ontology key extraction from URL, key → UUID resolution
+- [ ] Key-based addressing for all type references (no UUIDs exposed to LLM)
+- [ ] `create_ontology` bootstrap tool (creates ontology using key from connection URL)
+- [ ] Schema introspection (`get_schema`), entity type CRUD, relation type CRUD
+- [ ] Unified property tools (`add_property`, `update_property`, `delete_property`)
+- [ ] `validate_schema`, `export_schema`, `import_schema`
+- [ ] Unit tests (mocked service layer)
+- [ ] Integration testing against real Neo4j
+- [ ] `mcp[http]` dependency added to `pyproject.toml`
+
+**Depends on:** Phase 1
+
+**Status:** NOT STARTED
+
+---
+
+### Phase 4b — MCP: Runtime Server
+Expose the runtime service layer as an MCP server for schema-enforced data access. Enables LLMs to read and write instance data with every write validated against the ontology.
+
+Architecture: `docs/mcp-architecture.md`
+
+**Scope:**
+- [ ] Runtime MCP server with 13 tools (see `docs/mcp-architecture.md` §3.2)
+- [ ] FastAPI mount at `/mcp/runtime/{ontologyKey}` (HTTP/SSE transport)
+- [ ] Entity CRUD, relation CRUD, graph exploration, data wipe
+- [ ] Ontology existence verification on session init
+- [ ] Unit tests and integration tests
+
+**Depends on:** Phase 2 + Phase 4a (shared mount infrastructure)
 
 **Status:** DEFERRED
 
@@ -127,6 +158,7 @@ REST-to-MCP adapter layer for AI-driven interactions.
 - `docs/decisions.md` — Settled decisions with rationale
 - `docs/architecture.md` — Component boundaries, data flow, storage model (Phase 0 deliverable)
 - `docs/api-contracts/` — API endpoint contracts (Phase 0 deliverable)
+- `docs/mcp-architecture.md` — MCP integration architecture, tool catalog, deployment decisions (Phase 4 deliverable)
 
 ## Session Protocol
 
@@ -136,9 +168,13 @@ REST-to-MCP adapter layer for AI-driven interactions.
 
 ## Current Focus
 
-**Active phase:** Phase 3 — Frontend UI (runtime UI)
+**Active phase:** Phase 4a — MCP: Modeling Server
 
-**Next steps:** End-to-end testing of runtime UI against running backend. Phase 2 formal integration test suite and runtime documentation still pending.
+**Next steps:** Implement the modeling MCP server (15 tools) embedded in the existing FastAPI app. Start with FastAPI mount infrastructure and `get_schema` + `create_ontology` tools, then add remaining CRUD and property tools.
+
+**Deferred work (not blocking Phase 4a):**
+- Phase 2: formal integration test suite against real Neo4j
+- Phase 3: import dialog with overwrite option, runtime UI end-to-end testing
 
 **What's ready to use:**
 - Unified server: single Neo4j, both routers always mounted, no mode switching
@@ -148,6 +184,6 @@ REST-to-MCP adapter layer for AI-driven interactions.
 - Frontend runtime UI: generic data management (entity/relation CRUD, search, sort, pagination), architecture doc at `docs/runtime-ui-architecture.md`
 - Docker Compose: single Neo4j service
 - Test fixture: `backend/tests/fixtures/test_ontology.json` (person/company/works_for)
-- Architecture docs: complete for unified architecture
+- Architecture docs: complete for unified architecture, MCP architecture at `docs/mcp-architecture.md`
 - API contracts: modeling (26 endpoints) + runtime (17 endpoints) fully specified
 - Testing strategy: `docs/testing-strategy.md` for multi-agent test cycles

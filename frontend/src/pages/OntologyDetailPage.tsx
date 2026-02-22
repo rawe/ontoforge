@@ -151,6 +151,12 @@ export default function OntologyDetailPage() {
         <button onClick={handleExport} className="px-4 py-2 bg-gray-600 text-white text-sm rounded hover:bg-gray-700">
           Export
         </button>
+        <Link
+          to={`/data/${ontology.key}`}
+          className="px-4 py-2 bg-purple-600 text-white text-sm rounded hover:bg-purple-700"
+        >
+          Manage Data
+        </Link>
       </div>
 
       {validation && (

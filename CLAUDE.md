@@ -54,6 +54,21 @@ See: [docs/roadmap.md](docs/roadmap.md)
 
 When running multi-agent test-and-bugfix cycles, follow the strategy in [docs/testing-strategy.md](docs/testing-strategy.md). It defines agent roles (tester, dev, team lead), sequential execution flow, fresh-state protocol, handover formats, and test plans for backend and frontend.
 
+## Local Development Setup
+
+```bash
+# 1. Start Neo4j
+docker compose up -d
+
+# 2. Start the backend (serves both modeling and runtime APIs)
+cd backend && uv run uvicorn ontoforge_server.main:app --host 0.0.0.0 --port 8000
+
+# 3. Start the frontend (in a separate terminal)
+cd frontend && npm run dev
+```
+
+The backend runs on `http://localhost:8000`, the frontend on `http://localhost:5173`.
+
 ## Key Concepts
 
 - **Schema mode** — designing and managing ontology schemas

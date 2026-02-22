@@ -88,11 +88,25 @@ Build the React-based frontend applications.
 - [x] API client typed errors (ApiError class with status code and error code)
 - [ ] Import dialog with overwrite option (nice-to-have, current import shows conflict message)
 
-**Runtime UI scope:** TBD — deferred until Phase 2 backend complete.
+**Runtime UI scope (first draft complete):**
+- [x] Runtime API client (`api/runtimeClient.ts`) covering all 17 endpoints
+- [x] Shared request helper extracted (`api/request.ts`) with enhanced `ApiError` (includes `details`)
+- [x] Runtime TypeScript types (`types/runtime.ts`)
+- [x] Schema context provider with fetch-on-mount caching (`context/RuntimeSchemaContext.tsx`)
+- [x] RuntimeDashboardPage — entry point per ontology, lists entity/relation types, data wipe
+- [x] EntityInstanceListPage — generic entity CRUD with search, sort, pagination, modal create/edit
+- [x] RelationInstanceListPage — generic relation CRUD with entity pickers for from/to, entity label resolution
+- [x] DynamicForm — schema-driven form (string/integer/float/boolean/date/datetime inputs), edit-mode diffing
+- [x] DataTable — sortable columns, action buttons, type-aware cell rendering
+- [x] EntityPicker — debounced search select for entity instances
+- [x] Pagination and Modal shared components
+- [x] Navigation: "Manage Data" button on OntologyDetailPage, "Data" link on OntologyCard
+- [x] Architecture document: `docs/runtime-ui-architecture.md`
+- [ ] End-to-end testing against running backend
 
 **Depends on:** Phase 1 (modeling UI) / Phase 2 (runtime UI)
 
-**Status:** IN PROGRESS — modeling UI feature-complete (import, export, property CRUD with edit). Import dialog with overwrite toggle deferred. Runtime UI deferred.
+**Status:** IN PROGRESS — modeling UI and runtime UI both feature-complete. Import dialog with overwrite toggle deferred. Runtime end-to-end testing pending.
 
 ---
 
@@ -122,15 +136,16 @@ REST-to-MCP adapter layer for AI-driven interactions.
 
 ## Current Focus
 
-**Active phase:** Phase 2 — Backend: Runtime API
+**Active phase:** Phase 3 — Frontend UI (runtime UI)
 
-**Next steps:** Integration testing against real Neo4j (formal test suite). Runtime usage documentation.
+**Next steps:** End-to-end testing of runtime UI against running backend. Phase 2 formal integration test suite and runtime documentation still pending.
 
 **What's ready to use:**
 - Unified server: single Neo4j, both routers always mounted, no mode switching
 - Backend modeling API: 26 endpoints, ontology key field, integration tested
 - Backend runtime API: 17 endpoints under `/api/runtime/{ontologyKey}/...`, 92 unit tests passing
 - Frontend modeling UI: ontology key in creation form and display, 7/7 integration tested
+- Frontend runtime UI: generic data management (entity/relation CRUD, search, sort, pagination), architecture doc at `docs/runtime-ui-architecture.md`
 - Docker Compose: single Neo4j service
 - Test fixture: `backend/tests/fixtures/test_ontology.json` (person/company/works_for)
 - Architecture docs: complete for unified architecture

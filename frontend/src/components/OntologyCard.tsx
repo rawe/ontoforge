@@ -17,12 +17,17 @@ export default function OntologyCard({ ontology, onDelete }: Props) {
         <p className="text-sm text-gray-500 mt-1">{ontology.description || 'No description'}</p>
         <p className="text-xs text-gray-400 mt-2">Updated {new Date(ontology.updatedAt).toLocaleDateString()}</p>
       </Link>
-      <button
-        onClick={() => { if (confirm('Delete this ontology?')) onDelete(ontology.ontologyId); }}
-        className="mt-3 text-sm text-red-600 hover:text-red-800"
-      >
-        Delete
-      </button>
+      <div className="mt-3 flex gap-3">
+        <Link to={`/data/${ontology.key}`} className="text-sm text-purple-600 hover:text-purple-800">
+          Data
+        </Link>
+        <button
+          onClick={() => { if (confirm('Delete this ontology?')) onDelete(ontology.ontologyId); }}
+          className="text-sm text-red-600 hover:text-red-800"
+        >
+          Delete
+        </button>
+      </div>
     </div>
   );
 }

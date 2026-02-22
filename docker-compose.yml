@@ -1,7 +1,7 @@
 services:
   neo4j:
     image: neo4j:5
-    container_name: ontoforge-neo4j
+    container_name: ontoforge-neo4j-dev
     ports:
       - "7474:7474"
       - "7687:7687"

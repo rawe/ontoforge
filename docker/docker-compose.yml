@@ -3,8 +3,9 @@ services:
     image: neo4j:5
     container_name: ontoforge-neo4j
     ports:
-      - "7474:7474"
-      - "7687:7687"
+      # External ports differ from dev (7474/7687) to avoid conflicts
+      - "17474:7474"
+      - "17687:7687"
     environment:
       NEO4J_AUTH: neo4j/ontoforge_dev
     volumes:
@@ -17,11 +18,12 @@ services:
       start_period: 30s
 
   backend:
-    build: ./backend
+    build: ../backend
     container_name: ontoforge-backend
     ports:
       - "8000:8000"
     environment:
+      # DB_URI uses Docker-internal networking — not affected by external port mapping
       DB_URI: bolt://neo4j:7687
       DB_USER: neo4j
       DB_PASSWORD: ontoforge_dev
@@ -30,7 +32,7 @@ services:
         condition: service_healthy
 
   frontend:
-    build: ./frontend
+    build: ../frontend
     container_name: ontoforge-frontend
     ports:
       - "3000:80"

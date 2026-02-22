@@ -22,7 +22,8 @@ The key idea: **no unstructured writes**. Every entity and relation that goes in
 Start the full stack — Neo4j, backend, and frontend — with a single command:
 
 ```bash
-docker compose -f docker-compose.full.yml up -d --build
+cd docker
+docker compose up -d --build
 ```
 
 | Service  | URL |
@@ -30,12 +31,13 @@ docker compose -f docker-compose.full.yml up -d --build
 | Frontend | http://localhost:3000 |
 | Backend API | http://localhost:8000 |
 | API docs | http://localhost:8000/docs |
-| Neo4j Browser | http://localhost:7474 |
+| Neo4j Browser | http://localhost:17474 |
 
 Stop everything (data is preserved):
 
 ```bash
-docker compose -f docker-compose.full.yml stop
+cd docker
+docker compose stop
 ```
 
 ## MCP Servers
@@ -158,7 +160,8 @@ See `docs/architecture.md` for the full system design.
 ```
 ontoforge/
 ├── docker-compose.yml              # Neo4j only (for local development)
-├── docker-compose.full.yml         # Full stack: Neo4j + backend + frontend
+├── docker/
+│   └── docker-compose.yml          # Full stack: Neo4j + backend + frontend
 ├── backend/
 │   ├── Dockerfile
 │   ├── pyproject.toml              # Python deps (uv-managed)

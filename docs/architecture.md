@@ -142,7 +142,7 @@ The runtime module reads schema data using the same Pydantic models as the model
 
 ### 3.4 MCP Layer
 
-<!-- Deferred to Phase 4. -->
+Two MCP server endpoints are embedded in the FastAPI application, providing AI-assisted access to the same service layer used by the REST API. See `mcp-architecture.md` for the full design, tool catalog, and client configuration.
 
 ## 4. Neo4j Storage Model
 

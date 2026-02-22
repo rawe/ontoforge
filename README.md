@@ -38,26 +38,52 @@ Stop everything (data is preserved):
 docker compose -f docker-compose.full.yml stop
 ```
 
-## MCP Modeling Server
+## MCP Servers
 
-OntoForge exposes an MCP server for AI-assisted ontology design. Each ontology is accessed via its key in the URL.
+OntoForge exposes two MCP servers for AI-assisted workflows — one for schema design, one for data access. Both run inside the same backend process and are scoped to a single ontology via the URL.
+
+### Modeling Server
+
+Design and iterate on ontology schemas. 15 tools for managing entity types, relation types, properties, validation, and export/import.
 
 **Endpoint:** `http://localhost:8000/mcp/model/{ontologyKey}`
 
-To connect an MCP client (e.g., Claude Code, Cursor), add this to your MCP configuration:
+### Runtime Server
+
+Read and write instance data validated against the ontology. 13 tools for entity/relation CRUD, search, filtering, graph exploration, and data management.
+
+**Endpoint:** `http://localhost:8000/mcp/runtime/{ontologyKey}`
+
+### Client Configuration
+
+To connect an MCP client (e.g., Claude Code, Cursor), add one or both servers to your MCP configuration. Replace `my_ontology` with your ontology's key.
 
 ```json
 {
   "mcpServers": {
     "ontoforge-modeling": {
       "type": "http",
-      "url": "http://localhost:8000/mcp/model/your_ontology_key"
+      "url": "http://localhost:8000/mcp/model/my_ontology"
+    },
+    "ontoforge-runtime": {
+      "type": "http",
+      "url": "http://localhost:8000/mcp/runtime/my_ontology"
     }
   }
 }
 ```
 
-Replace `your_ontology_key` with the key of an existing ontology (e.g., `book_catalog`). The server provides 15 tools for schema design: creating/updating entity types, relation types, properties, validation, and export/import.
+### Example: Runtime Server Quick Start
+
+Once connected to the runtime server, an AI assistant can work with your knowledge graph:
+
+1. **Inspect the schema** — `get_schema()` returns all entity types, relation types, and property definitions so the assistant knows what data structures are available.
+2. **Create data** — `create_entity(entity_type_key="person", properties={"name": "Alice", "age": 30})` creates a schema-validated entity. Required properties are enforced, types are checked.
+3. **Explore the graph** — `get_neighbors(entity_type_key="person", entity_id="...", direction="outgoing")` discovers what an entity is connected to.
+
+Every write is validated against the ontology — the assistant cannot invent entity types, add undefined properties, or write structurally invalid data.
+
+See `docs/mcp-architecture.md` for the full tool catalog and design details.
 
 ## Development Setup
 
@@ -114,7 +140,7 @@ OntoForge is a modular monolith backed by a single Neo4j database that holds bot
 - **Modeling module** — ontology schema CRUD, validation, JSON export/import (`/api/model`)
 - **Runtime module** — schema-driven instance CRUD, validation, search, graph traversal (`/api/runtime/{ontologyKey}`)
 - **Frontend** — React UI for schema design and runtime data management
-- **MCP layer** — modeling server for AI-assisted ontology design, runtime server planned
+- **MCP layer** — two MCP servers: modeling (schema design) and runtime (data access)
 
 Schema nodes and instance nodes coexist in the same database, separated by label conventions. The runtime validates every write against an in-memory schema cache, ensuring instance data always conforms to the ontology.
 
@@ -135,7 +161,7 @@ ontoforge/
 │   │   ├── core/                   # Shared: DB driver, exceptions, schema models
 │   │   ├── modeling/               # Schema CRUD, validation, export/import
 │   │   ├── runtime/                # Instance CRUD, search, graph traversal
-│   │   └── mcp/                    # MCP server (modeling tools)
+│   │   └── mcp/                    # MCP servers (modeling + runtime tools)
 │   └── tests/
 ├── frontend/
 │   ├── Dockerfile
@@ -165,14 +191,12 @@ In Docker, `DB_URI` is set to `bolt://neo4j:7687` automatically via `docker-comp
 
 ## Current Status
 
-- **Phase 0 (Architecture)** — Complete
-- **Phase 1 (Modeling API)** — Complete (26 endpoints, 36 unit tests)
-- **Phase 2 (Runtime API)** — In progress (17 endpoints, 56 unit tests)
-- **Phase 3 (Frontend UI)** — Modeling UI and runtime UI complete
-- **Phase 4a (MCP Modeling)** — Complete (15 tools, 29 unit + 43 integration tests)
-- **Phase 4b (MCP Runtime)** — Deferred
+- **REST API** — Full modeling API (26 endpoints) and runtime API (17 endpoints) for schema and instance management
+- **Frontend** — React UI for ontology design and runtime data management
+- **MCP** — Both modeling (15 tools) and runtime (13 tools) MCP servers operational
+- **Testing** — 92 unit tests, integration-tested against real Neo4j
 
-See `docs/roadmap.md` for details.
+See `docs/roadmap.md` for detailed phase tracking.
 
 ## License
 

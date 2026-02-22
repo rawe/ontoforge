@@ -58,6 +58,13 @@ Read and write instance data validated against the ontology. 13 tools for entity
 
 To connect an MCP client (e.g., Claude Code, Cursor), add one or both servers to your MCP configuration. Replace `my_ontology` with your ontology's key.
 
+An example config is provided at the project root — edit the ontology key and use it directly:
+
+```bash
+# Claude Code
+claude --mcp-config mcp-example.json
+```
+
 ```json
 {
   "mcpServers": {

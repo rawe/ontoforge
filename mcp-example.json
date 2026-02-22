@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "ontoforge-modeling": {
+      "type": "http",
+      "url": "http://localhost:8000/mcp/model/my_ontology"
+    },
+    "ontoforge-runtime": {
+      "type": "http",
+      "url": "http://localhost:8000/mcp/runtime/my_ontology"
+    }
+  }
+}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, useSearchParams, Link } from 'react-router-dom';
 import type { Ontology, EntityType, RelationType, ValidationResult } from '../types/models';
 import * as api from '../api/client';
 import TypeList from '../components/TypeList';
@@ -18,7 +18,11 @@ export default function OntologyDetailPage() {
   const [showRelationForm, setShowRelationForm] = useState(false);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<'list' | 'graph'>('list');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const viewMode = searchParams.get('view') === 'graph' ? 'graph' : 'list';
+  const setViewMode = (mode: 'list' | 'graph') => {
+    setSearchParams(mode === 'graph' ? { view: 'graph' } : {}, { replace: true });
+  };
   const [propertyCounts, setPropertyCounts] = useState<Record<string, number>>({});
 
   const load = async () => {

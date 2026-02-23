@@ -30,28 +30,28 @@ async def wipe_data(
 
 
 @router.get("/schema", response_model=SchemaResponse)
-async def get_schema(ontology_key: str):
-    return service.get_full_schema(ontology_key)
+async def get_schema(ontology_key: str, driver: AsyncDriver = Depends(get_driver)):
+    return await service.get_full_schema(ontology_key, driver)
 
 
 @router.get("/schema/entity-types", response_model=list[ExportEntityType])
-async def list_entity_types(ontology_key: str):
-    return service.list_entity_types(ontology_key)
+async def list_entity_types(ontology_key: str, driver: AsyncDriver = Depends(get_driver)):
+    return await service.list_entity_types(ontology_key, driver)
 
 
 @router.get("/schema/entity-types/{key}", response_model=ExportEntityType)
-async def get_entity_type(ontology_key: str, key: str):
-    return service.get_entity_type(ontology_key, key)
+async def get_entity_type(ontology_key: str, key: str, driver: AsyncDriver = Depends(get_driver)):
+    return await service.get_entity_type(ontology_key, key, driver)
 
 
 @router.get("/schema/relation-types", response_model=list[ExportRelationType])
-async def list_relation_types(ontology_key: str):
-    return service.list_relation_types(ontology_key)
+async def list_relation_types(ontology_key: str, driver: AsyncDriver = Depends(get_driver)):
+    return await service.list_relation_types(ontology_key, driver)
 
 
 @router.get("/schema/relation-types/{key}", response_model=ExportRelationType)
-async def get_relation_type(ontology_key: str, key: str):
-    return service.get_relation_type(ontology_key, key)
+async def get_relation_type(ontology_key: str, key: str, driver: AsyncDriver = Depends(get_driver)):
+    return await service.get_relation_type(ontology_key, key, driver)
 
 
 # --- Entity Instance CRUD ---

@@ -72,16 +72,68 @@ class SchemaCache:
     relation_types: dict[str, RelationTypeDef] = field(default_factory=dict)
 
 
-# Schema caches keyed by ontology key
-_schema_caches: dict[str, SchemaCache] = {}
+async def _load_schema(ontology_key: str, driver: AsyncDriver) -> SchemaCache:
+    """Load the schema for the given ontology key from the database."""
+    async with driver.session() as session:
+        schema = await repository.get_full_schema(session, ontology_key)
 
-
-def _get_cache(ontology_key: str) -> SchemaCache:
-    """Return the schema cache for the given ontology key, or raise NotFoundError."""
-    cache = _schema_caches.get(ontology_key)
-    if cache is None:
+    if schema is None:
         raise NotFoundError(f"Ontology '{ontology_key}' not found or has no schema loaded")
-    return cache
+
+    ont = schema["ontology"]
+    entity_types_raw = schema["entityTypes"]
+    relation_types_raw = schema["relationTypes"]
+
+    export_entity_types = [
+        ExportEntityType(
+            key=et["key"],
+            displayName=et["displayName"],
+            description=et.get("description"),
+            properties=[
+                ExportProperty(
+                    key=p["key"],
+                    displayName=p["displayName"],
+                    description=p.get("description"),
+                    dataType=p["dataType"],
+                    required=p["required"],
+                    defaultValue=p.get("defaultValue"),
+                )
+                for p in et.get("properties", [])
+            ],
+        )
+        for et in entity_types_raw
+    ]
+
+    export_relation_types = [
+        ExportRelationType(
+            key=rt["key"],
+            displayName=rt["displayName"],
+            description=rt.get("description"),
+            fromEntityTypeKey=rt["sourceKey"],
+            toEntityTypeKey=rt["targetKey"],
+            properties=[
+                ExportProperty(
+                    key=p["key"],
+                    displayName=p["displayName"],
+                    description=p.get("description"),
+                    dataType=p["dataType"],
+                    required=p["required"],
+                    defaultValue=p.get("defaultValue"),
+                )
+                for p in rt.get("properties", [])
+            ],
+        )
+        for rt in relation_types_raw
+    ]
+
+    ontology_export = ExportOntology(
+        ontologyId=ont["ontologyId"],
+        key=ont["key"],
+        name=ont["name"],
+        description=ont.get("description"),
+    )
+
+    return _build_schema_cache(ontology_export, export_entity_types, export_relation_types)
 
 
 # ---------------------------------------------------------------------------
@@ -346,7 +398,7 @@ async def wipe_instance_data(
     ontology_key: str, driver: AsyncDriver,
 ) -> DataWipeResponse:
     """Delete all instance data for the given ontology."""
-    cache = _get_cache(ontology_key)
+    cache = await _load_schema(ontology_key, driver)
     entity_type_keys = list(cache.entity_types.keys())
 
     async with driver.session() as session:
@@ -366,9 +418,9 @@ async def wipe_instance_data(
 # ---------------------------------------------------------------------------
 
 
-def get_full_schema(ontology_key: str) -> SchemaResponse:
-    """Return the full schema from the cache for the given ontology."""
-    cache = _get_cache(ontology_key)
+async def get_full_schema(ontology_key: str, driver: AsyncDriver) -> SchemaResponse:
+    """Return the full schema for the given ontology."""
+    cache = await _load_schema(ontology_key, driver)
     ontology = ExportOntology(
         ontologyId=cache.ontology_id,
         key=cache.ontology_key,
@@ -390,36 +442,36 @@ def get_full_schema(ontology_key: str) -> SchemaResponse:
     )
 
 
-def list_entity_types(ontology_key: str) -> list[ExportEntityType]:
-    """Return all entity types from the schema cache."""
-    cache = _get_cache(ontology_key)
+async def list_entity_types(ontology_key: str, driver: AsyncDriver) -> list[ExportEntityType]:
+    """Return all entity types for the given ontology."""
+    cache = await _load_schema(ontology_key, driver)
     return [
         _entity_type_def_to_export(et_def)
         for et_def in cache.entity_types.values()
     ]
 
 
-def get_entity_type(ontology_key: str, key: str) -> ExportEntityType:
-    """Return a single entity type by key from the schema cache."""
-    cache = _get_cache(ontology_key)
+async def get_entity_type(ontology_key: str, key: str, driver: AsyncDriver) -> ExportEntityType:
+    """Return a single entity type by key."""
+    cache = await _load_schema(ontology_key, driver)
     et_def = cache.entity_types.get(key)
     if not et_def:
         raise NotFoundError(f"Entity type '{key}' not found")
     return _entity_type_def_to_export(et_def)
 
 
-def list_relation_types(ontology_key: str) -> list[ExportRelationType]:
-    """Return all relation types from the schema cache."""
-    cache = _get_cache(ontology_key)
+async def list_relation_types(ontology_key: str, driver: AsyncDriver) -> list[ExportRelationType]:
+    """Return all relation types for the given ontology."""
+    cache = await _load_schema(ontology_key, driver)
     return [
         _relation_type_def_to_export(rt_def)
         for rt_def in cache.relation_types.values()
     ]
 
 
-def get_relation_type(ontology_key: str, key: str) -> ExportRelationType:
-    """Return a single relation type by key from the schema cache."""
-    cache = _get_cache(ontology_key)
+async def get_relation_type(ontology_key: str, key: str, driver: AsyncDriver) -> ExportRelationType:
+    """Return a single relation type by key."""
+    cache = await _load_schema(ontology_key, driver)
     rt_def = cache.relation_types.get(key)
     if not rt_def:
         raise NotFoundError(f"Relation type '{key}' not found")
@@ -548,7 +600,7 @@ async def create_entity(
     driver: AsyncDriver,
 ) -> dict:
     """Create a new entity instance of the given type."""
-    cache = _get_cache(ontology_key)
+    cache = await _load_schema(ontology_key, driver)
     et_def = cache.entity_types.get(entity_type_key)
     if not et_def:
         raise NotFoundError(f"Entity type '{entity_type_key}' not found")
@@ -581,7 +633,7 @@ async def list_entities(
     driver: AsyncDriver,
 ) -> dict:
     """List entity instances with filtering, search, sorting, and pagination."""
-    cache = _get_cache(ontology_key)
+    cache = await _load_schema(ontology_key, driver)
     et_def = cache.entity_types.get(entity_type_key)
     if not et_def:
         raise NotFoundError(f"Entity type '{entity_type_key}' not found")
@@ -633,7 +685,7 @@ async def get_entity(
     driver: AsyncDriver,
 ) -> dict:
     """Get a single entity instance by type key and ID."""
-    cache = _get_cache(ontology_key)
+    cache = await _load_schema(ontology_key, driver)
     if entity_type_key not in cache.entity_types:
         raise NotFoundError(f"Entity type '{entity_type_key}' not found")
 
@@ -653,7 +705,7 @@ async def update_entity(
     driver: AsyncDriver,
 ) -> dict:
     """Partial update of an entity instance (PATCH semantics)."""
-    cache = _get_cache(ontology_key)
+    cache = await _load_schema(ontology_key, driver)
     et_def = cache.entity_types.get(entity_type_key)
     if not et_def:
         raise NotFoundError(f"Entity type '{entity_type_key}' not found")
@@ -690,7 +742,7 @@ async def delete_entity(
     driver: AsyncDriver,
 ) -> None:
     """Delete an entity instance (DETACH DELETE removes connected relationships too)."""
-    cache = _get_cache(ontology_key)
+    cache = await _load_schema(ontology_key, driver)
     if entity_type_key not in cache.entity_types:
         raise NotFoundError(f"Entity type '{entity_type_key}' not found")
 
@@ -699,94 +751,6 @@ async def delete_entity(
         deleted = await repository.delete_entity(session, pascal_label, entity_id)
     if not deleted:
         raise NotFoundError(f"Entity '{entity_id}' not found")
-
-
-# ---------------------------------------------------------------------------
-# Load Schema Caches from DB (for server startup)
-# ---------------------------------------------------------------------------
-
-
-async def load_schema_caches_from_db(driver: AsyncDriver) -> None:
-    """Load schema caches for all ontologies from the database on startup."""
-    async with driver.session() as session:
-        ontology_keys = await repository.get_all_ontology_keys(session)
-
-        if not ontology_keys:
-            logger.info("No ontologies found in database — no schema caches loaded")
-            return
-
-        for key in ontology_keys:
-            schema = await repository.get_full_schema(session, key)
-            if schema is None:
-                continue
-
-            ont = schema["ontology"]
-            entity_types_raw = schema["entityTypes"]
-            relation_types_raw = schema["relationTypes"]
-
-            # Build export types to reuse _build_schema_cache
-            export_entity_types = []
-            for et in entity_types_raw:
-                props = [
-                    ExportProperty(
-                        key=p["key"],
-                        displayName=p["displayName"],
-                        description=p.get("description"),
-                        dataType=p["dataType"],
-                        required=p["required"],
-                        defaultValue=p.get("defaultValue"),
-                    )
-                    for p in et.get("properties", [])
-                ]
-                export_entity_types.append(
-                    ExportEntityType(
-                        key=et["key"],
-                        displayName=et["displayName"],
-                        description=et.get("description"),
-                        properties=props,
-                    )
-                )
-
-            export_relation_types = []
-            for rt in relation_types_raw:
-                props = [
-                    ExportProperty(
-                        key=p["key"],
-                        displayName=p["displayName"],
-                        description=p.get("description"),
-                        dataType=p["dataType"],
-                        required=p["required"],
-                        defaultValue=p.get("defaultValue"),
-                    )
-                    for p in rt.get("properties", [])
-                ]
-                export_relation_types.append(
-                    ExportRelationType(
-                        key=rt["key"],
-                        displayName=rt["displayName"],
-                        description=rt.get("description"),
-                        fromEntityTypeKey=rt["sourceKey"],
-                        toEntityTypeKey=rt["targetKey"],
-                        properties=props,
-                    )
-                )
-
-            ontology_export = ExportOntology(
-                ontologyId=ont["ontologyId"],
-                key=ont["key"],
-                name=ont["name"],
-                description=ont.get("description"),
-            )
-
-            _schema_caches[key] = _build_schema_cache(
-                ontology_export, export_entity_types, export_relation_types
-            )
-            logger.info(
-                "Schema cache loaded: ontology '%s' with %d entity types, %d relation types",
-                key,
-                len(_schema_caches[key].entity_types),
-                len(_schema_caches[key].relation_types),
-            )
 
 
 # ---------------------------------------------------------------------------
@@ -801,7 +765,7 @@ async def create_relation(
     driver: AsyncDriver,
 ) -> dict:
     """Create a new relation instance between two entity instances."""
-    cache = _get_cache(ontology_key)
+    cache = await _load_schema(ontology_key, driver)
     rt_def = cache.relation_types.get(relation_type_key)
     if not rt_def:
         raise NotFoundError(f"Relation type '{relation_type_key}' not found")
@@ -862,7 +826,7 @@ async def list_relations(
     driver: AsyncDriver,
 ) -> PaginatedResponse:
     """List relation instances with filtering and pagination."""
-    cache = _get_cache(ontology_key)
+    cache = await _load_schema(ontology_key, driver)
     rt_def = cache.relation_types.get(relation_type_key)
     if not rt_def:
         raise NotFoundError(f"Relation type '{relation_type_key}' not found")
@@ -898,7 +862,7 @@ async def get_relation(
     driver: AsyncDriver,
 ) -> dict:
     """Get a single relation instance by type key and ID."""
-    cache = _get_cache(ontology_key)
+    cache = await _load_schema(ontology_key, driver)
     rt_def = cache.relation_types.get(relation_type_key)
     if not rt_def:
         raise NotFoundError(f"Relation type '{relation_type_key}' not found")
@@ -922,7 +886,7 @@ async def update_relation(
 
     Cannot change fromEntityId or toEntityId — those fields are silently ignored.
     """
-    cache = _get_cache(ontology_key)
+    cache = await _load_schema(ontology_key, driver)
     rt_def = cache.relation_types.get(relation_type_key)
     if not rt_def:
         raise NotFoundError(f"Relation type '{relation_type_key}' not found")
@@ -963,7 +927,7 @@ async def delete_relation(
     driver: AsyncDriver,
 ) -> None:
     """Delete a relation instance. Only removes the relationship, not the entities."""
-    cache = _get_cache(ontology_key)
+    cache = await _load_schema(ontology_key, driver)
     rt_def = cache.relation_types.get(relation_type_key)
     if not rt_def:
         raise NotFoundError(f"Relation type '{relation_type_key}' not found")
@@ -990,7 +954,7 @@ async def get_neighbors(
     driver: AsyncDriver,
 ) -> NeighborhoodResponse:
     """Get an entity's neighborhood — connected entities and the relations between them."""
-    cache = _get_cache(ontology_key)
+    cache = await _load_schema(ontology_key, driver)
     if entity_type_key not in cache.entity_types:
         raise NotFoundError(f"Entity type '{entity_type_key}' not found")
 

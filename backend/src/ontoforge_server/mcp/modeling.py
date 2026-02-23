@@ -111,12 +111,6 @@ async def _resolve_owner(driver, ontology_id: str, type_kind: str, type_key: str
         return owner["relationTypeId"], owner_label
 
 
-async def _invalidate_schema_cache(driver) -> None:
-    """Reload the runtime schema cache after a modeling change."""
-    from ontoforge_server.runtime import service as runtime_service
-
-    await runtime_service.load_schema_caches_from_db(driver)
-
 
 # ---------------------------------------------------------------------------
 # Tools
@@ -146,7 +140,7 @@ async def create_ontology(
     driver = await get_driver()
     body = OntologyCreate(key=ontology_key, name=name, description=description)
     result = await service.create_ontology(body=body, driver=driver)
-    await _invalidate_schema_cache(driver)
+
     return result.model_dump(by_alias=True)
 
 
@@ -163,7 +157,7 @@ async def update_ontology(
     result = await service.update_ontology(
         ontology["ontologyId"], body=body, driver=driver
     )
-    await _invalidate_schema_cache(driver)
+
     return result.model_dump(by_alias=True)
 
 
@@ -183,7 +177,7 @@ async def create_entity_type(
     result = await service.create_entity_type(
         ontology["ontologyId"], body=body, driver=driver
     )
-    await _invalidate_schema_cache(driver)
+
     return result.model_dump(by_alias=True)
 
 
@@ -202,7 +196,7 @@ async def update_entity_type(
     result = await service.update_entity_type(
         ontology["ontologyId"], et["entityTypeId"], body=body, driver=driver
     )
-    await _invalidate_schema_cache(driver)
+
     return result.model_dump(by_alias=True)
 
 
@@ -217,7 +211,7 @@ async def delete_entity_type(entity_type_key: str) -> str:
     await service.delete_entity_type(
         ontology["ontologyId"], et["entityTypeId"], driver=driver
     )
-    await _invalidate_schema_cache(driver)
+
     return f"Entity type '{entity_type_key}' deleted successfully."
 
 
@@ -247,7 +241,7 @@ async def create_relation_type(
     result = await service.create_relation_type(
         ontology_id, body=body, driver=driver
     )
-    await _invalidate_schema_cache(driver)
+
     return result.model_dump(by_alias=True)
 
 
@@ -269,7 +263,7 @@ async def update_relation_type(
     result = await service.update_relation_type(
         ontology["ontologyId"], rt["relationTypeId"], body=body, driver=driver
     )
-    await _invalidate_schema_cache(driver)
+
     return result.model_dump(by_alias=True)
 
 
@@ -285,7 +279,7 @@ async def delete_relation_type(relation_type_key: str) -> str:
     await service.delete_relation_type(
         ontology["ontologyId"], rt["relationTypeId"], driver=driver
     )
-    await _invalidate_schema_cache(driver)
+
     return f"Relation type '{relation_type_key}' deleted successfully."
 
 
@@ -323,7 +317,7 @@ async def add_property(
     result = await service.create_property(
         ontology_id, owner_id, owner_label, body=body, driver=driver
     )
-    await _invalidate_schema_cache(driver)
+
     return result.model_dump(by_alias=True)
 
 
@@ -358,7 +352,7 @@ async def update_property(
     result = await service.update_property(
         ontology_id, owner_id, owner_label, prop["propertyId"], body=body, driver=driver
     )
-    await _invalidate_schema_cache(driver)
+
     return result.model_dump(by_alias=True)
 
 
@@ -383,7 +377,7 @@ async def delete_property(
     await service.delete_property(
         ontology_id, owner_id, owner_label, prop["propertyId"], driver=driver
     )
-    await _invalidate_schema_cache(driver)
+
     return f"Property '{property_key}' deleted from {type_kind} '{type_key}'."
 
 
@@ -426,5 +420,5 @@ async def import_schema(
     if existing:
         export.ontology.ontology_id = existing["ontologyId"]
     result = await service.import_ontology(export, overwrite=overwrite, driver=driver)
-    await _invalidate_schema_cache(driver)
+
     return result.model_dump(by_alias=True)

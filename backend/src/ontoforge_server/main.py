@@ -16,14 +16,9 @@ from ontoforge_server.mcp.mount import mount_mcp
 from ontoforge_server.mcp.runtime import runtime_mcp
 from ontoforge_server.modeling.router import router as modeling_router
 from ontoforge_server.runtime.router import router as runtime_router
-from ontoforge_server.runtime import service as runtime_service
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_driver()
-    driver = await get_driver()
-    await runtime_service.load_schema_caches_from_db(driver)
     async with modeling_mcp.session_manager.run():
         async with runtime_mcp.session_manager.run():
             yield

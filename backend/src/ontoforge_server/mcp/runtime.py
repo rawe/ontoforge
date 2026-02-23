@@ -60,12 +60,13 @@ def _enrich_errors(fn):
 
 
 @runtime_mcp.tool()
-def get_schema() -> dict:
+async def get_schema() -> dict:
     """Understand the ontology before creating data. Shows available entity types,
     relation types, and their property definitions including data types and required
     flags. Call this first."""
     ontology_key = _get_ontology_key()
-    result = service.get_full_schema(ontology_key)
+    driver = await get_driver()
+    result = await service.get_full_schema(ontology_key, driver)
     return result.model_dump(by_alias=True)
 
 

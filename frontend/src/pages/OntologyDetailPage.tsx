@@ -6,6 +6,7 @@ import TypeList from '../components/TypeList';
 import OntologyForm from '../components/forms/OntologyForm';
 import EntityTypeForm from '../components/forms/EntityTypeForm';
 import RelationTypeForm from '../components/forms/RelationTypeForm';
+import OntologyGraph from '../components/graph/OntologyGraph';
 
 export default function OntologyDetailPage() {
   const { ontologyId } = useParams<{ ontologyId: string }>();
@@ -17,6 +18,8 @@ export default function OntologyDetailPage() {
   const [showRelationForm, setShowRelationForm] = useState(false);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<'list' | 'graph'>('list');
+  const [propertyCounts, setPropertyCounts] = useState<Record<string, number>>({});
 
   const load = async () => {
     if (!ontologyId) return;
@@ -29,6 +32,20 @@ export default function OntologyDetailPage() {
       setOntology(o);
       setEntityTypes(ets);
       setRelationTypes(rts);
+
+      // Fetch property counts for all entity types
+      const counts: Record<string, number> = {};
+      await Promise.all(
+        ets.map(async (et) => {
+          try {
+            const props = await api.listProperties(ontologyId, 'entity-types', et.entityTypeId);
+            counts[et.entityTypeId] = props.length;
+          } catch {
+            counts[et.entityTypeId] = 0;
+          }
+        }),
+      );
+      setPropertyCounts(counts);
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed to load');
     } finally {
@@ -174,55 +191,89 @@ export default function OntologyDetailPage() {
         </div>
       )}
 
-      {/* Entity Types */}
-      <section className="mb-8">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-lg font-semibold text-gray-800">Entity Types</h3>
-          <button
-            onClick={() => setShowEntityForm(!showEntityForm)}
-            className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
-          >
-            {showEntityForm ? 'Cancel' : 'Add Entity Type'}
-          </button>
-        </div>
-        {showEntityForm && (
-          <div className="mb-4 p-4 bg-white border rounded-lg">
-            <EntityTypeForm onSubmit={handleCreateEntityType} onCancel={() => setShowEntityForm(false)} />
-          </div>
-        )}
-        <TypeList
-          items={entityTypes.map((et) => ({ id: et.entityTypeId, key: et.key, displayName: et.displayName, description: et.description }))}
-          basePath={`/ontologies/${ontologyId}/entity-types`}
-          onDelete={handleDeleteEntityType}
-        />
-      </section>
+      {/* View mode toggle */}
+      <div className="flex items-center gap-1 mb-4">
+        <button
+          onClick={() => setViewMode('list')}
+          className={`px-3 py-1.5 text-sm font-medium rounded-l-md border ${
+            viewMode === 'list'
+              ? 'bg-blue-600 text-white border-blue-600'
+              : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+          }`}
+        >
+          List
+        </button>
+        <button
+          onClick={() => setViewMode('graph')}
+          className={`px-3 py-1.5 text-sm font-medium rounded-r-md border border-l-0 ${
+            viewMode === 'graph'
+              ? 'bg-blue-600 text-white border-blue-600'
+              : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+          }`}
+        >
+          Graph
+        </button>
+      </div>
 
-      {/* Relation Types */}
-      <section>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-lg font-semibold text-gray-800">Relation Types</h3>
-          <button
-            onClick={() => setShowRelationForm(!showRelationForm)}
-            className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
-          >
-            {showRelationForm ? 'Cancel' : 'Add Relation Type'}
-          </button>
-        </div>
-        {showRelationForm && (
-          <div className="mb-4 p-4 bg-white border rounded-lg">
-            <RelationTypeForm
-              entityTypes={entityTypes}
-              onSubmit={handleCreateRelationType}
-              onCancel={() => setShowRelationForm(false)}
+      {viewMode === 'list' ? (
+        <>
+          {/* Entity Types */}
+          <section className="mb-8">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-semibold text-gray-800">Entity Types</h3>
+              <button
+                onClick={() => setShowEntityForm(!showEntityForm)}
+                className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
+              >
+                {showEntityForm ? 'Cancel' : 'Add Entity Type'}
+              </button>
+            </div>
+            {showEntityForm && (
+              <div className="mb-4 p-4 bg-white border rounded-lg">
+                <EntityTypeForm onSubmit={handleCreateEntityType} onCancel={() => setShowEntityForm(false)} />
+              </div>
+            )}
+            <TypeList
+              items={entityTypes.map((et) => ({ id: et.entityTypeId, key: et.key, displayName: et.displayName, description: et.description }))}
+              basePath={`/ontologies/${ontologyId}/entity-types`}
+              onDelete={handleDeleteEntityType}
             />
-          </div>
-        )}
-        <TypeList
-          items={relationTypes.map((rt) => ({ id: rt.relationTypeId, key: rt.key, displayName: rt.displayName, description: rt.description }))}
-          basePath={`/ontologies/${ontologyId}/relation-types`}
-          onDelete={handleDeleteRelationType}
+          </section>
+
+          {/* Relation Types */}
+          <section>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-semibold text-gray-800">Relation Types</h3>
+              <button
+                onClick={() => setShowRelationForm(!showRelationForm)}
+                className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
+              >
+                {showRelationForm ? 'Cancel' : 'Add Relation Type'}
+              </button>
+            </div>
+            {showRelationForm && (
+              <div className="mb-4 p-4 bg-white border rounded-lg">
+                <RelationTypeForm
+                  entityTypes={entityTypes}
+                  onSubmit={handleCreateRelationType}
+                  onCancel={() => setShowRelationForm(false)}
+                />
+              </div>
+            )}
+            <TypeList
+              items={relationTypes.map((rt) => ({ id: rt.relationTypeId, key: rt.key, displayName: rt.displayName, description: rt.description }))}
+              basePath={`/ontologies/${ontologyId}/relation-types`}
+              onDelete={handleDeleteRelationType}
+            />
+          </section>
+        </>
+      ) : (
+        <OntologyGraph
+          entityTypes={entityTypes}
+          relationTypes={relationTypes}
+          propertyCounts={propertyCounts}
         />
-      </section>
+      )}
     </div>
   );
 }

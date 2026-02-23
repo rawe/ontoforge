@@ -1,5 +1,5 @@
 import { useMemo, useState, useCallback } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import {
   ReactFlow,
   Controls,
@@ -17,6 +17,8 @@ import type { EntityType, RelationType } from '../../types/models';
 import EntityTypeNode from './EntityTypeNode';
 import RelationTypeEdge from './RelationTypeEdge';
 import OntologyGraphFilters from './OntologyGraphFilters';
+import GraphDetailPanel from './GraphDetailPanel';
+import type { GraphSelection } from './GraphDetailPanel';
 import { layoutGraph } from './graphLayout';
 
 const nodeTypes = { entityType: EntityTypeNode };
@@ -29,7 +31,6 @@ interface Props {
 }
 
 export default function OntologyGraph({ entityTypes, relationTypes, propertyCounts }: Props) {
-  const navigate = useNavigate();
   const { ontologyId } = useParams<{ ontologyId: string }>();
 
   const [visibleEntityTypes, setVisibleEntityTypes] = useState<Set<string>>(
@@ -38,6 +39,11 @@ export default function OntologyGraph({ entityTypes, relationTypes, propertyCoun
   const [visibleRelationTypes, setVisibleRelationTypes] = useState<Set<string>>(
     () => new Set(relationTypes.map((rt) => rt.relationTypeId)),
   );
+
+  // Selection state: which node or edge is currently selected
+  const [selection, setSelection] = useState<GraphSelection | null>(null);
+
+  const clearSelection = useCallback(() => setSelection(null), []);
 
   const toggleEntityType = useCallback((id: string) => {
     setVisibleEntityTypes((prev) => {
@@ -57,13 +63,23 @@ export default function OntologyGraph({ entityTypes, relationTypes, propertyCoun
     });
   }, []);
 
+  // Derive the selected ID for highlighting
+  const selectedNodeId =
+    selection?.kind === 'entity' ? selection.entityType.entityTypeId : null;
+  const selectedEdgeId =
+    selection?.kind === 'relation' ? selection.relationType.relationTypeId : null;
+
   const { layoutNodes, layoutEdges } = useMemo(() => {
     const filteredNodes: Node[] = entityTypes
       .filter((et) => visibleEntityTypes.has(et.entityTypeId))
       .map((et) => ({
         id: et.entityTypeId,
         type: 'entityType',
-        data: { entityType: et, propertyCount: propertyCounts[et.entityTypeId] ?? 0 },
+        data: {
+          entityType: et,
+          propertyCount: propertyCounts[et.entityTypeId] ?? 0,
+          selected: et.entityTypeId === selectedNodeId,
+        },
         position: { x: 0, y: 0 },
       }));
 
@@ -79,15 +95,21 @@ export default function OntologyGraph({ entityTypes, relationTypes, propertyCoun
         source: rt.sourceEntityTypeId,
         target: rt.targetEntityTypeId,
         type: 'relationType',
-        data: { relationType: rt },
-        markerEnd: { type: MarkerType.ArrowClosed, color: '#9ca3af' },
+        data: {
+          relationType: rt,
+          selected: rt.relationTypeId === selectedEdgeId,
+        },
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          color: rt.relationTypeId === selectedEdgeId ? '#3b82f6' : '#9ca3af',
+        },
       }));
 
     return {
       layoutNodes: layoutGraph(filteredNodes, filteredEdges),
       layoutEdges: filteredEdges,
     };
-  }, [entityTypes, relationTypes, propertyCounts, visibleEntityTypes, visibleRelationTypes]);
+  }, [entityTypes, relationTypes, propertyCounts, visibleEntityTypes, visibleRelationTypes, selectedNodeId, selectedEdgeId]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(layoutEdges);
@@ -100,17 +122,27 @@ export default function OntologyGraph({ entityTypes, relationTypes, propertyCoun
 
   const onNodeClick: NodeMouseHandler = useCallback(
     (_event, node) => {
-      navigate(`/ontologies/${ontologyId}/entity-types/${node.id}`);
+      const et = entityTypes.find((e) => e.entityTypeId === node.id);
+      if (et) {
+        setSelection({ kind: 'entity', entityType: et });
+      }
     },
-    [navigate, ontologyId],
+    [entityTypes],
   );
 
   const onEdgeClick: EdgeMouseHandler = useCallback(
     (_event, edge) => {
-      navigate(`/ontologies/${ontologyId}/relation-types/${edge.id}`);
+      const rt = relationTypes.find((r) => r.relationTypeId === edge.id);
+      if (rt) {
+        setSelection({ kind: 'relation', relationType: rt });
+      }
     },
-    [navigate, ontologyId],
+    [relationTypes],
   );
+
+  const onPaneClick = useCallback(() => {
+    setSelection(null);
+  }, []);
 
   return (
     <div className="flex flex-col" style={{ height: 'calc(100vh - 280px)', minHeight: '400px' }}>
@@ -126,28 +158,39 @@ export default function OntologyGraph({ entityTypes, relationTypes, propertyCoun
         onShowAllRelations={() => setVisibleRelationTypes(new Set(relationTypes.map((rt) => rt.relationTypeId)))}
         onHideAllRelations={() => setVisibleRelationTypes(new Set())}
       />
-      <div className="flex-1 border border-gray-200 rounded-lg overflow-hidden bg-gray-50">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onNodeClick={onNodeClick}
-          onEdgeClick={onEdgeClick}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          fitView
-          fitViewOptions={{ padding: 0.3 }}
-          proOptions={{ hideAttribution: true }}
-        >
-          <Controls />
-          <MiniMap
-            nodeStrokeColor="#3b82f6"
-            nodeColor="#dbeafe"
-            nodeBorderRadius={4}
+      <div className="flex-1 flex border border-gray-200 rounded-lg overflow-hidden bg-gray-50">
+        <div className="flex-1 relative">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onNodeClick={onNodeClick}
+            onEdgeClick={onEdgeClick}
+            onPaneClick={onPaneClick}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            fitView
+            fitViewOptions={{ padding: 0.3 }}
+            proOptions={{ hideAttribution: true }}
+          >
+            <Controls />
+            <MiniMap
+              nodeStrokeColor="#3b82f6"
+              nodeColor="#dbeafe"
+              nodeBorderRadius={4}
+            />
+            <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#d1d5db" />
+          </ReactFlow>
+        </div>
+        {selection && ontologyId && (
+          <GraphDetailPanel
+            selection={selection}
+            ontologyId={ontologyId}
+            entityTypes={entityTypes}
+            onClose={clearSelection}
           />
-          <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#d1d5db" />
-        </ReactFlow>
+        )}
       </div>
     </div>
   );

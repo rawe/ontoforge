@@ -162,6 +162,8 @@ ontoforge/
 ├── docker-compose.yml              # Neo4j only (for local development)
 ├── docker/
 │   └── docker-compose.yml          # Full stack: Neo4j + backend + frontend
+├── examples/
+│   └── docker-compose/             # Run OntoForge from pre-built images
 ├── backend/
 │   ├── Dockerfile
 │   ├── pyproject.toml              # Python deps (uv-managed)
@@ -198,6 +200,21 @@ The backend reads settings from environment variables (or a `.env` file in `back
 | `PORT` | `8000` | HTTP listen port |
 
 In Docker, `DB_URI` is set to `bolt://neo4j:7687` automatically via `docker-compose.yml`.
+
+## Container Images
+
+Pushing a version tag triggers GitHub Actions to build and publish both images to GHCR:
+
+```bash
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+| Image | Description |
+|-------|-------------|
+| `ghcr.io/rawe/ontoforge-server:1.0.0` | Python FastAPI backend |
+| `ghcr.io/rawe/ontoforge-ui:1.0.0` | React frontend (nginx) |
+
+Each image is also tagged `:latest`. See `Makefile` for manual builds and [`examples/docker-compose/`](examples/docker-compose/) for a ready-to-use setup.
 
 ## Current Status
 

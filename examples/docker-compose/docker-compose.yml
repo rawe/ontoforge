@@ -1,0 +1,38 @@
+services:
+  neo4j:
+    image: neo4j:5
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/changeme
+    volumes:
+      - neo4j-data:/data
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "changeme", "RETURN 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  ontoforge-server:
+    image: ghcr.io/rawe/ontoforge-server:${VERSION:-latest}
+    ports:
+      - "8000:8000"
+    environment:
+      DB_URI: bolt://neo4j:7687
+      DB_USER: neo4j
+      DB_PASSWORD: changeme
+    depends_on:
+      neo4j:
+        condition: service_healthy
+
+  ontoforge-ui:
+    image: ghcr.io/rawe/ontoforge-ui:${VERSION:-latest}
+    ports:
+      - "3000:80"
+    depends_on:
+      - ontoforge-server
+
+volumes:
+  neo4j-data:

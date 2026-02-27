@@ -23,6 +23,13 @@ services:
       DB_URI: bolt://neo4j:7687
       DB_USER: neo4j
       DB_PASSWORD: changeme
+      # Semantic search (optional — remove comments to enable)
+      # EMBEDDING_PROVIDER: ollama
+      # EMBEDDING_MODEL: nomic-embed-text
+      # If Ollama runs on the host machine:
+      # EMBEDDING_BASE_URL: http://host.docker.internal:11434
+      # If Ollama runs as a container in this compose (see ollama service below):
+      # EMBEDDING_BASE_URL: http://ollama:11434
     depends_on:
       neo4j:
         condition: service_healthy
@@ -34,5 +41,15 @@ services:
     depends_on:
       - ontoforge-server
 
+  # Ollama embedding provider (optional — uncomment to run Ollama in Docker)
+  # After first start, pull the model: docker exec ollama ollama pull nomic-embed-text
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama-data:/root/.ollama
+
 volumes:
   neo4j-data:
+  # ollama-data:

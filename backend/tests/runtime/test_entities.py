@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-import ontoforge_server.runtime.service as svc
 from tests.runtime.conftest import ONTOLOGY_KEY
 
 
@@ -103,7 +102,7 @@ async def test_create_entity_default_value_injection(client, repo_patch):
     """POST /entities/{type_key} injects default value for optional prop with default."""
     captured_props = {}
 
-    async def capture_create(session, et_key, label, eid, props):
+    async def capture_create(session, et_key, label, eid, props, embedding=None):
         captured_props.update(props)
         return {**PERSON_ENTITY, **props, "active": True}
 
@@ -119,9 +118,9 @@ async def test_create_entity_default_value_injection(client, repo_patch):
     assert captured_props["name"] == "Alice"
 
 
-async def test_create_entity_required_with_default_injected(client, repo_patch):
+async def test_create_entity_required_with_default_injected(client, repo_patch, setup_schema_cache):
     """A required property with a default value is injected when not provided."""
-    cache = svc._schema_caches[ONTOLOGY_KEY]
+    cache = setup_schema_cache
     person_def = cache.entity_types["person"]
 
     # Temporarily make 'active' required with a default
@@ -130,7 +129,7 @@ async def test_create_entity_required_with_default_injected(client, repo_patch):
 
     captured_props = {}
 
-    async def capture_create(session, et_key, label, eid, props):
+    async def capture_create(session, et_key, label, eid, props, embedding=None):
         captured_props.update(props)
         return {**PERSON_ENTITY, **props}
 
@@ -233,7 +232,7 @@ async def test_update_entity_null_removes_optional(client, repo_patch):
     """PATCH with null value on optional prop removes it (passes null to repo)."""
     captured_remove = []
 
-    async def capture_update(session, label, eid, set_props, remove_props):
+    async def capture_update(session, label, eid, set_props, remove_props, embedding=None, has_embedding_update=False):
         captured_remove.extend(remove_props)
         return {**PERSON_ENTITY, "email": None}
 

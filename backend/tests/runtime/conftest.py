@@ -20,13 +20,66 @@ from ontoforge_server.core.schemas import (
 )
 from ontoforge_server.runtime.service import _build_schema_cache
 
-import ontoforge_server.runtime.service as svc
-
 
 FIXTURE_PATH = Path(__file__).parent.parent / "fixtures" / "test_ontology.json"
 
 # The ontology key used in the test fixture, used for route prefixes
 ONTOLOGY_KEY = "test_ontology"
+
+# Module-level cache reference for tests that need to modify it
+_test_cache = None
+
+
+def _build_test_cache(data: dict):
+    """Build a SchemaCache from the test fixture data."""
+    ont = data["ontology"]
+    ontology_export = ExportOntology(
+        ontologyId=ont["ontologyId"],
+        key=ont["key"],
+        name=ont["name"],
+        description=ont.get("description"),
+    )
+    entity_types = [
+        ExportEntityType(
+            key=et["key"],
+            displayName=et["displayName"],
+            description=et.get("description"),
+            properties=[
+                ExportProperty(
+                    key=p["key"],
+                    displayName=p["displayName"],
+                    description=p.get("description"),
+                    dataType=p["dataType"],
+                    required=p["required"],
+                    defaultValue=p.get("defaultValue"),
+                )
+                for p in et.get("properties", [])
+            ],
+        )
+        for et in data["entityTypes"]
+    ]
+    relation_types = [
+        ExportRelationType(
+            key=rt["key"],
+            displayName=rt["displayName"],
+            description=rt.get("description"),
+            fromEntityTypeKey=rt["fromEntityTypeKey"],
+            toEntityTypeKey=rt["toEntityTypeKey"],
+            properties=[
+                ExportProperty(
+                    key=p["key"],
+                    displayName=p["displayName"],
+                    description=p.get("description"),
+                    dataType=p["dataType"],
+                    required=p["required"],
+                    defaultValue=p.get("defaultValue"),
+                )
+                for p in rt.get("properties", [])
+            ],
+        )
+        for rt in data["relationTypes"]
+    ]
+    return _build_schema_cache(ontology_export, entity_types, relation_types)
 
 
 @pytest.fixture
@@ -86,62 +139,26 @@ async def client(runtime_app):
         yield ac
 
 
+@pytest.fixture
+def schema_cache(test_ontology_payload):
+    """Build and return the test schema cache for direct access in tests."""
+    return _build_test_cache(test_ontology_payload)
+
+
 @pytest.fixture(autouse=True)
 def setup_schema_cache(test_ontology_payload):
-    """Pre-populate the schema caches dict for every test.
+    """Patch _load_schema to return the test schema cache.
 
-    Tests that need no cache (e.g. testing the 'ontology not found' path)
-    should explicitly clear ``svc._schema_caches`` inside the test body.
+    Tests that need the 'ontology not found' path should override this by
+    patching _load_schema to raise NotFoundError.
     """
-    data = test_ontology_payload
-    ont = data["ontology"]
-    ontology_export = ExportOntology(
-        ontologyId=ont["ontologyId"],
-        key=ont["key"],
-        name=ont["name"],
-        description=ont.get("description"),
-    )
-    entity_types = [
-        ExportEntityType(
-            key=et["key"],
-            displayName=et["displayName"],
-            description=et.get("description"),
-            properties=[
-                ExportProperty(
-                    key=p["key"],
-                    displayName=p["displayName"],
-                    description=p.get("description"),
-                    dataType=p["dataType"],
-                    required=p["required"],
-                    defaultValue=p.get("defaultValue"),
-                )
-                for p in et.get("properties", [])
-            ],
-        )
-        for et in data["entityTypes"]
-    ]
-    relation_types = [
-        ExportRelationType(
-            key=rt["key"],
-            displayName=rt["displayName"],
-            description=rt.get("description"),
-            fromEntityTypeKey=rt["fromEntityTypeKey"],
-            toEntityTypeKey=rt["toEntityTypeKey"],
-            properties=[
-                ExportProperty(
-                    key=p["key"],
-                    displayName=p["displayName"],
-                    description=p.get("description"),
-                    dataType=p["dataType"],
-                    required=p["required"],
-                    defaultValue=p.get("defaultValue"),
-                )
-                for p in rt.get("properties", [])
-            ],
-        )
-        for rt in data["relationTypes"]
-    ]
-    cache = _build_schema_cache(ontology_export, entity_types, relation_types)
-    svc._schema_caches[ONTOLOGY_KEY] = cache
-    yield
-    svc._schema_caches.clear()
+    global _test_cache
+    _test_cache = _build_test_cache(test_ontology_payload)
+
+    with patch(
+        "ontoforge_server.runtime.service._load_schema",
+        return_value=_test_cache,
+    ):
+        yield _test_cache
+
+    _test_cache = None

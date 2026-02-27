@@ -10,6 +10,7 @@ from ontoforge_server.runtime.schemas import (
     PaginatedResponse,
     RelationInstanceCreate,
     SchemaResponse,
+    SemanticSearchResponse,
 )
 
 router = APIRouter(tags=["runtime"])
@@ -52,6 +53,23 @@ async def list_relation_types(ontology_key: str, driver: AsyncDriver = Depends(g
 @router.get("/schema/relation-types/{key}", response_model=ExportRelationType)
 async def get_relation_type(ontology_key: str, key: str, driver: AsyncDriver = Depends(get_driver)):
     return await service.get_relation_type(ontology_key, key, driver)
+
+
+# --- Semantic Search ---
+
+
+@router.get("/search/semantic", response_model=SemanticSearchResponse)
+async def semantic_search(
+    ontology_key: str,
+    q: str = Query(..., min_length=1),
+    type: str | None = Query(default=None),
+    limit: int = Query(default=10, ge=1, le=100),
+    min_score: float | None = Query(default=None, ge=0.0, le=1.0),
+    driver: AsyncDriver = Depends(get_driver),
+):
+    return await service.semantic_search(
+        ontology_key, q, type, limit, min_score, driver
+    )
 
 
 # --- Entity Instance CRUD ---

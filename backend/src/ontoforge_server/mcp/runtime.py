@@ -276,6 +276,24 @@ async def get_neighbors(
 
 
 @runtime_mcp.tool()
+async def semantic_search(
+    query: str,
+    entity_type_key: str | None = None,
+    limit: int = 10,
+) -> dict:
+    """Search entity instances by semantic similarity to a natural language query.
+    Returns entities ranked by relevance with similarity scores.
+    Optionally scope to a specific entity type."""
+    ontology_key = _get_ontology_key()
+    driver = await get_driver()
+    limit = max(1, min(limit, 100))
+    result = await service.semantic_search(
+        ontology_key, query, entity_type_key, limit, None, driver
+    )
+    return result
+
+
+@runtime_mcp.tool()
 async def wipe_data() -> dict:
     """DESTRUCTIVE. Delete ALL instance data for this ontology. The schema is
     preserved — only entity and relation instances are removed. Cannot be undone."""

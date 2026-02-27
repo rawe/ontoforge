@@ -10,6 +10,7 @@ from neo4j import AsyncDriver
 from neo4j.time import Date as Neo4jDate
 from neo4j.time import DateTime as Neo4jDateTime
 
+from ontoforge_server.core.embedding import get_embedding_provider
 from ontoforge_server.core.exceptions import NotFoundError, ValidationError
 from ontoforge_server.core.schemas import (
     ExportEntityType,
@@ -18,6 +19,7 @@ from ontoforge_server.core.schemas import (
     ExportRelationType,
 )
 from ontoforge_server.runtime import repository
+from ontoforge_server.runtime.embedding import build_text_repr
 from ontoforge_server.runtime.schemas import (
     DataWipeResponse,
     NeighborhoodResponse,
@@ -27,6 +29,8 @@ from ontoforge_server.runtime.schemas import (
 )
 
 logger = logging.getLogger(__name__)
+
+_NOT_SET = object()  # sentinel to distinguish "no embedding change" from None
 
 
 # ---------------------------------------------------------------------------
@@ -613,9 +617,16 @@ async def create_entity(
     entity_id = str(uuid4())
     pascal_label = to_pascal_case(entity_type_key)
 
+    embedding = None
+    provider = get_embedding_provider()
+    if provider:
+        text = build_text_repr(entity_type_key, coerced, et_def.properties)
+        embedding = await provider.embed(text)
+
     async with driver.session() as session:
         entity = await repository.create_entity(
-            session, entity_type_key, pascal_label, entity_id, coerced
+            session, entity_type_key, pascal_label, entity_id, coerced,
+            embedding=embedding,
         )
 
     return entity
@@ -726,9 +737,31 @@ async def update_entity(
         return await get_entity(ontology_key, entity_type_key, entity_id, driver)
 
     pascal_label = to_pascal_case(entity_type_key)
+
+    # Re-embed if any string properties changed
+    embedding = _NOT_SET
+    provider = get_embedding_provider()
+    if provider:
+        has_string_changes = any(
+            k in et_def.properties and et_def.properties[k].data_type == "string"
+            for k in coerced
+        )
+        if has_string_changes:
+            async with driver.session() as session:
+                current = await repository.get_entity(session, pascal_label, entity_id)
+            if current:
+                merged = {k: v for k, v in current.items() if not k.startswith("_")}
+                merged.update({k: v for k, v in set_props.items()})
+                for k in remove_props:
+                    merged.pop(k, None)
+                text = build_text_repr(entity_type_key, merged, et_def.properties)
+                embedding = await provider.embed(text)
+
     async with driver.session() as session:
         entity = await repository.update_entity(
-            session, pascal_label, entity_id, set_props, remove_props
+            session, pascal_label, entity_id, set_props, remove_props,
+            embedding=embedding if embedding is not _NOT_SET else None,
+            has_embedding_update=embedding is not _NOT_SET,
         )
     if not entity:
         raise NotFoundError(f"Entity '{entity_id}' not found")
@@ -973,3 +1006,69 @@ async def get_neighbors(
         )
 
     return NeighborhoodResponse(entity=entity, neighbors=neighbors)
+
+
+# ---------------------------------------------------------------------------
+# Service Functions — Semantic Search
+# ---------------------------------------------------------------------------
+
+
+async def semantic_search(
+    ontology_key: str,
+    query: str,
+    entity_type_key: str | None,
+    limit: int,
+    min_score: float | None,
+    driver: AsyncDriver,
+) -> dict:
+    """Perform semantic search over entity instances using vector embeddings."""
+    cache = await _load_schema(ontology_key, driver)
+
+    provider = get_embedding_provider()
+    if not provider:
+        raise ValidationError(
+            "Semantic search requires EMBEDDING_PROVIDER to be configured",
+            details={"code": "FEATURE_DISABLED"},
+        )
+
+    if entity_type_key:
+        if entity_type_key not in cache.entity_types:
+            raise NotFoundError(f"Entity type '{entity_type_key}' not found")
+
+    query_embedding = await provider.embed(query)
+    if query_embedding is None:
+        raise ValidationError("Failed to generate embedding for search query")
+
+    if entity_type_key:
+        # Single-type search
+        async with driver.session() as session:
+            results = await repository.semantic_search(
+                session,
+                to_pascal_case(entity_type_key),
+                entity_type_key,
+                query_embedding,
+                limit,
+                min_score,
+            )
+    else:
+        # Cross-type search: iterate all entity types, merge by score
+        all_results: list[dict] = []
+        async with driver.session() as session:
+            for et_key in cache.entity_types:
+                type_results = await repository.semantic_search(
+                    session,
+                    to_pascal_case(et_key),
+                    et_key,
+                    query_embedding,
+                    limit,
+                    min_score,
+                )
+                all_results.extend(type_results)
+        all_results.sort(key=lambda r: r["score"], reverse=True)
+        results = all_results[:limit]
+
+    return {
+        "results": results,
+        "query": query,
+        "total": len(results),
+    }

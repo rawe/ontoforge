@@ -3,7 +3,12 @@ from uuid import uuid4
 from fastapi import Depends
 from neo4j import AsyncDriver
 
-from ontoforge_server.core.database import get_driver
+from ontoforge_server.core.database import (
+    create_vector_index,
+    drop_vector_index,
+    get_driver,
+)
+from ontoforge_server.core.embedding import get_embedding_provider
 from ontoforge_server.core.exceptions import ConflictError, NotFoundError, ValidationError
 from ontoforge_server.modeling import repository
 from ontoforge_server.modeling.schemas import (
@@ -109,6 +114,11 @@ async def delete_ontology(
     driver: AsyncDriver = Depends(get_driver),
 ) -> None:
     async with driver.session() as session:
+        # Drop vector indexes for all entity types before deleting
+        if get_embedding_provider():
+            et_rows = await repository.list_entity_types(session, ontology_id)
+            for et in et_rows:
+                await drop_vector_index(driver, et["key"])
         deleted = await repository.delete_ontology(session, ontology_id)
         if not deleted:
             raise NotFoundError(f"Ontology '{ontology_id}' not found")
@@ -146,6 +156,9 @@ async def create_entity_type(
             body.display_name,
             body.description,
         )
+        provider = get_embedding_provider()
+        if provider:
+            await create_vector_index(driver, body.key, provider.dimensions)
         return _to_entity_type_response(data)
 
 
@@ -207,6 +220,8 @@ async def delete_entity_type(
             raise ConflictError(
                 f"Entity type '{entity_type_id}' is referenced by one or more relation types"
             )
+        # Get the entity type key before deleting (for vector index cleanup)
+        et_data = await repository.get_entity_type(session, ontology_id, entity_type_id)
         deleted = await repository.delete_entity_type(
             session, ontology_id, entity_type_id
         )
@@ -214,6 +229,8 @@ async def delete_entity_type(
             raise NotFoundError(
                 f"Entity type '{entity_type_id}' not found in ontology '{ontology_id}'"
             )
+        if et_data and get_embedding_provider():
+            await drop_vector_index(driver, et_data["key"])
 
 
 # --- Relation Type ---

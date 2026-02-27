@@ -45,3 +45,14 @@ class NeighborEntry(BaseModel):
 class NeighborhoodResponse(BaseModel):
     entity: dict
     neighbors: list[NeighborEntry]
+
+
+class SearchResultItem(BaseModel):
+    entity: dict
+    score: float
+
+
+class SemanticSearchResponse(BaseModel):
+    results: list[SearchResultItem]
+    query: str
+    total: int

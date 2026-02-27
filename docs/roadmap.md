@@ -158,6 +158,25 @@ Architecture: `docs/mcp-architecture.md`
 
 ---
 
+### Semantic Search
+
+Vector-based similarity search over entity instances using Neo4j native vector indexes and Ollama embeddings.
+
+**Scope:**
+- [x] Embedding provider abstraction with Ollama backend (nomic-embed-text)
+- [x] Automatic embedding generation on entity create/update
+- [x] Vector index lifecycle (bootstrap on startup, cascade on entity type deletion)
+- [x] REST endpoint: `GET /api/runtime/{ontologyKey}/search/semantic` with query, type scoping, limit, min_score
+- [x] MCP `semantic_search` tool in runtime server
+- [x] Graceful degradation when embedding provider is unavailable
+- [x] 110 unit tests passing, 22/24 end-to-end tests passing
+
+**Depends on:** Phase 2 + Phase 4b
+
+**Status:** COMPLETE — research, implementation, and testing done. Details in `docs/research/semantic-search/`.
+
+---
+
 ### Phase 5 — Production Docker Compose
 A separate `docker-compose.prod.yml` (not the development one) that runs the full stack — backend, frontend, and Neo4j — as containers, correctly networked together. This enables one-command deployment without local toolchains.
 

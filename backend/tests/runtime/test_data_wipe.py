@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-import ontoforge_server.runtime.service as svc
+from ontoforge_server.core.exceptions import NotFoundError
 from tests.runtime.conftest import ONTOLOGY_KEY
 
 
@@ -69,5 +69,9 @@ async def test_wipe_data_empty_db(client, repo_patch):
 
 async def test_wipe_data_unknown_ontology(client):
     """DELETE /data for an unknown ontology returns 404."""
-    resp = await client.delete("/api/runtime/nonexistent_ontology/data")
+    with patch(
+        "ontoforge_server.runtime.service._load_schema",
+        side_effect=NotFoundError("Ontology not found"),
+    ):
+        resp = await client.delete("/api/runtime/nonexistent_ontology/data")
     assert resp.status_code == 404

@@ -52,7 +52,7 @@ Design and iterate on ontology schemas. 15 tools for managing entity types, rela
 
 ### Runtime Server
 
-Read and write instance data validated against the ontology. 13 tools for entity/relation CRUD, search, filtering, graph exploration, and data management.
+Read and write instance data validated against the ontology. Tools for entity/relation CRUD, semantic search, filtering, graph exploration, and data management.
 
 **Endpoint:** `http://localhost:8000/mcp/runtime/{ontologyKey}`
 
@@ -88,7 +88,8 @@ Once connected to the runtime server, an AI assistant can work with your knowled
 
 1. **Inspect the schema** — `get_schema()` returns all entity types, relation types, and property definitions so the assistant knows what data structures are available.
 2. **Create data** — `create_entity(entity_type_key="person", properties={"name": "Alice", "age": 30})` creates a schema-validated entity. Required properties are enforced, types are checked.
-3. **Explore the graph** — `get_neighbors(entity_type_key="person", entity_id="...", direction="outgoing")` discovers what an entity is connected to.
+3. **Search by meaning** — `semantic_search(query="distributed systems engineers")` finds entities by semantic similarity, not just keyword matching. Requires `EMBEDDING_PROVIDER` to be configured.
+4. **Explore the graph** — `get_neighbors(entity_type_key="person", entity_id="...", direction="outgoing")` discovers what an entity is connected to.
 
 Every write is validated against the ontology — the assistant cannot invent entity types, add undefined properties, or write structurally invalid data.
 
@@ -185,6 +186,7 @@ ontoforge/
     ├── mcp-architecture.md         # MCP integration architecture
     ├── api-contracts/              # REST endpoint specifications
     ├── decisions.md                # Architectural decision log
+    ├── feature-ideas/              # Future extension proposals
     └── roadmap.md                  # Phase tracking
 ```
 
@@ -198,8 +200,11 @@ The backend reads settings from environment variables (or a `.env` file in `back
 | `DB_USER` | `neo4j` | Neo4j username |
 | `DB_PASSWORD` | `ontoforge_dev` | Neo4j password |
 | `PORT` | `8000` | HTTP listen port |
+| `EMBEDDING_PROVIDER` | *(unset — disabled)* | Set to `ollama` to enable semantic search |
+| `EMBEDDING_MODEL` | `nomic-embed-text` | Ollama embedding model |
+| `EMBEDDING_BASE_URL` | `http://localhost:11434` | Ollama API endpoint |
 
-In Docker, `DB_URI` is set to `bolt://neo4j:7687` automatically via `docker-compose.yml`.
+In Docker, `DB_URI` is set to `bolt://neo4j:7687` automatically via `docker-compose.yml`. Semantic search is opt-in — when `EMBEDDING_PROVIDER` is unset, all entity CRUD works normally without embeddings.
 
 ## Container Images
 
@@ -215,15 +220,6 @@ git tag v1.0.0 && git push origin v1.0.0
 | `ghcr.io/rawe/ontoforge-ui:1.0.0` | React frontend (nginx) |
 
 Each image is also tagged `:latest`. See `Makefile` for manual builds and [`examples/docker-compose/`](examples/docker-compose/) for a ready-to-use setup.
-
-## Current Status
-
-- **REST API** — Full modeling API (26 endpoints) and runtime API (17 endpoints) for schema and instance management
-- **Frontend** — React UI for ontology design and runtime data management
-- **MCP** — Both modeling (15 tools) and runtime (13 tools) MCP servers operational
-- **Testing** — 92 unit tests, integration-tested against real Neo4j
-
-See `docs/roadmap.md` for detailed phase tracking.
 
 ## License
 

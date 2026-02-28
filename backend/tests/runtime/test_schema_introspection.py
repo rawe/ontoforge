@@ -1,8 +1,10 @@
 """Tests for runtime schema introspection endpoints (GET /api/runtime/{ontologyKey}/schema/...)."""
 
+from unittest.mock import patch
+
 import pytest
 
-import ontoforge_server.runtime.service as svc
+from ontoforge_server.core.exceptions import NotFoundError
 from tests.runtime.conftest import ONTOLOGY_KEY
 
 PREFIX = f"/api/runtime/{ONTOLOGY_KEY}"
@@ -22,8 +24,11 @@ async def test_get_schema_provisioned(client):
 
 async def test_get_schema_not_provisioned(client):
     """GET /schema when ontology not loaded returns 404."""
-    svc._schema_caches.clear()
-    resp = await client.get(f"{PREFIX}/schema")
+    with patch(
+        "ontoforge_server.runtime.service._load_schema",
+        side_effect=NotFoundError("Ontology not found"),
+    ):
+        resp = await client.get(f"{PREFIX}/schema")
     assert resp.status_code == 404
 
 

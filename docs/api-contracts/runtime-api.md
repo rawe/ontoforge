@@ -163,6 +163,7 @@ List entity instances of a type, with optional filtering, search, sorting, and p
 | `q` | string | — | Text search across all string properties |
 | `filter.{key}` | any | — | Exact match on property |
 | `filter.{key}__{op}` | any | — | Operator match on property |
+| `fields` | string[] | — | Property keys to include in response entities (repeatable). When provided, only `_id` plus listed fields are returned. When omitted, all properties are returned. Unknown keys are silently ignored. |
 
 **Filter syntax:** All property filters use the `filter.` prefix to avoid namespace collisions with reserved parameters. Operator suffixes use double-underscore:
 
@@ -205,6 +206,12 @@ List entity instances of a type, with optional filtering, search, sorting, and p
 ### GET /api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}
 
 Get a single entity instance.
+
+**Query parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `fields` | string[] | — | Property keys to include (repeatable). When provided, only `_id` plus listed fields are returned. When omitted, all properties are returned. Unknown keys are silently ignored. |
 
 **Response:** `200 OK` — entity instance object (same shape as creation response).
 
@@ -355,6 +362,8 @@ Get an entity's neighborhood — the connected entities and the relations betwee
 | `relationTypeKey` | string | — | Filter by relation type |
 | `direction` | string | `both` | `outgoing`, `incoming`, or `both` |
 | `limit` | integer | 50 | Max neighbors to return |
+| `fields` | string[] | — | Property keys to include in entities (repeatable). Center entity gets `_id` plus listed fields. Neighbor entities get `_id`, `_entityTypeKey`, plus listed fields. When omitted, all properties are returned. |
+| `relationFields` | string[] | — | Property keys to include in relations (repeatable). Relations always include `_id`, `_relationTypeKey`, and `direction`. When omitted, all properties are returned. |
 
 **Response:** `200 OK`
 ```json
@@ -391,7 +400,63 @@ This is the primary exploration endpoint for MCP clients. Given an entity, disco
 
 ---
 
-## 6. Error Responses
+## 6. Semantic Search
+
+### GET /api/runtime/{ontologyKey}/search/semantic
+
+Search entity instances by natural language meaning using vector embeddings. Returns entities ranked by cosine similarity to the query.
+
+Requires `EMBEDDING_PROVIDER` to be configured. When embedding is disabled, returns a `422` error with code `FEATURE_DISABLED`.
+
+**Query parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `q` | string (required, min 1 char) | — | Natural language search query |
+| `type` | string (required) | — | Entity type key to search |
+| `limit` | integer | 10 | Max results (1–100) |
+| `min_score` | float | — | Minimum cosine similarity threshold (0.0–1.0) |
+| `filter.{key}` | any | — | Exact match on property |
+| `filter.{key}__{op}` | any | — | Operator match on property (same syntax as entity list filters) |
+| `fields` | string[] | — | Property keys to include in result entities (repeatable). When provided, only `_id` plus listed fields are returned per entity. The `score` field on the result wrapper is always present. When omitted, all properties are returned. |
+
+**Response:** `200 OK`
+```json
+{
+  "results": [
+    {
+      "entity": {
+        "_id": "b7e3f1a2-...",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-02-22T10:00:00Z",
+        "_updatedAt": "2026-02-22T10:00:00Z",
+        "name": "Alice Chen",
+        "role": "Distributed Systems Engineer"
+      },
+      "score": 0.92
+    }
+  ],
+  "query": "distributed systems engineers",
+  "total": 3
+}
+```
+
+**Behavior:**
+- Searches only the vector index for the specified entity type. Returns 404 if the type key is not found in the ontology schema.
+- When `filter.{key}` parameters are provided, the vector index over-fetches candidates and applies property `WHERE` clauses before the final `LIMIT`. Filter syntax is identical to the entity list endpoint (equality, `__gt`, `__gte`, `__lt`, `__lte`, `__contains`).
+- When `min_score` is provided, results below the threshold are excluded.
+- The `_embedding` property is never included in response entities.
+
+**Embedding generation:** Embeddings are generated automatically when entities are created or updated (if string properties change). The text representation concatenates all non-null string property values in schema-defined order, prefixed with the entity type key. If the embedding provider is unavailable at write time, the entity is created normally but without an embedding — it will not appear in semantic search results until re-embedded.
+
+**Errors:**
+- 404 if ontology key or entity type key not found.
+- 422 with code `FEATURE_DISABLED` if `EMBEDDING_PROVIDER` is not configured.
+- 422 if the query embedding fails to generate.
+
+---
+
+## 7. Error Responses
 
 The runtime API reuses the same error format as the modeling API (see `architecture.md` §5.1).
 
@@ -415,7 +480,7 @@ The runtime API reuses the same error format as the modeling API (see `architect
 
 ---
 
-## 7. Endpoint Summary
+## 8. Endpoint Summary
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -431,6 +496,7 @@ The runtime API reuses the same error format as the modeling API (see `architect
 | `PATCH` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}` | Partial update entity instance |
 | `DELETE` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}` | Delete entity instance |
 | `GET` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}/neighbors` | Graph traversal |
+| `GET` | `/api/runtime/{ontologyKey}/search/semantic` | Semantic search over entity instances |
 | `POST` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}` | Create relation instance |
 | `GET` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}` | List relation instances |
 | `GET` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}/{id}` | Get relation instance |

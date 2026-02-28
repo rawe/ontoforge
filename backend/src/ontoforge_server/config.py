@@ -9,5 +9,9 @@ class Settings(BaseSettings):
     DB_PASSWORD: str = "ontoforge_dev"
     PORT: int = 8000
 
+    EMBEDDING_PROVIDER: str | None = None
+    EMBEDDING_MODEL: str = "nomic-embed-text"
+    EMBEDDING_BASE_URL: str = "http://localhost:11434"
+
 
 settings = Settings()

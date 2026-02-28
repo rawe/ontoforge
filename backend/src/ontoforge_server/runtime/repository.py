@@ -5,6 +5,12 @@ from neo4j.time import Date as Neo4jDate
 from neo4j.time import DateTime as Neo4jDateTime
 
 
+def _strip_embedding(data: dict) -> dict:
+    """Remove _embedding from entity dict (768 floats should never appear in API responses)."""
+    data.pop("_embedding", None)
+    return data
+
+
 def _convert_neo4j_types(data: dict) -> dict:
     """Convert Neo4j-specific types (DateTime, Date) to Python stdlib types."""
     result = {}
@@ -143,19 +149,21 @@ async def create_entity(
     pascal_label: str,
     entity_id: str,
     properties: dict,
+    embedding: list[float] | None = None,
 ) -> dict:
     """Create an entity instance node with dual labels: _Entity and the PascalCase type label.
 
     The pascal_label comes from the SchemaCache (safe for Cypher label interpolation).
     All property values are passed via the $properties map parameter.
     """
+    embedding_clause = ", _embedding: $embedding" if embedding is not None else ""
     result = await session.run(
         f"""
         CREATE (n:_Entity:{pascal_label} {{
             _id: $entity_id,
             _entityTypeKey: $entity_type_key,
             _createdAt: datetime(),
-            _updatedAt: datetime()
+            _updatedAt: datetime(){embedding_clause}
         }})
         SET n += $properties
         RETURN n {{.*}} AS entity
@@ -163,9 +171,10 @@ async def create_entity(
         entity_id=entity_id,
         entity_type_key=entity_type_key,
         properties=properties,
+        embedding=embedding,
     )
     record = await result.single()
-    return _convert_neo4j_types(record["entity"])
+    return _strip_embedding(_convert_neo4j_types(record["entity"]))
 
 
 async def list_entities(
@@ -211,7 +220,7 @@ async def list_entities(
     params["offset"] = offset
     params["limit"] = limit
     data_result = await session.run(data_query, params)
-    items = [_convert_neo4j_types(record["entity"]) async for record in data_result]
+    items = [_strip_embedding(_convert_neo4j_types(record["entity"])) async for record in data_result]
 
     return items, total
 
@@ -229,7 +238,7 @@ async def get_entity(
     record = await result.single()
     if not record:
         return None
-    return _convert_neo4j_types(record["entity"])
+    return _strip_embedding(_convert_neo4j_types(record["entity"]))
 
 
 async def update_entity(
@@ -238,17 +247,23 @@ async def update_entity(
     entity_id: str,
     set_properties: dict,
     remove_properties: list[str],
+    embedding: list[float] | None = None,
+    has_embedding_update: bool = False,
 ) -> dict | None:
     """Partial update: set some properties, remove others (null values).
 
     set_properties: dict of {key: coerced_value} to set
     remove_properties: list of property keys to remove (nulled out)
+    embedding: new embedding vector (or None to clear)
+    has_embedding_update: True if embedding should be written (even if None)
     """
     set_clause = (
         "SET n += $set_properties, n._updatedAt = datetime()"
         if set_properties
         else "SET n._updatedAt = datetime()"
     )
+    if has_embedding_update:
+        set_clause += ", n._embedding = $embedding"
     remove_clause = (
         " ".join(f"REMOVE n.{k}" for k in remove_properties)
         if remove_properties
@@ -264,11 +279,12 @@ async def update_entity(
         """,
         entity_id=entity_id,
         set_properties=set_properties or {},
+        embedding=embedding,
     )
     record = await result.single()
     if not record:
         return None
-    return _convert_neo4j_types(record["entity"])
+    return _strip_embedding(_convert_neo4j_types(record["entity"]))
 
 
 async def delete_entity(
@@ -299,7 +315,7 @@ async def get_entity_by_id(session: AsyncSession, entity_id: str) -> dict | None
         entity_id=entity_id,
     )
     record = await result.single()
-    return _convert_neo4j_types(record["entity"]) if record else None
+    return _strip_embedding(_convert_neo4j_types(record["entity"])) if record else None
 
 
 async def create_relation(
@@ -508,7 +524,7 @@ async def get_neighbors(
             rel["direction"] = "outgoing"
             results.append({
                 "relation": rel,
-                "entity": _convert_neo4j_types(dict(record["neighbor_entity"])),
+                "entity": _strip_embedding(_convert_neo4j_types(dict(record["neighbor_entity"]))),
             })
 
         remaining = limit - len(results)
@@ -526,7 +542,7 @@ async def get_neighbors(
                 rel["direction"] = "incoming"
                 results.append({
                     "relation": rel,
-                    "entity": _convert_neo4j_types(dict(record["neighbor_entity"])),
+                    "entity": _strip_embedding(_convert_neo4j_types(dict(record["neighbor_entity"]))),
                 })
 
         return results
@@ -548,6 +564,69 @@ async def get_neighbors(
             rel["direction"] = direction
             results.append({
                 "relation": rel,
-                "entity": _convert_neo4j_types(dict(record["neighbor_entity"])),
+                "entity": _strip_embedding(_convert_neo4j_types(dict(record["neighbor_entity"]))),
             })
         return results
+
+
+# --- Semantic Search ---
+
+
+async def semantic_search(
+    session: AsyncSession,
+    entity_type_key: str,
+    query_embedding: list[float],
+    vector_limit: int,
+    limit: int,
+    min_score: float | None,
+    where_clauses: list[str] | None = None,
+    filter_params: dict | None = None,
+    index_name: str | None = None,
+) -> list[dict]:
+    """Vector similarity search on entity embeddings.
+
+    Searches the vector index for entity_type_key.
+    When where_clauses are provided, applies them as post-filter on vector results.
+    vector_limit controls how many candidates the index returns; limit is the final cap.
+    Returns list of dicts with 'entity' and 'score' keys.
+    """
+    if index_name is None:
+        index_name = f"{entity_type_key}_embedding"
+
+    params: dict = {
+        "index_name": index_name,
+        "vector_limit": vector_limit,
+        "query_embedding": query_embedding,
+    }
+
+    if where_clauses:
+        where_str = "WHERE " + " AND ".join(where_clauses)
+        params.update(filter_params or {})
+        params["limit"] = limit
+        query = (
+            f"CALL db.index.vector.queryNodes($index_name, $vector_limit, $query_embedding) "
+            f"YIELD node, score "
+            f"{where_str} "
+            f"RETURN node {{.*}} AS entity, score "
+            f"ORDER BY score DESC "
+            f"LIMIT $limit"
+        )
+    else:
+        query = (
+            f"CALL db.index.vector.queryNodes($index_name, $vector_limit, $query_embedding) "
+            f"YIELD node, score "
+            f"RETURN node {{.*}} AS entity, score "
+            f"ORDER BY score DESC"
+        )
+
+    result = await session.run(query, params)
+
+    items = []
+    async for record in result:
+        entity = _strip_embedding(_convert_neo4j_types(dict(record["entity"])))
+        score = record["score"]
+        if min_score is not None and score < min_score:
+            continue
+        items.append({"entity": entity, "score": score})
+
+    return items

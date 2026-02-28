@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-import ontoforge_server.runtime.service as svc
 from tests.runtime.conftest import ONTOLOGY_KEY
 
 
@@ -103,7 +102,7 @@ async def test_create_entity_default_value_injection(client, repo_patch):
     """POST /entities/{type_key} injects default value for optional prop with default."""
     captured_props = {}
 
-    async def capture_create(session, et_key, label, eid, props):
+    async def capture_create(session, et_key, label, eid, props, embedding=None):
         captured_props.update(props)
         return {**PERSON_ENTITY, **props, "active": True}
 
@@ -119,9 +118,9 @@ async def test_create_entity_default_value_injection(client, repo_patch):
     assert captured_props["name"] == "Alice"
 
 
-async def test_create_entity_required_with_default_injected(client, repo_patch):
+async def test_create_entity_required_with_default_injected(client, repo_patch, setup_schema_cache):
     """A required property with a default value is injected when not provided."""
-    cache = svc._schema_caches[ONTOLOGY_KEY]
+    cache = setup_schema_cache
     person_def = cache.entity_types["person"]
 
     # Temporarily make 'active' required with a default
@@ -130,7 +129,7 @@ async def test_create_entity_required_with_default_injected(client, repo_patch):
 
     captured_props = {}
 
-    async def capture_create(session, et_key, label, eid, props):
+    async def capture_create(session, et_key, label, eid, props, embedding=None):
         captured_props.update(props)
         return {**PERSON_ENTITY, **props}
 
@@ -233,7 +232,7 @@ async def test_update_entity_null_removes_optional(client, repo_patch):
     """PATCH with null value on optional prop removes it (passes null to repo)."""
     captured_remove = []
 
-    async def capture_update(session, label, eid, set_props, remove_props):
+    async def capture_update(session, label, eid, set_props, remove_props, embedding=None, has_embedding_update=False):
         captured_remove.extend(remove_props)
         return {**PERSON_ENTITY, "email": None}
 
@@ -300,3 +299,72 @@ async def test_delete_entity_nonexistent_type(client, repo_patch):
     with repo_patch():
         resp = await client.delete(f"{PREFIX}/entities/nonexistent/ent-1")
     assert resp.status_code == 404
+
+
+# --- Field Projection ---
+
+
+async def test_list_entities_with_fields(client, repo_patch):
+    """GET /entities/{type_key}?fields=name returns only _id and name."""
+    with repo_patch():
+        resp = await client.get(f"{PREFIX}/entities/person?fields=name")
+    assert resp.status_code == 200
+    item = resp.json()["items"][0]
+    assert "_id" in item
+    assert "name" in item
+    assert "age" not in item
+    assert "email" not in item
+    assert "_createdAt" not in item
+    assert "_entityTypeKey" not in item
+
+
+async def test_get_entity_with_fields(client, repo_patch):
+    """GET /entities/{type_key}/{id}?fields=name&fields=age returns only _id, name, age."""
+    with repo_patch():
+        resp = await client.get(f"{PREFIX}/entities/person/ent-1?fields=name&fields=age")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["_id"] == "ent-1"
+    assert data["name"] == "Alice"
+    assert data["age"] == 30
+    assert "email" not in data
+    assert "_createdAt" not in data
+
+
+async def test_list_entities_with_empty_fields(client, repo_patch):
+    """GET /entities/{type_key}?fields= returns only _id."""
+    with repo_patch():
+        resp = await client.get(f"{PREFIX}/entities/person?fields=")
+    assert resp.status_code == 200
+    item = resp.json()["items"][0]
+    assert "_id" in item
+    # Empty string field silently ignored, so only mandatory _id remains
+    assert "name" not in item
+    assert "age" not in item
+
+
+async def test_list_entities_fields_unknown_key_ignored(client, repo_patch):
+    """GET /entities/{type_key}?fields=name&fields=nonexistent returns _id and name only."""
+    with repo_patch():
+        resp = await client.get(
+            f"{PREFIX}/entities/person?fields=name&fields=nonexistent"
+        )
+    assert resp.status_code == 200
+    item = resp.json()["items"][0]
+    assert "_id" in item
+    assert "name" in item
+    assert "nonexistent" not in item
+    assert "age" not in item
+
+
+async def test_get_entity_without_fields_returns_all(client, repo_patch):
+    """GET /entities/{type_key}/{id} without fields returns all properties."""
+    with repo_patch():
+        resp = await client.get(f"{PREFIX}/entities/person/ent-1")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["_id"] == "ent-1"
+    assert data["name"] == "Alice"
+    assert data["age"] == 30
+    assert "email" in data
+    assert "_createdAt" in data

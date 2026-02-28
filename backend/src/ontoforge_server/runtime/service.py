@@ -10,6 +10,7 @@ from neo4j import AsyncDriver
 from neo4j.time import Date as Neo4jDate
 from neo4j.time import DateTime as Neo4jDateTime
 
+from ontoforge_server.core.embedding import get_embedding_provider
 from ontoforge_server.core.exceptions import NotFoundError, ValidationError
 from ontoforge_server.core.schemas import (
     ExportEntityType,
@@ -18,6 +19,7 @@ from ontoforge_server.core.schemas import (
     ExportRelationType,
 )
 from ontoforge_server.runtime import repository
+from ontoforge_server.runtime.embedding import build_text_repr
 from ontoforge_server.runtime.schemas import (
     DataWipeResponse,
     NeighborhoodResponse,
@@ -27,6 +29,8 @@ from ontoforge_server.runtime.schemas import (
 )
 
 logger = logging.getLogger(__name__)
+
+_NOT_SET = object()  # sentinel to distinguish "no embedding change" from None
 
 
 # ---------------------------------------------------------------------------
@@ -479,6 +483,32 @@ async def get_relation_type(ontology_key: str, key: str, driver: AsyncDriver) ->
 
 
 # ---------------------------------------------------------------------------
+# Field Projection
+# ---------------------------------------------------------------------------
+
+_ENTITY_ALWAYS_FIELDS = frozenset({"_id"})
+_ENTITY_NEIGHBOR_ALWAYS_FIELDS = frozenset({"_id", "_entityTypeKey"})
+_RELATION_ALWAYS_FIELDS = frozenset({"_id", "_relationTypeKey", "direction"})
+
+
+def _apply_field_projection(
+    data: dict,
+    fields: list[str] | None,
+    always_include: frozenset[str],
+) -> dict:
+    """Project entity or relation dict to only include requested fields.
+
+    If fields is None, return data unchanged (backward compatible).
+    If fields is an empty list, return only always_include keys.
+    Unknown keys in fields are silently ignored.
+    """
+    if fields is None:
+        return data
+    keep = always_include | set(fields)
+    return {k: v for k, v in data.items() if k in keep}
+
+
+# ---------------------------------------------------------------------------
 # Filter / Sort Helpers (for list endpoints)
 # ---------------------------------------------------------------------------
 
@@ -613,9 +643,16 @@ async def create_entity(
     entity_id = str(uuid4())
     pascal_label = to_pascal_case(entity_type_key)
 
+    embedding = None
+    provider = get_embedding_provider()
+    if provider:
+        text = build_text_repr(entity_type_key, coerced, et_def.properties)
+        embedding = await provider.embed(text)
+
     async with driver.session() as session:
         entity = await repository.create_entity(
-            session, entity_type_key, pascal_label, entity_id, coerced
+            session, entity_type_key, pascal_label, entity_id, coerced,
+            embedding=embedding,
         )
 
     return entity
@@ -631,6 +668,7 @@ async def list_entities(
     q: str | None,
     filters: dict[str, str],
     driver: AsyncDriver,
+    fields: list[str] | None = None,
 ) -> dict:
     """List entity instances with filtering, search, sorting, and pagination."""
     cache = await _load_schema(ontology_key, driver)
@@ -673,6 +711,9 @@ async def list_entities(
             offset,
         )
 
+    if fields is not None:
+        items = [_apply_field_projection(e, fields, _ENTITY_ALWAYS_FIELDS) for e in items]
+
     return PaginatedResponse(
         items=items, total=total, limit=limit, offset=offset
     )
@@ -683,6 +724,7 @@ async def get_entity(
     entity_type_key: str,
     entity_id: str,
     driver: AsyncDriver,
+    fields: list[str] | None = None,
 ) -> dict:
     """Get a single entity instance by type key and ID."""
     cache = await _load_schema(ontology_key, driver)
@@ -694,7 +736,7 @@ async def get_entity(
         entity = await repository.get_entity(session, pascal_label, entity_id)
     if not entity:
         raise NotFoundError(f"Entity '{entity_id}' not found")
-    return entity
+    return _apply_field_projection(entity, fields, _ENTITY_ALWAYS_FIELDS)
 
 
 async def update_entity(
@@ -726,9 +768,31 @@ async def update_entity(
         return await get_entity(ontology_key, entity_type_key, entity_id, driver)
 
     pascal_label = to_pascal_case(entity_type_key)
+
+    # Re-embed if any string properties changed
+    embedding = _NOT_SET
+    provider = get_embedding_provider()
+    if provider:
+        has_string_changes = any(
+            k in et_def.properties and et_def.properties[k].data_type == "string"
+            for k in coerced
+        )
+        if has_string_changes:
+            async with driver.session() as session:
+                current = await repository.get_entity(session, pascal_label, entity_id)
+            if current:
+                merged = {k: v for k, v in current.items() if not k.startswith("_")}
+                merged.update({k: v for k, v in set_props.items()})
+                for k in remove_props:
+                    merged.pop(k, None)
+                text = build_text_repr(entity_type_key, merged, et_def.properties)
+                embedding = await provider.embed(text)
+
     async with driver.session() as session:
         entity = await repository.update_entity(
-            session, pascal_label, entity_id, set_props, remove_props
+            session, pascal_label, entity_id, set_props, remove_props,
+            embedding=embedding if embedding is not _NOT_SET else None,
+            has_embedding_update=embedding is not _NOT_SET,
         )
     if not entity:
         raise NotFoundError(f"Entity '{entity_id}' not found")
@@ -952,6 +1016,8 @@ async def get_neighbors(
     relation_type_key: str | None,
     limit: int,
     driver: AsyncDriver,
+    fields: list[str] | None = None,
+    relation_fields: list[str] | None = None,
 ) -> NeighborhoodResponse:
     """Get an entity's neighborhood — connected entities and the relations between them."""
     cache = await _load_schema(ontology_key, driver)
@@ -972,4 +1038,86 @@ async def get_neighbors(
             session, entity_id, direction, rel_type_filter, limit
         )
 
+    if fields is not None:
+        entity = _apply_field_projection(entity, fields, _ENTITY_ALWAYS_FIELDS)
+        for n in neighbors:
+            n["entity"] = _apply_field_projection(n["entity"], fields, _ENTITY_NEIGHBOR_ALWAYS_FIELDS)
+    if relation_fields is not None:
+        for n in neighbors:
+            n["relation"] = _apply_field_projection(n["relation"], relation_fields, _RELATION_ALWAYS_FIELDS)
+
     return NeighborhoodResponse(entity=entity, neighbors=neighbors)
+
+
+# ---------------------------------------------------------------------------
+# Service Functions — Semantic Search
+# ---------------------------------------------------------------------------
+
+
+async def semantic_search(
+    ontology_key: str,
+    query: str,
+    entity_type_key: str,
+    limit: int,
+    min_score: float | None,
+    driver: AsyncDriver,
+    filters: dict[str, str] | None = None,
+    fields: list[str] | None = None,
+) -> dict:
+    """Perform semantic search over entity instances using vector embeddings.
+
+    entity_type_key is required — cross-type search is not supported.
+    When filters are provided, over-fetches from the vector index and applies
+    property WHERE clauses before the final LIMIT.
+    """
+    cache = await _load_schema(ontology_key, driver)
+
+    provider = get_embedding_provider()
+    if not provider:
+        raise ValidationError(
+            "Semantic search requires EMBEDDING_PROVIDER to be configured",
+            details={"code": "FEATURE_DISABLED"},
+        )
+
+    if entity_type_key not in cache.entity_types:
+        raise NotFoundError(f"Entity type '{entity_type_key}' not found")
+
+    et_def = cache.entity_types[entity_type_key]
+
+    query_embedding = await provider.embed(query)
+    if query_embedding is None:
+        raise ValidationError("Failed to generate embedding for search query")
+
+    # Build property filter clauses (if any)
+    filters = filters or {}
+    where_clauses: list[str] = []
+    filter_params: dict = {}
+    if filters:
+        where_clauses, filter_params = _build_filter_clauses(
+            filters, et_def.properties, entity_type_key, node_alias="node"
+        )
+
+    # Over-fetch from vector index when filters are present
+    vector_limit = min(limit * 5, 500) if where_clauses else limit
+
+    async with driver.session() as session:
+        results = await repository.semantic_search(
+            session,
+            entity_type_key,
+            query_embedding,
+            vector_limit,
+            limit,
+            min_score,
+            where_clauses=where_clauses if where_clauses else None,
+            filter_params=filter_params if filter_params else None,
+        )
+
+    if fields is not None:
+        for r in results:
+            r["entity"] = _apply_field_projection(r["entity"], fields, _ENTITY_ALWAYS_FIELDS)
+
+    return {
+        "results": results,
+        "query": query,
+        "total": len(results),
+    }

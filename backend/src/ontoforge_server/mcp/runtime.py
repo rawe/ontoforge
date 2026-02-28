@@ -97,13 +97,15 @@ async def list_entities(
     order: str = "asc",
     limit: int = 50,
     offset: int = 0,
+    fields: list[str] | None = None,
 ) -> dict:
     """List entities of a type with optional filtering, search, sorting, and
     pagination. Use 'search' for substring matching across all string properties.
     Use 'filters' for property-based filtering with operators: exact match
     ("name": "Alice"), greater than ("age__gt": "25"), greater or equal ("__gte"),
     less than ("__lt"), less or equal ("__lte"), contains
-    ("name__contains": "ali")."""
+    ("name__contains": "ali"). Use 'fields' to select which properties to
+    include — only listed fields plus _id are returned. Omit for all fields."""
     ontology_key = _get_ontology_key()
     driver = await get_driver()
     str_filters = {k: str(v) for k, v in (filters or {}).items()}
@@ -111,7 +113,7 @@ async def list_entities(
     offset = max(0, offset)
     result = await service.list_entities(
         ontology_key, entity_type_key, limit, offset, sort, order,
-        search, str_filters, driver,
+        search, str_filters, driver, fields=fields,
     )
     return result.model_dump()
 
@@ -120,12 +122,15 @@ async def list_entities(
 async def get_entity(
     entity_type_key: str,
     entity_id: str,
+    fields: list[str] | None = None,
 ) -> dict:
-    """Retrieve a specific entity by its _id."""
+    """Retrieve a specific entity by its _id. Use 'fields' to select which
+    properties to include — only listed fields plus _id are returned.
+    Omit for all fields."""
     ontology_key = _get_ontology_key()
     driver = await get_driver()
     result = await service.get_entity(
-        ontology_key, entity_type_key, entity_id, driver
+        ontology_key, entity_type_key, entity_id, driver, fields=fields
     )
     return result
 
@@ -261,18 +266,50 @@ async def get_neighbors(
     direction: str = "both",
     relation_type_key: str | None = None,
     limit: int = 50,
+    fields: list[str] | None = None,
+    relation_fields: list[str] | None = None,
 ) -> dict:
     """Explore an entity's local neighborhood — discover what it's connected to
     and how. Returns the center entity plus all connected entities with their
-    connecting relations."""
+    connecting relations. Use 'fields' to project entity properties (neighbor
+    entities always include _entityTypeKey). Use 'relation_fields' to project
+    relation properties."""
     ontology_key = _get_ontology_key()
     driver = await get_driver()
     limit = max(1, min(limit, 200))
     result = await service.get_neighbors(
         ontology_key, entity_type_key, entity_id, direction,
         relation_type_key, limit, driver,
+        fields=fields, relation_fields=relation_fields,
     )
     return result.model_dump()
+
+
+@runtime_mcp.tool()
+@_enrich_errors
+async def semantic_search(
+    query: str,
+    entity_type_key: str,
+    limit: int = 10,
+    filters: dict | None = None,
+    fields: list[str] | None = None,
+) -> dict:
+    """Search entity instances by semantic similarity to a natural language query.
+    Returns entities ranked by relevance with similarity scores.
+    entity_type_key is required — specifies which entity type to search.
+    Use 'filters' for property-based filtering on results: exact match
+    ("location": "Berlin"), operators ("age__gt": "25", "__gte", "__lt",
+    "__lte", "__contains"). Use 'fields' to select which entity properties to
+    include — only listed fields plus _id are returned. Omit for all fields."""
+    ontology_key = _get_ontology_key()
+    driver = await get_driver()
+    limit = max(1, min(limit, 100))
+    str_filters = {k: str(v) for k, v in (filters or {}).items()}
+    result = await service.semantic_search(
+        ontology_key, query, entity_type_key, limit, None, driver,
+        filters=str_filters, fields=fields,
+    )
+    return result
 
 
 @runtime_mcp.tool()

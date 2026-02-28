@@ -1,6 +1,10 @@
+import logging
+
 from neo4j import AsyncGraphDatabase, AsyncDriver
 
 from ontoforge_server.config import settings
+
+logger = logging.getLogger(__name__)
 
 _driver: AsyncDriver | None = None
 
@@ -16,10 +20,53 @@ _CONSTRAINTS = [
 ]
 
 
+def _to_pascal_case(key: str) -> str:
+    """Convert a snake_case key to PascalCase."""
+    return "".join(segment.capitalize() for segment in key.split("_"))
+
+
 async def _ensure_constraints(driver: AsyncDriver) -> None:
     async with driver.session() as session:
         for constraint in _CONSTRAINTS:
             await session.run(constraint)
+
+
+async def ensure_vector_indexes(driver: AsyncDriver, dimensions: int) -> None:
+    """Create vector indexes for all existing entity types across all ontologies."""
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            MATCH (o:Ontology)-[:HAS_ENTITY_TYPE]->(et:EntityType)
+            RETURN et.key AS key
+            """
+        )
+        keys = [record["key"] async for record in result]
+
+    for key in keys:
+        await create_vector_index(driver, key, dimensions)
+
+
+async def create_vector_index(driver: AsyncDriver, entity_type_key: str, dimensions: int) -> None:
+    """Create a vector index for the given entity type label."""
+    pascal_label = _to_pascal_case(entity_type_key)
+    index_name = f"{entity_type_key}_embedding"
+    query = (
+        f"CREATE VECTOR INDEX {index_name} IF NOT EXISTS "
+        f"FOR (n:{pascal_label}) ON (n._embedding) "
+        f"OPTIONS {{indexConfig: {{`vector.dimensions`: {dimensions}, "
+        f"`vector.similarity_function`: 'cosine'}}}}"
+    )
+    async with driver.session() as session:
+        await session.run(query)
+    logger.info("Vector index ensured: %s", index_name)
+
+
+async def drop_vector_index(driver: AsyncDriver, entity_type_key: str) -> None:
+    """Drop the vector index for the given entity type."""
+    index_name = f"{entity_type_key}_embedding"
+    async with driver.session() as session:
+        await session.run(f"DROP INDEX {index_name} IF EXISTS")
+    logger.info("Vector index dropped: %s", index_name)
 
 
 async def init_driver() -> AsyncDriver:

@@ -45,6 +45,48 @@ Add property filter parameters to the semantic search endpoint, matching the exi
 
 ---
 
+## Field Projection
+
+**Priority: High**
+
+### Problem
+
+Every query that returns entities — `list_entities`, `get_entity`, `semantic_search`, `get_neighbors` — returns the full entity with all properties. For entities with large text properties (bios, descriptions, notes), this creates unnecessary payload, especially when the caller only needs identifiers or a few key fields.
+
+This is particularly problematic for LLM consumers via MCP. A semantic search returning 10 entities with long bios can consume significant context window budget, when the LLM may only need names and IDs to decide what to fetch in detail.
+
+### Proposal
+
+Add an optional `fields` parameter that lets the caller specify which properties to include in the response. When omitted, the full entity is returned (backward compatible).
+
+**Behavior:**
+
+- System fields `_id` and `_entityTypeKey` are always returned regardless of the `fields` value.
+- Only listed property keys are included. Unknown keys are silently ignored.
+- The parameter applies to entities in the response — for semantic search, the `score` field is always present alongside the projected entity.
+
+**REST API:** Accept `fields` as a repeated query parameter.
+
+```
+GET /api/runtime/{ontologyKey}/entities/person?fields=name&fields=bio
+GET /api/runtime/{ontologyKey}/search/semantic?q=engineer&type=person&fields=name
+```
+
+**MCP tools:** Accept `fields` as an optional list parameter on `list_entities`, `get_entity`, `semantic_search`, and `get_neighbors`.
+
+```
+semantic_search(query="engineer", entity_type_key="person", fields=["name"])
+list_entities(entity_type_key="person", fields=["name", "bio"])
+```
+
+### Design Considerations
+
+- Projection should happen at the application layer (Python), not in Cypher. Entities are already fetched fully for validation and embedding — stripping fields before serialization is simpler and avoids query complexity.
+- The same `fields` parameter and logic should be shared between REST and MCP to keep behavior consistent.
+- For `get_neighbors`, projection applies to all returned entities (center and neighbors alike).
+
+---
+
 ## MCP Minimum Score Configuration
 
 **Priority: High**

@@ -483,6 +483,32 @@ async def get_relation_type(ontology_key: str, key: str, driver: AsyncDriver) ->
 
 
 # ---------------------------------------------------------------------------
+# Field Projection
+# ---------------------------------------------------------------------------
+
+_ENTITY_ALWAYS_FIELDS = frozenset({"_id"})
+_ENTITY_NEIGHBOR_ALWAYS_FIELDS = frozenset({"_id", "_entityTypeKey"})
+_RELATION_ALWAYS_FIELDS = frozenset({"_id", "_relationTypeKey", "direction"})
+
+
+def _apply_field_projection(
+    data: dict,
+    fields: list[str] | None,
+    always_include: frozenset[str],
+) -> dict:
+    """Project entity or relation dict to only include requested fields.
+
+    If fields is None, return data unchanged (backward compatible).
+    If fields is an empty list, return only always_include keys.
+    Unknown keys in fields are silently ignored.
+    """
+    if fields is None:
+        return data
+    keep = always_include | set(fields)
+    return {k: v for k, v in data.items() if k in keep}
+
+
+# ---------------------------------------------------------------------------
 # Filter / Sort Helpers (for list endpoints)
 # ---------------------------------------------------------------------------
 
@@ -642,6 +668,7 @@ async def list_entities(
     q: str | None,
     filters: dict[str, str],
     driver: AsyncDriver,
+    fields: list[str] | None = None,
 ) -> dict:
     """List entity instances with filtering, search, sorting, and pagination."""
     cache = await _load_schema(ontology_key, driver)
@@ -684,6 +711,9 @@ async def list_entities(
             offset,
         )
 
+    if fields is not None:
+        items = [_apply_field_projection(e, fields, _ENTITY_ALWAYS_FIELDS) for e in items]
+
     return PaginatedResponse(
         items=items, total=total, limit=limit, offset=offset
     )
@@ -694,6 +724,7 @@ async def get_entity(
     entity_type_key: str,
     entity_id: str,
     driver: AsyncDriver,
+    fields: list[str] | None = None,
 ) -> dict:
     """Get a single entity instance by type key and ID."""
     cache = await _load_schema(ontology_key, driver)
@@ -705,7 +736,7 @@ async def get_entity(
         entity = await repository.get_entity(session, pascal_label, entity_id)
     if not entity:
         raise NotFoundError(f"Entity '{entity_id}' not found")
-    return entity
+    return _apply_field_projection(entity, fields, _ENTITY_ALWAYS_FIELDS)
 
 
 async def update_entity(
@@ -985,6 +1016,8 @@ async def get_neighbors(
     relation_type_key: str | None,
     limit: int,
     driver: AsyncDriver,
+    fields: list[str] | None = None,
+    relation_fields: list[str] | None = None,
 ) -> NeighborhoodResponse:
     """Get an entity's neighborhood — connected entities and the relations between them."""
     cache = await _load_schema(ontology_key, driver)
@@ -1005,6 +1038,14 @@ async def get_neighbors(
             session, entity_id, direction, rel_type_filter, limit
         )
 
+    if fields is not None:
+        entity = _apply_field_projection(entity, fields, _ENTITY_ALWAYS_FIELDS)
+        for n in neighbors:
+            n["entity"] = _apply_field_projection(n["entity"], fields, _ENTITY_NEIGHBOR_ALWAYS_FIELDS)
+    if relation_fields is not None:
+        for n in neighbors:
+            n["relation"] = _apply_field_projection(n["relation"], relation_fields, _RELATION_ALWAYS_FIELDS)
+
     return NeighborhoodResponse(entity=entity, neighbors=neighbors)
 
 
@@ -1021,6 +1062,7 @@ async def semantic_search(
     min_score: float | None,
     driver: AsyncDriver,
     filters: dict[str, str] | None = None,
+    fields: list[str] | None = None,
 ) -> dict:
     """Perform semantic search over entity instances using vector embeddings.
 
@@ -1069,6 +1111,10 @@ async def semantic_search(
             where_clauses=where_clauses if where_clauses else None,
             filter_params=filter_params if filter_params else None,
         )
+
+    if fields is not None:
+        for r in results:
+            r["entity"] = _apply_field_projection(r["entity"], fields, _ENTITY_ALWAYS_FIELDS)
 
     return {
         "results": results,

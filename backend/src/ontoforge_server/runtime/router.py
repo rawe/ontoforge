@@ -66,11 +66,13 @@ async def semantic_search(
     type: str = Query(...),
     limit: int = Query(default=10, ge=1, le=100),
     min_score: float | None = Query(default=None, ge=0.0, le=1.0),
+    fields: list[str] | None = Query(default=None),
     driver: AsyncDriver = Depends(get_driver),
 ):
     filters = service._parse_filters(dict(request.query_params))
     return await service.semantic_search(
-        ontology_key, q, type, limit, min_score, driver, filters=filters
+        ontology_key, q, type, limit, min_score, driver, filters=filters,
+        fields=fields,
     )
 
 
@@ -99,11 +101,13 @@ async def list_entities(
     sort: str = Query(default="_createdAt"),
     order: str = Query(default="asc", pattern="^(asc|desc)$"),
     q: str | None = Query(default=None),
+    fields: list[str] | None = Query(default=None),
 ):
     # Parse filter.{key} params from the raw query string
     filters = service._parse_filters(dict(request.query_params))
     return await service.list_entities(
-        ontology_key, entity_type_key, limit, offset, sort, order, q, filters, driver
+        ontology_key, entity_type_key, limit, offset, sort, order, q, filters, driver,
+        fields=fields,
     )
 
 
@@ -112,9 +116,12 @@ async def get_entity(
     ontology_key: str,
     entity_type_key: str,
     entity_id: str,
+    fields: list[str] | None = Query(default=None),
     driver: AsyncDriver = Depends(get_driver),
 ):
-    return await service.get_entity(ontology_key, entity_type_key, entity_id, driver)
+    return await service.get_entity(
+        ontology_key, entity_type_key, entity_id, driver, fields=fields
+    )
 
 
 @router.patch("/entities/{entity_type_key}/{entity_id}")
@@ -155,9 +162,12 @@ async def get_neighbors(
     relation_type_key: str | None = Query(default=None, alias="relationTypeKey"),
     direction: str = Query(default="both", pattern="^(outgoing|incoming|both)$"),
     limit: int = Query(default=50, ge=1, le=200),
+    fields: list[str] | None = Query(default=None),
+    relation_fields: list[str] | None = Query(default=None, alias="relationFields"),
 ):
     return await service.get_neighbors(
-        ontology_key, entity_type_key, entity_id, direction, relation_type_key, limit, driver
+        ontology_key, entity_type_key, entity_id, direction, relation_type_key, limit, driver,
+        fields=fields, relation_fields=relation_fields,
     )
 
 

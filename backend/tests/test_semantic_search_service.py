@@ -245,3 +245,75 @@ async def test_multiple_filters(mock_driver, mock_session):
         call_kwargs = mock_repo.semantic_search.call_args
         where_clauses = call_kwargs[1]["where_clauses"]
         assert len(where_clauses) == 2
+
+
+# --- Field Projection ---
+
+
+async def test_search_with_fields_projects_entities(mock_driver, mock_session):
+    """Field projection strips entity properties, keeps _id and score."""
+    mock_provider = AsyncMock()
+    mock_provider.embed = AsyncMock(return_value=[0.1] * 768)
+
+    search_results = [
+        {
+            "entity": {
+                "_id": "e1",
+                "_entityTypeKey": "person",
+                "name": "Alice",
+                "age": 30,
+                "location": "Berlin",
+            },
+            "score": 0.95,
+        },
+    ]
+
+    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_cache()), \
+         patch("ontoforge_server.runtime.service.get_embedding_provider", return_value=mock_provider), \
+         patch("ontoforge_server.runtime.service.repository") as mock_repo:
+        mock_repo.semantic_search = AsyncMock(return_value=search_results)
+        result = await semantic_search(
+            "test", "find Alice", "person", 10, None, mock_driver,
+            fields=["name"],
+        )
+
+    entity = result["results"][0]["entity"]
+    assert entity["_id"] == "e1"
+    assert entity["name"] == "Alice"
+    assert "age" not in entity
+    assert "location" not in entity
+    assert "_entityTypeKey" not in entity
+    # score is on the result wrapper, not the entity
+    assert result["results"][0]["score"] == 0.95
+
+
+async def test_search_without_fields_returns_all(mock_driver, mock_session):
+    """Without fields param, full entity data is returned."""
+    mock_provider = AsyncMock()
+    mock_provider.embed = AsyncMock(return_value=[0.1] * 768)
+
+    search_results = [
+        {
+            "entity": {
+                "_id": "e1",
+                "_entityTypeKey": "person",
+                "name": "Alice",
+                "age": 30,
+            },
+            "score": 0.9,
+        },
+    ]
+
+    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_cache()), \
+         patch("ontoforge_server.runtime.service.get_embedding_provider", return_value=mock_provider), \
+         patch("ontoforge_server.runtime.service.repository") as mock_repo:
+        mock_repo.semantic_search = AsyncMock(return_value=search_results)
+        result = await semantic_search(
+            "test", "find Alice", "person", 10, None, mock_driver,
+        )
+
+    entity = result["results"][0]["entity"]
+    assert entity["_id"] == "e1"
+    assert entity["name"] == "Alice"
+    assert entity["age"] == 30
+    assert entity["_entityTypeKey"] == "person"

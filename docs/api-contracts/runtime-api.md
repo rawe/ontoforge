@@ -163,6 +163,7 @@ List entity instances of a type, with optional filtering, search, sorting, and p
 | `q` | string | — | Text search across all string properties |
 | `filter.{key}` | any | — | Exact match on property |
 | `filter.{key}__{op}` | any | — | Operator match on property |
+| `fields` | string[] | — | Property keys to include in response entities (repeatable). When provided, only `_id` plus listed fields are returned. When omitted, all properties are returned. Unknown keys are silently ignored. |
 
 **Filter syntax:** All property filters use the `filter.` prefix to avoid namespace collisions with reserved parameters. Operator suffixes use double-underscore:
 
@@ -205,6 +206,12 @@ List entity instances of a type, with optional filtering, search, sorting, and p
 ### GET /api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}
 
 Get a single entity instance.
+
+**Query parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `fields` | string[] | — | Property keys to include (repeatable). When provided, only `_id` plus listed fields are returned. When omitted, all properties are returned. Unknown keys are silently ignored. |
 
 **Response:** `200 OK` — entity instance object (same shape as creation response).
 
@@ -355,6 +362,8 @@ Get an entity's neighborhood — the connected entities and the relations betwee
 | `relationTypeKey` | string | — | Filter by relation type |
 | `direction` | string | `both` | `outgoing`, `incoming`, or `both` |
 | `limit` | integer | 50 | Max neighbors to return |
+| `fields` | string[] | — | Property keys to include in entities (repeatable). Center entity gets `_id` plus listed fields. Neighbor entities get `_id`, `_entityTypeKey`, plus listed fields. When omitted, all properties are returned. |
+| `relationFields` | string[] | — | Property keys to include in relations (repeatable). Relations always include `_id`, `_relationTypeKey`, and `direction`. When omitted, all properties are returned. |
 
 **Response:** `200 OK`
 ```json
@@ -409,6 +418,7 @@ Requires `EMBEDDING_PROVIDER` to be configured. When embedding is disabled, retu
 | `min_score` | float | — | Minimum cosine similarity threshold (0.0–1.0) |
 | `filter.{key}` | any | — | Exact match on property |
 | `filter.{key}__{op}` | any | — | Operator match on property (same syntax as entity list filters) |
+| `fields` | string[] | — | Property keys to include in result entities (repeatable). When provided, only `_id` plus listed fields are returned per entity. The `score` field on the result wrapper is always present. When omitted, all properties are returned. |
 
 **Response:** `200 OK`
 ```json

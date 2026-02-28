@@ -47,6 +47,8 @@ Add property filter parameters to the semantic search endpoint, matching the exi
 
 ## Field Projection
 
+**Status: IMPLEMENTED**
+
 **Priority: High**
 
 ### Problem

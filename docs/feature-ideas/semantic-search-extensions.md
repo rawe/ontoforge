@@ -8,17 +8,20 @@
 OntoForge supports semantic search over entity instances using vector embeddings. The implementation:
 
 - **Embedding at write time** — every entity's string properties are concatenated into a text representation and embedded via Ollama (`nomic-embed-text`, 768 dimensions). The embedding is stored as `_embedding` on the Neo4j node.
-- **REST endpoint** — `GET /api/runtime/{ontologyKey}/search/semantic` with parameters: `q` (query), `type` (entity type scope), `limit`, `min_score`.
-- **MCP tool** — `semantic_search(query, entity_type_key, limit)` on the runtime MCP server.
+- **REST endpoint** — `GET /api/runtime/{ontologyKey}/search/semantic` with parameters: `q` (query), `type` (required, entity type key), `limit`, `min_score`, `filter.{key}` (property filters).
+- **MCP tool** — `semantic_search(query, entity_type_key, limit, filters)` on the runtime MCP server.
+- **Property filtering** — `filter.{key}` parameters apply Cypher `WHERE` clauses on vector search results. Supports equality, `__gt`, `__gte`, `__lt`, `__lte`, `__contains`. When filters are present, the vector index over-fetches candidates (`min(limit * 5, 500)`) before applying property constraints.
 - **Vector indexes** — one per entity type, created/dropped automatically with the entity type lifecycle.
 - **Graceful degradation** — entities are created normally when the embedding provider is unavailable; they just lack embeddings until re-embedded.
 - **Configuration** — opt-in via `EMBEDDING_PROVIDER=ollama` environment variable. When unset, semantic search is disabled entirely.
 
-All string properties on an entity contribute to the embedding. Non-string properties are excluded. There is no per-property control, no property filtering combined with vector search, and no minimum score default for MCP.
+All string properties on an entity contribute to the embedding. Non-string properties are excluded. There is no per-property control and no minimum score default for MCP.
 
 ---
 
 ## Property-Level Filtering on Semantic Search
+
+**Status: IMPLEMENTED**
 
 **Priority: High**
 

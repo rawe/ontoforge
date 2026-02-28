@@ -61,14 +61,16 @@ async def get_relation_type(ontology_key: str, key: str, driver: AsyncDriver = D
 @router.get("/search/semantic", response_model=SemanticSearchResponse)
 async def semantic_search(
     ontology_key: str,
+    request: Request,
     q: str = Query(..., min_length=1),
-    type: str | None = Query(default=None),
+    type: str = Query(...),
     limit: int = Query(default=10, ge=1, le=100),
     min_score: float | None = Query(default=None, ge=0.0, le=1.0),
     driver: AsyncDriver = Depends(get_driver),
 ):
+    filters = service._parse_filters(dict(request.query_params))
     return await service.semantic_search(
-        ontology_key, q, type, limit, min_score, driver
+        ontology_key, q, type, limit, min_score, driver, filters=filters
     )
 
 

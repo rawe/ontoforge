@@ -276,19 +276,26 @@ async def get_neighbors(
 
 
 @runtime_mcp.tool()
+@_enrich_errors
 async def semantic_search(
     query: str,
-    entity_type_key: str | None = None,
+    entity_type_key: str,
     limit: int = 10,
+    filters: dict | None = None,
 ) -> dict:
     """Search entity instances by semantic similarity to a natural language query.
     Returns entities ranked by relevance with similarity scores.
-    Optionally scope to a specific entity type."""
+    entity_type_key is required — specifies which entity type to search.
+    Use 'filters' for property-based filtering on results: exact match
+    ("location": "Berlin"), operators ("age__gt": "25", "__gte", "__lt",
+    "__lte", "__contains")."""
     ontology_key = _get_ontology_key()
     driver = await get_driver()
     limit = max(1, min(limit, 100))
+    str_filters = {k: str(v) for k, v in (filters or {}).items()}
     result = await service.semantic_search(
-        ontology_key, query, entity_type_key, limit, None, driver
+        ontology_key, query, entity_type_key, limit, None, driver,
+        filters=str_filters,
     )
     return result
 

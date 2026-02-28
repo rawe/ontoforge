@@ -404,9 +404,11 @@ Requires `EMBEDDING_PROVIDER` to be configured. When embedding is disabled, retu
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `q` | string (required, min 1 char) | — | Natural language search query |
-| `type` | string | — | Entity type key to scope results. Omit for cross-type search. |
+| `type` | string (required) | — | Entity type key to search |
 | `limit` | integer | 10 | Max results (1–100) |
 | `min_score` | float | — | Minimum cosine similarity threshold (0.0–1.0) |
+| `filter.{key}` | any | — | Exact match on property |
+| `filter.{key}__{op}` | any | — | Operator match on property (same syntax as entity list filters) |
 
 **Response:** `200 OK`
 ```json
@@ -430,8 +432,8 @@ Requires `EMBEDDING_PROVIDER` to be configured. When embedding is disabled, retu
 ```
 
 **Behavior:**
-- When `type` is provided, searches only the vector index for that entity type. Returns 404 if the type key is not found in the ontology schema.
-- When `type` is omitted, searches all entity type indexes in the ontology, merges results by score, and returns the top `limit` results across types.
+- Searches only the vector index for the specified entity type. Returns 404 if the type key is not found in the ontology schema.
+- When `filter.{key}` parameters are provided, the vector index over-fetches candidates and applies property `WHERE` clauses before the final `LIMIT`. Filter syntax is identical to the entity list endpoint (equality, `__gt`, `__gte`, `__lt`, `__lte`, `__contains`).
 - When `min_score` is provided, results below the threshold are excluded.
 - The `_embedding` property is never included in response entities.
 

@@ -1016,12 +1016,18 @@ async def get_neighbors(
 async def semantic_search(
     ontology_key: str,
     query: str,
-    entity_type_key: str | None,
+    entity_type_key: str,
     limit: int,
     min_score: float | None,
     driver: AsyncDriver,
+    filters: dict[str, str] | None = None,
 ) -> dict:
-    """Perform semantic search over entity instances using vector embeddings."""
+    """Perform semantic search over entity instances using vector embeddings.
+
+    entity_type_key is required — cross-type search is not supported.
+    When filters are provided, over-fetches from the vector index and applies
+    property WHERE clauses before the final LIMIT.
+    """
     cache = await _load_schema(ontology_key, driver)
 
     provider = get_embedding_provider()
@@ -1031,41 +1037,38 @@ async def semantic_search(
             details={"code": "FEATURE_DISABLED"},
         )
 
-    if entity_type_key:
-        if entity_type_key not in cache.entity_types:
-            raise NotFoundError(f"Entity type '{entity_type_key}' not found")
+    if entity_type_key not in cache.entity_types:
+        raise NotFoundError(f"Entity type '{entity_type_key}' not found")
+
+    et_def = cache.entity_types[entity_type_key]
 
     query_embedding = await provider.embed(query)
     if query_embedding is None:
         raise ValidationError("Failed to generate embedding for search query")
 
-    if entity_type_key:
-        # Single-type search
-        async with driver.session() as session:
-            results = await repository.semantic_search(
-                session,
-                to_pascal_case(entity_type_key),
-                entity_type_key,
-                query_embedding,
-                limit,
-                min_score,
-            )
-    else:
-        # Cross-type search: iterate all entity types, merge by score
-        all_results: list[dict] = []
-        async with driver.session() as session:
-            for et_key in cache.entity_types:
-                type_results = await repository.semantic_search(
-                    session,
-                    to_pascal_case(et_key),
-                    et_key,
-                    query_embedding,
-                    limit,
-                    min_score,
-                )
-                all_results.extend(type_results)
-        all_results.sort(key=lambda r: r["score"], reverse=True)
-        results = all_results[:limit]
+    # Build property filter clauses (if any)
+    filters = filters or {}
+    where_clauses: list[str] = []
+    filter_params: dict = {}
+    if filters:
+        where_clauses, filter_params = _build_filter_clauses(
+            filters, et_def.properties, entity_type_key, node_alias="node"
+        )
+
+    # Over-fetch from vector index when filters are present
+    vector_limit = min(limit * 5, 500) if where_clauses else limit
+
+    async with driver.session() as session:
+        results = await repository.semantic_search(
+            session,
+            entity_type_key,
+            query_embedding,
+            vector_limit,
+            limit,
+            min_score,
+            where_clauses=where_clauses if where_clauses else None,
+            filter_params=filter_params if filter_params else None,
+        )
 
     return {
         "results": results,

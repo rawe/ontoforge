@@ -574,30 +574,52 @@ async def get_neighbors(
 
 async def semantic_search(
     session: AsyncSession,
-    pascal_label: str | None,
-    entity_type_key: str | None,
+    entity_type_key: str,
     query_embedding: list[float],
+    vector_limit: int,
     limit: int,
     min_score: float | None,
+    where_clauses: list[str] | None = None,
+    filter_params: dict | None = None,
     index_name: str | None = None,
 ) -> list[dict]:
     """Vector similarity search on entity embeddings.
 
-    If pascal_label/index_name are provided, searches a single type's index.
+    Searches the vector index for entity_type_key.
+    When where_clauses are provided, applies them as post-filter on vector results.
+    vector_limit controls how many candidates the index returns; limit is the final cap.
     Returns list of dicts with 'entity' and 'score' keys.
     """
-    if index_name is None and entity_type_key is not None:
+    if index_name is None:
         index_name = f"{entity_type_key}_embedding"
 
-    result = await session.run(
-        f"CALL db.index.vector.queryNodes($index_name, $limit, $query_embedding) "
-        f"YIELD node, score "
-        f"RETURN node {{.*}} AS entity, score "
-        f"ORDER BY score DESC",
-        index_name=index_name,
-        limit=limit,
-        query_embedding=query_embedding,
-    )
+    params: dict = {
+        "index_name": index_name,
+        "vector_limit": vector_limit,
+        "query_embedding": query_embedding,
+    }
+
+    if where_clauses:
+        where_str = "WHERE " + " AND ".join(where_clauses)
+        params.update(filter_params or {})
+        params["limit"] = limit
+        query = (
+            f"CALL db.index.vector.queryNodes($index_name, $vector_limit, $query_embedding) "
+            f"YIELD node, score "
+            f"{where_str} "
+            f"RETURN node {{.*}} AS entity, score "
+            f"ORDER BY score DESC "
+            f"LIMIT $limit"
+        )
+    else:
+        query = (
+            f"CALL db.index.vector.queryNodes($index_name, $vector_limit, $query_embedding) "
+            f"YIELD node, score "
+            f"RETURN node {{.*}} AS entity, score "
+            f"ORDER BY score DESC"
+        )
+
+    result = await session.run(query, params)
 
     items = []
     async for record in result:

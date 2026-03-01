@@ -88,6 +88,7 @@ release-server: _check-version
 	@echo ""
 ifdef PUSH
 	docker buildx build \
+		--platform linux/amd64,linux/arm64 \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg COMPONENT_VERSION=$(SERVER_VERSION) \
 		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
@@ -120,6 +121,7 @@ release-ui: _check-version
 	@echo ""
 ifdef PUSH
 	docker buildx build \
+		--platform linux/amd64,linux/arm64 \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg COMPONENT_VERSION=$(UI_VERSION) \
 		--build-arg GIT_COMMIT=$(GIT_COMMIT) \

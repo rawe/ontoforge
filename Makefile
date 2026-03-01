@@ -48,6 +48,16 @@ help:
 # ==============================================================================
 # RELEASE TARGETS
 # ==============================================================================
+# Builds use docker buildx with two modes:
+#   PUSH=true (CI):  Registry-based BuildKit layer cache (--cache-from/--cache-to)
+#                     reuses dependency layers across ephemeral GitHub Actions runners.
+#                     Images are pushed to GHCR in one step via --push.
+#   No PUSH (local): --load into local daemon, no registry interaction, works offline.
+#
+# Cache strategy: Each image has a :buildcache tag in GHCR that stores cached layers.
+# The Dockerfiles copy dependency files (pyproject.toml/package.json) before source code,
+# so dependency-install layers are cache hits when only source code changes. The UI image
+# is multi-stage (Node build → nginx), so mode=max is used to cache all stages.
 
 release: _check-version release-server release-ui
 	@echo ""

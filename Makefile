@@ -76,7 +76,21 @@ release-server: _check-version
 	@echo "  Component version: $(SERVER_VERSION)"
 	@echo "  Git commit: $(GIT_COMMIT)"
 	@echo ""
-	docker build \
+ifdef PUSH
+	docker buildx build \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg COMPONENT_VERSION=$(SERVER_VERSION) \
+		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
+		--build-arg BUILD_DATE=$(BUILD_DATE) \
+		--cache-from type=registry,ref=$(IMAGE_SERVER):buildcache \
+		--cache-to type=registry,ref=$(IMAGE_SERVER):buildcache,mode=max \
+		-t $(IMAGE_SERVER):$(VERSION) \
+		-t $(IMAGE_SERVER):latest \
+		-f backend/Dockerfile \
+		--push \
+		backend
+else
+	docker buildx build \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg COMPONENT_VERSION=$(SERVER_VERSION) \
 		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
@@ -84,11 +98,8 @@ release-server: _check-version
 		-t $(IMAGE_SERVER):$(VERSION) \
 		-t $(IMAGE_SERVER):latest \
 		-f backend/Dockerfile \
+		--load \
 		backend
-ifdef PUSH
-	@echo "Pushing $(IMAGE_SERVER):$(VERSION)..."
-	docker push $(IMAGE_SERVER):$(VERSION)
-	docker push $(IMAGE_SERVER):latest
 endif
 
 release-ui: _check-version
@@ -97,7 +108,21 @@ release-ui: _check-version
 	@echo "  Component version: $(UI_VERSION)"
 	@echo "  Git commit: $(GIT_COMMIT)"
 	@echo ""
-	docker build \
+ifdef PUSH
+	docker buildx build \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg COMPONENT_VERSION=$(UI_VERSION) \
+		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
+		--build-arg BUILD_DATE=$(BUILD_DATE) \
+		--cache-from type=registry,ref=$(IMAGE_UI):buildcache \
+		--cache-to type=registry,ref=$(IMAGE_UI):buildcache,mode=max \
+		-t $(IMAGE_UI):$(VERSION) \
+		-t $(IMAGE_UI):latest \
+		-f frontend/Dockerfile \
+		--push \
+		frontend
+else
+	docker buildx build \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg COMPONENT_VERSION=$(UI_VERSION) \
 		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
@@ -105,9 +130,6 @@ release-ui: _check-version
 		-t $(IMAGE_UI):$(VERSION) \
 		-t $(IMAGE_UI):latest \
 		-f frontend/Dockerfile \
+		--load \
 		frontend
-ifdef PUSH
-	@echo "Pushing $(IMAGE_UI):$(VERSION)..."
-	docker push $(IMAGE_UI):$(VERSION)
-	docker push $(IMAGE_UI):latest
 endif

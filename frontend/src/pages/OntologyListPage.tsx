@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import type { Ontology } from '../types/models';
 import * as api from '../api/client';
 import { ApiError } from '../api/client';
@@ -15,7 +16,7 @@ export default function OntologyListPage() {
     try {
       setOntologies(await api.listOntologies());
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed to load ontologies');
+      toast.error(e instanceof Error ? e.message : 'Failed to load ontologies');
     } finally {
       setLoading(false);
     }
@@ -30,7 +31,7 @@ export default function OntologyListPage() {
       setShowForm(false);
       load();
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed to create ontology');
+      toast.error(e instanceof Error ? e.message : 'Failed to create ontology');
     }
   };
 
@@ -39,7 +40,7 @@ export default function OntologyListPage() {
       await api.deleteOntology(id);
       load();
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed to delete ontology');
+      toast.error(e instanceof Error ? e.message : 'Failed to delete ontology');
     }
   };
 
@@ -51,9 +52,9 @@ export default function OntologyListPage() {
       load();
     } catch (e) {
       if (e instanceof ApiError && e.code === 'RESOURCE_CONFLICT') {
-        alert(`Import conflict: ${e.message}`);
+        toast.error(`Import conflict: ${e.message}`);
       } else {
-        alert(e instanceof Error ? e.message : 'Failed to import schema');
+        toast.error(e instanceof Error ? e.message : 'Failed to import schema');
       }
     }
   };

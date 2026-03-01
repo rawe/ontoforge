@@ -8,9 +8,9 @@ interface Props {
   columns: Column[];
   rows: Record<string, unknown>[];
   idKey?: string;
-  sortKey: string;
-  sortOrder: 'asc' | 'desc';
-  onSort: (key: string) => void;
+  sortKey?: string;
+  sortOrder?: 'asc' | 'desc';
+  onSort?: (key: string) => void;
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
 }
@@ -42,8 +42,8 @@ export default function DataTable({ columns, rows, idKey = '_id', sortKey, sortO
           {columns.map((col) => (
             <th
               key={col.key}
-              className={`py-2 pr-4 ${col.sortable ? 'cursor-pointer hover:text-gray-700 select-none' : ''}`}
-              onClick={col.sortable ? () => onSort(col.key) : undefined}
+              className={`py-2 pr-4 ${col.sortable && onSort ? 'cursor-pointer hover:text-gray-700 select-none' : ''}`}
+              onClick={col.sortable && onSort ? () => { onSort(col.key); } : undefined}
             >
               {col.label}{col.sortable ? sortIndicator(col.key) : ''}
             </th>

@@ -62,3 +62,20 @@ export interface PaginatedResponse<T> {
   limit: number;
   offset: number;
 }
+
+// Feature detection
+export interface FeaturesResponse {
+  semanticSearch: boolean;
+}
+
+// Semantic search
+export interface SemanticSearchResult {
+  entity: EntityInstance;
+  score: number;
+}
+
+export interface SemanticSearchResponse {
+  results: SemanticSearchResult[];
+  query: string;
+  total: number;
+}

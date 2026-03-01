@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { toast } from 'sonner';
 import type { EntityType, PropertyDefinition } from '../types/models';
 import * as api from '../api/client';
 import PropertyTable from '../components/PropertyTable';
@@ -22,7 +23,7 @@ export default function EntityTypeEditorPage() {
       setEntityType(et);
       setProperties(props);
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed to load');
+      toast.error(e instanceof Error ? e.message : 'Failed to load');
     } finally {
       setLoading(false);
     }
@@ -36,7 +37,7 @@ export default function EntityTypeEditorPage() {
       setEntityType(await api.updateEntityType(ontologyId, entityTypeId, data));
       setEditing(false);
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed to update');
+      toast.error(e instanceof Error ? e.message : 'Failed to update');
     }
   };
 
@@ -46,7 +47,7 @@ export default function EntityTypeEditorPage() {
       await api.createProperty(ontologyId, 'entity-types', entityTypeId, data);
       load();
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed to add property');
+      toast.error(e instanceof Error ? e.message : 'Failed to add property');
     }
   };
 
@@ -56,7 +57,7 @@ export default function EntityTypeEditorPage() {
       await api.updateProperty(ontologyId, 'entity-types', entityTypeId, propertyId, data);
       load();
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed to update property');
+      toast.error(e instanceof Error ? e.message : 'Failed to update property');
     }
   };
 
@@ -66,7 +67,7 @@ export default function EntityTypeEditorPage() {
       await api.deleteProperty(ontologyId, 'entity-types', entityTypeId, propertyId);
       load();
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed to delete property');
+      toast.error(e instanceof Error ? e.message : 'Failed to delete property');
     }
   };
 

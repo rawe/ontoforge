@@ -3,6 +3,8 @@ import type {
   EntityInstance,
   RelationInstance,
   PaginatedResponse,
+  FeaturesResponse,
+  SemanticSearchResponse,
 } from '../types/runtime';
 import { request as baseRequest } from './request';
 
@@ -99,6 +101,36 @@ export const updateRelation = (ontologyKey: string, relationTypeKey: string, id:
 
 export const deleteRelation = (ontologyKey: string, relationTypeKey: string, id: string) =>
   request<void>(`/${ontologyKey}/relations/${relationTypeKey}/${id}`, { method: 'DELETE' });
+
+// Features
+export const getFeatures = () =>
+  request<FeaturesResponse>('/features');
+
+// Semantic search
+export interface SemanticSearchParams {
+  q: string;
+  type: string;
+  limit?: number;
+  min_score?: number;
+  filters?: Record<string, string>;
+}
+
+function buildSemanticSearchQuery(params: SemanticSearchParams): string {
+  const parts: string[] = [];
+  parts.push(`q=${encodeURIComponent(params.q)}`);
+  parts.push(`type=${encodeURIComponent(params.type)}`);
+  if (params.limit != null) parts.push(`limit=${params.limit}`);
+  if (params.min_score != null) parts.push(`min_score=${params.min_score}`);
+  if (params.filters) {
+    for (const [key, value] of Object.entries(params.filters)) {
+      parts.push(`filter.${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
+    }
+  }
+  return `?${parts.join('&')}`;
+}
+
+export const semanticSearch = (ontologyKey: string, params: SemanticSearchParams) =>
+  request<SemanticSearchResponse>(`/${ontologyKey}/search/semantic${buildSemanticSearchQuery(params)}`);
 
 // Data management
 export interface WipeDataResponse {

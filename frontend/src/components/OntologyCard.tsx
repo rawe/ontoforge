@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { Ontology } from '../types/models';
+import ConfirmDialog from './ConfirmDialog';
 
 interface Props {
   ontology: Ontology;
@@ -7,6 +9,8 @@ interface Props {
 }
 
 export default function OntologyCard({ ontology, onDelete }: Props) {
+  const [showConfirm, setShowConfirm] = useState(false);
+
   return (
     <div className="border border-gray-200 rounded-lg p-4 bg-white shadow-sm hover:shadow-md transition-shadow">
       <Link to={`/ontologies/${ontology.ontologyId}`} className="block">
@@ -22,12 +26,19 @@ export default function OntologyCard({ ontology, onDelete }: Props) {
           Data
         </Link>
         <button
-          onClick={() => { if (confirm('Delete this ontology?')) onDelete(ontology.ontologyId); }}
+          onClick={() => setShowConfirm(true)}
           className="text-sm text-red-600 hover:text-red-800"
         >
           Delete
         </button>
       </div>
+      <ConfirmDialog
+        open={showConfirm}
+        onOpenChange={setShowConfirm}
+        title="Delete Ontology"
+        description="Delete this ontology? This cannot be undone."
+        onConfirm={() => onDelete(ontology.ontologyId)}
+      />
     </div>
   );
 }

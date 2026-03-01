@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { PropertyDefinition } from '../types/models';
 import PropertyForm from './forms/PropertyForm';
+import ConfirmDialog from './ConfirmDialog';
 
 interface Props {
   properties: PropertyDefinition[];
@@ -20,6 +21,7 @@ export default function PropertyTable({ properties, onAdd, onEdit, onDelete }: P
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editState, setEditState] = useState<EditState>({ displayName: '', description: '', required: false, defaultValue: '' });
+  const [deleteTarget, setDeleteTarget] = useState<PropertyDefinition | null>(null);
 
   const startEdit = (prop: PropertyDefinition) => {
     setEditingId(prop.propertyId);
@@ -131,7 +133,7 @@ export default function PropertyTable({ properties, onAdd, onEdit, onDelete }: P
                       </button>
                     )}
                     <button
-                      onClick={() => { if (confirm(`Delete property "${prop.key}"?`)) onDelete(prop.propertyId); }}
+                      onClick={() => setDeleteTarget(prop)}
                       className="text-red-600 hover:text-red-800 text-xs"
                     >
                       Delete
@@ -143,6 +145,16 @@ export default function PropertyTable({ properties, onAdd, onEdit, onDelete }: P
           </tbody>
         </table>
       )}
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
+        title="Delete Property"
+        description={`Delete property "${deleteTarget?.key}"?`}
+        onConfirm={() => {
+          if (deleteTarget) onDelete(deleteTarget.propertyId);
+          setDeleteTarget(null);
+        }}
+      />
     </div>
   );
 }

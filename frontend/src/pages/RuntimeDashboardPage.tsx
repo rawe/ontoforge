@@ -1,29 +1,31 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useRuntimeSchema } from '../context/RuntimeSchemaContext';
+import { toast } from 'sonner';
+import { useRuntimeSchema } from '../hooks/useRuntimeSchema';
 import * as runtimeApi from '../api/runtimeClient';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 export default function RuntimeDashboardPage() {
   const { ontologyKey } = useParams<{ ontologyKey: string }>();
-  const { schema, loading, error } = useRuntimeSchema();
+  const { data: schema, isLoading: loading, error } = useRuntimeSchema(ontologyKey);
   const [wiping, setWiping] = useState(false);
+  const [showWipeConfirm, setShowWipeConfirm] = useState(false);
 
   const handleWipe = async () => {
     if (!ontologyKey) return;
-    if (!confirm('Delete ALL instance data for this ontology? Schema will be preserved.')) return;
     setWiping(true);
     try {
       const result = await runtimeApi.wipeData(ontologyKey);
-      alert(`Wiped ${result.entitiesDeleted} entities and ${result.relationsDeleted} relations.`);
+      toast.success(`Wiped ${result.entitiesDeleted} entities and ${result.relationsDeleted} relations.`);
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Wipe failed');
+      toast.error(e instanceof Error ? e.message : 'Wipe failed');
     } finally {
       setWiping(false);
     }
   };
 
   if (loading) return <p>Loading schema...</p>;
-  if (error) return <p className="text-red-600">Error: {error}</p>;
+  if (error) return <p className="text-red-600">Error: {error.message}</p>;
   if (!schema) return <p>Schema not found.</p>;
 
   return (
@@ -48,13 +50,21 @@ export default function RuntimeDashboardPage() {
           Schema
         </Link>
         <button
-          onClick={handleWipe}
+          onClick={() => setShowWipeConfirm(true)}
           disabled={wiping}
           className="px-4 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700 disabled:opacity-50"
         >
           {wiping ? 'Wiping...' : 'Wipe Data'}
         </button>
       </div>
+      <ConfirmDialog
+        open={showWipeConfirm}
+        onOpenChange={setShowWipeConfirm}
+        title="Wipe All Data"
+        description="Delete ALL instance data for this ontology? Schema will be preserved."
+        confirmLabel="Wipe Data"
+        onConfirm={handleWipe}
+      />
 
       {/* Entity Types */}
       <section className="mb-8">

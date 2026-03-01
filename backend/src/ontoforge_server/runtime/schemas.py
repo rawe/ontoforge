@@ -56,3 +56,9 @@ class SemanticSearchResponse(BaseModel):
     results: list[SearchResultItem]
     query: str
     total: int
+
+
+class FeaturesResponse(BaseModel):
+    semantic_search: bool = Field(alias="semanticSearch")
+
+    model_config = {"populate_by_name": True}

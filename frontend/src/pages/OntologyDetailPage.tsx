@@ -1,46 +1,61 @@
 import { useEffect, useState } from 'react';
 import { useParams, useSearchParams, Link } from 'react-router-dom';
-import type { Ontology, EntityType, RelationType, ValidationResult } from '../types/models';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import type { ValidationResult } from '../types/models';
 import * as api from '../api/client';
 import TypeList from '../components/TypeList';
 import OntologyForm from '../components/forms/OntologyForm';
 import EntityTypeForm from '../components/forms/EntityTypeForm';
 import RelationTypeForm from '../components/forms/RelationTypeForm';
 import OntologyGraph from '../components/graph/OntologyGraph';
+import AutoRefreshToggle from '../components/AutoRefreshToggle';
 
 export default function OntologyDetailPage() {
   const { ontologyId } = useParams<{ ontologyId: string }>();
-  const [ontology, setOntology] = useState<Ontology | null>(null);
-  const [entityTypes, setEntityTypes] = useState<EntityType[]>([]);
-  const [relationTypes, setRelationTypes] = useState<RelationType[]>([]);
+  const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [showEntityForm, setShowEntityForm] = useState(false);
   const [showRelationForm, setShowRelationForm] = useState(false);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
-  const [loading, setLoading] = useState(true);
   const [searchParams, setSearchParams] = useSearchParams();
   const viewMode = searchParams.get('view') === 'graph' ? 'graph' : 'list';
   const setViewMode = (mode: 'list' | 'graph') => {
     setSearchParams(mode === 'graph' ? { view: 'graph' } : {}, { replace: true });
   };
   const [propertyCounts, setPropertyCounts] = useState<Record<string, number>>({});
+  const [autoRefresh, setAutoRefresh] = useState(false);
 
-  const load = async () => {
-    if (!ontologyId) return;
-    try {
-      const [o, ets, rts] = await Promise.all([
-        api.getOntology(ontologyId),
-        api.listEntityTypes(ontologyId),
-        api.listRelationTypes(ontologyId),
-      ]);
-      setOntology(o);
-      setEntityTypes(ets);
-      setRelationTypes(rts);
+  const { data: ontology = null, isLoading: ontologyLoading } = useQuery({
+    queryKey: ['ontology', ontologyId],
+    queryFn: () => api.getOntology(ontologyId!),
+    enabled: !!ontologyId,
+    refetchInterval: autoRefresh ? 3000 : false,
+  });
 
-      // Fetch property counts for all entity types
+  const { data: entityTypes = [], isLoading: entityTypesLoading } = useQuery({
+    queryKey: ['ontology', ontologyId, 'entityTypes'],
+    queryFn: () => api.listEntityTypes(ontologyId!),
+    enabled: !!ontologyId,
+    refetchInterval: autoRefresh ? 3000 : false,
+  });
+
+  const { data: relationTypes = [] } = useQuery({
+    queryKey: ['ontology', ontologyId, 'relationTypes'],
+    queryFn: () => api.listRelationTypes(ontologyId!),
+    enabled: !!ontologyId,
+    refetchInterval: autoRefresh ? 3000 : false,
+  });
+
+  const loading = ontologyLoading || entityTypesLoading;
+
+  // Fetch property counts when entity types change
+  useEffect(() => {
+    if (!ontologyId || entityTypes.length === 0) return;
+    const fetchCounts = async () => {
       const counts: Record<string, number> = {};
       await Promise.all(
-        ets.map(async (et) => {
+        entityTypes.map(async (et) => {
           try {
             const props = await api.listProperties(ontologyId, 'entity-types', et.entityTypeId);
             counts[et.entityTypeId] = props.length;
@@ -50,22 +65,20 @@ export default function OntologyDetailPage() {
         }),
       );
       setPropertyCounts(counts);
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed to load');
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
+    fetchCounts();
+  }, [ontologyId, entityTypes]);
 
-  useEffect(() => { load(); }, [ontologyId]);
+  const invalidateAll = () => queryClient.invalidateQueries({ queryKey: ['ontology', ontologyId] });
 
   const handleUpdate = async (data: { name?: string; description?: string }) => {
     if (!ontologyId) return;
     try {
-      setOntology(await api.updateOntology(ontologyId, data));
+      await api.updateOntology(ontologyId, data);
+      await invalidateAll();
       setEditing(false);
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed to update');
+      toast.error(e instanceof Error ? e.message : 'Failed to update');
     }
   };
 
@@ -74,9 +87,9 @@ export default function OntologyDetailPage() {
     try {
       await api.createEntityType(ontologyId, data);
       setShowEntityForm(false);
-      load();
+      await invalidateAll();
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed to create entity type');
+      toast.error(e instanceof Error ? e.message : 'Failed to create entity type');
     }
   };
 
@@ -84,9 +97,9 @@ export default function OntologyDetailPage() {
     if (!ontologyId) return;
     try {
       await api.deleteEntityType(ontologyId, id);
-      load();
+      await invalidateAll();
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed to delete entity type');
+      toast.error(e instanceof Error ? e.message : 'Failed to delete entity type');
     }
   };
 
@@ -95,9 +108,9 @@ export default function OntologyDetailPage() {
     try {
       await api.createRelationType(ontologyId, data);
       setShowRelationForm(false);
-      load();
+      await invalidateAll();
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed to create relation type');
+      toast.error(e instanceof Error ? e.message : 'Failed to create relation type');
     }
   };
 
@@ -105,9 +118,9 @@ export default function OntologyDetailPage() {
     if (!ontologyId) return;
     try {
       await api.deleteRelationType(ontologyId, id);
-      load();
+      await invalidateAll();
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed to delete relation type');
+      toast.error(e instanceof Error ? e.message : 'Failed to delete relation type');
     }
   };
 
@@ -116,7 +129,7 @@ export default function OntologyDetailPage() {
     try {
       setValidation(await api.validateSchema(ontologyId));
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Validation failed');
+      toast.error(e instanceof Error ? e.message : 'Validation failed');
     }
   };
 
@@ -132,7 +145,7 @@ export default function OntologyDetailPage() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Export failed');
+      toast.error(e instanceof Error ? e.message : 'Export failed');
     }
   };
 
@@ -165,7 +178,7 @@ export default function OntologyDetailPage() {
         )}
       </div>
 
-      <div className="flex gap-3 mb-6">
+      <div className="flex gap-3 mb-6 items-center">
         <button onClick={handleValidate} className="px-4 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700">
           Validate Schema
         </button>
@@ -178,6 +191,7 @@ export default function OntologyDetailPage() {
         >
           Manage Data
         </Link>
+        <AutoRefreshToggle enabled={autoRefresh} onToggle={setAutoRefresh} />
       </div>
 
       {validation && (

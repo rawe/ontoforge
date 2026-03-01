@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Depends, Query, Request, Response
 from neo4j import AsyncDriver
 
+from ontoforge_server.config import settings
 from ontoforge_server.core.database import get_driver
 from ontoforge_server.core.schemas import ExportEntityType, ExportRelationType
 from ontoforge_server.runtime import service
 from ontoforge_server.runtime.schemas import (
     DataWipeResponse,
+    FeaturesResponse,
     NeighborhoodResponse,
     PaginatedResponse,
     RelationInstanceCreate,
@@ -14,6 +16,12 @@ from ontoforge_server.runtime.schemas import (
 )
 
 router = APIRouter(tags=["runtime"])
+global_router = APIRouter(tags=["runtime"])
+
+
+@global_router.get("/features", response_model=FeaturesResponse)
+async def get_features():
+    return FeaturesResponse(semanticSearch=bool(settings.EMBEDDING_PROVIDER))
 
 
 # --- Data Wipe ---

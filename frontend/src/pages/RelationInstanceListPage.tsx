@@ -1,6 +1,7 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useRuntimeSchema } from '../context/RuntimeSchemaContext';
+import { toast } from 'sonner';
+import { useRuntimeSchema } from '../hooks/useRuntimeSchema';
 import * as runtimeApi from '../api/runtimeClient';
 import { ApiError } from '../api/request';
 import type { RelationInstance, RuntimeRelationType, EntityInstance } from '../types/runtime';
@@ -9,6 +10,8 @@ import Pagination from '../components/runtime/Pagination';
 import Modal from '../components/runtime/Modal';
 import DynamicForm from '../components/runtime/DynamicForm';
 import EntityPicker from '../components/runtime/EntityPicker';
+import ConfirmDialog from '../components/ConfirmDialog';
+import AutoRefreshToggle from '../components/AutoRefreshToggle';
 
 const PAGE_LIMIT = 20;
 
@@ -23,7 +26,7 @@ function getEntityDisplayLabel(entity: EntityInstance): string {
 
 export default function RelationInstanceListPage() {
   const { ontologyKey, relationTypeKey } = useParams<{ ontologyKey: string; relationTypeKey: string }>();
-  const { schema, loading: schemaLoading } = useRuntimeSchema();
+  const { data: schema, isLoading: schemaLoading } = useRuntimeSchema(ontologyKey);
 
   const [items, setItems] = useState<RelationInstance[]>([]);
   const [total, setTotal] = useState(0);
@@ -31,6 +34,9 @@ export default function RelationInstanceListPage() {
   const [sortKey, setSortKey] = useState('_createdAt');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [loading, setLoading] = useState(true);
+
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Entity display label cache
   const [entityLabels, setEntityLabels] = useState<Map<string, string>>(new Map());
@@ -42,6 +48,7 @@ export default function RelationInstanceListPage() {
   const [saving, setSaving] = useState(false);
   const [fromEntityId, setFromEntityId] = useState<string | null>(null);
   const [toEntityId, setToEntityId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   const relationType: RuntimeRelationType | undefined = schema?.relationTypes.find(
     (rt) => rt.key === relationTypeKey,
@@ -65,7 +72,7 @@ export default function RelationInstanceListPage() {
         resolveEntityLabels(ontologyKey, relationType, res.items);
       }
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed to load relations');
+      toast.error(e instanceof Error ? e.message : 'Failed to load relations');
     } finally {
       setLoading(false);
     }
@@ -108,6 +115,16 @@ export default function RelationInstanceListPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    if (autoRefresh) {
+      intervalRef.current = setInterval(load, 3000);
+    }
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    };
+  }, [autoRefresh, load]);
+
   const handleSort = (key: string) => {
     if (key === sortKey) {
       setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
@@ -149,7 +166,7 @@ export default function RelationInstanceListPage() {
     try {
       if (modalMode === 'create') {
         if (!fromEntityId || !toEntityId) {
-          alert('Please select both From and To entities.');
+          toast.error('Please select both From and To entities.');
           setSaving(false);
           return;
         }
@@ -167,7 +184,7 @@ export default function RelationInstanceListPage() {
       if (e instanceof ApiError && e.details?.fields) {
         setFormErrors(e.details.fields as Record<string, string>);
       } else {
-        alert(e instanceof Error ? e.message : 'Save failed');
+        toast.error(e instanceof Error ? e.message : 'Save failed');
       }
     } finally {
       setSaving(false);
@@ -176,12 +193,11 @@ export default function RelationInstanceListPage() {
 
   const handleDelete = async (id: string) => {
     if (!ontologyKey || !relationTypeKey) return;
-    if (!confirm('Delete this relation instance?')) return;
     try {
       await runtimeApi.deleteRelation(ontologyKey, relationTypeKey, id);
       load();
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Delete failed');
+      toast.error(e instanceof Error ? e.message : 'Delete failed');
     }
   };
 
@@ -216,12 +232,15 @@ export default function RelationInstanceListPage() {
             {relationType.fromEntityTypeKey} &rarr; {relationType.toEntityTypeKey}
           </p>
         </div>
-        <button
-          onClick={openCreate}
-          className="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
-        >
-          Create
-        </button>
+        <div className="flex items-center gap-2">
+          <AutoRefreshToggle enabled={autoRefresh} onToggle={setAutoRefresh} />
+          <button
+            onClick={openCreate}
+            className="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
+          >
+            Create
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -235,7 +254,7 @@ export default function RelationInstanceListPage() {
             sortOrder={sortOrder}
             onSort={handleSort}
             onEdit={openEdit}
-            onDelete={handleDelete}
+            onDelete={setDeleteTarget}
           />
           <Pagination
             total={total}
@@ -284,6 +303,16 @@ export default function RelationInstanceListPage() {
           ) : null}
         </DynamicForm>
       </Modal>
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
+        title="Delete Relation"
+        description="Delete this relation instance?"
+        onConfirm={() => {
+          if (deleteTarget) handleDelete(deleteTarget);
+          setDeleteTarget(null);
+        }}
+      />
     </div>
   );
 }

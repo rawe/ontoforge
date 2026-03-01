@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { toast } from 'sonner';
 import type { RelationType, EntityType, PropertyDefinition } from '../types/models';
 import * as api from '../api/client';
 import PropertyTable from '../components/PropertyTable';
@@ -25,7 +26,7 @@ export default function RelationTypeEditorPage() {
       setEntityTypes(ets);
       setProperties(props);
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed to load');
+      toast.error(e instanceof Error ? e.message : 'Failed to load');
     } finally {
       setLoading(false);
     }
@@ -39,7 +40,7 @@ export default function RelationTypeEditorPage() {
       setRelationType(await api.updateRelationType(ontologyId, relationTypeId, data));
       setEditing(false);
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed to update');
+      toast.error(e instanceof Error ? e.message : 'Failed to update');
     }
   };
 
@@ -49,7 +50,7 @@ export default function RelationTypeEditorPage() {
       await api.createProperty(ontologyId, 'relation-types', relationTypeId, data);
       load();
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed to add property');
+      toast.error(e instanceof Error ? e.message : 'Failed to add property');
     }
   };
 
@@ -59,7 +60,7 @@ export default function RelationTypeEditorPage() {
       await api.updateProperty(ontologyId, 'relation-types', relationTypeId, propertyId, data);
       load();
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed to update property');
+      toast.error(e instanceof Error ? e.message : 'Failed to update property');
     }
   };
 
@@ -69,7 +70,7 @@ export default function RelationTypeEditorPage() {
       await api.deleteProperty(ontologyId, 'relation-types', relationTypeId, propertyId);
       load();
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed to delete property');
+      toast.error(e instanceof Error ? e.message : 'Failed to delete property');
     }
   };
 

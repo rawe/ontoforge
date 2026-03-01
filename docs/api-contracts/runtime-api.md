@@ -480,10 +480,34 @@ The runtime API reuses the same error format as the modeling API (see `architect
 
 ---
 
-## 8. Endpoint Summary
+## 8. Feature Discovery
+
+### GET /api/runtime/features
+
+Return feature availability flags for the runtime API. This endpoint is not scoped to an ontology — it reports global runtime capabilities based on server configuration.
+
+**Response:** `200 OK`
+```json
+{
+  "semanticSearch": true
+}
+```
+
+**Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `semanticSearch` | boolean | `true` when `EMBEDDING_PROVIDER` is configured, `false` otherwise |
+
+This endpoint is useful for frontend feature detection — clients can check which optional features are available before rendering related UI.
+
+---
+
+## 9. Endpoint Summary
 
 | Method | Path | Description |
 |--------|------|-------------|
+| `GET` | `/api/runtime/features` | Feature availability flags |
 | `DELETE` | `/api/runtime/{ontologyKey}/data` | Wipe instance data for this ontology |
 | `GET` | `/api/runtime/{ontologyKey}/schema` | Full schema introspection |
 | `GET` | `/api/runtime/{ontologyKey}/schema/entity-types` | List entity types |

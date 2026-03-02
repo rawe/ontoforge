@@ -9,6 +9,7 @@ import OntologyForm from '../components/forms/OntologyForm';
 import EntityTypeForm from '../components/forms/EntityTypeForm';
 import RelationTypeForm from '../components/forms/RelationTypeForm';
 import OntologyGraph from '../components/graph/OntologyGraph';
+import Modal from '../components/Modal';
 import AutoRefreshToggle from '../components/AutoRefreshToggle';
 
 export default function OntologyDetailPage() {
@@ -17,11 +18,12 @@ export default function OntologyDetailPage() {
   const [editing, setEditing] = useState(false);
   const [showEntityForm, setShowEntityForm] = useState(false);
   const [showRelationForm, setShowRelationForm] = useState(false);
+  const [relationDefaults, setRelationDefaults] = useState<{ sourceId: string; targetId: string } | null>(null);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
-  const viewMode = searchParams.get('view') === 'graph' ? 'graph' : 'list';
+  const viewMode = searchParams.get('view') === 'list' ? 'list' : 'graph';
   const setViewMode = (mode: 'list' | 'graph') => {
-    setSearchParams(mode === 'graph' ? { view: 'graph' } : {}, { replace: true });
+    setSearchParams(mode === 'list' ? { view: 'list' } : {}, { replace: true });
   };
   const [propertyCounts, setPropertyCounts] = useState<Record<string, number>>({});
   const [autoRefresh, setAutoRefresh] = useState(false);
@@ -212,24 +214,24 @@ export default function OntologyDetailPage() {
       {/* View mode toggle */}
       <div className="flex items-center gap-1 mb-4">
         <button
-          onClick={() => setViewMode('list')}
-          className={`px-3 py-1.5 text-sm font-medium rounded-l-md border ${
-            viewMode === 'list'
-              ? 'bg-blue-600 text-white border-blue-600'
-              : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
-          }`}
-        >
-          List
-        </button>
-        <button
           onClick={() => setViewMode('graph')}
-          className={`px-3 py-1.5 text-sm font-medium rounded-r-md border border-l-0 ${
+          className={`px-3 py-1.5 text-sm font-medium rounded-l-md border ${
             viewMode === 'graph'
               ? 'bg-blue-600 text-white border-blue-600'
               : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
           }`}
         >
           Graph
+        </button>
+        <button
+          onClick={() => setViewMode('list')}
+          className={`px-3 py-1.5 text-sm font-medium rounded-r-md border border-l-0 ${
+            viewMode === 'list'
+              ? 'bg-blue-600 text-white border-blue-600'
+              : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+          }`}
+        >
+          List
         </button>
       </div>
 
@@ -286,11 +288,29 @@ export default function OntologyDetailPage() {
           </section>
         </>
       ) : (
-        <OntologyGraph
-          entityTypes={entityTypes}
-          relationTypes={relationTypes}
-          propertyCounts={propertyCounts}
-        />
+        <>
+          <OntologyGraph
+            entityTypes={entityTypes}
+            relationTypes={relationTypes}
+            propertyCounts={propertyCounts}
+            onAddEntityType={() => { setShowRelationForm(false); setRelationDefaults(null); setShowEntityForm(true); }}
+            onAddRelationType={() => { setShowEntityForm(false); setRelationDefaults(null); setShowRelationForm(true); }}
+            onConnectNodes={(sourceId, targetId) => { setShowEntityForm(false); setRelationDefaults({ sourceId, targetId }); setShowRelationForm(true); }}
+          />
+          <Modal open={showEntityForm} onClose={() => setShowEntityForm(false)} title="Add Entity Type">
+            <EntityTypeForm onSubmit={handleCreateEntityType} onCancel={() => setShowEntityForm(false)} />
+          </Modal>
+          <Modal open={showRelationForm} onClose={() => { setShowRelationForm(false); setRelationDefaults(null); }} title="Add Relation Type">
+            <RelationTypeForm
+              key={relationDefaults ? `${relationDefaults.sourceId}-${relationDefaults.targetId}` : 'empty'}
+              entityTypes={entityTypes}
+              defaultSourceId={relationDefaults?.sourceId}
+              defaultTargetId={relationDefaults?.targetId}
+              onSubmit={handleCreateRelationType}
+              onCancel={() => { setShowRelationForm(false); setRelationDefaults(null); }}
+            />
+          </Modal>
+        </>
       )}
     </div>
   );

@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   ReactFlow,
@@ -10,7 +10,7 @@ import {
   useNodesState,
   useEdgesState,
 } from '@xyflow/react';
-import type { Node, Edge, NodeMouseHandler, EdgeMouseHandler } from '@xyflow/react';
+import type { Node, Edge, Connection, NodeMouseHandler, EdgeMouseHandler } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
 import type { EntityType, RelationType } from '../../types/models';
@@ -28,9 +28,12 @@ interface Props {
   entityTypes: EntityType[];
   relationTypes: RelationType[];
   propertyCounts: Record<string, number>;
+  onAddEntityType?: () => void;
+  onAddRelationType?: () => void;
+  onConnectNodes?: (sourceEntityTypeId: string, targetEntityTypeId: string) => void;
 }
 
-export default function OntologyGraph({ entityTypes, relationTypes, propertyCounts }: Props) {
+export default function OntologyGraph({ entityTypes, relationTypes, propertyCounts, onAddEntityType, onAddRelationType, onConnectNodes }: Props) {
   const { ontologyId } = useParams<{ ontologyId: string }>();
 
   const [visibleEntityTypes, setVisibleEntityTypes] = useState<Set<string>>(
@@ -39,6 +42,23 @@ export default function OntologyGraph({ entityTypes, relationTypes, propertyCoun
   const [visibleRelationTypes, setVisibleRelationTypes] = useState<Set<string>>(
     () => new Set(relationTypes.map((rt) => rt.relationTypeId)),
   );
+
+  // Auto-show newly added types (keeps existing filter choices intact)
+  useEffect(() => {
+    setVisibleEntityTypes((prev) => {
+      const next = new Set(prev);
+      entityTypes.forEach((et) => { if (!prev.has(et.entityTypeId)) next.add(et.entityTypeId); });
+      return next.size === prev.size ? prev : next;
+    });
+  }, [entityTypes]);
+
+  useEffect(() => {
+    setVisibleRelationTypes((prev) => {
+      const next = new Set(prev);
+      relationTypes.forEach((rt) => { if (!prev.has(rt.relationTypeId)) next.add(rt.relationTypeId); });
+      return next.size === prev.size ? prev : next;
+    });
+  }, [relationTypes]);
 
   // Selection state: which node or edge is currently selected
   const [selection, setSelection] = useState<GraphSelection | null>(null);
@@ -144,6 +164,15 @@ export default function OntologyGraph({ entityTypes, relationTypes, propertyCoun
     setSelection(null);
   }, []);
 
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      if (onConnectNodes && connection.source && connection.target) {
+        onConnectNodes(connection.source, connection.target);
+      }
+    },
+    [onConnectNodes],
+  );
+
   return (
     <div className="flex flex-col" style={{ height: 'calc(100vh - 280px)', minHeight: '400px' }}>
       <OntologyGraphFilters
@@ -160,11 +189,32 @@ export default function OntologyGraph({ entityTypes, relationTypes, propertyCoun
       />
       <div className="flex-1 flex border border-gray-200 rounded-lg overflow-hidden bg-gray-50">
         <div className="flex-1 relative">
+          {(onAddEntityType || onAddRelationType) && (
+            <div className="absolute top-3 right-3 z-10 flex gap-2">
+              {onAddEntityType && (
+                <button
+                  onClick={onAddEntityType}
+                  className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-white/90 backdrop-blur border border-gray-300 rounded-md shadow-sm hover:bg-blue-50 hover:border-blue-300 transition-colors"
+                >
+                  <span className="text-blue-600 text-sm leading-none">+</span> Add Entity Type
+                </button>
+              )}
+              {onAddRelationType && (
+                <button
+                  onClick={onAddRelationType}
+                  className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-white/90 backdrop-blur border border-gray-300 rounded-md shadow-sm hover:bg-blue-50 hover:border-blue-300 transition-colors"
+                >
+                  <span className="text-blue-600 text-sm leading-none">+</span> Add Relation Type
+                </button>
+              )}
+            </div>
+          )}
           <ReactFlow
             nodes={nodes}
             edges={edges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
             onNodeClick={onNodeClick}
             onEdgeClick={onEdgeClick}
             onPaneClick={onPaneClick}

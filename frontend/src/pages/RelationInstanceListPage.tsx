@@ -7,7 +7,7 @@ import { ApiError } from '../api/request';
 import type { RelationInstance, RuntimeRelationType, EntityInstance } from '../types/runtime';
 import DataTable from '../components/runtime/DataTable';
 import Pagination from '../components/runtime/Pagination';
-import Modal from '../components/runtime/Modal';
+import Modal from '../components/Modal';
 import DynamicForm from '../components/runtime/DynamicForm';
 import EntityPicker from '../components/runtime/EntityPicker';
 import ConfirmDialog from '../components/ConfirmDialog';

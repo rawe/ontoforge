@@ -523,6 +523,7 @@ Dependencies are managed via Docker Compose. The backend connects to a pre-confi
 | `DB_USER` | `neo4j` | Neo4j username |
 | `DB_PASSWORD` | `ontoforge_dev` | Neo4j password |
 | `PORT` | `8000` | HTTP listen port |
+| `DEFAULT_MCP_ONTOLOGY_KEY` | *(unset)* | MCP default ontology key (used when key is not in URL or header) |
 
 **Running locally:**
 

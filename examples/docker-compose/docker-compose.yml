@@ -30,6 +30,8 @@ services:
       # EMBEDDING_BASE_URL: http://host.docker.internal:11434
       # If Ollama runs as a container in this compose (see ollama service below):
       # EMBEDDING_BASE_URL: http://ollama:11434
+      # MCP default ontology key (optional — used when no key in URL path or header)
+      # DEFAULT_MCP_ONTOLOGY_KEY: my_ontology
     depends_on:
       neo4j:
         condition: service_healthy

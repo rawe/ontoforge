@@ -69,11 +69,17 @@ This mirrors the REST API's separation (`/api/model` vs `/api/runtime`) and the 
 
 The REST API is multi-ontology: each request specifies which ontology to operate on. For an LLM, this is overwhelming — it should focus on one ontology without choosing or discovering ontologies per call.
 
-**Decision: The ontology key is embedded in the MCP endpoint URL.** The MCP client connects to a specific URL, and all tools operate on that single ontology. The LLM never sees multi-ontology complexity.
+**Decision: Hybrid ontology key resolution.** The ontology key is resolved from the first available source, checked in priority order:
+
+1. **URL path** (highest priority) — embedded in the endpoint URL: `/mcp/model/{ontologyKey}`. This is the primary mechanism and the default for direct MCP client connections.
+2. **`X-Ontology-Key` HTTP header** — passed as a request header. Supports orchestration frameworks that manage configuration via HTTP headers.
+3. **`DEFAULT_MCP_ONTOLOGY_KEY` environment variable** — set on the server. Supports single-ontology deployments where every MCP connection uses the same ontology.
+4. **400 error** — if no key is found from any source.
 
 | Connection Purpose | MCP Endpoint URL |
 |--------------------|------------------|
-| Model ontology "acme" | `http://localhost:8000/mcp/model/acme` |
+| Model ontology "acme" (URL) | `http://localhost:8000/mcp/model/acme` |
+| Model ontology "acme" (header) | `http://localhost:8000/mcp/model` + `X-Ontology-Key: acme` |
 | Use ontology "acme" data | `http://localhost:8000/mcp/runtime/acme` |
 
 **Ontology existence rules:**
@@ -302,7 +308,9 @@ The REST modeling API uses UUIDs extensively in URL paths (`ontologyId`, `entity
 
 ## 5. Client Configuration
 
-### Example: Claude Code MCP settings
+### URL-based (default)
+
+The ontology key is part of the URL path — the simplest configuration. See `mcp-example.json` at the project root.
 
 ```json
 {
@@ -319,9 +327,36 @@ The REST modeling API uses UUIDs extensively in URL paths (`ontologyId`, `entity
 }
 ```
 
-The user chooses which ontology to work with by setting the URL. Connecting both servers simultaneously is valid — model the schema in one session, write data in another.
+### Header-based
 
-No additional environment variables are needed beyond the existing `ontoforge-server` configuration (`DB_URI`, `DB_USER`, `DB_PASSWORD`, `PORT`).
+The ontology key is passed via the `X-Ontology-Key` HTTP header. Useful for orchestration frameworks that manage configuration via headers. See `mcp-example-header.json` at the project root.
+
+```json
+{
+  "mcpServers": {
+    "ontoforge-modeling": {
+      "type": "http",
+      "url": "http://localhost:8000/mcp/model",
+      "headers": {
+        "X-Ontology-Key": "my_ontology"
+      }
+    },
+    "ontoforge-runtime": {
+      "type": "http",
+      "url": "http://localhost:8000/mcp/runtime",
+      "headers": {
+        "X-Ontology-Key": "my_ontology"
+      }
+    }
+  }
+}
+```
+
+### Environment variable
+
+For single-ontology deployments, set `DEFAULT_MCP_ONTOLOGY_KEY` on the server. All MCP connections without a URL key or header will use this default — no client-side configuration needed beyond the base URL.
+
+The user chooses which ontology to work with by setting the URL, header, or env var. Connecting both servers simultaneously is valid — model the schema in one session, write data in another.
 
 ---
 

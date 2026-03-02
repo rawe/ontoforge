@@ -60,10 +60,11 @@ Read and write instance data validated against the ontology. Tools for entity/re
 
 To connect an MCP client (e.g., Claude Code, Cursor), add one or both servers to your MCP configuration. Replace `my_ontology` with your ontology's key.
 
-An example config is provided at the project root — edit the ontology key and use it directly:
+#### URL-based (default)
+
+The ontology key is part of the URL path. Example config at `mcp-example.json`:
 
 ```bash
-# Claude Code
 claude --mcp-config mcp-example.json
 ```
 
@@ -81,6 +82,34 @@ claude --mcp-config mcp-example.json
   }
 }
 ```
+
+#### Header-based
+
+The ontology key is passed via the `X-Ontology-Key` HTTP header. Useful for orchestration frameworks that manage config via headers. Example config at `mcp-example-header.json`:
+
+```bash
+claude --mcp-config mcp-example-header.json
+```
+
+```json
+{
+  "mcpServers": {
+    "ontoforge-modeling": {
+      "type": "http",
+      "url": "http://localhost:8000/mcp/model",
+      "headers": {
+        "X-Ontology-Key": "my_ontology"
+      }
+    }
+  }
+}
+```
+
+#### Environment variable
+
+For single-ontology deployments, set `DEFAULT_MCP_ONTOLOGY_KEY` on the server. All MCP connections without a URL key or header will use this default.
+
+**Resolution order:** URL path (highest priority) → `X-Ontology-Key` header → `DEFAULT_MCP_ONTOLOGY_KEY` env var → 400 error.
 
 ### Example: Runtime Server Quick Start
 
@@ -203,6 +232,7 @@ The backend reads settings from environment variables (or a `.env` file in `back
 | `EMBEDDING_PROVIDER` | *(unset — disabled)* | Set to `ollama` to enable semantic search |
 | `EMBEDDING_MODEL` | `nomic-embed-text` | Ollama embedding model |
 | `EMBEDDING_BASE_URL` | `http://localhost:11434` | Ollama API endpoint |
+| `DEFAULT_MCP_ONTOLOGY_KEY` | *(unset)* | MCP default ontology key — used when no key is in the URL or header |
 
 In Docker, `DB_URI` is set to `bolt://neo4j:7687` automatically via `docker-compose.yml`. Semantic search is opt-in — when `EMBEDDING_PROVIDER` is unset, all entity CRUD works normally without embeddings.
 

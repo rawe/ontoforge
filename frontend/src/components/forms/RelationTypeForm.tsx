@@ -4,16 +4,18 @@ import type { EntityType } from '../../types/models';
 interface Props {
   entityTypes: EntityType[];
   initial?: { key: string; displayName: string; description: string; sourceEntityTypeId: string; targetEntityTypeId: string };
+  defaultSourceId?: string;
+  defaultTargetId?: string;
   onSubmit: (data: { key: string; displayName: string; description?: string; sourceEntityTypeId: string; targetEntityTypeId: string }) => void;
   onCancel: () => void;
 }
 
-export default function RelationTypeForm({ entityTypes, initial, onSubmit, onCancel }: Props) {
+export default function RelationTypeForm({ entityTypes, initial, defaultSourceId, defaultTargetId, onSubmit, onCancel }: Props) {
   const [key, setKey] = useState(initial?.key ?? '');
   const [displayName, setDisplayName] = useState(initial?.displayName ?? '');
   const [description, setDescription] = useState(initial?.description ?? '');
-  const [sourceId, setSourceId] = useState(initial?.sourceEntityTypeId ?? '');
-  const [targetId, setTargetId] = useState(initial?.targetEntityTypeId ?? '');
+  const [sourceId, setSourceId] = useState(initial?.sourceEntityTypeId ?? defaultSourceId ?? '');
+  const [targetId, setTargetId] = useState(initial?.targetEntityTypeId ?? defaultTargetId ?? '');
   const isEdit = !!initial;
 
   const handleSubmit = (e: React.FormEvent) => {

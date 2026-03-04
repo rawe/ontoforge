@@ -89,6 +89,7 @@ function OntologyNode({ node, pathname }: { node: OntologyTreeNode; pathname: st
             <div className="mt-1">
               <span className="px-3 text-xs font-semibold uppercase text-gray-500 tracking-wider">Data</span>
               <div className="flex flex-col gap-0.5 mt-1">
+                <NavLink to={`/data/${node.ontology.key}/graph`} label="Visual Editor" pathname={pathname} />
                 {entityTypes.length > 0 && (
                   <>
                     <span className="px-3 text-xs uppercase text-gray-500 tracking-wider">Entities</span>

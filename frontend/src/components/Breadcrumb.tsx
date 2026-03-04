@@ -68,7 +68,9 @@ function buildCrumbs(pathname: string, queryClient: ReturnType<typeof useQueryCl
       { label: 'Data', to: `/data/${ontologyKey}` },
     ];
 
-    if (parts.length >= 4) {
+    if (parts[2] === 'graph') {
+      crumbs.push({ label: 'Visual Editor' });
+    } else if (parts.length >= 4) {
       const typeSegment = parts[2]; // 'entities' or 'relations'
       const typeKey = parts[3];
       const typeName = resolveRuntimeTypeName(queryClient, ontologyKey, typeSegment, typeKey);

@@ -49,6 +49,12 @@ export default function RuntimeDashboardPage() {
         >
           Schema
         </Link>
+        <Link
+          to={`/data/${ontologyKey}/graph`}
+          className="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
+        >
+          Visual Editor
+        </Link>
         <button
           onClick={() => setShowWipeConfirm(true)}
           disabled={wiping}

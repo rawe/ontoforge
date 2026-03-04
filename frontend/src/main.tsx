@@ -11,6 +11,7 @@ import RelationTypeEditorPage from './pages/RelationTypeEditorPage';
 import RuntimeDashboardPage from './pages/RuntimeDashboardPage';
 import EntityInstanceListPage from './pages/EntityInstanceListPage';
 import RelationInstanceListPage from './pages/RelationInstanceListPage';
+import DataGraphPage from './pages/DataGraphPage';
 
 const queryClient = new QueryClient();
 
@@ -28,6 +29,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/data/:ontologyKey" element={<RuntimeDashboardPage />} />
             <Route path="/data/:ontologyKey/entities/:entityTypeKey" element={<EntityInstanceListPage />} />
             <Route path="/data/:ontologyKey/relations/:relationTypeKey" element={<RelationInstanceListPage />} />
+            <Route path="/data/:ontologyKey/graph" element={<DataGraphPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

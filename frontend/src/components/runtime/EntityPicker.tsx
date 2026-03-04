@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import * as runtimeApi from '../../api/runtimeClient';
 import type { EntityInstance } from '../../types/runtime';
+import { getDisplayLabel } from '../../lib/displayLabel';
 
 interface Props {
   ontologyKey: string;
@@ -8,16 +9,6 @@ interface Props {
   value: string | null;
   onChange: (id: string) => void;
   label: string;
-}
-
-function getDisplayLabel(entity: EntityInstance): string {
-  // Use first string property value as display label, fallback to _id
-  for (const [key, val] of Object.entries(entity)) {
-    if (key.startsWith('_')) continue;
-    if (key === 'fromEntityId' || key === 'toEntityId') continue;
-    if (typeof val === 'string' && val.length > 0) return val;
-  }
-  return entity._id;
 }
 
 export default function EntityPicker({ ontologyKey, entityTypeKey, value, onChange, label }: Props) {

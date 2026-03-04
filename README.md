@@ -216,7 +216,7 @@ ontoforge/
     ├── api-contracts/              # REST endpoint specifications
     ├── decisions.md                # Architectural decision log
     ├── feature-ideas/              # Future extension proposals
-    └── roadmap.md                  # Phase tracking
+    └── releasing.md                # Release checklist
 ```
 
 ## Configuration

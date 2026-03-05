@@ -41,6 +41,22 @@ A marketplace entry allows the skill to be discovered and installed from within 
 - Distribution via Claude Code plugin marketplace
 - Documentation via SKILL.md within the plugin directory
 
+## Status
+
+### Done
+
+- **Export script** (`scripts/export_ontology.py`) — standalone PEP 723 script that exports schema + entities + relations to structured JSON files via the Runtime REST API. Includes pagination, slugified filenames, and UID-free output. Documented in `scripts/USAGE.md`.
+- **Import design** (`scripts/IMPORT_NOTES.md`) — reference doc specifying the two-pass import strategy (entities first, then relations resolved by type + filename), schema handling, and required API endpoints.
+
+### To Do
+
+- Design and implement the full skill folder structure that Claude Code requires for context
+- Import script
+- Scaffold workflow (if included in initial release)
+- `SKILL.md` documenting all workflows with parameters, output formats, and usage examples
+- Plugin manifest (`plugin.json`) and marketplace definition (`marketplace.json`)
+- Marketplace registration and distribution
+
 ## Open Questions
 
 - Which workflows should be included in the initial release?

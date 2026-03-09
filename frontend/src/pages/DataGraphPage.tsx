@@ -14,6 +14,7 @@ import Modal from '../components/Modal';
 import DynamicForm from '../components/runtime/DynamicForm';
 import EntityPicker from '../components/runtime/EntityPicker';
 import { MAX_WORKING_SET, PER_TYPE_LIMIT, RELATION_CAP, REFRESH_INTERVAL } from '../lib/dataGraphConstants';
+import { getDisplayLabel } from '../lib/displayLabel';
 
 export default function DataGraphPage() {
   const { ontologyKey } = useParams<{ ontologyKey: string }>();
@@ -259,6 +260,63 @@ export default function DataGraphPage() {
     setSelection(null);
   }, []);
 
+  // Refresh a single entity from the server (detect updates or deletion)
+  const handleRefreshEntity = useCallback(async (entityId: string, entityTypeKey: string) => {
+    if (!ontologyKey) return;
+    try {
+      const fresh = await runtimeApi.getEntity(ontologyKey, entityTypeKey, entityId);
+      handleEntityUpdated(fresh);
+      toast.success('Entity refreshed');
+    } catch {
+      removeEntityFromCanvas(entityId);
+      toast.info('Entity no longer exists — removed from canvas');
+    }
+  }, [ontologyKey, handleEntityUpdated, removeEntityFromCanvas]);
+
+  // Refresh a single relation from the server (detect updates or deletion)
+  const handleRefreshRelation = useCallback(async (relationId: string, relationTypeKey: string) => {
+    if (!ontologyKey) return;
+    try {
+      const fresh = await runtimeApi.getRelation(ontologyKey, relationTypeKey, relationId);
+      setRelations((prev) => {
+        const next = new Map(prev);
+        next.set(fresh._id, fresh);
+        return next;
+      });
+      // Update selection if this relation is selected
+      setSelection((prev) => {
+        if (prev?.kind === 'relation' && prev.relation._id === relationId) {
+          const rt = schema?.relationTypes.find((t) => t.key === relationTypeKey);
+          if (rt) {
+            const fromEntity = entitiesRef.current.get(fresh.fromEntityId);
+            const toEntity = entitiesRef.current.get(fresh.toEntityId);
+            return {
+              kind: 'relation',
+              relation: fresh,
+              relationType: rt,
+              fromLabel: fromEntity ? getDisplayLabel(fromEntity) : fresh.fromEntityId.slice(0, 12),
+              toLabel: toEntity ? getDisplayLabel(toEntity) : fresh.toEntityId.slice(0, 12),
+              fromEntityId: fresh.fromEntityId,
+              toEntityId: fresh.toEntityId,
+              fromTypeName: schema?.entityTypes.find((t) => t.key === rt.fromEntityTypeKey)?.displayName ?? rt.fromEntityTypeKey,
+              toTypeName: schema?.entityTypes.find((t) => t.key === rt.toEntityTypeKey)?.displayName ?? rt.toEntityTypeKey,
+            };
+          }
+        }
+        return prev;
+      });
+      toast.success('Relation refreshed');
+    } catch {
+      setRelations((prev) => {
+        const next = new Map(prev);
+        next.delete(relationId);
+        return next;
+      });
+      setSelection(null);
+      toast.info('Relation no longer exists — removed from canvas');
+    }
+  }, [ontologyKey, schema]);
+
   // Add neighbors of an entity
   const handleAddNeighbors = useCallback(async (entityId: string, _entityTypeKey: string) => {
     if (!ontologyKey || !schema) return;
@@ -370,7 +428,11 @@ export default function DataGraphPage() {
         for (const [id, entity] of batch) {
           if (controller.signal.aborted) return;
           try {
-            await runtimeApi.getEntity(ontologyKey, entity._entityTypeKey, id);
+            const fresh = await runtimeApi.getEntity(ontologyKey, entity._entityTypeKey, id);
+            if (fresh._updatedAt !== entity._updatedAt) {
+              updatedMap.set(id, fresh);
+              changed = true;
+            }
           } catch {
             updatedMap.delete(id);
             changed = true;
@@ -508,7 +570,10 @@ export default function DataGraphPage() {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer">
+          <label
+            className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer"
+            title="Polls for newly created entities of types already on the canvas. Does not detect changes to existing entities — use the Refresh button in the detail panel for that."
+          >
             <input
               type="checkbox"
               checked={autoRefresh}
@@ -624,6 +689,8 @@ export default function DataGraphPage() {
             onRelationDeleted={handleRelationDeleted}
             onAddNeighbors={handleAddNeighbors}
             onRemoveFromCanvas={removeEntityFromCanvas}
+            onRefreshEntity={handleRefreshEntity}
+            onRefreshRelation={handleRefreshRelation}
           />
         )}
 

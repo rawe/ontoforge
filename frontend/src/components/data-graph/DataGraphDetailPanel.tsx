@@ -32,6 +32,8 @@ interface Props {
   onRelationDeleted: (relationId: string, relationTypeKey: string) => void;
   onAddNeighbors: (entityId: string, entityTypeKey: string) => void;
   onRemoveFromCanvas: (entityId: string) => void;
+  onRefreshEntity: (entityId: string, entityTypeKey: string) => void;
+  onRefreshRelation: (relationId: string, relationTypeKey: string) => void;
 }
 
 const LONG_VALUE_THRESHOLD = 40;
@@ -93,6 +95,8 @@ export default function DataGraphDetailPanel({
   onRelationDeleted,
   onAddNeighbors,
   onRemoveFromCanvas,
+  onRefreshEntity,
+  onRefreshRelation,
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -241,6 +245,13 @@ export default function DataGraphDetailPanel({
             {/* Actions */}
             <div className="flex flex-wrap gap-2 pt-2 border-t border-gray-100">
               <button
+                onClick={() => onRefreshEntity(selection.entity._id, selection.entity._entityTypeKey)}
+                className="px-3 py-1.5 text-xs font-medium border border-gray-300 text-gray-600 rounded hover:bg-gray-100"
+                title="Fetch latest data from the server"
+              >
+                Refresh
+              </button>
+              <button
                 onClick={() => setEditing(true)}
                 className="px-3 py-1.5 text-xs font-medium bg-blue-50 text-blue-700 rounded hover:bg-blue-100"
               >
@@ -332,7 +343,14 @@ export default function DataGraphDetailPanel({
               </div>
             )}
 
-            <div className="pt-2 border-t border-gray-100">
+            <div className="flex flex-wrap gap-2 pt-2 border-t border-gray-100">
+              <button
+                onClick={() => onRefreshRelation(selection.relation._id, selection.relation._relationTypeKey)}
+                className="px-3 py-1.5 text-xs font-medium border border-gray-300 text-gray-600 rounded hover:bg-gray-100"
+                title="Fetch latest data from the server"
+              >
+                Refresh
+              </button>
               <button
                 onClick={() => setShowDeleteConfirm(true)}
                 className="px-3 py-1.5 text-xs font-medium bg-red-50 text-red-700 rounded hover:bg-red-100"

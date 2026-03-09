@@ -16,6 +16,7 @@ interface Props {
   canvasCounts: Map<string, number>;
   onToggleEntityType: (key: string) => void;
   onToggleRelationType: (key: string) => void;
+  onQuickAddType: (key: string) => void;
   onRemoveType: (key: string) => void;
   onShowAllEntities: () => void;
   onHideAllEntities: () => void;
@@ -32,6 +33,7 @@ export default function DataGraphFilters({
   canvasCounts,
   onToggleEntityType,
   onToggleRelationType,
+  onQuickAddType,
   onRemoveType,
   onShowAllEntities,
   onHideAllEntities,
@@ -52,14 +54,14 @@ export default function DataGraphFilters({
           return (
             <div key={et.key} className="inline-flex items-center group">
               <button
-                onClick={() => count > 0 ? onToggleEntityType(et.key) : undefined}
-                disabled={count === 0}
+                onClick={() => count > 0 ? onToggleEntityType(et.key) : onQuickAddType(et.key)}
+                title={count === 0 ? `Load up to 50 recent ${et.displayName} onto canvas` : undefined}
                 className={`px-2 py-0.5 rounded-l-full text-xs font-medium transition-colors inline-flex items-center gap-1 ${
                   count > 0 && isVisible
                     ? 'bg-blue-100 text-blue-700'
                     : count > 0
                     ? 'bg-gray-200 text-gray-600'
-                    : 'bg-gray-50 text-gray-400 cursor-default'
+                    : 'bg-gray-50 text-gray-500 hover:bg-blue-50 hover:text-blue-600 cursor-pointer'
                 } ${count > 0 ? 'rounded-r-full group-hover:rounded-r-none' : 'rounded-r-full'}`}
               >
                 {et.displayName}

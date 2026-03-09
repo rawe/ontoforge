@@ -126,7 +126,7 @@ export default function DataGraphPage() {
     setRelationTypeTotals(newRelTotals);
   }, [ontologyKey, schema]);
 
-  // Add entities to working set
+  // Add entities to working set (eagerly updates ref for immediate use)
   const addEntities = useCallback((newEntities: EntityInstance[]) => {
     setEntities((prev) => {
       const next = new Map(prev);
@@ -137,6 +137,7 @@ export default function DataGraphPage() {
         }
         next.set(entity._id, entity);
       }
+      entitiesRef.current = next;
       return next;
     });
   }, []);
@@ -156,7 +157,7 @@ export default function DataGraphPage() {
       visibleEntityTypesRef.current = newVisible;
       setVisibleEntityTypes(newVisible);
     }
-    setTimeout(() => fetchRelations(entitiesRef.current, visibleEntityTypesRef.current), 0);
+    fetchRelations(entitiesRef.current, visibleEntityTypesRef.current);
   }, [addEntities, fetchRelations]);
 
   // Remove a single entity from canvas (not from DB)
@@ -181,9 +182,10 @@ export default function DataGraphPage() {
       for (const [id, entity] of prev) {
         if (entity._entityTypeKey === key) next.delete(id);
       }
-      setTimeout(() => fetchRelations(next, newVisible), 0);
+      entitiesRef.current = next;
       return next;
     });
+    fetchRelations(entitiesRef.current, newVisible);
     setSelection(null);
   }, [fetchRelations]);
 
@@ -197,7 +199,7 @@ export default function DataGraphPage() {
     }
     visibleEntityTypesRef.current = newVisible;
     setVisibleEntityTypes(newVisible);
-    setTimeout(() => fetchRelations(entitiesRef.current, newVisible), 0);
+    fetchRelations(entitiesRef.current, newVisible);
   }, [fetchRelations]);
 
   // Show all types that have entities on canvas
@@ -208,7 +210,7 @@ export default function DataGraphPage() {
     }
     visibleEntityTypesRef.current = typesInMap;
     setVisibleEntityTypes(typesInMap);
-    setTimeout(() => fetchRelations(entitiesRef.current, typesInMap), 0);
+    fetchRelations(entitiesRef.current, typesInMap);
   }, [fetchRelations]);
 
   // Hide all types (entities stay in working set, just hidden)
@@ -220,13 +222,12 @@ export default function DataGraphPage() {
   }, []);
 
   const toggleRelationType = useCallback((key: string) => {
-    setVisibleRelationTypes((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      setTimeout(() => fetchRelations(entitiesRef.current, undefined, next), 0);
-      return next;
-    });
+    const next = new Set(visibleRelationTypesRef.current);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    visibleRelationTypesRef.current = next;
+    setVisibleRelationTypes(next);
+    fetchRelations(entitiesRef.current, undefined, next);
   }, [fetchRelations]);
 
   // Handle entity updated
@@ -358,12 +359,35 @@ export default function DataGraphPage() {
       for (const n of neighborEntities) newTypes.add(n._entityTypeKey);
       visibleEntityTypesRef.current = newTypes;
       setVisibleEntityTypes(newTypes);
-      setTimeout(() => fetchRelations(entitiesRef.current, newTypes), 100);
+      fetchRelations(entitiesRef.current, newTypes);
       toast.success(`Added ${neighborEntities.length} neighbor(s)`);
     } else {
       toast.info('No new neighbors found');
     }
   }, [ontologyKey, schema, addEntities, fetchRelations]);
+
+  // Quick-add: load up to PER_TYPE_LIMIT recent entities of a type onto the canvas
+  const handleQuickAddType = useCallback(async (typeKey: string) => {
+    if (!ontologyKey) return;
+    try {
+      const res = await runtimeApi.listEntities(ontologyKey, typeKey, {
+        limit: PER_TYPE_LIMIT,
+        sort: '_createdAt',
+        order: 'desc',
+      });
+      const newItems = res.items.filter((e) => !entitiesRef.current.has(e._id));
+      if (newItems.length > 0) {
+        addEntitiesAndEnableTypes(newItems);
+        toast.success(`Added ${newItems.length} ${typeKey} to canvas`);
+      } else if (res.items.length > 0) {
+        toast.info('All entities already on canvas');
+      } else {
+        toast.info('No entities found');
+      }
+    } catch {
+      toast.error('Failed to load entities');
+    }
+  }, [ontologyKey, addEntitiesAndEnableTypes]);
 
   // Auto-refresh: discover new entities and detect updates/deletions
   // Iterates all types present in the working set (not just visible types)
@@ -471,7 +495,7 @@ export default function DataGraphPage() {
       }
       setCreateEntityType(null);
       toast.success('Entity created and added to graph');
-      setTimeout(() => fetchRelations(entitiesRef.current), 100);
+      fetchRelations(entitiesRef.current);
     } catch (e: unknown) {
       const err = e as { details?: { fields?: Record<string, string> }; message?: string };
       if (err.details?.fields) setCreateEntityErrors(err.details.fields);
@@ -594,13 +618,15 @@ export default function DataGraphPage() {
         canvasCounts={canvasCounts}
         onToggleEntityType={toggleEntityType}
         onToggleRelationType={toggleRelationType}
+        onQuickAddType={handleQuickAddType}
         onRemoveType={removeTypeFromCanvas}
         onShowAllEntities={handleShowAllEntities}
         onHideAllEntities={handleHideAllEntities}
         onShowAllRelations={() => {
           const all = new Set(schema.relationTypes.map((rt) => rt.key));
+          visibleRelationTypesRef.current = all;
           setVisibleRelationTypes(all);
-          setTimeout(() => fetchRelations(entitiesRef.current, undefined, all), 0);
+          fetchRelations(entitiesRef.current, undefined, all);
         }}
         onHideAllRelations={() => {
           setVisibleRelationTypes(new Set());

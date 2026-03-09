@@ -31,6 +31,7 @@ interface Props {
   onEntityDeleted: (entityId: string) => void;
   onRelationDeleted: (relationId: string, relationTypeKey: string) => void;
   onAddNeighbors: (entityId: string, entityTypeKey: string) => void;
+  onRemoveFromCanvas: (entityId: string) => void;
 }
 
 const LONG_VALUE_THRESHOLD = 40;
@@ -91,6 +92,7 @@ export default function DataGraphDetailPanel({
   onEntityDeleted,
   onRelationDeleted,
   onAddNeighbors,
+  onRemoveFromCanvas,
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -249,6 +251,12 @@ export default function DataGraphDetailPanel({
                 className="px-3 py-1.5 text-xs font-medium bg-emerald-50 text-emerald-700 rounded hover:bg-emerald-100"
               >
                 Add Neighbors
+              </button>
+              <button
+                onClick={() => onRemoveFromCanvas(selection.entity._id)}
+                className="px-3 py-1.5 text-xs font-medium border border-gray-300 text-gray-600 rounded hover:bg-gray-100"
+              >
+                Remove from Canvas
               </button>
               <button
                 onClick={() => setShowDeleteConfirm(true)}

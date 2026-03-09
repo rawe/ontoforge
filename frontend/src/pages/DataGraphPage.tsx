@@ -4,43 +4,36 @@ import { toast } from 'sonner';
 import { useRuntimeSchema } from '../hooks/useRuntimeSchema';
 import * as runtimeApi from '../api/runtimeClient';
 import type { EntityInstance, RelationInstance, RuntimeEntityType } from '../types/runtime';
+import type { ListEntityParams } from '../api/runtimeClient';
 import DataGraph from '../components/data-graph/DataGraph';
 import DataGraphFilters from '../components/data-graph/DataGraphFilters';
-import type { PropertyFilter } from '../components/data-graph/DataGraphFilters';
-import type { ListEntityParams } from '../api/runtimeClient';
 import DataGraphDetailPanel from '../components/data-graph/DataGraphDetailPanel';
 import type { DataGraphSelection } from '../components/data-graph/DataGraphDetailPanel';
 import AddEntityPanel from '../components/data-graph/AddEntityPanel';
 import Modal from '../components/Modal';
 import DynamicForm from '../components/runtime/DynamicForm';
 import EntityPicker from '../components/runtime/EntityPicker';
-
-const MAX_WORKING_SET = 200;
-const PER_TYPE_LIMIT = 50;
-const RELATION_CAP = 200;
-const REFRESH_INTERVAL = 7000;
+import { MAX_WORKING_SET, PER_TYPE_LIMIT, RELATION_CAP, REFRESH_INTERVAL } from '../lib/dataGraphConstants';
 
 export default function DataGraphPage() {
   const { ontologyKey } = useParams<{ ontologyKey: string }>();
   const { data: schema, isLoading, error } = useRuntimeSchema(ontologyKey);
 
-  // Working set: entity instances
+  // Working set: entities on the canvas
   const [entities, setEntities] = useState<Map<string, EntityInstance>>(new Map());
-  // Relations between working set entities
   const [relations, setRelations] = useState<Map<string, RelationInstance>>(new Map());
 
-  // UI state
+  // Visibility toggles (which types are shown; entities stay in Map when hidden)
   const [visibleEntityTypes, setVisibleEntityTypes] = useState<Set<string>>(new Set());
   const [visibleRelationTypes, setVisibleRelationTypes] = useState<Set<string>>(new Set());
-  const [propertyFilters, setPropertyFilters] = useState<Record<string, Record<string, PropertyFilter>>>({});
+
+  // UI state
   const [selection, setSelection] = useState<DataGraphSelection | null>(null);
   const [showAddPanel, setShowAddPanel] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
 
-  // Type-driven loading state
-  const [typeTotals, setTypeTotals] = useState<Map<string, number>>(new Map());
+  // Relation totals (from API)
   const [relationTypeTotals, setRelationTypeTotals] = useState<Map<string, number>>(new Map());
-  const [typeLoading, setTypeLoading] = useState<Set<string>>(new Set());
 
   // Create entity modal
   const [createEntityType, setCreateEntityType] = useState<RuntimeEntityType | null>(null);
@@ -62,41 +55,8 @@ export default function DataGraphPage() {
   visibleEntityTypesRef.current = visibleEntityTypes;
   const visibleRelationTypesRef = useRef(visibleRelationTypes);
   visibleRelationTypesRef.current = visibleRelationTypes;
-  const propertyFiltersRef = useRef(propertyFilters);
-  propertyFiltersRef.current = propertyFilters;
-  const filterDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fetchRelationsSeqRef = useRef(0);
   const spotCheckOffsetRef = useRef(0);
-
-  // Build API filter params from nested PropertyFilter records for a specific entity type
-  const buildApiFilters = useCallback((typeKey: string, filters: Record<string, Record<string, PropertyFilter>>): Record<string, string> => {
-    if (!schema) return {};
-    const et = schema.entityTypes.find((t) => t.key === typeKey);
-    if (!et) return {};
-
-    const typeFilters = filters[typeKey];
-    if (!typeFilters) return {};
-
-    const apiFilters: Record<string, string> = {};
-    for (const [key, filter] of Object.entries(typeFilters)) {
-      if (!filter.value) continue;
-      const propDef = et.properties.find((p) => p.key === key);
-      if (!propDef) continue;
-
-      const dt = propDef.dataType;
-      if (dt === 'string' || dt === 'date' || dt === 'datetime') {
-        apiFilters[`${key}__contains`] = filter.value;
-      } else if (dt === 'integer' || dt === 'float') {
-        const op = filter.op ?? '=';
-        if (op === '>=') apiFilters[`${key}__gte`] = filter.value;
-        else if (op === '<=') apiFilters[`${key}__lte`] = filter.value;
-        else apiFilters[key] = filter.value;
-      } else if (dt === 'boolean') {
-        apiFilters[key] = filter.value;
-      }
-    }
-    return apiFilters;
-  }, [schema]);
 
   // Initialize relation type visibility when schema loads (all ON by default)
   useEffect(() => {
@@ -104,8 +64,8 @@ export default function DataGraphPage() {
     setVisibleRelationTypes(new Set(schema.relationTypes.map((rt) => rt.key)));
   }, [schema]);
 
-  // Computed: loaded entity counts per type
-  const loadedCounts = useMemo(() => {
+  // Entity counts per type on the canvas
+  const canvasCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const entity of entities.values()) {
       counts.set(entity._entityTypeKey, (counts.get(entity._entityTypeKey) ?? 0) + 1);
@@ -113,8 +73,16 @@ export default function DataGraphPage() {
     return counts;
   }, [entities]);
 
+  // Visible entity count (for empty state)
+  const visibleEntityCount = useMemo(() => {
+    let count = 0;
+    for (const entity of entities.values()) {
+      if (visibleEntityTypes.has(entity._entityTypeKey)) count++;
+    }
+    return count;
+  }, [entities, visibleEntityTypes]);
+
   // Fetch relations for the current working set, filtered by visible types.
-  // Uses a sequence counter to discard stale results from concurrent calls.
   const fetchRelations = useCallback(async (
     entityMap: Map<string, EntityInstance>,
     enabledEntityTypes?: Set<string>,
@@ -135,9 +103,7 @@ export default function DataGraphPage() {
 
     await Promise.all(
       schema.relationTypes.map(async (rt) => {
-        // Skip relation types that are toggled off
         if (!activeRelationTypes.has(rt.key)) return;
-        // Skip if either endpoint type is not enabled
         if (!activeEntityTypes.has(rt.fromEntityTypeKey) || !activeEntityTypes.has(rt.toEntityTypeKey)) return;
 
         try {
@@ -154,41 +120,10 @@ export default function DataGraphPage() {
       }),
     );
 
-    // Only apply results if no newer fetch has started
     if (seq !== fetchRelationsSeqRef.current) return;
     setRelations(newRelations);
     setRelationTypeTotals(newRelTotals);
   }, [ontologyKey, schema]);
-
-  // Load entities for a specific type, with optional API filters
-  const loadEntitiesForType = useCallback(async (typeKey: string, filters?: Record<string, Record<string, PropertyFilter>>): Promise<EntityInstance[]> => {
-    if (!ontologyKey) return [];
-
-    const apiFilters = buildApiFilters(typeKey, filters ?? propertyFiltersRef.current);
-
-    setTypeLoading((prev) => new Set(prev).add(typeKey));
-    try {
-      const params: ListEntityParams = {
-        limit: PER_TYPE_LIMIT,
-        sort: '_createdAt',
-        order: 'desc',
-      };
-      if (Object.keys(apiFilters).length > 0) params.filters = apiFilters;
-
-      const res = await runtimeApi.listEntities(ontologyKey, typeKey, params);
-      setTypeTotals((prev) => new Map(prev).set(typeKey, res.total));
-      return res.items;
-    } catch {
-      toast.error(`Failed to load ${typeKey} entities`);
-      return [];
-    } finally {
-      setTypeLoading((prev) => {
-        const next = new Set(prev);
-        next.delete(typeKey);
-        return next;
-      });
-    }
-  }, [ontologyKey, buildApiFilters]);
 
   // Add entities to working set
   const addEntities = useCallback((newEntities: EntityInstance[]) => {
@@ -205,7 +140,7 @@ export default function DataGraphPage() {
     });
   }, []);
 
-  // Add entities to working set and ensure their types are visible
+  // Add entities and ensure their types are visible
   const addEntitiesAndEnableTypes = useCallback((newEntities: EntityInstance[]) => {
     addEntities(newEntities);
     const newVisible = new Set(visibleEntityTypesRef.current);
@@ -223,8 +158,8 @@ export default function DataGraphPage() {
     setTimeout(() => fetchRelations(entitiesRef.current, visibleEntityTypesRef.current), 0);
   }, [addEntities, fetchRelations]);
 
-  // Remove entity from working set
-  const removeEntity = useCallback((entityId: string) => {
+  // Remove a single entity from canvas (not from DB)
+  const removeEntityFromCanvas = useCallback((entityId: string) => {
     setEntities((prev) => {
       const next = new Map(prev);
       next.delete(entityId);
@@ -233,78 +168,53 @@ export default function DataGraphPage() {
     setSelection(null);
   }, []);
 
-  // Toggle entity type: ON → load, OFF → remove all of that type.
-  // Updates visibleEntityTypesRef synchronously so rapid toggles see each other's changes.
-  const toggleEntityType = useCallback(async (key: string) => {
-    const wasEnabled = visibleEntityTypesRef.current.has(key);
-
-    // Update ref immediately so concurrent toggles build on the latest state
+  // Remove all entities of a type from canvas
+  const removeTypeFromCanvas = useCallback((key: string) => {
     const newVisible = new Set(visibleEntityTypesRef.current);
-    if (wasEnabled) {
+    newVisible.delete(key);
+    visibleEntityTypesRef.current = newVisible;
+    setVisibleEntityTypes(newVisible);
+
+    setEntities((prev) => {
+      const next = new Map(prev);
+      for (const [id, entity] of prev) {
+        if (entity._entityTypeKey === key) next.delete(id);
+      }
+      setTimeout(() => fetchRelations(next, newVisible), 0);
+      return next;
+    });
+    setSelection(null);
+  }, [fetchRelations]);
+
+  // Toggle entity type visibility (show/hide only — no load, no delete)
+  const toggleEntityType = useCallback((key: string) => {
+    const newVisible = new Set(visibleEntityTypesRef.current);
+    if (newVisible.has(key)) {
       newVisible.delete(key);
     } else {
       newVisible.add(key);
     }
     visibleEntityTypesRef.current = newVisible;
     setVisibleEntityTypes(newVisible);
+    setTimeout(() => fetchRelations(entitiesRef.current, newVisible), 0);
+  }, [fetchRelations]);
 
-    if (wasEnabled) {
-      // Toggle OFF: remove all entities of this type
-      setEntities((prev) => {
-        const next = new Map(prev);
-        for (const [id, entity] of prev) {
-          if (entity._entityTypeKey === key) next.delete(id);
-        }
-        // Re-fetch relations with updated entity set
-        setTimeout(() => fetchRelations(next, visibleEntityTypesRef.current), 0);
-        return next;
-      });
-    } else {
-      // Toggle ON: load entities for this type
-      const loaded = await loadEntitiesForType(key);
-      if (loaded.length > 0) {
-        setEntities((prev) => {
-          const next = new Map(prev);
-          for (const entity of loaded) {
-            if (next.size >= MAX_WORKING_SET && !next.has(entity._id)) break;
-            next.set(entity._id, entity);
-          }
-          // Use ref for latest visible types (may have changed during await)
-          setTimeout(() => fetchRelations(next, visibleEntityTypesRef.current), 0);
-          return next;
-        });
-      } else {
-        fetchRelations(entitiesRef.current, visibleEntityTypesRef.current);
-      }
+  // Show all types that have entities on canvas
+  const handleShowAllEntities = useCallback(() => {
+    const typesInMap = new Set<string>();
+    for (const entity of entitiesRef.current.values()) {
+      typesInMap.add(entity._entityTypeKey);
     }
-  }, [loadEntitiesForType, fetchRelations]);
+    visibleEntityTypesRef.current = typesInMap;
+    setVisibleEntityTypes(typesInMap);
+    setTimeout(() => fetchRelations(entitiesRef.current, typesInMap), 0);
+  }, [fetchRelations]);
 
-  // Show all / hide all entity types
-  const handleShowAllEntities = useCallback(async () => {
-    if (!schema) return;
-    const allKeys = schema.entityTypes.map((et) => et.key);
-    const newVisible = new Set(allKeys);
-    setVisibleEntityTypes(newVisible);
-
-    // Load entities for all types in parallel
-    const results = await Promise.all(allKeys.map((key) => loadEntitiesForType(key)));
-    const allLoaded = results.flat();
-    if (allLoaded.length > 0) {
-      setEntities((prev) => {
-        const next = new Map(prev);
-        for (const entity of allLoaded) {
-          if (next.size >= MAX_WORKING_SET && !next.has(entity._id)) break;
-          next.set(entity._id, entity);
-        }
-        setTimeout(() => fetchRelations(next, newVisible), 0);
-        return next;
-      });
-    }
-  }, [schema, loadEntitiesForType, fetchRelations]);
-
+  // Hide all types (entities stay in working set, just hidden)
   const handleHideAllEntities = useCallback(() => {
-    setVisibleEntityTypes(new Set());
-    setEntities(new Map());
+    const empty = new Set<string>();
+    visibleEntityTypesRef.current = empty;
+    setVisibleEntityTypes(empty);
     setRelations(new Map());
   }, []);
 
@@ -313,7 +223,6 @@ export default function DataGraphPage() {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
-      // Re-fetch relations with updated visibility
       setTimeout(() => fetchRelations(entitiesRef.current, undefined, next), 0);
       return next;
     });
@@ -337,8 +246,8 @@ export default function DataGraphPage() {
 
   // Handle entity deleted (from server)
   const handleEntityDeleted = useCallback((entityId: string) => {
-    removeEntity(entityId);
-  }, [removeEntity]);
+    removeEntityFromCanvas(entityId);
+  }, [removeEntityFromCanvas]);
 
   // Handle relation deleted
   const handleRelationDeleted = useCallback((relationId: string, _relationTypeKey: string) => {
@@ -387,9 +296,9 @@ export default function DataGraphPage() {
 
     if (neighborEntities.length > 0) {
       addEntities(neighborEntities);
-      // Ensure the neighbor's types are visible
       const newTypes = new Set(visibleEntityTypesRef.current);
       for (const n of neighborEntities) newTypes.add(n._entityTypeKey);
+      visibleEntityTypesRef.current = newTypes;
       setVisibleEntityTypes(newTypes);
       setTimeout(() => fetchRelations(entitiesRef.current, newTypes), 100);
       toast.success(`Added ${neighborEntities.length} neighbor(s)`);
@@ -399,6 +308,7 @@ export default function DataGraphPage() {
   }, [ontologyKey, schema, addEntities, fetchRelations]);
 
   // Auto-refresh: discover new entities and detect updates/deletions
+  // Iterates all types present in the working set (not just visible types)
   useEffect(() => {
     if (!autoRefresh || !ontologyKey || !schema) return;
 
@@ -406,26 +316,27 @@ export default function DataGraphPage() {
 
     const tick = async () => {
       const currentEntities = entitiesRef.current;
-      const enabledTypes = visibleEntityTypesRef.current;
-      if (enabledTypes.size === 0) return;
+
+      // Compute types present in the working set
+      const typesInMap = new Set<string>();
+      for (const entity of currentEntities.values()) {
+        typesInMap.add(entity._entityTypeKey);
+      }
+      if (typesInMap.size === 0) return;
 
       let changed = false;
       const updatedMap = new Map(currentEntities);
 
-      // Part 1: Discover new + detect updates for each enabled type
-      for (const typeKey of enabledTypes) {
+      // Part 1: Discover new + detect updates for each type in the Map
+      for (const typeKey of typesInMap) {
         if (controller.signal.aborted) return;
         try {
-          const apiFilters = buildApiFilters(typeKey, propertyFiltersRef.current);
           const params: ListEntityParams = {
             limit: 10,
             sort: '_createdAt',
             order: 'desc',
           };
-          if (Object.keys(apiFilters).length > 0) params.filters = apiFilters;
           const res = await runtimeApi.listEntities(ontologyKey, typeKey, params);
-          // Update total counts
-          setTypeTotals((prev) => new Map(prev).set(typeKey, res.total));
 
           const currentTypeCount = [...updatedMap.values()].filter((e) => e._entityTypeKey === typeKey).length;
 
@@ -479,7 +390,7 @@ export default function DataGraphPage() {
       controller.abort();
       clearInterval(interval);
     };
-  }, [autoRefresh, ontologyKey, schema, fetchRelations, buildApiFilters]);
+  }, [autoRefresh, ontologyKey, schema, fetchRelations]);
 
   // Create entity handler
   const handleCreateEntity = async (values: Record<string, unknown>) => {
@@ -493,6 +404,7 @@ export default function DataGraphPage() {
       if (!visibleEntityTypesRef.current.has(createEntityType.key)) {
         const newVisible = new Set(visibleEntityTypesRef.current);
         newVisible.add(createEntityType.key);
+        visibleEntityTypesRef.current = newVisible;
         setVisibleEntityTypes(newVisible);
       }
       setCreateEntityType(null);
@@ -534,43 +446,6 @@ export default function DataGraphPage() {
     }
   };
 
-  // Re-fetch all visible types with current filters
-  const reloadAllVisibleTypes = useCallback(async (filters: Record<string, Record<string, PropertyFilter>>) => {
-    const enabledTypes = visibleEntityTypesRef.current;
-    if (enabledTypes.size === 0) return;
-
-    const results = await Promise.all(
-      [...enabledTypes].map((key) => loadEntitiesForType(key, filters)),
-    );
-    const allLoaded = results.flat();
-    const next = new Map<string, EntityInstance>();
-    for (const entity of allLoaded) {
-      if (next.size >= MAX_WORKING_SET) break;
-      next.set(entity._id, entity);
-    }
-    setEntities(next);
-    setTimeout(() => fetchRelations(next), 0);
-  }, [loadEntitiesForType, fetchRelations]);
-
-  const handlePropertyFilterChange = useCallback((entityTypeKey: string, propertyKey: string, filter: PropertyFilter) => {
-    setPropertyFilters((prev) => {
-      const next: Record<string, Record<string, PropertyFilter>> = {
-        ...prev,
-        [entityTypeKey]: { ...prev[entityTypeKey], [propertyKey]: filter },
-      };
-      // Debounce re-fetch
-      if (filterDebounceRef.current) clearTimeout(filterDebounceRef.current);
-      filterDebounceRef.current = setTimeout(() => reloadAllVisibleTypes(next), 300);
-      return next;
-    });
-  }, [reloadAllVisibleTypes]);
-
-  const handleClearPropertyFilters = useCallback(() => {
-    setPropertyFilters({});
-    if (filterDebounceRef.current) clearTimeout(filterDebounceRef.current);
-    filterDebounceRef.current = setTimeout(() => reloadAllVisibleTypes({}), 300);
-  }, [reloadAllVisibleTypes]);
-
   // Handle drag-to-connect: find valid relation types between two entities
   const handleConnectEntities = useCallback((sourceEntityId: string, targetEntityId: string) => {
     if (!schema) return;
@@ -581,7 +456,6 @@ export default function DataGraphPage() {
     const sourceType = sourceEntity._entityTypeKey;
     const targetType = targetEntity._entityTypeKey;
 
-    // Check forward direction (source→target) and reverse (target→source)
     const forwardTypes = schema.relationTypes.filter(
       (rt) => rt.fromEntityTypeKey === sourceType && rt.toEntityTypeKey === targetType,
     );
@@ -594,7 +468,6 @@ export default function DataGraphPage() {
       return;
     }
 
-    // Prefer forward (user's drag direction), fall back to reverse with swapped from/to
     if (forwardTypes.length > 0) {
       setCreateRelType(forwardTypes[0].key);
       setCreateRelFrom(sourceEntityId);
@@ -607,7 +480,7 @@ export default function DataGraphPage() {
     setShowCreateRelation(true);
   }, [schema, entities]);
 
-  // Get valid relation types for create (both endpoints must be in working set entity types)
+  // Get valid relation types for create (both endpoints must be in working set)
   const validRelationTypes = schema?.relationTypes.filter((rt) => {
     const fromEntities = [...entities.values()].filter((e) => e._entityTypeKey === rt.fromEntityTypeKey);
     const toEntities = [...entities.values()].filter((e) => e._entityTypeKey === rt.toEntityTypeKey);
@@ -615,14 +488,6 @@ export default function DataGraphPage() {
   }) ?? [];
 
   const selectedRelType = schema?.relationTypes.find((rt) => rt.key === createRelType);
-
-  const visibleEntityCount = useMemo(() => {
-    let count = 0;
-    for (const entity of entities.values()) {
-      if (visibleEntityTypes.has(entity._entityTypeKey)) count++;
-    }
-    return count;
-  }, [entities, visibleEntityTypes]);
 
   if (isLoading) return <p>Loading schema...</p>;
   if (error) return <p className="text-red-600">Error: {error.message}</p>;
@@ -637,13 +502,12 @@ export default function DataGraphPage() {
         <div className="flex items-center gap-3">
           <Link to={`/data/${ontologyKey}`} className="text-blue-600 hover:underline text-sm">&larr; Data Dashboard</Link>
           <h2 className="text-lg font-bold text-gray-900">Visual Editor</h2>
-          <span className="text-xs text-gray-400 font-mono">{entities.size} entities, {relations.size} relations</span>
+          <span className="text-xs text-gray-400 font-mono">{entities.size}/{MAX_WORKING_SET} entities, {relations.size} relations</span>
           {entities.size >= MAX_WORKING_SET && (
             <span className="text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded">Limit reached</span>
           )}
         </div>
         <div className="flex items-center gap-2">
-          {/* Auto-refresh toggle */}
           <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer">
             <input
               type="checkbox"
@@ -656,14 +520,16 @@ export default function DataGraphPage() {
         </div>
       </div>
 
-      {/* Filters */}
+      {/* Visibility filters */}
       <DataGraphFilters
         entityTypes={schema.entityTypes}
         relationTypes={schema.relationTypes}
         visibleEntityTypes={visibleEntityTypes}
         visibleRelationTypes={visibleRelationTypes}
+        canvasCounts={canvasCounts}
         onToggleEntityType={toggleEntityType}
         onToggleRelationType={toggleRelationType}
+        onRemoveType={removeTypeFromCanvas}
         onShowAllEntities={handleShowAllEntities}
         onHideAllEntities={handleHideAllEntities}
         onShowAllRelations={() => {
@@ -675,12 +541,6 @@ export default function DataGraphPage() {
           setVisibleRelationTypes(new Set());
           setRelations(new Map());
         }}
-        propertyFilters={propertyFilters}
-        onPropertyFilterChange={handlePropertyFilterChange}
-        onClearPropertyFilters={handleClearPropertyFilters}
-        typeTotals={typeTotals}
-        loadedCounts={loadedCounts}
-        typeLoading={typeLoading}
         relationTypeTotals={relationTypeTotals}
       />
 
@@ -729,8 +589,12 @@ export default function DataGraphPage() {
               <svg className="w-16 h-16 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
-              <p className="text-lg font-medium mb-2">No entities loaded</p>
-              <p className="text-sm">Toggle entity types above to load data.</p>
+              <p className="text-lg font-medium mb-2">No entities visible</p>
+              <p className="text-sm">
+                {entities.size > 0
+                  ? 'Some entities are on the canvas but hidden. Use the type toggles above to show them.'
+                  : 'Use the Add Entities button to load data onto the canvas.'}
+              </p>
             </div>
           ) : (
             <DataGraph
@@ -759,6 +623,7 @@ export default function DataGraphPage() {
             onEntityDeleted={handleEntityDeleted}
             onRelationDeleted={handleRelationDeleted}
             onAddNeighbors={handleAddNeighbors}
+            onRemoveFromCanvas={removeEntityFromCanvas}
           />
         )}
 
@@ -798,7 +663,6 @@ export default function DataGraphPage() {
         title="Create Relation"
       >
         <div className="space-y-4">
-          {/* Relation type picker */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Relation Type</label>
             <select

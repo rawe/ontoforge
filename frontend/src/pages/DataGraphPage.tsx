@@ -66,6 +66,7 @@ export default function DataGraphPage() {
   propertyFiltersRef.current = propertyFilters;
   const filterDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fetchRelationsSeqRef = useRef(0);
+  const spotCheckOffsetRef = useRef(0);
 
   // Build API filter params from nested PropertyFilter records for a specific entity type
   const buildApiFilters = useCallback((typeKey: string, filters: Record<string, Record<string, PropertyFilter>>): Record<string, string> => {
@@ -203,6 +204,24 @@ export default function DataGraphPage() {
       return next;
     });
   }, []);
+
+  // Add entities to working set and ensure their types are visible
+  const addEntitiesAndEnableTypes = useCallback((newEntities: EntityInstance[]) => {
+    addEntities(newEntities);
+    const newVisible = new Set(visibleEntityTypesRef.current);
+    let changed = false;
+    for (const entity of newEntities) {
+      if (!newVisible.has(entity._entityTypeKey)) {
+        newVisible.add(entity._entityTypeKey);
+        changed = true;
+      }
+    }
+    if (changed) {
+      visibleEntityTypesRef.current = newVisible;
+      setVisibleEntityTypes(newVisible);
+    }
+    setTimeout(() => fetchRelations(entitiesRef.current, visibleEntityTypesRef.current), 0);
+  }, [addEntities, fetchRelations]);
 
   // Remove entity from working set
   const removeEntity = useCallback((entityId: string) => {
@@ -429,10 +448,14 @@ export default function DataGraphPage() {
         }
       }
 
-      // Part 2: Spot-check a batch of existing entities for deletions
+      // Part 2: Spot-check a rotating batch of existing entities for deletions
       if (!controller.signal.aborted) {
         const allIds = [...updatedMap.entries()];
-        const batch = allIds.slice(0, 10);
+        const offset = allIds.length > 0 ? spotCheckOffsetRef.current % allIds.length : 0;
+        const batch = allIds.slice(offset, offset + 10).concat(
+          offset + 10 > allIds.length ? allIds.slice(0, (offset + 10) - allIds.length) : [],
+        );
+        spotCheckOffsetRef.current = (offset + 10) % Math.max(allIds.length, 1);
         for (const [id, entity] of batch) {
           if (controller.signal.aborted) return;
           try {
@@ -593,6 +616,14 @@ export default function DataGraphPage() {
 
   const selectedRelType = schema?.relationTypes.find((rt) => rt.key === createRelType);
 
+  const visibleEntityCount = useMemo(() => {
+    let count = 0;
+    for (const entity of entities.values()) {
+      if (visibleEntityTypes.has(entity._entityTypeKey)) count++;
+    }
+    return count;
+  }, [entities, visibleEntityTypes]);
+
   if (isLoading) return <p>Loading schema...</p>;
   if (error) return <p className="text-red-600">Error: {error.message}</p>;
   if (!schema) return <p>Schema not found.</p>;
@@ -693,7 +724,7 @@ export default function DataGraphPage() {
           </div>
 
           {/* Empty state */}
-          {entities.size === 0 ? (
+          {visibleEntityCount === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-gray-400">
               <svg className="w-16 h-16 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -737,7 +768,7 @@ export default function DataGraphPage() {
             ontologyKey={ontologyKey!}
             entityTypes={schema.entityTypes}
             workingSetIds={workingSetIds}
-            onAddEntities={addEntities}
+            onAddEntities={addEntitiesAndEnableTypes}
             onClose={() => setShowAddPanel(false)}
           />
         )}

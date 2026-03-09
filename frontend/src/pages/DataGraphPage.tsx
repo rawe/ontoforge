@@ -65,6 +65,7 @@ export default function DataGraphPage() {
   const propertyFiltersRef = useRef(propertyFilters);
   propertyFiltersRef.current = propertyFilters;
   const filterDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fetchRelationsSeqRef = useRef(0);
 
   // Build API filter params from nested PropertyFilter records for a specific entity type
   const buildApiFilters = useCallback((typeKey: string, filters: Record<string, Record<string, PropertyFilter>>): Record<string, string> => {
@@ -111,14 +112,17 @@ export default function DataGraphPage() {
     return counts;
   }, [entities]);
 
-  // Fetch relations for the current working set, filtered by visible types
+  // Fetch relations for the current working set, filtered by visible types.
+  // Uses a sequence counter to discard stale results from concurrent calls.
   const fetchRelations = useCallback(async (
     entityMap: Map<string, EntityInstance>,
     enabledEntityTypes?: Set<string>,
     enabledRelationTypes?: Set<string>,
   ) => {
+    const seq = ++fetchRelationsSeqRef.current;
+
     if (!ontologyKey || !schema || entityMap.size === 0) {
-      setRelations(new Map());
+      if (seq === fetchRelationsSeqRef.current) setRelations(new Map());
       return;
     }
 
@@ -149,6 +153,8 @@ export default function DataGraphPage() {
       }),
     );
 
+    // Only apply results if no newer fetch has started
+    if (seq !== fetchRelationsSeqRef.current) return;
     setRelations(newRelations);
     setRelationTypeTotals(newRelTotals);
   }, [ontologyKey, schema]);
@@ -208,31 +214,34 @@ export default function DataGraphPage() {
     setSelection(null);
   }, []);
 
-  // Toggle entity type: ON → load, OFF → remove all of that type
+  // Toggle entity type: ON → load, OFF → remove all of that type.
+  // Updates visibleEntityTypesRef synchronously so rapid toggles see each other's changes.
   const toggleEntityType = useCallback(async (key: string) => {
     const wasEnabled = visibleEntityTypesRef.current.has(key);
 
+    // Update ref immediately so concurrent toggles build on the latest state
+    const newVisible = new Set(visibleEntityTypesRef.current);
+    if (wasEnabled) {
+      newVisible.delete(key);
+    } else {
+      newVisible.add(key);
+    }
+    visibleEntityTypesRef.current = newVisible;
+    setVisibleEntityTypes(newVisible);
+
     if (wasEnabled) {
       // Toggle OFF: remove all entities of this type
-      const newVisible = new Set(visibleEntityTypesRef.current);
-      newVisible.delete(key);
-      setVisibleEntityTypes(newVisible);
-
       setEntities((prev) => {
         const next = new Map(prev);
         for (const [id, entity] of prev) {
           if (entity._entityTypeKey === key) next.delete(id);
         }
         // Re-fetch relations with updated entity set
-        setTimeout(() => fetchRelations(next, newVisible), 0);
+        setTimeout(() => fetchRelations(next, visibleEntityTypesRef.current), 0);
         return next;
       });
     } else {
       // Toggle ON: load entities for this type
-      const newVisible = new Set(visibleEntityTypesRef.current);
-      newVisible.add(key);
-      setVisibleEntityTypes(newVisible);
-
       const loaded = await loadEntitiesForType(key);
       if (loaded.length > 0) {
         setEntities((prev) => {
@@ -241,11 +250,12 @@ export default function DataGraphPage() {
             if (next.size >= MAX_WORKING_SET && !next.has(entity._id)) break;
             next.set(entity._id, entity);
           }
-          setTimeout(() => fetchRelations(next, newVisible), 0);
+          // Use ref for latest visible types (may have changed during await)
+          setTimeout(() => fetchRelations(next, visibleEntityTypesRef.current), 0);
           return next;
         });
       } else {
-        fetchRelations(entitiesRef.current, newVisible);
+        fetchRelations(entitiesRef.current, visibleEntityTypesRef.current);
       }
     }
   }, [loadEntitiesForType, fetchRelations]);

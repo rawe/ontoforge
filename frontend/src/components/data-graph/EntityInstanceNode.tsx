@@ -17,6 +17,7 @@ const TYPE_COLORS: Record<number, { bg: string; border: string; text: string }> 
 export interface EntityInstanceNodeData {
   entity: EntityInstance;
   label: string;
+  labelPropertyName: string | null;
   typeDisplayName: string;
   colorIndex: number;
   selected?: boolean;
@@ -24,12 +25,12 @@ export interface EntityInstanceNodeData {
 }
 
 export default function EntityInstanceNode({ data }: NodeProps) {
-  const { entity, label, typeDisplayName, colorIndex, selected } = data as unknown as EntityInstanceNodeData;
+  const { entity, label, labelPropertyName, typeDisplayName, colorIndex, selected } = data as unknown as EntityInstanceNodeData;
   const colors = TYPE_COLORS[colorIndex % Object.keys(TYPE_COLORS).length];
 
   return (
     <div
-      className={`bg-white rounded-lg border shadow-sm hover:shadow-md transition-all cursor-pointer border-l-4 ${colors.border} px-3 py-2 min-w-[200px] max-w-[260px] ${
+      className={`bg-white rounded-lg border shadow-sm hover:shadow-md transition-all cursor-pointer border-l-4 ${colors.border} px-3 py-2 min-w-[200px] max-w-[280px] ${
         selected
           ? 'ring-2 ring-blue-500 ring-offset-1 border-blue-400 shadow-md'
           : 'border-gray-200'
@@ -41,8 +42,11 @@ export default function EntityInstanceNode({ data }: NodeProps) {
           {typeDisplayName}
         </span>
       </div>
-      <div className="font-medium text-sm text-gray-900 truncate">{label}</div>
-      <div className="text-[10px] text-gray-400 font-mono truncate">{entity._id.slice(0, 12)}...</div>
+      {labelPropertyName && (
+        <div className="text-[10px] text-gray-400 uppercase tracking-wide">{labelPropertyName}</div>
+      )}
+      <div className="font-medium text-sm text-gray-900 break-words leading-snug">{label}</div>
+      <div className="text-[10px] text-gray-400 font-mono truncate mt-0.5">{entity._id.slice(0, 12)}...</div>
       <Handle type="source" position={Position.Right} className="!bg-blue-400 !w-2 !h-2" />
     </div>
   );

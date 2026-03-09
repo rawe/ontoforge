@@ -1,14 +1,25 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import type { EntityInstance, RelationInstance, RuntimeEntityType, RuntimeRelationType } from '../../types/runtime';
 import * as runtimeApi from '../../api/runtimeClient';
+import { getDisplayLabelKey } from '../../lib/displayLabel';
 import DynamicForm from '../runtime/DynamicForm';
 import Modal from '../Modal';
 import ConfirmDialog from '../ConfirmDialog';
 
 type Selection =
   | { kind: 'entity'; entity: EntityInstance; entityType: RuntimeEntityType }
-  | { kind: 'relation'; relation: RelationInstance; relationType: RuntimeRelationType; fromLabel: string; toLabel: string };
+  | {
+      kind: 'relation';
+      relation: RelationInstance;
+      relationType: RuntimeRelationType;
+      fromLabel: string;
+      toLabel: string;
+      fromEntityId: string;
+      toEntityId: string;
+      fromTypeName: string;
+      toTypeName: string;
+    };
 
 interface Props {
   selection: Selection;
@@ -20,6 +31,56 @@ interface Props {
   onEntityDeleted: (entityId: string) => void;
   onRelationDeleted: (relationId: string, relationTypeKey: string) => void;
   onAddNeighbors: (entityId: string, entityTypeKey: string) => void;
+}
+
+const LONG_VALUE_THRESHOLD = 40;
+
+function isLongValue(value: unknown): boolean {
+  if (value == null) return false;
+  const str = String(value);
+  return str.length >= LONG_VALUE_THRESHOLD || str.includes('\n');
+}
+
+function PropertyValue({ value, expanded, onToggle }: { value: unknown; expanded: boolean; onToggle: () => void }) {
+  const textRef = useRef<HTMLParagraphElement>(null);
+  const [overflows, setOverflows] = useState(false);
+
+  const checkOverflow = useCallback(() => {
+    const el = textRef.current;
+    if (el) setOverflows(el.scrollHeight > el.clientHeight + 1);
+  }, []);
+
+  useEffect(() => {
+    checkOverflow();
+  }, [checkOverflow, value, expanded]);
+
+  if (value == null) return <span className="text-gray-300 italic">null</span>;
+
+  const str = String(value);
+  const long = isLongValue(value);
+
+  if (!long) {
+    return <span className="text-gray-900 font-medium break-all">{str}</span>;
+  }
+
+  return (
+    <div>
+      <p
+        ref={textRef}
+        className={`text-gray-900 text-sm whitespace-pre-wrap break-words ${expanded ? '' : 'line-clamp-3'}`}
+      >
+        {str}
+      </p>
+      {(overflows || expanded) && (
+        <button
+          onClick={onToggle}
+          className="text-xs text-blue-600 hover:text-blue-800 mt-0.5"
+        >
+          {expanded ? 'Show less' : 'Show more'}
+        </button>
+      )}
+    </div>
+  );
 }
 
 export default function DataGraphDetailPanel({
@@ -35,6 +96,16 @@ export default function DataGraphDetailPanel({
   const [saving, setSaving] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [expandedProps, setExpandedProps] = useState<Set<string>>(new Set());
+
+  const toggleExpanded = (key: string) => {
+    setExpandedProps((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   const handleEntityUpdate = async (values: Record<string, unknown>) => {
     if (selection.kind !== 'entity') return;
@@ -91,8 +162,14 @@ export default function DataGraphDetailPanel({
     value: instance[p.key],
   }));
 
+  // Reorder: label property first, rest in original order
+  const labelKey = isEntity ? getDisplayLabelKey(selection.entity) : null;
+  const orderedProps = labelKey
+    ? [...propValues.filter((p) => p.key === labelKey), ...propValues.filter((p) => p.key !== labelKey)]
+    : propValues;
+
   return (
-    <div className="w-80 border-l border-gray-200 bg-white flex flex-col overflow-hidden">
+    <div className="w-[28rem] border-l border-gray-200 bg-white flex flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
         <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">
@@ -111,6 +188,7 @@ export default function DataGraphDetailPanel({
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
         {isEntity ? (
           <>
+            {/* Type badge + ID */}
             <div>
               <span className="text-xs font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
                 {selection.entityType.displayName}
@@ -121,18 +199,39 @@ export default function DataGraphDetailPanel({
             {/* Properties */}
             <div>
               <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Properties</h4>
-              {propValues.length === 0 ? (
+              {orderedProps.length === 0 ? (
                 <p className="text-sm text-gray-400 italic">No properties</p>
               ) : (
-                <ul className="space-y-1.5">
-                  {propValues.map((p) => (
-                    <li key={p.key} className="flex justify-between text-sm">
-                      <span className="text-gray-500">{p.displayName}</span>
-                      <span className="text-gray-900 font-medium truncate ml-2 max-w-[140px]">
-                        {p.value == null ? <span className="text-gray-300 italic">null</span> : String(p.value)}
-                      </span>
-                    </li>
-                  ))}
+                <ul className="space-y-2.5">
+                  {orderedProps.map((p) => {
+                    const long = isLongValue(p.value);
+                    if (long) {
+                      // Stacked layout: label on top, value below (collapsible)
+                      return (
+                        <li key={p.key}>
+                          <span className="text-xs text-gray-500">{p.displayName}</span>
+                          <div className="mt-0.5">
+                            <PropertyValue
+                              value={p.value}
+                              expanded={expandedProps.has(p.key)}
+                              onToggle={() => toggleExpanded(p.key)}
+                            />
+                          </div>
+                        </li>
+                      );
+                    }
+                    // Inline layout: label left, value right
+                    return (
+                      <li key={p.key} className="flex justify-between items-baseline text-sm gap-2">
+                        <span className="text-gray-500 shrink-0">{p.displayName}</span>
+                        <PropertyValue
+                          value={p.value}
+                          expanded={false}
+                          onToggle={() => {}}
+                        />
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>
@@ -168,14 +267,24 @@ export default function DataGraphDetailPanel({
               <p className="text-[10px] text-gray-400 font-mono mt-1">{selection.relation._id}</p>
             </div>
 
-            <div className="text-sm">
-              <div className="flex items-center gap-1.5">
-                <span className="text-gray-500">From:</span>
-                <span className="text-gray-900 font-medium truncate">{selection.fromLabel}</span>
+            <div className="space-y-3">
+              <div>
+                <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                  <span>From</span>
+                  <span className="text-gray-300">&middot;</span>
+                  <span>{selection.fromTypeName}</span>
+                </div>
+                <div className="text-sm font-medium text-gray-900 break-words mt-0.5">{selection.fromLabel}</div>
+                <p className="text-[10px] text-gray-400 font-mono mt-0.5 break-all">{selection.fromEntityId}</p>
               </div>
-              <div className="flex items-center gap-1.5 mt-1">
-                <span className="text-gray-500">To:</span>
-                <span className="text-gray-900 font-medium truncate">{selection.toLabel}</span>
+              <div>
+                <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                  <span>To</span>
+                  <span className="text-gray-300">&middot;</span>
+                  <span>{selection.toTypeName}</span>
+                </div>
+                <div className="text-sm font-medium text-gray-900 break-words mt-0.5">{selection.toLabel}</div>
+                <p className="text-[10px] text-gray-400 font-mono mt-0.5 break-all">{selection.toEntityId}</p>
               </div>
             </div>
 
@@ -183,15 +292,34 @@ export default function DataGraphDetailPanel({
             {propValues.length > 0 && (
               <div>
                 <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Properties</h4>
-                <ul className="space-y-1.5">
-                  {propValues.map((p) => (
-                    <li key={p.key} className="flex justify-between text-sm">
-                      <span className="text-gray-500">{p.displayName}</span>
-                      <span className="text-gray-900 font-medium truncate ml-2 max-w-[140px]">
-                        {p.value == null ? <span className="text-gray-300 italic">null</span> : String(p.value)}
-                      </span>
-                    </li>
-                  ))}
+                <ul className="space-y-2.5">
+                  {propValues.map((p) => {
+                    const long = isLongValue(p.value);
+                    if (long) {
+                      return (
+                        <li key={p.key}>
+                          <span className="text-xs text-gray-500">{p.displayName}</span>
+                          <div className="mt-0.5">
+                            <PropertyValue
+                              value={p.value}
+                              expanded={expandedProps.has(p.key)}
+                              onToggle={() => toggleExpanded(p.key)}
+                            />
+                          </div>
+                        </li>
+                      );
+                    }
+                    return (
+                      <li key={p.key} className="flex justify-between items-baseline text-sm gap-2">
+                        <span className="text-gray-500 shrink-0">{p.displayName}</span>
+                        <PropertyValue
+                          value={p.value}
+                          expanded={false}
+                          onToggle={() => {}}
+                        />
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             )}

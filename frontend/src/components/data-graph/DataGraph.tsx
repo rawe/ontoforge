@@ -11,7 +11,7 @@ import type { Node, Edge, NodeMouseHandler, EdgeMouseHandler, NodeChange, EdgeCh
 import '@xyflow/react/dist/style.css';
 
 import type { EntityInstance, RelationInstance, RuntimeEntityType, RuntimeRelationType } from '../../types/runtime';
-import { getDisplayLabel } from '../../lib/displayLabel';
+import { getDisplayLabel, getDisplayLabelKey } from '../../lib/displayLabel';
 import EntityInstanceNode from './EntityInstanceNode';
 import RelationInstanceEdge from './RelationInstanceEdge';
 import { layoutDataGraph } from './dataGraphLayout';
@@ -79,18 +79,26 @@ export default function DataGraph({
       visibleEntityIds.add(entity._id);
     }
 
-    const nodes: Node[] = filteredEntities.map((entity) => ({
-      id: entity._id,
-      type: 'entityInstance',
-      data: {
-        entity,
-        label: getDisplayLabel(entity),
-        typeDisplayName: entityTypeMap.get(entity._entityTypeKey)?.displayName ?? entity._entityTypeKey,
-        colorIndex: typeColorMap.get(entity._entityTypeKey) ?? 0,
-        selected: false,
-      },
-      position: { x: 0, y: 0 },
-    }));
+    const nodes: Node[] = filteredEntities.map((entity) => {
+      const labelKey = getDisplayLabelKey(entity);
+      const et = entityTypeMap.get(entity._entityTypeKey);
+      const labelPropertyName = labelKey && et
+        ? et.properties.find((p) => p.key === labelKey)?.displayName ?? null
+        : null;
+      return {
+        id: entity._id,
+        type: 'entityInstance',
+        data: {
+          entity,
+          label: getDisplayLabel(entity),
+          labelPropertyName,
+          typeDisplayName: et?.displayName ?? entity._entityTypeKey,
+          colorIndex: typeColorMap.get(entity._entityTypeKey) ?? 0,
+          selected: false,
+        },
+        position: { x: 0, y: 0 },
+      };
+    });
 
     const edges: Edge[] = [];
     for (const relation of relations.values()) {
@@ -196,6 +204,10 @@ export default function DataGraph({
         relationType: rt,
         fromLabel: fromEntity ? getDisplayLabel(fromEntity) : relation.fromEntityId.slice(0, 12),
         toLabel: toEntity ? getDisplayLabel(toEntity) : relation.toEntityId.slice(0, 12),
+        fromEntityId: relation.fromEntityId,
+        toEntityId: relation.toEntityId,
+        fromTypeName: entityTypeMap.get(rt.fromEntityTypeKey)?.displayName ?? rt.fromEntityTypeKey,
+        toTypeName: entityTypeMap.get(rt.toEntityTypeKey)?.displayName ?? rt.toEntityTypeKey,
       });
     },
     [relations, entities, relationTypeMap, onSelect],

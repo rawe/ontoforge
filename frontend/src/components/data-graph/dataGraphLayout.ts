@@ -1,8 +1,8 @@
 import dagre from 'dagre';
 import type { Node, Edge } from '@xyflow/react';
 
-const NODE_WIDTH = 220;
-const NODE_HEIGHT = 60;
+const NODE_WIDTH = 240;
+const NODE_HEIGHT = 90;
 
 export function layoutDataGraph(nodes: Node[], edges: Edge[]): Node[] {
   if (nodes.length === 0) return nodes;

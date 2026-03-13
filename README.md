@@ -229,9 +229,11 @@ The backend reads settings from environment variables (or a `.env` file in `back
 | `DB_USER` | `neo4j` | Neo4j username |
 | `DB_PASSWORD` | `ontoforge_dev` | Neo4j password |
 | `PORT` | `8000` | HTTP listen port |
-| `EMBEDDING_PROVIDER` | *(unset — disabled)* | Set to `ollama` to enable semantic search |
-| `EMBEDDING_MODEL` | `nomic-embed-text` | Ollama embedding model |
-| `EMBEDDING_BASE_URL` | `http://localhost:11434` | Ollama API endpoint |
+| `EMBEDDING_PROVIDER` | *(unset — disabled)* | `ollama` or `openai` (OpenAI-compatible API) |
+| `EMBEDDING_MODEL` | `nomic-embed-text` | Embedding model name |
+| `EMBEDDING_BASE_URL` | `http://localhost:11434` | Embedding API endpoint |
+| `EMBEDDING_API_KEY` | *(unset)* | API key (required for `openai` provider) |
+| `EMBEDDING_DIMENSIONS` | *(auto)* | Vector dimensions (defaults: ollama=768, openai=1536) |
 | `DEFAULT_MCP_ONTOLOGY_KEY` | *(unset)* | MCP default ontology key — used when no key is in the URL or header |
 
 In Docker, `DB_URI` is set to `bolt://neo4j:7687` automatically via `docker-compose.yml`. Semantic search is opt-in — when `EMBEDDING_PROVIDER` is unset, all entity CRUD works normally without embeddings.

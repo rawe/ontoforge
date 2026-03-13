@@ -32,6 +32,30 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
+# --- Embedding preset ---
+EMBED_MODE="${1:-ollama}"
+
+case "$EMBED_MODE" in
+    ollama)
+        export EMBEDDING_PROVIDER=ollama
+        export EMBEDDING_MODEL=nomic-embed-text
+        export EMBEDDING_BASE_URL=http://localhost:11434
+        export EMBEDDING_DIMENSIONS=768
+        ;;
+    openai)
+        export EMBEDDING_PROVIDER=openai
+        export EMBEDDING_MODEL=nomic-embed-text
+        export EMBEDDING_BASE_URL=http://localhost:11434
+        export EMBEDDING_API_KEY=ollama
+        export EMBEDDING_DIMENSIONS=768
+        ;;
+    *)
+        echo "Unknown embedding mode: $EMBED_MODE (use 'ollama' or 'openai')"
+        exit 1
+        ;;
+esac
+echo "Embedding: $EMBED_MODE ($EMBEDDING_MODEL)"
+
 # --- Neo4j ---
 if docker compose -f "$ROOT_DIR/docker-compose.yml" ps neo4j 2>/dev/null | grep -q "running"; then
     echo "Neo4j already running"
@@ -51,8 +75,7 @@ fi
 # --- Backend ---
 echo "Starting backend..."
 cd "$ROOT_DIR/backend"
-EMBEDDING_PROVIDER=ollama \
-    uv run uvicorn ontoforge_server.main:app --reload --host 0.0.0.0 --port 8000 &
+uv run uvicorn ontoforge_server.main:app --reload --host 0.0.0.0 --port 8000 &
 BACKEND_PID=$!
 
 # Wait for backend to respond

@@ -211,6 +211,8 @@ Implementation would require creating Neo4j full-text indexes alongside vector i
 
 ## Additional Embedding Providers
 
+**Status: IMPLEMENTED** (Ollama + OpenAI-compatible)
+
 **Priority: Low**
 
 ### Problem

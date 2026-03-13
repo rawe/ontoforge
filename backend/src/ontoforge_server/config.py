@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     EMBEDDING_PROVIDER: str | None = None
     EMBEDDING_MODEL: str = "nomic-embed-text"
     EMBEDDING_BASE_URL: str = "http://localhost:11434"
+    EMBEDDING_API_KEY: str | None = None
+    EMBEDDING_DIMENSIONS: int | None = None
 
 
 settings = Settings()

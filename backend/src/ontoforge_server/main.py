@@ -12,6 +12,7 @@ from ontoforge_server.core.embedding import (
     init_embedding_provider,
 )
 from ontoforge_server.core.exceptions import (
+    CascadeRequiredError,
     ConflictError,
     NotFoundError,
     ValidationError,
@@ -22,6 +23,8 @@ from ontoforge_server.mcp.runtime import runtime_mcp
 from ontoforge_server.modeling.router import router as modeling_router
 from ontoforge_server.runtime.router import global_router as runtime_global_router
 from ontoforge_server.runtime.router import router as runtime_router
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     driver = await init_driver()
@@ -65,6 +68,15 @@ def create_app() -> FastAPI:
     @app.exception_handler(ValidationError)
     async def validation_handler(request: Request, exc: ValidationError):
         return _error_response(422, "VALIDATION_ERROR", str(exc), getattr(exc, "details", None))
+
+    @app.exception_handler(CascadeRequiredError)
+    async def cascade_required_handler(request: Request, exc: CascadeRequiredError):
+        return _error_response(
+            409,
+            "CASCADE_REQUIRED",
+            str(exc),
+            {"affectedOntologies": exc.affected_ontologies},
+        )
 
     @app.exception_handler(json.JSONDecodeError)
     async def json_error_handler(request: Request, exc: json.JSONDecodeError):

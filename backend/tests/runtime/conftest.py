@@ -1,164 +1,161 @@
-"""Runtime test fixtures.
-
-Provides a FastAPI app with mocked Neo4j driver and schema cache.
-"""
-
-import json
-from contextlib import asynccontextmanager
-from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from datetime import datetime, timezone
 
 import pytest
-from httpx import ASGITransport, AsyncClient
 
-from ontoforge_server.core.database import get_driver
-from ontoforge_server.core.schemas import (
-    ExportEntityType,
-    ExportOntology,
-    ExportProperty,
-    ExportRelationType,
-)
-from ontoforge_server.runtime.service import _build_schema_cache
+NOW = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+REPO = "ontoforge_server.runtime.service.repository"
+EMBEDDING = "ontoforge_server.runtime.service.get_embedding_provider"
 
 
-FIXTURE_PATH = Path(__file__).parent.parent / "fixtures" / "test_ontology.json"
+def _make_full_schema(
+    *,
+    ontology_key: str = "hr_view",
+    ontology_name: str = "HR View",
+    entity_inclusions: list | None = None,
+    relation_inclusions: list | None = None,
+) -> dict:
+    """Build a full schema dict as returned by repository.get_full_schema.
 
-# The ontology key used in the test fixture, used for route prefixes
-ONTOLOGY_KEY = "test_ontology"
-
-# Module-level cache reference for tests that need to modify it
-_test_cache = None
-
-
-def _build_test_cache(data: dict):
-    """Build a SchemaCache from the test fixture data."""
-    ont = data["ontology"]
-    ontology_export = ExportOntology(
-        ontologyId=ont["ontologyId"],
-        key=ont["key"],
-        name=ont["name"],
-        description=ont.get("description"),
-    )
-    entity_types = [
-        ExportEntityType(
-            key=et["key"],
-            displayName=et["displayName"],
-            description=et.get("description"),
-            properties=[
-                ExportProperty(
-                    key=p["key"],
-                    displayName=p["displayName"],
-                    description=p.get("description"),
-                    dataType=p["dataType"],
-                    required=p["required"],
-                    defaultValue=p.get("defaultValue"),
-                )
-                for p in et.get("properties", [])
-            ],
-        )
-        for et in data["entityTypes"]
-    ]
-    relation_types = [
-        ExportRelationType(
-            key=rt["key"],
-            displayName=rt["displayName"],
-            description=rt.get("description"),
-            fromEntityTypeKey=rt["fromEntityTypeKey"],
-            toEntityTypeKey=rt["toEntityTypeKey"],
-            properties=[
-                ExportProperty(
-                    key=p["key"],
-                    displayName=p["displayName"],
-                    description=p.get("description"),
-                    dataType=p["dataType"],
-                    required=p["required"],
-                    defaultValue=p.get("defaultValue"),
-                )
-                for p in rt.get("properties", [])
-            ],
-        )
-        for rt in data["relationTypes"]
-    ]
-    return _build_schema_cache(ontology_export, entity_types, relation_types)
-
-
-@pytest.fixture
-def test_ontology_payload():
-    """Load the test ontology fixture as a raw dict."""
-    return json.loads(FIXTURE_PATH.read_text())
-
-
-@pytest.fixture
-def mock_driver():
-    """Create a mock Neo4j async driver."""
-    driver = AsyncMock()
-    session = AsyncMock()
-
-    @asynccontextmanager
-    async def _session(**kwargs):
-        yield session
-
-    driver.session = _session
-    return driver
-
-
-@pytest.fixture
-def mock_session(mock_driver):
-    """Access the mock session directly for setting up return values."""
-    session = AsyncMock()
-
-    @asynccontextmanager
-    async def _session(**kwargs):
-        yield session
-
-    mock_driver.session = _session
-    return session
-
-
-@asynccontextmanager
-async def _noop_lifespan(app):
-    yield
-
-
-@pytest.fixture
-def runtime_app(mock_driver):
-    """Create a unified app with mocked driver and no-op lifespan."""
-    with patch("ontoforge_server.main.lifespan", _noop_lifespan):
-        from ontoforge_server.main import create_app
-
-        app = create_app()
-    app.dependency_overrides[get_driver] = lambda: mock_driver
-    return app
-
-
-@pytest.fixture
-async def client(runtime_app):
-    """Async HTTP client wired to the app."""
-    transport = ASGITransport(app=runtime_app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
-
-
-@pytest.fixture
-def schema_cache(test_ontology_payload):
-    """Build and return the test schema cache for direct access in tests."""
-    return _build_test_cache(test_ontology_payload)
-
-
-@pytest.fixture(autouse=True)
-def setup_schema_cache(test_ontology_payload):
-    """Patch _load_schema to return the test schema cache.
-
-    Tests that need the 'ontology not found' path should override this by
-    patching _load_schema to raise NotFoundError.
+    When entity_inclusions / relation_inclusions are provided the schema
+    represents a *scoped* ontology view.  When both are empty lists (or
+    omitted) the schema is fully unscoped.
     """
-    global _test_cache
-    _test_cache = _build_test_cache(test_ontology_payload)
+    return {
+        "ontology": {
+            "ontologyId": "ont-1",
+            "key": ontology_key,
+            "name": ontology_name,
+            "description": None,
+            "createdAt": NOW,
+            "updatedAt": NOW,
+        },
+        "entityTypes": [
+            {
+                "entityTypeId": "et-1",
+                "key": "person",
+                "displayName": "Person",
+                "description": None,
+                "properties": [
+                    {"key": "name", "displayName": "Name", "dataType": "string", "required": True, "defaultValue": None},
+                    {"key": "age", "displayName": "Age", "dataType": "integer", "required": False, "defaultValue": None},
+                    {"key": "email", "displayName": "Email", "dataType": "string", "required": False, "defaultValue": None},
+                    {"key": "active", "displayName": "Active", "dataType": "boolean", "required": False, "defaultValue": "true"},
+                ],
+            },
+            {
+                "entityTypeId": "et-2",
+                "key": "company",
+                "displayName": "Company",
+                "description": None,
+                "properties": [
+                    {"key": "name", "displayName": "Name", "dataType": "string", "required": True, "defaultValue": None},
+                ],
+            },
+            {
+                "entityTypeId": "et-3",
+                "key": "department",
+                "displayName": "Department",
+                "description": None,
+                "properties": [
+                    {"key": "name", "displayName": "Name", "dataType": "string", "required": True, "defaultValue": None},
+                    {"key": "code", "displayName": "Code", "dataType": "string", "required": False, "defaultValue": None},
+                ],
+            },
+        ],
+        "relationTypes": [
+            {
+                "relationTypeId": "rt-1",
+                "key": "works_for",
+                "displayName": "Works For",
+                "description": None,
+                "sourceKey": "person",
+                "targetKey": "company",
+                "properties": [
+                    {"key": "role", "displayName": "Role", "dataType": "string", "required": False, "defaultValue": None},
+                    {"key": "since", "displayName": "Since", "dataType": "date", "required": False, "defaultValue": None},
+                ],
+            },
+            {
+                "relationTypeId": "rt-2",
+                "key": "belongs_to",
+                "displayName": "Belongs To",
+                "description": None,
+                "sourceKey": "department",
+                "targetKey": "company",
+                "properties": [],
+            },
+        ],
+        "entityInclusions": entity_inclusions if entity_inclusions is not None else [],
+        "relationInclusions": relation_inclusions if relation_inclusions is not None else [],
+    }
 
-    with patch(
-        "ontoforge_server.runtime.service._load_schema",
-        return_value=_test_cache,
-    ):
-        yield _test_cache
 
-    _test_cache = None
+@pytest.fixture
+def scoped_schema():
+    """Schema for a scoped ontology view (hr_view).
+
+    person: only name and email visible (age and active hidden)
+    company: all properties visible
+    department: NOT included at all
+    works_for: all properties visible
+    belongs_to: NOT included (department is excluded)
+    """
+    return _make_full_schema(
+        ontology_key="hr_view",
+        ontology_name="HR View",
+        entity_inclusions=[
+            {"key": "person", "properties": ["name", "email"]},
+            {"key": "company", "properties": None},
+        ],
+        relation_inclusions=[
+            {"key": "works_for", "properties": None},
+        ],
+    )
+
+
+@pytest.fixture
+def unscoped_schema():
+    """Schema for a fully unscoped ontology (all types/properties visible)."""
+    return _make_full_schema(
+        ontology_key="full_ontology",
+        ontology_name="Full Ontology",
+        entity_inclusions=[],
+        relation_inclusions=[],
+    )
+
+
+def make_entity(
+    entity_type_key: str = "person",
+    entity_id: str = "ent-1",
+    **user_props,
+) -> dict:
+    """Build a raw entity dict as returned by the repository layer."""
+    base = {
+        "_id": entity_id,
+        "_entityTypeKey": entity_type_key,
+        "_createdAt": NOW,
+        "_updatedAt": NOW,
+    }
+    base.update(user_props)
+    return base
+
+
+def make_relation(
+    relation_type_key: str = "works_for",
+    relation_id: str = "rel-1",
+    from_entity_id: str = "ent-1",
+    to_entity_id: str = "ent-2",
+    **user_props,
+) -> dict:
+    """Build a raw relation dict as returned by the repository layer."""
+    base = {
+        "_id": relation_id,
+        "_relationTypeKey": relation_type_key,
+        "_createdAt": NOW,
+        "_updatedAt": NOW,
+        "fromEntityId": from_entity_id,
+        "toEntityId": to_entity_id,
+    }
+    base.update(user_props)
+    return base

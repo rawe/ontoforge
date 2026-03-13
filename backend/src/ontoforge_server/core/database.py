@@ -13,7 +13,9 @@ _CONSTRAINTS = [
     "CREATE CONSTRAINT ontology_key_unique IF NOT EXISTS FOR (o:Ontology) REQUIRE o.key IS UNIQUE",
     "CREATE CONSTRAINT ontology_name_unique IF NOT EXISTS FOR (o:Ontology) REQUIRE o.name IS UNIQUE",
     "CREATE CONSTRAINT entity_type_id_unique IF NOT EXISTS FOR (et:EntityType) REQUIRE et.entityTypeId IS UNIQUE",
+    "CREATE CONSTRAINT entity_type_key_unique IF NOT EXISTS FOR (et:EntityType) REQUIRE et.key IS UNIQUE",
     "CREATE CONSTRAINT relation_type_id_unique IF NOT EXISTS FOR (rt:RelationType) REQUIRE rt.relationTypeId IS UNIQUE",
+    "CREATE CONSTRAINT relation_type_key_unique IF NOT EXISTS FOR (rt:RelationType) REQUIRE rt.key IS UNIQUE",
     "CREATE CONSTRAINT property_id_unique IF NOT EXISTS FOR (pd:PropertyDefinition) REQUIRE pd.propertyId IS UNIQUE",
     "CREATE CONSTRAINT entity_instance_id_unique IF NOT EXISTS FOR (n:_Entity) REQUIRE n._id IS UNIQUE",
     "CREATE INDEX entity_type_key_index IF NOT EXISTS FOR (n:_Entity) ON (n._entityTypeKey)",
@@ -32,13 +34,10 @@ async def _ensure_constraints(driver: AsyncDriver) -> None:
 
 
 async def ensure_vector_indexes(driver: AsyncDriver, dimensions: int) -> None:
-    """Create vector indexes for all existing entity types across all ontologies."""
+    """Create vector indexes for all existing entity types."""
     async with driver.session() as session:
         result = await session.run(
-            """
-            MATCH (o:Ontology)-[:HAS_ENTITY_TYPE]->(et:EntityType)
-            RETURN et.key AS key
-            """
+            "MATCH (et:EntityType) RETURN et.key AS key"
         )
         keys = [record["key"] async for record in result]
 

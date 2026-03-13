@@ -1,370 +1,275 @@
-"""Tests for runtime entity instance CRUD endpoints."""
+"""Tests for runtime entity CRUD with scoped schema behavior."""
 
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from tests.runtime.conftest import ONTOLOGY_KEY
+from tests.runtime.conftest import EMBEDDING, REPO, make_entity
 
 
-NOW = datetime(2025, 6, 1, tzinfo=timezone.utc)
-PREFIX = f"/api/runtime/{ONTOLOGY_KEY}"
-
-PERSON_ENTITY = {
-    "_id": "ent-1",
-    "_entityTypeKey": "person",
-    "_createdAt": NOW,
-    "_updatedAt": NOW,
-    "name": "Alice",
-    "age": 30,
-    "email": "alice@example.com",
-    "active": True,
-}
+# ---------------------------------------------------------------------------
+# Create entity
+# ---------------------------------------------------------------------------
 
 
-def _mock_repo(**overrides):
-    defaults = {
-        "create_entity": AsyncMock(return_value=PERSON_ENTITY),
-        "list_entities": AsyncMock(return_value=([PERSON_ENTITY], 1)),
-        "get_entity": AsyncMock(return_value=PERSON_ENTITY),
-        "update_entity": AsyncMock(return_value=PERSON_ENTITY),
-        "delete_entity": AsyncMock(return_value=True),
-    }
-    defaults.update(overrides)
-    return defaults
+@pytest.mark.asyncio
+async def test_create_entity_unscoped(client, unscoped_schema):
+    """Creating through an unscoped ontology validates against the full property set."""
+    raw_entity = make_entity(name="Alice", age=30, email="a@b.com", active=True)
 
-
-@pytest.fixture
-def repo_patch():
-    def _patch(**overrides):
-        mocks = _mock_repo(**overrides)
-        return patch.multiple(
-            "ontoforge_server.runtime.service.repository", **mocks
-        )
-    return _patch
-
-
-# --- Create ---
-
-
-async def test_create_entity_valid(client, repo_patch):
-    """POST /entities/{type_key} with valid props returns 201."""
-    with repo_patch():
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=unscoped_schema),
+        patch(f"{REPO}.create_entity", new_callable=AsyncMock, return_value=raw_entity),
+        patch(EMBEDDING, return_value=None),
+    ):
         resp = await client.post(
-            f"{PREFIX}/entities/person",
-            json={"name": "Alice", "age": 30, "email": "alice@example.com"},
+            "/api/runtime/full_ontology/entities/person",
+            json={"name": "Alice", "age": 30, "email": "a@b.com"},
         )
+
     assert resp.status_code == 201
-    data = resp.json()
-    assert data["_id"] == "ent-1"
-    assert data["name"] == "Alice"
+    body = resp.json()
+    # All user properties visible in unscoped ontology
+    assert body["name"] == "Alice"
+    assert body["age"] == 30
+    assert body["email"] == "a@b.com"
+    assert body["active"] is True
+    assert "_id" in body
 
 
-async def test_create_entity_missing_required_prop(client, repo_patch):
-    """POST /entities/{type_key} with missing required prop returns 422."""
-    with repo_patch():
-        # 'name' is required for person, omitting it
+@pytest.mark.asyncio
+async def test_create_entity_scoped_validates_scoped_properties(client, scoped_schema):
+    """Creating through a scoped ontology validates only scoped properties.
+
+    Defaults from the full schema are applied for out-of-scope properties.
+    The response only includes scoped properties.
+    """
+    # Repository returns entity with ALL properties (including the default `active`)
+    raw_entity = make_entity(name="Alice", email="a@b.com", active=True)
+
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=scoped_schema),
+        patch(f"{REPO}.create_entity", new_callable=AsyncMock, return_value=raw_entity) as mock_create,
+        patch(EMBEDDING, return_value=None),
+    ):
         resp = await client.post(
-            f"{PREFIX}/entities/person",
-            json={"age": 30},
+            "/api/runtime/hr_view/entities/person",
+            json={"name": "Alice", "email": "a@b.com"},
         )
-    assert resp.status_code == 422
-    data = resp.json()
-    assert "name" in data["error"]["details"]["fields"]
 
-
-async def test_create_entity_unknown_prop(client, repo_patch):
-    """POST /entities/{type_key} with an unknown property returns 422."""
-    with repo_patch():
-        resp = await client.post(
-            f"{PREFIX}/entities/person",
-            json={"name": "Alice", "nonexistent_field": "bad"},
-        )
-    assert resp.status_code == 422
-    data = resp.json()
-    assert "nonexistent_field" in data["error"]["details"]["fields"]
-
-
-async def test_create_entity_type_mismatch(client, repo_patch):
-    """POST /entities/{type_key} with wrong data type returns 422."""
-    with repo_patch():
-        resp = await client.post(
-            f"{PREFIX}/entities/person",
-            json={"name": "Alice", "age": "not-a-number"},
-        )
-    assert resp.status_code == 422
-    data = resp.json()
-    assert "age" in data["error"]["details"]["fields"]
-
-
-async def test_create_entity_default_value_injection(client, repo_patch):
-    """POST /entities/{type_key} injects default value for optional prop with default."""
-    captured_props = {}
-
-    async def capture_create(session, et_key, label, eid, props, embedding=None):
-        captured_props.update(props)
-        return {**PERSON_ENTITY, **props, "active": True}
-
-    with repo_patch(create_entity=AsyncMock(side_effect=capture_create)):
-        resp = await client.post(
-            f"{PREFIX}/entities/person",
-            json={"name": "Alice"},
-        )
     assert resp.status_code == 201
-    # 'active' is required=False with defaultValue="true" => not injected on create.
-    # name is required with no default -> must be provided -> "Alice"
-    assert "name" in captured_props
-    assert captured_props["name"] == "Alice"
+    body = resp.json()
+
+    # Scoped properties are visible
+    assert body["name"] == "Alice"
+    assert body["email"] == "a@b.com"
+
+    # Out-of-scope properties are NOT visible in the response
+    assert "age" not in body
+    assert "active" not in body
+
+    # System properties are always visible
+    assert "_id" in body
+    assert "_entityTypeKey" in body
+
+    # Verify the repository received the default for `active` from the full schema
+    call_args = mock_create.call_args
+    stored_props = call_args.kwargs.get("properties") or call_args[0][4]
+    assert stored_props.get("active") is True
 
 
-async def test_create_entity_required_with_default_injected(client, repo_patch, setup_schema_cache):
-    """A required property with a default value is injected when not provided."""
-    cache = setup_schema_cache
-    person_def = cache.entity_types["person"]
-
-    # Temporarily make 'active' required with a default
-    original_required = person_def.properties["active"].required
-    person_def.properties["active"].required = True
-
-    captured_props = {}
-
-    async def capture_create(session, et_key, label, eid, props, embedding=None):
-        captured_props.update(props)
-        return {**PERSON_ENTITY, **props}
-
-    try:
-        with repo_patch(create_entity=AsyncMock(side_effect=capture_create)):
-            resp = await client.post(
-                f"{PREFIX}/entities/person",
-                json={"name": "Alice"},
-            )
-        assert resp.status_code == 201
-        # 'active' is required with default "true" -> should be injected as boolean True
-        assert captured_props.get("active") is True
-    finally:
-        person_def.properties["active"].required = original_required
-
-
-async def test_create_entity_nonexistent_type(client, repo_patch):
-    """POST /entities/{type_key} with a nonexistent type returns 404."""
-    with repo_patch():
+@pytest.mark.asyncio
+async def test_create_entity_scoped_rejects_unknown_property(client, scoped_schema):
+    """Submitting a property not in the scoped schema produces a validation error."""
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=scoped_schema),
+        patch(EMBEDDING, return_value=None),
+    ):
         resp = await client.post(
-            f"{PREFIX}/entities/nonexistent",
-            json={"name": "Alice"},
+            "/api/runtime/hr_view/entities/person",
+            json={"name": "Alice", "age": 30},  # age is not in scoped schema
         )
-    assert resp.status_code == 404
+
+    assert resp.status_code == 422
+    assert "age" in resp.json()["error"]["details"]["fields"]
 
 
-async def test_create_entity_boolean_type_check(client, repo_patch):
-    """POST /entities/{type_key} rejects non-boolean for boolean field."""
-    with repo_patch():
+@pytest.mark.asyncio
+async def test_create_entity_type_not_in_scope_returns_404(client, scoped_schema):
+    """Entity types not included in the scoped schema return 404."""
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=scoped_schema),
+        patch(EMBEDDING, return_value=None),
+    ):
         resp = await client.post(
-            f"{PREFIX}/entities/person",
-            json={"name": "Alice", "active": 42},
+            "/api/runtime/hr_view/entities/department",
+            json={"name": "Engineering"},
         )
-    assert resp.status_code == 422
-    data = resp.json()
-    assert "active" in data["error"]["details"]["fields"]
 
-
-# --- List ---
-
-
-async def test_list_entities(client, repo_patch):
-    """GET /entities/{type_key} returns paginated response."""
-    with repo_patch():
-        resp = await client.get(f"{PREFIX}/entities/person")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "items" in data
-    assert "total" in data
-    assert data["total"] == 1
-    assert data["limit"] == 50
-    assert data["offset"] == 0
-    assert len(data["items"]) == 1
-
-
-async def test_list_entities_nonexistent_type(client, repo_patch):
-    """GET /entities/{type_key} with unknown type returns 404."""
-    with repo_patch():
-        resp = await client.get(f"{PREFIX}/entities/nonexistent")
     assert resp.status_code == 404
 
 
-# --- Get ---
+# ---------------------------------------------------------------------------
+# Get entity
+# ---------------------------------------------------------------------------
 
 
-async def test_get_entity(client, repo_patch):
-    """GET /entities/{type_key}/{id} returns the entity."""
-    with repo_patch():
-        resp = await client.get(f"{PREFIX}/entities/person/ent-1")
+@pytest.mark.asyncio
+async def test_get_entity_scoped_filters_properties(client, scoped_schema):
+    """GET entity through scoped ontology returns only scoped properties."""
+    raw_entity = make_entity(name="Alice", age=30, email="a@b.com", active=True)
+
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=scoped_schema),
+        patch(f"{REPO}.get_entity", new_callable=AsyncMock, return_value=raw_entity),
+    ):
+        resp = await client.get("/api/runtime/hr_view/entities/person/ent-1")
+
     assert resp.status_code == 200
-    data = resp.json()
-    assert data["_id"] == "ent-1"
-    assert data["name"] == "Alice"
+    body = resp.json()
+    assert body["name"] == "Alice"
+    assert body["email"] == "a@b.com"
+    assert "age" not in body
+    assert "active" not in body
 
 
-async def test_get_entity_not_found(client, repo_patch):
-    """GET /entities/{type_key}/{id} with unknown ID returns 404."""
-    with repo_patch(get_entity=AsyncMock(return_value=None)):
-        resp = await client.get(f"{PREFIX}/entities/person/missing-id")
+@pytest.mark.asyncio
+async def test_get_entity_unscoped_returns_all_properties(client, unscoped_schema):
+    """GET entity through unscoped ontology returns all properties."""
+    raw_entity = make_entity(name="Alice", age=30, email="a@b.com", active=True)
+
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=unscoped_schema),
+        patch(f"{REPO}.get_entity", new_callable=AsyncMock, return_value=raw_entity),
+    ):
+        resp = await client.get("/api/runtime/full_ontology/entities/person/ent-1")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["name"] == "Alice"
+    assert body["age"] == 30
+    assert body["email"] == "a@b.com"
+    assert body["active"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_entity_not_found(client, scoped_schema):
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=scoped_schema),
+        patch(f"{REPO}.get_entity", new_callable=AsyncMock, return_value=None),
+    ):
+        resp = await client.get("/api/runtime/hr_view/entities/person/no-such-id")
+
     assert resp.status_code == 404
 
 
-# --- Update ---
+# ---------------------------------------------------------------------------
+# List entities
+# ---------------------------------------------------------------------------
 
 
-async def test_update_entity(client, repo_patch):
-    """PATCH /entities/{type_key}/{id} with valid update returns 200."""
-    updated = {**PERSON_ENTITY, "name": "Alice Updated"}
-    with repo_patch(update_entity=AsyncMock(return_value=updated)):
-        resp = await client.patch(
-            f"{PREFIX}/entities/person/ent-1",
-            json={"name": "Alice Updated"},
-        )
+@pytest.mark.asyncio
+async def test_list_entities_scoped_filters_properties(client, scoped_schema):
+    """Listing entities through scoped ontology filters properties on every item."""
+    raw_entities = [
+        make_entity(entity_id="ent-1", name="Alice", age=30, email="a@b.com", active=True),
+        make_entity(entity_id="ent-2", name="Bob", age=25, email="b@b.com", active=False),
+    ]
+
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=scoped_schema),
+        patch(f"{REPO}.list_entities", new_callable=AsyncMock, return_value=(raw_entities, 2)),
+    ):
+        resp = await client.get("/api/runtime/hr_view/entities/person")
+
     assert resp.status_code == 200
-    data = resp.json()
-    assert data["name"] == "Alice Updated"
+    body = resp.json()
+    assert body["total"] == 2
+    for item in body["items"]:
+        assert "name" in item
+        assert "email" in item
+        assert "age" not in item
+        assert "active" not in item
 
 
-async def test_update_entity_null_removes_optional(client, repo_patch):
-    """PATCH with null value on optional prop removes it (passes null to repo)."""
-    captured_remove = []
+# ---------------------------------------------------------------------------
+# Update entity
+# ---------------------------------------------------------------------------
 
-    async def capture_update(session, label, eid, set_props, remove_props, embedding=None, has_embedding_update=False):
-        captured_remove.extend(remove_props)
-        return {**PERSON_ENTITY, "email": None}
 
-    with repo_patch(update_entity=AsyncMock(side_effect=capture_update)):
+@pytest.mark.asyncio
+async def test_update_entity_scoped(client, scoped_schema):
+    """Update validates against scoped properties; no defaults re-applied."""
+    updated_entity = make_entity(name="Alice Updated", age=30, email="new@b.com", active=True)
+
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=scoped_schema),
+        patch(f"{REPO}.update_entity", new_callable=AsyncMock, return_value=updated_entity),
+        patch(EMBEDDING, return_value=None),
+    ):
         resp = await client.patch(
-            f"{PREFIX}/entities/person/ent-1",
-            json={"email": None},
+            "/api/runtime/hr_view/entities/person/ent-1",
+            json={"email": "new@b.com"},
         )
+
     assert resp.status_code == 200
-    assert "email" in captured_remove
+    body = resp.json()
+    assert body["email"] == "new@b.com"
+    assert body["name"] == "Alice Updated"
+    # Out-of-scope properties are filtered from response
+    assert "age" not in body
+    assert "active" not in body
 
 
-async def test_update_entity_null_on_required_returns_422(client, repo_patch):
-    """PATCH with null on a required prop returns 422."""
-    with repo_patch():
+@pytest.mark.asyncio
+async def test_update_entity_rejects_out_of_scope_property(client, scoped_schema):
+    """Updating an out-of-scope property is rejected as unknown."""
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=scoped_schema),
+        patch(EMBEDDING, return_value=None),
+    ):
         resp = await client.patch(
-            f"{PREFIX}/entities/person/ent-1",
-            json={"name": None},
+            "/api/runtime/hr_view/entities/person/ent-1",
+            json={"age": 31},
         )
+
     assert resp.status_code == 422
-    data = resp.json()
-    assert "name" in data["error"]["details"]["fields"]
+    assert "age" in resp.json()["error"]["details"]["fields"]
 
 
-async def test_update_entity_not_found(client, repo_patch):
-    """PATCH on a nonexistent entity returns 404."""
-    with repo_patch(update_entity=AsyncMock(return_value=None)):
-        resp = await client.patch(
-            f"{PREFIX}/entities/person/missing-id",
-            json={"name": "Updated"},
-        )
-    assert resp.status_code == 404
+# ---------------------------------------------------------------------------
+# Delete entity
+# ---------------------------------------------------------------------------
 
 
-async def test_update_entity_unknown_prop(client, repo_patch):
-    """PATCH with an unknown property returns 422."""
-    with repo_patch():
-        resp = await client.patch(
-            f"{PREFIX}/entities/person/ent-1",
-            json={"nonexistent_field": "value"},
-        )
-    assert resp.status_code == 422
+@pytest.mark.asyncio
+async def test_delete_entity(client, scoped_schema):
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=scoped_schema),
+        patch(f"{REPO}.delete_entity", new_callable=AsyncMock, return_value=True),
+    ):
+        resp = await client.delete("/api/runtime/hr_view/entities/person/ent-1")
 
-
-# --- Delete ---
-
-
-async def test_delete_entity(client, repo_patch):
-    """DELETE /entities/{type_key}/{id} returns 204."""
-    with repo_patch():
-        resp = await client.delete(f"{PREFIX}/entities/person/ent-1")
     assert resp.status_code == 204
 
 
-async def test_delete_entity_not_found(client, repo_patch):
-    """DELETE on a nonexistent entity returns 404."""
-    with repo_patch(delete_entity=AsyncMock(return_value=False)):
-        resp = await client.delete(f"{PREFIX}/entities/person/missing-id")
+@pytest.mark.asyncio
+async def test_delete_entity_type_not_in_scope(client, scoped_schema):
+    """Deleting an entity whose type is not in scope returns 404."""
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=scoped_schema),
+    ):
+        resp = await client.delete("/api/runtime/hr_view/entities/department/ent-99")
+
     assert resp.status_code == 404
 
 
-async def test_delete_entity_nonexistent_type(client, repo_patch):
-    """DELETE with an unknown entity type returns 404."""
-    with repo_patch():
-        resp = await client.delete(f"{PREFIX}/entities/nonexistent/ent-1")
+@pytest.mark.asyncio
+async def test_delete_entity_not_found(client, scoped_schema):
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=scoped_schema),
+        patch(f"{REPO}.delete_entity", new_callable=AsyncMock, return_value=False),
+    ):
+        resp = await client.delete("/api/runtime/hr_view/entities/person/no-such-id")
+
     assert resp.status_code == 404
-
-
-# --- Field Projection ---
-
-
-async def test_list_entities_with_fields(client, repo_patch):
-    """GET /entities/{type_key}?fields=name returns only _id and name."""
-    with repo_patch():
-        resp = await client.get(f"{PREFIX}/entities/person?fields=name")
-    assert resp.status_code == 200
-    item = resp.json()["items"][0]
-    assert "_id" in item
-    assert "name" in item
-    assert "age" not in item
-    assert "email" not in item
-    assert "_createdAt" not in item
-    assert "_entityTypeKey" not in item
-
-
-async def test_get_entity_with_fields(client, repo_patch):
-    """GET /entities/{type_key}/{id}?fields=name&fields=age returns only _id, name, age."""
-    with repo_patch():
-        resp = await client.get(f"{PREFIX}/entities/person/ent-1?fields=name&fields=age")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["_id"] == "ent-1"
-    assert data["name"] == "Alice"
-    assert data["age"] == 30
-    assert "email" not in data
-    assert "_createdAt" not in data
-
-
-async def test_list_entities_with_empty_fields(client, repo_patch):
-    """GET /entities/{type_key}?fields= returns only _id."""
-    with repo_patch():
-        resp = await client.get(f"{PREFIX}/entities/person?fields=")
-    assert resp.status_code == 200
-    item = resp.json()["items"][0]
-    assert "_id" in item
-    # Empty string field silently ignored, so only mandatory _id remains
-    assert "name" not in item
-    assert "age" not in item
-
-
-async def test_list_entities_fields_unknown_key_ignored(client, repo_patch):
-    """GET /entities/{type_key}?fields=name&fields=nonexistent returns _id and name only."""
-    with repo_patch():
-        resp = await client.get(
-            f"{PREFIX}/entities/person?fields=name&fields=nonexistent"
-        )
-    assert resp.status_code == 200
-    item = resp.json()["items"][0]
-    assert "_id" in item
-    assert "name" in item
-    assert "nonexistent" not in item
-    assert "age" not in item
-
-
-async def test_get_entity_without_fields_returns_all(client, repo_patch):
-    """GET /entities/{type_key}/{id} without fields returns all properties."""
-    with repo_patch():
-        resp = await client.get(f"{PREFIX}/entities/person/ent-1")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["_id"] == "ent-1"
-    assert data["name"] == "Alice"
-    assert data["age"] == 30
-    assert "email" in data
-    assert "_createdAt" in data

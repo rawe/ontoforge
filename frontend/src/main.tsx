@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import './index.css';
 import Layout from './components/Layout';
+import SchemaPage from './pages/SchemaPage';
 import OntologyListPage from './pages/OntologyListPage';
 import OntologyDetailPage from './pages/OntologyDetailPage';
 import EntityTypeEditorPage from './pages/EntityTypeEditorPage';
@@ -21,11 +22,12 @@ createRoot(document.getElementById('root')!).render(
       <BrowserRouter>
         <Routes>
           <Route element={<Layout />}>
-            <Route path="/" element={<Navigate to="/ontologies" replace />} />
+            <Route path="/" element={<Navigate to="/schema" replace />} />
+            <Route path="/schema" element={<SchemaPage />} />
+            <Route path="/schema/entity-types/:entityTypeId" element={<EntityTypeEditorPage />} />
+            <Route path="/schema/relation-types/:relationTypeId" element={<RelationTypeEditorPage />} />
             <Route path="/ontologies" element={<OntologyListPage />} />
             <Route path="/ontologies/:ontologyId" element={<OntologyDetailPage />} />
-            <Route path="/ontologies/:ontologyId/entity-types/:entityTypeId" element={<EntityTypeEditorPage />} />
-            <Route path="/ontologies/:ontologyId/relation-types/:relationTypeId" element={<RelationTypeEditorPage />} />
             <Route path="/data/:ontologyKey" element={<RuntimeDashboardPage />} />
             <Route path="/data/:ontologyKey/entities/:entityTypeKey" element={<EntityInstanceListPage />} />
             <Route path="/data/:ontologyKey/relations/:relationTypeKey" element={<RelationInstanceListPage />} />

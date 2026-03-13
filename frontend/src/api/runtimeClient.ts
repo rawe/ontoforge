@@ -132,12 +132,3 @@ function buildSemanticSearchQuery(params: SemanticSearchParams): string {
 export const semanticSearch = (ontologyKey: string, params: SemanticSearchParams) =>
   request<SemanticSearchResponse>(`/${ontologyKey}/search/semantic${buildSemanticSearchQuery(params)}`);
 
-// Data management
-export interface WipeDataResponse {
-  ontologyKey: string;
-  entitiesDeleted: number;
-  relationsDeleted: number;
-}
-
-export const wipeData = (ontologyKey: string) =>
-  request<WipeDataResponse>(`/${ontologyKey}/data`, { method: 'DELETE' });

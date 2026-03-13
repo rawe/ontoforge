@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -21,7 +22,6 @@ from ontoforge_server.core.schemas import (
 from ontoforge_server.runtime import repository
 from ontoforge_server.runtime.embedding import build_text_repr
 from ontoforge_server.runtime.schemas import (
-    DataWipeResponse,
     NeighborhoodResponse,
     PaginatedResponse,
     RelationInstanceCreate,
@@ -76,8 +76,17 @@ class SchemaCache:
     relation_types: dict[str, RelationTypeDef] = field(default_factory=dict)
 
 
-async def _load_schema(ontology_key: str, driver: AsyncDriver) -> SchemaCache:
-    """Load the schema for the given ontology key from the database."""
+@dataclass
+class LoadedSchema:
+    scoped: SchemaCache  # types/properties visible through this lens
+    full: SchemaCache    # all types/properties for default application
+
+
+async def _load_schema(ontology_key: str, driver: AsyncDriver) -> LoadedSchema:
+    """Load the schema for the given ontology key from the database.
+
+    Builds both full and scoped SchemaCache instances.
+    """
     async with driver.session() as session:
         schema = await repository.get_full_schema(session, ontology_key)
 
@@ -87,57 +96,152 @@ async def _load_schema(ontology_key: str, driver: AsyncDriver) -> SchemaCache:
     ont = schema["ontology"]
     entity_types_raw = schema["entityTypes"]
     relation_types_raw = schema["relationTypes"]
+    entity_inclusions = schema["entityInclusions"]
+    relation_inclusions = schema["relationInclusions"]
 
-    export_entity_types = [
-        ExportEntityType(
-            key=et["key"],
-            displayName=et["displayName"],
-            description=et.get("description"),
-            properties=[
-                ExportProperty(
-                    key=p["key"],
-                    displayName=p["displayName"],
-                    description=p.get("description"),
-                    dataType=p["dataType"],
-                    required=p["required"],
-                    defaultValue=p.get("defaultValue"),
-                )
-                for p in et.get("properties", [])
-            ],
-        )
-        for et in entity_types_raw
-    ]
+    # Build the full SchemaCache from all types
+    full_cache = _build_schema_cache_from_raw(ont, entity_types_raw, relation_types_raw)
 
-    export_relation_types = [
-        ExportRelationType(
-            key=rt["key"],
-            displayName=rt["displayName"],
-            description=rt.get("description"),
-            fromEntityTypeKey=rt["sourceKey"],
-            toEntityTypeKey=rt["targetKey"],
-            properties=[
-                ExportProperty(
-                    key=p["key"],
-                    displayName=p["displayName"],
-                    description=p.get("description"),
-                    dataType=p["dataType"],
-                    required=p["required"],
-                    defaultValue=p.get("defaultValue"),
-                )
-                for p in rt.get("properties", [])
-            ],
-        )
-        for rt in relation_types_raw
-    ]
-
-    ontology_export = ExportOntology(
-        ontologyId=ont["ontologyId"],
-        key=ont["key"],
-        name=ont["name"],
-        description=ont.get("description"),
+    # Apply scope filtering
+    scoped_cache = _apply_scope_filtering(
+        full_cache, entity_inclusions, relation_inclusions
     )
 
-    return _build_schema_cache(ontology_export, export_entity_types, export_relation_types)
+    return LoadedSchema(scoped=scoped_cache, full=full_cache)
+
+
+def _build_schema_cache_from_raw(
+    ont: dict,
+    entity_types_raw: list[dict],
+    relation_types_raw: list[dict],
+) -> SchemaCache:
+    """Build a SchemaCache from raw dicts."""
+    cache = SchemaCache(
+        ontology_id=ont["ontologyId"],
+        ontology_key=ont["key"],
+        ontology_name=ont["name"],
+        ontology_description=ont.get("description"),
+    )
+    for et in entity_types_raw:
+        props = {}
+        for p in et.get("properties", []):
+            props[p["key"]] = PropertyDef(
+                key=p["key"],
+                display_name=p["displayName"],
+                description=p.get("description"),
+                data_type=p["dataType"],
+                required=p["required"],
+                default_value=p.get("defaultValue"),
+            )
+        cache.entity_types[et["key"]] = EntityTypeDef(
+            key=et["key"],
+            display_name=et["displayName"],
+            description=et.get("description"),
+            properties=props,
+        )
+    for rt in relation_types_raw:
+        props = {}
+        for p in rt.get("properties", []):
+            props[p["key"]] = PropertyDef(
+                key=p["key"],
+                display_name=p["displayName"],
+                description=p.get("description"),
+                data_type=p["dataType"],
+                required=p["required"],
+                default_value=p.get("defaultValue"),
+            )
+        cache.relation_types[rt["key"]] = RelationTypeDef(
+            key=rt["key"],
+            display_name=rt["displayName"],
+            description=rt.get("description"),
+            from_entity_type_key=rt["sourceKey"],
+            to_entity_type_key=rt["targetKey"],
+            properties=props,
+        )
+    return cache
+
+
+def _apply_scope_filtering(
+    full_cache: SchemaCache,
+    entity_inclusions: list[dict],
+    relation_inclusions: list[dict],
+) -> SchemaCache:
+    """Apply the four-case scoping matrix to build a scoped SchemaCache.
+
+    CRITICAL: Deep-copy entity/relation type defs before filtering properties
+    to avoid mutating the full cache.
+    """
+    has_entity_scope = len(entity_inclusions) > 0
+    has_relation_scope = len(relation_inclusions) > 0
+
+    scoped = SchemaCache(
+        ontology_id=full_cache.ontology_id,
+        ontology_key=full_cache.ontology_key,
+        ontology_name=full_cache.ontology_name,
+        ontology_description=full_cache.ontology_description,
+    )
+
+    # --- Entity types ---
+    if not has_entity_scope:
+        # All entity types exposed (deep copy to avoid mutation)
+        for key, et_def in full_cache.entity_types.items():
+            scoped.entity_types[key] = copy.deepcopy(et_def)
+    else:
+        # Only included entity types
+        et_inclusion_map = {inc["key"]: inc["properties"] for inc in entity_inclusions}
+        for key, prop_filter in et_inclusion_map.items():
+            if key not in full_cache.entity_types:
+                continue
+            et_def = copy.deepcopy(full_cache.entity_types[key])
+            if prop_filter is not None:
+                # Filter to only listed properties
+                et_def.properties = {
+                    pk: pv for pk, pv in et_def.properties.items()
+                    if pk in prop_filter
+                }
+            scoped.entity_types[key] = et_def
+
+    included_et_keys = set(scoped.entity_types.keys())
+
+    # --- Relation types ---
+    if not has_entity_scope and not has_relation_scope:
+        # Case 1: fully unscoped — all relation types
+        for key, rt_def in full_cache.relation_types.items():
+            scoped.relation_types[key] = copy.deepcopy(rt_def)
+    elif has_entity_scope and not has_relation_scope:
+        # Case 2: auto-filter — only relations where BOTH source AND target are in included set
+        for key, rt_def in full_cache.relation_types.items():
+            if (rt_def.from_entity_type_key in included_et_keys and
+                    rt_def.to_entity_type_key in included_et_keys):
+                scoped.relation_types[key] = copy.deepcopy(rt_def)
+    elif not has_entity_scope and has_relation_scope:
+        # Case 3: only explicitly included relation types
+        rt_inclusion_map = {inc["key"]: inc["properties"] for inc in relation_inclusions}
+        for key, prop_filter in rt_inclusion_map.items():
+            if key not in full_cache.relation_types:
+                continue
+            rt_def = copy.deepcopy(full_cache.relation_types[key])
+            if prop_filter is not None:
+                rt_def.properties = {
+                    pk: pv for pk, pv in rt_def.properties.items()
+                    if pk in prop_filter
+                }
+            scoped.relation_types[key] = rt_def
+    else:
+        # Case 4: both entity and relation scoping — only explicitly included
+        rt_inclusion_map = {inc["key"]: inc["properties"] for inc in relation_inclusions}
+        for key, prop_filter in rt_inclusion_map.items():
+            if key not in full_cache.relation_types:
+                continue
+            rt_def = copy.deepcopy(full_cache.relation_types[key])
+            if prop_filter is not None:
+                rt_def.properties = {
+                    pk: pv for pk, pv in rt_def.properties.items()
+                    if pk in prop_filter
+                }
+            scoped.relation_types[key] = rt_def
+
+    return scoped
 
 
 # ---------------------------------------------------------------------------
@@ -161,10 +265,7 @@ def to_upper_snake_case(key: str) -> str:
 
 
 def coerce_value(value: Any, data_type: str, key: str) -> Any:
-    """Coerce a JSON value to the appropriate Python/Neo4j type.
-
-    Raises ValueError with a descriptive message on failure.
-    """
+    """Coerce a JSON value to the appropriate Python/Neo4j type."""
     if value is None:
         return None
 
@@ -222,7 +323,7 @@ def coerce_value(value: Any, data_type: str, key: str) -> Any:
                 return Neo4jDateTime(
                     parsed.year, parsed.month, parsed.day,
                     parsed.hour, parsed.minute, parsed.second,
-                    parsed.microsecond * 1000,  # nanoseconds
+                    parsed.microsecond * 1000,
                     tzinfo=parsed.tzinfo,
                 )
             except ValueError:
@@ -244,33 +345,24 @@ def validate_properties(
     type_key: str,
     partial: bool = False,
 ) -> tuple[dict[str, Any], dict[str, str]]:
-    """Validate and coerce properties against schema definitions.
-
-    Returns (coerced_properties, errors).
-    errors is a dict of {property_key: error_message}.
-    If partial=True, missing required properties are not flagged.
-    """
+    """Validate and coerce properties against schema definitions."""
     coerced: dict[str, Any] = {}
     errors: dict[str, str] = {}
 
-    # Check for unknown properties
     for key in properties:
         if key not in property_defs:
             errors[key] = f"Unknown property: not defined in type '{type_key}'"
 
-    # Check required properties and coerce values
     for prop_key, prop_def in property_defs.items():
         if prop_key in properties:
             value = properties[prop_key]
             if value is None:
-                # Null means "remove this property" in PATCH
                 if partial:
                     if prop_def.required:
                         errors[prop_key] = "Cannot set required property to null"
                     else:
                         coerced[prop_key] = None
                 else:
-                    # On create, null means "not provided"
                     if prop_def.required and prop_def.default_value is None:
                         errors[prop_key] = "Required property missing"
                     elif prop_def.default_value is not None:
@@ -280,14 +372,12 @@ def validate_properties(
                             )
                         except ValueError as e:
                             errors[prop_key] = str(e)
-                    # else: optional, null -> not stored
             else:
                 try:
                     coerced[prop_key] = coerce_value(value, prop_def.data_type, prop_key)
                 except ValueError as e:
                     errors[prop_key] = str(e)
         elif not partial:
-            # Property not provided on create
             if prop_def.required:
                 if prop_def.default_value is not None:
                     try:
@@ -308,7 +398,6 @@ def validate_properties(
 
 
 def _build_property_defs(props: list[ExportProperty]) -> dict[str, PropertyDef]:
-    """Convert a list of ExportProperty to a dict of PropertyDef."""
     result: dict[str, PropertyDef] = {}
     for p in props:
         result[p.key] = PropertyDef(
@@ -322,35 +411,7 @@ def _build_property_defs(props: list[ExportProperty]) -> dict[str, PropertyDef]:
     return result
 
 
-def _build_schema_cache(payload_ontology: ExportOntology, entity_types: list[ExportEntityType], relation_types: list[ExportRelationType]) -> SchemaCache:
-    """Build a SchemaCache from ontology metadata and type lists."""
-    cache = SchemaCache(
-        ontology_id=payload_ontology.ontology_id,
-        ontology_key=payload_ontology.key,
-        ontology_name=payload_ontology.name,
-        ontology_description=payload_ontology.description,
-    )
-    for et in entity_types:
-        cache.entity_types[et.key] = EntityTypeDef(
-            key=et.key,
-            display_name=et.display_name,
-            description=et.description,
-            properties=_build_property_defs(et.properties),
-        )
-    for rt in relation_types:
-        cache.relation_types[rt.key] = RelationTypeDef(
-            key=rt.key,
-            display_name=rt.display_name,
-            description=rt.description,
-            from_entity_type_key=rt.from_entity_type_key,
-            to_entity_type_key=rt.to_entity_type_key,
-            properties=_build_property_defs(rt.properties),
-        )
-    return cache
-
-
 def _entity_type_def_to_export(et_def: EntityTypeDef) -> ExportEntityType:
-    """Convert an EntityTypeDef to an ExportEntityType."""
     props = [
         ExportProperty(
             key=p.key,
@@ -371,7 +432,6 @@ def _entity_type_def_to_export(et_def: EntityTypeDef) -> ExportEntityType:
 
 
 def _relation_type_def_to_export(rt_def: RelationTypeDef) -> ExportRelationType:
-    """Convert a RelationTypeDef to an ExportRelationType."""
     props = [
         ExportProperty(
             key=p.key,
@@ -394,27 +454,18 @@ def _relation_type_def_to_export(rt_def: RelationTypeDef) -> ExportRelationType:
 
 
 # ---------------------------------------------------------------------------
-# Service Functions — Data Wipe
+# Response Property Filtering
 # ---------------------------------------------------------------------------
 
 
-async def wipe_instance_data(
-    ontology_key: str, driver: AsyncDriver,
-) -> DataWipeResponse:
-    """Delete all instance data for the given ontology."""
-    cache = await _load_schema(ontology_key, driver)
-    entity_type_keys = list(cache.entity_types.keys())
+def _filter_entity_properties(entity: dict, scoped_et: EntityTypeDef) -> dict:
+    """Filter entity properties to only those visible through the scoped schema."""
+    return {k: v for k, v in entity.items() if k.startswith("_") or k in scoped_et.properties}
 
-    async with driver.session() as session:
-        entities_deleted, relations_deleted = await repository.wipe_instance_data(
-            session, entity_type_keys,
-        )
 
-    return DataWipeResponse(
-        ontologyKey=ontology_key,
-        entitiesDeleted=entities_deleted,
-        relationsDeleted=relations_deleted,
-    )
+def _filter_relation_properties(relation: dict, scoped_rt: RelationTypeDef) -> dict:
+    """Filter relation properties to only those visible through the scoped schema."""
+    return {k: v for k, v in relation.items() if k.startswith("_") or k in scoped_rt.properties or k in ("fromEntityId", "toEntityId", "direction")}
 
 
 # ---------------------------------------------------------------------------
@@ -423,10 +474,10 @@ async def wipe_instance_data(
 
 
 async def get_full_schema(ontology_key: str, driver: AsyncDriver) -> SchemaResponse:
-    """Return the full schema for the given ontology."""
-    cache = await _load_schema(ontology_key, driver)
+    """Return the scoped schema for the given ontology."""
+    loaded = await _load_schema(ontology_key, driver)
+    cache = loaded.scoped
     ontology = ExportOntology(
-        ontologyId=cache.ontology_id,
         key=cache.ontology_key,
         name=cache.ontology_name,
         description=cache.ontology_description,
@@ -447,36 +498,32 @@ async def get_full_schema(ontology_key: str, driver: AsyncDriver) -> SchemaRespo
 
 
 async def list_entity_types(ontology_key: str, driver: AsyncDriver) -> list[ExportEntityType]:
-    """Return all entity types for the given ontology."""
-    cache = await _load_schema(ontology_key, driver)
+    loaded = await _load_schema(ontology_key, driver)
     return [
         _entity_type_def_to_export(et_def)
-        for et_def in cache.entity_types.values()
+        for et_def in loaded.scoped.entity_types.values()
     ]
 
 
 async def get_entity_type(ontology_key: str, key: str, driver: AsyncDriver) -> ExportEntityType:
-    """Return a single entity type by key."""
-    cache = await _load_schema(ontology_key, driver)
-    et_def = cache.entity_types.get(key)
+    loaded = await _load_schema(ontology_key, driver)
+    et_def = loaded.scoped.entity_types.get(key)
     if not et_def:
         raise NotFoundError(f"Entity type '{key}' not found")
     return _entity_type_def_to_export(et_def)
 
 
 async def list_relation_types(ontology_key: str, driver: AsyncDriver) -> list[ExportRelationType]:
-    """Return all relation types for the given ontology."""
-    cache = await _load_schema(ontology_key, driver)
+    loaded = await _load_schema(ontology_key, driver)
     return [
         _relation_type_def_to_export(rt_def)
-        for rt_def in cache.relation_types.values()
+        for rt_def in loaded.scoped.relation_types.values()
     ]
 
 
 async def get_relation_type(ontology_key: str, key: str, driver: AsyncDriver) -> ExportRelationType:
-    """Return a single relation type by key."""
-    cache = await _load_schema(ontology_key, driver)
-    rt_def = cache.relation_types.get(key)
+    loaded = await _load_schema(ontology_key, driver)
+    rt_def = loaded.scoped.relation_types.get(key)
     if not rt_def:
         raise NotFoundError(f"Relation type '{key}' not found")
     return _relation_type_def_to_export(rt_def)
@@ -496,12 +543,6 @@ def _apply_field_projection(
     fields: list[str] | None,
     always_include: frozenset[str],
 ) -> dict:
-    """Project entity or relation dict to only include requested fields.
-
-    If fields is None, return data unchanged (backward compatible).
-    If fields is an empty list, return only always_include keys.
-    Unknown keys in fields are silently ignored.
-    """
     if fields is None:
         return data
     keep = always_include | set(fields)
@@ -514,11 +555,10 @@ def _apply_field_projection(
 
 
 def _parse_filters(query_params: dict[str, str]) -> dict[str, str]:
-    """Extract filter.{key} and filter.{key}__{op} from query parameters."""
     filters = {}
     for param_name, value in query_params.items():
         if param_name.startswith("filter."):
-            filter_key = param_name[len("filter."):]  # e.g., "name" or "age__gt"
+            filter_key = param_name[len("filter."):]
             filters[filter_key] = value
     return filters
 
@@ -529,16 +569,6 @@ def _build_filter_clauses(
     type_key: str,
     node_alias: str = "n",
 ) -> tuple[list[str], dict]:
-    """Build WHERE clauses from filter params.
-
-    Filter syntax per the API contract:
-    - filter.{key} -> exact match
-    - filter.{key}__gt -> greater than
-    - filter.{key}__gte -> greater or equal
-    - filter.{key}__lt -> less than
-    - filter.{key}__lte -> less or equal
-    - filter.{key}__contains -> case-insensitive substring
-    """
     OPERATORS = {
         "gt": ">",
         "gte": ">=",
@@ -551,14 +581,12 @@ def _build_filter_clauses(
     params: dict[str, Any] = {}
 
     for filter_expr, raw_value in filters.items():
-        # Parse key and operator
         if "__" in filter_expr:
             prop_key, op_name = filter_expr.rsplit("__", 1)
         else:
             prop_key = filter_expr
             op_name = None
 
-        # Validate property exists in schema
         prop_def = property_defs.get(prop_key)
         if not prop_def:
             raise ValidationError(
@@ -566,7 +594,6 @@ def _build_filter_clauses(
                 details={"fields": {prop_key: f"Not defined in type '{type_key}'"}},
             )
 
-        # Coerce the filter value to the appropriate type
         try:
             if op_name == "contains":
                 coerced_value = str(raw_value)
@@ -578,7 +605,6 @@ def _build_filter_clauses(
                 details={"fields": {prop_key: str(e)}},
             )
 
-        # Generate a collision-resistant parameter name using index
         param_name = f"flt_{len(params)}"
 
         if op_name is None:
@@ -601,7 +627,6 @@ def _build_filter_clauses(
 
 
 def _validate_sort_field(sort: str, property_defs: dict[str, PropertyDef]) -> str:
-    """Validate and return the actual Neo4j property name for sorting."""
     SYSTEM_SORT_FIELDS = {
         "createdAt": "_createdAt",
         "updatedAt": "_updatedAt",
@@ -629,24 +654,36 @@ async def create_entity(
     body: dict,
     driver: AsyncDriver,
 ) -> dict:
-    """Create a new entity instance of the given type."""
-    cache = await _load_schema(ontology_key, driver)
-    et_def = cache.entity_types.get(entity_type_key)
-    if not et_def:
+    """Create a new entity instance. Validate against scoped properties, apply defaults from full schema."""
+    loaded = await _load_schema(ontology_key, driver)
+    scoped_et = loaded.scoped.entity_types.get(entity_type_key)
+    if not scoped_et:
         raise NotFoundError(f"Entity type '{entity_type_key}' not found")
 
-    # Validate and coerce properties
-    coerced, errors = validate_properties(body, et_def.properties, entity_type_key)
+    # Validate against scoped properties
+    coerced, errors = validate_properties(body, scoped_et.properties, entity_type_key)
     if errors:
         raise ValidationError("Instance validation failed", details={"fields": errors})
+
+    # Apply defaults from full schema for properties not in scope
+    full_et = loaded.full.entity_types.get(entity_type_key)
+    if full_et:
+        for prop_key, prop_def in full_et.properties.items():
+            if prop_key not in coerced and prop_def.default_value is not None:
+                try:
+                    coerced[prop_key] = coerce_value(
+                        prop_def.default_value, prop_def.data_type, prop_key
+                    )
+                except ValueError:
+                    pass  # Skip defaults that fail coercion
 
     entity_id = str(uuid4())
     pascal_label = to_pascal_case(entity_type_key)
 
     embedding = None
     provider = get_embedding_provider()
-    if provider:
-        text = build_text_repr(entity_type_key, coerced, et_def.properties)
+    if provider and full_et:
+        text = build_text_repr(entity_type_key, coerced, full_et.properties)
         embedding = await provider.embed(text)
 
     async with driver.session() as session:
@@ -655,7 +692,8 @@ async def create_entity(
             embedding=embedding,
         )
 
-    return entity
+    # Filter response to scoped properties
+    return _filter_entity_properties(entity, scoped_et)
 
 
 async def list_entities(
@@ -670,21 +708,18 @@ async def list_entities(
     driver: AsyncDriver,
     fields: list[str] | None = None,
 ) -> dict:
-    """List entity instances with filtering, search, sorting, and pagination."""
-    cache = await _load_schema(ontology_key, driver)
-    et_def = cache.entity_types.get(entity_type_key)
-    if not et_def:
+    loaded = await _load_schema(ontology_key, driver)
+    scoped_et = loaded.scoped.entity_types.get(entity_type_key)
+    if not scoped_et:
         raise NotFoundError(f"Entity type '{entity_type_key}' not found")
 
-    # Build WHERE clauses and params from filters
     where_clauses, params = _build_filter_clauses(
-        filters, et_def.properties, entity_type_key
+        filters, scoped_et.properties, entity_type_key
     )
 
-    # Handle text search (q parameter)
     if q:
         string_props = [
-            p.key for p in et_def.properties.values() if p.data_type == "string"
+            p.key for p in scoped_et.properties.values() if p.data_type == "string"
         ]
         if string_props:
             q_clauses = [
@@ -694,22 +729,17 @@ async def list_entities(
             where_clauses.append(f"({' OR '.join(q_clauses)})")
             params["q_search"] = q
 
-    # Validate sort field
-    sort_field = _validate_sort_field(sort, et_def.properties)
+    sort_field = _validate_sort_field(sort, scoped_et.properties)
 
     pascal_label = to_pascal_case(entity_type_key)
     async with driver.session() as session:
         items, total = await repository.list_entities(
-            session,
-            pascal_label,
-            entity_type_key,
-            where_clauses,
-            params,
-            sort_field,
-            order,
-            limit,
-            offset,
+            session, pascal_label, entity_type_key,
+            where_clauses, params, sort_field, order, limit, offset,
         )
+
+    # Filter response properties to scoped schema
+    items = [_filter_entity_properties(e, scoped_et) for e in items]
 
     if fields is not None:
         items = [_apply_field_projection(e, fields, _ENTITY_ALWAYS_FIELDS) for e in items]
@@ -726,9 +756,9 @@ async def get_entity(
     driver: AsyncDriver,
     fields: list[str] | None = None,
 ) -> dict:
-    """Get a single entity instance by type key and ID."""
-    cache = await _load_schema(ontology_key, driver)
-    if entity_type_key not in cache.entity_types:
+    loaded = await _load_schema(ontology_key, driver)
+    scoped_et = loaded.scoped.entity_types.get(entity_type_key)
+    if not scoped_et:
         raise NotFoundError(f"Entity type '{entity_type_key}' not found")
 
     pascal_label = to_pascal_case(entity_type_key)
@@ -736,6 +766,8 @@ async def get_entity(
         entity = await repository.get_entity(session, pascal_label, entity_id)
     if not entity:
         raise NotFoundError(f"Entity '{entity_id}' not found")
+
+    entity = _filter_entity_properties(entity, scoped_et)
     return _apply_field_projection(entity, fields, _ENTITY_ALWAYS_FIELDS)
 
 
@@ -746,35 +778,33 @@ async def update_entity(
     body: dict,
     driver: AsyncDriver,
 ) -> dict:
-    """Partial update of an entity instance (PATCH semantics)."""
-    cache = await _load_schema(ontology_key, driver)
-    et_def = cache.entity_types.get(entity_type_key)
-    if not et_def:
+    """Partial update. Validate against scoped properties. NO default re-application."""
+    loaded = await _load_schema(ontology_key, driver)
+    scoped_et = loaded.scoped.entity_types.get(entity_type_key)
+    if not scoped_et:
         raise NotFoundError(f"Entity type '{entity_type_key}' not found")
 
-    # Validate with partial=True (PATCH semantics)
     coerced, errors = validate_properties(
-        body, et_def.properties, entity_type_key, partial=True
+        body, scoped_et.properties, entity_type_key, partial=True
     )
     if errors:
         raise ValidationError("Instance validation failed", details={"fields": errors})
 
-    # Separate properties to set vs remove (null means remove)
     set_props = {k: v for k, v in coerced.items() if v is not None}
     remove_props = [k for k, v in coerced.items() if v is None]
 
-    # Short-circuit: no changes to apply
     if not set_props and not remove_props:
         return await get_entity(ontology_key, entity_type_key, entity_id, driver)
 
     pascal_label = to_pascal_case(entity_type_key)
 
-    # Re-embed if any string properties changed
+    # Re-embed if any string properties changed (use full schema for embedding)
     embedding = _NOT_SET
     provider = get_embedding_provider()
-    if provider:
+    full_et = loaded.full.entity_types.get(entity_type_key)
+    if provider and full_et:
         has_string_changes = any(
-            k in et_def.properties and et_def.properties[k].data_type == "string"
+            k in full_et.properties and full_et.properties[k].data_type == "string"
             for k in coerced
         )
         if has_string_changes:
@@ -785,7 +815,7 @@ async def update_entity(
                 merged.update({k: v for k, v in set_props.items()})
                 for k in remove_props:
                     merged.pop(k, None)
-                text = build_text_repr(entity_type_key, merged, et_def.properties)
+                text = build_text_repr(entity_type_key, merged, full_et.properties)
                 embedding = await provider.embed(text)
 
     async with driver.session() as session:
@@ -796,7 +826,8 @@ async def update_entity(
         )
     if not entity:
         raise NotFoundError(f"Entity '{entity_id}' not found")
-    return entity
+
+    return _filter_entity_properties(entity, scoped_et)
 
 
 async def delete_entity(
@@ -805,9 +836,8 @@ async def delete_entity(
     entity_id: str,
     driver: AsyncDriver,
 ) -> None:
-    """Delete an entity instance (DETACH DELETE removes connected relationships too)."""
-    cache = await _load_schema(ontology_key, driver)
-    if entity_type_key not in cache.entity_types:
+    loaded = await _load_schema(ontology_key, driver)
+    if entity_type_key not in loaded.scoped.entity_types:
         raise NotFoundError(f"Entity type '{entity_type_key}' not found")
 
     pascal_label = to_pascal_case(entity_type_key)
@@ -828,38 +858,48 @@ async def create_relation(
     body: RelationInstanceCreate,
     driver: AsyncDriver,
 ) -> dict:
-    """Create a new relation instance between two entity instances."""
-    cache = await _load_schema(ontology_key, driver)
-    rt_def = cache.relation_types.get(relation_type_key)
-    if not rt_def:
+    loaded = await _load_schema(ontology_key, driver)
+    scoped_rt = loaded.scoped.relation_types.get(relation_type_key)
+    if not scoped_rt:
         raise NotFoundError(f"Relation type '{relation_type_key}' not found")
 
     from_entity_id = body.from_entity_id
     to_entity_id = body.to_entity_id
-
-    # Extra fields (beyond fromEntityId/toEntityId) are user-defined properties
     user_props = dict(body.model_extra) if body.model_extra else {}
 
-    # Validate user properties against schema
-    coerced, errors = validate_properties(user_props, rt_def.properties, relation_type_key)
+    # Validate user properties against scoped schema
+    coerced, errors = validate_properties(user_props, scoped_rt.properties, relation_type_key)
 
-    # Validate source and target entities exist and match expected types
+    # Apply defaults from full schema for properties not in scope
+    full_rt = loaded.full.relation_types.get(relation_type_key)
+    if full_rt:
+        for prop_key, prop_def in full_rt.properties.items():
+            if prop_key not in coerced and prop_def.default_value is not None:
+                try:
+                    coerced[prop_key] = coerce_value(
+                        prop_def.default_value, prop_def.data_type, prop_key
+                    )
+                except ValueError:
+                    pass
+
+    # Use full schema for entity type validation
+    full_rt_for_validation = full_rt or scoped_rt
     async with driver.session() as session:
         from_entity = await repository.get_entity_by_id(session, from_entity_id)
         if not from_entity:
             errors["fromEntityId"] = f"Source entity '{from_entity_id}' not found"
-        elif from_entity["_entityTypeKey"] != rt_def.from_entity_type_key:
+        elif from_entity["_entityTypeKey"] != full_rt_for_validation.from_entity_type_key:
             errors["fromEntityId"] = (
-                f"Source entity type mismatch: expected '{rt_def.from_entity_type_key}', "
+                f"Source entity type mismatch: expected '{full_rt_for_validation.from_entity_type_key}', "
                 f"got '{from_entity['_entityTypeKey']}'"
             )
 
         to_entity = await repository.get_entity_by_id(session, to_entity_id)
         if not to_entity:
             errors["toEntityId"] = f"Target entity '{to_entity_id}' not found"
-        elif to_entity["_entityTypeKey"] != rt_def.to_entity_type_key:
+        elif to_entity["_entityTypeKey"] != full_rt_for_validation.to_entity_type_key:
             errors["toEntityId"] = (
-                f"Target entity type mismatch: expected '{rt_def.to_entity_type_key}', "
+                f"Target entity type mismatch: expected '{full_rt_for_validation.to_entity_type_key}', "
                 f"got '{to_entity['_entityTypeKey']}'"
             )
 
@@ -874,7 +914,7 @@ async def create_relation(
             relation_id, from_entity_id, to_entity_id, coerced,
         )
 
-    return relation
+    return _filter_relation_properties(relation, scoped_rt)
 
 
 async def list_relations(
@@ -889,17 +929,15 @@ async def list_relations(
     filters: dict[str, str],
     driver: AsyncDriver,
 ) -> PaginatedResponse:
-    """List relation instances with filtering and pagination."""
-    cache = await _load_schema(ontology_key, driver)
-    rt_def = cache.relation_types.get(relation_type_key)
-    if not rt_def:
+    loaded = await _load_schema(ontology_key, driver)
+    scoped_rt = loaded.scoped.relation_types.get(relation_type_key)
+    if not scoped_rt:
         raise NotFoundError(f"Relation type '{relation_type_key}' not found")
 
     where_clauses, params = _build_filter_clauses(
-        filters, rt_def.properties, relation_type_key, node_alias="r"
+        filters, scoped_rt.properties, relation_type_key, node_alias="r"
     )
 
-    # Add fromEntityId/toEntityId filters
     if from_entity_id:
         where_clauses.append("from._id = $from_entity_id_filter")
         params["from_entity_id_filter"] = from_entity_id
@@ -907,7 +945,7 @@ async def list_relations(
         where_clauses.append("to._id = $to_entity_id_filter")
         params["to_entity_id_filter"] = to_entity_id
 
-    sort_field = _validate_sort_field(sort, rt_def.properties)
+    sort_field = _validate_sort_field(sort, scoped_rt.properties)
     rel_type_upper = to_upper_snake_case(relation_type_key)
 
     async with driver.session() as session:
@@ -915,6 +953,8 @@ async def list_relations(
             session, rel_type_upper, relation_type_key,
             where_clauses, params, sort_field, order, limit, offset,
         )
+
+    items = [_filter_relation_properties(r, scoped_rt) for r in items]
 
     return PaginatedResponse(items=items, total=total, limit=limit, offset=offset)
 
@@ -925,10 +965,9 @@ async def get_relation(
     relation_id: str,
     driver: AsyncDriver,
 ) -> dict:
-    """Get a single relation instance by type key and ID."""
-    cache = await _load_schema(ontology_key, driver)
-    rt_def = cache.relation_types.get(relation_type_key)
-    if not rt_def:
+    loaded = await _load_schema(ontology_key, driver)
+    scoped_rt = loaded.scoped.relation_types.get(relation_type_key)
+    if not scoped_rt:
         raise NotFoundError(f"Relation type '{relation_type_key}' not found")
 
     rel_type_upper = to_upper_snake_case(relation_type_key)
@@ -936,7 +975,7 @@ async def get_relation(
         relation = await repository.get_relation(session, rel_type_upper, relation_id)
     if not relation:
         raise NotFoundError(f"Relation '{relation_id}' not found")
-    return relation
+    return _filter_relation_properties(relation, scoped_rt)
 
 
 async def update_relation(
@@ -946,31 +985,23 @@ async def update_relation(
     body: dict,
     driver: AsyncDriver,
 ) -> dict:
-    """Partial update of a relation instance (PATCH semantics).
-
-    Cannot change fromEntityId or toEntityId — those fields are silently ignored.
-    """
-    cache = await _load_schema(ontology_key, driver)
-    rt_def = cache.relation_types.get(relation_type_key)
-    if not rt_def:
+    loaded = await _load_schema(ontology_key, driver)
+    scoped_rt = loaded.scoped.relation_types.get(relation_type_key)
+    if not scoped_rt:
         raise NotFoundError(f"Relation type '{relation_type_key}' not found")
 
-    # Strip fromEntityId/toEntityId — cannot be changed via PATCH
     body.pop("fromEntityId", None)
     body.pop("toEntityId", None)
 
-    # Validate with partial=True (PATCH semantics)
     coerced, errors = validate_properties(
-        body, rt_def.properties, relation_type_key, partial=True
+        body, scoped_rt.properties, relation_type_key, partial=True
     )
     if errors:
         raise ValidationError("Instance validation failed", details={"fields": errors})
 
-    # Separate properties to set vs remove (null means remove)
     set_props = {k: v for k, v in coerced.items() if v is not None}
     remove_props = [k for k, v in coerced.items() if v is None]
 
-    # Short-circuit: no changes to apply
     if not set_props and not remove_props:
         return await get_relation(ontology_key, relation_type_key, relation_id, driver)
 
@@ -981,7 +1012,7 @@ async def update_relation(
         )
     if not relation:
         raise NotFoundError(f"Relation '{relation_id}' not found")
-    return relation
+    return _filter_relation_properties(relation, scoped_rt)
 
 
 async def delete_relation(
@@ -990,10 +1021,9 @@ async def delete_relation(
     relation_id: str,
     driver: AsyncDriver,
 ) -> None:
-    """Delete a relation instance. Only removes the relationship, not the entities."""
-    cache = await _load_schema(ontology_key, driver)
-    rt_def = cache.relation_types.get(relation_type_key)
-    if not rt_def:
+    loaded = await _load_schema(ontology_key, driver)
+    scoped_rt = loaded.scoped.relation_types.get(relation_type_key)
+    if not scoped_rt:
         raise NotFoundError(f"Relation type '{relation_type_key}' not found")
 
     rel_type_upper = to_upper_snake_case(relation_type_key)
@@ -1019,9 +1049,8 @@ async def get_neighbors(
     fields: list[str] | None = None,
     relation_fields: list[str] | None = None,
 ) -> NeighborhoodResponse:
-    """Get an entity's neighborhood — connected entities and the relations between them."""
-    cache = await _load_schema(ontology_key, driver)
-    if entity_type_key not in cache.entity_types:
+    loaded = await _load_schema(ontology_key, driver)
+    if entity_type_key not in loaded.scoped.entity_types:
         raise NotFoundError(f"Entity type '{entity_type_key}' not found")
 
     pascal_label = to_pascal_case(entity_type_key)
@@ -1031,22 +1060,42 @@ async def get_neighbors(
         if not entity:
             raise NotFoundError(f"Entity '{entity_id}' not found")
 
-        # Convert relation type key to UPPER_SNAKE_CASE if provided
         rel_type_filter = to_upper_snake_case(relation_type_key) if relation_type_key else None
 
         neighbors = await repository.get_neighbors(
             session, entity_id, direction, rel_type_filter, limit
         )
 
+    # Filter neighbors by scoped relation types
+    scoped_rt_upper = {to_upper_snake_case(k) for k in loaded.scoped.relation_types}
+    filtered_neighbors = []
+    for n in neighbors:
+        rel = n["relation"]
+        rt_key = rel.get("_relationTypeKey")
+        if rt_key and rt_key in loaded.scoped.relation_types:
+            scoped_rt = loaded.scoped.relation_types[rt_key]
+            n["relation"] = _filter_relation_properties(rel, scoped_rt)
+            # Filter neighbor entity properties if its type is in scope
+            neighbor_et_key = n["entity"].get("_entityTypeKey")
+            if neighbor_et_key and neighbor_et_key in loaded.scoped.entity_types:
+                n["entity"] = _filter_entity_properties(n["entity"], loaded.scoped.entity_types[neighbor_et_key])
+            filtered_neighbors.append(n)
+        elif not rt_key:
+            filtered_neighbors.append(n)
+
+    # Filter center entity
+    scoped_et = loaded.scoped.entity_types[entity_type_key]
+    entity = _filter_entity_properties(entity, scoped_et)
+
     if fields is not None:
         entity = _apply_field_projection(entity, fields, _ENTITY_ALWAYS_FIELDS)
-        for n in neighbors:
+        for n in filtered_neighbors:
             n["entity"] = _apply_field_projection(n["entity"], fields, _ENTITY_NEIGHBOR_ALWAYS_FIELDS)
     if relation_fields is not None:
-        for n in neighbors:
+        for n in filtered_neighbors:
             n["relation"] = _apply_field_projection(n["relation"], relation_fields, _RELATION_ALWAYS_FIELDS)
 
-    return NeighborhoodResponse(entity=entity, neighbors=neighbors)
+    return NeighborhoodResponse(entity=entity, neighbors=filtered_neighbors)
 
 
 # ---------------------------------------------------------------------------
@@ -1064,13 +1113,7 @@ async def semantic_search(
     filters: dict[str, str] | None = None,
     fields: list[str] | None = None,
 ) -> dict:
-    """Perform semantic search over entity instances using vector embeddings.
-
-    entity_type_key is required — cross-type search is not supported.
-    When filters are provided, over-fetches from the vector index and applies
-    property WHERE clauses before the final LIMIT.
-    """
-    cache = await _load_schema(ontology_key, driver)
+    loaded = await _load_schema(ontology_key, driver)
 
     provider = get_embedding_provider()
     if not provider:
@@ -1079,25 +1122,22 @@ async def semantic_search(
             details={"code": "FEATURE_DISABLED"},
         )
 
-    if entity_type_key not in cache.entity_types:
+    scoped_et = loaded.scoped.entity_types.get(entity_type_key)
+    if not scoped_et:
         raise NotFoundError(f"Entity type '{entity_type_key}' not found")
-
-    et_def = cache.entity_types[entity_type_key]
 
     query_embedding = await provider.embed(query)
     if query_embedding is None:
         raise ValidationError("Failed to generate embedding for search query")
 
-    # Build property filter clauses (if any)
     filters = filters or {}
     where_clauses: list[str] = []
     filter_params: dict = {}
     if filters:
         where_clauses, filter_params = _build_filter_clauses(
-            filters, et_def.properties, entity_type_key, node_alias="node"
+            filters, scoped_et.properties, entity_type_key, node_alias="node"
         )
 
-    # Over-fetch from vector index when filters are present
     vector_limit = min(limit * 5, 500) if where_clauses else limit
 
     async with driver.session() as session:
@@ -1111,6 +1151,10 @@ async def semantic_search(
             where_clauses=where_clauses if where_clauses else None,
             filter_params=filter_params if filter_params else None,
         )
+
+    # Filter result properties to scoped schema
+    for r in results:
+        r["entity"] = _filter_entity_properties(r["entity"], scoped_et)
 
     if fields is not None:
         for r in results:

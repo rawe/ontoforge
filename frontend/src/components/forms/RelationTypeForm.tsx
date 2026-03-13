@@ -3,30 +3,30 @@ import type { EntityType } from '../../types/models';
 
 interface Props {
   entityTypes: EntityType[];
-  initial?: { key: string; displayName: string; description: string; sourceEntityTypeId: string; targetEntityTypeId: string };
-  defaultSourceId?: string;
-  defaultTargetId?: string;
-  onSubmit: (data: { key: string; displayName: string; description?: string; sourceEntityTypeId: string; targetEntityTypeId: string }) => void;
+  initial?: { key: string; displayName: string; description: string; sourceEntityTypeKey: string; targetEntityTypeKey: string };
+  defaultSourceKey?: string;
+  defaultTargetKey?: string;
+  onSubmit: (data: { key: string; displayName: string; description?: string; sourceEntityTypeKey: string; targetEntityTypeKey: string }) => void;
   onCancel: () => void;
 }
 
-export default function RelationTypeForm({ entityTypes, initial, defaultSourceId, defaultTargetId, onSubmit, onCancel }: Props) {
+export default function RelationTypeForm({ entityTypes, initial, defaultSourceKey, defaultTargetKey, onSubmit, onCancel }: Props) {
   const [key, setKey] = useState(initial?.key ?? '');
   const [displayName, setDisplayName] = useState(initial?.displayName ?? '');
   const [description, setDescription] = useState(initial?.description ?? '');
-  const [sourceId, setSourceId] = useState(initial?.sourceEntityTypeId ?? defaultSourceId ?? '');
-  const [targetId, setTargetId] = useState(initial?.targetEntityTypeId ?? defaultTargetId ?? '');
+  const [sourceKey, setSourceKey] = useState(initial?.sourceEntityTypeKey ?? defaultSourceKey ?? '');
+  const [targetKey, setTargetKey] = useState(initial?.targetEntityTypeKey ?? defaultTargetKey ?? '');
   const isEdit = !!initial;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!key.trim() || !displayName.trim() || !sourceId || !targetId) return;
+    if (!key.trim() || !displayName.trim() || !sourceKey || !targetKey) return;
     onSubmit({
       key: key.trim(),
       displayName: displayName.trim(),
       description: description.trim() || undefined,
-      sourceEntityTypeId: sourceId,
-      targetEntityTypeId: targetId,
+      sourceEntityTypeKey: sourceKey,
+      targetEntityTypeKey: targetKey,
     });
   };
 
@@ -59,27 +59,27 @@ export default function RelationTypeForm({ entityTypes, initial, defaultSourceId
         rows={2}
       />
       <select
-        value={sourceId}
-        onChange={(e) => setSourceId(e.target.value)}
+        value={sourceKey}
+        onChange={(e) => setSourceKey(e.target.value)}
         className="border border-gray-300 rounded px-3 py-2 text-sm"
         required
         disabled={isEdit}
       >
         <option value="">Source entity type...</option>
         {entityTypes.map((et) => (
-          <option key={et.entityTypeId} value={et.entityTypeId}>{et.displayName} ({et.key})</option>
+          <option key={et.entityTypeId} value={et.key}>{et.displayName} ({et.key})</option>
         ))}
       </select>
       <select
-        value={targetId}
-        onChange={(e) => setTargetId(e.target.value)}
+        value={targetKey}
+        onChange={(e) => setTargetKey(e.target.value)}
         className="border border-gray-300 rounded px-3 py-2 text-sm"
         required
         disabled={isEdit}
       >
         <option value="">Target entity type...</option>
         {entityTypes.map((et) => (
-          <option key={et.entityTypeId} value={et.entityTypeId}>{et.displayName} ({et.key})</option>
+          <option key={et.entityTypeId} value={et.key}>{et.displayName} ({et.key})</option>
         ))}
       </select>
       <div className="flex gap-2">

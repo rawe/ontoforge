@@ -1,181 +1,338 @@
 # Ontology Views
 
-> Feature proposal for introducing ontology views — consistent subsets of a single root ontology that allow focused work on domain-specific portions of the model.
+> **Status: Implemented**
 
-## Glossary
+> Architectural specification for ontology views — separating the schema from ontologies so that ontologies become named lenses over a shared, independent schema.
 
-This feature introduces a hierarchy in the modeling domain. Precise terminology prevents confusion.
+## 1. Overview
 
-| Term | Context | Definition |
-|---|---|---|
-| **Ontology** | Modeling | The single, complete model hosted by an OntoForge server. Contains all entity types, relation types, and property definitions. This is the authoritative source of truth. |
-| **View** | Modeling | A named, consistent subset of the ontology. Declares which entity types, relation types, and properties are exposed. Has its own key, name, and description. |
-| **ontology** (lowercase) | Runtime | Anything addressable at runtime by key — either the ontology itself or a view. The runtime API does not distinguish between them. From a runtime consumer's perspective, a view *is* an ontology. |
+OntoForge currently ties entity types and relation types to individual ontologies via ownership relationships (`HAS_ENTITY_TYPE`, `HAS_RELATION_TYPE`). Ontology views replaces this with a model where the schema (all types and properties) exists independently, and ontologies are named lenses that expose the full schema or a filtered subset. This enables focused work on domain-specific portions without fragmenting the data model.
 
-**The naming rule:** In modeling, always use "Ontology" (the root) or "View" (a subset) — never use "ontology" generically. In runtime, the distinction does not exist; everything is an ontology addressed by key.
+**This is a breaking change.** No migration path from the current multi-ontology model. Existing deployments must recreate their setup.
 
-## Motivation
+## 2. Terminology
 
-The full ontology can become too large and complex to work with directly. Teams, applications, or LLMs often need to operate on a focused, domain-specific portion of the model. Today this requires creating separate ontologies, which fragments the data model and makes cross-domain relationships impossible.
-
-Views solve this by providing focused subsets while keeping a single, shared ontology as the source of truth. The ontology is primarily for modeling and integration; views enable practical day-to-day work.
-
-## Concept
-
-An OntoForge server hosts exactly **one ontology**. This ontology contains every entity type, relation type, and property definition.
-
-A **view** is a declarative filter over the ontology. It selects:
-- Which entity types are included
-- Which relation types are included
-- Which properties of included entity types are exposed
-- Which properties of included relation types are exposed
-
-Views do not copy or duplicate schema elements. They reference the same entity types, relation types, and property definitions that exist in the ontology. If an entity type appears in multiple views, it is the same entity type — not a duplicate.
-
-Each view has its own **key**, **name**, and **description**. At runtime, a view is accessed by its key through the same API pattern as the ontology itself. The runtime does not need to know whether a key resolves to the ontology or a view.
-
-## Invariants
-
-These properties must always hold:
-
-1. **Single ontology.** An OntoForge server has exactly one ontology. All entity types and relation types belong to it.
-2. **Views are subsets.** A view cannot define new entity types, relation types, or properties. It can only select from what the ontology defines.
-3. **Runtime is unchanged.** The runtime API, runtime service, and runtime data model do not change. A view resolves to a schema the same way the ontology does. No new runtime endpoints, no behavioral changes.
-4. **No-views fallback.** If no views exist, working with the ontology behaves exactly as today. The view concept only affects behavior once views are introduced.
-5. **Views are internally consistent.** A view must never expose a broken or infeasible schema (see Consistency Constraints below).
-6. **The ontology is always valid.** Changes to the ontology must not break existing views. Validation enforces this.
-
-## View Scope
-
-A view declaration specifies what is exposed. Everything not selected is hidden from that view's consumers.
-
-### Entity types
-A view selects a subset of entity types by key. Only selected entity types appear in the view's schema and are queryable through the view's runtime endpoint.
-
-### Relation types
-A view selects a subset of relation types by key. A relation type can only be included if both its source and target entity types are also included in the view (see Consistency Constraints).
-
-### Properties of entity types
-For each included entity type, a view may further restrict which properties are exposed. If no property filter is specified for an entity type, all properties are exposed.
-
-### Properties of relation types
-Same as entity type properties — a view may restrict which properties of a relation type are exposed.
-
-## Consistency Constraints
-
-A view must represent a valid, usable schema. The following constraints are enforced when a view is created or modified:
-
-### Referential integrity of relations
-If a view includes a relation type, it must also include both the source and target entity types of that relation. A relation type without its endpoints is meaningless.
-
-### Required properties
-If an entity type has a required property, a view that includes that entity type must either:
-- **Include the required property**, or
-- **Provide a default value** that satisfies the requirement, so that data created through the view remains valid against the full ontology.
-
-The same applies to required properties on relation types.
-
-### No dangling references
-A view's schema must be self-contained. Every type or property referenced within the view must be resolvable within the view.
-
-## Transparency
-
-Any filtering performed by a view must be fully transparent to users working with that view.
-
-- The view's description should convey its purpose and scope.
-- Modeling UI and API responses for a view should indicate which elements are included and that the view is a subset of the ontology.
-- Users must never be surprised by "missing" entity types or properties — it should be clear that they are working within a view, not the full ontology.
-
-## Impact on Modeling
-
-### What changes
-
-- **Ontology management** becomes singular. Instead of CRUD for multiple ontologies, there is one ontology to manage (create/read/update; delete is a server-level operation).
-- **View management** is new. CRUD for views, including their filter declarations. Creating a view is a selection step: choose entity types, relation types, and optionally restrict properties.
-- **Validation** must expand. Validating the ontology must also verify that all existing views remain consistent. Changes to the ontology that would break a view must be rejected or flagged.
-- **Schema graph visualization** needs to support both the full ontology and individual view scopes.
-
-### What does not change
-
-- **Entity type and relation type management** — these are still created, updated, and deleted on the ontology. Views do not own types.
-- **Property management** — properties are defined on entity types and relation types in the ontology. Views only select which ones are visible.
-
-## Impact on Runtime
-
-**None.** The runtime API, service layer, data model, and SchemaCache remain unchanged. A view resolves to a schema (a set of entity types, relation types, and property definitions) exactly as the ontology does. From the runtime's perspective, it is loading a schema by key — the fact that the key might point to a view is irrelevant.
-
-This is possible because each view has its own key, name, and description. The schema loaded for a view is a filtered version of the ontology's schema, but the runtime receives it in the same format and processes it identically.
-
-## Impact on MCP
-
-The modeling and runtime MCP servers are affected differently.
-
-### Runtime MCP — unchanged
-
-The runtime MCP is scoped to a key (`/mcp/runtime/{key}`). It exposes the schema and data operations for that key. Whether the key resolves to the ontology or a view is irrelevant — the runtime MCP receives a schema and works with it. No changes needed.
-
-### Modeling MCP — significant change
-
-The modeling MCP currently scopes to a specific ontology (`/mcp/model/{ontologyKey}`). With a single ontology, this per-ontology scoping no longer makes sense. The modeling MCP must:
-
-- Operate on **the ontology** directly (manage entity types, relation types, properties).
-- Manage **views** (create, update, delete view declarations).
-- Expose the full ontology schema and individual view schemas for inspection.
-
-This means the modeling MCP URL structure changes — there is no ontology key to select because there is only one ontology. The MCP mount point could simplify to `/mcp/model` (no key parameter).
-
-### Schema endpoints — two perspectives
-
-Today two schema views exist: the modeling schema (full structure with metadata) and the runtime schema (focused on what a runtime consumer needs). With views, these perspectives become more distinct:
-
-- **Modeling schema**: Always the full ontology. Used for editing, validation, and view management. The modeling MCP works with this.
-- **Runtime schema** (per key): The effective schema for a given key — either the full ontology or a view's filtered subset. The runtime MCP and REST API work with this.
-
-This separation is already present today; views make it more explicit.
-
-## Impact on Existing Multi-Ontology Behavior
-
-This feature replaces the current multi-ontology model with a single-ontology-plus-views model. This is a fundamental architectural shift.
-
-### Migration
-
-Existing deployments with multiple ontologies need a migration path:
-- The ontologies are merged into one ontology containing all entity types and relation types.
-- Each former ontology becomes a view that selects the same entity types and relation types it previously contained.
-- Runtime keys remain unchanged, so existing integrations continue to work.
-
-### Entity sharing (existing feature idea)
-
-The multi-ontology entity sharing concept (documented in `multi-ontology-entity-sharing.md`) is largely subsumed by views. Entities were already shared when multiple ontologies used the same entity type key. With a single ontology and views, sharing is explicit and by design — all views reference the same entity types in the same ontology.
-
-## Validation
-
-### When creating or modifying a view
-The system validates that the view's filter declaration produces a consistent schema (referential integrity, required properties, no dangling references).
-
-### When modifying the ontology
-Changes to the ontology must be checked against all existing views:
-
-| Ontology change | Potential view impact |
+| Term | Definition |
 |---|---|
-| Add entity type | No impact (no view includes it yet) |
-| Remove entity type | Views including this type break — reject or require view update first |
-| Add optional property | No impact (views that don't filter properties get it automatically; views that filter can ignore it) |
-| Add required property | Views including this entity type must be updated to include the property or provide a default |
-| Remove property | Views exposing this property must be updated |
-| Make optional property required | Views including the entity type but not the property must be updated |
-| Add relation type | No impact |
-| Remove relation type | Views including this relation type break |
-| Change relation type endpoints | Views including this relation type must be re-validated |
+| **Schema** | The independent, global set of all entity types, relation types, and property definitions. The ground truth. Exists in Neo4j without an owner node. |
+| **Ontology** | A named lens over the schema. Provides a key, name, and description for runtime access. Does not own types. |
+| **Unscoped ontology** | An ontology without `INCLUDES_TYPE` relationships. Exposes the full schema. Multiple unscoped ontologies are valid. |
+| **Scoped ontology** | An ontology with `INCLUDES_TYPE` relationships. Exposes only the referenced types and properties. |
 
-This validation can be enforced per-operation (reject changes that break views) or deferred to the existing validation endpoint (validate ontology + all views together). The approach is an architectural decision to be made during design.
+There is no root/view hierarchy. The structural difference between ontologies is purely whether `INCLUDES_TYPE` relationships exist.
 
-## Open Questions
+## 3. Neo4j Data Model
 
-1. **Migration strategy.** How are existing multi-ontology deployments migrated? Automatic merge, manual process, or tooling-assisted?
-2. **Property filtering granularity.** Can views restrict properties to read-only (exposed but not writable), or is it strictly include/exclude?
-3. **Default values for required properties.** Where are defaults defined — on the view declaration, on the property definition in the ontology, or both?
-4. **View composition.** Can a view be defined in terms of another view, or only in terms of the ontology?
-5. **Ontology-level runtime access.** Should the ontology itself always be accessible at runtime (exposing everything), or can it be restricted to modeling-only once views exist?
-6. **Cascading enforcement model.** Should ontology changes that break views be rejected immediately (strict), or should the system allow temporary inconsistency with a validation warning (lenient)?
-7. **Import/export.** How does JSON export/import handle views? Export the ontology with view declarations embedded, or separate exports per view?
+**Schema (independent, no owner):**
+
+```
+(:EntityType {entityTypeId, key, name, description})
+  -[:HAS_PROPERTY]->(:PropertyDefinition {propertyId, key, name, dataType, required, defaultValue})
+(:RelationType {relationTypeId, key, name, description})
+  -[:HAS_PROPERTY]->(:PropertyDefinition {...})
+  -[:RELATES_FROM]->(:EntityType)
+  -[:RELATES_TO]->(:EntityType)
+```
+
+**Ontologies (named lenses):**
+
+```
+(:Ontology {ontologyId, key, name, description})
+  -- no INCLUDES_TYPE → unscoped (full schema)
+  -- with INCLUDES_TYPE → scoped (subset):
+  -[:INCLUDES_TYPE {properties: [...] | null}]->(:EntityType)
+  -[:INCLUDES_TYPE {properties: [...] | null}]->(:RelationType)
+```
+
+**Instance layer (unchanged):**
+
+```
+(:_Entity:PascalCase {_entityTypeKey, _id, ...user props})
+(:_Entity)-[:UPPER_SNAKE_CASE {_relationTypeKey, _id, ...user props}]->(:_Entity)
+```
+
+**Constraints:**
+
+- `Ontology.ontologyId`, `Ontology.key` — globally unique
+- `EntityType.entityTypeId`, `EntityType.key` — globally unique (no longer per-ontology)
+- `RelationType.relationTypeId`, `RelationType.key` — globally unique
+- `PropertyDefinition.propertyId` — globally unique
+- `_Entity._id` — globally unique
+
+### INCLUDES_TYPE Relationship
+
+```
+(:Ontology {key: "hr"})
+  -[:INCLUDES_TYPE {properties: ["name", "email"]}]->(:EntityType {key: "person"})
+  -[:INCLUDES_TYPE {properties: null}]->(:EntityType {key: "department"})
+  -[:INCLUDES_TYPE {properties: null}]->(:RelationType {key: "works_in"})
+```
+
+- `properties: null` — all properties of that type are exposed
+- `properties: [...]` — only listed properties are exposed
+- Types without an `INCLUDES_TYPE` edge from this ontology are excluded
+
+**Duplicate prevention:** `MERGE` semantics in Cypher (not `CREATE`) to prevent duplicate edges.
+
+## 4. Schema Resolution
+
+### Full Schema Loading
+
+The runtime **always loads the full schema** from Neo4j — all entity types, relation types, and properties. For scoped ontologies, the repository also returns the `INCLUDES_TYPE` metadata. The service layer filters in Python to build the scoped `SchemaCache`. No filtering happens in Cypher.
+
+### Scoped Schema Filtering (Four-Case Matrix)
+
+Entity type and relation type scoping are **independent dimensions**:
+
+| Entity INCLUDES_TYPE | Relation INCLUDES_TYPE | Entity types exposed | Relation types exposed |
+|---|---|---|---|
+| None | None | All (fully unscoped) | All |
+| Some | None | Only included | Auto-filtered: only those whose source AND target are both in the included entity type set |
+| None | Some | All | Only included |
+| Some | Some | Only included | Only included (validation ensures referential integrity) |
+
+> **Cliff-edge behavior (Case 2 → Case 4):** When an ontology has entity type INCLUDES_TYPE but no relation type INCLUDES_TYPE (Case 2), relations are conveniently auto-filtered. Adding the **first** explicit relation type INCLUDES_TYPE transitions to Case 4, where **only** explicitly included relation types are exposed. All previously auto-filtered relations disappear. This is by design — adding explicit relation scoping means the user wants explicit control. Users and MCP consumers must understand that the first relation INCLUDES_TYPE changes the filtering mode.
+
+### Runtime Property Filtering
+
+**API responses include only properties visible in the scoped ontology's schema.** The runtime builds a `SchemaCache` from the scoped view and filters entity/relation responses to only the properties declared in that cache. Properties stored on the node but not in the scoped schema are invisible through that lens.
+
+Internally, the service retains access to the full schema for:
+- Applying `defaultValue` from the full schema on entity/relation creation when a property is omitted by the scope
+- Validating referential integrity
+
+**Writes** are also filtered — setting a property not in the scoped schema is rejected as "Unknown property."
+
+### Defaults for Omitted Properties
+
+When a scoped ontology omits a property that has a `defaultValue` in the full schema:
+
+1. The consumer does not see the property in the schema
+2. On entity/relation **creation**, the runtime applies the `defaultValue` from the full schema
+3. The entity/relation is stored with the default; the consumer never sees it through this lens
+4. On **updates** (PATCH), defaults are NOT re-applied — only creation triggers default application
+
+This applies to both required and optional properties with defaults. No computed or ontology-specific defaults — the `defaultValue` from the schema is used as-is.
+
+**Validation rule:** A scoped ontology may omit a required property **only if** that property has a `defaultValue` in the schema. Optional properties may always be omitted.
+
+### Neighbor Traversal
+
+The neighbor endpoint filters results against the scoped `SchemaCache`. Connections via relation types not in scope are excluded from the response. This prevents leaking relationships the scoped ontology does not acknowledge.
+
+### Semantic Search
+
+Search results are limited to entity types in the scoped schema. Note: embeddings are built from all string properties at creation/update time (using the full schema of the creating ontology). A scoped ontology's search may return results with high relevance driven by properties invisible to that scope. This is inherent to the shared data model and is documented, not prevented.
+
+## 5. Instance Data
+
+**Entities are not scoped by ontology.** An `_Entity` with `_entityTypeKey: "person"` is visible to any ontology that includes the `person` entity type. Ontologies are lenses over a shared data space, not isolated silos.
+
+- Creating a person through ontology A and reading it through ontology B (both include `person`) returns the same instance
+- Each ontology shows only its scoped properties; the underlying node data is unchanged
+- Concurrent writes through different ontologies follow last-write-wins semantics on shared properties
+
+### Data Wipe Removed
+
+`DELETE /api/runtime/{key}/data` is removed. Data does not belong to ontologies — wiping through a lens would delete shared instances visible to other ontologies. The corresponding MCP `wipe_data` tool is also removed.
+
+If batch deletion is needed in the future, it should be an explicit, schema-level operation with clear scope (e.g., delete all instances of a specific entity type).
+
+## 6. Validation
+
+### Schema Validation
+
+Validates the global schema independently of ontologies:
+
+- Entity type key global uniqueness
+- Relation type key global uniqueness
+- Property key uniqueness within each type
+- Data type validity
+- Relation type source/target entity type references exist
+
+### Ontology Validation
+
+Validates a scoped ontology's `INCLUDES_TYPE` declarations against the schema. Unscoped ontologies are always valid.
+
+- All referenced entity/relation type keys exist in the schema
+- For each included relation type: both source and target entity types are also included (exposed by the ontology — either explicitly or via "no entity scoping = all entity types")
+- For each explicit property list: all listed property keys exist on the respective type
+- Required property rule: every required property without a `defaultValue` must be in the property list (or `properties: null`)
+
+### Full Validation
+
+Validates the schema + all scoped ontologies in a single pass. Reports errors grouped by scope.
+
+## 7. Cascading Enforcement
+
+Schema changes that would break a scoped ontology are **rejected by default** with actionable errors naming the affected ontologies.
+
+### Delete Operations
+
+Delete endpoints for entity types, relation types, and properties accept `?cascade=true`:
+
+- Without cascade: blocked with error listing affected ontologies
+- With `cascade=true`: auto-removes `INCLUDES_TYPE` references, then deletes
+
+### Add Operations
+
+Adding a **required property without a default** to an entity type is blocked if any scoped ontology with an explicit property list for that type does not include the new property. The error lists affected ontologies. `?cascade=true` on the property creation endpoint auto-adds the new property key to all affected explicit property lists.
+
+### `properties: null` Exception
+
+Scoped ontologies using `properties: null` for a type are **not affected** by property additions or removals on that type — they dynamically reflect whatever properties exist.
+
+> **Stability note:** This creates two stability classes for scoped ontologies:
+> - `properties: null` = **unstable** contract (schema changes to that type are reflected automatically)
+> - `properties: [...]` = **stable** contract (changes are blocked unless cascaded)
+>
+> Consumers should be aware that `properties: null` ontologies may gain or lose properties when the schema changes.
+
+## 8. Modeling API
+
+### Schema Management (Global)
+
+Entity types, relation types, and properties are global — no ontology scope in the URL.
+
+```
+POST   /api/model/entity-types
+GET    /api/model/entity-types
+GET    /api/model/entity-types/{id}
+PUT    /api/model/entity-types/{id}
+DELETE /api/model/entity-types/{id}[?cascade=true]
+
+POST   /api/model/entity-types/{id}/properties
+GET    /api/model/entity-types/{id}/properties
+PUT    /api/model/entity-types/{id}/properties/{prop_id}
+DELETE /api/model/entity-types/{id}/properties/{prop_id}[?cascade=true]
+
+POST   /api/model/relation-types
+GET    /api/model/relation-types
+GET    /api/model/relation-types/{id}
+PUT    /api/model/relation-types/{id}
+DELETE /api/model/relation-types/{id}[?cascade=true]
+
+POST   /api/model/relation-types/{id}/properties
+GET    /api/model/relation-types/{id}/properties
+PUT    /api/model/relation-types/{id}/properties/{prop_id}
+DELETE /api/model/relation-types/{id}/properties/{prop_id}[?cascade=true]
+
+POST   /api/model/schema/validate
+```
+
+### Ontology Management
+
+```
+POST   /api/model/ontologies
+GET    /api/model/ontologies
+GET    /api/model/ontologies/{id}
+PUT    /api/model/ontologies/{id}
+DELETE /api/model/ontologies/{id}
+```
+
+### Scope Management
+
+```
+POST   /api/model/ontologies/{id}/includes/entity-types
+GET    /api/model/ontologies/{id}/includes/entity-types
+PUT    /api/model/ontologies/{id}/includes/entity-types/{type_id}
+DELETE /api/model/ontologies/{id}/includes/entity-types/{type_id}
+
+POST   /api/model/ontologies/{id}/includes/relation-types
+GET    /api/model/ontologies/{id}/includes/relation-types
+PUT    /api/model/ontologies/{id}/includes/relation-types/{type_id}
+DELETE /api/model/ontologies/{id}/includes/relation-types/{type_id}
+
+POST   /api/model/ontologies/{id}/validate
+```
+
+### Export / Import
+
+```
+GET    /api/model/export
+POST   /api/model/import
+```
+
+**Format v2.0** — breaking change from per-ontology format. No backward compatibility.
+
+```json
+{
+  "formatVersion": "2.0",
+  "entityTypes": [
+    {
+      "key": "person",
+      "displayName": "Person",
+      "description": "...",
+      "properties": [
+        { "key": "name", "displayName": "Name", "dataType": "string", "required": true, "defaultValue": null }
+      ]
+    }
+  ],
+  "relationTypes": [
+    {
+      "key": "works_at",
+      "displayName": "Works At",
+      "description": "...",
+      "fromEntityTypeKey": "person",
+      "toEntityTypeKey": "company",
+      "properties": []
+    }
+  ],
+  "ontologies": [
+    {
+      "key": "hr",
+      "name": "HR View",
+      "description": "...",
+      "includes": {
+        "entityTypes": [
+          { "key": "person", "properties": ["name"] },
+          { "key": "department", "properties": null }
+        ],
+        "relationTypes": [
+          { "key": "works_in", "properties": null }
+        ]
+      }
+    },
+    {
+      "key": "full",
+      "name": "Full Schema",
+      "description": "Unscoped access to everything"
+    }
+  ]
+}
+```
+
+Top-level `entityTypes` and `relationTypes` are the full schema. Unscoped ontologies have no `includes` field. Scoped ontologies list their inclusions with `properties` filters.
+
+## 9. Runtime API
+
+**The runtime API surface is unchanged** except for the removal of the data wipe endpoint. Schema resolution is extended to handle scoped ontologies, but all other endpoints, request/response contracts, and behavior remain the same.
+
+Requesting an entity type or relation type not in the scoped schema returns 404 — the type is invisible through this lens.
+
+## 10. MCP
+
+### Modeling MCP
+
+Mounts at `/mcp/model` with no key parameter. The `OntologyKeyMiddleware` is removed from the modeling mount.
+
+**Global schema tools** (no ontology key parameter): CRUD for types and properties, get/validate schema, export/import.
+
+**Ontology management tools** (explicit `ontology_key` parameter): CRUD for ontologies, scope management, validate ontology.
+
+### Runtime MCP
+
+**Unchanged** except: `wipe_data` tool removed (same as REST).
+
+Key resolution retains 3-tier: URL path → `X-Ontology-Key` header → env var.
+
+## 11. Interaction with Data Scoping
+
+The [data scoping](data-scoping.md) feature (if implemented) operates at the **data level** — filtering instances by scope dimension values. Ontology views operates at the **schema level** — filtering types and properties. The two compose naturally: schema scoping narrows what types are visible, data scoping narrows which instances within those types are returned.
+
+**Known interactions:**
+
+- **Scope dimension entity type excluded from scoped ontology:** Data scoping still works because it filters by the `{entity_type}_key` property value, not by the dimension entity type's presence in the schema. However, the consumer cannot discover valid scope values through an ontology that excludes the dimension type.
+- **Scope dimension property filtered out:** If a scoped ontology's explicit property list omits the `{entity_type}_key` property (e.g., `project_key`), data scoping must inject the scope value via the full schema, bypassing scoped validation — similar to how defaults are applied.
+- **Precedence:** When both a schema default and a scope value apply to the same property, the scope value takes precedence.
+

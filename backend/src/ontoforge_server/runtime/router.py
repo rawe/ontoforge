@@ -6,7 +6,6 @@ from ontoforge_server.core.database import get_driver
 from ontoforge_server.core.schemas import ExportEntityType, ExportRelationType
 from ontoforge_server.runtime import service
 from ontoforge_server.runtime.schemas import (
-    DataWipeResponse,
     FeaturesResponse,
     NeighborhoodResponse,
     PaginatedResponse,
@@ -22,17 +21,6 @@ global_router = APIRouter(tags=["runtime"])
 @global_router.get("/features", response_model=FeaturesResponse)
 async def get_features():
     return FeaturesResponse(semanticSearch=bool(settings.EMBEDDING_PROVIDER))
-
-
-# --- Data Wipe ---
-
-
-@router.delete("/data", response_model=DataWipeResponse)
-async def wipe_data(
-    ontology_key: str,
-    driver: AsyncDriver = Depends(get_driver),
-):
-    return await service.wipe_instance_data(ontology_key, driver)
 
 
 # --- Schema Introspection ---
@@ -111,7 +99,6 @@ async def list_entities(
     q: str | None = Query(default=None),
     fields: list[str] | None = Query(default=None),
 ):
-    # Parse filter.{key} params from the raw query string
     filters = service._parse_filters(dict(request.query_params))
     return await service.list_entities(
         ontology_key, entity_type_key, limit, offset, sort, order, q, filters, driver,

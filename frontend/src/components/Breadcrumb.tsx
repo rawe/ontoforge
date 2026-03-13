@@ -39,6 +39,20 @@ export default function Breadcrumb() {
 function buildCrumbs(pathname: string, queryClient: ReturnType<typeof useQueryClient>): Crumb[] {
   const parts = pathname.split('/').filter(Boolean);
 
+  // /schema
+  if (parts[0] === 'schema') {
+    const crumbs: Crumb[] = [{ label: 'Schema', to: '/schema' }];
+
+    if (parts.length >= 3) {
+      const typeSegment = parts[1]; // 'entity-types' or 'relation-types'
+      const typeId = parts[2];
+      const typeName = resolveGlobalTypeName(queryClient, typeSegment, typeId);
+      crumbs.push({ label: typeName });
+    }
+
+    return crumbs;
+  }
+
   // /ontologies
   if (parts[0] === 'ontologies') {
     const crumbs: Crumb[] = [{ label: 'Ontologies', to: '/ontologies' }];
@@ -46,14 +60,7 @@ function buildCrumbs(pathname: string, queryClient: ReturnType<typeof useQueryCl
     if (parts.length >= 2) {
       const ontologyId = parts[1];
       const ontologyName = resolveOntologyName(queryClient, ontologyId);
-      crumbs.push({ label: ontologyName, to: `/ontologies/${ontologyId}` });
-
-      if (parts.length >= 4) {
-        const typeSegment = parts[2]; // 'entity-types' or 'relation-types'
-        const typeId = parts[3];
-        const typeName = resolveModelingTypeName(queryClient, ontologyId, typeSegment, typeId);
-        crumbs.push({ label: typeName });
-      }
+      crumbs.push({ label: ontologyName });
     }
 
     return crumbs;
@@ -95,19 +102,18 @@ function resolveOntologyNameByKey(queryClient: ReturnType<typeof useQueryClient>
   return ontology?.name ?? key;
 }
 
-function resolveModelingTypeName(
+function resolveGlobalTypeName(
   queryClient: ReturnType<typeof useQueryClient>,
-  ontologyId: string,
   typeSegment: string,
   typeId: string,
 ): string {
   if (typeSegment === 'entity-types') {
-    const types = queryClient.getQueryData<EntityType[]>(['ontology', ontologyId, 'entityTypes']);
+    const types = queryClient.getQueryData<EntityType[]>(['entityTypes']);
     const et = types?.find((t) => t.entityTypeId === typeId);
     return et?.displayName ?? typeId;
   }
   if (typeSegment === 'relation-types') {
-    const types = queryClient.getQueryData<RelationType[]>(['ontology', ontologyId, 'relationTypes']);
+    const types = queryClient.getQueryData<RelationType[]>(['relationTypes']);
     const rt = types?.find((t) => t.relationTypeId === typeId);
     return rt?.displayName ?? typeId;
   }

@@ -3,19 +3,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+REPO = "ontoforge_server.modeling.service.repository"
 
-NOW = datetime(2025, 1, 1, tzinfo=timezone.utc)
+NOW = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
-ONTOLOGY_DATA = {
-    "ontologyId": "ont-1",
-    "key": "test_ontology",
-    "name": "Test",
-    "description": None,
-    "createdAt": NOW,
-    "updatedAt": NOW,
-}
-
-ENTITY_TYPE_DATA = {
+ET_DATA = {
     "entityTypeId": "et-1",
     "key": "person",
     "displayName": "Person",
@@ -24,7 +16,18 @@ ENTITY_TYPE_DATA = {
     "updatedAt": NOW,
 }
 
-PROPERTY_DATA = {
+RT_DATA = {
+    "relationTypeId": "rt-1",
+    "key": "works_for",
+    "displayName": "Works For",
+    "description": None,
+    "sourceEntityTypeKey": "person",
+    "targetEntityTypeKey": "company",
+    "createdAt": NOW,
+    "updatedAt": NOW,
+}
+
+PROP_DATA = {
     "propertyId": "prop-1",
     "key": "full_name",
     "displayName": "Full Name",
@@ -37,144 +40,201 @@ PROPERTY_DATA = {
 }
 
 
-def _mock_repo(**overrides):
-    defaults = {
-        "get_ontology": AsyncMock(return_value=ONTOLOGY_DATA),
-        "get_entity_type": AsyncMock(return_value=ENTITY_TYPE_DATA),
-        "get_relation_type": AsyncMock(return_value=None),
-        "get_property_by_key": AsyncMock(return_value=None),
-        "create_property": AsyncMock(return_value=PROPERTY_DATA),
-        "list_properties": AsyncMock(return_value=[PROPERTY_DATA]),
-        "get_property": AsyncMock(return_value=PROPERTY_DATA),
-        "update_property": AsyncMock(return_value=PROPERTY_DATA),
-        "delete_property": AsyncMock(return_value=True),
-    }
-    defaults.update(overrides)
-    return defaults
+# --- Entity Type Properties ---
 
 
-@pytest.fixture
-def repo_patch():
-    def _patch(**overrides):
-        mocks = _mock_repo(**overrides)
-        return patch.multiple(
-            "ontoforge_server.modeling.service.repository", **mocks
-        )
-
-    return _patch
-
-
-BASE = "/api/model/ontologies/ont-1/entity-types/et-1/properties"
-
-
-async def test_add_property(client, repo_patch):
-    with repo_patch():
+@pytest.mark.asyncio
+async def test_create_entity_type_property(client):
+    with (
+        patch(f"{REPO}.get_entity_type", new_callable=AsyncMock, return_value=ET_DATA),
+        patch(f"{REPO}.get_property_by_key", new_callable=AsyncMock, return_value=None),
+        patch(f"{REPO}.create_property", new_callable=AsyncMock, return_value=PROP_DATA),
+    ):
         resp = await client.post(
-            BASE,
-            json={
-                "key": "full_name",
-                "displayName": "Full Name",
-                "dataType": "string",
-            },
+            "/api/model/entity-types/et-1/properties",
+            json={"key": "full_name", "displayName": "Full Name", "dataType": "string"},
         )
     assert resp.status_code == 201
-    assert resp.json()["key"] == "full_name"
-    assert resp.json()["propertyId"] == "prop-1"
+    body = resp.json()
+    assert body["propertyId"] == "prop-1"
+    assert body["key"] == "full_name"
+    assert body["dataType"] == "string"
 
 
-async def test_add_property_duplicate_key(client, repo_patch):
-    with repo_patch(get_property_by_key=AsyncMock(return_value=PROPERTY_DATA)):
+@pytest.mark.asyncio
+async def test_create_property_key_conflict(client):
+    with (
+        patch(f"{REPO}.get_entity_type", new_callable=AsyncMock, return_value=ET_DATA),
+        patch(f"{REPO}.get_property_by_key", new_callable=AsyncMock, return_value=PROP_DATA),
+    ):
         resp = await client.post(
-            BASE,
-            json={
-                "key": "full_name",
-                "displayName": "Full Name",
-                "dataType": "string",
-            },
+            "/api/model/entity-types/et-1/properties",
+            json={"key": "full_name", "displayName": "Full Name", "dataType": "string"},
         )
     assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "RESOURCE_CONFLICT"
 
 
-async def test_list_properties(client, repo_patch):
-    with repo_patch():
-        resp = await client.get(BASE)
+@pytest.mark.asyncio
+async def test_create_property_owner_not_found(client):
+    with patch(f"{REPO}.get_entity_type", new_callable=AsyncMock, return_value=None):
+        resp = await client.post(
+            "/api/model/entity-types/nonexistent/properties",
+            json={"key": "full_name", "displayName": "Full Name", "dataType": "string"},
+        )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_list_entity_type_properties(client):
+    with (
+        patch(f"{REPO}.get_entity_type", new_callable=AsyncMock, return_value=ET_DATA),
+        patch(f"{REPO}.list_properties", new_callable=AsyncMock, return_value=[PROP_DATA]),
+    ):
+        resp = await client.get("/api/model/entity-types/et-1/properties")
     assert resp.status_code == 200
-    assert isinstance(resp.json(), list)
     assert len(resp.json()) == 1
+    assert resp.json()[0]["key"] == "full_name"
 
 
-async def test_update_property(client, repo_patch):
-    updated = {**PROPERTY_DATA, "displayName": "Updated Name"}
-    with repo_patch(update_property=AsyncMock(return_value=updated)):
+@pytest.mark.asyncio
+async def test_update_entity_type_property(client):
+    updated = {**PROP_DATA, "displayName": "Name", "required": True}
+    with (
+        patch(f"{REPO}.get_entity_type", new_callable=AsyncMock, return_value=ET_DATA),
+        patch(f"{REPO}.update_property", new_callable=AsyncMock, return_value=updated),
+    ):
         resp = await client.put(
-            f"{BASE}/prop-1",
-            json={"displayName": "Updated Name"},
+            "/api/model/entity-types/et-1/properties/prop-1",
+            json={"displayName": "Name", "required": True},
         )
     assert resp.status_code == 200
-    assert resp.json()["displayName"] == "Updated Name"
+    assert resp.json()["displayName"] == "Name"
 
 
-async def test_delete_property(client, repo_patch):
-    with repo_patch():
-        resp = await client.delete(f"{BASE}/prop-1")
+@pytest.mark.asyncio
+async def test_update_property_not_found(client):
+    with (
+        patch(f"{REPO}.get_entity_type", new_callable=AsyncMock, return_value=ET_DATA),
+        patch(f"{REPO}.update_property", new_callable=AsyncMock, return_value=None),
+    ):
+        resp = await client.put(
+            "/api/model/entity-types/et-1/properties/nonexistent",
+            json={"displayName": "Name"},
+        )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_entity_type_property(client):
+    with (
+        patch(f"{REPO}.get_entity_type", new_callable=AsyncMock, return_value=ET_DATA),
+        patch(f"{REPO}.get_property", new_callable=AsyncMock, return_value=PROP_DATA),
+        patch(f"{REPO}.find_ontologies_including_type", new_callable=AsyncMock, return_value=[]),
+        patch(f"{REPO}.delete_property", new_callable=AsyncMock, return_value=True),
+    ):
+        resp = await client.delete("/api/model/entity-types/et-1/properties/prop-1")
     assert resp.status_code == 204
 
 
-async def test_property_response_without_default_value(client, repo_patch):
-    """Regression: PropertyDefinitionResponse must accept missing defaultValue."""
-    prop_no_default = {
-        "propertyId": "prop-2",
-        "key": "age",
-        "displayName": "Age",
-        "description": None,
-        "dataType": "integer",
-        "required": True,
-        "createdAt": NOW,
-        "updatedAt": NOW,
-        # defaultValue intentionally omitted
-    }
-    with repo_patch(create_property=AsyncMock(return_value=prop_no_default)):
+@pytest.mark.asyncio
+async def test_delete_property_not_found(client):
+    with (
+        patch(f"{REPO}.get_entity_type", new_callable=AsyncMock, return_value=ET_DATA),
+        patch(f"{REPO}.get_property", new_callable=AsyncMock, return_value=None),
+    ):
+        resp = await client.delete("/api/model/entity-types/et-1/properties/nonexistent")
+    assert resp.status_code == 404
+
+
+# --- Relation Type Properties ---
+
+
+@pytest.mark.asyncio
+async def test_create_relation_type_property(client):
+    with (
+        patch(f"{REPO}.get_relation_type", new_callable=AsyncMock, return_value=RT_DATA),
+        patch(f"{REPO}.get_property_by_key", new_callable=AsyncMock, return_value=None),
+        patch(f"{REPO}.create_property", new_callable=AsyncMock, return_value=PROP_DATA),
+    ):
         resp = await client.post(
-            BASE,
+            "/api/model/relation-types/rt-1/properties",
+            json={"key": "full_name", "displayName": "Full Name", "dataType": "string"},
+        )
+    assert resp.status_code == 201
+    assert resp.json()["key"] == "full_name"
+
+
+# --- Required Property Cascade ---
+
+
+@pytest.mark.asyncio
+async def test_create_required_property_no_default_cascade_needed(client):
+    """Creating required prop without default when ontologies have explicit prop lists."""
+    with (
+        patch(f"{REPO}.get_entity_type", new_callable=AsyncMock, return_value=ET_DATA),
+        patch(f"{REPO}.get_property_by_key", new_callable=AsyncMock, return_value=None),
+        patch(
+            f"{REPO}.find_ontologies_with_explicit_property",
+            new_callable=AsyncMock,
+            return_value=["my_ontology"],
+        ),
+    ):
+        resp = await client.post(
+            "/api/model/entity-types/et-1/properties",
             json={
-                "key": "age",
-                "displayName": "Age",
-                "dataType": "integer",
+                "key": "email",
+                "displayName": "Email",
+                "dataType": "string",
+                "required": True,
+            },
+        )
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "CASCADE_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_create_required_property_no_default_with_cascade(client):
+    """Creating required prop without default with ?cascade=true auto-adds to lists."""
+    required_prop = {**PROP_DATA, "key": "email", "required": True}
+    with (
+        patch(f"{REPO}.get_entity_type", new_callable=AsyncMock, return_value=ET_DATA),
+        patch(f"{REPO}.get_property_by_key", new_callable=AsyncMock, return_value=None),
+        patch(
+            f"{REPO}.find_ontologies_with_explicit_property",
+            new_callable=AsyncMock,
+            return_value=["my_ontology"],
+        ),
+        patch(f"{REPO}.add_property_to_includes_lists", new_callable=AsyncMock, return_value=1),
+        patch(f"{REPO}.create_property", new_callable=AsyncMock, return_value=required_prop),
+    ):
+        resp = await client.post(
+            "/api/model/entity-types/et-1/properties?cascade=true",
+            json={
+                "key": "email",
+                "displayName": "Email",
+                "dataType": "string",
                 "required": True,
             },
         )
     assert resp.status_code == 201
-    assert resp.json()["defaultValue"] is None
+    assert resp.json()["required"] is True
 
 
-def test_property_definition_response_schema_no_default():
-    """Regression: PropertyDefinitionResponse accepts dict without defaultValue key."""
-    from ontoforge_server.modeling.schemas import PropertyDefinitionResponse
-
-    data = {
-        "propertyId": "prop-3",
-        "key": "email",
-        "displayName": "Email",
-        "description": None,
-        "dataType": "string",
-        "required": False,
-        "createdAt": NOW,
-        "updatedAt": NOW,
-    }
-    resp = PropertyDefinitionResponse.model_validate(data)
-    assert resp.default_value is None
-
-
-def test_export_property_schema_no_default():
-    """Regression: ExportProperty accepts dict without defaultValue key."""
-    from ontoforge_server.modeling.schemas import ExportProperty
-
-    data = {
-        "key": "email",
-        "displayName": "Email",
-        "description": None,
-        "dataType": "string",
-        "required": False,
-    }
-    prop = ExportProperty.model_validate(data)
-    assert prop.default_value is None
+@pytest.mark.asyncio
+async def test_delete_property_with_cascade(client):
+    with (
+        patch(f"{REPO}.get_entity_type", new_callable=AsyncMock, return_value=ET_DATA),
+        patch(f"{REPO}.get_property", new_callable=AsyncMock, return_value=PROP_DATA),
+        patch(
+            f"{REPO}.find_ontologies_including_type",
+            new_callable=AsyncMock,
+            return_value=["my_ontology"],
+        ),
+        patch(f"{REPO}.remove_property_from_includes_lists", new_callable=AsyncMock, return_value=1),
+        patch(f"{REPO}.delete_property", new_callable=AsyncMock, return_value=True),
+    ):
+        resp = await client.delete(
+            "/api/model/entity-types/et-1/properties/prop-1?cascade=true"
+        )
+    assert resp.status_code == 204

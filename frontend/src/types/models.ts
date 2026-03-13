@@ -21,8 +21,8 @@ export interface RelationType {
   key: string;
   displayName: string;
   description: string | null;
-  sourceEntityTypeId: string;
-  targetEntityTypeId: string;
+  sourceEntityTypeKey: string;
+  targetEntityTypeKey: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -44,4 +44,9 @@ export interface PropertyDefinition {
 export interface ValidationResult {
   valid: boolean;
   errors: { path: string; message: string }[];
+}
+
+export interface IncludeTypeResponse {
+  key: string;
+  properties: string[] | null;
 }

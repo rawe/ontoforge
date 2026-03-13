@@ -24,10 +24,6 @@ class OntologyKeyMiddleware:
     3. **Environment variable** — ``DEFAULT_MCP_ONTOLOGY_KEY``
 
     If none provide a key, returns 400.
-
-    Starlette's Mount does NOT rewrite ``scope["path"]``; it sets
-    ``scope["root_path"]`` instead.  We therefore compute the relative path
-    via ``get_route_path`` before splitting out the ontology key.
     """
 
     def __init__(self, app: ASGIApp):
@@ -44,8 +40,6 @@ class OntologyKeyMiddleware:
         url_key = parts[0] if parts and parts[0] else None
 
         if url_key:
-            # Check it's not a bare MCP protocol segment (e.g. "/mcp")
-            # A real ontology key won't equal "mcp"
             scope = dict(scope)
             scope["root_path"] = scope.get("root_path", "") + "/" + url_key
             token = current_ontology_key.set(url_key)
@@ -81,7 +75,6 @@ class OntologyKeyMiddleware:
 
 
 def _get_header(scope: Scope, name: str) -> str | None:
-    """Extract a header value from the ASGI scope (case-insensitive)."""
     name_lower = name.lower().encode("latin-1")
     for header_name, header_value in scope.get("headers", []):
         if header_name == name_lower:
@@ -90,7 +83,6 @@ def _get_header(scope: Scope, name: str) -> str | None:
 
 
 def _ensure_session_manager(mcp_instance) -> None:
-    """Ensure a FastMCP instance has its session manager initialized."""
     if mcp_instance._session_manager is None:
         from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
@@ -105,23 +97,21 @@ def _ensure_session_manager(mcp_instance) -> None:
 def mount_mcp(app) -> None:
     """Mount MCP endpoints on the FastAPI app.
 
-    Instead of using ``mcp.streamable_http_app()`` (which creates a full
-    Starlette app with its own lifespan that would conflict with our main
-    lifespan), we mount the raw ASGI handler directly.  The session manager
-    lifecycle is managed by the main FastAPI lifespan in ``main.py``.
+    Modeling MCP is mounted directly (no middleware — tools use explicit ontology_key parameter).
+    Runtime MCP uses OntologyKeyMiddleware for key resolution.
     """
     from ontoforge_server.mcp.modeling import modeling_mcp
     from ontoforge_server.mcp.runtime import runtime_mcp
 
-    # --- Modeling MCP ---
+    # --- Modeling MCP (no middleware) ---
     _ensure_session_manager(modeling_mcp)
 
     async def modeling_asgi_app(scope: Scope, receive: Receive, send: Send) -> None:
         await modeling_mcp.session_manager.handle_request(scope, receive, send)
 
-    app.mount("/mcp/model", OntologyKeyMiddleware(modeling_asgi_app))
+    app.mount("/mcp/model", modeling_asgi_app)
 
-    # --- Runtime MCP ---
+    # --- Runtime MCP (with middleware) ---
     _ensure_session_manager(runtime_mcp)
 
     async def runtime_asgi_app(scope: Scope, receive: Receive, send: Send) -> None:

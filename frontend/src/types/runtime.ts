@@ -3,7 +3,6 @@ import type { DataType } from './models';
 // Schema introspection types
 export interface RuntimeSchema {
   ontology: {
-    ontologyId: string;
     name: string;
     key: string;
     description: string | null;

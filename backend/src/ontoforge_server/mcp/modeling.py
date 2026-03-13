@@ -8,6 +8,7 @@ from ontoforge_server.modeling.schemas import (
     EntityTypeCreate,
     EntityTypeUpdate,
     ExportPayload,
+    IncludeTypeRequest,
     OntologyCreate,
     OntologyUpdate,
     PropertyDefinitionCreate,
@@ -15,7 +16,6 @@ from ontoforge_server.modeling.schemas import (
     RelationTypeCreate,
     RelationTypeUpdate,
 )
-from ontoforge_server.mcp.mount import current_ontology_key
 
 modeling_mcp = FastMCP(
     "OntoForge Modeling",
@@ -30,66 +30,34 @@ modeling_mcp.settings.streamable_http_path = "/"
 # ---------------------------------------------------------------------------
 
 
-def _get_ontology_key() -> str:
-    """Get the current ontology key from the request context."""
-    try:
-        return current_ontology_key.get()
-    except LookupError:
-        raise RuntimeError(
-            "No ontology key in context — is the MCP server mounted correctly?"
-        )
-
-
-async def _resolve_ontology(driver, ontology_key: str) -> dict:
-    """Resolve ontology key to full ontology dict. Raises NotFoundError if missing."""
+async def _resolve_entity_type(driver, entity_type_key: str) -> dict:
+    """Resolve entity type key to full dict globally."""
     async with driver.session() as session:
-        data = await repository.get_ontology_by_key(session, ontology_key)
-    if not data:
-        raise NotFoundError(f"Ontology '{ontology_key}' not found")
-    return data
-
-
-async def _resolve_entity_type(
-    driver, ontology_id: str, entity_type_key: str
-) -> dict:
-    """Resolve entity type key to full dict. Raises NotFoundError if missing."""
-    async with driver.session() as session:
-        data = await repository.get_entity_type_by_key(
-            session, ontology_id, entity_type_key
-        )
+        data = await repository.get_entity_type_by_key(session, entity_type_key)
     if not data:
         raise NotFoundError(f"Entity type '{entity_type_key}' not found")
     return data
 
 
-async def _resolve_relation_type(
-    driver, ontology_id: str, relation_type_key: str
-) -> dict:
-    """Resolve relation type key to full dict. Raises NotFoundError if missing."""
+async def _resolve_relation_type(driver, relation_type_key: str) -> dict:
+    """Resolve relation type key to full dict globally."""
     async with driver.session() as session:
-        data = await repository.get_relation_type_by_key(
-            session, ontology_id, relation_type_key
-        )
+        data = await repository.get_relation_type_by_key(session, relation_type_key)
     if not data:
         raise NotFoundError(f"Relation type '{relation_type_key}' not found")
     return data
 
 
-async def _resolve_property(
-    driver, owner_id: str, owner_label: str, property_key: str
-) -> dict:
-    """Resolve property key to full dict. Raises NotFoundError if missing."""
+async def _resolve_property(driver, owner_id: str, owner_label: str, property_key: str) -> dict:
+    """Resolve property key to full dict."""
     async with driver.session() as session:
-        data = await repository.get_property_by_key(
-            session, owner_id, owner_label, property_key
-        )
+        data = await repository.get_property_by_key(session, owner_id, owner_label, property_key)
     if not data:
         raise NotFoundError(f"Property '{property_key}' not found")
     return data
 
 
 def _resolve_owner_label(type_kind: str) -> str:
-    """Map type_kind string to Neo4j label."""
     if type_kind == "entity_type":
         return "EntityType"
     elif type_kind == "relation_type":
@@ -100,64 +68,37 @@ def _resolve_owner_label(type_kind: str) -> str:
         )
 
 
-async def _resolve_owner(driver, ontology_id: str, type_kind: str, type_key: str):
+async def _resolve_owner(driver, type_kind: str, type_key: str):
     """Resolve a type_kind + type_key to (owner_id, owner_label)."""
     owner_label = _resolve_owner_label(type_kind)
     if owner_label == "EntityType":
-        owner = await _resolve_entity_type(driver, ontology_id, type_key)
+        owner = await _resolve_entity_type(driver, type_key)
         return owner["entityTypeId"], owner_label
     else:
-        owner = await _resolve_relation_type(driver, ontology_id, type_key)
+        owner = await _resolve_relation_type(driver, type_key)
         return owner["relationTypeId"], owner_label
 
 
+async def _resolve_ontology_by_key(driver, ontology_key: str) -> dict:
+    """Resolve ontology key to full ontology dict."""
+    async with driver.session() as session:
+        data = await repository.get_ontology_by_key(session, ontology_key)
+    if not data:
+        raise NotFoundError(f"Ontology '{ontology_key}' not found")
+    return data
+
 
 # ---------------------------------------------------------------------------
-# Tools
+# Global Schema Tools
 # ---------------------------------------------------------------------------
 
 
 @modeling_mcp.tool()
 async def get_schema() -> dict:
-    """Get the current state of the ontology. Call this first to understand what
-    exists before making changes. Returns all entity types, relation types, and
-    their properties."""
-    ontology_key = _get_ontology_key()
+    """Get the current state of the global schema. Returns all entity types,
+    relation types, and their properties."""
     driver = await get_driver()
-    ontology = await _resolve_ontology(driver, ontology_key)
-    result = await service.export_ontology(ontology["ontologyId"], driver=driver)
-    return result.model_dump(by_alias=True)
-
-
-@modeling_mcp.tool()
-async def create_ontology(
-    name: str,
-    description: str | None = None,
-) -> dict:
-    """Bootstrap the ontology. The key is set automatically from the connection
-    URL. Fails if the ontology already exists."""
-    ontology_key = _get_ontology_key()
-    driver = await get_driver()
-    body = OntologyCreate(key=ontology_key, name=name, description=description)
-    result = await service.create_ontology(body=body, driver=driver)
-
-    return result.model_dump(by_alias=True)
-
-
-@modeling_mcp.tool()
-async def update_ontology(
-    name: str | None = None,
-    description: str | None = None,
-) -> dict:
-    """Update the ontology's display name or description."""
-    ontology_key = _get_ontology_key()
-    driver = await get_driver()
-    ontology = await _resolve_ontology(driver, ontology_key)
-    body = OntologyUpdate(name=name, description=description)
-    result = await service.update_ontology(
-        ontology["ontologyId"], body=body, driver=driver
-    )
-
+    result = await service.export_schema(driver=driver)
     return result.model_dump(by_alias=True)
 
 
@@ -167,17 +108,10 @@ async def create_entity_type(
     display_name: str,
     description: str | None = None,
 ) -> dict:
-    """Add a new entity type. Key must be snake_case, unique within the ontology."""
-    ontology_key = _get_ontology_key()
+    """Add a new entity type to the global schema. Key must be snake_case, globally unique."""
     driver = await get_driver()
-    ontology = await _resolve_ontology(driver, ontology_key)
-    body = EntityTypeCreate(
-        key=key, display_name=display_name, description=description
-    )
-    result = await service.create_entity_type(
-        ontology["ontologyId"], body=body, driver=driver
-    )
-
+    body = EntityTypeCreate(key=key, display_name=display_name, description=description)
+    result = await service.create_entity_type(body=body, driver=driver)
     return result.model_dump(by_alias=True)
 
 
@@ -188,30 +122,20 @@ async def update_entity_type(
     description: str | None = None,
 ) -> dict:
     """Update an entity type's display name or description. Key is immutable."""
-    ontology_key = _get_ontology_key()
     driver = await get_driver()
-    ontology = await _resolve_ontology(driver, ontology_key)
-    et = await _resolve_entity_type(driver, ontology["ontologyId"], entity_type_key)
+    et = await _resolve_entity_type(driver, entity_type_key)
     body = EntityTypeUpdate(display_name=display_name, description=description)
-    result = await service.update_entity_type(
-        ontology["ontologyId"], et["entityTypeId"], body=body, driver=driver
-    )
-
+    result = await service.update_entity_type(et["entityTypeId"], body=body, driver=driver)
     return result.model_dump(by_alias=True)
 
 
 @modeling_mcp.tool()
-async def delete_entity_type(entity_type_key: str) -> str:
-    """Remove an entity type and its properties. Fails if any relation type
-    references it as source or target."""
-    ontology_key = _get_ontology_key()
+async def delete_entity_type(entity_type_key: str, cascade: bool = False) -> str:
+    """Remove an entity type and its properties. Use cascade=True to auto-remove
+    from any scoped ontologies. Fails if any relation type references it."""
     driver = await get_driver()
-    ontology = await _resolve_ontology(driver, ontology_key)
-    et = await _resolve_entity_type(driver, ontology["ontologyId"], entity_type_key)
-    await service.delete_entity_type(
-        ontology["ontologyId"], et["entityTypeId"], driver=driver
-    )
-
+    et = await _resolve_entity_type(driver, entity_type_key)
+    await service.delete_entity_type(et["entityTypeId"], cascade=cascade, driver=driver)
     return f"Entity type '{entity_type_key}' deleted successfully."
 
 
@@ -225,23 +149,15 @@ async def create_relation_type(
 ) -> dict:
     """Add a new relation type connecting two entity types. Source and target are
     specified by entity type key."""
-    ontology_key = _get_ontology_key()
     driver = await get_driver()
-    ontology = await _resolve_ontology(driver, ontology_key)
-    ontology_id = ontology["ontologyId"]
-    source_et = await _resolve_entity_type(driver, ontology_id, source_entity_type_key)
-    target_et = await _resolve_entity_type(driver, ontology_id, target_entity_type_key)
     body = RelationTypeCreate(
         key=key,
         display_name=display_name,
         description=description,
-        source_entity_type_id=source_et["entityTypeId"],
-        target_entity_type_id=target_et["entityTypeId"],
+        source_entity_type_key=source_entity_type_key,
+        target_entity_type_key=target_entity_type_key,
     )
-    result = await service.create_relation_type(
-        ontology_id, body=body, driver=driver
-    )
-
+    result = await service.create_relation_type(body=body, driver=driver)
     return result.model_dump(by_alias=True)
 
 
@@ -253,33 +169,20 @@ async def update_relation_type(
 ) -> dict:
     """Update a relation type's display name or description. Source/target
     endpoints are immutable."""
-    ontology_key = _get_ontology_key()
     driver = await get_driver()
-    ontology = await _resolve_ontology(driver, ontology_key)
-    rt = await _resolve_relation_type(
-        driver, ontology["ontologyId"], relation_type_key
-    )
+    rt = await _resolve_relation_type(driver, relation_type_key)
     body = RelationTypeUpdate(display_name=display_name, description=description)
-    result = await service.update_relation_type(
-        ontology["ontologyId"], rt["relationTypeId"], body=body, driver=driver
-    )
-
+    result = await service.update_relation_type(rt["relationTypeId"], body=body, driver=driver)
     return result.model_dump(by_alias=True)
 
 
 @modeling_mcp.tool()
-async def delete_relation_type(relation_type_key: str) -> str:
-    """Remove a relation type and its properties."""
-    ontology_key = _get_ontology_key()
+async def delete_relation_type(relation_type_key: str, cascade: bool = False) -> str:
+    """Remove a relation type and its properties. Use cascade=True to auto-remove
+    from any scoped ontologies."""
     driver = await get_driver()
-    ontology = await _resolve_ontology(driver, ontology_key)
-    rt = await _resolve_relation_type(
-        driver, ontology["ontologyId"], relation_type_key
-    )
-    await service.delete_relation_type(
-        ontology["ontologyId"], rt["relationTypeId"], driver=driver
-    )
-
+    rt = await _resolve_relation_type(driver, relation_type_key)
+    await service.delete_relation_type(rt["relationTypeId"], cascade=cascade, driver=driver)
     return f"Relation type '{relation_type_key}' deleted successfully."
 
 
@@ -293,19 +196,16 @@ async def add_property(
     required: bool = False,
     default_value: str | None = None,
     description: str | None = None,
+    cascade: bool = False,
 ) -> dict:
     """Add a property definition to an entity type or relation type.
 
     type_kind must be "entity_type" or "relation_type".
     data_type must be one of: string, integer, float, boolean, date, datetime.
+    Use cascade=True to auto-add required properties to scoped ontology property lists.
     """
-    ontology_key = _get_ontology_key()
     driver = await get_driver()
-    ontology = await _resolve_ontology(driver, ontology_key)
-    ontology_id = ontology["ontologyId"]
-    owner_id, owner_label = await _resolve_owner(
-        driver, ontology_id, type_kind, type_key
-    )
+    owner_id, owner_label = await _resolve_owner(driver, type_kind, type_key)
     body = PropertyDefinitionCreate(
         key=key,
         display_name=display_name,
@@ -315,9 +215,8 @@ async def add_property(
         default_value=default_value,
     )
     result = await service.create_property(
-        ontology_id, owner_id, owner_label, body=body, driver=driver
+        owner_id, owner_label, body=body, cascade=cascade, driver=driver
     )
-
     return result.model_dump(by_alias=True)
 
 
@@ -335,13 +234,8 @@ async def update_property(
 
     type_kind must be "entity_type" or "relation_type".
     """
-    ontology_key = _get_ontology_key()
     driver = await get_driver()
-    ontology = await _resolve_ontology(driver, ontology_key)
-    ontology_id = ontology["ontologyId"]
-    owner_id, owner_label = await _resolve_owner(
-        driver, ontology_id, type_kind, type_key
-    )
+    owner_id, owner_label = await _resolve_owner(driver, type_kind, type_key)
     prop = await _resolve_property(driver, owner_id, owner_label, property_key)
     body = PropertyDefinitionUpdate(
         display_name=display_name,
@@ -350,9 +244,8 @@ async def update_property(
         default_value=default_value,
     )
     result = await service.update_property(
-        ontology_id, owner_id, owner_label, prop["propertyId"], body=body, driver=driver
+        owner_id, owner_label, prop["propertyId"], body=body, driver=driver
     )
-
     return result.model_dump(by_alias=True)
 
 
@@ -361,64 +254,149 @@ async def delete_property(
     type_kind: str,
     type_key: str,
     property_key: str,
+    cascade: bool = False,
 ) -> str:
     """Remove a property definition from an entity type or relation type.
 
     type_kind must be "entity_type" or "relation_type".
+    Use cascade=True to auto-remove from scoped ontology property lists.
     """
-    ontology_key = _get_ontology_key()
     driver = await get_driver()
-    ontology = await _resolve_ontology(driver, ontology_key)
-    ontology_id = ontology["ontologyId"]
-    owner_id, owner_label = await _resolve_owner(
-        driver, ontology_id, type_kind, type_key
-    )
+    owner_id, owner_label = await _resolve_owner(driver, type_kind, type_key)
     prop = await _resolve_property(driver, owner_id, owner_label, property_key)
     await service.delete_property(
-        ontology_id, owner_id, owner_label, prop["propertyId"], driver=driver
+        owner_id, owner_label, prop["propertyId"], cascade=cascade, driver=driver
     )
-
     return f"Property '{property_key}' deleted from {type_kind} '{type_key}'."
 
 
 @modeling_mcp.tool()
 async def validate_schema() -> dict:
-    """Check the schema for consistency — dangling references, duplicate keys,
-    missing fields."""
-    ontology_key = _get_ontology_key()
+    """Check the global schema + all scoped ontologies for consistency."""
     driver = await get_driver()
-    ontology = await _resolve_ontology(driver, ontology_key)
-    result = await service.validate_schema(ontology["ontologyId"], driver=driver)
+    result = await service.validate_all(driver=driver)
     return result.model_dump()
 
 
 @modeling_mcp.tool()
 async def export_schema() -> dict:
-    """Export the full ontology schema in OntoForge transfer format (JSON)."""
-    ontology_key = _get_ontology_key()
+    """Export the full schema in OntoForge v2.0 transfer format (JSON)."""
     driver = await get_driver()
-    ontology = await _resolve_ontology(driver, ontology_key)
-    result = await service.export_ontology(ontology["ontologyId"], driver=driver)
+    result = await service.export_schema(driver=driver)
     return result.model_dump(by_alias=True)
 
 
 @modeling_mcp.tool()
-async def import_schema(
-    payload: dict,
-    overwrite: bool = False,
-) -> dict:
-    """Import a schema from a JSON payload into the current ontology. With
-    overwrite=true, replaces the existing schema."""
-    ontology_key = _get_ontology_key()
+async def import_schema(payload: dict) -> dict:
+    """Import a v2.0 schema payload. Creates entity types, relation types,
+    and ontologies with scope configuration."""
     driver = await get_driver()
     export = ExportPayload.model_validate(payload)
-    # Override the ontology key to match the URL
-    export.ontology.key = ontology_key
-    # Check if ontology already exists by key
-    async with driver.session() as session:
-        existing = await repository.get_ontology_by_key(session, ontology_key)
-    if existing:
-        export.ontology.ontology_id = existing["ontologyId"]
-    result = await service.import_ontology(export, overwrite=overwrite, driver=driver)
+    result = await service.import_schema(export, driver=driver)
+    return result
 
+
+# ---------------------------------------------------------------------------
+# Ontology Management Tools
+# ---------------------------------------------------------------------------
+
+
+@modeling_mcp.tool()
+async def create_ontology(
+    key: str,
+    name: str,
+    description: str | None = None,
+) -> dict:
+    """Create a new ontology (named lens over the schema)."""
+    driver = await get_driver()
+    body = OntologyCreate(key=key, name=name, description=description)
+    result = await service.create_ontology(body=body, driver=driver)
     return result.model_dump(by_alias=True)
+
+
+@modeling_mcp.tool()
+async def update_ontology(
+    ontology_key: str,
+    name: str | None = None,
+    description: str | None = None,
+) -> dict:
+    """Update an ontology's display name or description."""
+    driver = await get_driver()
+    ontology = await _resolve_ontology_by_key(driver, ontology_key)
+    body = OntologyUpdate(name=name, description=description)
+    result = await service.update_ontology(ontology["ontologyId"], body=body, driver=driver)
+    return result.model_dump(by_alias=True)
+
+
+@modeling_mcp.tool()
+async def delete_ontology(ontology_key: str) -> str:
+    """Delete an ontology. Does not affect the schema or other ontologies."""
+    driver = await get_driver()
+    ontology = await _resolve_ontology_by_key(driver, ontology_key)
+    await service.delete_ontology(ontology["ontologyId"], driver=driver)
+    return f"Ontology '{ontology_key}' deleted successfully."
+
+
+@modeling_mcp.tool()
+async def add_entity_type_to_ontology(
+    ontology_key: str,
+    entity_type_key: str,
+    properties: list[str] | None = None,
+) -> dict:
+    """Add an entity type to an ontology's scope. Properties=null means all
+    properties. Properties=[...] means only listed properties are exposed."""
+    driver = await get_driver()
+    ontology = await _resolve_ontology_by_key(driver, ontology_key)
+    body = IncludeTypeRequest(key=entity_type_key, properties=properties)
+    result = await service.add_includes_entity_type(ontology["ontologyId"], body, driver)
+    return result.model_dump()
+
+
+@modeling_mcp.tool()
+async def remove_entity_type_from_ontology(
+    ontology_key: str,
+    entity_type_key: str,
+) -> str:
+    """Remove an entity type from an ontology's scope."""
+    driver = await get_driver()
+    ontology = await _resolve_ontology_by_key(driver, ontology_key)
+    et = await _resolve_entity_type(driver, entity_type_key)
+    await service.remove_includes_entity_type(ontology["ontologyId"], et["entityTypeId"], driver)
+    return f"Entity type '{entity_type_key}' removed from ontology '{ontology_key}'."
+
+
+@modeling_mcp.tool()
+async def add_relation_type_to_ontology(
+    ontology_key: str,
+    relation_type_key: str,
+    properties: list[str] | None = None,
+) -> dict:
+    """Add a relation type to an ontology's scope. Properties=null means all
+    properties. Properties=[...] means only listed properties are exposed."""
+    driver = await get_driver()
+    ontology = await _resolve_ontology_by_key(driver, ontology_key)
+    body = IncludeTypeRequest(key=relation_type_key, properties=properties)
+    result = await service.add_includes_relation_type(ontology["ontologyId"], body, driver)
+    return result.model_dump()
+
+
+@modeling_mcp.tool()
+async def remove_relation_type_from_ontology(
+    ontology_key: str,
+    relation_type_key: str,
+) -> str:
+    """Remove a relation type from an ontology's scope."""
+    driver = await get_driver()
+    ontology = await _resolve_ontology_by_key(driver, ontology_key)
+    rt = await _resolve_relation_type(driver, relation_type_key)
+    await service.remove_includes_relation_type(ontology["ontologyId"], rt["relationTypeId"], driver)
+    return f"Relation type '{relation_type_key}' removed from ontology '{ontology_key}'."
+
+
+@modeling_mcp.tool()
+async def validate_ontology(ontology_key: str) -> dict:
+    """Validate a single ontology's INCLUDES_TYPE configuration against the schema."""
+    driver = await get_driver()
+    ontology = await _resolve_ontology_by_key(driver, ontology_key)
+    result = await service.validate_ontology(ontology["ontologyId"], driver=driver)
+    return result.model_dump()

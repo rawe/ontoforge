@@ -1,11 +1,5 @@
 {
-  "formatVersion": "1.0",
-  "ontology": {
-    "ontologyId": "test-ontology-001",
-    "key": "test_ontology",
-    "name": "Test Ontology",
-    "description": "Person/Company ontology for testing"
-  },
+  "formatVersion": "2.0",
   "entityTypes": [
     {
       "key": "person",
@@ -40,6 +34,27 @@
         {"key": "since", "displayName": "Since", "description": null, "dataType": "date", "required": false, "defaultValue": null},
         {"key": "role", "displayName": "Role", "description": null, "dataType": "string", "required": false, "defaultValue": null}
       ]
+    }
+  ],
+  "ontologies": [
+    {
+      "key": "test_ontology",
+      "name": "Test Ontology",
+      "description": "Person/Company ontology for testing"
+    },
+    {
+      "key": "hr_view",
+      "name": "HR View",
+      "description": "HR-scoped view for testing",
+      "includes": {
+        "entityTypes": [
+          {"key": "person", "properties": ["name", "email"]},
+          {"key": "company", "properties": null}
+        ],
+        "relationTypes": [
+          {"key": "works_for", "properties": null}
+        ]
+      }
     }
   ]
 }

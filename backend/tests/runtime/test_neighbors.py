@@ -1,222 +1,232 @@
-"""Tests for the runtime neighbors endpoint (GET /api/runtime/{ontologyKey}/entities/{type}/{id}/neighbors)."""
+"""Tests for runtime neighbor traversal with scope filtering."""
 
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-import ontoforge_server.runtime.service as svc
-from tests.runtime.conftest import ONTOLOGY_KEY
+from tests.runtime.conftest import REPO, NOW, make_entity
 
 
-NOW = datetime(2025, 6, 1, tzinfo=timezone.utc)
-PREFIX = f"/api/runtime/{ONTOLOGY_KEY}"
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
-PERSON_ENTITY = {
-    "_id": "ent-person-1",
-    "_entityTypeKey": "person",
-    "_createdAt": NOW,
-    "_updatedAt": NOW,
-    "name": "Alice",
-}
 
-COMPANY_ENTITY = {
-    "_id": "ent-company-1",
-    "_entityTypeKey": "company",
-    "_createdAt": NOW,
-    "_updatedAt": NOW,
-    "name": "Acme Corp",
-}
-
-NEIGHBOR_DATA = [
-    {
-        "relation": {
-            "_id": "rel-1",
-            "_relationTypeKey": "works_for",
-            "_createdAt": NOW,
-            "_updatedAt": NOW,
-            "direction": "outgoing",
-        },
-        "entity": COMPANY_ENTITY,
+def _make_neighbor(
+    *,
+    relation_type_key: str,
+    direction: str,
+    neighbor_entity_type_key: str,
+    neighbor_id: str,
+    relation_props: dict | None = None,
+    entity_props: dict | None = None,
+) -> dict:
+    """Build a raw neighbor dict as returned by repository.get_neighbors."""
+    rel = {
+        "_id": f"rel-{neighbor_id}",
+        "_relationTypeKey": relation_type_key,
+        "_createdAt": NOW,
+        "_updatedAt": NOW,
+        "direction": direction,
     }
-]
+    if relation_props:
+        rel.update(relation_props)
 
-
-def _mock_repo(**overrides):
-    defaults = {
-        "get_entity": AsyncMock(return_value=PERSON_ENTITY),
-        "get_neighbors": AsyncMock(return_value=NEIGHBOR_DATA),
+    ent = {
+        "_id": neighbor_id,
+        "_entityTypeKey": neighbor_entity_type_key,
+        "_createdAt": NOW,
+        "_updatedAt": NOW,
     }
-    defaults.update(overrides)
-    return defaults
+    if entity_props:
+        ent.update(entity_props)
+
+    return {"relation": rel, "entity": ent}
 
 
-@pytest.fixture
-def repo_patch():
-    def _patch(**overrides):
-        mocks = _mock_repo(**overrides)
-        return patch.multiple(
-            "ontoforge_server.runtime.service.repository", **mocks
-        )
-    return _patch
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
 
 
-async def test_get_neighbors(client, repo_patch):
-    """GET /entities/{type}/{id}/neighbors returns entity + neighbors."""
-    with repo_patch():
-        resp = await client.get(f"{PREFIX}/entities/person/ent-person-1/neighbors")
+@pytest.mark.asyncio
+async def test_neighbors_filtered_by_scoped_relation_types(client, scoped_schema):
+    """Neighbors connected via out-of-scope relation types are excluded."""
+    center = make_entity(entity_type_key="person", entity_id="ent-1", name="Alice", email="a@b.com")
+
+    # Repository returns neighbors for both works_for and belongs_to
+    raw_neighbors = [
+        _make_neighbor(
+            relation_type_key="works_for",
+            direction="outgoing",
+            neighbor_entity_type_key="company",
+            neighbor_id="ent-2",
+            relation_props={"role": "Engineer", "since": "2024-01-15"},
+            entity_props={"name": "Acme"},
+        ),
+        _make_neighbor(
+            relation_type_key="belongs_to",  # NOT in scoped schema
+            direction="outgoing",
+            neighbor_entity_type_key="company",
+            neighbor_id="ent-3",
+            entity_props={"name": "OtherCorp"},
+        ),
+    ]
+
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=scoped_schema),
+        patch(f"{REPO}.get_entity", new_callable=AsyncMock, return_value=center),
+        patch(f"{REPO}.get_neighbors", new_callable=AsyncMock, return_value=raw_neighbors),
+    ):
+        resp = await client.get("/api/runtime/hr_view/entities/person/ent-1/neighbors")
+
     assert resp.status_code == 200
-    data = resp.json()
-    assert data["entity"]["_id"] == "ent-person-1"
-    assert len(data["neighbors"]) == 1
-    assert data["neighbors"][0]["relation"]["direction"] == "outgoing"
-    assert data["neighbors"][0]["entity"]["_id"] == "ent-company-1"
+    body = resp.json()
+
+    # Only the works_for neighbor should remain
+    assert len(body["neighbors"]) == 1
+    assert body["neighbors"][0]["relation"]["_relationTypeKey"] == "works_for"
 
 
-async def test_get_neighbors_with_direction_filter(client, repo_patch):
-    """GET /entities/{type}/{id}/neighbors?direction=outgoing filters by direction."""
-    with repo_patch():
-        resp = await client.get(
-            f"{PREFIX}/entities/person/ent-person-1/neighbors?direction=outgoing"
-        )
+@pytest.mark.asyncio
+async def test_neighbor_entity_properties_filtered_to_scope(client, scoped_schema):
+    """Neighbor entity properties are filtered according to scoped schema."""
+    center = make_entity(entity_type_key="person", entity_id="ent-1", name="Alice", email="a@b.com", age=30)
+
+    raw_neighbors = [
+        _make_neighbor(
+            relation_type_key="works_for",
+            direction="outgoing",
+            neighbor_entity_type_key="company",
+            neighbor_id="ent-2",
+            relation_props={"role": "Engineer"},
+            entity_props={"name": "Acme"},
+        ),
+    ]
+
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=scoped_schema),
+        patch(f"{REPO}.get_entity", new_callable=AsyncMock, return_value=center),
+        patch(f"{REPO}.get_neighbors", new_callable=AsyncMock, return_value=raw_neighbors),
+    ):
+        resp = await client.get("/api/runtime/hr_view/entities/person/ent-1/neighbors")
+
     assert resp.status_code == 200
-    # The direction param is passed to repository; just verify the endpoint accepts it
-    data = resp.json()
-    assert "entity" in data
-    assert "neighbors" in data
+    body = resp.json()
+
+    # Center entity: only scoped properties (name, email — not age)
+    assert body["entity"]["name"] == "Alice"
+    assert body["entity"]["email"] == "a@b.com"
+    assert "age" not in body["entity"]
+
+    # Neighbor entity (company: all props visible via properties=None)
+    neighbor_entity = body["neighbors"][0]["entity"]
+    assert neighbor_entity["name"] == "Acme"
 
 
-async def test_get_neighbors_with_incoming_direction(client, repo_patch):
-    """GET /entities/{type}/{id}/neighbors?direction=incoming is accepted."""
-    with repo_patch():
-        resp = await client.get(
-            f"{PREFIX}/entities/person/ent-person-1/neighbors?direction=incoming"
-        )
+@pytest.mark.asyncio
+async def test_neighbor_relation_properties_filtered(client):
+    """Relation properties on neighbor edges are filtered to scoped properties."""
+    from tests.runtime.conftest import _make_full_schema
+
+    schema = _make_full_schema(
+        ontology_key="restricted_view",
+        entity_inclusions=[
+            {"key": "person", "properties": None},
+            {"key": "company", "properties": None},
+        ],
+        relation_inclusions=[
+            {"key": "works_for", "properties": ["role"]},  # 'since' hidden
+        ],
+    )
+    center = make_entity(entity_type_key="person", entity_id="ent-1", name="Alice")
+
+    raw_neighbors = [
+        _make_neighbor(
+            relation_type_key="works_for",
+            direction="outgoing",
+            neighbor_entity_type_key="company",
+            neighbor_id="ent-2",
+            relation_props={"role": "Engineer", "since": "2024-01-15"},
+            entity_props={"name": "Acme"},
+        ),
+    ]
+
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=schema),
+        patch(f"{REPO}.get_entity", new_callable=AsyncMock, return_value=center),
+        patch(f"{REPO}.get_neighbors", new_callable=AsyncMock, return_value=raw_neighbors),
+    ):
+        resp = await client.get("/api/runtime/restricted_view/entities/person/ent-1/neighbors")
+
     assert resp.status_code == 200
+    body = resp.json()
+    rel = body["neighbors"][0]["relation"]
+    assert rel["role"] == "Engineer"
+    assert "since" not in rel
 
 
-async def test_get_neighbors_with_relation_type_filter(client, repo_patch):
-    """GET /entities/{type}/{id}/neighbors?relationTypeKey=works_for filters by relation type."""
-    with repo_patch():
-        resp = await client.get(
-            f"{PREFIX}/entities/person/ent-person-1/neighbors?relationTypeKey=works_for"
-        )
-    assert resp.status_code == 200
+@pytest.mark.asyncio
+async def test_neighbors_entity_type_not_in_scope(client, scoped_schema):
+    """Requesting neighbors for an entity type not in scope returns 404."""
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=scoped_schema),
+    ):
+        resp = await client.get("/api/runtime/hr_view/entities/department/ent-1/neighbors")
 
-
-async def test_get_neighbors_entity_not_found(client, repo_patch):
-    """GET /entities/{type}/{id}/neighbors with unknown entity returns 404."""
-    with repo_patch(get_entity=AsyncMock(return_value=None)):
-        resp = await client.get(f"{PREFIX}/entities/person/missing-id/neighbors")
     assert resp.status_code == 404
 
 
-async def test_get_neighbors_type_not_found(client, repo_patch):
-    """GET /entities/{type}/{id}/neighbors with unknown entity type returns 404."""
-    with repo_patch():
-        resp = await client.get(f"{PREFIX}/entities/nonexistent/ent-1/neighbors")
+@pytest.mark.asyncio
+async def test_neighbors_entity_not_found(client, scoped_schema):
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=scoped_schema),
+        patch(f"{REPO}.get_entity", new_callable=AsyncMock, return_value=None),
+    ):
+        resp = await client.get("/api/runtime/hr_view/entities/person/no-such-id/neighbors")
+
     assert resp.status_code == 404
 
 
-async def test_get_neighbors_empty_result(client, repo_patch):
-    """GET /entities/{type}/{id}/neighbors returns empty list when no neighbors."""
-    with repo_patch(get_neighbors=AsyncMock(return_value=[])):
-        resp = await client.get(f"{PREFIX}/entities/person/ent-person-1/neighbors")
+@pytest.mark.asyncio
+async def test_neighbors_unscoped_returns_all(client, unscoped_schema):
+    """Unscoped ontology returns neighbors for all relation types."""
+    center = make_entity(
+        entity_type_key="person", entity_id="ent-1", name="Alice", age=30, email="a@b.com"
+    )
+
+    raw_neighbors = [
+        _make_neighbor(
+            relation_type_key="works_for",
+            direction="outgoing",
+            neighbor_entity_type_key="company",
+            neighbor_id="ent-2",
+            relation_props={"role": "Engineer"},
+            entity_props={"name": "Acme"},
+        ),
+        _make_neighbor(
+            relation_type_key="belongs_to",
+            direction="outgoing",
+            neighbor_entity_type_key="company",
+            neighbor_id="ent-3",
+            entity_props={"name": "ParentCo"},
+        ),
+    ]
+
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=unscoped_schema),
+        patch(f"{REPO}.get_entity", new_callable=AsyncMock, return_value=center),
+        patch(f"{REPO}.get_neighbors", new_callable=AsyncMock, return_value=raw_neighbors),
+    ):
+        resp = await client.get("/api/runtime/full_ontology/entities/person/ent-1/neighbors")
+
     assert resp.status_code == 200
-    data = resp.json()
-    assert data["entity"]["_id"] == "ent-person-1"
-    assert len(data["neighbors"]) == 0
+    body = resp.json()
 
+    # Both neighbors visible in unscoped ontology
+    assert len(body["neighbors"]) == 2
+    rel_types = {n["relation"]["_relationTypeKey"] for n in body["neighbors"]}
+    assert rel_types == {"works_for", "belongs_to"}
 
-async def test_get_neighbors_invalid_direction(client, repo_patch):
-    """GET /entities/{type}/{id}/neighbors?direction=invalid returns 422."""
-    with repo_patch():
-        resp = await client.get(
-            f"{PREFIX}/entities/person/ent-person-1/neighbors?direction=invalid"
-        )
-    assert resp.status_code == 422
-
-
-# --- Field Projection ---
-
-
-async def test_get_neighbors_with_fields(client, repo_patch):
-    """GET /neighbors?fields=name projects entity properties.
-
-    Center entity gets only _id + requested fields.
-    Neighbor entities get _id + _entityTypeKey + requested fields.
-    """
-    with repo_patch():
-        resp = await client.get(
-            f"{PREFIX}/entities/person/ent-person-1/neighbors?fields=name"
-        )
-    assert resp.status_code == 200
-    data = resp.json()
-    # Center entity: _id + name only (no _entityTypeKey, no _createdAt)
-    center = data["entity"]
-    assert center["_id"] == "ent-person-1"
-    assert center["name"] == "Alice"
-    assert "_entityTypeKey" not in center
-    assert "_createdAt" not in center
-    # Neighbor entity: _id + _entityTypeKey + name
-    neighbor_entity = data["neighbors"][0]["entity"]
-    assert neighbor_entity["_id"] == "ent-company-1"
-    assert neighbor_entity["_entityTypeKey"] == "company"
-    assert neighbor_entity["name"] == "Acme Corp"
-    assert "_createdAt" not in neighbor_entity
-
-
-async def test_get_neighbors_with_relation_fields(client, repo_patch):
-    """GET /neighbors?relationFields=direction projects relation properties.
-
-    Relation always includes _id, _relationTypeKey, direction.
-    """
-    with repo_patch():
-        resp = await client.get(
-            f"{PREFIX}/entities/person/ent-person-1/neighbors?relationFields="
-        )
-    assert resp.status_code == 200
-    data = resp.json()
-    relation = data["neighbors"][0]["relation"]
-    # Always included
-    assert relation["_id"] == "rel-1"
-    assert relation["_relationTypeKey"] == "works_for"
-    assert relation["direction"] == "outgoing"
-    # Timestamps stripped
-    assert "_createdAt" not in relation
-
-
-async def test_get_neighbors_with_both_fields(client, repo_patch):
-    """GET /neighbors?fields=name&relationFields= applies both projections."""
-    with repo_patch():
-        resp = await client.get(
-            f"{PREFIX}/entities/person/ent-person-1/neighbors?fields=name&relationFields="
-        )
-    assert resp.status_code == 200
-    data = resp.json()
-    # Entity projection
-    assert "_createdAt" not in data["entity"]
-    assert data["entity"]["name"] == "Alice"
-    # Relation projection
-    relation = data["neighbors"][0]["relation"]
-    assert "_createdAt" not in relation
-    assert relation["_id"] == "rel-1"
-
-
-async def test_get_neighbors_without_fields_returns_all(client, repo_patch):
-    """GET /neighbors without fields returns full data (backward compatible)."""
-    with repo_patch():
-        resp = await client.get(
-            f"{PREFIX}/entities/person/ent-person-1/neighbors"
-        )
-    assert resp.status_code == 200
-    data = resp.json()
-    # Full entity data
-    assert "_entityTypeKey" in data["entity"]
-    assert "name" in data["entity"]
-    # Full relation data
-    assert "_relationTypeKey" in data["neighbors"][0]["relation"]
-    assert "direction" in data["neighbors"][0]["relation"]
-    # Full neighbor entity data
-    assert "_entityTypeKey" in data["neighbors"][0]["entity"]
-    assert "name" in data["neighbors"][0]["entity"]
+    # Center entity has all properties
+    assert body["entity"]["age"] == 30

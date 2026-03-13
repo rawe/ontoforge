@@ -45,20 +45,21 @@ A marketplace entry allows the skill to be discovered and installed from within 
 
 ### Done
 
-- **Export script** (`scripts/export_ontology.py`) — standalone PEP 723 script that exports schema + entities + relations to structured JSON files via the Runtime REST API. Includes pagination, slugified filenames, and UID-free output. Documented in `scripts/USAGE.md`.
-- **Import design** (`scripts/IMPORT_NOTES.md`) — reference doc specifying the two-pass import strategy (entities first, then relations resolved by type + filename), schema handling, and required API endpoints.
+- **Plugin and marketplace structure** — full Claude Code plugin at `plugins/ontoforge/` with marketplace registry at `.claude-plugin/marketplace.json`. Follows the same conventions as the DocFabric plugin.
+- **Schema export script** (`plugins/ontoforge/skills/ontoforge/scripts/export_schema.py`) — exports an ontology schema (entity types, relation types, properties) to a single JSON file via the Modeling REST API. Resolves ontology key to UUID automatically. Configurable output path (default: `./ontology/<key>.json`).
+- **Schema import script** (`plugins/ontoforge/skills/ontoforge/scripts/import_schema.py`) — imports an ontology schema from a JSON file via `POST /api/model/import?overwrite=true`. Always replaces the existing schema atomically.
+- **SKILL.md** — documents both workflows with parameters, output formats, and environment configuration.
+- **Plugin manifest** (`plugins/ontoforge/.claude-plugin/plugin.json`) and **marketplace definition** (`.claude-plugin/marketplace.json`).
+- **Data export script** (`scripts/export_ontology.py`) — standalone PEP 723 script that exports schema + entities + relations to structured JSON files via the Runtime REST API. Includes pagination, slugified filenames, and UID-free output. Documented in `scripts/USAGE.md`.
+- **Data import design** (`scripts/IMPORT_NOTES.md`) — reference doc specifying the two-pass import strategy (entities first, then relations resolved by type + filename), schema handling, and required API endpoints.
 
 ### To Do
 
-- Design and implement the full skill folder structure that Claude Code requires for context
-- Import script
-- Scaffold workflow (if included in initial release)
-- `SKILL.md` documenting all workflows with parameters, output formats, and usage examples
-- Plugin manifest (`plugin.json`) and marketplace definition (`marketplace.json`)
+- Data import script (entities + relations, as designed in `scripts/IMPORT_NOTES.md`)
+- Scaffold workflow (if included in a future release)
 - Marketplace registration and distribution
 
 ## Open Questions
 
-- Which workflows should be included in the initial release?
-- Should the skill support multiple OntoForge instances (e.g., via environment variable)?
+- Should the skill support multiple OntoForge instances (e.g., via environment variable)? Currently supported via `ONTOFORGE_BASE_URL`.
 - Should there be a workflow for ontology validation or schema diffing?

@@ -1,0 +1,14 @@
+{
+  "name": "ontoforge-marketplace",
+  "owner": {
+    "name": "rawe"
+  },
+  "plugins": [
+    {
+      "name": "ontoforge",
+      "source": "./plugins/ontoforge",
+      "description": "Export and import OntoForge ontology schemas",
+      "version": "0.1.0"
+    }
+  ]
+}

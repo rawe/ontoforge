@@ -1,6 +1,6 @@
 # OntoForge
 
-OntoForge is a Neo4j-native ontology studio for designing graph schemas and using them through generic, schema-driven APIs. It separates schema modeling from knowledge runtime, providing dedicated REST and MCP interfaces for each mode. The system stores schema and data together for portability and supports JSON-based export and import of ontologies.
+OntoForge is a Neo4j-native ontology studio for designing graph schemas and using them through generic, schema-driven APIs. The schema (entity types, relation types, properties) is global and independent. Ontologies are named lenses over this schema — either unscoped (full schema access) or scoped to a filtered subset of types and properties. The system provides dedicated REST and MCP interfaces for modeling and runtime, stores schema and data together in Neo4j for portability, and supports JSON-based export and import.
 
 ## Project Structure
 
@@ -69,8 +69,10 @@ The backend runs on `http://localhost:8000`, the frontend on `http://localhost:5
 
 ## Key Concepts
 
-- **Schema mode** — designing and managing ontology schemas
-- **Runtime mode** — querying and mutating knowledge data against a schema
-- **REST API** — HTTP interface for both schema and runtime operations
+- **Schema** — the global set of entity types, relation types, and property definitions. The ground truth, independent of any ontology.
+- **Ontology** — a named lens over the schema. Unscoped ontologies expose everything; scoped ontologies filter to specific types and properties via `INCLUDES_TYPE` edges.
+- **Modeling mode** — designing and managing the global schema and ontology scopes
+- **Runtime mode** — querying and mutating knowledge data through an ontology lens
+- **REST API** — HTTP interface for both modeling and runtime operations
 - **MCP interface** — Model Context Protocol server for AI-driven interactions
 - **Neo4j** — all schema and data stored in Neo4j for portability

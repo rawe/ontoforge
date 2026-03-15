@@ -6,16 +6,19 @@ A Neo4j-native ontology studio for designing graph schemas and using them throug
 
 When building applications that depend on structured domain knowledge — whether it's a research tool, a recommendation system, or an internal knowledge base — the schema behind the data matters as much as the data itself. Without a way to define and enforce that schema, knowledge graphs tend to drift into inconsistency.
 
-OntoForge exists to solve this. It lets you **model an ontology** (entity types, relation types, property definitions) through a dedicated UI and API, and then **interact with instance data** through a generic, schema-driven runtime API that validates every write against your ontology. You define the rules once; the system enforces them on every operation.
+OntoForge exists to solve this. It lets you **model a global schema** (entity types, relation types, property definitions) through a dedicated UI and API, and then **interact with instance data** through a generic, schema-driven runtime API that validates every write against your schema. You define the rules once; the system enforces them on every operation.
+
+**Ontologies are lenses.** The schema is global and independent. Ontologies are named views over this schema — either unscoped (full access to all types and properties) or scoped to a filtered subset. This lets different teams or applications work with the same data through focused, domain-specific views without fragmenting the data model.
 
 The intended workflow:
 
-1. **Design** your ontology using the modeling UI or API — define what entities, relations, and properties exist in your domain.
-2. **Test** your ontology by creating instance data through the runtime API and iterating on the schema until it fits.
-3. **Integrate** the runtime API into your application's backend — OntoForge becomes the schema-enforced persistence layer for your domain knowledge.
-4. **Connect AI tools** via MCP servers — one for modeling the ontology, one for structured read/write access to instance data, giving coding assistants controlled access to your knowledge graph.
+1. **Design** your schema using the modeling UI or API — define what entity types, relation types, and properties exist in your domain.
+2. **Create ontologies** — define named lenses over the schema, optionally scoping each to specific types and properties.
+3. **Test** your schema by creating instance data through the runtime API and iterating until it fits.
+4. **Integrate** the runtime API into your application's backend — OntoForge becomes the schema-enforced persistence layer for your domain knowledge.
+5. **Connect AI tools** via MCP servers — one for modeling the schema, one for structured read/write access to instance data, giving coding assistants controlled access to your knowledge graph.
 
-The key idea: **no unstructured writes**. Every entity and relation that goes into the graph must conform to the ontology. Read access can be more flexible (e.g., direct Neo4j queries for analytics), but writes are always schema-enforced through the runtime API.
+The key idea: **no unstructured writes**. Every entity and relation that goes into the graph must conform to the schema. Read access can be more flexible (e.g., direct Neo4j queries for analytics), but writes are always schema-enforced through the runtime API.
 
 ## Quick Start (Docker)
 
@@ -42,19 +45,23 @@ docker compose stop
 
 ## MCP Servers
 
-OntoForge exposes two MCP servers for AI-assisted workflows — one for schema design, one for data access. Both run inside the same backend process and are scoped to a single ontology via the URL.
+OntoForge exposes two MCP servers for AI-assisted workflows — one for schema design, one for data access. Both run inside the same backend process.
 
 ### Modeling Server
 
-Design and iterate on ontology schemas. 15 tools for managing entity types, relation types, properties, validation, and export/import.
+Design and iterate on the global schema. Tools for managing entity types, relation types, properties, ontology scopes, validation, and export/import.
 
-**Endpoint:** `http://localhost:8000/mcp/model/{ontologyKey}`
+**Endpoint:** `http://localhost:8000/mcp/model`
+
+The modeling server operates on the global schema — no ontology key required.
 
 ### Runtime Server
 
-Read and write instance data validated against the ontology. Tools for entity/relation CRUD, semantic search, filtering, graph exploration, and data management.
+Read and write instance data validated against the schema through an ontology lens. Tools for entity/relation CRUD, semantic search, filtering, and graph exploration.
 
 **Endpoint:** `http://localhost:8000/mcp/runtime/{ontologyKey}`
+
+The runtime server requires an ontology key to determine which lens to apply.
 
 ### Client Configuration
 
@@ -62,7 +69,7 @@ To connect an MCP client (e.g., Claude Code, Cursor), add one or both servers to
 
 #### URL-based (default)
 
-The ontology key is part of the URL path. Example config at `mcp-example.json`:
+The ontology key is part of the runtime URL path. Example config at `mcp-example.json`:
 
 ```bash
 claude --mcp-config mcp-example.json
@@ -73,7 +80,7 @@ claude --mcp-config mcp-example.json
   "mcpServers": {
     "ontoforge-modeling": {
       "type": "http",
-      "url": "http://localhost:8000/mcp/model/my_ontology"
+      "url": "http://localhost:8000/mcp/model"
     },
     "ontoforge-runtime": {
       "type": "http",
@@ -96,7 +103,11 @@ claude --mcp-config mcp-example-header.json
   "mcpServers": {
     "ontoforge-modeling": {
       "type": "http",
-      "url": "http://localhost:8000/mcp/model",
+      "url": "http://localhost:8000/mcp/model"
+    },
+    "ontoforge-runtime": {
+      "type": "http",
+      "url": "http://localhost:8000/mcp/runtime",
       "headers": {
         "X-Ontology-Key": "my_ontology"
       }
@@ -107,9 +118,9 @@ claude --mcp-config mcp-example-header.json
 
 #### Environment variable
 
-For single-ontology deployments, set `DEFAULT_MCP_ONTOLOGY_KEY` on the server. All MCP connections without a URL key or header will use this default.
+For single-ontology deployments, set `DEFAULT_MCP_ONTOLOGY_KEY` on the server. Runtime MCP connections without a URL key or header will use this default.
 
-**Resolution order:** URL path (highest priority) → `X-Ontology-Key` header → `DEFAULT_MCP_ONTOLOGY_KEY` env var → 400 error.
+**Runtime resolution order:** URL path (highest priority) → `X-Ontology-Key` header → `DEFAULT_MCP_ONTOLOGY_KEY` env var → 400 error.
 
 ### Example: Runtime Server Quick Start
 
@@ -148,7 +159,7 @@ uv sync
 uv run uvicorn ontoforge_server.main:app --reload --port 8000
 ```
 
-The API is available at `http://localhost:8000`. On startup it creates Neo4j constraints and loads the schema cache automatically.
+The API is available at `http://localhost:8000`. On startup it creates Neo4j constraints. The runtime schema cache is loaded lazily on first request per ontology.
 
 - Modeling endpoints: `/api/model/...`
 - Runtime endpoints: `/api/runtime/{ontologyKey}/...`
@@ -176,12 +187,12 @@ Tests are mocked — no running Neo4j instance required.
 
 OntoForge is a modular monolith backed by a single Neo4j database that holds both schema and instance data.
 
-- **Modeling module** — ontology schema CRUD, validation, JSON export/import (`/api/model`)
-- **Runtime module** — schema-driven instance CRUD, validation, search, graph traversal (`/api/runtime/{ontologyKey}`)
-- **Frontend** — React UI for schema design and runtime data management
-- **MCP layer** — two MCP servers: modeling (schema design) and runtime (data access)
+- **Modeling module** — global schema CRUD, ontology scope management, validation, JSON export/import (`/api/model`)
+- **Runtime module** — schema-driven instance CRUD, validation, search, graph traversal through ontology lenses (`/api/runtime/{ontologyKey}`)
+- **Frontend** — React UI for schema design, ontology scope configuration, and runtime data management
+- **MCP layer** — two MCP servers: modeling (global schema) and runtime (data access through an ontology)
 
-Schema nodes and instance nodes coexist in the same database, separated by label conventions. The runtime validates every write against an in-memory schema cache, ensuring instance data always conforms to the ontology.
+Schema nodes and instance nodes coexist in the same database, separated by label conventions. The runtime validates every write against an in-memory schema cache (lazily loaded, invalidated on modeling changes), ensuring instance data always conforms to the schema as seen through the selected ontology.
 
 See `docs/architecture.md` for the full system design.
 

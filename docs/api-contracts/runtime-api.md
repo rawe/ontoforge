@@ -9,28 +9,6 @@
 >
 > For storage model details, see `architecture.md` §4.2.
 
-## 1. Instance Data Management
-
-### DELETE /api/runtime/{ontologyKey}/data
-
-Wipe all instance data (entities and relations) for the specified ontology. Schema nodes are preserved.
-
-**Response:** `200 OK`
-```json
-{
-  "ontologyKey": "acme",
-  "entitiesDeleted": 150,
-  "relationsDeleted": 42
-}
-```
-
-**Behavior:**
-1. Delete all entity instance nodes and relation instance relationships belonging to this ontology's entity types.
-2. Rebuild the in-memory schema cache for this ontology.
-3. Return a summary of deleted items.
-
-**Errors:** 404 if ontology key not found.
-
 ---
 
 ## 2. Schema Introspection

@@ -8,12 +8,11 @@
 OntoForge consists of:
 
 - **ontoforge-server** — a Python application that serves both modeling and runtime routes from a single process
-- **modeling** (frontend) — React app for schema design
-- **runtime** (frontend) — React app for instance management (deferred)
-- **MCP adapters** (deferred) — likely split into modeling-mcp and runtime-mcp, granularity TBD
-- **Neo4j** — a single database holding all ontology schemas and instance data
+- **frontend** — React app for schema design, ontology scope configuration, and runtime data management
+- **MCP layer** — two MCP servers: modeling (global schema) and runtime (data access through an ontology)
+- **Neo4j** — a single database holding the global schema and instance data
 
-The server connects to one Neo4j database and always mounts both the modeling API (`/api/model`) and the runtime API (`/api/runtime/{ontologyKey}/...`). Schema nodes and instance nodes coexist in the same database, separated by label conventions (see section 4). Frontends communicate with the backend via REST only. The MCP layer will wrap REST endpoints for AI-driven access.
+The server connects to one Neo4j database and always mounts both the modeling API (`/api/model`) and the runtime API (`/api/runtime/{ontologyKey}/...`). Schema nodes and instance nodes coexist in the same database, separated by label conventions (see section 4). Frontends communicate with the backend via REST only. The MCP layer wraps the same service layer used by the REST API.
 
 ## 2. Naming Conventions
 
@@ -42,8 +41,7 @@ All Neo4j labels use PascalCase. Relationships use UPPER_SNAKE_CASE.
 | Node label | `EntityType` |
 | Node label | `RelationType` |
 | Node label | `PropertyDefinition` |
-| Relationship | `HAS_ENTITY_TYPE` (Ontology → EntityType) |
-| Relationship | `HAS_RELATION_TYPE` (Ontology → RelationType) |
+| Relationship | `INCLUDES_TYPE` (Ontology → EntityType/RelationType, optional scoping) |
 | Relationship | `HAS_PROPERTY` (EntityType/RelationType → PropertyDefinition) |
 | Relationship | `RELATES_FROM` (RelationType → EntityType) |
 | Relationship | `RELATES_TO` (RelationType → EntityType) |
@@ -102,13 +100,13 @@ backend/src/ontoforge_server/
 
 ### 3.2 Modeling Module
 
-Owns all schema operations. Standalone — no dependency on the runtime module.
+Owns all schema operations. Has a narrow dependency on the runtime module: after every mutation, the modeling service calls `invalidate_loaded_schema_cache()` to clear the runtime's in-memory cache. This is the only coupling between the two modules.
 
-- Ontology metadata CRUD
-- Entity type and relation type CRUD
+- Global entity type and relation type CRUD
 - Property definition CRUD
+- Ontology CRUD and scope management (INCLUDES_TYPE edges with optional property filtering)
 - Schema validation
-- Export/import via a Neo4j-independent JSON transfer format
+- Export/import via a Neo4j-independent JSON transfer format (v2.0)
 
 **Layer responsibilities:**
 
@@ -123,18 +121,17 @@ The service layer raises domain exceptions (from `core/exceptions.py`). The exce
 
 ### 3.3 Runtime Module
 
-Owns all instance operations. Reads schema data directly from the same database where the modeling module stores it.
+Owns all instance operations. Reads schema data directly from the same database where the modeling module stores it. All operations are scoped through an ontology lens — the ontology key determines which types and properties are visible.
 
-- Schema introspection (read-only — reads the ontology from the shared database)
+- Schema introspection (read-only — returns types and properties visible through the ontology)
 - Entity instance CRUD (create, read, update, delete, list with filtering)
 - Relation instance CRUD (create, read, update, delete, list with filtering)
 - Neighborhood exploration (graph traversal from a given entity)
-- Instance validation against the schema
-- Instance data wipe (deletes all instance data for an ontology, preserving schema)
+- Instance validation against the scoped schema
 
 The runtime module reads schema data using the same Pydantic models as the modeling module's export. These shared models live in `core/schemas.py`. The runtime module has **no dependency** on the modeling module — it only depends on `core/`.
 
-**Schema cache:** On startup, the runtime loads the schema for each ontology from the database into an in-memory dataclass structure (`SchemaCache`), keyed by ontology key. This avoids per-request database reads for schema data. The cache is rebuilt atomically (pointer swap) whenever schema changes occur. Since FastAPI runs on a single asyncio event loop, no locking is needed.
+**Schema cache:** The runtime lazily loads the schema for each ontology into an in-memory `LoadedSchema` structure (containing both full and scoped `SchemaCache` instances), keyed by ontology key. The cache is invalidated by the modeling service after any schema or scope mutation. Unscoped ontologies (no `INCLUDES_TYPE` edges) expose the full schema; scoped ontologies expose only the included types and their selected properties.
 
 **Validation:** Every write operation validates properties against the schema cache before executing Cypher. All validation errors are collected and returned at once (not fail-fast). The validation pipeline checks type existence, required properties, unknown properties, and data type coercion.
 
@@ -170,7 +167,7 @@ The `key` field is used in runtime URL paths (`/api/runtime/{ontologyKey}/...`).
 | Property | Type | Notes |
 |----------|------|-------|
 | `entityTypeId` | String (UUID) | Stable identifier |
-| `key` | String | Unique within owning ontology |
+| `key` | String | Globally unique |
 | `displayName` | String | Human-readable name |
 | `description` | String | Optional |
 | `createdAt` | DateTime | |
@@ -181,7 +178,7 @@ The `key` field is used in runtime URL paths (`/api/runtime/{ontologyKey}/...`).
 | Property | Type | Notes |
 |----------|------|-------|
 | `relationTypeId` | String (UUID) | Stable identifier |
-| `key` | String | Unique within owning ontology |
+| `key` | String | Globally unique |
 | `displayName` | String | Human-readable name |
 | `description` | String | Optional |
 | `createdAt` | DateTime | |
@@ -206,13 +203,15 @@ Connected to its source and target entity types via `RELATES_FROM` and `RELATES_
 **Relationships:**
 
 ```
-(Ontology)-[:HAS_ENTITY_TYPE]->(EntityType)
-(Ontology)-[:HAS_RELATION_TYPE]->(RelationType)
+(Ontology)-[:INCLUDES_TYPE {properties: [...] | null}]->(EntityType)    # scoped ontology only
+(Ontology)-[:INCLUDES_TYPE {properties: [...] | null}]->(RelationType)  # scoped ontology only
 (EntityType)-[:HAS_PROPERTY]->(PropertyDefinition)
 (RelationType)-[:HAS_PROPERTY]->(PropertyDefinition)
 (RelationType)-[:RELATES_FROM]->(EntityType)
 (RelationType)-[:RELATES_TO]->(EntityType)
 ```
+
+An ontology without any `INCLUDES_TYPE` edges is unscoped and exposes the full schema. An ontology with `INCLUDES_TYPE` edges is scoped — only the referenced types are visible. The `properties` attribute on `INCLUDES_TYPE` controls which properties are exposed: `null` means all properties, a list means only those properties.
 
 **Constraints and Indexes:**
 
@@ -237,14 +236,14 @@ CREATE INDEX entity_type_key_index FOR (n:_Entity) ON (n._entityTypeKey);
 
 All constraints and indexes — both schema and instance — are created on startup.
 
-Key uniqueness within an ontology (e.g., no two entity types with the same `key` under one ontology) is enforced at the application level in the service layer, since Neo4j community edition does not support composite constraints across relationships.
+Entity type and relation type keys are globally unique, enforced by Neo4j constraints.
 
 **Cascading Deletes:**
 
-- Deleting an **Ontology** deletes all its entity types, relation types, and property definitions.
-- Deleting an **EntityType** fails with 409 Conflict if any relation type references it as source or target. Its property definitions are deleted.
-- Deleting a **RelationType** deletes its property definitions.
-- Deleting a **PropertyDefinition** is always allowed.
+- Deleting an **Ontology** removes its `INCLUDES_TYPE` edges. Entity types, relation types, and properties are not affected (they are global).
+- Deleting an **EntityType** fails with 409 Conflict if any relation type references it as source or target. With `cascade=true`, it also removes `INCLUDES_TYPE` edges from all ontologies. Its property definitions are deleted.
+- Deleting a **RelationType** deletes its property definitions. With `cascade=true`, it also removes `INCLUDES_TYPE` edges from all ontologies.
+- Deleting a **PropertyDefinition** is always allowed. With `cascade=true`, it also removes the property key from scoped ontology property lists.
 
 ### 4.2 Instance Representation
 
@@ -325,11 +324,11 @@ Native relationships are used instead of intermediate nodes because they leverag
 
 Entity type keys are converted to PascalCase labels. If an entity type key matches a schema label (e.g., `ontology` → `Ontology`), instance nodes would share a label with schema nodes. The modeling service rejects entity type keys that would collide with reserved labels: `Ontology`, `EntityType`, `RelationType`, `PropertyDefinition`.
 
-### 4.3 Ontology Isolation
+### 4.3 Ontology Scoping
 
-Multiple ontologies coexist in the same database. Schema isolation is achieved through the graph structure — entity types belong to an ontology via `HAS_ENTITY_TYPE`, not via a property filter. All modeling queries start from the `Ontology` node and traverse outward.
+Multiple ontologies coexist in the same database as lenses over a shared global schema. Unscoped ontologies expose all types and properties. Scoped ontologies use `INCLUDES_TYPE` edges to expose a subset.
 
-Instance data is scoped to an ontology via the runtime URL path (`/api/runtime/{ontologyKey}/...`). The runtime module resolves the ontology key to load the correct schema cache and uses the schema's entity/relation type definitions to construct scoped Cypher queries.
+Instance data is shared — all ontologies see the same entities and relations. The ontology key in the runtime URL (`/api/runtime/{ontologyKey}/...`) determines which types and properties are visible for validation and response filtering. An entity created through one ontology is accessible through any other ontology that includes its type.
 
 ### 4.4 JSON Transfer Format
 
@@ -337,13 +336,7 @@ The export/import format is a self-contained JSON document:
 
 ```json
 {
-  "formatVersion": "1.0",
-  "ontology": {
-    "ontologyId": "uuid",
-    "name": "string",
-    "key": "string",
-    "description": "string"
-  },
+  "formatVersion": "2.0",
   "entityTypes": [
     {
       "key": "string",
@@ -370,17 +363,39 @@ The export/import format is a self-contained JSON document:
       "toEntityTypeKey": "string",
       "properties": []
     }
+  ],
+  "ontologies": [
+    {
+      "key": "string",
+      "name": "string",
+      "description": "string",
+      "includes": null
+    },
+    {
+      "key": "string",
+      "name": "string",
+      "description": "string",
+      "includes": {
+        "entityTypes": [
+          {"key": "string", "properties": null},
+          {"key": "string", "properties": ["prop1", "prop2"]}
+        ],
+        "relationTypes": [
+          {"key": "string", "properties": null}
+        ]
+      }
+    }
   ]
 }
 ```
 
-UUIDs are not included in the export for entity types, relation types, or properties — they are regenerated on import. Only `ontologyId` is preserved for identity.
+Entity types and relation types are global — not nested under any ontology. Ontologies are separate entries with optional `includes` for scoping. An ontology with `"includes": null` is unscoped (exposes the full schema). A scoped ontology lists the types it includes; `"properties": null` means all properties, a list means only those properties. UUIDs are not included in the export — they are regenerated on import.
 
 ## 5. API Design
 
 ### 5.1 Common Conventions
 
-**Ontology scoping:** The modeling API nests resources under `/api/model/ontologies/{ontologyId}/...` — the ontology is explicit in the URL path. The runtime API scopes all routes under `/api/runtime/{ontologyKey}/...` using the ontology's unique key.
+**API scoping:** The modeling API operates on the global schema under `/api/model/...` — entity types, relation types, and properties are not scoped to any ontology. Ontologies and their scope configuration are managed as separate resources under `/api/model/ontologies/...`. The runtime API scopes all routes under `/api/runtime/{ontologyKey}/...` using the ontology's unique key.
 
 **Error response format:**
 
@@ -439,8 +454,7 @@ The runtime API is generic and schema-driven — endpoints use type keys from th
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `DELETE` | `/api/runtime/{ontologyKey}/data` | Wipe all instance data for the ontology |
-| `GET` | `/api/runtime/{ontologyKey}/schema` | Full schema introspection |
+| `GET` | `/api/runtime/{ontologyKey}/schema` | Schema introspection (scoped to ontology) |
 | `GET` | `/api/runtime/{ontologyKey}/schema/entity-types` | List entity types |
 | `GET` | `/api/runtime/{ontologyKey}/schema/entity-types/{key}` | Get entity type with properties |
 | `GET` | `/api/runtime/{ontologyKey}/schema/relation-types` | List relation types |
@@ -535,4 +549,4 @@ docker compose up -d
 uv run ontoforge-server
 ```
 
-**Database bootstrap:** On startup, the server ensures all required constraints and indexes exist — both schema constraints (ontology, entity type, etc.) and instance constraints (`_Entity` uniqueness on `_id`, entity type key index). The schema cache for each ontology is loaded from the database.
+**Database bootstrap:** On startup, the server ensures all required constraints and indexes exist — both schema constraints (ontology, entity type, etc.) and instance constraints (`_Entity` uniqueness on `_id`, entity type key index). The runtime schema cache is loaded lazily on first request per ontology, not at startup.

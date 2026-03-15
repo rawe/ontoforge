@@ -3,126 +3,207 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+REPO = "ontoforge_server.modeling.service.repository"
 
-NOW = datetime(2025, 1, 1, tzinfo=timezone.utc)
+NOW = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
-ONTOLOGY_DATA = {
-    "ontologyId": "ont-1",
-    "key": "test_ontology",
-    "name": "Test",
-    "description": None,
-    "createdAt": NOW,
-    "updatedAt": NOW,
-}
-
-ENTITY_TYPE_DATA = {
-    "entityTypeId": "et-1",
+SOURCE_ET = {
+    "entityTypeId": "et-src",
     "key": "person",
     "displayName": "Person",
-    "description": None,
     "createdAt": NOW,
     "updatedAt": NOW,
 }
 
-ENTITY_TYPE_DATA_2 = {
-    "entityTypeId": "et-2",
+TARGET_ET = {
+    "entityTypeId": "et-tgt",
     "key": "company",
     "displayName": "Company",
-    "description": None,
     "createdAt": NOW,
     "updatedAt": NOW,
 }
 
-RELATION_TYPE_DATA = {
+RT_DATA = {
     "relationTypeId": "rt-1",
-    "key": "works_at",
-    "displayName": "Works At",
+    "key": "works_for",
+    "displayName": "Works For",
     "description": None,
-    "sourceEntityTypeId": "et-1",
-    "targetEntityTypeId": "et-2",
+    "sourceEntityTypeKey": "person",
+    "targetEntityTypeKey": "company",
     "createdAt": NOW,
     "updatedAt": NOW,
 }
 
 
-def _get_entity_type_side_effect(session, ontology_id, entity_type_id):
-    if entity_type_id == "et-1":
-        return ENTITY_TYPE_DATA
-    if entity_type_id == "et-2":
-        return ENTITY_TYPE_DATA_2
-    return None
-
-
-def _mock_repo(**overrides):
-    defaults = {
-        "get_ontology": AsyncMock(return_value=ONTOLOGY_DATA),
-        "get_relation_type_by_key": AsyncMock(return_value=None),
-        "get_entity_type": AsyncMock(side_effect=_get_entity_type_side_effect),
-        "create_relation_type": AsyncMock(return_value=RELATION_TYPE_DATA),
-        "list_relation_types": AsyncMock(return_value=[RELATION_TYPE_DATA]),
-        "get_relation_type": AsyncMock(return_value=RELATION_TYPE_DATA),
-        "delete_relation_type": AsyncMock(return_value=True),
-    }
-    defaults.update(overrides)
-    return defaults
-
-
-@pytest.fixture
-def repo_patch():
-    def _patch(**overrides):
-        mocks = _mock_repo(**overrides)
-        return patch.multiple(
-            "ontoforge_server.modeling.service.repository", **mocks
-        )
-
-    return _patch
-
-
-async def test_create_relation_type(client, repo_patch):
-    with repo_patch():
+@pytest.mark.asyncio
+async def test_create_relation_type(client):
+    with (
+        patch(f"{REPO}.get_relation_type_by_key", new_callable=AsyncMock, return_value=None),
+        patch(f"{REPO}.get_entity_type_by_key", new_callable=AsyncMock, side_effect=[SOURCE_ET, TARGET_ET]),
+        patch(f"{REPO}.create_relation_type", new_callable=AsyncMock, return_value=RT_DATA),
+    ):
         resp = await client.post(
-            "/api/model/ontologies/ont-1/relation-types",
+            "/api/model/relation-types",
             json={
-                "key": "works_at",
-                "displayName": "Works At",
-                "sourceEntityTypeId": "et-1",
-                "targetEntityTypeId": "et-2",
+                "key": "works_for",
+                "displayName": "Works For",
+                "sourceEntityTypeKey": "person",
+                "targetEntityTypeKey": "company",
             },
         )
     assert resp.status_code == 201
-    assert resp.json()["key"] == "works_at"
-    assert resp.json()["sourceEntityTypeId"] == "et-1"
-    assert resp.json()["targetEntityTypeId"] == "et-2"
+    body = resp.json()
+    assert body["relationTypeId"] == "rt-1"
+    assert body["sourceEntityTypeKey"] == "person"
+    assert body["targetEntityTypeKey"] == "company"
 
 
-async def test_create_relation_type_invalid_source(client, repo_patch):
-    def _bad_source(session, ontology_id, entity_type_id):
-        if entity_type_id == "et-2":
-            return ENTITY_TYPE_DATA_2
-        return None
-
-    with repo_patch(get_entity_type=AsyncMock(side_effect=_bad_source)):
+@pytest.mark.asyncio
+async def test_create_relation_type_key_conflict(client):
+    with patch(f"{REPO}.get_relation_type_by_key", new_callable=AsyncMock, return_value=RT_DATA):
         resp = await client.post(
-            "/api/model/ontologies/ont-1/relation-types",
+            "/api/model/relation-types",
             json={
-                "key": "works_at",
-                "displayName": "Works At",
-                "sourceEntityTypeId": "nonexistent",
-                "targetEntityTypeId": "et-2",
+                "key": "works_for",
+                "displayName": "Works For",
+                "sourceEntityTypeKey": "person",
+                "targetEntityTypeKey": "company",
+            },
+        )
+    assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_create_relation_type_source_not_found(client):
+    with (
+        patch(f"{REPO}.get_relation_type_by_key", new_callable=AsyncMock, return_value=None),
+        patch(f"{REPO}.get_entity_type_by_key", new_callable=AsyncMock, return_value=None),
+    ):
+        resp = await client.post(
+            "/api/model/relation-types",
+            json={
+                "key": "works_for",
+                "displayName": "Works For",
+                "sourceEntityTypeKey": "nonexistent",
+                "targetEntityTypeKey": "company",
             },
         )
     assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert "nonexistent" in resp.json()["error"]["message"]
 
 
-async def test_list_relation_types(client, repo_patch):
-    with repo_patch():
-        resp = await client.get("/api/model/ontologies/ont-1/relation-types")
+@pytest.mark.asyncio
+async def test_create_relation_type_target_not_found(client):
+    with (
+        patch(f"{REPO}.get_relation_type_by_key", new_callable=AsyncMock, return_value=None),
+        patch(
+            f"{REPO}.get_entity_type_by_key",
+            new_callable=AsyncMock,
+            side_effect=[SOURCE_ET, None],
+        ),
+    ):
+        resp = await client.post(
+            "/api/model/relation-types",
+            json={
+                "key": "works_for",
+                "displayName": "Works For",
+                "sourceEntityTypeKey": "person",
+                "targetEntityTypeKey": "nonexistent",
+            },
+        )
+    assert resp.status_code == 422
+    assert "nonexistent" in resp.json()["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_list_relation_types(client):
+    with patch(f"{REPO}.list_relation_types", new_callable=AsyncMock, return_value=[RT_DATA]):
+        resp = await client.get("/api/model/relation-types")
     assert resp.status_code == 200
-    assert isinstance(resp.json(), list)
     assert len(resp.json()) == 1
+    assert resp.json()[0]["key"] == "works_for"
 
 
-async def test_delete_relation_type(client, repo_patch):
-    with repo_patch():
-        resp = await client.delete("/api/model/ontologies/ont-1/relation-types/rt-1")
+@pytest.mark.asyncio
+async def test_get_relation_type(client):
+    with patch(f"{REPO}.get_relation_type", new_callable=AsyncMock, return_value=RT_DATA):
+        resp = await client.get("/api/model/relation-types/rt-1")
+    assert resp.status_code == 200
+    assert resp.json()["key"] == "works_for"
+
+
+@pytest.mark.asyncio
+async def test_get_relation_type_not_found(client):
+    with patch(f"{REPO}.get_relation_type", new_callable=AsyncMock, return_value=None):
+        resp = await client.get("/api/model/relation-types/nonexistent")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_update_relation_type(client):
+    updated = {**RT_DATA, "displayName": "Employed By"}
+    with patch(f"{REPO}.update_relation_type", new_callable=AsyncMock, return_value=updated):
+        resp = await client.put(
+            "/api/model/relation-types/rt-1",
+            json={"displayName": "Employed By"},
+        )
+    assert resp.status_code == 200
+    assert resp.json()["displayName"] == "Employed By"
+
+
+@pytest.mark.asyncio
+async def test_update_relation_type_not_found(client):
+    with patch(f"{REPO}.update_relation_type", new_callable=AsyncMock, return_value=None):
+        resp = await client.put(
+            "/api/model/relation-types/nonexistent",
+            json={"displayName": "Whatever"},
+        )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_relation_type(client):
+    with (
+        patch(f"{REPO}.find_ontologies_including_type", new_callable=AsyncMock, return_value=[]),
+        patch(f"{REPO}.delete_relation_type", new_callable=AsyncMock, return_value=True),
+    ):
+        resp = await client.delete("/api/model/relation-types/rt-1")
     assert resp.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_delete_relation_type_included_without_cascade(client):
+    with patch(
+        f"{REPO}.find_ontologies_including_type",
+        new_callable=AsyncMock,
+        return_value=["my_ontology"],
+    ):
+        resp = await client.delete("/api/model/relation-types/rt-1")
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "CASCADE_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_delete_relation_type_with_cascade(client):
+    with (
+        patch(
+            f"{REPO}.find_ontologies_including_type",
+            new_callable=AsyncMock,
+            return_value=["my_ontology"],
+        ),
+        patch(f"{REPO}.remove_all_includes_for_type", new_callable=AsyncMock, return_value=1),
+        patch(f"{REPO}.delete_relation_type", new_callable=AsyncMock, return_value=True),
+    ):
+        resp = await client.delete("/api/model/relation-types/rt-1?cascade=true")
+    assert resp.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_delete_relation_type_not_found(client):
+    with (
+        patch(f"{REPO}.find_ontologies_including_type", new_callable=AsyncMock, return_value=[]),
+        patch(f"{REPO}.delete_relation_type", new_callable=AsyncMock, return_value=False),
+    ):
+        resp = await client.delete("/api/model/relation-types/nonexistent")
+    assert resp.status_code == 404

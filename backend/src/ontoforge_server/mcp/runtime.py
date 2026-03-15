@@ -32,7 +32,6 @@ def _get_ontology_key() -> str:
 
 
 def _format_validation_error(exc: ValidationError) -> str:
-    """Format a ValidationError with field-level details for LLM consumption."""
     msg = str(exc)
     details = getattr(exc, "details", None)
     if details and "fields" in details:
@@ -42,7 +41,6 @@ def _format_validation_error(exc: ValidationError) -> str:
 
 
 def _enrich_errors(fn):
-    """Decorator that enriches ValidationError messages with field-level details."""
     @functools.wraps(fn)
     async def wrapper(*args, **kwargs):
         try:
@@ -310,13 +308,3 @@ async def semantic_search(
         filters=str_filters, fields=fields,
     )
     return result
-
-
-@runtime_mcp.tool()
-async def wipe_data() -> dict:
-    """DESTRUCTIVE. Delete ALL instance data for this ontology. The schema is
-    preserved — only entity and relation instances are removed. Cannot be undone."""
-    ontology_key = _get_ontology_key()
-    driver = await get_driver()
-    result = await service.wipe_instance_data(ontology_key, driver)
-    return result.model_dump(by_alias=True)

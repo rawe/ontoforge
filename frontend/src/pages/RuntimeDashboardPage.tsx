@@ -1,28 +1,9 @@
-import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { toast } from 'sonner';
 import { useRuntimeSchema } from '../hooks/useRuntimeSchema';
-import * as runtimeApi from '../api/runtimeClient';
-import ConfirmDialog from '../components/ConfirmDialog';
 
 export default function RuntimeDashboardPage() {
   const { ontologyKey } = useParams<{ ontologyKey: string }>();
   const { data: schema, isLoading: loading, error } = useRuntimeSchema(ontologyKey);
-  const [wiping, setWiping] = useState(false);
-  const [showWipeConfirm, setShowWipeConfirm] = useState(false);
-
-  const handleWipe = async () => {
-    if (!ontologyKey) return;
-    setWiping(true);
-    try {
-      const result = await runtimeApi.wipeData(ontologyKey);
-      toast.success(`Wiped ${result.entitiesDeleted} entities and ${result.relationsDeleted} relations.`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Wipe failed');
-    } finally {
-      setWiping(false);
-    }
-  };
 
   if (loading) return <p>Loading schema...</p>;
   if (error) return <p className="text-red-600">Error: {error.message}</p>;
@@ -30,10 +11,6 @@ export default function RuntimeDashboardPage() {
 
   return (
     <div>
-      <Link to={`/ontologies/${schema.ontology.ontologyId}`} className="text-blue-600 hover:underline text-sm">
-        &larr; Back to ontology
-      </Link>
-
       <div className="mt-4 mb-6">
         <div className="flex items-center gap-3">
           <h2 className="text-2xl font-bold text-gray-900">{schema.ontology.name}</h2>
@@ -44,7 +21,7 @@ export default function RuntimeDashboardPage() {
 
       <div className="flex gap-3 mb-6">
         <Link
-          to={`/ontologies/${schema.ontology.ontologyId}`}
+          to="/schema"
           className="px-4 py-2 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200 border border-gray-300"
         >
           Schema
@@ -55,22 +32,7 @@ export default function RuntimeDashboardPage() {
         >
           Visual Editor
         </Link>
-        <button
-          onClick={() => setShowWipeConfirm(true)}
-          disabled={wiping}
-          className="px-4 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700 disabled:opacity-50"
-        >
-          {wiping ? 'Wiping...' : 'Wipe Data'}
-        </button>
       </div>
-      <ConfirmDialog
-        open={showWipeConfirm}
-        onOpenChange={setShowWipeConfirm}
-        title="Wipe All Data"
-        description="Delete ALL instance data for this ontology? Schema will be preserved."
-        confirmLabel="Wipe Data"
-        onConfirm={handleWipe}
-      />
 
       {/* Entity Types */}
       <section className="mb-8">

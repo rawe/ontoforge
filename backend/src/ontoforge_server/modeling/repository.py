@@ -113,14 +113,11 @@ async def update_ontology(
 
 
 async def delete_ontology(session: AsyncSession, ontology_id: str) -> bool:
+    """Delete ontology node only (DETACH DELETE removes INCLUDES_TYPE edges)."""
     result = await session.run(
         """
         MATCH (o:Ontology {ontologyId: $ontology_id})
-        OPTIONAL MATCH (o)-[:HAS_ENTITY_TYPE]->(et:EntityType)
-        OPTIONAL MATCH (et)-[:HAS_PROPERTY]->(ep:PropertyDefinition)
-        OPTIONAL MATCH (o)-[:HAS_RELATION_TYPE]->(rt:RelationType)
-        OPTIONAL MATCH (rt)-[:HAS_PROPERTY]->(rp:PropertyDefinition)
-        DETACH DELETE o, et, ep, rt, rp
+        DETACH DELETE o
         RETURN count(o) AS deleted
         """,
         ontology_id=ontology_id,
@@ -129,12 +126,11 @@ async def delete_ontology(session: AsyncSession, ontology_id: str) -> bool:
     return record["deleted"] > 0
 
 
-# --- Entity Type ---
+# --- Entity Type (Global) ---
 
 
 async def create_entity_type(
     session: AsyncSession,
-    ontology_id: str,
     entity_type_id: str,
     key: str,
     display_name: str,
@@ -142,8 +138,7 @@ async def create_entity_type(
 ) -> dict:
     result = await session.run(
         """
-        MATCH (o:Ontology {ontologyId: $ontology_id})
-        CREATE (o)-[:HAS_ENTITY_TYPE]->(et:EntityType {
+        CREATE (et:EntityType {
             entityTypeId: $entity_type_id,
             key: $key,
             displayName: $display_name,
@@ -153,7 +148,6 @@ async def create_entity_type(
         })
         RETURN et {.*} AS entity_type
         """,
-        ontology_id=ontology_id,
         entity_type_id=entity_type_id,
         key=key,
         display_name=display_name,
@@ -163,43 +157,25 @@ async def create_entity_type(
     return _convert_neo4j_types(record["entity_type"])
 
 
-async def list_entity_types(
-    session: AsyncSession, ontology_id: str
-) -> list[dict]:
+async def list_entity_types(session: AsyncSession) -> list[dict]:
     result = await session.run(
-        """
-        MATCH (o:Ontology {ontologyId: $ontology_id})-[:HAS_ENTITY_TYPE]->(et:EntityType)
-        RETURN et {.*} AS entity_type ORDER BY et.key
-        """,
-        ontology_id=ontology_id,
+        "MATCH (et:EntityType) RETURN et {.*} AS entity_type ORDER BY et.key"
     )
     return [_convert_neo4j_types(record["entity_type"]) async for record in result]
 
 
-async def get_entity_type(
-    session: AsyncSession, ontology_id: str, entity_type_id: str
-) -> dict | None:
+async def get_entity_type(session: AsyncSession, entity_type_id: str) -> dict | None:
     result = await session.run(
-        """
-        MATCH (o:Ontology {ontologyId: $ontology_id})-[:HAS_ENTITY_TYPE]->(et:EntityType {entityTypeId: $entity_type_id})
-        RETURN et {.*} AS entity_type
-        """,
-        ontology_id=ontology_id,
+        "MATCH (et:EntityType {entityTypeId: $entity_type_id}) RETURN et {.*} AS entity_type",
         entity_type_id=entity_type_id,
     )
     record = await result.single()
     return _convert_neo4j_types(record["entity_type"]) if record else None
 
 
-async def get_entity_type_by_key(
-    session: AsyncSession, ontology_id: str, key: str
-) -> dict | None:
+async def get_entity_type_by_key(session: AsyncSession, key: str) -> dict | None:
     result = await session.run(
-        """
-        MATCH (o:Ontology {ontologyId: $ontology_id})-[:HAS_ENTITY_TYPE]->(et:EntityType {key: $key})
-        RETURN et {.*} AS entity_type
-        """,
-        ontology_id=ontology_id,
+        "MATCH (et:EntityType {key: $key}) RETURN et {.*} AS entity_type",
         key=key,
     )
     record = await result.single()
@@ -208,13 +184,12 @@ async def get_entity_type_by_key(
 
 async def update_entity_type(
     session: AsyncSession,
-    ontology_id: str,
     entity_type_id: str,
     display_name: str | None,
     description: str | None,
 ) -> dict | None:
     set_clauses = ["et.updatedAt = datetime()"]
-    params: dict = {"ontology_id": ontology_id, "entity_type_id": entity_type_id}
+    params: dict = {"entity_type_id": entity_type_id}
     if display_name is not None:
         set_clauses.append("et.displayName = $display_name")
         params["display_name"] = display_name
@@ -224,7 +199,7 @@ async def update_entity_type(
 
     result = await session.run(
         f"""
-        MATCH (o:Ontology {{ontologyId: $ontology_id}})-[:HAS_ENTITY_TYPE]->(et:EntityType {{entityTypeId: $entity_type_id}})
+        MATCH (et:EntityType {{entityTypeId: $entity_type_id}})
         SET {', '.join(set_clauses)}
         RETURN et {{.*}} AS entity_type
         """,
@@ -234,17 +209,15 @@ async def update_entity_type(
     return _convert_neo4j_types(record["entity_type"]) if record else None
 
 
-async def delete_entity_type(
-    session: AsyncSession, ontology_id: str, entity_type_id: str
-) -> bool:
+async def delete_entity_type(session: AsyncSession, entity_type_id: str) -> bool:
+    """Delete entity type and cascade to its properties only."""
     result = await session.run(
         """
-        MATCH (o:Ontology {ontologyId: $ontology_id})-[:HAS_ENTITY_TYPE]->(et:EntityType {entityTypeId: $entity_type_id})
+        MATCH (et:EntityType {entityTypeId: $entity_type_id})
         OPTIONAL MATCH (et)-[:HAS_PROPERTY]->(p:PropertyDefinition)
         DETACH DELETE et, p
         RETURN count(et) AS deleted
         """,
-        ontology_id=ontology_id,
         entity_type_id=entity_type_id,
     )
     record = await result.single()
@@ -265,25 +238,23 @@ async def is_entity_type_referenced(
     return record["referenced"]
 
 
-# --- Relation Type ---
+# --- Relation Type (Global) ---
 
 
 async def create_relation_type(
     session: AsyncSession,
-    ontology_id: str,
     relation_type_id: str,
     key: str,
     display_name: str,
     description: str | None,
-    source_entity_type_id: str,
-    target_entity_type_id: str,
+    source_entity_type_key: str,
+    target_entity_type_key: str,
 ) -> dict:
     result = await session.run(
         """
-        MATCH (o:Ontology {ontologyId: $ontology_id})
-        MATCH (source:EntityType {entityTypeId: $source_entity_type_id})
-        MATCH (target:EntityType {entityTypeId: $target_entity_type_id})
-        CREATE (o)-[:HAS_RELATION_TYPE]->(rt:RelationType {
+        MATCH (source:EntityType {key: $source_entity_type_key})
+        MATCH (target:EntityType {key: $target_entity_type_key})
+        CREATE (rt:RelationType {
             relationTypeId: $relation_type_id,
             key: $key,
             displayName: $display_name,
@@ -294,54 +265,49 @@ async def create_relation_type(
         CREATE (rt)-[:RELATES_FROM]->(source)
         CREATE (rt)-[:RELATES_TO]->(target)
         RETURN rt {.*,
-            sourceEntityTypeId: source.entityTypeId,
-            targetEntityTypeId: target.entityTypeId
+            sourceEntityTypeKey: source.key,
+            targetEntityTypeKey: target.key
         } AS relation_type
         """,
-        ontology_id=ontology_id,
         relation_type_id=relation_type_id,
         key=key,
         display_name=display_name,
         description=description,
-        source_entity_type_id=source_entity_type_id,
-        target_entity_type_id=target_entity_type_id,
+        source_entity_type_key=source_entity_type_key,
+        target_entity_type_key=target_entity_type_key,
     )
     record = await result.single()
     return _convert_neo4j_types(record["relation_type"])
 
 
-async def list_relation_types(
-    session: AsyncSession, ontology_id: str
-) -> list[dict]:
+async def list_relation_types(session: AsyncSession) -> list[dict]:
     result = await session.run(
         """
-        MATCH (o:Ontology {ontologyId: $ontology_id})-[:HAS_RELATION_TYPE]->(rt:RelationType)
+        MATCH (rt:RelationType)
         MATCH (rt)-[:RELATES_FROM]->(source:EntityType)
         MATCH (rt)-[:RELATES_TO]->(target:EntityType)
         RETURN rt {.*,
-            sourceEntityTypeId: source.entityTypeId,
-            targetEntityTypeId: target.entityTypeId
+            sourceEntityTypeKey: source.key,
+            targetEntityTypeKey: target.key
         } AS relation_type ORDER BY rt.key
-        """,
-        ontology_id=ontology_id,
+        """
     )
     return [_convert_neo4j_types(record["relation_type"]) async for record in result]
 
 
 async def get_relation_type(
-    session: AsyncSession, ontology_id: str, relation_type_id: str
+    session: AsyncSession, relation_type_id: str
 ) -> dict | None:
     result = await session.run(
         """
-        MATCH (o:Ontology {ontologyId: $ontology_id})-[:HAS_RELATION_TYPE]->(rt:RelationType {relationTypeId: $relation_type_id})
+        MATCH (rt:RelationType {relationTypeId: $relation_type_id})
         MATCH (rt)-[:RELATES_FROM]->(source:EntityType)
         MATCH (rt)-[:RELATES_TO]->(target:EntityType)
         RETURN rt {.*,
-            sourceEntityTypeId: source.entityTypeId,
-            targetEntityTypeId: target.entityTypeId
+            sourceEntityTypeKey: source.key,
+            targetEntityTypeKey: target.key
         } AS relation_type
         """,
-        ontology_id=ontology_id,
         relation_type_id=relation_type_id,
     )
     record = await result.single()
@@ -349,14 +315,18 @@ async def get_relation_type(
 
 
 async def get_relation_type_by_key(
-    session: AsyncSession, ontology_id: str, key: str
+    session: AsyncSession, key: str
 ) -> dict | None:
     result = await session.run(
         """
-        MATCH (o:Ontology {ontologyId: $ontology_id})-[:HAS_RELATION_TYPE]->(rt:RelationType {key: $key})
-        RETURN rt {.*} AS relation_type
+        MATCH (rt:RelationType {key: $key})
+        MATCH (rt)-[:RELATES_FROM]->(source:EntityType)
+        MATCH (rt)-[:RELATES_TO]->(target:EntityType)
+        RETURN rt {.*,
+            sourceEntityTypeKey: source.key,
+            targetEntityTypeKey: target.key
+        } AS relation_type
         """,
-        ontology_id=ontology_id,
         key=key,
     )
     record = await result.single()
@@ -365,13 +335,12 @@ async def get_relation_type_by_key(
 
 async def update_relation_type(
     session: AsyncSession,
-    ontology_id: str,
     relation_type_id: str,
     display_name: str | None,
     description: str | None,
 ) -> dict | None:
     set_clauses = ["rt.updatedAt = datetime()"]
-    params: dict = {"ontology_id": ontology_id, "relation_type_id": relation_type_id}
+    params: dict = {"relation_type_id": relation_type_id}
     if display_name is not None:
         set_clauses.append("rt.displayName = $display_name")
         params["display_name"] = display_name
@@ -381,13 +350,13 @@ async def update_relation_type(
 
     result = await session.run(
         f"""
-        MATCH (o:Ontology {{ontologyId: $ontology_id}})-[:HAS_RELATION_TYPE]->(rt:RelationType {{relationTypeId: $relation_type_id}})
+        MATCH (rt:RelationType {{relationTypeId: $relation_type_id}})
         MATCH (rt)-[:RELATES_FROM]->(source:EntityType)
         MATCH (rt)-[:RELATES_TO]->(target:EntityType)
         SET {', '.join(set_clauses)}
         RETURN rt {{.*,
-            sourceEntityTypeId: source.entityTypeId,
-            targetEntityTypeId: target.entityTypeId
+            sourceEntityTypeKey: source.key,
+            targetEntityTypeKey: target.key
         }} AS relation_type
         """,
         **params,
@@ -397,16 +366,16 @@ async def update_relation_type(
 
 
 async def delete_relation_type(
-    session: AsyncSession, ontology_id: str, relation_type_id: str
+    session: AsyncSession, relation_type_id: str
 ) -> bool:
+    """Delete relation type and cascade to its properties only."""
     result = await session.run(
         """
-        MATCH (o:Ontology {ontologyId: $ontology_id})-[:HAS_RELATION_TYPE]->(rt:RelationType {relationTypeId: $relation_type_id})
+        MATCH (rt:RelationType {relationTypeId: $relation_type_id})
         OPTIONAL MATCH (rt)-[:HAS_PROPERTY]->(p:PropertyDefinition)
         DETACH DELETE rt, p
         RETURN count(rt) AS deleted
         """,
-        ontology_id=ontology_id,
         relation_type_id=relation_type_id,
     )
     record = await result.single()
@@ -562,29 +531,252 @@ async def delete_property(
     return record["deleted"] > 0
 
 
+# --- Scope Management (INCLUDES_TYPE) ---
+
+
+async def add_includes_type(
+    session: AsyncSession,
+    ontology_id: str,
+    type_label: str,
+    type_key: str,
+    properties: list[str] | None,
+) -> dict:
+    """MERGE an INCLUDES_TYPE edge from ontology to a type node."""
+    id_field = "entityTypeId" if type_label == "EntityType" else "relationTypeId"
+    result = await session.run(
+        f"""
+        MATCH (o:Ontology {{ontologyId: $ontology_id}})
+        MATCH (t:{type_label} {{key: $type_key}})
+        MERGE (o)-[r:INCLUDES_TYPE]->(t)
+        SET r.properties = $properties
+        RETURN t.key AS key, t.{id_field} AS typeId, r.properties AS properties
+        """,
+        ontology_id=ontology_id,
+        type_key=type_key,
+        properties=properties,
+    )
+    record = await result.single()
+    if not record:
+        return None
+    return {"key": record["key"], "typeId": record["typeId"], "properties": record["properties"]}
+
+
+async def list_includes_types(
+    session: AsyncSession,
+    ontology_id: str,
+    type_label: str,
+) -> list[dict]:
+    """List all INCLUDES_TYPE edges from ontology to a given type label."""
+    id_field = "entityTypeId" if type_label == "EntityType" else "relationTypeId"
+    result = await session.run(
+        f"""
+        MATCH (o:Ontology {{ontologyId: $ontology_id}})-[r:INCLUDES_TYPE]->(t:{type_label})
+        RETURN t.key AS key, t.{id_field} AS typeId, r.properties AS properties
+        ORDER BY t.key
+        """,
+        ontology_id=ontology_id,
+    )
+    items = []
+    async for record in result:
+        items.append({
+            "key": record["key"],
+            "typeId": record["typeId"],
+            "properties": record["properties"],
+        })
+    return items
+
+
+async def get_includes_type(
+    session: AsyncSession,
+    ontology_id: str,
+    type_label: str,
+    type_id: str,
+) -> dict | None:
+    """Get a single INCLUDES_TYPE edge."""
+    id_field = "entityTypeId" if type_label == "EntityType" else "relationTypeId"
+    result = await session.run(
+        f"""
+        MATCH (o:Ontology {{ontologyId: $ontology_id}})-[r:INCLUDES_TYPE]->(t:{type_label} {{{id_field}: $type_id}})
+        RETURN t.key AS key, t.{id_field} AS typeId, r.properties AS properties
+        """,
+        ontology_id=ontology_id,
+        type_id=type_id,
+    )
+    record = await result.single()
+    if not record:
+        return None
+    return {"key": record["key"], "typeId": record["typeId"], "properties": record["properties"]}
+
+
+async def update_includes_type(
+    session: AsyncSession,
+    ontology_id: str,
+    type_label: str,
+    type_id: str,
+    properties: list[str] | None,
+) -> dict | None:
+    """Update the properties filter on an INCLUDES_TYPE edge."""
+    id_field = "entityTypeId" if type_label == "EntityType" else "relationTypeId"
+    result = await session.run(
+        f"""
+        MATCH (o:Ontology {{ontologyId: $ontology_id}})-[r:INCLUDES_TYPE]->(t:{type_label} {{{id_field}: $type_id}})
+        SET r.properties = $properties
+        RETURN t.key AS key, t.{id_field} AS typeId, r.properties AS properties
+        """,
+        ontology_id=ontology_id,
+        type_id=type_id,
+        properties=properties,
+    )
+    record = await result.single()
+    if not record:
+        return None
+    return {"key": record["key"], "typeId": record["typeId"], "properties": record["properties"]}
+
+
+async def remove_includes_type(
+    session: AsyncSession,
+    ontology_id: str,
+    type_label: str,
+    type_id: str,
+) -> bool:
+    """Remove an INCLUDES_TYPE edge."""
+    id_field = "entityTypeId" if type_label == "EntityType" else "relationTypeId"
+    result = await session.run(
+        f"""
+        MATCH (o:Ontology {{ontologyId: $ontology_id}})-[r:INCLUDES_TYPE]->(t:{type_label} {{{id_field}: $type_id}})
+        DELETE r
+        RETURN count(r) AS deleted
+        """,
+        ontology_id=ontology_id,
+        type_id=type_id,
+    )
+    record = await result.single()
+    return record["deleted"] > 0
+
+
+async def remove_all_includes_for_type(
+    session: AsyncSession,
+    type_label: str,
+    type_id: str,
+) -> int:
+    """Remove all INCLUDES_TYPE edges pointing to a specific type (for cascade delete)."""
+    id_field = "entityTypeId" if type_label == "EntityType" else "relationTypeId"
+    result = await session.run(
+        f"""
+        MATCH (o:Ontology)-[r:INCLUDES_TYPE]->(t:{type_label} {{{id_field}: $type_id}})
+        DELETE r
+        RETURN count(r) AS deleted
+        """,
+        type_id=type_id,
+    )
+    record = await result.single()
+    return record["deleted"]
+
+
+async def find_ontologies_including_type(
+    session: AsyncSession,
+    type_label: str,
+    type_id: str,
+) -> list[str]:
+    """Find all ontology keys that have INCLUDES_TYPE edges to a specific type."""
+    id_field = "entityTypeId" if type_label == "EntityType" else "relationTypeId"
+    result = await session.run(
+        f"""
+        MATCH (o:Ontology)-[:INCLUDES_TYPE]->(t:{type_label} {{{id_field}: $type_id}})
+        RETURN o.key AS key
+        ORDER BY o.key
+        """,
+        type_id=type_id,
+    )
+    return [record["key"] async for record in result]
+
+
+async def find_ontologies_with_explicit_property(
+    session: AsyncSession,
+    type_label: str,
+    type_id: str,
+    property_key: str,
+) -> list[str]:
+    """Find ontology keys with explicit property lists for a type that don't include a given property key.
+
+    Only returns ontologies where the INCLUDES_TYPE edge has a non-null properties list
+    that does NOT contain the given property_key.
+    """
+    id_field = "entityTypeId" if type_label == "EntityType" else "relationTypeId"
+    result = await session.run(
+        f"""
+        MATCH (o:Ontology)-[r:INCLUDES_TYPE]->(t:{type_label} {{{id_field}: $type_id}})
+        WHERE r.properties IS NOT NULL AND NOT $property_key IN r.properties
+        RETURN o.key AS key
+        ORDER BY o.key
+        """,
+        type_id=type_id,
+        property_key=property_key,
+    )
+    return [record["key"] async for record in result]
+
+
+async def add_property_to_includes_lists(
+    session: AsyncSession,
+    type_label: str,
+    type_id: str,
+    property_key: str,
+) -> int:
+    """Add a property key to all explicit INCLUDES_TYPE property lists for a type.
+
+    Only modifies edges with non-null properties lists that don't already include the key.
+    """
+    id_field = "entityTypeId" if type_label == "EntityType" else "relationTypeId"
+    result = await session.run(
+        f"""
+        MATCH (o:Ontology)-[r:INCLUDES_TYPE]->(t:{type_label} {{{id_field}: $type_id}})
+        WHERE r.properties IS NOT NULL AND NOT $property_key IN r.properties
+        SET r.properties = r.properties + $property_key
+        RETURN count(r) AS updated
+        """,
+        type_id=type_id,
+        property_key=property_key,
+    )
+    record = await result.single()
+    return record["updated"]
+
+
+async def remove_property_from_includes_lists(
+    session: AsyncSession,
+    type_label: str,
+    type_id: str,
+    property_key: str,
+) -> int:
+    """Remove a property key from all explicit INCLUDES_TYPE property lists for a type."""
+    id_field = "entityTypeId" if type_label == "EntityType" else "relationTypeId"
+    result = await session.run(
+        f"""
+        MATCH (o:Ontology)-[r:INCLUDES_TYPE]->(t:{type_label} {{{id_field}: $type_id}})
+        WHERE r.properties IS NOT NULL AND $property_key IN r.properties
+        SET r.properties = [p IN r.properties WHERE p <> $property_key]
+        RETURN count(r) AS updated
+        """,
+        type_id=type_id,
+        property_key=property_key,
+    )
+    record = await result.single()
+    return record["updated"]
+
+
 # --- Full Schema (for validation and export) ---
 
 
-async def get_full_schema(session: AsyncSession, ontology_id: str) -> dict | None:
-    # Get ontology
-    ont_result = await session.run(
-        "MATCH (o:Ontology {ontologyId: $ontology_id}) RETURN o {.*} AS ontology",
-        ontology_id=ontology_id,
-    )
-    ont_record = await ont_result.single()
-    if not ont_record:
-        return None
-
-    # Get entity types with properties
+async def get_full_schema(session: AsyncSession) -> dict:
+    """Load the entire global schema + all ontologies with their INCLUDES_TYPE edges."""
+    # Get all entity types with properties
     et_result = await session.run(
         """
-        MATCH (o:Ontology {ontologyId: $ontology_id})-[:HAS_ENTITY_TYPE]->(et:EntityType)
+        MATCH (et:EntityType)
         OPTIONAL MATCH (et)-[:HAS_PROPERTY]->(p:PropertyDefinition)
         WITH et, collect(p {.*}) AS properties
         RETURN et {.*} AS entity_type, properties
         ORDER BY et.key
-        """,
-        ontology_id=ontology_id,
+        """
     )
     entity_types = []
     async for record in et_result:
@@ -592,36 +784,63 @@ async def get_full_schema(session: AsyncSession, ontology_id: str) -> dict | Non
         et["properties"] = [_convert_neo4j_types(p) for p in record["properties"] if p]
         entity_types.append(et)
 
-    # Get relation types with properties and source/target
+    # Get all relation types with properties and source/target keys
     rt_result = await session.run(
         """
-        MATCH (o:Ontology {ontologyId: $ontology_id})-[:HAS_RELATION_TYPE]->(rt:RelationType)
+        MATCH (rt:RelationType)
         MATCH (rt)-[:RELATES_FROM]->(source:EntityType)
         MATCH (rt)-[:RELATES_TO]->(target:EntityType)
         OPTIONAL MATCH (rt)-[:HAS_PROPERTY]->(p:PropertyDefinition)
         WITH rt, source, target, collect(p {.*}) AS properties
         RETURN rt {.*} AS relation_type,
-               source.entityTypeId AS sourceEntityTypeId,
                source.key AS sourceKey,
-               target.entityTypeId AS targetEntityTypeId,
                target.key AS targetKey,
                properties
         ORDER BY rt.key
-        """,
-        ontology_id=ontology_id,
+        """
     )
     relation_types = []
     async for record in rt_result:
         rt = _convert_neo4j_types(dict(record["relation_type"]))
-        rt["sourceEntityTypeId"] = record["sourceEntityTypeId"]
-        rt["targetEntityTypeId"] = record["targetEntityTypeId"]
         rt["sourceKey"] = record["sourceKey"]
         rt["targetKey"] = record["targetKey"]
         rt["properties"] = [_convert_neo4j_types(p) for p in record["properties"] if p]
         relation_types.append(rt)
 
+    # Get all ontologies with their INCLUDES_TYPE edges
+    ont_result = await session.run(
+        """
+        MATCH (o:Ontology)
+        OPTIONAL MATCH (o)-[r:INCLUDES_TYPE]->(t)
+        WITH o, collect({
+            key: t.key,
+            label: labels(t)[0],
+            properties: r.properties
+        }) AS inclusions
+        RETURN o {.*} AS ontology, inclusions
+        ORDER BY o.name
+        """
+    )
+    ontologies = []
+    async for record in ont_result:
+        ont = _convert_neo4j_types(record["ontology"])
+        raw_inclusions = record["inclusions"]
+        entity_inclusions = []
+        relation_inclusions = []
+        for inc in raw_inclusions:
+            if inc["key"] is None:
+                continue
+            entry = {"key": inc["key"], "properties": inc["properties"]}
+            if inc["label"] == "EntityType":
+                entity_inclusions.append(entry)
+            elif inc["label"] == "RelationType":
+                relation_inclusions.append(entry)
+        ont["entityInclusions"] = entity_inclusions
+        ont["relationInclusions"] = relation_inclusions
+        ontologies.append(ont)
+
     return {
-        "ontology": _convert_neo4j_types(ont_record["ontology"]),
         "entityTypes": entity_types,
         "relationTypes": relation_types,
+        "ontologies": ontologies,
     }

@@ -10,8 +10,14 @@ from ontoforge_server.runtime.service import (
     PropertyDef,
     EntityTypeDef,
     SchemaCache,
+    LoadedSchema,
     semantic_search,
 )
+
+
+def _make_loaded(entity_type_keys: list[str] | None = None) -> LoadedSchema:
+    cache = _make_cache(entity_type_keys)
+    return LoadedSchema(scoped=cache, full=cache)
 
 
 def _make_cache(entity_type_keys: list[str] | None = None) -> SchemaCache:
@@ -77,7 +83,7 @@ def mock_session(mock_driver):
 
 async def test_search_disabled_raises(mock_driver):
     """Semantic search raises ValidationError when provider is not configured."""
-    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_cache()), \
+    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_loaded()), \
          patch("ontoforge_server.runtime.service.get_embedding_provider", return_value=None):
         with pytest.raises(ValidationError, match="EMBEDDING_PROVIDER"):
             await semantic_search("test", "engineers", "person", 10, None, mock_driver)
@@ -86,7 +92,7 @@ async def test_search_disabled_raises(mock_driver):
 async def test_search_unknown_type_raises(mock_driver):
     """Semantic search raises NotFoundError for unknown entity type."""
     mock_provider = MagicMock()
-    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_cache()), \
+    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_loaded()), \
          patch("ontoforge_server.runtime.service.get_embedding_provider", return_value=mock_provider):
         with pytest.raises(NotFoundError, match="nonexistent"):
             await semantic_search("test", "query", "nonexistent", 10, None, mock_driver)
@@ -101,7 +107,7 @@ async def test_search_single_type(mock_driver, mock_session):
         {"entity": {"_id": "e1", "name": "Alice"}, "score": 0.95},
     ]
 
-    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_cache()), \
+    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_loaded()), \
          patch("ontoforge_server.runtime.service.get_embedding_provider", return_value=mock_provider), \
          patch("ontoforge_server.runtime.service.repository") as mock_repo:
         mock_repo.semantic_search = AsyncMock(return_value=search_results)
@@ -118,7 +124,7 @@ async def test_search_embed_failure_raises(mock_driver):
     mock_provider = AsyncMock()
     mock_provider.embed = AsyncMock(return_value=None)
 
-    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_cache()), \
+    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_loaded()), \
          patch("ontoforge_server.runtime.service.get_embedding_provider", return_value=mock_provider):
         with pytest.raises(ValidationError, match="Failed to generate embedding"):
             await semantic_search("test", "query", "person", 10, None, mock_driver)
@@ -132,7 +138,7 @@ async def test_no_filters_passes_limit_as_vector_limit(mock_driver, mock_session
     mock_provider = AsyncMock()
     mock_provider.embed = AsyncMock(return_value=[0.1] * 768)
 
-    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_cache()), \
+    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_loaded()), \
          patch("ontoforge_server.runtime.service.get_embedding_provider", return_value=mock_provider), \
          patch("ontoforge_server.runtime.service.repository") as mock_repo:
         mock_repo.semantic_search = AsyncMock(return_value=[])
@@ -154,7 +160,7 @@ async def test_equality_filter_passes_where_clauses(mock_driver, mock_session):
     mock_provider = AsyncMock()
     mock_provider.embed = AsyncMock(return_value=[0.1] * 768)
 
-    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_cache()), \
+    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_loaded()), \
          patch("ontoforge_server.runtime.service.get_embedding_provider", return_value=mock_provider), \
          patch("ontoforge_server.runtime.service.repository") as mock_repo:
         mock_repo.semantic_search = AsyncMock(return_value=[])
@@ -178,7 +184,7 @@ async def test_operator_filter_passes_correct_clauses(mock_driver, mock_session)
     mock_provider = AsyncMock()
     mock_provider.embed = AsyncMock(return_value=[0.1] * 768)
 
-    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_cache()), \
+    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_loaded()), \
          patch("ontoforge_server.runtime.service.get_embedding_provider", return_value=mock_provider), \
          patch("ontoforge_server.runtime.service.repository") as mock_repo:
         mock_repo.semantic_search = AsyncMock(return_value=[])
@@ -200,7 +206,7 @@ async def test_unknown_filter_property_raises(mock_driver):
     mock_provider = AsyncMock()
     mock_provider.embed = AsyncMock(return_value=[0.1] * 768)
 
-    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_cache()), \
+    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_loaded()), \
          patch("ontoforge_server.runtime.service.get_embedding_provider", return_value=mock_provider):
         with pytest.raises(ValidationError, match="Unknown filter property"):
             await semantic_search(
@@ -214,7 +220,7 @@ async def test_overfetch_capped_at_500(mock_driver, mock_session):
     mock_provider = AsyncMock()
     mock_provider.embed = AsyncMock(return_value=[0.1] * 768)
 
-    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_cache()), \
+    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_loaded()), \
          patch("ontoforge_server.runtime.service.get_embedding_provider", return_value=mock_provider), \
          patch("ontoforge_server.runtime.service.repository") as mock_repo:
         mock_repo.semantic_search = AsyncMock(return_value=[])
@@ -233,7 +239,7 @@ async def test_multiple_filters(mock_driver, mock_session):
     mock_provider = AsyncMock()
     mock_provider.embed = AsyncMock(return_value=[0.1] * 768)
 
-    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_cache()), \
+    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_loaded()), \
          patch("ontoforge_server.runtime.service.get_embedding_provider", return_value=mock_provider), \
          patch("ontoforge_server.runtime.service.repository") as mock_repo:
         mock_repo.semantic_search = AsyncMock(return_value=[])
@@ -268,7 +274,7 @@ async def test_search_with_fields_projects_entities(mock_driver, mock_session):
         },
     ]
 
-    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_cache()), \
+    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_loaded()), \
          patch("ontoforge_server.runtime.service.get_embedding_provider", return_value=mock_provider), \
          patch("ontoforge_server.runtime.service.repository") as mock_repo:
         mock_repo.semantic_search = AsyncMock(return_value=search_results)
@@ -304,7 +310,7 @@ async def test_search_without_fields_returns_all(mock_driver, mock_session):
         },
     ]
 
-    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_cache()), \
+    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_loaded()), \
          patch("ontoforge_server.runtime.service.get_embedding_provider", return_value=mock_provider), \
          patch("ontoforge_server.runtime.service.repository") as mock_repo:
         mock_repo.semantic_search = AsyncMock(return_value=search_results)

@@ -7,18 +7,18 @@ import PropertyTable from '../components/PropertyTable';
 import EntityTypeForm from '../components/forms/EntityTypeForm';
 
 export default function EntityTypeEditorPage() {
-  const { ontologyId, entityTypeId } = useParams<{ ontologyId: string; entityTypeId: string }>();
+  const { entityTypeId } = useParams<{ entityTypeId: string }>();
   const [entityType, setEntityType] = useState<EntityType | null>(null);
   const [properties, setProperties] = useState<PropertyDefinition[]>([]);
   const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const load = async () => {
-    if (!ontologyId || !entityTypeId) return;
+    if (!entityTypeId) return;
     try {
       const [et, props] = await Promise.all([
-        api.getEntityType(ontologyId, entityTypeId),
-        api.listProperties(ontologyId, 'entity-types', entityTypeId),
+        api.getEntityType(entityTypeId),
+        api.listProperties('entity-types', entityTypeId),
       ]);
       setEntityType(et);
       setProperties(props);
@@ -29,12 +29,12 @@ export default function EntityTypeEditorPage() {
     }
   };
 
-  useEffect(() => { load(); }, [ontologyId, entityTypeId]);
+  useEffect(() => { load(); }, [entityTypeId]);
 
   const handleUpdate = async (data: { displayName?: string; description?: string }) => {
-    if (!ontologyId || !entityTypeId) return;
+    if (!entityTypeId) return;
     try {
-      setEntityType(await api.updateEntityType(ontologyId, entityTypeId, data));
+      setEntityType(await api.updateEntityType(entityTypeId, data));
       setEditing(false);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to update');
@@ -42,9 +42,9 @@ export default function EntityTypeEditorPage() {
   };
 
   const handleAddProperty = async (data: { key: string; displayName: string; description?: string; dataType: string; required?: boolean; defaultValue?: string }) => {
-    if (!ontologyId || !entityTypeId) return;
+    if (!entityTypeId) return;
     try {
-      await api.createProperty(ontologyId, 'entity-types', entityTypeId, data);
+      await api.createProperty('entity-types', entityTypeId, data);
       load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to add property');
@@ -52,9 +52,9 @@ export default function EntityTypeEditorPage() {
   };
 
   const handleEditProperty = async (propertyId: string, data: { displayName?: string; description?: string; required?: boolean; defaultValue?: string | null }) => {
-    if (!ontologyId || !entityTypeId) return;
+    if (!entityTypeId) return;
     try {
-      await api.updateProperty(ontologyId, 'entity-types', entityTypeId, propertyId, data);
+      await api.updateProperty('entity-types', entityTypeId, propertyId, data);
       load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to update property');
@@ -62,9 +62,9 @@ export default function EntityTypeEditorPage() {
   };
 
   const handleDeleteProperty = async (propertyId: string) => {
-    if (!ontologyId || !entityTypeId) return;
+    if (!entityTypeId) return;
     try {
-      await api.deleteProperty(ontologyId, 'entity-types', entityTypeId, propertyId);
+      await api.deleteProperty('entity-types', entityTypeId, propertyId);
       load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to delete property');
@@ -76,7 +76,7 @@ export default function EntityTypeEditorPage() {
 
   return (
     <div>
-      <Link to={`/ontologies/${ontologyId}`} className="text-blue-600 hover:underline text-sm">&larr; Back to ontology</Link>
+      <Link to="/schema" className="text-blue-600 hover:underline text-sm">&larr; Back to schema</Link>
 
       <div className="mt-4 mb-6">
         {editing ? (

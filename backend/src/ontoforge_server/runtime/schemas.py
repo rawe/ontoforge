@@ -7,14 +7,6 @@ from ontoforge_server.core.schemas import (
 )
 
 
-class DataWipeResponse(BaseModel):
-    ontology_key: str = Field(alias="ontologyKey")
-    entities_deleted: int = Field(alias="entitiesDeleted")
-    relations_deleted: int = Field(alias="relationsDeleted")
-
-    model_config = {"populate_by_name": True}
-
-
 class SchemaResponse(BaseModel):
     ontology: ExportOntology
     entity_types: list[ExportEntityType] = Field(alias="entityTypes")

@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
 import {
   ReactFlow,
   Controls,
@@ -30,11 +29,22 @@ interface Props {
   propertyCounts: Record<string, number>;
   onAddEntityType?: () => void;
   onAddRelationType?: () => void;
-  onConnectNodes?: (sourceEntityTypeId: string, targetEntityTypeId: string) => void;
+  onConnectNodes?: (sourceEntityTypeKey: string, targetEntityTypeKey: string) => void;
 }
 
 export default function OntologyGraph({ entityTypes, relationTypes, propertyCounts, onAddEntityType, onAddRelationType, onConnectNodes }: Props) {
-  const { ontologyId } = useParams<{ ontologyId: string }>();
+  // Build a map from entityTypeId to key for edge source/target resolution
+  const etIdToKey = useMemo(() => {
+    const map: Record<string, string> = {};
+    entityTypes.forEach((et) => { map[et.entityTypeId] = et.key; });
+    return map;
+  }, [entityTypes]);
+
+  const etKeyToId = useMemo(() => {
+    const map: Record<string, string> = {};
+    entityTypes.forEach((et) => { map[et.key] = et.entityTypeId; });
+    return map;
+  }, [entityTypes]);
 
   const [visibleEntityTypes, setVisibleEntityTypes] = useState<Set<string>>(
     () => new Set(entityTypes.map((et) => et.entityTypeId)),
@@ -43,7 +53,7 @@ export default function OntologyGraph({ entityTypes, relationTypes, propertyCoun
     () => new Set(relationTypes.map((rt) => rt.relationTypeId)),
   );
 
-  // Auto-show newly added types (keeps existing filter choices intact)
+  // Auto-show newly added types
   useEffect(() => {
     setVisibleEntityTypes((prev) => {
       const next = new Set(prev);
@@ -60,7 +70,6 @@ export default function OntologyGraph({ entityTypes, relationTypes, propertyCoun
     });
   }, [relationTypes]);
 
-  // Selection state: which node or edge is currently selected
   const [selection, setSelection] = useState<GraphSelection | null>(null);
 
   const clearSelection = useCallback(() => setSelection(null), []);
@@ -83,7 +92,6 @@ export default function OntologyGraph({ entityTypes, relationTypes, propertyCoun
     });
   }, []);
 
-  // Derive the selected ID for highlighting
   const selectedNodeId =
     selection?.kind === 'entity' ? selection.entityType.entityTypeId : null;
   const selectedEdgeId =
@@ -106,14 +114,16 @@ export default function OntologyGraph({ entityTypes, relationTypes, propertyCoun
     const filteredEdges: Edge[] = relationTypes
       .filter((rt) => visibleRelationTypes.has(rt.relationTypeId))
       .filter(
-        (rt) =>
-          visibleEntityTypes.has(rt.sourceEntityTypeId) &&
-          visibleEntityTypes.has(rt.targetEntityTypeId),
+        (rt) => {
+          const sourceId = etKeyToId[rt.sourceEntityTypeKey];
+          const targetId = etKeyToId[rt.targetEntityTypeKey];
+          return sourceId && targetId && visibleEntityTypes.has(sourceId) && visibleEntityTypes.has(targetId);
+        },
       )
       .map((rt) => ({
         id: rt.relationTypeId,
-        source: rt.sourceEntityTypeId,
-        target: rt.targetEntityTypeId,
+        source: etKeyToId[rt.sourceEntityTypeKey],
+        target: etKeyToId[rt.targetEntityTypeKey],
         type: 'relationType',
         data: {
           relationType: rt,
@@ -129,12 +139,11 @@ export default function OntologyGraph({ entityTypes, relationTypes, propertyCoun
       layoutNodes: layoutGraph(filteredNodes, filteredEdges),
       layoutEdges: filteredEdges,
     };
-  }, [entityTypes, relationTypes, propertyCounts, visibleEntityTypes, visibleRelationTypes, selectedNodeId, selectedEdgeId]);
+  }, [entityTypes, relationTypes, propertyCounts, visibleEntityTypes, visibleRelationTypes, selectedNodeId, selectedEdgeId, etKeyToId]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(layoutEdges);
 
-  // Keep nodes/edges in sync when layout recomputes
   useMemo(() => {
     setNodes(layoutNodes);
     setEdges(layoutEdges);
@@ -167,10 +176,14 @@ export default function OntologyGraph({ entityTypes, relationTypes, propertyCoun
   const onConnect = useCallback(
     (connection: Connection) => {
       if (onConnectNodes && connection.source && connection.target) {
-        onConnectNodes(connection.source, connection.target);
+        const sourceKey = etIdToKey[connection.source];
+        const targetKey = etIdToKey[connection.target];
+        if (sourceKey && targetKey) {
+          onConnectNodes(sourceKey, targetKey);
+        }
       }
     },
-    [onConnectNodes],
+    [onConnectNodes, etIdToKey],
   );
 
   return (
@@ -233,10 +246,9 @@ export default function OntologyGraph({ entityTypes, relationTypes, propertyCoun
             <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#d1d5db" />
           </ReactFlow>
         </div>
-        {selection && ontologyId && (
+        {selection && (
           <GraphDetailPanel
             selection={selection}
-            ontologyId={ontologyId}
             entityTypes={entityTypes}
             onClose={clearSelection}
           />

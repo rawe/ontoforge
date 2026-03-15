@@ -3,156 +3,275 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+REPO = "ontoforge_server.modeling.service.repository"
 
-NOW = datetime(2025, 1, 1, tzinfo=timezone.utc)
-
-ONTOLOGY_DATA = {
-    "ontologyId": "ont-1",
-    "key": "test_ontology",
-    "name": "Test",
-    "description": None,
-    "createdAt": NOW,
-    "updatedAt": NOW,
-}
+NOW = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
 FULL_SCHEMA = {
-    "ontology": ONTOLOGY_DATA,
     "entityTypes": [
         {
             "entityTypeId": "et-1",
             "key": "person",
             "displayName": "Person",
             "description": None,
-            "createdAt": NOW,
-            "updatedAt": NOW,
             "properties": [
                 {
-                    "propertyId": "prop-1",
+                    "propertyId": "p-1",
                     "key": "full_name",
                     "displayName": "Full Name",
-                    "description": None,
                     "dataType": "string",
-                    "required": False,
+                    "required": True,
                     "defaultValue": None,
-                    "createdAt": NOW,
-                    "updatedAt": NOW,
-                }
+                },
             ],
+        },
+        {
+            "entityTypeId": "et-2",
+            "key": "company",
+            "displayName": "Company",
+            "description": None,
+            "properties": [],
         },
     ],
     "relationTypes": [
         {
             "relationTypeId": "rt-1",
-            "key": "knows",
-            "displayName": "Knows",
+            "key": "works_for",
+            "displayName": "Works For",
             "description": None,
-            "sourceEntityTypeId": "et-1",
-            "targetEntityTypeId": "et-1",
             "sourceKey": "person",
-            "targetKey": "person",
+            "targetKey": "company",
+            "properties": [],
+        },
+    ],
+    "ontologies": [
+        {
+            "ontologyId": "ont-1",
+            "key": "test_ontology",
+            "name": "Test Ontology",
+            "description": None,
             "createdAt": NOW,
             "updatedAt": NOW,
-            "properties": [],
+            "entityInclusions": [
+                {"key": "person", "properties": ["full_name"]},
+                {"key": "company", "properties": None},
+            ],
+            "relationInclusions": [{"key": "works_for", "properties": None}],
         },
     ],
 }
 
 
-IMPORT_PAYLOAD = {
-    "formatVersion": "1.0",
-    "ontology": {
+# --- Validate Schema ---
+
+
+@pytest.mark.asyncio
+async def test_validate_schema_valid(client):
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=FULL_SCHEMA),
+        patch(f"{REPO}.list_ontologies", new_callable=AsyncMock, return_value=FULL_SCHEMA["ontologies"]),
+        patch(f"{REPO}.get_ontology", new_callable=AsyncMock, return_value=FULL_SCHEMA["ontologies"][0]),
+    ):
+        resp = await client.post("/api/model/schema/validate")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["valid"] is True
+    assert body["errors"] == []
+
+
+@pytest.mark.asyncio
+async def test_validate_schema_with_errors(client):
+    bad_schema = {
+        "entityTypes": [
+            {
+                "entityTypeId": "et-1",
+                "key": "person",
+                "displayName": "Person",
+                "properties": [
+                    {
+                        "key": "age",
+                        "displayName": "Age",
+                        "dataType": "invalid_type",
+                        "required": False,
+                    },
+                ],
+            },
+        ],
+        "relationTypes": [
+            {
+                "relationTypeId": "rt-1",
+                "key": "works_for",
+                "displayName": "Works For",
+                "sourceKey": "nonexistent",
+                "targetKey": "person",
+                "properties": [],
+            },
+        ],
+        "ontologies": [],
+    }
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=bad_schema),
+        patch(f"{REPO}.list_ontologies", new_callable=AsyncMock, return_value=[]),
+    ):
+        resp = await client.post("/api/model/schema/validate")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["valid"] is False
+    assert len(body["errors"]) >= 2
+    messages = [e["message"] for e in body["errors"]]
+    assert any("invalid_type" in m for m in messages)
+    assert any("nonexistent" in m for m in messages)
+
+
+# --- Export ---
+
+
+@pytest.mark.asyncio
+async def test_export_schema(client):
+    with patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=FULL_SCHEMA):
+        resp = await client.get("/api/model/export")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["formatVersion"] == "2.0"
+    assert len(body["entityTypes"]) == 2
+    assert len(body["relationTypes"]) == 1
+    assert len(body["ontologies"]) == 1
+    # Check entity type structure
+    person = body["entityTypes"][0]
+    assert person["key"] == "person"
+    assert len(person["properties"]) == 1
+    assert person["properties"][0]["key"] == "full_name"
+    # Check relation type has from/to keys
+    rt = body["relationTypes"][0]
+    assert rt["fromEntityTypeKey"] == "person"
+    assert rt["toEntityTypeKey"] == "company"
+    # Check ontology includes
+    ont = body["ontologies"][0]
+    assert ont["key"] == "test_ontology"
+    assert ont["includes"]["entityTypes"][0]["key"] == "person"
+    assert ont["includes"]["relationTypes"][0]["key"] == "works_for"
+
+
+@pytest.mark.asyncio
+async def test_export_schema_empty(client):
+    empty = {"entityTypes": [], "relationTypes": [], "ontologies": []}
+    with patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=empty):
+        resp = await client.get("/api/model/export")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["formatVersion"] == "2.0"
+    assert body["entityTypes"] == []
+    assert body["relationTypes"] == []
+    assert body["ontologies"] == []
+
+
+# --- Import ---
+
+
+@pytest.mark.asyncio
+async def test_import_schema(client):
+    ont_data = {
         "ontologyId": "ont-new",
-        "key": "test_ontology",
-        "name": "Test",
+        "key": "imported",
+        "name": "Imported",
         "description": None,
-    },
-    "entityTypes": [],
-    "relationTypes": [],
-}
-
-
-def _mock_repo(**overrides):
-    defaults = {
-        "get_ontology": AsyncMock(return_value=ONTOLOGY_DATA),
-        "get_ontology_by_key": AsyncMock(return_value=None),
-        "get_ontology_by_name": AsyncMock(return_value=None),
-        "get_full_schema": AsyncMock(return_value=FULL_SCHEMA),
-        "create_ontology": AsyncMock(return_value=ONTOLOGY_DATA),
-        "delete_ontology": AsyncMock(return_value=True),
+        "createdAt": NOW,
+        "updatedAt": NOW,
     }
-    defaults.update(overrides)
-    return defaults
-
-
-@pytest.fixture
-def repo_patch():
-    def _patch(**overrides):
-        mocks = _mock_repo(**overrides)
-        return patch.multiple(
-            "ontoforge_server.modeling.service.repository", **mocks
+    with (
+        patch(f"{REPO}.get_entity_type_by_key", new_callable=AsyncMock, return_value=None),
+        patch(f"{REPO}.create_entity_type", new_callable=AsyncMock, return_value={}),
+        patch(f"{REPO}.create_property", new_callable=AsyncMock, return_value={}),
+        patch(f"{REPO}.get_relation_type_by_key", new_callable=AsyncMock, return_value=None),
+        patch(f"{REPO}.create_relation_type", new_callable=AsyncMock, return_value={}),
+        patch(f"{REPO}.get_ontology_by_key", new_callable=AsyncMock, return_value=None),
+        patch(f"{REPO}.create_ontology", new_callable=AsyncMock, return_value=ont_data),
+        patch(f"{REPO}.add_includes_type", new_callable=AsyncMock, return_value={"key": "person", "properties": None}),
+    ):
+        resp = await client.post(
+            "/api/model/import",
+            json={
+                "formatVersion": "2.0",
+                "entityTypes": [
+                    {
+                        "key": "person",
+                        "displayName": "Person",
+                        "properties": [
+                            {
+                                "key": "full_name",
+                                "displayName": "Full Name",
+                                "dataType": "string",
+                                "required": True,
+                            },
+                        ],
+                    },
+                ],
+                "relationTypes": [
+                    {
+                        "key": "works_for",
+                        "displayName": "Works For",
+                        "fromEntityTypeKey": "person",
+                        "toEntityTypeKey": "person",
+                        "properties": [],
+                    },
+                ],
+                "ontologies": [
+                    {
+                        "key": "imported",
+                        "name": "Imported",
+                        "includes": {
+                            "entityTypes": [{"key": "person"}],
+                            "relationTypes": [{"key": "works_for"}],
+                        },
+                    },
+                ],
+            },
         )
-
-    return _patch
-
-
-async def test_validate_schema_returns_valid(client, repo_patch):
-    """Regression: validate endpoint works when get_full_schema returns proper data."""
-    with repo_patch():
-        resp = await client.post("/api/model/ontologies/ont-1/validate")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["valid"] is True
-    assert data["errors"] == []
+    assert resp.status_code == 201
+    body = resp.json()
+    assert len(body["ontologies"]) == 1
+    assert body["ontologies"][0]["key"] == "imported"
 
 
-async def test_export_ontology_returns_payload(client, repo_patch):
-    """Regression: export endpoint works when get_full_schema returns proper data."""
-    with repo_patch():
-        resp = await client.get("/api/model/ontologies/ont-1/export")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["formatVersion"] == "1.0"
-    assert data["ontology"]["ontologyId"] == "ont-1"
-    assert data["ontology"]["key"] == "test_ontology"
-    assert len(data["entityTypes"]) == 1
-    assert data["entityTypes"][0]["key"] == "person"
-    assert len(data["relationTypes"]) == 1
-    assert data["relationTypes"][0]["key"] == "knows"
-
-
-async def test_import_ontology_name_conflict_returns_409(client, repo_patch):
-    """Regression: importing with a name that already exists returns 409, not 500."""
-    existing_other = {
-        "ontologyId": "ont-other",
-        "key": "other_key",
-        "name": "Test",
-        "description": None,
-        "createdAt": NOW,
-        "updatedAt": NOW,
-    }
-    with repo_patch(
-        get_ontology=AsyncMock(return_value=None),
-        get_ontology_by_name=AsyncMock(return_value=existing_other),
-    ):
-        resp = await client.post("/api/model/import", json=IMPORT_PAYLOAD)
+@pytest.mark.asyncio
+async def test_import_schema_entity_type_conflict(client):
+    existing_et = {"entityTypeId": "et-existing", "key": "person"}
+    with patch(f"{REPO}.get_entity_type_by_key", new_callable=AsyncMock, return_value=existing_et):
+        resp = await client.post(
+            "/api/model/import",
+            json={
+                "formatVersion": "2.0",
+                "entityTypes": [{"key": "person", "displayName": "Person"}],
+                "relationTypes": [],
+                "ontologies": [],
+            },
+        )
     assert resp.status_code == 409
-    assert "already exists" in resp.json()["error"]["message"]
+    assert "person" in resp.json()["error"]["message"]
 
 
-async def test_import_ontology_key_conflict_returns_409(client, repo_patch):
-    """Importing with a key that already exists on a different ontology returns 409."""
-    existing_other = {
-        "ontologyId": "ont-other",
-        "key": "test_ontology",
-        "name": "Other Name",
-        "description": None,
-        "createdAt": NOW,
-        "updatedAt": NOW,
-    }
-    with repo_patch(
-        get_ontology=AsyncMock(return_value=None),
-        get_ontology_by_key=AsyncMock(return_value=existing_other),
+@pytest.mark.asyncio
+async def test_import_schema_missing_source_entity_type(client):
+    with (
+        patch(f"{REPO}.get_entity_type_by_key", new_callable=AsyncMock, return_value=None),
+        patch(f"{REPO}.create_entity_type", new_callable=AsyncMock, return_value={}),
+        patch(f"{REPO}.get_relation_type_by_key", new_callable=AsyncMock, return_value=None),
     ):
-        resp = await client.post("/api/model/import", json=IMPORT_PAYLOAD)
-    assert resp.status_code == 409
-    assert "already exists" in resp.json()["error"]["message"]
+        resp = await client.post(
+            "/api/model/import",
+            json={
+                "formatVersion": "2.0",
+                "entityTypes": [{"key": "person", "displayName": "Person"}],
+                "relationTypes": [
+                    {
+                        "key": "works_for",
+                        "displayName": "Works For",
+                        "fromEntityTypeKey": "nonexistent",
+                        "toEntityTypeKey": "person",
+                    },
+                ],
+                "ontologies": [],
+            },
+        )
+    assert resp.status_code == 422
+    assert "nonexistent" in resp.json()["error"]["message"]

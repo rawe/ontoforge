@@ -35,6 +35,8 @@ def _convert_neo4j_types(data: dict) -> dict:
 async def get_full_schema(session: AsyncSession, ontology_key: str) -> dict | None:
     """Read the full schema for a specific ontology by key.
 
+    Loads ALL entity types and relation types globally (not scoped to ontology),
+    plus INCLUDES_TYPE edges from this ontology for scope filtering.
     Returns None if no matching Ontology node exists.
     """
     ont_result = await session.run(
@@ -48,16 +50,15 @@ async def get_full_schema(session: AsyncSession, ontology_key: str) -> dict | No
     ontology = _convert_neo4j_types(ont_record["ontology"])
     ontology_id = ontology["ontologyId"]
 
-    # Get entity types with properties
+    # Get ALL entity types with properties (global, no ontology traversal)
     et_result = await session.run(
         """
-        MATCH (o:Ontology {ontologyId: $ontology_id})-[:HAS_ENTITY_TYPE]->(et:EntityType)
+        MATCH (et:EntityType)
         OPTIONAL MATCH (et)-[:HAS_PROPERTY]->(p:PropertyDefinition)
         WITH et, collect(p {.*}) AS properties
         RETURN et {.*} AS entity_type, properties
         ORDER BY et.key
-        """,
-        ontology_id=ontology_id,
+        """
     )
     entity_types = []
     async for record in et_result:
@@ -65,10 +66,10 @@ async def get_full_schema(session: AsyncSession, ontology_key: str) -> dict | No
         et["properties"] = [_convert_neo4j_types(p) for p in record["properties"] if p]
         entity_types.append(et)
 
-    # Get relation types with properties and source/target keys
+    # Get ALL relation types with properties and source/target keys
     rt_result = await session.run(
         """
-        MATCH (o:Ontology {ontologyId: $ontology_id})-[:HAS_RELATION_TYPE]->(rt:RelationType)
+        MATCH (rt:RelationType)
         MATCH (rt)-[:RELATES_FROM]->(source:EntityType)
         MATCH (rt)-[:RELATES_TO]->(target:EntityType)
         OPTIONAL MATCH (rt)-[:HAS_PROPERTY]->(p:PropertyDefinition)
@@ -78,8 +79,7 @@ async def get_full_schema(session: AsyncSession, ontology_key: str) -> dict | No
                target.key AS targetKey,
                properties
         ORDER BY rt.key
-        """,
-        ontology_id=ontology_id,
+        """
     )
     relation_types = []
     async for record in rt_result:
@@ -89,55 +89,30 @@ async def get_full_schema(session: AsyncSession, ontology_key: str) -> dict | No
         rt["properties"] = [_convert_neo4j_types(p) for p in record["properties"] if p]
         relation_types.append(rt)
 
+    # Load INCLUDES_TYPE edges from this ontology
+    inc_result = await session.run(
+        """
+        MATCH (o:Ontology {ontologyId: $ontology_id})-[r:INCLUDES_TYPE]->(t)
+        RETURN t.key AS key, labels(t)[0] AS label, r.properties AS properties
+        """,
+        ontology_id=ontology_id,
+    )
+    entity_inclusions = []
+    relation_inclusions = []
+    async for record in inc_result:
+        entry = {"key": record["key"], "properties": record["properties"]}
+        if record["label"] == "EntityType":
+            entity_inclusions.append(entry)
+        elif record["label"] == "RelationType":
+            relation_inclusions.append(entry)
+
     return {
         "ontology": ontology,
         "entityTypes": entity_types,
         "relationTypes": relation_types,
+        "entityInclusions": entity_inclusions,
+        "relationInclusions": relation_inclusions,
     }
-
-
-async def get_all_ontology_keys(session: AsyncSession) -> list[str]:
-    """Return all ontology keys in the database."""
-    result = await session.run("MATCH (o:Ontology) RETURN o.key AS key ORDER BY o.key")
-    return [record["key"] async for record in result]
-
-
-# --- Instance Data Wipe ---
-
-
-async def wipe_instance_data(
-    session: AsyncSession, entity_type_keys: list[str],
-) -> tuple[int, int]:
-    """Delete all entity instances (and their relationships) for the given entity type keys.
-
-    Returns (entities_deleted, relations_deleted).
-    """
-    # First count relationships that will be deleted
-    rel_result = await session.run(
-        """
-        MATCH (n:_Entity)-[r]-()
-        WHERE n._entityTypeKey IN $keys
-        RETURN count(DISTINCT r) AS rel_count
-        """,
-        keys=entity_type_keys,
-    )
-    rel_record = await rel_result.single()
-    relations_deleted = rel_record["rel_count"]
-
-    # Delete entities with DETACH DELETE (removes relationships too)
-    del_result = await session.run(
-        """
-        MATCH (n:_Entity)
-        WHERE n._entityTypeKey IN $keys
-        DETACH DELETE n
-        RETURN count(n) AS deleted
-        """,
-        keys=entity_type_keys,
-    )
-    del_record = await del_result.single()
-    entities_deleted = del_record["deleted"]
-
-    return entities_deleted, relations_deleted
 
 
 # --- Entity Instance CRUD ---
@@ -151,11 +126,7 @@ async def create_entity(
     properties: dict,
     embedding: list[float] | None = None,
 ) -> dict:
-    """Create an entity instance node with dual labels: _Entity and the PascalCase type label.
-
-    The pascal_label comes from the SchemaCache (safe for Cypher label interpolation).
-    All property values are passed via the $properties map parameter.
-    """
+    """Create an entity instance node with dual labels: _Entity and the PascalCase type label."""
     embedding_clause = ", _embedding: $embedding" if embedding is not None else ""
     result = await session.run(
         f"""
@@ -188,11 +159,7 @@ async def list_entities(
     limit: int,
     offset: int,
 ) -> tuple[list[dict], int]:
-    """List entity instances with filtering, sorting, and pagination.
-
-    Returns (items, total_count).
-    The pascal_label and sort_field come from the service layer (validated against the schema).
-    """
+    """List entity instances with filtering, sorting, and pagination."""
     base_where = "n._entityTypeKey = $entity_type_key"
     if where_clauses:
         where_str = f"WHERE {base_where} AND " + " AND ".join(where_clauses)
@@ -201,7 +168,6 @@ async def list_entities(
 
     params["entity_type_key"] = entity_type_key
 
-    # Count query
     count_query = f"MATCH (n:_Entity:{pascal_label}) {where_str} RETURN count(n) AS total"
     count_result = await session.run(count_query, params)
     count_record = await count_result.single()
@@ -210,7 +176,6 @@ async def list_entities(
     if total == 0:
         return [], 0
 
-    # Data query with sort/pagination
     data_query = f"""
         MATCH (n:_Entity:{pascal_label}) {where_str}
         RETURN n {{.*}} AS entity
@@ -230,7 +195,6 @@ async def get_entity(
     pascal_label: str,
     entity_id: str,
 ) -> dict | None:
-    """Get a single entity instance by ID."""
     result = await session.run(
         f"MATCH (n:_Entity:{pascal_label} {{_id: $entity_id}}) RETURN n {{.*}} AS entity",
         entity_id=entity_id,
@@ -250,13 +214,6 @@ async def update_entity(
     embedding: list[float] | None = None,
     has_embedding_update: bool = False,
 ) -> dict | None:
-    """Partial update: set some properties, remove others (null values).
-
-    set_properties: dict of {key: coerced_value} to set
-    remove_properties: list of property keys to remove (nulled out)
-    embedding: new embedding vector (or None to clear)
-    has_embedding_update: True if embedding should be written (even if None)
-    """
     set_clause = (
         "SET n += $set_properties, n._updatedAt = datetime()"
         if set_properties
@@ -292,7 +249,6 @@ async def delete_entity(
     pascal_label: str,
     entity_id: str,
 ) -> bool:
-    """Delete an entity with DETACH DELETE. Returns True if deleted, False if not found."""
     result = await session.run(
         f"""
         MATCH (n:_Entity:{pascal_label} {{_id: $entity_id}})
@@ -309,7 +265,6 @@ async def delete_entity(
 
 
 async def get_entity_by_id(session: AsyncSession, entity_id: str) -> dict | None:
-    """Get any entity by _id (regardless of type label)."""
     result = await session.run(
         "MATCH (n:_Entity {_id: $entity_id}) RETURN n {.*} AS entity",
         entity_id=entity_id,
@@ -327,7 +282,6 @@ async def create_relation(
     to_entity_id: str,
     properties: dict,
 ) -> dict:
-    """Create a relation instance between two entity nodes."""
     result = await session.run(
         f"""
         MATCH (from:_Entity {{_id: $from_entity_id}})
@@ -367,7 +321,6 @@ async def list_relations(
     limit: int,
     offset: int,
 ) -> tuple[list[dict], int]:
-    """List relation instances with filtering and pagination."""
     base_where = "r._relationTypeKey = $relation_type_key"
     if where_clauses:
         where_str = f"WHERE {base_where} AND " + " AND ".join(where_clauses)
@@ -376,7 +329,6 @@ async def list_relations(
 
     params["relation_type_key"] = relation_type_key
 
-    # Count query
     count_query = f"""
         MATCH (from:_Entity)-[r:{rel_type_upper}]->(to:_Entity)
         {where_str}
@@ -389,7 +341,6 @@ async def list_relations(
     if total == 0:
         return [], 0
 
-    # Data query with sort/pagination
     data_query = f"""
         MATCH (from:_Entity)-[r:{rel_type_upper}]->(to:_Entity)
         {where_str}
@@ -417,7 +368,6 @@ async def get_relation(
     rel_type_upper: str,
     relation_id: str,
 ) -> dict | None:
-    """Get a single relation instance by ID."""
     result = await session.run(
         f"""
         MATCH (from:_Entity)-[r:{rel_type_upper} {{_id: $relation_id}}]->(to:_Entity)
@@ -443,7 +393,6 @@ async def update_relation(
     set_properties: dict,
     remove_properties: list[str],
 ) -> dict | None:
-    """Partial update of a relation instance."""
     set_clause = (
         "SET r += $set_properties, r._updatedAt = datetime()"
         if set_properties
@@ -481,7 +430,6 @@ async def delete_relation(
     rel_type_upper: str,
     relation_id: str,
 ) -> bool:
-    """Delete a relation instance. Returns True if deleted."""
     result = await session.run(
         f"MATCH ()-[r:{rel_type_upper} {{_id: $relation_id}}]->() DELETE r RETURN count(*) AS deleted",
         relation_id=relation_id,
@@ -500,18 +448,12 @@ async def get_neighbors(
     relation_type_filter: str | None,
     limit: int,
 ) -> list[dict]:
-    """Get neighbors of an entity via relationships.
-
-    Returns a list of dicts with 'relation' and 'entity' keys.
-    The relation dict includes a 'direction' field ('outgoing' or 'incoming').
-    """
     if relation_type_filter:
         rel_pattern = f"[r:{relation_type_filter}]"
     else:
         rel_pattern = "[r]"
 
     if direction == "both":
-        # Run separate queries to determine direction per relationship
         out_query = f"""
             MATCH (n:_Entity {{_id: $entity_id}})-{rel_pattern}->(neighbor:_Entity)
             RETURN r {{.*}} AS relation, neighbor {{.*}} AS neighbor_entity
@@ -549,7 +491,7 @@ async def get_neighbors(
     else:
         if direction == "outgoing":
             match_clause = f"MATCH (n:_Entity {{_id: $entity_id}})-{rel_pattern}->(neighbor:_Entity)"
-        else:  # incoming
+        else:
             match_clause = f"MATCH (n:_Entity {{_id: $entity_id}})<-{rel_pattern}-(neighbor:_Entity)"
 
         query = f"""
@@ -583,13 +525,6 @@ async def semantic_search(
     filter_params: dict | None = None,
     index_name: str | None = None,
 ) -> list[dict]:
-    """Vector similarity search on entity embeddings.
-
-    Searches the vector index for entity_type_key.
-    When where_clauses are provided, applies them as post-filter on vector results.
-    vector_limit controls how many candidates the index returns; limit is the final cap.
-    Returns list of dicts with 'entity' and 'score' keys.
-    """
     if index_name is None:
         index_name = f"{entity_type_key}_embedding"
 

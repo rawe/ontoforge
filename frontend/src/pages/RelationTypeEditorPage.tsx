@@ -7,7 +7,7 @@ import PropertyTable from '../components/PropertyTable';
 import RelationTypeForm from '../components/forms/RelationTypeForm';
 
 export default function RelationTypeEditorPage() {
-  const { ontologyId, relationTypeId } = useParams<{ ontologyId: string; relationTypeId: string }>();
+  const { relationTypeId } = useParams<{ relationTypeId: string }>();
   const [relationType, setRelationType] = useState<RelationType | null>(null);
   const [entityTypes, setEntityTypes] = useState<EntityType[]>([]);
   const [properties, setProperties] = useState<PropertyDefinition[]>([]);
@@ -15,12 +15,12 @@ export default function RelationTypeEditorPage() {
   const [loading, setLoading] = useState(true);
 
   const load = async () => {
-    if (!ontologyId || !relationTypeId) return;
+    if (!relationTypeId) return;
     try {
       const [rt, ets, props] = await Promise.all([
-        api.getRelationType(ontologyId, relationTypeId),
-        api.listEntityTypes(ontologyId),
-        api.listProperties(ontologyId, 'relation-types', relationTypeId),
+        api.getRelationType(relationTypeId),
+        api.listEntityTypes(),
+        api.listProperties('relation-types', relationTypeId),
       ]);
       setRelationType(rt);
       setEntityTypes(ets);
@@ -32,12 +32,12 @@ export default function RelationTypeEditorPage() {
     }
   };
 
-  useEffect(() => { load(); }, [ontologyId, relationTypeId]);
+  useEffect(() => { load(); }, [relationTypeId]);
 
   const handleUpdate = async (data: { displayName?: string; description?: string }) => {
-    if (!ontologyId || !relationTypeId) return;
+    if (!relationTypeId) return;
     try {
-      setRelationType(await api.updateRelationType(ontologyId, relationTypeId, data));
+      setRelationType(await api.updateRelationType(relationTypeId, data));
       setEditing(false);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to update');
@@ -45,9 +45,9 @@ export default function RelationTypeEditorPage() {
   };
 
   const handleAddProperty = async (data: { key: string; displayName: string; description?: string; dataType: string; required?: boolean; defaultValue?: string }) => {
-    if (!ontologyId || !relationTypeId) return;
+    if (!relationTypeId) return;
     try {
-      await api.createProperty(ontologyId, 'relation-types', relationTypeId, data);
+      await api.createProperty('relation-types', relationTypeId, data);
       load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to add property');
@@ -55,9 +55,9 @@ export default function RelationTypeEditorPage() {
   };
 
   const handleEditProperty = async (propertyId: string, data: { displayName?: string; description?: string; required?: boolean; defaultValue?: string | null }) => {
-    if (!ontologyId || !relationTypeId) return;
+    if (!relationTypeId) return;
     try {
-      await api.updateProperty(ontologyId, 'relation-types', relationTypeId, propertyId, data);
+      await api.updateProperty('relation-types', relationTypeId, propertyId, data);
       load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to update property');
@@ -65,24 +65,24 @@ export default function RelationTypeEditorPage() {
   };
 
   const handleDeleteProperty = async (propertyId: string) => {
-    if (!ontologyId || !relationTypeId) return;
+    if (!relationTypeId) return;
     try {
-      await api.deleteProperty(ontologyId, 'relation-types', relationTypeId, propertyId);
+      await api.deleteProperty('relation-types', relationTypeId, propertyId);
       load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to delete property');
     }
   };
 
-  const sourceName = entityTypes.find((et) => et.entityTypeId === relationType?.sourceEntityTypeId);
-  const targetName = entityTypes.find((et) => et.entityTypeId === relationType?.targetEntityTypeId);
+  const sourceName = entityTypes.find((et) => et.key === relationType?.sourceEntityTypeKey);
+  const targetName = entityTypes.find((et) => et.key === relationType?.targetEntityTypeKey);
 
   if (loading) return <p>Loading...</p>;
   if (!relationType) return <p>Relation type not found.</p>;
 
   return (
     <div>
-      <Link to={`/ontologies/${ontologyId}`} className="text-blue-600 hover:underline text-sm">&larr; Back to ontology</Link>
+      <Link to="/schema" className="text-blue-600 hover:underline text-sm">&larr; Back to schema</Link>
 
       <div className="mt-4 mb-6">
         {editing ? (
@@ -92,8 +92,8 @@ export default function RelationTypeEditorPage() {
               key: relationType.key,
               displayName: relationType.displayName,
               description: relationType.description ?? '',
-              sourceEntityTypeId: relationType.sourceEntityTypeId,
-              targetEntityTypeId: relationType.targetEntityTypeId,
+              sourceEntityTypeKey: relationType.sourceEntityTypeKey,
+              targetEntityTypeKey: relationType.targetEntityTypeKey,
             }}
             onSubmit={handleUpdate}
             onCancel={() => setEditing(false)}
@@ -107,9 +107,9 @@ export default function RelationTypeEditorPage() {
             </div>
             <p className="text-gray-500 mt-1">{relationType.description || 'No description'}</p>
             <div className="mt-2 text-sm text-gray-600">
-              <span className="font-medium">{sourceName?.displayName ?? relationType.sourceEntityTypeId}</span>
+              <span className="font-medium">{sourceName?.displayName ?? relationType.sourceEntityTypeKey}</span>
               <span className="mx-2 text-gray-400">&rarr;</span>
-              <span className="font-medium">{targetName?.displayName ?? relationType.targetEntityTypeId}</span>
+              <span className="font-medium">{targetName?.displayName ?? relationType.targetEntityTypeKey}</span>
             </div>
           </div>
         )}

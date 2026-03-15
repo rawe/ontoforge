@@ -6,7 +6,10 @@
     },
     "ontoforge-runtime": {
       "type": "http",
-      "url": "http://localhost:8000/mcp/runtime/my_ontology"
+      "url": "http://localhost:8000/mcp/runtime",
+      "headers": {
+        "X-Ontology-Key": "test_ontology"
+      }
     }
   }
 }

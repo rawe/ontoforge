@@ -6,6 +6,8 @@ from ontoforge_server.core.schemas import (
     DataType,
     ExportEntityType,
     ExportOntology,
+    ExportOntologyInclusion,
+    ExportOntologyInclusions,
     ExportPayload,
     ExportProperty,
     ExportRelationType,
@@ -16,6 +18,8 @@ __all__ = [
     "DataType",
     "ExportEntityType",
     "ExportOntology",
+    "ExportOntologyInclusion",
+    "ExportOntologyInclusions",
     "ExportPayload",
     "ExportProperty",
     "ExportRelationType",
@@ -85,8 +89,8 @@ class RelationTypeCreate(BaseModel):
     key: str = Field(pattern=KEY_PATTERN)
     display_name: str = Field(alias="displayName")
     description: str | None = None
-    source_entity_type_id: str = Field(alias="sourceEntityTypeId")
-    target_entity_type_id: str = Field(alias="targetEntityTypeId")
+    source_entity_type_key: str = Field(alias="sourceEntityTypeKey")
+    target_entity_type_key: str = Field(alias="targetEntityTypeKey")
 
     model_config = {"populate_by_name": True}
 
@@ -103,8 +107,8 @@ class RelationTypeResponse(BaseModel):
     key: str
     display_name: str = Field(alias="displayName")
     description: str | None = None
-    source_entity_type_id: str = Field(alias="sourceEntityTypeId")
-    target_entity_type_id: str = Field(alias="targetEntityTypeId")
+    source_entity_type_key: str = Field(alias="sourceEntityTypeKey")
+    target_entity_type_key: str = Field(alias="targetEntityTypeKey")
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
 
@@ -146,6 +150,23 @@ class PropertyDefinitionResponse(BaseModel):
     updated_at: datetime = Field(alias="updatedAt")
 
     model_config = {"populate_by_name": True}
+
+
+# --- Scope Management ---
+
+
+class IncludeTypeRequest(BaseModel):
+    key: str
+    properties: list[str] | None = None
+
+
+class IncludeTypeUpdate(BaseModel):
+    properties: list[str] | None = None
+
+
+class IncludeTypeResponse(BaseModel):
+    key: str
+    properties: list[str] | None = None
 
 
 # --- Validation ---

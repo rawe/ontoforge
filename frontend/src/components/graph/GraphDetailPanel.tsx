@@ -17,12 +17,11 @@ export type GraphSelection = EntitySelection | RelationSelection;
 
 interface Props {
   selection: GraphSelection;
-  ontologyId: string;
   entityTypes: EntityType[];
   onClose: () => void;
 }
 
-export default function GraphDetailPanel({ selection, ontologyId, entityTypes, onClose }: Props) {
+export default function GraphDetailPanel({ selection, entityTypes, onClose }: Props) {
   const [properties, setProperties] = useState<PropertyDefinition[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -37,7 +36,7 @@ export default function GraphDetailPanel({ selection, ontologyId, entityTypes, o
     let cancelled = false;
     setLoading(true);
     setError(null);
-    listProperties(ontologyId, ownerType as 'entity-types' | 'relation-types', ownerId)
+    listProperties(ownerType as 'entity-types' | 'relation-types', ownerId)
       .then((props) => {
         if (!cancelled) setProperties(props);
       })
@@ -50,12 +49,12 @@ export default function GraphDetailPanel({ selection, ontologyId, entityTypes, o
     return () => {
       cancelled = true;
     };
-  }, [ontologyId, ownerType, ownerId]);
+  }, [ownerType, ownerId]);
 
   const editPath =
     selection.kind === 'entity'
-      ? `/ontologies/${ontologyId}/entity-types/${selection.entityType.entityTypeId}`
-      : `/ontologies/${ontologyId}/relation-types/${selection.relationType.relationTypeId}`;
+      ? `/schema/entity-types/${selection.entityType.entityTypeId}`
+      : `/schema/relation-types/${selection.relationType.relationTypeId}`;
 
   const displayName =
     selection.kind === 'entity'
@@ -72,14 +71,14 @@ export default function GraphDetailPanel({ selection, ontologyId, entityTypes, o
 
   const sourceName =
     selection.kind === 'relation'
-      ? entityTypes.find((et) => et.entityTypeId === selection.relationType.sourceEntityTypeId)
-          ?.displayName ?? 'Unknown'
+      ? entityTypes.find((et) => et.key === selection.relationType.sourceEntityTypeKey)
+          ?.displayName ?? selection.relationType.sourceEntityTypeKey
       : null;
 
   const targetName =
     selection.kind === 'relation'
-      ? entityTypes.find((et) => et.entityTypeId === selection.relationType.targetEntityTypeId)
-          ?.displayName ?? 'Unknown'
+      ? entityTypes.find((et) => et.key === selection.relationType.targetEntityTypeKey)
+          ?.displayName ?? selection.relationType.targetEntityTypeKey
       : null;
 
   return (

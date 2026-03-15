@@ -83,7 +83,7 @@ function OntologyNode({ node, pathname }: { node: OntologyTreeNode; pathname: st
 
       {expanded && (
         <div className="ml-3 pl-3 border-l border-gray-700 flex flex-col gap-0.5 mt-0.5">
-          <NavLink to={`/ontologies/${node.ontology.ontologyId}`} label="Schema" pathname={pathname} />
+          <NavLink to={`/ontologies/${node.ontology.ontologyId}`} label="Scope" pathname={pathname} />
 
           {(entityTypes.length > 0 || relationTypes.length > 0) && (
             <div className="mt-1">
@@ -144,7 +144,7 @@ export default function Sidebar() {
     >
       {/* Header */}
       <div className={`flex items-center p-4 ${collapsed ? 'justify-center' : ''}`}>
-        <Link to="/ontologies" className="text-xl font-bold hover:opacity-80 transition-opacity">
+        <Link to="/schema" className="text-xl font-bold hover:opacity-80 transition-opacity">
           {collapsed ? 'O' : 'OntoForge'}
         </Link>
       </div>
@@ -152,15 +152,25 @@ export default function Sidebar() {
       {/* Tree */}
       {!collapsed && (
         <nav className="flex-1 overflow-y-auto px-2 flex flex-col gap-1">
-          {isLoading && (
-            <p className="px-3 text-sm text-gray-400">Loading...</p>
-          )}
-          {ontologies.map((node) => (
-            <OntologyNode key={node.ontology.ontologyId} node={node} pathname={pathname} />
-          ))}
-          {!isLoading && ontologies.length === 0 && (
-            <p className="px-3 text-sm text-gray-500">No ontologies</p>
-          )}
+          {/* Global Schema */}
+          <NavLink to="/schema" label="Schema" pathname={pathname} />
+
+          {/* Ontologies section */}
+          <div className="mt-3">
+            <div className="flex items-center justify-between px-3 mb-1">
+              <span className="text-xs font-semibold uppercase text-gray-500 tracking-wider">Ontologies</span>
+              <Link to="/ontologies" className="text-xs text-gray-500 hover:text-gray-300">manage</Link>
+            </div>
+            {isLoading && (
+              <p className="px-3 text-sm text-gray-400">Loading...</p>
+            )}
+            {ontologies.map((node) => (
+              <OntologyNode key={node.ontology.ontologyId} node={node} pathname={pathname} />
+            ))}
+            {!isLoading && ontologies.length === 0 && (
+              <p className="px-3 text-sm text-gray-500">No ontologies</p>
+            )}
+          </div>
         </nav>
       )}
 

@@ -43,19 +43,33 @@ class ExportRelationType(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class ExportOntologyInclusion(BaseModel):
+    key: str
+    properties: list[str] | None = None
+
+    model_config = {"populate_by_name": True}
+
+
+class ExportOntologyInclusions(BaseModel):
+    entity_types: list[ExportOntologyInclusion] = Field(default_factory=list, alias="entityTypes")
+    relation_types: list[ExportOntologyInclusion] = Field(default_factory=list, alias="relationTypes")
+
+    model_config = {"populate_by_name": True}
+
+
 class ExportOntology(BaseModel):
-    ontology_id: str = Field(alias="ontologyId")
     key: str
     name: str
     description: str | None = None
+    includes: ExportOntologyInclusions | None = None
 
     model_config = {"populate_by_name": True}
 
 
 class ExportPayload(BaseModel):
-    format_version: str = Field(default="1.0", alias="formatVersion")
-    ontology: ExportOntology
-    entity_types: list[ExportEntityType] = Field(alias="entityTypes")
-    relation_types: list[ExportRelationType] = Field(alias="relationTypes")
+    format_version: str = Field(default="2.0", alias="formatVersion")
+    entity_types: list[ExportEntityType] = Field(default_factory=list, alias="entityTypes")
+    relation_types: list[ExportRelationType] = Field(default_factory=list, alias="relationTypes")
+    ontologies: list[ExportOntology] = Field(default_factory=list, alias="ontologies")
 
     model_config = {"populate_by_name": True}

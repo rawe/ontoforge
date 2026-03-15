@@ -12,6 +12,15 @@ async def _noop_lifespan(app):
     yield
 
 
+@pytest.fixture(autouse=True)
+def clear_runtime_schema_cache():
+    from ontoforge_server.runtime import service as runtime_service
+
+    runtime_service.invalidate_loaded_schema_cache()
+    yield
+    runtime_service.invalidate_loaded_schema_cache()
+
+
 @pytest.fixture
 def mock_driver():
     driver = AsyncMock()

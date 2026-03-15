@@ -47,5 +47,9 @@ npm-debug.log*
 neo4j/data/
 neo4j/logs/
 
+# Benchmark results (local comparison data)
+.bench-results.json
+.bench-baseline.json
+
 # Temporary working files (not committed)
 .tmp/

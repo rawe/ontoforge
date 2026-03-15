@@ -61,6 +61,13 @@ def _to_property_response(data: dict) -> PropertyDefinitionResponse:
     return PropertyDefinitionResponse.model_validate(data)
 
 
+def _invalidate_runtime_schema_cache() -> None:
+    """Modeling writes change runtime-visible schema, so clear runtime cache."""
+    from ontoforge_server.runtime import service as runtime_service
+
+    runtime_service.invalidate_loaded_schema_cache()
+
+
 # --- Ontology ---
 
 
@@ -79,7 +86,8 @@ async def create_ontology(
         data = await repository.create_ontology(
             session, ontology_id, body.key, body.name, body.description
         )
-        return _to_ontology_response(data)
+    _invalidate_runtime_schema_cache()
+    return _to_ontology_response(data)
 
 
 async def list_ontologies(
@@ -116,7 +124,8 @@ async def update_ontology(
         )
         if not data:
             raise NotFoundError(f"Ontology '{ontology_id}' not found")
-        return _to_ontology_response(data)
+    _invalidate_runtime_schema_cache()
+    return _to_ontology_response(data)
 
 
 async def delete_ontology(
@@ -127,6 +136,7 @@ async def delete_ontology(
         deleted = await repository.delete_ontology(session, ontology_id)
         if not deleted:
             raise NotFoundError(f"Ontology '{ontology_id}' not found")
+    _invalidate_runtime_schema_cache()
 
 
 # --- Entity Type (Global) ---
@@ -144,10 +154,11 @@ async def create_entity_type(
         data = await repository.create_entity_type(
             session, entity_type_id, body.key, body.display_name, body.description
         )
-        provider = get_embedding_provider()
-        if provider:
-            await create_vector_index(driver, body.key, provider.dimensions)
-        return _to_entity_type_response(data)
+    _invalidate_runtime_schema_cache()
+    provider = get_embedding_provider()
+    if provider:
+        await create_vector_index(driver, body.key, provider.dimensions)
+    return _to_entity_type_response(data)
 
 
 async def list_entity_types(
@@ -180,7 +191,8 @@ async def update_entity_type(
         )
         if not data:
             raise NotFoundError(f"Entity type '{entity_type_id}' not found")
-        return _to_entity_type_response(data)
+    _invalidate_runtime_schema_cache()
+    return _to_entity_type_response(data)
 
 
 async def delete_entity_type(
@@ -212,8 +224,9 @@ async def delete_entity_type(
         deleted = await repository.delete_entity_type(session, entity_type_id)
         if not deleted:
             raise NotFoundError(f"Entity type '{entity_type_id}' not found")
-        if et_data and get_embedding_provider():
-            await drop_vector_index(driver, et_data["key"])
+    _invalidate_runtime_schema_cache()
+    if et_data and get_embedding_provider():
+        await drop_vector_index(driver, et_data["key"])
 
 
 # --- Relation Type (Global) ---
@@ -248,7 +261,8 @@ async def create_relation_type(
             body.source_entity_type_key,
             body.target_entity_type_key,
         )
-        return _to_relation_type_response(data)
+    _invalidate_runtime_schema_cache()
+    return _to_relation_type_response(data)
 
 
 async def list_relation_types(
@@ -281,7 +295,8 @@ async def update_relation_type(
         )
         if not data:
             raise NotFoundError(f"Relation type '{relation_type_id}' not found")
-        return _to_relation_type_response(data)
+    _invalidate_runtime_schema_cache()
+    return _to_relation_type_response(data)
 
 
 async def delete_relation_type(
@@ -304,6 +319,7 @@ async def delete_relation_type(
         deleted = await repository.delete_relation_type(session, relation_type_id)
         if not deleted:
             raise NotFoundError(f"Relation type '{relation_type_id}' not found")
+    _invalidate_runtime_schema_cache()
 
 
 # --- Property Definition ---
@@ -366,7 +382,8 @@ async def create_property(
             body.required,
             body.default_value,
         )
-        return _to_property_response(data)
+    _invalidate_runtime_schema_cache()
+    return _to_property_response(data)
 
 
 async def list_properties(
@@ -407,7 +424,8 @@ async def update_property(
             raise NotFoundError(
                 f"Property '{property_id}' not found on this type"
             )
-        return _to_property_response(data)
+    _invalidate_runtime_schema_cache()
+    return _to_property_response(data)
 
 
 async def delete_property(
@@ -448,6 +466,7 @@ async def delete_property(
             raise NotFoundError(
                 f"Property '{property_id}' not found on this type"
             )
+    _invalidate_runtime_schema_cache()
 
 
 # --- Scope Management ---
@@ -490,7 +509,8 @@ async def add_includes_entity_type(
         )
         if not data:
             raise NotFoundError(f"Failed to add inclusion for entity type '{body.key}'")
-        return IncludeTypeResponse(key=data["key"], properties=data["properties"])
+    _invalidate_runtime_schema_cache()
+    return IncludeTypeResponse(key=data["key"], properties=data["properties"])
 
 
 async def list_includes_entity_types(
@@ -532,7 +552,8 @@ async def update_includes_entity_type(
         )
         if not data:
             raise NotFoundError(f"Entity type '{type_id}' is not included in this ontology")
-        return IncludeTypeResponse(key=data["key"], properties=data["properties"])
+    _invalidate_runtime_schema_cache()
+    return IncludeTypeResponse(key=data["key"], properties=data["properties"])
 
 
 async def remove_includes_entity_type(
@@ -547,6 +568,7 @@ async def remove_includes_entity_type(
         )
         if not deleted:
             raise NotFoundError(f"Entity type '{type_id}' is not included in this ontology")
+    _invalidate_runtime_schema_cache()
 
 
 async def add_includes_relation_type(
@@ -591,7 +613,8 @@ async def add_includes_relation_type(
         )
         if not data:
             raise NotFoundError(f"Failed to add inclusion for relation type '{body.key}'")
-        return IncludeTypeResponse(key=data["key"], properties=data["properties"])
+    _invalidate_runtime_schema_cache()
+    return IncludeTypeResponse(key=data["key"], properties=data["properties"])
 
 
 async def list_includes_relation_types(
@@ -631,7 +654,8 @@ async def update_includes_relation_type(
         )
         if not data:
             raise NotFoundError(f"Relation type '{type_id}' is not included in this ontology")
-        return IncludeTypeResponse(key=data["key"], properties=data["properties"])
+    _invalidate_runtime_schema_cache()
+    return IncludeTypeResponse(key=data["key"], properties=data["properties"])
 
 
 async def remove_includes_relation_type(
@@ -646,6 +670,7 @@ async def remove_includes_relation_type(
         )
         if not deleted:
             raise NotFoundError(f"Relation type '{type_id}' is not included in this ontology")
+    _invalidate_runtime_schema_cache()
 
 
 # --- Schema Validation ---
@@ -1015,4 +1040,5 @@ async def import_schema(
                     )
             created_ontologies.append(_to_ontology_response(ont_data))
 
+    _invalidate_runtime_schema_cache()
     return {"ontologies": [o.model_dump(by_alias=True) for o in created_ontologies]}

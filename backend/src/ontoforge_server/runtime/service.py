@@ -82,11 +82,31 @@ class LoadedSchema:
     full: SchemaCache    # all types/properties for default application
 
 
+_LOADED_SCHEMA_CACHE: dict[str, LoadedSchema] = {}
+
+
+def invalidate_loaded_schema_cache(ontology_key: str | None = None) -> None:
+    """Clear the runtime schema cache.
+
+    Single-process strategy:
+    - runtime builds and stores cache entries lazily
+    - modeling clears the cache after schema/view mutations
+    """
+    if ontology_key is None:
+        _LOADED_SCHEMA_CACHE.clear()
+        return
+    _LOADED_SCHEMA_CACHE.pop(ontology_key, None)
+
+
 async def _load_schema(ontology_key: str, driver: AsyncDriver) -> LoadedSchema:
     """Load the schema for the given ontology key from the database.
 
     Builds both full and scoped SchemaCache instances.
     """
+    cached = _LOADED_SCHEMA_CACHE.get(ontology_key)
+    if cached is not None:
+        return cached
+
     async with driver.session() as session:
         schema = await repository.get_full_schema(session, ontology_key)
 
@@ -107,7 +127,9 @@ async def _load_schema(ontology_key: str, driver: AsyncDriver) -> LoadedSchema:
         full_cache, entity_inclusions, relation_inclusions
     )
 
-    return LoadedSchema(scoped=scoped_cache, full=full_cache)
+    loaded = LoadedSchema(scoped=scoped_cache, full=full_cache)
+    _LOADED_SCHEMA_CACHE[ontology_key] = loaded
+    return loaded
 
 
 def _build_schema_cache_from_raw(

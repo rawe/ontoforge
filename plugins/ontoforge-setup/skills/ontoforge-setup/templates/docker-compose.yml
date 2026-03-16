@@ -1,0 +1,56 @@
+services:
+  neo4j:
+    image: neo4j:5
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-changeme}
+    volumes:
+      - neo4j-data:/data
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "${NEO4J_PASSWORD:-changeme}", "RETURN 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  ontoforge-server:
+    image: ghcr.io/rawe/ontoforge-server:latest
+    ports:
+      - "8000:8000"
+    environment:
+      DB_URI: bolt://neo4j:7687
+      DB_USER: neo4j
+      DB_PASSWORD: ${NEO4J_PASSWORD:-changeme}
+      # Semantic search (optional — uncomment to enable)
+      # EMBEDDING_PROVIDER: ollama
+      # EMBEDDING_MODEL: nomic-embed-text
+      # EMBEDDING_BASE_URL: http://host.docker.internal:11434
+      # EMBEDDING_API_KEY:           # required for openai provider
+      # EMBEDDING_DIMENSIONS:        # optional — defaults: ollama=768, openai=1536
+      # MCP default ontology key (optional)
+      # DEFAULT_MCP_ONTOLOGY_KEY: my_ontology
+    depends_on:
+      neo4j:
+        condition: service_healthy
+
+  ontoforge-ui:
+    image: ghcr.io/rawe/ontoforge-ui:latest
+    ports:
+      - "3000:80"
+    depends_on:
+      - ontoforge-server
+
+  # Ollama embedding provider (optional — uncomment to run Ollama in Docker)
+  # After first start, pull the model: docker exec ollama ollama pull nomic-embed-text
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama-data:/root/.ollama
+
+volumes:
+  neo4j-data:
+  # ollama-data:

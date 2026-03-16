@@ -9,6 +9,12 @@
       "source": "./plugins/ontoforge",
       "description": "Export and import OntoForge ontology schemas",
       "version": "0.1.0"
+    },
+    {
+      "name": "ontoforge-setup",
+      "source": "./plugins/ontoforge-setup",
+      "description": "Bootstrap a project with OntoForge: Docker Compose, environment variables, and MCP configuration",
+      "version": "0.1.0"
     }
   ]
 }

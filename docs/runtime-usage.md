@@ -200,7 +200,35 @@ The `q` parameter searches all string properties (case-insensitive substring mat
 curl "http://localhost:8000/api/runtime/test_ontology/entities/person?q=alice"
 ```
 
-## 5. Data Management
+## 5. Cypher Query
+
+For complex read queries that go beyond the CRUD endpoints, use the Cypher query endpoint. Queries are validated against the ontology's scoped schema and executed read-only.
+
+```bash
+curl -X POST http://localhost:8000/api/runtime/test_ontology/query \
+  -H 'Content-Type: application/json' \
+  -d '{"cypher": "MATCH (p:person)-[r:works_for]->(c:company) WHERE p.name = '\''Alice'\'' RETURN p, c LIMIT 10"}'
+```
+
+Use schema entity type keys (snake_case) as node labels and relation type keys as relationship types — they are translated automatically. Only read operations (MATCH/RETURN) are supported; writes and CALL are rejected.
+
+Response:
+
+```json
+{
+  "columns": ["p", "c"],
+  "results": [
+    {
+      "p": {"_id": "...", "_entityTypeKey": "person", "name": "Alice"},
+      "c": {"_id": "...", "_entityTypeKey": "company", "name": "Acme Corp"}
+    }
+  ]
+}
+```
+
+Validation errors include available types and properties so queries can be corrected.
+
+## 6. Data Management
 
 Wipe all instance data for an ontology (entities and relations). Schema is preserved.
 
@@ -210,7 +238,7 @@ curl -X DELETE http://localhost:8000/api/runtime/test_ontology/data
 
 Response: `{ "ontologyKey": "test_ontology", "entitiesDeleted": 150, "relationsDeleted": 42 }`
 
-## 6. Validation Errors
+## 7. Validation Errors
 
 Write operations that fail validation return 422 with field-level details:
 

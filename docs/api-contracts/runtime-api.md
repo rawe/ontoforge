@@ -434,7 +434,70 @@ Requires `EMBEDDING_PROVIDER` to be configured. When embedding is disabled, retu
 
 ---
 
-## 7. Error Responses
+## 7. Cypher Query
+
+### POST /api/runtime/{ontologyKey}/query
+
+Execute a read-only Cypher query against the ontology's scoped schema. The query is parsed, validated, and rewritten before execution.
+
+**Request body:**
+```json
+{
+  "cypher": "MATCH (p:person)-[r:works_for]->(c:company) WHERE p.name = 'Alice' RETURN p, c LIMIT 10"
+}
+```
+
+Use schema entity type keys (snake_case) as node labels and relation type keys as relationship types. They are automatically translated to Neo4j conventions (PascalCase for entities, UPPER_SNAKE_CASE for relations).
+
+**Response:** `200 OK`
+```json
+{
+  "columns": ["p", "c"],
+  "results": [
+    {
+      "p": {
+        "_id": "b7e3f1a2-...",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-02-22T10:00:00Z",
+        "_updatedAt": "2026-02-22T10:00:00Z",
+        "name": "Alice"
+      },
+      "c": {
+        "_id": "a1b2c3d4-...",
+        "_entityTypeKey": "company",
+        "_createdAt": "2026-02-22T10:00:00Z",
+        "_updatedAt": "2026-02-22T10:00:00Z",
+        "name": "Acme Corp"
+      }
+    }
+  ]
+}
+```
+
+**Supported Cypher:** `MATCH`, `OPTIONAL MATCH`, `WHERE`, `RETURN`, `ORDER BY`, `LIMIT`, `SKIP`, `WITH`, `UNWIND`.
+
+**Blocked operations (422):**
+- Write clauses: `CREATE`, `DELETE`, `DETACH DELETE`, `SET`, `MERGE`, `REMOVE`
+- Procedure calls: `CALL`
+- Labelless node patterns (e.g., `MATCH (n)`)
+- Internal labels (e.g., `_Entity`)
+
+**Validation (422):**
+- Node labels must be entity type keys in the ontology scope.
+- Relationship types must be relation type keys in the ontology scope.
+- Properties in `WHERE`, `RETURN`, and `ORDER BY` must exist on the referenced type's scoped property set.
+- System properties (`_id`, `_entityTypeKey`, `_relationTypeKey`, `_createdAt`, `_updatedAt`) are always allowed.
+- Error messages include the available types and properties to support self-correction by LLMs.
+
+**Result filtering:** Returned nodes and relationships are post-processed to strip properties that fall outside the scoped ontology, preventing leakage of out-of-scope properties.
+
+**Errors:**
+- 404 if ontology key not found.
+- 422 if Cypher syntax is invalid, contains blocked operations, or references unknown types/properties. The error `details.errors` array lists all violations.
+
+---
+
+## 8. Error Responses
 
 The runtime API reuses the same error format as the modeling API (see `architecture.md` §5.1).
 
@@ -458,7 +521,7 @@ The runtime API reuses the same error format as the modeling API (see `architect
 
 ---
 
-## 8. Feature Discovery
+## 9. Feature Discovery
 
 ### GET /api/runtime/features
 
@@ -481,7 +544,7 @@ This endpoint is useful for frontend feature detection — clients can check whi
 
 ---
 
-## 9. Endpoint Summary
+## 10. Endpoint Summary
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -499,6 +562,7 @@ This endpoint is useful for frontend feature detection — clients can check whi
 | `DELETE` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}` | Delete entity instance |
 | `GET` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}/neighbors` | Graph traversal |
 | `GET` | `/api/runtime/{ontologyKey}/search/semantic` | Semantic search over entity instances |
+| `POST` | `/api/runtime/{ontologyKey}/query` | Read-only Cypher query |
 | `POST` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}` | Create relation instance |
 | `GET` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}` | List relation instances |
 | `GET` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}/{id}` | Get relation instance |

@@ -1187,3 +1187,93 @@ async def semantic_search(
         "query": query,
         "total": len(results),
     }
+
+
+# ---------------------------------------------------------------------------
+# Service Functions — Cypher Query
+# ---------------------------------------------------------------------------
+
+
+async def execute_cypher_query(
+    ontology_key: str,
+    cypher: str,
+    driver: AsyncDriver,
+) -> dict:
+    """Validate, rewrite, and execute a read-only Cypher query.
+
+    Returns ``{"columns": [...], "results": [...]}`` with properties
+    filtered to the scoped ontology schema.
+    """
+    from ontoforge_server.runtime.cypher import (
+        SYSTEM_PROPERTIES,
+        get_return_variables,
+        validate_and_rewrite,
+    )
+
+    loaded = await _load_schema(ontology_key, driver)
+    scoped = loaded.scoped
+
+    # Map variables → schema keys before rewriting (uses original labels).
+    var_map = get_return_variables(cypher, scoped)
+
+    # Validate and rewrite (snake_case → PascalCase / UPPER_SNAKE_CASE).
+    rewritten = validate_and_rewrite(cypher, scoped)
+
+    # Execute in a read transaction.
+    async with driver.session() as session:
+        columns, rows = await repository.execute_cypher_read(
+            session, rewritten
+        )
+
+    # Post-process: filter out-of-scope properties from returned
+    # nodes and relationships.
+    for row in rows:
+        for col, value in row.items():
+            if not isinstance(value, dict):
+                continue
+            # Determine schema type for this value.
+            type_key = _resolve_type_key_for_value(col, value, var_map, scoped)
+            if type_key is None:
+                continue
+            _strip_out_of_scope_props(value, type_key, scoped)
+
+    return {"columns": columns, "results": rows}
+
+
+def _resolve_type_key_for_value(
+    column: str,
+    value: dict,
+    var_map: dict[str, str | None],
+    schema: SchemaCache,
+) -> str | None:
+    """Figure out the schema type key for a dict returned by Neo4j."""
+    # If the column is a known variable, use the pre-built mapping.
+    if column in var_map:
+        return var_map[column]
+    # Fallback: inspect _entityTypeKey or _relationTypeKey in the value.
+    etk = value.get("_entityTypeKey")
+    if etk and etk in schema.entity_types:
+        return etk
+    rtk = value.get("_relationTypeKey")
+    if rtk and rtk in schema.relation_types:
+        return rtk
+    return None
+
+
+def _strip_out_of_scope_props(
+    value: dict,
+    type_key: str,
+    schema: SchemaCache,
+) -> None:
+    """Remove properties not in the scoped schema (in place)."""
+    from ontoforge_server.runtime.cypher import SYSTEM_PROPERTIES
+
+    if type_key in schema.entity_types:
+        allowed = set(schema.entity_types[type_key].properties) | SYSTEM_PROPERTIES
+    elif type_key in schema.relation_types:
+        allowed = set(schema.relation_types[type_key].properties) | SYSTEM_PROPERTIES
+    else:
+        return
+    for key in list(value):
+        if key not in allowed:
+            del value[key]

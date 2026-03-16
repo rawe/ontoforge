@@ -6,6 +6,8 @@ from ontoforge_server.core.database import get_driver
 from ontoforge_server.core.schemas import ExportEntityType, ExportRelationType
 from ontoforge_server.runtime import service
 from ontoforge_server.runtime.schemas import (
+    CypherQueryRequest,
+    CypherQueryResponse,
     FeaturesResponse,
     NeighborhoodResponse,
     PaginatedResponse,
@@ -230,3 +232,15 @@ async def delete_relation(
 ):
     await service.delete_relation(ontology_key, relation_type_key, relation_id, driver)
     return Response(status_code=204)
+
+
+# --- Cypher Query ---
+
+
+@router.post("/query", response_model=CypherQueryResponse)
+async def cypher_query(
+    ontology_key: str,
+    body: CypherQueryRequest,
+    driver: AsyncDriver = Depends(get_driver),
+):
+    return await service.execute_cypher_query(ontology_key, body.cypher, driver)

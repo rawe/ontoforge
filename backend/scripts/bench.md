@@ -92,6 +92,11 @@ entity create                   5.31       6.52   ...   -1.8ms (-21%)
 | relation list | `GET /api/runtime/{key}/relations/{type}?limit=50` |
 | relation delete | `DELETE /api/runtime/{key}/relations/{type}/{id}` |
 | neighbors | `GET /api/runtime/{key}/entities/{type}/{id}/neighbors` |
+| cypher list | `POST /api/runtime/{key}/query` — `MATCH (n:type) RETURN n LIMIT 50` |
+| cypher filter | `POST /api/runtime/{key}/query` — `MATCH ... WHERE ... RETURN` |
+| cypher traverse | `POST /api/runtime/{key}/query` — `MATCH (a)-[r]->(b) RETURN ...` |
+
+The Cypher benchmarks run alongside their REST equivalents (entity list, entity list with filter, neighbors) so you can compare the overhead of query parsing and rewriting.
 
 ## Extending
 

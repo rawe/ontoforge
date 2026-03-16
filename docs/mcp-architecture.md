@@ -248,7 +248,7 @@ Properties are managed through unified tools that work on both entity types and 
 | `export_schema` | — | JSON export payload | Export the full ontology schema in OntoForge transfer format. |
 | `import_schema` | `payload` (JSON object), `overwrite` (opt, default false) | Imported ontology | Import a schema from a JSON payload into the current ontology. With `overwrite=true`, replaces the existing schema. |
 
-### 3.2 Runtime MCP Tools (13 tools)
+### 3.2 Runtime MCP Tools (14 tools)
 
 #### Schema Introspection
 
@@ -281,6 +281,12 @@ Properties are managed through unified tools that work on both entity types and 
 | Tool | Arguments | Returns | Description |
 |------|-----------|---------|-------------|
 | `get_neighbors` | `entity_type_key`, `entity_id`, `direction` (opt: "outgoing"/"incoming"/"both", default "both"), `relation_type_key` (opt), `limit` (opt, default 50) | Center entity + list of neighbor entities with connecting relations | Explore an entity's local neighborhood — discover what it's connected to and how. |
+
+#### Cypher Query
+
+| Tool | Arguments | Returns | Description |
+|------|-----------|---------|-------------|
+| `cypher_query` | `cypher` (string) | `{"columns": [...], "results": [...]}` | Execute a read-only Cypher query. Use schema keys as labels/types (auto-translated). Only MATCH/RETURN supported — no writes, no CALL. |
 
 #### Data Management
 

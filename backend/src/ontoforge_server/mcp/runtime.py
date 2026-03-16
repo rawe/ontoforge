@@ -34,9 +34,13 @@ def _get_ontology_key() -> str:
 def _format_validation_error(exc: ValidationError) -> str:
     msg = str(exc)
     details = getattr(exc, "details", None)
-    if details and "fields" in details:
+    if not details:
+        return msg
+    if "fields" in details:
         field_errors = "; ".join(f"{k}: {v}" for k, v in details["fields"].items())
         msg = f"{msg} — {field_errors}"
+    elif "errors" in details:
+        msg = f"{msg} — {'; '.join(details['errors'])}"
     return msg
 
 
@@ -281,6 +285,29 @@ async def get_neighbors(
         fields=fields, relation_fields=relation_fields,
     )
     return result.model_dump()
+
+
+@runtime_mcp.tool()
+@_enrich_errors
+async def cypher_query(
+    cypher: str,
+) -> dict:
+    """Execute a read-only Cypher query against the ontology's scoped schema.
+
+    Use schema entity type keys (snake_case) as node labels and relation type
+    keys as relationship types. They are automatically translated to Neo4j
+    conventions. Only MATCH/RETURN queries are allowed — no writes, no CALL.
+
+    All node patterns must include a label. Available types and properties can
+    be discovered via the get_schema tool. System properties (_id,
+    _entityTypeKey, _relationTypeKey, _createdAt, _updatedAt) are always
+    available.
+
+    Example: MATCH (p:person)-[r:works_for]->(c:company) WHERE p.name = 'Alice' RETURN p, c LIMIT 10
+    """
+    ontology_key = _get_ontology_key()
+    driver = await get_driver()
+    return await service.execute_cypher_query(ontology_key, cypher, driver)
 
 
 @runtime_mcp.tool()

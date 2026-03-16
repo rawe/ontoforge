@@ -1,6 +1,8 @@
 from datetime import date, datetime, timezone
+from typing import Any
 
 from neo4j import AsyncSession
+from neo4j.graph import Node, Relationship
 from neo4j.time import Date as Neo4jDate
 from neo4j.time import DateTime as Neo4jDateTime
 
@@ -565,3 +567,50 @@ async def semantic_search(
         items.append({"entity": entity, "score": score})
 
     return items
+
+
+# --- Cypher Query ---
+
+
+def _convert_record_value(value: Any) -> Any:
+    """Convert a single Neo4j record value to a JSON-friendly Python type."""
+    if isinstance(value, Node):
+        data = _strip_embedding(_convert_neo4j_types(dict(value)))
+        return data
+    if isinstance(value, Relationship):
+        return _convert_neo4j_types(dict(value))
+    if isinstance(value, Neo4jDateTime):
+        native = value.to_native()
+        return native.replace(tzinfo=timezone.utc) if value.tzinfo else datetime(
+            value.year, value.month, value.day,
+            value.hour, value.minute, value.second,
+            value.nanosecond // 1000,
+            tzinfo=timezone.utc,
+        )
+    if isinstance(value, Neo4jDate):
+        return date(value.year, value.month, value.day)
+    if isinstance(value, list):
+        return [_convert_record_value(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _convert_record_value(v) for k, v in value.items()}
+    return value
+
+
+async def execute_cypher_read(
+    session: AsyncSession,
+    cypher: str,
+) -> tuple[list[str], list[dict]]:
+    """Execute a read-only Cypher query and return (columns, rows).
+
+    Each row is a dict mapping column names to converted Python values.
+    Nodes and Relationships are returned as plain dicts of their properties.
+    """
+    result = await session.run(cypher)
+    columns = list(result.keys())
+    rows: list[dict] = []
+    async for record in result:
+        row: dict[str, Any] = {}
+        for col in columns:
+            row[col] = _convert_record_value(record[col])
+        rows.append(row)
+    return columns, rows

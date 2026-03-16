@@ -50,6 +50,15 @@ class SemanticSearchResponse(BaseModel):
     total: int
 
 
+class CypherQueryRequest(BaseModel):
+    cypher: str = Field(..., min_length=1)
+
+
+class CypherQueryResponse(BaseModel):
+    columns: list[str]
+    results: list[dict]
+
+
 class FeaturesResponse(BaseModel):
     semantic_search: bool = Field(alias="semanticSearch")
 

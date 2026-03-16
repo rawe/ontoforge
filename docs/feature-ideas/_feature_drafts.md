@@ -11,6 +11,11 @@ Here only drafts for features are listed.
 - The frontend is not affected. It already talks to the backend via REST; if auth is enabled, the frontend must include the header in its requests, but no frontend code changes are part of this feature.
 
 
+## Cypher Query
+
+See [cypher-query.md](cypher-query.md) for the full feature document.
+
+
 ## Data Scoping
 
 See [data-scoping.md](data-scoping.md) for the full feature document.

@@ -11,6 +11,7 @@ dependencies = [
     "pydantic-settings>=2.7",
     "mcp[cli]>=1.9",
     "httpx>=0.28",
+    "antlr4-cypher>=0.1.2",
 ]
 
 [dependency-groups]

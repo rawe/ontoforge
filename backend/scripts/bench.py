@@ -255,6 +255,62 @@ def bench_relation_delete(client, relation_key, relation_ids):
     return timings
 
 
+def bench_cypher_list(client, entity_key, n):
+    """Cypher equivalent of entity list: MATCH (n:<type>) RETURN n LIMIT 50."""
+    timings = []
+    cypher = f"MATCH (n:{entity_key}) RETURN n LIMIT 50"
+    for _ in range(n):
+        elapsed, resp = timed(
+            lambda: client.post(
+                f"/api/runtime/{ONTOLOGY_KEY}/query",
+                json={"cypher": cypher},
+            )
+        )
+        assert resp.status_code == 200, f"Cypher list failed: {resp.status_code} {resp.text}"
+        timings.append(elapsed)
+    return timings
+
+
+def bench_cypher_filter(client, entity_key, props, n):
+    """Cypher equivalent of entity list with filter."""
+    # Use the first string property for filtering
+    str_props = [p for p in props if p["dataType"] == "string"]
+    if not str_props:
+        return []
+    prop_key = str_props[0]["key"]
+    cypher = f"MATCH (n:{entity_key}) WHERE n.{prop_key} = 'bench_0' RETURN n"
+    timings = []
+    for _ in range(n):
+        elapsed, resp = timed(
+            lambda: client.post(
+                f"/api/runtime/{ONTOLOGY_KEY}/query",
+                json={"cypher": cypher},
+            )
+        )
+        assert resp.status_code == 200, f"Cypher filter failed: {resp.status_code} {resp.text}"
+        timings.append(elapsed)
+    return timings
+
+
+def bench_cypher_traverse(client, entity_key, relation_key, target_key, n):
+    """Cypher equivalent of neighbors: MATCH (a)-[r]->(b) RETURN a, r, b."""
+    cypher = (
+        f"MATCH (a:{entity_key})-[r:{relation_key}]->(b:{target_key}) "
+        f"RETURN a, r, b LIMIT 50"
+    )
+    timings = []
+    for _ in range(n):
+        elapsed, resp = timed(
+            lambda: client.post(
+                f"/api/runtime/{ONTOLOGY_KEY}/query",
+                json={"cypher": cypher},
+            )
+        )
+        assert resp.status_code == 200, f"Cypher traverse failed: {resp.status_code} {resp.text}"
+        timings.append(elapsed)
+    return timings
+
+
 # ---------------------------------------------------------------------------
 # Reporting
 # ---------------------------------------------------------------------------
@@ -363,8 +419,19 @@ def run(base_url: str, n: int, compare: bool):
             print(f"  neighbors (×{n})")
             results["neighbors"] = stats(bench_neighbors(client, ek, entity_ids))
 
+            print(f"  neighbors (via Cypher) (×{n})")
+            results["cypher traverse"] = stats(bench_cypher_traverse(client, ek, rk, tk, n))
+
             print(f"  relation delete (×{n})")
             results["relation delete"] = stats(bench_relation_delete(client, rk, relation_ids))
+
+        print(f"  cypher list (×{n})")
+        results["cypher list"] = stats(bench_cypher_list(client, ek, n))
+
+        print(f"  cypher filter (×{n})")
+        cypher_filter_timings = bench_cypher_filter(client, ek, schema["entity_props"], n)
+        if cypher_filter_timings:
+            results["cypher filter"] = stats(cypher_filter_timings)
 
         print(f"  entity delete (×{n})")
         results["entity delete"] = stats(bench_entity_delete(client, ek, entity_ids))

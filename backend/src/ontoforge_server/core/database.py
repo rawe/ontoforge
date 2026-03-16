@@ -34,10 +34,11 @@ async def _ensure_constraints(driver: AsyncDriver) -> None:
 
 
 async def ensure_vector_indexes(driver: AsyncDriver, dimensions: int) -> None:
-    """Create vector indexes for all existing entity types.
+    """Create vector indexes for all existing entity types (IF NOT EXISTS).
 
-    Drops and recreates each index so that the WITH clause reflects the
-    current property set (required for in-index filtering in Neo4j 2026+).
+    New indexes include a WITH clause listing all current properties for
+    in-index filtering (Neo4j 2026+ SEARCH clause). Existing indexes are
+    left untouched.
     """
     async with driver.session() as session:
         result = await session.run(
@@ -53,7 +54,6 @@ async def ensure_vector_indexes(driver: AsyncDriver, dimensions: int) -> None:
         ]
 
     for et in entity_types:
-        await drop_vector_index(driver, et["key"])
         await create_vector_index(
             driver, et["key"], dimensions, filter_properties=et["property_keys"]
         )

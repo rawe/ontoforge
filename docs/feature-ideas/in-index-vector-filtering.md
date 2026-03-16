@@ -98,14 +98,13 @@ A hybrid approach (in-index `WHERE` for supported operators, post-filter `WHERE`
 ## Changes Implemented
 
 1. **`docker-compose.yml`** — Updated image from `neo4j:5` to `neo4j:2026` (both dev and docker compose files).
-2. **`core/database.py`** — `create_vector_index` accepts `filter_properties` and emits the `WITH (...)` clause. `ensure_vector_indexes` drops and recreates all indexes on startup with current property sets. `rebuild_vector_index` helper for property mutations.
+2. **`core/database.py`** — `create_vector_index` accepts `filter_properties` and emits the `WITH [...]` clause. `rebuild_vector_index` helper for property mutations.
 3. **`runtime/service.py`** — Removed the over-fetch multiplier (`min(limit * 5, 500)`). `__contains` rejected on semantic search with a clear error message. All remaining filters go to in-index `WHERE`.
 4. **`runtime/repository.py`** — Rewrote `semantic_search` to use the `MATCH ... SEARCH n IN (VECTOR INDEX ...)` clause.
 5. **`modeling/service.py`** — Property create/delete on entity types triggers `rebuild_vector_index` to keep the `WITH` clause in sync with the schema.
 6. **`mcp/runtime.py`** — Updated `semantic_search` tool docstring to note `__contains` is not supported.
 7. **Schema-driven index metadata** — All properties on an entity type are included in the `WITH` clause (simplest strategy, no schema extension needed).
-8. **Index migration** — `ensure_vector_indexes` drops and recreates all indexes on startup, handling the v5 → 2026 migration automatically.
-9. **Cypher version** — Cypher 25 is the default for new databases in Neo4j 2026.02+; no driver configuration needed.
+8. **Cypher version** — Cypher 25 is the default for new databases in Neo4j 2026.02+; no driver configuration needed.
 
 ## Design Considerations
 

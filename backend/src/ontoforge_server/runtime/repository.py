@@ -518,43 +518,39 @@ async def get_neighbors(
 
 async def semantic_search(
     session: AsyncSession,
+    pascal_label: str,
     entity_type_key: str,
     query_embedding: list[float],
-    vector_limit: int,
     limit: int,
     min_score: float | None,
     where_clauses: list[str] | None = None,
     filter_params: dict | None = None,
     index_name: str | None = None,
 ) -> list[dict]:
+    """Semantic search using the Cypher 25 SEARCH clause with in-index filtering."""
     if index_name is None:
         index_name = f"{entity_type_key}_embedding"
 
     params: dict = {
-        "index_name": index_name,
-        "vector_limit": vector_limit,
         "query_embedding": query_embedding,
+        "limit": limit,
     }
 
+    in_index_where = ""
     if where_clauses:
-        where_str = "WHERE " + " AND ".join(where_clauses)
+        in_index_where = "WHERE " + " AND ".join(where_clauses)
         params.update(filter_params or {})
-        params["limit"] = limit
-        query = (
-            f"CALL db.index.vector.queryNodes($index_name, $vector_limit, $query_embedding) "
-            f"YIELD node, score "
-            f"{where_str} "
-            f"RETURN node {{.*}} AS entity, score "
-            f"ORDER BY score DESC "
-            f"LIMIT $limit"
-        )
-    else:
-        query = (
-            f"CALL db.index.vector.queryNodes($index_name, $vector_limit, $query_embedding) "
-            f"YIELD node, score "
-            f"RETURN node {{.*}} AS entity, score "
-            f"ORDER BY score DESC"
-        )
+
+    query = (
+        f"MATCH (n:{pascal_label}) "
+        f"SEARCH n IN ("
+        f"VECTOR INDEX {index_name} "
+        f"FOR $query_embedding "
+        f"{in_index_where} "
+        f"LIMIT $limit"
+        f") SCORE AS score "
+        f"RETURN n {{.*}} AS entity, score"
+    )
 
     result = await session.run(query, params)
 

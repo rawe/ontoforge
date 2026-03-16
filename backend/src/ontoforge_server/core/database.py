@@ -34,24 +34,53 @@ async def _ensure_constraints(driver: AsyncDriver) -> None:
 
 
 async def ensure_vector_indexes(driver: AsyncDriver, dimensions: int) -> None:
-    """Create vector indexes for all existing entity types."""
+    """Create vector indexes for all existing entity types.
+
+    Drops and recreates each index so that the WITH clause reflects the
+    current property set (required for in-index filtering in Neo4j 2026+).
+    """
     async with driver.session() as session:
         result = await session.run(
-            "MATCH (et:EntityType) RETURN et.key AS key"
+            """
+            MATCH (et:EntityType)
+            OPTIONAL MATCH (et)-[:HAS_PROPERTY]->(p:PropertyDefinition)
+            RETURN et.key AS key, collect(p.key) AS property_keys
+            """
         )
-        keys = [record["key"] async for record in result]
+        entity_types = [
+            {"key": record["key"], "property_keys": record["property_keys"]}
+            async for record in result
+        ]
 
-    for key in keys:
-        await create_vector_index(driver, key, dimensions)
+    for et in entity_types:
+        await drop_vector_index(driver, et["key"])
+        await create_vector_index(
+            driver, et["key"], dimensions, filter_properties=et["property_keys"]
+        )
 
 
-async def create_vector_index(driver: AsyncDriver, entity_type_key: str, dimensions: int) -> None:
-    """Create a vector index for the given entity type label."""
+async def create_vector_index(
+    driver: AsyncDriver,
+    entity_type_key: str,
+    dimensions: int,
+    filter_properties: list[str] | None = None,
+) -> None:
+    """Create a vector index for the given entity type label.
+
+    When *filter_properties* is provided, the index is created with a WITH
+    clause so that those properties are stored alongside vectors for in-index
+    filtering (Neo4j 2026+ SEARCH clause).
+    """
     pascal_label = _to_pascal_case(entity_type_key)
     index_name = f"{entity_type_key}_embedding"
+    with_clause = ""
+    if filter_properties:
+        props = ", ".join(f"n.{p}" for p in filter_properties)
+        with_clause = f"WITH [{props}] "
     query = (
         f"CREATE VECTOR INDEX {index_name} IF NOT EXISTS "
         f"FOR (n:{pascal_label}) ON (n._embedding) "
+        f"{with_clause}"
         f"OPTIONS {{indexConfig: {{`vector.dimensions`: {dimensions}, "
         f"`vector.similarity_function`: 'cosine'}}}}"
     )
@@ -66,6 +95,32 @@ async def drop_vector_index(driver: AsyncDriver, entity_type_key: str) -> None:
     async with driver.session() as session:
         await session.run(f"DROP INDEX {index_name} IF EXISTS")
     logger.info("Vector index dropped: %s", index_name)
+
+
+async def rebuild_vector_index(
+    driver: AsyncDriver, entity_type_key: str, dimensions: int
+) -> None:
+    """Drop and recreate the vector index with current properties.
+
+    Called when properties are added or removed from an entity type so that
+    the in-index filter properties stay in sync with the schema.
+    """
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            MATCH (et:EntityType {key: $key})
+            OPTIONAL MATCH (et)-[:HAS_PROPERTY]->(p:PropertyDefinition)
+            RETURN collect(p.key) AS property_keys
+            """,
+            key=entity_type_key,
+        )
+        record = await result.single()
+        property_keys = record["property_keys"] if record else []
+
+    await drop_vector_index(driver, entity_type_key)
+    await create_vector_index(
+        driver, entity_type_key, dimensions, filter_properties=property_keys
+    )
 
 
 async def init_driver() -> AsyncDriver:

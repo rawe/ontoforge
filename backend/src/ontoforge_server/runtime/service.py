@@ -1153,21 +1153,31 @@ async def semantic_search(
         raise ValidationError("Failed to generate embedding for search query")
 
     filters = filters or {}
+    # Reject __contains — not supported by in-index WHERE (SEARCH clause).
+    # Use the entity list endpoint for substring filtering.
+    for filter_key in filters:
+        if filter_key.endswith("__contains"):
+            raise ValidationError(
+                "The '__contains' filter is not supported on semantic search. "
+                "Use exact match or range operators (=, __gt, __gte, __lt, __lte).",
+                details={"fields": {filter_key: "Not supported on semantic search"}},
+            )
+
     where_clauses: list[str] = []
     filter_params: dict = {}
     if filters:
         where_clauses, filter_params = _build_filter_clauses(
-            filters, scoped_et.properties, entity_type_key, node_alias="node"
+            filters, scoped_et.properties, entity_type_key, node_alias="n"
         )
 
-    vector_limit = min(limit * 5, 500) if where_clauses else limit
+    pascal_label = to_pascal_case(entity_type_key)
 
     async with driver.session() as session:
         results = await repository.semantic_search(
             session,
+            pascal_label,
             entity_type_key,
             query_embedding,
-            vector_limit,
             limit,
             min_score,
             where_clauses=where_clauses if where_clauses else None,

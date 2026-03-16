@@ -7,6 +7,7 @@ from ontoforge_server.core.database import (
     create_vector_index,
     drop_vector_index,
     get_driver,
+    rebuild_vector_index,
 )
 from ontoforge_server.core.embedding import get_embedding_provider
 from ontoforge_server.core.exceptions import (
@@ -338,6 +339,23 @@ async def _ensure_owner_exists(
             raise NotFoundError(f"Relation type '{owner_id}' not found")
 
 
+async def _rebuild_entity_type_vector_index(
+    driver: AsyncDriver, entity_type_id: str
+) -> None:
+    """Rebuild the vector index for an entity type after property changes."""
+    provider = get_embedding_provider()
+    if not provider:
+        return
+    async with driver.session() as session:
+        result = await session.run(
+            "MATCH (et:EntityType {entityTypeId: $id}) RETURN et.key AS key",
+            id=entity_type_id,
+        )
+        record = await result.single()
+    if record:
+        await rebuild_vector_index(driver, record["key"], provider.dimensions)
+
+
 async def create_property(
     owner_id: str,
     owner_label: str,
@@ -383,6 +401,8 @@ async def create_property(
             body.default_value,
         )
     _invalidate_runtime_schema_cache()
+    if owner_label == "EntityType":
+        await _rebuild_entity_type_vector_index(driver, owner_id)
     return _to_property_response(data)
 
 
@@ -467,6 +487,8 @@ async def delete_property(
                 f"Property '{property_id}' not found on this type"
             )
     _invalidate_runtime_schema_cache()
+    if owner_label == "EntityType":
+        await _rebuild_entity_type_vector_index(driver, owner_id)
 
 
 # --- Scope Management ---

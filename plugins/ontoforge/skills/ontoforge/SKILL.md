@@ -48,3 +48,7 @@ Both scripts read the OntoForge server URL from (in order):
 1. `--base-url` flag
 2. `ONTOFORGE_BASE_URL` environment variable
 3. Default: `http://localhost:8000`
+
+## Related: Project Setup
+
+To bootstrap a new project with OntoForge (Docker Compose, environment variables, `.mcp.json`), use the **ontoforge-setup** plugin. It ships templates for Docker Compose and MCP configuration and walks through the setup interactively.

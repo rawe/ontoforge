@@ -130,11 +130,11 @@ async def test_search_embed_failure_raises(mock_driver):
             await semantic_search("test", "query", "person", 10, None, mock_driver)
 
 
-# --- No filters: no over-fetch ---
+# --- No filters: limit passed directly (no over-fetch) ---
 
 
-async def test_no_filters_passes_limit_as_vector_limit(mock_driver, mock_session):
-    """Without filters, vector_limit equals limit (no over-fetch)."""
+async def test_no_filters_passes_limit_directly(mock_driver, mock_session):
+    """Without filters, limit is passed directly to repository (no over-fetch)."""
     mock_provider = AsyncMock()
     mock_provider.embed = AsyncMock(return_value=[0.1] * 768)
 
@@ -147,16 +147,17 @@ async def test_no_filters_passes_limit_as_vector_limit(mock_driver, mock_session
         call_kwargs = mock_repo.semantic_search.call_args
         assert call_kwargs[1].get("where_clauses") is None
         assert call_kwargs[1].get("filter_params") is None
-        # positional: session, entity_type_key, query_embedding, vector_limit, limit, min_score
-        assert call_kwargs[0][3] == 10  # vector_limit == limit
-        assert call_kwargs[0][4] == 10  # limit
+        # positional: session, pascal_label, entity_type_key, query_embedding, limit, min_score
+        assert call_kwargs[0][1] == "Person"  # pascal_label
+        assert call_kwargs[0][2] == "person"  # entity_type_key
+        assert call_kwargs[0][4] == 10  # limit (no over-fetch)
 
 
-# --- Filters: over-fetch and WHERE clauses ---
+# --- Filters: in-index WHERE clauses (no over-fetch) ---
 
 
-async def test_equality_filter_passes_where_clauses(mock_driver, mock_session):
-    """Equality filter generates WHERE clause and over-fetches."""
+async def test_equality_filter_no_overfetch(mock_driver, mock_session):
+    """Equality filter generates WHERE clause without over-fetching."""
     mock_provider = AsyncMock()
     mock_provider.embed = AsyncMock(return_value=[0.1] * 768)
 
@@ -173,10 +174,10 @@ async def test_equality_filter_passes_where_clauses(mock_driver, mock_session):
         where_clauses = call_kwargs[1]["where_clauses"]
         filter_params = call_kwargs[1]["filter_params"]
         assert len(where_clauses) == 1
-        assert "node.location" in where_clauses[0]
+        assert "n.location" in where_clauses[0]
         assert filter_params["flt_0"] == "Berlin"
-        # Over-fetch: min(10*5, 500) = 50
-        assert call_kwargs[0][3] == 50  # vector_limit
+        # No over-fetch: limit is passed directly
+        assert call_kwargs[0][4] == 10  # limit
 
 
 async def test_operator_filter_passes_correct_clauses(mock_driver, mock_session):
@@ -197,7 +198,7 @@ async def test_operator_filter_passes_correct_clauses(mock_driver, mock_session)
         where_clauses = call_kwargs[1]["where_clauses"]
         filter_params = call_kwargs[1]["filter_params"]
         assert len(where_clauses) == 1
-        assert "node.age >" in where_clauses[0]
+        assert "n.age >" in where_clauses[0]
         assert filter_params["flt_0"] == 25  # coerced to int
 
 
@@ -215,23 +216,18 @@ async def test_unknown_filter_property_raises(mock_driver):
             )
 
 
-async def test_overfetch_capped_at_500(mock_driver, mock_session):
-    """Over-fetch is capped at 500 even with high limit."""
+async def test_contains_filter_rejected_on_semantic_search(mock_driver):
+    """__contains filter is rejected on semantic search (not supported by in-index WHERE)."""
     mock_provider = AsyncMock()
     mock_provider.embed = AsyncMock(return_value=[0.1] * 768)
 
     with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_loaded()), \
-         patch("ontoforge_server.runtime.service.get_embedding_provider", return_value=mock_provider), \
-         patch("ontoforge_server.runtime.service.repository") as mock_repo:
-        mock_repo.semantic_search = AsyncMock(return_value=[])
-        await semantic_search(
-            "test", "query", "person", 100, None, mock_driver,
-            filters={"location": "Berlin"},
-        )
-
-        call_kwargs = mock_repo.semantic_search.call_args
-        # min(100*5, 500) = 500
-        assert call_kwargs[0][3] == 500  # vector_limit
+         patch("ontoforge_server.runtime.service.get_embedding_provider", return_value=mock_provider):
+        with pytest.raises(ValidationError, match="__contains.*not supported"):
+            await semantic_search(
+                "test", "query", "person", 10, None, mock_driver,
+                filters={"name__contains": "Ali"},
+            )
 
 
 async def test_multiple_filters(mock_driver, mock_session):

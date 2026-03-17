@@ -324,8 +324,8 @@ async def semantic_search(
     entity_type_key is required — specifies which entity type to search.
     Use 'filters' for property-based filtering on results: exact match
     ("location": "Berlin"), operators ("age__gt": "25", "__gte", "__lt",
-    "__lte", "__contains"). Use 'fields' to select which entity properties to
-    include — only listed fields plus _id are returned. Omit for all fields."""
+    "__lte"). Use 'fields' to select which entity properties to include —
+    only listed fields plus _id are returned. Omit for all fields."""
     ontology_key = _get_ontology_key()
     driver = await get_driver()
     limit = max(1, min(limit, 100))

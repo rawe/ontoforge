@@ -89,41 +89,22 @@ The in-index `WHERE` supports a subset of predicates:
 
 The existing `__contains` filter operator uses `toLower(toString(node.{key})) CONTAINS toLower(...)`, which is **not** supported in-index. It must remain a post-filter `WHERE` clause outside the `SEARCH` block.
 
-### Hybrid Approach — Open Question
+### `__contains` on Semantic Search — Decision
 
-A hybrid strategy (in-index `WHERE` for supported operators, post-filter `WHERE` for `__contains`) is technically possible:
+**Decision: dropped.** The `__contains` operator is not supported on semantic search. It remains available on entity list and relation list endpoints.
 
-```cypher
-MATCH (n:{Label})
-SEARCH n IN (
-  VECTOR INDEX {type}_embedding
-  FOR $query_embedding
-  WHERE n.year >= $filter_year          -- in-index (fast)
-  LIMIT $over_limit                     -- slight over-fetch for post-filter
-) SCORE AS score
-WHERE toLower(toString(n.name)) CONTAINS toLower($filter_name)  -- post-filter
-RETURN n {.*} AS entity, score
-LIMIT $limit
-```
+A hybrid approach (in-index `WHERE` for supported operators, post-filter `WHERE` for `__contains`) was considered but rejected — it reintroduces the over-fetch complexity this feature eliminates. Semantic search already provides fuzzy text matching via vector similarity; substring filtering on top of that is redundant for practical use cases. If `__contains` on semantic search proves essential, the hybrid path can be revisited.
 
-**However, it reintroduces the over-fetch complexity we are trying to eliminate.** The hybrid path means maintaining two filter categories (in-index-eligible vs. post-filter-only), partitioning logic in the service layer, and keeping the over-fetch heuristic alive for `__contains` queries. This adds significant implementation and maintenance complexity for a single operator.
+## Changes Implemented
 
-**Decision needed at implementation time:** Consider dropping the `__contains` filter operator from semantic search entirely and relying only on operators that the in-index `WHERE` supports (`=`, `>`, `<`, `>=`, `<=`). This would allow removing all over-fetch logic and fully delegating filtering to Neo4j with no fallback path. The `__contains` operator would remain available on the entity list endpoint (which does not use vector search) where it continues to work without constraints.
-
-If `__contains` on semantic search proves essential for real use cases, the hybrid path can be revisited — but the default position should be to avoid it in favor of a single, clean in-index filtering strategy.
-
-## Changes Required
-
-1. **`docker-compose.yml`** — Update image from `neo4j:5` to `neo4j:2026` (all three compose files).
-2. **`core/database.py`** — Modify `create_vector_index` to accept a list of metadata properties and emit the `WITH [...]` clause.
-3. **`runtime/service.py`** — Remove the over-fetch multiplier logic. If `__contains` is dropped from semantic search, remove the filter partitioning entirely — all filters go directly to the in-index `WHERE`.
-4. **`runtime/repository.py`** — Rewrite `semantic_search` to emit the `SEARCH` clause with in-index `WHERE`.
-5. **Schema-driven index metadata** — When an entity type is created or updated, determine which properties to include in `WITH [...]`. Strategy options:
-   - All non-string properties + all properties used in known filter patterns.
-   - All properties (simpler, but may bloat the index).
-   - Only properties explicitly marked as filterable in the schema (requires a schema extension).
-6. **Index migration** — Existing vector indexes must be dropped and recreated with `WITH [...]` to add metadata properties. Embeddings on nodes are preserved; only the index structure changes. Add a migration path or document a manual re-index step.
-7. **Cypher version** — Ensure the Neo4j driver sends queries as Cypher 25. In Neo4j 2026.02+, Cypher 25 is the default for new databases.
+1. **`docker-compose.yml`** — Updated image from `neo4j:5` to `neo4j:2026` (both dev and docker compose files).
+2. **`core/database.py`** — `create_vector_index` accepts `filter_properties` and emits the `WITH [...]` clause. `rebuild_vector_index` helper for property mutations.
+3. **`runtime/service.py`** — Removed the over-fetch multiplier (`min(limit * 5, 500)`). `__contains` rejected on semantic search with a clear error message. All remaining filters go to in-index `WHERE`.
+4. **`runtime/repository.py`** — Rewrote `semantic_search` to use the `MATCH ... SEARCH n IN (VECTOR INDEX ...)` clause.
+5. **`modeling/service.py`** — Property create/delete on entity types triggers `rebuild_vector_index` to keep the `WITH` clause in sync with the schema.
+6. **`mcp/runtime.py`** — Updated `semantic_search` tool docstring to note `__contains` is not supported.
+7. **Schema-driven index metadata** — All properties on an entity type are included in the `WITH` clause (simplest strategy, no schema extension needed).
+8. **Cypher version** — Cypher 25 is the default for new databases in Neo4j 2026.02+; no driver configuration needed.
 
 ## Design Considerations
 

@@ -1,6 +1,6 @@
 services:
   neo4j:
-    image: neo4j:2026
+    image: neo4j:2026.02.2
     container_name: ontoforge-neo4j-dev
     ports:
       - "7474:7474"

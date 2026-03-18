@@ -74,6 +74,11 @@ def _describe_schema(schema: service.SchemaCache) -> str:
     if schema.ontology_description:
         lines.append(f"Description: {schema.ontology_description}")
 
+    lines.append("\nSystem properties (available on all entities and relations):")
+    lines.append("  - _id: string (unique identifier)")
+    lines.append("  - _createdAt: datetime")
+    lines.append("  - _updatedAt: datetime")
+
     lines.append("\nEntity types:")
     for et in schema.entity_types.values():
         desc = f"  - {et.key}"
@@ -129,7 +134,8 @@ def _register_tool(name: str):
 @_register_tool(TOOL_GET_SCHEMA)
 async def tool_get_schema(ctx: RunContext[AiDeps]) -> str:
     """Get the full ontology schema including entity types, relation types,
-    and their property definitions."""
+    and their property definitions with data types and required flags.
+    Call this if you need to verify available types or properties."""
     loaded = await service._load_schema(ctx.deps.ontology_key, ctx.deps.driver)
     return _describe_schema(loaded.scoped)
 
@@ -139,14 +145,19 @@ async def tool_list_entities(
     ctx: RunContext[AiDeps],
     entity_type_key: str,
     search: str | None = None,
+    filters: dict[str, str] | None = None,
     limit: int = 20,
 ) -> dict:
-    """List entities of a given type. Use 'search' for substring matching
-    across string properties. Returns items with their properties."""
+    """List entities of a type with optional filtering and search.
+    Use 'search' to match a term across ALL string properties at once.
+    Use 'filters' to filter on specific properties: exact match
+    ("name": "Alice"), greater than ("age__gt": "25"), greater or equal
+    ("__gte"), less than ("__lt"), less or equal ("__lte"), contains
+    ("name__contains": "ali"). All filter values must be strings."""
     result = await service.list_entities(
         ctx.deps.ontology_key, entity_type_key,
         min(limit, 50), 0, "_createdAt", "asc",
-        search, {}, ctx.deps.driver,
+        search, filters or {}, ctx.deps.driver,
     )
     return result.model_dump()
 
@@ -157,7 +168,7 @@ async def tool_get_entity(
     entity_type_key: str,
     entity_id: str,
 ) -> dict:
-    """Retrieve a specific entity by type and ID."""
+    """Retrieve a specific entity by its _id. Returns all properties."""
     return await service.get_entity(
         ctx.deps.ontology_key, entity_type_key, entity_id, ctx.deps.driver,
     )
@@ -169,7 +180,8 @@ async def tool_list_relations(
     relation_type_key: str,
     limit: int = 20,
 ) -> dict:
-    """List relations of a given type."""
+    """List relations of a type. Each result includes _id, source and target
+    entity IDs, and relation properties."""
     result = await service.list_relations(
         ctx.deps.ontology_key, relation_type_key,
         min(limit, 50), 0, "_createdAt", "asc",
@@ -186,7 +198,9 @@ async def tool_get_neighbors(
     direction: str = "both",
     limit: int = 20,
 ) -> dict:
-    """Explore an entity's neighborhood — connected entities and relations."""
+    """Explore an entity's connections. Returns the entity plus all connected
+    entities with their connecting relations. Use this to answer "what is X
+    connected to?" questions. Direction: "outgoing", "incoming", or "both"."""
     result = await service.get_neighbors(
         ctx.deps.ontology_key, entity_type_key, entity_id,
         direction, None, min(limit, 50), ctx.deps.driver,
@@ -201,7 +215,9 @@ async def tool_semantic_search(
     entity_type_key: str,
     limit: int = 10,
 ) -> dict:
-    """Search entities by semantic similarity to a natural language query."""
+    """Search entities by semantic similarity to a natural language query.
+    Returns entities ranked by relevance with similarity scores.
+    Best for finding entities when you don't know exact property values."""
     return await service.semantic_search(
         ctx.deps.ontology_key, query, entity_type_key,
         min(limit, 20), None, ctx.deps.driver,
@@ -213,10 +229,16 @@ async def tool_execute_cypher_query(
     ctx: RunContext[AiDeps],
     cypher: str,
 ) -> dict:
-    """Execute a read-only Cypher query. Use schema entity type keys
-    (snake_case) as node labels and relation type keys as relationship types.
-    All node patterns must include a label. Only MATCH/RETURN — no writes.
-    Example: MATCH (p:person)-[r:works_for]->(c:company) RETURN p.name, c.name LIMIT 10"""
+    """Execute a read-only Cypher query against the knowledge graph.
+    Use entity type keys (snake_case) as node labels and relation type keys
+    as relationship types. ALL node patterns MUST have a label. Only
+    MATCH/RETURN — no writes, no CALL. Use CONTAINS for substring matching
+    (not regex). If the query fails, read the error — it lists available
+    types and properties.
+    Examples:
+      MATCH (p:person {name: 'Alice'}) RETURN p
+      MATCH (p:person)-[r:works_for]->(c:company) RETURN p.name, c.name
+      MATCH (p:person) WHERE p.age > 30 RETURN p.name, p.age LIMIT 10"""
     return await service.execute_cypher_query(
         ctx.deps.ontology_key, cypher, ctx.deps.driver,
     )
@@ -425,18 +447,23 @@ def _match_key(props: dict) -> str:
 # Feature: Schema-Aware Chat
 # ---------------------------------------------------------------------------
 
-_CHAT_SYSTEM_PROMPT = """You are a knowledgeable assistant for a Neo4j knowledge graph.
-You answer questions about the data using the available tools.
+_CHAT_SYSTEM_PROMPT = """You are a knowledge graph assistant. You answer questions by \
+querying data with the available tools. You can only read data, not create or modify it.
 
-RULES:
-- Use the tools to look up data — do not make up answers
-- For complex queries, prefer the execute_cypher_query tool
-- For exploration, use list_entities or get_neighbors
-- For similarity search, use semantic_search (if available)
-- Be concise and direct in your answers
-- If the data doesn't contain the answer, say so
-
+SCHEMA:
 {schema}
+
+STRATEGY — use the exact keys from the schema as tool arguments (e.g. entity_type_key="person"):
+1. For questions about connections or relationships, use execute_cypher_query with a
+   relationship pattern. Example: "What does Lena do?" →
+   MATCH (p:person)-[r:works_for]->(c:company) WHERE p.name CONTAINS 'Lena' RETURN p.name, c.name
+2. For counting, filtering, or combining conditions, use execute_cypher_query.
+3. For fuzzy or "find something like..." questions, use semantic_search.
+4. For exploring an entity's connections when you have its _id, use get_neighbors.
+5. For browsing entities of a type, use list_entities.
+
+Never make up answers — only use data from tool results. If the data doesn't contain \
+the answer, say so. Be concise.
 """
 
 

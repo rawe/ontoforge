@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useOntologyTree } from '../hooks/useOntologyTree';
 import type { OntologyTreeNode } from '../hooks/useOntologyTree';
+import { useFeatures } from '../hooks/useFeatures';
 
 function getStoredCollapsed(key: string, fallback: boolean): boolean {
   try {
@@ -58,7 +59,7 @@ function NavLink({ to, label, pathname }: { to: string; label: string; pathname:
   );
 }
 
-function OntologyNode({ node, pathname }: { node: OntologyTreeNode; pathname: string }) {
+function OntologyNode({ node, pathname, aiEnabled }: { node: OntologyTreeNode; pathname: string; aiEnabled: boolean }) {
   const storageKey = `sidebar-collapsed-${node.ontology.key}`;
   const [expanded, setExpanded] = useState(() => !getStoredCollapsed(storageKey, true));
 
@@ -119,6 +120,17 @@ function OntologyNode({ node, pathname }: { node: OntologyTreeNode; pathname: st
               </div>
             </div>
           )}
+
+          {aiEnabled && (
+            <div className="mt-1">
+              <span className="px-3 text-xs font-semibold uppercase text-purple-400 tracking-wider">AI</span>
+              <div className="flex flex-col gap-0.5 mt-1">
+                <NavLink to={`/data/${node.ontology.key}/ai/query`} label="Query" pathname={pathname} />
+                <NavLink to={`/data/${node.ontology.key}/ai/extract`} label="Extract" pathname={pathname} />
+                <NavLink to={`/data/${node.ontology.key}/ai/chat`} label="Chat" pathname={pathname} />
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -127,6 +139,7 @@ function OntologyNode({ node, pathname }: { node: OntologyTreeNode; pathname: st
 
 export default function Sidebar() {
   const { ontologies, isLoading } = useOntologyTree();
+  const { data: features } = useFeatures();
   const { pathname } = useLocation();
   const [collapsed, setCollapsed] = useState(() => getStoredCollapsed('sidebar-collapsed', false));
 
@@ -165,7 +178,7 @@ export default function Sidebar() {
               <p className="px-3 text-sm text-gray-400">Loading...</p>
             )}
             {ontologies.map((node) => (
-              <OntologyNode key={node.ontology.ontologyId} node={node} pathname={pathname} />
+              <OntologyNode key={node.ontology.ontologyId} node={node} pathname={pathname} aiEnabled={features?.ai ?? false} />
             ))}
             {!isLoading && ontologies.length === 0 && (
               <p className="px-3 text-sm text-gray-500">No ontologies</p>

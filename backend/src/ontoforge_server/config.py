@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     EMBEDDING_DIMENSIONS: int | None = None
 
     AI_PROVIDER: str | None = None
-    AI_MODEL: str = "llama3.2"
+    AI_MODEL: str = "qwen3:8b"
     AI_BASE_URL: str = "http://localhost:11434"
     AI_API_KEY: str | None = None
 

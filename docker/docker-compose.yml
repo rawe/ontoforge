@@ -37,6 +37,17 @@ services:
       # For OpenAI-compatible providers: set EMBEDDING_PROVIDER to "openai"
       # EMBEDDING_API_KEY: sk-...
       # EMBEDDING_DIMENSIONS: 1536
+      # AI-powered runtime (optional — remove comments to enable)
+      # Requires a model with tool calling support. Recommended Ollama models:
+      #   qwen3:8b (~6 GB RAM), qwen3:14b (~11 GB), qwen3:32b (~22 GB)
+      # AI_PROVIDER: ollama
+      # AI_MODEL: qwen3:8b
+      # If Ollama runs on the host machine:
+      # AI_BASE_URL: http://host.docker.internal:11434
+      # If Ollama runs as a container in this compose (see ollama service below):
+      # AI_BASE_URL: http://ollama:11434
+      # For OpenAI-compatible providers: set AI_PROVIDER to "openai"
+      # AI_API_KEY: sk-...
       # MCP default ontology key (optional — used when no key in URL path or header)
       # DEFAULT_MCP_ONTOLOGY_KEY: my_ontology
     depends_on:
@@ -51,8 +62,10 @@ services:
     depends_on:
       - backend
 
-  # Ollama embedding provider (optional — uncomment to run Ollama in Docker)
-  # After first start, pull the model: docker exec ollama ollama pull nomic-embed-text
+  # Ollama provider (optional — uncomment to run Ollama in Docker)
+  # After first start, pull the models you need:
+  #   docker exec ollama ollama pull nomic-embed-text   (for semantic search)
+  #   docker exec ollama ollama pull qwen3:8b            (for AI features)
   # ollama:
   #   image: ollama/ollama:latest
   #   container_name: ontoforge-ollama

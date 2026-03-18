@@ -56,6 +56,12 @@ case "$EMBED_MODE" in
 esac
 echo "Embedding: $EMBED_MODE ($EMBEDDING_MODEL)"
 
+# --- AI preset (Ollama) ---
+export AI_PROVIDER="${AI_PROVIDER:-ollama}"
+export AI_MODEL="${AI_MODEL:-qwen3:14b}"
+export AI_BASE_URL="${AI_BASE_URL:-http://localhost:11434}"
+echo "AI: $AI_PROVIDER ($AI_MODEL)"
+
 # --- Neo4j ---
 if docker compose -f "$ROOT_DIR/docker-compose.yml" ps neo4j 2>/dev/null | grep -q "running"; then
     echo "Neo4j already running"

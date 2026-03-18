@@ -1,3 +1,5 @@
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from ontoforge_server.core.schemas import (
@@ -61,5 +63,55 @@ class CypherQueryResponse(BaseModel):
 
 class FeaturesResponse(BaseModel):
     semantic_search: bool = Field(alias="semanticSearch")
+    ai: bool = False
+
+    model_config = {"populate_by_name": True}
+
+
+# --- AI Endpoints ---
+
+
+class AiQueryRequest(BaseModel):
+    question: str = Field(..., min_length=1)
+
+
+class AiQueryResponse(BaseModel):
+    answer: str
+    cypher: str | None = None
+    results: dict | None = None
+
+
+class AiExtractRequest(BaseModel):
+    text: str = Field(..., min_length=1)
+    entity_types: list[str] | None = Field(default=None, alias="entityTypes")
+    create: bool = False
+
+    model_config = {"populate_by_name": True}
+
+
+class AiExtractResponse(BaseModel):
+    entities: list[dict[str, Any]]
+    relations: list[dict[str, Any]]
+    created: bool
+
+
+class AiChatMessage(BaseModel):
+    role: str = Field(..., pattern="^(user|assistant)$")
+    content: str
+
+
+class AiChatRequest(BaseModel):
+    message: str = Field(..., min_length=1)
+    history: list[AiChatMessage] | None = None
+    include_tool_calls: bool = Field(default=False, alias="includeToolCalls")
+
+    model_config = {"populate_by_name": True}
+
+
+class AiChatResponse(BaseModel):
+    reply: str
+    tool_calls: list[dict[str, Any]] | None = Field(
+        default=None, alias="toolCalls",
+    )
 
     model_config = {"populate_by_name": True}

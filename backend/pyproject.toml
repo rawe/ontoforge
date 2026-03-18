@@ -12,6 +12,7 @@ dependencies = [
     "mcp[cli]>=1.9",
     "httpx>=0.28",
     "antlr4-cypher>=0.1.2",
+    "pydantic-ai-slim[openai]>=1.70.0",
 ]
 
 [dependency-groups]
@@ -29,3 +30,7 @@ packages = ["src/ontoforge_server"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+markers = [
+    "integration: requires external services (Neo4j, Ollama, etc.)",
+]
+addopts = "-m 'not integration'"

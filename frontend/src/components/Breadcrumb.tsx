@@ -77,6 +77,9 @@ function buildCrumbs(pathname: string, queryClient: ReturnType<typeof useQueryCl
 
     if (parts[2] === 'graph') {
       crumbs.push({ label: 'Visual Editor' });
+    } else if (parts[2] === 'ai' && parts[3]) {
+      const aiLabels: Record<string, string> = { query: 'AI Query', extract: 'AI Extract', chat: 'AI Chat' };
+      crumbs.push({ label: aiLabels[parts[3]] ?? parts[3] });
     } else if (parts.length >= 4) {
       const typeSegment = parts[2]; // 'entities' or 'relations'
       const typeKey = parts[3];

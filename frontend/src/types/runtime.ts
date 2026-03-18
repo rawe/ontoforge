@@ -65,6 +65,47 @@ export interface PaginatedResponse<T> {
 // Feature detection
 export interface FeaturesResponse {
   semanticSearch: boolean;
+  ai: boolean;
+}
+
+// AI types
+export interface AiQueryResponse {
+  answer: string;
+  cypher: string | null;
+  results: Record<string, unknown> | null;
+}
+
+export interface ExtractedEntity {
+  entityTypeKey: string;
+  properties: Record<string, unknown>;
+}
+
+export interface ExtractedRelation {
+  relationTypeKey: string;
+  source: { entityTypeKey: string; match: Record<string, unknown> };
+  target: { entityTypeKey: string; match: Record<string, unknown> };
+  properties?: Record<string, unknown>;
+}
+
+export interface AiExtractResponse {
+  entities: ExtractedEntity[];
+  relations: ExtractedRelation[];
+  created: boolean;
+}
+
+export interface AiChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface AiChatToolCall {
+  tool: string;
+  args: Record<string, unknown>;
+}
+
+export interface AiChatResponse {
+  reply: string;
+  toolCalls: AiChatToolCall[] | null;
 }
 
 // Semantic search

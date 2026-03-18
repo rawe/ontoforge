@@ -29,6 +29,12 @@ services:
       # EMBEDDING_BASE_URL: http://host.docker.internal:11434
       # EMBEDDING_API_KEY:           # required for openai provider
       # EMBEDDING_DIMENSIONS:        # optional — defaults: ollama=768, openai=1536
+      # AI-powered runtime (optional — uncomment to enable)
+      # Requires a model with tool calling support.
+      # AI_PROVIDER: ollama
+      # AI_MODEL: qwen3:8b
+      # AI_BASE_URL: http://host.docker.internal:11434
+      # AI_API_KEY:              # required for openai provider
       # MCP default ontology key (optional)
       # DEFAULT_MCP_ONTOLOGY_KEY: my_ontology
     depends_on:
@@ -42,8 +48,10 @@ services:
     depends_on:
       - ontoforge-server
 
-  # Ollama embedding provider (optional — uncomment to run Ollama in Docker)
-  # After first start, pull the model: docker exec ollama ollama pull nomic-embed-text
+  # Ollama provider (optional — uncomment to run Ollama in Docker)
+  # After first start, pull the models you need:
+  #   docker exec ollama ollama pull nomic-embed-text   (for semantic search)
+  #   docker exec ollama ollama pull qwen3:8b            (for AI features)
   # ollama:
   #   image: ollama/ollama:latest
   #   ports:

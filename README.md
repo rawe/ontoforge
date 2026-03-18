@@ -240,14 +240,51 @@ The backend reads settings from environment variables (or a `.env` file in `back
 | `DB_USER` | `neo4j` | Neo4j username |
 | `DB_PASSWORD` | `ontoforge_dev` | Neo4j password |
 | `PORT` | `8000` | HTTP listen port |
-| `EMBEDDING_PROVIDER` | *(unset — disabled)* | `ollama` or `openai` (OpenAI-compatible API) |
+| `DEFAULT_MCP_ONTOLOGY_KEY` | *(unset)* | MCP default ontology key — used when no key is in the URL or header |
+
+In Docker, `DB_URI` is set to `bolt://neo4j:7687` automatically via `docker-compose.yml`.
+
+## Optional Features
+
+OntoForge has two optional features — **semantic search** and **AI-powered runtime** — that require an external model provider. Both are disabled by default and all core functionality (schema modeling, entity/relation CRUD, MCP) works without them.
+
+Both features support two provider types:
+
+- **`ollama`** — local inference via [Ollama](https://ollama.com). No API key needed, models run on your machine.
+- **`openai`** — any OpenAI-compatible API (OpenAI, Azure, LiteLLM, vLLM, etc.). Requires an API key.
+
+### Semantic Search
+
+Find entities by meaning rather than exact keywords. Requires an embedding model.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `EMBEDDING_PROVIDER` | *(unset — disabled)* | `ollama` or `openai` |
 | `EMBEDDING_MODEL` | `nomic-embed-text` | Embedding model name |
 | `EMBEDDING_BASE_URL` | `http://localhost:11434` | Embedding API endpoint |
 | `EMBEDDING_API_KEY` | *(unset)* | API key (required for `openai` provider) |
 | `EMBEDDING_DIMENSIONS` | *(auto)* | Vector dimensions (defaults: ollama=768, openai=1536) |
-| `DEFAULT_MCP_ONTOLOGY_KEY` | *(unset)* | MCP default ontology key — used when no key is in the URL or header |
 
-In Docker, `DB_URI` is set to `bolt://neo4j:7687` automatically via `docker-compose.yml`. Semantic search is opt-in — when `EMBEDDING_PROVIDER` is unset, all entity CRUD works normally without embeddings.
+### AI-Powered Runtime
+
+Natural language query, entity extraction from text, and conversational chat over your knowledge graph. These features use tool calling to interact with the schema and data, so the model must support function/tool calling.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AI_PROVIDER` | *(unset — disabled)* | `ollama` or `openai` |
+| `AI_MODEL` | `qwen3:8b` | AI model name (must support tool calling) |
+| `AI_BASE_URL` | `http://localhost:11434` | AI model API endpoint |
+| `AI_API_KEY` | *(unset)* | API key (required for `openai` provider) |
+
+**Recommended Ollama models** by available RAM (Apple Silicon / unified memory):
+
+| RAM | Model | Params | Memory Used |
+|-----|-------|--------|-------------|
+| ~8 GB | `qwen3:8b` | 8B dense | ~6 GB |
+| ~16 GB | `qwen3:14b` | 14B dense | ~11 GB |
+| ~32 GB+ | `qwen3:32b` | 32B dense | ~22 GB |
+
+Account for OS and other services (Docker, Neo4j) when choosing a model — pick one tier below your total RAM to leave headroom.
 
 ## Container Images
 

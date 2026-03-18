@@ -5,6 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from ontoforge_server.core.ai import init_ai_model
 from ontoforge_server.core.database import close_driver, ensure_vector_indexes, get_driver, init_driver
 from ontoforge_server.core.embedding import (
     close_embedding_provider,
@@ -29,6 +30,7 @@ from ontoforge_server.runtime.router import router as runtime_router
 async def lifespan(app: FastAPI):
     driver = await init_driver()
     await init_embedding_provider()
+    init_ai_model()
     provider = get_embedding_provider()
     if provider:
         await ensure_vector_indexes(driver, provider.dimensions)

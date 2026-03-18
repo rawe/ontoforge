@@ -17,7 +17,7 @@ The Docker Compose stack consists of three core services:
 - **ontoforge-server** — Backend: REST API and MCP servers. All environment variables documented below apply to this service.
 - **ontoforge-ui** — Frontend: web UI served on port 3000. No configuration needed beyond the server URL.
 
-Semantic search is optional and supports two embedding providers: **Ollama** (local) or an **OpenAI-compatible** API. When using Ollama, an optional **ollama** service can be added to the compose stack.
+Semantic search is optional and supports two embedding providers: **Ollama** (local) or an **OpenAI-compatible** API. AI-powered runtime (natural language query, entity extraction, chat) is also optional and requires a model with tool calling support. Both features can use Ollama or an OpenAI-compatible API. When using Ollama, an optional **ollama** service can be added to the compose stack.
 
 ## Templates
 
@@ -39,9 +39,13 @@ Ask the user:
    - `ollama` — local Ollama instance (default model: `nomic-embed-text`)
    - `openai` — OpenAI-compatible API (requires API key)
    - None — skip embedding configuration
-3. **Ollama deployment** (if ollama chosen) — whether Ollama runs on the host machine or should be added as a Docker container in the compose file.
-4. **Neo4j password** — the password for the Neo4j database (default: `changeme`).
-5. **Port conflicts** — whether the default ports (7474, 7687, 8000, 3000) conflict with other services.
+3. **AI provider** — whether they want AI-powered runtime (NL query, entity extraction, chat), and if so which provider:
+   - `ollama` — local Ollama instance (default model: `qwen3:8b`; recommended: `qwen3:14b` or `qwen3:32b` for better quality)
+   - `openai` — OpenAI-compatible API (requires API key)
+   - None — skip AI configuration
+4. **Ollama deployment** (if ollama chosen for embeddings or AI) — whether Ollama runs on the host machine or should be added as a Docker container in the compose file.
+5. **Neo4j password** — the password for the Neo4j database (default: `changeme`).
+6. **Port conflicts** — whether the default ports (7474, 7687, 8000, 3000) conflict with other services.
 
 ### 2. Generate Docker Compose
 
@@ -50,8 +54,10 @@ Read the template from `${CLAUDE_PLUGIN_ROOT}/skills/ontoforge-setup/templates/d
 - Set the Neo4j password in `NEO4J_AUTH` and `DB_PASSWORD`.
 - If the user wants embeddings, uncomment and configure the `EMBEDDING_*` environment variables on the `ontoforge-server` service.
 - If the user wants Ollama in Docker, uncomment the `ollama` service.
-- If the user wants Ollama on the host, set `EMBEDDING_BASE_URL` to `http://host.docker.internal:11434`.
+- If the user wants Ollama on the host (common setup), set `EMBEDDING_BASE_URL` and/or `AI_BASE_URL` to `http://host.docker.internal:11434` (Docker connects to the host's Ollama). The `ollama` service in the compose file is not needed in this case.
 - If the user chose `openai`, set `EMBEDDING_PROVIDER: openai` and note that `EMBEDDING_API_KEY` must be provided (do not write a real key into the file).
+- If the user wants AI, uncomment and configure the `AI_*` environment variables on the `ontoforge-server` service. The same Ollama/host/Docker/OpenAI logic applies as for embeddings.
+- If the user chose `openai` for AI, set `AI_PROVIDER: openai` and note that `AI_API_KEY` must be provided (do not write a real key into the file).
 - Adjust port mappings if the user reported conflicts.
 - `DEFAULT_MCP_ONTOLOGY_KEY` is a server-side fallback: if an MCP request arrives without an `X-Ontology-Key` header or a URL path key, the server uses this value. Uncomment it in the Docker Compose if the user wants a fallback; the primary mechanism is the `X-Ontology-Key` header set in `.mcp.json`.
 
@@ -83,6 +89,12 @@ DB_PASSWORD=changeme
 # EMBEDDING_API_KEY=
 # EMBEDDING_DIMENSIONS=
 
+# AI-powered runtime (optional — omit AI_PROVIDER to disable)
+# AI_PROVIDER=ollama
+# AI_MODEL=qwen3:8b
+# AI_BASE_URL=http://localhost:11434
+# AI_API_KEY=
+
 # MCP default ontology key (optional)
 # DEFAULT_MCP_ONTOLOGY_KEY=my_ontology
 ```
@@ -104,16 +116,20 @@ These are the **only** environment variables recognized by the `ontoforge-server
 | `EMBEDDING_BASE_URL` | no | `http://localhost:11434` | Embedding provider API base URL |
 | `EMBEDDING_API_KEY` | no | *(none)* | API key — **required** when `EMBEDDING_PROVIDER=openai` |
 | `EMBEDDING_DIMENSIONS` | no | *(auto)* | Vector dimensions (defaults: ollama=768, openai=1536) |
+| `AI_PROVIDER` | no | *(disabled)* | `ollama` or `openai` — omit to disable AI features |
+| `AI_MODEL` | no | `qwen3:8b` | AI model name (must support tool calling) |
+| `AI_BASE_URL` | no | `http://localhost:11434` | AI provider API base URL |
+| `AI_API_KEY` | no | *(none)* | API key — **required** when `AI_PROVIDER=openai` |
 | `DEFAULT_MCP_ONTOLOGY_KEY` | no | *(none)* | Fallback ontology key for MCP when not in URL/header |
 
 ## Container Images
 
 | Image | Description |
 |---|---|
-| `neo4j:5` | Neo4j Community Edition 5.x |
+| `neo4j:2026.02.2` | Neo4j 2026.x |
 | `ghcr.io/rawe/ontoforge-server:latest` | OntoForge backend (REST API + MCP) |
 | `ghcr.io/rawe/ontoforge-ui:latest` | OntoForge frontend |
-| `ollama/ollama:latest` | Ollama (optional, for local embeddings) |
+| `ollama/ollama:latest` | Ollama (optional, for local embeddings and AI) |
 
 ## MCP Endpoints
 
@@ -130,5 +146,7 @@ After generating the files, remind the user:
 2. Wait for Neo4j to become healthy (check `docker compose ps`).
 3. Access the OntoForge UI at `http://localhost:3000`.
 4. Access the API at `http://localhost:8000`.
-5. If using Ollama in Docker, pull the model: `docker exec <container> ollama pull nomic-embed-text`.
+5. If using Ollama in Docker, pull the required models:
+   - For semantic search: `docker exec <container> ollama pull nomic-embed-text`
+   - For AI features: `docker exec <container> ollama pull qwen3:8b` (or whichever model was configured)
 6. If using the `ontoforge` plugin for schema import/export, install it from the OntoForge marketplace.

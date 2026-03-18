@@ -5,6 +5,10 @@ import type {
   PaginatedResponse,
   FeaturesResponse,
   SemanticSearchResponse,
+  AiQueryResponse,
+  AiExtractResponse,
+  AiChatMessage,
+  AiChatResponse,
 } from '../types/runtime';
 import { request as baseRequest } from './request';
 
@@ -131,4 +135,33 @@ function buildSemanticSearchQuery(params: SemanticSearchParams): string {
 
 export const semanticSearch = (ontologyKey: string, params: SemanticSearchParams) =>
   request<SemanticSearchResponse>(`/${ontologyKey}/search/semantic${buildSemanticSearchQuery(params)}`);
+
+// AI
+export const aiQuery = (ontologyKey: string, question: string) =>
+  request<AiQueryResponse>(`/${ontologyKey}/ai/query`, {
+    method: 'POST',
+    body: JSON.stringify({ question }),
+  });
+
+export const aiExtract = (
+  ontologyKey: string,
+  text: string,
+  entityTypes?: string[],
+  create?: boolean,
+) =>
+  request<AiExtractResponse>(`/${ontologyKey}/ai/extract`, {
+    method: 'POST',
+    body: JSON.stringify({ text, entityTypes, create }),
+  });
+
+export const aiChat = (
+  ontologyKey: string,
+  message: string,
+  history?: AiChatMessage[],
+  includeToolCalls?: boolean,
+) =>
+  request<AiChatResponse>(`/${ontologyKey}/ai/chat`, {
+    method: 'POST',
+    body: JSON.stringify({ message, history, includeToolCalls }),
+  });
 

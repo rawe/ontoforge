@@ -1,9 +1,11 @@
 import { useParams, Link } from 'react-router-dom';
 import { useRuntimeSchema } from '../hooks/useRuntimeSchema';
+import { useFeatures } from '../hooks/useFeatures';
 
 export default function RuntimeDashboardPage() {
   const { ontologyKey } = useParams<{ ontologyKey: string }>();
   const { data: schema, isLoading: loading, error } = useRuntimeSchema(ontologyKey);
+  const { data: features } = useFeatures();
 
   if (loading) return <p>Loading schema...</p>;
   if (error) return <p className="text-red-600">Error: {error.message}</p>;
@@ -32,6 +34,28 @@ export default function RuntimeDashboardPage() {
         >
           Visual Editor
         </Link>
+        {features?.ai && (
+          <>
+            <Link
+              to={`/data/${ontologyKey}/ai/query`}
+              className="px-4 py-2 bg-purple-600 text-white text-sm rounded hover:bg-purple-700"
+            >
+              AI Query
+            </Link>
+            <Link
+              to={`/data/${ontologyKey}/ai/extract`}
+              className="px-4 py-2 bg-purple-600 text-white text-sm rounded hover:bg-purple-700"
+            >
+              AI Extract
+            </Link>
+            <Link
+              to={`/data/${ontologyKey}/ai/chat`}
+              className="px-4 py-2 bg-purple-600 text-white text-sm rounded hover:bg-purple-700"
+            >
+              AI Chat
+            </Link>
+          </>
+        )}
       </div>
 
       {/* Entity Types */}

@@ -530,7 +530,8 @@ Return feature availability flags for the runtime API. This endpoint is not scop
 **Response:** `200 OK`
 ```json
 {
-  "semanticSearch": true
+  "semanticSearch": true,
+  "ai": true
 }
 ```
 
@@ -538,13 +539,114 @@ Return feature availability flags for the runtime API. This endpoint is not scop
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `semanticSearch` | boolean | `true` when `EMBEDDING_PROVIDER` is configured, `false` otherwise |
+| `semanticSearch` | boolean | `true` when `EMBEDDING_PROVIDER` is configured |
+| `ai` | boolean | `true` when `AI_PROVIDER` is configured |
 
 This endpoint is useful for frontend feature detection — clients can check which optional features are available before rendering related UI.
 
 ---
 
-## 10. Endpoint Summary
+## 10. AI Endpoints
+
+LLM-powered endpoints for natural language interaction with the knowledge graph. Requires `AI_PROVIDER` to be configured. When disabled, all AI endpoints return `422` with code `VALIDATION_ERROR`.
+
+### POST /api/runtime/{ontologyKey}/ai/query
+
+Translate a natural language question into a Cypher query, execute it, and return a summarized answer.
+
+**Request body:**
+```json
+{
+  "question": "How many companies are in Berlin?"
+}
+```
+
+**Response:** `200 OK`
+```json
+{
+  "answer": "There are 3 companies in Berlin.",
+  "cypher": "MATCH (c:company) WHERE c.location = 'Berlin' RETURN count(c) AS total",
+  "results": {
+    "columns": ["total"],
+    "results": [{"total": 3}]
+  }
+}
+```
+
+The `cypher` and `results` fields may be `null` if the LLM answered without using the Cypher tool.
+
+### POST /api/runtime/{ontologyKey}/ai/extract
+
+Extract structured entities and relations from unstructured text, guided by the ontology schema.
+
+**Request body:**
+```json
+{
+  "text": "John Smith works at Acme Corp. He is 30 years old.",
+  "entityTypes": ["person", "company"],
+  "create": false
+}
+```
+
+- `entityTypes` (optional): filter extraction to specific types.
+- `create` (optional, default `false`): when `true`, persist extracted entities and relations with full validation.
+
+**Response:** `200 OK`
+```json
+{
+  "entities": [
+    {"entityTypeKey": "person", "properties": {"name": "John Smith", "age": 30}},
+    {"entityTypeKey": "company", "properties": {"name": "Acme Corp"}}
+  ],
+  "relations": [
+    {
+      "relationTypeKey": "works_for",
+      "source": {"entityTypeKey": "person", "match": {"name": "John Smith"}},
+      "target": {"entityTypeKey": "company", "match": {"name": "Acme Corp"}},
+      "properties": {}
+    }
+  ],
+  "created": false
+}
+```
+
+### POST /api/runtime/{ontologyKey}/ai/chat
+
+Conversational Q&A with tool use against the knowledge graph.
+
+**Request body:**
+```json
+{
+  "message": "How many people work at Acme Corp?",
+  "history": [
+    {"role": "user", "content": "Tell me about Acme"},
+    {"role": "assistant", "content": "Acme Corp is a technology company."}
+  ],
+  "includeToolCalls": true
+}
+```
+
+- `history` (optional): prior conversation turns for multi-turn context. Stateless — client sends full history.
+- `includeToolCalls` (optional, default `false`): include tool usage details in response for debugging.
+
+**Response:** `200 OK`
+```json
+{
+  "reply": "There are 12 people who work at Acme Corp.",
+  "toolCalls": [
+    {
+      "tool": "execute_cypher_query",
+      "args": {"cypher": "MATCH (p:person)-[:works_for]->(c:company {name: 'Acme Corp'}) RETURN count(p)"}
+    }
+  ]
+}
+```
+
+`toolCalls` is only present when `includeToolCalls` is `true`.
+
+---
+
+## 11. Endpoint Summary
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -568,3 +670,6 @@ This endpoint is useful for frontend feature detection — clients can check whi
 | `GET` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}/{id}` | Get relation instance |
 | `PATCH` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}/{id}` | Partial update relation instance |
 | `DELETE` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}/{id}` | Delete relation instance |
+| `POST` | `/api/runtime/{ontologyKey}/ai/query` | NL → Cypher query with answer |
+| `POST` | `/api/runtime/{ontologyKey}/ai/extract` | Extract entities/relations from text |
+| `POST` | `/api/runtime/{ontologyKey}/ai/chat` | Schema-aware conversational Q&A |

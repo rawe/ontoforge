@@ -24,19 +24,31 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Tool name constants
+# ---------------------------------------------------------------------------
+
+TOOL_GET_SCHEMA = "get_schema"
+TOOL_LIST_ENTITIES = "list_entities"
+TOOL_GET_ENTITY = "get_entity"
+TOOL_LIST_RELATIONS = "list_relations"
+TOOL_GET_NEIGHBORS = "get_neighbors"
+TOOL_SEMANTIC_SEARCH = "semantic_search"
+TOOL_EXECUTE_CYPHER = "execute_cypher_query"
+
+# ---------------------------------------------------------------------------
 # Tool allowlists — controls which tools each AI feature can use
 # ---------------------------------------------------------------------------
 
-QUERY_TOOLS = ["execute_cypher_query"]
+QUERY_TOOLS = [TOOL_EXECUTE_CYPHER]
 EXTRACT_TOOLS: list[str] = []  # schema context only
 CHAT_TOOLS = [
-    "get_schema",
-    "list_entities",
-    "get_entity",
-    "list_relations",
-    "get_neighbors",
-    "semantic_search",
-    "execute_cypher_query",
+    TOOL_GET_SCHEMA,
+    TOOL_LIST_ENTITIES,
+    TOOL_GET_ENTITY,
+    TOOL_LIST_RELATIONS,
+    TOOL_GET_NEIGHBORS,
+    TOOL_SEMANTIC_SEARCH,
+    TOOL_EXECUTE_CYPHER,
 ]
 
 
@@ -114,7 +126,7 @@ def _register_tool(name: str):
     return decorator
 
 
-@_register_tool("get_schema")
+@_register_tool(TOOL_GET_SCHEMA)
 async def tool_get_schema(ctx: RunContext[AiDeps]) -> str:
     """Get the full ontology schema including entity types, relation types,
     and their property definitions."""
@@ -122,7 +134,7 @@ async def tool_get_schema(ctx: RunContext[AiDeps]) -> str:
     return _describe_schema(loaded.scoped)
 
 
-@_register_tool("list_entities")
+@_register_tool(TOOL_LIST_ENTITIES)
 async def tool_list_entities(
     ctx: RunContext[AiDeps],
     entity_type_key: str,
@@ -139,7 +151,7 @@ async def tool_list_entities(
     return result.model_dump()
 
 
-@_register_tool("get_entity")
+@_register_tool(TOOL_GET_ENTITY)
 async def tool_get_entity(
     ctx: RunContext[AiDeps],
     entity_type_key: str,
@@ -151,7 +163,7 @@ async def tool_get_entity(
     )
 
 
-@_register_tool("list_relations")
+@_register_tool(TOOL_LIST_RELATIONS)
 async def tool_list_relations(
     ctx: RunContext[AiDeps],
     relation_type_key: str,
@@ -166,7 +178,7 @@ async def tool_list_relations(
     return result.model_dump()
 
 
-@_register_tool("get_neighbors")
+@_register_tool(TOOL_GET_NEIGHBORS)
 async def tool_get_neighbors(
     ctx: RunContext[AiDeps],
     entity_type_key: str,
@@ -182,7 +194,7 @@ async def tool_get_neighbors(
     return result.model_dump()
 
 
-@_register_tool("semantic_search")
+@_register_tool(TOOL_SEMANTIC_SEARCH)
 async def tool_semantic_search(
     ctx: RunContext[AiDeps],
     query: str,
@@ -196,7 +208,7 @@ async def tool_semantic_search(
     )
 
 
-@_register_tool("execute_cypher_query")
+@_register_tool(TOOL_EXECUTE_CYPHER)
 async def tool_execute_cypher_query(
     ctx: RunContext[AiDeps],
     cypher: str,
@@ -280,7 +292,7 @@ async def ai_query(
     for msg in result.new_messages():
         for part in getattr(msg, "parts", []):
             tool_name = getattr(part, "tool_name", None)
-            if tool_name and "execute_cypher_query" in tool_name:
+            if tool_name and TOOL_EXECUTE_CYPHER in tool_name:
                 # ToolCallPart: args is JSON string, use args_as_dict()
                 args_fn = getattr(part, "args_as_dict", None)
                 if args_fn:
@@ -444,7 +456,7 @@ async def ai_chat(
 
     available_tools = [
         t for t in CHAT_TOOLS
-        if t != "semantic_search" or get_embedding_provider() is not None
+        if t != TOOL_SEMANTIC_SEARCH or get_embedding_provider() is not None
     ]
 
     agent = _create_agent(

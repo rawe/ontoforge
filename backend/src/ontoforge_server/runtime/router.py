@@ -12,6 +12,7 @@ from ontoforge_server.runtime.schemas import (
     NeighborhoodResponse,
     PaginatedResponse,
     RelationInstanceCreate,
+    SavedQueryRunRequest,
     SchemaResponse,
     SemanticSearchResponse,
 )
@@ -247,3 +248,36 @@ async def cypher_query(
     driver: AsyncDriver = Depends(get_driver),
 ):
     return await service.execute_cypher_query(ontology_key, body.cypher, driver)
+
+
+# --- Saved Queries ---
+
+
+@router.get("/saved-queries")
+async def list_saved_queries(
+    ontology_key: str,
+    driver: AsyncDriver = Depends(get_driver),
+):
+    loaded = await service._load_schema(ontology_key, driver)
+    return [
+        {
+            "key": sq.key,
+            "name": sq.name,
+            "description": sq.description,
+            "parameters": [
+                {"name": p.name, "description": p.description, "dataType": p.data_type}
+                for p in sq.parameters
+            ],
+        }
+        for sq in loaded.saved_queries.values()
+    ]
+
+
+@router.post("/saved-queries/{query_key}/run", response_model=CypherQueryResponse)
+async def run_saved_query(
+    ontology_key: str,
+    query_key: str,
+    body: SavedQueryRunRequest,
+    driver: AsyncDriver = Depends(get_driver),
+):
+    return await service.execute_saved_query(ontology_key, query_key, body.params, driver)

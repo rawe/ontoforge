@@ -741,7 +741,7 @@ Execute a saved query with the provided parameter values. Parameters are validat
 **Request body:**
 ```json
 {
-  "parameters": {
+  "params": {
     "name": "Alice",
     "min_age": 25
   }

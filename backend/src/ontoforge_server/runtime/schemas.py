@@ -61,6 +61,10 @@ class CypherQueryResponse(BaseModel):
     results: list[dict]
 
 
+class SavedQueryRunRequest(BaseModel):
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
 class FeaturesResponse(BaseModel):
     semantic_search: bool = Field(alias="semanticSearch")
     ai: bool = False

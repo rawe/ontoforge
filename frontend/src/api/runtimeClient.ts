@@ -166,6 +166,17 @@ export const aiChat = (
     body: JSON.stringify({ message, history, includeToolCalls }),
   });
 
+// Saved Queries
+export const runSavedQuery = (
+  ontologyKey: string,
+  queryKey: string,
+  params: Record<string, unknown>,
+) =>
+  request<{ columns: string[]; results: Record<string, unknown>[] }>(
+    `/${ontologyKey}/saved-queries/${queryKey}/run`,
+    { method: 'POST', body: JSON.stringify({ params }) },
+  );
+
 // Agent discovery and chat
 export const listAgents = (ontologyKey: string) =>
   request<AgentInfo[]>(`/${ontologyKey}/ai/agents`);

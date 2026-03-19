@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from ontoforge_server.core.schemas import (
     DataType,
+    ExportAiAgent,
     ExportEntityType,
     ExportOntology,
     ExportOntologyInclusion,
@@ -16,6 +17,7 @@ from ontoforge_server.core.schemas import (
 # Re-export core schemas so existing imports from this module keep working
 __all__ = [
     "DataType",
+    "ExportAiAgent",
     "ExportEntityType",
     "ExportOntology",
     "ExportOntologyInclusion",
@@ -26,6 +28,7 @@ __all__ = [
 ]
 
 KEY_PATTERN = r"^[a-z][a-z0-9_]*$"
+AGENT_KEY_PATTERN = r"^[a-z][a-z0-9_-]*$"
 
 
 # --- Ontology ---
@@ -193,3 +196,27 @@ class ErrorDetail(BaseModel):
 
 class ErrorResponse(BaseModel):
     error: ErrorDetail
+
+
+# --- AI Agent Config ---
+
+
+class AiAgentConfigUpsert(BaseModel):
+    name: str
+    description: str | None = None
+    system_prompt: str | None = Field(default=None, alias="systemPrompt")
+    tools: list[str] | None = None
+
+    model_config = {"populate_by_name": True}
+
+
+class AiAgentConfigResponse(BaseModel):
+    key: str
+    name: str
+    description: str | None = None
+    system_prompt: str | None = Field(default=None, alias="systemPrompt")
+    tools: list[str] | None = None
+    created_at: datetime = Field(alias="createdAt")
+    updated_at: datetime = Field(alias="updatedAt")
+
+    model_config = {"populate_by_name": True}

@@ -115,3 +115,12 @@ class AiChatResponse(BaseModel):
     )
 
     model_config = {"populate_by_name": True}
+
+
+# --- Agent Discovery ---
+
+
+class AgentInfo(BaseModel):
+    key: str
+    name: str
+    description: str | None = None

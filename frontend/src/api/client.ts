@@ -5,12 +5,13 @@ import type {
   PropertyDefinition,
   ValidationResult,
   IncludeTypeResponse,
+  AiAgentConfig,
 } from '../types/models';
 import { ApiError, request as baseRequest } from './request';
 
 export { ApiError };
 
-const BASE_URL = 'http://localhost:8000/api/model';
+const BASE_URL = '/api/model';
 
 function request<T>(path: string, options?: RequestInit): Promise<T> {
   return baseRequest<T>(BASE_URL, path, options);
@@ -105,3 +106,14 @@ export const exportSchema = () =>
   request<unknown>('/export');
 export const importSchema = (data: unknown) =>
   request<unknown>('/import', { method: 'POST', body: JSON.stringify(data) });
+
+// AI Agent Config
+export const listAiAgents = (ontologyKey: string) =>
+  request<AiAgentConfig[]>(`/ontologies/${ontologyKey}/ai-agents`);
+export const upsertAiAgent = (
+  ontologyKey: string,
+  agentKey: string,
+  data: { name: string; description?: string | null; systemPrompt?: string | null; tools?: string[] | null },
+) => request<AiAgentConfig>(`/ontologies/${ontologyKey}/ai-agents/${agentKey}`, { method: 'PUT', body: JSON.stringify(data) });
+export const deleteAiAgent = (ontologyKey: string, agentKey: string) =>
+  request<void>(`/ontologies/${ontologyKey}/ai-agents/${agentKey}`, { method: 'DELETE' });

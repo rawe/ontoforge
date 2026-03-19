@@ -644,6 +644,68 @@ Conversational Q&A with tool use against the knowledge graph.
 
 `toolCalls` is only present when `includeToolCalls` is `true`.
 
+### GET /api/runtime/{ontologyKey}/ai/agents
+
+List available AI agents for this ontology. Returns the default agent plus any agents configured via the modeling API.
+
+**Response:** `200 OK`
+```json
+[
+  {
+    "key": "default",
+    "name": "Default Assistant",
+    "description": "Schema-aware conversational agent"
+  },
+  {
+    "key": "analyst",
+    "name": "Data Analyst",
+    "description": "Specialized agent for data analysis"
+  }
+]
+```
+
+### POST /api/runtime/{ontologyKey}/ai/agents/{agentKey}/chat
+
+Agent-scoped conversational Q&A. Behaves like the `/ai/chat` endpoint but uses the agent's configured system prompt and tool set.
+
+**Request body:** Same as `/ai/chat`.
+
+**Response:** `200 OK` — same shape as `/ai/chat`.
+
+**Errors:** 404 if agent key not found.
+
+### GET /api/runtime/{ontologyKey}/ai/.well-known/agent.json
+
+Return the A2A agent card for the default agent. Describes the agent's capabilities, skills, and endpoint URL following the Agent-to-Agent (A2A) protocol.
+
+**Response:** `200 OK` — A2A agent card JSON.
+
+### POST /api/runtime/{ontologyKey}/ai/a2a
+
+A2A task endpoint for the default agent. Accepts and processes tasks following the A2A protocol.
+
+**Request body:** A2A task request.
+
+**Response:** `200 OK` — A2A task response.
+
+### GET /api/runtime/{ontologyKey}/ai/agents/{agentKey}/.well-known/agent.json
+
+Return the A2A agent card for a specific configured agent.
+
+**Response:** `200 OK` — A2A agent card JSON.
+
+**Errors:** 404 if agent key not found.
+
+### POST /api/runtime/{ontologyKey}/ai/agents/{agentKey}/a2a
+
+A2A task endpoint for a specific configured agent.
+
+**Request body:** A2A task request.
+
+**Response:** `200 OK` — A2A task response.
+
+**Errors:** 404 if agent key not found.
+
 ---
 
 ## 11. Endpoint Summary
@@ -673,3 +735,9 @@ Conversational Q&A with tool use against the knowledge graph.
 | `POST` | `/api/runtime/{ontologyKey}/ai/query` | NL → Cypher query with answer |
 | `POST` | `/api/runtime/{ontologyKey}/ai/extract` | Extract entities/relations from text |
 | `POST` | `/api/runtime/{ontologyKey}/ai/chat` | Schema-aware conversational Q&A |
+| `GET` | `/api/runtime/{ontologyKey}/ai/agents` | List agents (default + configured) |
+| `POST` | `/api/runtime/{ontologyKey}/ai/agents/{agentKey}/chat` | Agent-scoped conversational Q&A |
+| `GET` | `/api/runtime/{ontologyKey}/ai/.well-known/agent.json` | Default agent A2A card |
+| `POST` | `/api/runtime/{ontologyKey}/ai/a2a` | Default agent A2A task |
+| `GET` | `/api/runtime/{ontologyKey}/ai/agents/{agentKey}/.well-known/agent.json` | Agent-specific A2A card |
+| `POST` | `/api/runtime/{ontologyKey}/ai/agents/{agentKey}/a2a` | Agent-specific A2A task |

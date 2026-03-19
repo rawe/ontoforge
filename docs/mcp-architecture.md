@@ -199,7 +199,7 @@ LLM Application / AI Agent
 3. **Minimal surface.** Only expose tools the LLM genuinely needs. Consolidate where possible to avoid overwhelming the LLM with similar tools.
 4. **Self-documenting.** Each tool has a description that tells the LLM when and how to use it. The `get_schema` tool provides full context about what types and properties exist.
 
-### 3.1 Modeling MCP Tools (15 tools)
+### 3.1 Modeling MCP Tools (24 tools)
 
 #### Schema Introspection
 
@@ -247,6 +247,14 @@ Properties are managed through unified tools that work on both entity types and 
 | `validate_schema` | — | Validation result: `valid` (boolean), `errors` (list) | Check the schema for consistency — dangling references, duplicate keys, missing fields. |
 | `export_schema` | — | JSON export payload | Export the full ontology schema in OntoForge transfer format. |
 | `import_schema` | `payload` (JSON object), `overwrite` (opt, default false) | Imported ontology | Import a schema from a JSON payload into the current ontology. With `overwrite=true`, replaces the existing schema. |
+
+#### AI Agent Configuration
+
+| Tool | Arguments | Returns | Description |
+|------|-----------|---------|-------------|
+| `list_ai_agents` | — | List of AI agent configs | List all AI agent configurations for this ontology. |
+| `set_ai_agent` | `key`, `name`, `description` (opt), `system_prompt` (opt), `tools` (opt, list of strings) | Created/updated agent config | Create or update an AI agent configuration. Creates if the key doesn't exist, updates if it does. |
+| `delete_ai_agent` | `key` | Confirmation | Delete an AI agent configuration. |
 
 ### 3.2 Runtime MCP Tools (14 tools)
 

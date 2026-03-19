@@ -5,14 +5,7 @@ from ontoforge_server.config import settings
 from ontoforge_server.core.database import get_driver
 from ontoforge_server.core.schemas import ExportEntityType, ExportRelationType
 from ontoforge_server.runtime import service
-from ontoforge_server.runtime import ai_service
 from ontoforge_server.runtime.schemas import (
-    AiChatRequest,
-    AiChatResponse,
-    AiExtractRequest,
-    AiExtractResponse,
-    AiQueryRequest,
-    AiQueryResponse,
     CypherQueryRequest,
     CypherQueryResponse,
     FeaturesResponse,
@@ -254,40 +247,3 @@ async def cypher_query(
     driver: AsyncDriver = Depends(get_driver),
 ):
     return await service.execute_cypher_query(ontology_key, body.cypher, driver)
-
-
-# --- AI Endpoints ---
-
-
-@router.post("/ai/query", response_model=AiQueryResponse)
-async def ai_query(
-    ontology_key: str,
-    body: AiQueryRequest,
-    driver: AsyncDriver = Depends(get_driver),
-):
-    return await ai_service.ai_query(ontology_key, body.question, driver)
-
-
-@router.post("/ai/extract", response_model=AiExtractResponse)
-async def ai_extract(
-    ontology_key: str,
-    body: AiExtractRequest,
-    driver: AsyncDriver = Depends(get_driver),
-):
-    return await ai_service.ai_extract(
-        ontology_key, body.text, driver,
-        entity_types=body.entity_types, create=body.create,
-    )
-
-
-@router.post("/ai/chat", response_model=AiChatResponse)
-async def ai_chat(
-    ontology_key: str,
-    body: AiChatRequest,
-    driver: AsyncDriver = Depends(get_driver),
-):
-    history = [h.model_dump() for h in body.history] if body.history else None
-    return await ai_service.ai_chat(
-        ontology_key, body.message, driver,
-        history=history, include_tool_calls=body.include_tool_calls,
-    )

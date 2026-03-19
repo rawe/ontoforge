@@ -128,11 +128,14 @@ async def test_validate_schema_with_errors(client):
 
 @pytest.mark.asyncio
 async def test_export_schema(client):
-    with patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=FULL_SCHEMA):
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=FULL_SCHEMA),
+        patch(f"{REPO}.list_ai_agents_for_export", new_callable=AsyncMock, return_value=[]),
+    ):
         resp = await client.get("/api/model/export")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["formatVersion"] == "2.0"
+    assert body["formatVersion"] == "2.1"
     assert len(body["entityTypes"]) == 2
     assert len(body["relationTypes"]) == 1
     assert len(body["ontologies"]) == 1
@@ -159,7 +162,7 @@ async def test_export_schema_empty(client):
         resp = await client.get("/api/model/export")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["formatVersion"] == "2.0"
+    assert body["formatVersion"] == "2.1"
     assert body["entityTypes"] == []
     assert body["relationTypes"] == []
     assert body["ontologies"] == []

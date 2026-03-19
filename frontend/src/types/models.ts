@@ -50,3 +50,13 @@ export interface IncludeTypeResponse {
   key: string;
   properties: string[] | null;
 }
+
+export interface AiAgentConfig {
+  key: string;
+  name: string;
+  description: string | null;
+  systemPrompt: string | null;
+  tools: string[] | null;
+  createdAt: string;
+  updatedAt: string;
+}

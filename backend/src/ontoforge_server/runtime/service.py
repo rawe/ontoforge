@@ -11,6 +11,7 @@ from neo4j import AsyncDriver
 from neo4j.time import Date as Neo4jDate
 from neo4j.time import DateTime as Neo4jDateTime
 
+from ontoforge_server.core.ai import AgentConfig
 from ontoforge_server.core.embedding import get_embedding_provider
 from ontoforge_server.core.exceptions import NotFoundError, ValidationError
 from ontoforge_server.core.schemas import (
@@ -80,6 +81,7 @@ class SchemaCache:
 class LoadedSchema:
     scoped: SchemaCache  # types/properties visible through this lens
     full: SchemaCache    # all types/properties for default application
+    agent_configs: dict[str, AgentConfig] = field(default_factory=dict)
 
 
 _LOADED_SCHEMA_CACHE: dict[str, LoadedSchema] = {}
@@ -127,7 +129,21 @@ async def _load_schema(ontology_key: str, driver: AsyncDriver) -> LoadedSchema:
         full_cache, entity_inclusions, relation_inclusions
     )
 
-    loaded = LoadedSchema(scoped=scoped_cache, full=full_cache)
+    # Load AI agent configs
+    async with driver.session() as session:
+        agent_rows = await repository.get_ai_agent_configs(session, ontology_key)
+    agent_configs = {
+        row["key"]: AgentConfig(
+            key=row["key"],
+            name=row["name"],
+            description=row.get("description"),
+            system_prompt=row.get("systemPrompt"),
+            tools=row.get("tools"),
+        )
+        for row in agent_rows
+    }
+
+    loaded = LoadedSchema(scoped=scoped_cache, full=full_cache, agent_configs=agent_configs)
     _LOADED_SCHEMA_CACHE[ontology_key] = loaded
     return loaded
 

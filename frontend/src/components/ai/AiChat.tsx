@@ -1,15 +1,16 @@
 import { useState, useRef, useEffect } from 'react';
 import { toast } from 'sonner';
-import { aiChat } from '../../api/runtimeClient';
+import { aiChat, aiAgentChat } from '../../api/runtimeClient';
 import type { AiChatMessage } from '../../types/runtime';
 import { useAiState } from '../../hooks/useAiState';
 import Markdown from './Markdown';
 
 interface AiChatProps {
   ontologyKey: string;
+  agentKey?: string;
 }
 
-export default function AiChat({ ontologyKey }: AiChatProps) {
+export default function AiChat({ ontologyKey, agentKey = '_default' }: AiChatProps) {
   const { getState, updateChat, resetChat } = useAiState();
   const { messages, input, showToolCalls } = getState(ontologyKey).chat;
   const [loading, setLoading] = useState(false);
@@ -47,7 +48,9 @@ export default function AiChat({ ontologyKey }: AiChatProps) {
         content: m.content,
       }));
 
-      const res = await aiChat(ontologyKey, userMessage, history.length > 0 ? history : undefined, showToolCalls);
+      const res = agentKey === '_default'
+        ? await aiChat(ontologyKey, userMessage, history.length > 0 ? history : undefined, showToolCalls)
+        : await aiAgentChat(ontologyKey, agentKey, userMessage, history.length > 0 ? history : undefined, showToolCalls);
       updateChat(ontologyKey, {
         messages: [...updatedMessages, { role: 'assistant', content: res.reply, toolCalls: res.toolCalls ?? undefined }],
       });

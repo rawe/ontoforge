@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 
 from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModel
@@ -7,6 +8,24 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from ontoforge_server.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class AgentConfig:
+    key: str
+    name: str
+    description: str | None
+    system_prompt: str | None
+    tools: list[str] | None  # None = all available
+
+
+DEFAULT_AGENT_CONFIG = AgentConfig(
+    key="_default",
+    name="Knowledge Assistant",
+    description=None,
+    system_prompt=None,
+    tools=None,
+)
 
 _model: Model | None = None
 

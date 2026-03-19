@@ -1,3 +1,4 @@
+import re
 from uuid import uuid4
 
 from fastapi import Depends
@@ -18,10 +19,14 @@ from ontoforge_server.core.exceptions import (
 )
 from ontoforge_server.modeling import repository
 from ontoforge_server.modeling.schemas import (
+    AGENT_KEY_PATTERN,
+    AiAgentConfigResponse,
+    AiAgentConfigUpsert,
     DataType,
     EntityTypeCreate,
     EntityTypeResponse,
     EntityTypeUpdate,
+    ExportAiAgent,
     ExportEntityType,
     ExportOntology,
     ExportOntologyInclusion,
@@ -973,17 +978,35 @@ async def export_schema(
             )
         else:
             includes = None
+
+        # Load AI agent configs for this ontology
+        async with driver.session() as session:
+            agent_rows = await repository.list_ai_agents_for_export(
+                session, ont["ontologyId"]
+            )
+        ai_agents = [
+            ExportAiAgent(
+                key=ag["key"],
+                name=ag["name"],
+                description=ag.get("description"),
+                systemPrompt=ag.get("systemPrompt"),
+                tools=ag.get("tools"),
+            )
+            for ag in agent_rows
+        ]
+
         ontologies.append(
             ExportOntology(
                 key=ont["key"],
                 name=ont["name"],
                 description=ont.get("description"),
                 includes=includes,
+                aiAgents=ai_agents,
             )
         )
 
     return ExportPayload(
-        formatVersion="2.0",
+        formatVersion="2.1",
         entityTypes=entity_types,
         relationTypes=relation_types,
         ontologies=ontologies,
@@ -1060,7 +1083,105 @@ async def import_schema(
                     await repository.add_includes_type(
                         session, ont_id, "RelationType", inc.key, inc.properties
                     )
+
+            # Import AI agent configs
+            for ag in ont.ai_agents:
+                # Validate tools strictly
+                if ag.tools is not None:
+                    from ontoforge_server.runtime.ai_service import ALL_TOOLS
+
+                    unknown = [t for t in ag.tools if t not in ALL_TOOLS]
+                    if unknown:
+                        available = sorted(ALL_TOOLS.keys())
+                        raise ValidationError(
+                            f"Import error: agent '{ag.key}' references unknown tool(s): "
+                            f"{unknown}. Available tools: {available}"
+                        )
+                ag_id = str(uuid4())
+                await repository.upsert_ai_agent(
+                    session, ont_id, ag_id, ag.key, ag.name,
+                    ag.description, ag.system_prompt, ag.tools,
+                )
+
             created_ontologies.append(_to_ontology_response(ont_data))
 
     _invalidate_runtime_schema_cache()
     return {"ontologies": [o.model_dump(by_alias=True) for o in created_ontologies]}
+
+
+# --- AI Agent Config ---
+
+
+def _to_ai_agent_response(data: dict) -> AiAgentConfigResponse:
+    return AiAgentConfigResponse.model_validate(data)
+
+
+async def list_ai_agents(
+    ontology_key: str,
+    driver: AsyncDriver = Depends(get_driver),
+) -> list[AiAgentConfigResponse]:
+    async with driver.session() as session:
+        ont = await repository.get_ontology_by_key(session, ontology_key)
+        if not ont:
+            raise NotFoundError(f"Ontology '{ontology_key}' not found")
+        rows = await repository.list_ai_agents(session, ont["ontologyId"])
+        return [_to_ai_agent_response(r) for r in rows]
+
+
+async def upsert_ai_agent(
+    ontology_key: str,
+    agent_key: str,
+    body: AiAgentConfigUpsert,
+    driver: AsyncDriver = Depends(get_driver),
+) -> tuple[AiAgentConfigResponse, bool]:
+    """Returns (response, created)."""
+    if not re.match(AGENT_KEY_PATTERN, agent_key):
+        raise ValidationError(
+            f"Invalid agent key '{agent_key}'. Must match pattern: {AGENT_KEY_PATTERN}"
+        )
+    if agent_key == "_default":
+        raise ValidationError("Agent key '_default' is reserved")
+
+    # Validate tools
+    if body.tools is not None:
+        from ontoforge_server.runtime.ai_service import ALL_TOOLS
+
+        unknown = [t for t in body.tools if t not in ALL_TOOLS]
+        if unknown:
+            available = sorted(ALL_TOOLS.keys())
+            raise ValidationError(
+                f"Unknown tool(s): {unknown}. Available tools: {available}"
+            )
+
+    async with driver.session() as session:
+        ont = await repository.get_ontology_by_key(session, ontology_key)
+        if not ont:
+            raise NotFoundError(f"Ontology '{ontology_key}' not found")
+        agent_config_id = str(uuid4())
+        data, created = await repository.upsert_ai_agent(
+            session,
+            ont["ontologyId"],
+            agent_config_id,
+            agent_key,
+            body.name,
+            body.description,
+            body.system_prompt,
+            body.tools,
+        )
+    _invalidate_runtime_schema_cache()
+    return _to_ai_agent_response(data), created
+
+
+async def delete_ai_agent(
+    ontology_key: str,
+    agent_key: str,
+    driver: AsyncDriver = Depends(get_driver),
+) -> None:
+    async with driver.session() as session:
+        ont = await repository.get_ontology_by_key(session, ontology_key)
+        if not ont:
+            raise NotFoundError(f"Ontology '{ontology_key}' not found")
+        deleted = await repository.delete_ai_agent(session, ont["ontologyId"], agent_key)
+        if not deleted:
+            raise NotFoundError(f"AI agent '{agent_key}' not found")
+    _invalidate_runtime_schema_cache()

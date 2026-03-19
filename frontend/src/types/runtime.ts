@@ -108,6 +108,13 @@ export interface AiChatResponse {
   toolCalls: AiChatToolCall[] | null;
 }
 
+// Agent discovery
+export interface AgentInfo {
+  key: string;
+  name: string;
+  description: string | null;
+}
+
 // Semantic search
 export interface SemanticSearchResult {
   entity: EntityInstance;

@@ -610,3 +610,22 @@ async def execute_cypher_read(
             row[col] = _convert_record_value(record[col])
         rows.append(row)
     return columns, rows
+
+
+# --- AI Agent Config ---
+
+
+async def get_ai_agent_configs(
+    session: AsyncSession, ontology_key: str
+) -> list[dict]:
+    """Query AiAgentConfig nodes for an ontology by key."""
+    result = await session.run(
+        """
+        MATCH (o:Ontology {key: $ontology_key})-[:HAS_AI_AGENT]->(ac:AiAgentConfig)
+        RETURN ac.key AS key, ac.name AS name, ac.description AS description,
+               ac.systemPrompt AS systemPrompt, ac.tools AS tools
+        ORDER BY ac.name
+        """,
+        ontology_key=ontology_key,
+    )
+    return [dict(record) async for record in result]

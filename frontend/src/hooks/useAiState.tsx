@@ -27,6 +27,7 @@ export interface ChatState {
   messages: ChatEntry[];
   input: string;
   showToolCalls: boolean;
+  agentKey: string;
 }
 
 interface OntologyAiState {
@@ -55,6 +56,7 @@ const defaultChat = (): ChatState => ({
   messages: [],
   input: '',
   showToolCalls: false,
+  agentKey: '_default',
 });
 
 const defaultState = (): OntologyAiState => ({

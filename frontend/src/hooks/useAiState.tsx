@@ -128,7 +128,7 @@ export function AiStateProvider({ children }: { children: ReactNode }) {
 
   const resetChat = useCallback((key: string) => {
     const s = getOrCreate(key);
-    s.chat = defaultChat();
+    s.chat = { ...defaultChat(), agentKey: s.chat.agentKey };
     bump();
   }, [getOrCreate, bump]);
 

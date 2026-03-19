@@ -35,6 +35,8 @@ TOOL_LIST_RELATIONS = "list_relations"
 TOOL_GET_NEIGHBORS = "get_neighbors"
 TOOL_SEMANTIC_SEARCH = "semantic_search"
 TOOL_EXECUTE_CYPHER = "execute_cypher_query"
+TOOL_LIST_SAVED_QUERIES = "list_saved_queries"
+TOOL_RUN_SAVED_QUERY = "run_saved_query"
 
 # ---------------------------------------------------------------------------
 # Tool allowlists — controls which tools each AI feature can use
@@ -50,6 +52,8 @@ CHAT_TOOLS = [
     TOOL_GET_NEIGHBORS,
     TOOL_SEMANTIC_SEARCH,
     TOOL_EXECUTE_CYPHER,
+    TOOL_LIST_SAVED_QUERIES,
+    TOOL_RUN_SAVED_QUERY,
 ]
 
 
@@ -242,6 +246,39 @@ async def tool_execute_cypher_query(
       MATCH (p:person) WHERE p.age > 30 RETURN p.name, p.age LIMIT 10"""
     return await service.execute_cypher_query(
         ctx.deps.ontology_key, cypher, ctx.deps.driver,
+    )
+
+
+@_register_tool(TOOL_LIST_SAVED_QUERIES)
+async def tool_list_saved_queries(ctx: RunContext[AiDeps]) -> list[dict]:
+    """List available saved queries with their parameters.
+    Each query has a key, name, description, and parameter definitions."""
+    loaded = await service._load_schema(ctx.deps.ontology_key, ctx.deps.driver)
+    return [
+        {
+            "key": sq.key,
+            "name": sq.name,
+            "description": sq.description,
+            "parameters": [
+                {"name": p.name, "description": p.description, "dataType": p.data_type}
+                for p in sq.parameters
+            ],
+        }
+        for sq in loaded.saved_queries.values()
+    ]
+
+
+@_register_tool(TOOL_RUN_SAVED_QUERY)
+async def tool_run_saved_query(
+    ctx: RunContext[AiDeps],
+    query_key: str,
+    params: dict | None = None,
+) -> dict:
+    """Execute a saved query by key with parameter values.
+    Use list_saved_queries first to discover available queries and
+    their required parameters."""
+    return await service.execute_saved_query(
+        ctx.deps.ontology_key, query_key, params or {}, ctx.deps.driver,
     )
 
 

@@ -11,7 +11,7 @@ from neo4j import AsyncDriver
 from neo4j.time import Date as Neo4jDate
 from neo4j.time import DateTime as Neo4jDateTime
 
-from ontoforge_server.core.ai import AgentConfig
+from ontoforge_server.core.ai import AgentConfig, SavedQueryConfig, SavedQueryParameter
 from ontoforge_server.core.embedding import get_embedding_provider
 from ontoforge_server.core.exceptions import NotFoundError, ValidationError
 from ontoforge_server.core.schemas import (
@@ -82,6 +82,7 @@ class LoadedSchema:
     scoped: SchemaCache  # types/properties visible through this lens
     full: SchemaCache    # all types/properties for default application
     agent_configs: dict[str, AgentConfig] = field(default_factory=dict)
+    saved_queries: dict[str, SavedQueryConfig] = field(default_factory=dict)
 
 
 _LOADED_SCHEMA_CACHE: dict[str, LoadedSchema] = {}
@@ -143,7 +144,33 @@ async def _load_schema(ontology_key: str, driver: AsyncDriver) -> LoadedSchema:
         for row in agent_rows
     }
 
-    loaded = LoadedSchema(scoped=scoped_cache, full=full_cache, agent_configs=agent_configs)
+    # Load saved queries
+    async with driver.session() as session:
+        query_rows = await repository.get_saved_queries(session, ontology_key)
+    saved_queries = {}
+    for row in query_rows:
+        params_raw = row.get("parameters", "[]")
+        if isinstance(params_raw, str):
+            import json
+            params_list = json.loads(params_raw)
+        else:
+            params_list = params_raw or []
+        saved_queries[row["key"]] = SavedQueryConfig(
+            key=row["key"],
+            name=row["name"],
+            description=row["description"],
+            cypher=row["cypher"],
+            parameters=[
+                SavedQueryParameter(
+                    name=p["name"],
+                    description=p["description"],
+                    data_type=p["dataType"],
+                )
+                for p in params_list
+            ],
+        )
+
+    loaded = LoadedSchema(scoped=scoped_cache, full=full_cache, agent_configs=agent_configs, saved_queries=saved_queries)
     _LOADED_SCHEMA_CACHE[ontology_key] = loaded
     return loaded
 
@@ -1303,3 +1330,89 @@ def _strip_out_of_scope_props(
     for key in list(value):
         if key not in allowed:
             del value[key]
+
+
+# ---------------------------------------------------------------------------
+# Service Functions — Saved Query Execution
+# ---------------------------------------------------------------------------
+
+
+async def execute_saved_query(
+    ontology_key: str,
+    query_key: str,
+    params: dict[str, Any],
+    driver: AsyncDriver,
+) -> dict:
+    """Execute a saved query by key with parameter values.
+
+    Validates parameters, coerces types, rewrites Cypher, and
+    post-processes results like execute_cypher_query.
+    """
+    from ontoforge_server.runtime.cypher import (
+        get_return_variables,
+        validate_and_rewrite,
+    )
+
+    loaded = await _load_schema(ontology_key, driver)
+    config = loaded.saved_queries.get(query_key)
+    if not config:
+        raise NotFoundError(f"Saved query '{query_key}' not found")
+
+    # Validate all declared parameters are present (no missing, no extra)
+    declared_names = {p.name for p in config.parameters}
+    provided_names = set(params.keys())
+    missing = declared_names - provided_names
+    extra = provided_names - declared_names
+    errors: list[str] = []
+    if missing:
+        errors.append(f"Missing required parameters: {sorted(missing)}")
+    if extra:
+        errors.append(f"Unknown parameters: {sorted(extra)}")
+    if errors:
+        raise ValidationError(
+            f"Parameter validation failed: {'; '.join(errors)}",
+            details={"errors": errors},
+        )
+
+    # Coerce parameter values to declared data types
+    coerced_params: dict[str, Any] = {}
+    coercion_errors: dict[str, str] = {}
+    for param_def in config.parameters:
+        raw_value = params[param_def.name]
+        try:
+            coerced_params[param_def.name] = coerce_value(
+                raw_value, param_def.data_type, param_def.name
+            )
+        except ValueError as e:
+            coercion_errors[param_def.name] = str(e)
+    if coercion_errors:
+        raise ValidationError(
+            "Parameter type coercion failed",
+            details={"fields": coercion_errors},
+        )
+
+    scoped = loaded.scoped
+
+    # Map variables before rewriting
+    var_map = get_return_variables(config.cypher, scoped)
+
+    # Validate and rewrite Cypher
+    rewritten = validate_and_rewrite(config.cypher, scoped)
+
+    # Execute with parameters
+    async with driver.session() as session:
+        columns, rows = await repository.execute_cypher_read(
+            session, rewritten, params=coerced_params
+        )
+
+    # Post-process: strip out-of-scope properties
+    for row in rows:
+        for col, value in row.items():
+            if not isinstance(value, dict):
+                continue
+            type_key = _resolve_type_key_for_value(col, value, var_map, scoped)
+            if type_key is None:
+                continue
+            _strip_out_of_scope_props(value, type_key, scoped)
+
+    return {"columns": columns, "results": rows}

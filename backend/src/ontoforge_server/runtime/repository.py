@@ -595,13 +595,14 @@ def _convert_record_value(value: Any) -> Any:
 async def execute_cypher_read(
     session: AsyncSession,
     cypher: str,
+    params: dict[str, Any] | None = None,
 ) -> tuple[list[str], list[dict]]:
     """Execute a read-only Cypher query and return (columns, rows).
 
     Each row is a dict mapping column names to converted Python values.
     Nodes and Relationships are returned as plain dicts of their properties.
     """
-    result = await session.run(cypher)
+    result = await session.run(cypher, **(params or {}))
     columns = list(result.keys())
     rows: list[dict] = []
     async for record in result:
@@ -625,6 +626,22 @@ async def get_ai_agent_configs(
         RETURN ac.key AS key, ac.name AS name, ac.description AS description,
                ac.systemPrompt AS systemPrompt, ac.tools AS tools
         ORDER BY ac.name
+        """,
+        ontology_key=ontology_key,
+    )
+    return [dict(record) async for record in result]
+
+
+async def get_saved_queries(
+    session: AsyncSession, ontology_key: str
+) -> list[dict]:
+    """Query SavedQuery nodes for an ontology by key."""
+    result = await session.run(
+        """
+        MATCH (o:Ontology {key: $ontology_key})-[:HAS_SAVED_QUERY]->(sq:SavedQuery)
+        RETURN sq.key AS key, sq.name AS name, sq.description AS description,
+               sq.cypher AS cypher, sq.parameters AS parameters
+        ORDER BY sq.name
         """,
         ontology_key=ontology_key,
     )

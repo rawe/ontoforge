@@ -60,3 +60,19 @@ export interface AiAgentConfig {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface SavedQueryParameter {
+  name: string;
+  description: string;
+  dataType: DataType;
+}
+
+export interface SavedQuery {
+  key: string;
+  name: string;
+  description: string;
+  cypher: string;
+  parameters: SavedQueryParameter[];
+  createdAt: string;
+  updatedAt: string;
+}

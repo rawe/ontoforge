@@ -42,11 +42,13 @@ All Neo4j labels use PascalCase. Relationships use UPPER_SNAKE_CASE.
 | Node label | `RelationType` |
 | Node label | `PropertyDefinition` |
 | Node label | `AiAgentConfig` |
+| Node label | `SavedQuery` |
 | Relationship | `INCLUDES_TYPE` (Ontology → EntityType/RelationType, optional scoping) |
 | Relationship | `HAS_PROPERTY` (EntityType/RelationType → PropertyDefinition) |
 | Relationship | `RELATES_FROM` (RelationType → EntityType) |
 | Relationship | `RELATES_TO` (RelationType → EntityType) |
 | Relationship | `HAS_AI_AGENT` (Ontology → AiAgentConfig) |
+| Relationship | `HAS_SAVED_QUERY` (Ontology → SavedQuery) |
 
 **Instance nodes:**
 
@@ -218,12 +220,28 @@ Connected to its source and target entity types via `RELATES_FROM` and `RELATES_
 
 Connected to its owning ontology via a `HAS_AI_AGENT` relationship.
 
+**Node: SavedQuery**
+
+| Property | Type | Notes |
+|----------|------|-------|
+| `savedQueryId` | String (UUID) | Stable identifier, immutable after creation |
+| `key` | String | Unique within owning ontology, pattern `^[a-z][a-z0-9_-]*$` |
+| `name` | String | Display name |
+| `description` | String | Required description |
+| `cypher` | String | Parameterized Cypher query |
+| `parameters` | String (JSON) | Serialized list of `{name, description, dataType}` |
+| `createdAt` | DateTime | Set on creation |
+| `updatedAt` | DateTime | Updated on every mutation |
+
+Connected to its owning ontology via a `HAS_SAVED_QUERY` relationship.
+
 **Relationships:**
 
 ```
 (Ontology)-[:INCLUDES_TYPE {properties: [...] | null}]->(EntityType)    # scoped ontology only
 (Ontology)-[:INCLUDES_TYPE {properties: [...] | null}]->(RelationType)  # scoped ontology only
 (Ontology)-[:HAS_AI_AGENT]->(AiAgentConfig)
+(Ontology)-[:HAS_SAVED_QUERY]->(SavedQuery)
 (EntityType)-[:HAS_PROPERTY]->(PropertyDefinition)
 (RelationType)-[:HAS_PROPERTY]->(PropertyDefinition)
 (RelationType)-[:RELATES_FROM]->(EntityType)
@@ -249,6 +267,8 @@ CREATE CONSTRAINT relation_type_id_unique FOR (rt:RelationType) REQUIRE rt.relat
 CREATE CONSTRAINT property_id_unique FOR (pd:PropertyDefinition) REQUIRE pd.propertyId IS UNIQUE;
 -- Unique AI agent config ID
 CREATE CONSTRAINT ai_agent_config_id_unique FOR (ac:AiAgentConfig) REQUIRE ac.agentConfigId IS UNIQUE;
+-- Unique saved query ID
+CREATE CONSTRAINT saved_query_id_unique FOR (sq:SavedQuery) REQUIRE sq.savedQueryId IS UNIQUE;
 -- Entity instance uniqueness
 CREATE CONSTRAINT entity_instance_id_unique FOR (n:_Entity) REQUIRE n._id IS UNIQUE;
 -- Index on entity type key for type-scoped queries
@@ -261,7 +281,7 @@ Entity type and relation type keys are globally unique, enforced by Neo4j constr
 
 **Cascading Deletes:**
 
-- Deleting an **Ontology** removes its `INCLUDES_TYPE` edges and deletes all associated `AiAgentConfig` nodes (via `HAS_AI_AGENT`). Entity types, relation types, and properties are not affected (they are global).
+- Deleting an **Ontology** removes its `INCLUDES_TYPE` edges and deletes all associated `AiAgentConfig` nodes (via `HAS_AI_AGENT`) and `SavedQuery` nodes (via `HAS_SAVED_QUERY`). Entity types, relation types, and properties are not affected (they are global).
 - Deleting an **EntityType** fails with 409 Conflict if any relation type references it as source or target. With `cascade=true`, it also removes `INCLUDES_TYPE` edges from all ontologies. Its property definitions are deleted.
 - Deleting a **RelationType** deletes its property definitions. With `cascade=true`, it also removes `INCLUDES_TYPE` edges from all ontologies.
 - Deleting a **PropertyDefinition** is always allowed. With `cascade=true`, it also removes the property key from scoped ontology property lists.
@@ -413,6 +433,21 @@ The export/import format is a self-contained JSON document:
           "description": "string",
           "systemPrompt": "string",
           "tools": ["string"]
+        }
+      ],
+      "savedQueries": [
+        {
+          "key": "string",
+          "name": "string",
+          "description": "string",
+          "cypher": "string",
+          "parameters": [
+            {
+              "name": "string",
+              "description": "string",
+              "dataType": "string"
+            }
+          ]
         }
       ]
     }

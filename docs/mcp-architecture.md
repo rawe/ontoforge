@@ -199,7 +199,7 @@ LLM Application / AI Agent
 3. **Minimal surface.** Only expose tools the LLM genuinely needs. Consolidate where possible to avoid overwhelming the LLM with similar tools.
 4. **Self-documenting.** Each tool has a description that tells the LLM when and how to use it. The `get_schema` tool provides full context about what types and properties exist.
 
-### 3.1 Modeling MCP Tools (24 tools)
+### 3.1 Modeling MCP Tools (27 tools)
 
 #### Schema Introspection
 
@@ -256,7 +256,15 @@ Properties are managed through unified tools that work on both entity types and 
 | `set_ai_agent` | `key`, `name`, `description` (opt), `system_prompt` (opt), `tools` (opt, list of strings) | Created/updated agent config | Create or update an AI agent configuration. Creates if the key doesn't exist, updates if it does. |
 | `delete_ai_agent` | `key` | Confirmation | Delete an AI agent configuration. |
 
-### 3.2 Runtime MCP Tools (14 tools)
+#### Saved Queries
+
+| Tool | Arguments | Returns | Description |
+|------|-----------|---------|-------------|
+| `list_saved_queries` | — | List of saved queries with key, name, description, parameters | List all saved queries defined for this ontology. |
+| `set_saved_query` | `key`, `name`, `description`, `cypher`, `parameters` (list of `{name, description, dataType}`) | Created/updated saved query | Create or update a saved query. Cypher is validated against the scoped schema at creation time. Parameters must match `$param` references in the Cypher. |
+| `delete_saved_query` | `key` | Confirmation | Delete a saved query. |
+
+### 3.2 Runtime MCP Tools (16 tools)
 
 #### Schema Introspection
 
@@ -295,6 +303,13 @@ Properties are managed through unified tools that work on both entity types and 
 | Tool | Arguments | Returns | Description |
 |------|-----------|---------|-------------|
 | `cypher_query` | `cypher` (string) | `{"columns": [...], "results": [...]}` | Execute a read-only Cypher query. Use schema keys as labels/types (auto-translated). Only MATCH/RETURN supported — no writes, no CALL. |
+
+#### Saved Queries
+
+| Tool | Arguments | Returns | Description |
+|------|-----------|---------|-------------|
+| `list_saved_queries` | — | List of saved queries with key, name, description, parameters | List all saved queries available for this ontology. |
+| `run_saved_query` | `query_key`, `parameters` (object) | `{"columns": [...], "results": [...]}` | Execute a saved query with the provided parameter values. Parameters are type-coerced and passed natively to Neo4j. |
 
 #### Data Management
 

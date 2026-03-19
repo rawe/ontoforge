@@ -6,6 +6,7 @@ import type {
   ValidationResult,
   IncludeTypeResponse,
   AiAgentConfig,
+  SavedQuery,
 } from '../types/models';
 import { ApiError, request as baseRequest } from './request';
 
@@ -117,3 +118,14 @@ export const upsertAiAgent = (
 ) => request<AiAgentConfig>(`/ontologies/${ontologyKey}/ai-agents/${agentKey}`, { method: 'PUT', body: JSON.stringify(data) });
 export const deleteAiAgent = (ontologyKey: string, agentKey: string) =>
   request<void>(`/ontologies/${ontologyKey}/ai-agents/${agentKey}`, { method: 'DELETE' });
+
+// Saved Query Config
+export const listSavedQueries = (ontologyKey: string) =>
+  request<SavedQuery[]>(`/ontologies/${ontologyKey}/saved-queries`);
+export const upsertSavedQuery = (
+  ontologyKey: string,
+  queryKey: string,
+  data: { name: string; description: string; cypher: string; parameters?: { name: string; description: string; dataType: string }[] },
+) => request<SavedQuery>(`/ontologies/${ontologyKey}/saved-queries/${queryKey}`, { method: 'PUT', body: JSON.stringify(data) });
+export const deleteSavedQuery = (ontologyKey: string, queryKey: string) =>
+  request<void>(`/ontologies/${ontologyKey}/saved-queries/${queryKey}`, { method: 'DELETE' });

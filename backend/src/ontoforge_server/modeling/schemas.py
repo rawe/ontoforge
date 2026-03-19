@@ -12,12 +12,16 @@ from ontoforge_server.core.schemas import (
     ExportPayload,
     ExportProperty,
     ExportRelationType,
+    ExportSavedQuery,
+    ExportSavedQueryParameter,
 )
 
 # Re-export core schemas so existing imports from this module keep working
 __all__ = [
     "DataType",
     "ExportAiAgent",
+    "ExportSavedQuery",
+    "ExportSavedQueryParameter",
     "ExportEntityType",
     "ExportOntology",
     "ExportOntologyInclusion",
@@ -216,6 +220,38 @@ class AiAgentConfigResponse(BaseModel):
     description: str | None = None
     system_prompt: str | None = Field(default=None, alias="systemPrompt")
     tools: list[str] | None = None
+    created_at: datetime = Field(alias="createdAt")
+    updated_at: datetime = Field(alias="updatedAt")
+
+    model_config = {"populate_by_name": True}
+
+
+# --- Saved Query Config ---
+
+
+class SavedQueryParameterSchema(BaseModel):
+    name: str = Field(pattern=r"^[a-zA-Z_]\w*$")
+    description: str
+    data_type: DataType = Field(alias="dataType")
+
+    model_config = {"populate_by_name": True}
+
+
+class SavedQueryUpsert(BaseModel):
+    name: str
+    description: str
+    cypher: str = Field(min_length=1)
+    parameters: list[SavedQueryParameterSchema] = Field(default_factory=list)
+
+    model_config = {"populate_by_name": True}
+
+
+class SavedQueryResponse(BaseModel):
+    key: str
+    name: str
+    description: str
+    cypher: str
+    parameters: list[SavedQueryParameterSchema]
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
 

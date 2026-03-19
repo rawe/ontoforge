@@ -8,6 +8,8 @@ const AVAILABLE_TOOLS = [
   { key: 'get_neighbors', label: 'Get Neighbors' },
   { key: 'semantic_search', label: 'Semantic Search' },
   { key: 'execute_cypher_query', label: 'Execute Cypher Query' },
+  { key: 'list_saved_queries', label: 'List Saved Queries' },
+  { key: 'run_saved_query', label: 'Run Saved Query' },
 ];
 
 interface Props {

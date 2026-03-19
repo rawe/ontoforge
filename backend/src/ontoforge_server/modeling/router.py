@@ -22,6 +22,8 @@ from ontoforge_server.modeling.schemas import (
     RelationTypeCreate,
     RelationTypeResponse,
     RelationTypeUpdate,
+    SavedQueryResponse,
+    SavedQueryUpsert,
     ValidationResult,
 )
 
@@ -473,4 +475,47 @@ async def delete_ai_agent(
     driver: AsyncDriver = Depends(get_driver),
 ):
     await service.delete_ai_agent(ontology_key, agent_key, driver)
+    return Response(status_code=204)
+
+
+# --- Saved Query Config ---
+
+
+@router.get(
+    "/ontologies/{ontology_key}/saved-queries",
+    response_model=list[SavedQueryResponse],
+)
+async def list_saved_queries(
+    ontology_key: str,
+    driver: AsyncDriver = Depends(get_driver),
+):
+    return await service.list_saved_queries(ontology_key, driver)
+
+
+@router.put(
+    "/ontologies/{ontology_key}/saved-queries/{query_key}",
+    response_model=SavedQueryResponse,
+)
+async def upsert_saved_query(
+    ontology_key: str,
+    query_key: str,
+    body: SavedQueryUpsert,
+    response: Response,
+    driver: AsyncDriver = Depends(get_driver),
+):
+    result, created = await service.upsert_saved_query(ontology_key, query_key, body, driver)
+    response.status_code = 201 if created else 200
+    return result
+
+
+@router.delete(
+    "/ontologies/{ontology_key}/saved-queries/{query_key}",
+    status_code=204,
+)
+async def delete_saved_query(
+    ontology_key: str,
+    query_key: str,
+    driver: AsyncDriver = Depends(get_driver),
+):
+    await service.delete_saved_query(ontology_key, query_key, driver)
     return Response(status_code=204)

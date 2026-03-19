@@ -16,6 +16,7 @@ from ontoforge_server.modeling.schemas import (
     PropertyDefinitionUpdate,
     RelationTypeCreate,
     RelationTypeUpdate,
+    SavedQueryUpsert,
 )
 
 modeling_mcp = FastMCP(
@@ -429,7 +430,8 @@ async def set_ai_agent(
 
     Key must match pattern ^[a-z][a-z0-9_-]*$ and cannot be '_default'.
     Tools must be valid tool names (get_schema, list_entities, get_entity,
-    list_relations, get_neighbors, semantic_search, execute_cypher_query).
+    list_relations, get_neighbors, semantic_search, execute_cypher_query,
+    list_saved_queries, run_saved_query).
     Set tools=null to allow all tools.
     """
     driver = await get_driver()
@@ -451,3 +453,52 @@ async def delete_ai_agent(ontology_key: str, agent_key: str) -> str:
     driver = await get_driver()
     await service.delete_ai_agent(ontology_key, agent_key, driver)
     return f"AI agent '{agent_key}' deleted from ontology '{ontology_key}'."
+
+
+# ---------------------------------------------------------------------------
+# Saved Query Config Tools
+# ---------------------------------------------------------------------------
+
+
+@modeling_mcp.tool()
+async def list_saved_queries(ontology_key: str) -> list[dict]:
+    """List all saved queries for an ontology."""
+    driver = await get_driver()
+    results = await service.list_saved_queries(ontology_key, driver)
+    return [r.model_dump(by_alias=True) for r in results]
+
+
+@modeling_mcp.tool()
+async def set_saved_query(
+    ontology_key: str,
+    key: str,
+    name: str,
+    description: str,
+    cypher: str,
+    parameters: list[dict] | None = None,
+) -> dict:
+    """Create or update a saved query for an ontology.
+
+    Key must match pattern ^[a-z][a-z0-9_-]*$.
+    Parameters define the $param placeholders in the Cypher query.
+    Each parameter needs: name, description, dataType (string/integer/float/boolean/date/datetime).
+    """
+    driver = await get_driver()
+    body = SavedQueryUpsert(
+        name=name,
+        description=description,
+        cypher=cypher,
+        parameters=parameters or [],
+    )
+    result, created = await service.upsert_saved_query(ontology_key, key, body, driver)
+    response = result.model_dump(by_alias=True)
+    response["created"] = created
+    return response
+
+
+@modeling_mcp.tool()
+async def delete_saved_query(ontology_key: str, query_key: str) -> str:
+    """Delete a saved query from an ontology."""
+    driver = await get_driver()
+    await service.delete_saved_query(ontology_key, query_key, driver)
+    return f"Saved query '{query_key}' deleted from ontology '{ontology_key}'."

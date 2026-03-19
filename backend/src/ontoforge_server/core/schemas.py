@@ -67,12 +67,31 @@ class ExportAiAgent(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class ExportSavedQueryParameter(BaseModel):
+    name: str
+    description: str
+    data_type: str = Field(alias="dataType")
+
+    model_config = {"populate_by_name": True}
+
+
+class ExportSavedQuery(BaseModel):
+    key: str
+    name: str
+    description: str
+    cypher: str
+    parameters: list[ExportSavedQueryParameter] = Field(default_factory=list)
+
+    model_config = {"populate_by_name": True}
+
+
 class ExportOntology(BaseModel):
     key: str
     name: str
     description: str | None = None
     includes: ExportOntologyInclusions | None = None
     ai_agents: list[ExportAiAgent] = Field(default_factory=list, alias="aiAgents")
+    saved_queries: list[ExportSavedQuery] = Field(default_factory=list, alias="savedQueries")
 
     model_config = {"populate_by_name": True}
 

@@ -19,6 +19,22 @@ class AgentConfig:
     tools: list[str] | None  # None = all available
 
 
+@dataclass
+class SavedQueryParameter:
+    name: str
+    description: str
+    data_type: str
+
+
+@dataclass
+class SavedQueryConfig:
+    key: str
+    name: str
+    description: str
+    cypher: str
+    parameters: list[SavedQueryParameter]
+
+
 DEFAULT_AGENT_CONFIG = AgentConfig(
     key="_default",
     name="Knowledge Assistant",

@@ -708,7 +708,76 @@ A2A task endpoint for a specific configured agent.
 
 ---
 
-## 11. Endpoint Summary
+## 11. Saved Queries
+
+### GET /api/runtime/{ontologyKey}/saved-queries
+
+List all saved queries available for this ontology. Returns query metadata and parameter definitions but not the Cypher itself.
+
+**Response:** `200 OK`
+```json
+[
+  {
+    "key": "string",
+    "name": "string",
+    "description": "string",
+    "parameters": [
+      {
+        "name": "string",
+        "description": "string",
+        "dataType": "string"
+      }
+    ]
+  }
+]
+```
+
+**Errors:** 404 if ontology key not found.
+
+### POST /api/runtime/{ontologyKey}/saved-queries/{queryKey}/run
+
+Execute a saved query with the provided parameter values. Parameters are validated, type-coerced, and passed natively to Neo4j. The Cypher is re-validated against the current schema before execution.
+
+**Request body:**
+```json
+{
+  "parameters": {
+    "name": "Alice",
+    "min_age": 25
+  }
+}
+```
+
+All declared parameters are required. Parameter values are coerced to their declared data types.
+
+**Response:** `200 OK`
+```json
+{
+  "columns": ["p", "c"],
+  "results": [
+    {
+      "p": {
+        "_id": "b7e3f1a2-...",
+        "_entityTypeKey": "person",
+        "name": "Alice"
+      },
+      "c": {
+        "_id": "a1b2c3d4-...",
+        "_entityTypeKey": "company",
+        "name": "Acme Corp"
+      }
+    }
+  ]
+}
+```
+
+**Errors:**
+- 404 if ontology key or query key not found.
+- 422 if parameters are missing, extra, or fail type coercion. Also 422 if the Cypher fails schema re-validation (e.g., a referenced type was removed since the query was created).
+
+---
+
+## 12. Endpoint Summary
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -741,3 +810,5 @@ A2A task endpoint for a specific configured agent.
 | `POST` | `/api/runtime/{ontologyKey}/ai/a2a` | Default agent A2A task |
 | `GET` | `/api/runtime/{ontologyKey}/ai/agents/{agentKey}/.well-known/agent.json` | Agent-specific A2A card |
 | `POST` | `/api/runtime/{ontologyKey}/ai/agents/{agentKey}/a2a` | Agent-specific A2A task |
+| `GET` | `/api/runtime/{ontologyKey}/saved-queries` | List saved queries |
+| `POST` | `/api/runtime/{ontologyKey}/saved-queries/{queryKey}/run` | Execute a saved query |

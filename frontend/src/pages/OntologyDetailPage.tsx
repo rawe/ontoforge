@@ -6,6 +6,7 @@ import type { ValidationResult, IncludeTypeResponse, PropertyDefinition } from '
 import * as api from '../api/client';
 import OntologyForm from '../components/forms/OntologyForm';
 import AiAgentForm from '../components/forms/AiAgentForm';
+import SavedQueryForm from '../components/forms/SavedQueryForm';
 
 export default function OntologyDetailPage() {
   const { ontologyId } = useParams<{ ontologyId: string }>();
@@ -47,8 +48,16 @@ export default function OntologyDetailPage() {
     enabled: !!ontology?.key,
   });
 
+  const { data: savedQueries = [], refetch: refetchQueries } = useQuery({
+    queryKey: ['ontology', ontology?.key, 'saved-queries'],
+    queryFn: () => api.listSavedQueries(ontology!.key),
+    enabled: !!ontology?.key,
+  });
+
   const [addingAgent, setAddingAgent] = useState(false);
   const [editingAgentKey, setEditingAgentKey] = useState<string | null>(null);
+  const [addingQuery, setAddingQuery] = useState(false);
+  const [editingQueryKey, setEditingQueryKey] = useState<string | null>(null);
 
   const isScoped = includedEntityTypes.length > 0 || includedRelationTypes.length > 0;
   const includedETKeys = new Set(includedEntityTypes.map((i) => i.key));
@@ -172,6 +181,38 @@ export default function OntologyDetailPage() {
       refetchAgents();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to delete agent');
+    }
+  };
+
+  const handleCreateQuery = async (data: { key: string; name: string; description: string; cypher: string; parameters: { name: string; description: string; dataType: string }[] }) => {
+    if (!ontology) return;
+    try {
+      await api.upsertSavedQuery(ontology.key, data.key, data);
+      refetchQueries();
+      setAddingQuery(false);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to create saved query');
+    }
+  };
+
+  const handleUpdateQuery = async (data: { key: string; name: string; description: string; cypher: string; parameters: { name: string; description: string; dataType: string }[] }) => {
+    if (!ontology) return;
+    try {
+      await api.upsertSavedQuery(ontology.key, data.key, data);
+      refetchQueries();
+      setEditingQueryKey(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to update saved query');
+    }
+  };
+
+  const handleDeleteQuery = async (queryKey: string) => {
+    if (!ontology || !confirm(`Delete saved query "${queryKey}"?`)) return;
+    try {
+      await api.deleteSavedQuery(ontology.key, queryKey);
+      refetchQueries();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to delete saved query');
     }
   };
 
@@ -351,6 +392,50 @@ export default function OntologyDetailPage() {
             className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
           >
             Add agent
+          </button>
+        )}
+      </section>
+
+      {/* Saved Queries */}
+      <section className="mt-8">
+        <h3 className="text-lg font-semibold text-gray-800 mb-3">Saved Queries</h3>
+        {savedQueries.length === 0 && !addingQuery && (
+          <p className="text-gray-400 text-sm italic mb-3">No saved queries configured.</p>
+        )}
+        <div className="space-y-2 mb-3">
+          {savedQueries.map((sq) =>
+            editingQueryKey === sq.key ? (
+              <SavedQueryForm
+                key={sq.key}
+                initial={sq}
+                onSubmit={handleUpdateQuery}
+                onCancel={() => setEditingQueryKey(null)}
+              />
+            ) : (
+              <div key={sq.key} className="flex items-center justify-between bg-white border rounded-lg p-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="font-medium text-gray-900 truncate">{sq.name}</span>
+                  <span className="text-sm text-gray-400 font-mono shrink-0">{sq.key}</span>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 shrink-0">
+                    {sq.parameters.length === 0 ? 'no params' : `${sq.parameters.length} param${sq.parameters.length === 1 ? '' : 's'}`}
+                  </span>
+                </div>
+                <div className="flex gap-2 shrink-0 ml-2">
+                  <button onClick={() => setEditingQueryKey(sq.key)} className="text-sm text-blue-600 hover:text-blue-800">Edit</button>
+                  <button onClick={() => handleDeleteQuery(sq.key)} className="text-sm text-red-600 hover:text-red-800">Delete</button>
+                </div>
+              </div>
+            ),
+          )}
+        </div>
+        {addingQuery ? (
+          <SavedQueryForm onSubmit={handleCreateQuery} onCancel={() => setAddingQuery(false)} />
+        ) : (
+          <button
+            onClick={() => setAddingQuery(true)}
+            className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
+          >
+            Add saved query
           </button>
         )}
       </section>

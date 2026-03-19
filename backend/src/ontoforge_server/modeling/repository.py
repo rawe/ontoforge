@@ -113,12 +113,13 @@ async def update_ontology(
 
 
 async def delete_ontology(session: AsyncSession, ontology_id: str) -> bool:
-    """Delete ontology and cascade to agent configs."""
+    """Delete ontology and cascade to agent configs and saved queries."""
     result = await session.run(
         """
         MATCH (o:Ontology {ontologyId: $ontology_id})
         OPTIONAL MATCH (o)-[:HAS_AI_AGENT]->(ac:AiAgentConfig)
-        DETACH DELETE o, ac
+        OPTIONAL MATCH (o)-[:HAS_SAVED_QUERY]->(sq:SavedQuery)
+        DETACH DELETE o, ac, sq
         RETURN count(o) AS deleted
         """,
         ontology_id=ontology_id,
@@ -944,6 +945,109 @@ async def list_ai_agents_for_export(session: AsyncSession, ontology_id: str) -> 
         RETURN ac.key AS key, ac.name AS name, ac.description AS description,
                ac.systemPrompt AS systemPrompt, ac.tools AS tools
         ORDER BY ac.name
+        """,
+        ontology_id=ontology_id,
+    )
+    return [dict(record) async for record in result]
+
+
+# --- Saved Query Config ---
+
+
+async def list_saved_queries(session: AsyncSession, ontology_id: str) -> list[dict]:
+    result = await session.run(
+        """
+        MATCH (o:Ontology {ontologyId: $ontology_id})-[:HAS_SAVED_QUERY]->(sq:SavedQuery)
+        RETURN sq {.*} AS query
+        ORDER BY sq.name
+        """,
+        ontology_id=ontology_id,
+    )
+    return [_convert_neo4j_types(record["query"]) async for record in result]
+
+
+async def get_saved_query_by_key(
+    session: AsyncSession, ontology_id: str, query_key: str
+) -> dict | None:
+    result = await session.run(
+        """
+        MATCH (o:Ontology {ontologyId: $ontology_id})-[:HAS_SAVED_QUERY]->(sq:SavedQuery {key: $query_key})
+        RETURN sq {.*} AS query
+        """,
+        ontology_id=ontology_id,
+        query_key=query_key,
+    )
+    record = await result.single()
+    return _convert_neo4j_types(record["query"]) if record else None
+
+
+async def upsert_saved_query(
+    session: AsyncSession,
+    ontology_id: str,
+    saved_query_id: str,
+    key: str,
+    name: str,
+    description: str,
+    cypher: str,
+    parameters_json: str,
+) -> tuple[dict, bool]:
+    """MERGE-based upsert. Returns (record, created)."""
+    result = await session.run(
+        """
+        MATCH (o:Ontology {ontologyId: $ontology_id})
+        MERGE (o)-[:HAS_SAVED_QUERY]->(sq:SavedQuery {key: $key})
+        ON CREATE SET
+            sq.savedQueryId = $saved_query_id,
+            sq.name = $name,
+            sq.description = $description,
+            sq.cypher = $cypher,
+            sq.parameters = $parameters_json,
+            sq.createdAt = datetime(),
+            sq.updatedAt = datetime()
+        ON MATCH SET
+            sq.name = $name,
+            sq.description = $description,
+            sq.cypher = $cypher,
+            sq.parameters = $parameters_json,
+            sq.updatedAt = datetime()
+        RETURN sq {.*} AS query, sq.savedQueryId = $saved_query_id AS created
+        """,
+        ontology_id=ontology_id,
+        saved_query_id=saved_query_id,
+        key=key,
+        name=name,
+        description=description,
+        cypher=cypher,
+        parameters_json=parameters_json,
+    )
+    record = await result.single()
+    return _convert_neo4j_types(record["query"]), record["created"]
+
+
+async def delete_saved_query(
+    session: AsyncSession, ontology_id: str, query_key: str
+) -> bool:
+    result = await session.run(
+        """
+        MATCH (o:Ontology {ontologyId: $ontology_id})-[:HAS_SAVED_QUERY]->(sq:SavedQuery {key: $query_key})
+        DETACH DELETE sq
+        RETURN count(sq) AS deleted
+        """,
+        ontology_id=ontology_id,
+        query_key=query_key,
+    )
+    record = await result.single()
+    return record["deleted"] > 0
+
+
+async def list_saved_queries_for_export(session: AsyncSession, ontology_id: str) -> list[dict]:
+    """List saved queries for export."""
+    result = await session.run(
+        """
+        MATCH (o:Ontology {ontologyId: $ontology_id})-[:HAS_SAVED_QUERY]->(sq:SavedQuery)
+        RETURN sq.key AS key, sq.name AS name, sq.description AS description,
+               sq.cypher AS cypher, sq.parameters AS parameters
+        ORDER BY sq.name
         """,
         ontology_id=ontology_id,
     )

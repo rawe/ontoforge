@@ -300,6 +300,19 @@ async def list_saved_queries() -> list[dict]:
             "key": sq.key,
             "name": sq.name,
             "description": sq.description,
+            "steps": [
+                {
+                    "name": s.name,
+                    "type": s.type,
+                    **({"cypher": s.cypher} if s.cypher else {}),
+                    **({"entityTypeKey": s.entity_type_key} if s.entity_type_key else {}),
+                    **({"query": s.query} if s.query else {}),
+                    **({"limit": s.limit} if s.limit is not None else {}),
+                    **({"minScore": s.min_score} if s.min_score is not None else {}),
+                    **({"bindings": s.bindings} if s.bindings else {}),
+                }
+                for s in sq.steps
+            ],
             "parameters": [
                 {"name": p.name, "description": p.description, "dataType": p.data_type}
                 for p in sq.parameters

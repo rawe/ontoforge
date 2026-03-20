@@ -75,11 +75,24 @@ class ExportSavedQueryParameter(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class ExportSavedQueryStep(BaseModel):
+    name: str
+    type: str
+    cypher: str | None = None
+    entity_type_key: str | None = Field(default=None, alias="entityTypeKey")
+    query: str | None = None
+    limit: int | None = None
+    min_score: float | None = Field(default=None, alias="minScore")
+    bindings: dict[str, str] | None = None
+
+    model_config = {"populate_by_name": True}
+
+
 class ExportSavedQuery(BaseModel):
     key: str
     name: str
     description: str
-    cypher: str
+    steps: list[ExportSavedQueryStep]
     parameters: list[ExportSavedQueryParameter] = Field(default_factory=list)
 
     model_config = {"populate_by_name": True}
@@ -97,7 +110,7 @@ class ExportOntology(BaseModel):
 
 
 class ExportPayload(BaseModel):
-    format_version: str = Field(default="2.1", alias="formatVersion")
+    format_version: str = Field(default="2.2", alias="formatVersion")
     entity_types: list[ExportEntityType] = Field(default_factory=list, alias="entityTypes")
     relation_types: list[ExportRelationType] = Field(default_factory=list, alias="relationTypes")
     ontologies: list[ExportOntology] = Field(default_factory=list, alias="ontologies")

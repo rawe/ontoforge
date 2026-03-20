@@ -67,11 +67,24 @@ export interface SavedQueryParameter {
   dataType: DataType;
 }
 
+export type StepType = 'cypher' | 'semantic_search';
+
+export interface SavedQueryStep {
+  name: string;
+  type: StepType;
+  cypher?: string;
+  entityTypeKey?: string;
+  query?: string;
+  limit?: number;
+  minScore?: number;
+  bindings?: Record<string, string>;
+}
+
 export interface SavedQuery {
   key: string;
   name: string;
   description: string;
-  cypher: string;
+  steps: SavedQueryStep[];
   parameters: SavedQueryParameter[];
   createdAt: string;
   updatedAt: string;

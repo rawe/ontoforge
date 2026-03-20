@@ -7,6 +7,7 @@ import type {
   IncludeTypeResponse,
   AiAgentConfig,
   SavedQuery,
+  SavedQueryStep,
 } from '../types/models';
 import { ApiError, request as baseRequest } from './request';
 
@@ -125,7 +126,7 @@ export const listSavedQueries = (ontologyKey: string) =>
 export const upsertSavedQuery = (
   ontologyKey: string,
   queryKey: string,
-  data: { name: string; description: string; cypher: string; parameters?: { name: string; description: string; dataType: string }[] },
+  data: { name: string; description: string; steps: SavedQueryStep[]; parameters?: { name: string; description: string; dataType: string }[] },
 ) => request<SavedQuery>(`/ontologies/${ontologyKey}/saved-queries/${queryKey}`, { method: 'PUT', body: JSON.stringify(data) });
 export const deleteSavedQuery = (ontologyKey: string, queryKey: string) =>
   request<void>(`/ontologies/${ontologyKey}/saved-queries/${queryKey}`, { method: 'DELETE' });

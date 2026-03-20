@@ -640,7 +640,7 @@ async def get_saved_queries(
         """
         MATCH (o:Ontology {key: $ontology_key})-[:HAS_SAVED_QUERY]->(sq:SavedQuery)
         RETURN sq.key AS key, sq.name AS name, sq.description AS description,
-               sq.cypher AS cypher, sq.parameters AS parameters
+               sq.steps AS steps, sq.parameters AS parameters
         ORDER BY sq.name
         """,
         ontology_key=ontology_key,

@@ -264,6 +264,19 @@ async def list_saved_queries(
             "key": sq.key,
             "name": sq.name,
             "description": sq.description,
+            "steps": [
+                {
+                    "name": s.name,
+                    "type": s.type,
+                    **({"cypher": s.cypher} if s.cypher else {}),
+                    **({"entityTypeKey": s.entity_type_key} if s.entity_type_key else {}),
+                    **({"query": s.query} if s.query else {}),
+                    **({"limit": s.limit} if s.limit is not None else {}),
+                    **({"minScore": s.min_score} if s.min_score is not None else {}),
+                    **({"bindings": s.bindings} if s.bindings else {}),
+                }
+                for s in sq.steps
+            ],
             "parameters": [
                 {"name": p.name, "description": p.description, "dataType": p.data_type}
                 for p in sq.parameters
@@ -286,7 +299,7 @@ async def search_saved_queries(
     )
 
 
-@router.post("/saved-queries/{query_key}/run", response_model=CypherQueryResponse)
+@router.post("/saved-queries/{query_key}/run")
 async def run_saved_query(
     ontology_key: str,
     query_key: str,

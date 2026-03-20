@@ -988,7 +988,7 @@ async def upsert_saved_query(
     key: str,
     name: str,
     description: str,
-    cypher: str,
+    steps_json: str,
     parameters_json: str,
     ontology_key: str | None = None,
     embedding: list[float] | None = None,
@@ -1005,14 +1005,14 @@ async def upsert_saved_query(
             sq.savedQueryId = $saved_query_id,
             sq.name = $name,
             sq.description = $description,
-            sq.cypher = $cypher,
+            sq.steps = $steps_json,
             sq.parameters = $parameters_json,
             sq.createdAt = datetime(),
             sq.updatedAt = datetime(){ontology_key_clause}{embedding_create}
         ON MATCH SET
             sq.name = $name,
             sq.description = $description,
-            sq.cypher = $cypher,
+            sq.steps = $steps_json,
             sq.parameters = $parameters_json,
             sq.updatedAt = datetime(){ontology_key_clause}{embedding_match}
         RETURN sq {{.*}} AS query, sq.savedQueryId = $saved_query_id AS created
@@ -1022,7 +1022,7 @@ async def upsert_saved_query(
         key=key,
         name=name,
         description=description,
-        cypher=cypher,
+        steps_json=steps_json,
         parameters_json=parameters_json,
         ontology_key=ontology_key,
         embedding=embedding,
@@ -1053,7 +1053,7 @@ async def list_saved_queries_for_export(session: AsyncSession, ontology_id: str)
         """
         MATCH (o:Ontology {ontologyId: $ontology_id})-[:HAS_SAVED_QUERY]->(sq:SavedQuery)
         RETURN sq.key AS key, sq.name AS name, sq.description AS description,
-               sq.cypher AS cypher, sq.parameters AS parameters
+               sq.steps AS steps, sq.parameters AS parameters
         ORDER BY sq.name
         """,
         ontology_id=ontology_id,

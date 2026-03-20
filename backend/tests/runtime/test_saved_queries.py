@@ -1,15 +1,17 @@
 """Tests for runtime saved query functions (service-level)."""
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from ontoforge_server.core.ai import SavedQueryConfig, SavedQueryParameter
+from ontoforge_server.core.ai import SavedQueryConfig, SavedQueryParameter, StepConfig
 from ontoforge_server.core.exceptions import NotFoundError, ValidationError
 from ontoforge_server.runtime.service import (
     LoadedSchema,
     SchemaCache,
     execute_saved_query,
+    _resolve_bindings,
 )
 
 
@@ -30,7 +32,13 @@ FIND_PEOPLE_QUERY = SavedQueryConfig(
     key="find-people",
     name="Find People",
     description="Find people by name",
-    cypher="MATCH (p:person) WHERE p.name CONTAINS $name RETURN p",
+    steps=[
+        StepConfig(
+            name="main",
+            type="cypher",
+            cypher="MATCH (p:person) WHERE p.name CONTAINS $name RETURN p",
+        ),
+    ],
     parameters=[
         SavedQueryParameter(name="name", description="Name to search", data_type="string"),
     ],
@@ -61,7 +69,9 @@ async def test_saved_queries_loaded_into_schema():
     assert config.key == "find-people"
     assert config.name == "Find People"
     assert config.description == "Find people by name"
-    assert config.cypher == "MATCH (p:person) WHERE p.name CONTAINS $name RETURN p"
+    assert len(config.steps) == 1
+    assert config.steps[0].type == "cypher"
+    assert config.steps[0].cypher == "MATCH (p:person) WHERE p.name CONTAINS $name RETURN p"
     assert len(config.parameters) == 1
     assert config.parameters[0].name == "name"
     assert config.parameters[0].data_type == "string"
@@ -80,7 +90,7 @@ async def test_saved_queries_empty_by_default():
 
 @pytest.mark.asyncio
 async def test_list_saved_queries_tool():
-    """Verify the saved queries return correct structure (key, name, description, parameters)."""
+    """Verify the saved queries return correct structure (key, name, description, steps, parameters)."""
     loaded = _make_loaded_schema(saved_queries={"find-people": FIND_PEOPLE_QUERY})
 
     # Simulate what a list tool would do: iterate over saved_queries
@@ -90,6 +100,10 @@ async def test_list_saved_queries_tool():
             "key": config.key,
             "name": config.name,
             "description": config.description,
+            "steps": [
+                {"name": s.name, "type": s.type}
+                for s in config.steps
+            ],
             "parameters": [
                 {
                     "name": p.name,
@@ -105,6 +119,8 @@ async def test_list_saved_queries_tool():
     assert q["key"] == "find-people"
     assert q["name"] == "Find People"
     assert q["description"] == "Find people by name"
+    assert len(q["steps"]) == 1
+    assert q["steps"][0]["type"] == "cypher"
     assert len(q["parameters"]) == 1
     assert q["parameters"][0]["name"] == "name"
     assert q["parameters"][0]["dataType"] == "string"
@@ -158,3 +174,152 @@ async def test_execute_saved_query_not_found():
     ):
         with pytest.raises(NotFoundError, match="Saved query 'nonexistent' not found"):
             await execute_saved_query("test_onto", "nonexistent", {}, mock_driver)
+
+
+# --- Binding resolution ---
+
+
+def test_resolve_bindings_basic():
+    """Resolve bindings collects field values from step results."""
+    step_results = {
+        "skills": [
+            {"_id": "id-1", "name": "Python"},
+            {"_id": "id-2", "name": "Go"},
+        ],
+    }
+    bindings = {"skill_ids": "{{skills._id}}"}
+    resolved = _resolve_bindings(bindings, step_results)
+    assert resolved == {"skill_ids": ["id-1", "id-2"]}
+
+
+def test_resolve_bindings_empty_results():
+    """Resolve bindings with empty step results returns empty list."""
+    step_results = {"skills": []}
+    bindings = {"skill_ids": "{{skills._id}}"}
+    resolved = _resolve_bindings(bindings, step_results)
+    assert resolved == {"skill_ids": []}
+
+
+def test_resolve_bindings_missing_field():
+    """Resolve bindings skips rows where field is missing."""
+    step_results = {
+        "skills": [
+            {"_id": "id-1", "name": "Python"},
+            {"name": "Go"},  # no _id
+        ],
+    }
+    bindings = {"skill_ids": "{{skills._id}}"}
+    resolved = _resolve_bindings(bindings, step_results)
+    assert resolved == {"skill_ids": ["id-1"]}
+
+
+def test_resolve_bindings_invalid_expression():
+    """Invalid binding expression raises ValidationError."""
+    step_results = {"skills": [{"_id": "id-1"}]}
+    bindings = {"ids": "invalid_expr"}
+    with pytest.raises(ValidationError, match="Invalid binding expression"):
+        _resolve_bindings(bindings, step_results)
+
+
+# --- Multi-step pipeline ---
+
+
+MULTI_STEP_QUERY = SavedQueryConfig(
+    key="skilled-persons",
+    name="Skilled Persons",
+    description="Find persons by skill",
+    steps=[
+        StepConfig(
+            name="skills",
+            type="semantic_search",
+            entity_type_key="skill",
+            query="$skill_query",
+            limit=5,
+        ),
+        StepConfig(
+            name="persons",
+            type="cypher",
+            cypher="MATCH (p:person)-[:has_skill]->(s:skill) WHERE s._id IN $skill_ids RETURN p",
+            bindings={"skill_ids": "{{skills._id}}"},
+        ),
+    ],
+    parameters=[
+        SavedQueryParameter(name="skill_query", description="Skill to search for", data_type="string"),
+    ],
+)
+
+
+@pytest.mark.asyncio
+async def test_multi_step_pipeline_execution():
+    """Multi-step pipeline: semantic_search -> cypher with binding."""
+    loaded = _make_loaded_schema(saved_queries={"skilled-persons": MULTI_STEP_QUERY})
+
+    # Set up driver mock with proper async context manager for session
+    mock_session = AsyncMock()
+    mock_driver = AsyncMock()
+
+    @asynccontextmanager
+    async def _session(**kwargs):
+        yield mock_session
+
+    mock_driver.session = _session
+
+    # Mock semantic_search to return skill entities
+    mock_search_result = {
+        "results": [
+            {"entity": {"_id": "skill-1", "name": "Python"}, "_score": 0.95},
+            {"entity": {"_id": "skill-2", "name": "Machine Learning"}, "_score": 0.85},
+        ],
+        "query": "machine learning",
+        "total": 2,
+    }
+
+    # Mock cypher execution to return persons
+    mock_cypher_result = (
+        ["p"],
+        [{"p": {"_id": "person-1", "name": "Alice"}}],
+    )
+
+    with (
+        patch(
+            "ontoforge_server.runtime.service._load_schema",
+            new_callable=AsyncMock,
+            return_value=loaded,
+        ),
+        patch(
+            "ontoforge_server.runtime.service.semantic_search",
+            new_callable=AsyncMock,
+            return_value=mock_search_result,
+        ) as mock_ss,
+        patch(
+            "ontoforge_server.runtime.cypher.get_return_variables",
+            return_value={},
+        ),
+        patch(
+            "ontoforge_server.runtime.cypher.validate_and_rewrite",
+            return_value="MATCH (p:Person)-[:HAS_SKILL]->(s:Skill) WHERE s._id IN $skill_ids RETURN p",
+        ),
+        patch(
+            "ontoforge_server.runtime.service.repository.execute_cypher_read",
+            new_callable=AsyncMock,
+            return_value=mock_cypher_result,
+        ) as mock_cypher,
+    ):
+        result = await execute_saved_query(
+            "test_onto", "skilled-persons", {"skill_query": "machine learning"}, mock_driver
+        )
+
+    # Verify semantic search was called with substituted query
+    mock_ss.assert_awaited_once()
+    ss_args = mock_ss.call_args
+    assert ss_args[0][1] == "machine learning"  # query text
+    assert ss_args[0][2] == "skill"  # entity_type_key
+
+    # Verify cypher was called with binding-resolved params
+    mock_cypher.assert_awaited_once()
+    cypher_params = mock_cypher.call_args[1]["params"]
+    assert cypher_params["skill_ids"] == ["skill-1", "skill-2"]  # from binding resolution
+
+    # Result should be from the last step (cypher)
+    assert result["columns"] == ["p"]
+    assert len(result["results"]) == 1

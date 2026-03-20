@@ -396,14 +396,14 @@ async def set_saved_query(
     key: str,
     name: str,
     description: str,
-    cypher: str,
+    steps: list[dict],
     parameters: list[dict] | None = None,
 ) -> dict:
     driver = await get_driver()
     body = SavedQueryUpsert(
         name=name,
         description=description,
-        cypher=cypher,
+        steps=steps,
         parameters=parameters or [],
     )
     result, created = await service.upsert_saved_query(ontology_key, key, body, driver)
@@ -572,10 +572,20 @@ _MODELING_TOOL_DEFS: list[tuple[Callable, str, str]] = [
     (
         set_saved_query,
         "set_saved_query",
-        "Create or update a saved query for an ontology. "
+        "Create or update a saved query pipeline for an ontology. "
         "Key must match pattern ^[a-z][a-z0-9_-]*$. "
-        "Parameters define the $param placeholders in the Cypher query. "
-        "Each parameter needs: name, description, dataType (string/integer/float/boolean/date/datetime).",
+        "Steps is an ordered array of pipeline steps. Each step requires a unique 'name' and a 'type'. "
+        "Step types: "
+        "'cypher' — needs 'cypher' field with a Cypher query using $param placeholders. "
+        "'semantic_search' — needs 'entityTypeKey' and 'query' (use $param_name to reference a declared parameter). "
+        "Optional: 'limit' (default 10), 'minScore'. "
+        "Data flow: steps can have 'bindings' dict mapping param names to '{{prevStepName.fieldName}}' "
+        "which collects that field from all rows of a previous step's output into a list. "
+        "Parameters define top-level $param placeholders. "
+        "Each parameter needs: name, description, dataType (string/integer/float/boolean/date/datetime). "
+        "Example: steps=[{name:'skills', type:'semantic_search', entityTypeKey:'skill', query:'$q', limit:5}, "
+        "{name:'results', type:'cypher', cypher:'MATCH (p:person)-[:has_skill]->(s:skill) "
+        "WHERE s._id IN $ids RETURN p', bindings:{ids:'{{skills._id}}'}}], parameters=[{name:'q', ...}]",
     ),
     (
         delete_saved_query,

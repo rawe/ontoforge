@@ -1,4 +1,5 @@
 from datetime import datetime
+from enum import Enum
 
 from pydantic import BaseModel, Field
 
@@ -14,6 +15,7 @@ from ontoforge_server.core.schemas import (
     ExportRelationType,
     ExportSavedQuery,
     ExportSavedQueryParameter,
+    ExportSavedQueryStep,
 )
 
 # Re-export core schemas so existing imports from this module keep working
@@ -22,6 +24,7 @@ __all__ = [
     "ExportAiAgent",
     "ExportSavedQuery",
     "ExportSavedQueryParameter",
+    "ExportSavedQueryStep",
     "ExportEntityType",
     "ExportOntology",
     "ExportOntologyInclusion",
@@ -229,6 +232,24 @@ class AiAgentConfigResponse(BaseModel):
 # --- Saved Query Config ---
 
 
+class StepType(str, Enum):
+    CYPHER = "cypher"
+    SEMANTIC_SEARCH = "semantic_search"
+
+
+class StepSchema(BaseModel):
+    name: str = Field(pattern=r"^[a-zA-Z_]\w*$")
+    type: StepType
+    cypher: str | None = None
+    entity_type_key: str | None = Field(default=None, alias="entityTypeKey")
+    query: str | None = None
+    limit: int | None = Field(default=None, ge=1, le=100)
+    min_score: float | None = Field(default=None, ge=0.0, le=1.0, alias="minScore")
+    bindings: dict[str, str] | None = None
+
+    model_config = {"populate_by_name": True}
+
+
 class SavedQueryParameterSchema(BaseModel):
     name: str = Field(pattern=r"^[a-zA-Z_]\w*$")
     description: str
@@ -240,7 +261,7 @@ class SavedQueryParameterSchema(BaseModel):
 class SavedQueryUpsert(BaseModel):
     name: str
     description: str
-    cypher: str = Field(min_length=1)
+    steps: list[StepSchema] = Field(min_length=1)
     parameters: list[SavedQueryParameterSchema] = Field(default_factory=list)
 
     model_config = {"populate_by_name": True}
@@ -250,7 +271,7 @@ class SavedQueryResponse(BaseModel):
     key: str
     name: str
     description: str
-    cypher: str
+    steps: list[StepSchema]
     parameters: list[SavedQueryParameterSchema]
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")

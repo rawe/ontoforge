@@ -135,7 +135,7 @@ async def test_export_schema(client):
         resp = await client.get("/api/model/export")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["formatVersion"] == "2.1"
+    assert body["formatVersion"] == "2.2"
     assert len(body["entityTypes"]) == 2
     assert len(body["relationTypes"]) == 1
     assert len(body["ontologies"]) == 1
@@ -162,7 +162,7 @@ async def test_export_schema_empty(client):
         resp = await client.get("/api/model/export")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["formatVersion"] == "2.1"
+    assert body["formatVersion"] == "2.2"
     assert body["entityTypes"] == []
     assert body["relationTypes"] == []
     assert body["ontologies"] == []

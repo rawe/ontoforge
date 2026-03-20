@@ -27,11 +27,23 @@ class SavedQueryParameter:
 
 
 @dataclass
+class StepConfig:
+    name: str
+    type: str  # "cypher" or "semantic_search"
+    cypher: str | None = None
+    entity_type_key: str | None = None
+    query: str | None = None
+    limit: int | None = None
+    min_score: float | None = None
+    bindings: dict[str, str] | None = None
+
+
+@dataclass
 class SavedQueryConfig:
     key: str
     name: str
     description: str
-    cypher: str
+    steps: list[StepConfig]
     parameters: list[SavedQueryParameter]
 
 

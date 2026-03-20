@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
@@ -11,7 +12,7 @@ from neo4j import AsyncDriver
 from neo4j.time import Date as Neo4jDate
 from neo4j.time import DateTime as Neo4jDateTime
 
-from ontoforge_server.core.ai import AgentConfig, SavedQueryConfig, SavedQueryParameter
+from ontoforge_server.core.ai import AgentConfig, SavedQueryConfig, SavedQueryParameter, StepConfig
 from ontoforge_server.core.embedding import get_embedding_provider
 from ontoforge_server.core.exceptions import NotFoundError, ValidationError
 from ontoforge_server.core.schemas import (
@@ -149,17 +150,34 @@ async def _load_schema(ontology_key: str, driver: AsyncDriver) -> LoadedSchema:
         query_rows = await repository.get_saved_queries(session, ontology_key)
     saved_queries = {}
     for row in query_rows:
+        import json as _json
         params_raw = row.get("parameters", "[]")
         if isinstance(params_raw, str):
-            import json
-            params_list = json.loads(params_raw)
+            params_list = _json.loads(params_raw)
         else:
             params_list = params_raw or []
+        steps_raw = row.get("steps", "[]")
+        if isinstance(steps_raw, str):
+            steps_list = _json.loads(steps_raw)
+        else:
+            steps_list = steps_raw or []
         saved_queries[row["key"]] = SavedQueryConfig(
             key=row["key"],
             name=row["name"],
             description=row["description"],
-            cypher=row["cypher"],
+            steps=[
+                StepConfig(
+                    name=s["name"],
+                    type=s["type"],
+                    cypher=s.get("cypher"),
+                    entity_type_key=s.get("entityTypeKey"),
+                    query=s.get("query"),
+                    limit=s.get("limit"),
+                    min_score=s.get("minScore"),
+                    bindings=s.get("bindings"),
+                )
+                for s in steps_list
+            ],
             parameters=[
                 SavedQueryParameter(
                     name=p["name"],
@@ -1337,16 +1355,47 @@ def _strip_out_of_scope_props(
 # ---------------------------------------------------------------------------
 
 
+_BINDING_RE = re.compile(r'\{\{(\w+)\.(\w+)\}\}')
+
+
+def _resolve_bindings(
+    bindings: dict[str, str],
+    step_results: dict[str, list[dict]],
+) -> dict[str, list]:
+    """Resolve binding expressions to concrete values from previous step results."""
+    resolved: dict[str, list] = {}
+    for param_name, expr in bindings.items():
+        match = _BINDING_RE.fullmatch(expr)
+        if not match:
+            raise ValidationError(f"Invalid binding expression: {expr}")
+        step_name = match.group(1)
+        field_name = match.group(2)
+        rows = step_results.get(step_name, [])
+        resolved[param_name] = [row[field_name] for row in rows if field_name in row]
+    return resolved
+
+
+def _substitute_params(template: str, params: dict[str, Any]) -> str:
+    """Replace $param_name references in a string with their values."""
+    def replacer(m: re.Match) -> str:
+        name = m.group(1)
+        if name in params:
+            return str(params[name])
+        return m.group(0)  # leave unresolved
+    return re.sub(r'\$([a-zA-Z_]\w*)', replacer, template)
+
+
 async def execute_saved_query(
     ontology_key: str,
     query_key: str,
     params: dict[str, Any],
     driver: AsyncDriver,
 ) -> dict:
-    """Execute a saved query by key with parameter values.
+    """Execute a saved query pipeline by key with parameter values.
 
-    Validates parameters, coerces types, rewrites Cypher, and
-    post-processes results like execute_cypher_query.
+    Validates parameters, coerces types, then runs each step sequentially.
+    Bindings allow steps to reference results from earlier steps.
+    Returns the last step's output.
     """
     from ontoforge_server.runtime.cypher import (
         get_return_variables,
@@ -1392,30 +1441,69 @@ async def execute_saved_query(
         )
 
     scoped = loaded.scoped
+    step_results: dict[str, list[dict]] = {}
+    last_output: dict = {"columns": [], "results": []}
 
-    # Map variables before rewriting
-    var_map = get_return_variables(config.cypher, scoped)
+    for step in config.steps:
+        # Resolve bindings from previous step outputs
+        resolved_bindings: dict[str, Any] = {}
+        if step.bindings:
+            resolved_bindings = _resolve_bindings(step.bindings, step_results)
 
-    # Validate and rewrite Cypher
-    rewritten = validate_and_rewrite(config.cypher, scoped)
+        if step.type == "cypher":
+            assert step.cypher is not None  # enforced by modeling validation
+            # Merge user params + resolved bindings for Cypher parameters
+            cypher_params = {**coerced_params, **resolved_bindings}
 
-    # Execute with parameters
-    async with driver.session() as session:
-        columns, rows = await repository.execute_cypher_read(
-            session, rewritten, params=coerced_params
-        )
+            var_map = get_return_variables(step.cypher, scoped)
+            rewritten = validate_and_rewrite(step.cypher, scoped)
 
-    # Post-process: strip out-of-scope properties
-    for row in rows:
-        for col, value in row.items():
-            if not isinstance(value, dict):
-                continue
-            type_key = _resolve_type_key_for_value(col, value, var_map, scoped)
-            if type_key is None:
-                continue
-            _strip_out_of_scope_props(value, type_key, scoped)
+            async with driver.session() as session:
+                columns, rows = await repository.execute_cypher_read(
+                    session, rewritten, params=cypher_params
+                )
 
-    return {"columns": columns, "results": rows}
+            # Post-process: strip out-of-scope properties
+            for row in rows:
+                for col, value in row.items():
+                    if not isinstance(value, dict):
+                        continue
+                    type_key = _resolve_type_key_for_value(col, value, var_map, scoped)
+                    if type_key is None:
+                        continue
+                    _strip_out_of_scope_props(value, type_key, scoped)
+
+            step_results[step.name] = rows
+            last_output = {"columns": columns, "results": rows}
+
+        elif step.type == "semantic_search":
+            assert step.query is not None  # enforced by modeling validation
+            assert step.entity_type_key is not None  # enforced by modeling validation
+            # Resolve the query text from user params
+            query_text = _substitute_params(step.query, coerced_params)
+
+            limit = step.limit or 10
+            min_score = step.min_score
+
+            result = await semantic_search(
+                ontology_key,
+                query_text,
+                step.entity_type_key,
+                limit,
+                min_score,
+                driver,
+            )
+
+            # Flatten results for binding: each result's entity dict becomes a row
+            rows = [r["entity"] for r in result.get("results", [])]
+            # Include _score in each row for downstream use
+            for r, row in zip(result.get("results", []), rows):
+                row["_score"] = r.get("_score", r.get("score"))
+
+            step_results[step.name] = rows
+            last_output = result
+
+    return last_output
 
 
 # ---------------------------------------------------------------------------

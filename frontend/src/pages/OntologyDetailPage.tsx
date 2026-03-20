@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import type { ValidationResult, IncludeTypeResponse, PropertyDefinition } from '../types/models';
+import type { ValidationResult, IncludeTypeResponse, PropertyDefinition, SavedQueryStep } from '../types/models';
 import * as api from '../api/client';
 import * as runtimeApi from '../api/runtimeClient';
 import OntologyForm from '../components/forms/OntologyForm';
@@ -186,7 +186,7 @@ export default function OntologyDetailPage() {
     }
   };
 
-  const handleCreateQuery = async (data: { key: string; name: string; description: string; cypher: string; parameters: { name: string; description: string; dataType: string }[] }) => {
+  const handleCreateQuery = async (data: { key: string; name: string; description: string; steps: SavedQueryStep[]; parameters: { name: string; description: string; dataType: string }[] }) => {
     if (!ontology) return;
     try {
       await api.upsertSavedQuery(ontology.key, data.key, data);
@@ -197,7 +197,7 @@ export default function OntologyDetailPage() {
     }
   };
 
-  const handleUpdateQuery = async (data: { key: string; name: string; description: string; cypher: string; parameters: { name: string; description: string; dataType: string }[] }) => {
+  const handleUpdateQuery = async (data: { key: string; name: string; description: string; steps: SavedQueryStep[]; parameters: { name: string; description: string; dataType: string }[] }) => {
     if (!ontology) return;
     try {
       await api.upsertSavedQuery(ontology.key, data.key, data);
@@ -419,6 +419,9 @@ export default function OntologyDetailPage() {
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="font-medium text-gray-900 truncate">{sq.name}</span>
                     <span className="text-sm text-gray-400 font-mono shrink-0">{sq.key}</span>
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 shrink-0">
+                      {sq.steps.length} step{sq.steps.length !== 1 ? 's' : ''}
+                    </span>
                     <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 shrink-0">
                       {sq.parameters.length === 0 ? 'no params' : `${sq.parameters.length} param${sq.parameters.length === 1 ? '' : 's'}`}
                     </span>

@@ -1,4 +1,5 @@
 import functools
+from collections.abc import Callable
 
 from mcp.server.fastmcp import FastMCP
 
@@ -7,6 +8,25 @@ from ontoforge_server.core.exceptions import ValidationError
 from ontoforge_server.mcp.mount import current_ontology_key
 from ontoforge_server.runtime import service
 from ontoforge_server.runtime.schemas import RelationInstanceCreate
+from ontoforge_server.runtime.tool_names import (
+    TOOL_CREATE_ENTITY,
+    TOOL_CREATE_RELATION,
+    TOOL_DELETE_ENTITY,
+    TOOL_DELETE_RELATION,
+    TOOL_EXECUTE_CYPHER,
+    TOOL_GET_ENTITY,
+    TOOL_GET_NEIGHBORS,
+    TOOL_GET_RELATION,
+    TOOL_GET_SCHEMA,
+    TOOL_LIST_ENTITIES,
+    TOOL_LIST_RELATIONS,
+    TOOL_LIST_SAVED_QUERIES,
+    TOOL_RUN_SAVED_QUERY,
+    TOOL_SEARCH_SAVED_QUERIES,
+    TOOL_SEMANTIC_SEARCH,
+    TOOL_UPDATE_ENTITY,
+    TOOL_UPDATE_RELATION,
+)
 
 runtime_mcp = FastMCP(
     "OntoForge Runtime",
@@ -22,7 +42,6 @@ runtime_mcp.settings.streamable_http_path = "/"
 
 
 def _get_ontology_key() -> str:
-    """Get the current ontology key from the request context."""
     try:
         return current_ontology_key.get()
     except LookupError:
@@ -57,30 +76,22 @@ def _enrich_errors(fn):
 
 
 # ---------------------------------------------------------------------------
-# Tools
+# Tool functions
 # ---------------------------------------------------------------------------
 
 
-@runtime_mcp.tool()
 async def get_schema() -> dict:
-    """Understand the ontology before creating data. Shows available entity types,
-    relation types, and their property definitions including data types and required
-    flags. Call this first."""
     ontology_key = _get_ontology_key()
     driver = await get_driver()
     result = await service.get_full_schema(ontology_key, driver)
     return result.model_dump(by_alias=True)
 
 
-@runtime_mcp.tool()
 @_enrich_errors
 async def create_entity(
     entity_type_key: str,
     properties: dict,
 ) -> dict:
-    """Create a new entity instance. Properties must conform to the schema —
-    required properties must be present, types must match the property
-    definitions."""
     ontology_key = _get_ontology_key()
     driver = await get_driver()
     result = await service.create_entity(
@@ -89,7 +100,6 @@ async def create_entity(
     return result
 
 
-@runtime_mcp.tool()
 @_enrich_errors
 async def list_entities(
     entity_type_key: str,
@@ -101,13 +111,6 @@ async def list_entities(
     offset: int = 0,
     fields: list[str] | None = None,
 ) -> dict:
-    """List entities of a type with optional filtering, search, sorting, and
-    pagination. Use 'search' for substring matching across all string properties.
-    Use 'filters' for property-based filtering with operators: exact match
-    ("name": "Alice"), greater than ("age__gt": "25"), greater or equal ("__gte"),
-    less than ("__lt"), less or equal ("__lte"), contains
-    ("name__contains": "ali"). Use 'fields' to select which properties to
-    include — only listed fields plus _id are returned. Omit for all fields."""
     ontology_key = _get_ontology_key()
     driver = await get_driver()
     str_filters = {k: str(v) for k, v in (filters or {}).items()}
@@ -120,15 +123,11 @@ async def list_entities(
     return result.model_dump()
 
 
-@runtime_mcp.tool()
 async def get_entity(
     entity_type_key: str,
     entity_id: str,
     fields: list[str] | None = None,
 ) -> dict:
-    """Retrieve a specific entity by its _id. Use 'fields' to select which
-    properties to include — only listed fields plus _id are returned.
-    Omit for all fields."""
     ontology_key = _get_ontology_key()
     driver = await get_driver()
     result = await service.get_entity(
@@ -137,15 +136,12 @@ async def get_entity(
     return result
 
 
-@runtime_mcp.tool()
 @_enrich_errors
 async def update_entity(
     entity_type_key: str,
     entity_id: str,
     properties: dict,
 ) -> dict:
-    """Partial update — only provided properties change. Set a property to null
-    to remove it (fails for required properties)."""
     ontology_key = _get_ontology_key()
     driver = await get_driver()
     result = await service.update_entity(
@@ -154,12 +150,10 @@ async def update_entity(
     return result
 
 
-@runtime_mcp.tool()
 async def delete_entity(
     entity_type_key: str,
     entity_id: str,
 ) -> dict:
-    """Delete an entity and all its connected relations."""
     ontology_key = _get_ontology_key()
     driver = await get_driver()
     await service.delete_entity(
@@ -168,7 +162,6 @@ async def delete_entity(
     return {"message": f"Entity '{entity_id}' deleted successfully."}
 
 
-@runtime_mcp.tool()
 @_enrich_errors
 async def create_relation(
     relation_type_key: str,
@@ -176,8 +169,6 @@ async def create_relation(
     to_entity_id: str,
     properties: dict | None = None,
 ) -> dict:
-    """Create a relation between two entities. The entity types must match the
-    relation type's source/target definition."""
     ontology_key = _get_ontology_key()
     driver = await get_driver()
     body = RelationInstanceCreate(
@@ -191,7 +182,6 @@ async def create_relation(
     return result
 
 
-@runtime_mcp.tool()
 @_enrich_errors
 async def list_relations(
     relation_type_key: str,
@@ -203,7 +193,6 @@ async def list_relations(
     limit: int = 50,
     offset: int = 0,
 ) -> dict:
-    """List relations of a type. Optionally filter by source or target entity."""
     ontology_key = _get_ontology_key()
     driver = await get_driver()
     str_filters = {k: str(v) for k, v in (filters or {}).items()}
@@ -216,12 +205,10 @@ async def list_relations(
     return result.model_dump()
 
 
-@runtime_mcp.tool()
 async def get_relation(
     relation_type_key: str,
     relation_id: str,
 ) -> dict:
-    """Retrieve a specific relation by its _id."""
     ontology_key = _get_ontology_key()
     driver = await get_driver()
     result = await service.get_relation(
@@ -230,15 +217,12 @@ async def get_relation(
     return result
 
 
-@runtime_mcp.tool()
 @_enrich_errors
 async def update_relation(
     relation_type_key: str,
     relation_id: str,
     properties: dict,
 ) -> dict:
-    """Partial update of relation properties. Cannot change connected entities —
-    delete and recreate instead."""
     ontology_key = _get_ontology_key()
     driver = await get_driver()
     result = await service.update_relation(
@@ -247,12 +231,10 @@ async def update_relation(
     return result
 
 
-@runtime_mcp.tool()
 async def delete_relation(
     relation_type_key: str,
     relation_id: str,
 ) -> dict:
-    """Delete a relation. Connected entities are unaffected."""
     ontology_key = _get_ontology_key()
     driver = await get_driver()
     await service.delete_relation(
@@ -261,7 +243,6 @@ async def delete_relation(
     return {"message": f"Relation '{relation_id}' deleted successfully."}
 
 
-@runtime_mcp.tool()
 async def get_neighbors(
     entity_type_key: str,
     entity_id: str,
@@ -271,11 +252,6 @@ async def get_neighbors(
     fields: list[str] | None = None,
     relation_fields: list[str] | None = None,
 ) -> dict:
-    """Explore an entity's local neighborhood — discover what it's connected to
-    and how. Returns the center entity plus all connected entities with their
-    connecting relations. Use 'fields' to project entity properties (neighbor
-    entities always include _entityTypeKey). Use 'relation_fields' to project
-    relation properties."""
     ontology_key = _get_ontology_key()
     driver = await get_driver()
     limit = max(1, min(limit, 200))
@@ -287,30 +263,15 @@ async def get_neighbors(
     return result.model_dump()
 
 
-@runtime_mcp.tool()
 @_enrich_errors
 async def cypher_query(
     cypher: str,
 ) -> dict:
-    """Execute a read-only Cypher query against the ontology's scoped schema.
-
-    Use schema entity type keys (snake_case) as node labels and relation type
-    keys as relationship types. They are automatically translated to Neo4j
-    conventions. Only MATCH/RETURN queries are allowed — no writes, no CALL.
-
-    All node patterns must include a label. Available types and properties can
-    be discovered via the get_schema tool. System properties (_id,
-    _entityTypeKey, _relationTypeKey, _createdAt, _updatedAt) are always
-    available.
-
-    Example: MATCH (p:person)-[r:works_for]->(c:company) WHERE p.name = 'Alice' RETURN p, c LIMIT 10
-    """
     ontology_key = _get_ontology_key()
     driver = await get_driver()
     return await service.execute_cypher_query(ontology_key, cypher, driver)
 
 
-@runtime_mcp.tool()
 @_enrich_errors
 async def semantic_search(
     query: str,
@@ -319,13 +280,6 @@ async def semantic_search(
     filters: dict | None = None,
     fields: list[str] | None = None,
 ) -> dict:
-    """Search entity instances by semantic similarity to a natural language query.
-    Returns entities ranked by relevance with similarity scores.
-    entity_type_key is required — specifies which entity type to search.
-    Use 'filters' for property-based filtering on results: exact match
-    ("location": "Berlin"), operators ("age__gt": "25", "__gte", "__lt",
-    "__lte"). Use 'fields' to select which entity properties to include —
-    only listed fields plus _id are returned. Omit for all fields."""
     ontology_key = _get_ontology_key()
     driver = await get_driver()
     limit = max(1, min(limit, 100))
@@ -337,11 +291,7 @@ async def semantic_search(
     return result
 
 
-@runtime_mcp.tool()
 async def list_saved_queries() -> list[dict]:
-    """Discover available pre-defined queries and their required parameters.
-    Each saved query has a key, name, description, and parameter definitions
-    with name, description, and dataType."""
     ontology_key = _get_ontology_key()
     driver = await get_driver()
     loaded = await service._load_schema(ontology_key, driver)
@@ -359,15 +309,11 @@ async def list_saved_queries() -> list[dict]:
     ]
 
 
-@runtime_mcp.tool()
 @_enrich_errors
 async def run_saved_query(
     query_key: str,
     params: dict | None = None,
 ) -> dict:
-    """Execute a saved query by name with parameter values.
-    Use list_saved_queries to discover available queries and their required
-    parameters first."""
     ontology_key = _get_ontology_key()
     driver = await get_driver()
     return await service.execute_saved_query(
@@ -375,17 +321,148 @@ async def run_saved_query(
     )
 
 
-@runtime_mcp.tool()
 @_enrich_errors
 async def search_saved_queries(
     query: str,
 ) -> list[dict]:
-    """Search saved queries by semantic similarity to a natural language
-    description. Returns the most relevant saved queries ranked by how well
-    their description matches. Use this to find the right saved query for a
-    user's intent."""
     ontology_key = _get_ontology_key()
     driver = await get_driver()
     return await service.search_saved_queries(
         ontology_key, query, 3, 0.7, driver
     )
+
+
+# ---------------------------------------------------------------------------
+# Programmatic tool registration
+# ---------------------------------------------------------------------------
+
+_MCP_TOOL_DEFS: list[tuple[Callable, str, str]] = [
+    (
+        get_schema,
+        TOOL_GET_SCHEMA,
+        "Understand the ontology before creating data. Shows available entity types, "
+        "relation types, and their property definitions including data types and "
+        "required flags. Call this first.",
+    ),
+    (
+        create_entity,
+        TOOL_CREATE_ENTITY,
+        "Create a new entity instance. Properties must conform to the schema — "
+        "required properties must be present, types must match the property "
+        "definitions.",
+    ),
+    (
+        list_entities,
+        TOOL_LIST_ENTITIES,
+        "List entities of a type with optional filtering, search, sorting, and "
+        "pagination. Use 'search' for substring matching across all string properties. "
+        "Use 'filters' for property-based filtering with operators: exact match "
+        '("name": "Alice"), greater than ("age__gt": "25"), greater or equal ("__gte"), '
+        'less than ("__lt"), less or equal ("__lte"), contains '
+        '("name__contains": "ali"). Use \'fields\' to select which properties to '
+        "include — only listed fields plus _id are returned. Omit for all fields.",
+    ),
+    (
+        get_entity,
+        TOOL_GET_ENTITY,
+        "Retrieve a specific entity by its _id. Use 'fields' to select which "
+        "properties to include — only listed fields plus _id are returned. "
+        "Omit for all fields.",
+    ),
+    (
+        update_entity,
+        TOOL_UPDATE_ENTITY,
+        "Partial update — only provided properties change. Set a property to null "
+        "to remove it (fails for required properties).",
+    ),
+    (
+        delete_entity,
+        TOOL_DELETE_ENTITY,
+        "Delete an entity and all its connected relations.",
+    ),
+    (
+        create_relation,
+        TOOL_CREATE_RELATION,
+        "Create a relation between two entities. The entity types must match the "
+        "relation type's source/target definition.",
+    ),
+    (
+        list_relations,
+        TOOL_LIST_RELATIONS,
+        "List relations of a type. Optionally filter by source or target entity.",
+    ),
+    (
+        get_relation,
+        TOOL_GET_RELATION,
+        "Retrieve a specific relation by its _id.",
+    ),
+    (
+        update_relation,
+        TOOL_UPDATE_RELATION,
+        "Partial update of relation properties. Cannot change connected entities — "
+        "delete and recreate instead.",
+    ),
+    (
+        delete_relation,
+        TOOL_DELETE_RELATION,
+        "Delete a relation. Connected entities are unaffected.",
+    ),
+    (
+        get_neighbors,
+        TOOL_GET_NEIGHBORS,
+        "Explore an entity's local neighborhood — discover what it's connected to "
+        "and how. Returns the center entity plus all connected entities with their "
+        "connecting relations. Use 'fields' to project entity properties (neighbor "
+        "entities always include _entityTypeKey). Use 'relation_fields' to project "
+        "relation properties.",
+    ),
+    (
+        cypher_query,
+        TOOL_EXECUTE_CYPHER,
+        "Execute a read-only Cypher query against the ontology's scoped schema. "
+        "Use schema entity type keys (snake_case) as node labels and relation type "
+        "keys as relationship types. They are automatically translated to Neo4j "
+        "conventions. Only MATCH/RETURN queries are allowed — no writes, no CALL. "
+        "All node patterns must include a label. Available types and properties can "
+        "be discovered via the get_schema tool. System properties (_id, "
+        "_entityTypeKey, _relationTypeKey, _createdAt, _updatedAt) are always "
+        "available. "
+        "Example: MATCH (p:person)-[r:works_for]->(c:company) WHERE p.name = 'Alice' RETURN p, c LIMIT 10",
+    ),
+    (
+        semantic_search,
+        TOOL_SEMANTIC_SEARCH,
+        "Search entity instances by semantic similarity to a natural language query. "
+        "Returns entities ranked by relevance with similarity scores. "
+        "entity_type_key is required — specifies which entity type to search. "
+        "Use 'filters' for property-based filtering on results: exact match "
+        '("location": "Berlin"), operators ("age__gt": "25", "__gte", "__lt", '
+        '"__lte"). Use \'fields\' to select which entity properties to include — '
+        "only listed fields plus _id are returned. Omit for all fields.",
+    ),
+    (
+        list_saved_queries,
+        TOOL_LIST_SAVED_QUERIES,
+        "Discover available pre-defined queries and their required parameters. "
+        "Each saved query has a key, name, description, and parameter definitions "
+        "with name, description, and dataType.",
+    ),
+    (
+        run_saved_query,
+        TOOL_RUN_SAVED_QUERY,
+        "Execute a saved query by name with parameter values. "
+        "Use list_saved_queries to discover available queries and their required "
+        "parameters first.",
+    ),
+    (
+        search_saved_queries,
+        TOOL_SEARCH_SAVED_QUERIES,
+        "Search saved queries by semantic similarity to a natural language "
+        "description. Returns the most relevant saved queries ranked by how well "
+        "their description matches. Use this to find the right saved query for a "
+        "user's intent.",
+    ),
+]
+
+for fn, name, description in _MCP_TOOL_DEFS:
+    runtime_mcp.add_tool(fn, name=name, description=description)

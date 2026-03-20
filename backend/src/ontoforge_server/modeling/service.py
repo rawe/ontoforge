@@ -18,6 +18,7 @@ from ontoforge_server.core.exceptions import (
     ValidationError,
 )
 from ontoforge_server.modeling import repository
+from ontoforge_server.runtime.tool_names import VALID_AGENT_TOOLS
 from ontoforge_server.modeling.schemas import (
     AGENT_KEY_PATTERN,
     AiAgentConfigResponse,
@@ -1110,11 +1111,9 @@ async def import_schema(
             for ag in ont.ai_agents:
                 # Validate tools strictly
                 if ag.tools is not None:
-                    from ontoforge_server.runtime.ai_service import ALL_TOOLS
-
-                    unknown = [t for t in ag.tools if t not in ALL_TOOLS]
+                    unknown = [t for t in ag.tools if t not in VALID_AGENT_TOOLS]
                     if unknown:
-                        available = sorted(ALL_TOOLS.keys())
+                        available = sorted(VALID_AGENT_TOOLS)
                         raise ValidationError(
                             f"Import error: agent '{ag.key}' references unknown tool(s): "
                             f"{unknown}. Available tools: {available}"
@@ -1185,11 +1184,9 @@ async def upsert_ai_agent(
 
     # Validate tools
     if body.tools is not None:
-        from ontoforge_server.runtime.ai_service import ALL_TOOLS
-
-        unknown = [t for t in body.tools if t not in ALL_TOOLS]
+        unknown = [t for t in body.tools if t not in VALID_AGENT_TOOLS]
         if unknown:
-            available = sorted(ALL_TOOLS.keys())
+            available = sorted(VALID_AGENT_TOOLS)
             raise ValidationError(
                 f"Unknown tool(s): {unknown}. Available tools: {available}"
             )

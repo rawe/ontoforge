@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 from mcp.server.fastmcp import FastMCP
 
 from ontoforge_server.core.database import get_driver
@@ -18,6 +20,7 @@ from ontoforge_server.modeling.schemas import (
     RelationTypeUpdate,
     SavedQueryUpsert,
 )
+from ontoforge_server.runtime.tool_names import VALID_AGENT_TOOLS_CSV
 
 modeling_mcp = FastMCP(
     "OntoForge Modeling",
@@ -91,39 +94,35 @@ async def _resolve_ontology_by_key(driver, ontology_key: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Global Schema Tools
+# Tool functions
 # ---------------------------------------------------------------------------
 
 
-@modeling_mcp.tool()
+# --- Global Schema Tools ---
+
+
 async def get_schema() -> dict:
-    """Get the current state of the global schema. Returns all entity types,
-    relation types, and their properties."""
     driver = await get_driver()
     result = await service.export_schema(driver=driver)
     return result.model_dump(by_alias=True)
 
 
-@modeling_mcp.tool()
 async def create_entity_type(
     key: str,
     display_name: str,
     description: str | None = None,
 ) -> dict:
-    """Add a new entity type to the global schema. Key must be snake_case, globally unique."""
     driver = await get_driver()
     body = EntityTypeCreate(key=key, display_name=display_name, description=description)
     result = await service.create_entity_type(body=body, driver=driver)
     return result.model_dump(by_alias=True)
 
 
-@modeling_mcp.tool()
 async def update_entity_type(
     entity_type_key: str,
     display_name: str | None = None,
     description: str | None = None,
 ) -> dict:
-    """Update an entity type's display name or description. Key is immutable."""
     driver = await get_driver()
     et = await _resolve_entity_type(driver, entity_type_key)
     body = EntityTypeUpdate(display_name=display_name, description=description)
@@ -131,17 +130,13 @@ async def update_entity_type(
     return result.model_dump(by_alias=True)
 
 
-@modeling_mcp.tool()
 async def delete_entity_type(entity_type_key: str, cascade: bool = False) -> str:
-    """Remove an entity type and its properties. Use cascade=True to auto-remove
-    from any scoped ontologies. Fails if any relation type references it."""
     driver = await get_driver()
     et = await _resolve_entity_type(driver, entity_type_key)
     await service.delete_entity_type(et["entityTypeId"], cascade=cascade, driver=driver)
     return f"Entity type '{entity_type_key}' deleted successfully."
 
 
-@modeling_mcp.tool()
 async def create_relation_type(
     key: str,
     display_name: str,
@@ -149,8 +144,6 @@ async def create_relation_type(
     target_entity_type_key: str,
     description: str | None = None,
 ) -> dict:
-    """Add a new relation type connecting two entity types. Source and target are
-    specified by entity type key."""
     driver = await get_driver()
     body = RelationTypeCreate(
         key=key,
@@ -163,14 +156,11 @@ async def create_relation_type(
     return result.model_dump(by_alias=True)
 
 
-@modeling_mcp.tool()
 async def update_relation_type(
     relation_type_key: str,
     display_name: str | None = None,
     description: str | None = None,
 ) -> dict:
-    """Update a relation type's display name or description. Source/target
-    endpoints are immutable."""
     driver = await get_driver()
     rt = await _resolve_relation_type(driver, relation_type_key)
     body = RelationTypeUpdate(display_name=display_name, description=description)
@@ -178,17 +168,13 @@ async def update_relation_type(
     return result.model_dump(by_alias=True)
 
 
-@modeling_mcp.tool()
 async def delete_relation_type(relation_type_key: str, cascade: bool = False) -> str:
-    """Remove a relation type and its properties. Use cascade=True to auto-remove
-    from any scoped ontologies."""
     driver = await get_driver()
     rt = await _resolve_relation_type(driver, relation_type_key)
     await service.delete_relation_type(rt["relationTypeId"], cascade=cascade, driver=driver)
     return f"Relation type '{relation_type_key}' deleted successfully."
 
 
-@modeling_mcp.tool()
 async def add_property(
     type_kind: str,
     type_key: str,
@@ -200,12 +186,6 @@ async def add_property(
     description: str | None = None,
     cascade: bool = False,
 ) -> dict:
-    """Add a property definition to an entity type or relation type.
-
-    type_kind must be "entity_type" or "relation_type".
-    data_type must be one of: string, integer, float, boolean, date, datetime.
-    Use cascade=True to auto-add required properties to scoped ontology property lists.
-    """
     driver = await get_driver()
     owner_id, owner_label = await _resolve_owner(driver, type_kind, type_key)
     body = PropertyDefinitionCreate(
@@ -222,7 +202,6 @@ async def add_property(
     return result.model_dump(by_alias=True)
 
 
-@modeling_mcp.tool()
 async def update_property(
     type_kind: str,
     type_key: str,
@@ -232,10 +211,6 @@ async def update_property(
     default_value: str | None = None,
     description: str | None = None,
 ) -> dict:
-    """Update a property's metadata. Key and data type are immutable after creation.
-
-    type_kind must be "entity_type" or "relation_type".
-    """
     driver = await get_driver()
     owner_id, owner_label = await _resolve_owner(driver, type_kind, type_key)
     prop = await _resolve_property(driver, owner_id, owner_label, property_key)
@@ -251,18 +226,12 @@ async def update_property(
     return result.model_dump(by_alias=True)
 
 
-@modeling_mcp.tool()
 async def delete_property(
     type_kind: str,
     type_key: str,
     property_key: str,
     cascade: bool = False,
 ) -> str:
-    """Remove a property definition from an entity type or relation type.
-
-    type_kind must be "entity_type" or "relation_type".
-    Use cascade=True to auto-remove from scoped ontology property lists.
-    """
     driver = await get_driver()
     owner_id, owner_label = await _resolve_owner(driver, type_kind, type_key)
     prop = await _resolve_property(driver, owner_id, owner_label, property_key)
@@ -272,57 +241,44 @@ async def delete_property(
     return f"Property '{property_key}' deleted from {type_kind} '{type_key}'."
 
 
-@modeling_mcp.tool()
 async def validate_schema() -> dict:
-    """Check the global schema + all scoped ontologies for consistency."""
     driver = await get_driver()
     result = await service.validate_all(driver=driver)
     return result.model_dump()
 
 
-@modeling_mcp.tool()
 async def export_schema() -> dict:
-    """Export the full schema in OntoForge v2.0 transfer format (JSON)."""
     driver = await get_driver()
     result = await service.export_schema(driver=driver)
     return result.model_dump(by_alias=True)
 
 
-@modeling_mcp.tool()
 async def import_schema(payload: dict) -> dict:
-    """Import a v2.0 schema payload. Creates entity types, relation types,
-    and ontologies with scope configuration."""
     driver = await get_driver()
     export = ExportPayload.model_validate(payload)
     result = await service.import_schema(export, driver=driver)
     return result
 
 
-# ---------------------------------------------------------------------------
-# Ontology Management Tools
-# ---------------------------------------------------------------------------
+# --- Ontology Management Tools ---
 
 
-@modeling_mcp.tool()
 async def create_ontology(
     key: str,
     name: str,
     description: str | None = None,
 ) -> dict:
-    """Create a new ontology (named lens over the schema)."""
     driver = await get_driver()
     body = OntologyCreate(key=key, name=name, description=description)
     result = await service.create_ontology(body=body, driver=driver)
     return result.model_dump(by_alias=True)
 
 
-@modeling_mcp.tool()
 async def update_ontology(
     ontology_key: str,
     name: str | None = None,
     description: str | None = None,
 ) -> dict:
-    """Update an ontology's display name or description."""
     driver = await get_driver()
     ontology = await _resolve_ontology_by_key(driver, ontology_key)
     body = OntologyUpdate(name=name, description=description)
@@ -330,23 +286,18 @@ async def update_ontology(
     return result.model_dump(by_alias=True)
 
 
-@modeling_mcp.tool()
 async def delete_ontology(ontology_key: str) -> str:
-    """Delete an ontology. Does not affect the schema or other ontologies."""
     driver = await get_driver()
     ontology = await _resolve_ontology_by_key(driver, ontology_key)
     await service.delete_ontology(ontology["ontologyId"], driver=driver)
     return f"Ontology '{ontology_key}' deleted successfully."
 
 
-@modeling_mcp.tool()
 async def add_entity_type_to_ontology(
     ontology_key: str,
     entity_type_key: str,
     properties: list[str] | None = None,
 ) -> dict:
-    """Add an entity type to an ontology's scope. Properties=null means all
-    properties. Properties=[...] means only listed properties are exposed."""
     driver = await get_driver()
     ontology = await _resolve_ontology_by_key(driver, ontology_key)
     body = IncludeTypeRequest(key=entity_type_key, properties=properties)
@@ -354,12 +305,10 @@ async def add_entity_type_to_ontology(
     return result.model_dump()
 
 
-@modeling_mcp.tool()
 async def remove_entity_type_from_ontology(
     ontology_key: str,
     entity_type_key: str,
 ) -> str:
-    """Remove an entity type from an ontology's scope."""
     driver = await get_driver()
     ontology = await _resolve_ontology_by_key(driver, ontology_key)
     et = await _resolve_entity_type(driver, entity_type_key)
@@ -367,14 +316,11 @@ async def remove_entity_type_from_ontology(
     return f"Entity type '{entity_type_key}' removed from ontology '{ontology_key}'."
 
 
-@modeling_mcp.tool()
 async def add_relation_type_to_ontology(
     ontology_key: str,
     relation_type_key: str,
     properties: list[str] | None = None,
 ) -> dict:
-    """Add a relation type to an ontology's scope. Properties=null means all
-    properties. Properties=[...] means only listed properties are exposed."""
     driver = await get_driver()
     ontology = await _resolve_ontology_by_key(driver, ontology_key)
     body = IncludeTypeRequest(key=relation_type_key, properties=properties)
@@ -382,12 +328,10 @@ async def add_relation_type_to_ontology(
     return result.model_dump()
 
 
-@modeling_mcp.tool()
 async def remove_relation_type_from_ontology(
     ontology_key: str,
     relation_type_key: str,
 ) -> str:
-    """Remove a relation type from an ontology's scope."""
     driver = await get_driver()
     ontology = await _resolve_ontology_by_key(driver, ontology_key)
     rt = await _resolve_relation_type(driver, relation_type_key)
@@ -395,29 +339,22 @@ async def remove_relation_type_from_ontology(
     return f"Relation type '{relation_type_key}' removed from ontology '{ontology_key}'."
 
 
-@modeling_mcp.tool()
 async def validate_ontology(ontology_key: str) -> dict:
-    """Validate a single ontology's INCLUDES_TYPE configuration against the schema."""
     driver = await get_driver()
     ontology = await _resolve_ontology_by_key(driver, ontology_key)
     result = await service.validate_ontology(ontology["ontologyId"], driver=driver)
     return result.model_dump()
 
 
-# ---------------------------------------------------------------------------
-# AI Agent Config Tools
-# ---------------------------------------------------------------------------
+# --- AI Agent Config Tools ---
 
 
-@modeling_mcp.tool()
 async def list_ai_agents(ontology_key: str) -> list[dict]:
-    """List all AI agent configurations for an ontology."""
     driver = await get_driver()
     results = await service.list_ai_agents(ontology_key, driver)
     return [r.model_dump(by_alias=True) for r in results]
 
 
-@modeling_mcp.tool()
 async def set_ai_agent(
     ontology_key: str,
     key: str,
@@ -426,14 +363,6 @@ async def set_ai_agent(
     system_prompt: str | None = None,
     tools: list[str] | None = None,
 ) -> dict:
-    """Create or update an AI agent configuration for an ontology.
-
-    Key must match pattern ^[a-z][a-z0-9_-]*$ and cannot be '_default'.
-    Tools must be valid tool names (get_schema, list_entities, get_entity,
-    list_relations, get_neighbors, semantic_search, execute_cypher_query,
-    list_saved_queries, run_saved_query, search_saved_queries).
-    Set tools=null to allow all tools.
-    """
     driver = await get_driver()
     body = AiAgentConfigUpsert(
         name=name,
@@ -447,28 +376,21 @@ async def set_ai_agent(
     return response
 
 
-@modeling_mcp.tool()
 async def delete_ai_agent(ontology_key: str, agent_key: str) -> str:
-    """Delete an AI agent configuration from an ontology."""
     driver = await get_driver()
     await service.delete_ai_agent(ontology_key, agent_key, driver)
     return f"AI agent '{agent_key}' deleted from ontology '{ontology_key}'."
 
 
-# ---------------------------------------------------------------------------
-# Saved Query Config Tools
-# ---------------------------------------------------------------------------
+# --- Saved Query Config Tools ---
 
 
-@modeling_mcp.tool()
 async def list_saved_queries(ontology_key: str) -> list[dict]:
-    """List all saved queries for an ontology."""
     driver = await get_driver()
     results = await service.list_saved_queries(ontology_key, driver)
     return [r.model_dump(by_alias=True) for r in results]
 
 
-@modeling_mcp.tool()
 async def set_saved_query(
     ontology_key: str,
     key: str,
@@ -477,12 +399,6 @@ async def set_saved_query(
     cypher: str,
     parameters: list[dict] | None = None,
 ) -> dict:
-    """Create or update a saved query for an ontology.
-
-    Key must match pattern ^[a-z][a-z0-9_-]*$.
-    Parameters define the $param placeholders in the Cypher query.
-    Each parameter needs: name, description, dataType (string/integer/float/boolean/date/datetime).
-    """
     driver = await get_driver()
     body = SavedQueryUpsert(
         name=name,
@@ -496,9 +412,177 @@ async def set_saved_query(
     return response
 
 
-@modeling_mcp.tool()
 async def delete_saved_query(ontology_key: str, query_key: str) -> str:
-    """Delete a saved query from an ontology."""
     driver = await get_driver()
     await service.delete_saved_query(ontology_key, query_key, driver)
     return f"Saved query '{query_key}' deleted from ontology '{ontology_key}'."
+
+
+# ---------------------------------------------------------------------------
+# Programmatic tool registration
+# ---------------------------------------------------------------------------
+
+_MODELING_TOOL_DEFS: list[tuple[Callable, str, str]] = [
+    # --- Global Schema ---
+    (
+        get_schema,
+        "get_schema",
+        "Get the current state of the global schema. Returns all entity types, "
+        "relation types, and their properties.",
+    ),
+    (
+        create_entity_type,
+        "create_entity_type",
+        "Add a new entity type to the global schema. Key must be snake_case, globally unique.",
+    ),
+    (
+        update_entity_type,
+        "update_entity_type",
+        "Update an entity type's display name or description. Key is immutable.",
+    ),
+    (
+        delete_entity_type,
+        "delete_entity_type",
+        "Remove an entity type and its properties. Use cascade=True to auto-remove "
+        "from any scoped ontologies. Fails if any relation type references it.",
+    ),
+    (
+        create_relation_type,
+        "create_relation_type",
+        "Add a new relation type connecting two entity types. Source and target are "
+        "specified by entity type key.",
+    ),
+    (
+        update_relation_type,
+        "update_relation_type",
+        "Update a relation type's display name or description. Source/target "
+        "endpoints are immutable.",
+    ),
+    (
+        delete_relation_type,
+        "delete_relation_type",
+        "Remove a relation type and its properties. Use cascade=True to auto-remove "
+        "from any scoped ontologies.",
+    ),
+    (
+        add_property,
+        "add_property",
+        "Add a property definition to an entity type or relation type. "
+        "type_kind must be 'entity_type' or 'relation_type'. "
+        "data_type must be one of: string, integer, float, boolean, date, datetime. "
+        "Use cascade=True to auto-add required properties to scoped ontology property lists.",
+    ),
+    (
+        update_property,
+        "update_property",
+        "Update a property's metadata. Key and data type are immutable after creation. "
+        "type_kind must be 'entity_type' or 'relation_type'.",
+    ),
+    (
+        delete_property,
+        "delete_property",
+        "Remove a property definition from an entity type or relation type. "
+        "type_kind must be 'entity_type' or 'relation_type'. "
+        "Use cascade=True to auto-remove from scoped ontology property lists.",
+    ),
+    (
+        validate_schema,
+        "validate_schema",
+        "Check the global schema + all scoped ontologies for consistency.",
+    ),
+    (
+        export_schema,
+        "export_schema",
+        "Export the full schema in OntoForge v2.0 transfer format (JSON).",
+    ),
+    (
+        import_schema,
+        "import_schema",
+        "Import a v2.0 schema payload. Creates entity types, relation types, "
+        "and ontologies with scope configuration.",
+    ),
+    # --- Ontology Management ---
+    (
+        create_ontology,
+        "create_ontology",
+        "Create a new ontology (named lens over the schema).",
+    ),
+    (
+        update_ontology,
+        "update_ontology",
+        "Update an ontology's display name or description.",
+    ),
+    (
+        delete_ontology,
+        "delete_ontology",
+        "Delete an ontology. Does not affect the schema or other ontologies.",
+    ),
+    (
+        add_entity_type_to_ontology,
+        "add_entity_type_to_ontology",
+        "Add an entity type to an ontology's scope. Properties=null means all "
+        "properties. Properties=[...] means only listed properties are exposed.",
+    ),
+    (
+        remove_entity_type_from_ontology,
+        "remove_entity_type_from_ontology",
+        "Remove an entity type from an ontology's scope.",
+    ),
+    (
+        add_relation_type_to_ontology,
+        "add_relation_type_to_ontology",
+        "Add a relation type to an ontology's scope. Properties=null means all "
+        "properties. Properties=[...] means only listed properties are exposed.",
+    ),
+    (
+        remove_relation_type_from_ontology,
+        "remove_relation_type_from_ontology",
+        "Remove a relation type from an ontology's scope.",
+    ),
+    (
+        validate_ontology,
+        "validate_ontology",
+        "Validate a single ontology's INCLUDES_TYPE configuration against the schema.",
+    ),
+    # --- AI Agent Config ---
+    (
+        list_ai_agents,
+        "list_ai_agents",
+        "List all AI agent configurations for an ontology.",
+    ),
+    (
+        set_ai_agent,
+        "set_ai_agent",
+        "Create or update an AI agent configuration for an ontology. "
+        "Key must match pattern ^[a-z][a-z0-9_-]*$ and cannot be '_default'. "
+        f"Tools must be valid tool names ({VALID_AGENT_TOOLS_CSV}). "
+        "Set tools=null to allow all tools.",
+    ),
+    (
+        delete_ai_agent,
+        "delete_ai_agent",
+        "Delete an AI agent configuration from an ontology.",
+    ),
+    # --- Saved Query Config ---
+    (
+        list_saved_queries,
+        "list_saved_queries",
+        "List all saved queries for an ontology.",
+    ),
+    (
+        set_saved_query,
+        "set_saved_query",
+        "Create or update a saved query for an ontology. "
+        "Key must match pattern ^[a-z][a-z0-9_-]*$. "
+        "Parameters define the $param placeholders in the Cypher query. "
+        "Each parameter needs: name, description, dataType (string/integer/float/boolean/date/datetime).",
+    ),
+    (
+        delete_saved_query,
+        "delete_saved_query",
+        "Delete a saved query from an ontology.",
+    ),
+]
+
+for fn, name, description in _MODELING_TOOL_DEFS:
+    modeling_mcp.add_tool(fn, name=name, description=description)

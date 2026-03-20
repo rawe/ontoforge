@@ -8,36 +8,33 @@ from __future__ import annotations
 
 import functools
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 from neo4j import AsyncDriver
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent, RunContext, Tool
 
-from ontoforge_server.config import settings
 from ontoforge_server.core.ai import DEFAULT_AGENT_CONFIG, AgentConfig, get_ai_model
 from ontoforge_server.core.exceptions import NotFoundError, ValidationError
 from ontoforge_server.runtime import service
 from ontoforge_server.runtime.schemas import RelationInstanceCreate
+from ontoforge_server.runtime.tool_names import (
+    TOOL_EXECUTE_CYPHER,
+    TOOL_GET_ENTITY,
+    TOOL_GET_NEIGHBORS,
+    TOOL_GET_SCHEMA,
+    TOOL_LIST_ENTITIES,
+    TOOL_LIST_RELATIONS,
+    TOOL_LIST_SAVED_QUERIES,
+    TOOL_RUN_SAVED_QUERY,
+    TOOL_SEARCH_SAVED_QUERIES,
+    TOOL_SEMANTIC_SEARCH,
+)
 
 logger = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# Tool name constants
-# ---------------------------------------------------------------------------
-
-TOOL_GET_SCHEMA = "get_schema"
-TOOL_LIST_ENTITIES = "list_entities"
-TOOL_GET_ENTITY = "get_entity"
-TOOL_LIST_RELATIONS = "list_relations"
-TOOL_GET_NEIGHBORS = "get_neighbors"
-TOOL_SEMANTIC_SEARCH = "semantic_search"
-TOOL_EXECUTE_CYPHER = "execute_cypher_query"
-TOOL_LIST_SAVED_QUERIES = "list_saved_queries"
-TOOL_RUN_SAVED_QUERY = "run_saved_query"
-TOOL_SEARCH_SAVED_QUERIES = "search_saved_queries"
 
 # ---------------------------------------------------------------------------
 # Tool allowlists — controls which tools each AI feature can use
@@ -116,38 +113,21 @@ def _describe_schema(schema: service.SchemaCache) -> str:
 # ---------------------------------------------------------------------------
 
 
-ALL_TOOLS: dict[str, Any] = {}
+def _make_tool(fn: Callable, name: str, description: str) -> Tool:
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await fn(*args, **kwargs)
+        except (NotFoundError, ValidationError) as exc:
+            return {"error": str(exc)}
+    return Tool(wrapper, name=name, description=description)
 
 
-def _register_tool(name: str):
-    """Decorator to register a tool function in the global tool registry.
-
-    Wraps each tool to catch service-layer errors and return them as
-    messages so the LLM can self-correct instead of crashing the endpoint.
-    """
-    def decorator(fn):
-        @functools.wraps(fn)
-        async def wrapper(*args, **kwargs):
-            try:
-                return await fn(*args, **kwargs)
-            except (NotFoundError, ValidationError) as exc:
-                return {"error": str(exc)}
-
-        ALL_TOOLS[name] = wrapper
-        return wrapper
-    return decorator
-
-
-@_register_tool(TOOL_GET_SCHEMA)
 async def tool_get_schema(ctx: RunContext[AiDeps]) -> str:
-    """Get the full ontology schema including entity types, relation types,
-    and their property definitions with data types and required flags.
-    Call this if you need to verify available types or properties."""
     loaded = await service._load_schema(ctx.deps.ontology_key, ctx.deps.driver)
     return _describe_schema(loaded.scoped)
 
 
-@_register_tool(TOOL_LIST_ENTITIES)
 async def tool_list_entities(
     ctx: RunContext[AiDeps],
     entity_type_key: str,
@@ -155,12 +135,6 @@ async def tool_list_entities(
     filters: dict[str, str] | None = None,
     limit: int = 20,
 ) -> dict:
-    """List entities of a type with optional filtering and search.
-    Use 'search' to match a term across ALL string properties at once.
-    Use 'filters' to filter on specific properties: exact match
-    ("name": "Alice"), greater than ("age__gt": "25"), greater or equal
-    ("__gte"), less than ("__lt"), less or equal ("__lte"), contains
-    ("name__contains": "ali"). All filter values must be strings."""
     result = await service.list_entities(
         ctx.deps.ontology_key, entity_type_key,
         min(limit, 50), 0, "_createdAt", "asc",
@@ -169,26 +143,21 @@ async def tool_list_entities(
     return result.model_dump()
 
 
-@_register_tool(TOOL_GET_ENTITY)
 async def tool_get_entity(
     ctx: RunContext[AiDeps],
     entity_type_key: str,
     entity_id: str,
 ) -> dict:
-    """Retrieve a specific entity by its _id. Returns all properties."""
     return await service.get_entity(
         ctx.deps.ontology_key, entity_type_key, entity_id, ctx.deps.driver,
     )
 
 
-@_register_tool(TOOL_LIST_RELATIONS)
 async def tool_list_relations(
     ctx: RunContext[AiDeps],
     relation_type_key: str,
     limit: int = 20,
 ) -> dict:
-    """List relations of a type. Each result includes _id, source and target
-    entity IDs, and relation properties."""
     result = await service.list_relations(
         ctx.deps.ontology_key, relation_type_key,
         min(limit, 50), 0, "_createdAt", "asc",
@@ -197,7 +166,6 @@ async def tool_list_relations(
     return result.model_dump()
 
 
-@_register_tool(TOOL_GET_NEIGHBORS)
 async def tool_get_neighbors(
     ctx: RunContext[AiDeps],
     entity_type_key: str,
@@ -205,9 +173,6 @@ async def tool_get_neighbors(
     direction: str = "both",
     limit: int = 20,
 ) -> dict:
-    """Explore an entity's connections. Returns the entity plus all connected
-    entities with their connecting relations. Use this to answer "what is X
-    connected to?" questions. Direction: "outgoing", "incoming", or "both"."""
     result = await service.get_neighbors(
         ctx.deps.ontology_key, entity_type_key, entity_id,
         direction, None, min(limit, 50), ctx.deps.driver,
@@ -215,46 +180,28 @@ async def tool_get_neighbors(
     return result.model_dump()
 
 
-@_register_tool(TOOL_SEMANTIC_SEARCH)
 async def tool_semantic_search(
     ctx: RunContext[AiDeps],
     query: str,
     entity_type_key: str,
     limit: int = 10,
 ) -> dict:
-    """Search entities by semantic similarity to a natural language query.
-    Returns entities ranked by relevance with similarity scores.
-    Best for finding entities when you don't know exact property values."""
     return await service.semantic_search(
         ctx.deps.ontology_key, query, entity_type_key,
         min(limit, 20), None, ctx.deps.driver,
     )
 
 
-@_register_tool(TOOL_EXECUTE_CYPHER)
 async def tool_execute_cypher_query(
     ctx: RunContext[AiDeps],
     cypher: str,
 ) -> dict:
-    """Execute a read-only Cypher query against the knowledge graph.
-    Use entity type keys (snake_case) as node labels and relation type keys
-    as relationship types. ALL node patterns MUST have a label. Only
-    MATCH/RETURN — no writes, no CALL. Use CONTAINS for substring matching
-    (not regex). If the query fails, read the error — it lists available
-    types and properties.
-    Examples:
-      MATCH (p:person {name: 'Alice'}) RETURN p
-      MATCH (p:person)-[r:works_for]->(c:company) RETURN p.name, c.name
-      MATCH (p:person) WHERE p.age > 30 RETURN p.name, p.age LIMIT 10"""
     return await service.execute_cypher_query(
         ctx.deps.ontology_key, cypher, ctx.deps.driver,
     )
 
 
-@_register_tool(TOOL_LIST_SAVED_QUERIES)
 async def tool_list_saved_queries(ctx: RunContext[AiDeps]) -> list[dict]:
-    """List available saved queries with their parameters.
-    Each query has a key, name, description, and parameter definitions."""
     loaded = await service._load_schema(ctx.deps.ontology_key, ctx.deps.driver)
     return [
         {
@@ -270,32 +217,109 @@ async def tool_list_saved_queries(ctx: RunContext[AiDeps]) -> list[dict]:
     ]
 
 
-@_register_tool(TOOL_RUN_SAVED_QUERY)
 async def tool_run_saved_query(
     ctx: RunContext[AiDeps],
     query_key: str,
     params: dict | None = None,
 ) -> dict:
-    """Execute a saved query by key with parameter values.
-    Use list_saved_queries first to discover available queries and
-    their required parameters."""
     return await service.execute_saved_query(
         ctx.deps.ontology_key, query_key, params or {}, ctx.deps.driver,
     )
 
 
-@_register_tool(TOOL_SEARCH_SAVED_QUERIES)
 async def tool_search_saved_queries(
     ctx: RunContext[AiDeps],
     query: str,
 ) -> list[dict]:
-    """Search saved queries by semantic similarity to a natural language query.
-    Returns the most relevant saved queries ranked by how well their
-    description matches your query. Use this to find the right saved query
-    for a user's intent instead of listing all queries."""
     return await service.search_saved_queries(
         ctx.deps.ontology_key, query, 3, 0.7, ctx.deps.driver,
     )
+
+
+_AGENT_TOOL_DEFS: list[tuple[Callable, str, str]] = [
+    (
+        tool_get_schema,
+        TOOL_GET_SCHEMA,
+        "Get the full ontology schema including entity types, relation types, "
+        "and their property definitions with data types and required flags. "
+        "Call this if you need to verify available types or properties.",
+    ),
+    (
+        tool_list_entities,
+        TOOL_LIST_ENTITIES,
+        "List entities of a type with optional filtering and search. "
+        "Use 'search' to match a term across ALL string properties at once. "
+        "Use 'filters' to filter on specific properties: exact match "
+        '("name": "Alice"), greater than ("age__gt": "25"), greater or equal '
+        '("__gte"), less than ("__lt"), less or equal ("__lte"), contains '
+        '("name__contains": "ali"). All filter values must be strings.',
+    ),
+    (
+        tool_get_entity,
+        TOOL_GET_ENTITY,
+        "Retrieve a specific entity by its _id. Returns all properties.",
+    ),
+    (
+        tool_list_relations,
+        TOOL_LIST_RELATIONS,
+        "List relations of a type. Each result includes _id, source and target "
+        "entity IDs, and relation properties.",
+    ),
+    (
+        tool_get_neighbors,
+        TOOL_GET_NEIGHBORS,
+        "Explore an entity's connections. Returns the entity plus all connected "
+        "entities with their connecting relations. Use this to answer 'what is X "
+        "connected to?' questions. Direction: 'outgoing', 'incoming', or 'both'.",
+    ),
+    (
+        tool_semantic_search,
+        TOOL_SEMANTIC_SEARCH,
+        "Search entities by semantic similarity to a natural language query. "
+        "Returns entities ranked by relevance with similarity scores. "
+        "Best for finding entities when you don't know exact property values.",
+    ),
+    (
+        tool_execute_cypher_query,
+        TOOL_EXECUTE_CYPHER,
+        "Execute a read-only Cypher query against the knowledge graph. "
+        "Use entity type keys (snake_case) as node labels and relation type keys "
+        "as relationship types. ALL node patterns MUST have a label. Only "
+        "MATCH/RETURN — no writes, no CALL. Use CONTAINS for substring matching "
+        "(not regex). If the query fails, read the error — it lists available "
+        "types and properties. "
+        "Examples: "
+        "MATCH (p:person {name: 'Alice'}) RETURN p | "
+        "MATCH (p:person)-[r:works_for]->(c:company) RETURN p.name, c.name | "
+        "MATCH (p:person) WHERE p.age > 30 RETURN p.name, p.age LIMIT 10",
+    ),
+    (
+        tool_list_saved_queries,
+        TOOL_LIST_SAVED_QUERIES,
+        "List available saved queries with their parameters. "
+        "Each query has a key, name, description, and parameter definitions.",
+    ),
+    (
+        tool_run_saved_query,
+        TOOL_RUN_SAVED_QUERY,
+        "Execute a saved query by key with parameter values. "
+        "Use list_saved_queries first to discover available queries and "
+        "their required parameters.",
+    ),
+    (
+        tool_search_saved_queries,
+        TOOL_SEARCH_SAVED_QUERIES,
+        "Search saved queries by semantic similarity to a natural language query. "
+        "Returns the most relevant saved queries ranked by how well their "
+        "description matches your query. Use this to find the right saved query "
+        "for a user's intent instead of listing all queries.",
+    ),
+]
+
+ALL_TOOLS: dict[str, Tool] = {
+    name: _make_tool(fn, name, desc)
+    for fn, name, desc in _AGENT_TOOL_DEFS
+}
 
 
 # ---------------------------------------------------------------------------
@@ -596,7 +620,7 @@ async def run_agent_chat(
                 args_fn = getattr(part, "args_as_dict", None)
                 if tool_name and args_fn:
                     tool_calls.append({
-                        "tool": tool_name.removeprefix("tool_"),
+                        "tool": tool_name,
                         "args": args_fn(),
                     })
         response["tool_calls"] = tool_calls

@@ -431,7 +431,7 @@ async def set_ai_agent(
     Key must match pattern ^[a-z][a-z0-9_-]*$ and cannot be '_default'.
     Tools must be valid tool names (get_schema, list_entities, get_entity,
     list_relations, get_neighbors, semantic_search, execute_cypher_query,
-    list_saved_queries, run_saved_query).
+    list_saved_queries, run_saved_query, search_saved_queries).
     Set tools=null to allow all tools.
     """
     driver = await get_driver()

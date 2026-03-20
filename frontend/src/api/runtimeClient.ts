@@ -159,11 +159,10 @@ export const aiChat = (
   ontologyKey: string,
   message: string,
   history?: AiChatMessage[],
-  includeToolCalls?: boolean,
 ) =>
   request<AiChatResponse>(`/${ontologyKey}/ai/chat`, {
     method: 'POST',
-    body: JSON.stringify({ message, history, includeToolCalls }),
+    body: JSON.stringify({ message, history, includeToolCalls: true }),
   });
 
 // Saved Queries
@@ -186,10 +185,9 @@ export const aiAgentChat = (
   agentKey: string,
   message: string,
   history?: AiChatMessage[],
-  includeToolCalls?: boolean,
 ) =>
   request<AiChatResponse>(`/${ontologyKey}/ai/agents/${agentKey}/chat`, {
     method: 'POST',
-    body: JSON.stringify({ message, history, includeToolCalls }),
+    body: JSON.stringify({ message, history, includeToolCalls: true }),
   });
 

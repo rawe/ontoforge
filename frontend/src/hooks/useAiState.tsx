@@ -21,12 +21,12 @@ export interface ChatEntry {
   role: 'user' | 'assistant';
   content: string;
   toolCalls?: AiChatToolCall[];
+  durationMs?: number;
 }
 
 export interface ChatState {
   messages: ChatEntry[];
   input: string;
-  showToolCalls: boolean;
   agentKey: string;
 }
 
@@ -55,7 +55,6 @@ const defaultExtract = (): ExtractState => ({
 const defaultChat = (): ChatState => ({
   messages: [],
   input: '',
-  showToolCalls: false,
   agentKey: '_default',
 });
 

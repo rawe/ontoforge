@@ -113,11 +113,13 @@ async def update_ontology(
 
 
 async def delete_ontology(session: AsyncSession, ontology_id: str) -> bool:
-    """Delete ontology node only (DETACH DELETE removes INCLUDES_TYPE edges)."""
+    """Delete ontology and cascade to agent configs and saved queries."""
     result = await session.run(
         """
         MATCH (o:Ontology {ontologyId: $ontology_id})
-        DETACH DELETE o
+        OPTIONAL MATCH (o)-[:HAS_AI_AGENT]->(ac:AiAgentConfig)
+        OPTIONAL MATCH (o)-[:HAS_SAVED_QUERY]->(sq:SavedQuery)
+        DETACH DELETE o, ac, sq
         RETURN count(o) AS deleted
         """,
         ontology_id=ontology_id,
@@ -844,3 +846,216 @@ async def get_full_schema(session: AsyncSession) -> dict:
         "relationTypes": relation_types,
         "ontologies": ontologies,
     }
+
+
+# --- AI Agent Config ---
+
+
+async def list_ai_agents(session: AsyncSession, ontology_id: str) -> list[dict]:
+    result = await session.run(
+        """
+        MATCH (o:Ontology {ontologyId: $ontology_id})-[:HAS_AI_AGENT]->(ac:AiAgentConfig)
+        RETURN ac {.*} AS agent
+        ORDER BY ac.name
+        """,
+        ontology_id=ontology_id,
+    )
+    return [_convert_neo4j_types(record["agent"]) async for record in result]
+
+
+async def get_ai_agent_by_key(
+    session: AsyncSession, ontology_id: str, agent_key: str
+) -> dict | None:
+    result = await session.run(
+        """
+        MATCH (o:Ontology {ontologyId: $ontology_id})-[:HAS_AI_AGENT]->(ac:AiAgentConfig {key: $agent_key})
+        RETURN ac {.*} AS agent
+        """,
+        ontology_id=ontology_id,
+        agent_key=agent_key,
+    )
+    record = await result.single()
+    return _convert_neo4j_types(record["agent"]) if record else None
+
+
+async def upsert_ai_agent(
+    session: AsyncSession,
+    ontology_id: str,
+    agent_config_id: str,
+    key: str,
+    name: str,
+    description: str | None,
+    system_prompt: str | None,
+    tools: list[str] | None,
+) -> tuple[dict, bool]:
+    """MERGE-based upsert. Returns (record, created)."""
+    result = await session.run(
+        """
+        MATCH (o:Ontology {ontologyId: $ontology_id})
+        MERGE (o)-[:HAS_AI_AGENT]->(ac:AiAgentConfig {key: $key})
+        ON CREATE SET
+            ac.agentConfigId = $agent_config_id,
+            ac.name = $name,
+            ac.description = $description,
+            ac.systemPrompt = $system_prompt,
+            ac.tools = $tools,
+            ac.createdAt = datetime(),
+            ac.updatedAt = datetime()
+        ON MATCH SET
+            ac.name = $name,
+            ac.description = $description,
+            ac.systemPrompt = $system_prompt,
+            ac.tools = $tools,
+            ac.updatedAt = datetime()
+        RETURN ac {.*} AS agent, ac.agentConfigId = $agent_config_id AS created
+        """,
+        ontology_id=ontology_id,
+        agent_config_id=agent_config_id,
+        key=key,
+        name=name,
+        description=description,
+        system_prompt=system_prompt,
+        tools=tools,
+    )
+    record = await result.single()
+    return _convert_neo4j_types(record["agent"]), record["created"]
+
+
+async def delete_ai_agent(
+    session: AsyncSession, ontology_id: str, agent_key: str
+) -> bool:
+    result = await session.run(
+        """
+        MATCH (o:Ontology {ontologyId: $ontology_id})-[:HAS_AI_AGENT]->(ac:AiAgentConfig {key: $agent_key})
+        DETACH DELETE ac
+        RETURN count(ac) AS deleted
+        """,
+        ontology_id=ontology_id,
+        agent_key=agent_key,
+    )
+    record = await result.single()
+    return record["deleted"] > 0
+
+
+async def list_ai_agents_for_export(session: AsyncSession, ontology_id: str) -> list[dict]:
+    """List agents for export (key, name, description, systemPrompt, tools)."""
+    result = await session.run(
+        """
+        MATCH (o:Ontology {ontologyId: $ontology_id})-[:HAS_AI_AGENT]->(ac:AiAgentConfig)
+        RETURN ac.key AS key, ac.name AS name, ac.description AS description,
+               ac.systemPrompt AS systemPrompt, ac.tools AS tools
+        ORDER BY ac.name
+        """,
+        ontology_id=ontology_id,
+    )
+    return [dict(record) async for record in result]
+
+
+# --- Saved Query Config ---
+
+
+async def list_saved_queries(session: AsyncSession, ontology_id: str) -> list[dict]:
+    result = await session.run(
+        """
+        MATCH (o:Ontology {ontologyId: $ontology_id})-[:HAS_SAVED_QUERY]->(sq:SavedQuery)
+        RETURN sq {.*} AS query
+        ORDER BY sq.name
+        """,
+        ontology_id=ontology_id,
+    )
+    return [_convert_neo4j_types(record["query"]) async for record in result]
+
+
+async def get_saved_query_by_key(
+    session: AsyncSession, ontology_id: str, query_key: str
+) -> dict | None:
+    result = await session.run(
+        """
+        MATCH (o:Ontology {ontologyId: $ontology_id})-[:HAS_SAVED_QUERY]->(sq:SavedQuery {key: $query_key})
+        RETURN sq {.*} AS query
+        """,
+        ontology_id=ontology_id,
+        query_key=query_key,
+    )
+    record = await result.single()
+    return _convert_neo4j_types(record["query"]) if record else None
+
+
+async def upsert_saved_query(
+    session: AsyncSession,
+    ontology_id: str,
+    saved_query_id: str,
+    key: str,
+    name: str,
+    description: str,
+    cypher: str,
+    parameters_json: str,
+    ontology_key: str | None = None,
+    embedding: list[float] | None = None,
+) -> tuple[dict, bool]:
+    """MERGE-based upsert. Returns (record, created)."""
+    embedding_create = ", sq._embedding = $embedding" if embedding is not None else ""
+    embedding_match = ", sq._embedding = $embedding" if embedding is not None else ""
+    ontology_key_clause = ", sq._ontologyKey = $ontology_key" if ontology_key is not None else ""
+    result = await session.run(
+        f"""
+        MATCH (o:Ontology {{ontologyId: $ontology_id}})
+        MERGE (o)-[:HAS_SAVED_QUERY]->(sq:SavedQuery {{key: $key}})
+        ON CREATE SET
+            sq.savedQueryId = $saved_query_id,
+            sq.name = $name,
+            sq.description = $description,
+            sq.cypher = $cypher,
+            sq.parameters = $parameters_json,
+            sq.createdAt = datetime(),
+            sq.updatedAt = datetime(){ontology_key_clause}{embedding_create}
+        ON MATCH SET
+            sq.name = $name,
+            sq.description = $description,
+            sq.cypher = $cypher,
+            sq.parameters = $parameters_json,
+            sq.updatedAt = datetime(){ontology_key_clause}{embedding_match}
+        RETURN sq {{.*}} AS query, sq.savedQueryId = $saved_query_id AS created
+        """,
+        ontology_id=ontology_id,
+        saved_query_id=saved_query_id,
+        key=key,
+        name=name,
+        description=description,
+        cypher=cypher,
+        parameters_json=parameters_json,
+        ontology_key=ontology_key,
+        embedding=embedding,
+    )
+    record = await result.single()
+    return _convert_neo4j_types(record["query"]), record["created"]
+
+
+async def delete_saved_query(
+    session: AsyncSession, ontology_id: str, query_key: str
+) -> bool:
+    result = await session.run(
+        """
+        MATCH (o:Ontology {ontologyId: $ontology_id})-[:HAS_SAVED_QUERY]->(sq:SavedQuery {key: $query_key})
+        DETACH DELETE sq
+        RETURN count(sq) AS deleted
+        """,
+        ontology_id=ontology_id,
+        query_key=query_key,
+    )
+    record = await result.single()
+    return record["deleted"] > 0
+
+
+async def list_saved_queries_for_export(session: AsyncSession, ontology_id: str) -> list[dict]:
+    """List saved queries for export."""
+    result = await session.run(
+        """
+        MATCH (o:Ontology {ontologyId: $ontology_id})-[:HAS_SAVED_QUERY]->(sq:SavedQuery)
+        RETURN sq.key AS key, sq.name AS name, sq.description AS description,
+               sq.cypher AS cypher, sq.parameters AS parameters
+        ORDER BY sq.name
+        """,
+        ontology_id=ontology_id,
+    )
+    return [dict(record) async for record in result]

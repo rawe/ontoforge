@@ -22,6 +22,7 @@ from ontoforge_server.mcp.modeling import modeling_mcp
 from ontoforge_server.mcp.mount import mount_mcp
 from ontoforge_server.mcp.runtime import runtime_mcp
 from ontoforge_server.modeling.router import router as modeling_router
+from ontoforge_server.runtime.ai_router import router as ai_router
 from ontoforge_server.runtime.router import global_router as runtime_global_router
 from ontoforge_server.runtime.router import router as runtime_router
 
@@ -87,6 +88,7 @@ def create_app() -> FastAPI:
     app.include_router(modeling_router, prefix="/api/model")
     app.include_router(runtime_global_router, prefix="/api/runtime")
     app.include_router(runtime_router, prefix="/api/runtime/{ontology_key}")
+    app.include_router(ai_router, prefix="/api/runtime")
     mount_mcp(app)
 
     return app

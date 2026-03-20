@@ -1,3 +1,4 @@
+import re
 from uuid import uuid4
 
 from fastapi import Depends
@@ -18,10 +19,14 @@ from ontoforge_server.core.exceptions import (
 )
 from ontoforge_server.modeling import repository
 from ontoforge_server.modeling.schemas import (
+    AGENT_KEY_PATTERN,
+    AiAgentConfigResponse,
+    AiAgentConfigUpsert,
     DataType,
     EntityTypeCreate,
     EntityTypeResponse,
     EntityTypeUpdate,
+    ExportAiAgent,
     ExportEntityType,
     ExportOntology,
     ExportOntologyInclusion,
@@ -29,6 +34,8 @@ from ontoforge_server.modeling.schemas import (
     ExportPayload,
     ExportProperty,
     ExportRelationType,
+    ExportSavedQuery,
+    ExportSavedQueryParameter,
     IncludeTypeRequest,
     IncludeTypeResponse,
     IncludeTypeUpdate,
@@ -41,6 +48,9 @@ from ontoforge_server.modeling.schemas import (
     RelationTypeCreate,
     RelationTypeResponse,
     RelationTypeUpdate,
+    SavedQueryParameterSchema,
+    SavedQueryResponse,
+    SavedQueryUpsert,
     SchemaValidationError,
     ValidationResult,
 )
@@ -973,17 +983,52 @@ async def export_schema(
             )
         else:
             includes = None
+
+        # Load AI agent configs for this ontology
+        async with driver.session() as session:
+            agent_rows = await repository.list_ai_agents_for_export(
+                session, ont["ontologyId"]
+            )
+        ai_agents = [
+            ExportAiAgent(
+                key=ag["key"],
+                name=ag["name"],
+                description=ag.get("description"),
+                systemPrompt=ag.get("systemPrompt"),
+                tools=ag.get("tools"),
+            )
+            for ag in agent_rows
+        ]
+
+        # Load saved query configs for this ontology
+        async with driver.session() as session:
+            query_rows = await repository.list_saved_queries_for_export(
+                session, ont["ontologyId"]
+            )
+        saved_queries = [
+            ExportSavedQuery(
+                key=sq["key"],
+                name=sq["name"],
+                description=sq["description"],
+                cypher=sq["cypher"],
+                parameters=_deserialize_export_params(sq.get("parameters")),
+            )
+            for sq in query_rows
+        ]
+
         ontologies.append(
             ExportOntology(
                 key=ont["key"],
                 name=ont["name"],
                 description=ont.get("description"),
                 includes=includes,
+                aiAgents=ai_agents,
+                savedQueries=saved_queries,
             )
         )
 
     return ExportPayload(
-        formatVersion="2.0",
+        formatVersion="2.1",
         entityTypes=entity_types,
         relationTypes=relation_types,
         ontologies=ontologies,
@@ -1060,7 +1105,287 @@ async def import_schema(
                     await repository.add_includes_type(
                         session, ont_id, "RelationType", inc.key, inc.properties
                     )
+
+            # Import AI agent configs
+            for ag in ont.ai_agents:
+                # Validate tools strictly
+                if ag.tools is not None:
+                    from ontoforge_server.runtime.ai_service import ALL_TOOLS
+
+                    unknown = [t for t in ag.tools if t not in ALL_TOOLS]
+                    if unknown:
+                        available = sorted(ALL_TOOLS.keys())
+                        raise ValidationError(
+                            f"Import error: agent '{ag.key}' references unknown tool(s): "
+                            f"{unknown}. Available tools: {available}"
+                        )
+                ag_id = str(uuid4())
+                await repository.upsert_ai_agent(
+                    session, ont_id, ag_id, ag.key, ag.name,
+                    ag.description, ag.system_prompt, ag.tools,
+                )
+
+            # Import saved queries
+            provider = get_embedding_provider()
+            for sq in ont.saved_queries:
+                _cross_check_params(sq.cypher, [p.name for p in sq.parameters], sq.key)
+                params_json = _serialize_params([
+                    {"name": p.name, "description": p.description, "dataType": p.data_type}
+                    for p in sq.parameters
+                ])
+                sq_embedding = None
+                if provider:
+                    sq_embedding = await provider.embed(sq.description)
+                sq_id = str(uuid4())
+                await repository.upsert_saved_query(
+                    session, ont_id, sq_id, sq.key, sq.name,
+                    sq.description, sq.cypher, params_json,
+                    ontology_key=ont.key,
+                    embedding=sq_embedding,
+                )
+
             created_ontologies.append(_to_ontology_response(ont_data))
 
     _invalidate_runtime_schema_cache()
     return {"ontologies": [o.model_dump(by_alias=True) for o in created_ontologies]}
+
+
+# --- AI Agent Config ---
+
+
+def _to_ai_agent_response(data: dict) -> AiAgentConfigResponse:
+    return AiAgentConfigResponse.model_validate(data)
+
+
+async def list_ai_agents(
+    ontology_key: str,
+    driver: AsyncDriver = Depends(get_driver),
+) -> list[AiAgentConfigResponse]:
+    async with driver.session() as session:
+        ont = await repository.get_ontology_by_key(session, ontology_key)
+        if not ont:
+            raise NotFoundError(f"Ontology '{ontology_key}' not found")
+        rows = await repository.list_ai_agents(session, ont["ontologyId"])
+        return [_to_ai_agent_response(r) for r in rows]
+
+
+async def upsert_ai_agent(
+    ontology_key: str,
+    agent_key: str,
+    body: AiAgentConfigUpsert,
+    driver: AsyncDriver = Depends(get_driver),
+) -> tuple[AiAgentConfigResponse, bool]:
+    """Returns (response, created)."""
+    if not re.match(AGENT_KEY_PATTERN, agent_key):
+        raise ValidationError(
+            f"Invalid agent key '{agent_key}'. Must match pattern: {AGENT_KEY_PATTERN}"
+        )
+    if agent_key == "_default":
+        raise ValidationError("Agent key '_default' is reserved")
+
+    # Validate tools
+    if body.tools is not None:
+        from ontoforge_server.runtime.ai_service import ALL_TOOLS
+
+        unknown = [t for t in body.tools if t not in ALL_TOOLS]
+        if unknown:
+            available = sorted(ALL_TOOLS.keys())
+            raise ValidationError(
+                f"Unknown tool(s): {unknown}. Available tools: {available}"
+            )
+
+    async with driver.session() as session:
+        ont = await repository.get_ontology_by_key(session, ontology_key)
+        if not ont:
+            raise NotFoundError(f"Ontology '{ontology_key}' not found")
+        agent_config_id = str(uuid4())
+        data, created = await repository.upsert_ai_agent(
+            session,
+            ont["ontologyId"],
+            agent_config_id,
+            agent_key,
+            body.name,
+            body.description,
+            body.system_prompt,
+            body.tools,
+        )
+    _invalidate_runtime_schema_cache()
+    return _to_ai_agent_response(data), created
+
+
+async def delete_ai_agent(
+    ontology_key: str,
+    agent_key: str,
+    driver: AsyncDriver = Depends(get_driver),
+) -> None:
+    async with driver.session() as session:
+        ont = await repository.get_ontology_by_key(session, ontology_key)
+        if not ont:
+            raise NotFoundError(f"Ontology '{ontology_key}' not found")
+        deleted = await repository.delete_ai_agent(session, ont["ontologyId"], agent_key)
+        if not deleted:
+            raise NotFoundError(f"AI agent '{agent_key}' not found")
+    _invalidate_runtime_schema_cache()
+
+
+# --- Saved Query Config ---
+
+
+def _to_saved_query_response(data: dict) -> SavedQueryResponse:
+    """Convert repository dict to SavedQueryResponse, deserializing parameters JSON."""
+    import json
+
+    params_raw = data.get("parameters", "[]")
+    if isinstance(params_raw, str):
+        params_list = json.loads(params_raw)
+    else:
+        params_list = params_raw or []
+
+    return SavedQueryResponse(
+        key=data["key"],
+        name=data["name"],
+        description=data["description"],
+        cypher=data["cypher"],
+        parameters=[
+            SavedQueryParameterSchema(
+                name=p["name"],
+                description=p["description"],
+                dataType=p["dataType"],
+            )
+            for p in params_list
+        ],
+        createdAt=data["createdAt"],
+        updatedAt=data["updatedAt"],
+    )
+
+
+def _serialize_params(params: list[dict]) -> str:
+    """Serialize parameter list to JSON string for Neo4j storage."""
+    import json
+    return json.dumps(params)
+
+
+def _deserialize_export_params(params_json: str | None) -> list[ExportSavedQueryParameter]:
+    """Deserialize parameters JSON to export model list."""
+    import json
+    if not params_json:
+        return []
+    params_list = json.loads(params_json) if isinstance(params_json, str) else params_json
+    return [
+        ExportSavedQueryParameter(
+            name=p["name"],
+            description=p["description"],
+            dataType=p["dataType"],
+        )
+        for p in params_list
+    ]
+
+
+def _cross_check_params(cypher: str, param_names: list[str], query_key: str) -> None:
+    """Verify parameter declarations match $param references in Cypher."""
+    cypher_params = set(re.findall(r'\$([a-zA-Z_]\w*)', cypher))
+    declared = set(param_names)
+    in_cypher_not_declared = cypher_params - declared
+    declared_not_in_cypher = declared - cypher_params
+    errors = []
+    if in_cypher_not_declared:
+        errors.append(
+            f"Parameters referenced in Cypher but not declared: {sorted(in_cypher_not_declared)}"
+        )
+    if declared_not_in_cypher:
+        errors.append(
+            f"Parameters declared but not referenced in Cypher: {sorted(declared_not_in_cypher)}"
+        )
+    if errors:
+        raise ValidationError(
+            f"Saved query '{query_key}' parameter mismatch: {'; '.join(errors)}"
+        )
+
+
+async def list_saved_queries(
+    ontology_key: str,
+    driver: AsyncDriver = Depends(get_driver),
+) -> list[SavedQueryResponse]:
+    async with driver.session() as session:
+        ont = await repository.get_ontology_by_key(session, ontology_key)
+        if not ont:
+            raise NotFoundError(f"Ontology '{ontology_key}' not found")
+        rows = await repository.list_saved_queries(session, ont["ontologyId"])
+        return [_to_saved_query_response(r) for r in rows]
+
+
+async def upsert_saved_query(
+    ontology_key: str,
+    query_key: str,
+    body: SavedQueryUpsert,
+    driver: AsyncDriver = Depends(get_driver),
+) -> tuple[SavedQueryResponse, bool]:
+    """Returns (response, created)."""
+    if not re.match(AGENT_KEY_PATTERN, query_key):
+        raise ValidationError(
+            f"Invalid query key '{query_key}'. Must match pattern: {AGENT_KEY_PATTERN}"
+        )
+
+    # Cross-check parameters against Cypher
+    param_names = [p.name for p in body.parameters]
+    _cross_check_params(body.cypher, param_names, query_key)
+
+    # Validate Cypher against schema
+    async with driver.session() as session:
+        ont = await repository.get_ontology_by_key(session, ontology_key)
+        if not ont:
+            raise NotFoundError(f"Ontology '{ontology_key}' not found")
+
+    # Try to validate Cypher against the scoped schema
+    try:
+        from ontoforge_server.runtime import service as runtime_service
+        loaded = await runtime_service._load_schema(ontology_key, driver)
+        from ontoforge_server.runtime.cypher import validate_and_rewrite
+        validate_and_rewrite(body.cypher, loaded.scoped)
+    except NotFoundError:
+        pass  # Ontology has no runtime schema loaded yet
+    except Exception as exc:
+        raise ValidationError(f"Cypher validation failed: {exc}")
+
+    params_json = _serialize_params([
+        {"name": p.name, "description": p.description, "dataType": p.data_type.value}
+        for p in body.parameters
+    ])
+
+    # Embed the description for semantic search over saved queries
+    embedding = None
+    provider = get_embedding_provider()
+    if provider:
+        embedding = await provider.embed(body.description)
+
+    async with driver.session() as session:
+        saved_query_id = str(uuid4())
+        data, created = await repository.upsert_saved_query(
+            session,
+            ont["ontologyId"],
+            saved_query_id,
+            query_key,
+            body.name,
+            body.description,
+            body.cypher,
+            params_json,
+            ontology_key=ontology_key,
+            embedding=embedding,
+        )
+    _invalidate_runtime_schema_cache()
+    return _to_saved_query_response(data), created
+
+
+async def delete_saved_query(
+    ontology_key: str,
+    query_key: str,
+    driver: AsyncDriver = Depends(get_driver),
+) -> None:
+    async with driver.session() as session:
+        ont = await repository.get_ontology_by_key(session, ontology_key)
+        if not ont:
+            raise NotFoundError(f"Ontology '{ontology_key}' not found")
+        deleted = await repository.delete_saved_query(session, ont["ontologyId"], query_key)
+        if not deleted:
+            raise NotFoundError(f"Saved query '{query_key}' not found")
+    _invalidate_runtime_schema_cache()

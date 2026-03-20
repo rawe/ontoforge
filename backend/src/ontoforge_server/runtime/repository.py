@@ -595,13 +595,14 @@ def _convert_record_value(value: Any) -> Any:
 async def execute_cypher_read(
     session: AsyncSession,
     cypher: str,
+    params: dict[str, Any] | None = None,
 ) -> tuple[list[str], list[dict]]:
     """Execute a read-only Cypher query and return (columns, rows).
 
     Each row is a dict mapping column names to converted Python values.
     Nodes and Relationships are returned as plain dicts of their properties.
     """
-    result = await session.run(cypher)
+    result = await session.run(cypher, **(params or {}))
     columns = list(result.keys())
     rows: list[dict] = []
     async for record in result:
@@ -610,3 +611,83 @@ async def execute_cypher_read(
             row[col] = _convert_record_value(record[col])
         rows.append(row)
     return columns, rows
+
+
+# --- AI Agent Config ---
+
+
+async def get_ai_agent_configs(
+    session: AsyncSession, ontology_key: str
+) -> list[dict]:
+    """Query AiAgentConfig nodes for an ontology by key."""
+    result = await session.run(
+        """
+        MATCH (o:Ontology {key: $ontology_key})-[:HAS_AI_AGENT]->(ac:AiAgentConfig)
+        RETURN ac.key AS key, ac.name AS name, ac.description AS description,
+               ac.systemPrompt AS systemPrompt, ac.tools AS tools
+        ORDER BY ac.name
+        """,
+        ontology_key=ontology_key,
+    )
+    return [dict(record) async for record in result]
+
+
+async def get_saved_queries(
+    session: AsyncSession, ontology_key: str
+) -> list[dict]:
+    """Query SavedQuery nodes for an ontology by key."""
+    result = await session.run(
+        """
+        MATCH (o:Ontology {key: $ontology_key})-[:HAS_SAVED_QUERY]->(sq:SavedQuery)
+        RETURN sq.key AS key, sq.name AS name, sq.description AS description,
+               sq.cypher AS cypher, sq.parameters AS parameters
+        ORDER BY sq.name
+        """,
+        ontology_key=ontology_key,
+    )
+    return [dict(record) async for record in result]
+
+
+async def search_saved_queries(
+    session: AsyncSession,
+    query_embedding: list[float],
+    ontology_key: str,
+    limit: int,
+    min_score: float | None,
+) -> list[dict]:
+    """Semantic search over SavedQuery descriptions using the vector index.
+
+    Scoped to a single ontology via in-index filtering on _ontologyKey.
+    """
+    query = (
+        "MATCH (sq:SavedQuery) "
+        "SEARCH sq IN ("
+        "VECTOR INDEX saved_query_embedding "
+        "FOR $query_embedding "
+        "WHERE sq._ontologyKey = $ontology_key "
+        "LIMIT $limit"
+        ") SCORE AS score "
+        "RETURN sq.key AS key, sq.name AS name, sq.description AS description, "
+        "sq.parameters AS parameters, score"
+    )
+
+    result = await session.run(
+        query,
+        query_embedding=query_embedding,
+        ontology_key=ontology_key,
+        limit=limit,
+    )
+
+    items = []
+    async for record in result:
+        score = record["score"]
+        if min_score is not None and score < min_score:
+            continue
+        items.append({
+            "key": record["key"],
+            "name": record["name"],
+            "description": record["description"],
+            "parameters": record["parameters"],
+            "score": score,
+        })
+    return items

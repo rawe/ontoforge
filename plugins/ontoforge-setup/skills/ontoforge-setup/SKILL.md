@@ -15,7 +15,7 @@ The Docker Compose stack consists of three core services:
 
 - **neo4j** — Graph database. Stores both schema and instance data.
 - **ontoforge-server** — Backend: REST API and MCP servers. All environment variables documented below apply to this service.
-- **ontoforge-ui** — Frontend: web UI served on port 3000. No configuration needed beyond the server URL.
+- **ontoforge-ui** — Frontend: web UI served on port 3000. Requires `BACKEND_URL` pointing to the backend's Docker-internal URL so nginx can proxy `/api` and `/mcp` requests.
 
 Semantic search is optional and supports two embedding providers: **Ollama** (local) or an **OpenAI-compatible** API. AI-powered runtime (natural language query, entity extraction, chat) is also optional and requires a model with tool calling support. Both features can use Ollama or an OpenAI-compatible API. When using Ollama, an optional **ollama** service can be added to the compose stack.
 
@@ -59,6 +59,7 @@ Read the template from `${CLAUDE_PLUGIN_ROOT}/skills/ontoforge-setup/templates/d
 - If the user wants AI, uncomment and configure the `AI_*` environment variables on the `ontoforge-server` service. The same Ollama/host/Docker/OpenAI logic applies as for embeddings.
 - If the user chose `openai` for AI, set `AI_PROVIDER: openai` and note that `AI_API_KEY` must be provided (do not write a real key into the file).
 - Adjust port mappings if the user reported conflicts.
+- If the backend service is renamed, update `BACKEND_URL` on the `ontoforge-ui` service to match (e.g. `http://<new-service-name>:8000`).
 - `DEFAULT_MCP_ONTOLOGY_KEY` is a server-side fallback: if an MCP request arrives without an `X-Ontology-Key` header or a URL path key, the server uses this value. Uncomment it in the Docker Compose if the user wants a fallback; the primary mechanism is the `X-Ontology-Key` header set in `.mcp.json`.
 
 Write the result as `docker-compose.yml` (or `docker-compose.ontoforge.yml` if the user already has a compose file) in the project root.
@@ -100,6 +101,16 @@ DB_PASSWORD=changeme
 ```
 
 Add `.env` to `.gitignore` if not already there.
+
+## OntoForge UI Environment Variable
+
+The `ontoforge-ui` container runs nginx, which proxies `/api` and `/mcp` requests to the backend. The backend URL must be set via an environment variable so nginx knows where to forward these requests.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `BACKEND_URL` | yes | `http://localhost:8000` | Docker-internal URL of the `ontoforge-server` service. Must match the backend service name in the compose file (e.g. `http://ontoforge-server:8000`). |
+
+If the user renames the backend service in Docker Compose, update `BACKEND_URL` on the UI service accordingly.
 
 ## OntoForge Server Environment Variables
 

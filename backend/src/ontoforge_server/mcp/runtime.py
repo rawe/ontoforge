@@ -335,3 +335,57 @@ async def semantic_search(
         filters=str_filters, fields=fields,
     )
     return result
+
+
+@runtime_mcp.tool()
+async def list_saved_queries() -> list[dict]:
+    """Discover available pre-defined queries and their required parameters.
+    Each saved query has a key, name, description, and parameter definitions
+    with name, description, and dataType."""
+    ontology_key = _get_ontology_key()
+    driver = await get_driver()
+    loaded = await service._load_schema(ontology_key, driver)
+    return [
+        {
+            "key": sq.key,
+            "name": sq.name,
+            "description": sq.description,
+            "parameters": [
+                {"name": p.name, "description": p.description, "dataType": p.data_type}
+                for p in sq.parameters
+            ],
+        }
+        for sq in loaded.saved_queries.values()
+    ]
+
+
+@runtime_mcp.tool()
+@_enrich_errors
+async def run_saved_query(
+    query_key: str,
+    params: dict | None = None,
+) -> dict:
+    """Execute a saved query by name with parameter values.
+    Use list_saved_queries to discover available queries and their required
+    parameters first."""
+    ontology_key = _get_ontology_key()
+    driver = await get_driver()
+    return await service.execute_saved_query(
+        ontology_key, query_key, params or {}, driver
+    )
+
+
+@runtime_mcp.tool()
+@_enrich_errors
+async def search_saved_queries(
+    query: str,
+) -> list[dict]:
+    """Search saved queries by semantic similarity to a natural language
+    description. Returns the most relevant saved queries ranked by how well
+    their description matches. Use this to find the right saved query for a
+    user's intent."""
+    ontology_key = _get_ontology_key()
+    driver = await get_driver()
+    return await service.search_saved_queries(
+        ontology_key, query, 3, 0.7, driver
+    )

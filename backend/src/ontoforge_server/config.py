@@ -20,5 +20,7 @@ class Settings(BaseSettings):
     AI_BASE_URL: str = "http://localhost:11434"
     AI_API_KEY: str | None = None
 
+    PUBLIC_URL: str | None = None
+
 
 settings = Settings()

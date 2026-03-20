@@ -57,17 +57,47 @@ class ExportOntologyInclusions(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class ExportAiAgent(BaseModel):
+    key: str
+    name: str
+    description: str | None = None
+    system_prompt: str | None = Field(default=None, alias="systemPrompt")
+    tools: list[str] | None = None
+
+    model_config = {"populate_by_name": True}
+
+
+class ExportSavedQueryParameter(BaseModel):
+    name: str
+    description: str
+    data_type: str = Field(alias="dataType")
+
+    model_config = {"populate_by_name": True}
+
+
+class ExportSavedQuery(BaseModel):
+    key: str
+    name: str
+    description: str
+    cypher: str
+    parameters: list[ExportSavedQueryParameter] = Field(default_factory=list)
+
+    model_config = {"populate_by_name": True}
+
+
 class ExportOntology(BaseModel):
     key: str
     name: str
     description: str | None = None
     includes: ExportOntologyInclusions | None = None
+    ai_agents: list[ExportAiAgent] = Field(default_factory=list, alias="aiAgents")
+    saved_queries: list[ExportSavedQuery] = Field(default_factory=list, alias="savedQueries")
 
     model_config = {"populate_by_name": True}
 
 
 class ExportPayload(BaseModel):
-    format_version: str = Field(default="2.0", alias="formatVersion")
+    format_version: str = Field(default="2.1", alias="formatVersion")
     entity_types: list[ExportEntityType] = Field(default_factory=list, alias="entityTypes")
     relation_types: list[ExportRelationType] = Field(default_factory=list, alias="relationTypes")
     ontologies: list[ExportOntology] = Field(default_factory=list, alias="ontologies")

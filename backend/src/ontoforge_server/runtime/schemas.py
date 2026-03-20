@@ -61,6 +61,10 @@ class CypherQueryResponse(BaseModel):
     results: list[dict]
 
 
+class SavedQueryRunRequest(BaseModel):
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
 class FeaturesResponse(BaseModel):
     semantic_search: bool = Field(alias="semanticSearch")
     ai: bool = False
@@ -115,3 +119,12 @@ class AiChatResponse(BaseModel):
     )
 
     model_config = {"populate_by_name": True}
+
+
+# --- Agent Discovery ---
+
+
+class AgentInfo(BaseModel):
+    key: str
+    name: str
+    description: str | None = None

@@ -15,7 +15,8 @@ from neo4j import AsyncDriver
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
 
-from ontoforge_server.core.ai import get_ai_model
+from ontoforge_server.config import settings
+from ontoforge_server.core.ai import DEFAULT_AGENT_CONFIG, AgentConfig, get_ai_model
 from ontoforge_server.core.exceptions import NotFoundError, ValidationError
 from ontoforge_server.runtime import service
 from ontoforge_server.runtime.schemas import RelationInstanceCreate
@@ -34,6 +35,9 @@ TOOL_LIST_RELATIONS = "list_relations"
 TOOL_GET_NEIGHBORS = "get_neighbors"
 TOOL_SEMANTIC_SEARCH = "semantic_search"
 TOOL_EXECUTE_CYPHER = "execute_cypher_query"
+TOOL_LIST_SAVED_QUERIES = "list_saved_queries"
+TOOL_RUN_SAVED_QUERY = "run_saved_query"
+TOOL_SEARCH_SAVED_QUERIES = "search_saved_queries"
 
 # ---------------------------------------------------------------------------
 # Tool allowlists — controls which tools each AI feature can use
@@ -49,6 +53,9 @@ CHAT_TOOLS = [
     TOOL_GET_NEIGHBORS,
     TOOL_SEMANTIC_SEARCH,
     TOOL_EXECUTE_CYPHER,
+    TOOL_LIST_SAVED_QUERIES,
+    TOOL_RUN_SAVED_QUERY,
+    TOOL_SEARCH_SAVED_QUERIES,
 ]
 
 
@@ -241,6 +248,53 @@ async def tool_execute_cypher_query(
       MATCH (p:person) WHERE p.age > 30 RETURN p.name, p.age LIMIT 10"""
     return await service.execute_cypher_query(
         ctx.deps.ontology_key, cypher, ctx.deps.driver,
+    )
+
+
+@_register_tool(TOOL_LIST_SAVED_QUERIES)
+async def tool_list_saved_queries(ctx: RunContext[AiDeps]) -> list[dict]:
+    """List available saved queries with their parameters.
+    Each query has a key, name, description, and parameter definitions."""
+    loaded = await service._load_schema(ctx.deps.ontology_key, ctx.deps.driver)
+    return [
+        {
+            "key": sq.key,
+            "name": sq.name,
+            "description": sq.description,
+            "parameters": [
+                {"name": p.name, "description": p.description, "dataType": p.data_type}
+                for p in sq.parameters
+            ],
+        }
+        for sq in loaded.saved_queries.values()
+    ]
+
+
+@_register_tool(TOOL_RUN_SAVED_QUERY)
+async def tool_run_saved_query(
+    ctx: RunContext[AiDeps],
+    query_key: str,
+    params: dict | None = None,
+) -> dict:
+    """Execute a saved query by key with parameter values.
+    Use list_saved_queries first to discover available queries and
+    their required parameters."""
+    return await service.execute_saved_query(
+        ctx.deps.ontology_key, query_key, params or {}, ctx.deps.driver,
+    )
+
+
+@_register_tool(TOOL_SEARCH_SAVED_QUERIES)
+async def tool_search_saved_queries(
+    ctx: RunContext[AiDeps],
+    query: str,
+) -> list[dict]:
+    """Search saved queries by semantic similarity to a natural language query.
+    Returns the most relevant saved queries ranked by how well their
+    description matches your query. Use this to find the right saved query
+    for a user's intent instead of listing all queries."""
+    return await service.search_saved_queries(
+        ctx.deps.ontology_key, query, 3, 0.7, ctx.deps.driver,
     )
 
 
@@ -467,27 +521,41 @@ the answer, say so. Be concise.
 """
 
 
-async def ai_chat(
+async def run_agent_chat(
+    agent_config: AgentConfig,
     ontology_key: str,
     message: str,
     driver: AsyncDriver,
     history: list[dict] | None = None,
     include_tool_calls: bool = False,
 ) -> dict:
-    """Chat with the knowledge graph using AI and tools."""
+    """Unified engine function for agent-powered chat."""
     loaded = await service._load_schema(ontology_key, driver)
     schema_desc = _describe_schema(loaded.scoped)
 
-    # Filter chat tools to only include semantic_search if embedding is enabled
+    # Resolve system prompt
+    system_prompt = agent_config.system_prompt or _CHAT_SYSTEM_PROMPT.format(schema=schema_desc)
+    if agent_config.system_prompt:
+        system_prompt += "\n\nSCHEMA:\n" + schema_desc
+
+    # Resolve tools: intersect with available set
     from ontoforge_server.core.embedding import get_embedding_provider
 
-    available_tools = [
-        t for t in CHAT_TOOLS
-        if t != TOOL_SEMANTIC_SEARCH or get_embedding_provider() is not None
-    ]
+    _embedding_tools = {TOOL_SEMANTIC_SEARCH, TOOL_SEARCH_SAVED_QUERIES}
+
+    if agent_config.tools is not None:
+        available_tools = [
+            t for t in agent_config.tools
+            if t in ALL_TOOLS and (t not in _embedding_tools or get_embedding_provider() is not None)
+        ]
+    else:
+        available_tools = [
+            t for t in CHAT_TOOLS
+            if t not in _embedding_tools or get_embedding_provider() is not None
+        ]
 
     agent = _create_agent(
-        system_prompt=_CHAT_SYSTEM_PROMPT.format(schema=schema_desc),
+        system_prompt=system_prompt,
         tool_names=available_tools,
     )
     deps = AiDeps(ontology_key=ontology_key, driver=driver)
@@ -534,3 +602,147 @@ async def ai_chat(
         response["tool_calls"] = tool_calls
 
     return response
+
+
+async def ai_chat(
+    ontology_key: str,
+    message: str,
+    driver: AsyncDriver,
+    history: list[dict] | None = None,
+    include_tool_calls: bool = False,
+) -> dict:
+    """Chat with the knowledge graph using AI and tools (default agent)."""
+    return await run_agent_chat(
+        DEFAULT_AGENT_CONFIG, ontology_key, message, driver,
+        history=history, include_tool_calls=include_tool_calls,
+    )
+
+
+async def ai_agent_chat(
+    ontology_key: str,
+    agent_key: str,
+    message: str,
+    driver: AsyncDriver,
+    history: list[dict] | None = None,
+    include_tool_calls: bool = False,
+) -> dict:
+    """Chat using a configured agent."""
+    loaded = await service._load_schema(ontology_key, driver)
+    config = loaded.agent_configs.get(agent_key)
+    if not config:
+        raise NotFoundError(f"AI agent '{agent_key}' not found")
+    return await run_agent_chat(
+        config, ontology_key, message, driver,
+        history=history, include_tool_calls=include_tool_calls,
+    )
+
+
+async def list_runtime_agents(
+    ontology_key: str,
+    driver: AsyncDriver,
+) -> list[dict]:
+    """List all agents (default + configured) for an ontology."""
+    loaded = await service._load_schema(ontology_key, driver)
+    agents = [
+        {
+            "key": DEFAULT_AGENT_CONFIG.key,
+            "name": DEFAULT_AGENT_CONFIG.name,
+            "description": DEFAULT_AGENT_CONFIG.description,
+        }
+    ]
+    for config in loaded.agent_configs.values():
+        agents.append({
+            "key": config.key,
+            "name": config.name,
+            "description": config.description,
+        })
+    return agents
+
+
+def build_agent_card(
+    agent_config: AgentConfig,
+    schema_cache: service.SchemaCache,
+    base_url: str,
+) -> dict:
+    """Generate an A2A agent card JSON."""
+    description = agent_config.description
+    if not description:
+        entity_types = list(schema_cache.entity_types.keys())
+        relation_types = list(schema_cache.relation_types.keys())
+        description = (
+            f"Knowledge assistant for {schema_cache.ontology_name}. "
+            f"Entity types: {', '.join(entity_types)}. "
+            f"Relation types: {', '.join(relation_types)}."
+        )
+
+    if agent_config.key == "_default":
+        url = f"{base_url}/api/runtime/{schema_cache.ontology_key}/ai/a2a"
+    else:
+        url = f"{base_url}/api/runtime/{schema_cache.ontology_key}/ai/agents/{agent_config.key}/a2a"
+
+    return {
+        "name": agent_config.name,
+        "description": description,
+        "url": url,
+        "version": "0.1.0",
+        "capabilities": {
+            "streaming": False,
+            "pushNotifications": False,
+        },
+        "skills": [
+            {
+                "id": "chat",
+                "name": "Knowledge Graph Chat",
+                "description": f"Chat with the {schema_cache.ontology_name} knowledge graph",
+            }
+        ],
+    }
+
+
+async def handle_a2a_task(
+    agent_config: AgentConfig,
+    ontology_key: str,
+    request_body: dict,
+    driver: AsyncDriver,
+) -> dict:
+    """Handle an A2A JSON-RPC tasks/send request."""
+    method = request_body.get("method")
+    if method != "tasks/send":
+        return {
+            "jsonrpc": "2.0",
+            "id": request_body.get("id"),
+            "error": {"code": -32601, "message": f"Method not found: {method}"},
+        }
+
+    params = request_body.get("params", {})
+    task_id = params.get("id", str(__import__("uuid").uuid4()))
+
+    # Extract text message from parts
+    message_text = ""
+    message = params.get("message", {})
+    for part in message.get("parts", []):
+        if part.get("type") == "text":
+            message_text += part.get("text", "")
+
+    if not message_text:
+        return {
+            "jsonrpc": "2.0",
+            "id": request_body.get("id"),
+            "error": {"code": -32602, "message": "No text message found in request"},
+        }
+
+    result = await run_agent_chat(agent_config, ontology_key, message_text, driver)
+
+    return {
+        "jsonrpc": "2.0",
+        "id": request_body.get("id"),
+        "result": {
+            "id": task_id,
+            "status": {"state": "completed"},
+            "artifacts": [
+                {
+                    "parts": [{"type": "text", "text": result["reply"]}],
+                }
+            ],
+        },
+    }

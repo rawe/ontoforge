@@ -5,20 +5,14 @@ from ontoforge_server.config import settings
 from ontoforge_server.core.database import get_driver
 from ontoforge_server.core.schemas import ExportEntityType, ExportRelationType
 from ontoforge_server.runtime import service
-from ontoforge_server.runtime import ai_service
 from ontoforge_server.runtime.schemas import (
-    AiChatRequest,
-    AiChatResponse,
-    AiExtractRequest,
-    AiExtractResponse,
-    AiQueryRequest,
-    AiQueryResponse,
     CypherQueryRequest,
     CypherQueryResponse,
     FeaturesResponse,
     NeighborhoodResponse,
     PaginatedResponse,
     RelationInstanceCreate,
+    SavedQueryRunRequest,
     SchemaResponse,
     SemanticSearchResponse,
 )
@@ -256,38 +250,47 @@ async def cypher_query(
     return await service.execute_cypher_query(ontology_key, body.cypher, driver)
 
 
-# --- AI Endpoints ---
+# --- Saved Queries ---
 
 
-@router.post("/ai/query", response_model=AiQueryResponse)
-async def ai_query(
+@router.get("/saved-queries")
+async def list_saved_queries(
     ontology_key: str,
-    body: AiQueryRequest,
     driver: AsyncDriver = Depends(get_driver),
 ):
-    return await ai_service.ai_query(ontology_key, body.question, driver)
+    loaded = await service._load_schema(ontology_key, driver)
+    return [
+        {
+            "key": sq.key,
+            "name": sq.name,
+            "description": sq.description,
+            "parameters": [
+                {"name": p.name, "description": p.description, "dataType": p.data_type}
+                for p in sq.parameters
+            ],
+        }
+        for sq in loaded.saved_queries.values()
+    ]
 
 
-@router.post("/ai/extract", response_model=AiExtractResponse)
-async def ai_extract(
+@router.get("/saved-queries/search")
+async def search_saved_queries(
     ontology_key: str,
-    body: AiExtractRequest,
+    q: str = Query(..., min_length=1),
+    limit: int = Query(default=3, ge=1, le=20),
+    min_score: float | None = Query(default=0.7, ge=0.0, le=1.0),
     driver: AsyncDriver = Depends(get_driver),
 ):
-    return await ai_service.ai_extract(
-        ontology_key, body.text, driver,
-        entity_types=body.entity_types, create=body.create,
+    return await service.search_saved_queries(
+        ontology_key, q, limit, min_score, driver
     )
 
 
-@router.post("/ai/chat", response_model=AiChatResponse)
-async def ai_chat(
+@router.post("/saved-queries/{query_key}/run", response_model=CypherQueryResponse)
+async def run_saved_query(
     ontology_key: str,
-    body: AiChatRequest,
+    query_key: str,
+    body: SavedQueryRunRequest,
     driver: AsyncDriver = Depends(get_driver),
 ):
-    history = [h.model_dump() for h in body.history] if body.history else None
-    return await ai_service.ai_chat(
-        ontology_key, body.message, driver,
-        history=history, include_tool_calls=body.include_tool_calls,
-    )
+    return await service.execute_saved_query(ontology_key, query_key, body.params, driver)

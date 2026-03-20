@@ -27,6 +27,7 @@ export interface ChatState {
   messages: ChatEntry[];
   input: string;
   showToolCalls: boolean;
+  agentKey: string;
 }
 
 interface OntologyAiState {
@@ -55,6 +56,7 @@ const defaultChat = (): ChatState => ({
   messages: [],
   input: '',
   showToolCalls: false,
+  agentKey: '_default',
 });
 
 const defaultState = (): OntologyAiState => ({
@@ -126,7 +128,7 @@ export function AiStateProvider({ children }: { children: ReactNode }) {
 
   const resetChat = useCallback((key: string) => {
     const s = getOrCreate(key);
-    s.chat = defaultChat();
+    s.chat = { ...defaultChat(), agentKey: s.chat.agentKey };
     bump();
   }, [getOrCreate, bump]);
 

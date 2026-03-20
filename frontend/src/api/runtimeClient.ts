@@ -9,10 +9,11 @@ import type {
   AiExtractResponse,
   AiChatMessage,
   AiChatResponse,
+  AgentInfo,
 } from '../types/runtime';
 import { request as baseRequest } from './request';
 
-const RUNTIME_BASE_URL = 'http://localhost:8000/api/runtime';
+const RUNTIME_BASE_URL = '/api/runtime';
 
 function request<T>(path: string, options?: RequestInit): Promise<T> {
   return baseRequest<T>(RUNTIME_BASE_URL, path, options);
@@ -161,6 +162,33 @@ export const aiChat = (
   includeToolCalls?: boolean,
 ) =>
   request<AiChatResponse>(`/${ontologyKey}/ai/chat`, {
+    method: 'POST',
+    body: JSON.stringify({ message, history, includeToolCalls }),
+  });
+
+// Saved Queries
+export const runSavedQuery = (
+  ontologyKey: string,
+  queryKey: string,
+  params: Record<string, unknown>,
+) =>
+  request<{ columns: string[]; results: Record<string, unknown>[] }>(
+    `/${ontologyKey}/saved-queries/${queryKey}/run`,
+    { method: 'POST', body: JSON.stringify({ params }) },
+  );
+
+// Agent discovery and chat
+export const listAgents = (ontologyKey: string) =>
+  request<AgentInfo[]>(`/${ontologyKey}/ai/agents`);
+
+export const aiAgentChat = (
+  ontologyKey: string,
+  agentKey: string,
+  message: string,
+  history?: AiChatMessage[],
+  includeToolCalls?: boolean,
+) =>
+  request<AiChatResponse>(`/${ontologyKey}/ai/agents/${agentKey}/chat`, {
     method: 'POST',
     body: JSON.stringify({ message, history, includeToolCalls }),
   });

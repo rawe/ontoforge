@@ -644,9 +644,175 @@ Conversational Q&A with tool use against the knowledge graph.
 
 `toolCalls` is only present when `includeToolCalls` is `true`.
 
+### GET /api/runtime/{ontologyKey}/ai/agents
+
+List available AI agents for this ontology. Returns the default agent plus any agents configured via the modeling API.
+
+**Response:** `200 OK`
+```json
+[
+  {
+    "key": "default",
+    "name": "Default Assistant",
+    "description": "Schema-aware conversational agent"
+  },
+  {
+    "key": "analyst",
+    "name": "Data Analyst",
+    "description": "Specialized agent for data analysis"
+  }
+]
+```
+
+### POST /api/runtime/{ontologyKey}/ai/agents/{agentKey}/chat
+
+Agent-scoped conversational Q&A. Behaves like the `/ai/chat` endpoint but uses the agent's configured system prompt and tool set.
+
+**Request body:** Same as `/ai/chat`.
+
+**Response:** `200 OK` — same shape as `/ai/chat`.
+
+**Errors:** 404 if agent key not found.
+
+### GET /api/runtime/{ontologyKey}/ai/.well-known/agent.json
+
+Return the A2A agent card for the default agent. Describes the agent's capabilities, skills, and endpoint URL following the Agent-to-Agent (A2A) protocol.
+
+**Response:** `200 OK` — A2A agent card JSON.
+
+### POST /api/runtime/{ontologyKey}/ai/a2a
+
+A2A task endpoint for the default agent. Accepts and processes tasks following the A2A protocol.
+
+**Request body:** A2A task request.
+
+**Response:** `200 OK` — A2A task response.
+
+### GET /api/runtime/{ontologyKey}/ai/agents/{agentKey}/.well-known/agent.json
+
+Return the A2A agent card for a specific configured agent.
+
+**Response:** `200 OK` — A2A agent card JSON.
+
+**Errors:** 404 if agent key not found.
+
+### POST /api/runtime/{ontologyKey}/ai/agents/{agentKey}/a2a
+
+A2A task endpoint for a specific configured agent.
+
+**Request body:** A2A task request.
+
+**Response:** `200 OK` — A2A task response.
+
+**Errors:** 404 if agent key not found.
+
 ---
 
-## 11. Endpoint Summary
+## 11. Saved Queries
+
+### GET /api/runtime/{ontologyKey}/saved-queries
+
+List all saved queries available for this ontology. Returns query metadata and parameter definitions but not the Cypher itself.
+
+**Response:** `200 OK`
+```json
+[
+  {
+    "key": "string",
+    "name": "string",
+    "description": "string",
+    "parameters": [
+      {
+        "name": "string",
+        "description": "string",
+        "dataType": "string"
+      }
+    ]
+  }
+]
+```
+
+**Errors:** 404 if ontology key not found.
+
+### GET /api/runtime/{ontologyKey}/saved-queries/search
+
+Search saved queries by semantic similarity to a natural language description. Returns queries ranked by how well their description matches.
+
+**Query parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `q` | string (required) | — | Natural language search query |
+| `limit` | integer | 3 | Maximum results (1–20) |
+| `min_score` | float | 0.7 | Minimum cosine similarity (0.0–1.0) |
+
+**Response:** `200 OK`
+```json
+[
+  {
+    "key": "string",
+    "name": "string",
+    "description": "string",
+    "parameters": [
+      {
+        "name": "string",
+        "description": "string",
+        "dataType": "string"
+      }
+    ],
+    "score": 0.87
+  }
+]
+```
+
+**Errors:**
+- 404 if ontology key not found.
+- 422 if embedding provider is not configured (`FEATURE_DISABLED`).
+
+### POST /api/runtime/{ontologyKey}/saved-queries/{queryKey}/run
+
+Execute a saved query with the provided parameter values. Parameters are validated, type-coerced, and passed natively to Neo4j. The Cypher is re-validated against the current schema before execution.
+
+**Request body:**
+```json
+{
+  "params": {
+    "name": "Alice",
+    "min_age": 25
+  }
+}
+```
+
+All declared parameters are required. Parameter values are coerced to their declared data types.
+
+**Response:** `200 OK`
+```json
+{
+  "columns": ["p", "c"],
+  "results": [
+    {
+      "p": {
+        "_id": "b7e3f1a2-...",
+        "_entityTypeKey": "person",
+        "name": "Alice"
+      },
+      "c": {
+        "_id": "a1b2c3d4-...",
+        "_entityTypeKey": "company",
+        "name": "Acme Corp"
+      }
+    }
+  ]
+}
+```
+
+**Errors:**
+- 404 if ontology key or query key not found.
+- 422 if parameters are missing, extra, or fail type coercion. Also 422 if the Cypher fails schema re-validation (e.g., a referenced type was removed since the query was created).
+
+---
+
+## 12. Endpoint Summary
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -673,3 +839,12 @@ Conversational Q&A with tool use against the knowledge graph.
 | `POST` | `/api/runtime/{ontologyKey}/ai/query` | NL → Cypher query with answer |
 | `POST` | `/api/runtime/{ontologyKey}/ai/extract` | Extract entities/relations from text |
 | `POST` | `/api/runtime/{ontologyKey}/ai/chat` | Schema-aware conversational Q&A |
+| `GET` | `/api/runtime/{ontologyKey}/ai/agents` | List agents (default + configured) |
+| `POST` | `/api/runtime/{ontologyKey}/ai/agents/{agentKey}/chat` | Agent-scoped conversational Q&A |
+| `GET` | `/api/runtime/{ontologyKey}/ai/.well-known/agent.json` | Default agent A2A card |
+| `POST` | `/api/runtime/{ontologyKey}/ai/a2a` | Default agent A2A task |
+| `GET` | `/api/runtime/{ontologyKey}/ai/agents/{agentKey}/.well-known/agent.json` | Agent-specific A2A card |
+| `POST` | `/api/runtime/{ontologyKey}/ai/agents/{agentKey}/a2a` | Agent-specific A2A task |
+| `GET` | `/api/runtime/{ontologyKey}/saved-queries` | List saved queries |
+| `GET` | `/api/runtime/{ontologyKey}/saved-queries/search` | Semantic search over saved queries |
+| `POST` | `/api/runtime/{ontologyKey}/saved-queries/{queryKey}/run` | Execute a saved query |

@@ -503,3 +503,204 @@ error: {
 | 409 | `RESOURCE_CONFLICT` | Duplicate name/key, entity type in use by relation types |
 | 422 | `VALIDATION_ERROR` | Semantic error (invalid entity type reference, schema inconsistency) |
 | 500 | `INTERNAL_ERROR` | Unexpected server error |
+
+---
+
+## 9. AI Agent Config Endpoints
+
+AI agent configurations are managed per ontology. The path uses `ontologyKey` (not UUID) for consistency with runtime routes.
+
+### GET /api/model/ontologies/{ontologyKey}/ai-agents
+
+List all AI agent configurations for an ontology.
+
+**Response:** `200 OK`
+```json
+[
+  {
+    "key": "string",
+    "name": "string",
+    "description": "string | null",
+    "systemPrompt": "string | null",
+    "tools": ["string"],
+    "createdAt": "datetime",
+    "updatedAt": "datetime"
+  }
+]
+```
+
+**Errors:** 404 if ontology not found.
+
+### PUT /api/model/ontologies/{ontologyKey}/ai-agents/{agentKey}
+
+Create or update an AI agent configuration. Returns `201 Created` when creating a new agent and `200 OK` when updating an existing one. The `agentKey` in the path becomes the agent's key.
+
+**Request body:**
+```json
+{
+  "name": "string (required)",
+  "description": "string (optional)",
+  "systemPrompt": "string (optional)",
+  "tools": ["string (optional, list of tool names)"]
+}
+```
+
+**Response:** `201 Created` or `200 OK`
+```json
+{
+  "key": "string",
+  "name": "string",
+  "description": "string | null",
+  "systemPrompt": "string | null",
+  "tools": ["string"],
+  "createdAt": "datetime",
+  "updatedAt": "datetime"
+}
+```
+
+**Errors:** 404 if ontology not found. 422 if validation fails.
+
+### DELETE /api/model/ontologies/{ontologyKey}/ai-agents/{agentKey}
+
+Delete an AI agent configuration.
+
+**Response:** `204 No Content`
+
+**Errors:** 404 if ontology or agent not found.
+
+---
+
+## 10. Saved Query Endpoints
+
+Saved queries are managed per ontology. The path uses `ontologyKey` (not UUID) for consistency with runtime routes and AI agent endpoints.
+
+### GET /api/model/ontologies/{ontologyKey}/saved-queries
+
+List all saved queries for an ontology.
+
+**Response:** `200 OK`
+```json
+[
+  {
+    "key": "string",
+    "name": "string",
+    "description": "string",
+    "cypher": "string",
+    "parameters": [
+      {
+        "name": "string",
+        "description": "string",
+        "dataType": "string"
+      }
+    ],
+    "createdAt": "datetime",
+    "updatedAt": "datetime"
+  }
+]
+```
+
+**Errors:** 404 if ontology not found.
+
+### PUT /api/model/ontologies/{ontologyKey}/saved-queries/{queryKey}
+
+Create or update a saved query. Returns `201 Created` when creating a new query and `200 OK` when updating an existing one. The `queryKey` in the path becomes the query's key.
+
+The Cypher string is validated against the ontology's scoped schema at creation time. Parameter declarations must match `$param` references in the Cypher string.
+
+**Request body:**
+```json
+{
+  "name": "string (required)",
+  "description": "string (required)",
+  "cypher": "string (required)",
+  "parameters": [
+    {
+      "name": "string (required)",
+      "description": "string (required)",
+      "dataType": "string (required, one of: string, integer, float, boolean, date, datetime)"
+    }
+  ]
+}
+```
+
+**Response:** `201 Created` or `200 OK`
+```json
+{
+  "key": "string",
+  "name": "string",
+  "description": "string",
+  "cypher": "string",
+  "parameters": [
+    {
+      "name": "string",
+      "description": "string",
+      "dataType": "string"
+    }
+  ],
+  "createdAt": "datetime",
+  "updatedAt": "datetime"
+}
+```
+
+**Errors:** 404 if ontology not found. 422 if Cypher validation fails or parameters don't match Cypher `$param` references.
+
+### DELETE /api/model/ontologies/{ontologyKey}/saved-queries/{queryKey}
+
+Delete a saved query.
+
+**Response:** `204 No Content`
+
+**Errors:** 404 if ontology or saved query not found.
+
+---
+
+## 11. AI Agent Config DTOs
+
+### AiAgentConfigUpsert
+```
+name: string (required)
+description: string (optional)
+systemPrompt: string (optional)
+tools: string[] (optional, list of tool names)
+```
+
+### AiAgentConfigResponse
+```
+key: string
+name: string
+description: string | null
+systemPrompt: string | null
+tools: string[]
+createdAt: datetime
+updatedAt: datetime
+```
+
+---
+
+## 12. Saved Query DTOs
+
+### SavedQueryUpsert
+```
+name: string (required)
+description: string (required)
+cypher: string (required)
+parameters: array of SavedQueryParameter (optional, default [])
+```
+
+### SavedQueryParameter
+```
+name: string (required, pattern: ^[a-zA-Z_]\w*$)
+description: string (required)
+dataType: string (required, enum: string | integer | float | boolean | date | datetime)
+```
+
+### SavedQueryResponse
+```
+key: string
+name: string
+description: string
+cypher: string
+parameters: array of SavedQueryParameter
+createdAt: datetime
+updatedAt: datetime
+```

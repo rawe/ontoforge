@@ -60,6 +60,29 @@ async def ensure_vector_indexes(driver: AsyncDriver, dimensions: int) -> None:
             driver, et["key"], dimensions, filter_properties=et["property_keys"]
         )
 
+    # Saved query vector index (for semantic search over descriptions)
+    await _ensure_saved_query_vector_index(driver, dimensions)
+
+
+async def _ensure_saved_query_vector_index(
+    driver: AsyncDriver, dimensions: int
+) -> None:
+    """Create the vector index for SavedQuery descriptions (IF NOT EXISTS).
+
+    Uses _ontologyKey as an in-index filter property so that semantic search
+    can be scoped to a single ontology in one query.
+    """
+    query = (
+        "CREATE VECTOR INDEX saved_query_embedding IF NOT EXISTS "
+        "FOR (sq:SavedQuery) ON (sq._embedding) "
+        "WITH [sq._ontologyKey] "
+        f"OPTIONS {{indexConfig: {{`vector.dimensions`: {dimensions}, "
+        f"`vector.similarity_function`: 'cosine'}}}}"
+    )
+    async with driver.session() as session:
+        await session.run(query)
+    logger.info("Vector index ensured: saved_query_embedding")
+
 
 async def create_vector_index(
     driver: AsyncDriver,

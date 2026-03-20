@@ -37,6 +37,7 @@ TOOL_SEMANTIC_SEARCH = "semantic_search"
 TOOL_EXECUTE_CYPHER = "execute_cypher_query"
 TOOL_LIST_SAVED_QUERIES = "list_saved_queries"
 TOOL_RUN_SAVED_QUERY = "run_saved_query"
+TOOL_SEARCH_SAVED_QUERIES = "search_saved_queries"
 
 # ---------------------------------------------------------------------------
 # Tool allowlists — controls which tools each AI feature can use
@@ -54,6 +55,7 @@ CHAT_TOOLS = [
     TOOL_EXECUTE_CYPHER,
     TOOL_LIST_SAVED_QUERIES,
     TOOL_RUN_SAVED_QUERY,
+    TOOL_SEARCH_SAVED_QUERIES,
 ]
 
 
@@ -279,6 +281,20 @@ async def tool_run_saved_query(
     their required parameters."""
     return await service.execute_saved_query(
         ctx.deps.ontology_key, query_key, params or {}, ctx.deps.driver,
+    )
+
+
+@_register_tool(TOOL_SEARCH_SAVED_QUERIES)
+async def tool_search_saved_queries(
+    ctx: RunContext[AiDeps],
+    query: str,
+) -> list[dict]:
+    """Search saved queries by semantic similarity to a natural language query.
+    Returns the most relevant saved queries ranked by how well their
+    description matches your query. Use this to find the right saved query
+    for a user's intent instead of listing all queries."""
+    return await service.search_saved_queries(
+        ctx.deps.ontology_key, query, 3, 0.7, ctx.deps.driver,
     )
 
 
@@ -525,15 +541,17 @@ async def run_agent_chat(
     # Resolve tools: intersect with available set
     from ontoforge_server.core.embedding import get_embedding_provider
 
+    _embedding_tools = {TOOL_SEMANTIC_SEARCH, TOOL_SEARCH_SAVED_QUERIES}
+
     if agent_config.tools is not None:
         available_tools = [
             t for t in agent_config.tools
-            if t in ALL_TOOLS and (t != TOOL_SEMANTIC_SEARCH or get_embedding_provider() is not None)
+            if t in ALL_TOOLS and (t not in _embedding_tools or get_embedding_provider() is not None)
         ]
     else:
         available_tools = [
             t for t in CHAT_TOOLS
-            if t != TOOL_SEMANTIC_SEARCH or get_embedding_provider() is not None
+            if t not in _embedding_tools or get_embedding_provider() is not None
         ]
 
     agent = _create_agent(

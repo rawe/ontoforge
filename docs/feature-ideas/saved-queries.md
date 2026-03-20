@@ -52,6 +52,8 @@ The agent provides `{"skillQuery": "data engineering"}` and gets back people wit
 | `description` | String | Required — the agent uses this to choose the right query |
 | `cypher` | String | Parameterized Cypher template using `$param` syntax |
 | `parameters` | String (JSON) | Serialized array of parameter definitions |
+| `_ontologyKey` | String | Owning ontology key — denormalized because Neo4j's SEARCH WHERE clause can only filter on node properties, not relationships |
+| `_embedding` | List of Float | Vector embedding of the description field (set when embedding provider is configured) |
 | `createdAt` | DateTime | Set on creation |
 | `updatedAt` | DateTime | Updated on every mutation |
 
@@ -102,12 +104,13 @@ Same layered pattern as AI agents (repository → service → router/MCP):
 
 ### Runtime Tools
 
-Two new tools registered in `ALL_TOOLS` (`runtime/ai_service.py`):
+Three tools registered in `ALL_TOOLS` (`runtime/ai_service.py`):
 
 | Tool | Arguments | Returns | Description |
 |------|-----------|---------|-------------|
 | `list_saved_queries` | — | List of `{ key, name, description, parameters }` | Discover available pre-defined queries and their required parameters. |
 | `run_saved_query` | `query_key` (string), `parameters` (object) | `{ "columns": [...], "results": [...] }` | Execute a saved query by name with the required parameters. Returns tabular results. |
+| `search_saved_queries` | `query` (string) | List of `{ key, name, description, parameters, score }` | Semantic search over saved query descriptions. Returns the most relevant queries ranked by similarity. |
 
 `run_saved_query` execution:
 
@@ -119,16 +122,28 @@ Two new tools registered in `ALL_TOOLS` (`runtime/ai_service.py`):
 
 The return format matches `cypher_query` — agents and consumers don't need to handle a different shape.
 
+### Semantic Search over Saved Queries
+
+`search_saved_queries` enables agents and callers to find the right saved query by describing intent in natural language, rather than listing all queries and scanning manually. The search operates on the `description` field only — at write time (create/update), the description is embedded via the configured embedding provider and stored as `_embedding` on the SavedQuery node.
+
+A dedicated vector index (`saved_query_embedding`) on SavedQuery nodes supports this search. Queries are scoped to a single ontology via in-index filtering on a stored `_ontologyKey` property.
+
+**REST:** `GET /api/runtime/{ontologyKey}/saved-queries/search?q=...&limit=3&min_score=0.7` — limit and min_score are optional with conservative defaults.
+
+**MCP/Agent tools:** `search_saved_queries(query)` — limit (3) and min_score (0.7) are fixed to avoid overloading LLM context. Only the query string is exposed as a parameter.
+
+The response format extends `list_saved_queries` with an additional `score` field (cosine similarity, 0–1).
+
 ### Runtime MCP
 
-Both tools are exposed as MCP tools on the runtime MCP server (`/mcp/runtime/{ontologyKey}`), following the same pattern as existing runtime tools.
+All three tools are exposed as MCP tools on the runtime MCP server (`/mcp/runtime/{ontologyKey}`), following the same pattern as existing runtime tools.
 
 ### Agent Tool Selection
 
-`list_saved_queries` and `run_saved_query` become selectable in AI agent tool lists (validated against `ALL_TOOLS`). A minimal agent optimized for small models might use only:
+`list_saved_queries`, `run_saved_query`, and `search_saved_queries` become selectable in AI agent tool lists (validated against `ALL_TOOLS`). `search_saved_queries` requires an embedding provider — it is automatically excluded when none is configured. A minimal agent optimized for small models might use only:
 
 ```json
-{ "tools": ["list_saved_queries", "run_saved_query"] }
+{ "tools": ["search_saved_queries", "run_saved_query"] }
 ```
 
 Or, if the available queries are baked into the system prompt:
@@ -175,18 +190,19 @@ Deleting an ontology cascades to its saved queries (same as AI agents). Deleting
 
 | File | Change |
 |------|--------|
-| `core/database.py` | New constraint for `SavedQuery` |
+| `core/database.py` | New constraint for `SavedQuery`; `saved_query_embedding` vector index creation on startup |
 | `core/schemas.py` | `ExportSavedQuery`, `ExportSavedQueryParameter` models; add to `ExportOntology` |
 | `core/ai.py` | `SavedQueryConfig` dataclass for runtime loading |
 | `modeling/schemas.py` | Request/response models for saved query CRUD |
-| `modeling/repository.py` | CRUD Cypher queries (MERGE upsert, list, delete, export) |
-| `modeling/service.py` | Validation logic, Cypher validation at creation, export/import |
+| `modeling/repository.py` | CRUD Cypher queries (MERGE upsert with `_ontologyKey` and `_embedding`, list, delete, export) |
+| `modeling/service.py` | Validation logic, Cypher validation at creation, description embedding at write time, export/import with embedding regeneration |
 | `modeling/router.py` | REST endpoints |
 | `mcp/modeling.py` | `set_saved_query`, `delete_saved_query`, `list_saved_queries` tools |
-| `runtime/ai_service.py` | Register `list_saved_queries` + `run_saved_query` in `ALL_TOOLS` |
-| `runtime/service.py` | Load saved queries into `LoadedSchema`, execution logic |
-| `runtime/repository.py` | Load saved queries for schema cache |
-| `mcp/runtime.py` | `list_saved_queries` + `run_saved_query` MCP tools |
+| `runtime/ai_service.py` | Register `list_saved_queries` + `run_saved_query` + `search_saved_queries` in `ALL_TOOLS` |
+| `runtime/service.py` | Load saved queries into `LoadedSchema`, execution logic, `search_saved_queries` service function |
+| `runtime/repository.py` | Load saved queries for schema cache; `search_saved_queries` vector search query |
+| `runtime/router.py` | `GET /saved-queries/search` REST endpoint |
+| `mcp/runtime.py` | `list_saved_queries` + `run_saved_query` + `search_saved_queries` MCP tools |
 | `docs/architecture.md` | `SavedQuery` node in storage model, `HAS_SAVED_QUERY` relationship |
 | `docs/mcp-architecture.md` | New tools in modeling and runtime catalogs |
 | `docs/api-contracts/` | New endpoints in modeling and runtime contracts |

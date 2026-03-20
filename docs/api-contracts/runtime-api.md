@@ -734,6 +734,41 @@ List all saved queries available for this ontology. Returns query metadata and p
 
 **Errors:** 404 if ontology key not found.
 
+### GET /api/runtime/{ontologyKey}/saved-queries/search
+
+Search saved queries by semantic similarity to a natural language description. Returns queries ranked by how well their description matches.
+
+**Query parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `q` | string (required) | — | Natural language search query |
+| `limit` | integer | 3 | Maximum results (1–20) |
+| `min_score` | float | 0.7 | Minimum cosine similarity (0.0–1.0) |
+
+**Response:** `200 OK`
+```json
+[
+  {
+    "key": "string",
+    "name": "string",
+    "description": "string",
+    "parameters": [
+      {
+        "name": "string",
+        "description": "string",
+        "dataType": "string"
+      }
+    ],
+    "score": 0.87
+  }
+]
+```
+
+**Errors:**
+- 404 if ontology key not found.
+- 422 if embedding provider is not configured (`FEATURE_DISABLED`).
+
 ### POST /api/runtime/{ontologyKey}/saved-queries/{queryKey}/run
 
 Execute a saved query with the provided parameter values. Parameters are validated, type-coerced, and passed natively to Neo4j. The Cypher is re-validated against the current schema before execution.
@@ -811,4 +846,5 @@ All declared parameters are required. Parameter values are coerced to their decl
 | `GET` | `/api/runtime/{ontologyKey}/ai/agents/{agentKey}/.well-known/agent.json` | Agent-specific A2A card |
 | `POST` | `/api/runtime/{ontologyKey}/ai/agents/{agentKey}/a2a` | Agent-specific A2A task |
 | `GET` | `/api/runtime/{ontologyKey}/saved-queries` | List saved queries |
+| `GET` | `/api/runtime/{ontologyKey}/saved-queries/search` | Semantic search over saved queries |
 | `POST` | `/api/runtime/{ontologyKey}/saved-queries/{queryKey}/run` | Execute a saved query |

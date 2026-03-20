@@ -1126,16 +1126,22 @@ async def import_schema(
                 )
 
             # Import saved queries
+            provider = get_embedding_provider()
             for sq in ont.saved_queries:
                 _cross_check_params(sq.cypher, [p.name for p in sq.parameters], sq.key)
                 params_json = _serialize_params([
                     {"name": p.name, "description": p.description, "dataType": p.data_type}
                     for p in sq.parameters
                 ])
+                sq_embedding = None
+                if provider:
+                    sq_embedding = await provider.embed(sq.description)
                 sq_id = str(uuid4())
                 await repository.upsert_saved_query(
                     session, ont_id, sq_id, sq.key, sq.name,
                     sq.description, sq.cypher, params_json,
+                    ontology_key=ont.key,
+                    embedding=sq_embedding,
                 )
 
             created_ontologies.append(_to_ontology_response(ont_data))
@@ -1346,6 +1352,12 @@ async def upsert_saved_query(
         for p in body.parameters
     ])
 
+    # Embed the description for semantic search over saved queries
+    embedding = None
+    provider = get_embedding_provider()
+    if provider:
+        embedding = await provider.embed(body.description)
+
     async with driver.session() as session:
         saved_query_id = str(uuid4())
         data, created = await repository.upsert_saved_query(
@@ -1357,6 +1369,8 @@ async def upsert_saved_query(
             body.description,
             body.cypher,
             params_json,
+            ontology_key=ontology_key,
+            embedding=embedding,
         )
     _invalidate_runtime_schema_cache()
     return _to_saved_query_response(data), created

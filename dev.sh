@@ -58,7 +58,7 @@ echo "Embedding: $EMBED_MODE ($EMBEDDING_MODEL)"
 
 # --- AI preset (Ollama) ---
 export AI_PROVIDER="${AI_PROVIDER:-ollama}"
-export AI_MODEL="${AI_MODEL:-qwen3:14b}"
+export AI_MODEL="${AI_MODEL:-qwen3:8b}"
 export AI_BASE_URL="${AI_BASE_URL:-http://localhost:11434}"
 echo "AI: $AI_PROVIDER ($AI_MODEL)"
 

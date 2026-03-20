@@ -264,7 +264,7 @@ Properties are managed through unified tools that work on both entity types and 
 | `set_saved_query` | `key`, `name`, `description`, `cypher`, `parameters` (list of `{name, description, dataType}`) | Created/updated saved query | Create or update a saved query. Cypher is validated against the scoped schema at creation time. Parameters must match `$param` references in the Cypher. |
 | `delete_saved_query` | `key` | Confirmation | Delete a saved query. |
 
-### 3.2 Runtime MCP Tools (16 tools)
+### 3.2 Runtime MCP Tools (17 tools)
 
 #### Schema Introspection
 
@@ -309,6 +309,7 @@ Properties are managed through unified tools that work on both entity types and 
 | Tool | Arguments | Returns | Description |
 |------|-----------|---------|-------------|
 | `list_saved_queries` | — | List of saved queries with key, name, description, parameters | List all saved queries available for this ontology. |
+| `search_saved_queries` | `query` (string) | List of saved queries with key, name, description, parameters, score | Search saved queries by semantic similarity to a natural language description. Returns up to 3 results above 0.7 similarity. Requires embedding provider. |
 | `run_saved_query` | `query_key`, `parameters` (object) | `{"columns": [...], "results": [...]}` | Execute a saved query with the provided parameter values. Parameters are type-coerced and passed natively to Neo4j. |
 
 #### Data Management

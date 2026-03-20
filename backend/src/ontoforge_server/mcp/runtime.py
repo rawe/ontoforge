@@ -373,3 +373,19 @@ async def run_saved_query(
     return await service.execute_saved_query(
         ontology_key, query_key, params or {}, driver
     )
+
+
+@runtime_mcp.tool()
+@_enrich_errors
+async def search_saved_queries(
+    query: str,
+) -> list[dict]:
+    """Search saved queries by semantic similarity to a natural language
+    description. Returns the most relevant saved queries ranked by how well
+    their description matches. Use this to find the right saved query for a
+    user's intent."""
+    ontology_key = _get_ontology_key()
+    driver = await get_driver()
+    return await service.search_saved_queries(
+        ontology_key, query, 3, 0.7, driver
+    )

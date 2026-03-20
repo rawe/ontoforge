@@ -646,3 +646,48 @@ async def get_saved_queries(
         ontology_key=ontology_key,
     )
     return [dict(record) async for record in result]
+
+
+async def search_saved_queries(
+    session: AsyncSession,
+    query_embedding: list[float],
+    ontology_key: str,
+    limit: int,
+    min_score: float | None,
+) -> list[dict]:
+    """Semantic search over SavedQuery descriptions using the vector index.
+
+    Scoped to a single ontology via in-index filtering on _ontologyKey.
+    """
+    query = (
+        "MATCH (sq:SavedQuery) "
+        "SEARCH sq IN ("
+        "VECTOR INDEX saved_query_embedding "
+        "FOR $query_embedding "
+        "WHERE sq._ontologyKey = $ontology_key "
+        "LIMIT $limit"
+        ") SCORE AS score "
+        "RETURN sq.key AS key, sq.name AS name, sq.description AS description, "
+        "sq.parameters AS parameters, score"
+    )
+
+    result = await session.run(
+        query,
+        query_embedding=query_embedding,
+        ontology_key=ontology_key,
+        limit=limit,
+    )
+
+    items = []
+    async for record in result:
+        score = record["score"]
+        if min_score is not None and score < min_score:
+            continue
+        items.append({
+            "key": record["key"],
+            "name": record["name"],
+            "description": record["description"],
+            "parameters": record["parameters"],
+            "score": score,
+        })
+    return items

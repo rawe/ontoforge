@@ -273,6 +273,19 @@ async def list_saved_queries(
     ]
 
 
+@router.get("/saved-queries/search")
+async def search_saved_queries(
+    ontology_key: str,
+    q: str = Query(..., min_length=1),
+    limit: int = Query(default=3, ge=1, le=20),
+    min_score: float | None = Query(default=0.7, ge=0.0, le=1.0),
+    driver: AsyncDriver = Depends(get_driver),
+):
+    return await service.search_saved_queries(
+        ontology_key, q, limit, min_score, driver
+    )
+
+
 @router.post("/saved-queries/{query_key}/run", response_model=CypherQueryResponse)
 async def run_saved_query(
     ontology_key: str,

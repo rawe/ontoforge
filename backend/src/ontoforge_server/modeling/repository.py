@@ -990,12 +990,17 @@ async def upsert_saved_query(
     description: str,
     cypher: str,
     parameters_json: str,
+    ontology_key: str | None = None,
+    embedding: list[float] | None = None,
 ) -> tuple[dict, bool]:
     """MERGE-based upsert. Returns (record, created)."""
+    embedding_create = ", sq._embedding = $embedding" if embedding is not None else ""
+    embedding_match = ", sq._embedding = $embedding" if embedding is not None else ""
+    ontology_key_clause = ", sq._ontologyKey = $ontology_key" if ontology_key is not None else ""
     result = await session.run(
-        """
-        MATCH (o:Ontology {ontologyId: $ontology_id})
-        MERGE (o)-[:HAS_SAVED_QUERY]->(sq:SavedQuery {key: $key})
+        f"""
+        MATCH (o:Ontology {{ontologyId: $ontology_id}})
+        MERGE (o)-[:HAS_SAVED_QUERY]->(sq:SavedQuery {{key: $key}})
         ON CREATE SET
             sq.savedQueryId = $saved_query_id,
             sq.name = $name,
@@ -1003,14 +1008,14 @@ async def upsert_saved_query(
             sq.cypher = $cypher,
             sq.parameters = $parameters_json,
             sq.createdAt = datetime(),
-            sq.updatedAt = datetime()
+            sq.updatedAt = datetime(){ontology_key_clause}{embedding_create}
         ON MATCH SET
             sq.name = $name,
             sq.description = $description,
             sq.cypher = $cypher,
             sq.parameters = $parameters_json,
-            sq.updatedAt = datetime()
-        RETURN sq {.*} AS query, sq.savedQueryId = $saved_query_id AS created
+            sq.updatedAt = datetime(){ontology_key_clause}{embedding_match}
+        RETURN sq {{.*}} AS query, sq.savedQueryId = $saved_query_id AS created
         """,
         ontology_id=ontology_id,
         saved_query_id=saved_query_id,
@@ -1019,6 +1024,8 @@ async def upsert_saved_query(
         description=description,
         cypher=cypher,
         parameters_json=parameters_json,
+        ontology_key=ontology_key,
+        embedding=embedding,
     )
     record = await result.single()
     return _convert_neo4j_types(record["query"]), record["created"]

@@ -1416,3 +1416,52 @@ async def execute_saved_query(
             _strip_out_of_scope_props(value, type_key, scoped)
 
     return {"columns": columns, "results": rows}
+
+
+# ---------------------------------------------------------------------------
+# Service Functions — Saved Query Semantic Search
+# ---------------------------------------------------------------------------
+
+
+async def search_saved_queries(
+    ontology_key: str,
+    query: str,
+    limit: int,
+    min_score: float | None,
+    driver: AsyncDriver,
+) -> list[dict]:
+    """Semantic search over saved query descriptions.
+
+    Returns results in the same shape as list_saved_queries, plus a score.
+    """
+    import json as _json
+
+    provider = get_embedding_provider()
+    if not provider:
+        raise ValidationError(
+            "Semantic search requires EMBEDDING_PROVIDER to be configured",
+            details={"code": "FEATURE_DISABLED"},
+        )
+
+    query_embedding = await provider.embed(query)
+    if query_embedding is None:
+        raise ValidationError("Failed to generate embedding for search query")
+
+    async with driver.session() as session:
+        results = await repository.search_saved_queries(
+            session, query_embedding, ontology_key, limit, min_score
+        )
+
+    # Deserialize parameters JSON for each result
+    for r in results:
+        params_raw = r.get("parameters", "[]")
+        if isinstance(params_raw, str):
+            params_list = _json.loads(params_raw)
+        else:
+            params_list = params_raw or []
+        r["parameters"] = [
+            {"name": p["name"], "description": p["description"], "dataType": p["dataType"]}
+            for p in params_list
+        ]
+
+    return results

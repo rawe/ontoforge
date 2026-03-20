@@ -230,6 +230,8 @@ Connected to its owning ontology via a `HAS_AI_AGENT` relationship.
 | `description` | String | Required description |
 | `cypher` | String | Parameterized Cypher query |
 | `parameters` | String (JSON) | Serialized list of `{name, description, dataType}` |
+| `_ontologyKey` | String | Owning ontology key — denormalized because SEARCH WHERE can only filter on node properties, not relationships |
+| `_embedding` | List of Float | Vector embedding of the description field |
 | `createdAt` | DateTime | Set on creation |
 | `updatedAt` | DateTime | Updated on every mutation |
 

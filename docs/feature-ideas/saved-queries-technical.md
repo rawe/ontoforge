@@ -13,6 +13,8 @@ SavedQuery nodes store pre-defined, parameterized Cypher queries per ontology.
 | `description` | string | Required description |
 | `cypher` | string | Parameterized Cypher query |
 | `parameters` | JSON string | Serialized list of `{name, description, dataType}` |
+| `_ontologyKey` | string | Owning ontology key (denormalized for in-index vector filtering) |
+| `_embedding` | float list | Vector embedding of the description field |
 | `createdAt` | datetime | Auto-set on creation |
 | `updatedAt` | datetime | Auto-set on creation and update |
 
@@ -53,22 +55,45 @@ Parameters are passed to Neo4j as native parameterized query arguments — they 
 
 ## Tool Registry Integration
 
-Two tools are registered in `ALL_TOOLS` via `@_register_tool`:
+Three tools are registered in `ALL_TOOLS` via `@_register_tool`:
 - `list_saved_queries` — returns `{key, name, description, parameters}` for each saved query from the loaded schema cache
 - `run_saved_query` — calls `service.execute_saved_query()`
+- `search_saved_queries` — semantic search over saved query descriptions via `service.search_saved_queries()`
 
-Both tools are included in `CHAT_TOOLS`, making them available to all agents by default. They can be selectively enabled per agent via the `tools` field on `AiAgentConfig`.
+All three tools are included in `CHAT_TOOLS`, making them available to all agents by default. `search_saved_queries` requires an embedding provider and is automatically excluded when none is configured (same gating as `semantic_search`). They can be selectively enabled per agent via the `tools` field on `AiAgentConfig`.
 
 Exposure:
 - **AI chat** — available as PydanticAI tools in the agent runtime
 - **Runtime MCP** — registered on the runtime MCP server at `/mcp/runtime/{ontology_key}`
-- **Agent config UI** — `list_saved_queries` and `run_saved_query` appear as checkboxes in the AiAgentForm
+- **Agent config UI** — `list_saved_queries`, `run_saved_query`, and `search_saved_queries` appear as checkboxes in the AiAgentForm
 
 ## Export/Import
 
 The `savedQueries` field on `ExportOntology` defaults to an empty list, maintaining backward compatibility with existing v2.1 exports (no format version bump needed).
 
 On export, parameters are deserialized from JSON and mapped to `ExportSavedQueryParameter` models. On import, parameters are cross-checked against the Cypher string, serialized back to JSON, and stored via `upsert_saved_query`.
+
+## Semantic Search over Saved Queries
+
+Saved queries support semantic search by description, enabling agents and callers to discover the right query by intent rather than by scanning all available queries.
+
+**Embedding at write time:** When a saved query is created or updated, the `description` field is embedded via the configured `EmbeddingProvider` and stored as `_embedding` on the SavedQuery node. Only the description is embedded — name, cypher, and parameters are excluded from the embedding text.
+
+**Ontology scoping:** A denormalized `_ontologyKey` property is stored on each SavedQuery node. This is necessary because the Neo4j SEARCH clause's in-index WHERE can only filter on node properties stored in the vector index — it cannot traverse relationships. Since SavedQuery nodes are linked to ontologies via `[:HAS_SAVED_QUERY]` relationships, scoping by ontology in a single vector search query requires the ontology key to be materialized as a flat property on the node itself. The property is set on both create and update, kept in sync with the owning ontology.
+
+**Vector index:** A `saved_query_embedding` index is created on startup alongside entity type vector indexes. It includes `_ontologyKey` in the WITH clause for in-index filtering.
+
+**Search flow:**
+1. Embed the natural language query via the embedding provider
+2. Execute a SEARCH clause against the `saved_query_embedding` index with `WHERE sq._ontologyKey = $ontology_key`
+3. Filter results by min_score
+4. Deserialize parameters JSON and return results in `list_saved_queries`-compatible format plus `score`
+
+**REST endpoint:** `GET /api/runtime/{ontologyKey}/saved-queries/search?q=...` with optional `limit` (default 3) and `min_score` (default 0.7) parameters.
+
+**MCP tool and AI agent tool:** `search_saved_queries(query)` — limit and min_score are fixed constants (3 and 0.7 respectively) to keep LLM context lean. Only the query string is exposed.
+
+**Import:** On schema import, saved query descriptions are re-embedded if an embedding provider is configured, and `_ontologyKey` is set from the ontology being imported.
 
 ## Known Limitations
 
@@ -88,3 +113,5 @@ On export, parameters are deserialized from JSON and mapped to `ExportSavedQuery
 | MCP runtime tools | `tests/integration/test_mcp_runtime.py` | Call `list_saved_queries` and `run_saved_query` via MCP client against real server with seeded data. |
 | AI agent with saved query tools | `tests/integration/test_ai.py` | Configure an agent with only `run_saved_query` tool, send a chat message, verify the agent uses the saved query to answer. (Requires AI provider.) |
 | Schema change impact | `tests/integration/test_saved_queries.py` | Create a saved query referencing an entity type, remove that type from the ontology scope, verify `run_saved_query` returns a clear validation error. |
+| Semantic search over saved queries | `tests/integration/test_saved_queries.py` | Create saved queries with descriptive descriptions, call `search_saved_queries` with a natural language query, verify results are ranked by relevance and scoped to the correct ontology. (Requires embedding provider.) |
+| Semantic search via MCP | `tests/integration/test_mcp_runtime.py` | Call `search_saved_queries` via MCP client, verify results and score format. |

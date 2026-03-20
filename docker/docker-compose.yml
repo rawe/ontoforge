@@ -59,6 +59,9 @@ services:
     container_name: ontoforge-frontend
     ports:
       - "3000:80"
+    environment:
+      # Internal URL of the backend service — nginx proxies /api and /mcp here
+      BACKEND_URL: http://backend:8000
     depends_on:
       - backend
 

@@ -126,22 +126,6 @@ function OntologyNode({ node, pathname, aiEnabled }: { node: OntologyTreeNode; p
         <div className="ml-3 pl-3 border-l border-gray-700 flex flex-col gap-0.5 mt-0.5">
           <NavLink to={`/ontologies/${node.ontology.ontologyId}`} label="Scope" pathname={pathname} exact />
 
-          {aiEnabled && (
-            <CollapsibleSection
-              label="AI"
-              labelClassName="text-purple-400"
-              storageKey={`sidebar-ai-${node.ontology.key}`}
-              defaultExpanded={true}
-              pathname={pathname}
-            >
-              <NavLink to={`/ontologies/${node.ontology.ontologyId}/agents`} label="Agents" pathname={pathname} />
-              <NavLink to={`/ontologies/${node.ontology.ontologyId}/saved-queries`} label="Saved Queries" pathname={pathname} />
-              <NavLink to={`/data/${node.ontology.key}/ai/chat`} label="Chat" pathname={pathname} />
-              <NavLink to={`/data/${node.ontology.key}/ai/query`} label="Query" pathname={pathname} />
-              <NavLink to={`/data/${node.ontology.key}/ai/extract`} label="Extract" pathname={pathname} />
-            </CollapsibleSection>
-          )}
-
           {hasSchemaTypes && (
             <CollapsibleSection
               label="Data"
@@ -156,6 +140,22 @@ function OntologyNode({ node, pathname, aiEnabled }: { node: OntologyTreeNode; p
               {relationTypes.length > 0 && (
                 <NavLink to={`/data/${node.ontology.key}/relations`} label="Relations" pathname={pathname} />
               )}
+            </CollapsibleSection>
+          )}
+
+          {aiEnabled && (
+            <CollapsibleSection
+              label="AI"
+              labelClassName="text-purple-400"
+              storageKey={`sidebar-ai-${node.ontology.key}`}
+              defaultExpanded={true}
+              pathname={pathname}
+            >
+              <NavLink to={`/ontologies/${node.ontology.ontologyId}/agents`} label="Agents" pathname={pathname} />
+              <NavLink to={`/ontologies/${node.ontology.ontologyId}/saved-queries`} label="Saved Queries" pathname={pathname} />
+              <NavLink to={`/data/${node.ontology.key}/ai/chat`} label="Chat" pathname={pathname} />
+              <NavLink to={`/data/${node.ontology.key}/ai/query`} label="Query" pathname={pathname} />
+              <NavLink to={`/data/${node.ontology.key}/ai/extract`} label="Extract" pathname={pathname} />
             </CollapsibleSection>
           )}
         </div>

@@ -4,7 +4,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import type { ValidationResult, IncludeTypeResponse, PropertyDefinition } from '../types/models';
 import * as api from '../api/client';
+import { useRuntimeSchema } from '../hooks/useRuntimeSchema';
 import OntologyForm from '../components/forms/OntologyForm';
+import ScopedOntologyGraph from '../components/graph/ScopedOntologyGraph';
 
 export default function OntologyDetailPage() {
   const { ontologyId } = useParams<{ ontologyId: string }>();
@@ -18,6 +20,8 @@ export default function OntologyDetailPage() {
     queryFn: () => api.getOntology(ontologyId!),
     enabled: !!ontologyId,
   });
+
+  const { data: runtimeSchema, isLoading: schemaLoading } = useRuntimeSchema(ontology?.key);
 
   const { data: allEntityTypes = [] } = useQuery({
     queryKey: ['entityTypes'],
@@ -299,14 +303,13 @@ export default function OntologyDetailPage() {
       )}
 
       {activeTab === 'diagram' && (
-        <div className="flex flex-col items-center justify-center py-20 text-gray-400 border-2 border-dashed border-gray-200 rounded-lg">
-          <svg className="w-12 h-12 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round"
-              d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6z" />
-          </svg>
-          <p className="text-sm font-medium">Scoped Ontology Diagram</p>
-          <p className="text-xs mt-1">React Flow visualization — coming soon</p>
-        </div>
+        schemaLoading ? (
+          <p className="text-gray-400 text-sm">Loading schema...</p>
+        ) : runtimeSchema ? (
+          <ScopedOntologyGraph schema={runtimeSchema} />
+        ) : (
+          <p className="text-gray-400 text-sm italic">Schema not available. Validate the ontology scope first.</p>
+        )
       )}
     </div>
   );

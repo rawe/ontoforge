@@ -186,8 +186,8 @@ export default function EntityInstanceListPage() {
 
   return (
     <div>
-      <Link to={`/data/${ontologyKey}`} className="text-blue-600 hover:underline text-sm">
-        &larr; Back to data
+      <Link to={`/data/${ontologyKey}/entities`} className="text-blue-600 hover:underline text-sm">
+        &larr; Back to entities
       </Link>
 
       <div className="mt-4 mb-4 flex items-center justify-between">

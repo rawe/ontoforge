@@ -60,7 +60,14 @@ function buildCrumbs(pathname: string, queryClient: ReturnType<typeof useQueryCl
     if (parts.length >= 2) {
       const ontologyId = parts[1];
       const ontologyName = resolveOntologyName(queryClient, ontologyId);
-      crumbs.push({ label: ontologyName });
+
+      if (parts.length === 2) {
+        crumbs.push({ label: ontologyName });
+      } else {
+        crumbs.push({ label: ontologyName, to: `/ontologies/${ontologyId}` });
+        if (parts[2] === 'agents') crumbs.push({ label: 'AI Agents' });
+        else if (parts[2] === 'saved-queries') crumbs.push({ label: 'Saved Queries' });
+      }
     }
 
     return crumbs;
@@ -80,10 +87,13 @@ function buildCrumbs(pathname: string, queryClient: ReturnType<typeof useQueryCl
     } else if (parts[2] === 'ai' && parts[3]) {
       const aiLabels: Record<string, string> = { query: 'AI Query', extract: 'AI Extract', chat: 'AI Chat' };
       crumbs.push({ label: aiLabels[parts[3]] ?? parts[3] });
+    } else if ((parts[2] === 'entities' || parts[2] === 'relations') && parts.length === 3) {
+      crumbs.push({ label: parts[2] === 'entities' ? 'Entities' : 'Relations' });
     } else if (parts.length >= 4) {
       const typeSegment = parts[2]; // 'entities' or 'relations'
       const typeKey = parts[3];
       const typeName = resolveRuntimeTypeName(queryClient, ontologyKey, typeSegment, typeKey);
+      crumbs.push({ label: typeSegment === 'entities' ? 'Entities' : 'Relations', to: `/data/${ontologyKey}/${typeSegment}` });
       crumbs.push({ label: typeName });
     }
 

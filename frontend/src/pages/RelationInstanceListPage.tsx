@@ -220,8 +220,8 @@ export default function RelationInstanceListPage() {
 
   return (
     <div>
-      <Link to={`/data/${ontologyKey}`} className="text-blue-600 hover:underline text-sm">
-        &larr; Back to data
+      <Link to={`/data/${ontologyKey}/relations`} className="text-blue-600 hover:underline text-sm">
+        &larr; Back to relations
       </Link>
 
       <div className="mt-4 mb-4 flex items-center justify-between">

@@ -43,8 +43,8 @@ function ExpandIcon() {
   );
 }
 
-function NavLink({ to, label, pathname }: { to: string; label: string; pathname: string }) {
-  const active = pathname === to || pathname.startsWith(to + '/');
+function NavLink({ to, label, pathname, exact }: { to: string; label: string; pathname: string; exact?: boolean }) {
+  const active = exact ? pathname === to : (pathname === to || pathname.startsWith(to + '/'));
   return (
     <Link
       to={to}
@@ -56,6 +56,45 @@ function NavLink({ to, label, pathname }: { to: string; label: string; pathname:
     >
       {label}
     </Link>
+  );
+}
+
+function CollapsibleSection({ label, labelClassName, storageKey, defaultExpanded, children, pathname }: {
+  label: string;
+  labelClassName?: string;
+  storageKey: string;
+  defaultExpanded: boolean;
+  children: React.ReactNode;
+  pathname: string;
+}) {
+  const [expanded, setExpanded] = useState(() => !getStoredCollapsed(storageKey, !defaultExpanded));
+
+  const toggle = () => {
+    const next = !expanded;
+    setExpanded(next);
+    try { localStorage.setItem(storageKey, String(!next)); } catch { /* noop */ }
+  };
+
+  // Keep pathname in scope for potential future use
+  void pathname;
+
+  return (
+    <div className="mt-1">
+      <button
+        onClick={toggle}
+        className="flex items-center gap-1.5 px-3 py-1 w-full text-left hover:bg-gray-800 rounded transition-colors"
+      >
+        <ChevronIcon expanded={expanded} />
+        <span className={`text-xs font-semibold uppercase tracking-wider ${labelClassName ?? 'text-gray-500'}`}>
+          {label}
+        </span>
+      </button>
+      {expanded && (
+        <div className="flex flex-col gap-0.5 mt-0.5">
+          {children}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -71,6 +110,7 @@ function OntologyNode({ node, pathname, aiEnabled }: { node: OntologyTreeNode; p
 
   const entityTypes = node.schema?.entityTypes ?? [];
   const relationTypes = node.schema?.relationTypes ?? [];
+  const hasSchemaTypes = entityTypes.length > 0 || relationTypes.length > 0;
 
   return (
     <div>
@@ -84,52 +124,39 @@ function OntologyNode({ node, pathname, aiEnabled }: { node: OntologyTreeNode; p
 
       {expanded && (
         <div className="ml-3 pl-3 border-l border-gray-700 flex flex-col gap-0.5 mt-0.5">
-          <NavLink to={`/ontologies/${node.ontology.ontologyId}`} label="Scope" pathname={pathname} />
-
-          {(entityTypes.length > 0 || relationTypes.length > 0) && (
-            <div className="mt-1">
-              <span className="px-3 text-xs font-semibold uppercase text-gray-500 tracking-wider">Data</span>
-              <div className="flex flex-col gap-0.5 mt-1">
-                <NavLink to={`/data/${node.ontology.key}/graph`} label="Visual Editor" pathname={pathname} />
-                {entityTypes.length > 0 && (
-                  <>
-                    <span className="px-3 text-xs uppercase text-gray-500 tracking-wider">Entities</span>
-                    {entityTypes.map((et) => (
-                      <NavLink
-                        key={et.key}
-                        to={`/data/${node.ontology.key}/entities/${et.key}`}
-                        label={et.displayName}
-                        pathname={pathname}
-                      />
-                    ))}
-                  </>
-                )}
-                {relationTypes.length > 0 && (
-                  <>
-                    <span className="px-3 text-xs uppercase text-gray-500 tracking-wider mt-1">Relations</span>
-                    {relationTypes.map((rt) => (
-                      <NavLink
-                        key={rt.key}
-                        to={`/data/${node.ontology.key}/relations/${rt.key}`}
-                        label={rt.displayName}
-                        pathname={pathname}
-                      />
-                    ))}
-                  </>
-                )}
-              </div>
-            </div>
-          )}
+          <NavLink to={`/ontologies/${node.ontology.ontologyId}`} label="Scope" pathname={pathname} exact />
 
           {aiEnabled && (
-            <div className="mt-1">
-              <span className="px-3 text-xs font-semibold uppercase text-purple-400 tracking-wider">AI</span>
-              <div className="flex flex-col gap-0.5 mt-1">
-                <NavLink to={`/data/${node.ontology.key}/ai/query`} label="Query" pathname={pathname} />
-                <NavLink to={`/data/${node.ontology.key}/ai/extract`} label="Extract" pathname={pathname} />
-                <NavLink to={`/data/${node.ontology.key}/ai/chat`} label="Chat" pathname={pathname} />
-              </div>
-            </div>
+            <CollapsibleSection
+              label="AI"
+              labelClassName="text-purple-400"
+              storageKey={`sidebar-ai-${node.ontology.key}`}
+              defaultExpanded={true}
+              pathname={pathname}
+            >
+              <NavLink to={`/ontologies/${node.ontology.ontologyId}/agents`} label="Agents" pathname={pathname} />
+              <NavLink to={`/ontologies/${node.ontology.ontologyId}/saved-queries`} label="Saved Queries" pathname={pathname} />
+              <NavLink to={`/data/${node.ontology.key}/ai/chat`} label="Chat" pathname={pathname} />
+              <NavLink to={`/data/${node.ontology.key}/ai/query`} label="Query" pathname={pathname} />
+              <NavLink to={`/data/${node.ontology.key}/ai/extract`} label="Extract" pathname={pathname} />
+            </CollapsibleSection>
+          )}
+
+          {hasSchemaTypes && (
+            <CollapsibleSection
+              label="Data"
+              storageKey={`sidebar-data-${node.ontology.key}`}
+              defaultExpanded={true}
+              pathname={pathname}
+            >
+              <NavLink to={`/data/${node.ontology.key}/graph`} label="Visual Editor" pathname={pathname} />
+              {entityTypes.length > 0 && (
+                <NavLink to={`/data/${node.ontology.key}/entities`} label="Entities" pathname={pathname} />
+              )}
+              {relationTypes.length > 0 && (
+                <NavLink to={`/data/${node.ontology.key}/relations`} label="Relations" pathname={pathname} />
+              )}
+            </CollapsibleSection>
           )}
         </div>
       )}

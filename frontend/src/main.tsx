@@ -16,6 +16,10 @@ import DataGraphPage from './pages/DataGraphPage';
 import AiQueryPage from './pages/AiQueryPage';
 import AiExtractPage from './pages/AiExtractPage';
 import AiChatPage from './pages/AiChatPage';
+import AgentsPage from './pages/AgentsPage';
+import SavedQueriesPage from './pages/SavedQueriesPage';
+import EntityTypeListPage from './pages/EntityTypeListPage';
+import RelationTypeListPage from './pages/RelationTypeListPage';
 import { AiStateProvider } from './hooks/useAiState';
 
 const queryClient = new QueryClient();
@@ -33,8 +37,12 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/schema/relation-types/:relationTypeId" element={<RelationTypeEditorPage />} />
             <Route path="/ontologies" element={<OntologyListPage />} />
             <Route path="/ontologies/:ontologyId" element={<OntologyDetailPage />} />
+            <Route path="/ontologies/:ontologyId/agents" element={<AgentsPage />} />
+            <Route path="/ontologies/:ontologyId/saved-queries" element={<SavedQueriesPage />} />
             <Route path="/data/:ontologyKey" element={<RuntimeDashboardPage />} />
+            <Route path="/data/:ontologyKey/entities" element={<EntityTypeListPage />} />
             <Route path="/data/:ontologyKey/entities/:entityTypeKey" element={<EntityInstanceListPage />} />
+            <Route path="/data/:ontologyKey/relations" element={<RelationTypeListPage />} />
             <Route path="/data/:ontologyKey/relations/:relationTypeKey" element={<RelationInstanceListPage />} />
             <Route path="/data/:ontologyKey/graph" element={<DataGraphPage />} />
             <Route path="/data/:ontologyKey/ai/query" element={<AiQueryPage />} />

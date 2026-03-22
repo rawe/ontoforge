@@ -176,41 +176,63 @@ export default function SchemaPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold text-gray-900">Schema</h2>
-        <p className="text-gray-500 mt-1">Global entity types, relation types, and properties</p>
-      </div>
-
-      <div className="flex gap-3 mb-6 items-center">
-        <button onClick={handleValidate} className="px-4 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700">
-          Validate
-        </button>
-        <button onClick={handleExport} className="px-4 py-2 bg-gray-600 text-white text-sm rounded hover:bg-gray-700">
-          Export
-        </button>
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          className="px-4 py-2 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200 border border-gray-300"
-        >
-          Import
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".json"
-          onChange={onFileSelected}
-          className="hidden"
-        />
-        <AutoRefreshToggle enabled={autoRefresh} onToggle={setAutoRefresh} />
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-3">
+          <h2 className="text-xl font-bold text-gray-900">Schema</h2>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setViewMode('graph')}
+              className={`px-3 py-1 text-xs font-medium rounded-l-md border ${
+                viewMode === 'graph'
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+              }`}
+            >
+              Graph
+            </button>
+            <button
+              onClick={() => setViewMode('list')}
+              className={`px-3 py-1 text-xs font-medium rounded-r-md border border-l-0 ${
+                viewMode === 'list'
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+              }`}
+            >
+              List
+            </button>
+          </div>
+        </div>
+        <div className="flex gap-2 items-center">
+          <button onClick={handleValidate} className="px-3 py-1.5 bg-green-600 text-white text-xs rounded hover:bg-green-700">
+            Validate
+          </button>
+          <button onClick={handleExport} className="px-3 py-1.5 bg-gray-600 text-white text-xs rounded hover:bg-gray-700">
+            Export
+          </button>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="px-3 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200 border border-gray-300"
+          >
+            Import
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json"
+            onChange={onFileSelected}
+            className="hidden"
+          />
+          <AutoRefreshToggle enabled={autoRefresh} onToggle={setAutoRefresh} />
+        </div>
       </div>
 
       {validation && (
-        <div className={`mb-6 p-4 rounded border ${validation.valid ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+        <div className={`mb-3 p-3 rounded border text-sm ${validation.valid ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
           <p className={`font-semibold ${validation.valid ? 'text-green-700' : 'text-red-700'}`}>
             {validation.valid ? 'Schema is valid' : 'Schema has errors'}
           </p>
           {validation.errors.length > 0 && (
-            <ul className="mt-2 text-sm text-red-600 list-disc list-inside">
+            <ul className="mt-1 text-red-600 list-disc list-inside">
               {validation.errors.map((err, i) => (
                 <li key={i}><span className="font-mono">{err.path}</span>: {err.message}</li>
               ))}
@@ -218,30 +240,6 @@ export default function SchemaPage() {
           )}
         </div>
       )}
-
-      {/* View mode toggle */}
-      <div className="flex items-center gap-1 mb-4">
-        <button
-          onClick={() => setViewMode('graph')}
-          className={`px-3 py-1.5 text-sm font-medium rounded-l-md border ${
-            viewMode === 'graph'
-              ? 'bg-blue-600 text-white border-blue-600'
-              : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
-          }`}
-        >
-          Graph
-        </button>
-        <button
-          onClick={() => setViewMode('list')}
-          className={`px-3 py-1.5 text-sm font-medium rounded-r-md border border-l-0 ${
-            viewMode === 'list'
-              ? 'bg-blue-600 text-white border-blue-600'
-              : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
-          }`}
-        >
-          List
-        </button>
-      </div>
 
       {viewMode === 'list' ? (
         <>

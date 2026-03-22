@@ -125,7 +125,7 @@ export default function ScopedOntologyGraph({ schema }: Props) {
   const onPaneClick = useCallback(() => setSelection(null), []);
 
   return (
-    <div className="flex flex-col" style={{ height: 'calc(100vh - 380px)', minHeight: '400px' }}>
+    <div className="flex flex-col" style={{ height: 'calc(100vh - 270px)', minHeight: '400px' }}>
       {/* Filters */}
       <div className="bg-white border border-gray-200 rounded-lg p-3 mb-3 space-y-2 text-sm">
         <div className="flex items-center gap-2 flex-wrap">

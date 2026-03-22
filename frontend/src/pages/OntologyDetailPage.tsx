@@ -146,49 +146,45 @@ export default function OntologyDetailPage() {
 
   return (
     <div>
-      <Link to="/ontologies" className="text-blue-600 hover:underline text-sm">&larr; Back to ontologies</Link>
-
-      <div className="mt-4 mb-6">
-        {editing ? (
+      {editing ? (
+        <div className="mb-4">
           <OntologyForm
             initial={{ name: ontology.name, description: ontology.description ?? '' }}
             onSubmit={handleUpdate}
             onCancel={() => setEditing(false)}
           />
-        ) : (
-          <div>
-            <div className="flex items-center gap-3">
-              <h2 className="text-2xl font-bold text-gray-900">{ontology.name}</h2>
-              <span className="text-sm text-gray-400 font-mono">{ontology.key}</span>
-              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${isScoped ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
-                {isScoped ? 'scoped' : 'unscoped'}
-              </span>
-              <button onClick={() => setEditing(true)} className="text-sm text-blue-600 hover:underline">Edit</button>
-            </div>
-            <p className="text-gray-500 mt-1">{ontology.description || 'No description'}</p>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <h2 className="text-xl font-bold text-gray-900 truncate">{ontology.name}</h2>
+            <span className="text-sm text-gray-400 font-mono shrink-0">{ontology.key}</span>
+            <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${isScoped ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
+              {isScoped ? 'scoped' : 'unscoped'}
+            </span>
+            <button onClick={() => setEditing(true)} className="text-xs text-blue-600 hover:underline shrink-0">Edit</button>
           </div>
-        )}
-      </div>
-
-      <div className="flex gap-3 mb-6">
-        <button onClick={handleValidate} className="px-4 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700">
-          Validate
-        </button>
-        <Link
-          to={`/data/${ontology.key}`}
-          className="px-4 py-2 bg-purple-600 text-white text-sm rounded hover:bg-purple-700"
-        >
-          Data
-        </Link>
-      </div>
+          <div className="flex gap-2 shrink-0">
+            <button onClick={handleValidate} className="px-3 py-1.5 bg-green-600 text-white text-xs rounded hover:bg-green-700">
+              Validate
+            </button>
+            <Link
+              to={`/data/${ontology.key}`}
+              className="px-3 py-1.5 bg-purple-600 text-white text-xs rounded hover:bg-purple-700"
+            >
+              Data
+            </Link>
+          </div>
+        </div>
+      )}
 
       {validation && (
-        <div className={`mb-6 p-4 rounded border ${validation.valid ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+        <div className={`mb-3 p-3 rounded border text-sm ${validation.valid ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
           <p className={`font-semibold ${validation.valid ? 'text-green-700' : 'text-red-700'}`}>
             {validation.valid ? 'Ontology scope is valid' : 'Scope has errors'}
           </p>
           {validation.errors.length > 0 && (
-            <ul className="mt-2 text-sm text-red-600 list-disc list-inside">
+            <ul className="mt-1 text-red-600 list-disc list-inside">
               {validation.errors.map((err, i) => (
                 <li key={i}><span className="font-mono">{err.path}</span>: {err.message}</li>
               ))}
@@ -198,19 +194,18 @@ export default function OntologyDetailPage() {
       )}
 
       {!isScoped && (
-        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded">
-          <p className="text-sm text-blue-700">
-            This ontology is <strong>unscoped</strong> — it exposes the entire global schema.
-            Add entity or relation types below to create a scoped view.
+        <div className="mb-3 px-3 py-2 bg-blue-50 border border-blue-200 rounded">
+          <p className="text-xs text-blue-700">
+            <strong>Unscoped</strong> — exposes the entire global schema. Add types below to scope.
           </p>
         </div>
       )}
 
       {/* Tab bar */}
-      <div className="flex gap-1 border-b border-gray-200 mb-6">
+      <div className="flex gap-1 border-b border-gray-200 mb-3">
         <button
           onClick={() => setActiveTab('configure')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+          className={`px-4 py-1.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
             activeTab === 'configure'
               ? 'border-blue-500 text-blue-600'
               : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -220,7 +215,7 @@ export default function OntologyDetailPage() {
         </button>
         <button
           onClick={() => setActiveTab('diagram')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+          className={`px-4 py-1.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
             activeTab === 'diagram'
               ? 'border-blue-500 text-blue-600'
               : 'border-transparent text-gray-500 hover:text-gray-700'

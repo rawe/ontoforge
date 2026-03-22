@@ -187,7 +187,7 @@ export default function OntologyGraph({ entityTypes, relationTypes, propertyCoun
   );
 
   return (
-    <div className="flex flex-col" style={{ height: 'calc(100vh - 280px)', minHeight: '400px' }}>
+    <div className="flex flex-col" style={{ height: 'calc(100vh - 200px)', minHeight: '400px' }}>
       <OntologyGraphFilters
         entityTypes={entityTypes}
         relationTypes={relationTypes}

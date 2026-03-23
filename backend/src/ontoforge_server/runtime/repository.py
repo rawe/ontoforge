@@ -602,7 +602,7 @@ async def execute_cypher_read(
     Each row is a dict mapping column names to converted Python values.
     Nodes and Relationships are returned as plain dicts of their properties.
     """
-    result = await session.run(cypher, **(params or {}))
+    result = await session.run(cypher, parameters=(params or {}))
     columns = list(result.keys())
     rows: list[dict] = []
     async for record in result:

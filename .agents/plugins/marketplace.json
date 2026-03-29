@@ -1,0 +1,12 @@
+{
+  "name": "ontoforge-marketplace",
+  "plugins": [
+    {
+      "name": "ontoforge",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ontoforge"
+      }
+    }
+  ]
+}

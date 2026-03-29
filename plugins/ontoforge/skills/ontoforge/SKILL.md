@@ -51,4 +51,4 @@ Both scripts read the OntoForge server URL from (in order):
 
 ## Related: Project Setup
 
-To bootstrap a new project with OntoForge (Docker Compose, environment variables, `.mcp.json`), use the **ontoforge-setup** plugin. It ships templates for Docker Compose and MCP configuration and walks through the setup interactively.
+To bootstrap a new project with OntoForge (Docker Compose, environment variables, `.mcp.json`), use the **ontoforge-setup** skill (also part of this plugin). It ships templates for Docker Compose and MCP configuration and walks through the setup interactively.

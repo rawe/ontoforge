@@ -53,7 +53,7 @@ A marketplace entry allows the skill to be discovered and installed from within 
 - **Data export script** (`scripts/export_ontology.py`) — standalone PEP 723 script that exports schema + entities + relations to structured JSON files via the Runtime REST API. Includes pagination, slugified filenames, and UID-free output. Documented in `scripts/USAGE.md`.
 - **Data import design** (`scripts/IMPORT_NOTES.md`) — reference doc specifying the two-pass import strategy (entities first, then relations resolved by type + filename), schema handling, and required API endpoints.
 
-- **OntoForge Setup plugin** (`plugins/ontoforge-setup/`) — a separate plugin that helps users bootstrap OntoForge in a new project. Ships Docker Compose and MCP templates; the skill walks through gathering requirements (ontology key, embedding provider, ports) and generates configured `docker-compose.yml`, `.mcp.json`, and optionally `.env` files. Registered in the marketplace alongside the main `ontoforge` plugin.
+- **OntoForge Setup skill** (`plugins/ontoforge/skills/ontoforge-setup/`) — a skill inside the `ontoforge` plugin that helps users bootstrap OntoForge in a new project. Ships Docker Compose and MCP templates; the skill walks through gathering requirements (ontology key, embedding provider, ports) and generates configured `docker-compose.yml`, `.mcp.json`, and optionally `.env` files. Registered in the marketplace as part of the `ontoforge` plugin.
 
 ### To Do
 

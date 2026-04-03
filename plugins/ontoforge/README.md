@@ -45,8 +45,8 @@ plugins/ontoforge/
 
 The plugin ships two templates under `skills/ontoforge-setup/templates/`:
 
-| Template | Purpose |
-|---|---|
+| File | Contents |
+| --- | --- |
 | `docker-compose.yml` | Full OntoForge stack (Neo4j + server + UI) with commented embedding and Ollama config |
 | `mcp.json` | MCP server entries for modeling and runtime |
 
@@ -58,7 +58,7 @@ The setup skill only uses variables that OntoForge actually reads. See the full 
 
 OntoForge supports two embedding providers for semantic search:
 
-- **Ollama** (`EMBEDDING_PROVIDER=ollama`) — runs locally, default model `nomic-embed-text` (768 dimensions). Can run on the host or as a Docker container.
+- **Ollama** (`EMBEDDING_PROVIDER=ollama`) — local, no API key needed. Default model: `nomic-embed-text`. Default 768 dimensions.
 - **OpenAI-compatible** (`EMBEDDING_PROVIDER=openai`) — works with OpenAI, Azure OpenAI, vLLM, LM Studio. Requires `EMBEDDING_API_KEY`. Default 1536 dimensions.
 
 Omit `EMBEDDING_PROVIDER` entirely to disable semantic search.

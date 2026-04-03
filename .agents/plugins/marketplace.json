@@ -1,5 +1,8 @@
 {
   "name": "ontoforge-marketplace",
+  "interface": {
+    "displayName": "OntoForge"
+  },
   "plugins": [
     {
       "name": "ontoforge",

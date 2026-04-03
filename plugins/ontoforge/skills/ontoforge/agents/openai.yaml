@@ -1,0 +1,7 @@
+interface:
+  display_name: "OntoForge"
+  short_description: "Export and import OntoForge ontology schemas"
+  icon_small: "./assets/ontoforge-icon.svg"
+  icon_large: "./assets/ontoforge-icon.svg"
+  brand_color: "#0A7CFF"
+  default_prompt: "Use $ontoforge to export or import an OntoForge schema for this project."

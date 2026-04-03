@@ -2,5 +2,12 @@
   "name": "ontoforge",
   "version": "0.5.0",
   "description": "OntoForge plugin: export and import ontology schemas, and bootstrap new projects with Docker Compose, environment variables, and MCP configuration.",
-  "skills": "./skills/"
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "OntoForge",
+    "shortDescription": "Schema tools and project setup for OntoForge",
+    "brandColor": "#0A7CFF",
+    "composerIcon": "./assets/ontoforge-logo.svg",
+    "logo": "./assets/ontoforge-logo.svg"
+  }
 }

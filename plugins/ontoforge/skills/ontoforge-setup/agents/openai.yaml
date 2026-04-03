@@ -1,0 +1,7 @@
+interface:
+  display_name: "OntoForge Setup"
+  short_description: "Bootstrap an OntoForge project with Docker and MCP"
+  icon_small: "./assets/ontoforge-icon.svg"
+  icon_large: "./assets/ontoforge-icon.svg"
+  brand_color: "#0A7CFF"
+  default_prompt: "Use $ontoforge-setup to scaffold the OntoForge Docker and MCP configuration for this project."

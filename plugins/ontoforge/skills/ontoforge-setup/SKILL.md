@@ -1,11 +1,11 @@
 ---
 name: ontoforge-setup
-description: "Bootstrap a project with OntoForge. Use when the user wants to set up OntoForge in a new or existing project — Docker Compose, environment variables, and MCP configuration for Claude Code."
+description: "Bootstrap a project with OntoForge. Use when the user wants to set up OntoForge in a new or existing project — Docker Compose, environment variables, and MCP configuration."
 ---
 
 # Goal
 
-Help the user set up OntoForge in their project by generating the necessary configuration files: Docker Compose for Neo4j and OntoForge services, environment variables, and `.mcp.json` for Claude Code MCP integration.
+Help the user set up OntoForge in their project by generating the necessary configuration files: Docker Compose for Neo4j and OntoForge services, environment variables, and `.mcp.json` for MCP integration.
 
 This skill uses **templates** shipped with the plugin. Never invent environment variable names — only use the variables documented below.
 
@@ -23,8 +23,8 @@ Semantic search is optional and supports two embedding providers: **Ollama** (lo
 
 The following templates are bundled with this plugin:
 
-- **Docker Compose**: `${CLAUDE_PLUGIN_ROOT}/skills/ontoforge-setup/templates/docker-compose.yml`
-- **MCP configuration**: `${CLAUDE_PLUGIN_ROOT}/skills/ontoforge-setup/templates/mcp.json`
+- **Docker Compose**: `templates/docker-compose.yml`
+- **MCP configuration**: `templates/mcp.json`
 
 Read these templates as the starting point. Adapt them to the user's needs and write the result into the user's project.
 
@@ -49,7 +49,7 @@ Ask the user:
 
 ### 2. Generate Docker Compose
 
-Read the template from `${CLAUDE_PLUGIN_ROOT}/skills/ontoforge-setup/templates/docker-compose.yml` and adapt it based on the user's answers:
+Read the template from `templates/docker-compose.yml` and adapt it based on the user's answers:
 
 - Set the Neo4j password in `NEO4J_AUTH` and `DB_PASSWORD`.
 - If the user wants embeddings, uncomment and configure the `EMBEDDING_*` environment variables on the `ontoforge-server` service.
@@ -66,7 +66,7 @@ Write the result as `docker-compose.yml` (or `docker-compose.ontoforge.yml` if t
 
 ### 3. Generate MCP Configuration
 
-Read the template from `${CLAUDE_PLUGIN_ROOT}/skills/ontoforge-setup/templates/mcp.json` and adapt it:
+Read the template from `templates/mcp.json` and adapt it:
 
 - Replace `my_ontology` in the `X-Ontology-Key` header with the user's ontology key.
 - Adjust the host/port if the user changed defaults.

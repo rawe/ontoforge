@@ -11,10 +11,10 @@ Export and import OntoForge ontology schemas via the Modeling REST API. These op
 
 Export an ontology schema to a single JSON file.
 
-**Script**: `${CLAUDE_PLUGIN_ROOT}/skills/ontoforge/scripts/export_schema.py`
+**Script**: `scripts/export_schema.py`
 
 ```bash
-uv run ${CLAUDE_PLUGIN_ROOT}/skills/ontoforge/scripts/export_schema.py <ontology_key> [-o <output_path>]
+uv run scripts/export_schema.py <ontology_key> [-o <output_path>]
 ```
 
 **Parameters**:
@@ -29,10 +29,10 @@ The exported file is the standard OntoForge transfer format and can be committed
 
 Import an ontology schema from a JSON file, completely replacing any existing schema with the same ontology ID.
 
-**Script**: `${CLAUDE_PLUGIN_ROOT}/skills/ontoforge/scripts/import_schema.py`
+**Script**: `scripts/import_schema.py`
 
 ```bash
-uv run ${CLAUDE_PLUGIN_ROOT}/skills/ontoforge/scripts/import_schema.py <file>
+uv run scripts/import_schema.py <file>
 ```
 
 **Parameters**:

@@ -1,0 +1,7 @@
+interface:
+  display_name: "OntoForge Runtime API"
+  short_description: "Build clients and curl calls for the runtime REST API"
+  icon_small: "./assets/ontoforge-icon.svg"
+  icon_large: "./assets/ontoforge-icon.svg"
+  brand_color: "#0A7CFF"
+  default_prompt: "Use $ontoforge-runtime-api to build a client or curl call against the OntoForge runtime REST API."

@@ -23,6 +23,10 @@ When invoked, the skill interactively gathers requirements and generates:
 
 The skill uses bundled templates as starting points and adapts them based on user input. It never invents environment variables — only the ones recognized by OntoForge are used.
 
+### ontoforge-runtime-api
+
+Help an agent build `curl` calls, clients, and integrations against the OntoForge runtime REST API. The skill stays runtime-only and points to the existing endpoint contract and usage guide instead of duplicating the API docs.
+
 ## Installation
 
 ### Claude Code

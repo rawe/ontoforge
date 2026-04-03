@@ -11,19 +11,27 @@ Do not use this skill for schema design or modeling endpoints under `/api/model/
 
 ## Primary Reference
 
-Read [runtime-api.md](references/runtime-api.md) first. It points to the exact docs that define the runtime endpoints and the practical usage patterns.
+Read [runtime-api.md](references/runtime-api.md) first. It is the bundled runtime API reference for this skill.
 
 ## Workflow
 
-1. Map the user request to the runtime endpoint family in `references/runtime-api.md`.
-2. Read the linked contract section in `../../../../docs/api-contracts/runtime-api.md` before generating code.
-3. Use `../../../../docs/runtime-usage.md` when the user wants concrete `curl` examples or request patterns.
-4. Treat `/api/runtime/{ontologyKey}` as the base path for ontology-scoped calls. The only non-scoped runtime endpoint is `GET /api/runtime/features`.
-5. If entity type keys, relation type keys, or property keys are unknown, start with schema introspection endpoints before generating write or query calls.
-6. Preserve documented filter syntax exactly: `filter.{key}` and `filter.{key}__{op}`.
-7. Set `Content-Type: application/json` on JSON `POST` and `PATCH` requests.
+1. Map the user request to the correct endpoint family in `references/runtime-api.md`.
+2. Use the bundled endpoint definitions there as the source of truth for path shape, request body, and query parameters.
+3. Treat `/api/runtime/{ontologyKey}` as the base path for ontology-scoped calls. The only non-scoped runtime endpoint is `GET /api/runtime/features`.
+4. If entity type keys, relation type keys, or property keys are unknown, start with schema introspection endpoints before generating write or query calls.
+5. Preserve documented filter syntax exactly: `filter.{key}` and `filter.{key}__{op}`.
+6. Set `Content-Type: application/json` on JSON `POST` and `PATCH` requests.
 
 ## Boundaries
 
 - Runtime only: schema introspection, entity CRUD, relation CRUD, neighbors, semantic search, Cypher query, feature discovery, AI runtime endpoints, saved queries, and runtime data wipe.
 - Not modeling: ontology creation, schema mutation, saved query definition, AI agent configuration, import/export via `/api/model/...`.
+
+## Output Style
+
+When answering:
+- name the exact endpoint first
+- include required path parameters
+- include relevant query parameters
+- include the JSON body when applicable
+- then produce the requested artifact: `curl`, client code, fetch wrapper, SDK helper, or typed interface

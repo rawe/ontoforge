@@ -1,72 +1,183 @@
-# OntoForge Runtime API Reference Map
+# OntoForge Runtime API Reference
 
-Use this file as the entry point for runtime REST work.
+Bundled reference for building against the OntoForge runtime REST API.
 
-## Primary Sources
+## Core Rules
 
-- Full contract: [docs/api-contracts/runtime-api.md](../../../../../docs/api-contracts/runtime-api.md)
-- Practical examples: [docs/runtime-usage.md](../../../../../docs/runtime-usage.md)
+- Base path for ontology-scoped calls: `/api/runtime/{ontologyKey}`
+- Global runtime feature probe: `GET /api/runtime/features`
+- Use the ontology key in the URL path for normal REST calls
+- Use `Content-Type: application/json` for JSON `POST` and `PATCH` requests
+- If type keys or property keys are unknown, inspect schema first
+- Property filter syntax is `filter.{key}` or `filter.{key}__{op}`
+- Supported filter operators: `__gt`, `__gte`, `__lt`, `__lte`, `__contains`
 
-## How To Use The Docs
+## Schema Introspection
 
-1. Start with the full contract for the exact endpoint definition.
-2. Use the usage guide when you need concrete `curl` calls, filter syntax, or example payloads.
-3. Do not use the modeling API docs for this skill.
+Use these first when you do not know the available entity types, relation types, or property keys.
 
-## Section Guide
+- `GET /api/runtime/{ontologyKey}/schema`
+  Returns full ontology metadata, entity types, relation types, and property definitions.
+- `GET /api/runtime/{ontologyKey}/schema/entity-types`
+  Returns the entity type list.
+- `GET /api/runtime/{ontologyKey}/schema/entity-types/{entityTypeKey}`
+  Returns one entity type with its property definitions.
+- `GET /api/runtime/{ontologyKey}/schema/relation-types`
+  Returns the relation type list.
+- `GET /api/runtime/{ontologyKey}/schema/relation-types/{relationTypeKey}`
+  Returns one relation type with `fromEntityTypeKey`, `toEntityTypeKey`, and property definitions.
 
-### Schema Introspection
+## Entity Instance CRUD
 
-- Full schema: [GET `/schema`](../../../../../docs/api-contracts/runtime-api.md#2-schema-introspection)
-- Entity types: [GET `/schema/entity-types` and `/schema/entity-types/{entityTypeKey}`](../../../../../docs/api-contracts/runtime-api.md#2-schema-introspection)
-- Relation types: [GET `/schema/relation-types` and `/schema/relation-types/{relationTypeKey}`](../../../../../docs/api-contracts/runtime-api.md#2-schema-introspection)
+- `POST /api/runtime/{ontologyKey}/entities/{entityTypeKey}`
+  Creates an entity instance.
+  Request body: flat JSON object of schema property values.
+  Validation: required properties, no unknown properties, value coercion by schema data type.
 
-### Entity CRUD
+- `GET /api/runtime/{ontologyKey}/entities/{entityTypeKey}`
+  Lists entity instances.
+  Query parameters:
+  `limit`, `offset`, `sort`, `order`, `q`, `fields`, `filter.{key}`, `filter.{key}__{op}`
 
-- Create entity: [POST `/entities/{entityTypeKey}`](../../../../../docs/api-contracts/runtime-api.md#3-entity-instance-crud)
-- List/search entities: [GET `/entities/{entityTypeKey}`](../../../../../docs/api-contracts/runtime-api.md#3-entity-instance-crud)
-- Get entity: [GET `/entities/{entityTypeKey}/{id}`](../../../../../docs/api-contracts/runtime-api.md#3-entity-instance-crud)
-- Update entity: [PATCH `/entities/{entityTypeKey}/{id}`](../../../../../docs/api-contracts/runtime-api.md#3-entity-instance-crud)
-- Delete entity: [DELETE `/entities/{entityTypeKey}/{id}`](../../../../../docs/api-contracts/runtime-api.md#3-entity-instance-crud)
-- Neighbors: [GET `/entities/{entityTypeKey}/{id}/neighbors`](../../../../../docs/api-contracts/runtime-api.md#5-graph-traversal)
+- `GET /api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}`
+  Gets one entity instance.
+  Query parameters:
+  `fields`
 
-### Relation CRUD
+- `PATCH /api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}`
+  Partially updates an entity instance.
+  Request body: flat JSON object of changed properties only.
+  `null` removes an optional property. `null` on a required property is rejected.
 
-- Create relation: [POST `/relations/{relationTypeKey}`](../../../../../docs/api-contracts/runtime-api.md#4-relation-instance-crud)
-- List relations: [GET `/relations/{relationTypeKey}`](../../../../../docs/api-contracts/runtime-api.md#4-relation-instance-crud)
-- Get relation: [GET `/relations/{relationTypeKey}/{id}`](../../../../../docs/api-contracts/runtime-api.md#4-relation-instance-crud)
-- Update relation: [PATCH `/relations/{relationTypeKey}/{id}`](../../../../../docs/api-contracts/runtime-api.md#4-relation-instance-crud)
-- Delete relation: [DELETE `/relations/{relationTypeKey}/{id}`](../../../../../docs/api-contracts/runtime-api.md#4-relation-instance-crud)
+- `DELETE /api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}`
+  Deletes the entity instance.
+  Uses detach-delete semantics, so connected relations are also removed.
 
-### Querying And Search
+## Relation Instance CRUD
 
-- Semantic search: [GET `/search/semantic`](../../../../../docs/api-contracts/runtime-api.md#6-semantic-search)
-- Read-only Cypher: [POST `/query`](../../../../../docs/api-contracts/runtime-api.md#7-cypher-query)
-- Filtering, sorting, pagination, and `q`: [runtime usage guide](../../../../../docs/runtime-usage.md#4-filtering-and-search)
+- `POST /api/runtime/{ontologyKey}/relations/{relationTypeKey}`
+  Creates a relation instance.
+  Request body:
+  `fromEntityId`, `toEntityId`, plus optional relation properties.
+  `fromEntityId` and `toEntityId` must exist and match the relation type's source and target entity types.
 
-### Runtime Features
+- `GET /api/runtime/{ontologyKey}/relations/{relationTypeKey}`
+  Lists relation instances.
+  Query parameters:
+  `limit`, `offset`, `sort`, `order`, `fromEntityId`, `toEntityId`, `filter.{key}`, `filter.{key}__{op}`
 
-- Feature flags: [GET `/api/runtime/features`](../../../../../docs/api-contracts/runtime-api.md#9-feature-discovery)
+- `GET /api/runtime/{ontologyKey}/relations/{relationTypeKey}/{id}`
+  Gets one relation instance.
 
-### AI Runtime Endpoints
+- `PATCH /api/runtime/{ontologyKey}/relations/{relationTypeKey}/{id}`
+  Partially updates a relation instance.
+  Request body: relation property changes only.
+  `fromEntityId` and `toEntityId` are immutable.
 
-- AI query: [POST `/ai/query`](../../../../../docs/api-contracts/runtime-api.md#10-ai-endpoints)
-- AI extract: [POST `/ai/extract`](../../../../../docs/api-contracts/runtime-api.md#10-ai-endpoints)
-- AI chat and agents: [AI runtime endpoints](../../../../../docs/api-contracts/runtime-api.md#10-ai-endpoints)
+- `DELETE /api/runtime/{ontologyKey}/relations/{relationTypeKey}/{id}`
+  Deletes only the relation instance. Connected entities remain.
 
-### Saved Queries
+## Graph Traversal
 
-- List saved queries: [GET `/saved-queries`](../../../../../docs/api-contracts/runtime-api.md#11-saved-queries)
-- Search saved queries: [GET `/saved-queries/search`](../../../../../docs/api-contracts/runtime-api.md#11-saved-queries)
-- Run saved query: [POST `/saved-queries/{queryKey}/run`](../../../../../docs/api-contracts/runtime-api.md#11-saved-queries)
+- `GET /api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}/neighbors`
+  Returns an entity and its connected neighbors.
+  Query parameters:
+  `relationTypeKey`, `direction`, `limit`, `fields`, `relationFields`
+  `direction` is `outgoing`, `incoming`, or `both`.
 
-### Data Management
+## Semantic Search
 
-- Wipe instance data: [DELETE `/data`](../../../../../docs/runtime-usage.md#6-data-management)
+- `GET /api/runtime/{ontologyKey}/search/semantic`
+  Searches entity instances by semantic similarity.
+  Query parameters:
+  `q` (required), `type` (required entity type key), `limit`, `min_score`, `fields`, `filter.{key}`, `filter.{key}__{op}`
+  Requires semantic search to be enabled in server config.
 
-## Important Reminders
+## Read-Only Cypher Query
 
-- Base path: `/api/runtime/{ontologyKey}`
-- Runtime REST uses the ontology key in the path.
-- `X-Ontology-Key` is relevant for MCP and some other integrations, not normal runtime REST calls.
-- If the shape of an entity or relation is unknown, inspect the runtime schema endpoints first.
+- `POST /api/runtime/{ontologyKey}/query`
+  Executes a read-only Cypher query validated against the ontology scope.
+  Request body:
+  ```json
+  { "cypher": "MATCH (p:person) RETURN p LIMIT 10" }
+  ```
+  Allowed: read-oriented clauses like `MATCH`, `WHERE`, `RETURN`, `ORDER BY`, `LIMIT`, `SKIP`, `WITH`, `UNWIND`
+  Blocked: write clauses, `CALL`, labelless node patterns, internal labels
+
+## Runtime Feature Discovery
+
+- `GET /api/runtime/features`
+  Returns global runtime feature flags.
+  Response fields:
+  `semanticSearch`, `ai`
+
+## AI Endpoints
+
+- `POST /api/runtime/{ontologyKey}/ai/query`
+  Natural-language question to answer plus generated Cypher and raw results when used.
+  Request body:
+  `question`
+
+- `POST /api/runtime/{ontologyKey}/ai/extract`
+  Extracts structured entities and relations from text.
+  Request body:
+  `text`, optional `entityTypes`, optional `create`
+
+- `POST /api/runtime/{ontologyKey}/ai/chat`
+  Conversational runtime assistant.
+  Request body:
+  `message`, optional `history`, optional `includeToolCalls`
+
+- `GET /api/runtime/{ontologyKey}/ai/agents`
+  Lists the default and configured agents.
+
+- `POST /api/runtime/{ontologyKey}/ai/agents/{agentKey}/chat`
+  Agent-specific chat endpoint.
+
+- `GET /api/runtime/{ontologyKey}/ai/.well-known/agent.json`
+- `POST /api/runtime/{ontologyKey}/ai/a2a`
+- `GET /api/runtime/{ontologyKey}/ai/agents/{agentKey}/.well-known/agent.json`
+- `POST /api/runtime/{ontologyKey}/ai/agents/{agentKey}/a2a`
+  A2A discovery and task endpoints for default or configured agents.
+
+## Saved Queries
+
+- `GET /api/runtime/{ontologyKey}/saved-queries`
+  Lists saved query metadata and parameter definitions.
+
+- `GET /api/runtime/{ontologyKey}/saved-queries/search`
+  Searches saved queries semantically.
+  Query parameters:
+  `q`, `limit`, `min_score`
+
+- `POST /api/runtime/{ontologyKey}/saved-queries/{queryKey}/run`
+  Executes a saved query.
+  Request body:
+  parameters expected by that saved query definition
+
+## Data Management
+
+- `DELETE /api/runtime/{ontologyKey}/data`
+  Wipes instance data for the ontology while preserving schema.
+
+## Error Shape
+
+The API uses structured error responses.
+
+- `404` for unknown ontology keys, type keys, relation keys, IDs, or agent keys
+- `400` for malformed request patterns such as invalid filter names
+- `422` for validation failures, blocked operations, feature-disabled states, or invalid payloads
+
+Validation errors may include field-level details such as:
+- missing required property
+- unknown property
+- type coercion failure
+- relation endpoint entity type mismatch
+
+## Recommended Build Pattern For Agents
+
+1. Resolve `ontologyKey`
+2. Read schema endpoints if the type or property shape is not already known
+3. Choose the narrowest runtime endpoint that solves the task
+4. Generate the request with exact path params, query params, and JSON body
+5. Only use `/query` when CRUD and search endpoints are not enough

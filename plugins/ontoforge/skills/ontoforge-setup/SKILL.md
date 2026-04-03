@@ -160,4 +160,4 @@ After generating the files, remind the user:
 5. If using Ollama in Docker, pull the required models:
    - For semantic search: `docker exec <container> ollama pull nomic-embed-text`
    - For AI features: `docker exec <container> ollama pull qwen3:8b` (or whichever model was configured)
-6. If using the `ontoforge` plugin for schema import/export, install it from the OntoForge marketplace.
+6. Use the **ontoforge** skill (also part of this plugin) for schema import/export.

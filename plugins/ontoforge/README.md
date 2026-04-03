@@ -1,8 +1,19 @@
-# OntoForge Setup Plugin
+# OntoForge Plugin
 
-A Claude Code plugin that helps bootstrap OntoForge in any project. It generates the Docker Compose, environment variables, and MCP configuration needed to get OntoForge running.
+A plugin for AI coding assistants (Claude Code and OpenAI Codex) that provides OntoForge skills for ontology schema management and project setup.
 
-## What It Does
+## Skills
+
+### ontoforge
+
+Export and import OntoForge ontology schemas via the Modeling REST API.
+
+- **Export**: save an ontology schema to a JSON file for version control
+- **Import**: load a schema from a JSON file, replacing any existing schema with the same ID
+
+### ontoforge-setup
+
+Bootstrap a project with OntoForge: Docker Compose, environment variables, and MCP configuration.
 
 When invoked, the skill interactively gathers requirements and generates:
 
@@ -14,10 +25,20 @@ The skill uses bundled templates as starting points and adapts them based on use
 
 ## Installation
 
+### Claude Code
+
 From a repository that has the OntoForge marketplace configured:
 
 ```bash
-claude plugin install ontoforge-setup
+claude plugin install ontoforge
+```
+
+### OpenAI Codex
+
+Load the plugin directory directly:
+
+```
+plugins/ontoforge/
 ```
 
 ## Templates
@@ -29,18 +50,9 @@ The plugin ships two templates under `skills/ontoforge-setup/templates/`:
 | `docker-compose.yml` | Full OntoForge stack (Neo4j + server + UI) with commented embedding and Ollama config |
 | `mcp.json` | MCP server entries for modeling and runtime |
 
-These templates reflect the container images published at `ghcr.io/rawe/ontoforge-server` and `ghcr.io/rawe/ontoforge-ui`.
-
 ## Environment Variables
 
-The skill only uses variables that OntoForge actually reads. See the full reference in the [SKILL.md](skills/ontoforge-setup/SKILL.md#ontoforge-server-environment-variables).
-
-Key groups:
-
-- **Database** — `DB_URI`, `DB_USER`, `DB_PASSWORD`
-- **Embedding** — `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `EMBEDDING_BASE_URL`, `EMBEDDING_API_KEY`, `EMBEDDING_DIMENSIONS`
-- **MCP** — `DEFAULT_MCP_ONTOLOGY_KEY`
-- **Server** — `PORT`
+The setup skill only uses variables that OntoForge actually reads. See the full reference in the [SKILL.md](skills/ontoforge-setup/SKILL.md#ontoforge-server-environment-variables).
 
 ## Embedding Providers
 
@@ -50,7 +62,3 @@ OntoForge supports two embedding providers for semantic search:
 - **OpenAI-compatible** (`EMBEDDING_PROVIDER=openai`) — works with OpenAI, Azure OpenAI, vLLM, LM Studio. Requires `EMBEDDING_API_KEY`. Default 1536 dimensions.
 
 Omit `EMBEDDING_PROVIDER` entirely to disable semantic search.
-
-## Related Plugins
-
-- **ontoforge** — Export and import ontology schemas. Use after setup to manage schemas as JSON files.

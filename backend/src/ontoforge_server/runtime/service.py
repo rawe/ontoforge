@@ -13,6 +13,7 @@ from neo4j.time import Date as Neo4jDate
 from neo4j.time import DateTime as Neo4jDateTime
 
 from ontoforge_server.core.ai import AgentConfig, SavedQueryConfig, SavedQueryParameter, StepConfig
+from ontoforge_server.core.database import validate_vector_indexed_properties
 from ontoforge_server.core.embedding import get_embedding_provider
 from ontoforge_server.core.exceptions import NotFoundError, ValidationError
 from ontoforge_server.core.schemas import (
@@ -766,6 +767,9 @@ async def create_entity(
     embedding = None
     provider = get_embedding_provider()
     if provider and full_et:
+        validate_vector_indexed_properties(
+            entity_type_key, coerced, list(full_et.properties.keys())
+        )
         text = build_text_repr(entity_type_key, coerced, full_et.properties)
         embedding = await provider.embed(text)
 
@@ -898,6 +902,9 @@ async def update_entity(
                 merged.update({k: v for k, v in set_props.items()})
                 for k in remove_props:
                     merged.pop(k, None)
+                validate_vector_indexed_properties(
+                    entity_type_key, merged, list(full_et.properties.keys()), entity_id=entity_id
+                )
                 text = build_text_repr(entity_type_key, merged, full_et.properties)
                 embedding = await provider.embed(text)
 

@@ -1,12 +1,15 @@
 import logging
+from typing import Any
 
 from neo4j import AsyncGraphDatabase, AsyncDriver
 
 from ontoforge_server.config import settings
+from ontoforge_server.core.exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
 
 _driver: AsyncDriver | None = None
+MAX_VECTOR_FILTER_VALUE_BYTES = 32766
 
 _CONSTRAINTS = [
     "CREATE CONSTRAINT ontology_id_unique IF NOT EXISTS FOR (o:Ontology) REQUIRE o.ontologyId IS UNIQUE",
@@ -27,6 +30,71 @@ _CONSTRAINTS = [
 def _to_pascal_case(key: str) -> str:
     """Convert a snake_case key to PascalCase."""
     return "".join(segment.capitalize() for segment in key.split("_"))
+
+
+def validate_vector_indexed_properties(
+    entity_type_key: str,
+    properties: dict[str, Any],
+    filter_properties: list[str],
+    entity_id: str | None = None,
+) -> None:
+    """Reject string values that Neo4j cannot safely store in vector index metadata."""
+    for property_key in filter_properties:
+        value = properties.get(property_key)
+        if value is None or not isinstance(value, str):
+            continue
+        value_bytes = len(value.encode("utf-8"))
+        if value_bytes <= MAX_VECTOR_FILTER_VALUE_BYTES:
+            continue
+
+        entity_ref = f" on entity '{entity_id}'" if entity_id else ""
+        raise ValidationError(
+            f"Property '{property_key}'{entity_ref} is too large for semantic indexing "
+            f"on type '{entity_type_key}' ({value_bytes} bytes > "
+            f"{MAX_VECTOR_FILTER_VALUE_BYTES} bytes)",
+            details={
+                "fields": {
+                    property_key: (
+                        "Value exceeds Neo4j's semantic-index size limit "
+                        f"({value_bytes} bytes > {MAX_VECTOR_FILTER_VALUE_BYTES} bytes)"
+                    )
+                }
+            },
+        )
+
+
+async def _validate_existing_vector_indexed_properties(
+    driver: AsyncDriver,
+    pascal_label: str,
+    entity_type_key: str,
+    filter_properties: list[str],
+) -> None:
+    if not filter_properties:
+        return
+
+    async with driver.session() as session:
+        result = await session.run(
+            f"MATCH (n:{pascal_label}) RETURN n._id AS entity_id, n {{.*}} AS properties"
+        )
+        async for record in result:
+            validate_vector_indexed_properties(
+                entity_type_key,
+                record["properties"] or {},
+                filter_properties,
+                entity_id=record["entity_id"],
+            )
+
+
+async def _drop_failed_index_if_exists(driver: AsyncDriver, index_name: str) -> None:
+    async with driver.session() as session:
+        result = await session.run(
+            "SHOW INDEXES YIELD name, state WHERE name = $name RETURN state",
+            name=index_name,
+        )
+        record = await result.single()
+        if record and record["state"] == "FAILED":
+            await session.run(f"DROP INDEX {index_name} IF EXISTS")
+            logger.warning("Dropped failed vector index before recreate: %s", index_name)
 
 
 async def _ensure_constraints(driver: AsyncDriver) -> None:
@@ -98,9 +166,14 @@ async def create_vector_index(
     """
     pascal_label = _to_pascal_case(entity_type_key)
     index_name = f"{entity_type_key}_embedding"
+    selected_properties = [p for p in (filter_properties or []) if p]
+    await _validate_existing_vector_indexed_properties(
+        driver, pascal_label, entity_type_key, selected_properties
+    )
+    await _drop_failed_index_if_exists(driver, index_name)
     with_clause = ""
-    if filter_properties:
-        props = ", ".join(f"n.{p}" for p in filter_properties)
+    if selected_properties:
+        props = ", ".join(f"n.{p}" for p in selected_properties)
         with_clause = f"WITH [{props}] "
     query = (
         f"CREATE VECTOR INDEX {index_name} IF NOT EXISTS "
@@ -142,6 +215,9 @@ async def rebuild_vector_index(
         record = await result.single()
         property_keys = record["property_keys"] if record else []
 
+    await _validate_existing_vector_indexed_properties(
+        driver, _to_pascal_case(entity_type_key), entity_type_key, property_keys
+    )
     await drop_vector_index(driver, entity_type_key)
     await create_vector_index(
         driver, entity_type_key, dimensions, filter_properties=property_keys

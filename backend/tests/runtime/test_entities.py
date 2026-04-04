@@ -1,10 +1,50 @@
 """Tests for runtime entity CRUD with scoped schema behavior."""
 
+from copy import deepcopy
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from tests.runtime.conftest import EMBEDDING, REPO, make_entity
+
+
+def _long_text_schema() -> dict:
+    schema = {
+        "ontology": {
+            "ontologyId": "ont-1",
+            "key": "full_ontology",
+            "name": "Full Ontology",
+            "description": None,
+        },
+        "entityTypes": [
+            {
+                "entityTypeId": "et-1",
+                "key": "person",
+                "displayName": "Person",
+                "description": None,
+                "properties": [
+                    {
+                        "key": "name",
+                        "displayName": "Name",
+                        "dataType": "string",
+                        "required": True,
+                        "defaultValue": None,
+                    },
+                    {
+                        "key": "content",
+                        "displayName": "Content",
+                        "dataType": "string",
+                        "required": False,
+                        "defaultValue": None,
+                    },
+                ],
+            },
+        ],
+        "relationTypes": [],
+        "entityInclusions": [],
+        "relationInclusions": [],
+    }
+    return deepcopy(schema)
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +147,26 @@ async def test_create_entity_type_not_in_scope_returns_404(client, scoped_schema
         )
 
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_create_entity_rejects_oversized_indexed_string(client):
+    mock_provider = AsyncMock()
+    mock_provider.embed = AsyncMock(return_value=[0.1] * 768)
+
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=_long_text_schema()),
+        patch(f"{REPO}.create_entity", new_callable=AsyncMock) as mock_create,
+        patch(EMBEDDING, return_value=mock_provider),
+    ):
+        resp = await client.post(
+            "/api/runtime/full_ontology/entities/person",
+            json={"name": "Alice", "content": "x" * 40000},
+        )
+
+    assert resp.status_code == 422
+    assert "content" in resp.json()["error"]["details"]["fields"]
+    mock_create.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +295,28 @@ async def test_update_entity_rejects_out_of_scope_property(client, scoped_schema
 
     assert resp.status_code == 422
     assert "age" in resp.json()["error"]["details"]["fields"]
+
+
+@pytest.mark.asyncio
+async def test_update_entity_rejects_oversized_indexed_string(client):
+    mock_provider = AsyncMock()
+    mock_provider.embed = AsyncMock(return_value=[0.1] * 768)
+    current_entity = make_entity(name="Alice", content="short")
+
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=_long_text_schema()),
+        patch(f"{REPO}.get_entity", new_callable=AsyncMock, return_value=current_entity),
+        patch(f"{REPO}.update_entity", new_callable=AsyncMock) as mock_update,
+        patch(EMBEDDING, return_value=mock_provider),
+    ):
+        resp = await client.patch(
+            "/api/runtime/full_ontology/entities/person/ent-1",
+            json={"content": "x" * 40000},
+        )
+
+    assert resp.status_code == 422
+    assert "content" in resp.json()["error"]["details"]["fields"]
+    mock_update.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

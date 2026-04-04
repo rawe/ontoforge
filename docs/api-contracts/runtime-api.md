@@ -123,8 +123,9 @@ Properties are provided as a flat JSON object. Keys must match property definiti
 - All `required` properties must be present (or have a `defaultValue` in the schema). → 422 if missing.
 - No unknown property keys (not defined in the schema). → 422 if unknown.
 - Each value must be coercible to its schema `dataType`. → 422 if type mismatch.
+- When semantic search is enabled, any string value that would exceed Neo4j's vector-index metadata size limit is rejected with 422 before the entity is written.
 - Default values are injected for required properties not in the request but with a `defaultValue` in the schema.
-- All validation errors are collected and returned at once (not fail-fast).
+- Schema/type validation errors are collected and returned together where practical; semantic-index size validation may still reject the request with 422 before persistence.
 
 ### GET /api/runtime/{ontologyKey}/entities/{entityTypeKey}
 
@@ -210,7 +211,7 @@ Partial update of an entity instance. Only provided properties are updated; omit
 
 **Response:** `200 OK` — full entity instance after update.
 
-**Validation:** Same type and unknown-property checks as creation, applied only to the provided properties.
+**Validation:** Same type and unknown-property checks as creation, applied only to the provided properties. When semantic search is enabled, the merged post-update entity must still fit Neo4j's vector-index metadata size limit for indexed string properties, or the update is rejected with 422.
 
 **Errors:** 404 if not found. 422 if validation fails.
 

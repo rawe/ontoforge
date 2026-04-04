@@ -110,6 +110,7 @@ A hybrid approach (in-index `WHERE` for supported operators, post-filter `WHERE`
 
 - **Backward compatibility.** The REST and MCP API surfaces do not change. This is a purely internal optimization — callers continue using `filter.*` parameters as before.
 - **Index size.** Storing metadata properties in the vector index increases index size. For ontologies with many properties per entity type, consider limiting `WITH [...]` to frequently filtered properties rather than all properties.
+- **Oversized indexed strings.** Long string values can make Neo4j/Lucene fail vector-index population. OntoForge should fail fast: writes and index rebuilds reject values that exceed the metadata size limit, rather than silently dropping properties from the index or leaving a `FAILED` vector index behind.
 - **`min_score` filtering.** Currently applied in Python after the Neo4j query. With the `SEARCH` clause this could remain as-is (post-filter in Python) since Neo4j's `SEARCH` does not support a minimum score predicate.
 - **Testing.** The Neo4j 5 → 2026 upgrade may surface breaking changes in Cypher syntax or driver behavior beyond vector search. Run the full test suite against Neo4j 2026 before committing.
 

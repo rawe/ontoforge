@@ -129,10 +129,10 @@ async def ensure_vector_indexes(driver: AsyncDriver, dimensions: int) -> None:
         )
 
     # Saved query vector index (for semantic search over descriptions)
-    await _ensure_saved_query_vector_index(driver, dimensions)
+    await ensure_saved_query_vector_index(driver, dimensions)
 
 
-async def _ensure_saved_query_vector_index(
+async def ensure_saved_query_vector_index(
     driver: AsyncDriver, dimensions: int
 ) -> None:
     """Create the vector index for SavedQuery descriptions (IF NOT EXISTS).

@@ -1,4 +1,7 @@
+import json
+import logging
 import re
+from collections.abc import AsyncGenerator
 from uuid import uuid4
 
 from fastapi import Depends
@@ -7,9 +10,13 @@ from neo4j import AsyncDriver
 from ontoforge_server.core.database import (
     create_vector_index,
     drop_vector_index,
+    ensure_saved_query_vector_index,
+    ensure_vector_indexes,
     get_driver,
     rebuild_vector_index,
 )
+from ontoforge_server.runtime.embedding import build_text_repr
+from ontoforge_server.runtime.service import PropertyDef, to_pascal_case
 from ontoforge_server.core.embedding import get_embedding_provider
 from ontoforge_server.core.exceptions import (
     CascadeRequiredError,
@@ -58,6 +65,8 @@ from ontoforge_server.modeling.schemas import (
     StepType,
     ValidationResult,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _to_ontology_response(data: dict) -> OntologyResponse:
@@ -1044,6 +1053,8 @@ async def import_schema(
     driver: AsyncDriver = Depends(get_driver),
 ) -> dict:
     """Import a v2.0 schema: create types globally, then ontologies with INCLUDES_TYPE edges."""
+    provider = get_embedding_provider()
+
     async with driver.session() as session:
         # Create entity types and track key->id mapping
         et_key_to_id: dict[str, str] = {}
@@ -1062,6 +1073,14 @@ async def import_schema(
                     session, et_id, "EntityType", prop_id,
                     prop.key, prop.display_name, prop.description,
                     prop.data_type, prop.required, prop.default_value,
+                )
+
+            # Create vector index for this entity type
+            if provider:
+                filter_props = [prop.key for prop in et.properties]
+                await create_vector_index(
+                    driver, et.key, provider.dimensions,
+                    filter_properties=filter_props,
                 )
 
         # Create relation types
@@ -1175,8 +1194,173 @@ async def import_schema(
 
             created_ontologies.append(_to_ontology_response(ont_data))
 
+    # Ensure saved query vector index exists
+    if provider:
+        await ensure_saved_query_vector_index(driver, provider.dimensions)
+
     _invalidate_runtime_schema_cache()
     return {"ontologies": [o.model_dump(by_alias=True) for o in created_ontologies]}
+
+
+# --- Rebuild Embeddings ---
+
+
+async def rebuild_embeddings(
+    driver: AsyncDriver,
+) -> AsyncGenerator[str, None]:
+    """Re-embed all entities and saved queries. Yields NDJSON progress lines."""
+    provider = get_embedding_provider()
+    if not provider:
+        raise ValidationError(
+            "Embedding provider is not configured. "
+            "Set EMBEDDING_PROVIDER to enable semantic search."
+        )
+
+    # Ensure all vector indexes exist
+    await ensure_vector_indexes(driver, provider.dimensions)
+
+    # Discover all entity types with their property definitions
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            MATCH (et:EntityType)
+            OPTIONAL MATCH (et)-[:HAS_PROPERTY]->(p:PropertyDefinition)
+            WITH et, p ORDER BY et.key, p.key
+            WITH et, collect(p {.*}) AS properties
+            RETURN et.key AS key, properties
+            ORDER BY et.key
+            """
+        )
+        entity_types = []
+        async for record in result:
+            props = {}
+            for p in record["properties"]:
+                if p:
+                    props[p["key"]] = PropertyDef(
+                        key=p["key"],
+                        display_name=p.get("displayName", p["key"]),
+                        description=p.get("description"),
+                        data_type=p.get("dataType", "string"),
+                        required=p.get("required", False),
+                        default_value=p.get("defaultValue"),
+                    )
+            entity_types.append({"key": record["key"], "properties": props})
+
+    # For each entity type, iterate all entities and re-embed
+    type_results = []
+    total_processed = 0
+    total_failed = 0
+
+    for et in entity_types:
+        et_key = et["key"]
+        property_defs = et["properties"]
+        pascal_label = to_pascal_case(et_key)
+
+        # Count entities of this type
+        async with driver.session() as session:
+            count_result = await session.run(
+                f"MATCH (n:{pascal_label}) RETURN count(n) AS total"
+            )
+            count_record = await count_result.single()
+            entity_total = count_record["total"]
+
+        processed = 0
+        failed = 0
+
+        # Iterate all entities and re-embed
+        async with driver.session() as session:
+            result = await session.run(
+                f"MATCH (n:{pascal_label}) RETURN n._id AS id, n {{.*}} AS props"
+            )
+            records = [record async for record in result]
+
+        for record in records:
+            entity_id = record["id"]
+            props = dict(record["props"])
+            user_props = {k: v for k, v in props.items() if not k.startswith("_")}
+
+            text = build_text_repr(et_key, user_props, property_defs)
+            embedding = await provider.embed(text)
+
+            if embedding is not None:
+                async with driver.session() as session:
+                    await session.run(
+                        "MATCH (n:_Entity {_id: $id}) SET n._embedding = $embedding",
+                        id=entity_id,
+                        embedding=embedding,
+                    )
+                processed += 1
+            else:
+                failed += 1
+
+            yield json.dumps({
+                "type": "progress",
+                "entityTypeKey": et_key,
+                "processed": processed + failed,
+                "total": entity_total,
+            }) + "\n"
+
+        type_results.append({
+            "entityTypeKey": et_key,
+            "processed": processed,
+            "failed": failed,
+        })
+        total_processed += processed
+        total_failed += failed
+
+    # Re-embed saved queries
+    async with driver.session() as session:
+        sq_result = await session.run(
+            "MATCH (sq:SavedQuery) "
+            "RETURN elementId(sq) AS elemId, sq.description AS description"
+        )
+        saved_queries = [
+            {"elemId": record["elemId"], "description": record["description"]}
+            async for record in sq_result
+        ]
+
+    sq_total = len(saved_queries)
+    sq_processed = 0
+    sq_failed = 0
+
+    for sq in saved_queries:
+        embedding = await provider.embed(sq["description"])
+        if embedding is not None:
+            async with driver.session() as session:
+                await session.run(
+                    "MATCH (sq) WHERE elementId(sq) = $elemId "
+                    "SET sq._embedding = $embedding",
+                    elemId=sq["elemId"],
+                    embedding=embedding,
+                )
+            sq_processed += 1
+        else:
+            sq_failed += 1
+
+        yield json.dumps({
+            "type": "progress",
+            "entityTypeKey": "saved_queries",
+            "processed": sq_processed + sq_failed,
+            "total": sq_total,
+        }) + "\n"
+
+    total_processed += sq_processed
+    total_failed += sq_failed
+
+    # Final summary
+    yield json.dumps({
+        "type": "summary",
+        "entityTypes": type_results,
+        "savedQueriesProcessed": sq_processed,
+        "savedQueriesFailed": sq_failed,
+        "totalProcessed": total_processed,
+        "totalFailed": total_failed,
+    }) + "\n"
+
+    logger.info(
+        "Rebuild embeddings complete: %d processed, %d failed",
+        total_processed, total_failed,
+    )
 
 
 # --- AI Agent Config ---

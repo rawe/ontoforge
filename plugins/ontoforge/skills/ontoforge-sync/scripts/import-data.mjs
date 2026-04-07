@@ -104,6 +104,7 @@ try {
 
   console.error(`Done: ${entityCount} entities, ${relationCount} relations imported.`);
   if (skipped) console.error(`  ${skipped} relations skipped (missing entity references).`);
+  console.error('Hint: run rebuild-embeddings.mjs to generate semantic search embeddings.');
 } catch (err) {
   die(err.message);
 }

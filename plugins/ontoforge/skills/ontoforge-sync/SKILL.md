@@ -94,11 +94,28 @@ The import creates all entities first (building a map from old IDs to new IDs), 
 
 **API used**: `POST /api/runtime/{key}/entities/{type}`, `POST /api/runtime/{key}/relations/{type}`
 
+### Rebuild Embeddings
+
+Regenerate all embedding vectors for semantic search. Run this after data import, after changing the embedding model, or to repair missing indexes.
+
+```bash
+node scripts/rebuild-embeddings.mjs [--base-url <url>]
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `--base-url` | no | OntoForge server URL |
+
+**API used**: `POST /api/model/rebuild-embeddings`
+
+Streams progress to stderr. On completion, prints a per-type summary. Returns a `422` error if the embedding provider is not configured on the server.
+
 ## Ordering Rules
 
 1. **Schema before data.** The schema defines entity types and relation types. Data cannot be imported until the schema exists.
 2. **Entities before relations.** The data import script handles this automatically.
-3. **Fresh database for schema import.** The schema import API does not support overwrite. If the database already has types or ontologies with the same keys, the import will fail with a 409 Conflict. To re-import, reset the database first (e.g. `docker compose down -v && docker compose up -d`).
+3. **Rebuild embeddings after data import.** Semantic search requires embedding vectors. Run `rebuild-embeddings.mjs` after importing data.
+4. **Fresh database for schema import.** The schema import API does not support overwrite. If the database already has types or ontologies with the same keys, the import will fail with a 409 Conflict. To re-import, reset the database first (e.g. `docker compose down -v && docker compose up -d`).
 
 ## Typical Workflows
 
@@ -115,6 +132,9 @@ node scripts/import-schema.mjs ./ontoforge/schema.json
 
 # 4. Optionally import seed data
 node scripts/import-data.mjs ./ontoforge/data.json
+
+# 5. Rebuild embeddings for semantic search
+node scripts/rebuild-embeddings.mjs
 ```
 
 ### Snapshot the current state for version control

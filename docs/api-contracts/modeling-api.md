@@ -367,7 +367,47 @@ Import an ontology from a JSON payload.
 
 **Response:** `201 Created` — the created/updated ontology object.
 
+**Side effects:** When an embedding provider is configured, the import automatically creates Neo4j vector indexes for each entity type and for saved queries. This ensures semantic search queries do not fail with "index not found" on a freshly imported database.
+
 **Errors:** 409 if ontology already exists and overwrite is false. 422 if the import payload fails validation.
+
+### POST /api/model/rebuild-embeddings
+
+Regenerate all embedding vectors for entity instances and saved queries. Ensures Neo4j vector indexes exist, then iterates all entities and saved queries to (re-)compute their embeddings.
+
+Use this after data import, after changing the embedding model or dimensions, or to repair missing/corrupted indexes.
+
+**Precondition:** Embedding provider must be configured (`EMBEDDING_PROVIDER` environment variable).
+
+**Response:** `200 OK` with `application/x-ndjson` streaming body. Each line is a JSON object:
+
+Progress lines (emitted per entity processed):
+```json
+{
+  "type": "progress",
+  "entityTypeKey": "string",
+  "processed": 5,
+  "total": 42
+}
+```
+
+For saved queries, `entityTypeKey` is `"saved_queries"`.
+
+Summary line (final line):
+```json
+{
+  "type": "summary",
+  "entityTypes": [
+    { "entityTypeKey": "topic", "processed": 42, "failed": 0 }
+  ],
+  "savedQueriesProcessed": 7,
+  "savedQueriesFailed": 0,
+  "totalProcessed": 49,
+  "totalFailed": 0
+}
+```
+
+**Errors:** 422 if embedding provider is not configured.
 
 ---
 

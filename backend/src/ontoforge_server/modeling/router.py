@@ -1,7 +1,10 @@
 from fastapi import APIRouter, Depends, Query, Response
+from fastapi.responses import StreamingResponse
 from neo4j import AsyncDriver
 
 from ontoforge_server.core.database import get_driver
+from ontoforge_server.core.embedding import get_embedding_provider
+from ontoforge_server.core.exceptions import ValidationError
 from ontoforge_server.modeling import service
 from ontoforge_server.modeling.schemas import (
     AiAgentConfigResponse,
@@ -519,3 +522,22 @@ async def delete_saved_query(
 ):
     await service.delete_saved_query(ontology_key, query_key, driver)
     return Response(status_code=204)
+
+
+# --- Rebuild Embeddings ---
+
+
+@router.post("/rebuild-embeddings")
+async def rebuild_embeddings(
+    driver: AsyncDriver = Depends(get_driver),
+):
+    provider = get_embedding_provider()
+    if not provider:
+        raise ValidationError(
+            "Embedding provider is not configured. "
+            "Set EMBEDDING_PROVIDER to enable semantic search."
+        )
+    return StreamingResponse(
+        service.rebuild_embeddings(driver),
+        media_type="application/x-ndjson",
+    )

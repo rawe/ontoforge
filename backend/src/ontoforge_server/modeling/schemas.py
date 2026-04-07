@@ -277,3 +277,24 @@ class SavedQueryResponse(BaseModel):
     updated_at: datetime = Field(alias="updatedAt")
 
     model_config = {"populate_by_name": True}
+
+
+# --- Rebuild Embeddings ---
+
+
+class RebuildEmbeddingsTypeResult(BaseModel):
+    entity_type_key: str = Field(alias="entityTypeKey")
+    processed: int
+    failed: int
+
+    model_config = {"populate_by_name": True}
+
+
+class RebuildEmbeddingsResult(BaseModel):
+    entity_types: list[RebuildEmbeddingsTypeResult] = Field(alias="entityTypes")
+    saved_queries_processed: int = Field(alias="savedQueriesProcessed")
+    saved_queries_failed: int = Field(alias="savedQueriesFailed")
+    total_processed: int = Field(alias="totalProcessed")
+    total_failed: int = Field(alias="totalFailed")
+
+    model_config = {"populate_by_name": True}

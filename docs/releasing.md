@@ -16,9 +16,10 @@ Component versions are embedded in container image labels during the build. Curr
 ## Release Process
 
 1. Bump component versions in `backend/pyproject.toml` and `frontend/package.json`
-2. Commit the version bump
-3. Tag: `git tag v{version}` (e.g., `git tag v0.2.0`)
-4. Push: `git push origin main --tags`
+2. Sync lock files: `cd backend && uv sync` and `cd frontend && npm install --package-lock-only`
+3. Commit the version bump (include both manifests and lock files)
+4. Tag: `git tag v{version}` (e.g., `git tag v0.2.0`)
+5. Push: `git push origin main --tags`
 
 The tag push triggers the GitHub Actions workflow (`.github/workflows/release-images.yml`), which runs `make release` to build and push container images to GHCR.
 

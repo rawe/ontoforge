@@ -4,12 +4,13 @@ A plugin for AI coding assistants (Claude Code and OpenAI Codex) that provides O
 
 ## Skills
 
-### ontoforge
+### ontoforge-sync
 
-Export and import OntoForge ontology schemas via the Modeling REST API.
+Export and import OntoForge schema and instance data via the REST API.
 
-- **Export**: save an ontology schema to a JSON file for version control
-- **Import**: load a schema from a JSON file, replacing any existing schema with the same ID
+- **Schema export/import**: save and restore the complete global schema (entity types, relation types, ontologies) as JSON
+- **Data export/import**: save and restore all instance data (entities, relations) with automatic ID remapping
+- Uses Node.js 18+ with built-in `fetch` — no external dependencies
 
 ### ontoforge-setup
 

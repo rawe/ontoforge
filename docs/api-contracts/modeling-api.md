@@ -221,7 +221,7 @@ Update a relation type. `key`, `sourceEntityTypeId`, and `targetEntityTypeId` ar
 
 **Errors:** 404 if not found. 422 if `factTemplate` fails validation.
 
-**Side effect:** Any update that touches `factTemplate` — setting it, changing it, or clearing it to `null` — marks every existing instance of this relation type as `_embeddingState = "stale"`. The background reconcile worker picks them up on its next pass and re-renders `_fact` / `_embedding` against the new template (or zeroes them out when the template was cleared).
+**Side effect:** Any update that touches `factTemplate` — setting it, changing it, or clearing it to `null` — marks every existing instance of this relation type as `_embeddingState = "stale"`. The background reconcile worker picks them up on its next pass and re-renders `_fact` / `_embedding` against the new template (or zeroes them out when the template was cleared). See [../embeddings.md](../embeddings.md) for the full embedding lifecycle.
 
 ### DELETE /api/model/ontologies/{ontologyId}/relation-types/{relationTypeId}
 

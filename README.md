@@ -264,6 +264,10 @@ Find entities by meaning rather than exact keywords. Requires an embedding model
 | `EMBEDDING_BASE_URL` | `http://localhost:11434` | Embedding API endpoint |
 | `EMBEDDING_API_KEY` | *(unset)* | API key (required for `openai` provider) |
 | `EMBEDDING_DIMENSIONS` | *(auto)* | Vector dimensions (defaults: ollama=768, openai=1536) |
+| `RECONCILE_INTERVAL_SECONDS` | `30` | Background reconcile-worker tick interval |
+| `RECONCILE_BATCH_SIZE` | `50` | Per-tick drain cap for stale / failed semantic relations |
+
+For how embeddings are created and kept in sync when data or templates change, see [docs/embeddings.md](docs/embeddings.md).
 
 ### AI-Powered Runtime
 

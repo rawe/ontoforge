@@ -213,7 +213,7 @@ Partial update of an entity instance. Only provided properties are updated; omit
 
 **Validation:** Same type and unknown-property checks as creation, applied only to the provided properties. When semantic search is enabled, the merged post-update entity must still fit Neo4j's vector-index metadata size limit for indexed string properties, or the update is rejected with 422.
 
-**Side effect:** Any update that actually mutates user properties (set or remove) flips every adjacent semantic relation to `_embeddingState = "stale"` — source-facing and target-facing edges both. The background reconcile worker re-renders `_fact` and re-embeds on its next pass, so the relation's searchable fact eventually reflects the updated entity. Updates with an empty body (no-ops) do not trigger the stale pass.
+**Side effect:** Any update that actually mutates user properties (set or remove) flips every adjacent semantic relation to `_embeddingState = "stale"` — source-facing and target-facing edges both. The background reconcile worker re-renders `_fact` and re-embeds on its next pass, so the relation's searchable fact eventually reflects the updated entity. Updates with an empty body (no-ops) do not trigger the stale pass. See [../embeddings.md](../embeddings.md) for the full embedding lifecycle.
 
 **Errors:** 404 if not found. 422 if validation fails.
 

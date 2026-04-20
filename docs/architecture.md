@@ -618,3 +618,5 @@ uv run ontoforge-server
 ```
 
 **Database bootstrap:** On startup, the server ensures all required constraints and indexes exist — both schema constraints (ontology, entity type, etc.) and instance constraints (`_Entity` uniqueness on `_id`, entity type key index). The runtime schema cache is loaded lazily on first request per ontology, not at startup.
+
+**Optional features.** Semantic search and AI-powered runtime are opt-in via environment variables; see the README for the full env-var table. The embedding lifecycle — write-time path, staleness, background reconcile worker, and the `rebuild-embeddings` endpoint — is documented in [embeddings.md](embeddings.md).

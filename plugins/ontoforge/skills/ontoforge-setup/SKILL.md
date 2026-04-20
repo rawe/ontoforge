@@ -132,6 +132,8 @@ These are the **only** environment variables recognized by the `ontoforge-server
 | `AI_BASE_URL` | no | `http://localhost:11434` | AI provider API base URL |
 | `AI_API_KEY` | no | *(none)* | API key — **required** when `AI_PROVIDER=openai` |
 | `DEFAULT_MCP_ONTOLOGY_KEY` | no | *(none)* | Fallback ontology key for MCP when not in URL/header |
+| `RECONCILE_INTERVAL_SECONDS` | no | `30` | Background worker tick that re-embeds stale / failed semantic relations (runs only when `EMBEDDING_PROVIDER` is set) |
+| `RECONCILE_BATCH_SIZE` | no | `50` | Max semantic relations reconciled per tick |
 
 ## Container Images
 

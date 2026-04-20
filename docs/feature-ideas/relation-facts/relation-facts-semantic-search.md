@@ -94,7 +94,7 @@ Still 1:1 native Neo4j. Every semantic relation edge carries:
 
 Structural (non-semantic) relations carry only the Phase 0 reservations on top of today's fields.
 
-Vector indexes are declared per relation type, created from schema at startup. Each semantic relation type gets its own vector index on `_embedding`. The index's `WITH [...]` list includes `_groupId`, `_validAt`, `_invalidAt`, `_relationTypeKey` so future filters can be pushed into the in-index `WHERE` clause. Only `_groupId` is used in Phase 1; the others are reserved for Phase 4 temporal.
+Vector indexes are declared per relation type, created from schema at startup. Each semantic relation type gets its own vector index on `_embedding`. The index's `WITH [...]` list includes `_groupId`, `_validAt`, `_invalidAt`, `_relationTypeKey` so future filters can be pushed into the in-index `WHERE` clause. Only `_groupId` is used in Phase 1; the others are reserved for the later temporal extension.
 
 No fulltext indexes in Phase 1.
 
@@ -115,7 +115,7 @@ Update of a relation's own properties follows the same path: re-render, re-embed
 
 ### 6.2 Entity-update staleness propagation
 
-When any property on an entity changes, the write path marks **every semantic relation of any type where that entity is source or target** as `_embeddingState = "stale"`. Dumb and over-inclusive by design: relations whose templates don't actually reference the changed property are still re-reconciled. This is the Phase 1 approach; a template-to-property-dependency index is a Phase 2+ optimization.
+When any property on an entity changes, the write path marks **every semantic relation of any type where that entity is source or target** as `_embeddingState = "stale"`. Dumb and over-inclusive by design: relations whose templates don't actually reference the changed property are still re-reconciled. This is the Phase 1 approach; a template-to-property-dependency index is a later optimization.
 
 Marking is a cheap label-scan by `_id` — no rendering, no embedding call, no model round-trip on the critical path.
 
@@ -205,7 +205,7 @@ This endpoint exists to make the semantic endpoint's locators usable in real pip
 
 ### 7.3 Filters at fan-out on `search/semantic/relations`
 
-Only system properties are filterable at fan-out: `_groupId` in Phase 1, with `_validAt`/`_invalidAt` reserved for Phase 4. User-property filtering is not supported on this endpoint — callers who need it compose downstream (fetch matches, filter client-side or via a later saved-query step).
+Only system properties are filterable at fan-out: `_groupId` in Phase 1, with `_validAt`/`_invalidAt` reserved for the later temporal extension. User-property filtering is not supported on this endpoint — callers who need it compose downstream (fetch matches, filter client-side or via a later saved-query step).
 
 Rationale: every eligible type has a different user-property set, so a single filter map doesn't type-check across types. The old single-type endpoint remains the path for typed filtering.
 
@@ -248,19 +248,21 @@ Callers who want user-defined properties on matches fetch via `get_relation(id)`
 
 ---
 
-## 11. Explicitly deferred to later phases
+## 11. Explicitly deferred — not in Phase 1
 
-- **`embeddable: bool` on `PropertyDefinition`.** Deferred to Phase 2. Entity embeddings in Phase 1 continue to use today's "all string properties concatenated" composition.
-- **`searchable: bool` on `PropertyDefinition`.** Deferred (Phase 2+ along with fulltext).
-- **`search/semantic/entities` (cross-entity-type semantic search).** Deferred to Phase 2 — Phase 1 concentrates on the relation side. The existing single-type entity semantic search covers the entity side in the meantime.
-- **Fulltext search on anything.** Deferred to Phase 2.
-- **`search/any` composer across entities and relations.** Deferred to Phase 2 or later. Callers who want cross-kind results call both primitives client-side.
-- **Saved-query step integration** (`relation_search`, `hybrid_search`, `fulltext`, `expand`, `seed_filter`). Deferred to Phase 2. The new endpoints are still callable directly; they just don't appear as saved-query step types yet.
-- **`type_keys?` whitelist on `search/semantic/relations`.** Deferred. Phase 1 always fans out over all eligible types in the lens.
-- **Template-to-property dependency index** for narrower stale-marking on entity updates. Deferred. Phase 1 uses the dumb "mark all relations of semantic types touching this entity" rule.
-- **Temporal (`_validAt`/`_invalidAt` actually populated, `asOf` queries, relation versioning).** Deferred to Phase 4. Fields are reserved now.
-- **Ingest-episode / LLM extraction.** Deferred to Phase 5.
-- **Community detection, LLM-synthesized facts, per-field vectors.** Deferred to Phase 6 and only if needed.
+These are known extensions not included in Phase 1's scope. Each entry records how Phase 1 behaves *without* the feature so the design can be reasoned about in isolation. For when each is planned to ship, see [roadmap.md](roadmap.md).
+
+- **`embeddable: bool` on `PropertyDefinition`.** Entity embeddings in Phase 1 continue to use today's "all string properties concatenated" composition.
+- **`searchable: bool` on `PropertyDefinition`.** No per-property fulltext control in Phase 1.
+- **`search/semantic/entities` (cross-entity-type semantic search).** Phase 1 concentrates on the relation side; the existing single-type entity semantic search covers the entity side in the meantime.
+- **Fulltext search on anything.** No fulltext indexes or fulltext queries in Phase 1.
+- **`search/any` composer across entities and relations.** Callers who want cross-kind results call both primitives client-side.
+- **Saved-query step integration** (`relation_search`, `hybrid_search`, `fulltext`, `expand`, `seed_filter`). The new endpoints are callable directly; they do not appear as saved-query step types yet.
+- **`type_keys?` whitelist on `search/semantic/relations`.** Phase 1 always fans out over all eligible types in the lens.
+- **Template-to-property dependency index** for narrower stale-marking on entity updates. Phase 1 uses the dumb "mark all relations of semantic types touching this entity" rule.
+- **Temporal (`_validAt`/`_invalidAt` populated, `asOf` queries, relation versioning).** Fields are reserved in Phase 1; behavior stays disabled.
+- **Ingest-episode / LLM extraction.** Not available in Phase 1.
+- **Community detection, LLM-synthesized facts, per-field vectors.** Not available in Phase 1.
 
 ---
 
@@ -302,7 +304,7 @@ Same as the source doc's §6, plus:
 | 9 | Relation locator shape includes `source_id`, `target_id`, and (semantic only) `_fact`.         | Endpoints `_id`s are structural identity; `_fact` answers "why did this match?".     |
 | 10 | One field — `RelationType.factTemplate: string | null`; presence = semantic.                 | Pit of success; no redundant flag states.                                            |
 | 11 | Constrained Jinja2 `SandboxedEnvironment`; filter whitelist; write-time parse validation only. | Expressive enough for §3.3 examples; security surface bounded; "just parses" gate.   |
-| 12 | Lazy entity re-embed triggered by `embeddable` flips — deferred to Phase 2.                    | Phase 1 focuses on relations; no unnecessary entity-side migration.                  |
+| 12 | Lazy entity re-embed triggered by `embeddable` flips — deferred.                               | Phase 1 focuses on relations; no unnecessary entity-side migration.                  |
 
 ---
 

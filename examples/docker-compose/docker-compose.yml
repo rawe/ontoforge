@@ -46,6 +46,10 @@ services:
       # AI_API_KEY: sk-...
       # MCP default ontology key (optional — used when no key in URL path or header)
       # DEFAULT_MCP_ONTOLOGY_KEY: my_ontology
+      # Relation-facts reconcile worker (optional — defaults shown).
+      # Only runs when EMBEDDING_PROVIDER is configured.
+      # RECONCILE_INTERVAL_SECONDS: 30
+      # RECONCILE_BATCH_SIZE: 50
     depends_on:
       neo4j:
         condition: service_healthy

@@ -27,10 +27,10 @@ Provider failures do not block writes. A relation or entity that fails to embed 
 
 The server flips embeddings from `"ok"` to `"stale"` automatically on two events:
 
-1. **Entity property change.** Any entity update that mutates user properties marks every adjacent semantic relation (source- or target-facing, all types) as stale. The rule is intentionally over-inclusive — relations whose templates don't actually reference the changed property get reconciled anyway. Rationale and the template-to-property dependency-index deferral live in [`feature-ideas/relation-facts/relation-facts-semantic-search.md`](feature-ideas/relation-facts/relation-facts-semantic-search.md) §6.2.
+1. **Entity property change.** Any entity update that mutates user properties marks every adjacent semantic relation (source- or target-facing, all types) as stale. The rule is intentionally over-inclusive — relations whose templates don't actually reference the changed property get reconciled anyway. A narrower template-to-property dependency index is a potential later optimisation; the current pass is the honest baseline.
 2. **`factTemplate` change on a relation type.** Setting, changing, or clearing a template marks every existing instance of that type as stale. A cleared template is handled specially by the worker — see below.
 
-Entity-side staleness (opt-in re-embed when an `embeddable` flag flips on a property) is a later-milestone extension; see [`feature-ideas/relation-facts/roadmap.md`](feature-ideas/relation-facts/roadmap.md).
+Entity-side staleness — opt-in re-embed when an `embeddable` flag flips on a property — is not yet shipped. Today every entity property composes into its embedding; schema-driven entity re-embed goes through the manual `rebuild-embeddings` endpoint.
 
 ## Two recovery mechanisms
 
@@ -79,5 +79,3 @@ Full contract: [`api-contracts/modeling-api.md`](api-contracts/modeling-api.md) 
 
 - [`api-contracts/runtime-api.md`](api-contracts/runtime-api.md) — entity-update side effect, semantic search endpoints
 - [`api-contracts/modeling-api.md`](api-contracts/modeling-api.md) — `factTemplate` side effect, `rebuild-embeddings`
-- [`feature-ideas/relation-facts/relation-facts-semantic-search.md`](feature-ideas/relation-facts/relation-facts-semantic-search.md) §6 — staleness-propagation spec and design decisions
-- [`feature-ideas/relation-facts/roadmap.md`](feature-ideas/relation-facts/roadmap.md) — milestone ordering; what's deferred and where it lands

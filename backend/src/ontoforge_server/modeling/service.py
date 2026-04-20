@@ -440,6 +440,21 @@ async def update_relation_type(
         )
         if not data:
             raise NotFoundError(f"Relation type '{relation_type_id}' not found")
+
+        # M2 §6.3: whenever factTemplate is touched (set / changed / cleared),
+        # mark every existing instance of this type as stale so the reconcile
+        # worker re-renders against the new template (or zeroes the fact if
+        # the template was cleared).
+        if fact_template_provided:
+            await session.run(
+                """
+                MATCH ()-[r]-()
+                WHERE r._relationTypeKey = $key
+                  AND r._factVersion IS NOT NULL
+                SET r._embeddingState = 'stale'
+                """,
+                key=data["key"],
+            )
     _invalidate_runtime_schema_cache()
     # Create the per-type relation vector index if a fact template was set.
     if created_index_for_key is not None:

@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    model_config = {"env_file": ".env"}
+    model_config = {"env_file": ".env", "extra": "ignore"}
 
     DB_URI: str = "bolt://localhost:7687"
     DB_USER: str = "neo4j"
@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     AI_API_KEY: str | None = None
 
     PUBLIC_URL: str | None = None
+
+    RECONCILE_INTERVAL_SECONDS: int = 30
+    RECONCILE_BATCH_SIZE: int = 50
 
 
 settings = Settings()

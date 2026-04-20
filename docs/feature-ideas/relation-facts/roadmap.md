@@ -15,7 +15,7 @@ The implementation roadmap for the relation-facts feature. Each milestone is **d
 ## Milestones
 
 - [x] **M1 — Walking skeleton for semantic relation search** _(shipped 2026-04-20, branch `feature/relation-facts`)_
-- [ ] **M2 — Staleness + reconcile worker**
+- [x] **M2 — Staleness + reconcile worker** _(shipped 2026-04-20, branch `feature/relation-facts`)_
 - [ ] **M3 — Graph expansion, first hop (`expand`, depth = 1)**
 - [ ] **M4 — Entity-side semantic parity**
 - [ ] **M5 — Fulltext + hybrid search**
@@ -56,7 +56,17 @@ The implementation roadmap for the relation-facts feature. Each milestone is **d
 - Temporal → **M7**
 - Ingest-from-text / episodes → **M8**
 
-### M2 — Staleness + reconcile worker
+### M2 — Staleness + reconcile worker ✅
+
+**Status:** shipped 2026-04-20 on branch `feature/relation-facts`. 310 unit tests pass (baseline 291 + 19 new). Scope delivered matches the spec exactly: no new endpoint, no schema additions, no per-type templateVersion.
+
+**What shipped (brief):**
+- **Entity-update stale-marking** (§6.2) — `runtime/repository.py::update_entity` runs a second statement against the same session after the primary `SET`, flipping every adjacent semantic relation (undirected `-[r]-()` with `r._factVersion IS NOT NULL`) to `_embeddingState = "stale"`. Gated on `set_properties` or `remove_properties` being non-empty; no-op updates skip the pass.
+- **Template-update stale-marking** (§6.3) — `modeling/service.py::update_relation_type` runs a single `MATCH ()-[r]-()` statement after a successful schema write whenever `fact_template_provided` is true (set / change / clear all trigger it), marking every instance of that relation type stale. Runs before `_invalidate_runtime_schema_cache()` and index creation.
+- **Background reconcile worker** (§6.4) — new `runtime/reconcile.py`. `run_reconcile_loop(driver)` is a single asyncio task started in `main.py` lifespan when an embedding provider is configured, cancelled + awaited on shutdown. `drain_once` picks up to `RECONCILE_BATCH_SIZE` stale/failed semantic relations per pass, reconciles each (re-render + re-embed), and reports `{processed, failed, skipped}`. Template-null path zeros out `_fact` / `_embedding` / `_factVersion` and sets state to `ok`.
+- **In-memory exponential backoff** — keyed by relation `_id`, `(attempts, last_attempt_epoch)`, base 30s / cap 1h / max 10 attempts. Not persisted: process restart re-reads the DB and retries everything.
+- **Two config knobs** in `config.py`: `RECONCILE_INTERVAL_SECONDS` (default 30) and `RECONCILE_BATCH_SIZE` (default 50).
+- **Docs** — `docs/api-contracts/modeling-api.md` notes the `factTemplate` PATCH side effect; `docs/api-contracts/runtime-api.md` notes the entity-update side effect.
 
 **Essence.** M1 ships a feature that works on day one and slowly drifts afterwards: change Alice's `displayName` and every `_fact` referencing her is outdated, but still what semantic search matches against. M2 closes that correctness gap so the feature is trustworthy under real data evolution. Entity updates mark touched semantic relations as stale (dumb, over-inclusive rule); a background worker re-renders `_fact` and re-embeds. `factTemplate` changes and previously failed embeddings use the same path.
 

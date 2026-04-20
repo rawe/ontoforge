@@ -1,4 +1,6 @@
+import asyncio
 import json
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -23,8 +25,11 @@ from ontoforge_server.mcp.mount import mount_mcp
 from ontoforge_server.mcp.runtime import runtime_mcp
 from ontoforge_server.modeling.router import router as modeling_router
 from ontoforge_server.runtime.ai_router import router as ai_router
+from ontoforge_server.runtime.reconcile import run_reconcile_loop
 from ontoforge_server.runtime.router import global_router as runtime_global_router
 from ontoforge_server.runtime.router import router as runtime_router
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -35,11 +40,27 @@ async def lifespan(app: FastAPI):
     provider = get_embedding_provider()
     if provider:
         await ensure_vector_indexes(driver, provider.dimensions)
-    async with modeling_mcp.session_manager.run():
-        async with runtime_mcp.session_manager.run():
-            yield
-    await close_embedding_provider()
-    await close_driver()
+    reconcile_task: asyncio.Task | None = None
+    if provider:
+        # M2 §6.4: background reconcile worker. Only started when embeddings
+        # are actually configured — mirrors how rebuild_embeddings refuses to
+        # run without a provider.
+        reconcile_task = asyncio.create_task(run_reconcile_loop(driver))
+    try:
+        async with modeling_mcp.session_manager.run():
+            async with runtime_mcp.session_manager.run():
+                yield
+    finally:
+        if reconcile_task is not None:
+            reconcile_task.cancel()
+            try:
+                await reconcile_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Reconcile worker shutdown error: %s", exc)
+        await close_embedding_provider()
+        await close_driver()
 
 
 def _error_response(status: int, code: str, message: str, details: dict | None = None) -> JSONResponse:

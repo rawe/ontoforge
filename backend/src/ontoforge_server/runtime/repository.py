@@ -259,6 +259,22 @@ async def update_entity(
     record = await result.single()
     if not record:
         return None
+
+    # M2 §6.2: when user properties actually changed, flip every adjacent
+    # semantic relation to stale so the background reconcile worker re-renders
+    # the fact against the updated entity props. Undirected `-[r]-()` covers
+    # source- and target-facing edges in one pass; the `_factVersion IS NOT
+    # NULL` predicate isolates semantic relations from structural ones.
+    if set_properties or remove_properties:
+        await session.run(
+            """
+            MATCH (n:_Entity {_id: $entity_id})-[r]-()
+            WHERE r._factVersion IS NOT NULL
+            SET r._embeddingState = 'stale'
+            """,
+            entity_id=entity_id,
+        )
+
     return _strip_embedding(_convert_neo4j_types(record["entity"]))
 
 

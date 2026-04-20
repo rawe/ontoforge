@@ -7,6 +7,7 @@ TOOL_GET_ENTITY = "get_entity"
 TOOL_LIST_RELATIONS = "list_relations"
 TOOL_GET_NEIGHBORS = "get_neighbors"
 TOOL_SEMANTIC_SEARCH = "semantic_search"
+TOOL_SEMANTIC_SEARCH_RELATIONS = "semantic_search_relations"
 TOOL_EXECUTE_CYPHER = "execute_cypher_query"
 TOOL_LIST_SAVED_QUERIES = "list_saved_queries"
 TOOL_RUN_SAVED_QUERY = "run_saved_query"
@@ -28,6 +29,7 @@ VALID_AGENT_TOOLS: set[str] = {
     TOOL_LIST_RELATIONS,
     TOOL_GET_NEIGHBORS,
     TOOL_SEMANTIC_SEARCH,
+    TOOL_SEMANTIC_SEARCH_RELATIONS,
     TOOL_EXECUTE_CYPHER,
     TOOL_LIST_SAVED_QUERIES,
     TOOL_RUN_SAVED_QUERY,

@@ -1,7 +1,7 @@
 # Relation-facts roadmap
 
 **Status:** active
-**Last updated:** 2026-04-19
+**Last updated:** 2026-04-20
 
 ## What this is
 
@@ -14,7 +14,7 @@ The implementation roadmap for the relation-facts feature. Each milestone is **d
 
 ## Milestones
 
-- [ ] **M1 — Walking skeleton for semantic relation search**
+- [x] **M1 — Walking skeleton for semantic relation search** _(shipped 2026-04-20, branch `feature/relation-facts`)_
 - [ ] **M2 — Staleness + reconcile worker**
 - [ ] **M3 — Graph expansion, first hop (`expand`, depth = 1)**
 - [ ] **M4 — Entity-side semantic parity**
@@ -24,13 +24,27 @@ The implementation roadmap for the relation-facts feature. Each milestone is **d
 - [ ] **M8 — Ingest-from-text (episodes)**
 - [ ] **M9 (optional) — Advanced extensions: LLM facts, per-field vectors, communities**
 
-### M1 — Walking skeleton for semantic relation search
+### M1 — Walking skeleton for semantic relation search ✅
+
+**Status:** shipped 2026-04-20 on branch `feature/relation-facts`. 286 unit tests pass; integration tested end-to-end against live Neo4j 2026.02 + Ollama `nomic-embed-text`.
 
 **Essence.** Minimum end-to-end path: define a relation type with a fact template, create instances, query semantically, get back matching facts with their fact strings. The core capability, working for demos and narrow pilots. Phase 0 system-property reservations ride along so later milestones don't need a migration.
 
 **Scope defined in:** `relation-facts-semantic-search.md` §3 (Phase 0 reservations), §4 (`factTemplate` modeling), §5 (storage + per-type vector index), §6.1 (create write path), §7.1 (the new semantic endpoint), §8 (MCP tool).
 
 **Demo criterion.** A relation type with a fact template has instances. `GET /search/semantic/relations?q=…` and the matching MCP tool return expected facts with `_fact` + endpoint IDs. Existing endpoints untouched.
+
+**What shipped (brief):**
+- **Modeling** — `RelationType.factTemplate: string | null` on create/update/response/export/import and in the modeling MCP tools. Constrained sandboxed-Jinja2 validator (`modeling/fact_template.py`) enforcing filter whitelist, tag whitelist, 2000-char source cap, `__` rejection, and variable-reference checks against the declared source/target/relation property sets. Reserved-schema-key blocklist (`episode`, `mentions`, `provenance`, case-insensitive). User property keys starting with `_` rejected.
+- **Storage** — per-semantic-relation-type vector index created idempotently at startup and on `factTemplate` set, with `WITH [_groupId, _validAt, _invalidAt, _relationTypeKey]` pushed into the index.
+- **Runtime write path** — every entity and relation write now persists the Phase 0 system properties (`_groupId`, `_validAt`, `_invalidAt`, `_embeddingState`, `_embeddingVersion`); a one-shot idempotent backfill runs at startup for pre-existing data. Semantic relations additionally render `_fact` from the template, try-sync-embed, and set `_factVersion`. Embedding failure is graceful: the relation is still persisted with `_embeddingState="failed"`.
+- **Read path** — `GET /api/runtime/{ontologyKey}/search/semantic/relations?q=…&limit=…&groupId=…&k=…`: embeds `q`, fans out one Cypher vector search per eligible relation type in parallel, fuses with RRF in application code, isolates per-index failure. Matching MCP tool `semantic_search_relations`. Response shape per §7.1 (locator + `_fact` + `score` + `matched_via:["vector"]`; no user-defined relation properties).
+- **Frontend** — relation-type editor (create + edit) gains a "Fact template" textarea with helper text; a "Semantic" badge appears on list cards and the editor header when `factTemplate` is non-null. Backend 422 messages surface via the existing toast flow.
+- **Docs** — `docs/api-contracts/modeling-api.md` and `docs/api-contracts/runtime-api.md` updated.
+
+**Known follow-ups (not bugs, by design):**
+- Hidden-data leak via `_fact` when a template references a property hidden by the lens's allowlist (§4.4) — accepted risk, mitigation parked.
+- Pre-existing doc drift in `docs/api-contracts/modeling-api.md` (uses `sourceEntityTypeId` / nested `/ontologies/{id}/...` paths while the implementation uses `sourceEntityTypeKey` / flat routes). Out of M1 scope, worth reconciling separately.
 
 **Not in M1 (and where it lives):**
 - Staleness when entity properties change → **M2**

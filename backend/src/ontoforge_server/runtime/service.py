@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import copy
 import logging
 import re
@@ -66,6 +67,7 @@ class RelationTypeDef:
     description: str | None
     from_entity_type_key: str
     to_entity_type_key: str
+    fact_template: str | None = None
     properties: dict[str, PropertyDef] = field(default_factory=dict)
 
 
@@ -240,6 +242,7 @@ def _build_schema_cache_from_raw(
             description=rt.get("description"),
             from_entity_type_key=rt["sourceKey"],
             to_entity_type_key=rt["targetKey"],
+            fact_template=rt.get("factTemplate"),
             properties=props,
         )
     return cache
@@ -533,6 +536,7 @@ def _relation_type_def_to_export(rt_def: RelationTypeDef) -> ExportRelationType:
         description=rt_def.description,
         fromEntityTypeKey=rt_def.from_entity_type_key,
         toEntityTypeKey=rt_def.to_entity_type_key,
+        factTemplate=rt_def.fact_template,
         properties=props,
     )
 
@@ -999,9 +1003,45 @@ async def create_relation(
         relation_id = str(uuid4())
         rel_type_upper = to_upper_snake_case(relation_type_key)
 
+        # Semantic relation type? Render + embed the fact.
+        fact: str | None = None
+        fact_version: int | None = None
+        embedding: list[float] | None = None
+        embedding_state = "ok"
+        embedding_version = 1
+        template = full_rt_for_validation.fact_template if full_rt_for_validation else None
+        if template:
+            from ontoforge_server.runtime.relation_embedding import (
+                render_and_embed_relation_fact,
+            )
+
+            # Relation data passed to the template is the coerced user props
+            # plus any explicit displayName (none for now — the relation carries
+            # no displayName property by default). Pass `_relationTypeKey` too.
+            relation_ctx: dict[str, Any] = dict(coerced)
+            try:
+                result = await render_and_embed_relation_fact(
+                    template, from_entity, to_entity, relation_ctx,
+                )
+            except ValueError as exc:
+                raise ValidationError(
+                    f"Fact template render failed: {exc}",
+                    details={"fields": {"factTemplate": str(exc)}},
+                )
+            fact = result.fact
+            fact_version = result.fact_version
+            embedding = result.embedding
+            embedding_state = result.embedding_state
+            embedding_version = result.embedding_version
+
         relation = await repository.create_relation(
             session, relation_type_key, rel_type_upper,
             relation_id, from_entity_id, to_entity_id, coerced,
+            fact=fact,
+            fact_version=fact_version,
+            embedding=embedding,
+            embedding_state=embedding_state,
+            embedding_version=embedding_version,
         )
 
     return _filter_relation_properties(relation, scoped_rt)
@@ -1096,9 +1136,58 @@ async def update_relation(
         return await get_relation(ontology_key, relation_type_key, relation_id, driver)
 
     rel_type_upper = to_upper_snake_case(relation_type_key)
+
+    # Semantic relation type? Re-render + re-embed using merged state.
+    full_rt = loaded.full.relation_types.get(relation_type_key)
+    template = full_rt.fact_template if full_rt else None
+    fact: str | None = None
+    fact_version: int | None = None
+    embedding: list[float] | None = None
+    has_embedding_update = False
+
+    if template:
+        async with driver.session() as session:
+            current = await repository.get_relation(session, rel_type_upper, relation_id)
+        if current is None:
+            raise NotFoundError(f"Relation '{relation_id}' not found")
+
+        merged_relation_props = {
+            k: v for k, v in current.items()
+            if not k.startswith("_") and k not in ("fromEntityId", "toEntityId")
+        }
+        merged_relation_props.update(set_props)
+        for k in remove_props:
+            merged_relation_props.pop(k, None)
+
+        async with driver.session() as session:
+            from_entity = await repository.get_entity_by_id(session, current["fromEntityId"])
+            to_entity = await repository.get_entity_by_id(session, current["toEntityId"])
+
+        from ontoforge_server.runtime.relation_embedding import (
+            render_and_embed_relation_fact,
+        )
+
+        try:
+            result = await render_and_embed_relation_fact(
+                template, from_entity or {}, to_entity or {}, merged_relation_props,
+            )
+        except ValueError as exc:
+            raise ValidationError(
+                f"Fact template render failed: {exc}",
+                details={"fields": {"factTemplate": str(exc)}},
+            )
+        fact = result.fact
+        fact_version = result.fact_version
+        embedding = result.embedding
+        has_embedding_update = True
+
     async with driver.session() as session:
         relation = await repository.update_relation(
-            session, rel_type_upper, relation_id, set_props, remove_props
+            session, rel_type_upper, relation_id, set_props, remove_props,
+            fact=fact,
+            fact_version=fact_version,
+            embedding=embedding,
+            has_embedding_update=has_embedding_update,
         )
     if not relation:
         raise NotFoundError(f"Relation '{relation_id}' not found")
@@ -1511,6 +1600,152 @@ async def execute_saved_query(
             last_output = result
 
     return last_output
+
+
+# ---------------------------------------------------------------------------
+# Service Functions — Semantic Search over Relation Facts (Phase 1 §7.1)
+# ---------------------------------------------------------------------------
+
+
+def _rrf_fuse(
+    ranked_lists: list[list[dict]],
+    k: int,
+) -> list[dict]:
+    """Fuse N per-type ranked lists with Reciprocal Rank Fusion.
+
+    Each input list is assumed to already be sorted best-first. Returns a list
+    sorted by RRF score desc, tiebroken by ``_id`` ascending, with the original
+    per-item dict preserved and a recomputed ``score`` reflecting the RRF total.
+    """
+    scores: dict[str, float] = {}
+    items: dict[str, dict] = {}
+    for ranked in ranked_lists:
+        for rank, item in enumerate(ranked):
+            rid = item["_id"]
+            scores[rid] = scores.get(rid, 0.0) + 1.0 / (k + rank + 1)
+            if rid not in items:
+                items[rid] = item
+    fused: list[dict] = []
+    for rid, total in scores.items():
+        row = dict(items[rid])
+        row["score"] = total
+        fused.append(row)
+    fused.sort(key=lambda r: (-r["score"], r["_id"]))
+    return fused
+
+
+async def _search_one_relation_type(
+    driver: AsyncDriver,
+    rel_type_upper: str,
+    relation_type_key: str,
+    query_embedding: list[float],
+    group_id: str,
+    per_type_limit: int,
+) -> list[dict]:
+    """Run the per-type SEARCH query for one semantic relation type.
+
+    On any Neo4j-side error, returns an empty list (per-index failure isolation
+    per §7.1 step 6).
+    """
+    index_name = f"{relation_type_key}_relation_embedding"
+    # Cypher 25 SEARCH ... IN (VECTOR INDEX ...) form, mirroring the entity
+    # semantic-search repository pattern (``SEARCH n IN (...)``).
+    query = (
+        f"MATCH ()-[r:{rel_type_upper}]-() "
+        f"SEARCH r IN ("
+        f"VECTOR INDEX {index_name} "
+        f"FOR $query_embedding "
+        f"WHERE r._groupId = $group_id "
+        f"LIMIT $per_type_limit"
+        f") SCORE AS score "
+        f"RETURN r._id AS _id, "
+        f"r._relationTypeKey AS _relationTypeKey, "
+        f"r._fact AS _fact, "
+        f"startNode(r)._id AS source_id, "
+        f"endNode(r)._id AS target_id, "
+        f"score "
+        f"ORDER BY score DESC"
+    )
+    try:
+        async with driver.session() as session:
+            result = await session.run(
+                query,
+                query_embedding=query_embedding,
+                group_id=group_id,
+                per_type_limit=per_type_limit,
+            )
+            rows: list[dict] = []
+            async for record in result:
+                rows.append(
+                    {
+                        "_id": record["_id"],
+                        "_relationTypeKey": record["_relationTypeKey"],
+                        "_fact": record["_fact"],
+                        "source_id": record["source_id"],
+                        "target_id": record["target_id"],
+                        "score": record["score"],
+                        "matched_via": ["vector"],
+                    }
+                )
+            return rows
+    except Exception as exc:
+        logger.warning(
+            "Relation semantic search failed for type '%s': %s",
+            relation_type_key, exc,
+        )
+        return []
+
+
+async def semantic_search_relations(
+    ontology_key: str,
+    q: str,
+    limit: int,
+    group_id: str | None,
+    k: int,
+    driver: AsyncDriver,
+) -> list[dict]:
+    """Cross-type semantic search over relation facts (Phase 1 §7.1).
+
+    Enumerates every semantic relation type visible through the active lens
+    (``fact_template is not None``), fans out one parallel Cypher call per
+    eligible type, then fuses the ranked lists with Reciprocal Rank Fusion.
+    """
+    loaded = await _load_schema(ontology_key, driver)
+
+    provider = get_embedding_provider()
+    if not provider:
+        return []
+
+    # Eligible relation types: visible in the scoped lens AND semantic.
+    eligible_types = [
+        rt for rt in loaded.scoped.relation_types.values()
+        if rt.fact_template is not None
+    ]
+    if not eligible_types:
+        return []
+
+    query_embedding = await provider.embed(q)
+    if query_embedding is None:
+        return []
+
+    effective_group = group_id or "default"
+    per_type_limit = max(limit, 50)
+
+    tasks = [
+        _search_one_relation_type(
+            driver,
+            to_upper_snake_case(rt.key),
+            rt.key,
+            query_embedding,
+            effective_group,
+            per_type_limit,
+        )
+        for rt in eligible_types
+    ]
+    ranked_lists = await asyncio.gather(*tasks, return_exceptions=False)
+
+    fused = _rrf_fuse(ranked_lists, k=k)
+    return fused[:limit]
 
 
 # ---------------------------------------------------------------------------

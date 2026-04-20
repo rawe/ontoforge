@@ -48,13 +48,13 @@ export const deleteEntityType = (entityTypeId: string, cascade = false) =>
 export const listRelationTypes = () =>
   request<RelationType[]>('/relation-types');
 export const createRelationType = (
-  data: { key: string; displayName: string; description?: string; sourceEntityTypeKey: string; targetEntityTypeKey: string },
+  data: { key: string; displayName: string; description?: string; sourceEntityTypeKey: string; targetEntityTypeKey: string; factTemplate?: string | null },
 ) => request<RelationType>('/relation-types', { method: 'POST', body: JSON.stringify(data) });
 export const getRelationType = (relationTypeId: string) =>
   request<RelationType>(`/relation-types/${relationTypeId}`);
 export const updateRelationType = (
   relationTypeId: string,
-  data: { displayName?: string; description?: string },
+  data: { displayName?: string; description?: string; factTemplate?: string | null },
 ) => request<RelationType>(`/relation-types/${relationTypeId}`, { method: 'PUT', body: JSON.stringify(data) });
 export const deleteRelationType = (relationTypeId: string, cascade = false) =>
   request<void>(`/relation-types/${relationTypeId}${cascade ? '?cascade=true' : ''}`, { method: 'DELETE' });

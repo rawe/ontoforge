@@ -95,7 +95,7 @@ export default function SchemaPage() {
     }
   };
 
-  const handleCreateRelationType = async (data: { key: string; displayName: string; description?: string; sourceEntityTypeKey: string; targetEntityTypeKey: string }) => {
+  const handleCreateRelationType = async (data: { key: string; displayName: string; description?: string; sourceEntityTypeKey: string; targetEntityTypeKey: string; factTemplate: string | null }) => {
     try {
       await api.createRelationType(data);
       setShowRelationForm(false);

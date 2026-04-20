@@ -109,6 +109,10 @@ async def ensure_vector_indexes(driver: AsyncDriver, dimensions: int) -> None:
     New indexes include a WITH clause listing all current properties for
     in-index filtering (Neo4j 2026+ SEARCH clause). Existing indexes are
     left untouched.
+
+    Also creates per-relation-type vector indexes for every relation type that
+    has a non-null ``factTemplate`` (semantic relation types). These carry a
+    fixed in-index filter list of Phase 0 reserved system properties.
     """
     async with driver.session() as session:
         result = await session.run(
@@ -128,8 +132,26 @@ async def ensure_vector_indexes(driver: AsyncDriver, dimensions: int) -> None:
             driver, et["key"], dimensions, filter_properties=et["property_keys"]
         )
 
+    # Semantic relation types (factTemplate IS NOT NULL) → per-type relation index.
+    async with driver.session() as session:
+        rt_result = await session.run(
+            "MATCH (rt:RelationType) WHERE rt.factTemplate IS NOT NULL "
+            "RETURN rt.key AS key"
+        )
+        rel_type_keys = [record["key"] async for record in rt_result]
+
+    for rt_key in rel_type_keys:
+        await create_relation_vector_index(driver, rt_key, dimensions)
+
     # Saved query vector index (for semantic search over descriptions)
     await ensure_saved_query_vector_index(driver, dimensions)
+
+
+async def drop_saved_query_vector_index(driver: AsyncDriver) -> None:
+    """Drop the SavedQuery vector index if it exists (idempotent)."""
+    async with driver.session() as session:
+        await session.run("DROP INDEX saved_query_embedding IF EXISTS")
+    logger.info("Vector index dropped: saved_query_embedding")
 
 
 async def ensure_saved_query_vector_index(
@@ -195,6 +217,48 @@ async def drop_vector_index(driver: AsyncDriver, entity_type_key: str) -> None:
     logger.info("Vector index dropped: %s", index_name)
 
 
+# --- Relation vector indexes (per semantic relation type) ---
+
+
+def _to_upper_snake_case(key: str) -> str:
+    return key.upper()
+
+
+async def create_relation_vector_index(
+    driver: AsyncDriver,
+    relation_type_key: str,
+    dimensions: int,
+) -> None:
+    """Create a relationship vector index for a semantic relation type.
+
+    Idempotent (``IF NOT EXISTS``). The in-index property list mirrors the
+    Phase 0 reservations so future temporal / group filters can be pushed into
+    the SEARCH clause without re-indexing.
+    """
+    index_name = f"{relation_type_key}_relation_embedding"
+    rel_type_upper = _to_upper_snake_case(relation_type_key)
+    await _drop_failed_index_if_exists(driver, index_name)
+    query = (
+        f"CREATE VECTOR INDEX {index_name} IF NOT EXISTS "
+        f"FOR ()-[r:{rel_type_upper}]-() ON (r._embedding) "
+        f"WITH [r._groupId, r._validAt, r._invalidAt, r._relationTypeKey] "
+        f"OPTIONS {{indexConfig: {{`vector.dimensions`: {dimensions}, "
+        f"`vector.similarity_function`: 'cosine'}}}}"
+    )
+    async with driver.session() as session:
+        await session.run(query)
+    logger.info("Relation vector index ensured: %s", index_name)
+
+
+async def drop_relation_vector_index(
+    driver: AsyncDriver, relation_type_key: str
+) -> None:
+    index_name = f"{relation_type_key}_relation_embedding"
+    async with driver.session() as session:
+        await session.run(f"DROP INDEX {index_name} IF EXISTS")
+    logger.info("Relation vector index dropped: %s", index_name)
+
+
 async def rebuild_vector_index(
     driver: AsyncDriver, entity_type_key: str, dimensions: int
 ) -> None:
@@ -224,6 +288,41 @@ async def rebuild_vector_index(
     )
 
 
+async def _backfill_phase0_system_properties(driver: AsyncDriver) -> None:
+    """One-shot idempotent backfill of Phase 0 system properties on every entity
+    and every relation edge.
+
+    Sets ``_groupId = "default"``, ``_embeddingState`` (derived from the presence
+    of ``_embedding``), and ``_embeddingVersion = 1`` on rows where those fields
+    are null. Leaves ``_validAt`` and ``_invalidAt`` null — temporal is deferred.
+    """
+    async with driver.session() as session:
+        await session.run(
+            """
+            MATCH (n:_Entity)
+            WHERE n._groupId IS NULL
+            SET n._groupId = 'default',
+                n._embeddingState = coalesce(
+                    n._embeddingState,
+                    CASE WHEN n._embedding IS NULL THEN 'failed' ELSE 'ok' END
+                ),
+                n._embeddingVersion = coalesce(n._embeddingVersion, 1)
+            """
+        )
+        await session.run(
+            """
+            MATCH ()-[r]-()
+            WHERE r._id IS NOT NULL AND r._groupId IS NULL
+            SET r._groupId = 'default',
+                r._embeddingState = coalesce(
+                    r._embeddingState,
+                    CASE WHEN r._embedding IS NULL THEN 'failed' ELSE 'ok' END
+                ),
+                r._embeddingVersion = coalesce(r._embeddingVersion, 1)
+            """
+        )
+
+
 async def init_driver() -> AsyncDriver:
     global _driver
     _driver = AsyncGraphDatabase.driver(
@@ -232,6 +331,7 @@ async def init_driver() -> AsyncDriver:
     )
     await _driver.verify_connectivity()
     await _ensure_constraints(_driver)
+    await _backfill_phase0_system_properties(_driver)
     return _driver
 
 

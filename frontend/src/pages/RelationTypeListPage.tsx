@@ -24,20 +24,30 @@ export default function RelationTypeListPage() {
         <p className="text-gray-400 text-sm italic">No relation types defined.</p>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {schema.relationTypes.map((rt) => (
-            <Link
-              key={rt.key}
-              to={`/data/${ontologyKey}/relations/${rt.key}`}
-              className="border border-gray-200 rounded-lg p-4 bg-white shadow-sm hover:shadow-md transition-shadow block"
-            >
-              <h4 className="text-md font-semibold text-gray-900">{rt.displayName}</h4>
-              <p className="text-sm text-gray-400 font-mono">{rt.key}</p>
-              <p className="text-xs text-gray-500 mt-1">
-                {rt.fromEntityTypeKey} &rarr; {rt.toEntityTypeKey}
-              </p>
-              <p className="text-xs text-gray-500">{rt.properties.length} properties</p>
-            </Link>
-          ))}
+          {schema.relationTypes.map((rt) => {
+            const factTemplate = (rt as unknown as { factTemplate?: string | null }).factTemplate;
+            return (
+              <Link
+                key={rt.key}
+                to={`/data/${ontologyKey}/relations/${rt.key}`}
+                className="border border-gray-200 rounded-lg p-4 bg-white shadow-sm hover:shadow-md transition-shadow block"
+              >
+                <div className="flex items-center gap-2">
+                  <h4 className="text-md font-semibold text-gray-900">{rt.displayName}</h4>
+                  {factTemplate && (
+                    <span className="inline-flex items-center rounded bg-purple-100 text-purple-700 px-2 py-0.5 text-xs font-medium">
+                      Semantic
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm text-gray-400 font-mono">{rt.key}</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  {rt.fromEntityTypeKey} &rarr; {rt.toEntityTypeKey}
+                </p>
+                <p className="text-xs text-gray-500">{rt.properties.length} properties</p>
+              </Link>
+            );
+          })}
         </div>
       )}
     </div>

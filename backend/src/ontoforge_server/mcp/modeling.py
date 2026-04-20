@@ -143,6 +143,7 @@ async def create_relation_type(
     source_entity_type_key: str,
     target_entity_type_key: str,
     description: str | None = None,
+    fact_template: str | None = None,
 ) -> dict:
     driver = await get_driver()
     body = RelationTypeCreate(
@@ -151,6 +152,7 @@ async def create_relation_type(
         description=description,
         source_entity_type_key=source_entity_type_key,
         target_entity_type_key=target_entity_type_key,
+        fact_template=fact_template,
     )
     result = await service.create_relation_type(body=body, driver=driver)
     return result.model_dump(by_alias=True)
@@ -160,10 +162,16 @@ async def update_relation_type(
     relation_type_key: str,
     display_name: str | None = None,
     description: str | None = None,
+    fact_template: str | None = None,
 ) -> dict:
     driver = await get_driver()
     rt = await _resolve_relation_type(driver, relation_type_key)
-    body = RelationTypeUpdate(display_name=display_name, description=description)
+    # Only include fact_template in the payload if the caller supplied it,
+    # so that omission doesn't silently clear an existing template.
+    update_kwargs: dict = {"display_name": display_name, "description": description}
+    if fact_template is not None:
+        update_kwargs["fact_template"] = fact_template
+    body = RelationTypeUpdate(**update_kwargs)
     result = await service.update_relation_type(rt["relationTypeId"], body=body, driver=driver)
     return result.model_dump(by_alias=True)
 

@@ -52,6 +52,18 @@ class SemanticSearchResponse(BaseModel):
     total: int
 
 
+class RelationSemanticMatch(BaseModel):
+    id: str = Field(alias="_id")
+    relation_type_key: str = Field(alias="_relationTypeKey")
+    source_id: str
+    target_id: str
+    fact: str | None = Field(default=None, alias="_fact")
+    score: float
+    matched_via: list[str]
+
+    model_config = {"populate_by_name": True}
+
+
 class CypherQueryRequest(BaseModel):
     cypher: str = Field(..., min_length=1)
 

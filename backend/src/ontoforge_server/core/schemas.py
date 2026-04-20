@@ -38,6 +38,7 @@ class ExportRelationType(BaseModel):
     description: str | None = None
     from_entity_type_key: str = Field(alias="fromEntityTypeKey")
     to_entity_type_key: str = Field(alias="toEntityTypeKey")
+    fact_template: str | None = Field(default=None, alias="factTemplate")
     properties: list[ExportProperty] = []
 
     model_config = {"populate_by_name": True}

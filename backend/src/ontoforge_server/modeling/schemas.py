@@ -101,6 +101,7 @@ class RelationTypeCreate(BaseModel):
     description: str | None = None
     source_entity_type_key: str = Field(alias="sourceEntityTypeKey")
     target_entity_type_key: str = Field(alias="targetEntityTypeKey")
+    fact_template: str | None = Field(default=None, alias="factTemplate")
 
     model_config = {"populate_by_name": True}
 
@@ -108,6 +109,7 @@ class RelationTypeCreate(BaseModel):
 class RelationTypeUpdate(BaseModel):
     display_name: str | None = Field(default=None, alias="displayName")
     description: str | None = None
+    fact_template: str | None = Field(default=None, alias="factTemplate")
 
     model_config = {"populate_by_name": True}
 
@@ -119,6 +121,7 @@ class RelationTypeResponse(BaseModel):
     description: str | None = None
     source_entity_type_key: str = Field(alias="sourceEntityTypeKey")
     target_entity_type_key: str = Field(alias="targetEntityTypeKey")
+    fact_template: str | None = Field(default=None, alias="factTemplate")
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
 
@@ -290,8 +293,19 @@ class RebuildEmbeddingsTypeResult(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class RebuildEmbeddingsRelationTypeResult(BaseModel):
+    relation_type_key: str = Field(alias="relationTypeKey")
+    processed: int
+    failed: int
+
+    model_config = {"populate_by_name": True}
+
+
 class RebuildEmbeddingsResult(BaseModel):
     entity_types: list[RebuildEmbeddingsTypeResult] = Field(alias="entityTypes")
+    relation_types: list[RebuildEmbeddingsRelationTypeResult] = Field(
+        alias="relationTypes", default_factory=list
+    )
     saved_queries_processed: int = Field(alias="savedQueriesProcessed")
     saved_queries_failed: int = Field(alias="savedQueriesFailed")
     total_processed: int = Field(alias="totalProcessed")

@@ -34,7 +34,7 @@ export default function RelationTypeEditorPage() {
 
   useEffect(() => { load(); }, [relationTypeId]);
 
-  const handleUpdate = async (data: { displayName?: string; description?: string }) => {
+  const handleUpdate = async (data: { displayName?: string; description?: string; factTemplate?: string | null }) => {
     if (!relationTypeId) return;
     try {
       setRelationType(await api.updateRelationType(relationTypeId, data));
@@ -94,6 +94,7 @@ export default function RelationTypeEditorPage() {
               description: relationType.description ?? '',
               sourceEntityTypeKey: relationType.sourceEntityTypeKey,
               targetEntityTypeKey: relationType.targetEntityTypeKey,
+              factTemplate: relationType.factTemplate,
             }}
             onSubmit={handleUpdate}
             onCancel={() => setEditing(false)}
@@ -103,6 +104,11 @@ export default function RelationTypeEditorPage() {
             <div className="flex items-center gap-3">
               <h2 className="text-2xl font-bold text-gray-900">{relationType.displayName}</h2>
               <span className="text-sm text-gray-400 font-mono">{relationType.key}</span>
+              {relationType.factTemplate && (
+                <span className="inline-flex items-center rounded bg-purple-100 text-purple-700 px-2 py-0.5 text-xs font-medium">
+                  Semantic
+                </span>
+              )}
               <button onClick={() => setEditing(true)} className="text-sm text-blue-600 hover:underline">Edit</button>
             </div>
             <p className="text-gray-500 mt-1">{relationType.description || 'No description'}</p>

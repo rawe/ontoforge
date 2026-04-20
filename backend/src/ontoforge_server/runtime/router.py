@@ -12,6 +12,7 @@ from ontoforge_server.runtime.schemas import (
     NeighborhoodResponse,
     PaginatedResponse,
     RelationInstanceCreate,
+    RelationSemanticMatch,
     SavedQueryRunRequest,
     SchemaResponse,
     SemanticSearchResponse,
@@ -75,6 +76,26 @@ async def semantic_search(
     return await service.semantic_search(
         ontology_key, q, type, limit, min_score, driver, filters=filters,
         fields=fields,
+    )
+
+
+# --- Semantic Search over Relation Facts (Phase 1 §7.1) ---
+
+
+@router.get(
+    "/search/semantic/relations",
+    response_model=list[RelationSemanticMatch],
+)
+async def semantic_search_relations(
+    ontology_key: str,
+    q: str = Query(..., min_length=1),
+    limit: int = Query(default=20, ge=1, le=100),
+    group_id: str | None = Query(default=None, alias="groupId"),
+    k: int = Query(default=60, ge=1, le=1000),
+    driver: AsyncDriver = Depends(get_driver),
+):
+    return await service.semantic_search_relations(
+        ontology_key, q, limit, group_id, k, driver,
     )
 
 

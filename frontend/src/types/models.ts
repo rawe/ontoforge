@@ -23,6 +23,7 @@ export interface RelationType {
   description: string | null;
   sourceEntityTypeKey: string;
   targetEntityTypeKey: string;
+  factTemplate: string | null;
   createdAt: string;
   updatedAt: string;
 }

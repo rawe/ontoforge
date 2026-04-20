@@ -128,15 +128,25 @@ async def create_entity(
     properties: dict,
     embedding: list[float] | None = None,
 ) -> dict:
-    """Create an entity instance node with dual labels: _Entity and the PascalCase type label."""
+    """Create an entity instance node with dual labels: _Entity and the PascalCase type label.
+
+    Every entity also receives the Phase 0 system properties: ``_groupId``,
+    ``_validAt``, ``_invalidAt``, ``_embeddingState`` and ``_embeddingVersion``.
+    """
     embedding_clause = ", _embedding: $embedding" if embedding is not None else ""
+    embedding_state = "ok" if embedding is not None else "failed"
     result = await session.run(
         f"""
         CREATE (n:_Entity:{pascal_label} {{
             _id: $entity_id,
             _entityTypeKey: $entity_type_key,
             _createdAt: datetime(),
-            _updatedAt: datetime(){embedding_clause}
+            _updatedAt: datetime(),
+            _groupId: $group_id,
+            _validAt: null,
+            _invalidAt: null,
+            _embeddingState: $embedding_state,
+            _embeddingVersion: 1{embedding_clause}
         }})
         SET n += $properties
         RETURN n {{.*}} AS entity
@@ -145,6 +155,8 @@ async def create_entity(
         entity_type_key=entity_type_key,
         properties=properties,
         embedding=embedding,
+        group_id="default",
+        embedding_state=embedding_state,
     )
     record = await result.single()
     return _strip_embedding(_convert_neo4j_types(record["entity"]))
@@ -222,7 +234,11 @@ async def update_entity(
         else "SET n._updatedAt = datetime()"
     )
     if has_embedding_update:
-        set_clause += ", n._embedding = $embedding"
+        # Re-embed: refresh the embedding and reflect its state.
+        if embedding is not None:
+            set_clause += ", n._embedding = $embedding, n._embeddingState = 'ok'"
+        else:
+            set_clause += ", n._embedding = null, n._embeddingState = 'failed'"
     remove_clause = (
         " ".join(f"REMOVE n.{k}" for k in remove_properties)
         if remove_properties
@@ -283,7 +299,42 @@ async def create_relation(
     from_entity_id: str,
     to_entity_id: str,
     properties: dict,
+    fact: str | None = None,
+    fact_version: int | None = None,
+    embedding: list[float] | None = None,
+    embedding_state: str = "ok",
+    embedding_version: int = 1,
 ) -> dict:
+    """Create a relation edge with Phase 0 system properties.
+
+    Semantic relations additionally receive ``_fact``, ``_factVersion``, and
+    ``_embedding`` / ``_embeddingState`` / ``_embeddingVersion`` per §6.1.
+    Non-semantic relations still carry the Phase 0 reservations (``_groupId``,
+    ``_validAt``, ``_invalidAt``) but leave the embedding state at ``"ok"``.
+    """
+    extra_clauses: list[str] = []
+    params: dict = {
+        "from_entity_id": from_entity_id,
+        "to_entity_id": to_entity_id,
+        "relation_id": relation_id,
+        "relation_type_key": relation_type_key,
+        "properties": properties,
+        "group_id": "default",
+        "embedding_state": embedding_state,
+        "embedding_version": embedding_version,
+    }
+    if fact is not None:
+        extra_clauses.append("_fact: $fact")
+        params["fact"] = fact
+    if fact_version is not None:
+        extra_clauses.append("_factVersion: $fact_version")
+        params["fact_version"] = fact_version
+    if embedding is not None:
+        extra_clauses.append("_embedding: $embedding")
+        params["embedding"] = embedding
+
+    extra_fragment = ("," + ", ".join(extra_clauses)) if extra_clauses else ""
+
     result = await session.run(
         f"""
         MATCH (from:_Entity {{_id: $from_entity_id}})
@@ -292,21 +343,23 @@ async def create_relation(
             _id: $relation_id,
             _relationTypeKey: $relation_type_key,
             _createdAt: datetime(),
-            _updatedAt: datetime()
+            _updatedAt: datetime(),
+            _groupId: $group_id,
+            _validAt: null,
+            _invalidAt: null,
+            _embeddingState: $embedding_state,
+            _embeddingVersion: $embedding_version{extra_fragment}
         }}]->(to)
         SET r += $properties
         RETURN r {{.*}} AS relation,
                from._id AS fromEntityId,
                to._id AS toEntityId
         """,
-        from_entity_id=from_entity_id,
-        to_entity_id=to_entity_id,
-        relation_id=relation_id,
-        relation_type_key=relation_type_key,
-        properties=properties,
+        **params,
     )
     record = await result.single()
     rel = _convert_neo4j_types(record["relation"])
+    rel.pop("_embedding", None)
     rel["fromEntityId"] = record["fromEntityId"]
     rel["toEntityId"] = record["toEntityId"]
     return rel
@@ -358,6 +411,7 @@ async def list_relations(
     items = []
     async for record in data_result:
         rel = _convert_neo4j_types(record["relation"])
+        rel.pop("_embedding", None)
         rel["fromEntityId"] = record["fromEntityId"]
         rel["toEntityId"] = record["toEntityId"]
         items.append(rel)
@@ -383,6 +437,7 @@ async def get_relation(
     if not record:
         return None
     rel = _convert_neo4j_types(record["relation"])
+    rel.pop("_embedding", None)
     rel["fromEntityId"] = record["fromEntityId"]
     rel["toEntityId"] = record["toEntityId"]
     return rel
@@ -394,12 +449,34 @@ async def update_relation(
     relation_id: str,
     set_properties: dict,
     remove_properties: list[str],
+    fact: str | None = None,
+    fact_version: int | None = None,
+    embedding: list[float] | None = None,
+    has_embedding_update: bool = False,
+    embedding_state: str | None = None,
 ) -> dict | None:
     set_clause = (
         "SET r += $set_properties, r._updatedAt = datetime()"
         if set_properties
         else "SET r._updatedAt = datetime()"
     )
+    extra_set_params: dict = {}
+    if fact is not None:
+        set_clause += ", r._fact = $fact"
+        extra_set_params["fact"] = fact
+    if fact_version is not None:
+        set_clause += ", r._factVersion = $fact_version"
+        extra_set_params["fact_version"] = fact_version
+    if has_embedding_update:
+        if embedding is not None:
+            set_clause += ", r._embedding = $embedding, r._embeddingState = 'ok'"
+            extra_set_params["embedding"] = embedding
+        else:
+            set_clause += ", r._embedding = null, r._embeddingState = 'failed'"
+    elif embedding_state is not None:
+        set_clause += ", r._embeddingState = $embedding_state"
+        extra_set_params["embedding_state"] = embedding_state
+
     remove_clause = (
         " ".join(f"REMOVE r.{k}" for k in remove_properties)
         if remove_properties
@@ -417,11 +494,13 @@ async def update_relation(
         """,
         relation_id=relation_id,
         set_properties=set_properties or {},
+        **extra_set_params,
     )
     record = await result.single()
     if not record:
         return None
     rel = _convert_neo4j_types(record["relation"])
+    rel.pop("_embedding", None)
     rel["fromEntityId"] = record["fromEntityId"]
     rel["toEntityId"] = record["toEntityId"]
     return rel

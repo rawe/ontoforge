@@ -8,7 +8,10 @@ from fastapi import Depends
 from neo4j import AsyncDriver
 
 from ontoforge_server.core.database import (
+    create_relation_vector_index,
     create_vector_index,
+    drop_relation_vector_index,
+    drop_saved_query_vector_index,
     drop_vector_index,
     ensure_saved_query_vector_index,
     ensure_vector_indexes,
@@ -16,7 +19,10 @@ from ontoforge_server.core.database import (
     rebuild_vector_index,
 )
 from ontoforge_server.runtime.embedding import build_text_repr
-from ontoforge_server.runtime.service import PropertyDef, to_pascal_case
+from ontoforge_server.runtime.relation_embedding import (
+    render_and_embed_relation_fact,
+)
+from ontoforge_server.runtime.service import PropertyDef, to_pascal_case, to_upper_snake_case
 from ontoforge_server.core.embedding import get_embedding_provider
 from ontoforge_server.core.exceptions import (
     CascadeRequiredError,
@@ -25,6 +31,7 @@ from ontoforge_server.core.exceptions import (
     ValidationError,
 )
 from ontoforge_server.modeling import repository
+from ontoforge_server.modeling.fact_template import validate_fact_template
 from ontoforge_server.runtime.tool_names import VALID_AGENT_TOOLS
 from ontoforge_server.modeling.schemas import (
     AGENT_KEY_PATTERN,
@@ -90,6 +97,78 @@ def _invalidate_runtime_schema_cache() -> None:
     from ontoforge_server.runtime import service as runtime_service
 
     runtime_service.invalidate_loaded_schema_cache()
+
+
+# --- Reserved-key / system-namespace blocklist (Phase 0 §3) ---
+
+# Schema keys reserved for future Graphiti-inspired features (episodes, provenance).
+# Keys are stored in lowercase snake_case and later mapped to PascalCase labels
+# (`episode` -> `:Episode`) and UPPER_SNAKE_CASE relationship types
+# (`mentions` -> `MENTIONS`), so the reserved namespace must be checked
+# case-insensitively against the user-facing key form.
+_RESERVED_SCHEMA_KEYS: frozenset[str] = frozenset({"episode", "mentions", "provenance"})
+
+
+def _reject_reserved_key(key: str, kind: str) -> None:
+    """Raise if ``key`` is on the reserved-schema-key blocklist."""
+    if key.lower() in _RESERVED_SCHEMA_KEYS:
+        raise ValidationError(
+            f"{kind} key '{key}' is reserved and cannot be used",
+            details={"fields": {"key": "Reserved schema key"}},
+        )
+
+
+def _reject_system_property_key(key: str) -> None:
+    """User property keys must not shadow system properties (``_``-prefixed)."""
+    if key.startswith("_"):
+        raise ValidationError(
+            f"Property key '{key}' is reserved; user property keys must not "
+            f"start with '_'",
+            details={"fields": {"key": "Reserved system-property namespace"}},
+        )
+
+
+async def _validate_fact_template_for_relation(
+    session,
+    source_entity_type_key: str,
+    target_entity_type_key: str,
+    relation_type_id: str | None,
+    fact_template: str,
+) -> None:
+    """Validate a fact template against the source/target/relation schema.
+
+    ``relation_type_id`` may be ``None`` when validating during create — in that
+    case relation properties are treated as empty (create starts with no props).
+    """
+    source_props: set[str] = set()
+    target_props: set[str] = set()
+    relation_props: set[str] = set()
+
+    source_et = await repository.get_entity_type_by_key(session, source_entity_type_key)
+    if source_et:
+        rows = await repository.list_properties(
+            session, source_et["entityTypeId"], "EntityType"
+        )
+        source_props = {p["key"] for p in rows}
+
+    target_et = await repository.get_entity_type_by_key(session, target_entity_type_key)
+    if target_et:
+        rows = await repository.list_properties(
+            session, target_et["entityTypeId"], "EntityType"
+        )
+        target_props = {p["key"] for p in rows}
+
+    if relation_type_id is not None:
+        rows = await repository.list_properties(session, relation_type_id, "RelationType")
+        relation_props = {p["key"] for p in rows}
+
+    try:
+        validate_fact_template(fact_template, source_props, target_props, relation_props)
+    except ValueError as exc:
+        raise ValidationError(
+            f"Invalid factTemplate: {exc}",
+            details={"fields": {"factTemplate": str(exc)}},
+        )
 
 
 # --- Ontology ---
@@ -170,6 +249,7 @@ async def create_entity_type(
     body: EntityTypeCreate,
     driver: AsyncDriver = Depends(get_driver),
 ) -> EntityTypeResponse:
+    _reject_reserved_key(body.key, "Entity type")
     async with driver.session() as session:
         existing = await repository.get_entity_type_by_key(session, body.key)
         if existing:
@@ -260,6 +340,7 @@ async def create_relation_type(
     body: RelationTypeCreate,
     driver: AsyncDriver = Depends(get_driver),
 ) -> RelationTypeResponse:
+    _reject_reserved_key(body.key, "Relation type")
     async with driver.session() as session:
         existing = await repository.get_relation_type_by_key(session, body.key)
         if existing:
@@ -275,6 +356,15 @@ async def create_relation_type(
             raise ValidationError(
                 f"Target entity type '{body.target_entity_type_key}' not found"
             )
+        # Validate the fact template before persisting.
+        if body.fact_template is not None:
+            await _validate_fact_template_for_relation(
+                session,
+                body.source_entity_type_key,
+                body.target_entity_type_key,
+                relation_type_id=None,
+                fact_template=body.fact_template,
+            )
         relation_type_id = str(uuid4())
         data = await repository.create_relation_type(
             session,
@@ -284,8 +374,15 @@ async def create_relation_type(
             body.description,
             body.source_entity_type_key,
             body.target_entity_type_key,
+            fact_template=body.fact_template,
         )
     _invalidate_runtime_schema_cache()
+    # Create the per-type relation vector index if this is a semantic relation
+    # type and an embedding provider is available.
+    if body.fact_template is not None:
+        provider = get_embedding_provider()
+        if provider:
+            await create_relation_vector_index(driver, body.key, provider.dimensions)
     return _to_relation_type_response(data)
 
 
@@ -313,13 +410,44 @@ async def update_relation_type(
     body: RelationTypeUpdate,
     driver: AsyncDriver = Depends(get_driver),
 ) -> RelationTypeResponse:
+    raw = body.model_dump(exclude_unset=True)
+    fact_template_provided = "fact_template" in raw
+    new_fact_template = body.fact_template
+    created_index_for_key: str | None = None
+
     async with driver.session() as session:
+        if fact_template_provided and new_fact_template is not None:
+            # Look up the relation type to know source/target for validation.
+            rt = await repository.get_relation_type(session, relation_type_id)
+            if not rt:
+                raise NotFoundError(f"Relation type '{relation_type_id}' not found")
+            await _validate_fact_template_for_relation(
+                session,
+                rt["sourceEntityTypeKey"],
+                rt["targetEntityTypeKey"],
+                relation_type_id=relation_type_id,
+                fact_template=new_fact_template,
+            )
+            created_index_for_key = rt["key"]
+
         data = await repository.update_relation_type(
-            session, relation_type_id, body.display_name, body.description
+            session,
+            relation_type_id,
+            body.display_name,
+            body.description,
+            fact_template=new_fact_template,
+            fact_template_provided=fact_template_provided,
         )
         if not data:
             raise NotFoundError(f"Relation type '{relation_type_id}' not found")
     _invalidate_runtime_schema_cache()
+    # Create the per-type relation vector index if a fact template was set.
+    if created_index_for_key is not None:
+        provider = get_embedding_provider()
+        if provider:
+            await create_relation_vector_index(
+                driver, created_index_for_key, provider.dimensions
+            )
     return _to_relation_type_response(data)
 
 
@@ -386,6 +514,8 @@ async def create_property(
     cascade: bool = False,
     driver: AsyncDriver = Depends(get_driver),
 ) -> PropertyDefinitionResponse:
+    _reject_system_property_key(body.key)
+    _reject_reserved_key(body.key, "Property")
     async with driver.session() as session:
         await _ensure_owner_exists(session, owner_id, owner_label)
         existing = await repository.get_property_by_key(
@@ -975,6 +1105,7 @@ async def export_schema(
                 description=rt.get("description"),
                 fromEntityTypeKey=rt["sourceKey"],
                 toEntityTypeKey=rt["targetKey"],
+                factTemplate=rt.get("factTemplate"),
                 properties=props,
             )
         )
@@ -1059,6 +1190,7 @@ async def import_schema(
         # Create entity types and track key->id mapping
         et_key_to_id: dict[str, str] = {}
         for et in payload.entity_types:
+            _reject_reserved_key(et.key, "Entity type")
             existing = await repository.get_entity_type_by_key(session, et.key)
             if existing:
                 raise ConflictError(f"Entity type with key '{et.key}' already exists")
@@ -1068,6 +1200,8 @@ async def import_schema(
             )
             et_key_to_id[et.key] = et_id
             for prop in et.properties:
+                _reject_system_property_key(prop.key)
+                _reject_reserved_key(prop.key, "Property")
                 prop_id = str(uuid4())
                 await repository.create_property(
                     session, et_id, "EntityType", prop_id,
@@ -1085,6 +1219,7 @@ async def import_schema(
 
         # Create relation types
         for rt in payload.relation_types:
+            _reject_reserved_key(rt.key, "Relation type")
             existing = await repository.get_relation_type_by_key(session, rt.key)
             if existing:
                 raise ConflictError(f"Relation type with key '{rt.key}' already exists")
@@ -1100,8 +1235,16 @@ async def import_schema(
             await repository.create_relation_type(
                 session, rt_id, rt.key, rt.display_name, rt.description,
                 rt.from_entity_type_key, rt.to_entity_type_key,
+                fact_template=rt.fact_template,
             )
+            # Create the per-type relation vector index for semantic types.
+            if rt.fact_template is not None and provider:
+                await create_relation_vector_index(
+                    driver, rt.key, provider.dimensions
+                )
             for prop in rt.properties:
+                _reject_system_property_key(prop.key)
+                _reject_reserved_key(prop.key, "Property")
                 prop_id = str(uuid4())
                 await repository.create_property(
                     session, rt_id, "RelationType", prop_id,
@@ -1208,7 +1351,12 @@ async def import_schema(
 async def rebuild_embeddings(
     driver: AsyncDriver,
 ) -> AsyncGenerator[str, None]:
-    """Re-embed all entities and saved queries. Yields NDJSON progress lines."""
+    """Re-embed all entities, semantic relations, and saved queries.
+
+    Drops and recreates every vector index first (at the provider's current
+    dimension) so this endpoint doubles as the "I changed my embedding model"
+    entry point. Yields NDJSON progress lines.
+    """
     provider = get_embedding_provider()
     if not provider:
         raise ValidationError(
@@ -1216,8 +1364,34 @@ async def rebuild_embeddings(
             "Set EMBEDDING_PROVIDER to enable semantic search."
         )
 
-    # Ensure all vector indexes exist
+    # Discover all entity type keys and semantic relation type keys up-front so
+    # we can drop their per-type vector indexes before recreating at the new
+    # dimension.
+    async with driver.session() as session:
+        et_keys_result = await session.run(
+            "MATCH (et:EntityType) RETURN et.key AS key ORDER BY et.key"
+        )
+        all_entity_type_keys = [
+            record["key"] async for record in et_keys_result
+        ]
+        rt_keys_result = await session.run(
+            "MATCH (rt:RelationType) WHERE rt.factTemplate IS NOT NULL "
+            "RETURN rt.key AS key ORDER BY rt.key"
+        )
+        all_semantic_relation_type_keys = [
+            record["key"] async for record in rt_keys_result
+        ]
+
+    # 1. Drop every relevant vector index (idempotent).
+    for et_key in all_entity_type_keys:
+        await drop_vector_index(driver, et_key)
+    for rt_key in all_semantic_relation_type_keys:
+        await drop_relation_vector_index(driver, rt_key)
+    await drop_saved_query_vector_index(driver)
+
+    # 2. Recreate indexes at the provider's current dimension.
     await ensure_vector_indexes(driver, provider.dimensions)
+    await ensure_saved_query_vector_index(driver, provider.dimensions)
 
     # Discover all entity types with their property definitions
     async with driver.session() as session:
@@ -1308,6 +1482,137 @@ async def rebuild_embeddings(
         total_processed += processed
         total_failed += failed
 
+    # Re-embed semantic relations.
+    relation_type_results: list[dict] = []
+    async with driver.session() as session:
+        rt_result = await session.run(
+            """
+            MATCH (rt:RelationType)
+            WHERE rt.factTemplate IS NOT NULL
+            OPTIONAL MATCH (rt)-[:HAS_PROPERTY]->(p:PropertyDefinition)
+            WITH rt, p ORDER BY rt.key, p.key
+            WITH rt, collect(p {.*}) AS properties
+            RETURN rt.key AS key, rt.factTemplate AS factTemplate, properties
+            ORDER BY rt.key
+            """
+        )
+        semantic_relation_types = []
+        async for record in rt_result:
+            rel_prop_defs: dict[str, PropertyDef] = {}
+            for p in record["properties"]:
+                if p:
+                    rel_prop_defs[p["key"]] = PropertyDef(
+                        key=p["key"],
+                        display_name=p.get("displayName", p["key"]),
+                        description=p.get("description"),
+                        data_type=p.get("dataType", "string"),
+                        required=p.get("required", False),
+                        default_value=p.get("defaultValue"),
+                    )
+            semantic_relation_types.append({
+                "key": record["key"],
+                "factTemplate": record["factTemplate"],
+                "properties": rel_prop_defs,
+            })
+
+    for rt in semantic_relation_types:
+        rt_key = rt["key"]
+        template = rt["factTemplate"]
+        rel_type_upper = to_upper_snake_case(rt_key)
+
+        # Count instances for progress totals.
+        async with driver.session() as session:
+            count_result = await session.run(
+                f"MATCH ()-[r:{rel_type_upper}]->() RETURN count(r) AS total"
+            )
+            count_record = await count_result.single()
+            rel_total = count_record["total"]
+
+        processed = 0
+        failed = 0
+
+        async with driver.session() as session:
+            list_result = await session.run(
+                f"""
+                MATCH (from:_Entity)-[r:{rel_type_upper}]->(to:_Entity)
+                RETURN r._id AS id,
+                       r {{.*}} AS rel_props,
+                       from {{.*}} AS from_props,
+                       to {{.*}} AS to_props
+                """
+            )
+            records = [record async for record in list_result]
+
+        for record in records:
+            relation_id = record["id"]
+            rel_props = dict(record["rel_props"] or {})
+            from_props = dict(record["from_props"] or {})
+            to_props = dict(record["to_props"] or {})
+
+            # Drop the old embedding before template rendering so it can't leak.
+            rel_props.pop("_embedding", None)
+            from_props.pop("_embedding", None)
+            to_props.pop("_embedding", None)
+
+            try:
+                result = await render_and_embed_relation_fact(
+                    template, from_props, to_props, rel_props,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Failed to re-embed relation %s (%s): %s",
+                    relation_id, rt_key, exc,
+                )
+                failed += 1
+                yield json.dumps({
+                    "type": "progress",
+                    "relationTypeKey": rt_key,
+                    "processed": processed + failed,
+                    "total": rel_total,
+                }) + "\n"
+                continue
+
+            new_fact_version = (rel_props.get("_factVersion") or 0) + 1
+            new_embedding_version = (rel_props.get("_embeddingVersion") or 0) + 1
+
+            async with driver.session() as session:
+                await session.run(
+                    f"""
+                    MATCH ()-[r:{rel_type_upper} {{_id: $id}}]->()
+                    SET r._fact = $fact,
+                        r._factVersion = $fact_version,
+                        r._embeddingState = $embedding_state,
+                        r._embeddingVersion = $embedding_version,
+                        r._embedding = $embedding
+                    """,
+                    id=relation_id,
+                    fact=result.fact,
+                    fact_version=new_fact_version,
+                    embedding_state=result.embedding_state,
+                    embedding_version=new_embedding_version,
+                    embedding=result.embedding,
+                )
+
+            if result.embedding_state == "ok":
+                processed += 1
+            else:
+                failed += 1
+
+            yield json.dumps({
+                "type": "progress",
+                "relationTypeKey": rt_key,
+                "processed": processed + failed,
+                "total": rel_total,
+            }) + "\n"
+
+        relation_type_results.append({
+            "relationTypeKey": rt_key,
+            "processed": processed,
+            "failed": failed,
+        })
+        total_processed += processed
+        total_failed += failed
+
     # Re-embed saved queries
     async with driver.session() as session:
         sq_result = await session.run(
@@ -1351,6 +1656,7 @@ async def rebuild_embeddings(
     yield json.dumps({
         "type": "summary",
         "entityTypes": type_results,
+        "relationTypes": relation_type_results,
         "savedQueriesProcessed": sq_processed,
         "savedQueriesFailed": sq_failed,
         "totalProcessed": total_processed,

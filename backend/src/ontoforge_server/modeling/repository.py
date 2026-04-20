@@ -251,6 +251,7 @@ async def create_relation_type(
     description: str | None,
     source_entity_type_key: str,
     target_entity_type_key: str,
+    fact_template: str | None = None,
 ) -> dict:
     result = await session.run(
         """
@@ -261,6 +262,7 @@ async def create_relation_type(
             key: $key,
             displayName: $display_name,
             description: $description,
+            factTemplate: $fact_template,
             createdAt: datetime(),
             updatedAt: datetime()
         })
@@ -275,6 +277,7 @@ async def create_relation_type(
         key=key,
         display_name=display_name,
         description=description,
+        fact_template=fact_template,
         source_entity_type_key=source_entity_type_key,
         target_entity_type_key=target_entity_type_key,
     )
@@ -340,6 +343,8 @@ async def update_relation_type(
     relation_type_id: str,
     display_name: str | None,
     description: str | None,
+    fact_template: str | None = None,
+    fact_template_provided: bool = False,
 ) -> dict | None:
     set_clauses = ["rt.updatedAt = datetime()"]
     params: dict = {"relation_type_id": relation_type_id}
@@ -349,6 +354,9 @@ async def update_relation_type(
     if description is not None:
         set_clauses.append("rt.description = $description")
         params["description"] = description
+    if fact_template_provided:
+        set_clauses.append("rt.factTemplate = $fact_template")
+        params["fact_template"] = fact_template
 
     result = await session.run(
         f"""

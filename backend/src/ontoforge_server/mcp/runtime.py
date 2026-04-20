@@ -24,6 +24,7 @@ from ontoforge_server.runtime.tool_names import (
     TOOL_RUN_SAVED_QUERY,
     TOOL_SEARCH_SAVED_QUERIES,
     TOOL_SEMANTIC_SEARCH,
+    TOOL_SEMANTIC_SEARCH_RELATIONS,
     TOOL_UPDATE_ENTITY,
     TOOL_UPDATE_RELATION,
 )
@@ -291,6 +292,21 @@ async def semantic_search(
     return result
 
 
+@_enrich_errors
+async def semantic_search_relations(
+    query: str,
+    limit: int = 20,
+    group_id: str | None = None,
+    k: int = 60,
+) -> list[dict]:
+    ontology_key = _get_ontology_key()
+    driver = await get_driver()
+    limit = max(1, min(limit, 100))
+    return await service.semantic_search_relations(
+        ontology_key, query, limit, group_id, k, driver,
+    )
+
+
 async def list_saved_queries() -> list[dict]:
     ontology_key = _get_ontology_key()
     driver = await get_driver()
@@ -452,6 +468,16 @@ _MCP_TOOL_DEFS: list[tuple[Callable, str, str]] = [
         '("location": "Berlin"), operators ("age__gt": "25", "__gte", "__lt", '
         '"__lte"). Use \'fields\' to select which entity properties to include — '
         "only listed fields plus _id are returned. Omit for all fields.",
+    ),
+    (
+        semantic_search_relations,
+        TOOL_SEMANTIC_SEARCH_RELATIONS,
+        "Search relation instances by semantic similarity to a natural-language "
+        "query across every semantic relation type visible in the active "
+        "ontology. Returns ranked matches with locator ids (_id, "
+        "_relationTypeKey, source_id, target_id), the rendered _fact string "
+        "that matched, and an RRF-fused score. Only relation types with a "
+        "factTemplate defined participate.",
     ),
     (
         list_saved_queries,

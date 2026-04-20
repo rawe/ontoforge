@@ -168,7 +168,8 @@ Create a relation type within an ontology.
   "displayName": "string (required)",
   "description": "string (optional)",
   "sourceEntityTypeId": "uuid (required, must exist in this ontology)",
-  "targetEntityTypeId": "uuid (required, must exist in this ontology)"
+  "targetEntityTypeId": "uuid (required, must exist in this ontology)",
+  "factTemplate": "string (optional, nullable) — constrained Jinja2 template. Presence of a non-null value marks this as a semantic relation type: a `_fact` is rendered and embedded on each instance write and the type participates in `GET /api/runtime/{key}/search/semantic/relations`. See the relation-facts feature spec for template grammar."
 }
 ```
 
@@ -181,12 +182,13 @@ Create a relation type within an ontology.
   "description": "string",
   "sourceEntityTypeId": "uuid",
   "targetEntityTypeId": "uuid",
+  "factTemplate": "string | null",
   "createdAt": "datetime",
   "updatedAt": "datetime"
 }
 ```
 
-**Errors:** 404 if ontology not found. 409 if key already exists. 422 if source or target entity type not found in this ontology.
+**Errors:** 404 if ontology not found. 409 if key already exists. 422 if source or target entity type not found in this ontology, or `factTemplate` fails validation (invalid tag/filter, unknown property reference, contains `__`, exceeds the 2000-char source cap).
 
 ### GET /api/model/ontologies/{ontologyId}/relation-types
 
@@ -210,13 +212,14 @@ Update a relation type. `key`, `sourceEntityTypeId`, and `targetEntityTypeId` ar
 ```json
 {
   "displayName": "string (optional)",
-  "description": "string (optional)"
+  "description": "string (optional)",
+  "factTemplate": "string | null (optional) — pass to set or change the template; pass `null` explicitly to clear it"
 }
 ```
 
-**Response:** `200 OK` — full relation type object.
+**Response:** `200 OK` — full relation type object (includes `factTemplate`).
 
-**Errors:** 404 if not found.
+**Errors:** 404 if not found. 422 if `factTemplate` fails validation.
 
 ### DELETE /api/model/ontologies/{ontologyId}/relation-types/{relationTypeId}
 
@@ -231,6 +234,12 @@ Delete a relation type and its property definitions.
 ## 4. Property Definition Endpoints
 
 Properties are nested under their owning type (entity type or relation type).
+
+**Reserved keys.** The following schema keys are reserved for future system use
+and rejected at create/import time for entity types, relation types, and
+property keys: `Episode`, `MENTIONS`, `provenance`. Property keys must also not
+start with an underscore (`_`) — that namespace is reserved for system-managed
+fields (`_id`, `_groupId`, `_embeddingState`, etc.).
 
 ### POST /api/model/ontologies/{ontologyId}/entity-types/{entityTypeId}/properties
 
@@ -373,7 +382,9 @@ Import an ontology from a JSON payload.
 
 ### POST /api/model/rebuild-embeddings
 
-Regenerate all embedding vectors for entity instances and saved queries. Ensures Neo4j vector indexes exist, then iterates all entities and saved queries to (re-)compute their embeddings.
+Regenerate all embedding vectors for entity instances, semantic relation instances, and saved queries. First **drops every relevant vector index** (per entity type, per semantic relation type, and the saved-query index) and **recreates them at the provider's current dimension**, then iterates each target and (re-)computes the embedding.
+
+This is the single entry point for "I changed my embedding model / dimensions": the drop-and-recreate step ensures existing indexes sized for a different dimension are cleared before re-embedding.
 
 Use this after data import, after changing the embedding model or dimensions, or to repair missing/corrupted indexes.
 
@@ -381,13 +392,23 @@ Use this after data import, after changing the embedding model or dimensions, or
 
 **Response:** `200 OK` with `application/x-ndjson` streaming body. Each line is a JSON object:
 
-Progress lines (emitted per entity processed):
+Progress lines (emitted per entity / relation / saved query processed):
 ```json
 {
   "type": "progress",
   "entityTypeKey": "string",
   "processed": 5,
   "total": 42
+}
+```
+
+For semantic relation progress, the key is `relationTypeKey` instead of `entityTypeKey`:
+```json
+{
+  "type": "progress",
+  "relationTypeKey": "works_for",
+  "processed": 3,
+  "total": 10
 }
 ```
 
@@ -400,12 +421,17 @@ Summary line (final line):
   "entityTypes": [
     { "entityTypeKey": "topic", "processed": 42, "failed": 0 }
   ],
+  "relationTypes": [
+    { "relationTypeKey": "works_for", "processed": 10, "failed": 0 }
+  ],
   "savedQueriesProcessed": 7,
   "savedQueriesFailed": 0,
-  "totalProcessed": 49,
+  "totalProcessed": 59,
   "totalFailed": 0
 }
 ```
+
+Semantic relations re-embedded by this endpoint have their `_fact` re-rendered from the relation type's `factTemplate` and their `_factVersion` / `_embeddingVersion` bumped. Non-semantic relation types (no `factTemplate`) are skipped.
 
 **Errors:** 422 if embedding provider is not configured.
 

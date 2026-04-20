@@ -433,6 +433,49 @@ Requires `EMBEDDING_PROVIDER` to be configured. When embedding is disabled, retu
 - 422 with code `FEATURE_DISABLED` if `EMBEDDING_PROVIDER` is not configured.
 - 422 if the query embedding fails to generate.
 
+### GET /api/runtime/{ontologyKey}/search/semantic/relations
+
+Cross-type semantic search over relation facts. Only relation types with a
+non-null `factTemplate` participate. Fans out one Cypher vector search per
+eligible type in parallel and fuses the per-type ranked lists with Reciprocal
+Rank Fusion (RRF). See the relation-facts feature spec §7.1 for the motivating
+design.
+
+**Query parameters:**
+
+| Name | Type | Default | Notes |
+|---|---|---|---|
+| `q` | string (required, min 1 char) | — | Natural language query to embed |
+| `limit` | integer (1-100) | 20 | Maximum matches returned |
+| `groupId` | string (optional) | `"default"` | Reserved for multi-tenant splits — Phase 1 always uses `"default"` |
+| `k` | integer (1-1000) | 60 | RRF `k` constant — raise to smooth rank differences |
+
+**Response:** `200 OK` — array of match locators.
+```json
+[
+  {
+    "_id": "uuid",
+    "_relationTypeKey": "works_for",
+    "source_id": "uuid",
+    "target_id": "uuid",
+    "_fact": "Alice works for Acme",
+    "score": 0.0327,
+    "matched_via": ["vector"]
+  }
+]
+```
+
+User-defined relation properties are **not** included in the response — fetch
+via `GET /api/runtime/{ontologyKey}/relations/{relation_type_key}/{id}` when
+needed.
+
+**Behavior:**
+- If no relation types in the lens have a `factTemplate`, returns `[]`.
+- If no `EMBEDDING_PROVIDER` is configured or the query embedding fails,
+  returns `[]` (does not 5xx).
+- Per-type Cypher failure is isolated: a broken index empties that list and is
+  logged, the fused response still surfaces the other types' hits.
+
 ---
 
 ## 7. Cypher Query
@@ -831,6 +874,7 @@ All declared parameters are required. Parameter values are coerced to their decl
 | `DELETE` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}` | Delete entity instance |
 | `GET` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}/neighbors` | Graph traversal |
 | `GET` | `/api/runtime/{ontologyKey}/search/semantic` | Semantic search over entity instances |
+| `GET` | `/api/runtime/{ontologyKey}/search/semantic/relations` | Cross-type semantic search over relation facts |
 | `POST` | `/api/runtime/{ontologyKey}/query` | Read-only Cypher query |
 | `POST` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}` | Create relation instance |
 | `GET` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}` | List relation instances |

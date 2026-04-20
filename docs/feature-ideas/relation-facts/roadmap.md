@@ -1,7 +1,7 @@
 # Relation-facts roadmap
 
 **Status:** active
-**Last updated:** 2026-04-20
+**Last updated:** 2026-04-20 (M3 cut; generalized `expand` de-promised from M6)
 
 ## What this is
 
@@ -16,10 +16,10 @@ The implementation roadmap for the relation-facts feature. Each milestone is **d
 
 - [x] **M1 — Walking skeleton for semantic relation search** _(shipped 2026-04-20, branch `feature/relation-facts`)_
 - [x] **M2 — Staleness + reconcile worker** _(shipped 2026-04-20, branch `feature/relation-facts`)_
-- [ ] **M3 — Graph expansion, first hop (`expand`, depth = 1)**
+- ~~**M3 — Graph expansion, first hop (`expand`, depth = 1)**~~ **Cut** — see below.
 - [ ] **M4 — Entity-side semantic parity**
 - [ ] **M5 — Fulltext + hybrid search**
-- [ ] **M6 — Saved-query pipelines + generalized `expand`**
+- [ ] **M6 — Saved-query pipelines as composable step types**
 - [ ] **M7 — Temporal (bi-temporal relations)**
 - [ ] **M8 — Ingest-from-text (episodes)**
 - [ ] **M9 (optional) — Advanced extensions: LLM facts, per-field vectors, communities**
@@ -48,7 +48,7 @@ The implementation roadmap for the relation-facts feature. Each milestone is **d
 
 **Not in M1 (and where it lives):**
 - Staleness when entity properties change → **M2**
-- Graph expansion from a seed entity (1-hop) → **M3**
+- Graph expansion from a seed entity (1-hop) → **cut** (see M3). Use existing `get_neighbors` for depth-1 traversal.
 - Entity-side cross-type semantic search + `embeddable` → **M4**
 - Fulltext / hybrid → **M5**
 - Saved-query steps + deeper graph traversal (multi-hop, multi-seed) → **M6**
@@ -76,24 +76,25 @@ The implementation roadmap for the relation-facts feature. Each milestone is **d
 
 **Not in M2 (and where it lives):**
 - Template-to-property dependency index (narrowing the "mark-all-touching" rule) → later, not a milestone — revisit only if the stale queue becomes a bottleneck
-- Graph expansion → **M3**
+- Graph expansion → **cut** (see M3).
 - Everything deferred from M1 stays deferred
 
-### M3 — Graph expansion, first hop (`expand`, depth = 1)
+### M3 — Cut: Graph expansion, first hop (`expand`, depth = 1)
 
-**Essence.** First step of the generalized graph-traversal primitive from `graphiti-inspired-rearchitecture.md` §3.5 (#5): given a starting entity, return all relations touching it regardless of type. Turns M1's semantic locators into composable pipelines — "find candidate facts → see what else is connected to the involved entities" becomes one natural flow instead of N per-type calls. Shipped under the same endpoint name as the later generalized version, with a narrower parameter space today (single seed, `depth = 1`, no per-hop filtering).
+**Status:** cut after scope analysis. Not shipping. Earlier draft spec lives in `relation-facts-semantic-search.md` §7.2 for history but is not implemented.
 
-**Scope defined in:** `relation-facts-semantic-search.md` §7.2 (shape and behavior), §8 (MCP tool), §10 (response-shape comparison). Aligned with `graphiti-inspired-rearchitecture.md` §3.5 primitive #5.
+**What this was going to be.** A depth-1 `search/expand` endpoint returning every relation touching a seed entity in a uniform locator shape, positioned as the narrow start of the generalized expand primitive (§3.5 #5).
 
-**Demo criterion.** Given a single entity id, the `expand` endpoint (REST + MCP) returns every relation touching that entity across types, respecting lens scope and direction, with the locator shape. A pipeline that starts from a semantic relation match and retrieves further relations on the involved endpoints works without branching per relation type.
+**Why it's cut.**
 
-**Not in M3 (and where it lives):**
-- Multi-hop traversal (`depth > 1`) → **M6**
-- Multi-seed input (`seeds: list[id]`) → **M6**
-- Per-hop filters, cycle-handling semantics, and ranking over traversal results → **M6**
-- User-property filters on the multi-type listing — intentionally excluded, per the β filter decision
-- Cross-type list of relations *not* anchored to a seed entity — not a milestone; callers fetch by type via existing `list_relations` if the type is known
-- Everything deferred from M1 / M2 stays deferred
+1. **`get_neighbors` already covers depth-1 traversal.** It supports direction, per-type filtering, field projection, and already returns `_fact` on semantic relations via `relationFields=["_fact"]`. The M3 endpoint's only real differences would have been a multi-type whitelist (saves one client-side merge) and a flat response shape (saves three lines of client `.map`). Neither is a capability gap.
+2. **The `_groupId` filter was semantically wrong here.** Groups partition the working set; a seed entity lives in exactly one group, so its edges belong to that group by construction. A group predicate on a traversal primitive is either a no-op or nonsense — it belongs on search endpoints, not on expand.
+3. **Uniform-locator composability with `search/semantic/relations`** was the strongest architectural argument, but the payoff only materializes when saved-query pipelines actually chain them — and the generalized expand those pipelines would need is itself deferred (see M6).
+4. **Every new MCP tool is surface area** — docs, tests, LLM tool-choice confusion. Shipping a thin primitive that duplicates 90% of `get_neighbors` makes the tool menu worse, not better.
+
+**What happens instead.** `get_neighbors` stays as-is. If a real user hits the multi-type-filter papercut, the fix is a ~3-line signature swap (`relation_type_key: str` → `relation_type_keys: list[str]`). Done then, not now.
+
+**The generalized expand primitive (multi-hop, multi-seed, per-hop filters, ranking) is now open-ended**, not reserved inside M6. Re-opening criteria: concrete user cases where Cypher + the saved-query engine + `get_neighbors` are demonstrably insufficient for LLM-driven traversal. Ranking must be designed first (depth decay? embedding overlay? cross-encoder reranker?) before any `expand` primitive ships.
 
 **Preview of M4.** Entity-side cross-type semantic search + the `embeddable` flag that controls which properties feed an entity's `_embedding`. Entity side gains parity with what M1 delivered for relations.
 
@@ -110,7 +111,7 @@ The implementation roadmap for the relation-facts feature. Each milestone is **d
 - `searchable: bool` + fulltext indexes → **M5**
 - Hybrid (vector + fulltext) fusion → **M5**
 - Saved-query step integration → **M6**
-- Multi-hop / multi-seed `expand` → **M6**
+- Multi-hop / multi-seed `expand` → **no longer promised** (see M3 and M6).
 - Temporal → **M7**
 - Ingest-from-text → **M8**
 - Per-type weighting inside a single primitive — intentionally out (RRF treats types as peers)
@@ -127,22 +128,23 @@ The implementation roadmap for the relation-facts feature. Each milestone is **d
 
 **Not in M5 (and where it lives):**
 - Saved-query step integration for `hybrid_search` / `fulltext` → **M6**
-- Multi-hop / multi-seed `expand` → **M6**
+- Multi-hop / multi-seed `expand` → **no longer promised** (see M3 and M6).
 - Temporal → **M7**
 - Ingest-from-text → **M8**
 - Cross-kind hybrid (one endpoint returning entities + relations hybrid-fused) — extension of the `search/any` parked idea; stays parked
 
-**Preview of M6.** Saved-query pipeline integration + deeper `expand`. Everything shipped through M5 becomes a composable step type; `expand` gains `depth > 1` and multi-seed input. This is where the "NL query → structured, typed result" pattern becomes a first-class surface.
+**Preview of M6.** Saved-query pipeline integration. Everything shipped through M5 becomes a composable step type, turning the "NL query → structured, typed result" pattern into a first-class surface backed by deterministic composable steps rather than glue code.
 
-### M6 — Saved-query pipelines + generalized `expand`
+### M6 — Saved-query pipelines as composable step types
 
-**Essence.** Two capabilities that only make sense together: the composable pipeline surface, and the expansion primitive that's most useful inside it. Every search capability shipped through M5 becomes a saved-query **step type** (`semantic_search_entities`, `semantic_search_relations`, `hybrid_search`, `fulltext`, `expand`, `seed_filter`), so callers can chain them declaratively. `expand` simultaneously gains `depth > 1` and multi-seed input — with cycle handling, per-hop filters, and result ranking — turning it from M3's one-hop convenience into the real graph-traversal primitive. The doc's "NL query → typed, structured result" pattern becomes a first-class surface backed by deterministic composable steps rather than glue code.
+**Essence.** Every search capability shipped through M5 becomes a saved-query **step type** (`semantic_search_entities`, `semantic_search_relations`, `hybrid_search`, `fulltext`), so callers can chain them declaratively inside the existing pipeline engine. This turns the "NL query → structured, typed result" pattern into a first-class surface backed by deterministic composable steps rather than glue code.
 
-**Scope defined in:** `graphiti-inspired-rearchitecture.md` §3.5 primitive #5 (generalized `expand`), §3.6 (saved-query pipeline step types and the canonical NL → typed-result pattern). The existing saved-query pipeline engine is the integration point.
+**Scope defined in:** `graphiti-inspired-rearchitecture.md` §3.6 (saved-query pipeline step types and the canonical NL → typed-result pattern). The existing saved-query pipeline engine is the integration point.
 
-**Demo criterion.** A saved query of the form *"NL query → semantic match → expand two hops → filter by type → return typed entities"* runs end-to-end. `expand` handles multi-seed, `depth = 2` input with cycle handling and returns ranked typed locators. Existing saved-query pipelines continue to work unchanged; all new step types appear in the pipeline schema and compose with existing `cypher` and `semantic_search` steps.
+**Demo criterion.** A saved query of the form *"NL query → semantic match → fulltext filter → return typed entities"* runs end-to-end. All new step types appear in the pipeline schema and compose with existing `cypher` and `semantic_search` steps.
 
 **Not in M6 (and where it lives):**
+- **Generalized `expand` (multi-hop, multi-seed, per-hop filters, ranking) — no longer promised.** M3 was cut (see above) and the generalized form is open-ended: re-opened only if concrete user cases show Cypher + saved queries + `get_neighbors` are insufficient. Ranking must be designed before any `expand` primitive ships.
 - Temporal (`asOf`, fact history, temporal write semantics) → **M7**
 - Ingest-from-text / episodes → **M8**
 - LLM-synthesized facts / per-field vectors / community detection → **M9 (optional)**

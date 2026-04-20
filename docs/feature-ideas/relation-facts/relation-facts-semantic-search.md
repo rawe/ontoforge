@@ -11,7 +11,7 @@ This document is the implementation-level decision record for the first concrete
 
 ## 1. Phase 1 scope in one paragraph
 
-Phase 1 focuses on **relations**. Relations gain a deterministic fact sentence and an embedding, and become first-class objects in semantic search. Two new REST endpoints (+ matching MCP tools) ship: a cross-type semantic search over relation facts, and a cross-type structural listing of relations touching a given entity. The entity side of search is untouched in Phase 1 — the existing single-type `semantic_search(entity_type_key=…)` endpoint is preserved unchanged, and the entity-embedding composition (today's "all string properties") is not refined in this phase. Phase 0 reservations (system properties on all nodes and edges) ship alongside so later phases never require a migration.
+Phase 1 focuses on **relations**. Relations gain a deterministic fact sentence and an embedding, and become first-class objects in semantic search. Two new REST endpoints (+ matching MCP tools) ship: a cross-type semantic search over relation facts, and a first-hop graph expansion from a seed entity — the narrow start of the generalized `expand` primitive described in [graphiti-inspired-rearchitecture.md](graphiti-inspired-rearchitecture.md) §3.5 (#5). The entity side of search is untouched in Phase 1 — the existing single-type `semantic_search(entity_type_key=…)` endpoint is preserved unchanged, and the entity-embedding composition (today's "all string properties") is not refined in this phase. Phase 0 reservations (system properties on all nodes and edges) ship alongside so later phases never require a migration.
 
 ---
 
@@ -172,17 +172,18 @@ Cross-relation-type semantic search over relation facts.
 
 `matched_via` is always `["vector"]` in Phase 1. The field exists to be forward-compatible for multi-path retrieval in later phases.
 
-### 7.2 `GET /api/runtime/{key}/entities/{entity_id}/relations`
+### 7.2 `GET /api/runtime/{key}/search/expand`
 
-Structural cross-relation-type listing of relations touching a specific entity.
+First-hop graph expansion from a seed entity: returns all relations touching the seed regardless of type. Phase 1 constrains the parameter space to `depth = 1` and a single seed; the endpoint name and shape are the forward-compatible form of the generalized expand primitive from [graphiti-inspired-rearchitecture.md](graphiti-inspired-rearchitecture.md) §3.5 (#5), which will later support multi-hop traversal and multi-seed input without renaming.
 
 **Query params:**
+- `seed_ids: string` — required. Entity id to expand from. Phase 1 accepts exactly one id; the parameter is plural to anticipate multi-seed input in a later milestone.
 - `direction: "in" | "out" | "both"` — default `"both"`.
 - `relation_type_keys: list<string> | null` — optional whitelist. Null = all relation types in the lens.
 - `limit: int` — default 50.
 - `group_id: string | null` — optional.
 
-**Behavior:** one Cypher query: `MATCH (e)-[r]-(n) WHERE e._id = $entity_id AND type(r) IN allowed_types AND r._groupId = $groupId …`, respecting direction. No embedding, no ranking — ordered by `_createdAt DESC` by default.
+**Behavior:** one Cypher query: `MATCH (e)-[r]-(n) WHERE e._id = $seed_id AND type(r) IN allowed_types AND r._groupId = $groupId …`, respecting direction. No embedding, no ranking — ordered by `_createdAt DESC` by default.
 
 **Response shape:**
 ```
@@ -200,7 +201,7 @@ Structural cross-relation-type listing of relations touching a specific entity.
 
 User-defined properties are not returned — fetch via `get_relation(id)`. This keeps the shape uniform across types and uniform with `search/semantic/relations`.
 
-This endpoint exists to make the semantic endpoint's locators usable in real pipelines: "find candidate facts → list other relations on the involved entities → decide" becomes a natural two-step flow without per-type branching.
+This endpoint exists to make the semantic endpoint's locators usable in real pipelines: "find candidate facts → expand from the involved entities → decide" becomes a natural two-step flow without per-type branching.
 
 ### 7.3 Filters at fan-out on `search/semantic/relations`
 
@@ -215,7 +216,7 @@ Rationale: every eligible type has a different user-property set, so a single fi
 Two new tools, mirroring the endpoints:
 
 - `semantic_search_relations(query, limit?, group_id?, k?)` — returns the shape of §7.1.
-- `list_entity_relations(entity_id, direction?, relation_type_keys?, limit?, group_id?)` — returns the shape of §7.2.
+- `expand(seed_ids, direction?, relation_type_keys?, limit?, group_id?)` — returns the shape of §7.2. Phase 1 accepts exactly one seed id; the generalized multi-hop / multi-seed form is deferred to a later milestone.
 
 Existing MCP tools (`semantic_search`, `get_relation`, `list_relations`, etc.) are unchanged.
 
@@ -241,7 +242,7 @@ For reference across the four read endpoints that touch relations:
 | `get_relation(id)` (existing)                  | Full typed payload with user props.                                                |
 | `list_relations(type)` (existing)              | Full typed payload with user props (single type).                                  |
 | `search/semantic/relations` (new)              | Locator + `source_id` + `target_id` + `_fact` + score + `matched_via`.              |
-| `/entities/{id}/relations` (new)               | Locator + `source_id` + `target_id` + `_createdAt`/`_updatedAt` + `matched_via`.    |
+| `search/expand` (new)                          | Locator + `source_id` + `target_id` + `_createdAt`/`_updatedAt` + `matched_via`.    |
 
 Callers who want user-defined properties on matches fetch via `get_relation(id)`.
 
@@ -296,7 +297,7 @@ Same as the source doc's §6, plus:
 | 4 | Filters at fan-out limited to system properties (`_groupId` now; temporal reserved).           | Cross-type user-prop filtering is ill-defined; old endpoint handles single-type.     |
 | 5 | Existing `semantic_search`, `list_relations`, `get_relation` untouched.                        | Explicit user constraint; new endpoints are additive.                                |
 | 6 | New endpoints always fan out over all eligible types in the lens.                              | KISS; `type_keys?` whitelist is a non-breaking later addition.                       |
-| 7 | URL naming: `/search/semantic/relations` and `/entities/{id}/relations`.                       | Conventional REST; distinct from the single-type `?type=` pattern.                   |
+| 7 | URL naming: `/search/semantic/relations` and `/search/expand`.                                 | Search-namespace primitives; `expand` anticipates the generalized multi-hop form.    |
 | 8 | Stale-marking on entity updates + background reconcile; dumb rule first.                       | Phase 0's `_embeddingState` makes marking free; dependency index is later.           |
 | 9 | Relation locator shape includes `source_id`, `target_id`, and (semantic only) `_fact`.         | Endpoints `_id`s are structural identity; `_fact` answers "why did this match?".     |
 | 10 | One field — `RelationType.factTemplate: string | null`; presence = semantic.                 | Pit of success; no redundant flag states.                                            |

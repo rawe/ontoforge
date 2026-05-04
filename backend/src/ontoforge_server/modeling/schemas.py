@@ -70,6 +70,12 @@ class EntityTypeCreate(BaseModel):
     key: str = Field(pattern=KEY_PATTERN)
     display_name: str = Field(alias="displayName")
     description: str | None = None
+    display_name_property: str | None = Field(
+        default=None, alias="displayNameProperty"
+    )
+    default_search_properties: list[str] | None = Field(
+        default=None, alias="defaultSearchProperties"
+    )
 
     model_config = {"populate_by_name": True}
 
@@ -77,6 +83,12 @@ class EntityTypeCreate(BaseModel):
 class EntityTypeUpdate(BaseModel):
     display_name: str | None = Field(default=None, alias="displayName")
     description: str | None = None
+    display_name_property: str | None = Field(
+        default=None, alias="displayNameProperty"
+    )
+    default_search_properties: list[str] | None = Field(
+        default=None, alias="defaultSearchProperties"
+    )
 
     model_config = {"populate_by_name": True}
 
@@ -86,6 +98,12 @@ class EntityTypeResponse(BaseModel):
     key: str
     display_name: str = Field(alias="displayName")
     description: str | None = None
+    display_name_property: str | None = Field(
+        default=None, alias="displayNameProperty"
+    )
+    default_search_properties: list[str] | None = Field(
+        default=None, alias="defaultSearchProperties"
+    )
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
 

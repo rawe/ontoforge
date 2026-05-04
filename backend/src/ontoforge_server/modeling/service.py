@@ -8,6 +8,7 @@ from fastapi import Depends
 from neo4j import AsyncDriver
 
 from ontoforge_server.core.database import (
+    create_global_entity_vector_index,
     create_relation_vector_index,
     create_vector_index,
     drop_relation_vector_index,
@@ -245,22 +246,75 @@ async def delete_ontology(
 # --- Entity Type (Global) ---
 
 
+def _validate_display_projection_fields(
+    *,
+    display_name_property: str | None,
+    default_search_properties: list[str] | None,
+    available_property_keys: set[str],
+    type_key: str,
+) -> None:
+    """Reject display/projection field references to undefined property keys.
+
+    Property keys are scoped to a single entity type, so callers pass the set
+    of currently defined keys for that owner.
+    """
+    field_errors: dict[str, str] = {}
+    if display_name_property is not None and display_name_property not in available_property_keys:
+        field_errors["displayNameProperty"] = (
+            f"Property '{display_name_property}' is not defined on entity type "
+            f"'{type_key}'"
+        )
+    if default_search_properties is not None:
+        unknown = [
+            k for k in default_search_properties if k not in available_property_keys
+        ]
+        if unknown:
+            field_errors["defaultSearchProperties"] = (
+                f"Unknown propert{'y' if len(unknown) == 1 else 'ies'} on entity type "
+                f"'{type_key}': {unknown}"
+            )
+    if field_errors:
+        raise ValidationError(
+            "Display/projection field validation failed",
+            details={"fields": field_errors},
+        )
+
+
 async def create_entity_type(
     body: EntityTypeCreate,
     driver: AsyncDriver = Depends(get_driver),
 ) -> EntityTypeResponse:
     _reject_reserved_key(body.key, "Entity type")
+    # Create cannot reference any properties yet (none have been added to the
+    # type), so any non-null projection field is automatically a 422.
+    _validate_display_projection_fields(
+        display_name_property=body.display_name_property,
+        default_search_properties=body.default_search_properties,
+        available_property_keys=set(),
+        type_key=body.key,
+    )
     async with driver.session() as session:
         existing = await repository.get_entity_type_by_key(session, body.key)
         if existing:
             raise ConflictError(f"Entity type with key '{body.key}' already exists")
         entity_type_id = str(uuid4())
         data = await repository.create_entity_type(
-            session, entity_type_id, body.key, body.display_name, body.description
+            session,
+            entity_type_id,
+            body.key,
+            body.display_name,
+            body.description,
+            display_name_property=body.display_name_property,
+            default_search_properties=body.default_search_properties,
         )
     _invalidate_runtime_schema_cache()
     provider = get_embedding_provider()
     if provider:
+        # M4 §6.1: ensure the cross-type ``_entity_embedding`` index exists.
+        # Idempotent and independent of any entity type, but creating it here
+        # mirrors the per-type index pattern so it lands without depending on
+        # the FastAPI lifespan (which integration tests bypass).
+        await create_global_entity_vector_index(driver, provider.dimensions)
         await create_vector_index(driver, body.key, provider.dimensions)
     return _to_entity_type_response(data)
 
@@ -289,9 +343,44 @@ async def update_entity_type(
     body: EntityTypeUpdate,
     driver: AsyncDriver = Depends(get_driver),
 ) -> EntityTypeResponse:
+    raw = body.model_dump(exclude_unset=True)
+    display_name_property_provided = "display_name_property" in raw
+    default_search_properties_provided = "default_search_properties" in raw
+
     async with driver.session() as session:
+        # Validate references against the type's current property set when any
+        # projection field is being touched. Skip the lookup entirely when
+        # neither field is provided to avoid extra work on no-op updates.
+        if display_name_property_provided or default_search_properties_provided:
+            existing_et = await repository.get_entity_type(session, entity_type_id)
+            if not existing_et:
+                raise NotFoundError(f"Entity type '{entity_type_id}' not found")
+            prop_rows = await repository.list_properties(
+                session, entity_type_id, "EntityType"
+            )
+            available_keys = {p["key"] for p in prop_rows}
+            _validate_display_projection_fields(
+                display_name_property=(
+                    body.display_name_property if display_name_property_provided else None
+                ),
+                default_search_properties=(
+                    body.default_search_properties
+                    if default_search_properties_provided
+                    else None
+                ),
+                available_property_keys=available_keys,
+                type_key=existing_et["key"],
+            )
+
         data = await repository.update_entity_type(
-            session, entity_type_id, body.display_name, body.description
+            session,
+            entity_type_id,
+            body.display_name,
+            body.description,
+            display_name_property=body.display_name_property,
+            display_name_property_provided=display_name_property_provided,
+            default_search_properties=body.default_search_properties,
+            default_search_properties_provided=default_search_properties_provided,
         )
         if not data:
             raise NotFoundError(f"Entity type '{entity_type_id}' not found")
@@ -597,6 +686,17 @@ async def update_property(
         # Determine if defaultValue was explicitly set to None (clear) vs not provided
         raw = body.model_dump(exclude_unset=True)
         clear_default = "default_value" in raw and raw["default_value"] is None
+
+        # Capture the property key before the update so the rename cascade can
+        # detect a change. Key updates are not currently exposed by
+        # PropertyDefinitionUpdate (keys are immutable today) — this is wired
+        # as a safety net per the M4 plan §4 so that the cascade is correct
+        # the day a key-rename API ships.
+        prior = await repository.get_property(
+            session, owner_id, owner_label, property_id
+        )
+        prior_key = prior["key"] if prior else None
+
         data = await repository.update_property(
             session,
             owner_id,
@@ -612,6 +712,24 @@ async def update_property(
             raise NotFoundError(
                 f"Property '{property_id}' not found on this type"
             )
+
+        # Rename cascade — runs in the same session/transaction as the update
+        # so observers never see a dangling reference.
+        new_key = data.get("key")
+        if (
+            owner_label == "EntityType"
+            and prior_key is not None
+            and new_key is not None
+            and prior_key != new_key
+        ):
+            affected_fields = await repository.cascade_rename_property_references(
+                session, owner_id, prior_key, new_key
+            )
+            for field in affected_fields:
+                logger.info(
+                    "auto-renamed %s on entity type '%s' from '%s' to '%s'",
+                    field, owner_id, prior_key, new_key,
+                )
     _invalidate_runtime_schema_cache()
     return _to_property_response(data)
 
@@ -647,6 +765,18 @@ async def delete_property(
             await repository.remove_property_from_includes_lists(
                 session, owner_label, owner_id, prop["key"]
             )
+        # Auto-clear EntityType.displayNameProperty / defaultSearchProperties
+        # references in the same transaction so observers never see a dangling
+        # reference. RelationType has no such fields today (M4 §5.2 deferred).
+        if owner_label == "EntityType":
+            affected_fields = await repository.cascade_clear_property_references(
+                session, owner_id, prop["key"]
+            )
+            for field in affected_fields:
+                logger.info(
+                    "auto-cleared %s on entity type '%s' due to property delete",
+                    field, prop["key"],
+                )
         deleted = await repository.delete_property(
             session, owner_id, owner_label, property_id
         )
@@ -1096,6 +1226,8 @@ async def export_schema(
                 key=et["key"],
                 displayName=et["displayName"],
                 description=et.get("description"),
+                displayNameProperty=et.get("displayNameProperty"),
+                defaultSearchProperties=et.get("defaultSearchProperties"),
                 properties=props,
             )
         )
@@ -1210,8 +1342,23 @@ async def import_schema(
             if existing:
                 raise ConflictError(f"Entity type with key '{et.key}' already exists")
             et_id = str(uuid4())
+            available_property_keys = {prop.key for prop in et.properties}
+            # Validate display/projection field references against the
+            # properties declared on this type in the payload before persisting.
+            _validate_display_projection_fields(
+                display_name_property=et.display_name_property,
+                default_search_properties=et.default_search_properties,
+                available_property_keys=available_property_keys,
+                type_key=et.key,
+            )
             await repository.create_entity_type(
-                session, et_id, et.key, et.display_name, et.description
+                session,
+                et_id,
+                et.key,
+                et.display_name,
+                et.description,
+                display_name_property=et.display_name_property,
+                default_search_properties=et.default_search_properties,
             )
             et_key_to_id[et.key] = et_id
             for prop in et.properties:
@@ -1230,6 +1377,11 @@ async def import_schema(
                 await create_vector_index(
                     driver, et.key, provider.dimensions,
                     filter_properties=filter_props,
+                )
+                # M4 §6.1: ensure the global cross-type ``_entity_embedding``
+                # index exists. Idempotent; lives independently of any type.
+                await create_global_entity_vector_index(
+                    driver, provider.dimensions
                 )
 
         # Create relation types

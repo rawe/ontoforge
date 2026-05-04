@@ -97,7 +97,9 @@ Create an entity type within an ontology.
 {
   "key": "string (required, unique within ontology, lowercase alphanumeric + underscore)",
   "displayName": "string (required)",
-  "description": "string (optional)"
+  "description": "string (optional)",
+  "displayNameProperty": "string (optional, nullable) — name of a property defined on this type whose value the runtime returns as the entity's display name in cross-type search results. Validated as a 422 when the referenced key is not defined on the type.",
+  "defaultSearchProperties": "string[] (optional, nullable) — ordered list of property keys to include in the projection returned by cross-type entity semantic search. Each key must be defined on this type (422 otherwise). Order is preserved."
 }
 ```
 
@@ -108,12 +110,14 @@ Create an entity type within an ontology.
   "key": "string",
   "displayName": "string",
   "description": "string",
+  "displayNameProperty": "string | null",
+  "defaultSearchProperties": "string[] | null",
   "createdAt": "datetime",
   "updatedAt": "datetime"
 }
 ```
 
-**Errors:** 404 if ontology not found. 409 if key already exists in this ontology.
+**Errors:** 404 if ontology not found. 409 if key already exists in this ontology. 422 if `displayNameProperty` or `defaultSearchProperties` references a property not defined on this type.
 
 ### GET /api/model/ontologies/{ontologyId}/entity-types
 
@@ -137,13 +141,17 @@ Update an entity type. `key` is immutable after creation.
 ```json
 {
   "displayName": "string (optional)",
-  "description": "string (optional)"
+  "description": "string (optional)",
+  "displayNameProperty": "string | null (optional) — set to null to clear. Must reference a defined property key (422 otherwise).",
+  "defaultSearchProperties": "string[] | null (optional) — set to null or [] to clear. Each key must reference a defined property key (422 otherwise)."
 }
 ```
 
 **Response:** `200 OK` — full entity type object.
 
-**Errors:** 404 if not found.
+**Errors:** 404 if not found. 422 if `displayNameProperty` or `defaultSearchProperties` references a property not defined on this type.
+
+**Cascade behavior:** When a property referenced by `displayNameProperty` is deleted, the field is auto-cleared (set to null). When a property listed in `defaultSearchProperties` is deleted, that key is auto-removed from the list. Both cascades run in the same transaction as the property delete and emit an INFO log line per affected field. No `409 CASCADE_REQUIRED` is raised — the cascade is always automatic.
 
 ### DELETE /api/model/ontologies/{ontologyId}/entity-types/{entityTypeId}
 

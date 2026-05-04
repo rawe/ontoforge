@@ -111,9 +111,17 @@ async def create_entity_type(
     key: str,
     display_name: str,
     description: str | None = None,
+    display_name_property: str | None = None,
+    default_search_properties: list[str] | None = None,
 ) -> dict:
     driver = await get_driver()
-    body = EntityTypeCreate(key=key, display_name=display_name, description=description)
+    body = EntityTypeCreate(
+        key=key,
+        display_name=display_name,
+        description=description,
+        display_name_property=display_name_property,
+        default_search_properties=default_search_properties,
+    )
     result = await service.create_entity_type(body=body, driver=driver)
     return result.model_dump(by_alias=True)
 
@@ -122,10 +130,22 @@ async def update_entity_type(
     entity_type_key: str,
     display_name: str | None = None,
     description: str | None = None,
+    display_name_property: str | None = None,
+    default_search_properties: list[str] | None = None,
 ) -> dict:
     driver = await get_driver()
     et = await _resolve_entity_type(driver, entity_type_key)
-    body = EntityTypeUpdate(display_name=display_name, description=description)
+    # Pass-through projection fields only when the caller actually supplied
+    # them — defaults of None must not silently clear a configured value.
+    update_kwargs: dict = {
+        "display_name": display_name,
+        "description": description,
+    }
+    if display_name_property is not None:
+        update_kwargs["display_name_property"] = display_name_property
+    if default_search_properties is not None:
+        update_kwargs["default_search_properties"] = default_search_properties
+    body = EntityTypeUpdate(**update_kwargs)
     result = await service.update_entity_type(et["entityTypeId"], body=body, driver=driver)
     return result.model_dump(by_alias=True)
 

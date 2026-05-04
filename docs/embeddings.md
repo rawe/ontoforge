@@ -6,7 +6,7 @@ How OntoForge creates embeddings, detects when they go stale, and brings them ba
 
 Three kinds of records:
 
-1. **Entities** — one `_embedding` per entity node. Composed at write time from the concatenation of the entity's string properties in schema-declared order, prefixed with the entity type key.
+1. **Entities** — one `_embedding` per entity node. Composed at write time from the concatenation of the entity's string properties in schema-declared order, prefixed with the entity type key. Each entity vector is indexed twice: by the per-type index (`{entity_type_key}_embedding`) and by the global cross-type index (`_entity_embedding`). The two share the same vector — only the index lookup path differs. The cross-type index serves `GET /search/semantic/entities`; the per-type index serves `GET /search/semantic`.
 2. **Semantic relations** — relation types with a non-null `factTemplate` render a deterministic `_fact` sentence per instance; the embedding is computed over `_fact`. Relation types without a `factTemplate` are structural-only and carry no embedding.
 3. **Saved queries** — one `_embedding` per saved query, derived from its description.
 

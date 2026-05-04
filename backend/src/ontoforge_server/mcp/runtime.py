@@ -24,6 +24,7 @@ from ontoforge_server.runtime.tool_names import (
     TOOL_RUN_SAVED_QUERY,
     TOOL_SEARCH_SAVED_QUERIES,
     TOOL_SEMANTIC_SEARCH,
+    TOOL_SEMANTIC_SEARCH_ENTITIES,
     TOOL_SEMANTIC_SEARCH_RELATIONS,
     TOOL_UPDATE_ENTITY,
     TOOL_UPDATE_RELATION,
@@ -307,6 +308,21 @@ async def semantic_search_relations(
     )
 
 
+@_enrich_errors
+async def semantic_search_entities(
+    query: str,
+    limit: int = 20,
+    group_id: str | None = None,
+    min_score: float | None = None,
+) -> list[dict]:
+    ontology_key = _get_ontology_key()
+    driver = await get_driver()
+    limit = max(1, min(limit, 100))
+    return await service.semantic_search_entities(
+        ontology_key, query, limit, group_id, min_score, driver,
+    )
+
+
 async def list_saved_queries() -> list[dict]:
     ontology_key = _get_ontology_key()
     driver = await get_driver()
@@ -478,6 +494,17 @@ _MCP_TOOL_DEFS: list[tuple[Callable, str, str]] = [
         "_relationTypeKey, source_id, target_id), the rendered _fact string "
         "that matched, and an RRF-fused score. Only relation types with a "
         "factTemplate defined participate.",
+    ),
+    (
+        semantic_search_entities,
+        TOOL_SEMANTIC_SEARCH_ENTITIES,
+        "Search entity instances by semantic similarity to a natural-language "
+        "query across every entity type visible in the active ontology. "
+        "Returns ranked matches with _id, _entityTypeKey, the configured "
+        "displayName (or null if EntityType.displayNameProperty is unset), a "
+        "properties projection driven by EntityType.defaultSearchProperties, "
+        "and a similarity score. Use this when you don't know which type to "
+        "search; use semantic_search when you do.",
     ),
     (
         list_saved_queries,

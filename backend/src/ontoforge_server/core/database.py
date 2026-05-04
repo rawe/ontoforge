@@ -114,6 +114,10 @@ async def ensure_vector_indexes(driver: AsyncDriver, dimensions: int) -> None:
     has a non-null ``factTemplate`` (semantic relation types). These carry a
     fixed in-index filter list of Phase 0 reserved system properties.
     """
+    # Global cross-type entity vector index. Lives independently of any
+    # entity type and complements the per-type indexes; M4 §6.1.
+    await create_global_entity_vector_index(driver, dimensions)
+
     async with driver.session() as session:
         result = await session.run(
             """
@@ -172,6 +176,30 @@ async def ensure_saved_query_vector_index(
     async with driver.session() as session:
         await session.run(query)
     logger.info("Vector index ensured: saved_query_embedding")
+
+
+async def create_global_entity_vector_index(
+    driver: AsyncDriver,
+    dimensions: int,
+) -> None:
+    """Create the cross-type ``_entity_embedding`` vector index (M4 §6.1).
+
+    Idempotent (``IF NOT EXISTS``). Indexes every node carrying the ``_Entity``
+    label so cross-type semantic search can be served by a single Cypher call.
+    The in-index filter list mirrors the M4 plan §3 / §6.1 decision.
+    """
+    index_name = "_entity_embedding"
+    await _drop_failed_index_if_exists(driver, index_name)
+    query = (
+        f"CREATE VECTOR INDEX {index_name} IF NOT EXISTS "
+        f"FOR (n:_Entity) ON (n._embedding) "
+        f"WITH [n._entityTypeKey, n._groupId] "
+        f"OPTIONS {{indexConfig: {{`vector.dimensions`: {dimensions}, "
+        f"`vector.similarity_function`: 'cosine'}}}}"
+    )
+    async with driver.session() as session:
+        await session.run(query)
+    logger.info("Vector index ensured: %s", index_name)
 
 
 async def create_vector_index(

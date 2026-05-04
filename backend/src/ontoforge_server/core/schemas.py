@@ -27,6 +27,12 @@ class ExportEntityType(BaseModel):
     key: str
     display_name: str = Field(alias="displayName")
     description: str | None = None
+    display_name_property: str | None = Field(
+        default=None, alias="displayNameProperty"
+    )
+    default_search_properties: list[str] | None = Field(
+        default=None, alias="defaultSearchProperties"
+    )
     properties: list[ExportProperty] = []
 
     model_config = {"populate_by_name": True}

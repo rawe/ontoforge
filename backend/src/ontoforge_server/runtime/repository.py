@@ -660,6 +660,51 @@ async def semantic_search(
     return items
 
 
+async def semantic_search_entities_global(
+    session: AsyncSession,
+    query_embedding: list[float],
+    internal_limit: int,
+    allowed_keys: list[str] | None,
+    group_id: str | None,
+    min_score: float | None,
+) -> list[dict]:
+    """Cross-type entity semantic search (M4 §6.4).
+
+    Uses the global ``_entity_embedding`` vector index to return ranked
+    matches across every entity type carrying the ``_Entity`` label. Scope
+    enforcement is delegated to the caller via ``allowed_keys``; ``None``
+    means unscoped (no filter).
+    """
+    query = (
+        "CALL db.index.vector.queryNodes('_entity_embedding', $internal_limit, $query_embedding) "
+        "YIELD node, score "
+        "WHERE ($allowed_keys IS NULL OR node._entityTypeKey IN $allowed_keys) "
+        "  AND ($group_id IS NULL OR node._groupId = $group_id) "
+        "  AND ($min_score IS NULL OR score >= $min_score) "
+        "RETURN node {.*} AS entity, score, "
+        "       node._entityTypeKey AS type_key, node._id AS id "
+        "ORDER BY score DESC"
+    )
+    result = await session.run(
+        query,
+        query_embedding=query_embedding,
+        internal_limit=internal_limit,
+        allowed_keys=allowed_keys,
+        group_id=group_id,
+        min_score=min_score,
+    )
+    items: list[dict] = []
+    async for record in result:
+        entity = _strip_embedding(_convert_neo4j_types(dict(record["entity"])))
+        items.append({
+            "entity": entity,
+            "score": record["score"],
+            "type_key": record["type_key"],
+            "id": record["id"],
+        })
+    return items
+
+
 # --- Cypher Query ---
 
 

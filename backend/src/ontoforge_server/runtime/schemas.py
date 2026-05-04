@@ -64,6 +64,17 @@ class RelationSemanticMatch(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class EntitySemanticMatch(BaseModel):
+    id: str = Field(alias="_id")
+    entity_type_key: str = Field(alias="_entityTypeKey")
+    display_name: str | None = Field(default=None, alias="displayName")
+    properties: dict = Field(default_factory=dict)
+    score: float
+    matched_via: list[str] = Field(default_factory=lambda: ["vector"])
+
+    model_config = {"populate_by_name": True}
+
+
 class CypherQueryRequest(BaseModel):
     cypher: str = Field(..., min_length=1)
 

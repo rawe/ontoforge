@@ -58,6 +58,8 @@ class EntityTypeDef:
     display_name: str
     description: str | None
     properties: dict[str, PropertyDef] = field(default_factory=dict)
+    display_name_property: str | None = None
+    default_search_properties: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -219,11 +221,14 @@ def _build_schema_cache_from_raw(
                 required=p["required"],
                 default_value=p.get("defaultValue"),
             )
+        raw_search = et.get("defaultSearchProperties")
         cache.entity_types[et["key"]] = EntityTypeDef(
             key=et["key"],
             display_name=et["displayName"],
             description=et.get("description"),
             properties=props,
+            display_name_property=et.get("displayNameProperty"),
+            default_search_properties=list(raw_search) if raw_search else [],
         )
     for rt in relation_types_raw:
         props = {}
@@ -514,6 +519,12 @@ def _entity_type_def_to_export(et_def: EntityTypeDef) -> ExportEntityType:
         key=et_def.key,
         displayName=et_def.display_name,
         description=et_def.description,
+        displayNameProperty=et_def.display_name_property,
+        defaultSearchProperties=(
+            list(et_def.default_search_properties)
+            if et_def.default_search_properties
+            else None
+        ),
         properties=props,
     )
 
@@ -1694,6 +1705,97 @@ async def _search_one_relation_type(
             relation_type_key, exc,
         )
         return []
+
+
+async def semantic_search_entities(
+    ontology_key: str,
+    q: str,
+    limit: int,
+    group_id: str | None,
+    min_score: float | None,
+    driver: AsyncDriver,
+) -> list[dict]:
+    """Cross-type semantic search over entity instances (M4 §6.3).
+
+    One Cypher call against the global ``_entity_embedding`` index. Scoped
+    ontologies pass ``allowed_keys`` for in-Cypher filtering; unscoped
+    ontologies pass ``None`` so the WHERE collapses to a no-op. Overfetches
+    by ``5×`` to compensate for in-WHERE filtering after the vector index
+    returns its top-K, then truncates to ``limit``.
+    """
+    loaded = await _load_schema(ontology_key, driver)
+
+    provider = get_embedding_provider()
+    if not provider:
+        return []
+
+    query_embedding = await provider.embed(q)
+    if query_embedding is None:
+        return []
+
+    # Scope enforcement: only constrain by allowed_keys when the ontology is
+    # actually scoped. Unscoped ontologies expose every entity type.
+    scoped_keys = list(loaded.scoped.entity_types.keys())
+    full_keys = set(loaded.full.entity_types.keys())
+    allowed_keys: list[str] | None
+    if set(scoped_keys) != full_keys:
+        allowed_keys = scoped_keys
+    else:
+        allowed_keys = None
+
+    internal_limit = max(limit * 5, limit)
+
+    async with driver.session() as session:
+        rows = await repository.semantic_search_entities_global(
+            session,
+            query_embedding,
+            internal_limit,
+            allowed_keys,
+            group_id,
+            min_score,
+        )
+
+    matches: list[dict] = []
+    for row in rows:
+        type_key = row["type_key"]
+        type_def = loaded.scoped.entity_types.get(type_key)
+        if type_def is None:
+            # Out-of-scope match leaked through (would only happen if the index
+            # contained nodes whose types are filtered out and `allowed_keys`
+            # was None — i.e. unscoped, in which case all types are in scope).
+            continue
+
+        entity = row["entity"]
+        scoped_keys_set = set(type_def.properties.keys())
+
+        # displayName: configured property only, scope-filtered. None when
+        # unset, when the configured key is out-of-scope, or when the entity
+        # has no value for that key.
+        display_name: str | None = None
+        if (
+            type_def.display_name_property is not None
+            and type_def.display_name_property in scoped_keys_set
+        ):
+            raw = entity.get(type_def.display_name_property)
+            display_name = str(raw) if raw is not None else None
+
+        # properties projection: keys that are both configured AND in scope
+        # AND present on the node, preserving the configured order.
+        projection: dict = {}
+        for key in type_def.default_search_properties:
+            if key in scoped_keys_set and key in entity:
+                projection[key] = entity[key]
+
+        matches.append({
+            "_id": row["id"],
+            "_entityTypeKey": type_key,
+            "displayName": display_name,
+            "properties": projection,
+            "score": row["score"],
+            "matched_via": ["vector"],
+        })
+
+    return matches[:limit]
 
 
 async def semantic_search_relations(

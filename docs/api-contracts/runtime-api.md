@@ -478,6 +478,48 @@ needed.
 - Per-type Cypher failure is isolated: a broken index empties that list and is
   logged, the fused response still surfaces the other types' hits.
 
+### GET /api/runtime/{ontologyKey}/search/semantic/entities
+
+Cross-type semantic search over entity instances (M4). Backed by a single global
+`_entity_embedding` vector index over `(:_Entity)._embedding`. One Cypher call,
+no fan-out, no RRF — results are returned in raw similarity order.
+
+**Query parameters:**
+
+| Name | Type | Default | Notes |
+|---|---|---|---|
+| `q` | string (required, min 1 char) | — | Natural language query to embed |
+| `limit` | integer (1-100) | 20 | Maximum matches returned |
+| `groupId` | string (optional) | none | Filters on `_groupId` when set |
+| `min_score` | float (0.0-1.0, optional) | none | Minimum cosine similarity floor |
+
+**Response:** `200 OK` — array of match locators projected via the entity type's configured display fields.
+```json
+[
+  {
+    "_id": "uuid",
+    "_entityTypeKey": "person",
+    "displayName": "Alice Chen",
+    "properties": {"role": "Senior Engineer", "bio": "Builds distributed systems"},
+    "score": 0.91,
+    "matched_via": ["vector"]
+  }
+]
+```
+
+- `displayName` is the value of the property named by `EntityType.displayNameProperty`
+  on the matched type — `null` when unset, when the configured key is filtered out
+  by the active ontology scope, or when the entity has no value for that key.
+- `properties` is a key-ordered projection driven by `EntityType.defaultSearchProperties`.
+  Out-of-scope keys and keys absent on the node are dropped. `{}` when unset.
+- The active ontology's scope is enforced in-Cypher; out-of-scope entity types
+  never appear in the results. Unscoped ontologies see every entity type.
+
+**Behavior:**
+- If no `EMBEDDING_PROVIDER` is configured or the query embedding fails,
+  returns `[]` (does not 5xx).
+- The single-type endpoint `GET /search/semantic` continues to behave exactly as before.
+
 ---
 
 ## 7. Cypher Query
@@ -877,6 +919,7 @@ All declared parameters are required. Parameter values are coerced to their decl
 | `GET` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}/neighbors` | Graph traversal |
 | `GET` | `/api/runtime/{ontologyKey}/search/semantic` | Semantic search over entity instances |
 | `GET` | `/api/runtime/{ontologyKey}/search/semantic/relations` | Cross-type semantic search over relation facts |
+| `GET` | `/api/runtime/{ontologyKey}/search/semantic/entities` | Cross-type semantic search over entity instances |
 | `POST` | `/api/runtime/{ontologyKey}/query` | Read-only Cypher query |
 | `POST` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}` | Create relation instance |
 | `GET` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}` | List relation instances |

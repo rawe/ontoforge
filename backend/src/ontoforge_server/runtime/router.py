@@ -8,6 +8,7 @@ from ontoforge_server.runtime import service
 from ontoforge_server.runtime.schemas import (
     CypherQueryRequest,
     CypherQueryResponse,
+    EntitySemanticMatch,
     FeaturesResponse,
     NeighborhoodResponse,
     PaginatedResponse,
@@ -96,6 +97,26 @@ async def semantic_search_relations(
 ):
     return await service.semantic_search_relations(
         ontology_key, q, limit, group_id, k, driver,
+    )
+
+
+# --- Cross-type Semantic Search over Entities (M4 §6.5) ---
+
+
+@router.get(
+    "/search/semantic/entities",
+    response_model=list[EntitySemanticMatch],
+)
+async def semantic_search_entities(
+    ontology_key: str,
+    q: str = Query(..., min_length=1),
+    limit: int = Query(default=20, ge=1, le=100),
+    group_id: str | None = Query(default=None, alias="groupId"),
+    min_score: float | None = Query(default=None, ge=0.0, le=1.0),
+    driver: AsyncDriver = Depends(get_driver),
+):
+    return await service.semantic_search_entities(
+        ontology_key, q, limit, group_id, min_score, driver,
     )
 
 

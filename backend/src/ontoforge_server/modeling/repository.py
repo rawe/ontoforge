@@ -137,6 +137,8 @@ async def create_entity_type(
     key: str,
     display_name: str,
     description: str | None,
+    display_name_property: str | None = None,
+    default_search_properties: list[str] | None = None,
 ) -> dict:
     result = await session.run(
         """
@@ -145,6 +147,8 @@ async def create_entity_type(
             key: $key,
             displayName: $display_name,
             description: $description,
+            displayNameProperty: $display_name_property,
+            defaultSearchProperties: $default_search_properties,
             createdAt: datetime(),
             updatedAt: datetime()
         })
@@ -154,6 +158,8 @@ async def create_entity_type(
         key=key,
         display_name=display_name,
         description=description,
+        display_name_property=display_name_property,
+        default_search_properties=default_search_properties,
     )
     record = await result.single()
     return _convert_neo4j_types(record["entity_type"])
@@ -189,6 +195,10 @@ async def update_entity_type(
     entity_type_id: str,
     display_name: str | None,
     description: str | None,
+    display_name_property: str | None = None,
+    display_name_property_provided: bool = False,
+    default_search_properties: list[str] | None = None,
+    default_search_properties_provided: bool = False,
 ) -> dict | None:
     set_clauses = ["et.updatedAt = datetime()"]
     params: dict = {"entity_type_id": entity_type_id}
@@ -198,6 +208,12 @@ async def update_entity_type(
     if description is not None:
         set_clauses.append("et.description = $description")
         params["description"] = description
+    if display_name_property_provided:
+        set_clauses.append("et.displayNameProperty = $display_name_property")
+        params["display_name_property"] = display_name_property
+    if default_search_properties_provided:
+        set_clauses.append("et.defaultSearchProperties = $default_search_properties")
+        params["default_search_properties"] = default_search_properties
 
     result = await session.run(
         f"""
@@ -522,6 +538,91 @@ async def update_property(
     )
     record = await result.single()
     return _convert_neo4j_types(record["property"]) if record else None
+
+
+async def cascade_clear_property_references(
+    session: AsyncSession,
+    owner_id: str,
+    property_key: str,
+) -> list[str]:
+    """Clear references to a deleted property key on a single entity type.
+
+    Sets ``displayNameProperty`` to null when it equals ``property_key`` and
+    removes ``property_key`` from ``defaultSearchProperties``. Returns the list
+    of fields that were actually mutated so the caller can emit per-field log
+    lines. Targets one entity type at a time because property keys are scoped
+    to their owner.
+    """
+    result = await session.run(
+        """
+        MATCH (et:EntityType {entityTypeId: $entity_type_id})
+        WITH et,
+             (et.displayNameProperty = $property_key) AS clear_display_name,
+             (et.defaultSearchProperties IS NOT NULL
+              AND $property_key IN et.defaultSearchProperties) AS prune_search
+        FOREACH (_ IN CASE WHEN clear_display_name THEN [1] ELSE [] END |
+            SET et.displayNameProperty = null
+        )
+        FOREACH (_ IN CASE WHEN prune_search THEN [1] ELSE [] END |
+            SET et.defaultSearchProperties =
+                [p IN et.defaultSearchProperties WHERE p <> $property_key]
+        )
+        RETURN clear_display_name, prune_search
+        """,
+        entity_type_id=owner_id,
+        property_key=property_key,
+    )
+    record = await result.single()
+    if not record:
+        return []
+    affected: list[str] = []
+    if record["clear_display_name"]:
+        affected.append("displayNameProperty")
+    if record["prune_search"]:
+        affected.append("defaultSearchProperties")
+    return affected
+
+
+async def cascade_rename_property_references(
+    session: AsyncSession,
+    owner_id: str,
+    old_key: str,
+    new_key: str,
+) -> list[str]:
+    """Substitute ``old_key`` with ``new_key`` in display/search references.
+
+    Returns the list of fields that were actually mutated. Mirrors
+    ``cascade_clear_property_references`` but rewrites instead of clears.
+    """
+    result = await session.run(
+        """
+        MATCH (et:EntityType {entityTypeId: $entity_type_id})
+        WITH et,
+             (et.displayNameProperty = $old_key) AS rename_display_name,
+             (et.defaultSearchProperties IS NOT NULL
+              AND $old_key IN et.defaultSearchProperties) AS rename_search
+        FOREACH (_ IN CASE WHEN rename_display_name THEN [1] ELSE [] END |
+            SET et.displayNameProperty = $new_key
+        )
+        FOREACH (_ IN CASE WHEN rename_search THEN [1] ELSE [] END |
+            SET et.defaultSearchProperties =
+                [p IN et.defaultSearchProperties | CASE WHEN p = $old_key THEN $new_key ELSE p END]
+        )
+        RETURN rename_display_name, rename_search
+        """,
+        entity_type_id=owner_id,
+        old_key=old_key,
+        new_key=new_key,
+    )
+    record = await result.single()
+    if not record:
+        return []
+    affected: list[str] = []
+    if record["rename_display_name"]:
+        affected.append("displayNameProperty")
+    if record["rename_search"]:
+        affected.append("defaultSearchProperties")
+    return affected
 
 
 async def delete_property(

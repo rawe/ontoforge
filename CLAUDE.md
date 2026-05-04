@@ -54,6 +54,17 @@ Before tagging a release, read [docs/releasing.md](docs/releasing.md).
 
 ## Local Development Setup
 
+The fastest path is `./dev.sh`, which orchestrates everything with prereq checks and trap-based cleanup:
+
+```bash
+./dev.sh            # full stack (Neo4j + backend + Vite)
+./dev.sh backend    # Neo4j + backend only — pair with Preview MCP or `npm run dev`
+```
+
+Backend-only mode is the right choice when running the frontend via the Claude Preview launch config (`.claude/launch.json`), which starts Vite separately.
+
+Manual equivalent if you'd rather run each service yourself:
+
 ```bash
 # 1. Start Neo4j
 docker compose up -d

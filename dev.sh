@@ -6,6 +6,24 @@ BACKEND_PID=""
 FRONTEND_PID=""
 NEO4J_STARTED_BY_US=false
 
+# --- Mode selection ---
+MODE="${1:-all}"
+case "$MODE" in
+    all)
+        START_FRONTEND=true
+        ;;
+    backend)
+        START_FRONTEND=false
+        ;;
+    *)
+        echo "Usage: $0 [all|backend]" >&2
+        echo "  all      (default) Neo4j + backend + frontend" >&2
+        echo "  backend  Neo4j + backend only — pair with the Claude Preview" >&2
+        echo "           launch config or run 'cd frontend && npm run dev' separately" >&2
+        exit 1
+        ;;
+esac
+
 cleanup() {
     echo ""
     echo "Shutting down..."
@@ -130,18 +148,22 @@ if ! curl -sf -o /dev/null http://localhost:8000/docs 2>/dev/null; then
 fi
 
 # --- Frontend ---
-echo "Starting frontend..."
-cd "$ROOT_DIR/frontend"
-npm run dev &
-FRONTEND_PID=$!
+if [ "$START_FRONTEND" = true ]; then
+    echo "Starting frontend..."
+    cd "$ROOT_DIR/frontend"
+    npm run dev &
+    FRONTEND_PID=$!
+fi
 
 echo ""
-echo "All services running:"
-echo "  Frontend  http://localhost:5173"
+echo "Services running:"
+if [ "$START_FRONTEND" = true ]; then
+    echo "  Frontend  http://localhost:5173"
+fi
 echo "  Backend   http://localhost:8000"
 echo "  API docs  http://localhost:8000/docs"
 echo "  Neo4j     http://localhost:7474"
 echo ""
-echo "Press Ctrl+C to stop all services."
+echo "Press Ctrl+C to stop."
 
 wait

@@ -1662,7 +1662,7 @@ async def _search_one_relation_type(
     # Cypher 25 SEARCH ... IN (VECTOR INDEX ...) form, mirroring the entity
     # semantic-search repository pattern (``SEARCH n IN (...)``).
     query = (
-        f"MATCH ()-[r:{rel_type_upper}]-() "
+        f"MATCH ()-[r:{rel_type_upper}]->() "
         f"SEARCH r IN ("
         f"VECTOR INDEX {index_name} "
         f"FOR $query_embedding "

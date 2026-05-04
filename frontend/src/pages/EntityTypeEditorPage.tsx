@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import type { EntityType, PropertyDefinition } from '../types/models';
 import * as api from '../api/client';
+import { ApiError } from '../api/client';
 import PropertyTable from '../components/PropertyTable';
 import EntityTypeForm from '../components/forms/EntityTypeForm';
 
@@ -31,13 +32,24 @@ export default function EntityTypeEditorPage() {
 
   useEffect(() => { load(); }, [entityTypeId]);
 
-  const handleUpdate = async (data: { displayName?: string; description?: string }) => {
+  const handleUpdate = async (data: {
+    displayName?: string;
+    description?: string;
+    displayNameProperty?: string | null;
+    defaultSearchProperties?: string[] | null;
+  }) => {
     if (!entityTypeId) return;
     try {
       setEntityType(await api.updateEntityType(entityTypeId, data));
       setEditing(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to update');
+      if (e instanceof ApiError && e.details?.fields) {
+        const fields = e.details.fields as Record<string, string>;
+        const detail = Object.entries(fields).map(([k, v]) => `${k}: ${v}`).join('; ');
+        toast.error(`${e.message}${detail ? ` — ${detail}` : ''}`);
+      } else {
+        toast.error(e instanceof Error ? e.message : 'Failed to update');
+      }
     }
   };
 
@@ -81,7 +93,14 @@ export default function EntityTypeEditorPage() {
       <div className="mt-4 mb-6">
         {editing ? (
           <EntityTypeForm
-            initial={{ key: entityType.key, displayName: entityType.displayName, description: entityType.description ?? '' }}
+            initial={{
+              key: entityType.key,
+              displayName: entityType.displayName,
+              description: entityType.description ?? '',
+              displayNameProperty: entityType.displayNameProperty,
+              defaultSearchProperties: entityType.defaultSearchProperties,
+            }}
+            properties={properties}
             onSubmit={handleUpdate}
             onCancel={() => setEditing(false)}
           />

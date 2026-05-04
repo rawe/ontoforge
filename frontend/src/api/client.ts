@@ -39,7 +39,12 @@ export const getEntityType = (entityTypeId: string) =>
   request<EntityType>(`/entity-types/${entityTypeId}`);
 export const updateEntityType = (
   entityTypeId: string,
-  data: { displayName?: string; description?: string },
+  data: {
+    displayName?: string;
+    description?: string;
+    displayNameProperty?: string | null;
+    defaultSearchProperties?: string[] | null;
+  },
 ) => request<EntityType>(`/entity-types/${entityTypeId}`, { method: 'PUT', body: JSON.stringify(data) });
 export const deleteEntityType = (entityTypeId: string, cascade = false) =>
   request<void>(`/entity-types/${entityTypeId}${cascade ? '?cascade=true' : ''}`, { method: 'DELETE' });

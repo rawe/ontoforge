@@ -12,6 +12,8 @@ export interface EntityType {
   key: string;
   displayName: string;
   description: string | null;
+  displayNameProperty: string | null;
+  defaultSearchProperties: string[] | null;
   createdAt: string;
   updatedAt: string;
 }

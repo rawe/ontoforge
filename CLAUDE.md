@@ -78,17 +78,6 @@ cd frontend && npm run dev
 
 The backend runs on `http://localhost:8000`, the frontend on `http://localhost:5173`.
 
-## Attaching Claude Code to the OntoForge MCP Server
-
-The backend exposes HTTP MCP endpoints for modeling (`/mcp/model`) and runtime (`/mcp/runtime`, ontology selected via `X-Ontology-Key` header). To use them from the Claude Code desktop app:
-
-1. Copy the template: `cp mcp-example-header.json .mcp.json`
-2. Edit `.mcp.json` and set `X-Ontology-Key` to the ontology key you want runtime tools scoped to.
-3. **Restart Claude Code** — the desktop app loads MCP servers only at session startup; there is no runtime add/reload.
-4. Approve the project MCP trust prompt the first time.
-
-The MCP servers expect the backend to be running (`./dev.sh` or `./dev.sh backend`). Calls fail loudly when it's down.
-
 ## Key Concepts
 
 - **Schema** — the global set of entity types, relation types, and property definitions. The ground truth, independent of any ontology.

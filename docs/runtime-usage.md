@@ -200,6 +200,20 @@ The `q` parameter searches all string properties (case-insensitive substring mat
 curl "http://localhost:8000/api/runtime/test_ontology/entities/person?q=alice"
 ```
 
+### Semantic search
+
+When an embedding provider is configured (`EMBEDDING_PROVIDER`), entities can also be searched by meaning instead of substrings. The `type` parameter is optional — omit it to search across all entity types of the ontology at once; each result then carries `_entityTypeKey`.
+
+```bash
+# Within one entity type
+curl "http://localhost:8000/api/runtime/test_ontology/search/semantic?q=software%20engineer&type=person"
+
+# Across all entity types
+curl "http://localhost:8000/api/runtime/test_ontology/search/semantic?q=software%20engineer"
+```
+
+See `api-contracts/runtime-api.md` §6 for the full parameter set, scoring behavior, and filter support.
+
 ## 5. Cypher Query
 
 For complex read queries that go beyond the CRUD endpoints, use the Cypher query endpoint. Queries are validated against the ontology's scoped schema and executed read-only.

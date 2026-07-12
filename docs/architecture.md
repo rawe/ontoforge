@@ -279,6 +279,8 @@ CREATE INDEX entity_type_key_index FOR (n:_Entity) ON (n._entityTypeKey);
 
 All constraints and indexes — both schema and instance — are created on startup.
 
+When an embedding provider is configured, vector indexes are additionally ensured on startup: one per entity type (`{entity_type_key}_embedding` on the PascalCase label, kept in sync with the entity type lifecycle), a shared cross-type index (`entity_embedding` on `_Entity`) for semantic search without a type filter, and `saved_query_embedding` for saved-query descriptions.
+
 Entity type and relation type keys are globally unique, enforced by Neo4j constraints.
 
 **Cascading Deletes:**
@@ -307,6 +309,7 @@ Each entity instance is a Neo4j node with two labels:
 | `_entityTypeKey` | String | Schema entity type key (e.g., `person`) |
 | `_createdAt` | DateTime | Creation timestamp |
 | `_updatedAt` | DateTime | Last-modified timestamp |
+| `_embedding` | List of Float | Vector embedding of string properties (only when an embedding provider is configured; never returned by the API) |
 
 **User-defined properties** are stored as direct node properties, keyed by their property definition key:
 

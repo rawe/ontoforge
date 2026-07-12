@@ -304,6 +304,12 @@ Properties are managed through unified tools that work on both entity types and 
 |------|-----------|---------|-------------|
 | `cypher_query` | `cypher` (string) | `{"columns": [...], "results": [...]}` | Execute a read-only Cypher query. Use schema keys as labels/types (auto-translated). Only MATCH/RETURN supported — no writes, no CALL. |
 
+#### Semantic Search
+
+| Tool | Arguments | Returns | Description |
+|------|-----------|---------|-------------|
+| `semantic_search` | `query` (string), `entity_type_key` (opt), `limit` (opt, default 10), `filters` (opt, object), `fields` (opt, list) | List of `{entity, score}` ranked by similarity | Search entities by semantic similarity to a natural language query. Omit `entity_type_key` to search across all entity types at once — results carry `_entityTypeKey`. `filters` requires `entity_type_key`. Requires embedding provider. |
+
 #### Saved Queries
 
 | Tool | Arguments | Returns | Description |

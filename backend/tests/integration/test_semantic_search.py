@@ -140,6 +140,64 @@ async def test_semantic_search_type_scoped(integration_client, test_ontology):
         assert item["entity"]["_entityTypeKey"] == "person"
 
 
+async def test_semantic_search_cross_type(integration_client, test_ontology):
+    """Cross-type search without a type param spans multiple entity types."""
+    key = test_ontology["ontology_key"]
+
+    # The shared _Entity index is normally ensured at app startup; the test
+    # client skips the lifespan, so create it explicitly.
+    from ontoforge_server.core.database import ensure_entity_vector_index, get_driver
+    from ontoforge_server.core.embedding import get_embedding_provider
+
+    driver = await get_driver()
+    provider = get_embedding_provider()
+    await ensure_entity_vector_index(driver, provider.dimensions)
+
+    # Second entity type: company
+    resp = await integration_client.post("/api/model/entity-types", json={
+        "key": "company",
+        "displayName": "Company",
+    })
+    assert resp.status_code == 201, f"Create company type failed: {resp.text}"
+    company_id = resp.json()["entityTypeId"]
+    resp = await integration_client.post(
+        f"/api/model/entity-types/{company_id}/properties",
+        json={"key": "name", "displayName": "Name", "dataType": "string", "required": True},
+    )
+    assert resp.status_code == 201
+
+    await integration_client.post(f"/api/runtime/{key}/entities/person", json={
+        "name": "Alice Chen",
+        "role": "Backend Engineer",
+        "bio": "Expert in distributed systems and microservices",
+    })
+    await integration_client.post(f"/api/runtime/{key}/entities/company", json={
+        "name": "Distributed Systems Consulting",
+    })
+
+    resp = await integration_client.get(
+        f"/api/runtime/{key}/search/semantic",
+        params={"q": "distributed systems", "limit": 10},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] > 0
+    type_keys = {item["entity"]["_entityTypeKey"] for item in data["results"]}
+    assert {"person", "company"} <= type_keys
+
+
+async def test_semantic_search_cross_type_rejects_filters(integration_client, test_ontology):
+    """Property filters without a type are rejected — they are per entity type."""
+    key = test_ontology["ontology_key"]
+
+    resp = await integration_client.get(
+        f"/api/runtime/{key}/search/semantic",
+        params={"q": "anything", "filter.name": "Alice"},
+    )
+    assert resp.status_code == 422
+    assert "require 'type'" in resp.json()["error"]["message"]
+
+
 async def test_semantic_search_disabled_without_provider(integration_client, test_ontology):
     """Search returns error when embedding provider is not configured."""
     key = test_ontology["ontology_key"]

@@ -13,7 +13,10 @@ from neo4j.time import Date as Neo4jDate
 from neo4j.time import DateTime as Neo4jDateTime
 
 from ontoforge_server.core.ai import AgentConfig, SavedQueryConfig, SavedQueryParameter, StepConfig
-from ontoforge_server.core.database import validate_vector_indexed_properties
+from ontoforge_server.core.database import (
+    ENTITY_VECTOR_INDEX_NAME,
+    validate_vector_indexed_properties,
+)
 from ontoforge_server.core.embedding import get_embedding_provider
 from ontoforge_server.core.exceptions import NotFoundError, ValidationError
 from ontoforge_server.core.schemas import (
@@ -1196,7 +1199,7 @@ async def get_neighbors(
 async def semantic_search(
     ontology_key: str,
     query: str,
-    entity_type_key: str,
+    entity_type_key: str | None,
     limit: int,
     min_score: float | None,
     driver: AsyncDriver,
@@ -1212,15 +1215,38 @@ async def semantic_search(
             details={"code": "FEATURE_DISABLED"},
         )
 
-    scoped_et = loaded.scoped.entity_types.get(entity_type_key)
-    if not scoped_et:
-        raise NotFoundError(f"Entity type '{entity_type_key}' not found")
+    filters = filters or {}
+
+    scoped_et = None
+    if entity_type_key is not None:
+        scoped_et = loaded.scoped.entity_types.get(entity_type_key)
+        if not scoped_et:
+            raise NotFoundError(f"Entity type '{entity_type_key}' not found")
+    elif filters:
+        raise ValidationError(
+            "Property filters require 'type' — filters are defined per entity type",
+            details={"fields": {k: "Requires 'type'" for k in filters}},
+        )
 
     query_embedding = await provider.embed(query)
     if query_embedding is None:
         raise ValidationError("Failed to generate embedding for search query")
 
-    filters = filters or {}
+    if entity_type_key is None:
+        results = await _semantic_search_all_types(
+            loaded, query_embedding, limit, min_score, driver
+        )
+        if fields is not None:
+            for r in results:
+                r["entity"] = _apply_field_projection(
+                    r["entity"], fields, _ENTITY_NEIGHBOR_ALWAYS_FIELDS
+                )
+        return {
+            "results": results,
+            "query": query,
+            "total": len(results),
+        }
+
     # Reject __contains — not supported by in-index WHERE (SEARCH clause).
     # Use the entity list endpoint for substring filtering.
     for filter_key in filters:
@@ -1265,6 +1291,50 @@ async def semantic_search(
         "query": query,
         "total": len(results),
     }
+
+
+async def _semantic_search_all_types(
+    loaded: LoadedSchema,
+    query_embedding: list[float],
+    limit: int,
+    min_score: float | None,
+    driver: AsyncDriver,
+) -> list[dict]:
+    """Search the shared _Entity vector index across all scoped entity types.
+
+    The SEARCH clause's in-index WHERE cannot express membership in a set of
+    type keys, so scoped ontologies over-fetch and filter to scoped types in
+    Python. The candidate pool is capped, so a heavily restricted scope may
+    return fewer than `limit` results even when more matches exist.
+    """
+    scoped_type_keys = set(loaded.scoped.entity_types.keys())
+    if not scoped_type_keys:
+        return []
+
+    is_restricted = scoped_type_keys != set(loaded.full.entity_types.keys())
+    fetch_limit = min(limit * 5, 500) if is_restricted else limit
+
+    async with driver.session() as session:
+        raw = await repository.semantic_search(
+            session,
+            "_Entity",
+            "",
+            query_embedding,
+            fetch_limit,
+            min_score,
+            index_name=ENTITY_VECTOR_INDEX_NAME,
+        )
+
+    results: list[dict] = []
+    for r in raw:
+        scoped_et = loaded.scoped.entity_types.get(r["entity"].get("_entityTypeKey"))
+        if scoped_et is None:
+            continue
+        r["entity"] = _filter_entity_properties(r["entity"], scoped_et)
+        results.append(r)
+        if len(results) >= limit:
+            break
+    return results
 
 
 # ---------------------------------------------------------------------------

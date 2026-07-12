@@ -65,7 +65,7 @@ async def semantic_search(
     ontology_key: str,
     request: Request,
     q: str = Query(..., min_length=1),
-    type: str = Query(...),
+    type: str | None = Query(default=None),
     limit: int = Query(default=10, ge=1, le=100),
     min_score: float | None = Query(default=None, ge=0.0, le=1.0),
     fields: list[str] | None = Query(default=None),

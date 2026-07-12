@@ -8,10 +8,10 @@
 OntoForge supports semantic search over entity instances using vector embeddings. The implementation:
 
 - **Embedding at write time** — every entity's string properties are concatenated into a text representation and embedded via Ollama (`nomic-embed-text`, 768 dimensions). The embedding is stored as `_embedding` on the Neo4j node.
-- **REST endpoint** — `GET /api/runtime/{ontologyKey}/search/semantic` with parameters: `q` (query), `type` (required, entity type key), `limit`, `min_score`, `filter.{key}` (property filters).
-- **MCP tool** — `semantic_search(query, entity_type_key, limit, filters)` on the runtime MCP server.
+- **REST endpoint** — `GET /api/runtime/{ontologyKey}/search/semantic` with parameters: `q` (query), `type` (optional entity type key — omit for cross-type search), `limit`, `min_score`, `filter.{key}` (property filters, require `type`).
+- **MCP tool** — `semantic_search(query, entity_type_key, limit, filters)` on the runtime MCP server; `entity_type_key` is optional for cross-type search.
 - **Property filtering** — `filter.{key}` parameters apply Cypher `WHERE` clauses on vector search results. Supports equality, `__gt`, `__gte`, `__lt`, `__lte`, `__contains`. When filters are present, the vector index over-fetches candidates (`min(limit * 5, 500)`) before applying property constraints.
-- **Vector indexes** — one per entity type, created/dropped automatically with the entity type lifecycle.
+- **Vector indexes** — one per entity type, created/dropped automatically with the entity type lifecycle, plus a shared cross-type index (`entity_embedding` on the `_Entity` label) for search without a type filter.
 - **Graceful degradation** — entities are created normally when the embedding provider is unavailable; they just lack embeddings until re-embedded.
 - **Configuration** — opt-in via `EMBEDDING_PROVIDER=ollama` environment variable. When unset, semantic search is disabled entirely.
 
@@ -136,6 +136,8 @@ This is a schema-level change — modifying a property's `embeddable` flag means
 
 ## Frontend Semantic Search UI
 
+**Status: IMPLEMENTED**
+
 **Priority: Medium**
 
 ### Problem
@@ -147,6 +149,10 @@ Semantic search is only accessible via REST and MCP. The runtime UI has no searc
 Add a semantic search bar to the runtime dashboard or entity list page. When the user types a natural language query, call the `GET /search/semantic` endpoint and display results ranked by score. Results should show the similarity score, entity type, and key properties.
 
 Cross-type search (no type filter) is the default mode — the UI groups or labels results by entity type. The user can optionally scope to a single type.
+
+### Implementation Notes
+
+Cross-type search lives on the runtime dashboard (`GlobalSemanticSearch` component) — results are labeled with their entity type and link to the type's instance list. Single-type semantic search remains on the entity instance list page.
 
 ---
 

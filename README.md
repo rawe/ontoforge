@@ -255,7 +255,7 @@ Both features support two provider types:
 
 ### Semantic Search
 
-Find entities by meaning rather than exact keywords. Requires an embedding model.
+Find entities by meaning rather than exact keywords — within a single entity type or across all types at once. Available via REST, MCP, and the runtime dashboard. Requires an embedding model.
 
 | Variable | Default | Description |
 |----------|---------|-------------|

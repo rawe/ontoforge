@@ -114,7 +114,8 @@ export const getFeatures = () =>
 // Semantic search
 export interface SemanticSearchParams {
   q: string;
-  type: string;
+  /** Entity type key — omit to search across all entity types. */
+  type?: string;
   limit?: number;
   min_score?: number;
   filters?: Record<string, string>;
@@ -123,7 +124,7 @@ export interface SemanticSearchParams {
 function buildSemanticSearchQuery(params: SemanticSearchParams): string {
   const parts: string[] = [];
   parts.push(`q=${encodeURIComponent(params.q)}`);
-  parts.push(`type=${encodeURIComponent(params.type)}`);
+  if (params.type) parts.push(`type=${encodeURIComponent(params.type)}`);
   if (params.limit != null) parts.push(`limit=${params.limit}`);
   if (params.min_score != null) parts.push(`min_score=${params.min_score}`);
   if (params.filters) {

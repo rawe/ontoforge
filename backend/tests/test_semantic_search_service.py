@@ -20,6 +20,10 @@ def _make_loaded(entity_type_keys: list[str] | None = None) -> LoadedSchema:
     return LoadedSchema(scoped=cache, full=cache)
 
 
+def _make_loaded_scoped(scoped_keys: list[str], full_keys: list[str]) -> LoadedSchema:
+    return LoadedSchema(scoped=_make_cache(scoped_keys), full=_make_cache(full_keys))
+
+
 def _make_cache(entity_type_keys: list[str] | None = None) -> SchemaCache:
     """Build a minimal SchemaCache for testing."""
     cache = SchemaCache(
@@ -319,3 +323,141 @@ async def test_search_without_fields_returns_all(mock_driver, mock_session):
     assert entity["name"] == "Alice"
     assert entity["age"] == 30
     assert entity["_entityTypeKey"] == "person"
+
+
+# --- Cross-type search (no entity_type_key) ---
+
+
+async def test_cross_type_search_uses_shared_index(mock_driver, mock_session):
+    """Without a type, search hits the shared _Entity index with the plain limit."""
+    mock_provider = AsyncMock()
+    mock_provider.embed = AsyncMock(return_value=[0.1] * 768)
+
+    search_results = [
+        {"entity": {"_id": "e1", "_entityTypeKey": "person", "name": "Alice"}, "score": 0.95},
+        {"entity": {"_id": "e2", "_entityTypeKey": "company", "name": "Acme"}, "score": 0.9},
+    ]
+
+    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_loaded(["person", "company"])), \
+         patch("ontoforge_server.runtime.service.get_embedding_provider", return_value=mock_provider), \
+         patch("ontoforge_server.runtime.service.repository") as mock_repo:
+        mock_repo.semantic_search = AsyncMock(return_value=search_results)
+        result = await semantic_search("test", "query", None, 10, None, mock_driver)
+
+        call_args = mock_repo.semantic_search.call_args
+        assert call_args[0][1] == "_Entity"  # pascal_label
+        assert call_args[0][4] == 10  # limit (unscoped: no over-fetch)
+        assert call_args[1]["index_name"] == "entity_embedding"
+
+    assert result["total"] == 2
+    assert result["results"][0]["entity"]["_entityTypeKey"] == "person"
+    assert result["results"][1]["entity"]["_entityTypeKey"] == "company"
+
+
+async def test_cross_type_search_scoped_overfetches_and_filters(mock_driver, mock_session):
+    """A scoped ontology over-fetches and drops results of excluded types."""
+    mock_provider = AsyncMock()
+    mock_provider.embed = AsyncMock(return_value=[0.1] * 768)
+
+    search_results = [
+        {"entity": {"_id": "e1", "_entityTypeKey": "company", "name": "Acme"}, "score": 0.95},
+        {"entity": {"_id": "e2", "_entityTypeKey": "person", "name": "Alice"}, "score": 0.9},
+    ]
+
+    loaded = _make_loaded_scoped(["person"], ["person", "company"])
+    with patch("ontoforge_server.runtime.service._load_schema", return_value=loaded), \
+         patch("ontoforge_server.runtime.service.get_embedding_provider", return_value=mock_provider), \
+         patch("ontoforge_server.runtime.service.repository") as mock_repo:
+        mock_repo.semantic_search = AsyncMock(return_value=search_results)
+        result = await semantic_search("test", "query", None, 10, None, mock_driver)
+
+        call_args = mock_repo.semantic_search.call_args
+        assert call_args[0][4] == 50  # limit * 5 over-fetch
+
+    assert result["total"] == 1
+    assert result["results"][0]["entity"]["_entityTypeKey"] == "person"
+
+
+async def test_cross_type_search_truncates_to_limit(mock_driver, mock_session):
+    """Over-fetched results are truncated to the requested limit after filtering."""
+    mock_provider = AsyncMock()
+    mock_provider.embed = AsyncMock(return_value=[0.1] * 768)
+
+    search_results = [
+        {"entity": {"_id": f"e{i}", "_entityTypeKey": "person", "name": f"P{i}"}, "score": 0.9}
+        for i in range(5)
+    ]
+
+    loaded = _make_loaded_scoped(["person"], ["person", "company"])
+    with patch("ontoforge_server.runtime.service._load_schema", return_value=loaded), \
+         patch("ontoforge_server.runtime.service.get_embedding_provider", return_value=mock_provider), \
+         patch("ontoforge_server.runtime.service.repository") as mock_repo:
+        mock_repo.semantic_search = AsyncMock(return_value=search_results)
+        result = await semantic_search("test", "query", None, 2, None, mock_driver)
+
+    assert result["total"] == 2
+
+
+async def test_cross_type_search_rejects_filters(mock_driver):
+    """Property filters require a type — they are defined per entity type."""
+    mock_provider = AsyncMock()
+    mock_provider.embed = AsyncMock(return_value=[0.1] * 768)
+
+    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_loaded()), \
+         patch("ontoforge_server.runtime.service.get_embedding_provider", return_value=mock_provider):
+        with pytest.raises(ValidationError, match="require 'type'"):
+            await semantic_search(
+                "test", "query", None, 10, None, mock_driver,
+                filters={"location": "Berlin"},
+            )
+
+
+async def test_cross_type_search_fields_keeps_type_key(mock_driver, mock_session):
+    """Field projection on cross-type search always keeps _id and _entityTypeKey."""
+    mock_provider = AsyncMock()
+    mock_provider.embed = AsyncMock(return_value=[0.1] * 768)
+
+    search_results = [
+        {
+            "entity": {
+                "_id": "e1",
+                "_entityTypeKey": "person",
+                "name": "Alice",
+                "age": 30,
+            },
+            "score": 0.95,
+        },
+    ]
+
+    with patch("ontoforge_server.runtime.service._load_schema", return_value=_make_loaded()), \
+         patch("ontoforge_server.runtime.service.get_embedding_provider", return_value=mock_provider), \
+         patch("ontoforge_server.runtime.service.repository") as mock_repo:
+        mock_repo.semantic_search = AsyncMock(return_value=search_results)
+        result = await semantic_search(
+            "test", "query", None, 10, None, mock_driver,
+            fields=["name"],
+        )
+
+    entity = result["results"][0]["entity"]
+    assert entity["_id"] == "e1"
+    assert entity["_entityTypeKey"] == "person"
+    assert entity["name"] == "Alice"
+    assert "age" not in entity
+
+
+async def test_cross_type_search_empty_scope_returns_empty(mock_driver, mock_session):
+    """An ontology whose scope includes no entity types returns no results."""
+    mock_provider = AsyncMock()
+    mock_provider.embed = AsyncMock(return_value=[0.1] * 768)
+
+    loaded = LoadedSchema(scoped=_make_cache([]), full=_make_cache(["person"]))
+    loaded.scoped.entity_types.clear()
+
+    with patch("ontoforge_server.runtime.service._load_schema", return_value=loaded), \
+         patch("ontoforge_server.runtime.service.get_embedding_provider", return_value=mock_provider), \
+         patch("ontoforge_server.runtime.service.repository") as mock_repo:
+        mock_repo.semantic_search = AsyncMock(return_value=[])
+        result = await semantic_search("test", "query", None, 10, None, mock_driver)
+
+    assert result["total"] == 0
+    mock_repo.semantic_search.assert_not_called()

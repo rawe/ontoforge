@@ -1,6 +1,7 @@
 import { useParams, Link } from 'react-router-dom';
 import { useRuntimeSchema } from '../hooks/useRuntimeSchema';
 import { useFeatures } from '../hooks/useFeatures';
+import GlobalSemanticSearch from '../components/runtime/GlobalSemanticSearch';
 
 export default function RuntimeDashboardPage() {
   const { ontologyKey } = useParams<{ ontologyKey: string }>();
@@ -57,6 +58,10 @@ export default function RuntimeDashboardPage() {
           </>
         )}
       </div>
+
+      {features?.semanticSearch && ontologyKey && (
+        <GlobalSemanticSearch ontologyKey={ontologyKey} entityTypes={schema.entityTypes} />
+      )}
 
       {/* Entity Types */}
       <section className="mb-8">

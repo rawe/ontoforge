@@ -275,7 +275,7 @@ async def cypher_query(
 @_enrich_errors
 async def semantic_search(
     query: str,
-    entity_type_key: str,
+    entity_type_key: str | None = None,
     limit: int = 10,
     filters: dict | None = None,
     fields: list[str] | None = None,
@@ -447,11 +447,14 @@ _MCP_TOOL_DEFS: list[tuple[Callable, str, str]] = [
         TOOL_SEMANTIC_SEARCH,
         "Search entity instances by semantic similarity to a natural language query. "
         "Returns entities ranked by relevance with similarity scores. "
-        "entity_type_key is required — specifies which entity type to search. "
-        "Use 'filters' for property-based filtering on results: exact match "
+        "entity_type_key is optional — omit it to search across all entity types "
+        "at once (each result carries _entityTypeKey), or set it to search a "
+        "single type. Use 'filters' for property-based filtering on results "
+        "(requires entity_type_key): exact match "
         '("location": "Berlin"), operators ("age__gt": "25", "__gte", "__lt", '
         '"__lte"). Use \'fields\' to select which entity properties to include — '
-        "only listed fields plus _id are returned. Omit for all fields.",
+        "only listed fields plus _id (and _entityTypeKey for cross-type search) "
+        "are returned. Omit for all fields.",
     ),
     (
         list_saved_queries,

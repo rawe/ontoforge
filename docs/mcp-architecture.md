@@ -304,6 +304,12 @@ Properties are managed through unified tools that work on both entity types and 
 |------|-----------|---------|-------------|
 | `cypher_query` | `cypher` (string) | `{"columns": [...], "results": [...]}` | Execute a read-only Cypher query. Use schema keys as labels/types (auto-translated). Only MATCH/RETURN supported — no writes, no CALL. |
 
+#### Semantic Search
+
+| Tool | Arguments | Returns | Description |
+|------|-----------|---------|-------------|
+| `semantic_search` | `query` (string), `entity_type_key` (opt), `limit` (opt, default 10), `filters` (opt, object), `fields` (opt, list) | List of `{entity, score}` ranked by similarity | Search entities by semantic similarity to a natural language query. Omit `entity_type_key` to search across all entity types at once — results carry `_entityTypeKey`. `filters` requires `entity_type_key`. Requires embedding provider. |
+
 #### Saved Queries
 
 | Tool | Arguments | Returns | Description |
@@ -311,12 +317,6 @@ Properties are managed through unified tools that work on both entity types and 
 | `list_saved_queries` | — | List of saved queries with key, name, description, parameters | List all saved queries available for this ontology. |
 | `search_saved_queries` | `query` (string) | List of saved queries with key, name, description, parameters, score | Search saved queries by semantic similarity to a natural language description. Returns up to 3 results above 0.7 similarity. Requires embedding provider. |
 | `run_saved_query` | `query_key`, `parameters` (object) | `{"columns": [...], "results": [...]}` | Execute a saved query with the provided parameter values. Parameters are type-coerced and passed natively to Neo4j. |
-
-#### Data Management
-
-| Tool | Arguments | Returns | Description |
-|------|-----------|---------|-------------|
-| `wipe_data` | — | Count of deleted entities and relations | **Destructive.** Delete all instance data for this ontology. Schema is preserved. |
 
 ---
 

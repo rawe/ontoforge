@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 _driver: AsyncDriver | None = None
 MAX_VECTOR_FILTER_VALUE_BYTES = 32766
+ENTITY_VECTOR_INDEX_NAME = "entity_embedding"
 
 _CONSTRAINTS = [
     "CREATE CONSTRAINT ontology_id_unique IF NOT EXISTS FOR (o:Ontology) REQUIRE o.ontologyId IS UNIQUE",
@@ -128,8 +129,30 @@ async def ensure_vector_indexes(driver: AsyncDriver, dimensions: int) -> None:
             driver, et["key"], dimensions, filter_properties=et["property_keys"]
         )
 
+    # Cross-type entity vector index (semantic search across all types)
+    await ensure_entity_vector_index(driver, dimensions)
+
     # Saved query vector index (for semantic search over descriptions)
     await ensure_saved_query_vector_index(driver, dimensions)
+
+
+async def ensure_entity_vector_index(driver: AsyncDriver, dimensions: int) -> None:
+    """Create the cross-type vector index on the shared _Entity label (IF NOT EXISTS).
+
+    Indexes _embedding across all entity instances so semantic search can run
+    over every entity type in a single query. Type/scope filtering happens in
+    the service layer, so no in-index filter properties are needed.
+    """
+    await _drop_failed_index_if_exists(driver, ENTITY_VECTOR_INDEX_NAME)
+    query = (
+        f"CREATE VECTOR INDEX {ENTITY_VECTOR_INDEX_NAME} IF NOT EXISTS "
+        "FOR (n:_Entity) ON (n._embedding) "
+        f"OPTIONS {{indexConfig: {{`vector.dimensions`: {dimensions}, "
+        f"`vector.similarity_function`: 'cosine'}}}}"
+    )
+    async with driver.session() as session:
+        await session.run(query)
+    logger.info("Vector index ensured: %s", ENTITY_VECTOR_INDEX_NAME)
 
 
 async def ensure_saved_query_vector_index(

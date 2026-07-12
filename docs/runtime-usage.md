@@ -242,17 +242,7 @@ Response:
 
 Validation errors include available types and properties so queries can be corrected.
 
-## 6. Data Management
-
-Wipe all instance data for an ontology (entities and relations). Schema is preserved.
-
-```bash
-curl -X DELETE http://localhost:8000/api/runtime/test_ontology/data
-```
-
-Response: `{ "ontologyKey": "test_ontology", "entitiesDeleted": 150, "relationsDeleted": 42 }`
-
-## 7. Validation Errors
+## 6. Validation Errors
 
 Write operations that fail validation return 422 with field-level details:
 

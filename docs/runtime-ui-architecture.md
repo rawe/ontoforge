@@ -29,7 +29,6 @@ No entity detail page for now — create/edit via modals on the list page. Neigh
 - Lists entity types as clickable cards (displayName, key, property count)
 - Lists relation types as clickable cards (displayName, from→to display)
 - Each card links to the corresponding list page
-- "Wipe Data" button (with confirmation) calls `DELETE /data`
 - Breadcrumb: `Ontologies → {ontology name} → Data`
 
 ### EntityInstanceListPage
@@ -186,7 +185,6 @@ deleteRelation(ontologyKey, relationTypeKey, id): void
 
 // Other
 getNeighbors(ontologyKey, entityTypeKey, id, params?): NeighborResponse
-wipeData(ontologyKey): WipeDataResponse
 ```
 
 **List params type:**

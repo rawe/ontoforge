@@ -819,7 +819,6 @@ All declared parameters are required. Parameter values are coerced to their decl
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/runtime/features` | Feature availability flags |
-| `DELETE` | `/api/runtime/{ontologyKey}/data` | Wipe instance data for this ontology |
 | `GET` | `/api/runtime/{ontologyKey}/schema` | Full schema introspection |
 | `GET` | `/api/runtime/{ontologyKey}/schema/entity-types` | List entity types |
 | `GET` | `/api/runtime/{ontologyKey}/schema/entity-types/{key}` | Get entity type with properties |

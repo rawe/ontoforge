@@ -318,12 +318,6 @@ Properties are managed through unified tools that work on both entity types and 
 | `search_saved_queries` | `query` (string) | List of saved queries with key, name, description, parameters, score | Search saved queries by semantic similarity to a natural language description. Returns up to 3 results above 0.7 similarity. Requires embedding provider. |
 | `run_saved_query` | `query_key`, `parameters` (object) | `{"columns": [...], "results": [...]}` | Execute a saved query with the provided parameter values. Parameters are type-coerced and passed natively to Neo4j. |
 
-#### Data Management
-
-| Tool | Arguments | Returns | Description |
-|------|-----------|---------|-------------|
-| `wipe_data` | — | Count of deleted entities and relations | **Destructive.** Delete all instance data for this ontology. Schema is preserved. |
-
 ---
 
 ## 4. Key Abstraction: UUID Hiding

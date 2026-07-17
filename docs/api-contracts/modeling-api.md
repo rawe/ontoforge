@@ -242,11 +242,13 @@ Add a property definition to an entity type.
   "key": "string (required, unique within owning type, lowercase alphanumeric + underscore)",
   "displayName": "string (required)",
   "description": "string (optional)",
-  "dataType": "string (required, one of: string, integer, float, boolean, date, datetime)",
+  "dataType": "string (required, one of: string, integer, float, boolean, date, datetime, document)",
   "required": "boolean (default: false)",
   "defaultValue": "string (optional, interpreted according to dataType)"
 }
 ```
+
+The `document` data type holds large text content, interpreted as Markdown (see `architecture.md` §4.2 for its storage model). When an embedding provider is configured, creating a document property also creates its chunk vector index; deleting the property drops its chunks and index.
 
 **Response:** `201 Created`
 ```json
@@ -367,13 +369,13 @@ Import an ontology from a JSON payload.
 
 **Response:** `201 Created` — the created/updated ontology object.
 
-**Side effects:** When an embedding provider is configured, the import automatically creates Neo4j vector indexes for each entity type and for saved queries. This ensures semantic search queries do not fail with "index not found" on a freshly imported database.
+**Side effects:** When an embedding provider is configured, the import automatically creates Neo4j vector indexes for each entity type, for each document property, and for saved queries. This ensures semantic search queries do not fail with "index not found" on a freshly imported database. Document chunk nodes are derived data and are not part of the transfer format — regenerate them via `POST /api/model/rebuild-embeddings` after importing instance data.
 
 **Errors:** 409 if ontology already exists and overwrite is false. 422 if the import payload fails validation.
 
 ### POST /api/model/rebuild-embeddings
 
-Regenerate all embedding vectors for entity instances and saved queries. Ensures Neo4j vector indexes exist, then iterates all entities and saved queries to (re-)compute their embeddings.
+Regenerate all embedding vectors for entity instances and saved queries. Ensures Neo4j vector indexes exist, then iterates all entities and saved queries to (re-)compute their embeddings. For entities with document properties, the document chunks are also rebuilt (existing chunks deleted, text re-chunked and re-embedded).
 
 Use this after data import, after changing the embedding model or dimensions, or to repair missing/corrupted indexes.
 
@@ -491,7 +493,7 @@ updatedAt: datetime
 key: string (required, pattern: ^[a-z][a-z0-9_]*$)
 displayName: string (required)
 description: string (optional)
-dataType: string (required, enum: string | integer | float | boolean | date | datetime)
+dataType: string (required, enum: string | integer | float | boolean | date | datetime | document)
 required: boolean (default: false)
 defaultValue: string (optional)
 ```

@@ -21,6 +21,11 @@ See [cypher-query.md](cypher-query.md) for the full feature document.
 See [data-scoping.md](data-scoping.md) for the full feature document.
 
 
+## Document Properties
+
+See [document-properties.md](document-properties.md) for the full feature document and [document-properties-technical.md](document-properties-technical.md) for the implementation design.
+
+
 ## OpenAI-Compatible Embedding
 
 - Support the OpenAI embedding API format so the same embedding provider can serve both OntoForge and OpenAI-compatible clients.

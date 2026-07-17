@@ -44,12 +44,25 @@ class NeighborhoodResponse(BaseModel):
 class SearchResultItem(BaseModel):
     entity: dict
     score: float
+    matched_via: dict | None = Field(default=None, alias="matchedVia")
+
+    model_config = {"populate_by_name": True}
 
 
 class SemanticSearchResponse(BaseModel):
     results: list[SearchResultItem]
     query: str
     total: int
+
+
+class DocumentContentResponse(BaseModel):
+    property_key: str = Field(alias="propertyKey")
+    content: str
+    offset: int
+    length: int
+    total_length: int = Field(alias="totalLength")
+
+    model_config = {"populate_by_name": True}
 
 
 class CypherQueryRequest(BaseModel):

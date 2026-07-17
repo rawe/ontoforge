@@ -194,7 +194,7 @@ Available operators: `__gt`, `__gte`, `__lt`, `__lte`, `__contains`.
 
 ### Text search
 
-The `q` parameter searches all string properties (case-insensitive substring match). Only available on entity list endpoints.
+The `q` parameter searches all `string` properties (case-insensitive substring match); `document` properties are not included — use semantic search for document content. Only available on entity list endpoints.
 
 ```bash
 curl "http://localhost:8000/api/runtime/test_ontology/entities/person?q=alice"
@@ -214,7 +214,32 @@ curl "http://localhost:8000/api/runtime/test_ontology/search/semantic?q=software
 
 See `api-contracts/runtime-api.md` §6 for the full parameter set, scoring behavior, and filter support.
 
-## 5. Cypher Query
+## 5. Working with Documents
+
+Properties with data type `document` hold large Markdown text (a biography, a specification, meeting notes). Entity reads never return the content — instead the property appears as a stub with its character count:
+
+```json
+"bio": { "document": true, "length": 40213 }
+```
+
+This keeps entity payloads small no matter how large the documents are. The intended retrieval flow:
+
+1. **Search.** With an embedding provider configured, semantic search also matches inside documents at passage level (chunks). Each hit carries `matchedVia` — for a document match it includes the property key, the raw cosine `similarity`, a ~200-char `snippet`, and the character coordinates `charOffset`/`charLength` of the matching passage. Note that the top-level `score` is a fusion value for ordering only; threshold on `matchedVia.similarity`.
+2. **Slice.** Feed the coordinates into the document read endpoint to fetch exactly the matching passage — no full-document fetch needed.
+
+```bash
+# 1. Search — a hit returns matchedVia with charOffset=5200, charLength=1500
+curl "http://localhost:8000/api/runtime/test_ontology/search/semantic?q=analytical%20engines"
+
+# 2. Slice — read exactly the matching passage
+curl "http://localhost:8000/api/runtime/test_ontology/entities/person/{id}/documents/bio?offset=5200&limit=1500"
+```
+
+Omit `offset`/`limit` to read the full document. To narrow search to documents only, pass `searchIn=documents`; to skip snippets, `snippets=false`.
+
+Documents are written whole through normal entity create/update — there are no partial writes. See `api-contracts/runtime-api.md` §3 and §6 for the full contract.
+
+## 6. Cypher Query
 
 For complex read queries that go beyond the CRUD endpoints, use the Cypher query endpoint. Queries are validated against the ontology's scoped schema and executed read-only.
 
@@ -242,7 +267,7 @@ Response:
 
 Validation errors include available types and properties so queries can be corrected.
 
-## 6. Validation Errors
+## 7. Validation Errors
 
 Write operations that fail validation return 422 with field-level details:
 
@@ -274,3 +299,4 @@ Property values are coerced to their schema `dataType` before storage:
 | `boolean`  | Boolean       | `true` |
 | `date`     | ISO date string | `"2024-03-15"` |
 | `datetime` | ISO datetime string | `"2024-03-15T10:30:00Z"` |
+| `document` | String (Markdown) | `"# Bio\n\nAlice is…"` |

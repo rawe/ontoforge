@@ -31,6 +31,9 @@ export function opsForDataType(dataType: DataType): FilterOpUi[] {
       return ['eq', 'gte', 'lte', 'between']
     case 'boolean':
       return ['is']
+    // Documents are stubbed in reads and not filterable from the table.
+    case 'document':
+      return []
   }
 }
 

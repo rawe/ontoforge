@@ -11,6 +11,7 @@ import type {
   SchemaEntityType,
   SchemaProperty,
 } from '@/api/types'
+import { DocumentPropertyRow } from '@/components/entity/DocumentPropertyRow'
 import { PropertyInput } from '@/components/schema/PropertyField'
 import {
   coerceDraft,
@@ -186,8 +187,14 @@ interface PropertiesCardProps {
  * All schema properties of the entity, click-to-edit inline. Enter saves a
  * single-field PATCH, Esc cancels; API field errors render under the input.
  * Empty optional properties show as a dimmed "—" and are editable too.
+ * Document properties render last as collapsed rows (stub badge; expanding
+ * fetches and renders the Markdown, editing opens a Write/Preview dialog).
  */
 export function PropertiesCard({ ontologyKey, entityType, entity }: PropertiesCardProps) {
+  const scalarProperties = entityType.properties.filter((p) => p.dataType !== 'document')
+  const documentProperties = entityType.properties.filter(
+    (p) => p.dataType === 'document',
+  )
   return (
     <section className="overflow-hidden rounded-xl border bg-card">
       <header className="flex items-center border-b bg-muted/30 px-4 py-2">
@@ -199,8 +206,16 @@ export function PropertiesCard({ ontologyKey, entityType, entity }: PropertiesCa
         </p>
       ) : (
         <div className="divide-y divide-border/60">
-          {entityType.properties.map((property) => (
+          {scalarProperties.map((property) => (
             <PropertyRow
+              key={property.key}
+              ontologyKey={ontologyKey}
+              entity={entity}
+              property={property}
+            />
+          ))}
+          {documentProperties.map((property) => (
+            <DocumentPropertyRow
               key={property.key}
               ontologyKey={ontologyKey}
               entity={entity}

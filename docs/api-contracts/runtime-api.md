@@ -123,7 +123,7 @@ Properties are provided as a flat JSON object. Keys must match property definiti
 - All `required` properties must be present (or have a `defaultValue` in the schema). → 422 if missing.
 - No unknown property keys (not defined in the schema). → 422 if unknown.
 - Each value must be coercible to its schema `dataType`. → 422 if type mismatch.
-- When semantic search is enabled, any string value that would exceed Neo4j's vector-index metadata size limit is rejected with 422 before the entity is written.
+- When semantic search is enabled, any string value that would exceed Neo4j's vector-index metadata size limit is rejected with 422 before the entity is written. Document properties are exempt — their values are never stored in vector-index metadata.
 - Default values are injected for required properties not in the request but with a `defaultValue` in the schema.
 - Schema/type validation errors are collected and returned together where practical; semantic-index size validation may still reject the request with 422 before persistence.
 
@@ -155,7 +155,7 @@ List entity instances of a type, with optional filtering, search, sorting, and p
 | `__lte` | less than or equal | `filter.age__lte=40` |
 | `__contains` | substring match (case-insensitive) | `filter.name__contains=ali` |
 
-**Text search (`q`):** Searches all string properties of the entity type using case-insensitive `CONTAINS`. Simple substring matching, not full-text indexing. Sufficient for the MVP; full-text indexes can be added later without API changes.
+**Text search (`q`):** Searches all `string` properties of the entity type using case-insensitive `CONTAINS`. `document` properties are not searched — use semantic search for document content. Simple substring matching, not full-text indexing. Sufficient for the MVP; full-text indexes can be added later without API changes.
 
 **Sorting:** The `sort` parameter accepts any property key defined in the schema. System fields `createdAt` and `updatedAt` are also valid sort values (mapped to `_createdAt` and `_updatedAt` internally).
 
@@ -211,17 +211,62 @@ Partial update of an entity instance. Only provided properties are updated; omit
 
 **Response:** `200 OK` — full entity instance after update.
 
-**Validation:** Same type and unknown-property checks as creation, applied only to the provided properties. When semantic search is enabled, the merged post-update entity must still fit Neo4j's vector-index metadata size limit for indexed string properties, or the update is rejected with 422.
+**Validation:** Same type and unknown-property checks as creation, applied only to the provided properties. When semantic search is enabled, the merged post-update entity must still fit Neo4j's vector-index metadata size limit for indexed string properties (document properties are exempt), or the update is rejected with 422.
 
 **Errors:** 404 if not found. 422 if validation fails.
 
 ### DELETE /api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}
 
-Delete an entity instance. Uses `DETACH DELETE` — all relationships connected to this entity are also deleted.
+Delete an entity instance. Uses `DETACH DELETE` — all relationships connected to this entity are also deleted. Document chunk nodes of the entity are deleted in the same query.
 
 **Response:** `204 No Content`
 
 **Errors:** 404 if not found.
+
+### Document Properties in Entity Reads
+
+Properties with data type `document` (large Markdown text — see `architecture.md` §4.2) are never returned inline. In **every** entity payload — create/update responses, list, detail, neighbors, semantic search hits, Cypher results, saved-query results, and the MCP tools — a set document property is replaced by a stub:
+
+```json
+"bio": { "document": true, "length": 40213 }
+```
+
+`length` is the character count of the full document. Unset document properties are simply absent, like any other unset property.
+
+Two ways to get the content:
+
+- The dedicated document read endpoint below (preferred — supports slicing).
+- The `fields` projection parameter: explicitly listing a document property key in `fields` returns its raw value instead of the stub.
+
+Document values are **written** whole through normal entity create/update — there are no partial writes.
+
+### GET /api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}/documents/{propertyKey}
+
+Read a document property's content, optionally sliced by character range.
+
+**Query parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `offset` | integer | 0 | Character offset to start reading from (min 0) |
+| `limit` | integer | — | Maximum number of characters to return (min 1). When omitted, reads to the end of the document |
+
+Without parameters, the full document is returned. Slicing is plain character indexing — `offset` past the end yields empty content.
+
+**Response:** `200 OK`
+```json
+{
+  "propertyKey": "bio",
+  "content": "…the requested slice…",
+  "offset": 5200,
+  "length": 1500,
+  "totalLength": 40213
+}
+```
+
+`length` is the actual number of characters returned (may be shorter than `limit` at the end of the document); `totalLength` is the full document's character count.
+
+**Errors:** 404 if the entity type, entity ID, or property is not found, or if the property is not a `document` property. Ontology scoping applies — the property must be visible through the ontology lens.
 
 ---
 
@@ -383,7 +428,7 @@ This is the primary exploration endpoint for MCP clients. Given an entity, disco
 
 ### GET /api/runtime/{ontologyKey}/search/semantic
 
-Search entity instances by natural language meaning using vector embeddings. Returns entities ranked by cosine similarity to the query.
+Search entity instances by natural language meaning using vector embeddings. Two rankings feed the results: **entity embeddings** (one vector per entity, built from its string properties) and **document chunks** (passage-level vectors of `document` properties — see `architecture.md` §4.2). By default both are searched and fused.
 
 Requires `EMBEDDING_PROVIDER` to be configured. When embedding is disabled, returns a `422` error with code `FEATURE_DISABLED`.
 
@@ -394,10 +439,12 @@ Requires `EMBEDDING_PROVIDER` to be configured. When embedding is disabled, retu
 | `q` | string (required, min 1 char) | — | Natural language search query |
 | `type` | string (optional) | — | Entity type key to search. When omitted, the search runs across all entity types in the ontology scope |
 | `limit` | integer | 10 | Max results (1–100) |
-| `min_score` | float | — | Minimum cosine similarity threshold (0.0–1.0) |
+| `min_score` | float | — | Minimum cosine similarity threshold (0.0–1.0), applied to the raw similarity of each ranking (see `matchedVia.similarity`), not to the fused `score` |
+| `searchIn` | string | `all` | Which rankings to search: `entities` (entity embeddings only — the pre-document behavior), `documents` (document chunks only), or `all` (both, fused) |
+| `snippets` | boolean | `true` | Whether document hits include a text snippet in `matchedVia` |
 | `filter.{key}` | any | — | Exact match on property |
 | `filter.{key}__{op}` | any | — | Operator match on property (same syntax as entity list filters) |
-| `fields` | string[] | — | Property keys to include in result entities (repeatable). When provided, only `_id` plus listed fields are returned per entity (cross-type search additionally keeps `_entityTypeKey`). The `score` field on the result wrapper is always present. When omitted, all properties are returned. |
+| `fields` | string[] | — | Property keys to include in result entities (repeatable). When provided, only `_id` plus listed fields are returned per entity (cross-type search additionally keeps `_entityTypeKey`). The `score` and `matchedVia` fields on the result wrapper are always present. When omitted, all properties are returned. |
 
 **Response:** `200 OK`
 ```json
@@ -410,9 +457,18 @@ Requires `EMBEDDING_PROVIDER` to be configured. When embedding is disabled, retu
         "_createdAt": "2026-02-22T10:00:00Z",
         "_updatedAt": "2026-02-22T10:00:00Z",
         "name": "Alice Chen",
-        "role": "Distributed Systems Engineer"
+        "role": "Distributed Systems Engineer",
+        "bio": { "document": true, "length": 40213 }
       },
-      "score": 0.92
+      "score": 0.0164,
+      "matchedVia": {
+        "source": "document",
+        "propertyKey": "bio",
+        "charOffset": 5200,
+        "charLength": 1500,
+        "similarity": 0.87,
+        "snippet": "first ~200 chars of the matching chunk…"
+      }
     }
   ],
   "query": "distributed systems engineers",
@@ -420,14 +476,22 @@ Requires `EMBEDDING_PROVIDER` to be configured. When embedding is disabled, retu
 }
 ```
 
-**Behavior:**
-- With `type`: searches only the vector index for the specified entity type. Returns 404 if the type key is not found in the ontology schema.
-- Without `type`: searches the shared cross-type vector index (`entity_embedding` on the `_Entity` label) over all entity types visible through the ontology scope. Each result entity carries `_entityTypeKey`. For scoped ontologies the candidate pool is over-fetched and filtered to scoped types in the application, so a heavily restricted scope may return fewer than `limit` results even when more matches exist.
-- When `filter.{key}` parameters are provided, the vector index over-fetches candidates and applies property `WHERE` clauses before the final `LIMIT`. Filter syntax matches the entity list endpoint except that `__contains` is not supported here and is rejected with 422 (use equality or the range operators `__gt`, `__gte`, `__lt`, `__lte`). Filters require `type` — cross-type search rejects them with 422, since property definitions are per entity type.
-- When `min_score` is provided, results below the threshold are excluded.
-- The `_embedding` property is never included in response entities.
+**The `matchedVia` contract:** every hit carries `matchedVia`, identifying what matched:
 
-**Embedding generation:** Embeddings are generated automatically when entities are created or updated (if string properties change). The text representation concatenates all non-null string property values in schema-defined order, prefixed with the entity type key. If the embedding provider is unavailable at write time, the entity is created normally but without an embedding — it will not appear in semantic search results until re-embedded.
+- Entity-embedding hits carry `{ "source": "entity", "similarity": <cosine> }`.
+- Document hits carry `source: "document"`, the `propertyKey`, the matching chunk's character coordinates (`charOffset`, `charLength`) — pass them as `offset`/`limit` to the document read endpoint to fetch exactly the matching passage — the raw cosine `similarity`, and a ~200-char `snippet` (omitted when `snippets=false`).
+- When an entity matches in **both** rankings, the document `matchedVia` wins regardless of which similarity is higher — it carries the retrieval coordinates, which are the more actionable information. The entity-side similarity is not surfaced for that hit.
+
+**Score semantics:** with `searchIn=all`, `score` is the Reciprocal Rank Fusion value (`Σ 1/(60 + rank)` over the rankings an entity appears in) — useful **only for ordering**, not as a similarity measure. Threshold on `matchedVia.similarity` instead; `min_score` does exactly that, filtering each ranking by raw similarity before fusion. With `searchIn=entities` or `documents`, `score` equals the raw cosine similarity.
+
+**Behavior:**
+- With `type`: searches only the vector indexes for the specified entity type. Returns 404 if the type key is not found in the ontology schema.
+- Without `type`: the entity ranking searches the shared cross-type vector index (`entity_embedding` on the `_Entity` label) over all entity types visible through the ontology scope. Each result entity carries `_entityTypeKey`. For scoped ontologies the candidate pool is over-fetched and filtered to scoped types in the application, so a heavily restricted scope may return fewer than `limit` results even when more matches exist.
+- The document ranking queries each in-scope (entity type, document property) chunk index, merges chunk hits by score, and dedupes to parent entities — the best chunk per entity wins and provides `matchedVia`. Only properties visible through the ontology lens are searched: a lens excluding `bio` from `person` never touches that chunk index.
+- When `filter.{key}` parameters are provided, the entity ranking's vector index over-fetches candidates and applies property `WHERE` clauses before the final `LIMIT`; document-chunk hits are filtered against the parent entity's properties after resolution. Filter syntax matches the entity list endpoint except that `__contains` is not supported here and is rejected with 422 (use equality or the range operators `__gt`, `__gte`, `__lt`, `__lte`). Filters require `type` — cross-type search rejects them with 422, since property definitions are per entity type.
+- The `_embedding` property is never included in response entities. Document properties appear as stubs.
+
+**Embedding generation:** Embeddings are generated automatically when entities are created or updated (if string properties change). The entity's text representation concatenates all non-null string property values in schema-defined order, prefixed with the entity type key — document property values are excluded (they are chunked and embedded separately). If the embedding provider is unavailable at write time, the entity is created normally but without an embedding — it will not appear in semantic search results until re-embedded.
 
 **Errors:**
 - 404 if ontology key or entity type key not found.
@@ -482,7 +546,7 @@ Use schema entity type keys (snake_case) as node labels and relation type keys a
 - Write clauses: `CREATE`, `DELETE`, `DETACH DELETE`, `SET`, `MERGE`, `REMOVE`
 - Procedure calls: `CALL`
 - Labelless node patterns (e.g., `MATCH (n)`)
-- Internal labels (e.g., `_Entity`)
+- Internal labels (`_Entity`, `_Chunk`) and internal relationship types (`_HAS_CHUNK`)
 
 **Validation (422):**
 - Node labels must be entity type keys in the ontology scope.
@@ -491,7 +555,7 @@ Use schema entity type keys (snake_case) as node labels and relation type keys a
 - System properties (`_id`, `_entityTypeKey`, `_relationTypeKey`, `_createdAt`, `_updatedAt`) are always allowed.
 - Error messages include the available types and properties to support self-correction by LLMs.
 
-**Result filtering:** Returned nodes and relationships are post-processed to strip properties that fall outside the scoped ontology, preventing leakage of out-of-scope properties.
+**Result filtering:** Returned nodes and relationships are post-processed to strip properties that fall outside the scoped ontology, preventing leakage of out-of-scope properties. Document property values are replaced with stubs in results — although document properties remain valid references in the query itself (e.g., `WHERE p.bio IS NOT NULL`).
 
 **Errors:**
 - 404 if ontology key not found.
@@ -844,7 +908,8 @@ All declared parameters are required. Parameter values are coerced to their decl
 | `PATCH` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}` | Partial update entity instance |
 | `DELETE` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}` | Delete entity instance |
 | `GET` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}/neighbors` | Graph traversal |
-| `GET` | `/api/runtime/{ontologyKey}/search/semantic` | Semantic search over entity instances |
+| `GET` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}/documents/{propertyKey}` | Read (a slice of) a document property |
+| `GET` | `/api/runtime/{ontologyKey}/search/semantic` | Semantic search over entity instances and documents |
 | `POST` | `/api/runtime/{ontologyKey}/query` | Read-only Cypher query |
 | `POST` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}` | Create relation instance |
 | `GET` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}` | List relation instances |

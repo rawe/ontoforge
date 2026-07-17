@@ -1,6 +1,7 @@
 import { Command as CommandPrimitive } from 'cmdk'
 import {
   Clock,
+  FileText,
   LayoutDashboard,
   Loader2,
   Moon,
@@ -61,6 +62,8 @@ function StatusRow({ children }: { children: ReactNode }) {
   )
 }
 
+/** Similarity bar — feed it the raw cosine (`matchedVia.similarity`), never
+ * the RRF fusion `score` (ordering only, tiny values). */
 function ScoreBar({ score }: { score: number }) {
   const pct = Math.round(score * 100)
   return (
@@ -289,23 +292,46 @@ function PaletteContent({
   /* ------------------------------ result renders ----------------------------- */
 
   const entityItem = (result: EntitySearchResult, valuePrefix: 'entity' | 'recent') => {
-    const { entity, score } = result
+    const { entity, score, matchedVia } = result
+    // Display similarity comes from matchedVia (raw cosine); the top-level
+    // score is an RRF fusion value and only meaningful for ordering.
+    const similarity = matchedVia?.similarity ?? score
+    const documentMatch =
+      matchedVia?.source === 'document' && matchedVia.propertyKey !== undefined
+        ? matchedVia
+        : undefined
     return (
       <CommandItem
         key={`${valuePrefix}:${entity._id}`}
         value={`${valuePrefix}:${entity._entityTypeKey}:${entity._id}`}
         onSelect={() => go(`${base}/e/${entity._entityTypeKey}/${entity._id}`)}
+        className={documentMatch !== undefined ? 'flex-col items-stretch gap-1' : undefined}
       >
-        {valuePrefix === 'recent' && (
-          <Clock className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="flex min-w-0 items-center gap-2">
+          {valuePrefix === 'recent' && (
+            <Clock className="size-3.5 shrink-0 text-muted-foreground" />
+          )}
+          <TypeChip
+            typeKey={entity._entityTypeKey}
+            displayName={typeName(entity._entityTypeKey)}
+            size="sm"
+          />
+          <span className="min-w-0 flex-1 truncate">{displayLabel(entity)}</span>
+          {similarity !== undefined && <ScoreBar score={similarity} />}
+        </span>
+        {documentMatch !== undefined && (
+          <span className="flex min-w-0 items-center gap-1.5 pl-0.5">
+            <span className="inline-flex shrink-0 items-center gap-1 rounded border bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+              <FileText className="size-2.5" aria-hidden />
+              matched in {documentMatch.propertyKey}
+            </span>
+            {documentMatch.snippet !== undefined && (
+              <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+                {documentMatch.snippet}
+              </span>
+            )}
+          </span>
         )}
-        <TypeChip
-          typeKey={entity._entityTypeKey}
-          displayName={typeName(entity._entityTypeKey)}
-          size="sm"
-        />
-        <span className="min-w-0 flex-1 truncate">{displayLabel(entity)}</span>
-        {score !== undefined && <ScoreBar score={score} />}
       </CommandItem>
     )
   }

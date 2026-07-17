@@ -10,6 +10,7 @@ class DataType(str, Enum):
     BOOLEAN = "boolean"
     DATE = "date"
     DATETIME = "datetime"
+    DOCUMENT = "document"
 
 
 class ExportProperty(BaseModel):

@@ -352,21 +352,27 @@ function AddRelationFlow({
                   <Plus className="size-4 text-muted-foreground" />
                   New connected {targetType.displayName}…
                 </CommandItem>
-                {(targetSearch.data ?? []).map(({ entity: candidate, score }) => (
-                  <CommandItem
-                    key={candidate._id}
-                    value={`target:${candidate._id}`}
-                    disabled={pending}
-                    onSelect={() => pickTarget(candidate)}
-                  >
-                    <span className="min-w-0 flex-1 truncate">{displayLabel(candidate)}</span>
-                    {score !== undefined && (
-                      <span className="font-mono text-[10px] text-muted-foreground">
-                        {Math.round(score * 100)}%
+                {(targetSearch.data ?? []).map(({ entity: candidate, score, matchedVia }) => {
+                  // Similarity from matchedVia (raw cosine) — score is RRF-fused.
+                  const similarity = matchedVia?.similarity ?? score
+                  return (
+                    <CommandItem
+                      key={candidate._id}
+                      value={`target:${candidate._id}`}
+                      disabled={pending}
+                      onSelect={() => pickTarget(candidate)}
+                    >
+                      <span className="min-w-0 flex-1 truncate">
+                        {displayLabel(candidate)}
                       </span>
-                    )}
-                  </CommandItem>
-                ))}
+                      {similarity !== undefined && (
+                        <span className="font-mono text-[10px] text-muted-foreground">
+                          {Math.round(similarity * 100)}%
+                        </span>
+                      )}
+                    </CommandItem>
+                  )
+                })}
                 {!targetSearch.isFetching &&
                   (targetSearch.data?.length ?? 0) === 0 && (
                     <div className="px-4 py-4 text-center text-[13px] text-muted-foreground">

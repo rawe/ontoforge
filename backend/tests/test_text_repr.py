@@ -90,3 +90,14 @@ def test_truncation():
 
     result = build_text_repr("doc", props, defs)
     assert len(result) == _MAX_TEXT_CHARS
+
+
+def test_document_properties_excluded():
+    """Document values never contribute to the entity embedding text."""
+    props = {"name": "Alice", "bio": "# A very long markdown biography..."}
+    defs = {
+        "name": _prop("name"),
+        "bio": _prop("bio", data_type="document"),
+    }
+    result = build_text_repr("person", props, defs)
+    assert result == "person: name=Alice"

@@ -8,6 +8,7 @@ from ontoforge_server.runtime import service
 from ontoforge_server.runtime.schemas import (
     CypherQueryRequest,
     CypherQueryResponse,
+    DocumentContentResponse,
     FeaturesResponse,
     NeighborhoodResponse,
     PaginatedResponse,
@@ -69,12 +70,14 @@ async def semantic_search(
     limit: int = Query(default=10, ge=1, le=100),
     min_score: float | None = Query(default=None, ge=0.0, le=1.0),
     fields: list[str] | None = Query(default=None),
+    search_in: str = Query(default="all", alias="searchIn", pattern="^(entities|documents|all)$"),
+    snippets: bool = Query(default=True),
     driver: AsyncDriver = Depends(get_driver),
 ):
     filters = service._parse_filters(dict(request.query_params))
     return await service.semantic_search(
         ontology_key, q, type, limit, min_score, driver, filters=filters,
-        fields=fields,
+        fields=fields, search_in=search_in, snippets=snippets,
     )
 
 
@@ -146,6 +149,27 @@ async def delete_entity(
 ):
     await service.delete_entity(ontology_key, entity_type_key, entity_id, driver)
     return Response(status_code=204)
+
+
+# --- Document Properties ---
+
+
+@router.get(
+    "/entities/{entity_type_key}/{entity_id}/documents/{property_key}",
+    response_model=DocumentContentResponse,
+)
+async def get_document(
+    ontology_key: str,
+    entity_type_key: str,
+    entity_id: str,
+    property_key: str,
+    offset: int = Query(default=0, ge=0),
+    limit: int | None = Query(default=None, ge=1),
+    driver: AsyncDriver = Depends(get_driver),
+):
+    return await service.get_document(
+        ontology_key, entity_type_key, entity_id, property_key, offset, limit, driver
+    )
 
 
 # --- Graph Traversal ---

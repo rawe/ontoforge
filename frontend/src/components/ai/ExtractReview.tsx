@@ -187,7 +187,7 @@ function EntityCard({
                   <RadioGroupItem value="__new__" />
                   Create new
                 </Label>
-                {similar.map(({ entity, score }) => (
+                {similar.map(({ entity, score, matchedVia }) => (
                   <Label
                     key={entity._id}
                     className="flex cursor-pointer items-center gap-2 text-xs font-normal"
@@ -197,7 +197,8 @@ function EntityCard({
                       Use existing <span className="font-medium">{displayLabel(entity)}</span>
                     </span>
                     <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground">
-                      {Math.round(score * 100)}%
+                      {/* Raw cosine similarity — top-level score is RRF-fused. */}
+                      {Math.round((matchedVia?.similarity ?? score) * 100)}%
                     </span>
                   </Label>
                 ))}

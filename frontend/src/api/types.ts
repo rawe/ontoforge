@@ -14,7 +14,25 @@ export interface Features {
   ai: boolean
 }
 
-export type DataType = 'string' | 'integer' | 'float' | 'boolean' | 'date' | 'datetime'
+export type DataType =
+  | 'string'
+  | 'integer'
+  | 'float'
+  | 'boolean'
+  | 'date'
+  | 'datetime'
+  | 'document'
+
+/**
+ * Document property values never appear inline in entity reads — every read
+ * (list, detail, neighbors, search, Cypher) replaces them with this stub.
+ * Full content is fetched via the document endpoint (`getDocument`).
+ */
+export interface DocumentStub {
+  document: true
+  /** Character count of the full document. */
+  length: number
+}
 
 export interface ListResponse<T> {
   items: T[]
@@ -138,15 +156,45 @@ export interface NeighborsResponse {
 
 /* ------------------------------ runtime — search ----------------------------- */
 
+/**
+ * How a semantic hit matched. `similarity` is the raw cosine of the winning
+ * vector — use it for any display or threshold. Document matches also carry
+ * the property key, character coordinates and (unless disabled) a snippet.
+ */
+export interface SearchMatchedVia {
+  source: 'entity' | 'document'
+  similarity: number
+  propertyKey?: string
+  charOffset?: number
+  charLength?: number
+  snippet?: string
+}
+
 export interface SemanticSearchResult {
   entity: EntityInstance
+  /**
+   * RRF fusion score — ordering only (small values like 0.016). For a
+   * user-facing similarity use `matchedVia.similarity`.
+   */
   score: number
+  matchedVia?: SearchMatchedVia
 }
 
 export interface SemanticSearchResponse {
   results: SemanticSearchResult[]
   query: string
   total: number
+}
+
+/* ----------------------------- runtime — documents ---------------------------- */
+
+/** Slice of a document property (`length` = actual returned characters). */
+export interface DocumentContentResponse {
+  propertyKey: string
+  content: string
+  offset: number
+  length: number
+  totalLength: number
 }
 
 /* ------------------------------ runtime — query ------------------------------ */

@@ -57,6 +57,9 @@ All Neo4j labels use PascalCase. Relationships use UPPER_SNAKE_CASE.
 | Marker label | `_Entity` | Present on every entity instance node |
 | Type label | e.g. `Person`, `ResearchPaper` | Entity type key converted to PascalCase |
 | Relationship type | e.g. `WORKS_FOR`, `AUTHORED_BY` | Relation type key converted to UPPER_SNAKE_CASE |
+| Marker label | `_Chunk` | Present on every document chunk node (see §4.2) |
+| Virtual chunk label | e.g. `PersonDocumentBio` | Pascal(entity type key) + `Document` + Pascal(property key) |
+| Relationship type | `_HAS_CHUNK` | Entity instance → its document chunk nodes |
 
 The underscore-prefixed `_Entity` label separates instance nodes from schema nodes. Entity type keys are converted from `snake_case` to `PascalCase` (split on underscores, capitalize segments). Relation type keys are converted to `UPPER_SNAKE_CASE`.
 
@@ -199,11 +202,13 @@ Connected to its source and target entity types via `RELATES_FROM` and `RELATES_
 | `key` | String | Unique within owning type |
 | `displayName` | String | Human-readable name |
 | `description` | String | Optional |
-| `dataType` | String | One of: `string`, `integer`, `float`, `boolean`, `date`, `datetime` |
+| `dataType` | String | One of: `string`, `integer`, `float`, `boolean`, `date`, `datetime`, `document` |
 | `required` | Boolean | Whether instances must provide this property |
 | `defaultValue` | String | Optional, stored as string, interpreted by dataType |
 | `createdAt` | DateTime | Set on creation |
 | `updatedAt` | DateTime | Updated on every mutation |
+
+The `document` data type holds large text content interpreted as Markdown. Its storage and retrieval model (chunk nodes, virtual labels, vector indexes) is described under Document Chunks in §4.2.
 
 **Node: AiAgentConfig**
 
@@ -279,7 +284,7 @@ CREATE INDEX entity_type_key_index FOR (n:_Entity) ON (n._entityTypeKey);
 
 All constraints and indexes — both schema and instance — are created on startup.
 
-When an embedding provider is configured, vector indexes are additionally ensured on startup: one per entity type (`{entity_type_key}_embedding` on the PascalCase label, kept in sync with the entity type lifecycle), a shared cross-type index (`entity_embedding` on `_Entity`) for semantic search without a type filter, and `saved_query_embedding` for saved-query descriptions.
+When an embedding provider is configured, vector indexes are additionally ensured on startup: one per entity type (`{entity_type_key}_embedding` on the PascalCase label, kept in sync with the entity type lifecycle), a shared cross-type index (`entity_embedding` on `_Entity`) for semantic search without a type filter, `saved_query_embedding` for saved-query descriptions, and one per document property (`{entity_type_key}_document_{property_key}_embedding` on the virtual chunk label — see Document Chunks in §4.2). Document chunk indexes are also created immediately when a document property is added via the modeling API, and dropped when the property or its entity type is deleted.
 
 Entity type and relation type keys are globally unique, enforced by Neo4j constraints.
 
@@ -309,7 +314,8 @@ Each entity instance is a Neo4j node with two labels:
 | `_entityTypeKey` | String | Schema entity type key (e.g., `person`) |
 | `_createdAt` | DateTime | Creation timestamp |
 | `_updatedAt` | DateTime | Last-modified timestamp |
-| `_embedding` | List of Float | Vector embedding of string properties (only when an embedding provider is configured; never returned by the API) |
+| `_embedding` | List of Float | Vector embedding of string properties, excluding document properties (only when an embedding provider is configured; never returned by the API) |
+| `_doc_{key}_length` | Integer | Character count of the document property `{key}`, maintained at write time so reads can build stubs without loading the value (only on entities with document properties) |
 
 **User-defined properties** are stored as direct node properties, keyed by their property definition key:
 
@@ -334,6 +340,24 @@ Properties are stored using native Neo4j types, not serialized into a JSON blob.
 | `boolean` | Boolean |
 | `date` | Date |
 | `datetime` | DateTime |
+| `document` | String |
+
+A `document` value is stored inline on the entity node like any string, but it is treated specially everywhere else: it is excluded from the entity's `_embedding`, excluded from vector-index filter metadata (and from the metadata size limit that applies to indexed string properties), never returned inline in entity reads (a stub with the character length is returned instead), and — when an embedding provider is configured — chunked into dedicated chunk nodes for passage-level semantic search (see Document Chunks below). The API shapes for stubs, document reads, and search hits are defined in `api-contracts/runtime-api.md`.
+
+#### Document Chunks
+
+When an embedding provider is configured, each write of a document property synchronously replaces that property's chunk nodes: the text is split into overlapping fixed-size character chunks (paragraph/sentence/whitespace boundaries preferred; sizes configured via `DOCUMENT_CHUNK_SIZE` and `DOCUMENT_CHUNK_OVERLAP`), each chunk is embedded, and the chunks are written as nodes. Without an embedding provider no chunks exist and `document` behaves as a plain long-text property.
+
+Each chunk node carries two labels:
+
+1. `_Chunk` — shared marker label on every chunk node
+2. A **virtual label** per (entity type, document property): Pascal(entity type key) + `Document` + Pascal(property key) — e.g. entity type `person` with document property `bio` produces `PersonDocumentBio` (`document_virtual_label` in `core/database.py`)
+
+Chunk nodes store their character coordinates (`startChar`, `charLength`), the chunk text, the chunk vector, and denormalized owner references (`_entityId`, `_entityTypeKey`, `_propertyKey`) for direct index-to-entity resolution. The owning entity links to its chunks via `_HAS_CHUNK` relationships.
+
+Each virtual type gets its own vector index, named `{entity_type_key}_document_{property_key}_embedding` (`document_index_name` in `core/database.py`). There is no cross-type chunk index — cross-type document search queries the in-scope virtual indexes and merges by score.
+
+**Lifecycle:** chunks are kept in sync on entity write (only the changed property's chunks are replaced); deleted with their entity (the entity delete query removes chunk nodes explicitly alongside `DETACH DELETE`); dropped together with their vector index when the document property definition or its entity type is deleted; and rebuilt in full by the rebuild-embeddings operation. Chunk nodes are internal derived data: hidden from the schema API, rejected by the Cypher validator, and never exported — after an import they are regenerated by rebuild-embeddings.
 
 #### Relation Instances
 
@@ -519,9 +543,9 @@ Full contract: see `api-contracts/modeling-api.md`
 
 Base path: `/api/runtime/{ontologyKey}`
 
-The runtime API is generic and schema-driven — endpoints use type keys from the ontology as path parameters. It covers schema introspection, entity and relation instance CRUD, graph traversal, and instance data management.
+The runtime API is generic and schema-driven — endpoints use type keys from the ontology as path parameters. It covers schema introspection, entity and relation instance CRUD, graph traversal, and instance data management. Additional endpoints for semantic search, Cypher queries, saved queries, and AI interaction are documented in the full contract.
 
-**Endpoint summary:**
+**Endpoint summary (core data access):**
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -536,6 +560,7 @@ The runtime API is generic and schema-driven — endpoints use type keys from th
 | `PATCH` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}` | Partial update entity instance |
 | `DELETE` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}` | Delete entity instance |
 | `GET` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}/neighbors` | Graph traversal |
+| `GET` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}/documents/{propertyKey}` | Read (a slice of) a document property |
 | `POST` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}` | Create relation instance |
 | `GET` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}` | List relation instances |
 | `GET` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}/{id}` | Get relation instance |

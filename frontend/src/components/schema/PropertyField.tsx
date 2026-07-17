@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import { DocumentEditor } from '@/components/schema/DocumentEditor'
 import { isLongText } from '@/components/schema/propertyDraft'
 import { cn } from '@/lib/utils'
 
@@ -103,6 +104,20 @@ export function PropertyInput({
           value={draft}
           onChange={(e) => onDraftChange(e.target.value)}
           className={cn('h-8 font-mono text-[13px]', className)}
+        />
+      )
+    case 'document':
+      // Full-text Markdown editor; drafts hold the entire document string.
+      return (
+        <DocumentEditor
+          id={id}
+          autoFocus={autoFocus}
+          invalid={invalid}
+          disabled={disabled}
+          rows={8}
+          value={draft}
+          onChange={onDraftChange}
+          className={className}
         />
       )
     default:

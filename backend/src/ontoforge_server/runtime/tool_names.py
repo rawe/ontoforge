@@ -4,6 +4,7 @@
 TOOL_GET_SCHEMA = "get_schema"
 TOOL_LIST_ENTITIES = "list_entities"
 TOOL_GET_ENTITY = "get_entity"
+TOOL_GET_DOCUMENT = "get_document"
 TOOL_LIST_RELATIONS = "list_relations"
 TOOL_GET_NEIGHBORS = "get_neighbors"
 TOOL_SEMANTIC_SEARCH = "semantic_search"

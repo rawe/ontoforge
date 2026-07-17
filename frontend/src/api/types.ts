@@ -1,0 +1,319 @@
+/**
+ * Wire types for the OntoForge backend.
+ * Field names are the exact wire names (pydantic camelCase aliases) — see
+ * the API contract. Runtime addresses by ontology/type KEY, modeling by UUID.
+ */
+
+/* ----------------------------------- misc ---------------------------------- */
+
+export type JsonPrimitive = string | number | boolean | null
+export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }
+
+export interface Features {
+  semanticSearch: boolean
+  ai: boolean
+}
+
+export type DataType = 'string' | 'integer' | 'float' | 'boolean' | 'date' | 'datetime'
+
+export interface ListResponse<T> {
+  items: T[]
+  total: number
+  limit: number
+  offset: number
+}
+
+/* ----------------------------- runtime — schema ----------------------------- */
+
+export interface SchemaProperty {
+  key: string
+  displayName: string
+  description: string | null
+  dataType: DataType
+  required: boolean
+  defaultValue: JsonPrimitive | null
+}
+
+export interface SchemaEntityType {
+  key: string
+  displayName: string
+  description: string | null
+  properties: SchemaProperty[]
+}
+
+export interface SchemaRelationType {
+  key: string
+  displayName: string
+  description: string | null
+  fromEntityTypeKey: string
+  toEntityTypeKey: string
+  properties: SchemaProperty[]
+}
+
+export interface SavedQueryStep {
+  name: string
+  type: 'cypher' | 'semantic_search'
+  cypher?: string
+  entityTypeKey?: string
+  query?: string
+  limit?: number
+  minScore?: number
+  bindings?: Record<string, string>
+}
+
+export interface SavedQueryParameter {
+  name: string
+  description: string | null
+  dataType: DataType
+}
+
+export interface SavedQuery {
+  key: string
+  name: string
+  description: string | null
+  steps: SavedQueryStep[]
+  parameters: SavedQueryParameter[]
+}
+
+export interface AiAgent {
+  key: string
+  name: string
+  description: string | null
+  systemPrompt?: string | null
+  /** null = all tools */
+  tools?: string[] | null
+}
+
+export interface SchemaOntology {
+  key: string
+  name: string
+  description: string | null
+  /** null = unscoped (full schema visible) */
+  includes: { entityTypes?: unknown; relationTypes?: unknown } | null
+  aiAgents: AiAgent[]
+  savedQueries: SavedQuery[]
+}
+
+export interface RuntimeSchema {
+  ontology: SchemaOntology
+  entityTypes: SchemaEntityType[]
+  relationTypes: SchemaRelationType[]
+}
+
+/* ---------------------------- runtime — instances ---------------------------- */
+
+export interface EntityInstance {
+  _id: string
+  _entityTypeKey: string
+  _createdAt: string
+  _updatedAt: string
+  [property: string]: JsonValue
+}
+
+export interface RelationInstance {
+  _id: string
+  _relationTypeKey: string
+  _createdAt: string
+  _updatedAt: string
+  fromEntityId: string
+  toEntityId: string
+  [property: string]: JsonValue
+}
+
+export type NeighborDirection = 'outgoing' | 'incoming' | 'both'
+
+export interface NeighborRelation extends RelationInstance {
+  direction: 'outgoing' | 'incoming'
+}
+
+export interface Neighbor {
+  relation: NeighborRelation
+  entity: EntityInstance
+}
+
+export interface NeighborsResponse {
+  entity: EntityInstance
+  neighbors: Neighbor[]
+}
+
+/* ------------------------------ runtime — search ----------------------------- */
+
+export interface SemanticSearchResult {
+  entity: EntityInstance
+  score: number
+}
+
+export interface SemanticSearchResponse {
+  results: SemanticSearchResult[]
+  query: string
+  total: number
+}
+
+/* ------------------------------ runtime — query ------------------------------ */
+
+export interface QueryResult {
+  columns: string[]
+  results: Record<string, JsonValue>[]
+}
+
+/* -------------------------------- runtime — AI ------------------------------- */
+
+export interface AiQueryResponse {
+  answer: string
+  cypher: string | null
+  results: QueryResult | null
+}
+
+export interface ExtractedEntity {
+  entityTypeKey: string
+  properties: Record<string, JsonValue>
+}
+
+export interface ExtractedRelationEndpoint {
+  entityTypeKey: string
+  match: Record<string, JsonValue>
+}
+
+export interface ExtractedRelation {
+  relationTypeKey: string
+  source: ExtractedRelationEndpoint
+  target: ExtractedRelationEndpoint
+  properties: Record<string, JsonValue>
+}
+
+export interface ExtractResponse {
+  entities: ExtractedEntity[]
+  relations: ExtractedRelation[]
+  created: boolean
+}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface ToolCall {
+  tool: string
+  args: Record<string, JsonValue>
+}
+
+export interface ChatResponse {
+  reply: string
+  toolCalls: ToolCall[] | null
+}
+
+/* --------------------------------- modeling --------------------------------- */
+
+export interface Ontology {
+  ontologyId: string
+  key: string
+  name: string
+  description: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface EntityType {
+  entityTypeId: string
+  key: string
+  displayName: string
+  description: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface RelationType {
+  relationTypeId: string
+  key: string
+  displayName: string
+  description: string | null
+  sourceEntityTypeKey: string
+  targetEntityTypeKey: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface PropertyDefinition {
+  propertyId: string
+  key: string
+  displayName: string
+  description: string | null
+  dataType: DataType
+  required: boolean
+  defaultValue: JsonPrimitive | null
+}
+
+/** Scope include item — `properties: null` means "all properties". */
+export interface ScopeInclude {
+  key: string
+  properties: string[] | null
+}
+
+export interface ValidationError {
+  path: string
+  message: string
+}
+
+export interface ValidationResult {
+  valid: boolean
+  errors: ValidationError[]
+}
+
+/* ------------------------------ modeling inputs ------------------------------ */
+
+export interface OntologyInput {
+  key?: string
+  name: string
+  description?: string | null
+}
+
+export interface EntityTypeInput {
+  key?: string
+  displayName: string
+  description?: string | null
+}
+
+export interface RelationTypeInput {
+  key?: string
+  displayName: string
+  description?: string | null
+  sourceEntityTypeKey?: string
+  targetEntityTypeKey?: string
+}
+
+export interface PropertyInput {
+  key?: string
+  displayName: string
+  description?: string | null
+  dataType?: DataType
+  required?: boolean
+  defaultValue?: JsonPrimitive | null
+}
+
+export interface AiAgentInput {
+  name: string
+  description?: string | null
+  systemPrompt?: string | null
+  tools?: string[] | null
+}
+
+export interface SavedQueryInput {
+  name: string
+  description?: string | null
+  steps: SavedQueryStep[]
+  parameters?: SavedQueryParameter[]
+}
+
+/** Runtime tool names an agent may be restricted to. */
+export const AGENT_TOOL_NAMES = [
+  'get_schema',
+  'list_entities',
+  'get_entity',
+  'list_relations',
+  'get_neighbors',
+  'semantic_search',
+  'execute_cypher_query',
+  'list_saved_queries',
+  'run_saved_query',
+] as const
+export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number]

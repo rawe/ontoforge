@@ -423,7 +423,7 @@ Requires `EMBEDDING_PROVIDER` to be configured. When embedding is disabled, retu
 **Behavior:**
 - With `type`: searches only the vector index for the specified entity type. Returns 404 if the type key is not found in the ontology schema.
 - Without `type`: searches the shared cross-type vector index (`entity_embedding` on the `_Entity` label) over all entity types visible through the ontology scope. Each result entity carries `_entityTypeKey`. For scoped ontologies the candidate pool is over-fetched and filtered to scoped types in the application, so a heavily restricted scope may return fewer than `limit` results even when more matches exist.
-- When `filter.{key}` parameters are provided, the vector index over-fetches candidates and applies property `WHERE` clauses before the final `LIMIT`. Filter syntax is identical to the entity list endpoint (equality, `__gt`, `__gte`, `__lt`, `__lte`, `__contains`). Filters require `type` — cross-type search rejects them with 422, since property definitions are per entity type.
+- When `filter.{key}` parameters are provided, the vector index over-fetches candidates and applies property `WHERE` clauses before the final `LIMIT`. Filter syntax matches the entity list endpoint except that `__contains` is not supported here and is rejected with 422 (use equality or the range operators `__gt`, `__gte`, `__lt`, `__lte`). Filters require `type` — cross-type search rejects them with 422, since property definitions are per entity type.
 - When `min_score` is provided, results below the threshold are excluded.
 - The `_embedding` property is never included in response entities.
 
@@ -714,7 +714,7 @@ A2A task endpoint for a specific configured agent.
 
 ### GET /api/runtime/{ontologyKey}/saved-queries
 
-List all saved queries available for this ontology. Returns query metadata and parameter definitions but not the Cypher itself.
+List all saved queries available for this ontology. Returns query metadata, the step pipeline, and parameter definitions.
 
 **Response:** `200 OK`
 ```json
@@ -723,6 +723,18 @@ List all saved queries available for this ontology. Returns query metadata and p
     "key": "string",
     "name": "string",
     "description": "string",
+    "steps": [
+      {
+        "name": "string",
+        "type": "cypher | semantic_search",
+        "cypher": "string (cypher steps only)",
+        "entityTypeKey": "string (semantic_search steps only)",
+        "query": "string (semantic_search steps only)",
+        "limit": 10,
+        "minScore": 0.7,
+        "bindings": { "param": "{{stepName.field}}" }
+      }
+    ],
     "parameters": [
       {
         "name": "string",
@@ -733,6 +745,8 @@ List all saved queries available for this ontology. Returns query metadata and p
   }
 ]
 ```
+
+Step fields are included only when set; `steps` reflects the multi-step pipeline defined in the modeling API.
 
 **Errors:** 404 if ontology key not found.
 

@@ -1,0 +1,41 @@
+import { SearchX } from 'lucide-react'
+import { useParams } from 'react-router-dom'
+import { useRuntimeSchema } from '@/api/hooks'
+import { EmptyState } from '@/components/EmptyState'
+import { ExplorerCanvas } from '@/components/explore/ExplorerCanvas'
+import { Skeleton } from '@/components/ui/skeleton'
+
+/**
+ * `/w/:ontologyKey/explore` — the Explorer canvas (slice S5). Full-bleed
+ * React Flow surface; all page state lives in `ExplorerCanvas`, remounted
+ * per ontology so working sets never bleed across lenses.
+ */
+export function ExplorePage() {
+  const { ontologyKey } = useParams<{ ontologyKey: string }>()
+  const schema = useRuntimeSchema(ontologyKey)
+
+  if (ontologyKey === undefined) return null
+
+  if (schema.isPending) {
+    return (
+      <div className="h-full p-6">
+        <Skeleton className="h-full w-full rounded-xl" />
+      </div>
+    )
+  }
+
+  if (schema.isError || schema.data === undefined) {
+    return (
+      <EmptyState
+        icon={SearchX}
+        title="Failed to load schema"
+        description={schema.error instanceof Error ? schema.error.message : undefined}
+        className="py-24"
+      />
+    )
+  }
+
+  return (
+    <ExplorerCanvas key={ontologyKey} ontologyKey={ontologyKey} schema={schema.data} />
+  )
+}

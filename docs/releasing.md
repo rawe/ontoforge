@@ -11,7 +11,7 @@ OntoForge uses two levels of versioning:
   - Backend: `version` in `backend/pyproject.toml`
   - Frontend: `version` in `frontend/package.json`
 
-Component versions are embedded in container image labels during the build. Currently, component versions match the system version for simplicity, but they may diverge in the future as components evolve independently.
+Component versions are embedded in container image labels during the build. Both components version in lockstep with the system version: the git tag `v{x.y.z}` always matches `version` in `backend/pyproject.toml` and `frontend/package.json`.
 
 ## Release Process
 

@@ -5,6 +5,21 @@
     <link rel="icon" type="image/svg+xml" href="/ontoforge-logo.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OntoForge</title>
+    <script>
+      // Apply theme before first paint to avoid flash.
+      ;(function () {
+        try {
+          var theme = localStorage.getItem('of.theme')
+          var dark =
+            theme === 'dark' ||
+            ((theme === null || theme === 'system') &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches)
+          if (dark) document.documentElement.classList.add('dark')
+        } catch (e) {
+          /* no-op */
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

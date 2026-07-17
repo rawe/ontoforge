@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Usage: ./dev.sh [ollama|openai]
+
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKEND_PID=""
 FRONTEND_PID=""

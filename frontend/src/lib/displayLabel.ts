@@ -1,28 +1,18 @@
-import type { EntityInstance } from '../types/runtime';
+import type { EntityInstance } from '@/api/types'
 
-const LABEL_CANDIDATES = ['name', 'title', 'label', 'display_name'];
-
-export function getDisplayLabel(entity: EntityInstance): string {
-  for (const key of LABEL_CANDIDATES) {
-    const val = entity[key];
-    if (typeof val === 'string' && val.length > 0) return val;
+/**
+ * Human-readable label for an entity instance (parity with legacy):
+ * `name` → `title` → `label` → `display_name` → first non-underscore string
+ * prop → truncated `_id`.
+ */
+export function displayLabel(entity: EntityInstance): string {
+  for (const key of ['name', 'title', 'label', 'display_name']) {
+    const value = entity[key]
+    if (typeof value === 'string' && value.trim() !== '') return value
   }
-  for (const [key, val] of Object.entries(entity)) {
-    if (key.startsWith('_') || key === 'fromEntityId' || key === 'toEntityId') continue;
-    if (typeof val === 'string' && val.length > 0) return val;
+  for (const [key, value] of Object.entries(entity)) {
+    if (key.startsWith('_')) continue
+    if (typeof value === 'string' && value.trim() !== '') return value
   }
-  return entity._id.slice(0, 12);
-}
-
-/** Returns the property key used as the display label, or null if falling back to _id. */
-export function getDisplayLabelKey(entity: EntityInstance): string | null {
-  for (const key of LABEL_CANDIDATES) {
-    const val = entity[key];
-    if (typeof val === 'string' && val.length > 0) return key;
-  }
-  for (const [key, val] of Object.entries(entity)) {
-    if (key.startsWith('_') || key === 'fromEntityId' || key === 'toEntityId') continue;
-    if (typeof val === 'string' && val.length > 0) return key;
-  }
-  return null;
+  return entity._id.slice(0, 12)
 }

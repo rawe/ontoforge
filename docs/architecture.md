@@ -546,21 +546,12 @@ Full contract: see `api-contracts/runtime-api.md`
 
 ## 6. Frontend
 
-### 6.1 Modeling UI
+React + TypeScript + Vite single-page application (`frontend/`) with two surfaces:
 
-React + TypeScript + Vite application for schema design.
+- **Studio** — schema design against the modeling API: entity/relation type editors with property management, ontology scoping, agents, saved queries, validation, export/import.
+- **Workbench** — instance data work through one ontology lens against the runtime API: schema-driven type tables, entity detail, Explorer canvas, Cypher query workbench, AI assistant.
 
-Core views:
-- Ontology list and creation
-- Ontology detail with entity types and relation types
-- Entity type editor with property management
-- Relation type editor with source/target selection and property management
-- Schema validation results
-- Export/import interface
-
-### 6.2 Runtime UI
-
-<!-- Deferred to Phase 3. -->
+See `docs/runtime-ui-architecture.md` for the frontend architecture. The previous UI is kept in `frontend-legacy/` during a transition period.
 
 ## 7. Data Flow
 

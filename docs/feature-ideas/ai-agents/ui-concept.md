@@ -1,5 +1,7 @@
 # AI Agent Engine — UI Concept
 
+> **Note:** This document describes the legacy UI, which now lives in `frontend-legacy/`. The current frontend (`frontend/`, UI v3) implements agent management in Studio and agent chat in the Workbench AI page — see `docs/runtime-ui-architecture.md`. Kept for historical reference.
+
 > Modeling UI for agent management and runtime UI for agent chat, built on the existing frontend patterns.
 
 ## Context

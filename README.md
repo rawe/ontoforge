@@ -137,7 +137,7 @@ See `docs/mcp-architecture.md` for the full tool catalog and design details.
 
 ## Development Setup
 
-For local development with hot reload, run Neo4j in Docker and the backend/frontend natively:
+For local development with hot reload, run Neo4j in Docker and the backend/frontend natively — either manually as below, or all at once with `./dev.sh`. During the transition period the previous UI can be started instead of (or alongside) the new one: `./dev.sh ollama legacy` serves `frontend-legacy/` on port 5174 (`both` starts both UIs). Removing the legacy UI later means deleting `frontend-legacy/`, the marked `legacy-ui` blocks in `dev.sh`, and the `ontoforge-legacy` entry in `.claude/launch.json`.
 
 ### Prerequisites
 
@@ -189,7 +189,7 @@ OntoForge is a modular monolith backed by a single Neo4j database that holds bot
 
 - **Modeling module** — global schema CRUD, ontology scope management, validation, JSON export/import (`/api/model`)
 - **Runtime module** — schema-driven instance CRUD, validation, search, graph traversal through ontology lenses (`/api/runtime/{ontologyKey}`)
-- **Frontend** — React UI for schema design, ontology scope configuration, and runtime data management
+- **Frontend** — React UI with two surfaces: Workbench (data work through an ontology lens) and Studio (schema design, ontology scoping) — see `docs/runtime-ui-architecture.md`
 - **MCP layer** — two MCP servers: modeling (global schema) and runtime (data access through an ontology)
 
 Schema nodes and instance nodes coexist in the same database, separated by label conventions. The runtime validates every write against an in-memory schema cache (lazily loaded, invalidated on modeling changes), ensuring instance data always conforms to the schema as seen through the selected ontology.
@@ -216,10 +216,12 @@ ontoforge/
 │   │   ├── runtime/                # Instance CRUD, search, graph traversal
 │   │   └── mcp/                    # MCP servers (modeling + runtime tools)
 │   └── tests/
+├── dev.sh                          # Start Neo4j + backend + frontend for local development
 ├── frontend/
 │   ├── Dockerfile
-│   ├── package.json                # React 19 + TypeScript + Vite
+│   ├── package.json                # UI v3 (Workbench + Studio): React 19 + TypeScript + Vite
 │   └── src/
+├── frontend-legacy/                # Previous UI, kept during the transition period
 └── docs/
     ├── prd.md                      # Product requirements
     ├── architecture.md             # System architecture, Neo4j storage model
@@ -255,7 +257,7 @@ Both features support two provider types:
 
 ### Semantic Search
 
-Find entities by meaning rather than exact keywords — within a single entity type or across all types at once. Available via REST, MCP, and the runtime dashboard. Requires an embedding model.
+Find entities by meaning rather than exact keywords — within a single entity type or across all types at once. Available via REST, MCP, and the UI (command palette and entity pickers). Requires an embedding model.
 
 | Variable | Default | Description |
 |----------|---------|-------------|

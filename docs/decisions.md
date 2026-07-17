@@ -23,6 +23,8 @@ One Python backend application with separate code modules for `modeling`, `runti
 ### 002 — Consistent naming across all layers
 Use "modeling" and "runtime" consistently for backend modules, API routes, frontend apps, and store layers. No synonyms (explorer, studio, use). The backend app is named `ontoforge-server`. "Studio" is rejected as a product or component name.
 
+> **Partially superseded by frontend v3:** the rejection of "Studio"/"Explorer" as UI names no longer applies — the approved v3 frontend names its schema-design surface *Studio* and its canvas *Explorer* (see `docs/runtime-ui-architecture.md`). Backend module, API route, and app naming ("modeling"/"runtime", `ontoforge-server`) is unchanged.
+
 ### 003 — Single database, unified server
 One Neo4j instance holds all schema and instance data. The server always serves both modeling (`/api/model`) and runtime (`/api/runtime/{ontologyKey}`) routes from a single process. No mode switching, no separate deployments for different concerns. Schema and instance nodes coexist in the same database, separated by label conventions (`_Entity` marker label, reserved label collision check). This is the simplest architecture that supports multiple ontologies with their instance data.
 

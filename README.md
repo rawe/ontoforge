@@ -137,7 +137,7 @@ See `docs/mcp-architecture.md` for the full tool catalog and design details.
 
 ## Development Setup
 
-For local development with hot reload, run Neo4j in Docker and the backend/frontend natively — either manually as below, or all at once with `./dev.sh`. During the transition period the previous UI can be started instead of (or alongside) the new one: `./dev.sh ollama legacy` serves `frontend-legacy/` on port 5174 (`both` starts both UIs). Removing the legacy UI later means deleting `frontend-legacy/`, the marked `legacy-ui` blocks in `dev.sh`, and the `ontoforge-legacy` entry in `.claude/launch.json`.
+For local development with hot reload, run Neo4j in Docker and the backend/frontend natively — either manually as below, or all at once with `./dev.sh`.
 
 ### Prerequisites
 
@@ -221,7 +221,6 @@ ontoforge/
 │   ├── Dockerfile
 │   ├── package.json                # UI v3 (Workbench + Studio): React 19 + TypeScript + Vite
 │   └── src/
-├── frontend-legacy/                # Previous UI, kept during the transition period
 └── docs/
     ├── prd.md                      # Product requirements
     ├── architecture.md             # System architecture, Neo4j storage model

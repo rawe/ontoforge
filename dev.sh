@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: ./dev.sh [ollama|openai] [new|legacy|both]
+# Usage: ./dev.sh [ollama|openai]
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKEND_PID=""
 FRONTEND_PID=""
-LEGACY_FRONTEND_PID=""
 NEO4J_STARTED_BY_US=false
 
 cleanup() {
@@ -18,14 +17,6 @@ cleanup() {
         wait "$FRONTEND_PID" 2>/dev/null || true
         echo "  Frontend stopped"
     fi
-
-    # --- legacy-ui (delete this block when frontend-legacy/ is removed) ---
-    if [ -n "$LEGACY_FRONTEND_PID" ] && kill -0 "$LEGACY_FRONTEND_PID" 2>/dev/null; then
-        kill "$LEGACY_FRONTEND_PID" 2>/dev/null
-        wait "$LEGACY_FRONTEND_PID" 2>/dev/null || true
-        echo "  Legacy frontend stopped"
-    fi
-    # --- end legacy-ui ---
 
     if [ -n "$BACKEND_PID" ] && kill -0 "$BACKEND_PID" 2>/dev/null; then
         kill "$BACKEND_PID" 2>/dev/null
@@ -67,18 +58,6 @@ case "$EMBED_MODE" in
 esac
 echo "Embedding: $EMBED_MODE ($EMBEDDING_MODEL)"
 
-# --- UI preset ---
-UI_MODE="${2:-new}"
-
-case "$UI_MODE" in
-    new|legacy|both) ;;
-    *)
-        echo "Unknown UI mode: $UI_MODE (use 'new', 'legacy', or 'both')"
-        exit 1
-        ;;
-esac
-echo "UI: $UI_MODE"
-
 # --- AI preset (Ollama) ---
 export AI_PROVIDER="${AI_PROVIDER:-ollama}"
 export AI_MODEL="${AI_MODEL:-qwen3:8b}"
@@ -116,30 +95,14 @@ done
 echo " ready"
 
 # --- Frontend ---
-if [ "$UI_MODE" = "new" ] || [ "$UI_MODE" = "both" ]; then
-    echo "Starting frontend..."
-    cd "$ROOT_DIR/frontend"
-    npm run dev &
-    FRONTEND_PID=$!
-fi
-
-# --- legacy-ui (delete this block when frontend-legacy/ is removed) ---
-if [ "$UI_MODE" = "legacy" ] || [ "$UI_MODE" = "both" ]; then
-    echo "Starting legacy frontend..."
-    cd "$ROOT_DIR/frontend-legacy"
-    npm run dev -- --port 5174 &
-    LEGACY_FRONTEND_PID=$!
-fi
-# --- end legacy-ui ---
+echo "Starting frontend..."
+cd "$ROOT_DIR/frontend"
+npm run dev &
+FRONTEND_PID=$!
 
 echo ""
 echo "All services running:"
-if [ -n "$FRONTEND_PID" ]; then
-    echo "  Frontend  http://localhost:5173"
-fi
-if [ -n "$LEGACY_FRONTEND_PID" ]; then
-    echo "  Legacy UI http://localhost:5174"
-fi
+echo "  Frontend  http://localhost:5173"
 echo "  Backend   http://localhost:8000"
 echo "  API docs  http://localhost:8000/docs"
 echo "  Neo4j     http://localhost:7474"

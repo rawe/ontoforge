@@ -551,7 +551,7 @@ React + TypeScript + Vite single-page application (`frontend/`) with two surface
 - **Studio** — schema design against the modeling API: entity/relation type editors with property management, ontology scoping, agents, saved queries, validation, export/import.
 - **Workbench** — instance data work through one ontology lens against the runtime API: schema-driven type tables, entity detail, Explorer canvas, Cypher query workbench, AI assistant.
 
-See `docs/runtime-ui-architecture.md` for the frontend architecture. The previous UI is kept in `frontend-legacy/` during a transition period.
+See `docs/runtime-ui-architecture.md` for the frontend architecture.
 
 ## 7. Data Flow
 

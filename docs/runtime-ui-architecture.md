@@ -1,6 +1,6 @@
 # Frontend Architecture (UI v3)
 
-Architecture of the OntoForge frontend in `frontend/`. It replaces the previous UI, which is kept in `frontend-legacy/` during a transition period. Stack and dev commands: see `frontend/README.md`. API details: see `docs/api-contracts/`.
+Architecture of the OntoForge frontend in `frontend/`. Stack and dev commands: see `frontend/README.md`. API details: see `docs/api-contracts/`.
 
 ## 1. Surfaces
 

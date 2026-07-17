@@ -229,7 +229,6 @@ Monorepo with a single Python backend (modular monolith) and a React frontend. T
 ```
 /backend          — Python (uv-managed), modular monolith
 /frontend         — React app (Workbench + Studio surfaces)
-/frontend-legacy  — previous React app, kept during the transition period
 /docs
 ```
 

@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-REPO = "ontoforge_server.modeling.service.repository"
+REPO = "ontoforge_server.adapters.neo4j.modeling_queries"
 
 NOW = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 

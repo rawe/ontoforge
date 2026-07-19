@@ -7,7 +7,7 @@ import pytest
 
 from ontoforge_server.core.exceptions import NotFoundError
 
-REPO = "ontoforge_server.modeling.service.repository"
+REPO = "ontoforge_server.adapters.neo4j.modeling_queries"
 INVALIDATE = "ontoforge_server.modeling.service._invalidate_runtime_schema_cache"
 
 NOW = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)

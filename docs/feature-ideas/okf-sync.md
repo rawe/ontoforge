@@ -2,7 +2,7 @@
 
 > Move knowledge between Google's Open Knowledge Format (OKF) — Markdown files with YAML frontmatter — and OntoForge entities with a single `document` property. Built modularly: a pure md↔entity codec, a per-document push/pull primitive that needs no backend changes, and bundle-level sync composed on top. The generic core stays OKF-unaware.
 
-**Status: proposal — open decisions below require approval before implementation.**
+**Status: Layers 1–2 implemented** as the `ontoforge-okf` plugin skill (see its [SKILL.md](../../plugins/ontoforge/skills/ontoforge-okf/SKILL.md) for usage). Layer 3 (bundle sync, link extraction) and the backend phases remain proposals; their open decisions below still require approval.
 
 ## Purpose
 
@@ -98,14 +98,18 @@ This is the efficiency fix for the Claude Code workflow: the agent edits a file 
 
 Phase 1 can ship without any backend change: the skill lists existing entities, builds a conceptId→id map client-side, and issues per-item POST/PATCH. Correct and idempotent, just O(N) requests — acceptable for hundreds of concepts, painful beyond. Phase 2 adds the bulk endpoints.
 
-## Open Decisions (require approval)
+## Decisions
 
-1. **Architecture split** — generic backend + `ontoforge-okf` client skill (recommended), vs. native backend OKF endpoints.
-2. **Tags representation** — (a) new list-of-string `DataType` (clean, but touches validation, Cypher, filtering, UI), (b) delimited/JSON string property (KISS, lossy for querying), (c) `Tag` entities + relations (graph-native, heavier). Recommendation: (b) now, (a) if list querying becomes a need.
-3. **Cross-type links** — (a) auto-created per-type-pair relation types (e.g. `references__note__table`; works today, clutters the schema), (b) relation types with unconstrained endpoints (schema-level feature, one clean `references` type), (c) store links only inside the document body and skip relation extraction entirely (KISS baseline; the graph loses link structure). Recommendation: start with (c) as an explicit `--no-links` default is *not* desirable for a graph tool — so (a) now, (b) as a follow-up feature if wanted.
-4. **Export of native relations** — relations created inside OntoForge have no source line in any document body. Append a generated section to the body on export, emit frontmatter extension keys, or leave them out of the bundle? Recommendation: leave out in v1; the bundle is a document-centric lens.
-5. **Format consolidation** — should OKF supersede the `export_ontology.py` folder format (which it strongly resembles: one file per entity, slug filenames, relations by reference)? Recommendation: yes, deprecate the Python script once the skill exists.
-6. **Bulk endpoint scope** — runtime-level generic bulk upsert as specified, or a narrower internal-only batch for the skill? Recommendation: generic — it also benefits `ontoforge-sync` and any future integration.
+Settled (approved with the Layer 1–2 implementation):
+
+1. **Architecture split** — generic backend + `ontoforge-okf` client skill. The backend stays OKF-unaware.
+2. **Tags representation** — delimited string property (skill config `listProperties`/`listDelimiter`); a list `DataType` remains a possible follow-up if list querying becomes a need.
+
+Open (gate Layer 3 / backend phases):
+1. **Cross-type links** — (a) auto-created per-type-pair relation types (e.g. `references__note__table`; works today, clutters the schema), (b) relation types with unconstrained endpoints (schema-level feature, one clean `references` type), (c) store links only inside the document body and skip relation extraction entirely (KISS baseline; the graph loses link structure). Recommendation: (a) now, (b) as a follow-up feature if wanted — (c) forfeits the link graph, which is the point of a graph tool.
+2. **Export of native relations** — relations created inside OntoForge have no source line in any document body. Append a generated section to the body on export, emit frontmatter extension keys, or leave them out of the bundle? Recommendation: leave out in v1; the bundle is a document-centric lens.
+3. **Format consolidation** — should OKF supersede the `export_ontology.py` folder format (which it strongly resembles: one file per entity, slug filenames, relations by reference)? Recommendation: yes, deprecate the Python script once the skill exists.
+4. **Bulk endpoint scope** — runtime-level generic bulk upsert as specified, or a narrower internal-only batch for the skill? Recommendation: generic — it also benefits `ontoforge-sync` and any future integration.
 
 ## Out of Scope
 

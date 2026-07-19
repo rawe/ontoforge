@@ -1,0 +1,7 @@
+interface:
+  display_name: "OntoForge"
+  short_description: "Sync OKF Markdown documents with OntoForge entities"
+  icon_small: "./assets/ontoforge-icon.svg"
+  icon_large: "./assets/ontoforge-icon.svg"
+  brand_color: "#0A7CFF"
+  default_prompt: "Use $ontoforge-okf to push or pull Markdown documents with YAML frontmatter between the filesystem and OntoForge entities."

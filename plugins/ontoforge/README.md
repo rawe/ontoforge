@@ -12,6 +12,17 @@ Export and import OntoForge schema and instance data via the REST API.
 - **Data export/import**: save and restore all instance data (entities, relations) with automatic ID remapping
 - Uses Node.js 18+ with built-in `fetch` — no external dependencies
 
+### ontoforge-okf
+
+Sync Markdown documents with YAML frontmatter (Google's [Open Knowledge Format](https://github.com/GoogleCloudPlatform/knowledge-catalog/tree/main/okf)) with OntoForge entities — one file, one entity.
+
+- **Push**: `okf-push.mjs <file.md>` turns a concept document into an entity — frontmatter keys become scalar properties, the Markdown body becomes the `document` property, the file path becomes the concept ID (natural key). Idempotent: re-pushing updates instead of duplicating.
+- **Pull**: `okf-pull.mjs <conceptId>` writes an entity back to `<conceptId>.md` with deterministic frontmatter ordering for clean git diffs.
+- Document content moves filesystem ↔ API directly, never through an LLM context — use it alongside the MCP tools, not instead of them.
+- Optional `okf.config.json` per bundle for ontology key, type mapping, and list-property handling.
+
+See [SKILL.md](skills/ontoforge-okf/SKILL.md) for the full usage reference, schema requirements, and the supported YAML subset.
+
 ### ontoforge-setup
 
 Bootstrap a project with OntoForge: Docker Compose, environment variables, and MCP configuration.

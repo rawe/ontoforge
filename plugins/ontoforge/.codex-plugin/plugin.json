@@ -1,7 +1,7 @@
 {
   "name": "ontoforge",
-  "version": "0.6.0",
-  "description": "OntoForge plugin: export and import ontology schemas and instance data, bootstrap new projects with Docker Compose, and build against the runtime API.",
+  "version": "0.7.0",
+  "description": "OntoForge plugin: export and import ontology schemas and instance data, sync OKF Markdown documents with entities, bootstrap new projects with Docker Compose, and build against the runtime API.",
   "skills": "./skills/",
   "interface": {
     "displayName": "OntoForge",

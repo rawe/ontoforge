@@ -267,6 +267,28 @@ async def delete_entity(
 # --- Document Chunks ---
 
 
+async def get_chunk_embeddings_for_entity_property(
+    session: AsyncSession,
+    entity_id: str,
+    property_key: str,
+) -> dict[str, list[float]]:
+    """Map chunk text → embedding for one document property on one entity.
+
+    Used to reuse embeddings of unchanged chunk texts when re-chunking after
+    a (partial) document write. Chunks without an embedding are skipped.
+    """
+    result = await session.run(
+        """
+        MATCH (n:_Entity {_id: $entity_id})-[:_HAS_CHUNK]->(c:_Chunk {_propertyKey: $property_key})
+        WHERE c._embedding IS NOT NULL
+        RETURN c.text AS text, c._embedding AS embedding
+        """,
+        entity_id=entity_id,
+        property_key=property_key,
+    )
+    return {record["text"]: record["embedding"] async for record in result}
+
+
 async def delete_chunks_for_entity_property(
     session: AsyncSession,
     entity_id: str,

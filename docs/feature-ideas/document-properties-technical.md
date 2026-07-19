@@ -34,7 +34,8 @@ Created only when an embedding provider is configured, synchronously in the enti
 
 **Lifecycle:**
 
-- Entity create/update with a document property → delete that property's existing chunks → re-chunk → embed (batched where the provider supports it) → write chunk nodes. Updating property A never touches property B's chunks.
+- Entity create/update with a document property → collect the existing chunks' text→embedding map → delete that property's chunks → re-chunk → embed only chunks whose text has no reusable embedding → write chunk nodes. Updating property A never touches property B's chunks.
+- **Embedding reuse:** because chunk boundaries are found by local text scanning, a partial edit leaves most chunk texts identical (at shifted offsets) — the chunker re-synchronizes on the same paragraph/sentence boundaries after the edit. Reusing embeddings keyed by exact chunk text means a small edit re-embeds only the 1–3 chunks it touches; the worst case degrades to a full re-embed, never worse.
 - Entity delete → existing `DETACH DELETE` removes chunks' relationships; chunk nodes are deleted explicitly in the same query (`OPTIONAL MATCH (n)-[:_HAS_CHUNK]->(c) DETACH DELETE c, n`).
 - Property definition deleted (modeling) → drop all chunks of that virtual type and its vector index.
 - Entity type deleted → same cascade for all its document properties.
@@ -77,7 +78,19 @@ GET /api/runtime/{ontologyKey}/entities/{entityType}/{entityId}/documents/{prope
 - `offset`, `limit` are character-based; both optional; no params → full document.
 - Response: `{ "propertyKey": "bio", "content": "...", "offset": 0, "length": 5000, "totalLength": 40213 }` (`length` = actual returned length).
 - 404 if the property is not a document property or the entity/type is unknown; scoping rules apply (property must be in the ontology lens).
-- Read-only; writes remain full-value via normal entity create/update.
+
+## Document Edit Endpoint (Partial Writes)
+
+```
+PATCH /api/runtime/{ontologyKey}/entities/{entityType}/{entityId}/documents/{propertyKey}
+```
+
+One operation per request, selected by `op` — see `api-contracts/runtime-api.md` §3 for the full request/response contract:
+
+- `str_replace` — exact, unique string replacement (`replaceAll` for every occurrence). Rejected when the string is missing or ambiguous.
+- `replace_range` — overwrite `[offset, offset+length)` with `content`; insert with `length` 0, append at `offset == totalLength`. Optional `expect` = compare-and-swap guard (409 on mismatch).
+
+The edit persists the whole new value plus the `_doc_{key}_length` internal property, then re-syncs chunks through the shared `sync_document_chunks` path with embedding reuse (see Lifecycle above). The entity's own embedding is untouched — document values are excluded from `build_text_repr`. Full-value writes via normal entity create/update remain valid; concurrency stays last-write-wins.
 
 ## Semantic Search
 
@@ -132,6 +145,8 @@ GET /api/runtime/{ontologyKey}/entities/{entityType}/{entityId}/documents/{prope
 | Tool | Change |
 |------|--------|
 | `get_document` | **New.** Args `entity_type`, `entity_id`, `property_key`, optional `offset`, `limit`. Mirrors the REST endpoint. |
+| `edit_document` | **New.** Partial write via `str_replace`. Args `entity_type_key`, `entity_id`, `property_key`, `old_string`, `new_string`, optional `replace_all`. |
+| `write_document` | **New.** Partial write via `replace_range`. Args `entity_type_key`, `entity_id`, `property_key`, `offset`, `length`, `content`, optional `expect`. |
 | `semantic_search` | Gains `search_in`, `snippets`; returns the new hit shape. |
 | `list_entities` / `get_entity` / `get_neighbors` / `cypher_query` / saved queries | Return document stubs automatically via the shared service layer. |
 

@@ -238,7 +238,7 @@ Two ways to get the content:
 - The dedicated document read endpoint below (preferred — supports slicing).
 - The `fields` projection parameter: explicitly listing a document property key in `fields` returns its raw value instead of the stub.
 
-Document values are **written** whole through normal entity create/update — there are no partial writes.
+Document values can be **written** whole through normal entity create/update, or partially through the document edit endpoint below.
 
 ### GET /api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}/documents/{propertyKey}
 
@@ -267,6 +267,44 @@ Without parameters, the full document is returned. Slicing is plain character in
 `length` is the actual number of characters returned (may be shorter than `limit` at the end of the document); `totalLength` is the full document's character count.
 
 **Errors:** 404 if the entity type, entity ID, or property is not found, or if the property is not a `document` property. Ontology scoping applies — the property must be visible through the ontology lens.
+
+### PATCH /api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}/documents/{propertyKey}
+
+Apply one partial-write operation to a document property. The request body carries exactly one operation, selected by `op`:
+
+**`str_replace`** — exact string replacement, the preferred operation for agents:
+
+```json
+{ "op": "str_replace", "oldString": "the old passage", "newString": "the new passage", "replaceAll": false }
+```
+
+`oldString` must occur in the document exactly once; if it occurs multiple times the edit is rejected (use a longer string with surrounding context, or set `replaceAll: true` to replace every occurrence). `oldString` must be non-empty and differ from `newString`.
+
+**`replace_range`** — character-range overwrite:
+
+```json
+{ "op": "replace_range", "offset": 5200, "length": 1500, "content": "replacement text", "expect": "the text currently in the range" }
+```
+
+Replaces the characters `[offset, offset + length)` with `content`. Insert with `length: 0`; append with `offset` = `totalLength`. Offsets pair with the read endpoint and with the `charOffset`/`charLength` of semantic search hits. The optional `expect` field is a guard against stale offsets: when provided, the text currently in the range must equal it or the edit is rejected with 409.
+
+**Response:** `200 OK`
+```json
+{
+  "propertyKey": "bio",
+  "totalLength": 40196,
+  "editedRange": { "offset": 5200, "length": 1483 },
+  "replacements": 1,
+  "context": "…~200 chars before and after the edited range…",
+  "contextOffset": 5000
+}
+```
+
+`editedRange` locates the inserted text in the **new** document (for `replaceAll`, the first replacement). `context` returns the edited range plus up to 200 surrounding characters on each side, starting at `contextOffset` — enough to verify the edit without a follow-up read.
+
+After a partial write the property's chunks are re-synced. Chunks whose text is unchanged keep their stored embeddings (content-hash reuse), so a small edit only re-embeds the chunks it touches — partial writes stay cheap even for large documents. The entity's own embedding is unaffected (document values are never part of it).
+
+**Errors:** 404 as for the read endpoint. 422 if the operation is malformed, `oldString` is not found or not unique, or the range exceeds the document bounds. 409 if `expect` does not match the current range content.
 
 ---
 
@@ -909,6 +947,7 @@ All declared parameters are required. Parameter values are coerced to their decl
 | `DELETE` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}` | Delete entity instance |
 | `GET` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}/neighbors` | Graph traversal |
 | `GET` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}/documents/{propertyKey}` | Read (a slice of) a document property |
+| `PATCH` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}/documents/{propertyKey}` | Partial write to a document property |
 | `GET` | `/api/runtime/{ontologyKey}/search/semantic` | Semantic search over entity instances and documents |
 | `POST` | `/api/runtime/{ontologyKey}/query` | Read-only Cypher query |
 | `POST` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}` | Create relation instance |

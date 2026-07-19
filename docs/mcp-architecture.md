@@ -236,7 +236,7 @@ Properties are managed through unified tools that work on both entity types and 
 
 | Tool | Arguments | Returns | Description |
 |------|-----------|---------|-------------|
-| `add_property` | `type_kind` ("entity_type" or "relation_type"), `type_key`, `key`, `display_name`, `data_type`, `required` (opt, default false), `default_value` (opt), `description` (opt) | Created property | Add a property definition. `data_type` must be one of: string, integer, float, boolean, date, datetime, document. `document` holds large text interpreted as Markdown, chunked for semantic search when embeddings are enabled. |
+| `add_property` | `type_kind` ("entity_type" or "relation_type"), `type_key`, `key`, `display_name`, `data_type`, `required` (opt, default false), `default_value` (opt), `description` (opt) | Created property | Add a property definition. `data_type` must be one of: string, integer, float, boolean, date, datetime, document. `document` holds large text interpreted as Markdown, chunked for semantic search when embeddings are enabled; it is only allowed on entity types. |
 | `update_property` | `type_kind`, `type_key`, `property_key`, `display_name` (opt), `required` (opt), `default_value` (opt), `description` (opt) | Updated property | Update a property's metadata. Key and data type are immutable after creation. |
 | `delete_property` | `type_kind`, `type_key`, `property_key` | Confirmation | Remove a property definition from an entity type or relation type. |
 

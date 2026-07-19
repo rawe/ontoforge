@@ -121,6 +121,14 @@ export function PropertyDialog({
 
   const valid = (isEdit || isValidKey(key)) && displayName.trim() !== ''
 
+  // Document properties exist only on entity types (backend rejects them on
+  // relation types). Edit mode keeps the full list so the disabled select can
+  // still display any existing value.
+  const dataTypes =
+    kind === 'relation-types' && !isEdit
+      ? DATA_TYPES.filter((t) => t !== 'document')
+      : DATA_TYPES
+
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
@@ -181,7 +189,7 @@ export function PropertyDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {DATA_TYPES.map((t) => (
+                    {dataTypes.map((t) => (
                       <SelectItem key={t} value={t}>
                         <span className="font-mono text-xs">{t}</span>
                       </SelectItem>

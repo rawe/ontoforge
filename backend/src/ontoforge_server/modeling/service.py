@@ -414,6 +414,10 @@ async def create_property(
     cascade: bool = False,
     driver: AsyncDriver = Depends(get_driver),
 ) -> PropertyDefinitionResponse:
+    if owner_label == "RelationType" and body.data_type == DataType.DOCUMENT:
+        raise ValidationError(
+            "Document properties are only supported on entity types"
+        )
     async with driver.session() as session:
         await _ensure_owner_exists(session, owner_id, owner_label)
         existing = await repository.get_property_by_key(
@@ -1153,6 +1157,12 @@ async def import_schema(
                 rt.from_entity_type_key, rt.to_entity_type_key,
             )
             for prop in rt.properties:
+                if prop.data_type == DataType.DOCUMENT.value:
+                    raise ValidationError(
+                        f"Import error: property '{prop.key}' on relation type "
+                        f"'{rt.key}' has data type 'document'; document properties "
+                        "are only supported on entity types"
+                    )
                 prop_id = str(uuid4())
                 await repository.create_property(
                     session, rt_id, "RelationType", prop_id,

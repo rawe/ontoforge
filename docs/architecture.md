@@ -208,7 +208,7 @@ Connected to its source and target entity types via `RELATES_FROM` and `RELATES_
 | `createdAt` | DateTime | Set on creation |
 | `updatedAt` | DateTime | Updated on every mutation |
 
-The `document` data type holds large text content interpreted as Markdown. Its storage and retrieval model (chunk nodes, virtual labels, vector indexes) is described under Document Chunks in §4.2.
+The `document` data type holds large text content interpreted as Markdown. It is only valid on entity type properties — the modeling layer rejects document properties on relation types, since the chunk/stub machinery is anchored to entity instances. Its storage and retrieval model (chunk nodes, virtual labels, vector indexes) is described under Document Chunks in §4.2.
 
 **Node: AiAgentConfig**
 

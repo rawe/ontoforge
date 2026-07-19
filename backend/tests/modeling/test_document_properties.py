@@ -81,6 +81,56 @@ async def test_create_document_property_without_provider_creates_no_chunk_index(
 
 
 @pytest.mark.asyncio
+async def test_create_document_property_on_relation_type_rejected(client):
+    resp = await client.post(
+        "/api/model/relation-types/rt-1/properties",
+        json={"key": "notes", "displayName": "Notes", "dataType": "document"},
+    )
+    assert resp.status_code == 422
+    assert "entity types" in resp.json()["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_import_rejects_document_property_on_relation_type(client):
+    with (
+        patch(f"{REPO}.get_entity_type_by_key", new_callable=AsyncMock, return_value=None),
+        patch(f"{REPO}.create_entity_type", new_callable=AsyncMock, return_value={}),
+        patch(f"{REPO}.create_property", new_callable=AsyncMock, return_value={}) as mock_create_prop,
+        patch(f"{REPO}.get_relation_type_by_key", new_callable=AsyncMock, return_value=None),
+        patch(f"{REPO}.create_relation_type", new_callable=AsyncMock, return_value={}),
+    ):
+        resp = await client.post(
+            "/api/model/import",
+            json={
+                "formatVersion": "2.2",
+                "entityTypes": [{"key": "person", "displayName": "Person"}],
+                "relationTypes": [
+                    {
+                        "key": "knows",
+                        "displayName": "Knows",
+                        "fromEntityTypeKey": "person",
+                        "toEntityTypeKey": "person",
+                        "properties": [
+                            {
+                                "key": "notes",
+                                "displayName": "Notes",
+                                "dataType": "document",
+                                "required": False,
+                            },
+                        ],
+                    },
+                ],
+                "ontologies": [],
+            },
+        )
+    assert resp.status_code == 422
+    assert "entity types" in resp.json()["error"]["message"]
+    # The offending relation property was never written
+    for call in mock_create_prop.call_args_list:
+        assert call[0][2] != "RelationType"
+
+
+@pytest.mark.asyncio
 async def test_delete_document_property_drops_chunks_and_index(client):
     with (
         patch(f"{REPO}.get_entity_type", new_callable=AsyncMock, return_value=ET_DATA),

@@ -122,12 +122,9 @@ export function PropertyDialog({
   const valid = (isEdit || isValidKey(key)) && displayName.trim() !== ''
 
   // Document properties exist only on entity types (backend rejects them on
-  // relation types). Edit mode keeps the full list so the disabled select can
-  // still display any existing value.
+  // relation types).
   const dataTypes =
-    kind === 'relation-types' && !isEdit
-      ? DATA_TYPES.filter((t) => t !== 'document')
-      : DATA_TYPES
+    kind === 'relation-types' ? DATA_TYPES.filter((t) => t !== 'document') : DATA_TYPES
 
   return (
     <>

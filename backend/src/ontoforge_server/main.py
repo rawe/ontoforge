@@ -6,12 +6,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from ontoforge_server.core.ai import init_ai_model
-from ontoforge_server.core.database import close_driver, ensure_vector_indexes, get_driver, init_driver
+from ontoforge_server.core.database import ensure_vector_indexes, get_driver
 from ontoforge_server.core.embedding import (
     close_embedding_provider,
     get_embedding_provider,
     init_embedding_provider,
 )
+from ontoforge_server.core.ports import close_stores, init_stores
 from ontoforge_server.core.exceptions import (
     CascadeRequiredError,
     ConflictError,
@@ -29,17 +30,17 @@ from ontoforge_server.runtime.router import router as runtime_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    driver = await init_driver()
+    await init_stores()
     await init_embedding_provider()
     init_ai_model()
     provider = get_embedding_provider()
     if provider:
-        await ensure_vector_indexes(driver, provider.dimensions)
+        await ensure_vector_indexes(await get_driver(), provider.dimensions)
     async with modeling_mcp.session_manager.run():
         async with runtime_mcp.session_manager.run():
             yield
     await close_embedding_provider()
-    await close_driver()
+    await close_stores()
 
 
 def _error_response(status: int, code: str, message: str, details: dict | None = None) -> JSONResponse:

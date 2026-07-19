@@ -4,7 +4,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from ontoforge_server.core.database import get_driver
+from ontoforge_server.adapters.neo4j.driver import get_driver
+from ontoforge_server.core.ports import get_modeling_store, get_runtime_store
 
 
 @asynccontextmanager
@@ -36,11 +37,21 @@ def mock_driver():
 
 @pytest.fixture
 def app(mock_driver):
+    from ontoforge_server.adapters.neo4j.modeling_store import Neo4jModelingStore
+    from ontoforge_server.adapters.neo4j.runtime_store import Neo4jRuntimeStore
+
     with patch("ontoforge_server.main.lifespan", _noop_lifespan):
         from ontoforge_server.main import create_app
 
         application = create_app()
     application.dependency_overrides[get_driver] = lambda: mock_driver
+    # Stores wrap the mocked driver; tests stub the adapter query modules.
+    application.dependency_overrides[get_modeling_store] = (
+        lambda: Neo4jModelingStore(mock_driver)
+    )
+    application.dependency_overrides[get_runtime_store] = (
+        lambda: Neo4jRuntimeStore(mock_driver)
+    )
     return application
 
 

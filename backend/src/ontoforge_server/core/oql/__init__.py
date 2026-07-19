@@ -1,14 +1,22 @@
-"""Cypher query validation, rewriting, and execution for the runtime API.
+"""OQL — OntoForge Query Language: parsing and validation.
 
-Parses user-submitted Cypher using antlr4-cypher, validates labels,
-relationship types, and properties against the scoped ontology schema,
-rewrites snake_case identifiers to Neo4j conventions (PascalCase labels,
-UPPER_SNAKE_CASE relationship types), and rejects write operations / CALL.
+OQL is OntoForge's read-only graph query language over ontology type keys.
+Its syntax is openCypher-shaped; its normative reference is the ISO GQL
+standard (ISO/IEC 39075:2024) and the GPML pattern sublanguage shared with
+SQL/PGQ — see decision 009 in ``docs/decisions.md``.
+
+This package is database-independent: it parses user-submitted OQL with
+antlr4-cypher, validates entity/relation type keys and properties against
+the scoped ontology schema, and rejects write operations / CALL. The
+result of ``parse_and_validate`` is a ``ValidatedQuery`` that a database
+adapter compiles to its native dialect (e.g.
+``adapters.neo4j.oql_compiler``).
 """
 
 from __future__ import annotations
 
 import dataclasses
+from typing import TYPE_CHECKING
 
 from antlr4 import CommonTokenStream, InputStream, ParseTreeWalker
 from antlr4.error.ErrorListener import ErrorListener
@@ -19,11 +27,9 @@ from antlr4_cypher import (
 )
 
 from ontoforge_server.core.exceptions import ValidationError
-from ontoforge_server.runtime.service import (
-    SchemaCache,
-    to_pascal_case,
-    to_upper_snake_case,
-)
+
+if TYPE_CHECKING:
+    from ontoforge_server.runtime.service import SchemaCache
 
 # System properties allowed on all entities / relations.
 SYSTEM_PROPERTIES = frozenset(
@@ -216,9 +222,9 @@ def _strip_backticks(name: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _parse(cypher: str) -> tuple[CommonTokenStream, CypherParser.ScriptContext]:
-    """Lex + parse a Cypher string. Raises on syntax errors."""
-    input_stream = InputStream(cypher)
+def _parse(query: str) -> tuple[CommonTokenStream, CypherParser.ScriptContext]:
+    """Lex + parse an OQL string. Raises on syntax errors."""
+    input_stream = InputStream(query)
     lexer = CypherLexer(input_stream)
     lexer.removeErrorListeners()
     err = _SyntaxErrorListener()
@@ -347,52 +353,45 @@ def _validate(analysis: _Analysis, schema: SchemaCache) -> list[str]:
     return errors
 
 
-def _rewrite(
-    token_stream: CommonTokenStream, analysis: _Analysis
-) -> str:
-    """Replace schema-key labels/types with Neo4j conventions."""
-    from antlr4.TokenStreamRewriter import TokenStreamRewriter
-
-    rewriter = TokenStreamRewriter(token_stream)
-    for lt in analysis.label_tokens:
-        if lt.is_relationship:
-            new = to_upper_snake_case(lt.text)
-        else:
-            new = to_pascal_case(lt.text)
-        if new != lt.text:
-            rewriter.replaceSingleToken(
-                token_stream.tokens[lt.token_index], new
-            )
-    return rewriter.getDefaultText()
-
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 
-def validate_and_rewrite(cypher: str, schema: SchemaCache) -> str:
-    """Parse, validate, and rewrite a Cypher query.
+@dataclasses.dataclass
+class ValidatedQuery:
+    """A parsed and schema-validated OQL query.
 
-    Returns the rewritten query string ready for execution against Neo4j.
+    Opaque to services; database adapters compile it to their native
+    dialect (token stream + analysis carry everything a compiler needs).
+    """
+
+    text: str
+    token_stream: CommonTokenStream
+    analysis: _Analysis
+
+
+def parse_and_validate(query: str, schema: SchemaCache) -> ValidatedQuery:
+    """Parse and validate an OQL query against the scoped schema.
+
     Raises ``ValidationError`` if the query is invalid.
     """
-    token_stream, tree = _parse(cypher)
+    token_stream, tree = _parse(query)
     analysis = _analyze(tree)
     errors = _validate(analysis, schema)
     if errors:
         raise ValidationError(
             "Query validation failed", details={"errors": errors}
         )
-    return _rewrite(token_stream, analysis)
+    return ValidatedQuery(text=query, token_stream=token_stream, analysis=analysis)
 
 
-def get_return_variables(cypher: str, schema: SchemaCache) -> dict[str, str | None]:
+def get_return_variables(query: str, schema: SchemaCache) -> dict[str, str | None]:
     """Map variables used in the query to their schema type key (or None).
 
     Useful for post-processing results to filter properties per type.
     """
-    _, tree = _parse(cypher)
+    _, tree = _parse(query)
     analysis = _analyze(tree)
     result: dict[str, str | None] = {}
     for var, labels in analysis.node_variables.items():

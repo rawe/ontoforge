@@ -329,16 +329,6 @@ def _apply_scope_filtering(
 # ---------------------------------------------------------------------------
 
 
-def to_pascal_case(key: str) -> str:
-    """Convert a snake_case key to PascalCase. E.g. 'research_paper' -> 'ResearchPaper'."""
-    return "".join(segment.capitalize() for segment in key.split("_"))
-
-
-def to_upper_snake_case(key: str) -> str:
-    """Convert a key to UPPER_SNAKE_CASE. E.g. 'works_for' -> 'WORKS_FOR'."""
-    return key.upper()
-
-
 # ---------------------------------------------------------------------------
 # Type Coercion
 # ---------------------------------------------------------------------------
@@ -1762,31 +1752,31 @@ async def execute_query(
     Returns ``{"columns": [...], "results": [...]}`` with properties
     filtered to the scoped ontology schema.
     """
-    from ontoforge_server.runtime.cypher import (
+    from ontoforge_server.core.oql import (
         SYSTEM_PROPERTIES,
         get_return_variables,
-        validate_and_rewrite,
+        parse_and_validate,
     )
 
     loaded = await _load_schema(ontology_key, store)
     scoped = loaded.scoped
 
-    # Map variables → schema keys before compiling (uses original type keys).
+    # Map variables → schema keys (uses original type keys).
     var_map = get_return_variables(query, scoped)
 
-    # Validate and compile to the Neo4j dialect
-    # (snake_case → PascalCase / UPPER_SNAKE_CASE).
-    rewritten = validate_and_rewrite(query, scoped)
+    # Validate against the scoped schema; the adapter compiles the
+    # validated query to its native dialect at execution time.
+    validated = parse_and_validate(query, scoped)
 
-    columns, rows = await store.execute_cypher_read(rewritten)
+    columns, rows = await store.execute_oql(validated)
 
     # Post-process: filter out-of-scope properties and stub document values.
-    _postprocess_cypher_rows(rows, var_map, scoped)
+    _postprocess_query_rows(rows, var_map, scoped)
 
     return {"columns": columns, "results": rows}
 
 
-def _postprocess_cypher_rows(
+def _postprocess_query_rows(
     rows: list[dict],
     var_map: dict[str, str | None],
     scoped: SchemaCache,
@@ -1844,7 +1834,7 @@ def _strip_out_of_scope_props(
     schema: SchemaCache,
 ) -> None:
     """Remove properties not in the scoped schema and stub documents (in place)."""
-    from ontoforge_server.runtime.cypher import SYSTEM_PROPERTIES
+    from ontoforge_server.core.oql import SYSTEM_PROPERTIES
 
     if type_key in schema.entity_types:
         property_defs = schema.entity_types[type_key].properties
@@ -1909,9 +1899,9 @@ async def execute_saved_query(
     Bindings allow steps to reference results from earlier steps.
     Returns the last step's output.
     """
-    from ontoforge_server.runtime.cypher import (
+    from ontoforge_server.core.oql import (
         get_return_variables,
-        validate_and_rewrite,
+        parse_and_validate,
     )
 
     loaded = await _load_schema(ontology_key, store)
@@ -1968,14 +1958,14 @@ async def execute_saved_query(
             query_params = {**coerced_params, **resolved_bindings}
 
             var_map = get_return_variables(step.oql, scoped)
-            rewritten = validate_and_rewrite(step.oql, scoped)
+            validated = parse_and_validate(step.oql, scoped)
 
-            columns, rows = await store.execute_cypher_read(
-                rewritten, params=query_params
+            columns, rows = await store.execute_oql(
+                validated, params=query_params
             )
 
             # Post-process: strip out-of-scope properties + stub documents
-            _postprocess_cypher_rows(rows, var_map, scoped)
+            _postprocess_query_rows(rows, var_map, scoped)
 
             step_results[step.name] = rows
             last_output = {"columns": columns, "results": rows}

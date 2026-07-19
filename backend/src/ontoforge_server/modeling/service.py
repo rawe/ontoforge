@@ -1625,10 +1625,10 @@ async def upsert_saved_query(
     try:
         from ontoforge_server.runtime import service as runtime_service
         loaded = await runtime_service._load_schema(ontology_key, runtime_store)
-        from ontoforge_server.runtime.cypher import validate_and_rewrite
+        from ontoforge_server.core.oql import parse_and_validate
         for step in body.steps:
             if step.type == StepType.OQL and step.oql:
-                validate_and_rewrite(step.oql, loaded.scoped)
+                parse_and_validate(step.oql, loaded.scoped)
     except NotFoundError:
         pass  # Ontology has no runtime schema loaded yet
     except ValidationError:

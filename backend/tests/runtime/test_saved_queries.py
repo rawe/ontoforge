@@ -295,11 +295,15 @@ async def test_multi_step_pipeline_execution():
             return_value=mock_search_result,
         ) as mock_ss,
         patch(
-            "ontoforge_server.runtime.cypher.get_return_variables",
+            "ontoforge_server.core.oql.get_return_variables",
             return_value={},
         ),
         patch(
-            "ontoforge_server.runtime.cypher.validate_and_rewrite",
+            "ontoforge_server.core.oql.parse_and_validate",
+            return_value="validated-query-sentinel",
+        ),
+        patch(
+            "ontoforge_server.adapters.neo4j.oql_compiler.compile_query",
             return_value="MATCH (p:Person)-[:HAS_SKILL]->(s:Skill) WHERE s._id IN $skill_ids RETURN p",
         ),
         patch(

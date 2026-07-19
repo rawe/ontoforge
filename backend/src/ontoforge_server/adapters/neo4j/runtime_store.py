@@ -12,11 +12,12 @@ from typing import Any
 
 from neo4j import AsyncDriver
 
-from ontoforge_server.adapters.neo4j import ddl, runtime_queries
+from ontoforge_server.adapters.neo4j import ddl, oql_compiler, runtime_queries
 from ontoforge_server.adapters.neo4j.filters import (
     build_filter_clauses,
     build_search_clause,
 )
+from ontoforge_server.core.oql import ValidatedQuery
 
 
 class Neo4jRuntimeStore:
@@ -367,11 +368,13 @@ class Neo4jRuntimeStore:
     # Compiled read queries (OQL execution)
     # ------------------------------------------------------------------
 
-    async def execute_cypher_read(
+    async def execute_oql(
         self,
-        cypher: str,
+        validated: "ValidatedQuery",
         params: dict[str, Any] | None = None,
     ) -> tuple[list[str], list[dict]]:
+        """Compile a validated OQL query to Cypher and execute it read-only."""
+        cypher = oql_compiler.compile_query(validated)
         async with self._driver.session() as session:
             return await runtime_queries.execute_cypher_read(
                 session, cypher, params=params

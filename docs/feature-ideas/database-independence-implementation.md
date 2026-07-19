@@ -174,13 +174,20 @@ step keeps the app running.
   AST; the Neo4j store compiles and runs it. Saved-query validation
   (`validate_and_rewrite` call sites in import/save paths) uses `core/oql` only.
 
-**3.2 Write the OQL spec**
-- New doc `docs/oql-spec.md`: supported clauses (`MATCH`, `OPTIONAL MATCH`, `WHERE`,
-  `RETURN`, `ORDER BY`, `LIMIT`, `SKIP`, `WITH`, `UNWIND`), pattern forms, the
-  variable-length-path decision (proposal §6), function whitelist, `$param` syntax,
-  type coercion, result shape, error codes. The spec is the contract adapters must
-  implement — derive it from the current validator's actual behavior, then make the
-  validator the spec's reference implementation.
+**3.2 Write the OQL spec (ISO-anchored)**
+- New doc `docs/oql-spec.md`. Normative reference: **GQL (ISO/IEC 39075:2024)** and
+  its GPML pattern sublanguage (shared with SQL/PGQ, ISO/IEC 9075-16) — per the
+  settled anchoring in proposal §4.2. Contents: supported clauses (`MATCH`,
+  `OPTIONAL MATCH`, `WHERE`, `RETURN`, `ORDER BY`, `LIMIT`, `SKIP`, `WITH`,
+  `UNWIND`), pattern forms per the GPML grammar, the variable-length/quantified-path
+  decision (proposal §6), function whitelist, `$param` syntax, type coercion, result
+  shape, error codes. Each construct cross-references its GQL/GPML counterpart;
+  OntoForge restrictions (read-only, ontology keys, reserved names) are explicit
+  deltas from the standard.
+- Gap analysis first: diff the current validator's accepted grammar against GPML;
+  where behavior diverges from the standard, the spec follows ISO and the validator
+  is adjusted (breaking cases go through the Phase-1 deprecation policy). The
+  validator then becomes the spec's reference implementation.
 - `api-contracts/runtime-api.md` §7 and the MCP tool descriptions link to the spec.
 
 **3.3 Verification gate**

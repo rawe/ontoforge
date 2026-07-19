@@ -204,14 +204,20 @@ generation). Three options were considered:
 
 | Option | Assessment |
 |--------|------------|
-| **A. Define the existing validated subset as OntoForge's own query language ("OQL")** | The endpoint already accepts only a parsed, validated, rewritten read-only subset (`MATCH`, `OPTIONAL MATCH`, `WHERE`, `RETURN`, `ORDER BY`, `LIMIT`, `SKIP`, `WITH`, `UNWIND`) expressed in ontology keys, not Neo4j labels. Formalize exactly that as OQL: openCypher-shaped syntax, OntoForge semantics, spec'd independently of Neo4j. Adapters compile the validated AST to their native form. **Recommended.** |
+| **A. Define the existing validated subset as OntoForge's own query language ("OQL"), anchored to the ISO standard** | The endpoint already accepts only a parsed, validated, rewritten read-only subset (`MATCH`, `OPTIONAL MATCH`, `WHERE`, `RETURN`, `ORDER BY`, `LIMIT`, `SKIP`, `WITH`, `UNWIND`) expressed in ontology keys, not Neo4j labels. Formalize exactly that as OQL — spec'd against the **ISO GQL pattern grammar** (see below), not against Neo4j's Cypher behavior. Adapters compile the validated AST to their native form. **Recommended.** |
 | B. Replace with a structured JSON query DSL | Loses expressiveness, is worse for humans, and materially worse for LLM query generation (models write Cypher-style patterns well, bespoke JSON DSLs poorly). More work for less capability. |
 | C. Drop the generic query endpoint | Feature regression (Query workbench, saved queries, AI query) — not acceptable. |
 
-Option A is honest about the trade-off: OQL *syntax* stays openCypher-shaped (which is
-also the direction of the ISO GQL standard and of SQL/PGQ's pattern sublanguage, so
-the syntax family is an industry standard, not a Neo4j private dialect). What changes
-is the contract: the API promises **OQL semantics defined by OntoForge's spec**, not
+**ISO anchoring (settled 2026-07-19).** OQL's normative reference is the ISO
+standard, not Neo4j: the spec is written against **GQL (ISO/IEC 39075:2024)** and its
+graph pattern sublanguage **GPML**, which GQL shares with **SQL/PGQ (ISO/IEC
+9075-16:2023)** — the standard PostgreSQL 19 implements via `GRAPH_TABLE`. OQL is
+thus the read-only intersection of the standards family: pattern syntax that is
+simultaneously ISO-blessed, natively pattern-compatible with PostgreSQL's SQL/PGQ,
+and maximally familiar to LLMs (it is the Cypher `MATCH` syntax that got
+standardized). Where today's validator behavior diverges from GQL/GPML, the spec
+follows the ISO grammar and the divergence is fixed in the validator — not the other
+way around. The API promises **OQL semantics defined by OntoForge's spec**, not
 "whatever Neo4j does". Concretely:
 
 - `runtime/cypher.py` splits: parser + validator + AST become `core/oql/`
@@ -219,10 +225,13 @@ is the contract: the API promises **OQL semantics defined by OntoForge's spec**,
   Neo4j adapter's OQL compiler.
 - The wire field renames from `cypher` to `query` everywhere (with a deprecation
   window, see 4.3).
-- A short OQL spec document defines: supported clauses, pattern forms (including
-  whether variable-length patterns are in scope — they must be either specified and
-  implemented by every adapter, e.g. via `WITH RECURSIVE` on PostgreSQL, or rejected
-  by the validator), functions, parameter syntax, and result shape.
+- A short OQL spec document defines: supported clauses, pattern forms per the GPML
+  grammar (including whether variable-length/quantified patterns are in scope — they
+  must be either specified and implemented by every adapter, e.g. via
+  `WITH RECURSIVE` on PostgreSQL, or rejected by the validator), functions,
+  parameter syntax, and result shape — each construct cross-referenced to its
+  GQL/GPML counterpart, with OntoForge restrictions (read-only, ontology keys,
+  reserved names) listed as explicit deltas from the standard.
 - Adapter-specific error strings are replaced by OQL validator messages (already
   mostly true today).
 
@@ -295,9 +304,12 @@ compiler approach makes AGE unnecessary.
 1. **D1 — Introduce the persistence port** (`ModelingStore`/`RuntimeStore` protocols in
    `core/ports.py`, Neo4j code moves to `adapters/neo4j/`), adapter owns sessions,
    transactions, DDL, and type conversion.
-2. **D2 — OQL**: adopt option A — the existing validated read-only openCypher-shaped
-   subset becomes OntoForge's own specified query language; parser/validator move to
-   `core/oql/`; compilation is adapter-private.
+2. **D2 — OQL**: adopt option A — the existing validated read-only subset becomes
+   OntoForge's own specified query language; parser/validator move to `core/oql/`;
+   compilation is adapter-private. *The anchoring question within D2 is already
+   settled by the user (2026-07-19): the spec's normative reference is ISO GQL
+   (ISO/IEC 39075:2024) / GPML, shared with SQL/PGQ — not Neo4j Cypher.* Remaining
+   to approve: adopting OQL as such, and the module split.
 3. **D3 — Contract renames with deprecation**: `cypher` → `query` across REST, MCP
    (`execute_query`), AI responses, and frontend types; one-minor-release aliases.
 4. **D4 — Export format 3.0**: saved-query steps use `query`; import keeps accepting

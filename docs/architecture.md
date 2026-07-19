@@ -346,7 +346,7 @@ A `document` value is stored inline on the entity node like any string, but it i
 
 #### Document Chunks
 
-When an embedding provider is configured, each write of a document property synchronously replaces that property's chunk nodes: the text is split into overlapping fixed-size character chunks (paragraph/sentence/whitespace boundaries preferred; sizes configured via `DOCUMENT_CHUNK_SIZE` and `DOCUMENT_CHUNK_OVERLAP`), each chunk is embedded, and the chunks are written as nodes. Without an embedding provider no chunks exist and `document` behaves as a plain long-text property.
+When an embedding provider is configured, each write of a document property synchronously replaces that property's chunk nodes: the text is split into overlapping fixed-size character chunks (paragraph/sentence/whitespace boundaries preferred; sizes configured via `DOCUMENT_CHUNK_SIZE` and `DOCUMENT_CHUNK_OVERLAP`), each chunk is embedded — reusing the stored embedding when a chunk's text is unchanged, so partial writes only re-embed the chunks they touch — and the chunks are written as nodes. Without an embedding provider no chunks exist and `document` behaves as a plain long-text property.
 
 Each chunk node carries two labels:
 

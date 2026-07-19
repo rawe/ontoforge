@@ -23,7 +23,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { DATA_TYPES, deriveKey, isValidKey, toastError } from '@/components/studio/lib'
+import { PARAMETER_DATA_TYPES, deriveKey, isValidKey, toastError } from '@/components/studio/lib'
 import { KeyField } from '@/components/studio/shared'
 import { detectParams } from './resultUtils'
 
@@ -219,7 +219,7 @@ export function SaveQueryDialog({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {DATA_TYPES.map((t) => (
+                      {PARAMETER_DATA_TYPES.map((t) => (
                         <SelectItem key={t} value={t}>
                           <span className="font-mono text-xs">{t}</span>
                         </SelectItem>

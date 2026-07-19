@@ -1224,6 +1224,13 @@ async def import_schema(
                     )
                     for s in sq.steps
                 ]
+                for p in sq.parameters:
+                    if p.data_type == DataType.DOCUMENT.value:
+                        raise ValidationError(
+                            f"Import error: parameter '{p.name}' of saved query "
+                            f"'{sq.key}' has data type 'document'; parameters "
+                            "must be scalar types"
+                        )
                 _validate_pipeline(import_steps, [p.name for p in sq.parameters], sq.key)
                 steps_json = _serialize_json([
                     {
@@ -1710,6 +1717,13 @@ async def upsert_saved_query(
         raise ValidationError(
             f"Invalid query key '{query_key}'. Must match pattern: {AGENT_KEY_PATTERN}"
         )
+
+    for p in body.parameters:
+        if p.data_type == DataType.DOCUMENT:
+            raise ValidationError(
+                f"Saved query parameter '{p.name}' has data type 'document'; "
+                "parameters must be scalar types"
+            )
 
     # Validate pipeline structure and parameter cross-checks
     param_names = [p.name for p in body.parameters]

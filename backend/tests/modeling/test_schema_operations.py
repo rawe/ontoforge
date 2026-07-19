@@ -254,6 +254,61 @@ async def test_import_schema_entity_type_conflict(client):
 
 
 @pytest.mark.asyncio
+async def test_import_rejects_document_saved_query_parameter(client):
+    ont_data = {
+        "ontologyId": "ont-new",
+        "key": "imported",
+        "name": "Imported",
+        "description": None,
+        "createdAt": NOW,
+        "updatedAt": NOW,
+    }
+    with (
+        patch(f"{REPO}.get_ontology_by_key", new_callable=AsyncMock, return_value=None),
+        patch(f"{REPO}.create_ontology", new_callable=AsyncMock, return_value=ont_data),
+        patch(f"{REPO}.upsert_saved_query", new_callable=AsyncMock) as mock_upsert,
+    ):
+        resp = await client.post(
+            "/api/model/import",
+            json={
+                "formatVersion": "2.2",
+                "entityTypes": [],
+                "relationTypes": [],
+                "ontologies": [
+                    {
+                        "key": "imported",
+                        "name": "Imported",
+                        "savedQueries": [
+                            {
+                                "key": "find-people",
+                                "name": "Find People",
+                                "description": "Find people by name",
+                                "steps": [
+                                    {
+                                        "name": "main",
+                                        "type": "cypher",
+                                        "cypher": "MATCH (p:person) RETURN p",
+                                    },
+                                ],
+                                "parameters": [
+                                    {
+                                        "name": "bio",
+                                        "description": "A document",
+                                        "dataType": "document",
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        )
+    assert resp.status_code == 422
+    assert "scalar" in resp.json()["error"]["message"]
+    mock_upsert.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_import_schema_missing_source_entity_type(client):
     with (
         patch(f"{REPO}.get_entity_type_by_key", new_callable=AsyncMock, return_value=None),

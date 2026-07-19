@@ -35,6 +35,12 @@ export const DATA_TYPES: readonly DataType[] = [
   'document',
 ]
 
+/** Saved-query parameters are scalar only — `document` exists only as an
+ * entity property type. */
+export const PARAMETER_DATA_TYPES: readonly DataType[] = DATA_TYPES.filter(
+  (t) => t !== 'document',
+)
+
 /** Hint shown for data types that need explanation beyond their name. */
 export const DATA_TYPE_DESCRIPTIONS: Partial<Record<DataType, string>> = {
   document:

@@ -1,6 +1,6 @@
 # OKF Knowledge-Base Sync
 
-> Import and export knowledge bases in Google's Open Knowledge Format (OKF) — directories of Markdown files with YAML frontmatter — by mapping concept documents to entities with a single `document` property, without making the generic core OKF-aware.
+> Move knowledge between Google's Open Knowledge Format (OKF) — Markdown files with YAML frontmatter — and OntoForge entities with a single `document` property. Built modularly: a pure md↔entity codec, a per-document push/pull primitive that needs no backend changes, and bundle-level sync composed on top. The generic core stays OKF-unaware.
 
 **Status: proposal — open decisions below require approval before implementation.**
 
@@ -14,7 +14,7 @@ The target workflow uses OntoForge as the graph-backed store for such a knowledg
 2. **Pull**: the OntoForge data of an ontology is materialized as an OKF bundle on disk.
 3. **Interactive work** continues through the existing runtime MCP tools.
 
-Today, moving a bundle in or out of OntoForge via MCP means the LLM re-emits every document through individual tool calls — slow, token-expensive, and error-prone. Bulk transfer must be a *program*, not a conversation. The MCP interface remains the primary interactive surface; file-based sync needs a complementary mechanical path, following the same pattern as the existing `ontoforge-sync` skill.
+The core inefficiency of doing this via MCP is not call count — it is that the **document content itself flows through the LLM**. To push an md file, the agent must read it and re-emit the full text as a tool-call argument; to write one, it must re-emit the property payload as file content. Even for a single document that is token-expensive and error-prone. The fundamental primitive needed is therefore a *per-document* transfer the agent triggers by path or ID — `push file.md`, `pull <conceptId>` — where the content moves directly between filesystem and API, bypassing the model's context. Bundle-level sync is then just composition over that primitive. The MCP interface remains the primary interactive surface; the file transfer path is a complementary mechanical tool, following the same pattern as the existing `ontoforge-sync` skill.
 
 ## OKF in one paragraph
 
@@ -52,12 +52,29 @@ What the generic core is missing for this to be efficient and idempotent:
 
 **Recommendation: keep the core generic.** OKF interpretation ("entity = markdown document, frontmatter = properties") is a *convention*, not a core concept. The split:
 
-- **Backend** gains small, generic enhancements that any bulk/file-based integration needs (bulk upsert, additive schema import). Nothing in the backend mentions OKF.
-- **A new plugin skill `ontoforge-okf`** (sibling of `ontoforge-sync`, zero-dependency Node scripts) implements the OKF mapping against the REST API. Claude Code invokes it as a single command — one tool call per sync instead of one per document. This is what makes the workflow efficient: MCP for interactive work, the skill for bulk transfer.
+- **Backend** gains small, generic enhancements only where scale demands them (bulk upsert, additive schema import). Nothing in the backend mentions OKF. The single-document primitive needs **no backend changes**.
+- **A new plugin skill `ontoforge-okf`** (sibling of `ontoforge-sync`, zero-dependency Node scripts) implements the OKF mapping against the REST API. Claude Code invokes it as a single command; document content moves filesystem ↔ API without touching the model's context. MCP stays the interface for interactive queries and in-place edits.
 
-An alternative — native `POST /api/runtime/{key}/okf/import` accepting an uploaded archive, plus a Studio Transfer-page UI — is heavier, bakes a third-party convention into the core, and doesn't fit the filesystem-centric workflow (the bundle lives next to the agent, not next to the server). Rejected under KISS unless a no-local-tooling path becomes a requirement.
+An alternative — native `POST /api/runtime/{key}/okf/import` accepting an uploaded archive, plus a Studio Transfer-page UI — is heavier, bakes a third-party convention into the core, and doesn't fit the filesystem-centric workflow (the files live next to the agent, not next to the server). Rejected under KISS unless a no-local-tooling path becomes a requirement.
 
-### Processes
+### Modular design — three layers
+
+The skill is layered so each concern is usable and testable on its own:
+
+**Layer 1 — Codec (pure mapping, no I/O).** A module that converts between the two representations of one concept:
+- *decode*: md text → `{ frontmatter fields, body }` → an entity property payload (frontmatter keys → scalar properties per the mapping config, body → the document property, file path → `conceptId`).
+- *encode*: entity payload → md text (properties → frontmatter in stable key order, document property → body, `conceptId` → file path).
+- Owns all convention knowledge: reserved filenames, type mapping, unknown-key preservation, tag serialization. No HTTP, no filesystem — both directions are pure functions, which is what makes round-tripping verifiable.
+
+**Layer 2 — Single-document transfer (the core primitive).** Two commands over the existing API, no backend changes:
+- `okf-push.mjs <file.md> --ontology <key>` — decode the file, look up the entity by `conceptId` (one filtered `GET /entities/{type}` call), then `POST` (new) or `PATCH` (existing) the scalar properties and write the body through the entity payload's document property. Idempotent per file.
+- `okf-pull.mjs <conceptId> --ontology <key>` (or `--all-into <dir>`) — fetch the entity with the document value via `fields` projection, encode, write the file.
+
+This is the efficiency fix for the Claude Code workflow: the agent edits a file with its normal file tools, then runs one command; or materializes an entity as a file to read/edit it natively. Content never round-trips through tool-call arguments.
+
+**Layer 3 — Bundle sync (composition).** `okf-import.mjs` / `okf-export.mjs` walk a tree and apply Layer 2 per file, adding the cross-document concerns: link extraction → relations, schema bootstrap, `index.md` generation, `--prune`. Phase 1 runs on per-item calls (O(N) requests — fine for hundreds of concepts); the Phase 2 bulk endpoints slot in under Layer 3 without touching Layers 1–2.
+
+### Processes (Layer 3 detail)
 
 **Import (bundle → OntoForge)** — `okf-import.mjs <bundle-dir> --ontology <key>`
 1. Walk the tree, parse frontmatter, skip reserved files; derive concept IDs.

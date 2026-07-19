@@ -20,3 +20,10 @@ async def create_stores():
 
 async def close_stores() -> None:
     await close_driver()
+
+
+async def wipe() -> None:
+    """Delete all stored data. Test support only — never used by the app."""
+    driver = await get_driver()
+    async with driver.session() as session:
+        await session.run("MATCH (n) DETACH DELETE n")

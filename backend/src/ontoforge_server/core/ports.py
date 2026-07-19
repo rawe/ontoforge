@@ -54,6 +54,18 @@ async def close_stores() -> None:
     _runtime_store = None
 
 
+async def wipe_database() -> None:
+    """Delete all stored data via the active adapter. Test support only."""
+    if settings.DB_BACKEND == "neo4j":
+        from ontoforge_server.adapters import neo4j as adapter
+
+        await adapter.wipe()
+    else:
+        raise ValueError(
+            f"Unknown DB_BACKEND '{settings.DB_BACKEND}' (supported: neo4j)"
+        )
+
+
 def get_modeling_store() -> Any:
     assert _modeling_store is not None, "Stores not initialized"
     return _modeling_store

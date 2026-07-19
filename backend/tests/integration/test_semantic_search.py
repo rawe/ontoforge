@@ -14,7 +14,7 @@ from ontoforge_server.core.embedding import (
     close_embedding_provider,
     init_embedding_provider,
 )
-from tests.integration.conftest import check_neo4j, check_ollama_model
+from tests.integration.conftest import check_database, check_ollama_model
 
 EMBEDDING_MODEL = "nomic-embed-text"
 
@@ -24,7 +24,7 @@ pytestmark = pytest.mark.integration
 @pytest.fixture(scope="module")
 async def services_available():
     """Skip the entire module if Neo4j or Ollama aren't available."""
-    if not await check_neo4j():
+    if not await check_database():
         pytest.skip("Neo4j not available")
     if not await check_ollama_model(EMBEDDING_MODEL):
         pytest.skip(f"Ollama not available or model '{EMBEDDING_MODEL}' not pulled")

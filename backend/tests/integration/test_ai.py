@@ -11,7 +11,7 @@ import pytest
 
 from ontoforge_server.config import settings
 from ontoforge_server.core.ai import init_ai_model
-from tests.integration.conftest import check_neo4j, check_ollama_model
+from tests.integration.conftest import check_database, check_ollama_model
 
 # Model used for AI integration tests — must support tool calling
 AI_MODEL = "qwen3:14b"
@@ -22,7 +22,7 @@ pytestmark = pytest.mark.integration
 @pytest.fixture(scope="module")
 async def services_available():
     """Skip the entire module if Neo4j or Ollama aren't available."""
-    if not await check_neo4j():
+    if not await check_database():
         pytest.skip("Neo4j not available")
     if not await check_ollama_model(AI_MODEL):
         pytest.skip(f"Ollama not available or model '{AI_MODEL}' not pulled")

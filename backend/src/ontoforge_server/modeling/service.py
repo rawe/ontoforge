@@ -414,6 +414,10 @@ async def create_property(
     cascade: bool = False,
     driver: AsyncDriver = Depends(get_driver),
 ) -> PropertyDefinitionResponse:
+    if owner_label == "RelationType" and body.data_type == DataType.DOCUMENT:
+        raise ValidationError(
+            "Document properties are only supported on entity types"
+        )
     async with driver.session() as session:
         await _ensure_owner_exists(session, owner_id, owner_label)
         existing = await repository.get_property_by_key(
@@ -1153,6 +1157,12 @@ async def import_schema(
                 rt.from_entity_type_key, rt.to_entity_type_key,
             )
             for prop in rt.properties:
+                if prop.data_type == DataType.DOCUMENT.value:
+                    raise ValidationError(
+                        f"Import error: property '{prop.key}' on relation type "
+                        f"'{rt.key}' has data type 'document'; document properties "
+                        "are only supported on entity types"
+                    )
                 prop_id = str(uuid4())
                 await repository.create_property(
                     session, rt_id, "RelationType", prop_id,
@@ -1214,6 +1224,13 @@ async def import_schema(
                     )
                     for s in sq.steps
                 ]
+                for p in sq.parameters:
+                    if p.data_type == DataType.DOCUMENT.value:
+                        raise ValidationError(
+                            f"Import error: parameter '{p.name}' of saved query "
+                            f"'{sq.key}' has data type 'document'; parameters "
+                            "must be scalar types"
+                        )
                 _validate_pipeline(import_steps, [p.name for p in sq.parameters], sq.key)
                 steps_json = _serialize_json([
                     {
@@ -1700,6 +1717,13 @@ async def upsert_saved_query(
         raise ValidationError(
             f"Invalid query key '{query_key}'. Must match pattern: {AGENT_KEY_PATTERN}"
         )
+
+    for p in body.parameters:
+        if p.data_type == DataType.DOCUMENT:
+            raise ValidationError(
+                f"Saved query parameter '{p.name}' has data type 'document'; "
+                "parameters must be scalar types"
+            )
 
     # Validate pipeline structure and parameter cross-checks
     param_names = [p.name for p in body.parameters]

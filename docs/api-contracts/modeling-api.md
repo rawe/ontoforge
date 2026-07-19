@@ -248,7 +248,7 @@ Add a property definition to an entity type.
 }
 ```
 
-The `document` data type holds large text content, interpreted as Markdown (see `architecture.md` §4.2 for its storage model). When an embedding provider is configured, creating a document property also creates its chunk vector index; deleting the property drops its chunks and index.
+The `document` data type holds large text content, interpreted as Markdown (see `architecture.md` §4.2 for its storage model). It is only valid on entity types — creating a document property on a relation type is rejected with 422. When an embedding provider is configured, creating a document property also creates its chunk vector index; deleting the property drops its chunks and index.
 
 **Response:** `201 Created`
 ```json
@@ -308,7 +308,7 @@ The same four endpoints exist under relation types:
 - `PUT /api/model/ontologies/{ontologyId}/relation-types/{relationTypeId}/properties/{propertyId}`
 - `DELETE /api/model/ontologies/{ontologyId}/relation-types/{relationTypeId}/properties/{propertyId}`
 
-Request and response shapes are identical to entity type properties.
+Request and response shapes are identical to entity type properties, except that the `document` data type is not allowed on relation types (422).
 
 ---
 
@@ -493,7 +493,7 @@ updatedAt: datetime
 key: string (required, pattern: ^[a-z][a-z0-9_]*$)
 displayName: string (required)
 description: string (optional)
-dataType: string (required, enum: string | integer | float | boolean | date | datetime | document)
+dataType: string (required, enum: string | integer | float | boolean | date | datetime | document; document only on entity types)
 required: boolean (default: false)
 defaultValue: string (optional)
 ```

@@ -66,7 +66,7 @@ import {
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { TypedValueInput } from './TypedValueInput'
-import { DATA_TYPES, coerceTypedValue, deriveKey, invalidateModeling, isValidKey, toastError } from './lib'
+import { PARAMETER_DATA_TYPES, coerceTypedValue, deriveKey, invalidateModeling, isValidKey, toastError } from './lib'
 import { KeyField } from './shared'
 
 /* ------------------------------ bindings editor ------------------------------ */
@@ -580,7 +580,7 @@ function SavedQueryDialog({ ontologyKey, query, open, onOpenChange }: SavedQuery
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {DATA_TYPES.map((t) => (
+                    {PARAMETER_DATA_TYPES.map((t) => (
                       <SelectItem key={t} value={t}>
                         <span className="font-mono text-xs">{t}</span>
                       </SelectItem>

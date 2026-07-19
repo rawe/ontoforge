@@ -126,6 +126,31 @@ async def test_upsert_saved_query_create(client):
 
 
 @pytest.mark.asyncio
+async def test_upsert_saved_query_rejects_document_parameter(client):
+    with patch(f"{REPO}.upsert_saved_query", new_callable=AsyncMock) as mock_upsert:
+        resp = await client.put(
+            "/api/model/ontologies/test_onto/saved-queries/find-people",
+            json={
+                "name": "Find People",
+                "description": "Find people by name",
+                "steps": [
+                    {
+                        "name": "main",
+                        "type": "cypher",
+                        "cypher": "MATCH (p:person) WHERE p.name CONTAINS $name RETURN p",
+                    },
+                ],
+                "parameters": [
+                    {"name": "name", "description": "Name to search for", "dataType": "document"},
+                ],
+            },
+        )
+    assert resp.status_code == 422
+    assert "scalar" in resp.json()["error"]["message"]
+    mock_upsert.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_upsert_saved_query_update(client):
     """Updates an existing saved query (returns 200)."""
 

@@ -1,8 +1,21 @@
 # Database Independence — Implementation Guide
 
 > Companion to [database-independence.md](database-independence.md) (the proposal —
-> read it first; this guide does not repeat the rationale). **Do not start before the
-> decisions in proposal §7 are approved.**
+> read it first; this guide does not repeat the rationale). Approved 2026-07-19 as
+> decisions 008–010.
+>
+> **Status (2026-07-19): Phases 1–4 are implemented** on this branch. Notable
+> deviations from the plan as written: the saved-query step field is `oql` (not
+> `query` — that name was already taken by the semantic-search search text, see
+> decision 010); the store classes wrap adapter-private query modules
+> (`modeling_queries`/`runtime_queries`) instead of absorbing them, so unit tests
+> patch the query modules; managed read/write transactions were deferred to keep
+> the extraction behavior-preserving (today's per-statement auto-commit semantics
+> are unchanged); the OQL spec document (`docs/oql-spec.md`, step 3.2) and the
+> explicit Protocol classes in `core/ports.py` are still open. Phase 5
+> (PostgreSQL adapter) remains future work. The integration suite could not be
+> executed in the implementation environment (no database reachable) and must be
+> run against a live Neo4j before release.
 
 ## Ground Rules
 

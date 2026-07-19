@@ -25,6 +25,7 @@ from ontoforge_server.modeling.schemas import (
     RelationTypeCreate,
     RelationTypeResponse,
     RelationTypeUpdate,
+    SavedQueryHealthResponse,
     SavedQueryResponse,
     SavedQueryUpsert,
     ValidationResult,
@@ -493,6 +494,17 @@ async def list_saved_queries(
     driver: AsyncDriver = Depends(get_driver),
 ):
     return await service.list_saved_queries(ontology_key, driver)
+
+
+@router.get(
+    "/ontologies/{ontology_key}/saved-queries/health",
+    response_model=SavedQueryHealthResponse,
+)
+async def saved_query_health(
+    ontology_key: str,
+    driver: AsyncDriver = Depends(get_driver),
+):
+    return await service.saved_query_health(ontology_key, driver)
 
 
 @router.put(

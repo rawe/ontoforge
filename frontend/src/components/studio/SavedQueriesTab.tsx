@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  AlertTriangle,
   ArrowDown,
   ArrowUp,
   Braces,
@@ -16,9 +17,9 @@ import * as model from '@/api/model'
 import * as runtime from '@/api/runtime'
 import { qk } from '@/api/queryKeys'
 import type {
-  DataType,
   JsonValue,
   Ontology,
+  ParamDataType,
   QueryResult,
   SavedQuery,
   SavedQueryParameter,
@@ -339,6 +340,8 @@ function SavedQueryDialog({ ontologyKey, query, open, onOpenChange }: SavedQuery
   const [keyTouched, setKeyTouched] = useState(false)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [exampleQuestions, setExampleQuestions] = useState('')
+  const [maxRows, setMaxRows] = useState('')
   const [steps, setSteps] = useState<SavedQueryStep[]>([])
   const [parameters, setParameters] = useState<SavedQueryParameter[]>([])
 
@@ -350,8 +353,16 @@ function SavedQueryDialog({ ontologyKey, query, open, onOpenChange }: SavedQuery
       setKeyTouched(isEdit)
       setName(query?.name ?? '')
       setDescription(query?.description ?? '')
+      setExampleQuestions((query?.exampleQuestions ?? []).join('\n'))
+      setMaxRows(query?.maxRows != null ? String(query.maxRows) : '')
       setSteps(query?.steps.map((s) => ({ ...s })) ?? [{ name: 'step1', type: 'cypher', cypher: '' }])
-      setParameters(query?.parameters.map((p) => ({ ...p })) ?? [])
+      setParameters(
+        query?.parameters.map((p) => ({
+          ...p,
+          // Edit defaults as raw strings; coerced back on save.
+          default: p.default != null ? String(p.default) : undefined,
+        })) ?? [],
+      )
     }
   }
 
@@ -384,6 +395,26 @@ function SavedQueryDialog({ ontologyKey, query, open, onOpenChange }: SavedQuery
       return base
     })
 
+  const cleanParameters = (): SavedQueryParameter[] =>
+    parameters.map((p) => {
+      const out: SavedQueryParameter = {
+        name: p.name,
+        description: p.description ?? '',
+        dataType: p.dataType,
+      }
+      const rawDefault = p.default != null ? String(p.default).trim() : ''
+      if (rawDefault !== '') {
+        out.default = coerceTypedValue(
+          p.dataType === 'entity_ref' ? 'string' : p.dataType,
+          rawDefault,
+        )
+      }
+      if (p.dataType === 'entity_ref' && p.entityTypeKey !== undefined) {
+        out.entityTypeKey = p.entityTypeKey
+      }
+      return out
+    })
+
   const save = useMutation({
     // NOTE: the backend requires `description` as a plain string on saved
     // queries and their parameters (it is embedded for semantic discovery).
@@ -391,8 +422,13 @@ function SavedQueryDialog({ ontologyKey, query, open, onOpenChange }: SavedQuery
       model.upsertSavedQuery(ontologyKey, key, {
         name: name.trim(),
         description: description.trim(),
+        exampleQuestions: exampleQuestions
+          .split('\n')
+          .map((q) => q.trim())
+          .filter((q) => q !== ''),
         steps: cleanSteps(),
-        parameters: parameters.map((p) => ({ ...p, description: p.description ?? '' })),
+        parameters: cleanParameters(),
+        maxRows: maxRows.trim() === '' ? undefined : Number(maxRows),
       }),
     onSuccess: (saved) => {
       invalidateModeling(queryClient)
@@ -409,7 +445,11 @@ function SavedQueryDialog({ ontologyKey, query, open, onOpenChange }: SavedQuery
         ? (s.cypher ?? '').trim() !== ''
         : (s.entityTypeKey ?? '') !== '' && (s.query ?? '').trim() !== ''),
   )
-  const paramsValid = parameters.every((p) => p.name.trim() !== '')
+  const paramsValid = parameters.every(
+    (p) =>
+      p.name.trim() !== '' &&
+      (p.dataType !== 'entity_ref' || (p.entityTypeKey ?? '') !== ''),
+  )
   const valid =
     isValidKey(key) && name.trim() !== '' && steps.length > 0 && stepsValid && paramsValid
 
@@ -463,6 +503,20 @@ function SavedQueryDialog({ ontologyKey, query, open, onOpenChange }: SavedQuery
               rows={2}
               placeholder="Used for semantic discovery of this query — describe what it answers."
             />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="sq-examples">Example questions</Label>
+            <Textarea
+              id="sq-examples"
+              value={exampleQuestions}
+              onChange={(e) => setExampleQuestions(e.target.value)}
+              rows={2}
+              placeholder={'One question per line, e.g.\nWho knows Kubernetes?'}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Embedded together with the description — improves semantic discovery and
+              agent tool descriptions.
+            </p>
           </div>
 
           <div className="grid gap-2">
@@ -541,69 +595,144 @@ function SavedQueryDialog({ ontologyKey, query, open, onOpenChange }: SavedQuery
               </Button>
             </div>
             {parameters.map((p, i) => (
-              <div key={i} className="flex items-center gap-1.5">
-                <Input
-                  value={p.name}
-                  onChange={(e) =>
-                    setParameters((prev) =>
-                      prev.map((q, j) => (j === i ? { ...q, name: e.target.value } : q)),
-                    )
-                  }
-                  placeholder="name"
-                  className="h-7 w-36 font-mono text-xs"
-                  aria-label="Parameter name"
-                />
-                <Input
-                  value={p.description ?? ''}
-                  onChange={(e) =>
-                    setParameters((prev) =>
-                      prev.map((q, j) =>
-                        j === i
-                          ? { ...q, description: e.target.value === '' ? null : e.target.value }
-                          : q,
-                      ),
-                    )
-                  }
-                  placeholder="description"
-                  className="h-7 flex-1 text-xs"
-                  aria-label="Parameter description"
-                />
-                <Select
-                  value={p.dataType}
-                  onValueChange={(v) =>
-                    setParameters((prev) =>
-                      prev.map((q, j) => (j === i ? { ...q, dataType: v as DataType } : q)),
-                    )
-                  }
-                >
-                  <SelectTrigger className="h-7 w-28 text-xs" aria-label="Parameter data type">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PARAMETER_DATA_TYPES.map((t) => (
-                      <SelectItem key={t} value={t}>
-                        <span className="font-mono text-xs">{t}</span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label="Remove parameter"
-                  onClick={() => setParameters((prev) => prev.filter((_, j) => j !== i))}
-                >
-                  <X className="size-3" />
-                </Button>
+              <div key={i} className="grid gap-1.5 rounded-lg border bg-muted/20 p-2">
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    value={p.name}
+                    onChange={(e) =>
+                      setParameters((prev) =>
+                        prev.map((q, j) => (j === i ? { ...q, name: e.target.value } : q)),
+                      )
+                    }
+                    placeholder="name"
+                    className="h-7 w-36 font-mono text-xs"
+                    aria-label="Parameter name"
+                  />
+                  <Input
+                    value={p.description ?? ''}
+                    onChange={(e) =>
+                      setParameters((prev) =>
+                        prev.map((q, j) =>
+                          j === i
+                            ? { ...q, description: e.target.value === '' ? null : e.target.value }
+                            : q,
+                        ),
+                      )
+                    }
+                    placeholder="description"
+                    className="h-7 flex-1 text-xs"
+                    aria-label="Parameter description"
+                  />
+                  <Select
+                    value={p.dataType}
+                    onValueChange={(v) =>
+                      setParameters((prev) =>
+                        prev.map((q, j) =>
+                          j === i
+                            ? {
+                                ...q,
+                                dataType: v as ParamDataType,
+                                entityTypeKey:
+                                  v === 'entity_ref' ? q.entityTypeKey : undefined,
+                              }
+                            : q,
+                        ),
+                      )
+                    }
+                  >
+                    <SelectTrigger className="h-7 w-28 text-xs" aria-label="Parameter data type">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PARAMETER_DATA_TYPES.map((t) => (
+                        <SelectItem key={t} value={t}>
+                          <span className="font-mono text-xs">{t}</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label="Remove parameter"
+                    onClick={() => setParameters((prev) => prev.filter((_, j) => j !== i))}
+                  >
+                    <X className="size-3" />
+                  </Button>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {p.dataType === 'entity_ref' && (
+                    <Select
+                      value={p.entityTypeKey ?? ''}
+                      onValueChange={(v) =>
+                        setParameters((prev) =>
+                          prev.map((q, j) => (j === i ? { ...q, entityTypeKey: v } : q)),
+                        )
+                      }
+                    >
+                      <SelectTrigger
+                        className="h-7 w-44 text-xs"
+                        aria-label="Referenced entity type"
+                      >
+                        <SelectValue placeholder="Entity type…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {entityTypeKeys.map((etKey) => (
+                          <SelectItem key={etKey} value={etKey}>
+                            <span className="flex items-center gap-1.5">
+                              <TypeDot typeKey={etKey} />
+                              <span className="font-mono text-xs">{etKey}</span>
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  <Input
+                    value={p.default != null ? String(p.default) : ''}
+                    onChange={(e) =>
+                      setParameters((prev) =>
+                        prev.map((q, j) =>
+                          j === i
+                            ? {
+                                ...q,
+                                default: e.target.value === '' ? undefined : e.target.value,
+                              }
+                            : q,
+                        ),
+                      )
+                    }
+                    placeholder="default (makes the parameter optional)"
+                    className="h-7 flex-1 font-mono text-xs"
+                    aria-label="Parameter default value"
+                  />
+                </div>
               </div>
             ))}
             {parameters.length > 0 && (
               <p className="text-[11px] text-muted-foreground">
                 Reference parameters in Cypher and query text as{' '}
-                <code className="font-mono">$name</code>.
+                <code className="font-mono">$name</code>. Parameters with a default are
+                optional at run time; <code className="font-mono">entity_ref</code>{' '}
+                parameters accept an entity <code className="font-mono">_id</code> or a
+                description resolved via semantic search.
               </p>
             )}
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="sq-max-rows">Max rows per Cypher step</Label>
+            <Input
+              id="sq-max-rows"
+              type="number"
+              min={1}
+              max={10000}
+              value={maxRows}
+              onChange={(e) => setMaxRows(e.target.value)}
+              placeholder="1000"
+              className="w-40"
+            />
           </div>
 
           <DialogFooter>
@@ -671,7 +800,13 @@ function SavedQueryRunner({
             <div key={p.name} className="grid gap-1">
               <Label htmlFor={`run-${query.key}-${p.name}`} className="text-xs">
                 <span className="font-mono">{p.name}</span>
-                <span className="ml-1 font-normal text-muted-foreground">({p.dataType})</span>
+                <span className="ml-1 font-normal text-muted-foreground">
+                  ({p.dataType}
+                  {p.dataType === 'entity_ref' && p.entityTypeKey !== undefined
+                    ? ` → ${p.entityTypeKey}`
+                    : ''}
+                  {p.default !== undefined ? `, default ${String(p.default)}` : ''})
+                </span>
               </Label>
               <TypedValueInput
                 id={`run-${query.key}-${p.name}`}
@@ -701,6 +836,27 @@ function SavedQueryRunner({
           </>
         )}
       </div>
+      {result?.pipeline !== undefined && (
+        <p className="font-mono text-[11px] text-muted-foreground">
+          {result.pipeline
+            .map(
+              (s) =>
+                `${s.step}: ${s.rows} row${s.rows === 1 ? '' : 's'}${
+                  s.truncated === true ? ' (truncated)' : ''
+                }`,
+            )
+            .join(' · ')}
+          {result.resolvedParameters !== undefined &&
+            Object.entries(result.resolvedParameters).map(([param, r]) => (
+              <span key={param} className="ml-2">
+                {param} → {r.entityId}
+                {r.matched === 'semantic' && r.score !== undefined
+                  ? ` (score ${r.score.toFixed(2)})`
+                  : ''}
+              </span>
+            ))}
+        </p>
+      )}
       {error !== null && (
         <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-destructive/40 bg-destructive/5 p-3 font-mono text-xs text-destructive">
           {error}
@@ -767,6 +923,17 @@ export function SavedQueriesTab({ ontology }: { ontology: Ontology }) {
   })
   const queries = queriesQuery.data
 
+  // Re-validates every saved query against the current schema, so queries
+  // broken by later schema/scope changes are flagged in the list.
+  const healthQuery = useQuery({
+    queryKey: qk.model('ontologies', ontology.key, 'saved-queries', 'health'),
+    queryFn: () => model.savedQueryHealth(ontology.key),
+    enabled: queries !== undefined && queries.length > 0,
+  })
+  const healthByKey = new Map(
+    (healthQuery.data?.queries ?? []).map((entry) => [entry.key, entry]),
+  )
+
   const remove = useMutation({
     mutationFn: (queryKey: string) => model.deleteSavedQuery(ontology.key, queryKey),
     onSuccess: () => {
@@ -829,6 +996,15 @@ export function SavedQueriesTab({ ontology }: { ontology: Ontology }) {
                     {q.parameters.length > 0 && (
                       <Badge variant="outline" className="text-[10px]">
                         {q.parameters.length} param{q.parameters.length === 1 ? '' : 's'}
+                      </Badge>
+                    )}
+                    {healthByKey.get(q.key)?.valid === false && (
+                      <Badge
+                        variant="destructive"
+                        className="gap-1 text-[10px]"
+                        title={healthByKey.get(q.key)?.errors.join('\n')}
+                      >
+                        <AlertTriangle className="size-3" /> broken
                       </Badge>
                     )}
                   </div>

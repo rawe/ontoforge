@@ -208,8 +208,19 @@ async def tool_list_saved_queries(ctx: RunContext[AiDeps]) -> list[dict]:
             "key": sq.key,
             "name": sq.name,
             "description": sq.description,
+            **(
+                {"exampleQuestions": sq.example_questions}
+                if sq.example_questions
+                else {}
+            ),
             "parameters": [
-                {"name": p.name, "description": p.description, "dataType": p.data_type}
+                service._parameter_summary({
+                    "name": p.name,
+                    "description": p.description,
+                    "dataType": p.data_type,
+                    "default": p.default,
+                    "entityTypeKey": p.entity_type_key,
+                })
                 for p in sq.parameters
             ],
         }
@@ -230,9 +241,11 @@ async def tool_run_saved_query(
 async def tool_search_saved_queries(
     ctx: RunContext[AiDeps],
     query: str,
+    limit: int = 5,
 ) -> list[dict]:
+    limit = max(1, min(limit, 20))
     return await service.search_saved_queries(
-        ctx.deps.ontology_key, query, 3, 0.7, ctx.deps.driver,
+        ctx.deps.ontology_key, query, limit, 0.5, ctx.deps.driver,
     )
 
 
@@ -296,23 +309,27 @@ _AGENT_TOOL_DEFS: list[tuple[Callable, str, str]] = [
     (
         tool_list_saved_queries,
         TOOL_LIST_SAVED_QUERIES,
-        "List available saved queries with their parameters. "
-        "Each query has a key, name, description, and parameter definitions.",
+        "List available saved queries with their parameters. Each query has a "
+        "key, name, description, optional example questions, and parameter "
+        "definitions. Parameters with a default are optional.",
     ),
     (
         tool_run_saved_query,
         TOOL_RUN_SAVED_QUERY,
         "Execute a saved query by key with parameter values. "
         "Use list_saved_queries first to discover available queries and "
-        "their required parameters.",
+        "their required parameters. The response includes a 'pipeline' block "
+        "with per-step row counts — if results are empty, it shows which step "
+        "returned nothing. entity_ref parameters accept an entity _id or a "
+        "name/description, which is resolved via semantic search.",
     ),
     (
         tool_search_saved_queries,
         TOOL_SEARCH_SAVED_QUERIES,
         "Search saved queries by semantic similarity to a natural language query. "
         "Returns the most relevant saved queries ranked by how well their "
-        "description matches your query. Use this to find the right saved query "
-        "for a user's intent instead of listing all queries.",
+        "description and example questions match. Use this to find the right "
+        "saved query for a user's intent instead of listing all queries.",
     ),
 ]
 

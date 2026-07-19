@@ -28,6 +28,11 @@ import { formatQueryError } from './resultUtils'
 
 /* --------------------------------- run panel --------------------------------- */
 
+/** A parameter with a default (or explicit required=false) may be left blank. */
+function isOptionalParam(p: SavedQuery['parameters'][number]): boolean {
+  return p.required === false || p.default !== undefined
+}
+
 function RunPanel({
   ontologyKey,
   query,
@@ -75,7 +80,9 @@ function RunPanel({
     if (autoRun) mutate()
   }, [autoRun, mutate])
 
-  const allParamsFilled = query.parameters.every((p) => (raw[p.name] ?? '').trim() !== '')
+  const allParamsFilled = query.parameters.every(
+    (p) => isOptionalParam(p) || (raw[p.name] ?? '').trim() !== '',
+  )
 
   const copyCurl = () => {
     const url = `${window.location.origin}/api/runtime/${ontologyKey}/saved-queries/${query.key}/run`
@@ -96,9 +103,13 @@ function RunPanel({
               <Label htmlFor={`lib-run-${query.key}-${p.name}`} className="text-xs">
                 <span className="font-mono">{p.name}</span>
                 <span className="ml-1 font-normal text-muted-foreground">
-                  ({p.dataType})
+                  ({p.dataType}
+                  {p.dataType === 'entity_ref' && p.entityTypeKey !== undefined
+                    ? ` → ${p.entityTypeKey}`
+                    : ''}
+                  {p.default !== undefined ? `, default ${String(p.default)}` : ''})
                 </span>
-                <span className="text-destructive">*</span>
+                {!isOptionalParam(p) && <span className="text-destructive">*</span>}
               </Label>
               <TypedValueInput
                 id={`lib-run-${query.key}-${p.name}`}
@@ -132,6 +143,19 @@ function RunPanel({
 
       {error !== null && <QueryErrorBlock message={error} />}
 
+      {run?.result.pipeline !== undefined && (
+        <p className="font-mono text-[11px] text-muted-foreground">
+          {run.result.pipeline
+            .map(
+              (s) =>
+                `${s.step}: ${s.rows} row${s.rows === 1 ? '' : 's'}${
+                  s.truncated === true ? ' (truncated)' : ''
+                }`,
+            )
+            .join(' · ')}
+        </p>
+      )}
+
       {run !== null && (
         <ResultsPanel
           ontologyKey={ontologyKey}
@@ -148,8 +172,10 @@ function RunPanel({
 /* ----------------------------------- cards ----------------------------------- */
 
 function stepBadges(query: SavedQuery) {
-  const cypherCount = query.steps.filter((s) => s.type === 'cypher').length
-  const semanticCount = query.steps.filter((s) => s.type === 'semantic_search').length
+  // Semantic search results carry no steps — badges are simply omitted.
+  const steps = query.steps ?? []
+  const cypherCount = steps.filter((s) => s.type === 'cypher').length
+  const semanticCount = steps.filter((s) => s.type === 'semantic_search').length
   const badges: string[] = []
   if (cypherCount > 0) badges.push(`${cypherCount} cypher`)
   if (semanticCount > 0) badges.push(`${semanticCount} semantic`)
@@ -311,7 +337,7 @@ export function LibraryTab({
                   ontologyKey={ontologyKey}
                   query={q}
                   relationTypes={relationTypes}
-                  autoRun={runKey === q.key && q.parameters.length === 0}
+                  autoRun={runKey === q.key && q.parameters.every(isOptionalParam)}
                 />
               )}
             </div>

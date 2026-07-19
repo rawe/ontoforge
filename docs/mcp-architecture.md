@@ -260,11 +260,12 @@ Properties are managed through unified tools that work on both entity types and 
 
 | Tool | Arguments | Returns | Description |
 |------|-----------|---------|-------------|
-| `list_saved_queries` | — | List of saved queries with key, name, description, parameters | List all saved queries defined for this ontology. |
-| `set_saved_query` | `key`, `name`, `description`, `cypher`, `parameters` (list of `{name, description, dataType}`) | Created/updated saved query | Create or update a saved query. Cypher is validated against the scoped schema at creation time. Parameters must match `$param` references in the Cypher. |
-| `delete_saved_query` | `key` | Confirmation | Delete a saved query. |
+| `list_saved_queries` | — | List of saved queries with key, name, description, example questions, steps, parameters, maxRows | List all saved queries defined for this ontology. |
+| `set_saved_query` | `key`, `name`, `description`, `steps` (list of step objects), `parameters` (opt, list of `{name, description, dataType, default?, entityTypeKey?}`), `example_questions` (opt, list of strings), `max_rows` (opt) | Created/updated saved query | Create or update a saved query pipeline. Cypher steps are validated against the scoped schema; per-step `$param` references must be covered by declared parameters or the step's own bindings. Parameters with a `default` are optional at run time; `entity_ref` parameters need an `entityTypeKey`. |
+| `delete_saved_query` | `query_key` | Confirmation | Delete a saved query. |
+| `check_saved_queries` | — | `{queries: [{key, name, valid, errors}], valid}` | Re-validate all saved queries against the current schema without executing them — surfaces queries broken by schema or scope changes. |
 
-### 3.2 Runtime MCP Tools (20 tools)
+### 3.2 Runtime MCP Tools (20 static tools + one per saved query)
 
 Entity-returning tools (`list_entities`, `get_entity`, `get_neighbors`, `cypher_query`, `run_saved_query`, `semantic_search`) share the REST service layer, so `document` properties appear as stubs — never inline content (see `api-contracts/runtime-api.md` §3, Document Properties in Entity Reads). Content is read via `get_document`.
 
@@ -324,9 +325,15 @@ Entity-returning tools (`list_entities`, `get_entity`, `get_neighbors`, `cypher_
 
 | Tool | Arguments | Returns | Description |
 |------|-----------|---------|-------------|
-| `list_saved_queries` | — | List of saved queries with key, name, description, parameters | List all saved queries available for this ontology. |
-| `search_saved_queries` | `query` (string) | List of saved queries with key, name, description, parameters, score | Search saved queries by semantic similarity to a natural language description. Returns up to 3 results above 0.7 similarity. Requires embedding provider. |
-| `run_saved_query` | `query_key`, `parameters` (object) | `{"columns": [...], "results": [...]}` | Execute a saved query with the provided parameter values. Parameters are type-coerced and passed natively to Neo4j. |
+| `list_saved_queries` | — | List of saved queries with key, name, description, example questions, parameters | List all saved queries available for this ontology. Steps are omitted — the agent never needs the underlying Cypher. Parameter definitions carry `dataType`, `required`, and `default`/`entityTypeKey` when set. |
+| `search_saved_queries` | `query` (string), `limit` (opt, default 5, max 20) | List of saved queries with key, name, description, example questions, parameters, score | Search saved queries by semantic similarity to a natural language description. The embedding covers description + example questions; results above 0.5 similarity. Requires embedding provider. |
+| `run_saved_query` | `query_key`, `params` (object) | Last step's output plus `pipeline` (per-step row counts and truncation flags) and `resolvedParameters` (entity_ref resolutions) | Execute a saved query. Parameters without a default are required; values are type-coerced and passed natively to Neo4j. `entity_ref` parameters accept an entity `_id` or a name/description resolved via semantic search — unresolvable references fail with a candidate list. |
+
+#### Dynamic Per-Query Tools
+
+Beyond the static tools, the runtime MCP server exposes **each saved query of the connected ontology as its own tool** named `query_<key>` (e.g. `query_people_by_skill`). The tool's title is the query name, its description combines the query description and example questions, and its input schema is generated from the parameter definitions — typed properties, `default` values, and a `required` list containing exactly the parameters without defaults. Calling a dynamic tool is equivalent to `run_saved_query` with that key.
+
+This gives agents first-class, schema-validated tools for the ontology's curated queries: an MCP client sees `query_people_by_skill(skill, limit=10)` with typed arguments instead of composing a generic `run_saved_query` call. The tool list follows the ontology resolved per request, so each `/mcp/runtime/{ontologyKey}` mount advertises exactly that ontology's queries.
 
 ---
 

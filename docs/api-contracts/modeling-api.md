@@ -375,7 +375,7 @@ Import an ontology from a JSON payload.
 
 ### POST /api/model/rebuild-embeddings
 
-Regenerate all embedding vectors for entity instances and saved queries. Ensures Neo4j vector indexes exist, then iterates all entities and saved queries to (re-)compute their embeddings. For entities with document properties, the document chunks are also rebuilt (existing chunks deleted, text re-chunked and re-embedded).
+Regenerate all embedding vectors for entity instances and saved queries. Ensures Neo4j vector indexes exist, then iterates all entities and saved queries to (re-)compute their embeddings (for saved queries, the embedded text is the description plus the example questions). For entities with document properties, the document chunks are also rebuilt (existing chunks deleted, text re-chunked and re-embedded).
 
 Use this after data import, after changing the embedding model or dimensions, or to repair missing/corrupted indexes.
 
@@ -620,71 +620,39 @@ Saved queries are managed per ontology. The path uses `ontologyKey` (not UUID) f
 
 List all saved queries for an ontology.
 
+**Response:** `200 OK` — array of `SavedQueryResponse` (see §12).
+
+**Errors:** 404 if ontology not found.
+
+### GET /api/model/ontologies/{ontologyKey}/saved-queries/health
+
+Re-validate every saved query of the ontology against the current schema, without executing anything. Surfaces queries broken by later schema or scope changes (renamed types, removed properties, entity types dropped from the scope).
+
 **Response:** `200 OK`
 ```json
-[
-  {
-    "key": "string",
-    "name": "string",
-    "description": "string",
-    "cypher": "string",
-    "parameters": [
-      {
-        "name": "string",
-        "description": "string",
-        "dataType": "string"
-      }
-    ],
-    "createdAt": "datetime",
-    "updatedAt": "datetime"
-  }
-]
+{
+  "queries": [
+    { "key": "string", "name": "string", "valid": true, "errors": [] }
+  ],
+  "valid": true
+}
 ```
+
+`valid` on the top level is true only when every saved query validates.
 
 **Errors:** 404 if ontology not found.
 
 ### PUT /api/model/ontologies/{ontologyKey}/saved-queries/{queryKey}
 
-Create or update a saved query. Returns `201 Created` when creating a new query and `200 OK` when updating an existing one. The `queryKey` in the path becomes the query's key.
+Create or update a saved query. Returns `201 Created` when creating a new query and `200 OK` when updating an existing one. The `queryKey` in the path becomes the query's key (pattern `^[a-z][a-z0-9_-]*$`).
 
-The Cypher string is validated against the ontology's scoped schema at creation time. Parameter declarations must match `$param` references in the Cypher string.
+Validation is comprehensive and collects all errors: pipeline structure (step names, per-step required fields), per-step parameter coverage (every `$param` in a step must be satisfied by a declared parameter or that step's own bindings), binding references (must point to earlier steps, must not shadow declared parameters, not allowed on `semantic_search` steps), parameter definitions (defaults must coerce to the declared data type, `entity_ref` parameters need an `entityTypeKey`), and — when a runtime schema is available — Cypher validation and entity-type existence against the scoped schema.
 
-**Request body:**
-```json
-{
-  "name": "string (required)",
-  "description": "string (required)",
-  "cypher": "string (required)",
-  "parameters": [
-    {
-      "name": "string (required)",
-      "description": "string (required)",
-      "dataType": "string (required, one of: string, integer, float, boolean, date, datetime)"
-    }
-  ]
-}
-```
+**Request body:** `SavedQueryUpsert` (see §12).
 
-**Response:** `201 Created` or `200 OK`
-```json
-{
-  "key": "string",
-  "name": "string",
-  "description": "string",
-  "cypher": "string",
-  "parameters": [
-    {
-      "name": "string",
-      "description": "string",
-      "dataType": "string"
-    }
-  ],
-  "createdAt": "datetime",
-  "updatedAt": "datetime"
-}
-```
+**Response:** `201 Created` or `200 OK` — `SavedQueryResponse` (see §12).
 
-**Errors:** 404 if ontology not found. 422 if Cypher validation fails or parameters don't match Cypher `$param` references.
+**Errors:** 404 if ontology not found. 422 with an `errors` list if any validation fails.
 
 ### DELETE /api/model/ontologies/{ontologyKey}/saved-queries/{queryKey}
 
@@ -725,15 +693,37 @@ updatedAt: datetime
 ```
 name: string (required)
 description: string (required)
-cypher: string (required)
+exampleQuestions: string[] (optional, default []) — natural-language questions the
+    query answers; embedded together with the description for semantic discovery
+steps: array of SavedQueryStep (required, min 1)
 parameters: array of SavedQueryParameter (optional, default [])
+maxRows: integer (optional, 1–10000) — cap on rows per cypher step; 1000 when unset
+```
+
+### SavedQueryStep
+```
+name: string (required, pattern: ^[a-zA-Z_]\w*$, unique within the pipeline)
+type: string (required, enum: cypher | semantic_search)
+cypher: string (cypher steps: required) — Cypher with $param placeholders
+entityTypeKey: string (semantic_search steps: required)
+query: string (semantic_search steps: required, supports $param substitution)
+limit: integer (semantic_search steps: optional, 1–100, default 10)
+minScore: float (semantic_search steps: optional, 0.0–1.0)
+bindings: object (cypher steps only, optional) — maps param names to
+    {{stepName.fieldName}} expressions collecting that field from all rows of an
+    earlier step's output into a list
 ```
 
 ### SavedQueryParameter
 ```
 name: string (required, pattern: ^[a-zA-Z_]\w*$)
 description: string (required)
-dataType: string (required, enum: string | integer | float | boolean | date | datetime)
+dataType: string (required, enum: string | integer | float | boolean | date |
+    datetime | entity_ref)
+default: scalar (optional) — a parameter with a default is optional at run time;
+    the default must coerce to the declared dataType
+entityTypeKey: string (entity_ref parameters: required; not allowed otherwise) —
+    the entity type the parameter refers to
 ```
 
 ### SavedQueryResponse
@@ -741,8 +731,10 @@ dataType: string (required, enum: string | integer | float | boolean | date | da
 key: string
 name: string
 description: string
-cypher: string
+exampleQuestions: string[]
+steps: array of SavedQueryStep
 parameters: array of SavedQueryParameter
+maxRows: integer | null
 createdAt: datetime
 updatedAt: datetime
 ```

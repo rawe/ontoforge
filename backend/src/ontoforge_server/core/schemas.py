@@ -72,6 +72,8 @@ class ExportSavedQueryParameter(BaseModel):
     name: str
     description: str
     data_type: str = Field(alias="dataType")
+    default: str | int | float | bool | None = None
+    entity_type_key: str | None = Field(default=None, alias="entityTypeKey")
 
     model_config = {"populate_by_name": True}
 
@@ -93,8 +95,10 @@ class ExportSavedQuery(BaseModel):
     key: str
     name: str
     description: str
+    example_questions: list[str] = Field(default_factory=list, alias="exampleQuestions")
     steps: list[ExportSavedQueryStep]
     parameters: list[ExportSavedQueryParameter] = Field(default_factory=list)
+    max_rows: int | None = Field(default=None, alias="maxRows")
 
     model_config = {"populate_by_name": True}
 
@@ -111,7 +115,7 @@ class ExportOntology(BaseModel):
 
 
 class ExportPayload(BaseModel):
-    format_version: str = Field(default="2.2", alias="formatVersion")
+    format_version: str = Field(default="2.3", alias="formatVersion")
     entity_types: list[ExportEntityType] = Field(default_factory=list, alias="entityTypes")
     relation_types: list[ExportRelationType] = Field(default_factory=list, alias="relationTypes")
     ontologies: list[ExportOntology] = Field(default_factory=list, alias="ontologies")

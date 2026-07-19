@@ -135,7 +135,7 @@ async def test_export_schema(client):
         resp = await client.get("/api/model/export")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["formatVersion"] == "2.2"
+    assert body["formatVersion"] == "2.3"
     assert len(body["entityTypes"]) == 2
     assert len(body["relationTypes"]) == 1
     assert len(body["ontologies"]) == 1
@@ -162,7 +162,7 @@ async def test_export_schema_empty(client):
         resp = await client.get("/api/model/export")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["formatVersion"] == "2.2"
+    assert body["formatVersion"] == "2.3"
     assert body["entityTypes"] == []
     assert body["relationTypes"] == []
     assert body["ontologies"] == []
@@ -304,7 +304,7 @@ async def test_import_rejects_document_saved_query_parameter(client):
             },
         )
     assert resp.status_code == 422
-    assert "scalar" in resp.json()["error"]["message"]
+    assert "invalid parameters" in resp.json()["error"]["message"]
     mock_upsert.assert_not_awaited()
 
 

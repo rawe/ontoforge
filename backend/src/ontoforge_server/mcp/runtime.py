@@ -1,10 +1,12 @@
 import functools
 from collections.abc import Callable
+from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import Tool as MCPTool
 
 from ontoforge_server.core.database import get_driver
-from ontoforge_server.core.exceptions import ValidationError
+from ontoforge_server.core.exceptions import NotFoundError, ValidationError
 from ontoforge_server.mcp.mount import current_ontology_key
 from ontoforge_server.runtime import service
 from ontoforge_server.runtime.schemas import DocumentEditRequest, RelationInstanceCreate
@@ -31,7 +33,98 @@ from ontoforge_server.runtime.tool_names import (
     TOOL_WRITE_DOCUMENT,
 )
 
-runtime_mcp = FastMCP(
+# Dynamic per-saved-query tools are named with this prefix followed by the
+# saved query key (e.g. "query_people_by_skill").
+SAVED_QUERY_TOOL_PREFIX = "query_"
+
+_PARAM_JSON_TYPES: dict[str, dict] = {
+    "string": {"type": "string"},
+    "integer": {"type": "integer"},
+    "float": {"type": "number"},
+    "boolean": {"type": "boolean"},
+    "date": {"type": "string", "format": "date"},
+    "datetime": {"type": "string", "format": "date-time"},
+    "entity_ref": {"type": "string"},
+}
+
+
+def _saved_query_input_schema(sq) -> dict:
+    """Build a JSON Schema for a saved query's parameters."""
+    properties: dict[str, dict] = {}
+    required: list[str] = []
+    for p in sq.parameters:
+        prop = dict(_PARAM_JSON_TYPES.get(p.data_type, {"type": "string"}))
+        description = p.description
+        if p.data_type == "entity_ref":
+            description += (
+                f" (reference to a '{p.entity_type_key}' entity — pass its _id, "
+                "or a name/description to resolve via semantic search)"
+            )
+        prop["description"] = description
+        if p.default is not None:
+            prop["default"] = p.default
+        else:
+            required.append(p.name)
+        properties[p.name] = prop
+    schema: dict = {
+        "type": "object",
+        "properties": properties,
+        "additionalProperties": False,
+    }
+    if required:
+        schema["required"] = required
+    return schema
+
+
+def _saved_query_tool_description(sq) -> str:
+    description = f"{sq.name}. {sq.description}".rstrip()
+    if not description.endswith((".", "!", "?")):
+        description += "."
+    if sq.example_questions:
+        examples = " | ".join(sq.example_questions[:5])
+        description += f" Example questions it answers: {examples}"
+    return description
+
+
+class RuntimeFastMCP(FastMCP):
+    """FastMCP server that additionally exposes each saved query of the
+    current ontology as its own typed tool."""
+
+    async def _saved_query_configs(self) -> dict:
+        try:
+            ontology_key = current_ontology_key.get()
+        except LookupError:
+            return {}
+        driver = await get_driver()
+        try:
+            loaded = await service._load_schema(ontology_key, driver)
+        except NotFoundError:
+            return {}
+        return loaded.saved_queries
+
+    async def list_tools(self) -> list[MCPTool]:
+        tools = await super().list_tools()
+        for sq in (await self._saved_query_configs()).values():
+            tools.append(
+                MCPTool(
+                    name=f"{SAVED_QUERY_TOOL_PREFIX}{sq.key}",
+                    title=sq.name,
+                    description=_saved_query_tool_description(sq),
+                    inputSchema=_saved_query_input_schema(sq),
+                )
+            )
+        return tools
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]):
+        if name.startswith(SAVED_QUERY_TOOL_PREFIX):
+            query_key = name[len(SAVED_QUERY_TOOL_PREFIX):]
+            configs = await self._saved_query_configs()
+            if query_key in configs:
+                return await run_saved_query(query_key, arguments)
+        return await super().call_tool(name, arguments)
+
+
+runtime_mcp = RuntimeFastMCP(
     "OntoForge Runtime",
     stateless_http=True,
     json_response=True,
@@ -361,6 +454,7 @@ async def semantic_search(
     return result
 
 
+@_enrich_errors
 async def list_saved_queries() -> list[dict]:
     ontology_key = _get_ontology_key()
     driver = await get_driver()
@@ -370,21 +464,19 @@ async def list_saved_queries() -> list[dict]:
             "key": sq.key,
             "name": sq.name,
             "description": sq.description,
-            "steps": [
-                {
-                    "name": s.name,
-                    "type": s.type,
-                    **({"cypher": s.cypher} if s.cypher else {}),
-                    **({"entityTypeKey": s.entity_type_key} if s.entity_type_key else {}),
-                    **({"query": s.query} if s.query else {}),
-                    **({"limit": s.limit} if s.limit is not None else {}),
-                    **({"minScore": s.min_score} if s.min_score is not None else {}),
-                    **({"bindings": s.bindings} if s.bindings else {}),
-                }
-                for s in sq.steps
-            ],
+            **(
+                {"exampleQuestions": sq.example_questions}
+                if sq.example_questions
+                else {}
+            ),
             "parameters": [
-                {"name": p.name, "description": p.description, "dataType": p.data_type}
+                service._parameter_summary({
+                    "name": p.name,
+                    "description": p.description,
+                    "dataType": p.data_type,
+                    "default": p.default,
+                    "entityTypeKey": p.entity_type_key,
+                })
                 for p in sq.parameters
             ],
         }
@@ -407,11 +499,13 @@ async def run_saved_query(
 @_enrich_errors
 async def search_saved_queries(
     query: str,
+    limit: int = 5,
 ) -> list[dict]:
     ontology_key = _get_ontology_key()
     driver = await get_driver()
+    limit = max(1, min(limit, 20))
     return await service.search_saved_queries(
-        ontology_key, query, 3, 0.7, driver
+        ontology_key, query, limit, 0.5, driver
     )
 
 
@@ -571,24 +665,29 @@ _MCP_TOOL_DEFS: list[tuple[Callable, str, str]] = [
     (
         list_saved_queries,
         TOOL_LIST_SAVED_QUERIES,
-        "Discover available pre-defined queries and their required parameters. "
-        "Each saved query has a key, name, description, and parameter definitions "
-        "with name, description, and dataType.",
+        "Discover available pre-defined queries. Each saved query has a key, "
+        "name, description, optional example questions, and parameter "
+        "definitions with name, description, dataType, and required flag. "
+        "Parameters with a default are optional. Saved queries are also "
+        "exposed directly as tools named 'query_<key>'.",
     ),
     (
         run_saved_query,
         TOOL_RUN_SAVED_QUERY,
-        "Execute a saved query by name with parameter values. "
-        "Use list_saved_queries to discover available queries and their required "
-        "parameters first.",
+        "Execute a saved query by key with parameter values. "
+        "Use list_saved_queries to discover available queries and their "
+        "required parameters first. The response includes a 'pipeline' block "
+        "with per-step row counts — if results are empty, it shows which step "
+        "returned nothing. entity_ref parameters accept an entity _id or a "
+        "name/description, which is resolved via semantic search.",
     ),
     (
         search_saved_queries,
         TOOL_SEARCH_SAVED_QUERIES,
         "Search saved queries by semantic similarity to a natural language "
         "description. Returns the most relevant saved queries ranked by how well "
-        "their description matches. Use this to find the right saved query for a "
-        "user's intent.",
+        "their description and example questions match. Use this to find the "
+        "right saved query for a user's intent instead of listing all queries.",
     ),
 ]
 

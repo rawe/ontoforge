@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from fastapi import Depends
 from neo4j import AsyncDriver
+from pydantic import ValidationError as PydanticValidationError
 
 from ontoforge_server.core.database import (
     create_document_vector_index,
@@ -61,9 +62,12 @@ from ontoforge_server.modeling.schemas import (
     PropertyDefinitionCreate,
     PropertyDefinitionResponse,
     PropertyDefinitionUpdate,
+    ParamDataType,
     RelationTypeCreate,
     RelationTypeResponse,
     RelationTypeUpdate,
+    SavedQueryHealthEntry,
+    SavedQueryHealthResponse,
     SavedQueryParameterSchema,
     SavedQueryResponse,
     SavedQueryUpsert,
@@ -1069,8 +1073,10 @@ async def export_schema(
                 key=sq["key"],
                 name=sq["name"],
                 description=sq["description"],
+                exampleQuestions=sq.get("exampleQuestions") or [],
                 steps=_deserialize_export_steps(sq.get("steps")),
                 parameters=_deserialize_export_params(sq.get("parameters")),
+                maxRows=sq.get("maxRows"),
             )
             for sq in query_rows
         ]
@@ -1087,7 +1093,7 @@ async def export_schema(
         )
 
     return ExportPayload(
-        formatVersion="2.2",
+        formatVersion="2.3",
         entityTypes=entity_types,
         relationTypes=relation_types,
         ontologies=ontologies,
@@ -1210,7 +1216,7 @@ async def import_schema(
             # Import saved queries
             provider = get_embedding_provider()
             for sq in ont.saved_queries:
-                # Convert export steps to StepSchema for validation
+                # Convert export models to modeling schemas for validation
                 import_steps = [
                     StepSchema(
                         name=s.name,
@@ -1224,40 +1230,38 @@ async def import_schema(
                     )
                     for s in sq.steps
                 ]
-                for p in sq.parameters:
-                    if p.data_type == DataType.DOCUMENT.value:
-                        raise ValidationError(
-                            f"Import error: parameter '{p.name}' of saved query "
-                            f"'{sq.key}' has data type 'document'; parameters "
-                            "must be scalar types"
+                try:
+                    import_params = [
+                        SavedQueryParameterSchema(
+                            name=p.name,
+                            description=p.description,
+                            dataType=p.data_type,
+                            default=p.default,
+                            entityTypeKey=p.entity_type_key,
                         )
-                _validate_pipeline(import_steps, [p.name for p in sq.parameters], sq.key)
-                steps_json = _serialize_json([
-                    {
-                        "name": s.name,
-                        "type": s.type,
-                        **({"cypher": s.cypher} if s.cypher else {}),
-                        **({"entityTypeKey": s.entity_type_key} if s.entity_type_key else {}),
-                        **({"query": s.query} if s.query else {}),
-                        **({"limit": s.limit} if s.limit is not None else {}),
-                        **({"minScore": s.min_score} if s.min_score is not None else {}),
-                        **({"bindings": s.bindings} if s.bindings else {}),
-                    }
-                    for s in sq.steps
-                ])
-                params_json = _serialize_json([
-                    {"name": p.name, "description": p.description, "dataType": p.data_type}
-                    for p in sq.parameters
-                ])
+                        for p in sq.parameters
+                    ]
+                except PydanticValidationError as exc:
+                    raise ValidationError(
+                        f"Import error: saved query '{sq.key}' has invalid parameters: {exc}"
+                    )
+                _validate_parameter_defs(import_params, sq.key)
+                _validate_pipeline(import_steps, [p.name for p in import_params], sq.key)
+                steps_json = _serialize_json([_step_to_dict(s) for s in import_steps])
+                params_json = _serialize_json([_param_to_dict(p) for p in import_params])
                 sq_embedding = None
                 if provider:
-                    sq_embedding = await provider.embed(sq.description)
+                    sq_embedding = await provider.embed(
+                        _embedding_text(sq.description, sq.example_questions)
+                    )
                 sq_id = str(uuid4())
                 await repository.upsert_saved_query(
                     session, ont_id, sq_id, sq.key, sq.name,
                     sq.description, steps_json, params_json,
                     ontology_key=ont.key,
                     embedding=sq_embedding,
+                    example_questions=sq.example_questions,
+                    max_rows=sq.max_rows,
                 )
 
             created_ontologies.append(_to_ontology_response(ont_data))
@@ -1389,10 +1393,15 @@ async def rebuild_embeddings(
     async with driver.session() as session:
         sq_result = await session.run(
             "MATCH (sq:SavedQuery) "
-            "RETURN elementId(sq) AS elemId, sq.description AS description"
+            "RETURN elementId(sq) AS elemId, sq.description AS description, "
+            "sq.exampleQuestions AS exampleQuestions"
         )
         saved_queries = [
-            {"elemId": record["elemId"], "description": record["description"]}
+            {
+                "elemId": record["elemId"],
+                "description": record["description"],
+                "exampleQuestions": record["exampleQuestions"] or [],
+            }
             async for record in sq_result
         ]
 
@@ -1401,7 +1410,9 @@ async def rebuild_embeddings(
     sq_failed = 0
 
     for sq in saved_queries:
-        embedding = await provider.embed(sq["description"])
+        embedding = await provider.embed(
+            _embedding_text(sq["description"], sq["exampleQuestions"])
+        )
         if embedding is not None:
             async with driver.session() as session:
                 await session.run(
@@ -1539,6 +1550,7 @@ def _to_saved_query_response(data: dict) -> SavedQueryResponse:
         key=data["key"],
         name=data["name"],
         description=data["description"],
+        exampleQuestions=data.get("exampleQuestions") or [],
         steps=[
             StepSchema(
                 name=s["name"],
@@ -1557,9 +1569,12 @@ def _to_saved_query_response(data: dict) -> SavedQueryResponse:
                 name=p["name"],
                 description=p["description"],
                 dataType=p["dataType"],
+                default=p.get("default"),
+                entityTypeKey=p.get("entityTypeKey"),
             )
             for p in params_list
         ],
+        maxRows=data.get("maxRows"),
         createdAt=data["createdAt"],
         updatedAt=data["updatedAt"],
     )
@@ -1582,6 +1597,8 @@ def _deserialize_export_params(params_json: str | None) -> list[ExportSavedQuery
             name=p["name"],
             description=p["description"],
             dataType=p["dataType"],
+            default=p.get("default"),
+            entityTypeKey=p.get("entityTypeKey"),
         )
         for p in params_list
     ]
@@ -1616,10 +1633,16 @@ def _validate_pipeline(
     param_names: list[str],
     query_key: str,
 ) -> None:
-    """Validate a saved query pipeline. Collects all errors before raising."""
+    """Validate a saved query pipeline. Collects all errors before raising.
+
+    Parameter coverage is checked per step: every $ref in a cypher step must
+    be satisfied by a declared parameter or by that step's own bindings, since
+    bindings are resolved per step at execution time.
+    """
     errors: list[str] = []
     declared_params = set(param_names)
     seen_step_names: dict[str, int] = {}
+    used_params: set[str] = set()
 
     for i, step in enumerate(steps):
         prefix = f"steps[{i}]"
@@ -1630,20 +1653,49 @@ def _validate_pipeline(
                 f"{prefix}.name: '{step.name}' already used by steps[{seen_step_names[step.name]}]"
             )
         seen_step_names[step.name] = i
+        step_bindings = set(step.bindings or {})
 
         # Type-specific required fields
         if step.type == StepType.CYPHER:
             if not step.cypher:
                 errors.append(f"{prefix}.cypher: Required for cypher steps")
+            else:
+                refs = set(re.findall(r'\$([a-zA-Z_]\w*)', step.cypher))
+                undeclared = refs - declared_params - step_bindings
+                if undeclared:
+                    errors.append(
+                        f"{prefix}.cypher: References {sorted(undeclared)} which are neither "
+                        "declared parameters nor bindings of this step"
+                    )
+                used_params.update(refs & declared_params)
         elif step.type == StepType.SEMANTIC_SEARCH:
             if not step.entity_type_key:
                 errors.append(f"{prefix}.entityTypeKey: Required for semantic_search steps")
             if not step.query:
                 errors.append(f"{prefix}.query: Required for semantic_search steps")
+            else:
+                refs = set(re.findall(r'\$([a-zA-Z_]\w*)', step.query))
+                undeclared = refs - declared_params
+                if undeclared:
+                    errors.append(
+                        f"{prefix}.query: References {sorted(undeclared)} which are not "
+                        "declared parameters"
+                    )
+                used_params.update(refs & declared_params)
+            if step.bindings:
+                errors.append(
+                    f"{prefix}.bindings: Bindings are not supported on semantic_search "
+                    "steps — use $param references in the query field instead"
+                )
 
-        # Validate bindings reference earlier steps
+        # Validate bindings reference earlier steps and don't shadow parameters
         if step.bindings:
             for param_name, expr in step.bindings.items():
+                if param_name in declared_params:
+                    errors.append(
+                        f"{prefix}.bindings.{param_name}: Shadows the declared parameter "
+                        f"'{param_name}' — rename one of them"
+                    )
                 match = _BINDING_PATTERN.fullmatch(expr)
                 if not match:
                     errors.append(
@@ -1658,30 +1710,7 @@ def _validate_pipeline(
                         "which does not exist before this step"
                     )
 
-    # Cross-check parameters against Cypher $param references across all cypher steps
-    all_cypher_params: set[str] = set()
-    all_binding_names: set[str] = set()
-    for step in steps:
-        if step.bindings:
-            all_binding_names.update(step.bindings.keys())
-        if step.type == StepType.CYPHER and step.cypher:
-            cypher_refs = set(re.findall(r'\$([a-zA-Z_]\w*)', step.cypher))
-            all_cypher_params.update(cypher_refs)
-
-    # Params needed by cypher = all $refs minus those provided by bindings
-    needed_from_user = all_cypher_params - all_binding_names
-    # Also check $param refs in semantic_search query fields
-    for step in steps:
-        if step.type == StepType.SEMANTIC_SEARCH and step.query:
-            for ref in re.findall(r'\$([a-zA-Z_]\w*)', step.query):
-                needed_from_user.add(ref)
-
-    in_cypher_not_declared = needed_from_user - declared_params
-    declared_not_used = declared_params - needed_from_user
-    if in_cypher_not_declared:
-        errors.append(
-            f"Parameters referenced in steps but not declared: {sorted(in_cypher_not_declared)}"
-        )
+    declared_not_used = declared_params - used_params
     if declared_not_used:
         errors.append(
             f"Parameters declared but not referenced in any step: {sorted(declared_not_used)}"
@@ -1692,6 +1721,160 @@ def _validate_pipeline(
             f"Saved query '{query_key}' validation failed",
             details={"errors": errors},
         )
+
+
+def _validate_parameter_defs(
+    parameters: list[SavedQueryParameterSchema],
+    query_key: str,
+) -> None:
+    """Validate saved query parameter definitions (defaults, entity refs)."""
+    from ontoforge_server.runtime.service import coerce_value
+
+    errors: list[str] = []
+    seen: set[str] = set()
+    for p in parameters:
+        if p.name in seen:
+            errors.append(f"parameters.{p.name}: Duplicate parameter name")
+        seen.add(p.name)
+        if p.data_type == ParamDataType.ENTITY_REF:
+            if not p.entity_type_key:
+                errors.append(
+                    f"parameters.{p.name}: entityTypeKey is required for entity_ref parameters"
+                )
+        elif p.entity_type_key:
+            errors.append(
+                f"parameters.{p.name}: entityTypeKey is only allowed on entity_ref parameters"
+            )
+        if p.default is not None:
+            coerce_type = (
+                "string" if p.data_type == ParamDataType.ENTITY_REF else p.data_type.value
+            )
+            try:
+                coerce_value(p.default, coerce_type, p.name)
+            except ValueError as e:
+                errors.append(f"parameters.{p.name}.default: {e}")
+
+    if errors:
+        raise ValidationError(
+            f"Saved query '{query_key}' validation failed",
+            details={"errors": errors},
+        )
+
+
+def _validate_against_schema(
+    steps: list[StepSchema],
+    parameters: list[SavedQueryParameterSchema],
+    query_key: str,
+    scoped_schema,
+) -> None:
+    """Validate steps and entity_ref parameters against the scoped schema."""
+    from ontoforge_server.runtime.cypher import validate_and_rewrite
+
+    errors: list[str] = []
+    for i, step in enumerate(steps):
+        if step.type == StepType.CYPHER and step.cypher:
+            try:
+                validate_and_rewrite(step.cypher, scoped_schema)
+            except ValidationError as exc:
+                errors.append(f"steps[{i}].cypher: {exc}")
+        elif step.type == StepType.SEMANTIC_SEARCH and step.entity_type_key:
+            if step.entity_type_key not in scoped_schema.entity_types:
+                errors.append(
+                    f"steps[{i}].entityTypeKey: Entity type '{step.entity_type_key}' "
+                    "is not in the ontology scope"
+                )
+    for p in parameters:
+        if p.data_type == ParamDataType.ENTITY_REF and p.entity_type_key:
+            if p.entity_type_key not in scoped_schema.entity_types:
+                errors.append(
+                    f"parameters.{p.name}.entityTypeKey: Entity type "
+                    f"'{p.entity_type_key}' is not in the ontology scope"
+                )
+    if errors:
+        raise ValidationError(
+            f"Saved query '{query_key}' validation failed",
+            details={"errors": errors},
+        )
+
+
+def _step_to_dict(s: StepSchema) -> dict:
+    return {
+        "name": s.name,
+        "type": s.type.value if isinstance(s.type, StepType) else s.type,
+        **({"cypher": s.cypher} if s.cypher else {}),
+        **({"entityTypeKey": s.entity_type_key} if s.entity_type_key else {}),
+        **({"query": s.query} if s.query else {}),
+        **({"limit": s.limit} if s.limit is not None else {}),
+        **({"minScore": s.min_score} if s.min_score is not None else {}),
+        **({"bindings": s.bindings} if s.bindings else {}),
+    }
+
+
+def _param_to_dict(p: SavedQueryParameterSchema) -> dict:
+    return {
+        "name": p.name,
+        "description": p.description,
+        "dataType": p.data_type.value,
+        **({"default": p.default} if p.default is not None else {}),
+        **({"entityTypeKey": p.entity_type_key} if p.entity_type_key else {}),
+    }
+
+
+def _embedding_text(description: str, example_questions: list[str]) -> str:
+    """Text embedded for semantic search over saved queries."""
+    parts = [description, *example_questions]
+    return "\n".join(part for part in parts if part)
+
+
+async def saved_query_health(
+    ontology_key: str,
+    driver: AsyncDriver = Depends(get_driver),
+) -> SavedQueryHealthResponse:
+    """Re-validate every saved query of an ontology against the current schema.
+
+    Reports queries broken by schema or scope changes without executing them.
+    """
+    from ontoforge_server.runtime import service as runtime_service
+
+    async with driver.session() as session:
+        ont = await repository.get_ontology_by_key(session, ontology_key)
+        if not ont:
+            raise NotFoundError(f"Ontology '{ontology_key}' not found")
+        rows = await repository.list_saved_queries(session, ont["ontologyId"])
+
+    loaded = await runtime_service._load_schema(ontology_key, driver)
+
+    entries: list[SavedQueryHealthEntry] = []
+    for row in rows:
+        response = _to_saved_query_response(row)
+        errors: list[str] = []
+        for check in (
+            lambda: _validate_parameter_defs(response.parameters, response.key),
+            lambda: _validate_pipeline(
+                response.steps, [p.name for p in response.parameters], response.key
+            ),
+            lambda: _validate_against_schema(
+                response.steps, response.parameters, response.key, loaded.scoped
+            ),
+        ):
+            try:
+                check()
+            except ValidationError as exc:
+                details = getattr(exc, "details", None) or {}
+                errors.extend(details.get("errors", [str(exc)]))
+        entries.append(
+            SavedQueryHealthEntry(
+                key=response.key,
+                name=response.name,
+                valid=not errors,
+                errors=errors,
+            )
+        )
+
+    return SavedQueryHealthResponse(
+        queries=entries,
+        valid=all(e.valid for e in entries),
+    )
 
 
 async def list_saved_queries(
@@ -1718,30 +1901,21 @@ async def upsert_saved_query(
             f"Invalid query key '{query_key}'. Must match pattern: {AGENT_KEY_PATTERN}"
         )
 
-    for p in body.parameters:
-        if p.data_type == DataType.DOCUMENT:
-            raise ValidationError(
-                f"Saved query parameter '{p.name}' has data type 'document'; "
-                "parameters must be scalar types"
-            )
-
-    # Validate pipeline structure and parameter cross-checks
+    # Validate parameter definitions, pipeline structure and parameter cross-checks
+    _validate_parameter_defs(body.parameters, query_key)
     param_names = [p.name for p in body.parameters]
     _validate_pipeline(body.steps, param_names, query_key)
 
-    # Validate Cypher steps against schema
     async with driver.session() as session:
         ont = await repository.get_ontology_by_key(session, ontology_key)
         if not ont:
             raise NotFoundError(f"Ontology '{ontology_key}' not found")
 
+    # Validate steps and entity_ref parameters against the scoped schema
     try:
         from ontoforge_server.runtime import service as runtime_service
         loaded = await runtime_service._load_schema(ontology_key, driver)
-        from ontoforge_server.runtime.cypher import validate_and_rewrite
-        for step in body.steps:
-            if step.type == StepType.CYPHER and step.cypher:
-                validate_and_rewrite(step.cypher, loaded.scoped)
+        _validate_against_schema(body.steps, body.parameters, query_key, loaded.scoped)
     except NotFoundError:
         pass  # Ontology has no runtime schema loaded yet
     except ValidationError:
@@ -1749,29 +1923,16 @@ async def upsert_saved_query(
     except Exception as exc:
         raise ValidationError(f"Cypher validation failed: {exc}")
 
-    steps_json = _serialize_json([
-        {
-            "name": s.name,
-            "type": s.type.value,
-            **({"cypher": s.cypher} if s.cypher else {}),
-            **({"entityTypeKey": s.entity_type_key} if s.entity_type_key else {}),
-            **({"query": s.query} if s.query else {}),
-            **({"limit": s.limit} if s.limit is not None else {}),
-            **({"minScore": s.min_score} if s.min_score is not None else {}),
-            **({"bindings": s.bindings} if s.bindings else {}),
-        }
-        for s in body.steps
-    ])
-    params_json = _serialize_json([
-        {"name": p.name, "description": p.description, "dataType": p.data_type.value}
-        for p in body.parameters
-    ])
+    steps_json = _serialize_json([_step_to_dict(s) for s in body.steps])
+    params_json = _serialize_json([_param_to_dict(p) for p in body.parameters])
 
-    # Embed the description for semantic search over saved queries
+    # Embed description + example questions for semantic search over saved queries
     embedding = None
     provider = get_embedding_provider()
     if provider:
-        embedding = await provider.embed(body.description)
+        embedding = await provider.embed(
+            _embedding_text(body.description, body.example_questions)
+        )
 
     async with driver.session() as session:
         saved_query_id = str(uuid4())
@@ -1786,6 +1947,8 @@ async def upsert_saved_query(
             params_json,
             ontology_key=ontology_key,
             embedding=embedding,
+            example_questions=body.example_questions,
+            max_rows=body.max_rows,
         )
     _invalidate_runtime_schema_cache()
     return _to_saved_query_response(data), created

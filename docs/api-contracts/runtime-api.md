@@ -816,7 +816,7 @@ A2A task endpoint for a specific configured agent.
 
 ### GET /api/runtime/{ontologyKey}/saved-queries
 
-List all saved queries available for this ontology. Returns query metadata, the step pipeline, and parameter definitions.
+List all saved queries available for this ontology. Returns query metadata, example questions, the step pipeline, and parameter definitions.
 
 **Response:** `200 OK`
 ```json
@@ -825,6 +825,7 @@ List all saved queries available for this ontology. Returns query metadata, the 
     "key": "string",
     "name": "string",
     "description": "string",
+    "exampleQuestions": ["string"],
     "steps": [
       {
         "name": "string",
@@ -841,28 +842,32 @@ List all saved queries available for this ontology. Returns query metadata, the 
       {
         "name": "string",
         "description": "string",
-        "dataType": "string"
+        "dataType": "string",
+        "required": true,
+        "default": "scalar (only when set)",
+        "entityTypeKey": "string (entity_ref parameters only)"
       }
-    ]
+    ],
+    "maxRows": 500
   }
 ]
 ```
 
-Step fields are included only when set; `steps` reflects the multi-step pipeline defined in the modeling API.
+Step and optional fields are included only when set; `steps` reflects the multi-step pipeline defined in the modeling API. `required` is false exactly when the parameter declares a `default`.
 
 **Errors:** 404 if ontology key not found.
 
 ### GET /api/runtime/{ontologyKey}/saved-queries/search
 
-Search saved queries by semantic similarity to a natural language description. Returns queries ranked by how well their description matches.
+Search saved queries by semantic similarity to a natural language description. The embedding covers the query's description and its example questions. Returns queries ranked by similarity; steps are omitted from search results.
 
 **Query parameters:**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `q` | string (required) | — | Natural language search query |
-| `limit` | integer | 3 | Maximum results (1–20) |
-| `min_score` | float | 0.7 | Minimum cosine similarity (0.0–1.0) |
+| `limit` | integer | 5 | Maximum results (1–20) |
+| `min_score` | float | 0.5 | Minimum cosine similarity (0.0–1.0) |
 
 **Response:** `200 OK`
 ```json
@@ -871,11 +876,13 @@ Search saved queries by semantic similarity to a natural language description. R
     "key": "string",
     "name": "string",
     "description": "string",
+    "exampleQuestions": ["string"],
     "parameters": [
       {
         "name": "string",
         "description": "string",
-        "dataType": "string"
+        "dataType": "string",
+        "required": true
       }
     ],
     "score": 0.87
@@ -901,7 +908,11 @@ Execute a saved query with the provided parameter values. Parameters are validat
 }
 ```
 
-All declared parameters are required. Parameter values are coerced to their declared data types.
+Parameters without a default are required; parameters with a default may be omitted. Parameter values are coerced to their declared data types.
+
+**entity_ref parameters** accept either an existing entity `_id` of the declared entity type, or a natural-language reference (a name or description). Non-`_id` values are resolved via semantic search over that entity type: the top hit is used when it scores at least 0.75; otherwise the request fails with a 422 listing candidate entities (`_id`, score, and a few string properties) so the caller can retry with an explicit `_id`. Semantic resolution requires an embedding provider.
+
+**Row cap:** every cypher step returns at most `maxRows` rows (1000 when the query declares none). Truncation is reported per step in the `pipeline` block.
 
 **Response:** `200 OK`
 ```json
@@ -920,13 +931,21 @@ All declared parameters are required. Parameter values are coerced to their decl
         "name": "Acme Corp"
       }
     }
-  ]
+  ],
+  "pipeline": [
+    { "step": "main", "type": "cypher", "rows": 1, "truncated": false }
+  ],
+  "resolvedParameters": {
+    "person": { "entityId": "b7e3f1a2-...", "matched": "semantic", "score": 0.91 }
+  }
 }
 ```
 
+The shape of `columns`/`results` comes from the last step (a `semantic_search` last step returns the semantic-search response shape instead). `pipeline` always lists every executed step with its row count — when the final result is empty it shows which step ran dry. `resolvedParameters` is present only when the query has `entity_ref` parameters; `matched` is `"id"` for direct `_id` matches and `"semantic"` (with `score`) for resolved references.
+
 **Errors:**
 - 404 if ontology key or query key not found.
-- 422 if parameters are missing, extra, or fail type coercion. Also 422 if the Cypher fails schema re-validation (e.g., a referenced type was removed since the query was created).
+- 422 if required parameters are missing, unknown parameters are passed, values fail type coercion, or an `entity_ref` value cannot be resolved. Also 422 if the Cypher fails schema re-validation (e.g., a referenced type was removed since the query was created).
 
 ---
 

@@ -250,10 +250,24 @@ class StepSchema(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class ParamDataType(str, Enum):
+    """Data types allowed for saved query parameters (scalars + entity_ref)."""
+
+    STRING = "string"
+    INTEGER = "integer"
+    FLOAT = "float"
+    BOOLEAN = "boolean"
+    DATE = "date"
+    DATETIME = "datetime"
+    ENTITY_REF = "entity_ref"
+
+
 class SavedQueryParameterSchema(BaseModel):
     name: str = Field(pattern=r"^[a-zA-Z_]\w*$")
     description: str
-    data_type: DataType = Field(alias="dataType")
+    data_type: ParamDataType = Field(alias="dataType")
+    default: str | int | float | bool | None = None
+    entity_type_key: str | None = Field(default=None, alias="entityTypeKey")
 
     model_config = {"populate_by_name": True}
 
@@ -261,8 +275,10 @@ class SavedQueryParameterSchema(BaseModel):
 class SavedQueryUpsert(BaseModel):
     name: str
     description: str
+    example_questions: list[str] = Field(default_factory=list, alias="exampleQuestions")
     steps: list[StepSchema] = Field(min_length=1)
     parameters: list[SavedQueryParameterSchema] = Field(default_factory=list)
+    max_rows: int | None = Field(default=None, ge=1, le=10000, alias="maxRows")
 
     model_config = {"populate_by_name": True}
 
@@ -271,12 +287,26 @@ class SavedQueryResponse(BaseModel):
     key: str
     name: str
     description: str
+    example_questions: list[str] = Field(default_factory=list, alias="exampleQuestions")
     steps: list[StepSchema]
     parameters: list[SavedQueryParameterSchema]
+    max_rows: int | None = Field(default=None, alias="maxRows")
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
 
     model_config = {"populate_by_name": True}
+
+
+class SavedQueryHealthEntry(BaseModel):
+    key: str
+    name: str
+    valid: bool
+    errors: list[str] = Field(default_factory=list)
+
+
+class SavedQueryHealthResponse(BaseModel):
+    queries: list[SavedQueryHealthEntry]
+    valid: bool  # true when every saved query validates
 
 
 # --- Rebuild Embeddings ---

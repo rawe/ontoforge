@@ -725,11 +725,14 @@ async def execute_cypher_read(
     session: AsyncSession,
     cypher: str,
     params: dict[str, Any] | None = None,
+    max_rows: int | None = None,
 ) -> tuple[list[str], list[dict]]:
     """Execute a read-only Cypher query and return (columns, rows).
 
     Each row is a dict mapping column names to converted Python values.
     Nodes and Relationships are returned as plain dicts of their properties.
+    With max_rows, consumption stops after max_rows + 1 rows — the extra row
+    lets callers detect truncation.
     """
     result = await session.run(cypher, parameters=(params or {}))
     columns = list(result.keys())
@@ -739,6 +742,8 @@ async def execute_cypher_read(
         for col in columns:
             row[col] = _convert_record_value(record[col])
         rows.append(row)
+        if max_rows is not None and len(rows) > max_rows:
+            break
     return columns, rows
 
 
@@ -769,7 +774,8 @@ async def get_saved_queries(
         """
         MATCH (o:Ontology {key: $ontology_key})-[:HAS_SAVED_QUERY]->(sq:SavedQuery)
         RETURN sq.key AS key, sq.name AS name, sq.description AS description,
-               sq.steps AS steps, sq.parameters AS parameters
+               sq.exampleQuestions AS exampleQuestions,
+               sq.steps AS steps, sq.parameters AS parameters, sq.maxRows AS maxRows
         ORDER BY sq.name
         """,
         ontology_key=ontology_key,
@@ -797,7 +803,7 @@ async def search_saved_queries(
         "LIMIT $limit"
         ") SCORE AS score "
         "RETURN sq.key AS key, sq.name AS name, sq.description AS description, "
-        "sq.parameters AS parameters, score"
+        "sq.exampleQuestions AS exampleQuestions, sq.parameters AS parameters, score"
     )
 
     result = await session.run(
@@ -816,6 +822,7 @@ async def search_saved_queries(
             "key": record["key"],
             "name": record["name"],
             "description": record["description"],
+            "exampleQuestions": record["exampleQuestions"] or [],
             "parameters": record["parameters"],
             "score": score,
         })

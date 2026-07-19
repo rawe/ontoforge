@@ -79,18 +79,48 @@ export interface SavedQueryStep {
   bindings?: Record<string, string>
 }
 
+/** Data types allowed for saved query parameters (scalars + entity references). */
+export type ParamDataType =
+  | 'string'
+  | 'integer'
+  | 'float'
+  | 'boolean'
+  | 'date'
+  | 'datetime'
+  | 'entity_ref'
+
 export interface SavedQueryParameter {
   name: string
   description: string | null
-  dataType: DataType
+  dataType: ParamDataType
+  /** A parameter with a default is optional at run time. */
+  default?: string | number | boolean | null
+  /** Target entity type — only for entity_ref parameters. */
+  entityTypeKey?: string
+  /** Present in runtime listings: false when a default exists. */
+  required?: boolean
 }
 
 export interface SavedQuery {
   key: string
   name: string
   description: string | null
+  exampleQuestions?: string[]
   steps: SavedQueryStep[]
   parameters: SavedQueryParameter[]
+  maxRows?: number | null
+}
+
+export interface SavedQueryHealthEntry {
+  key: string
+  name: string
+  valid: boolean
+  errors: string[]
+}
+
+export interface SavedQueryHealthResponse {
+  queries: SavedQueryHealthEntry[]
+  valid: boolean
 }
 
 export interface AiAgent {
@@ -202,6 +232,23 @@ export interface DocumentContentResponse {
 export interface QueryResult {
   columns: string[]
   results: Record<string, JsonValue>[]
+  /** Saved query runs: per-step diagnostics (row counts, truncation). */
+  pipeline?: PipelineStepInfo[]
+  /** Saved query runs: how entity_ref parameters were resolved. */
+  resolvedParameters?: Record<string, ResolvedEntityRef>
+}
+
+export interface PipelineStepInfo {
+  step: string
+  type: 'cypher' | 'semantic_search'
+  rows: number
+  truncated?: boolean
+}
+
+export interface ResolvedEntityRef {
+  entityId: string
+  matched: 'id' | 'semantic'
+  score?: number
 }
 
 /* -------------------------------- runtime — AI ------------------------------- */
@@ -348,8 +395,10 @@ export interface AiAgentInput {
 export interface SavedQueryInput {
   name: string
   description?: string | null
+  exampleQuestions?: string[]
   steps: SavedQueryStep[]
   parameters?: SavedQueryParameter[]
+  maxRows?: number | null
 }
 
 /** Runtime tool names an agent may be restricted to. */

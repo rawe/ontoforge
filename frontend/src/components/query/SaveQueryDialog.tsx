@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import * as model from '@/api/model'
 import { qk } from '@/api/queryKeys'
-import type { DataType, SavedQueryParameter } from '@/api/types'
+import type { ParamDataType, SavedQueryParameter } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -26,6 +26,10 @@ import { Textarea } from '@/components/ui/textarea'
 import { PARAMETER_DATA_TYPES, deriveKey, isValidKey, toastError } from '@/components/studio/lib'
 import { KeyField } from '@/components/studio/shared'
 import { detectParams } from './resultUtils'
+
+/** Quick-save offers scalar types only — entity_ref needs the Studio editor
+ * (it requires a target entity type). */
+const SCALAR_PARAM_TYPES = PARAMETER_DATA_TYPES.filter((t) => t !== 'entity_ref')
 
 interface SaveQueryDialogProps {
   ontologyKey: string
@@ -207,7 +211,7 @@ export function SaveQueryDialog({
                     onValueChange={(v) =>
                       setParameters((prev) =>
                         prev.map((q, j) =>
-                          j === i ? { ...q, dataType: v as DataType } : q,
+                          j === i ? { ...q, dataType: v as ParamDataType } : q,
                         ),
                       )
                     }
@@ -219,7 +223,7 @@ export function SaveQueryDialog({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {PARAMETER_DATA_TYPES.map((t) => (
+                      {SCALAR_PARAM_TYPES.map((t) => (
                         <SelectItem key={t} value={t}>
                           <span className="font-mono text-xs">{t}</span>
                         </SelectItem>

@@ -233,10 +233,12 @@ Connected to its owning ontology via a `HAS_AI_AGENT` relationship.
 | `key` | String | Unique within owning ontology, pattern `^[a-z][a-z0-9_-]*$` |
 | `name` | String | Display name |
 | `description` | String | Required description |
-| `cypher` | String | Parameterized Cypher query |
-| `parameters` | String (JSON) | Serialized list of `{name, description, dataType}` |
+| `exampleQuestions` | List of String | Natural-language questions the query answers |
+| `steps` | String (JSON) | Serialized array of pipeline step definitions |
+| `parameters` | String (JSON) | Serialized list of `{name, description, dataType, default?, entityTypeKey?}` |
+| `maxRows` | Integer | Optional per-cypher-step row cap (1000 when absent) |
 | `_ontologyKey` | String | Owning ontology key — denormalized because SEARCH WHERE can only filter on node properties, not relationships |
-| `_embedding` | List of Float | Vector embedding of the description field |
+| `_embedding` | List of Float | Vector embedding of description + example questions |
 | `createdAt` | DateTime | Set on creation |
 | `updatedAt` | DateTime | Updated on every mutation |
 
@@ -284,7 +286,7 @@ CREATE INDEX entity_type_key_index FOR (n:_Entity) ON (n._entityTypeKey);
 
 All constraints and indexes — both schema and instance — are created on startup.
 
-When an embedding provider is configured, vector indexes are additionally ensured on startup: one per entity type (`{entity_type_key}_embedding` on the PascalCase label, kept in sync with the entity type lifecycle), a shared cross-type index (`entity_embedding` on `_Entity`) for semantic search without a type filter, `saved_query_embedding` for saved-query descriptions, and one per document property (`{entity_type_key}_document_{property_key}_embedding` on the virtual chunk label — see Document Chunks in §4.2). Document chunk indexes are also created immediately when a document property is added via the modeling API, and dropped when the property or its entity type is deleted.
+When an embedding provider is configured, vector indexes are additionally ensured on startup: one per entity type (`{entity_type_key}_embedding` on the PascalCase label, kept in sync with the entity type lifecycle), a shared cross-type index (`entity_embedding` on `_Entity`) for semantic search without a type filter, `saved_query_embedding` for saved-query discovery (description + example questions), and one per document property (`{entity_type_key}_document_{property_key}_embedding` on the virtual chunk label — see Document Chunks in §4.2). Document chunk indexes are also created immediately when a document property is added via the modeling API, and dropped when the property or its entity type is deleted.
 
 Entity type and relation type keys are globally unique, enforced by Neo4j constraints.
 

@@ -17,6 +17,7 @@ import type {
   RelationType,
   RelationTypeInput,
   SavedQuery,
+  SavedQueryHealthResponse,
   SavedQueryInput,
   ScopeInclude,
   ValidationResult,
@@ -223,6 +224,10 @@ export const deleteAiAgent = (ontologyKey: string, agentKey: string) =>
 
 export const listSavedQueries = (ontologyKey: string) =>
   request<SavedQuery[]>(`${BASE}/ontologies/${ontologyKey}/saved-queries`)
+
+/** Re-validate all saved queries against the current schema. */
+export const savedQueryHealth = (ontologyKey: string) =>
+  request<SavedQueryHealthResponse>(`${BASE}/ontologies/${ontologyKey}/saved-queries/health`)
 
 /** Upsert — 201 created / 200 updated. */
 export const upsertSavedQuery = (

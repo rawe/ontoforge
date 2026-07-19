@@ -1,5 +1,5 @@
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModel
@@ -24,6 +24,8 @@ class SavedQueryParameter:
     name: str
     description: str
     data_type: str
+    default: str | int | float | bool | None = None  # non-None makes the parameter optional
+    entity_type_key: str | None = None  # required for data_type "entity_ref"
 
 
 @dataclass
@@ -45,6 +47,8 @@ class SavedQueryConfig:
     description: str
     steps: list[StepConfig]
     parameters: list[SavedQueryParameter]
+    example_questions: list[str] = field(default_factory=list)
+    max_rows: int | None = None
 
 
 DEFAULT_AGENT_CONFIG = AgentConfig(

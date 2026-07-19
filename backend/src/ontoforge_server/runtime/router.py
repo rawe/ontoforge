@@ -307,6 +307,7 @@ async def list_saved_queries(
             "key": sq.key,
             "name": sq.name,
             "description": sq.description,
+            "exampleQuestions": sq.example_questions,
             "steps": [
                 {
                     "name": s.name,
@@ -321,9 +322,16 @@ async def list_saved_queries(
                 for s in sq.steps
             ],
             "parameters": [
-                {"name": p.name, "description": p.description, "dataType": p.data_type}
+                service._parameter_summary({
+                    "name": p.name,
+                    "description": p.description,
+                    "dataType": p.data_type,
+                    "default": p.default,
+                    "entityTypeKey": p.entity_type_key,
+                })
                 for p in sq.parameters
             ],
+            **({"maxRows": sq.max_rows} if sq.max_rows is not None else {}),
         }
         for sq in loaded.saved_queries.values()
     ]
@@ -333,8 +341,8 @@ async def list_saved_queries(
 async def search_saved_queries(
     ontology_key: str,
     q: str = Query(..., min_length=1),
-    limit: int = Query(default=3, ge=1, le=20),
-    min_score: float | None = Query(default=0.7, ge=0.0, le=1.0),
+    limit: int = Query(default=5, ge=1, le=20),
+    min_score: float | None = Query(default=0.5, ge=0.0, le=1.0),
     driver: AsyncDriver = Depends(get_driver),
 ):
     return await service.search_saved_queries(

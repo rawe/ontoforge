@@ -992,6 +992,8 @@ async def upsert_saved_query(
     parameters_json: str,
     ontology_key: str | None = None,
     embedding: list[float] | None = None,
+    example_questions: list[str] | None = None,
+    max_rows: int | None = None,
 ) -> tuple[dict, bool]:
     """MERGE-based upsert. Returns (record, created)."""
     embedding_create = ", sq._embedding = $embedding" if embedding is not None else ""
@@ -1005,15 +1007,19 @@ async def upsert_saved_query(
             sq.savedQueryId = $saved_query_id,
             sq.name = $name,
             sq.description = $description,
+            sq.exampleQuestions = $example_questions,
             sq.steps = $steps_json,
             sq.parameters = $parameters_json,
+            sq.maxRows = $max_rows,
             sq.createdAt = datetime(),
             sq.updatedAt = datetime(){ontology_key_clause}{embedding_create}
         ON MATCH SET
             sq.name = $name,
             sq.description = $description,
+            sq.exampleQuestions = $example_questions,
             sq.steps = $steps_json,
             sq.parameters = $parameters_json,
+            sq.maxRows = $max_rows,
             sq.updatedAt = datetime(){ontology_key_clause}{embedding_match}
         RETURN sq {{.*}} AS query, sq.savedQueryId = $saved_query_id AS created
         """,
@@ -1026,6 +1032,8 @@ async def upsert_saved_query(
         parameters_json=parameters_json,
         ontology_key=ontology_key,
         embedding=embedding,
+        example_questions=example_questions or [],
+        max_rows=max_rows,
     )
     record = await result.single()
     return _convert_neo4j_types(record["query"]), record["created"]
@@ -1053,7 +1061,8 @@ async def list_saved_queries_for_export(session: AsyncSession, ontology_id: str)
         """
         MATCH (o:Ontology {ontologyId: $ontology_id})-[:HAS_SAVED_QUERY]->(sq:SavedQuery)
         RETURN sq.key AS key, sq.name AS name, sq.description AS description,
-               sq.steps AS steps, sq.parameters AS parameters
+               sq.exampleQuestions AS exampleQuestions,
+               sq.steps AS steps, sq.parameters AS parameters, sq.maxRows AS maxRows
         ORDER BY sq.name
         """,
         ontology_id=ontology_id,

@@ -157,17 +157,25 @@ Writes are unchanged: send the full string as a normal property value. An explic
 ## Saved Queries
 
 - `GET /api/runtime/{ontologyKey}/saved-queries`
-  Lists saved query metadata and parameter definitions.
+  Lists saved query metadata, example questions, steps, and parameter
+  definitions. Parameters with a `default` are optional at run time;
+  `entity_ref` parameters carry an `entityTypeKey`.
 
 - `GET /api/runtime/{ontologyKey}/saved-queries/search`
-  Searches saved queries semantically.
+  Searches saved queries semantically (description + example questions).
   Query parameters:
-  `q`, `limit`, `min_score`
+  `q`, `limit` (default 5), `min_score` (default 0.5)
 
 - `POST /api/runtime/{ontologyKey}/saved-queries/{queryKey}/run`
   Executes a saved query.
   Request body:
-  parameters expected by that saved query definition
+  `{"params": {...}}` — parameters without a default are required.
+  `entity_ref` parameters accept an entity `_id` or a name/description
+  resolved via semantic search (a failed resolution returns 422 with
+  candidate entities).
+  The response is the last step's output plus a `pipeline` block with
+  per-step row counts/truncation and, for entity_ref parameters, a
+  `resolvedParameters` block.
 
 ## Data Management
 

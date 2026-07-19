@@ -1,4 +1,4 @@
-import type { DataType } from '@/api/types'
+import type { DataType, ParamDataType } from '@/api/types'
 import { Input } from '@/components/ui/input'
 import {
   Select,
@@ -10,7 +10,7 @@ import {
 
 interface TypedValueInputProps {
   id?: string
-  dataType: DataType
+  dataType: DataType | ParamDataType
   /** Raw string state — coerce with `coerceTypedValue` (see `./lib`) on submit. */
   value: string
   onChange: (raw: string) => void

@@ -39,7 +39,7 @@ node scripts/export-schema.mjs [-o <output>] [--base-url <url>]
 
 **API used**: `GET /api/model/export`
 
-The output file is the standard OntoForge transfer format (v2.2) and can be committed to version control.
+The output file is the standard OntoForge transfer format (v2.3) and can be committed to version control.
 
 ### Import Schema
 
@@ -149,13 +149,13 @@ node scripts/export-data.mjs -o ./ontoforge/data.json
 
 ## File Formats
 
-### Schema file (v2.2)
+### Schema file (v2.3)
 
 Standard OntoForge transfer format produced by `GET /api/model/export`:
 
 ```json
 {
-  "formatVersion": "2.2",
+  "formatVersion": "2.3",
   "entityTypes": [
     {
       "key": "person",

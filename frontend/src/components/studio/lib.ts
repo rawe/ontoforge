@@ -6,7 +6,7 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { ApiError } from '@/api/http'
-import type { DataType, JsonPrimitive } from '@/api/types'
+import type { DataType, JsonPrimitive, ParamDataType } from '@/api/types'
 
 /* ---------------------------------- keys ----------------------------------- */
 
@@ -35,11 +35,17 @@ export const DATA_TYPES: readonly DataType[] = [
   'document',
 ]
 
-/** Saved-query parameters are scalar only — `document` exists only as an
- * entity property type. */
-export const PARAMETER_DATA_TYPES: readonly DataType[] = DATA_TYPES.filter(
-  (t) => t !== 'document',
-)
+/** Saved-query parameter types: scalars plus entity references — `document`
+ * exists only as an entity property type. */
+export const PARAMETER_DATA_TYPES: readonly ParamDataType[] = [
+  'string',
+  'integer',
+  'float',
+  'boolean',
+  'date',
+  'datetime',
+  'entity_ref',
+]
 
 /** Hint shown for data types that need explanation beyond their name. */
 export const DATA_TYPE_DESCRIPTIONS: Partial<Record<DataType, string>> = {
@@ -52,7 +58,7 @@ export const DATA_TYPE_DESCRIPTIONS: Partial<Record<DataType, string>> = {
  * Unparseable numbers are passed through as strings so the backend reports
  * the proper validation error.
  */
-export function coerceTypedValue(dataType: DataType, raw: string): JsonPrimitive {
+export function coerceTypedValue(dataType: DataType | ParamDataType, raw: string): JsonPrimitive {
   const value = raw.trim()
   if (value === '') return null
   switch (dataType) {

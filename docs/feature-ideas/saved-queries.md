@@ -6,24 +6,25 @@
 
 The `execute_cypher_query` tool is powerful but demands that the model compose valid Cypher from scratch: correct label keys, relationship types, property names, `$param` syntax. For large models with a well-crafted system prompt, this works. For smaller, cheaper models that should handle routine lookups, it's fragile and wastes tokens on query construction.
 
-Saved queries flip this: the ontology designer pre-defines named, parameterized pipelines at design time. At runtime, the agent picks a query by name, fills in the parameters, and gets results. The agent never sees Cypher.
+Saved queries flip this: the ontology designer pre-defines named, parameterized pipelines at design time. At runtime, the agent picks a query by name — or calls it directly as a typed MCP tool — fills in the parameters, and gets results. The agent never sees Cypher.
 
 ### Example: Simple Cypher Query
 
 A talent ontology designer creates a saved query `people_by_skill`:
 
 ```
-Steps:     [{ name: "main", type: "cypher", cypher: "MATCH (p:person)-[:has_skill]->(s:skill) WHERE s._id = $skillId RETURN p.name" }]
-Parameters:  skillId (string) — The _id of the skill to search for
+Steps:      [{ name: "main", type: "cypher", cypher: "MATCH (p:person)-[:has_skill]->(s:skill) WHERE s._id = $skill RETURN p.name" }]
+Parameters: skill (entity_ref → skill) — The skill to search for
+Examples:   "Who knows Kubernetes?", "Find people with a given skill"
 ```
 
-An agent configured with only `list_saved_queries` + `run_saved_query` calls:
+An agent connected to the runtime MCP server sees this as a first-class tool `query_people_by_skill(skill)` and calls it with either a skill `_id` or simply `"kubernetes"` — the entity reference is resolved automatically. Agents restricted to the generic tools instead call:
 
 ```json
-run_saved_query({ "query_key": "people_by_skill", "params": { "skillId": "3bd5..." } })
+run_saved_query({ "query_key": "people_by_skill", "params": { "skill": "kubernetes" } })
 ```
 
-No Cypher knowledge required.
+No Cypher knowledge required, and no manual ID lookup.
 
 ### Example: Multi-Step Pipeline
 
@@ -57,7 +58,8 @@ Each saved query is an **ordered pipeline of steps**. Steps execute sequentially
 |-------|----------|-------------|
 | `name` | Yes | Unique identifier for the step (used in binding references) |
 | `type` | Yes | `cypher` or `semantic_search` |
-| `bindings` | No | Dict mapping parameter names to `{{stepName.fieldName}}` expressions |
+
+**Cypher-only field:** `bindings` — dict mapping parameter names to `{{stepName.fieldName}}` expressions. Bindings are not supported on semantic search steps.
 
 **Semantic search optional fields:** `limit` (default 10), `minScore`.
 
@@ -67,37 +69,32 @@ Two reference syntaxes:
 
 | Syntax | Where Used | Resolves To |
 |--------|-----------|-------------|
-| `$param_name` | Cypher `$param` placeholders, semantic search `query` field | User-provided parameter value |
-| `{{stepName.fieldName}}` | Step `bindings` values | List of that field's values from all rows of the named step's output |
+| `$param_name` | Cypher `$param` placeholders, semantic search `query` field | User-provided parameter value (or its default) |
+| `{{stepName.fieldName}}` | Cypher step `bindings` values | List of that field's values from all rows of the named step's output |
 
-Bindings are resolved before each step executes. For cypher steps, resolved bindings are merged with user params to form the Cypher parameter map. For example, `"bindings": {"skill_ids": "{{skills._id}}"}` collects all `_id` values from the "skills" step's results into a list, then makes it available as `$skill_ids` in the Cypher query.
+Bindings are resolved before each step executes. For cypher steps, resolved bindings are merged with user params to form the Cypher parameter map. For example, `"bindings": {"skill_ids": "{{skills._id}}"}` collects all `_id` values from the "skills" step's results into a list, then makes it available as `$skill_ids` in the Cypher query. A binding name must not shadow a declared parameter.
+
+### Parameters
+
+Each parameter declares `name`, `description`, and `dataType` — one of `string`, `integer`, `float`, `boolean`, `date`, `datetime`, or `entity_ref`.
+
+- **Optional parameters** — a parameter with a `default` value may be omitted at run time; the default (validated against the data type at save time) is used instead. Parameters without a default are required.
+- **Entity references** — `entity_ref` parameters additionally declare an `entityTypeKey`. Callers pass either an entity `_id` of that type or a natural-language reference (a name or description) that is resolved via semantic search. This removes the "look up the ID first" round-trip that LLM callers otherwise need.
+
+### Example Questions
+
+A saved query can carry `exampleQuestions` — natural-language questions it answers ("Who knows Kubernetes?"). They are embedded together with the description for semantic discovery, shown in agent tool descriptions, and double as few-shot material for system prompts.
+
+### Result Limits and Diagnostics
+
+- **`maxRows`** (optional, default 1000) caps the rows each cypher step returns, protecting agent context windows and server memory from unbounded result sets.
+- Every run response carries a **`pipeline` block** with per-step row counts and truncation flags, so a caller — human or agent — can see which step ran dry when the final result is empty, and a **`resolvedParameters` block** showing how each `entity_ref` parameter was resolved.
 
 ### Neo4j Storage
 
-**Node: SavedQuery**
-
-| Property | Type | Notes |
-|----------|------|-------|
-| `savedQueryId` | String (UUID) | Stable identifier, immutable after creation |
-| `key` | String | Unique within owning ontology (`^[a-z][a-z0-9_-]*$`) |
-| `name` | String | Display name |
-| `description` | String | Required — the agent uses this to choose the right query |
-| `steps` | String (JSON) | Serialized array of step definitions |
-| `parameters` | String (JSON) | Serialized array of parameter definitions |
-| `_ontologyKey` | String | Owning ontology key (denormalized for in-index vector filtering) |
-| `_embedding` | List of Float | Vector embedding of the description field |
-| `createdAt` | DateTime | Set on creation |
-| `updatedAt` | DateTime | Updated on every mutation |
+**Node: SavedQuery** — see `docs/architecture.md` (§ Ontology-Related Nodes) for the property table. Steps and parameters are stored as JSON strings; example questions as a native string list.
 
 **Relationship:** `(Ontology)-[:HAS_SAVED_QUERY]->(SavedQuery)`
-
-**Parameters** are stored as a JSON string. Each parameter definition:
-
-```json
-{ "name": "skillId", "description": "The _id of the skill entity", "dataType": "string" }
-```
-
-All parameters are required. Supported data types: string, integer, float, boolean, date, datetime.
 
 ### Pipeline Validation at Creation Time
 
@@ -106,9 +103,10 @@ When a saved query is created or updated, the pipeline goes through comprehensiv
 1. **Steps non-empty** — at least one step required
 2. **Valid step types** — must be `cypher` or `semantic_search`
 3. **Step name uniqueness** — no duplicate names
-4. **Binding reference validity** — `{{stepName.fieldName}}` must reference a step that appears *before* the current step
-5. **Cypher steps validated** — Cypher goes through `validate_and_rewrite()` (schema labels, read-only check)
-6. **Parameter cross-check** — all `$param` references across all steps (Cypher and semantic search `query` fields) must be covered by declared parameters or bindings, and all declared parameters must be referenced somewhere
+4. **Binding reference validity** — `{{stepName.fieldName}}` must reference a step that appears *before* the current step, must not shadow a declared parameter, and is rejected on semantic search steps
+5. **Per-step parameter coverage** — every `$param` reference in a step must be satisfied by a declared parameter or by that step's own bindings (bindings of other steps don't count — they are resolved per step at execution time); every declared parameter must be referenced somewhere
+6. **Parameter definitions** — defaults must coerce to the declared data type; `entity_ref` parameters must name an `entityTypeKey` that exists in the ontology scope
+7. **Schema validation** — Cypher goes through `validate_and_rewrite()` (schema labels, read-only check); semantic step entity types must be in scope
 
 ### Modeling CRUD
 
@@ -117,43 +115,41 @@ When a saved query is created or updated, the pipeline goes through comprehensiv
 | List | `GET /api/model/ontologies/{key}/saved-queries` | `list_saved_queries` |
 | Create/Update | `PUT /api/model/ontologies/{key}/saved-queries/{queryKey}` | `set_saved_query` |
 | Delete | `DELETE /api/model/ontologies/{key}/saved-queries/{queryKey}` | `delete_saved_query` |
+| Health check | `GET /api/model/ontologies/{key}/saved-queries/health` | `check_saved_queries` |
 
-`set_saved_query` is an upsert (MERGE pattern). Accepts `steps` (list of step definitions) and `parameters` (list of parameter definitions).
+`set_saved_query` is an upsert (MERGE pattern). Accepts `steps`, `parameters`, `exampleQuestions`, and `maxRows`.
+
+The **health check** re-validates every saved query against the current schema without executing anything, so queries broken by later schema or scope changes surface in the Studio (a "broken" badge in the saved queries list) instead of failing at agent runtime.
 
 ### Runtime Tools
 
 | Tool | Arguments | Returns | Description |
 |------|-----------|---------|-------------|
-| `list_saved_queries` | — | List of `{ key, name, description, steps, parameters }` | Discover available queries and their structure |
-| `run_saved_query` | `query_key`, `params` | Last step's output | Execute a saved query pipeline by name |
-| `search_saved_queries` | `query` | List of `{ key, name, description, parameters, score }` | Semantic search over saved query descriptions |
+| `list_saved_queries` | — | List of `{ key, name, description, exampleQuestions, parameters }` | Discover available queries. Steps are omitted — callers never need the Cypher. |
+| `run_saved_query` | `query_key`, `params` | Last step's output + `pipeline` + `resolvedParameters` | Execute a saved query pipeline by name |
+| `search_saved_queries` | `query`, `limit` (default 5) | List of `{ key, name, description, exampleQuestions, parameters, score }` | Semantic search over saved queries (description + example questions) |
+| `query_<key>` | The query's own parameters | Same as `run_saved_query` | Each saved query is additionally exposed as its own typed MCP tool with a generated JSON input schema |
 
 `run_saved_query` execution:
 
 1. Look up saved query by key from the schema cache
-2. Validate all required parameters are present
+2. Validate parameters (missing required / unknown), apply defaults
 3. Coerce parameter values to declared data types
-4. Execute pipeline steps sequentially, resolving bindings between steps
-5. Return the last step's output
+4. Resolve `entity_ref` parameters to entity `_id`s (direct match or semantic search)
+5. Execute pipeline steps sequentially, resolving bindings between steps and capping cypher rows at `maxRows`
+6. Return the last step's output with pipeline diagnostics
 
-### Pipeline Execution Engine
+### Saved Queries as Typed MCP Tools
 
-For each step in order:
-
-1. **Resolve bindings** — evaluate `{{stepName.fieldName}}` expressions against previous step results
-2. **Dispatch by type:**
-   - **cypher** — merge user params + resolved bindings, validate & rewrite Cypher, execute, strip out-of-scope properties
-   - **semantic_search** — substitute `$param` in query text, call semantic search service with entity type, limit, min_score
-3. **Store results** in the step context (keyed by step name)
-4. **Return the last step's output** to the caller
+The runtime MCP server generates one tool per saved query of the connected ontology, named `query_<key>`. The tool description combines name, description, and example questions; the input schema is generated from the parameter definitions (types, defaults, required list). For LLM agents this is the most reliable calling convention — the MCP client validates arguments against the schema before the request ever reaches the server. The generic `list/run/search` tools remain for discovery-driven flows.
 
 ### Semantic Search over Saved Queries
 
-`search_saved_queries` enables agents to find the right saved query by describing intent in natural language. The search operates on the `description` field — at write time, the description is embedded via the configured embedding provider and stored as `_embedding`.
+`search_saved_queries` enables agents to find the right saved query by describing intent in natural language. At write time, the description and example questions are embedded via the configured embedding provider and stored as `_embedding`.
 
 ### What's Possible
 
-- **Single Cypher query** — the simplest case: one cypher step (equivalent to the original design)
+- **Single Cypher query** — the simplest case: one cypher step
 - **Semantic search → Cypher** — search entities by description, use results in a follow-up Cypher query
 - **Cypher → Cypher chaining** — run a broad query, then use IDs in a more targeted query
 - **Multiple semantic searches** — search different entity types, then join results in a Cypher step
@@ -165,19 +161,15 @@ For each step in order:
 |------------|-------------------|
 | Only `cypher` and `semantic_search` step types | Everything the other runtime tools do (list_entities, get_neighbors) can be expressed as Cypher. Semantic search is the one capability that can't. |
 | `{{step.field}}` always produces a flat list | Cypher handles filtering/aggregation. Use `limit` on semantic_search for "top N". |
-| No conditional branching | Keeps the engine deterministic. Empty results from step 1 pass empty lists to step 2. |
+| No conditional branching | Keeps the engine deterministic. Empty results from step 1 pass empty lists to step 2 — the `pipeline` block shows where results ran dry. |
 | Strictly sequential execution | Easy to reason about. For "search two types", do two sequential steps and combine in a Cypher `UNWIND`. |
 | No loops | Batch via `IN` clauses handles iteration: `WHERE s._id IN $skill_ids`. |
 | Steps stored as JSON blob | Saved queries are always loaded/saved as a whole unit. |
 
 ### Export/Import
 
-Export format version **2.2** includes `steps` on `ExportSavedQuery` (replacing the old `cypher` field from 2.1).
+Export format version **2.3**: `ExportSavedQuery` carries `steps`, `parameters` (with `default`/`entityTypeKey`), `exampleQuestions`, and `maxRows`.
 
 ### Cascading Deletes
 
-Deleting an ontology cascades to its saved queries. Removing entity types from an ontology scope may invalidate saved queries that reference them — this produces a validation error at execution time.
-
-## Format Version
-
-Adding `steps` to `ExportSavedQuery` (replacing `cypher`) is a breaking change from v2.1. Format version bumped to **2.2**.
+Deleting an ontology cascades to its saved queries. Removing entity types from an ontology scope may invalidate saved queries that reference them — the health check surfaces this in the Studio, and execution fails with a clear validation error.

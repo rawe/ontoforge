@@ -192,9 +192,13 @@ async def _load_schema(ontology_key: str, driver: AsyncDriver) -> LoadedSchema:
                     name=p["name"],
                     description=p["description"],
                     data_type=p["dataType"],
+                    default=p.get("default"),
+                    entity_type_key=p.get("entityTypeKey"),
                 )
                 for p in params_list
             ],
+            example_questions=row.get("exampleQuestions") or [],
+            max_rows=row.get("maxRows"),
         )
 
     loaded = LoadedSchema(scoped=scoped_cache, full=full_cache, agent_configs=agent_configs, saved_queries=saved_queries)
@@ -2070,6 +2074,78 @@ def _substitute_params(template: str, params: dict[str, Any]) -> str:
     return re.sub(r'\$([a-zA-Z_]\w*)', replacer, template)
 
 
+# Rows returned per cypher step when the saved query declares no maxRows
+DEFAULT_SAVED_QUERY_MAX_ROWS = 1000
+
+# Minimum similarity score for resolving an entity_ref parameter via semantic search
+ENTITY_REF_MIN_SCORE = 0.75
+
+
+def _entity_candidate_summary(entity: dict, score: float | None) -> dict:
+    """Compact representation of an entity for entity_ref resolution feedback."""
+    props = {
+        k: v
+        for k, v in entity.items()
+        if not k.startswith("_") and isinstance(v, str) and len(v) <= 120
+    }
+    summary = {"_id": entity.get("_id"), "properties": dict(list(props.items())[:3])}
+    if score is not None:
+        summary["score"] = score
+    return summary
+
+
+async def _resolve_entity_ref(
+    ontology_key: str,
+    param_name: str,
+    entity_type_key: str,
+    value: str,
+    driver: AsyncDriver,
+) -> dict:
+    """Resolve an entity_ref parameter value to an entity _id.
+
+    The value is first tried as a direct _id. Otherwise it is treated as a
+    natural-language reference and resolved via semantic search over the
+    parameter's entity type: the top hit wins if it scores at least
+    ENTITY_REF_MIN_SCORE, else the candidates are reported so the caller can
+    retry with an explicit _id.
+
+    Returns a resolution dict: {"entityId": ..., "matched": "id" | "semantic",
+    "score": ...}.
+    """
+    pascal_label = to_pascal_case(entity_type_key)
+    async with driver.session() as session:
+        entity = await repository.get_entity(session, pascal_label, value)
+    if entity:
+        return {"entityId": value, "matched": "id"}
+
+    provider = get_embedding_provider()
+    if not provider:
+        raise ValidationError(
+            f"Parameter '{param_name}': '{value}' is not an existing "
+            f"{entity_type_key} _id, and resolving it by description requires "
+            "EMBEDDING_PROVIDER to be configured"
+        )
+
+    result = await semantic_search(
+        ontology_key, value, entity_type_key, 5, None, driver,
+        search_in="entities", snippets=False,
+    )
+    hits = result.get("results", [])
+    scored = [
+        (r["entity"], r.get("_score", r.get("score"))) for r in hits if r.get("entity")
+    ]
+    if scored and scored[0][1] is not None and scored[0][1] >= ENTITY_REF_MIN_SCORE:
+        top_entity, top_score = scored[0]
+        return {"entityId": top_entity["_id"], "matched": "semantic", "score": top_score}
+
+    candidates = [_entity_candidate_summary(e, s) for e, s in scored]
+    raise ValidationError(
+        f"Parameter '{param_name}': could not resolve '{value}' to a "
+        f"{entity_type_key} entity. Pass an explicit _id, or a closer description.",
+        details={"candidates": candidates},
+    )
+
+
 async def execute_saved_query(
     ontology_key: str,
     query_key: str,
@@ -2078,9 +2154,10 @@ async def execute_saved_query(
 ) -> dict:
     """Execute a saved query pipeline by key with parameter values.
 
-    Validates parameters, coerces types, then runs each step sequentially.
-    Bindings allow steps to reference results from earlier steps.
-    Returns the last step's output.
+    Validates parameters, applies defaults, coerces types, resolves entity_ref
+    parameters, then runs each step sequentially. Bindings allow steps to
+    reference results from earlier steps. Returns the last step's output plus
+    a "pipeline" diagnostics block with per-step row counts.
     """
     from ontoforge_server.runtime.cypher import (
         get_return_variables,
@@ -2092,10 +2169,11 @@ async def execute_saved_query(
     if not config:
         raise NotFoundError(f"Saved query '{query_key}' not found")
 
-    # Validate all declared parameters are present (no missing, no extra)
+    # Validate provided parameters: parameters without a default are required
     declared_names = {p.name for p in config.parameters}
+    required_names = {p.name for p in config.parameters if p.default is None}
     provided_names = set(params.keys())
-    missing = declared_names - provided_names
+    missing = required_names - provided_names
     extra = provided_names - declared_names
     errors: list[str] = []
     if missing:
@@ -2108,14 +2186,15 @@ async def execute_saved_query(
             details={"errors": errors},
         )
 
-    # Coerce parameter values to declared data types
+    # Apply defaults and coerce parameter values to declared data types
     coerced_params: dict[str, Any] = {}
     coercion_errors: dict[str, str] = {}
     for param_def in config.parameters:
-        raw_value = params[param_def.name]
+        raw_value = params.get(param_def.name, param_def.default)
+        coerce_type = "string" if param_def.data_type == "entity_ref" else param_def.data_type
         try:
             coerced_params[param_def.name] = coerce_value(
-                raw_value, param_def.data_type, param_def.name
+                raw_value, coerce_type, param_def.name
             )
         except ValueError as e:
             coercion_errors[param_def.name] = str(e)
@@ -2125,8 +2204,24 @@ async def execute_saved_query(
             details={"fields": coercion_errors},
         )
 
+    # Resolve entity_ref parameters to entity _ids
+    resolved_refs: dict[str, dict] = {}
+    for param_def in config.parameters:
+        if param_def.data_type == "entity_ref":
+            resolution = await _resolve_entity_ref(
+                ontology_key,
+                param_def.name,
+                param_def.entity_type_key,
+                coerced_params[param_def.name],
+                driver,
+            )
+            coerced_params[param_def.name] = resolution["entityId"]
+            resolved_refs[param_def.name] = resolution
+
+    max_rows = config.max_rows or DEFAULT_SAVED_QUERY_MAX_ROWS
     scoped = loaded.scoped
     step_results: dict[str, list[dict]] = {}
+    pipeline_info: list[dict] = []
     last_output: dict = {"columns": [], "results": []}
 
     for step in config.steps:
@@ -2145,13 +2240,22 @@ async def execute_saved_query(
 
             async with driver.session() as session:
                 columns, rows = await repository.execute_cypher_read(
-                    session, rewritten, params=cypher_params
+                    session, rewritten, params=cypher_params, max_rows=max_rows
                 )
+            truncated = len(rows) > max_rows
+            if truncated:
+                rows = rows[:max_rows]
 
             # Post-process: strip out-of-scope properties + stub documents
             _postprocess_cypher_rows(rows, var_map, scoped)
 
             step_results[step.name] = rows
+            pipeline_info.append({
+                "step": step.name,
+                "type": "cypher",
+                "rows": len(rows),
+                "truncated": truncated,
+            })
             last_output = {"columns": columns, "results": rows}
 
         elif step.type == "semantic_search":
@@ -2179,8 +2283,16 @@ async def execute_saved_query(
                 row["_score"] = r.get("_score", r.get("score"))
 
             step_results[step.name] = rows
+            pipeline_info.append({
+                "step": step.name,
+                "type": "semantic_search",
+                "rows": len(rows),
+            })
             last_output = result
 
+    last_output["pipeline"] = pipeline_info
+    if resolved_refs:
+        last_output["resolvedParameters"] = resolved_refs
     return last_output
 
 
@@ -2225,9 +2337,18 @@ async def search_saved_queries(
             params_list = _json.loads(params_raw)
         else:
             params_list = params_raw or []
-        r["parameters"] = [
-            {"name": p["name"], "description": p["description"], "dataType": p["dataType"]}
-            for p in params_list
-        ]
+        r["parameters"] = [_parameter_summary(p) for p in params_list]
 
     return results
+
+
+def _parameter_summary(p: dict) -> dict:
+    """Public shape of a saved query parameter definition."""
+    return {
+        "name": p["name"],
+        "description": p["description"],
+        "dataType": p["dataType"],
+        "required": p.get("default") is None,
+        **({"default": p["default"]} if p.get("default") is not None else {}),
+        **({"entityTypeKey": p["entityTypeKey"]} if p.get("entityTypeKey") else {}),
+    }

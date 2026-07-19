@@ -146,7 +146,7 @@ async def test_upsert_saved_query_rejects_document_parameter(client):
             },
         )
     assert resp.status_code == 422
-    assert "scalar" in resp.json()["error"]["message"]
+    assert "dataType" in resp.text
     mock_upsert.assert_not_awaited()
 
 
@@ -503,3 +503,263 @@ async def test_delete_ontology_cascades_queries(client):
     ):
         resp = await client.delete("/api/model/ontologies/ont-1")
     assert resp.status_code == 204
+
+
+# --- New validation rules ---
+
+
+def _upsert_payload(steps, parameters):
+    return {
+        "name": "Test Query",
+        "description": "A test query",
+        "steps": steps,
+        "parameters": parameters,
+    }
+
+
+async def _upsert(client, payload):
+    with (
+        patch(f"{REPO}.get_ontology_by_key", new_callable=AsyncMock, return_value=MOCK_ONTOLOGY),
+        patch(f"{REPO}.upsert_saved_query", new_callable=AsyncMock, return_value=(MOCK_QUERY, True)),
+        patch(
+            "ontoforge_server.runtime.service._load_schema",
+            new_callable=AsyncMock,
+            side_effect=NotFoundError("no runtime schema"),
+        ),
+    ):
+        return await client.put(
+            "/api/model/ontologies/test_onto/saved-queries/test-query", json=payload
+        )
+
+
+@pytest.mark.asyncio
+async def test_upsert_binding_from_other_step_not_shared(client):
+    """A $ref satisfied only by another step's binding is rejected."""
+    payload = _upsert_payload(
+        steps=[
+            {
+                "name": "first",
+                "type": "cypher",
+                "cypher": "MATCH (p:person) WHERE p._id IN $ids RETURN p",
+            },
+            {
+                "name": "second",
+                "type": "cypher",
+                "cypher": "MATCH (p:person) RETURN p",
+                "bindings": {"ids": "{{first.p}}"},
+            },
+        ],
+        parameters=[],
+    )
+    resp = await _upsert(client, payload)
+    assert resp.status_code == 422
+    errors = resp.json()["error"]["details"]["errors"]
+    assert any("steps[0].cypher" in e and "ids" in e for e in errors)
+
+
+@pytest.mark.asyncio
+async def test_upsert_bindings_on_semantic_search_rejected(client):
+    payload = _upsert_payload(
+        steps=[
+            {
+                "name": "people",
+                "type": "cypher",
+                "cypher": "MATCH (p:person) RETURN p._id AS _id",
+            },
+            {
+                "name": "search",
+                "type": "semantic_search",
+                "entityTypeKey": "skill",
+                "query": "some skill",
+                "bindings": {"ids": "{{people._id}}"},
+            },
+        ],
+        parameters=[],
+    )
+    resp = await _upsert(client, payload)
+    assert resp.status_code == 422
+    errors = resp.json()["error"]["details"]["errors"]
+    assert any("not supported on semantic_search" in e for e in errors)
+
+
+@pytest.mark.asyncio
+async def test_upsert_binding_shadows_parameter_rejected(client):
+    payload = _upsert_payload(
+        steps=[
+            {
+                "name": "first",
+                "type": "cypher",
+                "cypher": "MATCH (p:person) WHERE p.name = $name RETURN p._id AS _id",
+            },
+            {
+                "name": "second",
+                "type": "cypher",
+                "cypher": "MATCH (p:person) WHERE p._id IN $name RETURN p",
+                "bindings": {"name": "{{first._id}}"},
+            },
+        ],
+        parameters=[
+            {"name": "name", "description": "Name", "dataType": "string"},
+        ],
+    )
+    resp = await _upsert(client, payload)
+    assert resp.status_code == 422
+    errors = resp.json()["error"]["details"]["errors"]
+    assert any("Shadows the declared parameter" in e for e in errors)
+
+
+@pytest.mark.asyncio
+async def test_upsert_default_must_coerce(client):
+    payload = _upsert_payload(
+        steps=[
+            {
+                "name": "main",
+                "type": "cypher",
+                "cypher": "MATCH (p:person) WHERE p.age > $min_age RETURN p",
+            },
+        ],
+        parameters=[
+            {
+                "name": "min_age",
+                "description": "Minimum age",
+                "dataType": "integer",
+                "default": "not-a-number",
+            },
+        ],
+    )
+    resp = await _upsert(client, payload)
+    assert resp.status_code == 422
+    errors = resp.json()["error"]["details"]["errors"]
+    assert any("min_age.default" in e for e in errors)
+
+
+@pytest.mark.asyncio
+async def test_upsert_entity_ref_requires_entity_type_key(client):
+    payload = _upsert_payload(
+        steps=[
+            {
+                "name": "main",
+                "type": "cypher",
+                "cypher": "MATCH (p:person {_id: $person}) RETURN p",
+            },
+        ],
+        parameters=[
+            {"name": "person", "description": "The person", "dataType": "entity_ref"},
+        ],
+    )
+    resp = await _upsert(client, payload)
+    assert resp.status_code == 422
+    errors = resp.json()["error"]["details"]["errors"]
+    assert any("entityTypeKey is required for entity_ref" in e for e in errors)
+
+
+@pytest.mark.asyncio
+async def test_upsert_entity_type_key_only_for_entity_ref(client):
+    payload = _upsert_payload(
+        steps=[
+            {
+                "name": "main",
+                "type": "cypher",
+                "cypher": "MATCH (p:person {name: $name}) RETURN p",
+            },
+        ],
+        parameters=[
+            {
+                "name": "name",
+                "description": "Name",
+                "dataType": "string",
+                "entityTypeKey": "person",
+            },
+        ],
+    )
+    resp = await _upsert(client, payload)
+    assert resp.status_code == 422
+    errors = resp.json()["error"]["details"]["errors"]
+    assert any("only allowed on entity_ref" in e for e in errors)
+
+
+@pytest.mark.asyncio
+async def test_upsert_stores_example_questions_and_max_rows(client):
+    payload = {
+        "name": "Test Query",
+        "description": "A test query",
+        "exampleQuestions": ["Who knows Python?", "Find Python devs"],
+        "maxRows": 50,
+        "steps": [
+            {"name": "main", "type": "cypher", "cypher": "MATCH (p:person) RETURN p"},
+        ],
+        "parameters": [],
+    }
+    with (
+        patch(f"{REPO}.get_ontology_by_key", new_callable=AsyncMock, return_value=MOCK_ONTOLOGY),
+        patch(
+            f"{REPO}.upsert_saved_query", new_callable=AsyncMock, return_value=(MOCK_QUERY, True)
+        ) as mock_upsert,
+        patch(
+            "ontoforge_server.runtime.service._load_schema",
+            new_callable=AsyncMock,
+            side_effect=NotFoundError("no runtime schema"),
+        ),
+    ):
+        resp = await client.put(
+            "/api/model/ontologies/test_onto/saved-queries/test-query", json=payload
+        )
+    assert resp.status_code == 201
+    kwargs = mock_upsert.call_args.kwargs
+    assert kwargs["example_questions"] == ["Who knows Python?", "Find Python devs"]
+    assert kwargs["max_rows"] == 50
+
+
+# --- Health check ---
+
+
+@pytest.mark.asyncio
+async def test_saved_query_health_reports_broken_queries(client):
+    from ontoforge_server.core.exceptions import ValidationError as OFValidationError
+
+    broken_query = {
+        **MOCK_QUERY,
+        "key": "broken-query",
+        "name": "Broken",
+        "steps": '[{"name": "main", "type": "cypher", "cypher": "MATCH (x:gone) RETURN x"}]',
+        "parameters": "[]",
+    }
+
+    from ontoforge_server.runtime.service import LoadedSchema, SchemaCache
+
+    schema = SchemaCache(
+        ontology_id="ont-1", ontology_key="test_onto",
+        ontology_name="Test", ontology_description=None,
+    )
+    loaded = LoadedSchema(scoped=schema, full=schema)
+
+    def _fail_unknown_label(cypher, scoped):
+        if "gone" in cypher:
+            raise OFValidationError("Unknown label: gone")
+        return cypher
+
+    with (
+        patch(f"{REPO}.get_ontology_by_key", new_callable=AsyncMock, return_value=MOCK_ONTOLOGY),
+        patch(
+            f"{REPO}.list_saved_queries",
+            new_callable=AsyncMock,
+            return_value=[MOCK_QUERY, broken_query],
+        ),
+        patch(
+            "ontoforge_server.runtime.service._load_schema",
+            new_callable=AsyncMock,
+            return_value=loaded,
+        ),
+        patch(
+            "ontoforge_server.runtime.cypher.validate_and_rewrite",
+            side_effect=_fail_unknown_label,
+        ),
+    ):
+        resp = await client.get("/api/model/ontologies/test_onto/saved-queries/health")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["valid"] is False
+    by_key = {q["key"]: q for q in body["queries"]}
+    assert by_key["find-people"]["valid"] is True
+    assert by_key["broken-query"]["valid"] is False
+    assert any("Unknown label" in e for e in by_key["broken-query"]["errors"])

@@ -398,13 +398,17 @@ async def set_saved_query(
     description: str,
     steps: list[dict],
     parameters: list[dict] | None = None,
+    example_questions: list[str] | None = None,
+    max_rows: int | None = None,
 ) -> dict:
     driver = await get_driver()
     body = SavedQueryUpsert(
         name=name,
         description=description,
+        exampleQuestions=example_questions or [],
         steps=steps,
         parameters=parameters or [],
+        maxRows=max_rows,
     )
     result, created = await service.upsert_saved_query(ontology_key, key, body, driver)
     response = result.model_dump(by_alias=True)
@@ -416,6 +420,12 @@ async def delete_saved_query(ontology_key: str, query_key: str) -> str:
     driver = await get_driver()
     await service.delete_saved_query(ontology_key, query_key, driver)
     return f"Saved query '{query_key}' deleted from ontology '{ontology_key}'."
+
+
+async def check_saved_queries(ontology_key: str) -> dict:
+    driver = await get_driver()
+    result = await service.saved_query_health(ontology_key, driver)
+    return result.model_dump(by_alias=True)
 
 
 # ---------------------------------------------------------------------------
@@ -584,10 +594,15 @@ _MODELING_TOOL_DEFS: list[tuple[Callable, str, str]] = [
         "'cypher' — needs 'cypher' field with a Cypher query using $param placeholders. "
         "'semantic_search' — needs 'entityTypeKey' and 'query' (use $param_name to reference a declared parameter). "
         "Optional: 'limit' (default 10), 'minScore'. "
-        "Data flow: steps can have 'bindings' dict mapping param names to '{{prevStepName.fieldName}}' "
+        "Data flow: cypher steps can have 'bindings' dict mapping param names to '{{prevStepName.fieldName}}' "
         "which collects that field from all rows of a previous step's output into a list. "
         "Parameters define top-level $param placeholders. "
-        "Each parameter needs: name, description, dataType (string/integer/float/boolean/date/datetime). "
+        "Each parameter needs: name, description, dataType (string/integer/float/boolean/date/datetime/entity_ref). "
+        "A parameter with a 'default' value is optional at call time. "
+        "entity_ref parameters also need 'entityTypeKey'; at runtime callers pass an entity _id or a "
+        "description that is resolved via semantic search. "
+        "example_questions (list of natural-language questions the query answers) improves semantic "
+        "discovery and agent tool descriptions. max_rows (default 1000) caps rows per cypher step. "
         "Example: steps=[{name:'skills', type:'semantic_search', entityTypeKey:'skill', query:'$q', limit:5}, "
         "{name:'results', type:'cypher', cypher:'MATCH (p:person)-[:has_skill]->(s:skill) "
         "WHERE s._id IN $ids RETURN p', bindings:{ids:'{{skills._id}}'}}], parameters=[{name:'q', ...}]",
@@ -596,6 +611,13 @@ _MODELING_TOOL_DEFS: list[tuple[Callable, str, str]] = [
         delete_saved_query,
         "delete_saved_query",
         "Delete a saved query from an ontology.",
+    ),
+    (
+        check_saved_queries,
+        "check_saved_queries",
+        "Re-validate all saved queries of an ontology against the current schema. "
+        "Reports queries broken by schema or scope changes (renamed types, removed "
+        "properties) without executing them. Returns per-query validity and errors.",
     ),
 ]
 

@@ -1,7 +1,8 @@
-import { Pin } from 'lucide-react'
+import { FileText, Pin } from 'lucide-react'
 import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { displayLabel } from '@/lib/displayLabel'
+import { isDocumentStub } from '@/lib/documents'
 import { getTypeColor } from '@/lib/typeColors'
 import { cn } from '@/lib/utils'
 import { NODE_WIDTH, type EntityFlowNode } from './workingSet'
@@ -11,12 +12,13 @@ const handleClass =
 
 /**
  * Canvas entity card: type-colored left border + dot, display label, type
- * name, pin indicator and a selected ring. Left handle receives connections,
+ * name, document/pin indicators and a selected ring. Left handle receives connections,
  * right handle starts them (drag-connect). A `flashedAt` bump in data renders
  * a one-shot ring flash ("already on canvas").
  */
 function EntityNodeInner({ data, selected }: NodeProps<EntityFlowNode>) {
   const color = getTypeColor(data.entity._entityTypeKey)
+  const hasDocuments = Object.values(data.entity).some(isDocumentStub)
 
   return (
     <div
@@ -40,9 +42,17 @@ function EntityNodeInner({ data, selected }: NodeProps<EntityFlowNode>) {
         <span className="truncate text-[10.5px] text-muted-foreground">
           {data.typeName}
         </span>
-        {data.pinned && (
-          <Pin className="ml-auto size-3 shrink-0 text-muted-foreground" aria-label="Pinned" />
-        )}
+        <span className="ml-auto flex shrink-0 items-center gap-1">
+          {hasDocuments && (
+            <FileText
+              className="size-3 text-muted-foreground/70"
+              aria-label="Has documents"
+            />
+          )}
+          {data.pinned && (
+            <Pin className="size-3 text-muted-foreground" aria-label="Pinned" />
+          )}
+        </span>
       </div>
       <div className="mt-0.5 truncate text-[13px] font-medium text-foreground">
         {displayLabel(data.entity)}

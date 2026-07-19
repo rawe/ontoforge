@@ -6,6 +6,7 @@
  *   ['schema', ontologyKey]                          runtime schema
  *   ['entities', ontologyKey, typeKey, params]
  *   ['entity', ontologyKey, typeKey, id]
+ *   ['document', ontologyKey, typeKey, id, propertyKey]
  *   ['neighbors', ontologyKey, typeKey, id, params]
  *   ['relations', ontologyKey, typeKey, params]
  *   ['savedQueries', ontologyKey]
@@ -29,6 +30,8 @@ export const qk = {
       : (['entities', ontologyKey, typeKey, params] as const),
   entity: (ontologyKey: string, typeKey: string, id: string) =>
     ['entity', ontologyKey, typeKey, id] as const,
+  document: (ontologyKey: string, typeKey: string, id: string, propertyKey: string) =>
+    ['document', ontologyKey, typeKey, id, propertyKey] as const,
   neighbors: (ontologyKey: string, typeKey: string, id: string, params?: unknown) =>
     params === undefined
       ? (['neighbors', ontologyKey, typeKey, id] as const)

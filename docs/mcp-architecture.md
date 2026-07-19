@@ -236,7 +236,7 @@ Properties are managed through unified tools that work on both entity types and 
 
 | Tool | Arguments | Returns | Description |
 |------|-----------|---------|-------------|
-| `add_property` | `type_kind` ("entity_type" or "relation_type"), `type_key`, `key`, `display_name`, `data_type`, `required` (opt, default false), `default_value` (opt), `description` (opt) | Created property | Add a property definition. `data_type` must be one of: string, integer, float, boolean, date, datetime. |
+| `add_property` | `type_kind` ("entity_type" or "relation_type"), `type_key`, `key`, `display_name`, `data_type`, `required` (opt, default false), `default_value` (opt), `description` (opt) | Created property | Add a property definition. `data_type` must be one of: string, integer, float, boolean, date, datetime, document. `document` holds large text interpreted as Markdown, chunked for semantic search when embeddings are enabled. |
 | `update_property` | `type_kind`, `type_key`, `property_key`, `display_name` (opt), `required` (opt), `default_value` (opt), `description` (opt) | Updated property | Update a property's metadata. Key and data type are immutable after creation. |
 | `delete_property` | `type_kind`, `type_key`, `property_key` | Confirmation | Remove a property definition from an entity type or relation type. |
 
@@ -264,7 +264,9 @@ Properties are managed through unified tools that work on both entity types and 
 | `set_saved_query` | `key`, `name`, `description`, `cypher`, `parameters` (list of `{name, description, dataType}`) | Created/updated saved query | Create or update a saved query. Cypher is validated against the scoped schema at creation time. Parameters must match `$param` references in the Cypher. |
 | `delete_saved_query` | `key` | Confirmation | Delete a saved query. |
 
-### 3.2 Runtime MCP Tools (17 tools)
+### 3.2 Runtime MCP Tools (18 tools)
+
+Entity-returning tools (`list_entities`, `get_entity`, `get_neighbors`, `cypher_query`, `run_saved_query`, `semantic_search`) share the REST service layer, so `document` properties appear as stubs — never inline content (see `api-contracts/runtime-api.md` §3, Document Properties in Entity Reads). Content is read via `get_document`.
 
 #### Schema Introspection
 
@@ -281,6 +283,12 @@ Properties are managed through unified tools that work on both entity types and 
 | `get_entity` | `entity_type_key`, `entity_id` | Single entity instance | Retrieve a specific entity by its `_id`. |
 | `update_entity` | `entity_type_key`, `entity_id`, `properties` (object) | Updated entity instance | Partial update — only provided properties change. Set a property to `null` to remove it (fails for required properties). |
 | `delete_entity` | `entity_type_key`, `entity_id` | Confirmation | Delete an entity and all its connected relations. |
+
+#### Document Access
+
+| Tool | Arguments | Returns | Description |
+|------|-----------|---------|-------------|
+| `get_document` | `entity_type_key`, `entity_id`, `property_key`, `offset` (opt, default 0), `limit` (opt) | `{propertyKey, content, offset, length, totalLength}` | Read (a slice of) a `document` property. `offset`/`limit` are character-based; without them the full document is returned. Use the `charOffset`/`charLength` from a `semantic_search` document hit to fetch exactly the matching passage. Mirrors the REST document read endpoint. |
 
 #### Relation Operations
 
@@ -308,7 +316,7 @@ Properties are managed through unified tools that work on both entity types and 
 
 | Tool | Arguments | Returns | Description |
 |------|-----------|---------|-------------|
-| `semantic_search` | `query` (string), `entity_type_key` (opt), `limit` (opt, default 10), `filters` (opt, object), `fields` (opt, list) | List of `{entity, score}` ranked by similarity | Search entities by semantic similarity to a natural language query. Omit `entity_type_key` to search across all entity types at once — results carry `_entityTypeKey`. `filters` requires `entity_type_key`. Requires embedding provider. |
+| `semantic_search` | `query` (string), `entity_type_key` (opt), `limit` (opt, default 10), `filters` (opt, object), `fields` (opt, list), `search_in` (opt: "entities"/"documents"/"all", default "all"), `snippets` (opt, default true) | List of `{entity, score, matchedVia}` ranked by relevance | Search entities by semantic similarity to a natural language query, over entity embeddings and/or document chunks. `matchedVia` tells what matched — document hits carry the property key, `charOffset`/`charLength` (usable with `get_document`), the raw cosine `similarity`, and a ~200-char snippet. Omit `entity_type_key` to search across all entity types at once — results carry `_entityTypeKey`. `filters` requires `entity_type_key`. Requires embedding provider. See `api-contracts/runtime-api.md` §6 for the full contract (score semantics, matchedVia precedence). |
 
 #### Saved Queries
 

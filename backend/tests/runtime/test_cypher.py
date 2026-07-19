@@ -453,3 +453,91 @@ async def test_query_endpoint_scoped_filters_properties(client, scoped_schema):
     assert result_p["name"] == "Alice"
     assert result_p["email"] == "a@b.com"
     assert "age" not in result_p  # out of scope
+
+
+# ---------------------------------------------------------------------------
+# Document properties: internal chunk blocklist + result stubs
+# ---------------------------------------------------------------------------
+
+
+def _doc_schema_cache() -> SchemaCache:
+    """Scoped schema whose person type has a document property."""
+    schema = _schema()
+    schema.entity_types["person"].properties["bio"] = PropertyDef(
+        key="bio", display_name="Bio", description=None,
+        data_type="document", required=False, default_value=None,
+    )
+    return schema
+
+
+class TestChunkBlocklist:
+    def test_chunk_label_rejected(self):
+        _, tree = _parse("MATCH (c:_Chunk) RETURN c")
+        errors = _validate(_analyze(tree), _schema())
+        assert any("Internal label '_Chunk'" in e for e in errors)
+
+    def test_has_chunk_relationship_rejected(self):
+        _, tree = _parse("MATCH (p:person)-[r:_HAS_CHUNK]->(c:person) RETURN c")
+        errors = _validate(_analyze(tree), _schema())
+        assert any("Internal relationship type '_HAS_CHUNK'" in e for e in errors)
+
+    def test_virtual_chunk_label_rejected_as_unknown(self):
+        _, tree = _parse("MATCH (c:PersonDocumentBio) RETURN c")
+        errors = _validate(_analyze(tree), _schema())
+        assert any("Unknown entity type: 'PersonDocumentBio'" in e for e in errors)
+
+    def test_document_property_reference_is_valid(self):
+        """Document properties remain valid property references in queries."""
+        _, tree = _parse("MATCH (p:person) WHERE p.bio IS NOT NULL RETURN p")
+        errors = _validate(_analyze(tree), _doc_schema_cache())
+        assert errors == []
+
+
+@pytest.mark.asyncio
+async def test_query_endpoint_stubs_document_values_in_nodes(client):
+    """Full nodes returned by Cypher carry document stubs, never content."""
+    from tests.runtime.test_documents import _doc_schema
+
+    raw_entity = make_entity(name="Ada", bio="x" * 500, _doc_bio_length=500)
+    mock_execute = AsyncMock(return_value=(["p"], [{"p": raw_entity}]))
+
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=_doc_schema()),
+        patch(f"{CYPHER_REPO}.execute_cypher_read", mock_execute),
+        patch(EMBEDDING, return_value=None),
+    ):
+        resp = await client.post(
+            "/api/runtime/docs_view/query",
+            json={"cypher": "MATCH (p:person) RETURN p"},
+        )
+
+    assert resp.status_code == 200
+    result_p = resp.json()["results"][0]["p"]
+    assert result_p["name"] == "Ada"
+    assert result_p["bio"] == {"document": True, "length": 500}
+    assert "_doc_bio_length" not in result_p
+
+
+@pytest.mark.asyncio
+async def test_query_endpoint_stubs_scalar_document_projection(client):
+    """`RETURN p.bio` scalar columns are stubbed as well."""
+    from tests.runtime.test_documents import _doc_schema
+
+    mock_execute = AsyncMock(
+        return_value=(["p.bio", "p.name"], [{"p.bio": "x" * 500, "p.name": "Ada"}])
+    )
+
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=_doc_schema()),
+        patch(f"{CYPHER_REPO}.execute_cypher_read", mock_execute),
+        patch(EMBEDDING, return_value=None),
+    ):
+        resp = await client.post(
+            "/api/runtime/docs_view/query",
+            json={"cypher": "MATCH (p:person) RETURN p.bio, p.name"},
+        )
+
+    assert resp.status_code == 200
+    row = resp.json()["results"][0]
+    assert row["p.bio"] == {"document": True, "length": 500}
+    assert row["p.name"] == "Ada"

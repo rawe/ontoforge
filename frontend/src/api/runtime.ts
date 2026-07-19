@@ -8,6 +8,7 @@ import type {
   AiQueryResponse,
   ChatMessage,
   ChatResponse,
+  DocumentContentResponse,
   EntityInstance,
   ExtractResponse,
   Features,
@@ -98,6 +99,27 @@ export const deleteEntity = (ontologyKey: string, entityTypeKey: string, id: str
     method: 'DELETE',
   })
 
+/* --------------------------------- documents -------------------------------- */
+
+export interface GetDocumentParams {
+  /** Character offset into the document (default 0). */
+  offset?: number
+  /** Max characters to return; omit for the rest of the document. */
+  limit?: number
+}
+
+/** Full or sliced content of a document property (stubbed in entity reads). */
+export const getDocument = (
+  ontologyKey: string,
+  entityTypeKey: string,
+  id: string,
+  propertyKey: string,
+  params?: GetDocumentParams,
+) =>
+  request<DocumentContentResponse>(
+    `${base(ontologyKey)}/entities/${entityTypeKey}/${id}/documents/${propertyKey}${buildQuery(params)}`,
+  )
+
 /* --------------------------------- neighbors -------------------------------- */
 
 export interface NeighborsParams {
@@ -180,11 +202,15 @@ export interface SemanticSearchParams {
   /** Omit for cross-type search (results carry `_entityTypeKey`). */
   type?: string
   limit?: number
-  /** 0–1; serialized snake_case per the contract. */
+  /** 0–1 raw similarity; serialized snake_case per the contract. */
   minScore?: number
   fields?: readonly string[]
   /** Requires `type`; `contains` is rejected on semantic search. */
   filter?: FilterMap
+  /** What to rank: entity embeddings, document chunks, or both (default `all`). */
+  searchIn?: 'entities' | 'documents' | 'all'
+  /** Include ~200-char snippets on document matches (default true). */
+  snippets?: boolean
 }
 
 export const semanticSearch = (

@@ -32,7 +32,14 @@ export const DATA_TYPES: readonly DataType[] = [
   'boolean',
   'date',
   'datetime',
+  'document',
 ]
+
+/** Hint shown for data types that need explanation beyond their name. */
+export const DATA_TYPE_DESCRIPTIONS: Partial<Record<DataType, string>> = {
+  document:
+    'Large text, interpreted as Markdown. Chunked for semantic search when embeddings are enabled.',
+}
 
 /**
  * Coerce a raw input string to the JSON value for a dataType. Empty → null.

@@ -31,7 +31,10 @@ SYSTEM_PROPERTIES = frozenset(
 )
 
 # Internal labels that must not appear in user queries.
-_INTERNAL_LABELS = frozenset({"_Entity"})
+_INTERNAL_LABELS = frozenset({"_Entity", "_Chunk"})
+
+# Internal relationship types that must not appear in user queries.
+_INTERNAL_REL_TYPES = frozenset({"_HAS_CHUNK"})
 
 
 # ---------------------------------------------------------------------------
@@ -290,7 +293,13 @@ def _validate(analysis: _Analysis, schema: SchemaCache) -> list[str]:
     # 5. Relationship types
     valid_rel_keys = set(schema.relation_types)
     for rel_type in sorted(analysis.all_rel_types):
-        if rel_type not in valid_rel_keys:
+        if rel_type in _INTERNAL_REL_TYPES:
+            errors.append(
+                f"Internal relationship type '{rel_type}' cannot be queried "
+                f"directly. Use relation type keys: "
+                f"{', '.join(sorted(valid_rel_keys))}"
+            )
+        elif rel_type not in valid_rel_keys:
             errors.append(
                 f"Unknown relation type: '{rel_type}'. "
                 f"Available: {', '.join(sorted(valid_rel_keys))}"

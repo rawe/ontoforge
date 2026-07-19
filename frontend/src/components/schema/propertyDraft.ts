@@ -7,6 +7,7 @@
  */
 
 import type { DataType, JsonPrimitive, JsonValue, SchemaProperty } from '@/api/types'
+import { formatDocSize, isDocumentStub } from '@/lib/documents'
 
 /** String props that read better as a textarea (parity with legacy heuristic). */
 export function isLongText(property: SchemaProperty): boolean {
@@ -19,6 +20,9 @@ export function isLongText(property: SchemaProperty): boolean {
 /** Existing wire value → input draft (per input control expectations). */
 export function valueToDraft(dataType: DataType, value: JsonValue | undefined): string {
   if (value === undefined || value === null) return ''
+  // Document stubs (and any other object) carry no editable text — the full
+  // content must be fetched via the document endpoint.
+  if (typeof value === 'object') return ''
   switch (dataType) {
     case 'boolean':
       return value === true ? 'true' : 'false'
@@ -95,6 +99,9 @@ export function coerceDrafts(
 /** Human-readable rendering of a wire value for read-only display. */
 export function formatValue(dataType: DataType, value: JsonValue | undefined): string | null {
   if (value === undefined || value === null) return null
+  // Document properties arrive as stubs — render the size, never the object.
+  if (isDocumentStub(value)) return formatDocSize(value.length)
+  if (typeof value === 'object') return JSON.stringify(value)
   switch (dataType) {
     case 'boolean':
       return value === true ? 'true' : 'false'

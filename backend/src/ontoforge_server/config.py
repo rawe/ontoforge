@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     EMBEDDING_API_KEY: str | None = None
     EMBEDDING_DIMENSIONS: int | None = None
 
+    DOCUMENT_CHUNK_SIZE: int = 1500
+    DOCUMENT_CHUNK_OVERLAP: int = 200
+
     AI_PROVIDER: str | None = None
     AI_MODEL: str = "qwen3:8b"
     AI_BASE_URL: str = "http://localhost:11434"

@@ -51,7 +51,9 @@ export function FilterPopover({
   const [value, setValue] = useState('')
   const [value2, setValue2] = useState('')
 
-  const property = properties.find((p) => p.key === propertyKey)
+  // Only properties with at least one operator (documents have none).
+  const filterable = properties.filter((p) => opsForDataType(p.dataType).length > 0)
+  const property = filterable.find((p) => p.key === propertyKey)
   const ops = property !== undefined ? opsForDataType(property.dataType) : []
 
   const valid =
@@ -102,7 +104,7 @@ export function FilterPopover({
               setPropertyKey(key)
               setValue('')
               setValue2('')
-              const p = properties.find((x) => x.key === key)
+              const p = filterable.find((x) => x.key === key)
               const nextOps = p !== undefined ? opsForDataType(p.dataType) : []
               setOp(nextOps[0])
               if (p?.dataType === 'boolean') setValue('true')
@@ -112,7 +114,7 @@ export function FilterPopover({
               <SelectValue placeholder="Property…" />
             </SelectTrigger>
             <SelectContent>
-              {properties.map((p) => (
+              {filterable.map((p) => (
                 <SelectItem key={p.key} value={p.key}>
                   <span className="flex items-center gap-2">
                     {p.displayName}

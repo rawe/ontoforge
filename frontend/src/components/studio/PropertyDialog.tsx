@@ -27,7 +27,15 @@ import { Textarea } from '@/components/ui/textarea'
 import { CascadeDialog } from './CascadeDialog'
 import { useCascade } from './useCascade'
 import { TypedValueInput } from './TypedValueInput'
-import { DATA_TYPES, coerceTypedValue, deriveKey, invalidateModeling, isValidKey, toastError } from './lib'
+import {
+  DATA_TYPE_DESCRIPTIONS,
+  DATA_TYPES,
+  coerceTypedValue,
+  deriveKey,
+  invalidateModeling,
+  isValidKey,
+  toastError,
+} from './lib'
 import { KeyField } from './shared'
 
 interface PropertyDialogProps {
@@ -189,6 +197,11 @@ export function PropertyDialog({
                 Required
               </label>
             </div>
+            {DATA_TYPE_DESCRIPTIONS[dataType] !== undefined && (
+              <p className="-mt-2 text-xs text-muted-foreground">
+                {DATA_TYPE_DESCRIPTIONS[dataType]}
+              </p>
+            )}
             <div className="grid gap-1.5">
               <Label htmlFor="prop-default">Default value</Label>
               <TypedValueInput

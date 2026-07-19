@@ -120,7 +120,13 @@ async def test_search_single_type(mock_driver, mock_session):
     assert result["query"] == "find Alice"
     assert result["total"] == 1
     assert result["results"][0]["entity"]["name"] == "Alice"
-    assert result["results"][0]["score"] == 0.95
+    # Default searchIn=all fuses rankings via RRF; the raw cosine similarity
+    # lives in matchedVia.
+    assert result["results"][0]["score"] == pytest.approx(1 / 61)
+    assert result["results"][0]["matchedVia"] == {
+        "source": "entity",
+        "similarity": 0.95,
+    }
 
 
 async def test_search_embed_failure_raises(mock_driver):
@@ -289,8 +295,8 @@ async def test_search_with_fields_projects_entities(mock_driver, mock_session):
     assert "age" not in entity
     assert "location" not in entity
     assert "_entityTypeKey" not in entity
-    # score is on the result wrapper, not the entity
-    assert result["results"][0]["score"] == 0.95
+    # score is on the result wrapper, not the entity; raw similarity in matchedVia
+    assert result["results"][0]["matchedVia"]["similarity"] == 0.95
 
 
 async def test_search_without_fields_returns_all(mock_driver, mock_session):

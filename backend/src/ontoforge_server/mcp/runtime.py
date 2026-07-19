@@ -14,6 +14,7 @@ from ontoforge_server.runtime.tool_names import (
     TOOL_DELETE_ENTITY,
     TOOL_DELETE_RELATION,
     TOOL_EXECUTE_CYPHER,
+    TOOL_GET_DOCUMENT,
     TOOL_GET_ENTITY,
     TOOL_GET_NEIGHBORS,
     TOOL_GET_RELATION,
@@ -162,6 +163,24 @@ async def delete_entity(
     return {"message": f"Entity '{entity_id}' deleted successfully."}
 
 
+async def get_document(
+    entity_type_key: str,
+    entity_id: str,
+    property_key: str,
+    offset: int = 0,
+    limit: int | None = None,
+) -> dict:
+    ontology_key = _get_ontology_key()
+    driver = await get_driver()
+    offset = max(0, offset)
+    if limit is not None:
+        limit = max(1, limit)
+    return await service.get_document(
+        ontology_key, entity_type_key, entity_id, property_key,
+        offset, limit, driver,
+    )
+
+
 @_enrich_errors
 async def create_relation(
     relation_type_key: str,
@@ -279,6 +298,8 @@ async def semantic_search(
     limit: int = 10,
     filters: dict | None = None,
     fields: list[str] | None = None,
+    search_in: str = "all",
+    snippets: bool = True,
 ) -> dict:
     ontology_key = _get_ontology_key()
     driver = await get_driver()
@@ -287,6 +308,7 @@ async def semantic_search(
     result = await service.semantic_search(
         ontology_key, query, entity_type_key, limit, None, driver,
         filters=str_filters, fields=fields,
+        search_in=search_in, snippets=snippets,
     )
     return result
 
@@ -380,7 +402,19 @@ _MCP_TOOL_DEFS: list[tuple[Callable, str, str]] = [
         TOOL_GET_ENTITY,
         "Retrieve a specific entity by its _id. Use 'fields' to select which "
         "properties to include — only listed fields plus _id are returned. "
-        "Omit for all fields.",
+        "Omit for all fields. Document properties appear as "
+        '{"document": true, "length": N} stubs — read their content with the '
+        "get_document tool.",
+    ),
+    (
+        get_document,
+        TOOL_GET_DOCUMENT,
+        "Read (a slice of) a document property's content. Document properties "
+        "hold large Markdown text and are never returned inline by other tools "
+        '— they appear as {"document": true, "length": N} stubs. '
+        "'offset' and 'limit' are character-based; omit both to read the full "
+        "document. Use the charOffset/charLength from a semantic search hit's "
+        "matchedVia to read exactly the matching passage.",
     ),
     (
         update_entity,
@@ -446,10 +480,17 @@ _MCP_TOOL_DEFS: list[tuple[Callable, str, str]] = [
         semantic_search,
         TOOL_SEMANTIC_SEARCH,
         "Search entity instances by semantic similarity to a natural language query. "
-        "Returns entities ranked by relevance with similarity scores. "
+        "Returns entities ranked by relevance. "
         "entity_type_key is optional — omit it to search across all entity types "
         "at once (each result carries _entityTypeKey), or set it to search a "
-        "single type. Use 'filters' for property-based filtering on results "
+        "single type. 'search_in' selects the ranking: 'entities' (entity "
+        "embeddings), 'documents' (passage-level matches inside document "
+        "properties), or 'all' (default — both, fused via reciprocal rank "
+        "fusion). Every hit carries 'matchedVia': document hits include the "
+        "property key, charOffset/charLength (usable with get_document), a "
+        "~200-char snippet (disable with snippets=false), and the raw cosine "
+        "'similarity'; entity hits carry only source and similarity. "
+        "Use 'filters' for property-based filtering on results "
         "(requires entity_type_key): exact match "
         '("location": "Berlin"), operators ("age__gt": "25", "__gte", "__lt", '
         '"__lte"). Use \'fields\' to select which entity properties to include — '

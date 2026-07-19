@@ -254,13 +254,120 @@ async def delete_entity(
     result = await session.run(
         f"""
         MATCH (n:_Entity:{pascal_label} {{_id: $entity_id}})
-        DETACH DELETE n
+        OPTIONAL MATCH (n)-[:_HAS_CHUNK]->(c:_Chunk)
+        DETACH DELETE c, n
         RETURN count(*) AS deleted
         """,
         entity_id=entity_id,
     )
     record = await result.single()
     return record["deleted"] > 0
+
+
+# --- Document Chunks ---
+
+
+async def delete_chunks_for_entity_property(
+    session: AsyncSession,
+    entity_id: str,
+    property_key: str,
+) -> None:
+    """Delete all chunk nodes of one document property on one entity."""
+    await session.run(
+        """
+        MATCH (n:_Entity {_id: $entity_id})-[:_HAS_CHUNK]->(c:_Chunk {_propertyKey: $property_key})
+        DETACH DELETE c
+        """,
+        entity_id=entity_id,
+        property_key=property_key,
+    )
+
+
+async def delete_chunks_for_virtual_type(
+    session: AsyncSession,
+    entity_type_key: str,
+    property_key: str,
+) -> None:
+    """Delete all chunk nodes of a (entity type, document property) virtual type."""
+    await session.run(
+        """
+        MATCH (c:_Chunk {_entityTypeKey: $entity_type_key, _propertyKey: $property_key})
+        DETACH DELETE c
+        """,
+        entity_type_key=entity_type_key,
+        property_key=property_key,
+    )
+
+
+async def create_document_chunks(
+    session: AsyncSession,
+    entity_id: str,
+    virtual_label: str,
+    chunks: list[dict],
+) -> None:
+    """Create chunk nodes for a document property and link them to the entity.
+
+    Each chunk dict carries: _id, _entityId, _entityTypeKey, _propertyKey,
+    _index, startChar, charLength, text, and optionally _embedding.
+    """
+    if not chunks:
+        return
+    await session.run(
+        f"""
+        MATCH (n:_Entity {{_id: $entity_id}})
+        UNWIND $chunks AS chunk
+        CREATE (c:_Chunk:{virtual_label})
+        SET c = chunk
+        CREATE (n)-[:_HAS_CHUNK]->(c)
+        """,
+        entity_id=entity_id,
+        chunks=chunks,
+    )
+
+
+async def search_document_chunks(
+    session: AsyncSession,
+    virtual_label: str,
+    index_name: str,
+    query_embedding: list[float],
+    limit: int,
+) -> list[dict]:
+    """Semantic search over one document property's chunk vector index."""
+    query = (
+        f"MATCH (c:{virtual_label}) "
+        f"SEARCH c IN ("
+        f"VECTOR INDEX {index_name} "
+        f"FOR $query_embedding "
+        f"LIMIT $limit"
+        f") SCORE AS score "
+        f"RETURN c {{.*}} AS chunk, score"
+    )
+    result = await session.run(
+        query, query_embedding=query_embedding, limit=limit
+    )
+    items = []
+    async for record in result:
+        chunk = _strip_embedding(_convert_neo4j_types(dict(record["chunk"])))
+        items.append({"chunk": chunk, "score": record["score"]})
+    return items
+
+
+async def get_entities_by_ids(
+    session: AsyncSession,
+    entity_ids: list[str],
+) -> dict[str, dict]:
+    """Fetch entities by _id. Returns a map of _id -> entity dict."""
+    if not entity_ids:
+        return {}
+    result = await session.run(
+        "MATCH (n:_Entity) WHERE n._id IN $entity_ids RETURN n {.*} AS entity",
+        entity_ids=entity_ids,
+    )
+    entities: dict[str, dict] = {}
+    async for record in result:
+        entity = _strip_embedding(_convert_neo4j_types(dict(record["entity"])))
+        entities[entity["_id"]] = entity
+    return entities
 
 
 # --- Relation Instance CRUD ---

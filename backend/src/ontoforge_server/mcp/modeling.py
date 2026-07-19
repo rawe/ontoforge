@@ -469,7 +469,11 @@ _MODELING_TOOL_DEFS: list[tuple[Callable, str, str]] = [
         "add_property",
         "Add a property definition to an entity type or relation type. "
         "type_kind must be 'entity_type' or 'relation_type'. "
-        "data_type must be one of: string, integer, float, boolean, date, datetime. "
+        "data_type must be one of: string, integer, float, boolean, date, "
+        "datetime, document. The 'document' type holds large text interpreted "
+        "as Markdown; it is chunked for passage-level semantic search when "
+        "embeddings are enabled and is returned as a stub (never inline) by "
+        "runtime reads. "
         "Use cascade=True to auto-add required properties to scoped ontology property lists.",
     ),
     (

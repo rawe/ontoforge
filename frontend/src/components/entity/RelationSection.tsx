@@ -43,7 +43,10 @@ function relationPropsSummary(neighbor: Neighbor): string {
         key !== 'toEntityId' &&
         key !== 'direction',
     )
-    .map(([key, value]) => `${key}: ${String(value)}`)
+    .map(
+      ([key, value]) =>
+        `${key}: ${typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value)}`,
+    )
     .join(' · ')
 }
 

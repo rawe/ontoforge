@@ -53,6 +53,19 @@ Use these first when you do not know the available entity types, relation types,
   Deletes the entity instance.
   Uses detach-delete semantics, so connected relations are also removed.
 
+## Document Properties
+
+Properties with data type `document` hold large Markdown text. Entity reads never return their content inline — every entity payload (list, get, neighbors, search, Cypher, MCP) replaces the value with a stub:
+`{"document": true, "length": <charCount>}`
+Writes are unchanged: send the full string as a normal property value. An explicit `fields` projection naming the property returns the raw value.
+
+- `GET /api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}/documents/{propertyKey}`
+  Reads document content.
+  Query parameters:
+  `offset`, `limit` (character-based slicing; omit both for the full document)
+  Response fields:
+  `propertyKey`, `content`, `offset`, `length`, `totalLength`
+
 ## Relation Instance CRUD
 
 - `POST /api/runtime/{ontologyKey}/relations/{relationTypeKey}`
@@ -88,10 +101,11 @@ Use these first when you do not know the available entity types, relation types,
 ## Semantic Search
 
 - `GET /api/runtime/{ontologyKey}/search/semantic`
-  Searches entity instances by semantic similarity.
+  Searches entity instances by semantic similarity over entity embeddings and document chunks.
   Query parameters:
-  `q` (required), `type` (required entity type key), `limit`, `min_score`, `fields`, `filter.{key}`, `filter.{key}__{op}`
+  `q` (required), `type` (optional entity type key), `searchIn` (`entities`, `documents`, or `all`; default `all`), `snippets` (default `true`), `limit`, `min_score`, `fields`, `filter.{key}`, `filter.{key}__{op}`
   Requires semantic search to be enabled in server config.
+  Each hit carries `matchedVia`: `{source: "entity", similarity}` for entity-embedding matches, or `{source: "document", propertyKey, charOffset, charLength, snippet, similarity}` for document-chunk matches. Pass `charOffset`/`charLength` as `offset`/`limit` to the documents endpoint to read the exact matched passage. In `all` mode `score` is a rank-fusion value for ordering only — threshold on `matchedVia.similarity`.
 
 ## Read-Only Cypher Query
 

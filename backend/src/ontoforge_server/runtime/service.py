@@ -12,9 +12,12 @@ from neo4j import AsyncDriver
 from neo4j.time import Date as Neo4jDate
 from neo4j.time import DateTime as Neo4jDateTime
 
+from ontoforge_server.config import settings
 from ontoforge_server.core.ai import AgentConfig, SavedQueryConfig, SavedQueryParameter, StepConfig
 from ontoforge_server.core.database import (
     ENTITY_VECTOR_INDEX_NAME,
+    document_index_name,
+    document_virtual_label,
     validate_vector_indexed_properties,
 )
 from ontoforge_server.core.embedding import get_embedding_provider
@@ -26,6 +29,7 @@ from ontoforge_server.core.schemas import (
     ExportRelationType,
 )
 from ontoforge_server.runtime import repository
+from ontoforge_server.runtime.chunking import chunk_document
 from ontoforge_server.runtime.embedding import build_text_repr
 from ontoforge_server.runtime.schemas import (
     NeighborhoodResponse,
@@ -359,6 +363,10 @@ def coerce_value(value: Any, data_type: str, key: str) -> Any:
     if data_type == "string":
         return str(value)
 
+    elif data_type == "document":
+        # Large text content, interpreted as Markdown; stored as a plain string.
+        return str(value)
+
     elif data_type == "integer":
         if isinstance(value, bool):
             raise ValueError(f"Expected integer for '{key}', got boolean")
@@ -541,13 +549,70 @@ def _relation_type_def_to_export(rt_def: RelationTypeDef) -> ExportRelationType:
 
 
 # ---------------------------------------------------------------------------
+# Document Properties
+# ---------------------------------------------------------------------------
+
+_DOC_LENGTH_PREFIX = "_doc_"
+_DOC_LENGTH_SUFFIX = "_length"
+
+
+def _doc_length_key(property_key: str) -> str:
+    """Internal entity property that stores a document property's character count."""
+    return f"{_DOC_LENGTH_PREFIX}{property_key}{_DOC_LENGTH_SUFFIX}"
+
+
+def _document_property_keys(property_defs: dict[str, PropertyDef]) -> set[str]:
+    return {k for k, p in property_defs.items() if p.data_type == "document"}
+
+
+def _stub_document_properties(
+    entity: dict,
+    property_defs: dict[str, PropertyDef],
+    fields: list[str] | None = None,
+) -> dict:
+    """Replace document property values with ``{"document": true, "length": N}`` stubs.
+
+    Internal ``_doc_{key}_length`` helper properties are consumed for the stub
+    length and removed from the payload. Properties explicitly requested via
+    the *fields* projection keep their raw value.
+    """
+    requested = set(fields) if fields is not None else set()
+
+    lengths: dict[str, Any] = {}
+    result: dict = {}
+    for k, v in entity.items():
+        if k.startswith(_DOC_LENGTH_PREFIX) and k.endswith(_DOC_LENGTH_SUFFIX):
+            lengths[k[len(_DOC_LENGTH_PREFIX):-len(_DOC_LENGTH_SUFFIX)]] = v
+            continue
+        result[k] = v
+
+    for key in _document_property_keys(property_defs):
+        if key in requested:
+            continue  # raw value explicitly requested via fields projection
+        value = result.get(key)
+        if value is None:
+            continue
+        length = lengths.get(key)
+        if length is None:
+            length = len(value) if isinstance(value, str) else 0
+        result[key] = {"document": True, "length": length}
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Response Property Filtering
 # ---------------------------------------------------------------------------
 
 
-def _filter_entity_properties(entity: dict, scoped_et: EntityTypeDef) -> dict:
-    """Filter entity properties to only those visible through the scoped schema."""
-    return {k: v for k, v in entity.items() if k.startswith("_") or k in scoped_et.properties}
+def _filter_entity_properties(
+    entity: dict,
+    scoped_et: EntityTypeDef,
+    fields: list[str] | None = None,
+) -> dict:
+    """Filter entity properties to the scoped schema and stub document values."""
+    filtered = {k: v for k, v in entity.items() if k.startswith("_") or k in scoped_et.properties}
+    return _stub_document_properties(filtered, scoped_et.properties, fields)
 
 
 def _filter_relation_properties(relation: dict, scoped_rt: RelationTypeDef) -> dict:
@@ -767,11 +832,19 @@ async def create_entity(
     entity_id = str(uuid4())
     pascal_label = to_pascal_case(entity_type_key)
 
+    # Document properties: store character counts alongside the values
+    doc_keys = _document_property_keys(full_et.properties) if full_et else set()
+    doc_values = {k: v for k, v in coerced.items() if k in doc_keys}
+    for k, v in doc_values.items():
+        if v is not None:
+            coerced[_doc_length_key(k)] = len(v)
+
     embedding = None
     provider = get_embedding_provider()
     if provider and full_et:
         validate_vector_indexed_properties(
-            entity_type_key, coerced, list(full_et.properties.keys())
+            entity_type_key, coerced,
+            [k for k in full_et.properties if k not in doc_keys],
         )
         text = build_text_repr(entity_type_key, coerced, full_et.properties)
         embedding = await provider.embed(text)
@@ -781,6 +854,9 @@ async def create_entity(
             session, entity_type_key, pascal_label, entity_id, coerced,
             embedding=embedding,
         )
+
+    # Chunk + embed document properties (no-op without embedding provider)
+    await sync_document_chunks(driver, entity_type_key, entity_id, doc_values)
 
     # Filter response to scoped properties
     return _filter_entity_properties(entity, scoped_et)
@@ -829,7 +905,7 @@ async def list_entities(
         )
 
     # Filter response properties to scoped schema
-    items = [_filter_entity_properties(e, scoped_et) for e in items]
+    items = [_filter_entity_properties(e, scoped_et, fields) for e in items]
 
     if fields is not None:
         items = [_apply_field_projection(e, fields, _ENTITY_ALWAYS_FIELDS) for e in items]
@@ -857,7 +933,7 @@ async def get_entity(
     if not entity:
         raise NotFoundError(f"Entity '{entity_id}' not found")
 
-    entity = _filter_entity_properties(entity, scoped_et)
+    entity = _filter_entity_properties(entity, scoped_et, fields)
     return _apply_field_projection(entity, fields, _ENTITY_ALWAYS_FIELDS)
 
 
@@ -887,11 +963,20 @@ async def update_entity(
         return await get_entity(ontology_key, entity_type_key, entity_id, driver)
 
     pascal_label = to_pascal_case(entity_type_key)
+    full_et = loaded.full.entity_types.get(entity_type_key)
+
+    # Document properties: maintain stored lengths for changed values
+    doc_keys = _document_property_keys(full_et.properties) if full_et else set()
+    doc_changes = {k: v for k, v in coerced.items() if k in doc_keys}
+    for k, v in doc_changes.items():
+        if v is not None:
+            set_props[_doc_length_key(k)] = len(v)
+        else:
+            remove_props.append(_doc_length_key(k))
 
     # Re-embed if any string properties changed (use full schema for embedding)
     embedding = _NOT_SET
     provider = get_embedding_provider()
-    full_et = loaded.full.entity_types.get(entity_type_key)
     if provider and full_et:
         has_string_changes = any(
             k in full_et.properties and full_et.properties[k].data_type == "string"
@@ -906,7 +991,9 @@ async def update_entity(
                 for k in remove_props:
                     merged.pop(k, None)
                 validate_vector_indexed_properties(
-                    entity_type_key, merged, list(full_et.properties.keys()), entity_id=entity_id
+                    entity_type_key, merged,
+                    [k for k in full_et.properties if k not in doc_keys],
+                    entity_id=entity_id,
                 )
                 text = build_text_repr(entity_type_key, merged, full_et.properties)
                 embedding = await provider.embed(text)
@@ -919,6 +1006,9 @@ async def update_entity(
         )
     if not entity:
         raise NotFoundError(f"Entity '{entity_id}' not found")
+
+    # Re-chunk changed document properties only (no-op without provider)
+    await sync_document_chunks(driver, entity_type_key, entity_id, doc_changes)
 
     return _filter_entity_properties(entity, scoped_et)
 
@@ -938,6 +1028,113 @@ async def delete_entity(
         deleted = await repository.delete_entity(session, pascal_label, entity_id)
     if not deleted:
         raise NotFoundError(f"Entity '{entity_id}' not found")
+
+
+# ---------------------------------------------------------------------------
+# Service Functions — Document Properties
+# ---------------------------------------------------------------------------
+
+
+async def sync_document_chunks(
+    driver: AsyncDriver,
+    entity_type_key: str,
+    entity_id: str,
+    doc_values: dict[str, str | None],
+) -> None:
+    """Replace the chunk nodes for the given document property values.
+
+    For each property: delete its existing chunks, then (for non-null values)
+    re-chunk, embed, and write new chunk nodes. No-op when no embedding
+    provider is configured.
+    """
+    if not doc_values:
+        return
+    provider = get_embedding_provider()
+    if not provider:
+        return
+
+    for property_key, value in doc_values.items():
+        async with driver.session() as session:
+            await repository.delete_chunks_for_entity_property(
+                session, entity_id, property_key
+            )
+        if not value:
+            continue
+
+        chunks = chunk_document(
+            value, settings.DOCUMENT_CHUNK_SIZE, settings.DOCUMENT_CHUNK_OVERLAP
+        )
+        rows = []
+        for index, chunk in enumerate(chunks):
+            row = {
+                "_id": str(uuid4()),
+                "_entityId": entity_id,
+                "_entityTypeKey": entity_type_key,
+                "_propertyKey": property_key,
+                "_index": index,
+                "startChar": chunk.start_char,
+                "charLength": chunk.char_length,
+                "text": chunk.text,
+            }
+            chunk_embedding = await provider.embed(chunk.text)
+            if chunk_embedding is not None:
+                row["_embedding"] = chunk_embedding
+            rows.append(row)
+
+        virtual_label = document_virtual_label(entity_type_key, property_key)
+        async with driver.session() as session:
+            await repository.create_document_chunks(
+                session, entity_id, virtual_label, rows
+            )
+
+
+async def get_document(
+    ontology_key: str,
+    entity_type_key: str,
+    entity_id: str,
+    property_key: str,
+    offset: int,
+    limit: int | None,
+    driver: AsyncDriver,
+) -> dict:
+    """Read (a slice of) a document property value.
+
+    ``offset``/``limit`` are character-based; without them the full document
+    is returned.
+    """
+    loaded = await _load_schema(ontology_key, driver)
+    scoped_et = loaded.scoped.entity_types.get(entity_type_key)
+    if not scoped_et:
+        raise NotFoundError(f"Entity type '{entity_type_key}' not found")
+
+    prop_def = scoped_et.properties.get(property_key)
+    if not prop_def or prop_def.data_type != "document":
+        raise NotFoundError(
+            f"Document property '{property_key}' not found on entity type '{entity_type_key}'"
+        )
+
+    pascal_label = to_pascal_case(entity_type_key)
+    async with driver.session() as session:
+        entity = await repository.get_entity(session, pascal_label, entity_id)
+    if not entity:
+        raise NotFoundError(f"Entity '{entity_id}' not found")
+
+    value = entity.get(property_key)
+    if not isinstance(value, str):
+        value = ""
+
+    if limit is None:
+        content = value[offset:]
+    else:
+        content = value[offset:offset + limit]
+
+    return {
+        "propertyKey": property_key,
+        "content": content,
+        "offset": offset,
+        "length": len(content),
+        "totalLength": len(value),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1171,14 +1368,19 @@ async def get_neighbors(
             # Filter neighbor entity properties if its type is in scope
             neighbor_et_key = n["entity"].get("_entityTypeKey")
             if neighbor_et_key and neighbor_et_key in loaded.scoped.entity_types:
-                n["entity"] = _filter_entity_properties(n["entity"], loaded.scoped.entity_types[neighbor_et_key])
+                n["entity"] = _filter_entity_properties(n["entity"], loaded.scoped.entity_types[neighbor_et_key], fields)
+            elif neighbor_et_key and neighbor_et_key in loaded.full.entity_types:
+                # Type not in scope — still stub document values (never inline)
+                n["entity"] = _stub_document_properties(
+                    n["entity"], loaded.full.entity_types[neighbor_et_key].properties, fields
+                )
             filtered_neighbors.append(n)
         elif not rt_key:
             filtered_neighbors.append(n)
 
     # Filter center entity
     scoped_et = loaded.scoped.entity_types[entity_type_key]
-    entity = _filter_entity_properties(entity, scoped_et)
+    entity = _filter_entity_properties(entity, scoped_et, fields)
 
     if fields is not None:
         entity = _apply_field_projection(entity, fields, _ENTITY_ALWAYS_FIELDS)
@@ -1196,6 +1398,11 @@ async def get_neighbors(
 # ---------------------------------------------------------------------------
 
 
+_SEARCH_IN_VALUES = ("entities", "documents", "all")
+_RRF_K = 60
+_SNIPPET_CHARS = 200
+
+
 async def semantic_search(
     ontology_key: str,
     query: str,
@@ -1205,6 +1412,8 @@ async def semantic_search(
     driver: AsyncDriver,
     filters: dict[str, str] | None = None,
     fields: list[str] | None = None,
+    search_in: str = "all",
+    snippets: bool = True,
 ) -> dict:
     loaded = await _load_schema(ontology_key, driver)
 
@@ -1213,6 +1422,13 @@ async def semantic_search(
         raise ValidationError(
             "Semantic search requires EMBEDDING_PROVIDER to be configured",
             details={"code": "FEATURE_DISABLED"},
+        )
+
+    if search_in not in _SEARCH_IN_VALUES:
+        raise ValidationError(
+            f"Invalid searchIn value: '{search_in}'. "
+            f"Must be one of: {', '.join(_SEARCH_IN_VALUES)}",
+            details={"fields": {"searchIn": f"Invalid value '{search_in}'"}},
         )
 
     filters = filters or {}
@@ -1228,25 +1444,6 @@ async def semantic_search(
             details={"fields": {k: "Requires 'type'" for k in filters}},
         )
 
-    query_embedding = await provider.embed(query)
-    if query_embedding is None:
-        raise ValidationError("Failed to generate embedding for search query")
-
-    if entity_type_key is None:
-        results = await _semantic_search_all_types(
-            loaded, query_embedding, limit, min_score, driver
-        )
-        if fields is not None:
-            for r in results:
-                r["entity"] = _apply_field_projection(
-                    r["entity"], fields, _ENTITY_NEIGHBOR_ALWAYS_FIELDS
-                )
-        return {
-            "results": results,
-            "query": query,
-            "total": len(results),
-        }
-
     # Reject __contains — not supported by in-index WHERE (SEARCH clause).
     # Use the entity list endpoint for substring filtering.
     for filter_key in filters:
@@ -1257,6 +1454,69 @@ async def semantic_search(
                 details={"fields": {filter_key: "Not supported on semantic search"}},
             )
 
+    query_embedding = await provider.embed(query)
+    if query_embedding is None:
+        raise ValidationError("Failed to generate embedding for search query")
+
+    entity_ranking: list[dict] = []
+    if search_in in ("entities", "all"):
+        if entity_type_key is None:
+            entity_ranking = await _semantic_search_all_types(
+                loaded, query_embedding, limit, min_score, driver, fields
+            )
+        else:
+            entity_ranking = await _semantic_search_single_type(
+                entity_type_key, scoped_et, query_embedding,
+                limit, min_score, filters, driver, fields,
+            )
+
+    document_ranking: list[dict] = []
+    if search_in in ("documents", "all"):
+        document_ranking = await _semantic_search_documents(
+            loaded, entity_type_key, query_embedding, limit, min_score,
+            filters, snippets, driver, fields,
+        )
+
+    if search_in == "entities":
+        results = [
+            {
+                "entity": r["entity"],
+                "score": r["score"],
+                "matchedVia": {"source": "entity", "similarity": r["score"]},
+            }
+            for r in entity_ranking
+        ]
+    elif search_in == "documents":
+        results = document_ranking
+    else:
+        results = _rrf_fuse(entity_ranking, document_ranking, limit)
+
+    if fields is not None:
+        always = (
+            _ENTITY_ALWAYS_FIELDS if entity_type_key is not None
+            else _ENTITY_NEIGHBOR_ALWAYS_FIELDS
+        )
+        for r in results:
+            r["entity"] = _apply_field_projection(r["entity"], fields, always)
+
+    return {
+        "results": results,
+        "query": query,
+        "total": len(results),
+    }
+
+
+async def _semantic_search_single_type(
+    entity_type_key: str,
+    scoped_et: EntityTypeDef,
+    query_embedding: list[float],
+    limit: int,
+    min_score: float | None,
+    filters: dict[str, str],
+    driver: AsyncDriver,
+    fields: list[str] | None,
+) -> list[dict]:
+    """Rank entities of a single type via its per-type vector index."""
     where_clauses: list[str] = []
     filter_params: dict = {}
     if filters:
@@ -1280,17 +1540,8 @@ async def semantic_search(
 
     # Filter result properties to scoped schema
     for r in results:
-        r["entity"] = _filter_entity_properties(r["entity"], scoped_et)
-
-    if fields is not None:
-        for r in results:
-            r["entity"] = _apply_field_projection(r["entity"], fields, _ENTITY_ALWAYS_FIELDS)
-
-    return {
-        "results": results,
-        "query": query,
-        "total": len(results),
-    }
+        r["entity"] = _filter_entity_properties(r["entity"], scoped_et, fields)
+    return results
 
 
 async def _semantic_search_all_types(
@@ -1299,6 +1550,7 @@ async def _semantic_search_all_types(
     limit: int,
     min_score: float | None,
     driver: AsyncDriver,
+    fields: list[str] | None = None,
 ) -> list[dict]:
     """Search the shared _Entity vector index across all scoped entity types.
 
@@ -1330,11 +1582,204 @@ async def _semantic_search_all_types(
         scoped_et = loaded.scoped.entity_types.get(r["entity"].get("_entityTypeKey"))
         if scoped_et is None:
             continue
-        r["entity"] = _filter_entity_properties(r["entity"], scoped_et)
+        r["entity"] = _filter_entity_properties(r["entity"], scoped_et, fields)
         results.append(r)
         if len(results) >= limit:
             break
     return results
+
+
+def _entity_matches_filters(
+    entity: dict,
+    filters: dict[str, str],
+    property_defs: dict[str, PropertyDef],
+    type_key: str,
+) -> bool:
+    """Evaluate list-endpoint-style property filters against an entity in Python.
+
+    Used for document-chunk hits, where filters cannot be applied in-index.
+    ``__contains`` is rejected upstream; supported operators mirror the
+    in-index ones (=, __gt, __gte, __lt, __lte).
+    """
+    from operator import eq, ge, gt, le, lt
+
+    OPERATORS = {None: eq, "gt": gt, "gte": ge, "lt": lt, "lte": le}
+
+    for filter_expr, raw_value in filters.items():
+        if "__" in filter_expr:
+            prop_key, op_name = filter_expr.rsplit("__", 1)
+        else:
+            prop_key, op_name = filter_expr, None
+
+        prop_def = property_defs.get(prop_key)
+        if not prop_def:
+            raise ValidationError(
+                f"Unknown filter property: '{prop_key}'",
+                details={"fields": {prop_key: f"Not defined in type '{type_key}'"}},
+            )
+        if op_name not in OPERATORS:
+            raise ValidationError(
+                f"Unknown filter operator: '{op_name}'",
+                details={"fields": {filter_expr: f"Unsupported operator '{op_name}'"}},
+            )
+
+        try:
+            expected = coerce_value(raw_value, prop_def.data_type, prop_key)
+        except ValueError as e:
+            raise ValidationError(
+                f"Invalid filter value for '{prop_key}'",
+                details={"fields": {prop_key: str(e)}},
+            )
+        if isinstance(expected, (Neo4jDate, Neo4jDateTime)):
+            expected = expected.to_native()
+
+        actual = entity.get(prop_key)
+        if actual is None:
+            return False
+        try:
+            if not OPERATORS[op_name](actual, expected):
+                return False
+        except TypeError:
+            return False
+
+    return True
+
+
+async def _semantic_search_documents(
+    loaded: LoadedSchema,
+    entity_type_key: str | None,
+    query_embedding: list[float],
+    limit: int,
+    min_score: float | None,
+    filters: dict[str, str],
+    snippets: bool,
+    driver: AsyncDriver,
+    fields: list[str] | None,
+) -> list[dict]:
+    """Rank entities by their best-matching document chunk.
+
+    Queries each in-scope (entity type, document property) virtual index,
+    merges chunk hits by raw score, and dedupes to parent entities — the best
+    chunk per entity wins and provides ``matchedVia``.
+    """
+    if entity_type_key is not None:
+        type_keys = [entity_type_key]
+    else:
+        type_keys = list(loaded.scoped.entity_types)
+
+    pairs: list[tuple[str, str]] = []
+    for tk in type_keys:
+        et_def = loaded.scoped.entity_types.get(tk)
+        if not et_def:
+            continue
+        for pk in _document_property_keys(et_def.properties):
+            pairs.append((tk, pk))
+
+    if not pairs:
+        return []
+
+    chunk_hits: list[dict] = []
+    async with driver.session() as session:
+        for tk, pk in pairs:
+            hits = await repository.search_document_chunks(
+                session,
+                document_virtual_label(tk, pk),
+                document_index_name(tk, pk),
+                query_embedding,
+                limit,
+            )
+            chunk_hits.extend(hits)
+
+    # Dedupe to parent entities: best chunk per entity wins
+    best_per_entity: dict[str, dict] = {}
+    for hit in chunk_hits:
+        if min_score is not None and hit["score"] < min_score:
+            continue
+        parent_id = hit["chunk"].get("_entityId")
+        if not parent_id:
+            continue
+        current = best_per_entity.get(parent_id)
+        if current is None or hit["score"] > current["score"]:
+            best_per_entity[parent_id] = hit
+
+    if not best_per_entity:
+        return []
+
+    ranked = sorted(best_per_entity.values(), key=lambda h: h["score"], reverse=True)
+
+    async with driver.session() as session:
+        entities = await repository.get_entities_by_ids(
+            session, [h["chunk"]["_entityId"] for h in ranked]
+        )
+
+    results: list[dict] = []
+    for hit in ranked:
+        chunk = hit["chunk"]
+        entity = entities.get(chunk["_entityId"])
+        if entity is None:
+            continue
+        et_key = entity.get("_entityTypeKey")
+        scoped_et = loaded.scoped.entity_types.get(et_key)
+        if scoped_et is None:
+            continue
+        if filters and not _entity_matches_filters(
+            entity, filters, scoped_et.properties, et_key
+        ):
+            continue
+
+        matched_via = {
+            "source": "document",
+            "propertyKey": chunk["_propertyKey"],
+            "charOffset": chunk["startChar"],
+            "charLength": chunk["charLength"],
+            "similarity": hit["score"],
+        }
+        if snippets:
+            matched_via["snippet"] = chunk["text"][:_SNIPPET_CHARS]
+
+        results.append({
+            "entity": _filter_entity_properties(entity, scoped_et, fields),
+            "score": hit["score"],
+            "matchedVia": matched_via,
+        })
+        if len(results) >= limit:
+            break
+
+    return results
+
+
+def _rrf_fuse(
+    entity_ranking: list[dict],
+    document_ranking: list[dict],
+    limit: int,
+) -> list[dict]:
+    """Reciprocal Rank Fusion over entity and document rankings.
+
+    ``score = Σ 1/(K + rank)`` with K=60. Document ``matchedVia`` wins when an
+    entity appears in both rankings (it carries retrieval coordinates).
+    """
+    fused: dict[str, dict] = {}
+
+    for rank, r in enumerate(entity_ranking, start=1):
+        eid = r["entity"].get("_id")
+        item = fused.setdefault(
+            eid,
+            {"entity": r["entity"], "score": 0.0, "matchedVia": None},
+        )
+        item["score"] += 1.0 / (_RRF_K + rank)
+        if item["matchedVia"] is None:
+            item["matchedVia"] = {"source": "entity", "similarity": r["score"]}
+
+    for rank, r in enumerate(document_ranking, start=1):
+        eid = r["entity"].get("_id")
+        item = fused.setdefault(
+            eid,
+            {"entity": r["entity"], "score": 0.0, "matchedVia": None},
+        )
+        item["score"] += 1.0 / (_RRF_K + rank)
+        item["matchedVia"] = r["matchedVia"]
+
+    return sorted(fused.values(), key=lambda x: x["score"], reverse=True)[:limit]
 
 
 # ---------------------------------------------------------------------------
@@ -1373,19 +1818,42 @@ async def execute_cypher_query(
             session, rewritten
         )
 
-    # Post-process: filter out-of-scope properties from returned
-    # nodes and relationships.
-    for row in rows:
-        for col, value in row.items():
-            if not isinstance(value, dict):
-                continue
-            # Determine schema type for this value.
-            type_key = _resolve_type_key_for_value(col, value, var_map, scoped)
-            if type_key is None:
-                continue
-            _strip_out_of_scope_props(value, type_key, scoped)
+    # Post-process: filter out-of-scope properties and stub document values.
+    _postprocess_cypher_rows(rows, var_map, scoped)
 
     return {"columns": columns, "results": rows}
+
+
+def _postprocess_cypher_rows(
+    rows: list[dict],
+    var_map: dict[str, str | None],
+    scoped: SchemaCache,
+) -> None:
+    """Filter out-of-scope properties and stub document values (in place).
+
+    Node/relationship dicts are stripped to scoped properties with document
+    values stubbed. Scalar columns of the form ``var.property`` that reference
+    a document property are stubbed as well.
+    """
+    for row in rows:
+        for col, value in row.items():
+            if isinstance(value, dict):
+                type_key = _resolve_type_key_for_value(col, value, var_map, scoped)
+                if type_key is None:
+                    continue
+                _strip_out_of_scope_props(value, type_key, scoped)
+            elif isinstance(value, str) and "." in col:
+                # Scalar projection like `RETURN p.bio` — stub document values
+                var, _, prop = col.partition(".")
+                type_key = var_map.get(var.strip())
+                if type_key is None:
+                    continue
+                et_def = scoped.entity_types.get(type_key)
+                if et_def is None:
+                    continue
+                prop_def = et_def.properties.get(prop.strip())
+                if prop_def is not None and prop_def.data_type == "document":
+                    row[col] = {"document": True, "length": len(value)}
 
 
 def _resolve_type_key_for_value(
@@ -1413,11 +1881,16 @@ def _strip_out_of_scope_props(
     type_key: str,
     schema: SchemaCache,
 ) -> None:
-    """Remove properties not in the scoped schema (in place)."""
+    """Remove properties not in the scoped schema and stub documents (in place)."""
     from ontoforge_server.runtime.cypher import SYSTEM_PROPERTIES
 
     if type_key in schema.entity_types:
-        allowed = set(schema.entity_types[type_key].properties) | SYSTEM_PROPERTIES
+        property_defs = schema.entity_types[type_key].properties
+        allowed = set(property_defs) | SYSTEM_PROPERTIES
+        # Stub document values before the helper `_doc_*_length` keys are stripped
+        stubbed = _stub_document_properties(value, property_defs)
+        value.clear()
+        value.update(stubbed)
     elif type_key in schema.relation_types:
         allowed = set(schema.relation_types[type_key].properties) | SYSTEM_PROPERTIES
     else:
@@ -1540,15 +2013,8 @@ async def execute_saved_query(
                     session, rewritten, params=cypher_params
                 )
 
-            # Post-process: strip out-of-scope properties
-            for row in rows:
-                for col, value in row.items():
-                    if not isinstance(value, dict):
-                        continue
-                    type_key = _resolve_type_key_for_value(col, value, var_map, scoped)
-                    if type_key is None:
-                        continue
-                    _strip_out_of_scope_props(value, type_key, scoped)
+            # Post-process: strip out-of-scope properties + stub documents
+            _postprocess_cypher_rows(rows, var_map, scoped)
 
             step_results[step.name] = rows
             last_output = {"columns": columns, "results": rows}

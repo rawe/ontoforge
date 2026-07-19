@@ -46,6 +46,9 @@ export function useSimilarEntities(
             type: item.entityTypeKey,
             limit: 3,
             minScore: 0.75,
+            // Entity-embedding dedupe only — document chunk matches would fuse
+            // the ranking (RRF scores) and dilute the similarity threshold.
+            searchIn: 'entities',
           })
           return res.results
         },

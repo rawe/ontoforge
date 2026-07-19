@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { JsonValue, QueryResult } from '@/api/types'
+import { DocumentBadge } from '@/components/DocumentBadge'
 import { TypeChip } from '@/components/TypeChip'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -12,6 +13,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { displayLabel } from '@/lib/displayLabel'
+import { isDocumentStub } from '@/lib/documents'
 import { isEntityObject, isRelationObject, relationUserProps } from './resultUtils'
 
 /** Non-entity object/array cell — collapsed `{…}` chip, expandable to JSON. */
@@ -53,6 +55,11 @@ function ResultCell({
 }) {
   if (value === undefined || value === null) {
     return <span className="text-muted-foreground/50">—</span>
+  }
+
+  // Document property stubs (Cypher results carry stubs, never content).
+  if (isDocumentStub(value)) {
+    return <DocumentBadge length={value.length} />
   }
 
   if (isEntityObject(value)) {

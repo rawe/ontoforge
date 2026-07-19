@@ -83,7 +83,12 @@ function SortableHeader({
 }
 
 function csvEscape(value: unknown): string {
-  const s = value === undefined || value === null ? '' : String(value)
+  const s =
+    value === undefined || value === null
+      ? ''
+      : typeof value === 'object'
+        ? JSON.stringify(value)
+        : String(value)
   return /[",\n\r]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s
 }
 
@@ -153,19 +158,27 @@ export function TypeTablePage() {
     }
   }, [typeKey])
 
-  // Hidden columns are excluded from the request via `fields` (always keep _id).
+  // Hidden columns are excluded from the request via `fields` (always keep
+  // _id). Exception: `fields` returns document properties as their RAW full
+  // content (stubs only appear in unprojected reads) — when a document column
+  // is visible, skip the projection entirely so the table gets cheap stubs
+  // and never pulls document content.
   const params = useMemo<ListEntitiesParams>(() => {
     const sort = sorting[0]
     const allIds = [...properties.map((p) => p.key), '_updatedAt', '_createdAt']
     const visibleIds = allIds.filter((id) => columnVisibility[id] !== false)
     const anyHidden = visibleIds.length < allIds.length
+    const documentKeys = new Set(
+      properties.filter((p) => p.dataType === 'document').map((p) => p.key),
+    )
+    const anyDocumentVisible = visibleIds.some((id) => documentKeys.has(id))
     return {
       limit: PAGE_SIZE,
       offset: page * PAGE_SIZE,
       sort: sort?.id ?? '_updatedAt',
       order: sort === undefined || sort.desc ? 'desc' : 'asc',
       ...(debouncedQ !== '' ? { q: debouncedQ } : {}),
-      ...(anyHidden ? { fields: ['_id', ...visibleIds] } : {}),
+      ...(anyHidden && !anyDocumentVisible ? { fields: ['_id', ...visibleIds] } : {}),
       filter: filtersToParam(filters, properties),
     }
   }, [sorting, properties, columnVisibility, page, debouncedQ, filters])

@@ -6,7 +6,7 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import * as runtime from '@/api/runtime'
-import type { EntityInstance, SavedQuery } from '@/api/types'
+import type { EntityInstance, SavedQuery, SearchMatchedVia } from '@/api/types'
 
 export function useDebouncedValue<T>(value: T, delayMs: number): T {
   const [debounced, setDebounced] = useState(value)
@@ -19,8 +19,10 @@ export function useDebouncedValue<T>(value: T, delayMs: number): T {
 
 export interface EntitySearchResult {
   entity: EntityInstance
-  /** Only present for semantic results. */
+  /** Only present for semantic results (RRF fusion score — ordering only). */
   score?: number
+  /** Only present for semantic results; carries the raw cosine similarity. */
+  matchedVia?: SearchMatchedVia
 }
 
 export interface EntitySearchOptions {
@@ -76,7 +78,11 @@ export function useEntitySearch({
           ...(typeKey !== undefined ? { type: typeKey } : {}),
           limit,
         })
-        return res.results.map(({ entity, score }) => ({ entity, score }))
+        return res.results.map(({ entity, score, matchedVia }) => ({
+          entity,
+          score,
+          matchedVia,
+        }))
       }
       if (typeKey !== undefined) {
         const res = await runtime.listEntities(ontologyKey, typeKey, { q, limit })

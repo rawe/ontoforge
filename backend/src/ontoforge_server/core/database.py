@@ -33,6 +33,16 @@ def _to_pascal_case(key: str) -> str:
     return "".join(segment.capitalize() for segment in key.split("_"))
 
 
+def document_virtual_label(entity_type_key: str, property_key: str) -> str:
+    """Virtual chunk label for a document property. E.g. ('person', 'bio') -> 'PersonDocumentBio'."""
+    return f"{_to_pascal_case(entity_type_key)}Document{_to_pascal_case(property_key)}"
+
+
+def document_index_name(entity_type_key: str, property_key: str) -> str:
+    """Vector index name for a document property's chunks."""
+    return f"{entity_type_key}_document_{property_key}_embedding"
+
+
 def validate_vector_indexed_properties(
     entity_type_key: str,
     properties: dict[str, Any],
@@ -116,6 +126,7 @@ async def ensure_vector_indexes(driver: AsyncDriver, dimensions: int) -> None:
             """
             MATCH (et:EntityType)
             OPTIONAL MATCH (et)-[:HAS_PROPERTY]->(p:PropertyDefinition)
+            WHERE p.dataType <> 'document'
             RETURN et.key AS key, collect(p.key) AS property_keys
             """
         )
@@ -127,6 +138,24 @@ async def ensure_vector_indexes(driver: AsyncDriver, dimensions: int) -> None:
     for et in entity_types:
         await create_vector_index(
             driver, et["key"], dimensions, filter_properties=et["property_keys"]
+        )
+
+    # Chunk vector indexes for document properties (one per virtual type)
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            MATCH (et:EntityType)-[:HAS_PROPERTY]->(p:PropertyDefinition {dataType: 'document'})
+            RETURN et.key AS entity_type_key, p.key AS property_key
+            """
+        )
+        document_properties = [
+            (record["entity_type_key"], record["property_key"])
+            async for record in result
+        ]
+
+    for entity_type_key, property_key in document_properties:
+        await create_document_vector_index(
+            driver, entity_type_key, property_key, dimensions
         )
 
     # Cross-type entity vector index (semantic search across all types)
@@ -210,6 +239,37 @@ async def create_vector_index(
     logger.info("Vector index ensured: %s", index_name)
 
 
+async def create_document_vector_index(
+    driver: AsyncDriver,
+    entity_type_key: str,
+    property_key: str,
+    dimensions: int,
+) -> None:
+    """Create the vector index for a document property's chunk nodes."""
+    index_name = document_index_name(entity_type_key, property_key)
+    virtual_label = document_virtual_label(entity_type_key, property_key)
+    await _drop_failed_index_if_exists(driver, index_name)
+    query = (
+        f"CREATE VECTOR INDEX {index_name} IF NOT EXISTS "
+        f"FOR (c:{virtual_label}) ON (c._embedding) "
+        f"OPTIONS {{indexConfig: {{`vector.dimensions`: {dimensions}, "
+        f"`vector.similarity_function`: 'cosine'}}}}"
+    )
+    async with driver.session() as session:
+        await session.run(query)
+    logger.info("Vector index ensured: %s", index_name)
+
+
+async def drop_document_vector_index(
+    driver: AsyncDriver, entity_type_key: str, property_key: str
+) -> None:
+    """Drop the vector index for a document property's chunk nodes."""
+    index_name = document_index_name(entity_type_key, property_key)
+    async with driver.session() as session:
+        await session.run(f"DROP INDEX {index_name} IF EXISTS")
+    logger.info("Vector index dropped: %s", index_name)
+
+
 async def drop_vector_index(driver: AsyncDriver, entity_type_key: str) -> None:
     """Drop the vector index for the given entity type."""
     index_name = f"{entity_type_key}_embedding"
@@ -231,6 +291,7 @@ async def rebuild_vector_index(
             """
             MATCH (et:EntityType {key: $key})
             OPTIONAL MATCH (et)-[:HAS_PROPERTY]->(p:PropertyDefinition)
+            WHERE p.dataType <> 'document'
             RETURN collect(p.key) AS property_keys
             """,
             key=entity_type_key,

@@ -8,15 +8,22 @@ from fastapi import Depends
 from neo4j import AsyncDriver
 
 from ontoforge_server.core.database import (
+    create_document_vector_index,
     create_vector_index,
+    drop_document_vector_index,
     drop_vector_index,
     ensure_saved_query_vector_index,
     ensure_vector_indexes,
     get_driver,
     rebuild_vector_index,
 )
+from ontoforge_server.runtime import repository as runtime_repository
 from ontoforge_server.runtime.embedding import build_text_repr
-from ontoforge_server.runtime.service import PropertyDef, to_pascal_case
+from ontoforge_server.runtime.service import (
+    PropertyDef,
+    sync_document_chunks,
+    to_pascal_case,
+)
 from ontoforge_server.core.embedding import get_embedding_provider
 from ontoforge_server.core.exceptions import (
     CascadeRequiredError,
@@ -243,14 +250,24 @@ async def delete_entity_type(
         if affected:
             await repository.remove_all_includes_for_type(session, "EntityType", entity_type_id)
 
-        # Get key for vector index cleanup before deleting
+        # Get key + properties for vector index / chunk cleanup before deleting
         et_data = await repository.get_entity_type(session, entity_type_id)
+        et_props = (
+            await repository.list_properties(session, entity_type_id, "EntityType")
+            if et_data else []
+        )
         deleted = await repository.delete_entity_type(session, entity_type_id)
         if not deleted:
             raise NotFoundError(f"Entity type '{entity_type_id}' not found")
     _invalidate_runtime_schema_cache()
-    if et_data and get_embedding_provider():
-        await drop_vector_index(driver, et_data["key"])
+    if et_data:
+        for prop in et_props:
+            if prop.get("dataType") == DataType.DOCUMENT.value:
+                await _drop_document_property_artifacts(
+                    driver, et_data["key"], prop["key"]
+                )
+        if get_embedding_provider():
+            await drop_vector_index(driver, et_data["key"])
 
 
 # --- Relation Type (Global) ---
@@ -362,6 +379,17 @@ async def _ensure_owner_exists(
             raise NotFoundError(f"Relation type '{owner_id}' not found")
 
 
+async def _drop_document_property_artifacts(
+    driver: AsyncDriver, entity_type_key: str, property_key: str
+) -> None:
+    """Remove all chunk nodes and the vector index of a document property."""
+    async with driver.session() as session:
+        await runtime_repository.delete_chunks_for_virtual_type(
+            session, entity_type_key, property_key
+        )
+    await drop_document_vector_index(driver, entity_type_key, property_key)
+
+
 async def _rebuild_entity_type_vector_index(
     driver: AsyncDriver, entity_type_id: str
 ) -> None:
@@ -426,6 +454,15 @@ async def create_property(
     _invalidate_runtime_schema_cache()
     if owner_label == "EntityType":
         await _rebuild_entity_type_vector_index(driver, owner_id)
+        if body.data_type == DataType.DOCUMENT:
+            provider = get_embedding_provider()
+            if provider:
+                async with driver.session() as session:
+                    et = await repository.get_entity_type(session, owner_id)
+                if et:
+                    await create_document_vector_index(
+                        driver, et["key"], body.key, provider.dimensions
+                    )
     return _to_property_response(data)
 
 
@@ -512,6 +549,11 @@ async def delete_property(
     _invalidate_runtime_schema_cache()
     if owner_label == "EntityType":
         await _rebuild_entity_type_vector_index(driver, owner_id)
+        if prop.get("dataType") == DataType.DOCUMENT.value:
+            async with driver.session() as session:
+                et = await repository.get_entity_type(session, owner_id)
+            if et:
+                await _drop_document_property_artifacts(driver, et["key"], prop["key"])
 
 
 # --- Scope Management ---
@@ -1075,13 +1117,22 @@ async def import_schema(
                     prop.data_type, prop.required, prop.default_value,
                 )
 
-            # Create vector index for this entity type
+            # Create vector indexes for this entity type (document values
+            # are never in-index metadata; chunks get their own index)
             if provider:
-                filter_props = [prop.key for prop in et.properties]
+                filter_props = [
+                    prop.key for prop in et.properties
+                    if prop.data_type != DataType.DOCUMENT.value
+                ]
                 await create_vector_index(
                     driver, et.key, provider.dimensions,
                     filter_properties=filter_props,
                 )
+                for prop in et.properties:
+                    if prop.data_type == DataType.DOCUMENT.value:
+                        await create_document_vector_index(
+                            driver, et.key, prop.key, provider.dimensions
+                        )
 
         # Create relation types
         for rt in payload.relation_types:
@@ -1274,6 +1325,10 @@ async def rebuild_embeddings(
             )
             records = [record async for record in result]
 
+        doc_prop_keys = [
+            k for k, p in property_defs.items() if p.data_type == "document"
+        ]
+
         for record in records:
             entity_id = record["id"]
             props = dict(record["props"])
@@ -1292,6 +1347,11 @@ async def rebuild_embeddings(
                 processed += 1
             else:
                 failed += 1
+
+            # Rebuild document chunks (delete + re-chunk + re-embed)
+            if doc_prop_keys:
+                doc_values = {k: user_props.get(k) for k in doc_prop_keys}
+                await sync_document_chunks(driver, et_key, entity_id, doc_values)
 
             yield json.dumps({
                 "type": "progress",

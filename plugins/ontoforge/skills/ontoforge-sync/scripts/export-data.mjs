@@ -33,11 +33,17 @@ try {
   // Export all entities by type
   const entities = {};
   for (const et of schema.entityTypes || []) {
+    // Document properties are returned as stubs by default; request raw
+    // values via the fields projection. Since `fields` limits the response,
+    // list every property plus the system fields the export format needs.
+    let path = `/api/runtime/${encodeURIComponent(ontologyKey)}/entities/${encodeURIComponent(et.key)}`;
+    const props = et.properties || [];
+    if (props.some((p) => p.dataType === 'document')) {
+      const fields = ['_entityTypeKey', '_createdAt', '_updatedAt', ...props.map((p) => p.key)];
+      path += `?${fields.map((f) => `fields=${encodeURIComponent(f)}`).join('&')}`;
+    }
     try {
-      const items = await paginate(
-        baseUrl,
-        `/api/runtime/${encodeURIComponent(ontologyKey)}/entities/${encodeURIComponent(et.key)}`,
-      );
+      const items = await paginate(baseUrl, path);
       if (items.length > 0) {
         entities[et.key] = items;
         console.error(`  ${et.key}: ${items.length} entities`);

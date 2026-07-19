@@ -74,8 +74,8 @@ function ResultsTable({ results }: { results: QueryResult }) {
   )
 }
 
-/** Collapsible "Generated Cypher" block: mono, copy, open-in-console. */
-function CypherBlock({ ontologyKey, cypher }: { ontologyKey: string; cypher: string }) {
+/** Collapsible "Generated query" block: mono, copy, open-in-console. */
+function GeneratedQueryBlock({ ontologyKey, query }: { ontologyKey: string; query: string }) {
   const [open, setOpen] = useState(false)
   return (
     <div className="rounded-md border">
@@ -87,16 +87,16 @@ function CypherBlock({ ontologyKey, cypher }: { ontologyKey: string; cypher: str
           aria-expanded={open}
         >
           <ChevronRight className={cn('size-3 transition-transform', open && 'rotate-90')} />
-          Generated Cypher
+          Generated query
         </button>
-        <CopyButton text={cypher} />
+        <CopyButton text={query} />
         <Button
           asChild
           variant="ghost"
           size="sm"
           className="h-6 gap-1 px-1.5 text-xs text-muted-foreground"
         >
-          <Link to={`/w/${ontologyKey}/query?cypher=${encodeURIComponent(cypher)}`}>
+          <Link to={`/w/${ontologyKey}/query?query=${encodeURIComponent(query)}`}>
             <SquareTerminal className="size-3" />
             Open in console
           </Link>
@@ -104,7 +104,7 @@ function CypherBlock({ ontologyKey, cypher }: { ontologyKey: string; cypher: str
       </div>
       {open && (
         <pre className="overflow-x-auto border-t bg-muted/40 p-2.5 font-mono text-xs leading-relaxed">
-          {cypher}
+          {query}
         </pre>
       )}
     </div>
@@ -117,8 +117,8 @@ function AnswerCard({ ontologyKey, entry }: { ontologyKey: string; entry: AskEnt
       <div className="border-b px-4 py-2.5 text-[13px] font-medium">{entry.question}</div>
       <div className="space-y-3 px-4 py-3">
         <Markdown>{entry.response.answer}</Markdown>
-        {entry.response.cypher !== null && (
-          <CypherBlock ontologyKey={ontologyKey} cypher={entry.response.cypher} />
+        {entry.response.query !== null && (
+          <GeneratedQueryBlock ontologyKey={ontologyKey} query={entry.response.query} />
         )}
         {entry.response.results !== null && <ResultsTable results={entry.response.results} />}
       </div>
@@ -128,7 +128,7 @@ function AnswerCard({ ontologyKey, entry }: { ontologyKey: string; entry: AskEnt
 
 /**
  * Ask tab: one-shot natural-language question → markdown answer, collapsible
- * generated-Cypher block and a results table. Past Q&As of this session are
+ * generated-query block and a results table. Past Q&As of this session are
  * kept below (in memory only).
  */
 export function AskTab({ ontologyKey }: { ontologyKey: string }) {
@@ -213,7 +213,7 @@ export function AskTab({ ontologyKey }: { ontologyKey: string }) {
           <EmptyState
             icon={MessageCircleQuestion}
             title="One question, one answer"
-            description='Try "How many people work for NeuralWorks GmbH?" — the AI writes and runs a Cypher query, then explains the result.'
+            description='Try "How many people work for NeuralWorks GmbH?" — the AI writes and runs a query, then explains the result.'
             className="py-12"
           />
         )}

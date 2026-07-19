@@ -65,8 +65,9 @@ async def test_list_saved_queries_with_queries(client):
     assert len(query["steps"]) == 1
     step = query["steps"][0]
     assert step["name"] == "main"
-    assert step["type"] == "cypher"
-    assert "MATCH" in step["cypher"]
+    # Stored legacy rows are normalized to the new step shape on read
+    assert step["type"] == "oql"
+    assert "MATCH" in step["oql"]
     # Parameters should be deserialized from JSON string
     assert len(query["parameters"]) == 1
     assert query["parameters"][0]["name"] == "name"
@@ -110,8 +111,8 @@ async def test_upsert_saved_query_create(client):
                 "steps": [
                     {
                         "name": "main",
-                        "type": "cypher",
-                        "cypher": "MATCH (p:person) WHERE p.name CONTAINS $name RETURN p",
+                        "type": "oql",
+                        "oql": "MATCH (p:person) WHERE p.name CONTAINS $name RETURN p",
                     },
                 ],
                 "parameters": [
@@ -136,8 +137,8 @@ async def test_upsert_saved_query_rejects_document_parameter(client):
                 "steps": [
                     {
                         "name": "main",
-                        "type": "cypher",
-                        "cypher": "MATCH (p:person) WHERE p.name CONTAINS $name RETURN p",
+                        "type": "oql",
+                        "oql": "MATCH (p:person) WHERE p.name CONTAINS $name RETURN p",
                     },
                 ],
                 "parameters": [
@@ -172,8 +173,8 @@ async def test_upsert_saved_query_update(client):
                 "steps": [
                     {
                         "name": "main",
-                        "type": "cypher",
-                        "cypher": "MATCH (p:person) WHERE p.name CONTAINS $name RETURN p",
+                        "type": "oql",
+                        "oql": "MATCH (p:person) WHERE p.name CONTAINS $name RETURN p",
                     },
                 ],
                 "parameters": [
@@ -226,7 +227,7 @@ async def test_upsert_invalid_key(client):
                 "name": "Test",
                 "description": "test",
                 "steps": [
-                    {"name": "main", "type": "cypher", "cypher": "MATCH (n) RETURN n"},
+                    {"name": "main", "type": "oql", "oql": "MATCH (n) RETURN n"},
                 ],
                 "parameters": [],
             },
@@ -238,8 +239,8 @@ async def test_upsert_invalid_key(client):
 
 
 @pytest.mark.asyncio
-async def test_upsert_param_in_cypher_not_declared(client):
-    """Param $age in cypher but not in parameters should return 422."""
+async def test_upsert_param_in_query_not_declared(client):
+    """Param $age referenced in a step but not declared should return 422."""
 
     with (
         patch(f"{REPO}.get_ontology_by_key", new_callable=AsyncMock, return_value=MOCK_ONTOLOGY),
@@ -252,8 +253,8 @@ async def test_upsert_param_in_cypher_not_declared(client):
                 "steps": [
                     {
                         "name": "main",
-                        "type": "cypher",
-                        "cypher": "MATCH (p:person) WHERE p.age > $age RETURN p",
+                        "type": "oql",
+                        "oql": "MATCH (p:person) WHERE p.age > $age RETURN p",
                     },
                 ],
                 "parameters": [],
@@ -275,7 +276,7 @@ async def test_upsert_param_declared_not_in_steps(client):
                 "name": "Test",
                 "description": "test",
                 "steps": [
-                    {"name": "main", "type": "cypher", "cypher": "MATCH (p:person) RETURN p"},
+                    {"name": "main", "type": "oql", "oql": "MATCH (p:person) RETURN p"},
                 ],
                 "parameters": [
                     {"name": "unused", "description": "Not used", "dataType": "string"},
@@ -320,7 +321,7 @@ async def test_upsert_invalid_step_type(client):
                 "name": "Test",
                 "description": "test",
                 "steps": [
-                    {"name": "main", "type": "invalid_type", "cypher": "MATCH (n) RETURN n"},
+                    {"name": "main", "type": "invalid_type", "oql": "MATCH (n) RETURN n"},
                 ],
                 "parameters": [],
             },
@@ -341,8 +342,8 @@ async def test_upsert_duplicate_step_names(client):
                 "name": "Test",
                 "description": "test",
                 "steps": [
-                    {"name": "main", "type": "cypher", "cypher": "MATCH (n) RETURN n"},
-                    {"name": "main", "type": "cypher", "cypher": "MATCH (m) RETURN m"},
+                    {"name": "main", "type": "oql", "oql": "MATCH (n) RETURN n"},
+                    {"name": "main", "type": "oql", "oql": "MATCH (m) RETURN m"},
                 ],
                 "parameters": [],
             },
@@ -365,8 +366,8 @@ async def test_upsert_binding_references_nonexistent_step(client):
                 "steps": [
                     {
                         "name": "main",
-                        "type": "cypher",
-                        "cypher": "MATCH (p:person) WHERE p._id IN $ids RETURN p",
+                        "type": "oql",
+                        "oql": "MATCH (p:person) WHERE p._id IN $ids RETURN p",
                         "bindings": {"ids": "{{nonexistent._id}}"},
                     },
                 ],
@@ -391,14 +392,14 @@ async def test_upsert_binding_references_later_step(client):
                 "steps": [
                     {
                         "name": "first",
-                        "type": "cypher",
-                        "cypher": "MATCH (p:person) WHERE p._id IN $ids RETURN p",
+                        "type": "oql",
+                        "oql": "MATCH (p:person) WHERE p._id IN $ids RETURN p",
                         "bindings": {"ids": "{{second._id}}"},
                     },
                     {
                         "name": "second",
-                        "type": "cypher",
-                        "cypher": "MATCH (n) RETURN n",
+                        "type": "oql",
+                        "oql": "MATCH (n) RETURN n",
                     },
                 ],
                 "parameters": [],
@@ -408,8 +409,8 @@ async def test_upsert_binding_references_later_step(client):
 
 
 @pytest.mark.asyncio
-async def test_upsert_cypher_step_missing_cypher(client):
-    """Cypher step without cypher field should return 422."""
+async def test_upsert_oql_step_missing_oql(client):
+    """OQL step without oql field should return 422."""
 
     with (
         patch(f"{REPO}.get_ontology_by_key", new_callable=AsyncMock, return_value=MOCK_ONTOLOGY),
@@ -420,7 +421,7 @@ async def test_upsert_cypher_step_missing_cypher(client):
                 "name": "Test",
                 "description": "test",
                 "steps": [
-                    {"name": "main", "type": "cypher"},
+                    {"name": "main", "type": "oql"},
                 ],
                 "parameters": [],
             },
@@ -478,8 +479,8 @@ async def test_upsert_multi_step_pipeline_valid(client):
                     },
                     {
                         "name": "results",
-                        "type": "cypher",
-                        "cypher": "MATCH (p:person)-[:has_skill]->(s:skill) WHERE s._id IN $skill_ids RETURN p",
+                        "type": "oql",
+                        "oql": "MATCH (p:person)-[:has_skill]->(s:skill) WHERE s._id IN $skill_ids RETURN p",
                         "bindings": {"skill_ids": "{{skills._id}}"},
                     },
                 ],

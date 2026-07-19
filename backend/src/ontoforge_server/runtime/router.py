@@ -6,8 +6,8 @@ from ontoforge_server.core.database import get_driver
 from ontoforge_server.core.schemas import ExportEntityType, ExportRelationType
 from ontoforge_server.runtime import service
 from ontoforge_server.runtime.schemas import (
-    CypherQueryRequest,
-    CypherQueryResponse,
+    QueryRequest,
+    QueryResponse,
     DocumentContentResponse,
     DocumentEditRequest,
     DocumentEditResponse,
@@ -281,16 +281,17 @@ async def delete_relation(
     return Response(status_code=204)
 
 
-# --- Cypher Query ---
+# --- OQL Query ---
 
 
-@router.post("/query", response_model=CypherQueryResponse)
-async def cypher_query(
+@router.post("/query", response_model=QueryResponse)
+async def run_query(
     ontology_key: str,
-    body: CypherQueryRequest,
+    body: QueryRequest,
     driver: AsyncDriver = Depends(get_driver),
 ):
-    return await service.execute_cypher_query(ontology_key, body.cypher, driver)
+    """Execute a read-only OQL query scoped to the ontology."""
+    return await service.execute_query(ontology_key, body.query, driver)
 
 
 # --- Saved Queries ---
@@ -311,7 +312,7 @@ async def list_saved_queries(
                 {
                     "name": s.name,
                     "type": s.type,
-                    **({"cypher": s.cypher} if s.cypher else {}),
+                    **({"oql": s.oql} if s.oql else {}),
                     **({"entityTypeKey": s.entity_type_key} if s.entity_type_key else {}),
                     **({"query": s.query} if s.query else {}),
                     **({"limit": s.limit} if s.limit is not None else {}),

@@ -170,9 +170,9 @@ function StepEditor({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="cypher">
+            <SelectItem value="oql">
               <span className="flex items-center gap-1.5">
-                <SquareTerminal className="size-3.5" /> Cypher
+                <SquareTerminal className="size-3.5" /> Query
               </span>
             </SelectItem>
             <SelectItem value="semantic_search">
@@ -215,14 +215,14 @@ function StepEditor({
         </span>
       </div>
 
-      {step.type === 'cypher' && (
+      {step.type === 'oql' && (
         <Textarea
-          value={step.cypher ?? ''}
-          onChange={(e) => onChange({ cypher: e.target.value })}
+          value={step.oql ?? ''}
+          onChange={(e) => onChange({ oql: e.target.value })}
           rows={3}
           className="font-mono text-xs"
           placeholder="MATCH (p:person) WHERE p.name = $name RETURN p LIMIT 25"
-          aria-label="Cypher"
+          aria-label="Query"
         />
       )}
 
@@ -350,7 +350,7 @@ function SavedQueryDialog({ ontologyKey, query, open, onOpenChange }: SavedQuery
       setKeyTouched(isEdit)
       setName(query?.name ?? '')
       setDescription(query?.description ?? '')
-      setSteps(query?.steps.map((s) => ({ ...s })) ?? [{ name: 'step1', type: 'cypher', cypher: '' }])
+      setSteps(query?.steps.map((s) => ({ ...s })) ?? [{ name: 'step1', type: 'oql', oql: '' }])
       setParameters(query?.parameters.map((p) => ({ ...p })) ?? [])
     }
   }
@@ -370,8 +370,8 @@ function SavedQueryDialog({ ontologyKey, query, open, onOpenChange }: SavedQuery
   const cleanSteps = (): SavedQueryStep[] =>
     steps.map((s, i) => {
       const base: SavedQueryStep = { name: s.name.trim(), type: s.type }
-      if (s.type === 'cypher') {
-        base.cypher = s.cypher ?? ''
+      if (s.type === 'oql') {
+        base.oql = s.oql ?? ''
       } else {
         base.entityTypeKey = s.entityTypeKey
         base.query = s.query ?? ''
@@ -405,8 +405,8 @@ function SavedQueryDialog({ ontologyKey, query, open, onOpenChange }: SavedQuery
   const stepsValid = steps.every(
     (s) =>
       s.name.trim() !== '' &&
-      (s.type === 'cypher'
-        ? (s.cypher ?? '').trim() !== ''
+      (s.type === 'oql'
+        ? (s.oql ?? '').trim() !== ''
         : (s.entityTypeKey ?? '') !== '' && (s.query ?? '').trim() !== ''),
   )
   const paramsValid = parameters.every((p) => p.name.trim() !== '')
@@ -419,7 +419,7 @@ function SavedQueryDialog({ ontologyKey, query, open, onOpenChange }: SavedQuery
         <DialogHeader>
           <DialogTitle>{isEdit ? `Edit query "${query.key}"` : 'New saved query'}</DialogTitle>
           <DialogDescription>
-            Multi-step pipelines of Cypher and semantic-search steps. Later steps can bind
+            Multi-step pipelines of query and semantic-search steps. Later steps can bind
             values from earlier results.
           </DialogDescription>
         </DialogHeader>
@@ -476,11 +476,11 @@ function SavedQueryDialog({ ontologyKey, query, open, onOpenChange }: SavedQuery
                   onClick={() =>
                     setSteps((prev) => [
                       ...prev,
-                      { name: `step${prev.length + 1}`, type: 'cypher', cypher: '' },
+                      { name: `step${prev.length + 1}`, type: 'oql', oql: '' },
                     ])
                   }
                 >
-                  <Plus className="size-3" /> Cypher step
+                  <Plus className="size-3" /> Query step
                 </Button>
                 <Button
                   type="button"
@@ -600,7 +600,7 @@ function SavedQueryDialog({ ontologyKey, query, open, onOpenChange }: SavedQuery
             ))}
             {parameters.length > 0 && (
               <p className="text-[11px] text-muted-foreground">
-                Reference parameters in Cypher and query text as{' '}
+                Reference parameters in query and search text as{' '}
                 <code className="font-mono">$name</code>.
               </p>
             )}

@@ -1087,7 +1087,7 @@ async def export_schema(
         )
 
     return ExportPayload(
-        formatVersion="2.2",
+        formatVersion="3.0",
         entityTypes=entity_types,
         relationTypes=relation_types,
         ontologies=ontologies,
@@ -1215,7 +1215,7 @@ async def import_schema(
                     StepSchema(
                         name=s.name,
                         type=StepType(s.type),
-                        cypher=s.cypher,
+                        oql=s.oql,
                         entityTypeKey=s.entity_type_key,
                         query=s.query,
                         limit=s.limit,
@@ -1236,7 +1236,7 @@ async def import_schema(
                     {
                         "name": s.name,
                         "type": s.type,
-                        **({"cypher": s.cypher} if s.cypher else {}),
+                        **({"oql": s.oql} if s.oql else {}),
                         **({"entityTypeKey": s.entity_type_key} if s.entity_type_key else {}),
                         **({"query": s.query} if s.query else {}),
                         **({"limit": s.limit} if s.limit is not None else {}),
@@ -1543,7 +1543,7 @@ def _to_saved_query_response(data: dict) -> SavedQueryResponse:
             StepSchema(
                 name=s["name"],
                 type=s["type"],
-                cypher=s.get("cypher"),
+                oql=s.get("oql", s.get("cypher")),
                 entityTypeKey=s.get("entityTypeKey"),
                 query=s.get("query"),
                 limit=s.get("limit"),
@@ -1597,7 +1597,7 @@ def _deserialize_export_steps(steps_json: str | None) -> list[ExportSavedQuerySt
         ExportSavedQueryStep(
             name=s["name"],
             type=s["type"],
-            cypher=s.get("cypher"),
+            oql=s.get("oql", s.get("cypher")),
             entityTypeKey=s.get("entityTypeKey"),
             query=s.get("query"),
             limit=s.get("limit"),
@@ -1632,9 +1632,9 @@ def _validate_pipeline(
         seen_step_names[step.name] = i
 
         # Type-specific required fields
-        if step.type == StepType.CYPHER:
-            if not step.cypher:
-                errors.append(f"{prefix}.cypher: Required for cypher steps")
+        if step.type == StepType.OQL:
+            if not step.oql:
+                errors.append(f"{prefix}.oql: Required for oql steps")
         elif step.type == StepType.SEMANTIC_SEARCH:
             if not step.entity_type_key:
                 errors.append(f"{prefix}.entityTypeKey: Required for semantic_search steps")
@@ -1658,29 +1658,29 @@ def _validate_pipeline(
                         "which does not exist before this step"
                     )
 
-    # Cross-check parameters against Cypher $param references across all cypher steps
-    all_cypher_params: set[str] = set()
+    # Cross-check parameters against $param references across all oql steps
+    all_query_params: set[str] = set()
     all_binding_names: set[str] = set()
     for step in steps:
         if step.bindings:
             all_binding_names.update(step.bindings.keys())
-        if step.type == StepType.CYPHER and step.cypher:
-            cypher_refs = set(re.findall(r'\$([a-zA-Z_]\w*)', step.cypher))
-            all_cypher_params.update(cypher_refs)
+        if step.type == StepType.OQL and step.oql:
+            param_refs = set(re.findall(r'\$([a-zA-Z_]\w*)', step.oql))
+            all_query_params.update(param_refs)
 
-    # Params needed by cypher = all $refs minus those provided by bindings
-    needed_from_user = all_cypher_params - all_binding_names
+    # Params needed by oql steps = all $refs minus those provided by bindings
+    needed_from_user = all_query_params - all_binding_names
     # Also check $param refs in semantic_search query fields
     for step in steps:
         if step.type == StepType.SEMANTIC_SEARCH and step.query:
             for ref in re.findall(r'\$([a-zA-Z_]\w*)', step.query):
                 needed_from_user.add(ref)
 
-    in_cypher_not_declared = needed_from_user - declared_params
+    referenced_not_declared = needed_from_user - declared_params
     declared_not_used = declared_params - needed_from_user
-    if in_cypher_not_declared:
+    if referenced_not_declared:
         errors.append(
-            f"Parameters referenced in steps but not declared: {sorted(in_cypher_not_declared)}"
+            f"Parameters referenced in steps but not declared: {sorted(referenced_not_declared)}"
         )
     if declared_not_used:
         errors.append(
@@ -1729,7 +1729,7 @@ async def upsert_saved_query(
     param_names = [p.name for p in body.parameters]
     _validate_pipeline(body.steps, param_names, query_key)
 
-    # Validate Cypher steps against schema
+    # Validate OQL steps against schema
     async with driver.session() as session:
         ont = await repository.get_ontology_by_key(session, ontology_key)
         if not ont:
@@ -1740,20 +1740,20 @@ async def upsert_saved_query(
         loaded = await runtime_service._load_schema(ontology_key, driver)
         from ontoforge_server.runtime.cypher import validate_and_rewrite
         for step in body.steps:
-            if step.type == StepType.CYPHER and step.cypher:
-                validate_and_rewrite(step.cypher, loaded.scoped)
+            if step.type == StepType.OQL and step.oql:
+                validate_and_rewrite(step.oql, loaded.scoped)
     except NotFoundError:
         pass  # Ontology has no runtime schema loaded yet
     except ValidationError:
         raise
     except Exception as exc:
-        raise ValidationError(f"Cypher validation failed: {exc}")
+        raise ValidationError(f"Query validation failed: {exc}")
 
     steps_json = _serialize_json([
         {
             "name": s.name,
             "type": s.type.value,
-            **({"cypher": s.cypher} if s.cypher else {}),
+            **({"oql": s.oql} if s.oql else {}),
             **({"entityTypeKey": s.entity_type_key} if s.entity_type_key else {}),
             **({"query": s.query} if s.query else {}),
             **({"limit": s.limit} if s.limit is not None else {}),

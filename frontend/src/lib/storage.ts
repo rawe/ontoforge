@@ -7,7 +7,7 @@
  *   of.explore.{ontologyKey} — Explorer canvas working set (later slice)
  *   of.chat.{ontologyKey}    — AI chat history (later slice)
  *   of.recents.{ontologyKey} — last 10 opened entities (see `lib/recents.ts`)
- *   of.queryHistory.{ontologyKey} — last 10 run Cypher queries (Query console)
+ *   of.queryHistory.{ontologyKey} — last 10 run OQL queries (Query console)
  */
 
 export const storageKeys = {

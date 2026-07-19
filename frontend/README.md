@@ -2,7 +2,7 @@
 
 The OntoForge frontend (v3) — a single-page app with two surfaces:
 
-- **Workbench** (`/w/:ontologyKey`) — work with instance data through one ontology lens: overview dashboard, schema-driven type tables, entity detail, Explorer canvas, Cypher query workbench, AI assistant.
+- **Workbench** (`/w/:ontologyKey`) — work with instance data through one ontology lens: overview dashboard, schema-driven type tables, entity detail, Explorer canvas, OQL query workbench, AI assistant.
 - **Studio** (`/studio`) — design the global schema: entity/relation type editors, ontology scope configuration, agents, saved queries, export/import.
 
 Architecture overview: `docs/runtime-ui-architecture.md` (repo root).
@@ -45,7 +45,7 @@ src/
 │   ├── explore/ # Explorer canvas (React Flow nodes, edges, working set)
 │   ├── table/   # type table building blocks
 │   ├── entity/  # entity detail building blocks
-│   ├── query/   # Cypher console + saved-query library
+│   ├── query/   # query console (OQL) + saved-query library
 │   ├── ai/      # chat / ask / extract
 │   ├── studio/  # Studio editors (types, scope, agents, saved queries, transfer)
 │   └── home/    # Workbench Home cards

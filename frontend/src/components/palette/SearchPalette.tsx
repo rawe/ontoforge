@@ -225,7 +225,8 @@ function PaletteContent({
       label: 'Go to Query',
       icon: SquareTerminal,
       run: () => go(`${base}/query`),
-      keywords: 'cypher console',
+      // 'cypher' kept as a hidden alias for muscle memory.
+      keywords: 'oql query console cypher',
     },
     ...(features?.ai !== false
       ? [

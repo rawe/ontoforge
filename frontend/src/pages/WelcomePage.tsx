@@ -132,7 +132,7 @@ export function WelcomePage() {
         </div>
 
         <p className="mt-16 text-center text-xs text-muted-foreground">
-          Schema and data live together in Neo4j · manage the global schema in the{' '}
+          Schema and data live together in one graph database · manage the global schema in the{' '}
           <Link to="/studio" className="font-medium text-foreground/80 underline-offset-4 hover:underline">
             Studio
           </Link>

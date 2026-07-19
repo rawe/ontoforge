@@ -21,7 +21,7 @@ from ontoforge_server.core.exceptions import NotFoundError, ValidationError
 from ontoforge_server.runtime import service
 from ontoforge_server.runtime.schemas import RelationInstanceCreate
 from ontoforge_server.runtime.tool_names import (
-    TOOL_EXECUTE_CYPHER,
+    TOOL_EXECUTE_QUERY,
     TOOL_GET_ENTITY,
     TOOL_GET_NEIGHBORS,
     TOOL_GET_SCHEMA,
@@ -31,6 +31,7 @@ from ontoforge_server.runtime.tool_names import (
     TOOL_RUN_SAVED_QUERY,
     TOOL_SEARCH_SAVED_QUERIES,
     TOOL_SEMANTIC_SEARCH,
+    normalize_tool_name,
 )
 
 logger = logging.getLogger(__name__)
@@ -40,7 +41,7 @@ logger = logging.getLogger(__name__)
 # Tool allowlists — controls which tools each AI feature can use
 # ---------------------------------------------------------------------------
 
-QUERY_TOOLS = [TOOL_EXECUTE_CYPHER]
+QUERY_TOOLS = [TOOL_EXECUTE_QUERY]
 EXTRACT_TOOLS: list[str] = []  # schema context only
 CHAT_TOOLS = [
     TOOL_GET_SCHEMA,
@@ -49,7 +50,7 @@ CHAT_TOOLS = [
     TOOL_LIST_RELATIONS,
     TOOL_GET_NEIGHBORS,
     TOOL_SEMANTIC_SEARCH,
-    TOOL_EXECUTE_CYPHER,
+    TOOL_EXECUTE_QUERY,
     TOOL_LIST_SAVED_QUERIES,
     TOOL_RUN_SAVED_QUERY,
     TOOL_SEARCH_SAVED_QUERIES,
@@ -192,12 +193,12 @@ async def tool_semantic_search(
     )
 
 
-async def tool_execute_cypher_query(
+async def tool_execute_query(
     ctx: RunContext[AiDeps],
-    cypher: str,
+    query: str,
 ) -> dict:
-    return await service.execute_cypher_query(
-        ctx.deps.ontology_key, cypher, ctx.deps.driver,
+    return await service.execute_query(
+        ctx.deps.ontology_key, query, ctx.deps.driver,
     )
 
 
@@ -280,9 +281,10 @@ _AGENT_TOOL_DEFS: list[tuple[Callable, str, str]] = [
         "Best for finding entities when you don't know exact property values.",
     ),
     (
-        tool_execute_cypher_query,
-        TOOL_EXECUTE_CYPHER,
-        "Execute a read-only Cypher query against the knowledge graph. "
+        tool_execute_query,
+        TOOL_EXECUTE_QUERY,
+        "Execute a read-only OQL query (openCypher-style graph pattern syntax) "
+        "against the knowledge graph. "
         "Use entity type keys (snake_case) as node labels and relation type keys "
         "as relationship types. ALL node patterns MUST have a label. Only "
         "MATCH/RETURN — no writes, no CALL. Use CONTAINS for substring matching "
@@ -352,18 +354,19 @@ def _create_agent(
 
 
 # ---------------------------------------------------------------------------
-# Feature: NL → Cypher Query
+# Feature: NL → OQL Query
 # ---------------------------------------------------------------------------
 
-_QUERY_SYSTEM_PROMPT = """You are a Cypher query assistant for a Neo4j knowledge graph.
-You translate natural language questions into Cypher queries.
+_QUERY_SYSTEM_PROMPT = """You are a query assistant for a knowledge graph.
+You translate natural language questions into read-only OQL queries \
+(openCypher-style graph pattern syntax).
 
 RULES:
 - Use entity type keys (snake_case) as node labels: e.g., person, company
 - Use relation type keys (snake_case) as relationship types: e.g., works_for
 - ALL node patterns MUST have a label — never use bare (n) patterns
 - Only generate read queries (MATCH/RETURN) — no writes
-- Use the execute_cypher_query tool to run your query
+- Use the execute_query tool to run your query
 - After getting results, provide a clear natural language answer
 
 {schema}
@@ -375,7 +378,7 @@ async def ai_query(
     question: str,
     driver: AsyncDriver,
 ) -> dict:
-    """Translate a natural language question to Cypher, execute it, and summarize."""
+    """Translate a natural language question to OQL, execute it, and summarize."""
     loaded = await service._load_schema(ontology_key, driver)
     schema_desc = _describe_schema(loaded.scoped)
 
@@ -386,27 +389,29 @@ async def ai_query(
     deps = AiDeps(ontology_key=ontology_key, driver=driver)
     result = await agent.run(question, deps=deps)
 
-    # Extract the Cypher query and results from tool call messages
-    cypher_used = None
-    cypher_results = None
+    # Extract the executed query and results from tool call messages
+    query_used = None
+    query_results = None
     for msg in result.new_messages():
         for part in getattr(msg, "parts", []):
             tool_name = getattr(part, "tool_name", None)
-            if tool_name and TOOL_EXECUTE_CYPHER in tool_name:
+            if tool_name and TOOL_EXECUTE_QUERY in tool_name:
                 # ToolCallPart: args is JSON string, use args_as_dict()
                 args_fn = getattr(part, "args_as_dict", None)
                 if args_fn:
                     args_dict = args_fn()
-                    cypher_used = args_dict.get("cypher")
+                    query_used = args_dict.get("query")
                 # ToolReturnPart: content is the result dict
                 content = getattr(part, "content", None)
                 if isinstance(content, dict):
-                    cypher_results = content
+                    query_results = content
 
     return {
         "answer": result.output,
-        "cypher": cypher_used,
-        "results": cypher_results,
+        "query": query_used,
+        # Deprecated mirror of "query"; removed after the deprecation window.
+        "cypher": query_used,
+        "results": query_results,
     }
 
 
@@ -532,10 +537,10 @@ SCHEMA:
 {schema}
 
 STRATEGY — use the exact keys from the schema as tool arguments (e.g. entity_type_key="person"):
-1. For questions about connections or relationships, use execute_cypher_query with a
+1. For questions about connections or relationships, use execute_query with a
    relationship pattern. Example: "What does Lena do?" →
    MATCH (p:person)-[r:works_for]->(c:company) WHERE p.name CONTAINS 'Lena' RETURN p.name, c.name
-2. For counting, filtering, or combining conditions, use execute_cypher_query.
+2. For counting, filtering, or combining conditions, use execute_query.
 3. For fuzzy or "find something like..." questions, use semantic_search.
 4. For exploring an entity's connections when you have its _id, use get_neighbors.
 5. For browsing entities of a type, use list_entities.
@@ -568,8 +573,10 @@ async def run_agent_chat(
     _embedding_tools = {TOOL_SEMANTIC_SEARCH, TOOL_SEARCH_SAVED_QUERIES}
 
     if agent_config.tools is not None:
+        # Stored agent configs may still use deprecated tool names.
+        normalized = [normalize_tool_name(t) for t in agent_config.tools]
         available_tools = [
-            t for t in agent_config.tools
+            t for t in normalized
             if t in ALL_TOOLS and (t not in _embedding_tools or get_embedding_provider() is not None)
         ]
     else:

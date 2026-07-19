@@ -92,7 +92,7 @@ class TestParsing:
         assert tree is not None
 
     def test_syntax_error_raises(self):
-        with pytest.raises(ValidationError, match="Invalid Cypher syntax"):
+        with pytest.raises(ValidationError, match="Invalid query syntax"):
             _parse("MATCH (n:person RETURN")
 
 
@@ -389,7 +389,7 @@ async def test_query_endpoint_success(client, unscoped_schema):
     ):
         resp = await client.post(
             "/api/runtime/full_ontology/query",
-            json={"cypher": "MATCH (p:person) RETURN p"},
+            json={"query": "MATCH (p:person) RETURN p"},
         )
 
     assert resp.status_code == 200
@@ -397,6 +397,27 @@ async def test_query_endpoint_success(client, unscoped_schema):
     assert body["columns"] == ["p"]
     assert len(body["results"]) == 1
     assert body["results"][0]["p"]["name"] == "Alice"
+
+
+async def test_query_endpoint_accepts_deprecated_cypher_field(client, unscoped_schema):
+    """The legacy request field "cypher" is a deprecated alias for "query"."""
+    raw_entity = make_entity(name="Alice", age=30)
+    mock_execute = AsyncMock(
+        return_value=(["p"], [{"p": raw_entity}])
+    )
+
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=unscoped_schema),
+        patch(f"{CYPHER_REPO}.execute_cypher_read", mock_execute),
+        patch(EMBEDDING, return_value=None),
+    ):
+        resp = await client.post(
+            "/api/runtime/full_ontology/query",
+            json={"cypher": "MATCH (p:person) RETURN p"},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["columns"] == ["p"]
 
 
 @pytest.mark.asyncio
@@ -408,7 +429,7 @@ async def test_query_endpoint_rejects_write(client, unscoped_schema):
     ):
         resp = await client.post(
             "/api/runtime/full_ontology/query",
-            json={"cypher": "CREATE (n:person {name: 'Bob'})"},
+            json={"query": "CREATE (n:person {name: 'Bob'})"},
         )
 
     assert resp.status_code == 422
@@ -423,7 +444,7 @@ async def test_query_endpoint_rejects_unknown_type(client, unscoped_schema):
     ):
         resp = await client.post(
             "/api/runtime/full_ontology/query",
-            json={"cypher": "MATCH (n:animal) RETURN n"},
+            json={"query": "MATCH (n:animal) RETURN n"},
         )
 
     assert resp.status_code == 422
@@ -445,7 +466,7 @@ async def test_query_endpoint_scoped_filters_properties(client, scoped_schema):
     ):
         resp = await client.post(
             "/api/runtime/hr_view/query",
-            json={"cypher": "MATCH (p:person) RETURN p"},
+            json={"query": "MATCH (p:person) RETURN p"},
         )
 
     assert resp.status_code == 200
@@ -508,7 +529,7 @@ async def test_query_endpoint_stubs_document_values_in_nodes(client):
     ):
         resp = await client.post(
             "/api/runtime/docs_view/query",
-            json={"cypher": "MATCH (p:person) RETURN p"},
+            json={"query": "MATCH (p:person) RETURN p"},
         )
 
     assert resp.status_code == 200
@@ -534,7 +555,7 @@ async def test_query_endpoint_stubs_scalar_document_projection(client):
     ):
         resp = await client.post(
             "/api/runtime/docs_view/query",
-            json={"cypher": "MATCH (p:person) RETURN p.bio, p.name"},
+            json={"query": "MATCH (p:person) RETURN p.bio, p.name"},
         )
 
     assert resp.status_code == 200

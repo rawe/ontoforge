@@ -14,7 +14,8 @@ from ontoforge_server.runtime.tool_names import (
     TOOL_DELETE_ENTITY,
     TOOL_DELETE_RELATION,
     TOOL_EDIT_DOCUMENT,
-    TOOL_EXECUTE_CYPHER,
+    TOOL_EXECUTE_QUERY,
+    TOOL_EXECUTE_QUERY_LEGACY,
     TOOL_GET_DOCUMENT,
     TOOL_GET_ENTITY,
     TOOL_GET_NEIGHBORS,
@@ -331,12 +332,12 @@ async def get_neighbors(
 
 
 @_enrich_errors
-async def cypher_query(
-    cypher: str,
+async def run_query(
+    query: str,
 ) -> dict:
     ontology_key = _get_ontology_key()
     driver = await get_driver()
-    return await service.execute_cypher_query(ontology_key, cypher, driver)
+    return await service.execute_query(ontology_key, query, driver)
 
 
 @_enrich_errors
@@ -374,7 +375,7 @@ async def list_saved_queries() -> list[dict]:
                 {
                     "name": s.name,
                     "type": s.type,
-                    **({"cypher": s.cypher} if s.cypher else {}),
+                    **({"oql": s.oql} if s.oql else {}),
                     **({"entityTypeKey": s.entity_type_key} if s.entity_type_key else {}),
                     **({"query": s.query} if s.query else {}),
                     **({"limit": s.limit} if s.limit is not None else {}),
@@ -535,12 +536,13 @@ _MCP_TOOL_DEFS: list[tuple[Callable, str, str]] = [
         "relation properties.",
     ),
     (
-        cypher_query,
-        TOOL_EXECUTE_CYPHER,
-        "Execute a read-only Cypher query against the ontology's scoped schema. "
+        run_query,
+        TOOL_EXECUTE_QUERY,
+        "Execute a read-only OQL query (openCypher-style graph pattern syntax) "
+        "against the ontology's scoped schema. "
         "Use schema entity type keys (snake_case) as node labels and relation type "
-        "keys as relationship types. They are automatically translated to Neo4j "
-        "conventions. Only MATCH/RETURN queries are allowed — no writes, no CALL. "
+        "keys as relationship types. Only MATCH/RETURN queries are allowed — no "
+        "writes, no CALL. "
         "All node patterns must include a label. Available types and properties can "
         "be discovered via the get_schema tool. System properties (_id, "
         "_entityTypeKey, _relationTypeKey, _createdAt, _updatedAt) are always "
@@ -594,3 +596,21 @@ _MCP_TOOL_DEFS: list[tuple[Callable, str, str]] = [
 
 for fn, name, description in _MCP_TOOL_DEFS:
     runtime_mcp.add_tool(fn, name=name, description=description)
+
+
+@_enrich_errors
+async def _legacy_cypher_query(cypher: str) -> dict:
+    ontology_key = _get_ontology_key()
+    driver = await get_driver()
+    return await service.execute_query(ontology_key, cypher, driver)
+
+
+# Deprecated alias for execute_query; removed after the deprecation window.
+runtime_mcp.add_tool(
+    _legacy_cypher_query,
+    name=TOOL_EXECUTE_QUERY_LEGACY,
+    description=(
+        "Deprecated alias for execute_query — use execute_query instead. "
+        "Executes a read-only OQL query."
+    ),
+)

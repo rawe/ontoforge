@@ -233,7 +233,7 @@ def _parse(cypher: str) -> tuple[CommonTokenStream, CypherParser.ScriptContext]:
 
     if err.errors:
         raise ValidationError(
-            "Invalid Cypher syntax: " + "; ".join(err.errors)
+            "Invalid query syntax: " + "; ".join(err.errors)
         )
     return token_stream, tree
 
@@ -382,7 +382,7 @@ def validate_and_rewrite(cypher: str, schema: SchemaCache) -> str:
     errors = _validate(analysis, schema)
     if errors:
         raise ValidationError(
-            "Cypher query validation failed", details={"errors": errors}
+            "Query validation failed", details={"errors": errors}
         )
     return _rewrite(token_stream, analysis)
 

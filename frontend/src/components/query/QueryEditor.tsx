@@ -1,11 +1,12 @@
 import { useMemo } from 'react'
 import CodeMirror, { EditorView, type ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import { StreamLanguage } from '@codemirror/language'
+// OQL syntax is openCypher-shaped, so CodeMirror's cypher mode applies unchanged.
 import { cypher } from '@codemirror/legacy-modes/mode/cypher'
 import { useTheme } from 'next-themes'
-import { EXAMPLE_CYPHER } from './snippets'
+import { EXAMPLE_QUERY } from './snippets'
 
-interface CypherEditorProps {
+interface QueryEditorProps {
   value: string
   onChange: (value: string) => void
   /** Cmd/Ctrl+Enter inside the editor. */
@@ -15,12 +16,12 @@ interface CypherEditorProps {
 }
 
 /**
- * Minimal CodeMirror 6 Cypher editor: legacy-mode Cypher highlighting,
+ * Minimal CodeMirror 6 OQL editor: legacy-mode syntax highlighting,
  * bracket matching from the basic setup, app-theme aware, mono font.
  * Cmd/Ctrl+Enter is intercepted in the capture phase (before CodeMirror's
  * own keymap) and triggers `onRun`.
  */
-export function CypherEditor({ value, onChange, onRun, editorRef }: CypherEditorProps) {
+export function QueryEditor({ value, onChange, onRun, editorRef }: QueryEditorProps) {
   const { resolvedTheme } = useTheme()
 
   const extensions = useMemo(
@@ -58,7 +59,7 @@ export function CypherEditor({ value, onChange, onRun, editorRef }: CypherEditor
         onChange={onChange}
         extensions={extensions}
         theme={resolvedTheme === 'dark' ? 'dark' : 'light'}
-        placeholder={EXAMPLE_CYPHER}
+        placeholder={EXAMPLE_QUERY}
         minHeight="140px"
         maxHeight="320px"
         autoFocus
@@ -70,7 +71,7 @@ export function CypherEditor({ value, onChange, onRun, editorRef }: CypherEditor
           highlightActiveLineGutter: false,
         }}
         style={{ background: 'transparent' }}
-        aria-label="Cypher editor"
+        aria-label="Query editor"
       />
     </div>
   )

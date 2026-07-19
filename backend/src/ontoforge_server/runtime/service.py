@@ -177,8 +177,10 @@ async def _load_schema(ontology_key: str, driver: AsyncDriver) -> LoadedSchema:
             steps=[
                 StepConfig(
                     name=s["name"],
-                    type=s["type"],
-                    cypher=s.get("cypher"),
+                    # Legacy rows may still use step type "cypher" / field
+                    # "cypher"; normalize on load.
+                    type="oql" if s["type"] == "cypher" else s["type"],
+                    oql=s.get("oql", s.get("cypher")),
                     entity_type_key=s.get("entityTypeKey"),
                     query=s.get("query"),
                     limit=s.get("limit"),
@@ -1918,16 +1920,16 @@ def _rrf_fuse(
 
 
 # ---------------------------------------------------------------------------
-# Service Functions — Cypher Query
+# Service Functions — OQL Query
 # ---------------------------------------------------------------------------
 
 
-async def execute_cypher_query(
+async def execute_query(
     ontology_key: str,
-    cypher: str,
+    query: str,
     driver: AsyncDriver,
 ) -> dict:
-    """Validate, rewrite, and execute a read-only Cypher query.
+    """Validate, compile, and execute a read-only OQL query.
 
     Returns ``{"columns": [...], "results": [...]}`` with properties
     filtered to the scoped ontology schema.
@@ -1941,11 +1943,12 @@ async def execute_cypher_query(
     loaded = await _load_schema(ontology_key, driver)
     scoped = loaded.scoped
 
-    # Map variables → schema keys before rewriting (uses original labels).
-    var_map = get_return_variables(cypher, scoped)
+    # Map variables → schema keys before compiling (uses original type keys).
+    var_map = get_return_variables(query, scoped)
 
-    # Validate and rewrite (snake_case → PascalCase / UPPER_SNAKE_CASE).
-    rewritten = validate_and_rewrite(cypher, scoped)
+    # Validate and compile to the Neo4j dialect
+    # (snake_case → PascalCase / UPPER_SNAKE_CASE).
+    rewritten = validate_and_rewrite(query, scoped)
 
     # Execute in a read transaction.
     async with driver.session() as session:
@@ -2135,17 +2138,17 @@ async def execute_saved_query(
         if step.bindings:
             resolved_bindings = _resolve_bindings(step.bindings, step_results)
 
-        if step.type == "cypher":
-            assert step.cypher is not None  # enforced by modeling validation
-            # Merge user params + resolved bindings for Cypher parameters
-            cypher_params = {**coerced_params, **resolved_bindings}
+        if step.type == "oql":
+            assert step.oql is not None  # enforced by modeling validation
+            # Merge user params + resolved bindings for query parameters
+            query_params = {**coerced_params, **resolved_bindings}
 
-            var_map = get_return_variables(step.cypher, scoped)
-            rewritten = validate_and_rewrite(step.cypher, scoped)
+            var_map = get_return_variables(step.oql, scoped)
+            rewritten = validate_and_rewrite(step.oql, scoped)
 
             async with driver.session() as session:
                 columns, rows = await repository.execute_cypher_read(
-                    session, rewritten, params=cypher_params
+                    session, rewritten, params=query_params
                 )
 
             # Post-process: strip out-of-scope properties + stub documents

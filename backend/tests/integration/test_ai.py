@@ -128,7 +128,7 @@ async def test_features_endpoint_shows_ai_enabled(integration_client):
 
 
 # ---------------------------------------------------------------------------
-# AI Query (NL → Cypher)
+# AI Query (NL → OQL)
 # ---------------------------------------------------------------------------
 
 
@@ -143,16 +143,17 @@ async def test_ai_query_returns_answer(integration_client, test_ontology):
     assert len(data["answer"]) > 0
 
 
-async def test_ai_query_returns_cypher_and_results(integration_client, test_ontology):
+async def test_ai_query_returns_query_and_results(integration_client, test_ontology):
     resp = await integration_client.post("/api/runtime/ai_test/ai/query", json={
         "question": "List all companies",
     })
     assert resp.status_code == 200
     data = resp.json()
-    # Cypher should be captured from tool call
-    if data["cypher"] is not None:
-        assert isinstance(data["cypher"], str)
-    # Results should contain Cypher execution output
+    # The executed query should be captured from the tool call, and the
+    # deprecated "cypher" field must mirror it during the deprecation window.
+    if data["query"] is not None:
+        assert isinstance(data["query"], str)
+    assert data["cypher"] == data["query"]
     if data["results"] is not None:
         assert "columns" in data["results"]
         assert "results" in data["results"]

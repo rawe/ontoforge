@@ -49,7 +49,7 @@ def validate_vector_indexed_properties(
     filter_properties: list[str],
     entity_id: str | None = None,
 ) -> None:
-    """Reject string values that Neo4j cannot safely store in vector index metadata."""
+    """Reject string values too large for vector-index filter metadata."""
     for property_key in filter_properties:
         value = properties.get(property_key)
         if value is None or not isinstance(value, str):
@@ -66,7 +66,7 @@ def validate_vector_indexed_properties(
             details={
                 "fields": {
                     property_key: (
-                        "Value exceeds Neo4j's semantic-index size limit "
+                        "Value exceeds the indexed property size limit "
                         f"({value_bytes} bytes > {MAX_VECTOR_FILTER_VALUE_BYTES} bytes)"
                     )
                 }

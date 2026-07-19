@@ -8,7 +8,7 @@ import { ResultsTable } from './ResultsTable'
 import { deriveGraph, exportResultsCsv, hasEntityResults } from './resultUtils'
 
 /**
- * Backend error block — rendered verbatim in mono/amber: the Cypher endpoint
+ * Backend error block — rendered verbatim in mono/amber: the query endpoint
  * intentionally returns self-correction hints listing available types and
  * properties.
  */

@@ -35,8 +35,8 @@ FIND_PEOPLE_QUERY = SavedQueryConfig(
     steps=[
         StepConfig(
             name="main",
-            type="cypher",
-            cypher="MATCH (p:person) WHERE p.name CONTAINS $name RETURN p",
+            type="oql",
+            oql="MATCH (p:person) WHERE p.name CONTAINS $name RETURN p",
         ),
     ],
     parameters=[
@@ -70,8 +70,8 @@ async def test_saved_queries_loaded_into_schema():
     assert config.name == "Find People"
     assert config.description == "Find people by name"
     assert len(config.steps) == 1
-    assert config.steps[0].type == "cypher"
-    assert config.steps[0].cypher == "MATCH (p:person) WHERE p.name CONTAINS $name RETURN p"
+    assert config.steps[0].type == "oql"
+    assert config.steps[0].oql == "MATCH (p:person) WHERE p.name CONTAINS $name RETURN p"
     assert len(config.parameters) == 1
     assert config.parameters[0].name == "name"
     assert config.parameters[0].data_type == "string"
@@ -120,7 +120,7 @@ async def test_list_saved_queries_tool():
     assert q["name"] == "Find People"
     assert q["description"] == "Find people by name"
     assert len(q["steps"]) == 1
-    assert q["steps"][0]["type"] == "cypher"
+    assert q["steps"][0]["type"] == "oql"
     assert len(q["parameters"]) == 1
     assert q["parameters"][0]["name"] == "name"
     assert q["parameters"][0]["dataType"] == "string"
@@ -238,8 +238,8 @@ MULTI_STEP_QUERY = SavedQueryConfig(
         ),
         StepConfig(
             name="persons",
-            type="cypher",
-            cypher="MATCH (p:person)-[:has_skill]->(s:skill) WHERE s._id IN $skill_ids RETURN p",
+            type="oql",
+            oql="MATCH (p:person)-[:has_skill]->(s:skill) WHERE s._id IN $skill_ids RETURN p",
             bindings={"skill_ids": "{{skills._id}}"},
         ),
     ],
@@ -251,7 +251,7 @@ MULTI_STEP_QUERY = SavedQueryConfig(
 
 @pytest.mark.asyncio
 async def test_multi_step_pipeline_execution():
-    """Multi-step pipeline: semantic_search -> cypher with binding."""
+    """Multi-step pipeline: semantic_search -> oql with binding."""
     loaded = _make_loaded_schema(saved_queries={"skilled-persons": MULTI_STEP_QUERY})
 
     # Set up driver mock with proper async context manager for session
@@ -274,7 +274,7 @@ async def test_multi_step_pipeline_execution():
         "total": 2,
     }
 
-    # Mock cypher execution to return persons
+    # Mock query execution to return persons
     mock_cypher_result = (
         ["p"],
         [{"p": {"_id": "person-1", "name": "Alice"}}],
@@ -315,11 +315,11 @@ async def test_multi_step_pipeline_execution():
     assert ss_args[0][1] == "machine learning"  # query text
     assert ss_args[0][2] == "skill"  # entity_type_key
 
-    # Verify cypher was called with binding-resolved params
+    # Verify the query step ran with binding-resolved params
     mock_cypher.assert_awaited_once()
     cypher_params = mock_cypher.call_args[1]["params"]
     assert cypher_params["skill_ids"] == ["skill-1", "skill-2"]  # from binding resolution
 
-    # Result should be from the last step (cypher)
+    # Result should be from the last step (oql)
     assert result["columns"] == ["p"]
     assert len(result["results"]) == 1

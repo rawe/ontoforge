@@ -3,7 +3,7 @@ from collections.abc import Callable
 
 from mcp.server.fastmcp import FastMCP
 
-from ontoforge_server.core.database import get_driver
+from ontoforge_server.core.ports import get_runtime_store
 from ontoforge_server.core.exceptions import ValidationError
 from ontoforge_server.mcp.mount import current_ontology_key
 from ontoforge_server.runtime import service
@@ -86,8 +86,8 @@ def _enrich_errors(fn):
 
 async def get_schema() -> dict:
     ontology_key = _get_ontology_key()
-    driver = await get_driver()
-    result = await service.get_full_schema(ontology_key, driver)
+    store = get_runtime_store()
+    result = await service.get_full_schema(ontology_key, store)
     return result.model_dump(by_alias=True)
 
 
@@ -97,9 +97,9 @@ async def create_entity(
     properties: dict,
 ) -> dict:
     ontology_key = _get_ontology_key()
-    driver = await get_driver()
+    store = get_runtime_store()
     result = await service.create_entity(
-        ontology_key, entity_type_key, properties, driver
+        ontology_key, entity_type_key, properties, store
     )
     return result
 
@@ -116,13 +116,13 @@ async def list_entities(
     fields: list[str] | None = None,
 ) -> dict:
     ontology_key = _get_ontology_key()
-    driver = await get_driver()
+    store = get_runtime_store()
     str_filters = {k: str(v) for k, v in (filters or {}).items()}
     limit = max(1, min(limit, 200))
     offset = max(0, offset)
     result = await service.list_entities(
         ontology_key, entity_type_key, limit, offset, sort, order,
-        search, str_filters, driver, fields=fields,
+        search, str_filters, store, fields=fields,
     )
     return result.model_dump()
 
@@ -133,9 +133,9 @@ async def get_entity(
     fields: list[str] | None = None,
 ) -> dict:
     ontology_key = _get_ontology_key()
-    driver = await get_driver()
+    store = get_runtime_store()
     result = await service.get_entity(
-        ontology_key, entity_type_key, entity_id, driver, fields=fields
+        ontology_key, entity_type_key, entity_id, store, fields=fields
     )
     return result
 
@@ -147,9 +147,9 @@ async def update_entity(
     properties: dict,
 ) -> dict:
     ontology_key = _get_ontology_key()
-    driver = await get_driver()
+    store = get_runtime_store()
     result = await service.update_entity(
-        ontology_key, entity_type_key, entity_id, properties, driver
+        ontology_key, entity_type_key, entity_id, properties, store
     )
     return result
 
@@ -159,9 +159,9 @@ async def delete_entity(
     entity_id: str,
 ) -> dict:
     ontology_key = _get_ontology_key()
-    driver = await get_driver()
+    store = get_runtime_store()
     await service.delete_entity(
-        ontology_key, entity_type_key, entity_id, driver
+        ontology_key, entity_type_key, entity_id, store
     )
     return {"message": f"Entity '{entity_id}' deleted successfully."}
 
@@ -174,13 +174,13 @@ async def get_document(
     limit: int | None = None,
 ) -> dict:
     ontology_key = _get_ontology_key()
-    driver = await get_driver()
+    store = get_runtime_store()
     offset = max(0, offset)
     if limit is not None:
         limit = max(1, limit)
     return await service.get_document(
         ontology_key, entity_type_key, entity_id, property_key,
-        offset, limit, driver,
+        offset, limit, store,
     )
 
 
@@ -194,7 +194,7 @@ async def edit_document(
     replace_all: bool = False,
 ) -> dict:
     ontology_key = _get_ontology_key()
-    driver = await get_driver()
+    store = get_runtime_store()
     body = DocumentEditRequest(
         op="str_replace",
         old_string=old_string,
@@ -202,7 +202,7 @@ async def edit_document(
         replace_all=replace_all,
     )
     return await service.edit_document(
-        ontology_key, entity_type_key, entity_id, property_key, body, driver
+        ontology_key, entity_type_key, entity_id, property_key, body, store
     )
 
 
@@ -217,7 +217,7 @@ async def write_document(
     expect: str | None = None,
 ) -> dict:
     ontology_key = _get_ontology_key()
-    driver = await get_driver()
+    store = get_runtime_store()
     body = DocumentEditRequest(
         op="replace_range",
         offset=offset,
@@ -226,7 +226,7 @@ async def write_document(
         expect=expect,
     )
     return await service.edit_document(
-        ontology_key, entity_type_key, entity_id, property_key, body, driver
+        ontology_key, entity_type_key, entity_id, property_key, body, store
     )
 
 
@@ -238,14 +238,14 @@ async def create_relation(
     properties: dict | None = None,
 ) -> dict:
     ontology_key = _get_ontology_key()
-    driver = await get_driver()
+    store = get_runtime_store()
     body = RelationInstanceCreate(
         fromEntityId=from_entity_id,
         toEntityId=to_entity_id,
         **(properties or {}),
     )
     result = await service.create_relation(
-        ontology_key, relation_type_key, body, driver
+        ontology_key, relation_type_key, body, store
     )
     return result
 
@@ -262,13 +262,13 @@ async def list_relations(
     offset: int = 0,
 ) -> dict:
     ontology_key = _get_ontology_key()
-    driver = await get_driver()
+    store = get_runtime_store()
     str_filters = {k: str(v) for k, v in (filters or {}).items()}
     limit = max(1, min(limit, 200))
     offset = max(0, offset)
     result = await service.list_relations(
         ontology_key, relation_type_key, limit, offset, sort, order,
-        from_entity_id, to_entity_id, str_filters, driver,
+        from_entity_id, to_entity_id, str_filters, store,
     )
     return result.model_dump()
 
@@ -278,9 +278,9 @@ async def get_relation(
     relation_id: str,
 ) -> dict:
     ontology_key = _get_ontology_key()
-    driver = await get_driver()
+    store = get_runtime_store()
     result = await service.get_relation(
-        ontology_key, relation_type_key, relation_id, driver
+        ontology_key, relation_type_key, relation_id, store
     )
     return result
 
@@ -292,9 +292,9 @@ async def update_relation(
     properties: dict,
 ) -> dict:
     ontology_key = _get_ontology_key()
-    driver = await get_driver()
+    store = get_runtime_store()
     result = await service.update_relation(
-        ontology_key, relation_type_key, relation_id, properties, driver
+        ontology_key, relation_type_key, relation_id, properties, store
     )
     return result
 
@@ -304,9 +304,9 @@ async def delete_relation(
     relation_id: str,
 ) -> dict:
     ontology_key = _get_ontology_key()
-    driver = await get_driver()
+    store = get_runtime_store()
     await service.delete_relation(
-        ontology_key, relation_type_key, relation_id, driver
+        ontology_key, relation_type_key, relation_id, store
     )
     return {"message": f"Relation '{relation_id}' deleted successfully."}
 
@@ -321,11 +321,11 @@ async def get_neighbors(
     relation_fields: list[str] | None = None,
 ) -> dict:
     ontology_key = _get_ontology_key()
-    driver = await get_driver()
+    store = get_runtime_store()
     limit = max(1, min(limit, 200))
     result = await service.get_neighbors(
         ontology_key, entity_type_key, entity_id, direction,
-        relation_type_key, limit, driver,
+        relation_type_key, limit, store,
         fields=fields, relation_fields=relation_fields,
     )
     return result.model_dump()
@@ -336,8 +336,8 @@ async def run_query(
     query: str,
 ) -> dict:
     ontology_key = _get_ontology_key()
-    driver = await get_driver()
-    return await service.execute_query(ontology_key, query, driver)
+    store = get_runtime_store()
+    return await service.execute_query(ontology_key, query, store)
 
 
 @_enrich_errors
@@ -351,11 +351,11 @@ async def semantic_search(
     snippets: bool = True,
 ) -> dict:
     ontology_key = _get_ontology_key()
-    driver = await get_driver()
+    store = get_runtime_store()
     limit = max(1, min(limit, 100))
     str_filters = {k: str(v) for k, v in (filters or {}).items()}
     result = await service.semantic_search(
-        ontology_key, query, entity_type_key, limit, None, driver,
+        ontology_key, query, entity_type_key, limit, None, store,
         filters=str_filters, fields=fields,
         search_in=search_in, snippets=snippets,
     )
@@ -364,8 +364,8 @@ async def semantic_search(
 
 async def list_saved_queries() -> list[dict]:
     ontology_key = _get_ontology_key()
-    driver = await get_driver()
-    loaded = await service._load_schema(ontology_key, driver)
+    store = get_runtime_store()
+    loaded = await service._load_schema(ontology_key, store)
     return [
         {
             "key": sq.key,
@@ -399,9 +399,9 @@ async def run_saved_query(
     params: dict | None = None,
 ) -> dict:
     ontology_key = _get_ontology_key()
-    driver = await get_driver()
+    store = get_runtime_store()
     return await service.execute_saved_query(
-        ontology_key, query_key, params or {}, driver
+        ontology_key, query_key, params or {}, store
     )
 
 
@@ -410,9 +410,9 @@ async def search_saved_queries(
     query: str,
 ) -> list[dict]:
     ontology_key = _get_ontology_key()
-    driver = await get_driver()
+    store = get_runtime_store()
     return await service.search_saved_queries(
-        ontology_key, query, 3, 0.7, driver
+        ontology_key, query, 3, 0.7, store
     )
 
 
@@ -601,8 +601,8 @@ for fn, name, description in _MCP_TOOL_DEFS:
 @_enrich_errors
 async def _legacy_cypher_query(cypher: str) -> dict:
     ontology_key = _get_ontology_key()
-    driver = await get_driver()
-    return await service.execute_query(ontology_key, cypher, driver)
+    store = get_runtime_store()
+    return await service.execute_query(ontology_key, cypher, store)
 
 
 # Deprecated alias for execute_query; removed after the deprecation window.

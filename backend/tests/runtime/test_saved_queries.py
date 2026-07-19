@@ -255,6 +255,8 @@ async def test_multi_step_pipeline_execution():
     loaded = _make_loaded_schema(saved_queries={"skilled-persons": MULTI_STEP_QUERY})
 
     # Set up driver mock with proper async context manager for session
+    from ontoforge_server.adapters.neo4j.runtime_store import Neo4jRuntimeStore
+
     mock_session = AsyncMock()
     mock_driver = AsyncMock()
 
@@ -263,6 +265,7 @@ async def test_multi_step_pipeline_execution():
         yield mock_session
 
     mock_driver.session = _session
+    store = Neo4jRuntimeStore(mock_driver)
 
     # Mock semantic_search to return skill entities
     mock_search_result = {
@@ -300,13 +303,13 @@ async def test_multi_step_pipeline_execution():
             return_value="MATCH (p:Person)-[:HAS_SKILL]->(s:Skill) WHERE s._id IN $skill_ids RETURN p",
         ),
         patch(
-            "ontoforge_server.runtime.service.repository.execute_cypher_read",
+            "ontoforge_server.adapters.neo4j.runtime_queries.execute_cypher_read",
             new_callable=AsyncMock,
             return_value=mock_cypher_result,
         ) as mock_cypher,
     ):
         result = await execute_saved_query(
-            "test_onto", "skilled-persons", {"skill_query": "machine learning"}, mock_driver
+            "test_onto", "skilled-persons", {"skill_query": "machine learning"}, store
         )
 
     # Verify semantic search was called with substituted query

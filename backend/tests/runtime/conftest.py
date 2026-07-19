@@ -4,8 +4,20 @@ import pytest
 
 NOW = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
-REPO = "ontoforge_server.runtime.service.repository"
+REPO = "ontoforge_server.adapters.neo4j.runtime_queries"
 EMBEDDING = "ontoforge_server.runtime.service.get_embedding_provider"
+
+
+@pytest.fixture
+def mock_store(mock_driver):
+    """Real Neo4j runtime store over the mocked driver.
+
+    Tests stub the adapter query module (see REPO); the store supplies the
+    session plumbing the service no longer owns.
+    """
+    from ontoforge_server.adapters.neo4j.runtime_store import Neo4jRuntimeStore
+
+    return Neo4jRuntimeStore(mock_driver)
 
 
 def _make_full_schema(

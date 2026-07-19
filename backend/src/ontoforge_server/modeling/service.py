@@ -17,7 +17,10 @@ from ontoforge_server.core.database import (
     get_driver,
     rebuild_vector_index,
 )
-from ontoforge_server.runtime import repository as runtime_repository
+# TRANSITION: the modeling half of the port extraction moves these adapter
+# imports behind the modeling store.
+from ontoforge_server.adapters.neo4j import runtime_queries as runtime_repository
+from ontoforge_server.adapters.neo4j.runtime_store import Neo4jRuntimeStore
 from ontoforge_server.runtime.embedding import build_text_repr
 from ontoforge_server.runtime.service import (
     PropertyDef,
@@ -1368,7 +1371,9 @@ async def rebuild_embeddings(
             # Rebuild document chunks (delete + re-chunk + re-embed)
             if doc_prop_keys:
                 doc_values = {k: user_props.get(k) for k in doc_prop_keys}
-                await sync_document_chunks(driver, et_key, entity_id, doc_values)
+                await sync_document_chunks(
+                    Neo4jRuntimeStore(driver), et_key, entity_id, doc_values
+                )
 
             yield json.dumps({
                 "type": "progress",

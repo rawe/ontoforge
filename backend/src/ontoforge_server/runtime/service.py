@@ -8,18 +8,8 @@ from datetime import date, datetime
 from typing import Any
 from uuid import uuid4
 
-from neo4j import AsyncDriver
-from neo4j.time import Date as Neo4jDate
-from neo4j.time import DateTime as Neo4jDateTime
-
 from ontoforge_server.config import settings
 from ontoforge_server.core.ai import AgentConfig, SavedQueryConfig, SavedQueryParameter, StepConfig
-from ontoforge_server.core.database import (
-    ENTITY_VECTOR_INDEX_NAME,
-    document_index_name,
-    document_virtual_label,
-    validate_vector_indexed_properties,
-)
 from ontoforge_server.core.embedding import get_embedding_provider
 from ontoforge_server.core.exceptions import ConflictError, NotFoundError, ValidationError
 from ontoforge_server.core.schemas import (
@@ -28,7 +18,6 @@ from ontoforge_server.core.schemas import (
     ExportProperty,
     ExportRelationType,
 )
-from ontoforge_server.runtime import repository
 from ontoforge_server.runtime.chunking import chunk_document
 from ontoforge_server.runtime.embedding import build_text_repr
 from ontoforge_server.runtime.schemas import (
@@ -111,8 +100,8 @@ def invalidate_loaded_schema_cache(ontology_key: str | None = None) -> None:
     _LOADED_SCHEMA_CACHE.pop(ontology_key, None)
 
 
-async def _load_schema(ontology_key: str, driver: AsyncDriver) -> LoadedSchema:
-    """Load the schema for the given ontology key from the database.
+async def _load_schema(ontology_key: str, store: Any) -> LoadedSchema:
+    """Load the schema for the given ontology key from the store.
 
     Builds both full and scoped SchemaCache instances.
     """
@@ -120,8 +109,7 @@ async def _load_schema(ontology_key: str, driver: AsyncDriver) -> LoadedSchema:
     if cached is not None:
         return cached
 
-    async with driver.session() as session:
-        schema = await repository.get_full_schema(session, ontology_key)
+    schema = await store.get_full_schema(ontology_key)
 
     if schema is None:
         raise NotFoundError(f"Ontology '{ontology_key}' not found or has no schema loaded")
@@ -141,8 +129,7 @@ async def _load_schema(ontology_key: str, driver: AsyncDriver) -> LoadedSchema:
     )
 
     # Load AI agent configs
-    async with driver.session() as session:
-        agent_rows = await repository.get_ai_agent_configs(session, ontology_key)
+    agent_rows = await store.get_ai_agent_configs(ontology_key)
     agent_configs = {
         row["key"]: AgentConfig(
             key=row["key"],
@@ -155,8 +142,7 @@ async def _load_schema(ontology_key: str, driver: AsyncDriver) -> LoadedSchema:
     }
 
     # Load saved queries
-    async with driver.session() as session:
-        query_rows = await repository.get_saved_queries(session, ontology_key)
+    query_rows = await store.get_saved_queries(ontology_key)
     saved_queries = {}
     for row in query_rows:
         import json as _json
@@ -359,7 +345,11 @@ def to_upper_snake_case(key: str) -> str:
 
 
 def coerce_value(value: Any, data_type: str, key: str) -> Any:
-    """Coerce a JSON value to the appropriate Python/Neo4j type."""
+    """Coerce a JSON value to the appropriate plain Python type.
+
+    Temporal values become ``datetime.date`` / ``datetime.datetime`` — the
+    persistence adapter converts them to its native types on write.
+    """
     if value is None:
         return None
 
@@ -408,8 +398,7 @@ def coerce_value(value: Any, data_type: str, key: str) -> Any:
     elif data_type == "date":
         if isinstance(value, str):
             try:
-                parsed = date.fromisoformat(value)
-                return Neo4jDate(parsed.year, parsed.month, parsed.day)
+                return date.fromisoformat(value)
             except ValueError:
                 raise ValueError(f"Expected ISO date for '{key}', got '{value}'")
         raise ValueError(f"Expected ISO date string for '{key}', got {type(value).__name__}")
@@ -417,13 +406,7 @@ def coerce_value(value: Any, data_type: str, key: str) -> Any:
     elif data_type == "datetime":
         if isinstance(value, str):
             try:
-                parsed = datetime.fromisoformat(value)
-                return Neo4jDateTime(
-                    parsed.year, parsed.month, parsed.day,
-                    parsed.hour, parsed.minute, parsed.second,
-                    parsed.microsecond * 1000,
-                    tzinfo=parsed.tzinfo,
-                )
+                return datetime.fromisoformat(value)
             except ValueError:
                 raise ValueError(f"Expected ISO datetime for '{key}', got '{value}'")
         raise ValueError(f"Expected ISO datetime string for '{key}', got {type(value).__name__}")
@@ -628,9 +611,9 @@ def _filter_relation_properties(relation: dict, scoped_rt: RelationTypeDef) -> d
 # ---------------------------------------------------------------------------
 
 
-async def get_full_schema(ontology_key: str, driver: AsyncDriver) -> SchemaResponse:
+async def get_full_schema(ontology_key: str, store: Any) -> SchemaResponse:
     """Return the scoped schema for the given ontology."""
-    loaded = await _load_schema(ontology_key, driver)
+    loaded = await _load_schema(ontology_key, store)
     cache = loaded.scoped
     ontology = ExportOntology(
         key=cache.ontology_key,
@@ -652,32 +635,32 @@ async def get_full_schema(ontology_key: str, driver: AsyncDriver) -> SchemaRespo
     )
 
 
-async def list_entity_types(ontology_key: str, driver: AsyncDriver) -> list[ExportEntityType]:
-    loaded = await _load_schema(ontology_key, driver)
+async def list_entity_types(ontology_key: str, store: Any) -> list[ExportEntityType]:
+    loaded = await _load_schema(ontology_key, store)
     return [
         _entity_type_def_to_export(et_def)
         for et_def in loaded.scoped.entity_types.values()
     ]
 
 
-async def get_entity_type(ontology_key: str, key: str, driver: AsyncDriver) -> ExportEntityType:
-    loaded = await _load_schema(ontology_key, driver)
+async def get_entity_type(ontology_key: str, key: str, store: Any) -> ExportEntityType:
+    loaded = await _load_schema(ontology_key, store)
     et_def = loaded.scoped.entity_types.get(key)
     if not et_def:
         raise NotFoundError(f"Entity type '{key}' not found")
     return _entity_type_def_to_export(et_def)
 
 
-async def list_relation_types(ontology_key: str, driver: AsyncDriver) -> list[ExportRelationType]:
-    loaded = await _load_schema(ontology_key, driver)
+async def list_relation_types(ontology_key: str, store: Any) -> list[ExportRelationType]:
+    loaded = await _load_schema(ontology_key, store)
     return [
         _relation_type_def_to_export(rt_def)
         for rt_def in loaded.scoped.relation_types.values()
     ]
 
 
-async def get_relation_type(ontology_key: str, key: str, driver: AsyncDriver) -> ExportRelationType:
-    loaded = await _load_schema(ontology_key, driver)
+async def get_relation_type(ontology_key: str, key: str, store: Any) -> ExportRelationType:
+    loaded = await _load_schema(ontology_key, store)
     rt_def = loaded.scoped.relation_types.get(key)
     if not rt_def:
         raise NotFoundError(f"Relation type '{key}' not found")
@@ -718,69 +701,6 @@ def _parse_filters(query_params: dict[str, str]) -> dict[str, str]:
     return filters
 
 
-def _build_filter_clauses(
-    filters: dict[str, str],
-    property_defs: dict[str, PropertyDef],
-    type_key: str,
-    node_alias: str = "n",
-) -> tuple[list[str], dict]:
-    OPERATORS = {
-        "gt": ">",
-        "gte": ">=",
-        "lt": "<",
-        "lte": "<=",
-        "contains": "CONTAINS",
-    }
-
-    where_clauses: list[str] = []
-    params: dict[str, Any] = {}
-
-    for filter_expr, raw_value in filters.items():
-        if "__" in filter_expr:
-            prop_key, op_name = filter_expr.rsplit("__", 1)
-        else:
-            prop_key = filter_expr
-            op_name = None
-
-        prop_def = property_defs.get(prop_key)
-        if not prop_def:
-            raise ValidationError(
-                f"Unknown filter property: '{prop_key}'",
-                details={"fields": {prop_key: f"Not defined in type '{type_key}'"}},
-            )
-
-        try:
-            if op_name == "contains":
-                coerced_value = str(raw_value)
-            else:
-                coerced_value = coerce_value(raw_value, prop_def.data_type, prop_key)
-        except ValueError as e:
-            raise ValidationError(
-                f"Invalid filter value for '{prop_key}'",
-                details={"fields": {prop_key: str(e)}},
-            )
-
-        param_name = f"flt_{len(params)}"
-
-        if op_name is None:
-            where_clauses.append(f"{node_alias}.{prop_key} = ${param_name}")
-        elif op_name == "contains":
-            where_clauses.append(
-                f"toLower(toString({node_alias}.{prop_key})) CONTAINS toLower(${param_name})"
-            )
-        elif op_name in OPERATORS:
-            where_clauses.append(f"{node_alias}.{prop_key} {OPERATORS[op_name]} ${param_name}")
-        else:
-            raise ValidationError(
-                f"Unknown filter operator: '{op_name}'",
-                details={"fields": {filter_expr: f"Unsupported operator '{op_name}'"}},
-            )
-
-        params[param_name] = coerced_value
-
-    return where_clauses, params
-
-
 def _validate_sort_field(sort: str, property_defs: dict[str, PropertyDef]) -> str:
     SYSTEM_SORT_FIELDS = {
         "createdAt": "_createdAt",
@@ -807,10 +727,10 @@ async def create_entity(
     ontology_key: str,
     entity_type_key: str,
     body: dict,
-    driver: AsyncDriver,
+    store: Any,
 ) -> dict:
     """Create a new entity instance. Validate against scoped properties, apply defaults from full schema."""
-    loaded = await _load_schema(ontology_key, driver)
+    loaded = await _load_schema(ontology_key, store)
     scoped_et = loaded.scoped.entity_types.get(entity_type_key)
     if not scoped_et:
         raise NotFoundError(f"Entity type '{entity_type_key}' not found")
@@ -833,7 +753,6 @@ async def create_entity(
                     pass  # Skip defaults that fail coercion
 
     entity_id = str(uuid4())
-    pascal_label = to_pascal_case(entity_type_key)
 
     # Document properties: store character counts alongside the values
     doc_keys = _document_property_keys(full_et.properties) if full_et else set()
@@ -845,21 +764,19 @@ async def create_entity(
     embedding = None
     provider = get_embedding_provider()
     if provider and full_et:
-        validate_vector_indexed_properties(
+        store.validate_vector_indexed_properties(
             entity_type_key, coerced,
             [k for k in full_et.properties if k not in doc_keys],
         )
         text = build_text_repr(entity_type_key, coerced, full_et.properties)
         embedding = await provider.embed(text)
 
-    async with driver.session() as session:
-        entity = await repository.create_entity(
-            session, entity_type_key, pascal_label, entity_id, coerced,
-            embedding=embedding,
-        )
+    entity = await store.create_entity(
+        entity_type_key, entity_id, coerced, embedding=embedding
+    )
 
     # Chunk + embed document properties (no-op without embedding provider)
-    await sync_document_chunks(driver, entity_type_key, entity_id, doc_values)
+    await sync_document_chunks(store, entity_type_key, entity_id, doc_values)
 
     # Filter response to scoped properties
     return _filter_entity_properties(entity, scoped_et)
@@ -874,38 +791,24 @@ async def list_entities(
     order: str,
     q: str | None,
     filters: dict[str, str],
-    driver: AsyncDriver,
+    store: Any,
     fields: list[str] | None = None,
 ) -> dict:
-    loaded = await _load_schema(ontology_key, driver)
+    loaded = await _load_schema(ontology_key, store)
     scoped_et = loaded.scoped.entity_types.get(entity_type_key)
     if not scoped_et:
         raise NotFoundError(f"Entity type '{entity_type_key}' not found")
 
-    where_clauses, params = _build_filter_clauses(
-        filters, scoped_et.properties, entity_type_key
-    )
-
-    if q:
-        string_props = [
-            p.key for p in scoped_et.properties.values() if p.data_type == "string"
-        ]
-        if string_props:
-            q_clauses = [
-                f"toLower(toString(n.{prop})) CONTAINS toLower($q_search)"
-                for prop in string_props
-            ]
-            where_clauses.append(f"({' OR '.join(q_clauses)})")
-            params["q_search"] = q
+    string_props = [
+        p.key for p in scoped_et.properties.values() if p.data_type == "string"
+    ]
 
     sort_field = _validate_sort_field(sort, scoped_et.properties)
 
-    pascal_label = to_pascal_case(entity_type_key)
-    async with driver.session() as session:
-        items, total = await repository.list_entities(
-            session, pascal_label, entity_type_key,
-            where_clauses, params, sort_field, order, limit, offset,
-        )
+    items, total = await store.list_entities(
+        entity_type_key, scoped_et.properties, filters,
+        q, string_props, sort_field, order, limit, offset,
+    )
 
     # Filter response properties to scoped schema
     items = [_filter_entity_properties(e, scoped_et, fields) for e in items]
@@ -922,17 +825,15 @@ async def get_entity(
     ontology_key: str,
     entity_type_key: str,
     entity_id: str,
-    driver: AsyncDriver,
+    store: Any,
     fields: list[str] | None = None,
 ) -> dict:
-    loaded = await _load_schema(ontology_key, driver)
+    loaded = await _load_schema(ontology_key, store)
     scoped_et = loaded.scoped.entity_types.get(entity_type_key)
     if not scoped_et:
         raise NotFoundError(f"Entity type '{entity_type_key}' not found")
 
-    pascal_label = to_pascal_case(entity_type_key)
-    async with driver.session() as session:
-        entity = await repository.get_entity(session, pascal_label, entity_id)
+    entity = await store.get_entity(entity_type_key, entity_id)
     if not entity:
         raise NotFoundError(f"Entity '{entity_id}' not found")
 
@@ -945,10 +846,10 @@ async def update_entity(
     entity_type_key: str,
     entity_id: str,
     body: dict,
-    driver: AsyncDriver,
+    store: Any,
 ) -> dict:
     """Partial update. Validate against scoped properties. NO default re-application."""
-    loaded = await _load_schema(ontology_key, driver)
+    loaded = await _load_schema(ontology_key, store)
     scoped_et = loaded.scoped.entity_types.get(entity_type_key)
     if not scoped_et:
         raise NotFoundError(f"Entity type '{entity_type_key}' not found")
@@ -963,9 +864,8 @@ async def update_entity(
     remove_props = [k for k, v in coerced.items() if v is None]
 
     if not set_props and not remove_props:
-        return await get_entity(ontology_key, entity_type_key, entity_id, driver)
+        return await get_entity(ontology_key, entity_type_key, entity_id, store)
 
-    pascal_label = to_pascal_case(entity_type_key)
     full_et = loaded.full.entity_types.get(entity_type_key)
 
     # Document properties: maintain stored lengths for changed values
@@ -986,14 +886,13 @@ async def update_entity(
             for k in coerced
         )
         if has_string_changes:
-            async with driver.session() as session:
-                current = await repository.get_entity(session, pascal_label, entity_id)
+            current = await store.get_entity(entity_type_key, entity_id)
             if current:
                 merged = {k: v for k, v in current.items() if not k.startswith("_")}
                 merged.update({k: v for k, v in set_props.items()})
                 for k in remove_props:
                     merged.pop(k, None)
-                validate_vector_indexed_properties(
+                store.validate_vector_indexed_properties(
                     entity_type_key, merged,
                     [k for k in full_et.properties if k not in doc_keys],
                     entity_id=entity_id,
@@ -1001,17 +900,16 @@ async def update_entity(
                 text = build_text_repr(entity_type_key, merged, full_et.properties)
                 embedding = await provider.embed(text)
 
-    async with driver.session() as session:
-        entity = await repository.update_entity(
-            session, pascal_label, entity_id, set_props, remove_props,
-            embedding=embedding if embedding is not _NOT_SET else None,
-            has_embedding_update=embedding is not _NOT_SET,
-        )
+    entity = await store.update_entity(
+        entity_type_key, entity_id, set_props, remove_props,
+        embedding=embedding if embedding is not _NOT_SET else None,
+        has_embedding_update=embedding is not _NOT_SET,
+    )
     if not entity:
         raise NotFoundError(f"Entity '{entity_id}' not found")
 
     # Re-chunk changed document properties only (no-op without provider)
-    await sync_document_chunks(driver, entity_type_key, entity_id, doc_changes)
+    await sync_document_chunks(store, entity_type_key, entity_id, doc_changes)
 
     return _filter_entity_properties(entity, scoped_et)
 
@@ -1020,15 +918,13 @@ async def delete_entity(
     ontology_key: str,
     entity_type_key: str,
     entity_id: str,
-    driver: AsyncDriver,
+    store: Any,
 ) -> None:
-    loaded = await _load_schema(ontology_key, driver)
+    loaded = await _load_schema(ontology_key, store)
     if entity_type_key not in loaded.scoped.entity_types:
         raise NotFoundError(f"Entity type '{entity_type_key}' not found")
 
-    pascal_label = to_pascal_case(entity_type_key)
-    async with driver.session() as session:
-        deleted = await repository.delete_entity(session, pascal_label, entity_id)
+    deleted = await store.delete_entity(entity_type_key, entity_id)
     if not deleted:
         raise NotFoundError(f"Entity '{entity_id}' not found")
 
@@ -1039,7 +935,7 @@ async def delete_entity(
 
 
 async def sync_document_chunks(
-    driver: AsyncDriver,
+    store: Any,
     entity_type_key: str,
     entity_id: str,
     doc_values: dict[str, str | None],
@@ -1061,13 +957,10 @@ async def sync_document_chunks(
         # edit the chunker re-synchronizes on the same boundaries, so most
         # chunks keep their exact text (at shifted offsets) and only the
         # chunks overlapping the edit need a fresh embedding.
-        async with driver.session() as session:
-            reusable = await repository.get_chunk_embeddings_for_entity_property(
-                session, entity_id, property_key
-            )
-            await repository.delete_chunks_for_entity_property(
-                session, entity_id, property_key
-            )
+        reusable = await store.get_chunk_embeddings_for_entity_property(
+            entity_id, property_key
+        )
+        await store.delete_chunks_for_entity_property(entity_id, property_key)
         if not value:
             continue
 
@@ -1093,11 +986,9 @@ async def sync_document_chunks(
                 row["_embedding"] = chunk_embedding
             rows.append(row)
 
-        virtual_label = document_virtual_label(entity_type_key, property_key)
-        async with driver.session() as session:
-            await repository.create_document_chunks(
-                session, entity_id, virtual_label, rows
-            )
+        await store.create_document_chunks(
+            entity_id, entity_type_key, property_key, rows
+        )
 
 
 async def _load_document_value(
@@ -1105,14 +996,14 @@ async def _load_document_value(
     entity_type_key: str,
     entity_id: str,
     property_key: str,
-    driver: AsyncDriver,
+    store: Any,
 ) -> str:
     """Resolve a scoped document property and return its current value.
 
     Raises NotFoundError for unknown/out-of-scope types or properties,
     non-document properties, and missing entities. An unset value reads as "".
     """
-    loaded = await _load_schema(ontology_key, driver)
+    loaded = await _load_schema(ontology_key, store)
     scoped_et = loaded.scoped.entity_types.get(entity_type_key)
     if not scoped_et:
         raise NotFoundError(f"Entity type '{entity_type_key}' not found")
@@ -1123,9 +1014,7 @@ async def _load_document_value(
             f"Document property '{property_key}' not found on entity type '{entity_type_key}'"
         )
 
-    pascal_label = to_pascal_case(entity_type_key)
-    async with driver.session() as session:
-        entity = await repository.get_entity(session, pascal_label, entity_id)
+    entity = await store.get_entity(entity_type_key, entity_id)
     if not entity:
         raise NotFoundError(f"Entity '{entity_id}' not found")
 
@@ -1140,7 +1029,7 @@ async def get_document(
     property_key: str,
     offset: int,
     limit: int | None,
-    driver: AsyncDriver,
+    store: Any,
 ) -> dict:
     """Read (a slice of) a document property value.
 
@@ -1148,7 +1037,7 @@ async def get_document(
     is returned.
     """
     value = await _load_document_value(
-        ontology_key, entity_type_key, entity_id, property_key, driver
+        ontology_key, entity_type_key, entity_id, property_key, store
     )
 
     if limit is None:
@@ -1226,7 +1115,7 @@ async def edit_document(
     entity_id: str,
     property_key: str,
     body: DocumentEditRequest,
-    driver: AsyncDriver,
+    store: Any,
 ) -> dict:
     """Apply one partial-write operation to a document property.
 
@@ -1238,7 +1127,7 @@ async def edit_document(
     embeddings, so only chunks overlapping the edit are re-embedded.
     """
     value = await _load_document_value(
-        ontology_key, entity_type_key, entity_id, property_key, driver
+        ontology_key, entity_type_key, entity_id, property_key, store
     )
 
     if body.op == "str_replace":
@@ -1246,20 +1135,16 @@ async def edit_document(
     else:
         new_value, offset, length, replacements = _apply_replace_range(value, body)
 
-    pascal_label = to_pascal_case(entity_type_key)
     set_props = {
         property_key: new_value,
         _doc_length_key(property_key): len(new_value),
     }
-    async with driver.session() as session:
-        entity = await repository.update_entity(
-            session, pascal_label, entity_id, set_props, [],
-        )
+    entity = await store.update_entity(entity_type_key, entity_id, set_props, [])
     if not entity:
         raise NotFoundError(f"Entity '{entity_id}' not found")
 
     await sync_document_chunks(
-        driver, entity_type_key, entity_id, {property_key: new_value}
+        store, entity_type_key, entity_id, {property_key: new_value}
     )
 
     context_start = max(0, offset - _EDIT_CONTEXT_CHARS)
@@ -1283,9 +1168,9 @@ async def create_relation(
     ontology_key: str,
     relation_type_key: str,
     body: RelationInstanceCreate,
-    driver: AsyncDriver,
+    store: Any,
 ) -> dict:
-    loaded = await _load_schema(ontology_key, driver)
+    loaded = await _load_schema(ontology_key, store)
     scoped_rt = loaded.scoped.relation_types.get(relation_type_key)
     if not scoped_rt:
         raise NotFoundError(f"Relation type '{relation_type_key}' not found")
@@ -1311,35 +1196,32 @@ async def create_relation(
 
     # Use full schema for entity type validation
     full_rt_for_validation = full_rt or scoped_rt
-    async with driver.session() as session:
-        from_entity = await repository.get_entity_by_id(session, from_entity_id)
-        if not from_entity:
-            errors["fromEntityId"] = f"Source entity '{from_entity_id}' not found"
-        elif from_entity["_entityTypeKey"] != full_rt_for_validation.from_entity_type_key:
-            errors["fromEntityId"] = (
-                f"Source entity type mismatch: expected '{full_rt_for_validation.from_entity_type_key}', "
-                f"got '{from_entity['_entityTypeKey']}'"
-            )
-
-        to_entity = await repository.get_entity_by_id(session, to_entity_id)
-        if not to_entity:
-            errors["toEntityId"] = f"Target entity '{to_entity_id}' not found"
-        elif to_entity["_entityTypeKey"] != full_rt_for_validation.to_entity_type_key:
-            errors["toEntityId"] = (
-                f"Target entity type mismatch: expected '{full_rt_for_validation.to_entity_type_key}', "
-                f"got '{to_entity['_entityTypeKey']}'"
-            )
-
-        if errors:
-            raise ValidationError("Instance validation failed", details={"fields": errors})
-
-        relation_id = str(uuid4())
-        rel_type_upper = to_upper_snake_case(relation_type_key)
-
-        relation = await repository.create_relation(
-            session, relation_type_key, rel_type_upper,
-            relation_id, from_entity_id, to_entity_id, coerced,
+    from_entity = await store.get_entity_by_id(from_entity_id)
+    if not from_entity:
+        errors["fromEntityId"] = f"Source entity '{from_entity_id}' not found"
+    elif from_entity["_entityTypeKey"] != full_rt_for_validation.from_entity_type_key:
+        errors["fromEntityId"] = (
+            f"Source entity type mismatch: expected '{full_rt_for_validation.from_entity_type_key}', "
+            f"got '{from_entity['_entityTypeKey']}'"
         )
+
+    to_entity = await store.get_entity_by_id(to_entity_id)
+    if not to_entity:
+        errors["toEntityId"] = f"Target entity '{to_entity_id}' not found"
+    elif to_entity["_entityTypeKey"] != full_rt_for_validation.to_entity_type_key:
+        errors["toEntityId"] = (
+            f"Target entity type mismatch: expected '{full_rt_for_validation.to_entity_type_key}', "
+            f"got '{to_entity['_entityTypeKey']}'"
+        )
+
+    if errors:
+        raise ValidationError("Instance validation failed", details={"fields": errors})
+
+    relation_id = str(uuid4())
+
+    relation = await store.create_relation(
+        relation_type_key, relation_id, from_entity_id, to_entity_id, coerced,
+    )
 
     return _filter_relation_properties(relation, scoped_rt)
 
@@ -1354,32 +1236,19 @@ async def list_relations(
     from_entity_id: str | None,
     to_entity_id: str | None,
     filters: dict[str, str],
-    driver: AsyncDriver,
+    store: Any,
 ) -> PaginatedResponse:
-    loaded = await _load_schema(ontology_key, driver)
+    loaded = await _load_schema(ontology_key, store)
     scoped_rt = loaded.scoped.relation_types.get(relation_type_key)
     if not scoped_rt:
         raise NotFoundError(f"Relation type '{relation_type_key}' not found")
 
-    where_clauses, params = _build_filter_clauses(
-        filters, scoped_rt.properties, relation_type_key, node_alias="r"
-    )
-
-    if from_entity_id:
-        where_clauses.append("from._id = $from_entity_id_filter")
-        params["from_entity_id_filter"] = from_entity_id
-    if to_entity_id:
-        where_clauses.append("to._id = $to_entity_id_filter")
-        params["to_entity_id_filter"] = to_entity_id
-
     sort_field = _validate_sort_field(sort, scoped_rt.properties)
-    rel_type_upper = to_upper_snake_case(relation_type_key)
 
-    async with driver.session() as session:
-        items, total = await repository.list_relations(
-            session, rel_type_upper, relation_type_key,
-            where_clauses, params, sort_field, order, limit, offset,
-        )
+    items, total = await store.list_relations(
+        relation_type_key, scoped_rt.properties, filters,
+        from_entity_id, to_entity_id, sort_field, order, limit, offset,
+    )
 
     items = [_filter_relation_properties(r, scoped_rt) for r in items]
 
@@ -1390,16 +1259,14 @@ async def get_relation(
     ontology_key: str,
     relation_type_key: str,
     relation_id: str,
-    driver: AsyncDriver,
+    store: Any,
 ) -> dict:
-    loaded = await _load_schema(ontology_key, driver)
+    loaded = await _load_schema(ontology_key, store)
     scoped_rt = loaded.scoped.relation_types.get(relation_type_key)
     if not scoped_rt:
         raise NotFoundError(f"Relation type '{relation_type_key}' not found")
 
-    rel_type_upper = to_upper_snake_case(relation_type_key)
-    async with driver.session() as session:
-        relation = await repository.get_relation(session, rel_type_upper, relation_id)
+    relation = await store.get_relation(relation_type_key, relation_id)
     if not relation:
         raise NotFoundError(f"Relation '{relation_id}' not found")
     return _filter_relation_properties(relation, scoped_rt)
@@ -1410,9 +1277,9 @@ async def update_relation(
     relation_type_key: str,
     relation_id: str,
     body: dict,
-    driver: AsyncDriver,
+    store: Any,
 ) -> dict:
-    loaded = await _load_schema(ontology_key, driver)
+    loaded = await _load_schema(ontology_key, store)
     scoped_rt = loaded.scoped.relation_types.get(relation_type_key)
     if not scoped_rt:
         raise NotFoundError(f"Relation type '{relation_type_key}' not found")
@@ -1430,13 +1297,11 @@ async def update_relation(
     remove_props = [k for k, v in coerced.items() if v is None]
 
     if not set_props and not remove_props:
-        return await get_relation(ontology_key, relation_type_key, relation_id, driver)
+        return await get_relation(ontology_key, relation_type_key, relation_id, store)
 
-    rel_type_upper = to_upper_snake_case(relation_type_key)
-    async with driver.session() as session:
-        relation = await repository.update_relation(
-            session, rel_type_upper, relation_id, set_props, remove_props
-        )
+    relation = await store.update_relation(
+        relation_type_key, relation_id, set_props, remove_props
+    )
     if not relation:
         raise NotFoundError(f"Relation '{relation_id}' not found")
     return _filter_relation_properties(relation, scoped_rt)
@@ -1446,16 +1311,14 @@ async def delete_relation(
     ontology_key: str,
     relation_type_key: str,
     relation_id: str,
-    driver: AsyncDriver,
+    store: Any,
 ) -> None:
-    loaded = await _load_schema(ontology_key, driver)
+    loaded = await _load_schema(ontology_key, store)
     scoped_rt = loaded.scoped.relation_types.get(relation_type_key)
     if not scoped_rt:
         raise NotFoundError(f"Relation type '{relation_type_key}' not found")
 
-    rel_type_upper = to_upper_snake_case(relation_type_key)
-    async with driver.session() as session:
-        deleted = await repository.delete_relation(session, rel_type_upper, relation_id)
+    deleted = await store.delete_relation(relation_type_key, relation_id)
     if not deleted:
         raise NotFoundError(f"Relation '{relation_id}' not found")
 
@@ -1472,29 +1335,23 @@ async def get_neighbors(
     direction: str,
     relation_type_key: str | None,
     limit: int,
-    driver: AsyncDriver,
+    store: Any,
     fields: list[str] | None = None,
     relation_fields: list[str] | None = None,
 ) -> NeighborhoodResponse:
-    loaded = await _load_schema(ontology_key, driver)
+    loaded = await _load_schema(ontology_key, store)
     if entity_type_key not in loaded.scoped.entity_types:
         raise NotFoundError(f"Entity type '{entity_type_key}' not found")
 
-    pascal_label = to_pascal_case(entity_type_key)
+    entity = await store.get_entity(entity_type_key, entity_id)
+    if not entity:
+        raise NotFoundError(f"Entity '{entity_id}' not found")
 
-    async with driver.session() as session:
-        entity = await repository.get_entity(session, pascal_label, entity_id)
-        if not entity:
-            raise NotFoundError(f"Entity '{entity_id}' not found")
-
-        rel_type_filter = to_upper_snake_case(relation_type_key) if relation_type_key else None
-
-        neighbors = await repository.get_neighbors(
-            session, entity_id, direction, rel_type_filter, limit
-        )
+    neighbors = await store.get_neighbors(
+        entity_id, direction, relation_type_key, limit
+    )
 
     # Filter neighbors by scoped relation types
-    scoped_rt_upper = {to_upper_snake_case(k) for k in loaded.scoped.relation_types}
     filtered_neighbors = []
     for n in neighbors:
         rel = n["relation"]
@@ -1546,13 +1403,13 @@ async def semantic_search(
     entity_type_key: str | None,
     limit: int,
     min_score: float | None,
-    driver: AsyncDriver,
+    store: Any,
     filters: dict[str, str] | None = None,
     fields: list[str] | None = None,
     search_in: str = "all",
     snippets: bool = True,
 ) -> dict:
-    loaded = await _load_schema(ontology_key, driver)
+    loaded = await _load_schema(ontology_key, store)
 
     provider = get_embedding_provider()
     if not provider:
@@ -1599,19 +1456,19 @@ async def semantic_search(
     if search_in in ("entities", "all"):
         if entity_type_key is None:
             entity_ranking = await _semantic_search_all_types(
-                loaded, query_embedding, limit, min_score, driver, fields
+                loaded, query_embedding, limit, min_score, store, fields
             )
         else:
             entity_ranking = await _semantic_search_single_type(
                 entity_type_key, scoped_et, query_embedding,
-                limit, min_score, filters, driver, fields,
+                limit, min_score, filters, store, fields,
             )
 
     document_ranking: list[dict] = []
     if search_in in ("documents", "all"):
         document_ranking = await _semantic_search_documents(
             loaded, entity_type_key, query_embedding, limit, min_score,
-            filters, snippets, driver, fields,
+            filters, snippets, store, fields,
         )
 
     if search_in == "entities":
@@ -1650,30 +1507,18 @@ async def _semantic_search_single_type(
     limit: int,
     min_score: float | None,
     filters: dict[str, str],
-    driver: AsyncDriver,
+    store: Any,
     fields: list[str] | None,
 ) -> list[dict]:
     """Rank entities of a single type via its per-type vector index."""
-    where_clauses: list[str] = []
-    filter_params: dict = {}
-    if filters:
-        where_clauses, filter_params = _build_filter_clauses(
-            filters, scoped_et.properties, entity_type_key, node_alias="n"
-        )
-
-    pascal_label = to_pascal_case(entity_type_key)
-
-    async with driver.session() as session:
-        results = await repository.semantic_search(
-            session,
-            pascal_label,
-            entity_type_key,
-            query_embedding,
-            limit,
-            min_score,
-            where_clauses=where_clauses if where_clauses else None,
-            filter_params=filter_params if filter_params else None,
-        )
+    results = await store.semantic_search(
+        entity_type_key,
+        scoped_et.properties,
+        query_embedding,
+        limit,
+        min_score,
+        filters=filters if filters else None,
+    )
 
     # Filter result properties to scoped schema
     for r in results:
@@ -1686,10 +1531,10 @@ async def _semantic_search_all_types(
     query_embedding: list[float],
     limit: int,
     min_score: float | None,
-    driver: AsyncDriver,
+    store: Any,
     fields: list[str] | None = None,
 ) -> list[dict]:
-    """Search the shared _Entity vector index across all scoped entity types.
+    """Search the shared cross-type entity vector index across all scoped entity types.
 
     The SEARCH clause's in-index WHERE cannot express membership in a set of
     type keys, so scoped ontologies over-fetch and filter to scoped types in
@@ -1703,16 +1548,7 @@ async def _semantic_search_all_types(
     is_restricted = scoped_type_keys != set(loaded.full.entity_types.keys())
     fetch_limit = min(limit * 5, 500) if is_restricted else limit
 
-    async with driver.session() as session:
-        raw = await repository.semantic_search(
-            session,
-            "_Entity",
-            "",
-            query_embedding,
-            fetch_limit,
-            min_score,
-            index_name=ENTITY_VECTOR_INDEX_NAME,
-        )
+    raw = await store.semantic_search_all(query_embedding, fetch_limit, min_score)
 
     results: list[dict] = []
     for r in raw:
@@ -1767,8 +1603,8 @@ def _entity_matches_filters(
                 f"Invalid filter value for '{prop_key}'",
                 details={"fields": {prop_key: str(e)}},
             )
-        if isinstance(expected, (Neo4jDate, Neo4jDateTime)):
-            expected = expected.to_native()
+        # coerce_value returns plain datetime.date/datetime.datetime, matching
+        # the native temporals the adapter returns on read — compare directly.
 
         actual = entity.get(prop_key)
         if actual is None:
@@ -1790,7 +1626,7 @@ async def _semantic_search_documents(
     min_score: float | None,
     filters: dict[str, str],
     snippets: bool,
-    driver: AsyncDriver,
+    store: Any,
     fields: list[str] | None,
 ) -> list[dict]:
     """Rank entities by their best-matching document chunk.
@@ -1816,16 +1652,9 @@ async def _semantic_search_documents(
         return []
 
     chunk_hits: list[dict] = []
-    async with driver.session() as session:
-        for tk, pk in pairs:
-            hits = await repository.search_document_chunks(
-                session,
-                document_virtual_label(tk, pk),
-                document_index_name(tk, pk),
-                query_embedding,
-                limit,
-            )
-            chunk_hits.extend(hits)
+    for tk, pk in pairs:
+        hits = await store.search_document_chunks(tk, pk, query_embedding, limit)
+        chunk_hits.extend(hits)
 
     # Dedupe to parent entities: best chunk per entity wins
     best_per_entity: dict[str, dict] = {}
@@ -1844,10 +1673,9 @@ async def _semantic_search_documents(
 
     ranked = sorted(best_per_entity.values(), key=lambda h: h["score"], reverse=True)
 
-    async with driver.session() as session:
-        entities = await repository.get_entities_by_ids(
-            session, [h["chunk"]["_entityId"] for h in ranked]
-        )
+    entities = await store.get_entities_by_ids(
+        [h["chunk"]["_entityId"] for h in ranked]
+    )
 
     results: list[dict] = []
     for hit in ranked:
@@ -1927,7 +1755,7 @@ def _rrf_fuse(
 async def execute_query(
     ontology_key: str,
     query: str,
-    driver: AsyncDriver,
+    store: Any,
 ) -> dict:
     """Validate, compile, and execute a read-only OQL query.
 
@@ -1940,7 +1768,7 @@ async def execute_query(
         validate_and_rewrite,
     )
 
-    loaded = await _load_schema(ontology_key, driver)
+    loaded = await _load_schema(ontology_key, store)
     scoped = loaded.scoped
 
     # Map variables → schema keys before compiling (uses original type keys).
@@ -1950,11 +1778,7 @@ async def execute_query(
     # (snake_case → PascalCase / UPPER_SNAKE_CASE).
     rewritten = validate_and_rewrite(query, scoped)
 
-    # Execute in a read transaction.
-    async with driver.session() as session:
-        columns, rows = await repository.execute_cypher_read(
-            session, rewritten
-        )
+    columns, rows = await store.execute_cypher_read(rewritten)
 
     # Post-process: filter out-of-scope properties and stub document values.
     _postprocess_cypher_rows(rows, var_map, scoped)
@@ -2077,7 +1901,7 @@ async def execute_saved_query(
     ontology_key: str,
     query_key: str,
     params: dict[str, Any],
-    driver: AsyncDriver,
+    store: Any,
 ) -> dict:
     """Execute a saved query pipeline by key with parameter values.
 
@@ -2090,7 +1914,7 @@ async def execute_saved_query(
         validate_and_rewrite,
     )
 
-    loaded = await _load_schema(ontology_key, driver)
+    loaded = await _load_schema(ontology_key, store)
     config = loaded.saved_queries.get(query_key)
     if not config:
         raise NotFoundError(f"Saved query '{query_key}' not found")
@@ -2146,10 +1970,9 @@ async def execute_saved_query(
             var_map = get_return_variables(step.oql, scoped)
             rewritten = validate_and_rewrite(step.oql, scoped)
 
-            async with driver.session() as session:
-                columns, rows = await repository.execute_cypher_read(
-                    session, rewritten, params=query_params
-                )
+            columns, rows = await store.execute_cypher_read(
+                rewritten, params=query_params
+            )
 
             # Post-process: strip out-of-scope properties + stub documents
             _postprocess_cypher_rows(rows, var_map, scoped)
@@ -2172,7 +1995,7 @@ async def execute_saved_query(
                 step.entity_type_key,
                 limit,
                 min_score,
-                driver,
+                store,
             )
 
             # Flatten results for binding: each result's entity dict becomes a row
@@ -2197,7 +2020,7 @@ async def search_saved_queries(
     query: str,
     limit: int,
     min_score: float | None,
-    driver: AsyncDriver,
+    store: Any,
 ) -> list[dict]:
     """Semantic search over saved query descriptions.
 
@@ -2216,10 +2039,9 @@ async def search_saved_queries(
     if query_embedding is None:
         raise ValidationError("Failed to generate embedding for search query")
 
-    async with driver.session() as session:
-        results = await repository.search_saved_queries(
-            session, query_embedding, ontology_key, limit, min_score
-        )
+    results = await store.search_saved_queries(
+        query_embedding, ontology_key, limit, min_score
+    )
 
     # Deserialize parameters JSON for each result
     for r in results:

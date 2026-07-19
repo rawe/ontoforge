@@ -384,6 +384,8 @@ async def test_sync_reuses_embeddings_for_unchanged_chunk_texts():
     reuse_map = {c.text: [0.5] * 8 for c in chunks[1:]}
     provider = _mock_provider()
 
+    from ontoforge_server.adapters.neo4j.runtime_store import Neo4jRuntimeStore
+
     driver = AsyncMock()
     mock_session = AsyncMock()
 
@@ -392,6 +394,7 @@ async def test_sync_reuses_embeddings_for_unchanged_chunk_texts():
         yield mock_session
 
     driver.session = _session
+    store = Neo4jRuntimeStore(driver)
 
     with (
         patch(f"{REPO}.get_chunk_embeddings_for_entity_property", new_callable=AsyncMock, return_value=reuse_map),
@@ -399,7 +402,7 @@ async def test_sync_reuses_embeddings_for_unchanged_chunk_texts():
         patch(f"{REPO}.create_document_chunks", new_callable=AsyncMock) as mock_chunks,
         patch(EMBEDDING, return_value=provider),
     ):
-        await sync_document_chunks(driver, "person", "ent-1", {"bio": text})
+        await sync_document_chunks(store, "person", "ent-1", {"bio": text})
 
     # Exactly one embedding call — for the one chunk not in the reuse map
     provider.embed.assert_awaited_once_with(chunks[0].text)

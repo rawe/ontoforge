@@ -1,6 +1,6 @@
 import pytest
 
-from ontoforge_server.core.database import (
+from ontoforge_server.adapters.neo4j.ddl import (
     MAX_VECTOR_FILTER_VALUE_BYTES,
     validate_vector_indexed_properties,
 )

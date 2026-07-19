@@ -1,3 +1,10 @@
+"""Neo4j Cypher query functions for the runtime store.
+
+Adapter-private. Every function takes an ``AsyncSession`` as its first
+argument and is invoked exclusively by ``Neo4jRuntimeStore``, which owns the
+session lifecycle.
+"""
+
 from datetime import date, datetime, timezone
 from typing import Any
 

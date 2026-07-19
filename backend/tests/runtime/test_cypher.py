@@ -371,7 +371,7 @@ class TestGetReturnVariables:
 # REST endpoint (via HTTP client)
 # ---------------------------------------------------------------------------
 
-CYPHER_REPO = "ontoforge_server.runtime.service.repository"
+CYPHER_REPO = "ontoforge_server.adapters.neo4j.runtime_queries"
 
 
 @pytest.mark.asyncio

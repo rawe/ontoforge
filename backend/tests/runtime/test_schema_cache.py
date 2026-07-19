@@ -4,12 +4,13 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from ontoforge_server.adapters.neo4j import runtime_queries
 from ontoforge_server.runtime import service
 from tests.runtime.conftest import _make_full_schema
 
 
 @pytest.mark.asyncio
-async def test_runtime_schema_reuses_cached_loaded_schema(mock_driver):
+async def test_runtime_schema_reuses_cached_loaded_schema(mock_store):
     schema = _make_full_schema(
         ontology_key="hr_view",
         entity_inclusions=[
@@ -21,9 +22,9 @@ async def test_runtime_schema_reuses_cached_loaded_schema(mock_driver):
         ],
     )
 
-    with patch.object(service.repository, "get_full_schema", new=AsyncMock(return_value=schema)) as mock_get_schema:
-        first = await service.get_full_schema("hr_view", mock_driver)
-        second = await service.get_full_schema("hr_view", mock_driver)
+    with patch.object(runtime_queries, "get_full_schema", new=AsyncMock(return_value=schema)) as mock_get_schema:
+        first = await service.get_full_schema("hr_view", mock_store)
+        second = await service.get_full_schema("hr_view", mock_store)
 
     assert first.ontology.key == "hr_view"
     assert second.ontology.key == "hr_view"

@@ -9,6 +9,8 @@ from ontoforge_server.runtime.schemas import (
     CypherQueryRequest,
     CypherQueryResponse,
     DocumentContentResponse,
+    DocumentEditRequest,
+    DocumentEditResponse,
     FeaturesResponse,
     NeighborhoodResponse,
     PaginatedResponse,
@@ -169,6 +171,23 @@ async def get_document(
 ):
     return await service.get_document(
         ontology_key, entity_type_key, entity_id, property_key, offset, limit, driver
+    )
+
+
+@router.patch(
+    "/entities/{entity_type_key}/{entity_id}/documents/{property_key}",
+    response_model=DocumentEditResponse,
+)
+async def edit_document(
+    ontology_key: str,
+    entity_type_key: str,
+    entity_id: str,
+    property_key: str,
+    body: DocumentEditRequest,
+    driver: AsyncDriver = Depends(get_driver),
+):
+    return await service.edit_document(
+        ontology_key, entity_type_key, entity_id, property_key, body, driver
     )
 
 

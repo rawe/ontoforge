@@ -7,12 +7,13 @@ from ontoforge_server.core.database import get_driver
 from ontoforge_server.core.exceptions import ValidationError
 from ontoforge_server.mcp.mount import current_ontology_key
 from ontoforge_server.runtime import service
-from ontoforge_server.runtime.schemas import RelationInstanceCreate
+from ontoforge_server.runtime.schemas import DocumentEditRequest, RelationInstanceCreate
 from ontoforge_server.runtime.tool_names import (
     TOOL_CREATE_ENTITY,
     TOOL_CREATE_RELATION,
     TOOL_DELETE_ENTITY,
     TOOL_DELETE_RELATION,
+    TOOL_EDIT_DOCUMENT,
     TOOL_EXECUTE_CYPHER,
     TOOL_GET_DOCUMENT,
     TOOL_GET_ENTITY,
@@ -27,6 +28,7 @@ from ontoforge_server.runtime.tool_names import (
     TOOL_SEMANTIC_SEARCH,
     TOOL_UPDATE_ENTITY,
     TOOL_UPDATE_RELATION,
+    TOOL_WRITE_DOCUMENT,
 )
 
 runtime_mcp = FastMCP(
@@ -178,6 +180,52 @@ async def get_document(
     return await service.get_document(
         ontology_key, entity_type_key, entity_id, property_key,
         offset, limit, driver,
+    )
+
+
+@_enrich_errors
+async def edit_document(
+    entity_type_key: str,
+    entity_id: str,
+    property_key: str,
+    old_string: str,
+    new_string: str,
+    replace_all: bool = False,
+) -> dict:
+    ontology_key = _get_ontology_key()
+    driver = await get_driver()
+    body = DocumentEditRequest(
+        op="str_replace",
+        old_string=old_string,
+        new_string=new_string,
+        replace_all=replace_all,
+    )
+    return await service.edit_document(
+        ontology_key, entity_type_key, entity_id, property_key, body, driver
+    )
+
+
+@_enrich_errors
+async def write_document(
+    entity_type_key: str,
+    entity_id: str,
+    property_key: str,
+    offset: int,
+    length: int,
+    content: str,
+    expect: str | None = None,
+) -> dict:
+    ontology_key = _get_ontology_key()
+    driver = await get_driver()
+    body = DocumentEditRequest(
+        op="replace_range",
+        offset=offset,
+        length=length,
+        content=content,
+        expect=expect,
+    )
+    return await service.edit_document(
+        ontology_key, entity_type_key, entity_id, property_key, body, driver
     )
 
 
@@ -420,7 +468,30 @@ _MCP_TOOL_DEFS: list[tuple[Callable, str, str]] = [
         update_entity,
         TOOL_UPDATE_ENTITY,
         "Partial update — only provided properties change. Set a property to null "
-        "to remove it (fails for required properties).",
+        "to remove it (fails for required properties). Document properties are "
+        "replaced whole here — prefer edit_document / write_document for "
+        "partial edits inside a document.",
+    ),
+    (
+        edit_document,
+        TOOL_EDIT_DOCUMENT,
+        "Edit a document property by exact string replacement — the preferred "
+        "way to change part of a document. old_string must match the current "
+        "content exactly and uniquely; if it matches more than once, provide a "
+        "longer string with surrounding context, or set replace_all to true to "
+        "replace every occurrence. Returns the new totalLength, the edited "
+        "range, and ~200 chars of context around the edit for verification.",
+    ),
+    (
+        write_document,
+        TOOL_WRITE_DOCUMENT,
+        "Overwrite a character range of a document property: replaces "
+        "[offset, offset+length) with content. Insert with length=0; append "
+        "with offset=totalLength and length=0. Offsets pair with get_document "
+        "reads and the charOffset/charLength of semantic search hits. Pass "
+        "'expect' (the text currently in the range) to fail safely if the "
+        "document changed since it was read. Returns the new totalLength, the "
+        "edited range, and ~200 chars of context around the edit.",
     ),
     (
         delete_entity,

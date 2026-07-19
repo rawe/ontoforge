@@ -16,6 +16,8 @@ TOOL_SEARCH_SAVED_QUERIES = "search_saved_queries"
 # Write tools (MCP only)
 TOOL_CREATE_ENTITY = "create_entity"
 TOOL_UPDATE_ENTITY = "update_entity"
+TOOL_EDIT_DOCUMENT = "edit_document"
+TOOL_WRITE_DOCUMENT = "write_document"
 TOOL_DELETE_ENTITY = "delete_entity"
 TOOL_CREATE_RELATION = "create_relation"
 TOOL_GET_RELATION = "get_relation"

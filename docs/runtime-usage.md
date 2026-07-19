@@ -237,7 +237,14 @@ curl "http://localhost:8000/api/runtime/test_ontology/entities/person/{id}/docum
 
 Omit `offset`/`limit` to read the full document. To narrow search to documents only, pass `searchIn=documents`; to skip snippets, `snippets=false`.
 
-Documents are written whole through normal entity create/update — there are no partial writes. See `api-contracts/runtime-api.md` §3 and §6 for the full contract.
+Documents are written whole through normal entity create/update, or partially through the document edit endpoint — `str_replace` for exact string replacement, `replace_range` for character-range overwrites reusing the same offset coordinates as reads and search hits. See `api-contracts/runtime-api.md` §3 for the full contract.
+
+```bash
+# Partial write — replace an exact, unique string
+curl -X PATCH "http://localhost:8000/api/runtime/test_ontology/entities/person/{id}/documents/bio" \
+  -H 'Content-Type: application/json' \
+  -d '{"op": "str_replace", "oldString": "analytical engines", "newString": "Analytical Engines"}'
+```
 
 ## 6. Cypher Query
 

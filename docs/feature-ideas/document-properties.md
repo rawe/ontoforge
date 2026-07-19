@@ -34,6 +34,8 @@ A `person` entity type has scalar properties (`name`, `role`) plus two document 
 | Visibility | Chunk nodes are internal: hidden from the schema API, rejected by the Cypher validator, never exported |
 | Reads | Document properties appear as `{ "document": true, "length": N }` stubs in **all** entity reads (list, detail, search, Cypher results, MCP) |
 | Document access | Dedicated read endpoint with character-based `offset`/`limit` slicing; no params = full document |
+| Partial writes | Dedicated edit endpoint with two operations: `str_replace` (exact, unique string replacement — the agent-preferred path) and `replace_range` (character-range overwrite pairing with read offsets and search hit coordinates, optional `expect` guard). Full-value writes via entity update remain valid. |
+| Re-chunking on edit | Chunks are always rebuilt from the full new text, but embeddings are reused for chunks whose text is unchanged (content-hash reuse) — a small edit re-embeds only the chunks it touches |
 | Search | Single `GET /search/semantic` endpoint; chunk hits resolved to parent entities and fused with entity-embedding hits via Reciprocal Rank Fusion; `searchIn=entities|documents|all` (default `all`) |
 | Match transparency | Every hit carries `matchedVia` (source, property key, `charOffset`/`charLength`, raw similarity, ~200-char snippet; `snippets=false` drops snippets) |
 | Multiple document properties | Fully supported — each gets its own virtual type and index; dedupe keeps one hit per entity (best chunk wins) |
@@ -42,7 +44,6 @@ A `person` entity type has scalar properties (`name`, `role`) plus two document 
 ## Out of Scope
 
 - **Migration / backwards compatibility** — explicitly not required.
-- **Partial writes** — documents are written whole via normal entity create/update; slicing is read-only.
 - **Markdown-aware chunking** — chunking prefers paragraph/sentence boundaries near the target size but does not parse Markdown structure.
 - **Rich Markdown editor** — the frontend uses a plain textarea with a rendered preview tab.
 

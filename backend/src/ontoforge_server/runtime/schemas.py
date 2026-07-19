@@ -65,6 +65,44 @@ class DocumentContentResponse(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class DocumentEditRequest(BaseModel):
+    """One partial-write operation on a document property.
+
+    ``str_replace`` needs ``oldString``/``newString``; ``replace_range`` needs
+    ``offset``/``length``/``content`` (plus optional ``expect`` as a guard
+    against stale offsets). Per-op field validation happens in the service.
+    """
+
+    op: str = Field(pattern="^(str_replace|replace_range)$")
+    # str_replace
+    old_string: str | None = Field(default=None, alias="oldString")
+    new_string: str | None = Field(default=None, alias="newString")
+    replace_all: bool = Field(default=False, alias="replaceAll")
+    # replace_range
+    offset: int | None = None
+    length: int | None = None
+    content: str | None = None
+    expect: str | None = None
+
+    model_config = {"populate_by_name": True}
+
+
+class DocumentEditedRange(BaseModel):
+    offset: int
+    length: int
+
+
+class DocumentEditResponse(BaseModel):
+    property_key: str = Field(alias="propertyKey")
+    total_length: int = Field(alias="totalLength")
+    edited_range: DocumentEditedRange = Field(alias="editedRange")
+    replacements: int
+    context: str
+    context_offset: int = Field(alias="contextOffset")
+
+    model_config = {"populate_by_name": True}
+
+
 class CypherQueryRequest(BaseModel):
     cypher: str = Field(..., min_length=1)
 

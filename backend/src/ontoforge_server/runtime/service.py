@@ -21,7 +21,7 @@ from ontoforge_server.core.database import (
     validate_vector_indexed_properties,
 )
 from ontoforge_server.core.embedding import get_embedding_provider
-from ontoforge_server.core.exceptions import NotFoundError, ValidationError
+from ontoforge_server.core.exceptions import ConflictError, NotFoundError, ValidationError
 from ontoforge_server.core.schemas import (
     ExportEntityType,
     ExportOntology,
@@ -32,6 +32,7 @@ from ontoforge_server.runtime import repository
 from ontoforge_server.runtime.chunking import chunk_document
 from ontoforge_server.runtime.embedding import build_text_repr
 from ontoforge_server.runtime.schemas import (
+    DocumentEditRequest,
     NeighborhoodResponse,
     PaginatedResponse,
     RelationInstanceCreate,
@@ -1054,7 +1055,14 @@ async def sync_document_chunks(
         return
 
     for property_key, value in doc_values.items():
+        # Reuse embeddings of chunks whose text is unchanged — after a partial
+        # edit the chunker re-synchronizes on the same boundaries, so most
+        # chunks keep their exact text (at shifted offsets) and only the
+        # chunks overlapping the edit need a fresh embedding.
         async with driver.session() as session:
+            reusable = await repository.get_chunk_embeddings_for_entity_property(
+                session, entity_id, property_key
+            )
             await repository.delete_chunks_for_entity_property(
                 session, entity_id, property_key
             )
@@ -1076,7 +1084,9 @@ async def sync_document_chunks(
                 "charLength": chunk.char_length,
                 "text": chunk.text,
             }
-            chunk_embedding = await provider.embed(chunk.text)
+            chunk_embedding = reusable.get(chunk.text)
+            if chunk_embedding is None:
+                chunk_embedding = await provider.embed(chunk.text)
             if chunk_embedding is not None:
                 row["_embedding"] = chunk_embedding
             rows.append(row)
@@ -1088,19 +1098,17 @@ async def sync_document_chunks(
             )
 
 
-async def get_document(
+async def _load_document_value(
     ontology_key: str,
     entity_type_key: str,
     entity_id: str,
     property_key: str,
-    offset: int,
-    limit: int | None,
     driver: AsyncDriver,
-) -> dict:
-    """Read (a slice of) a document property value.
+) -> str:
+    """Resolve a scoped document property and return its current value.
 
-    ``offset``/``limit`` are character-based; without them the full document
-    is returned.
+    Raises NotFoundError for unknown/out-of-scope types or properties,
+    non-document properties, and missing entities. An unset value reads as "".
     """
     loaded = await _load_schema(ontology_key, driver)
     scoped_et = loaded.scoped.entity_types.get(entity_type_key)
@@ -1120,8 +1128,26 @@ async def get_document(
         raise NotFoundError(f"Entity '{entity_id}' not found")
 
     value = entity.get(property_key)
-    if not isinstance(value, str):
-        value = ""
+    return value if isinstance(value, str) else ""
+
+
+async def get_document(
+    ontology_key: str,
+    entity_type_key: str,
+    entity_id: str,
+    property_key: str,
+    offset: int,
+    limit: int | None,
+    driver: AsyncDriver,
+) -> dict:
+    """Read (a slice of) a document property value.
+
+    ``offset``/``limit`` are character-based; without them the full document
+    is returned.
+    """
+    value = await _load_document_value(
+        ontology_key, entity_type_key, entity_id, property_key, driver
+    )
 
     if limit is None:
         content = value[offset:]
@@ -1134,6 +1160,115 @@ async def get_document(
         "offset": offset,
         "length": len(content),
         "totalLength": len(value),
+    }
+
+
+# Characters returned around an edit so callers can verify without re-reading.
+_EDIT_CONTEXT_CHARS = 200
+
+
+def _apply_str_replace(value: str, body: DocumentEditRequest) -> tuple[str, int, int, int]:
+    """Returns (new_value, edit_offset, edit_length, replacements)."""
+    old, new = body.old_string, body.new_string
+    if not old:
+        raise ValidationError("oldString must be a non-empty string")
+    if new is None:
+        raise ValidationError("newString is required for str_replace")
+    if old == new:
+        raise ValidationError("newString must differ from oldString")
+
+    count = value.count(old)
+    if count == 0:
+        raise ValidationError("oldString not found in document")
+    if count > 1 and not body.replace_all:
+        raise ValidationError(
+            f"oldString matches {count} times — provide a longer, unique string "
+            "or set replaceAll to true"
+        )
+
+    first = value.index(old)
+    if body.replace_all:
+        return value.replace(old, new), first, len(new), count
+    return value[:first] + new + value[first + len(old):], first, len(new), 1
+
+
+def _apply_replace_range(value: str, body: DocumentEditRequest) -> tuple[str, int, int, int]:
+    """Returns (new_value, edit_offset, edit_length, replacements)."""
+    offset, length, content = body.offset, body.length, body.content
+    if offset is None or length is None or content is None:
+        raise ValidationError(
+            "replace_range requires offset, length, and content"
+        )
+    if offset < 0 or length < 0:
+        raise ValidationError("offset and length must be >= 0")
+    if offset > len(value):
+        raise ValidationError(
+            f"offset {offset} is beyond the document end ({len(value)} chars)"
+        )
+    if offset + length > len(value):
+        raise ValidationError(
+            f"range [{offset}, {offset + length}) exceeds the document end "
+            f"({len(value)} chars)"
+        )
+    if body.expect is not None and value[offset:offset + length] != body.expect:
+        raise ConflictError(
+            f"expect mismatch at [{offset}, {offset + length}) — the document "
+            "changed since it was read; re-read before editing"
+        )
+    return value[:offset] + content + value[offset + length:], offset, len(content), 1
+
+
+async def edit_document(
+    ontology_key: str,
+    entity_type_key: str,
+    entity_id: str,
+    property_key: str,
+    body: DocumentEditRequest,
+    driver: AsyncDriver,
+) -> dict:
+    """Apply one partial-write operation to a document property.
+
+    ``str_replace`` swaps an exact, unique string (or all occurrences with
+    ``replaceAll``); ``replace_range`` overwrites the character range
+    ``[offset, offset+length)`` with ``content`` (insert with length 0, append
+    at ``offset == totalLength``). The changed value is persisted whole and the
+    property's chunks are re-synced — unchanged chunk texts keep their
+    embeddings, so only chunks overlapping the edit are re-embedded.
+    """
+    value = await _load_document_value(
+        ontology_key, entity_type_key, entity_id, property_key, driver
+    )
+
+    if body.op == "str_replace":
+        new_value, offset, length, replacements = _apply_str_replace(value, body)
+    else:
+        new_value, offset, length, replacements = _apply_replace_range(value, body)
+
+    pascal_label = to_pascal_case(entity_type_key)
+    set_props = {
+        property_key: new_value,
+        _doc_length_key(property_key): len(new_value),
+    }
+    async with driver.session() as session:
+        entity = await repository.update_entity(
+            session, pascal_label, entity_id, set_props, [],
+        )
+    if not entity:
+        raise NotFoundError(f"Entity '{entity_id}' not found")
+
+    await sync_document_chunks(
+        driver, entity_type_key, entity_id, {property_key: new_value}
+    )
+
+    context_start = max(0, offset - _EDIT_CONTEXT_CHARS)
+    context_end = min(len(new_value), offset + length + _EDIT_CONTEXT_CHARS)
+    return {
+        "propertyKey": property_key,
+        "totalLength": len(new_value),
+        "editedRange": {"offset": offset, "length": length},
+        "replacements": replacements,
+        "context": new_value[context_start:context_end],
+        "contextOffset": context_start,
     }
 
 

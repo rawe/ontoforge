@@ -264,7 +264,7 @@ Properties are managed through unified tools that work on both entity types and 
 | `set_saved_query` | `key`, `name`, `description`, `cypher`, `parameters` (list of `{name, description, dataType}`) | Created/updated saved query | Create or update a saved query. Cypher is validated against the scoped schema at creation time. Parameters must match `$param` references in the Cypher. |
 | `delete_saved_query` | `key` | Confirmation | Delete a saved query. |
 
-### 3.2 Runtime MCP Tools (18 tools)
+### 3.2 Runtime MCP Tools (20 tools)
 
 Entity-returning tools (`list_entities`, `get_entity`, `get_neighbors`, `cypher_query`, `run_saved_query`, `semantic_search`) share the REST service layer, so `document` properties appear as stubs — never inline content (see `api-contracts/runtime-api.md` §3, Document Properties in Entity Reads). Content is read via `get_document`.
 
@@ -289,6 +289,8 @@ Entity-returning tools (`list_entities`, `get_entity`, `get_neighbors`, `cypher_
 | Tool | Arguments | Returns | Description |
 |------|-----------|---------|-------------|
 | `get_document` | `entity_type_key`, `entity_id`, `property_key`, `offset` (opt, default 0), `limit` (opt) | `{propertyKey, content, offset, length, totalLength}` | Read (a slice of) a `document` property. `offset`/`limit` are character-based; without them the full document is returned. Use the `charOffset`/`charLength` from a `semantic_search` document hit to fetch exactly the matching passage. Mirrors the REST document read endpoint. |
+| `edit_document` | `entity_type_key`, `entity_id`, `property_key`, `old_string`, `new_string`, `replace_all` (opt, default false) | `{propertyKey, totalLength, editedRange, replacements, context, contextOffset}` | Partial write by exact string replacement — the preferred way to change part of a document. `old_string` must match uniquely unless `replace_all` is set. Mirrors the REST document edit endpoint (`str_replace` op). |
+| `write_document` | `entity_type_key`, `entity_id`, `property_key`, `offset`, `length`, `content`, `expect` (opt) | Same as `edit_document` | Partial write by character range: replaces `[offset, offset+length)` with `content`. Insert with `length=0`; append at `offset=totalLength`. `expect` guards against stale offsets. Mirrors the REST document edit endpoint (`replace_range` op). |
 
 #### Relation Operations
 

@@ -27,6 +27,7 @@ import { useRuntimeSchema } from '@/api/hooks'
 import { qk } from '@/api/queryKeys'
 import { deleteEntity, listEntities, type ListEntitiesParams } from '@/api/runtime'
 import type { EntityInstance, SchemaProperty } from '@/api/types'
+import { DocumentViewerDialog, type DocumentViewerTarget } from '@/components/DocumentViewerDialog'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
 import { TypeChip } from '@/components/TypeChip'
@@ -51,6 +52,8 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { displayLabel } from '@/lib/displayLabel'
+import { isDocumentStub } from '@/lib/documents'
 
 const PAGE_SIZE = 25
 
@@ -126,6 +129,7 @@ export function TypeTablePage() {
   const [qInput, setQInput] = useState('')
   const [debouncedQ, setDebouncedQ] = useState('')
   const [filters, setFilters] = useState<FilterCondition[]>([])
+  const [docTarget, setDocTarget] = useState<DocumentViewerTarget | null>(null)
 
   // Debounce the quick filter.
   useEffect(() => {
@@ -227,7 +231,27 @@ export function TypeTablePage() {
         id: p.key,
         accessorFn: (row) => row[p.key],
         header: p.displayName,
-        cell: ({ row }) => <CellValue value={row.original[p.key]} dataType={p.dataType} />,
+        cell: ({ row }) => {
+          const value = row.original[p.key]
+          return (
+            <CellValue
+              value={value}
+              dataType={p.dataType}
+              onOpenDocument={
+                isDocumentStub(value)
+                  ? () =>
+                      setDocTarget({
+                        entityTypeKey: typeKey!,
+                        entityId: row.original._id,
+                        entityLabel: displayLabel(row.original),
+                        property: p,
+                        length: value.length,
+                      })
+                  : undefined
+              }
+            />
+          )
+        },
       })),
       {
         id: '_updatedAt',
@@ -659,6 +683,12 @@ export function TypeTablePage() {
             deleting={bulkDelete.isPending}
             onDelete={() => bulkDelete.mutate(selectedIds)}
             onClear={() => setRowSelection({})}
+          />
+
+          <DocumentViewerDialog
+            ontologyKey={ontologyKey}
+            target={docTarget}
+            onClose={() => setDocTarget(null)}
           />
         </div>
       )}

@@ -3,6 +3,7 @@ import {
   ArrowLeftRight,
   ArrowRight,
   ExternalLink,
+  FileText,
   Link2,
   Loader2,
   Pin,
@@ -21,6 +22,11 @@ import type {
   SchemaEntityType,
   SchemaRelationType,
 } from '@/api/types'
+import { DocumentBadge } from '@/components/DocumentBadge'
+import {
+  DocumentViewerDialog,
+  type DocumentViewerTarget,
+} from '@/components/DocumentViewerDialog'
 import { TypeChip } from '@/components/TypeChip'
 import { AddRelationDialog } from '@/components/entity/AddRelationDialog'
 import { useNeighborCounts } from '@/components/entity/useNeighborCounts'
@@ -30,6 +36,7 @@ import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { displayLabel } from '@/lib/displayLabel'
+import { isDocumentStub } from '@/lib/documents'
 import type { EntityFlowNode } from './workingSet'
 
 const EXPAND_PAGE = 10
@@ -61,7 +68,8 @@ interface NodePanelProps {
 }
 
 /**
- * Right side panel for the selected node: entity summary, per-relation-type
+ * Right side panel for the selected node: entity summary, click-to-read
+ * document properties (opens `DocumentViewerDialog`), per-relation-type
  * expand rows (exact counts + direction indicators; clicking a row pulls the
  * first 10 neighbors onto the canvas, "Show 10 more" bumps the limit), plus
  * open-detail / pin / remove-from-canvas / add-connected-entity actions.
@@ -94,6 +102,7 @@ export function NodePanel({
   const [fetched, setFetched] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState<string | null>(null)
   const [addRelationOpen, setAddRelationOpen] = useState(false)
+  const [docTarget, setDocTarget] = useState<DocumentViewerTarget | null>(null)
 
   const expand = async (rt: SchemaRelationType) => {
     if (loading !== null) return
@@ -114,10 +123,17 @@ export function NodePanel({
     }
   }
 
+  // Documents get their own click-to-read section, so keep them out of the
+  // scalar summary (where a stub would only render as a size string).
   const summaryProps = (entityType?.properties ?? [])
+    .filter((p) => p.dataType !== 'document')
     .map((p) => ({ property: p, value: formatValue(p.dataType, entity[p.key]) }))
     .filter((p) => p.value !== null)
     .slice(0, MAX_SUMMARY_PROPS)
+
+  const documentProps = (entityType?.properties ?? []).filter(
+    (p) => p.dataType === 'document' && isDocumentStub(entity[p.key]),
+  )
 
   const typeNameOf = (key: string) =>
     entityTypes.find((t) => t.key === key)?.displayName ?? key
@@ -206,6 +222,50 @@ export function NodePanel({
 
         {summaryProps.length > 0 && <Separator />}
 
+        {documentProps.length > 0 && (
+          <>
+            <div className="px-4 py-3">
+              <h3 className="mb-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                Documents
+              </h3>
+              <ul className="space-y-0.5">
+                {documentProps.map((p) => {
+                  const stub = entity[p.key]
+                  if (!isDocumentStub(stub)) return null
+                  return (
+                    <li key={p.key}>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDocTarget({
+                            entityTypeKey: typeKey,
+                            entityId: entity._id,
+                            entityLabel: label,
+                            property: p,
+                            length: stub.length,
+                          })
+                        }
+                        className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-[12.5px] transition-colors hover:bg-muted/60"
+                        aria-label={`Read ${p.displayName}`}
+                      >
+                        <FileText className="size-3 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 flex-1 truncate font-medium">
+                          {p.displayName}
+                        </span>
+                        <DocumentBadge length={stub.length} />
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                Click a document to read it as Markdown.
+              </p>
+            </div>
+            <Separator />
+          </>
+        )}
+
         <div className="px-4 py-3">
           <h3 className="mb-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
             Relations
@@ -288,6 +348,12 @@ export function NodePanel({
           </p>
         </div>
       </div>
+
+      <DocumentViewerDialog
+        ontologyKey={ontologyKey}
+        target={docTarget}
+        onClose={() => setDocTarget(null)}
+      />
 
       <AddRelationDialog
         ontologyKey={ontologyKey}

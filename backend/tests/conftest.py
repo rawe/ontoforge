@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from ontoforge_server.adapters.neo4j.driver import get_driver
 from ontoforge_server.core.ports import get_modeling_store, get_runtime_store
 
 
@@ -44,7 +43,6 @@ def app(mock_driver):
         from ontoforge_server.main import create_app
 
         application = create_app()
-    application.dependency_overrides[get_driver] = lambda: mock_driver
     # Stores wrap the mocked driver; tests stub the adapter query modules.
     application.dependency_overrides[get_modeling_store] = (
         lambda: Neo4jModelingStore(mock_driver)

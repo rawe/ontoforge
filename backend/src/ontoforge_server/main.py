@@ -6,13 +6,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from ontoforge_server.core.ai import init_ai_model
-from ontoforge_server.core.database import ensure_vector_indexes, get_driver
 from ontoforge_server.core.embedding import (
     close_embedding_provider,
     get_embedding_provider,
     init_embedding_provider,
 )
-from ontoforge_server.core.ports import close_stores, init_stores
+from ontoforge_server.core.ports import (
+    close_stores,
+    ensure_semantic_indexes,
+    init_stores,
+)
 from ontoforge_server.core.exceptions import (
     CascadeRequiredError,
     ConflictError,
@@ -35,7 +38,7 @@ async def lifespan(app: FastAPI):
     init_ai_model()
     provider = get_embedding_provider()
     if provider:
-        await ensure_vector_indexes(await get_driver(), provider.dimensions)
+        await ensure_semantic_indexes(provider.dimensions)
     async with modeling_mcp.session_manager.run():
         async with runtime_mcp.session_manager.run():
             yield

@@ -22,6 +22,13 @@ async def close_stores() -> None:
     await close_driver()
 
 
+async def ensure_semantic_indexes(dimensions: int) -> None:
+    """Ensure all vector indexes exist for the configured dimensions."""
+    from ontoforge_server.adapters.neo4j import ddl
+
+    await ddl.ensure_vector_indexes(await get_driver(), dimensions)
+
+
 async def wipe() -> None:
     """Delete all stored data. Test support only — never used by the app."""
     driver = await get_driver()

@@ -146,7 +146,8 @@ async def test_semantic_search_cross_type(integration_client, test_ontology):
 
     # The shared _Entity index is normally ensured at app startup; the test
     # client skips the lifespan, so create it explicitly.
-    from ontoforge_server.core.database import ensure_entity_vector_index, get_driver
+    from ontoforge_server.adapters.neo4j.ddl import ensure_entity_vector_index
+    from ontoforge_server.adapters.neo4j.driver import get_driver
     from ontoforge_server.core.embedding import get_embedding_provider
 
     driver = await get_driver()

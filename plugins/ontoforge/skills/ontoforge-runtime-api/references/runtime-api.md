@@ -55,7 +55,7 @@ Use these first when you do not know the available entity types, relation types,
 
 ## Document Properties
 
-Properties with data type `document` hold large Markdown text. Entity reads never return their content inline — every entity payload (list, get, neighbors, search, Cypher, MCP) replaces the value with a stub:
+Properties with data type `document` hold large Markdown text. Entity reads never return their content inline — every entity payload (list, get, neighbors, search, query results, MCP) replaces the value with a stub:
 `{"document": true, "length": <charCount>}`
 Writes are unchanged: send the full string as a normal property value. An explicit `fields` projection naming the property returns the raw value.
 
@@ -107,16 +107,17 @@ Writes are unchanged: send the full string as a normal property value. An explic
   Requires semantic search to be enabled in server config.
   Each hit carries `matchedVia`: `{source: "entity", similarity}` for entity-embedding matches, or `{source: "document", propertyKey, charOffset, charLength, snippet, similarity}` for document-chunk matches. Pass `charOffset`/`charLength` as `offset`/`limit` to the documents endpoint to read the exact matched passage. In `all` mode `score` is a rank-fusion value for ordering only — threshold on `matchedVia.similarity`.
 
-## Read-Only Cypher Query
+## Read-Only OQL Query
 
 - `POST /api/runtime/{ontologyKey}/query`
-  Executes a read-only Cypher query validated against the ontology scope.
+  Executes a read-only OQL query (openCypher-shaped syntax over schema type keys) validated against the ontology scope.
   Request body:
   ```json
-  { "cypher": "MATCH (p:person) RETURN p LIMIT 10" }
+  { "query": "MATCH (p:person) RETURN p LIMIT 10" }
   ```
+  The legacy field name `cypher` is accepted as a deprecated input alias for `query`.
   Allowed: read-oriented clauses like `MATCH`, `WHERE`, `RETURN`, `ORDER BY`, `LIMIT`, `SKIP`, `WITH`, `UNWIND`
-  Blocked: write clauses, `CALL`, labelless node patterns, internal labels
+  Blocked: write clauses, `CALL`, labelless node patterns, reserved internal names
 
 ## Runtime Feature Discovery
 
@@ -128,7 +129,7 @@ Writes are unchanged: send the full string as a normal property value. An explic
 ## AI Endpoints
 
 - `POST /api/runtime/{ontologyKey}/ai/query`
-  Natural-language question to answer plus generated Cypher and raw results when used.
+  Natural-language question to answer plus generated OQL query and raw results when used.
   Request body:
   `question`
 

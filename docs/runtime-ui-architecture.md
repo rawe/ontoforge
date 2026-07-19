@@ -22,7 +22,7 @@ Defined in `router.tsx`:
 /w/:ontologyKey/t/:typeKey     → type table (server-side pagination/sort/filter)
 /w/:ontologyKey/e/:typeKey/:id → entity detail (inline property edit, relations)
 /w/:ontologyKey/explore        → Explorer canvas (supports ?focus={typeKey}:{id})
-/w/:ontologyKey/query          → query workbench (Cypher console + saved-query library)
+/w/:ontologyKey/query          → query workbench (OQL console + saved-query library)
 /w/:ontologyKey/ai             → AI assistant (Chat | Ask | Extract)
 /studio                        → schema overview (type lists + diagram)
 /studio/entity-types/:id       → entity type editor
@@ -75,6 +75,6 @@ All persisted UI state lives in localStorage under `of.*` keys (`lib/storage.ts`
 | `of.explore.{ontologyKey}` | Explorer working set |
 | `of.chat.{ontologyKey}` | AI chat history (capped) |
 | `of.recents.{ontologyKey}` | recently opened entities (palette) |
-| `of.queryHistory.{ontologyKey}` | recent Cypher queries |
+| `of.queryHistory.{ontologyKey}` | recent OQL queries |
 
 Everything else is server state (TanStack Query) or URL state — there is no global state library.

@@ -7,7 +7,7 @@
 > The ontology key is the ontology's unique `key` field (snake_case, pattern: `^[a-z][a-z0-9_]*$`).
 > The runtime module reads schema data from the same database as the modeling module.
 >
-> For storage model details, see `architecture.md` §4.2.
+> For the logical data model, see `architecture.md` §4.
 
 ---
 
@@ -123,7 +123,7 @@ Properties are provided as a flat JSON object. Keys must match property definiti
 - All `required` properties must be present (or have a `defaultValue` in the schema). → 422 if missing.
 - No unknown property keys (not defined in the schema). → 422 if unknown.
 - Each value must be coercible to its schema `dataType`. → 422 if type mismatch.
-- When semantic search is enabled, any string value that would exceed Neo4j's vector-index metadata size limit is rejected with 422 before the entity is written. Document properties are exempt — their values are never stored in vector-index metadata.
+- When semantic search is enabled, any string value that would exceed the indexed property size limit is rejected with 422 before the entity is written. Document properties are exempt — their values are never part of the semantic-index metadata.
 - Default values are injected for required properties not in the request but with a `defaultValue` in the schema.
 - Schema/type validation errors are collected and returned together where practical; semantic-index size validation may still reject the request with 422 before persistence.
 
@@ -155,7 +155,7 @@ List entity instances of a type, with optional filtering, search, sorting, and p
 | `__lte` | less than or equal | `filter.age__lte=40` |
 | `__contains` | substring match (case-insensitive) | `filter.name__contains=ali` |
 
-**Text search (`q`):** Searches all `string` properties of the entity type using case-insensitive `CONTAINS`. `document` properties are not searched — use semantic search for document content. Simple substring matching, not full-text indexing. Sufficient for the MVP; full-text indexes can be added later without API changes.
+**Text search (`q`):** Searches all `string` properties of the entity type using case-insensitive substring matching. `document` properties are not searched — use semantic search for document content. Simple substring matching, not full-text indexing. Sufficient for the MVP; full-text indexes can be added later without API changes.
 
 **Sorting:** The `sort` parameter accepts any property key defined in the schema. System fields `createdAt` and `updatedAt` are also valid sort values (mapped to `_createdAt` and `_updatedAt` internally).
 
@@ -207,17 +207,17 @@ Partial update of an entity instance. Only provided properties are updated; omit
 }
 ```
 
-**Null removal:** Setting a property to `null` removes it from the node (using Cypher `REMOVE`). This is the only way to unset an optional property. Setting a `required` property to `null` is rejected with 422.
+**Null removal:** Setting a property to `null` unsets the property. This is the only way to unset an optional property. Setting a `required` property to `null` is rejected with 422.
 
 **Response:** `200 OK` — full entity instance after update.
 
-**Validation:** Same type and unknown-property checks as creation, applied only to the provided properties. When semantic search is enabled, the merged post-update entity must still fit Neo4j's vector-index metadata size limit for indexed string properties (document properties are exempt), or the update is rejected with 422.
+**Validation:** Same type and unknown-property checks as creation, applied only to the provided properties. When semantic search is enabled, the merged post-update entity must still fit the indexed property size limit for indexed string properties (document properties are exempt), or the update is rejected with 422.
 
 **Errors:** 404 if not found. 422 if validation fails.
 
 ### DELETE /api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}
 
-Delete an entity instance. Uses `DETACH DELETE` — all relationships connected to this entity are also deleted. Document chunk nodes of the entity are deleted in the same query.
+Delete an entity instance. All relations connected to this entity are deleted with it, as is the entity's document chunk data.
 
 **Response:** `204 No Content`
 
@@ -225,7 +225,7 @@ Delete an entity instance. Uses `DETACH DELETE` — all relationships connected 
 
 ### Document Properties in Entity Reads
 
-Properties with data type `document` (large Markdown text — see `architecture.md` §4.2) are never returned inline. In **every** entity payload — create/update responses, list, detail, neighbors, semantic search hits, Cypher results, saved-query results, and the MCP tools — a set document property is replaced by a stub:
+Properties with data type `document` (large Markdown text — see `architecture.md` §4.2) are never returned inline. In **every** entity payload — create/update responses, list, detail, neighbors, semantic search hits, query results, saved-query results, and the MCP tools — a set document property is replaced by a stub:
 
 ```json
 "bio": { "document": true, "length": 40213 }
@@ -524,9 +524,9 @@ Requires `EMBEDDING_PROVIDER` to be configured. When embedding is disabled, retu
 
 **Behavior:**
 - With `type`: searches only the vector indexes for the specified entity type. Returns 404 if the type key is not found in the ontology schema.
-- Without `type`: the entity ranking searches the shared cross-type vector index (`entity_embedding` on the `_Entity` label) over all entity types visible through the ontology scope. Each result entity carries `_entityTypeKey`. For scoped ontologies the candidate pool is over-fetched and filtered to scoped types in the application, so a heavily restricted scope may return fewer than `limit` results even when more matches exist.
+- Without `type`: the entity ranking searches a shared cross-type semantic index over all entity types visible through the ontology scope. Each result entity carries `_entityTypeKey`. For scoped ontologies the candidate pool is over-fetched and filtered to scoped types in the application, so a heavily restricted scope may return fewer than `limit` results even when more matches exist.
 - The document ranking queries each in-scope (entity type, document property) chunk index, merges chunk hits by score, and dedupes to parent entities — the best chunk per entity wins and provides `matchedVia`. Only properties visible through the ontology lens are searched: a lens excluding `bio` from `person` never touches that chunk index.
-- When `filter.{key}` parameters are provided, the entity ranking's vector index over-fetches candidates and applies property `WHERE` clauses before the final `LIMIT`; document-chunk hits are filtered against the parent entity's properties after resolution. Filter syntax matches the entity list endpoint except that `__contains` is not supported here and is rejected with 422 (use equality or the range operators `__gt`, `__gte`, `__lt`, `__lte`). Filters require `type` — cross-type search rejects them with 422, since property definitions are per entity type.
+- When `filter.{key}` parameters are provided, the entity ranking over-fetches candidates from the semantic index and applies the property filters before the final limit; document-chunk hits are filtered against the parent entity's properties after resolution. Filter syntax matches the entity list endpoint except that `__contains` is not supported here and is rejected with 422 (use equality or the range operators `__gt`, `__gte`, `__lt`, `__lte`). Filters require `type` — cross-type search rejects them with 422, since property definitions are per entity type.
 - The `_embedding` property is never included in response entities. Document properties appear as stubs.
 
 **Embedding generation:** Embeddings are generated automatically when entities are created or updated (if string properties change). The entity's text representation concatenates all non-null string property values in schema-defined order, prefixed with the entity type key — document property values are excluded (they are chunked and embedded separately). If the embedding provider is unavailable at write time, the entity is created normally but without an embedding — it will not appear in semantic search results until re-embedded.
@@ -538,20 +538,22 @@ Requires `EMBEDDING_PROVIDER` to be configured. When embedding is disabled, retu
 
 ---
 
-## 7. Cypher Query
+## 7. OQL Query
 
 ### POST /api/runtime/{ontologyKey}/query
 
-Execute a read-only Cypher query against the ontology's scoped schema. The query is parsed, validated, and rewritten before execution.
+Execute a read-only OQL query against the ontology's scoped schema. OQL — the OntoForge Query Language — is a read-only, openCypher-shaped graph pattern language anchored to the ISO GQL standard and its GPML pattern sublanguage (see decision 009 in `decisions.md`). The query is parsed and validated before execution.
 
 **Request body:**
 ```json
 {
-  "cypher": "MATCH (p:person)-[r:works_for]->(c:company) WHERE p.name = 'Alice' RETURN p, c LIMIT 10"
+  "query": "MATCH (p:person)-[r:works_for]->(c:company) WHERE p.name = 'Alice' RETURN p, c LIMIT 10"
 }
 ```
 
-Use schema entity type keys (snake_case) as node labels and relation type keys as relationship types. They are automatically translated to Neo4j conventions (PascalCase for entities, UPPER_SNAKE_CASE for relations).
+The legacy field name `cypher` is accepted as a deprecated input alias for `query` for one minor release.
+
+Queries are written entirely in schema type keys: entity type keys (snake_case) as node labels and relation type keys as relationship types.
 
 **Response:** `200 OK`
 ```json
@@ -578,13 +580,13 @@ Use schema entity type keys (snake_case) as node labels and relation type keys a
 }
 ```
 
-**Supported Cypher:** `MATCH`, `OPTIONAL MATCH`, `WHERE`, `RETURN`, `ORDER BY`, `LIMIT`, `SKIP`, `WITH`, `UNWIND`.
+**Supported OQL clauses:** `MATCH`, `OPTIONAL MATCH`, `WHERE`, `RETURN`, `ORDER BY`, `LIMIT`, `SKIP`, `WITH`, `UNWIND`.
 
 **Blocked operations (422):**
 - Write clauses: `CREATE`, `DELETE`, `DETACH DELETE`, `SET`, `MERGE`, `REMOVE`
 - Procedure calls: `CALL`
 - Labelless node patterns (e.g., `MATCH (n)`)
-- Internal labels (`_Entity`, `_Chunk`) and internal relationship types (`_HAS_CHUNK`)
+- Reserved internal names are rejected as labels or relationship types
 
 **Validation (422):**
 - Node labels must be entity type keys in the ontology scope.
@@ -597,7 +599,7 @@ Use schema entity type keys (snake_case) as node labels and relation type keys a
 
 **Errors:**
 - 404 if ontology key not found.
-- 422 if Cypher syntax is invalid, contains blocked operations, or references unknown types/properties. The error `details.errors` array lists all violations.
+- 422 if the query syntax is invalid, contains blocked operations, or references unknown types/properties. The error `details.errors` array lists all violations.
 
 ---
 
@@ -656,7 +658,7 @@ LLM-powered endpoints for natural language interaction with the knowledge graph.
 
 ### POST /api/runtime/{ontologyKey}/ai/query
 
-Translate a natural language question into a Cypher query, execute it, and return a summarized answer.
+Translate a natural language question into an OQL query, execute it, and return a summarized answer.
 
 **Request body:**
 ```json
@@ -669,6 +671,7 @@ Translate a natural language question into a Cypher query, execute it, and retur
 ```json
 {
   "answer": "There are 3 companies in Berlin.",
+  "query": "MATCH (c:company) WHERE c.location = 'Berlin' RETURN count(c) AS total",
   "cypher": "MATCH (c:company) WHERE c.location = 'Berlin' RETURN count(c) AS total",
   "results": {
     "columns": ["total"],
@@ -677,7 +680,7 @@ Translate a natural language question into a Cypher query, execute it, and retur
 }
 ```
 
-The `cypher` and `results` fields may be `null` if the LLM answered without using the Cypher tool.
+The `query` and `results` fields may be `null` if the LLM answered without using the query tool. `cypher` is a deprecated mirror of `query`, kept for one minor release and then removed.
 
 ### POST /api/runtime/{ontologyKey}/ai/extract
 
@@ -739,8 +742,8 @@ Conversational Q&A with tool use against the knowledge graph.
   "reply": "There are 12 people who work at Acme Corp.",
   "toolCalls": [
     {
-      "tool": "execute_cypher_query",
-      "args": {"cypher": "MATCH (p:person)-[:works_for]->(c:company {name: 'Acme Corp'}) RETURN count(p)"}
+      "tool": "execute_query",
+      "args": {"query": "MATCH (p:person)-[:works_for]->(c:company {name: 'Acme Corp'}) RETURN count(p)"}
     }
   ]
 }
@@ -828,10 +831,10 @@ List all saved queries available for this ontology. Returns query metadata, the 
     "steps": [
       {
         "name": "string",
-        "type": "cypher | semantic_search",
-        "cypher": "string (cypher steps only)",
+        "type": "oql | semantic_search",
+        "oql": "string (oql steps only)",
         "entityTypeKey": "string (semantic_search steps only)",
-        "query": "string (semantic_search steps only)",
+        "query": "string (semantic_search steps only — the search text)",
         "limit": 10,
         "minScore": 0.7,
         "bindings": { "param": "{{stepName.field}}" }
@@ -848,7 +851,7 @@ List all saved queries available for this ontology. Returns query metadata, the 
 ]
 ```
 
-Step fields are included only when set; `steps` reflects the multi-step pipeline defined in the modeling API.
+Step fields are included only when set; `steps` reflects the multi-step pipeline defined in the modeling API. Responses always emit the current field names; the legacy step type `cypher` and its `cypher` field are accepted on input paths only (modeling API, import).
 
 **Errors:** 404 if ontology key not found.
 
@@ -889,7 +892,7 @@ Search saved queries by semantic similarity to a natural language description. R
 
 ### POST /api/runtime/{ontologyKey}/saved-queries/{queryKey}/run
 
-Execute a saved query with the provided parameter values. Parameters are validated, type-coerced, and passed natively to Neo4j. The Cypher is re-validated against the current schema before execution.
+Execute a saved query with the provided parameter values. Parameters are validated, type-coerced, and passed as typed parameters. The query is re-validated against the current schema before execution.
 
 **Request body:**
 ```json
@@ -926,7 +929,7 @@ All declared parameters are required. Parameter values are coerced to their decl
 
 **Errors:**
 - 404 if ontology key or query key not found.
-- 422 if parameters are missing, extra, or fail type coercion. Also 422 if the Cypher fails schema re-validation (e.g., a referenced type was removed since the query was created).
+- 422 if parameters are missing, extra, or fail type coercion. Also 422 if the query fails schema re-validation (e.g., a referenced type was removed since the query was created).
 
 ---
 
@@ -949,13 +952,13 @@ All declared parameters are required. Parameter values are coerced to their decl
 | `GET` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}/documents/{propertyKey}` | Read (a slice of) a document property |
 | `PATCH` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}/documents/{propertyKey}` | Partial write to a document property |
 | `GET` | `/api/runtime/{ontologyKey}/search/semantic` | Semantic search over entity instances and documents |
-| `POST` | `/api/runtime/{ontologyKey}/query` | Read-only Cypher query |
+| `POST` | `/api/runtime/{ontologyKey}/query` | Read-only OQL query |
 | `POST` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}` | Create relation instance |
 | `GET` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}` | List relation instances |
 | `GET` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}/{id}` | Get relation instance |
 | `PATCH` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}/{id}` | Partial update relation instance |
 | `DELETE` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}/{id}` | Delete relation instance |
-| `POST` | `/api/runtime/{ontologyKey}/ai/query` | NL → Cypher query with answer |
+| `POST` | `/api/runtime/{ontologyKey}/ai/query` | NL → OQL query with answer |
 | `POST` | `/api/runtime/{ontologyKey}/ai/extract` | Extract entities/relations from text |
 | `POST` | `/api/runtime/{ontologyKey}/ai/chat` | Schema-aware conversational Q&A |
 | `GET` | `/api/runtime/{ontologyKey}/ai/agents` | List agents (default + configured) |

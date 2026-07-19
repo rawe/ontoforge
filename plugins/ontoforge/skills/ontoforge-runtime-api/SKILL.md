@@ -24,7 +24,7 @@ Read [runtime-api.md](references/runtime-api.md) first. It is the bundled runtim
 
 ## Boundaries
 
-- Runtime only: schema introspection, entity CRUD, relation CRUD, neighbors, semantic search, Cypher query, feature discovery, AI runtime endpoints, saved queries, and runtime data wipe.
+- Runtime only: schema introspection, entity CRUD, relation CRUD, neighbors, semantic search, OQL query, feature discovery, AI runtime endpoints, saved queries, and runtime data wipe.
 - Not modeling: ontology creation, schema mutation, saved query definition, AI agent configuration, import/export via `/api/model/...`.
 
 ## Output Style

@@ -1,6 +1,6 @@
 # OntoForge
 
-OntoForge is a Neo4j-native ontology studio for designing graph schemas and using them through generic, schema-driven APIs. The schema (entity types, relation types, properties) is global and independent. Ontologies are named lenses over this schema — either unscoped (full schema access) or scoped to a filtered subset of types and properties. The system provides dedicated REST and MCP interfaces for modeling and runtime, stores schema and data together in Neo4j for portability, and supports JSON-based export and import.
+OntoForge is a graph-native ontology studio for designing graph schemas and using them through generic, schema-driven APIs. Storage sits behind an exchangeable database adapter — Neo4j is the current adapter. The schema (entity types, relation types, properties) is global and independent. Ontologies are named lenses over this schema — either unscoped (full schema access) or scoped to a filtered subset of types and properties. The system provides dedicated REST and MCP interfaces for modeling and runtime, stores schema and data together in one database (Neo4j adapter today) behind a persistence port, and supports JSON-based export and import.
 
 ## Project Structure
 
@@ -75,4 +75,5 @@ The backend runs on `http://localhost:8000`, the frontend on `http://localhost:5
 - **Runtime mode** — querying and mutating knowledge data through an ontology lens
 - **REST API** — HTTP interface for both modeling and runtime operations
 - **MCP interface** — Model Context Protocol server for AI-driven interactions
-- **Neo4j** — all schema and data stored in Neo4j for portability
+- **OQL** — the OntoForge Query Language: the read-only, openCypher-shaped graph pattern language (anchored to ISO GQL/GPML) used by the query endpoint, saved queries, and AI query generation
+- **Persistence port** — all database access goes through `core/ports.py`; Neo4j is the current adapter (`adapters/neo4j/`)

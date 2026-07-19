@@ -1,10 +1,11 @@
 # Database Independence — Proposal
 
-> **Status: PROPOSAL — not approved.** Per the project rules, every architectural
-> decision requires user approval. Section 7 lists the decisions to settle before
-> implementation starts. The companion document
+> **Status: APPROVED 2026-07-19** as decisions 008–010 in
+> [../decisions.md](../decisions.md); implementation is in progress. The companion
+> document
 > [database-independence-implementation.md](database-independence-implementation.md)
-> contains the concrete implementation steps.
+> contains the concrete implementation steps. The remainder of this document is
+> preserved unchanged as the design record.
 
 ## 1. Motivation and Goal
 

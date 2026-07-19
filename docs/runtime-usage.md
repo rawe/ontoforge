@@ -246,17 +246,17 @@ curl -X PATCH "http://localhost:8000/api/runtime/test_ontology/entities/person/{
   -d '{"op": "str_replace", "oldString": "analytical engines", "newString": "Analytical Engines"}'
 ```
 
-## 6. Cypher Query
+## 6. OQL Query
 
-For complex read queries that go beyond the CRUD endpoints, use the Cypher query endpoint. Queries are validated against the ontology's scoped schema and executed read-only.
+For complex read queries that go beyond the CRUD endpoints, use the OQL query endpoint. Queries use openCypher-shaped syntax written entirely in schema type keys, are validated against the ontology's scoped schema, and executed read-only.
 
 ```bash
 curl -X POST http://localhost:8000/api/runtime/test_ontology/query \
   -H 'Content-Type: application/json' \
-  -d '{"cypher": "MATCH (p:person)-[r:works_for]->(c:company) WHERE p.name = '\''Alice'\'' RETURN p, c LIMIT 10"}'
+  -d '{"query": "MATCH (p:person)-[r:works_for]->(c:company) WHERE p.name = '\''Alice'\'' RETURN p, c LIMIT 10"}'
 ```
 
-Use schema entity type keys (snake_case) as node labels and relation type keys as relationship types — they are translated automatically. Only read operations (MATCH/RETURN) are supported; writes and CALL are rejected.
+Use schema entity type keys (snake_case) as node labels and relation type keys as relationship types. Only read operations (MATCH/RETURN) are supported; writes and CALL are rejected. The legacy request field `cypher` is accepted as a deprecated alias for `query`.
 
 Response:
 

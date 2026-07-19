@@ -13,7 +13,7 @@ This skill uses **templates** shipped with the plugin. Never invent environment 
 
 The Docker Compose stack consists of three core services:
 
-- **neo4j** — Graph database. Stores both schema and instance data.
+- **neo4j** — Graph database used by the current storage adapter. Stores both schema and instance data.
 - **ontoforge-server** — Backend: REST API and MCP servers. All environment variables documented below apply to this service.
 - **ontoforge-ui** — Frontend: web UI served on port 3000. Requires `BACKEND_URL` pointing to the backend's Docker-internal URL so nginx can proxy `/api` and `/mcp` requests.
 

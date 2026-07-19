@@ -1,6 +1,6 @@
 # OntoForge
 
-A Neo4j-native ontology studio for designing graph schemas and using them through generic, schema-driven APIs.
+A graph-native ontology studio for designing graph schemas and using them through generic, schema-driven APIs. Storage sits behind an exchangeable database adapter — Neo4j is the current adapter and default deployment.
 
 ## Motivation
 
@@ -18,7 +18,7 @@ The intended workflow:
 4. **Integrate** the runtime API into your application's backend — OntoForge becomes the schema-enforced persistence layer for your domain knowledge.
 5. **Connect AI tools** via MCP servers — one for modeling the schema, one for structured read/write access to instance data, giving coding assistants controlled access to your knowledge graph.
 
-The key idea: **no unstructured writes**. Every entity and relation that goes into the graph must conform to the schema. Read access can be more flexible (e.g., direct Neo4j queries for analytics), but writes are always schema-enforced through the runtime API.
+The key idea: **no unstructured writes**. Every entity and relation that goes into the graph must conform to the schema. Read access can be more flexible (e.g., OQL queries for analytics), but writes are always schema-enforced through the runtime API.
 
 ## Quick Start (Docker)
 
@@ -185,14 +185,14 @@ Tests are mocked — no running Neo4j instance required.
 
 ## Architecture
 
-OntoForge is a modular monolith backed by a single Neo4j database that holds both schema and instance data.
+OntoForge is a modular monolith backed by a single graph database that holds both schema and instance data. All database access goes through a persistence port; Neo4j is the current adapter.
 
 - **Modeling module** — global schema CRUD, ontology scope management, validation, JSON export/import (`/api/model`)
 - **Runtime module** — schema-driven instance CRUD, validation, search, graph traversal through ontology lenses (`/api/runtime/{ontologyKey}`)
 - **Frontend** — React UI with two surfaces: Workbench (data work through an ontology lens) and Studio (schema design, ontology scoping) — see `docs/runtime-ui-architecture.md`
 - **MCP layer** — two MCP servers: modeling (global schema) and runtime (data access through an ontology)
 
-Schema nodes and instance nodes coexist in the same database, separated by label conventions. The runtime validates every write against an in-memory schema cache (lazily loaded, invalidated on modeling changes), ensuring instance data always conforms to the schema as seen through the selected ontology.
+Schema objects and instance data coexist in the same database. The runtime validates every write against an in-memory schema cache (lazily loaded, invalidated on modeling changes), ensuring instance data always conforms to the schema as seen through the selected ontology.
 
 See `docs/architecture.md` for the full system design.
 
@@ -211,7 +211,8 @@ ontoforge/
 │   ├── src/ontoforge_server/
 │   │   ├── main.py                 # FastAPI app, mounts both routers
 │   │   ├── config.py               # Environment-based settings
-│   │   ├── core/                   # Shared: DB driver, exceptions, schema models
+│   │   ├── core/                   # Shared: persistence port, exceptions, schema models
+│   │   ├── adapters/               # Database adapters (Neo4j)
 │   │   ├── modeling/               # Schema CRUD, validation, export/import
 │   │   ├── runtime/                # Instance CRUD, search, graph traversal
 │   │   └── mcp/                    # MCP servers (modeling + runtime tools)
@@ -223,7 +224,8 @@ ontoforge/
 │   └── src/
 └── docs/
     ├── prd.md                      # Product requirements
-    ├── architecture.md             # System architecture, Neo4j storage model
+    ├── architecture.md             # System architecture, logical data model
+    ├── neo4j-adapter.md            # Neo4j adapter internals (physical storage)
     ├── mcp-architecture.md         # MCP integration architecture
     ├── api-contracts/              # REST endpoint specifications
     ├── decisions.md                # Architectural decision log
@@ -237,9 +239,10 @@ The backend reads settings from environment variables (or a `.env` file in `back
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DB_URI` | `bolt://localhost:7687` | Neo4j Bolt connection |
-| `DB_USER` | `neo4j` | Neo4j username |
-| `DB_PASSWORD` | `ontoforge_dev` | Neo4j password |
+| `DB_BACKEND` | `neo4j` | Persistence adapter selection (`neo4j` is the only built-in adapter) |
+| `DB_URI` | `bolt://localhost:7687` | Database connection (Neo4j adapter) |
+| `DB_USER` | `neo4j` | Database username (Neo4j adapter) |
+| `DB_PASSWORD` | `ontoforge_dev` | Database password (Neo4j adapter) |
 | `PORT` | `8000` | HTTP listen port |
 | `DEFAULT_MCP_ONTOLOGY_KEY` | *(unset)* | MCP default ontology key — used when no key is in the URL or header |
 

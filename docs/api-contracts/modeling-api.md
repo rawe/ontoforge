@@ -355,7 +355,7 @@ Or with errors:
 
 Export an ontology schema as JSON.
 
-**Response:** `200 OK` — JSON transfer format as defined in `architecture.md` section 4.4.
+**Response:** `200 OK` — JSON transfer format (formatVersion `3.0`) as defined in `architecture.md` section 4.4.
 
 **Errors:** 404 if ontology not found.
 
@@ -363,19 +363,19 @@ Export an ontology schema as JSON.
 
 Import an ontology from a JSON payload.
 
-**Request body:** JSON transfer format (see `architecture.md` section 4.4).
+**Request body:** JSON transfer format (see `architecture.md` section 4.4). Format `2.x` payloads are accepted: legacy saved-query steps of type `cypher` and their `cypher` field are mapped to `oql` on import.
 
 **Query parameter:** `overwrite=true|false` (default: false). If true and an ontology with the same `ontologyId` exists, it will be replaced. If false and it exists, returns 409.
 
 **Response:** `201 Created` — the created/updated ontology object.
 
-**Side effects:** When an embedding provider is configured, the import automatically creates Neo4j vector indexes for each entity type, for each document property, and for saved queries. This ensures semantic search queries do not fail with "index not found" on a freshly imported database. Document chunk nodes are derived data and are not part of the transfer format — regenerate them via `POST /api/model/rebuild-embeddings` after importing instance data.
+**Side effects:** When an embedding provider is configured, the import recreates the semantic-search indexes for each entity type, for each document property, and for saved queries. This ensures semantic search does not fail with missing indexes on a freshly imported database. Document chunk nodes are derived data and are not part of the transfer format — regenerate them via `POST /api/model/rebuild-embeddings` after importing instance data.
 
 **Errors:** 409 if ontology already exists and overwrite is false. 422 if the import payload fails validation.
 
 ### POST /api/model/rebuild-embeddings
 
-Regenerate all embedding vectors for entity instances and saved queries. Ensures Neo4j vector indexes exist, then iterates all entities and saved queries to (re-)compute their embeddings. For entities with document properties, the document chunks are also rebuilt (existing chunks deleted, text re-chunked and re-embedded).
+Regenerate all embedding vectors for entity instances and saved queries. Ensures the semantic-search indexes exist, then iterates all entities and saved queries to (re-)compute their embeddings. For entities with document properties, the document chunks are also rebuilt (existing chunks deleted, text re-chunked and re-embedded).
 
 Use this after data import, after changing the embedding model or dimensions, or to repair missing/corrupted indexes.
 
@@ -627,7 +627,18 @@ List all saved queries for an ontology.
     "key": "string",
     "name": "string",
     "description": "string",
-    "cypher": "string",
+    "steps": [
+      {
+        "name": "string",
+        "type": "oql | semantic_search",
+        "oql": "string (oql steps only)",
+        "entityTypeKey": "string (semantic_search steps only)",
+        "query": "string (semantic_search steps only — the search text)",
+        "limit": 10,
+        "minScore": 0.7,
+        "bindings": { "param": "{{stepName.field}}" }
+      }
+    ],
     "parameters": [
       {
         "name": "string",
@@ -647,14 +658,27 @@ List all saved queries for an ontology.
 
 Create or update a saved query. Returns `201 Created` when creating a new query and `200 OK` when updating an existing one. The `queryKey` in the path becomes the query's key.
 
-The Cypher string is validated against the ontology's scoped schema at creation time. Parameter declarations must match `$param` references in the Cypher string.
+A saved query is an ordered pipeline of steps. `oql` steps carry their OQL text in the `oql` field; `semantic_search` steps carry their search text in the `query` field. The legacy step type `cypher` and its `cypher` field are accepted on input as deprecated aliases for `oql`; responses always emit the current names.
+
+The OQL is validated against the ontology's scoped schema at creation time. Parameter declarations must match `$param` references in the steps.
 
 **Request body:**
 ```json
 {
   "name": "string (required)",
   "description": "string (required)",
-  "cypher": "string (required)",
+  "steps": [
+    {
+      "name": "string (required, unique per pipeline)",
+      "type": "oql | semantic_search",
+      "oql": "string (oql steps)",
+      "entityTypeKey": "string (semantic_search steps)",
+      "query": "string (semantic_search steps — the search text)",
+      "limit": 10,
+      "minScore": 0.7,
+      "bindings": { "param": "{{stepName.field}}" }
+    }
+  ],
   "parameters": [
     {
       "name": "string (required)",
@@ -665,26 +689,9 @@ The Cypher string is validated against the ontology's scoped schema at creation 
 }
 ```
 
-**Response:** `201 Created` or `200 OK`
-```json
-{
-  "key": "string",
-  "name": "string",
-  "description": "string",
-  "cypher": "string",
-  "parameters": [
-    {
-      "name": "string",
-      "description": "string",
-      "dataType": "string"
-    }
-  ],
-  "createdAt": "datetime",
-  "updatedAt": "datetime"
-}
-```
+**Response:** `201 Created` or `200 OK` — same shape as a list item.
 
-**Errors:** 404 if ontology not found. 422 if Cypher validation fails or parameters don't match Cypher `$param` references.
+**Errors:** 404 if ontology not found. 422 if OQL validation fails or parameters don't match `$param` references.
 
 ### DELETE /api/model/ontologies/{ontologyKey}/saved-queries/{queryKey}
 
@@ -725,8 +732,20 @@ updatedAt: datetime
 ```
 name: string (required)
 description: string (required)
-cypher: string (required)
+steps: array of SavedQueryStep (required, min 1)
 parameters: array of SavedQueryParameter (optional, default [])
+```
+
+### SavedQueryStep
+```
+name: string (required, pattern: ^[a-zA-Z_]\w*$)
+type: string (required, enum: oql | semantic_search; legacy "cypher" accepted on input as alias for oql)
+oql: string (oql steps; legacy field name "cypher" accepted on input)
+entityTypeKey: string (semantic_search steps)
+query: string (semantic_search steps — the search text)
+limit: integer (optional, 1–100)
+minScore: float (optional, 0.0–1.0)
+bindings: object (optional, param name → "{{stepName.field}}")
 ```
 
 ### SavedQueryParameter
@@ -741,7 +760,7 @@ dataType: string (required, enum: string | integer | float | boolean | date | da
 key: string
 name: string
 description: string
-cypher: string
+steps: array of SavedQueryStep
 parameters: array of SavedQueryParameter
 createdAt: datetime
 updatedAt: datetime

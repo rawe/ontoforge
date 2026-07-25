@@ -379,6 +379,8 @@ Regenerate all embedding vectors for entity instances and saved queries. Ensures
 
 Use this after data import, after changing the embedding model or dimensions, or to repair missing/corrupted indexes.
 
+This is the only operation that rebuilds a semantic index whose vector width no longer matches the configured embedding model — the index is recreated at the model's width and repopulated by the regeneration that follows. Startup only reports such indexes (see `architecture.md` section 4.1); until this endpoint is called, semantic search over them fails with `STORAGE_ERROR`.
+
 **Precondition:** Embedding provider must be configured (`EMBEDDING_PROVIDER` environment variable).
 
 **Response:** `200 OK` with `application/x-ndjson` streaming body. Each line is a JSON object:

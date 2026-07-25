@@ -269,6 +269,8 @@ Find entities by meaning rather than exact keywords — within a single entity t
 | `EMBEDDING_API_KEY` | *(unset)* | API key (required for `openai` provider) |
 | `EMBEDDING_DIMENSIONS` | *(auto)* | Vector dimensions (defaults: ollama=768, openai=1536) |
 
+Semantic indexes are built for the vector width of the model that created them, so changing `EMBEDDING_MODEL` or `EMBEDDING_DIMENSIONS` on an existing database — including a reused Docker volume — leaves indexes the new model cannot be searched against. Startup names each one in a warning; `POST /api/model/rebuild-embeddings` rebuilds them at the new width and regenerates the vectors.
+
 ### AI-Powered Runtime
 
 Natural language query, entity extraction from text, and conversational chat over your knowledge graph. These features use tool calling to interact with the schema and data, so the model must support function/tool calling.

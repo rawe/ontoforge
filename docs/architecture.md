@@ -239,6 +239,8 @@ Uniqueness of all IDs, names, and keys above — and of entity instance IDs — 
 
 When an embedding provider is configured, semantic-search indexes are additionally ensured on startup: one per entity type, a shared cross-type index for search without a type filter, one for saved-query descriptions, and one per document property (kept in sync with the schema lifecycle — created when a document property is added, dropped when the property or its entity type is deleted). Physical index names and layouts are documented in `neo4j-adapter.md`.
 
+A semantic index is built for the vector width of the embedding model configured when it was created, so changing that model leaves indexes the new model's vectors cannot be searched against. Startup names each such index — by entity type, document property, or search scope — in a warning giving both widths and the remedy, but repairs nothing: rebuilding an index discards the vectors it holds, and that is the operator's decision. `POST /api/model/rebuild-embeddings` performs the repair, rebuilding the index at the model's width and regenerating its vectors (decision 013).
+
 **Cascading Deletes:**
 
 - Deleting an **Ontology** removes its `INCLUDES_TYPE` edges and deletes all associated `AiAgentConfig` records (via `HAS_AI_AGENT`) and `SavedQuery` records (via `HAS_SAVED_QUERY`). Entity types, relation types, and properties are not affected (they are global).

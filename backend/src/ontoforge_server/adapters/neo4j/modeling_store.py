@@ -559,5 +559,9 @@ class Neo4jModelingStore:
     async def ensure_saved_query_vector_index(self, dimensions: int) -> None:
         await ddl.ensure_saved_query_vector_index(self._driver, dimensions)
 
-    async def ensure_vector_indexes(self, dimensions: int) -> None:
-        await ddl.ensure_vector_indexes(self._driver, dimensions)
+    async def ensure_vector_indexes(
+        self, dimensions: int, recreate_on_mismatch: bool = False
+    ) -> None:
+        await ddl.ensure_vector_indexes(
+            self._driver, dimensions, recreate_on_mismatch=recreate_on_mismatch
+        )

@@ -13,6 +13,7 @@ from typing import Any
 
 from neo4j import AsyncDriver
 
+from ontoforge_server.adapters.neo4j.errors import open_session
 from ontoforge_server.core.exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
@@ -119,7 +120,7 @@ async def _validate_existing_vector_indexed_properties(
     if not filter_properties:
         return
 
-    async with driver.session() as session:
+    async with open_session(driver) as session:
         result = await session.run(
             f"MATCH (n:{pascal_label}) RETURN n._id AS entity_id, n {{.*}} AS properties"
         )
@@ -133,7 +134,7 @@ async def _validate_existing_vector_indexed_properties(
 
 
 async def _drop_failed_index_if_exists(driver: AsyncDriver, index_name: str) -> None:
-    async with driver.session() as session:
+    async with open_session(driver) as session:
         result = await session.run(
             "SHOW INDEXES YIELD name, state WHERE name = $name RETURN state",
             name=index_name,
@@ -151,7 +152,7 @@ async def ensure_vector_indexes(driver: AsyncDriver, dimensions: int) -> None:
     in-index filtering (Neo4j 2026+ SEARCH clause). Existing indexes are
     left untouched.
     """
-    async with driver.session() as session:
+    async with open_session(driver) as session:
         result = await session.run(
             """
             MATCH (et:EntityType)
@@ -171,7 +172,7 @@ async def ensure_vector_indexes(driver: AsyncDriver, dimensions: int) -> None:
         )
 
     # Chunk vector indexes for document properties (one per virtual type)
-    async with driver.session() as session:
+    async with open_session(driver) as session:
         result = await session.run(
             """
             MATCH (et:EntityType)-[:HAS_PROPERTY]->(p:PropertyDefinition {dataType: 'document'})
@@ -209,7 +210,7 @@ async def ensure_entity_vector_index(driver: AsyncDriver, dimensions: int) -> No
         f"OPTIONS {{indexConfig: {{`vector.dimensions`: {dimensions}, "
         f"`vector.similarity_function`: 'cosine'}}}}"
     )
-    async with driver.session() as session:
+    async with open_session(driver) as session:
         await session.run(query)
     logger.info("Vector index ensured: %s", ENTITY_VECTOR_INDEX_NAME)
 
@@ -229,7 +230,7 @@ async def ensure_saved_query_vector_index(
         f"OPTIONS {{indexConfig: {{`vector.dimensions`: {dimensions}, "
         f"`vector.similarity_function`: 'cosine'}}}}"
     )
-    async with driver.session() as session:
+    async with open_session(driver) as session:
         await session.run(query)
     logger.info("Vector index ensured: saved_query_embedding")
 
@@ -264,7 +265,7 @@ async def create_vector_index(
         f"OPTIONS {{indexConfig: {{`vector.dimensions`: {dimensions}, "
         f"`vector.similarity_function`: 'cosine'}}}}"
     )
-    async with driver.session() as session:
+    async with open_session(driver) as session:
         await session.run(query)
     logger.info("Vector index ensured: %s", index_name)
 
@@ -285,7 +286,7 @@ async def create_document_vector_index(
         f"OPTIONS {{indexConfig: {{`vector.dimensions`: {dimensions}, "
         f"`vector.similarity_function`: 'cosine'}}}}"
     )
-    async with driver.session() as session:
+    async with open_session(driver) as session:
         await session.run(query)
     logger.info("Vector index ensured: %s", index_name)
 
@@ -295,7 +296,7 @@ async def drop_document_vector_index(
 ) -> None:
     """Drop the vector index for a document property's chunk nodes."""
     index_name = document_index_name(entity_type_key, property_key)
-    async with driver.session() as session:
+    async with open_session(driver) as session:
         await session.run(f"DROP INDEX {index_name} IF EXISTS")
     logger.info("Vector index dropped: %s", index_name)
 
@@ -303,7 +304,7 @@ async def drop_document_vector_index(
 async def drop_vector_index(driver: AsyncDriver, entity_type_key: str) -> None:
     """Drop the vector index for the given entity type."""
     index_name = f"{entity_type_key}_embedding"
-    async with driver.session() as session:
+    async with open_session(driver) as session:
         await session.run(f"DROP INDEX {index_name} IF EXISTS")
     logger.info("Vector index dropped: %s", index_name)
 
@@ -316,7 +317,7 @@ async def rebuild_vector_index(
     Called when properties are added or removed from an entity type so that
     the in-index filter properties stay in sync with the schema.
     """
-    async with driver.session() as session:
+    async with open_session(driver) as session:
         result = await session.run(
             """
             MATCH (et:EntityType {key: $key})

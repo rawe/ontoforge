@@ -17,6 +17,7 @@ from ontoforge_server.core.exceptions import (
     CascadeRequiredError,
     ConflictError,
     NotFoundError,
+    StoreError,
     ValidationError,
 )
 from ontoforge_server.runtime.tool_names import VALID_AGENT_TOOLS
@@ -1657,7 +1658,10 @@ async def upsert_saved_query(
                 parse_and_validate(step.oql, loaded.scoped)
     except NotFoundError:
         pass  # Ontology has no runtime schema loaded yet
-    except ValidationError:
+    except (ValidationError, StoreError):
+        # A storage failure loading the schema is not a problem with the
+        # submitted query: reporting it as one would answer 422 and discard
+        # the error id the adapter logged.
         raise
     except Exception as exc:
         raise ValidationError(f"Query validation failed: {exc}")

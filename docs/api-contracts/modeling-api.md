@@ -544,7 +544,7 @@ error: {
 | 404 | `RESOURCE_NOT_FOUND` | Ontology, entity type, relation type, or property not found |
 | 409 | `RESOURCE_CONFLICT` | Duplicate name/key, entity type in use by relation types |
 | 422 | `VALIDATION_ERROR` | Semantic error (invalid entity type reference, schema inconsistency) |
-| 500 | `INTERNAL_ERROR` | Unexpected server error |
+| 500 | `STORAGE_ERROR` | Storage failure; `details.errorId` correlates the response with the server log |
 
 ---
 

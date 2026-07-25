@@ -425,7 +425,7 @@ Saved-query steps are either `oql` steps (query text in the `oql` field) or `sem
 | 404 | Resource not found |
 | 409 | Conflict (duplicate name/key, referenced entity in use) |
 | 422 | Semantic validation error (schema inconsistency) |
-| 500 | Internal server error |
+| 500 | Storage failure (`STORAGE_ERROR`, with an `errorId` for log correlation) |
 
 **Validation errors** (400/422) include details:
 
@@ -512,6 +512,8 @@ The runtime module follows the same layered pattern against the same database, w
 
 The adapter maps driver errors to domain exceptions (or returns `None` for missing records) → Service raises a domain exception (e.g., `NotFoundError`, `ConflictError`) → Exception handler in `main.py` maps to HTTP response with structured error body. Driver exception types never cross the persistence port.
 
+Failures no domain exception describes — connection loss, timeouts, index state problems — become `StoreError`, so an unexpected storage failure is still answered with a structured body rather than a bare 500. Its message is deliberately empty of detail; the adapter logs the originating failure against the `errorId` the response carries, which is what ties a reported error to its server-side stack.
+
 **Domain exceptions:**
 
 | Exception | HTTP Status | Error Code |
@@ -519,6 +521,7 @@ The adapter maps driver errors to domain exceptions (or returns `None` for missi
 | `NotFoundError` | 404 | `RESOURCE_NOT_FOUND` |
 | `ConflictError` | 409 | `RESOURCE_CONFLICT` |
 | `ValidationError` | 422 | `VALIDATION_ERROR` |
+| `StoreError` | 500 | `STORAGE_ERROR` |
 
 ## 8. Local Development
 

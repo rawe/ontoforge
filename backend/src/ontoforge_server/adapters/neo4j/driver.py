@@ -6,7 +6,9 @@ Adapter-private: nothing outside ``adapters.neo4j`` may import the driver.
 import logging
 
 from neo4j import AsyncDriver, AsyncGraphDatabase
+from neo4j.exceptions import DriverError, Neo4jError
 
+from ontoforge_server.adapters.neo4j.errors import open_session, to_store_error
 from ontoforge_server.config import settings
 
 logger = logging.getLogger(__name__)
@@ -30,7 +32,7 @@ _CONSTRAINTS = [
 
 
 async def _ensure_constraints(driver: AsyncDriver) -> None:
-    async with driver.session() as session:
+    async with open_session(driver) as session:
         for constraint in _CONSTRAINTS:
             await session.run(constraint)
 
@@ -41,7 +43,10 @@ async def init_driver() -> AsyncDriver:
         settings.DB_URI,
         auth=(settings.DB_USER, settings.DB_PASSWORD),
     )
-    await _driver.verify_connectivity()
+    try:
+        await _driver.verify_connectivity()
+    except (Neo4jError, DriverError) as exc:
+        raise to_store_error(exc) from exc
     await _ensure_constraints(_driver)
     return _driver
 

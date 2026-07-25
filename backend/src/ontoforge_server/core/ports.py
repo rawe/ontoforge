@@ -18,7 +18,12 @@ Port contract (every adapter must satisfy it):
 3. Filtering, search, and sorting inputs are structured values, never query
    fragments.
 4. Driver exceptions never cross the port; adapters raise the domain
-   exceptions from ``core.exceptions``.
+   exceptions from ``core.exceptions``. Expected conditions are pre-checked
+   by the services or expressed as ``None`` returns; anything left — lost
+   connections, timeouts, index state, constraint violations the code did
+   not anticipate — is raised as ``StoreError``, whose message carries no
+   storage detail. The adapter logs what it withheld against the error's
+   ``error_id``, which is what reaches the client (decision 012).
 5. Adapters declare the type keys they cannot store — keys whose physical
    form would collide with the adapter's own storage objects — through
    ``reserved_entity_type_keys()`` and ``reserved_relation_type_keys()`` on

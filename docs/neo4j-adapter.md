@@ -11,8 +11,9 @@ The adapter package `adapters/neo4j/` implements the persistence port on Neo4j:
 - `modeling_store.py` — `Neo4jModelingStore`, the schema persistence implementation.
 - `runtime_store.py` — `Neo4jRuntimeStore`, the instance persistence implementation.
 - `modeling_queries.py` / `runtime_queries.py` — the Cypher query modules backing the two stores.
+- `errors.py` — the adapter's only door to the database (`open_session`), translating driver failures into `StoreError`.
 
-The stores own their sessions; multi-statement methods currently run per-statement auto-commit, and managed transactions are not yet used. Driver temporal types (`neo4j.time.Date`/`DateTime`) are converted to plain Python `date`/`datetime` at the port boundary, in both directions. Driver exceptions are mapped to the domain exceptions in `core/exceptions.py` and never cross the port.
+The stores own their sessions; multi-statement methods currently run per-statement auto-commit, and managed transactions are not yet used. Driver temporal types (`neo4j.time.Date`/`DateTime`) are converted to plain Python `date`/`datetime` at the port boundary, in both directions. Driver exceptions are mapped to the domain exceptions in `core/exceptions.py` and never cross the port: every session in the package is opened through `errors.open_session`, which translates any driver failure into `StoreError`, logging the original — vendor name, driver code and message — against the error id the client receives in its place.
 
 ## 2. Label and Relationship Naming
 

@@ -13,6 +13,7 @@ from typing import Any
 from neo4j import AsyncDriver
 
 from ontoforge_server.adapters.neo4j import ddl, oql_compiler, runtime_queries
+from ontoforge_server.adapters.neo4j.errors import open_session
 from ontoforge_server.adapters.neo4j.filters import (
     build_filter_clauses,
     build_search_clause,
@@ -24,20 +25,24 @@ class Neo4jRuntimeStore:
     def __init__(self, driver: AsyncDriver):
         self._driver = driver
 
+    def _session(self):
+        """Session whose driver failures surface as ``StoreError`` (rule 4)."""
+        return open_session(self._driver)
+
     # ------------------------------------------------------------------
     # Schema reading (for the runtime schema cache)
     # ------------------------------------------------------------------
 
     async def get_full_schema(self, ontology_key: str) -> dict | None:
-        async with self._driver.session() as session:
+        async with self._session() as session:
             return await runtime_queries.get_full_schema(session, ontology_key)
 
     async def get_ai_agent_configs(self, ontology_key: str) -> list[dict]:
-        async with self._driver.session() as session:
+        async with self._session() as session:
             return await runtime_queries.get_ai_agent_configs(session, ontology_key)
 
     async def get_saved_queries(self, ontology_key: str) -> list[dict]:
-        async with self._driver.session() as session:
+        async with self._session() as session:
             return await runtime_queries.get_saved_queries(session, ontology_key)
 
     # ------------------------------------------------------------------
@@ -66,7 +71,7 @@ class Neo4jRuntimeStore:
         properties: dict,
         embedding: list[float] | None = None,
     ) -> dict:
-        async with self._driver.session() as session:
+        async with self._session() as session:
             return await runtime_queries.create_entity(
                 session,
                 entity_type_key,
@@ -95,7 +100,7 @@ class Neo4jRuntimeStore:
             clause, search_params = build_search_clause(search, search_property_keys)
             where_clauses.append(clause)
             params.update(search_params)
-        async with self._driver.session() as session:
+        async with self._session() as session:
             return await runtime_queries.list_entities(
                 session,
                 ddl._to_pascal_case(entity_type_key),
@@ -109,17 +114,17 @@ class Neo4jRuntimeStore:
             )
 
     async def get_entity(self, entity_type_key: str, entity_id: str) -> dict | None:
-        async with self._driver.session() as session:
+        async with self._session() as session:
             return await runtime_queries.get_entity(
                 session, ddl._to_pascal_case(entity_type_key), entity_id
             )
 
     async def get_entity_by_id(self, entity_id: str) -> dict | None:
-        async with self._driver.session() as session:
+        async with self._session() as session:
             return await runtime_queries.get_entity_by_id(session, entity_id)
 
     async def get_entities_by_ids(self, entity_ids: list[str]) -> dict[str, dict]:
-        async with self._driver.session() as session:
+        async with self._session() as session:
             return await runtime_queries.get_entities_by_ids(session, entity_ids)
 
     async def update_entity(
@@ -131,7 +136,7 @@ class Neo4jRuntimeStore:
         embedding: list[float] | None = None,
         has_embedding_update: bool = False,
     ) -> dict | None:
-        async with self._driver.session() as session:
+        async with self._session() as session:
             return await runtime_queries.update_entity(
                 session,
                 ddl._to_pascal_case(entity_type_key),
@@ -143,7 +148,7 @@ class Neo4jRuntimeStore:
             )
 
     async def delete_entity(self, entity_type_key: str, entity_id: str) -> bool:
-        async with self._driver.session() as session:
+        async with self._session() as session:
             return await runtime_queries.delete_entity(
                 session, ddl._to_pascal_case(entity_type_key), entity_id
             )
@@ -155,7 +160,7 @@ class Neo4jRuntimeStore:
     async def get_chunk_embeddings_for_entity_property(
         self, entity_id: str, property_key: str
     ) -> dict[str, list[float]]:
-        async with self._driver.session() as session:
+        async with self._session() as session:
             return await runtime_queries.get_chunk_embeddings_for_entity_property(
                 session, entity_id, property_key
             )
@@ -163,7 +168,7 @@ class Neo4jRuntimeStore:
     async def delete_chunks_for_entity_property(
         self, entity_id: str, property_key: str
     ) -> None:
-        async with self._driver.session() as session:
+        async with self._session() as session:
             await runtime_queries.delete_chunks_for_entity_property(
                 session, entity_id, property_key
             )
@@ -175,7 +180,7 @@ class Neo4jRuntimeStore:
         property_key: str,
         chunks: list[dict],
     ) -> None:
-        async with self._driver.session() as session:
+        async with self._session() as session:
             await runtime_queries.create_document_chunks(
                 session,
                 entity_id,
@@ -190,7 +195,7 @@ class Neo4jRuntimeStore:
         query_embedding: list[float],
         limit: int,
     ) -> list[dict]:
-        async with self._driver.session() as session:
+        async with self._session() as session:
             return await runtime_queries.search_document_chunks(
                 session,
                 ddl.document_virtual_label(entity_type_key, property_key),
@@ -211,7 +216,7 @@ class Neo4jRuntimeStore:
         to_entity_id: str,
         properties: dict,
     ) -> dict:
-        async with self._driver.session() as session:
+        async with self._session() as session:
             return await runtime_queries.create_relation(
                 session,
                 relation_type_key,
@@ -243,7 +248,7 @@ class Neo4jRuntimeStore:
         if to_entity_id:
             where_clauses.append("to._id = $to_entity_id_filter")
             params["to_entity_id_filter"] = to_entity_id
-        async with self._driver.session() as session:
+        async with self._session() as session:
             return await runtime_queries.list_relations(
                 session,
                 relation_type_key.upper(),
@@ -259,7 +264,7 @@ class Neo4jRuntimeStore:
     async def get_relation(
         self, relation_type_key: str, relation_id: str
     ) -> dict | None:
-        async with self._driver.session() as session:
+        async with self._session() as session:
             return await runtime_queries.get_relation(
                 session, relation_type_key.upper(), relation_id
             )
@@ -271,7 +276,7 @@ class Neo4jRuntimeStore:
         set_properties: dict,
         remove_properties: list[str],
     ) -> dict | None:
-        async with self._driver.session() as session:
+        async with self._session() as session:
             return await runtime_queries.update_relation(
                 session,
                 relation_type_key.upper(),
@@ -281,7 +286,7 @@ class Neo4jRuntimeStore:
             )
 
     async def delete_relation(self, relation_type_key: str, relation_id: str) -> bool:
-        async with self._driver.session() as session:
+        async with self._session() as session:
             return await runtime_queries.delete_relation(
                 session, relation_type_key.upper(), relation_id
             )
@@ -298,7 +303,7 @@ class Neo4jRuntimeStore:
         limit: int,
     ) -> list[dict]:
         rel_type_filter = relation_type_key.upper() if relation_type_key else None
-        async with self._driver.session() as session:
+        async with self._session() as session:
             return await runtime_queries.get_neighbors(
                 session, entity_id, direction, rel_type_filter, limit
             )
@@ -322,7 +327,7 @@ class Neo4jRuntimeStore:
             where_clauses, filter_params = build_filter_clauses(
                 filters, property_defs, entity_type_key, node_alias="n"
             )
-        async with self._driver.session() as session:
+        async with self._session() as session:
             return await runtime_queries.semantic_search(
                 session,
                 ddl._to_pascal_case(entity_type_key),
@@ -341,7 +346,7 @@ class Neo4jRuntimeStore:
         min_score: float | None,
     ) -> list[dict]:
         """Search the shared cross-type entity vector index."""
-        async with self._driver.session() as session:
+        async with self._session() as session:
             return await runtime_queries.semantic_search(
                 session,
                 "_Entity",
@@ -359,7 +364,7 @@ class Neo4jRuntimeStore:
         limit: int,
         min_score: float | None,
     ) -> list[dict]:
-        async with self._driver.session() as session:
+        async with self._session() as session:
             return await runtime_queries.search_saved_queries(
                 session, query_embedding, ontology_key, limit, min_score
             )
@@ -375,7 +380,7 @@ class Neo4jRuntimeStore:
     ) -> tuple[list[str], list[dict]]:
         """Compile a validated OQL query to Cypher and execute it read-only."""
         cypher = oql_compiler.compile_query(validated)
-        async with self._driver.session() as session:
+        async with self._session() as session:
             return await runtime_queries.execute_cypher_read(
                 session, cypher, params=params
             )

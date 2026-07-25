@@ -7,6 +7,7 @@ anywhere else in the server.
 """
 
 from ontoforge_server.adapters.neo4j.driver import close_driver, get_driver, init_driver
+from ontoforge_server.adapters.neo4j.errors import open_session
 
 
 async def create_stores():
@@ -32,5 +33,5 @@ async def ensure_semantic_indexes(dimensions: int) -> None:
 async def wipe() -> None:
     """Delete all stored data. Test support only — never used by the app."""
     driver = await get_driver()
-    async with driver.session() as session:
+    async with open_session(driver) as session:
         await session.run("MATCH (n) DETACH DELETE n")

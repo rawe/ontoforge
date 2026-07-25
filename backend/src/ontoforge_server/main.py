@@ -22,6 +22,7 @@ from ontoforge_server.core.exceptions import (
     CascadeRequiredError,
     ConflictError,
     NotFoundError,
+    StoreError,
     ValidationError,
 )
 from ontoforge_server.mcp.modeling import modeling_mcp
@@ -109,6 +110,14 @@ def create_app() -> FastAPI:
             "CASCADE_REQUIRED",
             str(exc),
             {"affectedOntologies": exc.affected_ontologies},
+        )
+
+    @app.exception_handler(StoreError)
+    async def store_error_handler(request: Request, exc: StoreError):
+        # The adapter has already logged the originating failure against this
+        # id; the response carries the id and nothing else about the storage.
+        return _error_response(
+            500, "STORAGE_ERROR", str(exc), {"errorId": exc.error_id}
         )
 
     @app.exception_handler(json.JSONDecodeError)

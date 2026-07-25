@@ -520,6 +520,7 @@ Failures no domain exception describes — connection loss, timeouts, index stat
 |-----------|-------------|------------|
 | `NotFoundError` | 404 | `RESOURCE_NOT_FOUND` |
 | `ConflictError` | 409 | `RESOURCE_CONFLICT` |
+| `CascadeRequiredError` | 409 | `CASCADE_REQUIRED` |
 | `ValidationError` | 422 | `VALIDATION_ERROR` |
 | `StoreError` | 500 | `STORAGE_ERROR` |
 

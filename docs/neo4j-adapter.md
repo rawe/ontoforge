@@ -12,7 +12,7 @@ The adapter package `adapters/neo4j/` implements the persistence port on Neo4j:
 - `runtime_store.py` — `Neo4jRuntimeStore`, the instance persistence implementation.
 - `modeling_queries.py` / `runtime_queries.py` — the Cypher query modules backing the two stores.
 
-The stores own sessions and transactions; each port method is atomic. Driver temporal types (`neo4j.time.Date`/`DateTime`) are converted to plain Python `date`/`datetime` at the port boundary, in both directions. Driver exceptions are mapped to the domain exceptions in `core/exceptions.py` and never cross the port.
+The stores own their sessions; multi-statement methods currently run per-statement auto-commit, and managed transactions are not yet used. Driver temporal types (`neo4j.time.Date`/`DateTime`) are converted to plain Python `date`/`datetime` at the port boundary, in both directions. Driver exceptions are mapped to the domain exceptions in `core/exceptions.py` and never cross the port.
 
 ## 2. Label and Relationship Naming
 

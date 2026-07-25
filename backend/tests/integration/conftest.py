@@ -2,7 +2,8 @@
 
 This is the adapter conformance suite: it talks to a real database through
 the persistence port, selected by ``DB_BACKEND`` (plus the adapter's own
-connection settings). All tests start from a wiped database.
+connection settings). All tests start from empty data; indexes and
+constraints are created at startup and persist across wipes.
 """
 
 import httpx

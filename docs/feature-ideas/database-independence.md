@@ -1,11 +1,12 @@
 # Database Independence — Proposal
 
-> **Status: APPROVED 2026-07-19** as decisions 008–010 in
-> [../decisions.md](../decisions.md); implementation is in progress. The companion
-> document
-> [database-independence-implementation.md](database-independence-implementation.md)
-> contains the concrete implementation steps. The remainder of this document is
-> preserved unchanged as the design record.
+> **Status: Implemented 2026-07-19** as decisions 008–010 in
+> [../decisions.md](../decisions.md). The resulting architecture is documented in
+> [../architecture.md](../architecture.md) and [../neo4j-adapter.md](../neo4j-adapter.md);
+> the PostgreSQL adapter (§4.5) remains future work. The remainder of this document is
+> preserved unchanged as the design record: it describes the design as proposed, not
+> necessarily as delivered. Where the two differ, `architecture.md`, `neo4j-adapter.md`
+> and `core/ports.py` are authoritative.
 
 ## 1. Motivation and Goal
 
@@ -320,6 +321,5 @@ compiler approach makes AGE unnecessary.
 6. **D6 — Scope**: no PostgreSQL adapter implementation now; conformance test suite is
    built against the port so a second adapter can be validated later.
 
-Once approved, these become entries in `docs/decisions.md`, `architecture.md` is
-restructured per §4.4, and implementation follows the phases in
-[database-independence-implementation.md](database-independence-implementation.md).
+All six were approved on 2026-07-19 and recorded as decisions 008–010 in
+`docs/decisions.md`; `architecture.md` was restructured per §4.4.

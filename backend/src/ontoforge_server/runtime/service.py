@@ -1814,7 +1814,7 @@ def _resolve_type_key_for_value(
     var_map: dict[str, str | None],
     schema: SchemaCache,
 ) -> str | None:
-    """Figure out the schema type key for a dict returned by Neo4j."""
+    """Figure out the schema type key for a dict returned by the store."""
     # If the column is a known variable, use the pre-built mapping.
     if column in var_map:
         return var_map[column]

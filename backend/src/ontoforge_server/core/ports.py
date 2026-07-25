@@ -10,8 +10,11 @@ Port contract (every adapter must satisfy it):
 
 1. Methods accept and return plain Python/JSON-safe types; temporal values
    cross the boundary as ``datetime.date``/``datetime.datetime`` or ISO
-   strings, never as driver types.
-2. Each method owns its connection and is atomic on its own.
+   strings, never as driver types. The sole exception is the validated-query
+   object from ``core.oql``, which crosses the port opaque and is compiled
+   by the adapter.
+2. Each method owns its connection. Multi-statement methods currently run
+   per-statement auto-commit; managed transactions are not yet used.
 3. Filtering, search, and sorting inputs are structured values, never query
    fragments.
 4. Driver exceptions never cross the port; adapters raise the domain
@@ -21,6 +24,10 @@ The reference implementation and the authoritative method list is the Neo4j
 adapter: ``adapters.neo4j.modeling_store.Neo4jModelingStore`` and
 ``adapters.neo4j.runtime_store.Neo4jRuntimeStore``. A future adapter
 implements the same method surface and is registered in ``init_stores``.
+
+The port is intentionally structural rather than an explicit ``Protocol``:
+with a single adapter, formal signatures would be speculative (decision 008,
+YAGNI). A second adapter is the trigger to introduce them.
 """
 
 from typing import Any

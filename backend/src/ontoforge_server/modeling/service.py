@@ -89,6 +89,28 @@ def _invalidate_runtime_schema_cache() -> None:
     runtime_service.invalidate_loaded_schema_cache()
 
 
+def _reject_reserved_entity_type_key(store, key: str, context: str = "") -> None:
+    """Reject an entity type key the storage adapter reserves for its own objects."""
+    reserved = store.reserved_entity_type_keys()
+    if key in reserved:
+        raise ValidationError(
+            f"{context}Entity type key '{key}' is reserved for internal use and "
+            "cannot name a user-defined type. Reserved entity type keys: "
+            f"{', '.join(sorted(reserved))}"
+        )
+
+
+def _reject_reserved_relation_type_key(store, key: str, context: str = "") -> None:
+    """Reject a relation type key the storage adapter reserves for its own objects."""
+    reserved = store.reserved_relation_type_keys()
+    if key in reserved:
+        raise ValidationError(
+            f"{context}Relation type key '{key}' is reserved for internal use and "
+            "cannot name a user-defined type. Reserved relation type keys: "
+            f"{', '.join(sorted(reserved))}"
+        )
+
+
 # --- Ontology ---
 
 
@@ -160,6 +182,7 @@ async def create_entity_type(
     body: EntityTypeCreate,
     store=Depends(get_modeling_store),
 ) -> EntityTypeResponse:
+    _reject_reserved_entity_type_key(store, body.key)
     existing = await store.get_entity_type_by_key(body.key)
     if existing:
         raise ConflictError(f"Entity type with key '{body.key}' already exists")
@@ -255,6 +278,7 @@ async def create_relation_type(
     body: RelationTypeCreate,
     store=Depends(get_modeling_store),
 ) -> RelationTypeResponse:
+    _reject_reserved_relation_type_key(store, body.key)
     existing = await store.get_relation_type_by_key(body.key)
     if existing:
         raise ConflictError(f"Relation type with key '{body.key}' already exists")
@@ -1028,6 +1052,7 @@ async def import_schema(
     # Create entity types and track key->id mapping
     et_key_to_id: dict[str, str] = {}
     for et in payload.entity_types:
+        _reject_reserved_entity_type_key(store, et.key, context="Import error: ")
         existing = await store.get_entity_type_by_key(et.key)
         if existing:
             raise ConflictError(f"Entity type with key '{et.key}' already exists")
@@ -1063,6 +1088,7 @@ async def import_schema(
 
     # Create relation types
     for rt in payload.relation_types:
+        _reject_reserved_relation_type_key(store, rt.key, context="Import error: ")
         existing = await store.get_relation_type_by_key(rt.key)
         if existing:
             raise ConflictError(f"Relation type with key '{rt.key}' already exists")

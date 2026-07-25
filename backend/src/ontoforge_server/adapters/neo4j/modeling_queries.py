@@ -173,6 +173,33 @@ async def list_entity_types(session: AsyncSession) -> list[dict]:
     return [_convert_neo4j_types(record["entity_type"]) async for record in result]
 
 
+async def find_reserved_type_keys_in_use(
+    session: AsyncSession,
+    entity_type_keys: list[str],
+    relation_type_keys: list[str],
+) -> list[dict]:
+    """Find stored types whose key is reserved (created before the check existed).
+
+    The id filters keep this read correct in exactly the state it detects:
+    an instance of a collided type carries the schema label too, so an
+    unfiltered read would return counterfeit rows.
+    """
+    result = await session.run(
+        """
+        MATCH (et:EntityType)
+        WHERE et.entityTypeId IS NOT NULL AND et.key IN $entity_type_keys
+        RETURN 'entityType' AS kind, et.key AS key
+        UNION
+        MATCH (rt:RelationType)
+        WHERE rt.relationTypeId IS NOT NULL AND rt.key IN $relation_type_keys
+        RETURN 'relationType' AS kind, rt.key AS key
+        """,
+        entity_type_keys=entity_type_keys,
+        relation_type_keys=relation_type_keys,
+    )
+    return [{"kind": r["kind"], "key": r["key"]} async for r in result]
+
+
 async def get_entity_type(session: AsyncSession, entity_type_id: str) -> dict | None:
     result = await session.run(
         "MATCH (et:EntityType {entityTypeId: $entity_type_id}) RETURN et {.*} AS entity_type",

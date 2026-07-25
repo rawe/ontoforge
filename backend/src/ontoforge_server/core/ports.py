@@ -19,6 +19,12 @@ Port contract (every adapter must satisfy it):
    fragments.
 4. Driver exceptions never cross the port; adapters raise the domain
    exceptions from ``core.exceptions``.
+5. Adapters declare the type keys they cannot store — keys whose physical
+   form would collide with the adapter's own storage objects — through
+   ``reserved_entity_type_keys()`` and ``reserved_relation_type_keys()`` on
+   the modeling store. They return plain type keys, never physical names,
+   so the modeling service can reject a colliding key without knowing why
+   it collides. An adapter with no such collisions returns empty sets.
 
 The reference implementation and the authoritative method list is the Neo4j
 adapter: ``adapters.neo4j.modeling_store.Neo4jModelingStore`` and

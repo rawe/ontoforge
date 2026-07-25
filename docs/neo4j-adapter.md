@@ -48,7 +48,7 @@ All Neo4j labels use PascalCase. Relationships use UPPER_SNAKE_CASE.
 
 The underscore-prefixed `_Entity` label separates instance nodes from schema nodes. Entity type keys are converted from `snake_case` to `PascalCase` (split on underscores, capitalize segments). Relation type keys are converted to `UPPER_SNAKE_CASE`.
 
-This label conversion is the source of the reserved-name rule in `architecture.md` §4: entity type keys whose PascalCase form would collide with a schema node label (`Ontology`, `EntityType`, `RelationType`, `PropertyDefinition`) are rejected by the modeling service, and the internal names `_Entity`, `_Chunk`, and `_HAS_CHUNK` are rejected by the OQL validator.
+This name conversion is the source of the reserved-name rule in `architecture.md` §4, and this adapter derives its reserved sets directly from the schema names listed above: an entity type key whose PascalCase form is a schema node label (`ontology`, `entity_type`, `relation_type`, `property_definition`, `ai_agent_config`, `saved_query`) and a relation type key whose UPPER_SNAKE_CASE form is a schema relationship type (`includes_type`, `has_property`, `relates_from`, `relates_to`, `has_ai_agent`, `has_saved_query`) are rejected by the modeling service. The internal names `_Entity`, `_Chunk`, and `_HAS_CHUNK` need no reserved key — the type key pattern forbids a leading underscore, so no key converts to them — and are rejected by the OQL validator.
 
 ## 3. Physical Instance Representation
 

@@ -17,6 +17,27 @@ class Neo4jModelingStore:
         self._driver = driver
 
     # ------------------------------------------------------------------
+    # Reserved keys
+    # ------------------------------------------------------------------
+
+    def reserved_entity_type_keys(self) -> frozenset[str]:
+        """Entity type keys this adapter cannot store (see ``ddl``)."""
+        return ddl.reserved_entity_type_keys()
+
+    def reserved_relation_type_keys(self) -> frozenset[str]:
+        """Relation type keys this adapter cannot store (see ``ddl``)."""
+        return ddl.reserved_relation_type_keys()
+
+    async def find_reserved_type_keys_in_use(self) -> list[dict]:
+        """Stored types with a now-reserved key, as ``{"kind", "key"}`` rows."""
+        async with self._driver.session() as session:
+            return await modeling_queries.find_reserved_type_keys_in_use(
+                session,
+                sorted(ddl.reserved_entity_type_keys()),
+                sorted(ddl.reserved_relation_type_keys()),
+            )
+
+    # ------------------------------------------------------------------
     # Ontology
     # ------------------------------------------------------------------
 

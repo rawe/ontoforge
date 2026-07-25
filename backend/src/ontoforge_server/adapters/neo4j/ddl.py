@@ -2,10 +2,13 @@
 
 Adapter-private. Labels, index names, and the PascalCase/UPPER_SNAKE_CASE
 conventions are implementation details of this adapter and must not leak
-through the persistence port.
+through the persistence port. The reserved-key sets below are the one
+exception: they cross the port as plain type keys (never as labels), so the
+modeling service can reject colliding keys without knowing why they collide.
 """
 
 import logging
+import re
 from typing import Any
 
 from neo4j import AsyncDriver
@@ -17,10 +20,53 @@ logger = logging.getLogger(__name__)
 MAX_VECTOR_FILTER_VALUE_BYTES = 32766
 ENTITY_VECTOR_INDEX_NAME = "entity_embedding"
 
+#: Node labels this adapter uses to store schema objects.
+SCHEMA_LABELS = frozenset(
+    {
+        "Ontology",
+        "EntityType",
+        "RelationType",
+        "PropertyDefinition",
+        "AiAgentConfig",
+        "SavedQuery",
+    }
+)
+
+#: Relationship types this adapter uses to connect schema objects.
+SCHEMA_RELATIONSHIP_TYPES = frozenset(
+    {
+        "INCLUDES_TYPE",
+        "HAS_PROPERTY",
+        "RELATES_FROM",
+        "RELATES_TO",
+        "HAS_AI_AGENT",
+        "HAS_SAVED_QUERY",
+    }
+)
+
+# The internal names `_Entity`, `_Chunk` and `_HAS_CHUNK` need no reserved
+# key: the type key pattern forbids a leading underscore, so no key can
+# convert to them.
+
 
 def _to_pascal_case(key: str) -> str:
     """Convert a snake_case key to PascalCase."""
     return "".join(segment.capitalize() for segment in key.split("_"))
+
+
+def _to_snake_case(pascal: str) -> str:
+    """Convert a PascalCase label to the snake_case key that produces it."""
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", pascal).lower()
+
+
+def reserved_entity_type_keys() -> frozenset[str]:
+    """Entity type keys whose physical label would collide with a schema label."""
+    return frozenset(_to_snake_case(label) for label in SCHEMA_LABELS)
+
+
+def reserved_relation_type_keys() -> frozenset[str]:
+    """Relation type keys whose physical type would collide with a schema relationship."""
+    return frozenset(rel_type.lower() for rel_type in SCHEMA_RELATIONSHIP_TYPES)
 
 
 def document_virtual_label(entity_type_key: str, property_key: str) -> str:

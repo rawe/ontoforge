@@ -127,7 +127,7 @@ Two MCP server endpoints are embedded in the FastAPI application, providing AI-a
 
 ## 4. Logical Data Model
 
-A single database instance holds both ontology schemas and instance data. Multiple ontologies coexist in the same database, each with their own schema objects and instance data. Entity type keys colliding with reserved internal names are rejected by the modeling service, so user-defined types can never clash with the system's own storage structures. The physical representation of this model — labels, relationship storage, constraints, indexes — is the Neo4j adapter's concern and is documented in `neo4j-adapter.md`.
+A single database instance holds both ontology schemas and instance data. Multiple ontologies coexist in the same database, each with their own schema objects and instance data. Entity and relation type keys colliding with reserved internal names are rejected by the modeling service, so user-defined types can never clash with the system's own storage structures. The physical representation of this model — labels, relationship storage, constraints, indexes — is the Neo4j adapter's concern and is documented in `neo4j-adapter.md`.
 
 ### 4.1 Schema Representation
 
@@ -292,7 +292,9 @@ Each relation instance connects exactly two entity instances and is typed by its
 
 #### Reserved Names
 
-Entity type keys that would collide with reserved internal names are rejected by the modeling service. This keeps user-defined instance data structurally separate from the system's schema objects and internal storage structures. The concrete reserved set is derived from the adapter's physical naming (see `neo4j-adapter.md`).
+Entity and relation type keys that would collide with reserved internal names are rejected by the modeling service, on every write path — type creation and schema import alike. This keeps user-defined instance data structurally separate from the system's schema objects and internal storage structures. The concrete reserved set is derived from the adapter's physical naming and reaches the modeling service through the persistence port as plain type keys, so the service rejects a colliding key without knowing why it collides; an adapter with no such collisions reserves nothing (see `neo4j-adapter.md`).
+
+Types created before the check existed are left in place — renaming a type key is destructive and is the operator's decision — but the server names each one in a startup warning, because their only other symptom is a failing modeling read once instance data exists under them.
 
 ### 4.3 Ontology Scoping
 

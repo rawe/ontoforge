@@ -1,4 +1,5 @@
 import json
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -14,6 +15,7 @@ from ontoforge_server.core.embedding import (
 from ontoforge_server.core.ports import (
     close_stores,
     ensure_semantic_indexes,
+    get_modeling_store,
     init_stores,
 )
 from ontoforge_server.core.exceptions import (
@@ -31,9 +33,33 @@ from ontoforge_server.runtime.router import global_router as runtime_global_rout
 from ontoforge_server.runtime.router import router as runtime_router
 
 
+logger = logging.getLogger(__name__)
+
+
+async def _warn_about_reserved_type_keys_in_use() -> None:
+    """Name any stored type whose key is now reserved.
+
+    Such types can only predate the reserved-key check. They are left in
+    place — renaming a type key is destructive and is the operator's call —
+    but without this warning their only symptom is an unexplained 500 from
+    the modeling API once instance data exists under them.
+    """
+    collisions = await get_modeling_store().find_reserved_type_keys_in_use()
+    for collision in collisions:
+        logger.warning(
+            "Stored %s '%s' uses a reserved key. It predates the reserved-key "
+            "check and can corrupt schema reads once instance data exists "
+            "under it. Export its data, delete the type, and recreate it "
+            "under a different key.",
+            collision["kind"],
+            collision["key"],
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_stores()
+    await _warn_about_reserved_type_keys_in_use()
     await init_embedding_provider()
     init_ai_model()
     provider = get_embedding_provider()

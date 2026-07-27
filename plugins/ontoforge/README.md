@@ -29,7 +29,7 @@ Bootstrap a project with OntoForge: Docker Compose, environment variables, and M
 
 When invoked, the skill interactively gathers requirements and generates:
 
-1. **`docker-compose.yml`** — Neo4j, OntoForge server, and OntoForge UI, with optional Ollama for local embeddings.
+1. **`docker-compose.yml`** — Neo4j (the database used by OntoForge's current storage adapter), OntoForge server, and OntoForge UI, with optional Ollama for local embeddings.
 2. **`.mcp.json`** — Claude Code MCP configuration pointing to the OntoForge modeling and runtime servers.
 3. **`.env`** (optional) — Environment variables for secrets and local overrides.
 

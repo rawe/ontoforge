@@ -1,5 +1,5 @@
 /**
- * Pure helpers for Cypher / saved-query results: entity/relation guards,
+ * Pure helpers for OQL / saved-query results: entity/relation guards,
  * `$param` detection, CSV export and graph derivation. No React.
  */
 
@@ -29,7 +29,7 @@ export function formatQueryError(err: unknown): string {
 
 /**
  * Relation object as it appears in query results. NOTE: unlike the REST
- * relation endpoints, Cypher results do NOT include `fromEntityId` /
+ * relation endpoints, OQL query results do NOT include `fromEntityId` /
  * `toEntityId` — treat endpoints as optional.
  */
 export interface QueryRelationObject {
@@ -71,10 +71,10 @@ export function relationUserProps(relation: QueryRelationObject): Record<string,
 
 /* --------------------------------- $params ---------------------------------- */
 
-/** Unique `$param` tokens in a Cypher string, in order of appearance. */
-export function detectParams(cypher: string): string[] {
+/** Unique `$param` tokens in a query string, in order of appearance. */
+export function detectParams(query: string): string[] {
   const names: string[] = []
-  for (const match of cypher.matchAll(/\$([a-zA-Z_][a-zA-Z0-9_]*)/g)) {
+  for (const match of query.matchAll(/\$([a-zA-Z_][a-zA-Z0-9_]*)/g)) {
     const name = match[1]!
     if (!names.includes(name)) names.push(name)
   }
@@ -128,7 +128,7 @@ export function hasEntityResults(result: QueryResult): boolean {
 
 /**
  * Derive a graph from result rows: nodes are the unique entities, edges come
- * from relation objects. Cypher results carry no endpoint ids on relations,
+ * from relation objects. OQL query results carry no endpoint ids on relations,
  * so endpoints are resolved per row — explicit `fromEntityId`/`toEntityId`
  * when present, otherwise the schema's from/to entity types matched against
  * the entities of the same row. Ambiguous or unresolvable relations are

@@ -96,7 +96,7 @@ uv run pytest -m integration -v
 
 - Place in `tests/` subdirectories matching the module structure (`modeling/`, `runtime/`, etc.)
 - Use the `mock_driver` and `client` fixtures from `tests/conftest.py`
-- Mock repository calls — never hit real Neo4j
+- Mock the adapter query modules (`adapters.neo4j.modeling_queries` / `runtime_queries`) — never hit a real database
 - See `tests/runtime/conftest.py` for schema fixtures
 
 ### Integration Tests

@@ -148,10 +148,10 @@ function RunPanel({
 /* ----------------------------------- cards ----------------------------------- */
 
 function stepBadges(query: SavedQuery) {
-  const cypherCount = query.steps.filter((s) => s.type === 'cypher').length
+  const queryCount = query.steps.filter((s) => s.type === 'oql').length
   const semanticCount = query.steps.filter((s) => s.type === 'semantic_search').length
   const badges: string[] = []
-  if (cypherCount > 0) badges.push(`${cypherCount} cypher`)
+  if (queryCount > 0) badges.push(`${queryCount} query`)
   if (semanticCount > 0) badges.push(`${semanticCount} semantic`)
   return badges
 }
@@ -223,7 +223,7 @@ export function LibraryTab({
         <EmptyState
           icon={BookMarked}
           title="No saved queries yet"
-          description="Save a Cypher from the console with “Save as query”, or build multi-step pipelines in the Studio."
+          description="Save a query from the console with “Save as query”, or build multi-step pipelines in the Studio."
           action={
             <div className="flex items-center gap-2">
               <Button onClick={onOpenConsole}>

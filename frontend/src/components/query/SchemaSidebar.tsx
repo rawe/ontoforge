@@ -74,7 +74,7 @@ interface SchemaSidebarProps {
 }
 
 /**
- * Schema browser for the Cypher console: entity types (expandable to their
+ * Schema browser for the query console: entity types (expandable to their
  * properties) and relation types (from → to). Clicking a type inserts a
  * ready-to-run MATCH snippet at the editor cursor.
  */

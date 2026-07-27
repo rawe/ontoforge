@@ -221,12 +221,13 @@ export const semanticSearch = (
     `${base(ontologyKey)}/search/semantic${buildQuery({ ...params, min_score: minScore })}`,
   )
 
-/* ---------------------------------- cypher ----------------------------------- */
+/* ----------------------------------- query ----------------------------------- */
 
-export const cypherQuery = (ontologyKey: string, cypher: string) =>
+/** Run a read-only OQL query against the ontology. */
+export const runQuery = (ontologyKey: string, query: string) =>
   request<QueryResult>(`${base(ontologyKey)}/query`, {
     method: 'POST',
-    body: { cypher },
+    body: { query },
   })
 
 /* -------------------------------- saved queries ------------------------------ */

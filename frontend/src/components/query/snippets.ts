@@ -1,12 +1,12 @@
 /**
- * Cypher snippet builders for the schema sidebar and the editor insert
+ * OQL snippet builders for the schema sidebar and the editor insert
  * helper (works on the CodeMirror view behind `ReactCodeMirrorRef`).
  */
 
 import type { ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import type { SchemaRelationType } from '@/api/types'
 
-export const EXAMPLE_CYPHER =
+export const EXAMPLE_QUERY =
   'MATCH (p:person)-[r:works_for]->(c:company) RETURN p, r, c LIMIT 25'
 
 export const entitySnippet = (typeKey: string) =>

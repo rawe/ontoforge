@@ -11,7 +11,7 @@ import pytest
 
 from ontoforge_server.config import settings
 from ontoforge_server.core.ai import init_ai_model
-from tests.integration.conftest import check_neo4j, check_ollama_model
+from tests.integration.conftest import check_database, check_ollama_model
 
 # Model used for AI integration tests — must support tool calling
 AI_MODEL = "qwen3:14b"
@@ -22,7 +22,7 @@ pytestmark = pytest.mark.integration
 @pytest.fixture(scope="module")
 async def services_available():
     """Skip the entire module if Neo4j or Ollama aren't available."""
-    if not await check_neo4j():
+    if not await check_database():
         pytest.skip("Neo4j not available")
     if not await check_ollama_model(AI_MODEL):
         pytest.skip(f"Ollama not available or model '{AI_MODEL}' not pulled")
@@ -128,7 +128,7 @@ async def test_features_endpoint_shows_ai_enabled(integration_client):
 
 
 # ---------------------------------------------------------------------------
-# AI Query (NL → Cypher)
+# AI Query (NL → OQL)
 # ---------------------------------------------------------------------------
 
 
@@ -143,16 +143,17 @@ async def test_ai_query_returns_answer(integration_client, test_ontology):
     assert len(data["answer"]) > 0
 
 
-async def test_ai_query_returns_cypher_and_results(integration_client, test_ontology):
+async def test_ai_query_returns_query_and_results(integration_client, test_ontology):
     resp = await integration_client.post("/api/runtime/ai_test/ai/query", json={
         "question": "List all companies",
     })
     assert resp.status_code == 200
     data = resp.json()
-    # Cypher should be captured from tool call
-    if data["cypher"] is not None:
-        assert isinstance(data["cypher"], str)
-    # Results should contain Cypher execution output
+    # The executed query should be captured from the tool call, and the
+    # deprecated "cypher" field must mirror it during the deprecation window.
+    if data["query"] is not None:
+        assert isinstance(data["query"], str)
+    assert data["cypher"] == data["query"]
     if data["results"] is not None:
         assert "columns" in data["results"]
         assert "results" in data["results"]

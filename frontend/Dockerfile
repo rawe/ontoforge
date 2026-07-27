@@ -13,7 +13,7 @@ ARG GIT_COMMIT=unknown
 ARG BUILD_DATE=unknown
 
 LABEL org.opencontainers.image.title="OntoForge UI" \
-      org.opencontainers.image.description="Neo4j-native ontology studio frontend" \
+      org.opencontainers.image.description="Graph-native ontology studio frontend" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${GIT_COMMIT}" \
       org.opencontainers.image.created="${BUILD_DATE}" \

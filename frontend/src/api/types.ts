@@ -25,7 +25,7 @@ export type DataType =
 
 /**
  * Document property values never appear inline in entity reads — every read
- * (list, detail, neighbors, search, Cypher) replaces them with this stub.
+ * (list, detail, neighbors, search, OQL query) replaces them with this stub.
  * Full content is fetched via the document endpoint (`getDocument`).
  */
 export interface DocumentStub {
@@ -70,9 +70,11 @@ export interface SchemaRelationType {
 
 export interface SavedQueryStep {
   name: string
-  type: 'cypher' | 'semantic_search'
-  cypher?: string
+  type: 'oql' | 'semantic_search'
+  /** OQL text — `oql` steps only. */
+  oql?: string
   entityTypeKey?: string
+  /** Semantic-search text — `semantic_search` steps only. */
   query?: string
   limit?: number
   minScore?: number
@@ -208,7 +210,8 @@ export interface QueryResult {
 
 export interface AiQueryResponse {
   answer: string
-  cypher: string | null
+  /** The generated OQL query, when the AI ran one. */
+  query: string | null
   results: QueryResult | null
 }
 
@@ -360,7 +363,7 @@ export const AGENT_TOOL_NAMES = [
   'list_relations',
   'get_neighbors',
   'semantic_search',
-  'execute_cypher_query',
+  'execute_query',
   'list_saved_queries',
   'run_saved_query',
 ] as const

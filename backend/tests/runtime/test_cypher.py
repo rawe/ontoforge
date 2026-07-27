@@ -1,18 +1,21 @@
-"""Tests for the Cypher query validation, rewriting, and endpoint."""
+"""Tests for OQL parsing/validation (core.oql), the Neo4j compiler, and the endpoint."""
 
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from ontoforge_server.core.exceptions import ValidationError
-from ontoforge_server.runtime.cypher import (
+from ontoforge_server.adapters.neo4j.oql_compiler import (
+    compile_query,
+    validate_and_compile,
+)
+from ontoforge_server.core.oql import (
     SYSTEM_PROPERTIES,
+    ValidatedQuery,
     _analyze,
     _parse,
-    _rewrite,
     _validate,
     get_return_variables,
-    validate_and_rewrite,
 )
 from ontoforge_server.runtime.service import (
     EntityTypeDef,
@@ -92,7 +95,7 @@ class TestParsing:
         assert tree is not None
 
     def test_syntax_error_raises(self):
-        with pytest.raises(ValidationError, match="Invalid Cypher syntax"):
+        with pytest.raises(ValidationError, match="Invalid query syntax"):
             _parse("MATCH (n:person RETURN")
 
 
@@ -260,7 +263,7 @@ class TestRewriting:
     def test_rewrites_entity_labels(self):
         ts, tree = _parse("MATCH (p:person) RETURN p")
         analysis = _analyze(tree)
-        result = _rewrite(ts, analysis)
+        result = compile_query(ValidatedQuery(text="", token_stream=ts, analysis=analysis))
         assert ":Person)" in result
         assert ":person)" not in result
 
@@ -269,7 +272,7 @@ class TestRewriting:
             "MATCH (p:person)-[r:works_for]->(c:company) RETURN p, c"
         )
         analysis = _analyze(tree)
-        result = _rewrite(ts, analysis)
+        result = compile_query(ValidatedQuery(text="", token_stream=ts, analysis=analysis))
         assert ":WORKS_FOR]" in result
         assert ":Person)" in result
         assert ":Company)" in result
@@ -278,7 +281,7 @@ class TestRewriting:
         query = "MATCH (p:person) WHERE p.name = 'Alice' RETURN p LIMIT 10"
         ts, tree = _parse(query)
         analysis = _analyze(tree)
-        result = _rewrite(ts, analysis)
+        result = compile_query(ValidatedQuery(text="", token_stream=ts, analysis=analysis))
         assert "WHERE p.name = 'Alice'" in result
         assert "LIMIT 10" in result
 
@@ -294,7 +297,7 @@ class TestRewriting:
             },
             relation_types={},
         )
-        result = validate_and_rewrite(
+        result = validate_and_compile(
             "MATCH (r:research_paper) RETURN r", schema
         )
         assert ":ResearchPaper)" in result
@@ -307,7 +310,7 @@ class TestRewriting:
 
 class TestValidateAndRewrite:
     def test_full_pipeline(self):
-        result = validate_and_rewrite(
+        result = validate_and_compile(
             "MATCH (p:person)-[r:works_for]->(c:company) "
             "WHERE p.name = 'Alice' RETURN p, r, c LIMIT 10",
             _schema(),
@@ -318,14 +321,14 @@ class TestValidateAndRewrite:
 
     def test_raises_on_write(self):
         with pytest.raises(ValidationError):
-            validate_and_rewrite("CREATE (n:person {name: 'Bob'})", _schema())
+            validate_and_compile("CREATE (n:person {name: 'Bob'})", _schema())
 
     def test_raises_on_unknown_label(self):
         with pytest.raises(ValidationError):
-            validate_and_rewrite("MATCH (n:animal) RETURN n", _schema())
+            validate_and_compile("MATCH (n:animal) RETURN n", _schema())
 
     def test_optional_match_supported(self):
-        result = validate_and_rewrite(
+        result = validate_and_compile(
             "MATCH (p:person) OPTIONAL MATCH (p)-[r:works_for]->(c:company) "
             "RETURN p, r, c",
             _schema(),
@@ -334,7 +337,7 @@ class TestValidateAndRewrite:
         assert ":Person)" in result
 
     def test_with_clause_supported(self):
-        result = validate_and_rewrite(
+        result = validate_and_compile(
             "MATCH (p:person) WITH p MATCH (p)-[r:works_for]->(c:company) "
             "RETURN p, c",
             _schema(),
@@ -342,7 +345,7 @@ class TestValidateAndRewrite:
         assert "WITH p" in result
 
     def test_order_by_limit_skip(self):
-        result = validate_and_rewrite(
+        result = validate_and_compile(
             "MATCH (p:person) RETURN p ORDER BY p.name SKIP 5 LIMIT 10",
             _schema(),
         )
@@ -371,7 +374,7 @@ class TestGetReturnVariables:
 # REST endpoint (via HTTP client)
 # ---------------------------------------------------------------------------
 
-CYPHER_REPO = "ontoforge_server.runtime.service.repository"
+CYPHER_REPO = "ontoforge_server.adapters.neo4j.runtime_queries"
 
 
 @pytest.mark.asyncio
@@ -389,7 +392,7 @@ async def test_query_endpoint_success(client, unscoped_schema):
     ):
         resp = await client.post(
             "/api/runtime/full_ontology/query",
-            json={"cypher": "MATCH (p:person) RETURN p"},
+            json={"query": "MATCH (p:person) RETURN p"},
         )
 
     assert resp.status_code == 200
@@ -397,6 +400,27 @@ async def test_query_endpoint_success(client, unscoped_schema):
     assert body["columns"] == ["p"]
     assert len(body["results"]) == 1
     assert body["results"][0]["p"]["name"] == "Alice"
+
+
+async def test_query_endpoint_accepts_deprecated_cypher_field(client, unscoped_schema):
+    """The legacy request field "cypher" is a deprecated alias for "query"."""
+    raw_entity = make_entity(name="Alice", age=30)
+    mock_execute = AsyncMock(
+        return_value=(["p"], [{"p": raw_entity}])
+    )
+
+    with (
+        patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=unscoped_schema),
+        patch(f"{CYPHER_REPO}.execute_cypher_read", mock_execute),
+        patch(EMBEDDING, return_value=None),
+    ):
+        resp = await client.post(
+            "/api/runtime/full_ontology/query",
+            json={"cypher": "MATCH (p:person) RETURN p"},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["columns"] == ["p"]
 
 
 @pytest.mark.asyncio
@@ -408,7 +432,7 @@ async def test_query_endpoint_rejects_write(client, unscoped_schema):
     ):
         resp = await client.post(
             "/api/runtime/full_ontology/query",
-            json={"cypher": "CREATE (n:person {name: 'Bob'})"},
+            json={"query": "CREATE (n:person {name: 'Bob'})"},
         )
 
     assert resp.status_code == 422
@@ -423,7 +447,7 @@ async def test_query_endpoint_rejects_unknown_type(client, unscoped_schema):
     ):
         resp = await client.post(
             "/api/runtime/full_ontology/query",
-            json={"cypher": "MATCH (n:animal) RETURN n"},
+            json={"query": "MATCH (n:animal) RETURN n"},
         )
 
     assert resp.status_code == 422
@@ -445,7 +469,7 @@ async def test_query_endpoint_scoped_filters_properties(client, scoped_schema):
     ):
         resp = await client.post(
             "/api/runtime/hr_view/query",
-            json={"cypher": "MATCH (p:person) RETURN p"},
+            json={"query": "MATCH (p:person) RETURN p"},
         )
 
     assert resp.status_code == 200
@@ -508,7 +532,7 @@ async def test_query_endpoint_stubs_document_values_in_nodes(client):
     ):
         resp = await client.post(
             "/api/runtime/docs_view/query",
-            json={"cypher": "MATCH (p:person) RETURN p"},
+            json={"query": "MATCH (p:person) RETURN p"},
         )
 
     assert resp.status_code == 200
@@ -534,7 +558,7 @@ async def test_query_endpoint_stubs_scalar_document_projection(client):
     ):
         resp = await client.post(
             "/api/runtime/docs_view/query",
-            json={"cypher": "MATCH (p:person) RETURN p.bio, p.name"},
+            json={"query": "MATCH (p:person) RETURN p.bio, p.name"},
         )
 
     assert resp.status_code == 200

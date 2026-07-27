@@ -12,7 +12,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from neo4j import AsyncDriver
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext, Tool
 
@@ -21,7 +20,7 @@ from ontoforge_server.core.exceptions import NotFoundError, ValidationError
 from ontoforge_server.runtime import service
 from ontoforge_server.runtime.schemas import RelationInstanceCreate
 from ontoforge_server.runtime.tool_names import (
-    TOOL_EXECUTE_CYPHER,
+    TOOL_EXECUTE_QUERY,
     TOOL_GET_ENTITY,
     TOOL_GET_NEIGHBORS,
     TOOL_GET_SCHEMA,
@@ -31,6 +30,7 @@ from ontoforge_server.runtime.tool_names import (
     TOOL_RUN_SAVED_QUERY,
     TOOL_SEARCH_SAVED_QUERIES,
     TOOL_SEMANTIC_SEARCH,
+    normalize_tool_name,
 )
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 # Tool allowlists — controls which tools each AI feature can use
 # ---------------------------------------------------------------------------
 
-QUERY_TOOLS = [TOOL_EXECUTE_CYPHER]
+QUERY_TOOLS = [TOOL_EXECUTE_QUERY]
 EXTRACT_TOOLS: list[str] = []  # schema context only
 CHAT_TOOLS = [
     TOOL_GET_SCHEMA,
@@ -49,7 +49,7 @@ CHAT_TOOLS = [
     TOOL_LIST_RELATIONS,
     TOOL_GET_NEIGHBORS,
     TOOL_SEMANTIC_SEARCH,
-    TOOL_EXECUTE_CYPHER,
+    TOOL_EXECUTE_QUERY,
     TOOL_LIST_SAVED_QUERIES,
     TOOL_RUN_SAVED_QUERY,
     TOOL_SEARCH_SAVED_QUERIES,
@@ -64,7 +64,7 @@ CHAT_TOOLS = [
 @dataclass
 class AiDeps:
     ontology_key: str
-    driver: AsyncDriver
+    store: Any
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +124,7 @@ def _make_tool(fn: Callable, name: str, description: str) -> Tool:
 
 
 async def tool_get_schema(ctx: RunContext[AiDeps]) -> str:
-    loaded = await service._load_schema(ctx.deps.ontology_key, ctx.deps.driver)
+    loaded = await service._load_schema(ctx.deps.ontology_key, ctx.deps.store)
     return _describe_schema(loaded.scoped)
 
 
@@ -138,7 +138,7 @@ async def tool_list_entities(
     result = await service.list_entities(
         ctx.deps.ontology_key, entity_type_key,
         min(limit, 50), 0, "_createdAt", "asc",
-        search, filters or {}, ctx.deps.driver,
+        search, filters or {}, ctx.deps.store,
     )
     return result.model_dump()
 
@@ -149,7 +149,7 @@ async def tool_get_entity(
     entity_id: str,
 ) -> dict:
     return await service.get_entity(
-        ctx.deps.ontology_key, entity_type_key, entity_id, ctx.deps.driver,
+        ctx.deps.ontology_key, entity_type_key, entity_id, ctx.deps.store,
     )
 
 
@@ -161,7 +161,7 @@ async def tool_list_relations(
     result = await service.list_relations(
         ctx.deps.ontology_key, relation_type_key,
         min(limit, 50), 0, "_createdAt", "asc",
-        None, None, {}, ctx.deps.driver,
+        None, None, {}, ctx.deps.store,
     )
     return result.model_dump()
 
@@ -175,7 +175,7 @@ async def tool_get_neighbors(
 ) -> dict:
     result = await service.get_neighbors(
         ctx.deps.ontology_key, entity_type_key, entity_id,
-        direction, None, min(limit, 50), ctx.deps.driver,
+        direction, None, min(limit, 50), ctx.deps.store,
     )
     return result.model_dump()
 
@@ -188,21 +188,21 @@ async def tool_semantic_search(
 ) -> dict:
     return await service.semantic_search(
         ctx.deps.ontology_key, query, entity_type_key,
-        min(limit, 20), None, ctx.deps.driver,
+        min(limit, 20), None, ctx.deps.store,
     )
 
 
-async def tool_execute_cypher_query(
+async def tool_execute_query(
     ctx: RunContext[AiDeps],
-    cypher: str,
+    query: str,
 ) -> dict:
-    return await service.execute_cypher_query(
-        ctx.deps.ontology_key, cypher, ctx.deps.driver,
+    return await service.execute_query(
+        ctx.deps.ontology_key, query, ctx.deps.store,
     )
 
 
 async def tool_list_saved_queries(ctx: RunContext[AiDeps]) -> list[dict]:
-    loaded = await service._load_schema(ctx.deps.ontology_key, ctx.deps.driver)
+    loaded = await service._load_schema(ctx.deps.ontology_key, ctx.deps.store)
     return [
         {
             "key": sq.key,
@@ -223,7 +223,7 @@ async def tool_run_saved_query(
     params: dict | None = None,
 ) -> dict:
     return await service.execute_saved_query(
-        ctx.deps.ontology_key, query_key, params or {}, ctx.deps.driver,
+        ctx.deps.ontology_key, query_key, params or {}, ctx.deps.store,
     )
 
 
@@ -232,7 +232,7 @@ async def tool_search_saved_queries(
     query: str,
 ) -> list[dict]:
     return await service.search_saved_queries(
-        ctx.deps.ontology_key, query, 3, 0.7, ctx.deps.driver,
+        ctx.deps.ontology_key, query, 3, 0.7, ctx.deps.store,
     )
 
 
@@ -280,9 +280,10 @@ _AGENT_TOOL_DEFS: list[tuple[Callable, str, str]] = [
         "Best for finding entities when you don't know exact property values.",
     ),
     (
-        tool_execute_cypher_query,
-        TOOL_EXECUTE_CYPHER,
-        "Execute a read-only Cypher query against the knowledge graph. "
+        tool_execute_query,
+        TOOL_EXECUTE_QUERY,
+        "Execute a read-only OQL query (openCypher-style graph pattern syntax) "
+        "against the knowledge graph. "
         "Use entity type keys (snake_case) as node labels and relation type keys "
         "as relationship types. ALL node patterns MUST have a label. Only "
         "MATCH/RETURN — no writes, no CALL. Use CONTAINS for substring matching "
@@ -352,18 +353,19 @@ def _create_agent(
 
 
 # ---------------------------------------------------------------------------
-# Feature: NL → Cypher Query
+# Feature: NL → OQL Query
 # ---------------------------------------------------------------------------
 
-_QUERY_SYSTEM_PROMPT = """You are a Cypher query assistant for a Neo4j knowledge graph.
-You translate natural language questions into Cypher queries.
+_QUERY_SYSTEM_PROMPT = """You are a query assistant for a knowledge graph.
+You translate natural language questions into read-only OQL queries \
+(openCypher-style graph pattern syntax).
 
 RULES:
 - Use entity type keys (snake_case) as node labels: e.g., person, company
 - Use relation type keys (snake_case) as relationship types: e.g., works_for
 - ALL node patterns MUST have a label — never use bare (n) patterns
 - Only generate read queries (MATCH/RETURN) — no writes
-- Use the execute_cypher_query tool to run your query
+- Use the execute_query tool to run your query
 - After getting results, provide a clear natural language answer
 
 {schema}
@@ -373,40 +375,42 @@ RULES:
 async def ai_query(
     ontology_key: str,
     question: str,
-    driver: AsyncDriver,
+    store: Any,
 ) -> dict:
-    """Translate a natural language question to Cypher, execute it, and summarize."""
-    loaded = await service._load_schema(ontology_key, driver)
+    """Translate a natural language question to OQL, execute it, and summarize."""
+    loaded = await service._load_schema(ontology_key, store)
     schema_desc = _describe_schema(loaded.scoped)
 
     agent = _create_agent(
         system_prompt=_QUERY_SYSTEM_PROMPT.format(schema=schema_desc),
         tool_names=QUERY_TOOLS,
     )
-    deps = AiDeps(ontology_key=ontology_key, driver=driver)
+    deps = AiDeps(ontology_key=ontology_key, store=store)
     result = await agent.run(question, deps=deps)
 
-    # Extract the Cypher query and results from tool call messages
-    cypher_used = None
-    cypher_results = None
+    # Extract the executed query and results from tool call messages
+    query_used = None
+    query_results = None
     for msg in result.new_messages():
         for part in getattr(msg, "parts", []):
             tool_name = getattr(part, "tool_name", None)
-            if tool_name and TOOL_EXECUTE_CYPHER in tool_name:
+            if tool_name and TOOL_EXECUTE_QUERY in tool_name:
                 # ToolCallPart: args is JSON string, use args_as_dict()
                 args_fn = getattr(part, "args_as_dict", None)
                 if args_fn:
                     args_dict = args_fn()
-                    cypher_used = args_dict.get("cypher")
+                    query_used = args_dict.get("query")
                 # ToolReturnPart: content is the result dict
                 content = getattr(part, "content", None)
                 if isinstance(content, dict):
-                    cypher_results = content
+                    query_results = content
 
     return {
         "answer": result.output,
-        "cypher": cypher_used,
-        "results": cypher_results,
+        "query": query_used,
+        # Deprecated mirror of "query"; removed after the deprecation window.
+        "cypher": query_used,
+        "results": query_results,
     }
 
 
@@ -458,12 +462,12 @@ RULES:
 async def ai_extract(
     ontology_key: str,
     text: str,
-    driver: AsyncDriver,
+    store: Any,
     entity_types: list[str] | None = None,
     create: bool = False,
 ) -> dict:
     """Extract entities and relations from text using the ontology schema."""
-    loaded = await service._load_schema(ontology_key, driver)
+    loaded = await service._load_schema(ontology_key, store)
     schema_desc = _describe_schema(loaded.scoped)
 
     prompt_extra = ""
@@ -475,7 +479,7 @@ async def ai_extract(
         tool_names=EXTRACT_TOOLS,
         result_type=ExtractionResult,
     )
-    deps = AiDeps(ontology_key=ontology_key, driver=driver)
+    deps = AiDeps(ontology_key=ontology_key, store=store)
     result = await agent.run(
         f"Extract entities and relations from this text:\n\n{text}",
         deps=deps,
@@ -492,7 +496,7 @@ async def ai_extract(
         created_entities: dict[str, dict] = {}
         for entity in extraction.entities:
             created = await service.create_entity(
-                ontology_key, entity.entity_type_key, entity.properties, driver,
+                ontology_key, entity.entity_type_key, entity.properties, store,
             )
             match_key = f"{entity.entity_type_key}:{_match_key(entity.properties)}"
             created_entities[match_key] = created
@@ -509,7 +513,7 @@ async def ai_extract(
                     **relation.properties,
                 )
                 await service.create_relation(
-                    ontology_key, relation.relation_type_key, body, driver,
+                    ontology_key, relation.relation_type_key, body, store,
                 )
         response["created"] = True
 
@@ -532,10 +536,10 @@ SCHEMA:
 {schema}
 
 STRATEGY — use the exact keys from the schema as tool arguments (e.g. entity_type_key="person"):
-1. For questions about connections or relationships, use execute_cypher_query with a
+1. For questions about connections or relationships, use execute_query with a
    relationship pattern. Example: "What does Lena do?" →
    MATCH (p:person)-[r:works_for]->(c:company) WHERE p.name CONTAINS 'Lena' RETURN p.name, c.name
-2. For counting, filtering, or combining conditions, use execute_cypher_query.
+2. For counting, filtering, or combining conditions, use execute_query.
 3. For fuzzy or "find something like..." questions, use semantic_search.
 4. For exploring an entity's connections when you have its _id, use get_neighbors.
 5. For browsing entities of a type, use list_entities.
@@ -549,12 +553,12 @@ async def run_agent_chat(
     agent_config: AgentConfig,
     ontology_key: str,
     message: str,
-    driver: AsyncDriver,
+    store: Any,
     history: list[dict] | None = None,
     include_tool_calls: bool = False,
 ) -> dict:
     """Unified engine function for agent-powered chat."""
-    loaded = await service._load_schema(ontology_key, driver)
+    loaded = await service._load_schema(ontology_key, store)
     schema_desc = _describe_schema(loaded.scoped)
 
     # Resolve system prompt
@@ -568,8 +572,10 @@ async def run_agent_chat(
     _embedding_tools = {TOOL_SEMANTIC_SEARCH, TOOL_SEARCH_SAVED_QUERIES}
 
     if agent_config.tools is not None:
+        # Stored agent configs may still use deprecated tool names.
+        normalized = [normalize_tool_name(t) for t in agent_config.tools]
         available_tools = [
-            t for t in agent_config.tools
+            t for t in normalized
             if t in ALL_TOOLS and (t not in _embedding_tools or get_embedding_provider() is not None)
         ]
     else:
@@ -582,7 +588,7 @@ async def run_agent_chat(
         system_prompt=system_prompt,
         tool_names=available_tools,
     )
-    deps = AiDeps(ontology_key=ontology_key, driver=driver)
+    deps = AiDeps(ontology_key=ontology_key, store=store)
 
     # Build message history for multi-turn
     message_history = None
@@ -631,13 +637,13 @@ async def run_agent_chat(
 async def ai_chat(
     ontology_key: str,
     message: str,
-    driver: AsyncDriver,
+    store: Any,
     history: list[dict] | None = None,
     include_tool_calls: bool = False,
 ) -> dict:
     """Chat with the knowledge graph using AI and tools (default agent)."""
     return await run_agent_chat(
-        DEFAULT_AGENT_CONFIG, ontology_key, message, driver,
+        DEFAULT_AGENT_CONFIG, ontology_key, message, store,
         history=history, include_tool_calls=include_tool_calls,
     )
 
@@ -646,27 +652,27 @@ async def ai_agent_chat(
     ontology_key: str,
     agent_key: str,
     message: str,
-    driver: AsyncDriver,
+    store: Any,
     history: list[dict] | None = None,
     include_tool_calls: bool = False,
 ) -> dict:
     """Chat using a configured agent."""
-    loaded = await service._load_schema(ontology_key, driver)
+    loaded = await service._load_schema(ontology_key, store)
     config = loaded.agent_configs.get(agent_key)
     if not config:
         raise NotFoundError(f"AI agent '{agent_key}' not found")
     return await run_agent_chat(
-        config, ontology_key, message, driver,
+        config, ontology_key, message, store,
         history=history, include_tool_calls=include_tool_calls,
     )
 
 
 async def list_runtime_agents(
     ontology_key: str,
-    driver: AsyncDriver,
+    store: Any,
 ) -> list[dict]:
     """List all agents (default + configured) for an ontology."""
-    loaded = await service._load_schema(ontology_key, driver)
+    loaded = await service._load_schema(ontology_key, store)
     agents = [
         {
             "key": DEFAULT_AGENT_CONFIG.key,
@@ -727,7 +733,7 @@ async def handle_a2a_task(
     agent_config: AgentConfig,
     ontology_key: str,
     request_body: dict,
-    driver: AsyncDriver,
+    store: Any,
 ) -> dict:
     """Handle an A2A JSON-RPC tasks/send request."""
     method = request_body.get("method")
@@ -755,7 +761,7 @@ async def handle_a2a_task(
             "error": {"code": -32602, "message": "No text message found in request"},
         }
 
-    result = await run_agent_chat(agent_config, ontology_key, message_text, driver)
+    result = await run_agent_chat(agent_config, ontology_key, message_text, store)
 
     return {
         "jsonrpc": "2.0",

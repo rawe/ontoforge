@@ -1,5 +1,5 @@
 import { useQueries } from '@tanstack/react-query'
-import { cypherQuery } from '@/api/runtime'
+import { listEntities } from '@/api/runtime'
 import type { SchemaEntityType } from '@/api/types'
 
 export interface TypeCounts {
@@ -12,9 +12,10 @@ export interface TypeCounts {
 }
 
 /**
- * Live per-type instance counts via one cheap Cypher count query per entity
- * type, run in parallel and cached for 30s. Keys align with the `entities`
- * query-key family so bulk mutations invalidate them too.
+ * Live per-type instance counts via one minimal entity-list request per
+ * entity type (`limit=1`, reading the pagination `total`), run in parallel
+ * and cached for 30s. Keys align with the `entities` query-key family so
+ * bulk mutations invalidate them too.
  */
 export function useTypeCounts(
   ontologyKey: string | undefined,
@@ -24,9 +25,8 @@ export function useTypeCounts(
     queries: entityTypes.map((t) => ({
       queryKey: ['entities', ontologyKey ?? '', t.key, 'count'] as const,
       queryFn: async () => {
-        const res = await cypherQuery(ontologyKey!, `MATCH (n:${t.key}) RETURN count(n) AS c`)
-        const c = res.results[0]?.['c']
-        return typeof c === 'number' ? c : 0
+        const res = await listEntities(ontologyKey!, t.key, { limit: 1 })
+        return res.total
       },
       enabled: ontologyKey !== undefined,
       staleTime: 30_000,

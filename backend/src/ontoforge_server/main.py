@@ -1,4 +1,5 @@
 import json
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -6,16 +7,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from ontoforge_server.core.ai import init_ai_model
-from ontoforge_server.core.database import close_driver, ensure_vector_indexes, get_driver, init_driver
 from ontoforge_server.core.embedding import (
     close_embedding_provider,
     get_embedding_provider,
     init_embedding_provider,
 )
+from ontoforge_server.core.ports import (
+    close_stores,
+    ensure_semantic_indexes,
+    get_modeling_store,
+    init_stores,
+)
 from ontoforge_server.core.exceptions import (
     CascadeRequiredError,
     ConflictError,
     NotFoundError,
+    StoreError,
     ValidationError,
 )
 from ontoforge_server.mcp.modeling import modeling_mcp
@@ -27,19 +34,43 @@ from ontoforge_server.runtime.router import global_router as runtime_global_rout
 from ontoforge_server.runtime.router import router as runtime_router
 
 
+logger = logging.getLogger(__name__)
+
+
+async def _warn_about_reserved_type_keys_in_use() -> None:
+    """Name any stored type whose key is now reserved.
+
+    Such types can only predate the reserved-key check. They are left in
+    place — renaming a type key is destructive and is the operator's call —
+    but without this warning their only symptom is an unexplained 500 from
+    the modeling API once instance data exists under them.
+    """
+    collisions = await get_modeling_store().find_reserved_type_keys_in_use()
+    for collision in collisions:
+        logger.warning(
+            "Stored %s '%s' uses a reserved key. It predates the reserved-key "
+            "check and can corrupt schema reads once instance data exists "
+            "under it. Export its data, delete the type, and recreate it "
+            "under a different key.",
+            collision["kind"],
+            collision["key"],
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    driver = await init_driver()
+    await init_stores()
+    await _warn_about_reserved_type_keys_in_use()
     await init_embedding_provider()
     init_ai_model()
     provider = get_embedding_provider()
     if provider:
-        await ensure_vector_indexes(driver, provider.dimensions)
+        await ensure_semantic_indexes(provider.dimensions)
     async with modeling_mcp.session_manager.run():
         async with runtime_mcp.session_manager.run():
             yield
     await close_embedding_provider()
-    await close_driver()
+    await close_stores()
 
 
 def _error_response(status: int, code: str, message: str, details: dict | None = None) -> JSONResponse:
@@ -79,6 +110,14 @@ def create_app() -> FastAPI:
             "CASCADE_REQUIRED",
             str(exc),
             {"affectedOntologies": exc.affected_ontologies},
+        )
+
+    @app.exception_handler(StoreError)
+    async def store_error_handler(request: Request, exc: StoreError):
+        # The adapter has already logged the originating failure against this
+        # id; the response carries the id and nothing else about the storage.
+        return _error_response(
+            500, "STORAGE_ERROR", str(exc), {"errorId": exc.error_id}
         )
 
     @app.exception_handler(json.JSONDecodeError)

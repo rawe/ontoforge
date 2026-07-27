@@ -1,36 +1,73 @@
+"""Neo4j naming conventions, vector-index DDL, and index-metadata limits.
+
+Adapter-private. Labels, index names, and the PascalCase/UPPER_SNAKE_CASE
+conventions are implementation details of this adapter and must not leak
+through the persistence port. The reserved-key sets below are the one
+exception: they cross the port as plain type keys (never as labels), so the
+modeling service can reject colliding keys without knowing why they collide.
+"""
+
 import logging
+import re
 from typing import Any
 
-from neo4j import AsyncGraphDatabase, AsyncDriver
+from neo4j import AsyncDriver
 
-from ontoforge_server.config import settings
+from ontoforge_server.adapters.neo4j.errors import open_session
 from ontoforge_server.core.exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
 
-_driver: AsyncDriver | None = None
 MAX_VECTOR_FILTER_VALUE_BYTES = 32766
 ENTITY_VECTOR_INDEX_NAME = "entity_embedding"
 
-_CONSTRAINTS = [
-    "CREATE CONSTRAINT ontology_id_unique IF NOT EXISTS FOR (o:Ontology) REQUIRE o.ontologyId IS UNIQUE",
-    "CREATE CONSTRAINT ontology_key_unique IF NOT EXISTS FOR (o:Ontology) REQUIRE o.key IS UNIQUE",
-    "CREATE CONSTRAINT ontology_name_unique IF NOT EXISTS FOR (o:Ontology) REQUIRE o.name IS UNIQUE",
-    "CREATE CONSTRAINT entity_type_id_unique IF NOT EXISTS FOR (et:EntityType) REQUIRE et.entityTypeId IS UNIQUE",
-    "CREATE CONSTRAINT entity_type_key_unique IF NOT EXISTS FOR (et:EntityType) REQUIRE et.key IS UNIQUE",
-    "CREATE CONSTRAINT relation_type_id_unique IF NOT EXISTS FOR (rt:RelationType) REQUIRE rt.relationTypeId IS UNIQUE",
-    "CREATE CONSTRAINT relation_type_key_unique IF NOT EXISTS FOR (rt:RelationType) REQUIRE rt.key IS UNIQUE",
-    "CREATE CONSTRAINT property_id_unique IF NOT EXISTS FOR (pd:PropertyDefinition) REQUIRE pd.propertyId IS UNIQUE",
-    "CREATE CONSTRAINT entity_instance_id_unique IF NOT EXISTS FOR (n:_Entity) REQUIRE n._id IS UNIQUE",
-    "CREATE INDEX entity_type_key_index IF NOT EXISTS FOR (n:_Entity) ON (n._entityTypeKey)",
-    "CREATE CONSTRAINT agent_config_id_unique IF NOT EXISTS FOR (ac:AiAgentConfig) REQUIRE ac.agentConfigId IS UNIQUE",
-    "CREATE CONSTRAINT saved_query_id_unique IF NOT EXISTS FOR (sq:SavedQuery) REQUIRE sq.savedQueryId IS UNIQUE",
-]
+#: Node labels this adapter uses to store schema objects.
+SCHEMA_LABELS = frozenset(
+    {
+        "Ontology",
+        "EntityType",
+        "RelationType",
+        "PropertyDefinition",
+        "AiAgentConfig",
+        "SavedQuery",
+    }
+)
+
+#: Relationship types this adapter uses to connect schema objects.
+SCHEMA_RELATIONSHIP_TYPES = frozenset(
+    {
+        "INCLUDES_TYPE",
+        "HAS_PROPERTY",
+        "RELATES_FROM",
+        "RELATES_TO",
+        "HAS_AI_AGENT",
+        "HAS_SAVED_QUERY",
+    }
+)
+
+# The internal names `_Entity`, `_Chunk` and `_HAS_CHUNK` need no reserved
+# key: the type key pattern forbids a leading underscore, so no key can
+# convert to them.
 
 
 def _to_pascal_case(key: str) -> str:
     """Convert a snake_case key to PascalCase."""
     return "".join(segment.capitalize() for segment in key.split("_"))
+
+
+def _to_snake_case(pascal: str) -> str:
+    """Convert a PascalCase label to the snake_case key that produces it."""
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", pascal).lower()
+
+
+def reserved_entity_type_keys() -> frozenset[str]:
+    """Entity type keys whose physical label would collide with a schema label."""
+    return frozenset(_to_snake_case(label) for label in SCHEMA_LABELS)
+
+
+def reserved_relation_type_keys() -> frozenset[str]:
+    """Relation type keys whose physical type would collide with a schema relationship."""
+    return frozenset(rel_type.lower() for rel_type in SCHEMA_RELATIONSHIP_TYPES)
 
 
 def document_virtual_label(entity_type_key: str, property_key: str) -> str:
@@ -49,7 +86,7 @@ def validate_vector_indexed_properties(
     filter_properties: list[str],
     entity_id: str | None = None,
 ) -> None:
-    """Reject string values that Neo4j cannot safely store in vector index metadata."""
+    """Reject string values too large for vector-index filter metadata."""
     for property_key in filter_properties:
         value = properties.get(property_key)
         if value is None or not isinstance(value, str):
@@ -66,7 +103,7 @@ def validate_vector_indexed_properties(
             details={
                 "fields": {
                     property_key: (
-                        "Value exceeds Neo4j's semantic-index size limit "
+                        "Value exceeds the indexed property size limit "
                         f"({value_bytes} bytes > {MAX_VECTOR_FILTER_VALUE_BYTES} bytes)"
                     )
                 }
@@ -83,7 +120,7 @@ async def _validate_existing_vector_indexed_properties(
     if not filter_properties:
         return
 
-    async with driver.session() as session:
+    async with open_session(driver) as session:
         result = await session.run(
             f"MATCH (n:{pascal_label}) RETURN n._id AS entity_id, n {{.*}} AS properties"
         )
@@ -97,7 +134,7 @@ async def _validate_existing_vector_indexed_properties(
 
 
 async def _drop_failed_index_if_exists(driver: AsyncDriver, index_name: str) -> None:
-    async with driver.session() as session:
+    async with open_session(driver) as session:
         result = await session.run(
             "SHOW INDEXES YIELD name, state WHERE name = $name RETURN state",
             name=index_name,
@@ -108,20 +145,87 @@ async def _drop_failed_index_if_exists(driver: AsyncDriver, index_name: str) -> 
             logger.warning("Dropped failed vector index before recreate: %s", index_name)
 
 
-async def _ensure_constraints(driver: AsyncDriver) -> None:
-    async with driver.session() as session:
-        for constraint in _CONSTRAINTS:
-            await session.run(constraint)
+async def _existing_vector_index_dimensions(
+    driver: AsyncDriver, index_name: str
+) -> int | None:
+    """The vector width an existing index is configured for, or None if absent."""
+    async with open_session(driver) as session:
+        result = await session.run(
+            "SHOW VECTOR INDEXES YIELD name, options WHERE name = $name RETURN options",
+            name=index_name,
+        )
+        record = await result.single()
+    if record is None:
+        return None
+    index_config = (record["options"] or {}).get("indexConfig") or {}
+    configured = index_config.get("vector.dimensions")
+    return int(configured) if configured is not None else None
 
 
-async def ensure_vector_indexes(driver: AsyncDriver, dimensions: int) -> None:
+async def _reconcile_index_dimensions(
+    driver: AsyncDriver,
+    index_name: str,
+    describes: str,
+    dimensions: int,
+    recreate_on_mismatch: bool,
+) -> None:
+    """Handle an existing index whose width no longer matches the model.
+
+    A vector index fixes its width at creation, and ``CREATE ... IF NOT
+    EXISTS`` is a no-op against one that already exists — so changing the
+    embedding model leaves an index that rejects every vector the new model
+    produces. Nothing else notices: the index is ONLINE, so the failed-index
+    check above does not see it, and the symptom only appears later, as a
+    storage failure on the first semantic search.
+
+    On startup this only warns: dropping an index destroys the vectors it
+    holds, and that is the operator's call. The rebuild path passes
+    *recreate_on_mismatch*, because there the drop is followed immediately
+    by regeneration at the new width — the operator asked for exactly that.
+
+    The messages describe indexes the way the API does — by entity type,
+    document property, or search scope — never by index name: physical
+    naming is this adapter's own business (decision 013).
+    """
+    existing = await _existing_vector_index_dimensions(driver, index_name)
+    if existing is None or existing == dimensions:
+        return
+
+    if not recreate_on_mismatch:
+        logger.warning(
+            "The semantic index for %s holds %d-dimensional vectors, but the "
+            "configured embedding model produces %d. Semantic search over it "
+            "fails until the widths agree. Run POST /api/model/rebuild-embeddings "
+            "to recreate it at the model's width and regenerate its vectors.",
+            describes,
+            existing,
+            dimensions,
+        )
+        return
+
+    async with open_session(driver) as session:
+        await session.run(f"DROP INDEX {index_name} IF EXISTS")
+    logger.info(
+        "Recreating the semantic index for %s at %d dimensions (was %d) to match "
+        "the configured embedding model; its vectors are regenerated by this rebuild.",
+        describes,
+        dimensions,
+        existing,
+    )
+
+
+async def ensure_vector_indexes(
+    driver: AsyncDriver, dimensions: int, recreate_on_mismatch: bool = False
+) -> None:
     """Create vector indexes for all existing entity types (IF NOT EXISTS).
 
     New indexes include a WITH clause listing all current properties for
-    in-index filtering (Neo4j 2026+ SEARCH clause). Existing indexes are
-    left untouched.
+    in-index filtering (Neo4j 2026+ SEARCH clause). Existing indexes are left
+    untouched unless their width no longer matches *dimensions*, in which case
+    they are reported — or, with *recreate_on_mismatch*, dropped and recreated.
+    See ``_reconcile_index_dimensions``.
     """
-    async with driver.session() as session:
+    async with open_session(driver) as session:
         result = await session.run(
             """
             MATCH (et:EntityType)
@@ -137,11 +241,15 @@ async def ensure_vector_indexes(driver: AsyncDriver, dimensions: int) -> None:
 
     for et in entity_types:
         await create_vector_index(
-            driver, et["key"], dimensions, filter_properties=et["property_keys"]
+            driver,
+            et["key"],
+            dimensions,
+            filter_properties=et["property_keys"],
+            recreate_on_mismatch=recreate_on_mismatch,
         )
 
     # Chunk vector indexes for document properties (one per virtual type)
-    async with driver.session() as session:
+    async with open_session(driver) as session:
         result = await session.run(
             """
             MATCH (et:EntityType)-[:HAS_PROPERTY]->(p:PropertyDefinition {dataType: 'document'})
@@ -155,17 +263,23 @@ async def ensure_vector_indexes(driver: AsyncDriver, dimensions: int) -> None:
 
     for entity_type_key, property_key in document_properties:
         await create_document_vector_index(
-            driver, entity_type_key, property_key, dimensions
+            driver,
+            entity_type_key,
+            property_key,
+            dimensions,
+            recreate_on_mismatch=recreate_on_mismatch,
         )
 
     # Cross-type entity vector index (semantic search across all types)
-    await ensure_entity_vector_index(driver, dimensions)
+    await ensure_entity_vector_index(driver, dimensions, recreate_on_mismatch)
 
     # Saved query vector index (for semantic search over descriptions)
-    await ensure_saved_query_vector_index(driver, dimensions)
+    await ensure_saved_query_vector_index(driver, dimensions, recreate_on_mismatch)
 
 
-async def ensure_entity_vector_index(driver: AsyncDriver, dimensions: int) -> None:
+async def ensure_entity_vector_index(
+    driver: AsyncDriver, dimensions: int, recreate_on_mismatch: bool = False
+) -> None:
     """Create the cross-type vector index on the shared _Entity label (IF NOT EXISTS).
 
     Indexes _embedding across all entity instances so semantic search can run
@@ -173,25 +287,39 @@ async def ensure_entity_vector_index(driver: AsyncDriver, dimensions: int) -> No
     the service layer, so no in-index filter properties are needed.
     """
     await _drop_failed_index_if_exists(driver, ENTITY_VECTOR_INDEX_NAME)
+    await _reconcile_index_dimensions(
+        driver,
+        ENTITY_VECTOR_INDEX_NAME,
+        "search across all entity types",
+        dimensions,
+        recreate_on_mismatch,
+    )
     query = (
         f"CREATE VECTOR INDEX {ENTITY_VECTOR_INDEX_NAME} IF NOT EXISTS "
         "FOR (n:_Entity) ON (n._embedding) "
         f"OPTIONS {{indexConfig: {{`vector.dimensions`: {dimensions}, "
         f"`vector.similarity_function`: 'cosine'}}}}"
     )
-    async with driver.session() as session:
+    async with open_session(driver) as session:
         await session.run(query)
     logger.info("Vector index ensured: %s", ENTITY_VECTOR_INDEX_NAME)
 
 
 async def ensure_saved_query_vector_index(
-    driver: AsyncDriver, dimensions: int
+    driver: AsyncDriver, dimensions: int, recreate_on_mismatch: bool = False
 ) -> None:
     """Create the vector index for SavedQuery descriptions (IF NOT EXISTS).
 
     Uses _ontologyKey as an in-index filter property so that semantic search
     can be scoped to a single ontology in one query.
     """
+    await _reconcile_index_dimensions(
+        driver,
+        "saved_query_embedding",
+        "saved-query descriptions",
+        dimensions,
+        recreate_on_mismatch,
+    )
     query = (
         "CREATE VECTOR INDEX saved_query_embedding IF NOT EXISTS "
         "FOR (sq:SavedQuery) ON (sq._embedding) "
@@ -199,7 +327,7 @@ async def ensure_saved_query_vector_index(
         f"OPTIONS {{indexConfig: {{`vector.dimensions`: {dimensions}, "
         f"`vector.similarity_function`: 'cosine'}}}}"
     )
-    async with driver.session() as session:
+    async with open_session(driver) as session:
         await session.run(query)
     logger.info("Vector index ensured: saved_query_embedding")
 
@@ -209,6 +337,7 @@ async def create_vector_index(
     entity_type_key: str,
     dimensions: int,
     filter_properties: list[str] | None = None,
+    recreate_on_mismatch: bool = False,
 ) -> None:
     """Create a vector index for the given entity type label.
 
@@ -223,6 +352,13 @@ async def create_vector_index(
         driver, pascal_label, entity_type_key, selected_properties
     )
     await _drop_failed_index_if_exists(driver, index_name)
+    await _reconcile_index_dimensions(
+        driver,
+        index_name,
+        f"entity type '{entity_type_key}'",
+        dimensions,
+        recreate_on_mismatch,
+    )
     with_clause = ""
     if selected_properties:
         props = ", ".join(f"n.{p}" for p in selected_properties)
@@ -234,7 +370,7 @@ async def create_vector_index(
         f"OPTIONS {{indexConfig: {{`vector.dimensions`: {dimensions}, "
         f"`vector.similarity_function`: 'cosine'}}}}"
     )
-    async with driver.session() as session:
+    async with open_session(driver) as session:
         await session.run(query)
     logger.info("Vector index ensured: %s", index_name)
 
@@ -244,18 +380,26 @@ async def create_document_vector_index(
     entity_type_key: str,
     property_key: str,
     dimensions: int,
+    recreate_on_mismatch: bool = False,
 ) -> None:
     """Create the vector index for a document property's chunk nodes."""
     index_name = document_index_name(entity_type_key, property_key)
     virtual_label = document_virtual_label(entity_type_key, property_key)
     await _drop_failed_index_if_exists(driver, index_name)
+    await _reconcile_index_dimensions(
+        driver,
+        index_name,
+        f"document property '{property_key}' on entity type '{entity_type_key}'",
+        dimensions,
+        recreate_on_mismatch,
+    )
     query = (
         f"CREATE VECTOR INDEX {index_name} IF NOT EXISTS "
         f"FOR (c:{virtual_label}) ON (c._embedding) "
         f"OPTIONS {{indexConfig: {{`vector.dimensions`: {dimensions}, "
         f"`vector.similarity_function`: 'cosine'}}}}"
     )
-    async with driver.session() as session:
+    async with open_session(driver) as session:
         await session.run(query)
     logger.info("Vector index ensured: %s", index_name)
 
@@ -265,7 +409,7 @@ async def drop_document_vector_index(
 ) -> None:
     """Drop the vector index for a document property's chunk nodes."""
     index_name = document_index_name(entity_type_key, property_key)
-    async with driver.session() as session:
+    async with open_session(driver) as session:
         await session.run(f"DROP INDEX {index_name} IF EXISTS")
     logger.info("Vector index dropped: %s", index_name)
 
@@ -273,7 +417,7 @@ async def drop_document_vector_index(
 async def drop_vector_index(driver: AsyncDriver, entity_type_key: str) -> None:
     """Drop the vector index for the given entity type."""
     index_name = f"{entity_type_key}_embedding"
-    async with driver.session() as session:
+    async with open_session(driver) as session:
         await session.run(f"DROP INDEX {index_name} IF EXISTS")
     logger.info("Vector index dropped: %s", index_name)
 
@@ -286,7 +430,7 @@ async def rebuild_vector_index(
     Called when properties are added or removed from an entity type so that
     the in-index filter properties stay in sync with the schema.
     """
-    async with driver.session() as session:
+    async with open_session(driver) as session:
         result = await session.run(
             """
             MATCH (et:EntityType {key: $key})
@@ -306,26 +450,3 @@ async def rebuild_vector_index(
     await create_vector_index(
         driver, entity_type_key, dimensions, filter_properties=property_keys
     )
-
-
-async def init_driver() -> AsyncDriver:
-    global _driver
-    _driver = AsyncGraphDatabase.driver(
-        settings.DB_URI,
-        auth=(settings.DB_USER, settings.DB_PASSWORD),
-    )
-    await _driver.verify_connectivity()
-    await _ensure_constraints(_driver)
-    return _driver
-
-
-async def get_driver() -> AsyncDriver:
-    assert _driver is not None, "Neo4j driver not initialized"
-    return _driver
-
-
-async def close_driver() -> None:
-    global _driver
-    if _driver is not None:
-        await _driver.close()
-        _driver = None

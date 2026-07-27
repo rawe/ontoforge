@@ -9,9 +9,9 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 type Tab = 'console' | 'library'
 
 /**
- * `/w/:ontologyKey/query` — Query workbench. Two tabs: Cypher Console and
+ * `/w/:ontologyKey/query` — Query workbench. Two tabs: Console and
  * saved-query Library. URL params: `?tab=library`, `?run={queryKey}` (open a
- * saved query's run panel) and `?cypher=...` (prefill the console).
+ * saved query's run panel) and `?query=...` (prefill the console).
  */
 export function QueryPage() {
   const { ontologyKey } = useParams<{ ontologyKey: string }>()
@@ -19,13 +19,14 @@ export function QueryPage() {
   const schema = useRuntimeSchema(ontologyKey)
 
   const runParam = searchParams.get('run')
-  const cypherParam = searchParams.get('cypher')
+  // Legacy `?cypher=` is still read so old links keep working.
+  const queryParam = searchParams.get('query') ?? searchParams.get('cypher')
   const tabParam = searchParams.get('tab')
-  // `?run=` forces the Library, `?cypher=` forces the Console.
+  // `?run=` forces the Library, `?query=` forces the Console.
   const tab: Tab =
     runParam !== null
       ? 'library'
-      : cypherParam !== null
+      : queryParam !== null
         ? 'console'
         : tabParam === 'library'
           ? 'library'
@@ -41,7 +42,7 @@ export function QueryPage() {
     <div>
       <PageHeader
         title="Query"
-        description="Run read-only Cypher against this ontology and use the saved-query library."
+        description="Run read-only OQL queries against this ontology and use the saved-query library."
         actions={
           <Tabs value={tab} onValueChange={(v) => switchTab(v as Tab)}>
             <TabsList>
@@ -69,7 +70,7 @@ export function QueryPage() {
                 key={ontologyKey}
                 ontologyKey={ontologyKey}
                 schema={schema.data}
-                initialCypher={cypherParam ?? undefined}
+                initialQuery={queryParam ?? undefined}
               />
             </div>
             <div className={tab === 'library' ? '' : 'hidden'}>

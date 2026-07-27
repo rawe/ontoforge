@@ -1,3 +1,10 @@
+"""Neo4j Cypher query functions for the modeling store.
+
+Adapter-private. Every function takes an ``AsyncSession`` as its first
+argument and is invoked exclusively by ``Neo4jModelingStore``, which owns the
+session lifecycle.
+"""
+
 from datetime import datetime, timezone
 
 from neo4j import AsyncSession
@@ -164,6 +171,33 @@ async def list_entity_types(session: AsyncSession) -> list[dict]:
         "MATCH (et:EntityType) RETURN et {.*} AS entity_type ORDER BY et.key"
     )
     return [_convert_neo4j_types(record["entity_type"]) async for record in result]
+
+
+async def find_reserved_type_keys_in_use(
+    session: AsyncSession,
+    entity_type_keys: list[str],
+    relation_type_keys: list[str],
+) -> list[dict]:
+    """Find stored types whose key is reserved (created before the check existed).
+
+    The id filters keep this read correct in exactly the state it detects:
+    an instance of a collided type carries the schema label too, so an
+    unfiltered read would return counterfeit rows.
+    """
+    result = await session.run(
+        """
+        MATCH (et:EntityType)
+        WHERE et.entityTypeId IS NOT NULL AND et.key IN $entity_type_keys
+        RETURN 'entityType' AS kind, et.key AS key
+        UNION
+        MATCH (rt:RelationType)
+        WHERE rt.relationTypeId IS NOT NULL AND rt.key IN $relation_type_keys
+        RETURN 'relationType' AS kind, rt.key AS key
+        """,
+        entity_type_keys=entity_type_keys,
+        relation_type_keys=relation_type_keys,
+    )
+    return [{"kind": r["kind"], "key": r["key"]} async for r in result]
 
 
 async def get_entity_type(session: AsyncSession, entity_type_id: str) -> dict | None:
@@ -1059,3 +1093,84 @@ async def list_saved_queries_for_export(session: AsyncSession, ontology_id: str)
         ontology_id=ontology_id,
     )
     return [dict(record) async for record in result]
+
+
+# --- Embedding Rebuild ---
+
+
+async def get_entity_types_with_properties(session: AsyncSession) -> list[dict]:
+    """List all entity type keys with their raw property definition dicts."""
+    result = await session.run(
+        """
+        MATCH (et:EntityType)
+        OPTIONAL MATCH (et)-[:HAS_PROPERTY]->(p:PropertyDefinition)
+        WITH et, p ORDER BY et.key, p.key
+        WITH et, collect(p {.*}) AS properties
+        RETURN et.key AS key, properties
+        ORDER BY et.key
+        """
+    )
+    entity_types = []
+    async for record in result:
+        properties = [
+            _convert_neo4j_types(p) for p in record["properties"] if p
+        ]
+        entity_types.append({"key": record["key"], "properties": properties})
+    return entity_types
+
+
+async def set_entity_embedding(
+    session: AsyncSession, entity_id: str, embedding: list[float]
+) -> None:
+    """Set the embedding vector on a single entity instance."""
+    await session.run(
+        "MATCH (n:_Entity {_id: $id}) SET n._embedding = $embedding",
+        id=entity_id,
+        embedding=embedding,
+    )
+
+
+async def list_saved_query_refs(session: AsyncSession) -> list[dict]:
+    """List all saved queries (id + description) across all ontologies."""
+    result = await session.run(
+        "MATCH (sq:SavedQuery) "
+        "RETURN sq.savedQueryId AS savedQueryId, sq.description AS description"
+    )
+    return [
+        {"savedQueryId": record["savedQueryId"], "description": record["description"]}
+        async for record in result
+    ]
+
+
+async def set_saved_query_embedding(
+    session: AsyncSession, saved_query_id: str, embedding: list[float]
+) -> None:
+    """Set the embedding vector on a single saved query."""
+    await session.run(
+        "MATCH (sq:SavedQuery {savedQueryId: $saved_query_id}) "
+        "SET sq._embedding = $embedding",
+        saved_query_id=saved_query_id,
+        embedding=embedding,
+    )
+
+
+# --- Document Property Cascade ---
+
+
+async def delete_chunks_for_virtual_type(
+    session: AsyncSession,
+    entity_type_key: str,
+    property_key: str,
+) -> None:
+    """Delete all chunk nodes of a (entity type, document property) virtual type.
+
+    Modeling-side cascade for dropping a document property or its entity type.
+    """
+    await session.run(
+        """
+        MATCH (c:_Chunk {_entityTypeKey: $entity_type_key, _propertyKey: $property_key})
+        DETACH DELETE c
+        """,
+        entity_type_key=entity_type_key,
+        property_key=property_key,
+    )

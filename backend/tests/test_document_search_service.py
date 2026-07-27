@@ -1,10 +1,11 @@
 """Tests for document-aware semantic search (searchIn, RRF fusion, matchedVia)."""
 
-from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock, patch
+from contextlib import asynccontextmanager, contextmanager
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from ontoforge_server.adapters.neo4j.runtime_store import Neo4jRuntimeStore
 from ontoforge_server.core.exceptions import ValidationError
 from ontoforge_server.runtime.service import (
     EntityTypeDef,
@@ -15,6 +16,7 @@ from ontoforge_server.runtime.service import (
 )
 
 SERVICE = "ontoforge_server.runtime.service"
+RQ = "ontoforge_server.adapters.neo4j.runtime_queries"
 
 
 def _prop(key: str, data_type: str = "string", required: bool = False) -> PropertyDef:
@@ -93,7 +95,8 @@ def _person(entity_id: str, name: str, **props) -> dict:
 
 
 @pytest.fixture
-def mock_driver():
+def store():
+    """Real Neo4j runtime store over a mocked driver; tests stub runtime_queries."""
     driver = AsyncMock()
     session = AsyncMock()
 
@@ -102,7 +105,7 @@ def mock_driver():
         yield session
 
     driver.session = _session
-    return driver
+    return Neo4jRuntimeStore(driver)
 
 
 @pytest.fixture
@@ -112,11 +115,26 @@ def mock_provider():
     return provider
 
 
+@contextmanager
+def _patch_queries():
+    """Patch the adapter query functions a search touches; configure via attributes."""
+    mock_repo = MagicMock()
+    mock_repo.semantic_search = AsyncMock(return_value=[])
+    mock_repo.search_document_chunks = AsyncMock(return_value=[])
+    mock_repo.get_entities_by_ids = AsyncMock(return_value={})
+    with (
+        patch(f"{RQ}.semantic_search", mock_repo.semantic_search),
+        patch(f"{RQ}.search_document_chunks", mock_repo.search_document_chunks),
+        patch(f"{RQ}.get_entities_by_ids", mock_repo.get_entities_by_ids),
+    ):
+        yield mock_repo
+
+
 def _patched(loaded, provider):
     return (
         patch(f"{SERVICE}._load_schema", return_value=loaded),
         patch(f"{SERVICE}.get_embedding_provider", return_value=provider),
-        patch(f"{SERVICE}.repository"),
+        _patch_queries(),
     )
 
 
@@ -125,12 +143,12 @@ def _patched(loaded, provider):
 # ---------------------------------------------------------------------------
 
 
-async def test_invalid_search_in_raises(mock_driver, mock_provider):
+async def test_invalid_search_in_raises(store, mock_provider):
     p1, p2, p3 = _patched(_make_loaded(), mock_provider)
     with p1, p2, p3:
         with pytest.raises(ValidationError, match="searchIn"):
             await semantic_search(
-                "test", "q", None, 10, None, mock_driver, search_in="bogus"
+                "test", "q", None, 10, None, store, search_in="bogus"
             )
 
 
@@ -139,7 +157,7 @@ async def test_invalid_search_in_raises(mock_driver, mock_provider):
 # ---------------------------------------------------------------------------
 
 
-async def test_documents_mode_ranks_dedupes_and_shapes_matched_via(mock_driver, mock_provider):
+async def test_documents_mode_ranks_dedupes_and_shapes_matched_via(store, mock_provider):
     loaded = _make_loaded()
     p1, p2, p3 = _patched(loaded, mock_provider)
     with p1, p2, p3 as mock_repo:
@@ -153,13 +171,13 @@ async def test_documents_mode_ranks_dedupes_and_shapes_matched_via(mock_driver, 
                 ]
             return []
 
-        mock_repo.search_document_chunks = AsyncMock(side_effect=_search_chunks)
-        mock_repo.get_entities_by_ids = AsyncMock(return_value={
+        mock_repo.search_document_chunks.side_effect = (_search_chunks)
+        mock_repo.get_entities_by_ids.return_value = ({
             "e1": _person("e1", "Ada", bio="x" * 4000, _doc_bio_length=4000),
             "e2": _person("e2", "Grace", bio="y" * 3000),
         })
         result = await semantic_search(
-            "test", "analytical engines", None, 10, None, mock_driver,
+            "test", "analytical engines", None, 10, None, store,
             search_in="documents",
         )
 
@@ -188,46 +206,46 @@ async def test_documents_mode_ranks_dedupes_and_shapes_matched_via(mock_driver, 
     assert "_doc_bio_length" not in first["entity"]
 
 
-async def test_documents_mode_snippets_false_omits_snippet(mock_driver, mock_provider):
+async def test_documents_mode_snippets_false_omits_snippet(store, mock_provider):
     loaded = _make_loaded()
     p1, p2, p3 = _patched(loaded, mock_provider)
     with p1, p2, p3 as mock_repo:
-        mock_repo.search_document_chunks = AsyncMock(
-            side_effect=lambda *a, **k: [_chunk_hit("e1", 0.9)]
+        mock_repo.search_document_chunks.side_effect = (
+            lambda *a, **k: [_chunk_hit("e1", 0.9)]
             if a[2] == "person_document_bio_embedding" else []
         )
-        mock_repo.get_entities_by_ids = AsyncMock(
-            return_value={"e1": _person("e1", "Ada")}
+        mock_repo.get_entities_by_ids.return_value = (
+            {"e1": _person("e1", "Ada")}
         )
         result = await semantic_search(
-            "test", "q", None, 10, None, mock_driver,
+            "test", "q", None, 10, None, store,
             search_in="documents", snippets=False,
         )
 
     assert "snippet" not in result["results"][0]["matchedVia"]
 
 
-async def test_documents_mode_min_score_filters_chunks(mock_driver, mock_provider):
+async def test_documents_mode_min_score_filters_chunks(store, mock_provider):
     loaded = _make_loaded()
     p1, p2, p3 = _patched(loaded, mock_provider)
     with p1, p2, p3 as mock_repo:
-        mock_repo.search_document_chunks = AsyncMock(
-            side_effect=lambda *a, **k: [
+        mock_repo.search_document_chunks.side_effect = (
+            lambda *a, **k: [
                 _chunk_hit("e1", 0.9), _chunk_hit("e2", 0.5),
             ] if a[2] == "person_document_bio_embedding" else []
         )
-        mock_repo.get_entities_by_ids = AsyncMock(
-            return_value={"e1": _person("e1", "Ada")}
+        mock_repo.get_entities_by_ids.return_value = (
+            {"e1": _person("e1", "Ada")}
         )
         result = await semantic_search(
-            "test", "q", None, 10, 0.8, mock_driver, search_in="documents",
+            "test", "q", None, 10, 0.8, store, search_in="documents",
         )
 
     assert result["total"] == 1
     assert result["results"][0]["entity"]["_id"] == "e1"
 
 
-async def test_documents_mode_queries_only_in_scope_virtual_indexes(mock_driver, mock_provider):
+async def test_documents_mode_queries_only_in_scope_virtual_indexes(store, mock_provider):
     """A lens excluding `notes` from person never touches PersonDocumentNotes."""
     scoped = _make_cache(person_props={
         "name": _prop("name", required=True),
@@ -238,10 +256,10 @@ async def test_documents_mode_queries_only_in_scope_virtual_indexes(mock_driver,
 
     p1, p2, p3 = _patched(loaded, mock_provider)
     with p1, p2, p3 as mock_repo:
-        mock_repo.search_document_chunks = AsyncMock(return_value=[])
-        mock_repo.get_entities_by_ids = AsyncMock(return_value={})
+        mock_repo.search_document_chunks.return_value = ([])
+        mock_repo.get_entities_by_ids.return_value = ({})
         await semantic_search(
-            "test", "q", None, 10, None, mock_driver, search_in="documents",
+            "test", "q", None, 10, None, store, search_in="documents",
         )
 
         calls = mock_repo.search_document_chunks.call_args_list
@@ -249,14 +267,14 @@ async def test_documents_mode_queries_only_in_scope_virtual_indexes(mock_driver,
         assert queried == {("PersonDocumentBio", "person_document_bio_embedding")}
 
 
-async def test_documents_mode_type_filter_narrows_indexes(mock_driver, mock_provider):
+async def test_documents_mode_type_filter_narrows_indexes(store, mock_provider):
     loaded = _make_loaded(include_company=True)
     p1, p2, p3 = _patched(loaded, mock_provider)
     with p1, p2, p3 as mock_repo:
-        mock_repo.search_document_chunks = AsyncMock(return_value=[])
-        mock_repo.get_entities_by_ids = AsyncMock(return_value={})
+        mock_repo.search_document_chunks.return_value = ([])
+        mock_repo.get_entities_by_ids.return_value = ({})
         await semantic_search(
-            "test", "q", "person", 10, None, mock_driver, search_in="documents",
+            "test", "q", "person", 10, None, store, search_in="documents",
         )
 
         queried = {
@@ -268,34 +286,34 @@ async def test_documents_mode_type_filter_narrows_indexes(mock_driver, mock_prov
         }
 
 
-async def test_documents_mode_no_document_properties_returns_empty(mock_driver, mock_provider):
+async def test_documents_mode_no_document_properties_returns_empty(store, mock_provider):
     loaded = _make_loaded(person_props={"name": _prop("name", required=True)})
     p1, p2, p3 = _patched(loaded, mock_provider)
     with p1, p2, p3 as mock_repo:
-        mock_repo.search_document_chunks = AsyncMock(return_value=[])
+        mock_repo.search_document_chunks.return_value = ([])
         result = await semantic_search(
-            "test", "q", None, 10, None, mock_driver, search_in="documents",
+            "test", "q", None, 10, None, store, search_in="documents",
         )
 
     assert result["total"] == 0
     mock_repo.search_document_chunks.assert_not_awaited()
 
 
-async def test_documents_mode_applies_property_filters_to_parents(mock_driver, mock_provider):
+async def test_documents_mode_applies_property_filters_to_parents(store, mock_provider):
     loaded = _make_loaded()
     p1, p2, p3 = _patched(loaded, mock_provider)
     with p1, p2, p3 as mock_repo:
-        mock_repo.search_document_chunks = AsyncMock(
-            side_effect=lambda *a, **k: [
+        mock_repo.search_document_chunks.side_effect = (
+            lambda *a, **k: [
                 _chunk_hit("e1", 0.9), _chunk_hit("e2", 0.8),
             ] if a[2] == "person_document_bio_embedding" else []
         )
-        mock_repo.get_entities_by_ids = AsyncMock(return_value={
+        mock_repo.get_entities_by_ids.return_value = ({
             "e1": _person("e1", "Ada", age=30),
             "e2": _person("e2", "Grace", age=20),
         })
         result = await semantic_search(
-            "test", "q", "person", 10, None, mock_driver,
+            "test", "q", "person", 10, None, store,
             filters={"age__gt": "25"}, search_in="documents",
         )
 
@@ -308,15 +326,15 @@ async def test_documents_mode_applies_property_filters_to_parents(mock_driver, m
 # ---------------------------------------------------------------------------
 
 
-async def test_entities_mode_keeps_raw_similarity_and_adds_matched_via(mock_driver, mock_provider):
+async def test_entities_mode_keeps_raw_similarity_and_adds_matched_via(store, mock_provider):
     loaded = _make_loaded()
     p1, p2, p3 = _patched(loaded, mock_provider)
     with p1, p2, p3 as mock_repo:
-        mock_repo.semantic_search = AsyncMock(return_value=[
+        mock_repo.semantic_search.return_value = ([
             {"entity": _person("e1", "Ada"), "score": 0.95},
         ])
         result = await semantic_search(
-            "test", "q", "person", 10, None, mock_driver, search_in="entities",
+            "test", "q", "person", 10, None, store, search_in="entities",
         )
 
     hit = result["results"][0]
@@ -324,14 +342,14 @@ async def test_entities_mode_keeps_raw_similarity_and_adds_matched_via(mock_driv
     assert hit["matchedVia"] == {"source": "entity", "similarity": 0.95}
 
 
-async def test_entities_mode_never_queries_chunk_indexes(mock_driver, mock_provider):
+async def test_entities_mode_never_queries_chunk_indexes(store, mock_provider):
     loaded = _make_loaded()
     p1, p2, p3 = _patched(loaded, mock_provider)
     with p1, p2, p3 as mock_repo:
-        mock_repo.semantic_search = AsyncMock(return_value=[])
-        mock_repo.search_document_chunks = AsyncMock(return_value=[])
+        mock_repo.semantic_search.return_value = ([])
+        mock_repo.search_document_chunks.return_value = ([])
         await semantic_search(
-            "test", "q", "person", 10, None, mock_driver, search_in="entities",
+            "test", "q", "person", 10, None, store, search_in="entities",
         )
 
     mock_repo.search_document_chunks.assert_not_awaited()
@@ -342,26 +360,26 @@ async def test_entities_mode_never_queries_chunk_indexes(mock_driver, mock_provi
 # ---------------------------------------------------------------------------
 
 
-async def test_all_mode_fuses_rankings_with_rrf(mock_driver, mock_provider):
+async def test_all_mode_fuses_rankings_with_rrf(store, mock_provider):
     """e1 appears in both rankings (rank 1 + rank 2), e2/e3 in one each."""
     loaded = _make_loaded()
     p1, p2, p3 = _patched(loaded, mock_provider)
     with p1, p2, p3 as mock_repo:
-        mock_repo.semantic_search = AsyncMock(return_value=[
+        mock_repo.semantic_search.return_value = ([
             {"entity": _person("e1", "Ada"), "score": 0.95},
             {"entity": _person("e2", "Grace"), "score": 0.85},
         ])
-        mock_repo.search_document_chunks = AsyncMock(
-            side_effect=lambda *a, **k: [
+        mock_repo.search_document_chunks.side_effect = (
+            lambda *a, **k: [
                 _chunk_hit("e3", 0.9), _chunk_hit("e1", 0.8, start=300),
             ] if a[2] == "person_document_bio_embedding" else []
         )
-        mock_repo.get_entities_by_ids = AsyncMock(return_value={
+        mock_repo.get_entities_by_ids.return_value = ({
             "e3": _person("e3", "Alan"),
             "e1": _person("e1", "Ada"),
         })
         result = await semantic_search(
-            "test", "q", "person", 10, None, mock_driver, search_in="all",
+            "test", "q", "person", 10, None, store, search_in="all",
         )
 
     results = {r["entity"]["_id"]: r for r in result["results"]}
@@ -385,40 +403,40 @@ async def test_all_mode_fuses_rankings_with_rrf(mock_driver, mock_provider):
     assert results["e3"]["matchedVia"]["source"] == "document"
 
 
-async def test_all_mode_applies_limit_after_fusion(mock_driver, mock_provider):
+async def test_all_mode_applies_limit_after_fusion(store, mock_provider):
     loaded = _make_loaded()
     p1, p2, p3 = _patched(loaded, mock_provider)
     with p1, p2, p3 as mock_repo:
-        mock_repo.semantic_search = AsyncMock(return_value=[
+        mock_repo.semantic_search.return_value = ([
             {"entity": _person(f"e{i}", f"P{i}"), "score": 0.9 - i * 0.01}
             for i in range(5)
         ])
-        mock_repo.search_document_chunks = AsyncMock(
-            side_effect=lambda *a, **k: [
+        mock_repo.search_document_chunks.side_effect = (
+            lambda *a, **k: [
                 _chunk_hit(f"d{i}", 0.9 - i * 0.01) for i in range(5)
             ] if a[2] == "person_document_bio_embedding" else []
         )
-        mock_repo.get_entities_by_ids = AsyncMock(return_value={
+        mock_repo.get_entities_by_ids.return_value = ({
             f"d{i}": _person(f"d{i}", f"D{i}") for i in range(5)
         })
         result = await semantic_search(
-            "test", "q", "person", 3, None, mock_driver, search_in="all",
+            "test", "q", "person", 3, None, store, search_in="all",
         )
 
     assert result["total"] == 3
 
 
-async def test_all_mode_without_documents_matches_entity_ranking_order(mock_driver, mock_provider):
+async def test_all_mode_without_documents_matches_entity_ranking_order(store, mock_provider):
     """With no document properties, `all` degrades to the entity ranking."""
     loaded = _make_loaded(person_props={"name": _prop("name", required=True)})
     p1, p2, p3 = _patched(loaded, mock_provider)
     with p1, p2, p3 as mock_repo:
-        mock_repo.semantic_search = AsyncMock(return_value=[
+        mock_repo.semantic_search.return_value = ([
             {"entity": _person("e1", "Ada"), "score": 0.95},
             {"entity": _person("e2", "Grace"), "score": 0.85},
         ])
         result = await semantic_search(
-            "test", "q", "person", 10, None, mock_driver,
+            "test", "q", "person", 10, None, store,
         )
 
     assert [r["entity"]["_id"] for r in result["results"]] == ["e1", "e2"]

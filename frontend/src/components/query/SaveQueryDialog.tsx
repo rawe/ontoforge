@@ -29,8 +29,8 @@ import { detectParams } from './resultUtils'
 
 interface SaveQueryDialogProps {
   ontologyKey: string
-  /** The console's current Cypher — becomes the single `main` step. */
-  cypher: string
+  /** The console's current query — becomes the single `main` step. */
+  query: string
   open: boolean
   onOpenChange: (open: boolean) => void
   onSaved?: (queryKey: string) => void
@@ -39,11 +39,11 @@ interface SaveQueryDialogProps {
 /**
  * "Save as query" dialog for the console: key/name/description plus a
  * parameter row per auto-detected `$param` token. Persists via the modeling
- * API as a single-step Cypher pipeline.
+ * API as a single-step OQL pipeline.
  */
 export function SaveQueryDialog({
   ontologyKey,
-  cypher,
+  query,
   open,
   onOpenChange,
   onSaved,
@@ -66,7 +66,7 @@ export function SaveQueryDialog({
       setName('')
       setDescription('')
       setParameters(
-        detectParams(cypher).map((p) => ({ name: p, description: '', dataType: 'string' })),
+        detectParams(query).map((p) => ({ name: p, description: '', dataType: 'string' })),
       )
     }
   }
@@ -78,7 +78,7 @@ export function SaveQueryDialog({
       model.upsertSavedQuery(ontologyKey, key, {
         name: name.trim(),
         description: description.trim(),
-        steps: [{ name: 'main', type: 'cypher', cypher }],
+        steps: [{ name: 'main', type: 'oql', oql: query }],
         parameters: parameters.map((p) => ({
           ...p,
           name: p.name.trim(),
@@ -104,7 +104,7 @@ export function SaveQueryDialog({
     isValidKey(key) &&
     name.trim() !== '' &&
     description.trim() !== '' &&
-    cypher.trim() !== '' &&
+    query.trim() !== '' &&
     parameters.every((p) => p.name.trim() !== '')
 
   return (
@@ -113,7 +113,7 @@ export function SaveQueryDialog({
         <DialogHeader>
           <DialogTitle>Save as query</DialogTitle>
           <DialogDescription>
-            Stores the current Cypher as a reusable saved query on this ontology —
+            Stores the current query as a reusable saved query on this ontology —
             runnable from the Library, REST and MCP.
           </DialogDescription>
         </DialogHeader>
@@ -166,7 +166,7 @@ export function SaveQueryDialog({
           </div>
 
           <pre className="max-h-32 overflow-auto rounded-lg border bg-muted/40 p-2.5 font-mono text-[11px]">
-            {cypher}
+            {query}
           </pre>
 
           {parameters.length > 0 && (
@@ -174,7 +174,7 @@ export function SaveQueryDialog({
               <Label>Parameters</Label>
               <p className="-mt-1 text-xs text-muted-foreground">
                 Auto-detected from <code className="font-mono">$param</code> tokens in
-                the Cypher.
+                the query.
               </p>
               {parameters.map((p, i) => (
                 <div key={i} className="flex items-center gap-1.5">

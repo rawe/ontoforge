@@ -20,7 +20,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { CypherEditor } from './CypherEditor'
+import { QueryEditor } from './QueryEditor'
 import { QueryErrorBlock, ResultsPanel } from './ResultsPanel'
 import { formatQueryError } from './resultUtils'
 import { SaveQueryDialog } from './SaveQueryDialog'
@@ -31,17 +31,17 @@ import { useQueryHistory } from './useQueryHistory'
 interface ConsoleTabProps {
   ontologyKey: string
   schema: RuntimeSchema
-  /** Prefill from `?cypher=` (palette / AI hand-off). */
-  initialCypher?: string
+  /** Prefill from `?query=` (palette / AI hand-off). */
+  initialQuery?: string
 }
 
 /**
- * Cypher console: CodeMirror editor with schema sidebar (click-to-insert
+ * Query console: CodeMirror editor with schema sidebar (click-to-insert
  * snippets), Cmd+Enter / Run, per-ontology history, verbatim backend error
  * hints and the shared results panel with graph toggle.
  */
-export function ConsoleTab({ ontologyKey, schema, initialCypher }: ConsoleTabProps) {
-  const [cypher, setCypher] = useState(initialCypher ?? '')
+export function ConsoleTab({ ontologyKey, schema, initialQuery }: ConsoleTabProps) {
+  const [query, setQuery] = useState(initialQuery ?? '')
   const [run, setRun] = useState<{ result: QueryResult; ms: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saveOpen, setSaveOpen] = useState(false)
@@ -49,17 +49,17 @@ export function ConsoleTab({ ontologyKey, schema, initialCypher }: ConsoleTabPro
   const editorRef = useRef<ReactCodeMirrorRef | null>(null)
   const { history, push } = useQueryHistory(ontologyKey)
 
-  // Adopt a new `?cypher=` prefill arriving while mounted (AI → console).
-  const [lastInitial, setLastInitial] = useState(initialCypher)
-  if (initialCypher !== lastInitial) {
-    setLastInitial(initialCypher)
-    if (initialCypher !== undefined && initialCypher !== '') setCypher(initialCypher)
+  // Adopt a new `?query=` prefill arriving while mounted (AI → console).
+  const [lastInitial, setLastInitial] = useState(initialQuery)
+  if (initialQuery !== lastInitial) {
+    setLastInitial(initialQuery)
+    if (initialQuery !== undefined && initialQuery !== '') setQuery(initialQuery)
   }
 
   const execute = useMutation({
     mutationFn: async (text: string) => {
       const started = performance.now()
-      const result = await runtime.cypherQuery(ontologyKey, text)
+      const result = await runtime.runQuery(ontologyKey, text)
       return { result, ms: Math.round(performance.now() - started) }
     },
     onSuccess: (data, text) => {
@@ -74,7 +74,7 @@ export function ConsoleTab({ ontologyKey, schema, initialCypher }: ConsoleTabPro
   })
 
   const runQuery = () => {
-    const text = cypher.trim()
+    const text = query.trim()
     if (text === '' || execute.isPending) return
     execute.mutate(text)
   }
@@ -82,9 +82,9 @@ export function ConsoleTab({ ontologyKey, schema, initialCypher }: ConsoleTabPro
   return (
     <div className="flex gap-4">
       <div className="min-w-0 flex-1 space-y-3">
-        <CypherEditor
-          value={cypher}
-          onChange={setCypher}
+        <QueryEditor
+          value={query}
+          onChange={setQuery}
           onRun={runQuery}
           editorRef={editorRef}
         />
@@ -95,7 +95,7 @@ export function ConsoleTab({ ontologyKey, schema, initialCypher }: ConsoleTabPro
               <Button
                 size="sm"
                 onClick={runQuery}
-                disabled={cypher.trim() === '' || execute.isPending}
+                disabled={query.trim() === '' || execute.isPending}
               >
                 <Play className="size-3.5" />
                 {execute.isPending ? 'Running…' : 'Run'}
@@ -116,7 +116,7 @@ export function ConsoleTab({ ontologyKey, schema, initialCypher }: ConsoleTabPro
               {history.map((entry, i) => (
                 <DropdownMenuItem
                   key={i}
-                  onSelect={() => setCypher(entry)}
+                  onSelect={() => setQuery(entry)}
                   className="font-mono text-xs"
                 >
                   <span className="block max-w-lg truncate">{entry}</span>
@@ -128,7 +128,7 @@ export function ConsoleTab({ ontologyKey, schema, initialCypher }: ConsoleTabPro
           <Button
             variant="outline"
             size="sm"
-            disabled={cypher.trim() === ''}
+            disabled={query.trim() === ''}
             onClick={() => setSaveOpen(true)}
           >
             <BookmarkPlus className="size-3.5" /> Save as query
@@ -164,7 +164,7 @@ export function ConsoleTab({ ontologyKey, schema, initialCypher }: ConsoleTabPro
         {run === null && error === null && (
           <EmptyState
             icon={SquareTerminal}
-            title="Run a read-only Cypher query"
+            title="Run a read-only query"
             description="Use snake_case type keys — click a type in the schema sidebar to insert a starter MATCH. Cmd+Enter runs."
           />
         )}
@@ -181,7 +181,7 @@ export function ConsoleTab({ ontologyKey, schema, initialCypher }: ConsoleTabPro
 
       <SaveQueryDialog
         ontologyKey={ontologyKey}
-        cypher={cypher.trim()}
+        query={query.trim()}
         open={saveOpen}
         onOpenChange={setSaveOpen}
       />

@@ -2,9 +2,9 @@ from collections.abc import Callable
 
 from mcp.server.fastmcp import FastMCP
 
-from ontoforge_server.core.database import get_driver
+from ontoforge_server.core.ports import get_modeling_store, get_runtime_store
 from ontoforge_server.core.exceptions import NotFoundError, ValidationError
-from ontoforge_server.modeling import repository, service
+from ontoforge_server.modeling import service
 from ontoforge_server.modeling.schemas import (
     AiAgentConfigUpsert,
     DataType,
@@ -35,28 +35,25 @@ modeling_mcp.settings.streamable_http_path = "/"
 # ---------------------------------------------------------------------------
 
 
-async def _resolve_entity_type(driver, entity_type_key: str) -> dict:
+async def _resolve_entity_type(store, entity_type_key: str) -> dict:
     """Resolve entity type key to full dict globally."""
-    async with driver.session() as session:
-        data = await repository.get_entity_type_by_key(session, entity_type_key)
+    data = await store.get_entity_type_by_key(entity_type_key)
     if not data:
         raise NotFoundError(f"Entity type '{entity_type_key}' not found")
     return data
 
 
-async def _resolve_relation_type(driver, relation_type_key: str) -> dict:
+async def _resolve_relation_type(store, relation_type_key: str) -> dict:
     """Resolve relation type key to full dict globally."""
-    async with driver.session() as session:
-        data = await repository.get_relation_type_by_key(session, relation_type_key)
+    data = await store.get_relation_type_by_key(relation_type_key)
     if not data:
         raise NotFoundError(f"Relation type '{relation_type_key}' not found")
     return data
 
 
-async def _resolve_property(driver, owner_id: str, owner_label: str, property_key: str) -> dict:
+async def _resolve_property(store, owner_id: str, owner_label: str, property_key: str) -> dict:
     """Resolve property key to full dict."""
-    async with driver.session() as session:
-        data = await repository.get_property_by_key(session, owner_id, owner_label, property_key)
+    data = await store.get_property_by_key(owner_id, owner_label, property_key)
     if not data:
         raise NotFoundError(f"Property '{property_key}' not found")
     return data
@@ -73,21 +70,20 @@ def _resolve_owner_label(type_kind: str) -> str:
         )
 
 
-async def _resolve_owner(driver, type_kind: str, type_key: str):
+async def _resolve_owner(store, type_kind: str, type_key: str):
     """Resolve a type_kind + type_key to (owner_id, owner_label)."""
     owner_label = _resolve_owner_label(type_kind)
     if owner_label == "EntityType":
-        owner = await _resolve_entity_type(driver, type_key)
+        owner = await _resolve_entity_type(store, type_key)
         return owner["entityTypeId"], owner_label
     else:
-        owner = await _resolve_relation_type(driver, type_key)
+        owner = await _resolve_relation_type(store, type_key)
         return owner["relationTypeId"], owner_label
 
 
-async def _resolve_ontology_by_key(driver, ontology_key: str) -> dict:
+async def _resolve_ontology_by_key(store, ontology_key: str) -> dict:
     """Resolve ontology key to full ontology dict."""
-    async with driver.session() as session:
-        data = await repository.get_ontology_by_key(session, ontology_key)
+    data = await store.get_ontology_by_key(ontology_key)
     if not data:
         raise NotFoundError(f"Ontology '{ontology_key}' not found")
     return data
@@ -102,8 +98,8 @@ async def _resolve_ontology_by_key(driver, ontology_key: str) -> dict:
 
 
 async def get_schema() -> dict:
-    driver = await get_driver()
-    result = await service.export_schema(driver=driver)
+    store = get_modeling_store()
+    result = await service.export_schema(store=store)
     return result.model_dump(by_alias=True)
 
 
@@ -112,9 +108,9 @@ async def create_entity_type(
     display_name: str,
     description: str | None = None,
 ) -> dict:
-    driver = await get_driver()
+    store = get_modeling_store()
     body = EntityTypeCreate(key=key, display_name=display_name, description=description)
-    result = await service.create_entity_type(body=body, driver=driver)
+    result = await service.create_entity_type(body=body, store=store)
     return result.model_dump(by_alias=True)
 
 
@@ -123,17 +119,17 @@ async def update_entity_type(
     display_name: str | None = None,
     description: str | None = None,
 ) -> dict:
-    driver = await get_driver()
-    et = await _resolve_entity_type(driver, entity_type_key)
+    store = get_modeling_store()
+    et = await _resolve_entity_type(store, entity_type_key)
     body = EntityTypeUpdate(display_name=display_name, description=description)
-    result = await service.update_entity_type(et["entityTypeId"], body=body, driver=driver)
+    result = await service.update_entity_type(et["entityTypeId"], body=body, store=store)
     return result.model_dump(by_alias=True)
 
 
 async def delete_entity_type(entity_type_key: str, cascade: bool = False) -> str:
-    driver = await get_driver()
-    et = await _resolve_entity_type(driver, entity_type_key)
-    await service.delete_entity_type(et["entityTypeId"], cascade=cascade, driver=driver)
+    store = get_modeling_store()
+    et = await _resolve_entity_type(store, entity_type_key)
+    await service.delete_entity_type(et["entityTypeId"], cascade=cascade, store=store)
     return f"Entity type '{entity_type_key}' deleted successfully."
 
 
@@ -144,7 +140,7 @@ async def create_relation_type(
     target_entity_type_key: str,
     description: str | None = None,
 ) -> dict:
-    driver = await get_driver()
+    store = get_modeling_store()
     body = RelationTypeCreate(
         key=key,
         display_name=display_name,
@@ -152,7 +148,7 @@ async def create_relation_type(
         source_entity_type_key=source_entity_type_key,
         target_entity_type_key=target_entity_type_key,
     )
-    result = await service.create_relation_type(body=body, driver=driver)
+    result = await service.create_relation_type(body=body, store=store)
     return result.model_dump(by_alias=True)
 
 
@@ -161,17 +157,17 @@ async def update_relation_type(
     display_name: str | None = None,
     description: str | None = None,
 ) -> dict:
-    driver = await get_driver()
-    rt = await _resolve_relation_type(driver, relation_type_key)
+    store = get_modeling_store()
+    rt = await _resolve_relation_type(store, relation_type_key)
     body = RelationTypeUpdate(display_name=display_name, description=description)
-    result = await service.update_relation_type(rt["relationTypeId"], body=body, driver=driver)
+    result = await service.update_relation_type(rt["relationTypeId"], body=body, store=store)
     return result.model_dump(by_alias=True)
 
 
 async def delete_relation_type(relation_type_key: str, cascade: bool = False) -> str:
-    driver = await get_driver()
-    rt = await _resolve_relation_type(driver, relation_type_key)
-    await service.delete_relation_type(rt["relationTypeId"], cascade=cascade, driver=driver)
+    store = get_modeling_store()
+    rt = await _resolve_relation_type(store, relation_type_key)
+    await service.delete_relation_type(rt["relationTypeId"], cascade=cascade, store=store)
     return f"Relation type '{relation_type_key}' deleted successfully."
 
 
@@ -186,8 +182,8 @@ async def add_property(
     description: str | None = None,
     cascade: bool = False,
 ) -> dict:
-    driver = await get_driver()
-    owner_id, owner_label = await _resolve_owner(driver, type_kind, type_key)
+    store = get_modeling_store()
+    owner_id, owner_label = await _resolve_owner(store, type_kind, type_key)
     body = PropertyDefinitionCreate(
         key=key,
         display_name=display_name,
@@ -197,7 +193,7 @@ async def add_property(
         default_value=default_value,
     )
     result = await service.create_property(
-        owner_id, owner_label, body=body, cascade=cascade, driver=driver
+        owner_id, owner_label, body=body, cascade=cascade, store=store
     )
     return result.model_dump(by_alias=True)
 
@@ -211,9 +207,9 @@ async def update_property(
     default_value: str | None = None,
     description: str | None = None,
 ) -> dict:
-    driver = await get_driver()
-    owner_id, owner_label = await _resolve_owner(driver, type_kind, type_key)
-    prop = await _resolve_property(driver, owner_id, owner_label, property_key)
+    store = get_modeling_store()
+    owner_id, owner_label = await _resolve_owner(store, type_kind, type_key)
+    prop = await _resolve_property(store, owner_id, owner_label, property_key)
     body = PropertyDefinitionUpdate(
         display_name=display_name,
         description=description,
@@ -221,7 +217,7 @@ async def update_property(
         default_value=default_value,
     )
     result = await service.update_property(
-        owner_id, owner_label, prop["propertyId"], body=body, driver=driver
+        owner_id, owner_label, prop["propertyId"], body=body, store=store
     )
     return result.model_dump(by_alias=True)
 
@@ -232,31 +228,31 @@ async def delete_property(
     property_key: str,
     cascade: bool = False,
 ) -> str:
-    driver = await get_driver()
-    owner_id, owner_label = await _resolve_owner(driver, type_kind, type_key)
-    prop = await _resolve_property(driver, owner_id, owner_label, property_key)
+    store = get_modeling_store()
+    owner_id, owner_label = await _resolve_owner(store, type_kind, type_key)
+    prop = await _resolve_property(store, owner_id, owner_label, property_key)
     await service.delete_property(
-        owner_id, owner_label, prop["propertyId"], cascade=cascade, driver=driver
+        owner_id, owner_label, prop["propertyId"], cascade=cascade, store=store
     )
     return f"Property '{property_key}' deleted from {type_kind} '{type_key}'."
 
 
 async def validate_schema() -> dict:
-    driver = await get_driver()
-    result = await service.validate_all(driver=driver)
+    store = get_modeling_store()
+    result = await service.validate_all(store=store)
     return result.model_dump()
 
 
 async def export_schema() -> dict:
-    driver = await get_driver()
-    result = await service.export_schema(driver=driver)
+    store = get_modeling_store()
+    result = await service.export_schema(store=store)
     return result.model_dump(by_alias=True)
 
 
 async def import_schema(payload: dict) -> dict:
-    driver = await get_driver()
+    store = get_modeling_store()
     export = ExportPayload.model_validate(payload)
-    result = await service.import_schema(export, driver=driver)
+    result = await service.import_schema(export, store=store)
     return result
 
 
@@ -268,9 +264,9 @@ async def create_ontology(
     name: str,
     description: str | None = None,
 ) -> dict:
-    driver = await get_driver()
+    store = get_modeling_store()
     body = OntologyCreate(key=key, name=name, description=description)
-    result = await service.create_ontology(body=body, driver=driver)
+    result = await service.create_ontology(body=body, store=store)
     return result.model_dump(by_alias=True)
 
 
@@ -279,17 +275,17 @@ async def update_ontology(
     name: str | None = None,
     description: str | None = None,
 ) -> dict:
-    driver = await get_driver()
-    ontology = await _resolve_ontology_by_key(driver, ontology_key)
+    store = get_modeling_store()
+    ontology = await _resolve_ontology_by_key(store, ontology_key)
     body = OntologyUpdate(name=name, description=description)
-    result = await service.update_ontology(ontology["ontologyId"], body=body, driver=driver)
+    result = await service.update_ontology(ontology["ontologyId"], body=body, store=store)
     return result.model_dump(by_alias=True)
 
 
 async def delete_ontology(ontology_key: str) -> str:
-    driver = await get_driver()
-    ontology = await _resolve_ontology_by_key(driver, ontology_key)
-    await service.delete_ontology(ontology["ontologyId"], driver=driver)
+    store = get_modeling_store()
+    ontology = await _resolve_ontology_by_key(store, ontology_key)
+    await service.delete_ontology(ontology["ontologyId"], store=store)
     return f"Ontology '{ontology_key}' deleted successfully."
 
 
@@ -298,10 +294,10 @@ async def add_entity_type_to_ontology(
     entity_type_key: str,
     properties: list[str] | None = None,
 ) -> dict:
-    driver = await get_driver()
-    ontology = await _resolve_ontology_by_key(driver, ontology_key)
+    store = get_modeling_store()
+    ontology = await _resolve_ontology_by_key(store, ontology_key)
     body = IncludeTypeRequest(key=entity_type_key, properties=properties)
-    result = await service.add_includes_entity_type(ontology["ontologyId"], body, driver)
+    result = await service.add_includes_entity_type(ontology["ontologyId"], body, store)
     return result.model_dump()
 
 
@@ -309,10 +305,10 @@ async def remove_entity_type_from_ontology(
     ontology_key: str,
     entity_type_key: str,
 ) -> str:
-    driver = await get_driver()
-    ontology = await _resolve_ontology_by_key(driver, ontology_key)
-    et = await _resolve_entity_type(driver, entity_type_key)
-    await service.remove_includes_entity_type(ontology["ontologyId"], et["entityTypeId"], driver)
+    store = get_modeling_store()
+    ontology = await _resolve_ontology_by_key(store, ontology_key)
+    et = await _resolve_entity_type(store, entity_type_key)
+    await service.remove_includes_entity_type(ontology["ontologyId"], et["entityTypeId"], store)
     return f"Entity type '{entity_type_key}' removed from ontology '{ontology_key}'."
 
 
@@ -321,10 +317,10 @@ async def add_relation_type_to_ontology(
     relation_type_key: str,
     properties: list[str] | None = None,
 ) -> dict:
-    driver = await get_driver()
-    ontology = await _resolve_ontology_by_key(driver, ontology_key)
+    store = get_modeling_store()
+    ontology = await _resolve_ontology_by_key(store, ontology_key)
     body = IncludeTypeRequest(key=relation_type_key, properties=properties)
-    result = await service.add_includes_relation_type(ontology["ontologyId"], body, driver)
+    result = await service.add_includes_relation_type(ontology["ontologyId"], body, store)
     return result.model_dump()
 
 
@@ -332,17 +328,17 @@ async def remove_relation_type_from_ontology(
     ontology_key: str,
     relation_type_key: str,
 ) -> str:
-    driver = await get_driver()
-    ontology = await _resolve_ontology_by_key(driver, ontology_key)
-    rt = await _resolve_relation_type(driver, relation_type_key)
-    await service.remove_includes_relation_type(ontology["ontologyId"], rt["relationTypeId"], driver)
+    store = get_modeling_store()
+    ontology = await _resolve_ontology_by_key(store, ontology_key)
+    rt = await _resolve_relation_type(store, relation_type_key)
+    await service.remove_includes_relation_type(ontology["ontologyId"], rt["relationTypeId"], store)
     return f"Relation type '{relation_type_key}' removed from ontology '{ontology_key}'."
 
 
 async def validate_ontology(ontology_key: str) -> dict:
-    driver = await get_driver()
-    ontology = await _resolve_ontology_by_key(driver, ontology_key)
-    result = await service.validate_ontology(ontology["ontologyId"], driver=driver)
+    store = get_modeling_store()
+    ontology = await _resolve_ontology_by_key(store, ontology_key)
+    result = await service.validate_ontology(ontology["ontologyId"], store=store)
     return result.model_dump()
 
 
@@ -350,8 +346,8 @@ async def validate_ontology(ontology_key: str) -> dict:
 
 
 async def list_ai_agents(ontology_key: str) -> list[dict]:
-    driver = await get_driver()
-    results = await service.list_ai_agents(ontology_key, driver)
+    store = get_modeling_store()
+    results = await service.list_ai_agents(ontology_key, store)
     return [r.model_dump(by_alias=True) for r in results]
 
 
@@ -363,22 +359,22 @@ async def set_ai_agent(
     system_prompt: str | None = None,
     tools: list[str] | None = None,
 ) -> dict:
-    driver = await get_driver()
+    store = get_modeling_store()
     body = AiAgentConfigUpsert(
         name=name,
         description=description,
         system_prompt=system_prompt,
         tools=tools,
     )
-    result, created = await service.upsert_ai_agent(ontology_key, key, body, driver)
+    result, created = await service.upsert_ai_agent(ontology_key, key, body, store)
     response = result.model_dump(by_alias=True)
     response["created"] = created
     return response
 
 
 async def delete_ai_agent(ontology_key: str, agent_key: str) -> str:
-    driver = await get_driver()
-    await service.delete_ai_agent(ontology_key, agent_key, driver)
+    store = get_modeling_store()
+    await service.delete_ai_agent(ontology_key, agent_key, store)
     return f"AI agent '{agent_key}' deleted from ontology '{ontology_key}'."
 
 
@@ -386,8 +382,8 @@ async def delete_ai_agent(ontology_key: str, agent_key: str) -> str:
 
 
 async def list_saved_queries(ontology_key: str) -> list[dict]:
-    driver = await get_driver()
-    results = await service.list_saved_queries(ontology_key, driver)
+    store = get_modeling_store()
+    results = await service.list_saved_queries(ontology_key, store)
     return [r.model_dump(by_alias=True) for r in results]
 
 
@@ -399,22 +395,24 @@ async def set_saved_query(
     steps: list[dict],
     parameters: list[dict] | None = None,
 ) -> dict:
-    driver = await get_driver()
+    store = get_modeling_store()
     body = SavedQueryUpsert(
         name=name,
         description=description,
         steps=steps,
         parameters=parameters or [],
     )
-    result, created = await service.upsert_saved_query(ontology_key, key, body, driver)
+    result, created = await service.upsert_saved_query(
+        ontology_key, key, body, store, get_runtime_store()
+    )
     response = result.model_dump(by_alias=True)
     response["created"] = created
     return response
 
 
 async def delete_saved_query(ontology_key: str, query_key: str) -> str:
-    driver = await get_driver()
-    await service.delete_saved_query(ontology_key, query_key, driver)
+    store = get_modeling_store()
+    await service.delete_saved_query(ontology_key, query_key, store)
     return f"Saved query '{query_key}' deleted from ontology '{ontology_key}'."
 
 
@@ -581,7 +579,8 @@ _MODELING_TOOL_DEFS: list[tuple[Callable, str, str]] = [
         "Key must match pattern ^[a-z][a-z0-9_-]*$. "
         "Steps is an ordered array of pipeline steps. Each step requires a unique 'name' and a 'type'. "
         "Step types: "
-        "'cypher' — needs 'cypher' field with a Cypher query using $param placeholders. "
+        "'oql' — needs 'oql' field with a read-only OQL query (openCypher-style "
+        "pattern syntax over entity/relation type keys) using $param placeholders. "
         "'semantic_search' — needs 'entityTypeKey' and 'query' (use $param_name to reference a declared parameter). "
         "Optional: 'limit' (default 10), 'minScore'. "
         "Data flow: steps can have 'bindings' dict mapping param names to '{{prevStepName.fieldName}}' "
@@ -589,7 +588,7 @@ _MODELING_TOOL_DEFS: list[tuple[Callable, str, str]] = [
         "Parameters define top-level $param placeholders. "
         "Each parameter needs: name, description, dataType (string/integer/float/boolean/date/datetime). "
         "Example: steps=[{name:'skills', type:'semantic_search', entityTypeKey:'skill', query:'$q', limit:5}, "
-        "{name:'results', type:'cypher', cypher:'MATCH (p:person)-[:has_skill]->(s:skill) "
+        "{name:'results', type:'oql', oql:'MATCH (p:person)-[:has_skill]->(s:skill) "
         "WHERE s._id IN $ids RETURN p', bindings:{ids:'{{skills._id}}'}}], parameters=[{name:'q', ...}]",
     ),
     (

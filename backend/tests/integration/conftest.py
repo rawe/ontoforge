@@ -1,24 +1,24 @@
 """Shared fixtures for integration tests.
 
-All integration tests start from a clean Neo4j database.
+This is the adapter conformance suite: it talks to a real database through
+the persistence port, selected by ``DB_BACKEND`` (plus the adapter's own
+connection settings). All tests start from empty data; indexes and
+constraints are created at startup and persist across wipes.
 """
 
 import httpx
 import pytest
 from httpx import ASGITransport, AsyncClient
-from neo4j import AsyncGraphDatabase
 
-from ontoforge_server.config import settings
+from ontoforge_server.core import ports
 from ontoforge_server.runtime.service import invalidate_loaded_schema_cache
 
 
-async def check_neo4j() -> bool:
+async def check_database() -> bool:
+    """True when the configured database adapter can connect."""
     try:
-        driver = AsyncGraphDatabase.driver(
-            settings.DB_URI, auth=(settings.DB_USER, settings.DB_PASSWORD)
-        )
-        await driver.verify_connectivity()
-        await driver.close()
+        await ports.init_stores()
+        await ports.close_stores()
         return True
     except Exception:
         return False
@@ -36,37 +36,34 @@ async def check_ollama_model(model: str) -> bool:
         return False
 
 
-async def wipe_neo4j():
-    """Delete all nodes and relationships from the database."""
-    driver = AsyncGraphDatabase.driver(
-        settings.DB_URI, auth=(settings.DB_USER, settings.DB_PASSWORD)
-    )
-    async with driver.session() as session:
-        await session.run("MATCH (n) DETACH DELETE n")
-    await driver.close()
+async def wipe_database():
+    """Delete all stored data through the active adapter."""
+    await ports.init_stores()
+    await ports.wipe_database()
+    await ports.close_stores()
     invalidate_loaded_schema_cache()
+
 
 
 @pytest.fixture
 async def clean_db():
-    """Wipe Neo4j before the test. Yields, then wipes again after."""
-    await wipe_neo4j()
+    """Wipe the database before the test. Yields, then wipes again after."""
+    await wipe_database()
     yield
-    await wipe_neo4j()
+    await wipe_database()
 
 
 @pytest.fixture
 async def integration_client(clean_db):
-    """HTTP client connected to a real app with real Neo4j.
+    """HTTP client connected to a real app with a real database.
 
     Depends on clean_db to ensure a fresh database.
     """
-    from ontoforge_server.core.database import close_driver, init_driver
     from ontoforge_server.main import create_app
 
-    await init_driver()
+    await ports.init_stores()
     app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
-    await close_driver()
+    await ports.close_stores()

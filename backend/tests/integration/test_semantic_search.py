@@ -14,7 +14,7 @@ from ontoforge_server.core.embedding import (
     close_embedding_provider,
     init_embedding_provider,
 )
-from tests.integration.conftest import check_neo4j, check_ollama_model
+from tests.integration.conftest import check_database, check_ollama_model
 
 EMBEDDING_MODEL = "nomic-embed-text"
 
@@ -24,7 +24,7 @@ pytestmark = pytest.mark.integration
 @pytest.fixture(scope="module")
 async def services_available():
     """Skip the entire module if Neo4j or Ollama aren't available."""
-    if not await check_neo4j():
+    if not await check_database():
         pytest.skip("Neo4j not available")
     if not await check_ollama_model(EMBEDDING_MODEL):
         pytest.skip(f"Ollama not available or model '{EMBEDDING_MODEL}' not pulled")
@@ -146,7 +146,8 @@ async def test_semantic_search_cross_type(integration_client, test_ontology):
 
     # The shared _Entity index is normally ensured at app startup; the test
     # client skips the lifespan, so create it explicitly.
-    from ontoforge_server.core.database import ensure_entity_vector_index, get_driver
+    from ontoforge_server.adapters.neo4j.ddl import ensure_entity_vector_index
+    from ontoforge_server.adapters.neo4j.driver import get_driver
     from ontoforge_server.core.embedding import get_embedding_provider
 
     driver = await get_driver()

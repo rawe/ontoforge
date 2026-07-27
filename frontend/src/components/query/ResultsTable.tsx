@@ -57,7 +57,7 @@ function ResultCell({
     return <span className="text-muted-foreground/50">—</span>
   }
 
-  // Document property stubs (Cypher results carry stubs, never content).
+  // Document property stubs (query results carry stubs, never content).
   if (isDocumentStub(value)) {
     return <DocumentBadge length={value.length} />
   }
@@ -113,7 +113,7 @@ interface ResultsTableProps {
 }
 
 /**
- * Result table for Cypher and saved-query runs: entity objects render as
+ * Result table for OQL and saved-query runs: entity objects render as
  * type chips linking to their detail page, relation objects as mono chips,
  * plain scalars as-is, other objects as expandable JSON.
  */

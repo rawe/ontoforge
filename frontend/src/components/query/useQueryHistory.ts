@@ -4,7 +4,7 @@ import { readJson, storageKeys, writeJson } from '@/lib/storage'
 const MAX_HISTORY = 10
 
 /**
- * Last 10 run Cypher strings for one ontology, persisted under
+ * Last 10 run query strings for one ontology, persisted under
  * `of.queryHistory.{ontologyKey}`. Mount the consuming component keyed by
  * ontology so the initial read matches the active ontology.
  */
@@ -14,8 +14,8 @@ export function useQueryHistory(ontologyKey: string) {
   )
 
   const push = useCallback(
-    (cypher: string) => {
-      const trimmed = cypher.trim()
+    (query: string) => {
+      const trimmed = query.trim()
       if (trimmed === '') return
       setHistory((prev) => {
         const next = [trimmed, ...prev.filter((c) => c !== trimmed)].slice(0, MAX_HISTORY)

@@ -9,9 +9,9 @@
 
 Two primary scenarios drive the MCP integration:
 
-1. **Schema brainstorming** — An AI coding assistant (e.g., Claude Code) connects to OntoForge to collaboratively design an ontology. The assistant can inspect the current schema, propose entity types, relation types, and properties, and persist changes live in Neo4j. This enables conversational ontology design where the developer and the LLM iterate together.
+1. **Schema brainstorming** — An AI coding assistant (e.g., Claude Code) connects to OntoForge to collaboratively design an ontology. The assistant can inspect the current schema, propose entity types, relation types, and properties, and persist changes live in the database. This enables conversational ontology design where the developer and the LLM iterate together.
 
-2. **Schema-enforced data access** — An LLM uses OntoForge as a controlled write layer for a Neo4j knowledge graph. Every write is validated against the ontology, preventing the LLM from hallucinating new entity types, inventing undefined properties, or writing structurally invalid data. The LLM gets structured, schema-aware CRUD access without needing to understand Cypher or Neo4j internals.
+2. **Schema-enforced data access** — An LLM uses OntoForge as a controlled write layer for a knowledge graph. Every write is validated against the ontology, preventing the LLM from hallucinating new entity types, inventing undefined properties, or writing structurally invalid data. The LLM gets structured, schema-aware CRUD access without needing to understand query languages or database internals.
 
 Both use cases share a key requirement: the LLM should operate on **one ontology at a time**, without being aware that the system supports multiple ontologies.
 
@@ -34,13 +34,13 @@ We evaluated three deployment shapes:
 
 **Shape B — Separate process, REST adapter (rejected):** A standalone MCP process that wraps the REST API, calling it over HTTP.
 
-**Shape C — Separate process, direct DB (rejected):** A standalone MCP process with its own Neo4j connection, importing service code as a library.
+**Shape C — Separate process, direct DB (rejected):** A standalone MCP process with its own database connection, importing service code as a library.
 
 #### Why Shape A (Embedded)
 
 - **No extra process.** The `ontoforge-server` already runs at port 8000. MCP endpoints are additional FastAPI routes — no second process to start for local development.
 - **Direct service calls.** MCP handlers call the same service layer (`modeling/service.py`, `runtime/service.py`) as the REST routers. No REST-to-REST network hop, no HTTP adapter layer, no serialization/deserialization overhead.
-- **Shared infrastructure.** Reuses the existing Neo4j connection, schema cache, error handling, and configuration. No duplication.
+- **Shared infrastructure.** Reuses the existing persistence port (and its database adapter), schema cache, error handling, and configuration. No duplication.
 - **Natural ontology scoping.** The ontology key is part of the MCP endpoint URL. The client configures which ontology it connects to by choosing the URL.
 
 #### Why Not Shape B (Separate process, REST adapter)
@@ -52,7 +52,7 @@ We evaluated three deployment shapes:
 
 #### Why Not Shape C (Separate process, direct DB)
 
-- Duplicates Neo4j connection management, schema cache, and startup logic.
+- Duplicates database connection management, schema cache, and startup logic.
 - Two processes competing for the same database.
 - Over-engineered for the use case — violates KISS.
 
@@ -115,14 +115,15 @@ The REST API is multi-ontology: each request specifies which ontology to operate
 │                   └────────┬─────────┘                      │
 │                            │                                │
 │                   ┌────────▼──────────┐                     │
-│                   │  Repository Layer │                     │
+│                   │  Persistence Port │                     │
+│                   │  (stores)         │                     │
 │                   └────────┬──────────┘                     │
 │                            │                                │
 └────────────────────────────┼────────────────────────────────┘
                              │
-                    ┌────────▼────────┐
-                    │     Neo4j       │
-                    └─────────────────┘
+                    ┌────────▼────────────────┐
+                    │ Database (Neo4j adapter)│
+                    └─────────────────────────┘
 ```
 
 REST and MCP are **two interfaces to the same business logic**. Both call the service layer directly. Neither depends on the other.
@@ -153,7 +154,7 @@ AI Coding Assistant (e.g., Claude Code)
 │  (same code the REST router uses)             │
 └───────────────────┬───────────────────────────┘
                     ▼
-                 [Neo4j]
+              [database]
 ```
 
 **Example:** The LLM calls `create_entity_type(key="person", display_name="Person")`. The MCP handler resolves the ontology key "acme" to its UUID, then calls `service.create_entity_type(ontology_id="<uuid>", ...)`.
@@ -183,10 +184,10 @@ LLM Application / AI Agent
 │  (schema cache validates every write)         │
 └───────────────────┬───────────────────────────┘
                     ▼
-                 [Neo4j]
+              [database]
 ```
 
-**Example:** The LLM calls `create_entity(entity_type_key="person", properties={"name": "Alice", "age": 30})`. The runtime service checks the schema cache: does `person` exist? Is `name` a valid string property? Is `age` a valid integer? Is anything required but missing? Only valid data reaches Neo4j.
+**Example:** The LLM calls `create_entity(entity_type_key="person", properties={"name": "Alice", "age": 30})`. The runtime service checks the schema cache: does `person` exist? Is `name` a valid string property? Is `age` a valid integer? Is anything required but missing? Only valid data reaches the database.
 
 ---
 
@@ -261,12 +262,12 @@ Properties are managed through unified tools that work on both entity types and 
 | Tool | Arguments | Returns | Description |
 |------|-----------|---------|-------------|
 | `list_saved_queries` | — | List of saved queries with key, name, description, parameters | List all saved queries defined for this ontology. |
-| `set_saved_query` | `key`, `name`, `description`, `cypher`, `parameters` (list of `{name, description, dataType}`) | Created/updated saved query | Create or update a saved query. Cypher is validated against the scoped schema at creation time. Parameters must match `$param` references in the Cypher. |
+| `set_saved_query` | `key`, `name`, `description`, `steps` (list of step objects), `parameters` (list of `{name, description, dataType}`) | Created/updated saved query | Create or update a saved query pipeline. `oql` steps carry OQL text in `oql`; `semantic_search` steps carry their search text in `query`. OQL is validated against the scoped schema at creation time. Parameters must match `$param` references in the steps. |
 | `delete_saved_query` | `key` | Confirmation | Delete a saved query. |
 
 ### 3.2 Runtime MCP Tools (20 tools)
 
-Entity-returning tools (`list_entities`, `get_entity`, `get_neighbors`, `cypher_query`, `run_saved_query`, `semantic_search`) share the REST service layer, so `document` properties appear as stubs — never inline content (see `api-contracts/runtime-api.md` §3, Document Properties in Entity Reads). Content is read via `get_document`.
+Entity-returning tools (`list_entities`, `get_entity`, `get_neighbors`, `execute_query`, `run_saved_query`, `semantic_search`) share the REST service layer, so `document` properties appear as stubs — never inline content (see `api-contracts/runtime-api.md` §3, Document Properties in Entity Reads). Content is read via `get_document`.
 
 #### Schema Introspection
 
@@ -308,11 +309,13 @@ Entity-returning tools (`list_entities`, `get_entity`, `get_neighbors`, `cypher_
 |------|-----------|---------|-------------|
 | `get_neighbors` | `entity_type_key`, `entity_id`, `direction` (opt: "outgoing"/"incoming"/"both", default "both"), `relation_type_key` (opt), `limit` (opt, default 50) | Center entity + list of neighbor entities with connecting relations | Explore an entity's local neighborhood — discover what it's connected to and how. |
 
-#### Cypher Query
+#### OQL Query
 
 | Tool | Arguments | Returns | Description |
 |------|-----------|---------|-------------|
-| `cypher_query` | `cypher` (string) | `{"columns": [...], "results": [...]}` | Execute a read-only Cypher query. Use schema keys as labels/types (auto-translated). Only MATCH/RETURN supported — no writes, no CALL. |
+| `execute_query` | `query` (string) | `{"columns": [...], "results": [...]}` | Execute a read-only OQL query (openCypher-style graph pattern syntax) written in schema type keys. Read clauses only — no writes, no CALL. |
+
+The old tool name `execute_cypher_query` is registered as a deprecated alias that delegates to `execute_query`; it remains available for one release and agent-config tool lists accept and normalize the old name.
 
 #### Semantic Search
 
@@ -326,7 +329,7 @@ Entity-returning tools (`list_entities`, `get_entity`, `get_neighbors`, `cypher_
 |------|-----------|---------|-------------|
 | `list_saved_queries` | — | List of saved queries with key, name, description, parameters | List all saved queries available for this ontology. |
 | `search_saved_queries` | `query` (string) | List of saved queries with key, name, description, parameters, score | Search saved queries by semantic similarity to a natural language description. Returns up to 3 results above 0.7 similarity. Requires embedding provider. |
-| `run_saved_query` | `query_key`, `parameters` (object) | `{"columns": [...], "results": [...]}` | Execute a saved query with the provided parameter values. Parameters are type-coerced and passed natively to Neo4j. |
+| `run_saved_query` | `query_key`, `parameters` (object) | `{"columns": [...], "results": [...]}` | Execute a saved query with the provided parameter values. Parameters are type-coerced and passed as typed parameters. |
 
 ---
 
@@ -428,4 +431,4 @@ dependencies = [
 ### 6.3 Changes to Existing Code
 
 - `main.py` — mount MCP endpoints alongside REST routers
-- No changes to service, repository, or core layers
+- No changes to service, store, or core layers

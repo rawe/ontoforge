@@ -396,7 +396,7 @@ The export/import format is a self-contained JSON document:
 
 Entity types and relation types are global — not nested under any ontology. Ontologies are separate entries with optional `includes` for scoping. An ontology with `"includes": null` is unscoped (exposes the full schema). A scoped ontology lists the types it includes; `"properties": null` means all properties, a list means only those properties. UUIDs are not included in the export — they are regenerated on import.
 
-Saved-query steps are either `oql` steps (query text in the `oql` field) or `semantic_search` steps (search text in the `query` field). Import accepts format `2.x` payloads: the legacy step type `cypher` and its `cypher` field are mapped to `oql` on import.
+Saved-query steps are either `oql` steps (query text in the `oql` field) or `semantic_search` steps (search text in the `query` field). Import expects the current format; payloads from earlier formats are not converted.
 
 ## 5. API Design
 

@@ -9,9 +9,6 @@ TOOL_LIST_RELATIONS = "list_relations"
 TOOL_GET_NEIGHBORS = "get_neighbors"
 TOOL_SEMANTIC_SEARCH = "semantic_search"
 TOOL_EXECUTE_QUERY = "execute_query"
-# Deprecated alias, accepted in stored agent configs; removed after the
-# deprecation window.
-TOOL_EXECUTE_QUERY_LEGACY = "execute_cypher_query"
 TOOL_LIST_SAVED_QUERIES = "list_saved_queries"
 TOOL_RUN_SAVED_QUERY = "run_saved_query"
 TOOL_SEARCH_SAVED_QUERIES = "search_saved_queries"
@@ -39,11 +36,6 @@ VALID_AGENT_TOOLS: set[str] = {
     TOOL_RUN_SAVED_QUERY,
     TOOL_SEARCH_SAVED_QUERIES,
 }
-
-
-def normalize_tool_name(name: str) -> str:
-    """Map deprecated tool names to their current spelling."""
-    return TOOL_EXECUTE_QUERY if name == TOOL_EXECUTE_QUERY_LEGACY else name
 
 # Formatted list for use in descriptions (e.g. MCP modeling tool docs)
 VALID_AGENT_TOOLS_CSV: str = ", ".join(sorted(VALID_AGENT_TOOLS))

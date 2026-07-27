@@ -402,16 +402,10 @@ async def test_query_endpoint_success(client, unscoped_schema):
     assert body["results"][0]["p"]["name"] == "Alice"
 
 
-async def test_query_endpoint_accepts_deprecated_cypher_field(client, unscoped_schema):
-    """The legacy request field "cypher" is a deprecated alias for "query"."""
-    raw_entity = make_entity(name="Alice", age=30)
-    mock_execute = AsyncMock(
-        return_value=(["p"], [{"p": raw_entity}])
-    )
-
+async def test_query_endpoint_rejects_legacy_cypher_field(client, unscoped_schema):
+    """The request body field is "query"; "cypher" is no longer accepted."""
     with (
         patch(f"{REPO}.get_full_schema", new_callable=AsyncMock, return_value=unscoped_schema),
-        patch(f"{CYPHER_REPO}.execute_cypher_read", mock_execute),
         patch(EMBEDDING, return_value=None),
     ):
         resp = await client.post(
@@ -419,8 +413,7 @@ async def test_query_endpoint_accepts_deprecated_cypher_field(client, unscoped_s
             json={"cypher": "MATCH (p:person) RETURN p"},
         )
 
-    assert resp.status_code == 200
-    assert resp.json()["columns"] == ["p"]
+    assert resp.status_code == 422
 
 
 @pytest.mark.asyncio

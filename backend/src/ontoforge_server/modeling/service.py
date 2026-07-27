@@ -1161,6 +1161,13 @@ async def import_schema(
         provider = get_embedding_provider()
         for sq in ont.saved_queries:
             # Convert export steps to StepSchema for validation
+            for s in sq.steps:
+                if s.type not in {t.value for t in StepType}:
+                    raise ValidationError(
+                        f"Import error: saved query '{sq.key}' has step "
+                        f"'{s.name}' with unknown type '{s.type}'; expected "
+                        f"{' or '.join(t.value for t in StepType)}"
+                    )
             import_steps = [
                 StepSchema(
                     name=s.name,
@@ -1460,7 +1467,7 @@ def _to_saved_query_response(data: dict) -> SavedQueryResponse:
             StepSchema(
                 name=s["name"],
                 type=s["type"],
-                oql=s.get("oql", s.get("cypher")),
+                oql=s.get("oql"),
                 entityTypeKey=s.get("entityTypeKey"),
                 query=s.get("query"),
                 limit=s.get("limit"),
@@ -1514,7 +1521,7 @@ def _deserialize_export_steps(steps_json: str | None) -> list[ExportSavedQuerySt
         ExportSavedQueryStep(
             name=s["name"],
             type=s["type"],
-            oql=s.get("oql", s.get("cypher")),
+            oql=s.get("oql"),
             entityTypeKey=s.get("entityTypeKey"),
             query=s.get("query"),
             limit=s.get("limit"),

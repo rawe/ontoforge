@@ -115,7 +115,6 @@ Writes are unchanged: send the full string as a normal property value. An explic
   ```json
   { "query": "MATCH (p:person) RETURN p LIMIT 10" }
   ```
-  The legacy field name `cypher` is accepted as a deprecated input alias for `query`.
   Allowed: read-oriented clauses like `MATCH`, `WHERE`, `RETURN`, `ORDER BY`, `LIMIT`, `SKIP`, `WITH`, `UNWIND`
   Blocked: write clauses, `CALL`, labelless node patterns, reserved internal names
 

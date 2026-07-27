@@ -1,6 +1,6 @@
 from enum import Enum
 
-from pydantic import AliasChoices, BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 
 class DataType(str, Enum):
@@ -80,15 +80,12 @@ class ExportSavedQueryStep(BaseModel):
     """Saved-query step in the transfer format.
 
     ``oql`` steps carry the query text in ``oql``; ``semantic_search`` steps
-    carry their search text in ``query``. Step type ``cypher`` / field
-    ``cypher`` are accepted on import from format 2.x and normalized.
+    carry their search text in ``query``.
     """
 
     name: str
     type: str
-    oql: str | None = Field(
-        default=None, validation_alias=AliasChoices("oql", "cypher"),
-    )
+    oql: str | None = None
     entity_type_key: str | None = Field(default=None, alias="entityTypeKey")
     query: str | None = None
     limit: int | None = None
@@ -96,11 +93,6 @@ class ExportSavedQueryStep(BaseModel):
     bindings: dict[str, str] | None = None
 
     model_config = {"populate_by_name": True}
-
-    @field_validator("type", mode="before")
-    @classmethod
-    def _legacy_step_type(cls, v: object) -> object:
-        return "oql" if v == "cypher" else v
 
 
 class ExportSavedQuery(BaseModel):

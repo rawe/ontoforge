@@ -551,8 +551,6 @@ Execute a read-only OQL query against the ontology's scoped schema. OQL — the 
 }
 ```
 
-The legacy field name `cypher` is accepted as a deprecated input alias for `query` for one minor release.
-
 Queries are written entirely in schema type keys: entity type keys (snake_case) as node labels and relation type keys as relationship types.
 
 **Response:** `200 OK`
@@ -672,7 +670,6 @@ Translate a natural language question into an OQL query, execute it, and return 
 {
   "answer": "There are 3 companies in Berlin.",
   "query": "MATCH (c:company) WHERE c.location = 'Berlin' RETURN count(c) AS total",
-  "cypher": "MATCH (c:company) WHERE c.location = 'Berlin' RETURN count(c) AS total",
   "results": {
     "columns": ["total"],
     "results": [{"total": 3}]
@@ -680,7 +677,7 @@ Translate a natural language question into an OQL query, execute it, and return 
 }
 ```
 
-The `query` and `results` fields may be `null` if the LLM answered without using the query tool. `cypher` is a deprecated mirror of `query`, kept for one minor release and then removed.
+The `query` and `results` fields may be `null` if the LLM answered without using the query tool.
 
 ### POST /api/runtime/{ontologyKey}/ai/extract
 
@@ -851,7 +848,7 @@ List all saved queries available for this ontology. Returns query metadata, the 
 ]
 ```
 
-Step fields are included only when set; `steps` reflects the multi-step pipeline defined in the modeling API. Responses always emit the current field names; the legacy step type `cypher` and its `cypher` field are accepted on input paths only (modeling API, import).
+Step fields are included only when set; `steps` reflects the multi-step pipeline defined in the modeling API.
 
 **Errors:** 404 if ontology key not found.
 

@@ -315,8 +315,6 @@ Entity-returning tools (`list_entities`, `get_entity`, `get_neighbors`, `execute
 |------|-----------|---------|-------------|
 | `execute_query` | `query` (string) | `{"columns": [...], "results": [...]}` | Execute a read-only OQL query (openCypher-style graph pattern syntax) written in schema type keys. Read clauses only — no writes, no CALL. |
 
-The old tool name `execute_cypher_query` is registered as a deprecated alias that delegates to `execute_query`; it remains available for one release and agent-config tool lists accept and normalize the old name.
-
 #### Semantic Search
 
 | Tool | Arguments | Returns | Description |

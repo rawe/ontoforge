@@ -363,7 +363,7 @@ Export an ontology schema as JSON.
 
 Import an ontology from a JSON payload.
 
-**Request body:** JSON transfer format (see `architecture.md` section 4.4). Format `2.x` payloads are accepted: legacy saved-query steps of type `cypher` and their `cypher` field are mapped to `oql` on import.
+**Request body:** JSON transfer format (see `architecture.md` section 4.4). `formatVersion` is informational — it is not validated on import, and payloads from earlier formats are not converted.
 
 **Query parameter:** `overwrite=true|false` (default: false). If true and an ontology with the same `ontologyId` exists, it will be replaced. If false and it exists, returns 409.
 
@@ -660,7 +660,7 @@ List all saved queries for an ontology.
 
 Create or update a saved query. Returns `201 Created` when creating a new query and `200 OK` when updating an existing one. The `queryKey` in the path becomes the query's key.
 
-A saved query is an ordered pipeline of steps. `oql` steps carry their OQL text in the `oql` field; `semantic_search` steps carry their search text in the `query` field. The legacy step type `cypher` and its `cypher` field are accepted on input as deprecated aliases for `oql`; responses always emit the current names.
+A saved query is an ordered pipeline of steps. `oql` steps carry their OQL text in the `oql` field; `semantic_search` steps carry their search text in the `query` field.
 
 The OQL is validated against the ontology's scoped schema at creation time. Parameter declarations must match `$param` references in the steps.
 
@@ -741,8 +741,8 @@ parameters: array of SavedQueryParameter (optional, default [])
 ### SavedQueryStep
 ```
 name: string (required, pattern: ^[a-zA-Z_]\w*$)
-type: string (required, enum: oql | semantic_search; legacy "cypher" accepted on input as alias for oql)
-oql: string (oql steps; legacy field name "cypher" accepted on input)
+type: string (required, enum: oql | semantic_search)
+oql: string (oql steps)
 entityTypeKey: string (semantic_search steps)
 query: string (semantic_search steps — the search text)
 limit: integer (optional, 1–100)

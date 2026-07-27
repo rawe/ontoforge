@@ -256,7 +256,7 @@ curl -X POST http://localhost:8000/api/runtime/test_ontology/query \
   -d '{"query": "MATCH (p:person)-[r:works_for]->(c:company) WHERE p.name = '\''Alice'\'' RETURN p, c LIMIT 10"}'
 ```
 
-Use schema entity type keys (snake_case) as node labels and relation type keys as relationship types. Only read operations (MATCH/RETURN) are supported; writes and CALL are rejected. The legacy request field `cypher` is accepted as a deprecated alias for `query`.
+Use schema entity type keys (snake_case) as node labels and relation type keys as relationship types. Only read operations (MATCH/RETURN) are supported; writes and CALL are rejected.
 
 Response:
 

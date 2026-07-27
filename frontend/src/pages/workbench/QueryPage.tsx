@@ -19,8 +19,7 @@ export function QueryPage() {
   const schema = useRuntimeSchema(ontologyKey)
 
   const runParam = searchParams.get('run')
-  // Legacy `?cypher=` is still read so old links keep working.
-  const queryParam = searchParams.get('query') ?? searchParams.get('cypher')
+  const queryParam = searchParams.get('query')
   const tabParam = searchParams.get('tab')
   // `?run=` forces the Library, `?query=` forces the Console.
   const tab: Tab =

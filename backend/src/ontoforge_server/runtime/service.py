@@ -163,10 +163,8 @@ async def _load_schema(ontology_key: str, store: Any) -> LoadedSchema:
             steps=[
                 StepConfig(
                     name=s["name"],
-                    # Legacy rows may still use step type "cypher" / field
-                    # "cypher"; normalize on load.
-                    type="oql" if s["type"] == "cypher" else s["type"],
-                    oql=s.get("oql", s.get("cypher")),
+                    type=s["type"],
+                    oql=s.get("oql"),
                     entity_type_key=s.get("entityTypeKey"),
                     query=s.get("query"),
                     limit=s.get("limit"),

@@ -15,7 +15,6 @@ from ontoforge_server.runtime.tool_names import (
     TOOL_DELETE_RELATION,
     TOOL_EDIT_DOCUMENT,
     TOOL_EXECUTE_QUERY,
-    TOOL_EXECUTE_QUERY_LEGACY,
     TOOL_GET_DOCUMENT,
     TOOL_GET_ENTITY,
     TOOL_GET_NEIGHBORS,
@@ -596,21 +595,3 @@ _MCP_TOOL_DEFS: list[tuple[Callable, str, str]] = [
 
 for fn, name, description in _MCP_TOOL_DEFS:
     runtime_mcp.add_tool(fn, name=name, description=description)
-
-
-@_enrich_errors
-async def _legacy_cypher_query(cypher: str) -> dict:
-    ontology_key = _get_ontology_key()
-    store = get_runtime_store()
-    return await service.execute_query(ontology_key, cypher, store)
-
-
-# Deprecated alias for execute_query; removed after the deprecation window.
-runtime_mcp.add_tool(
-    _legacy_cypher_query,
-    name=TOOL_EXECUTE_QUERY_LEGACY,
-    description=(
-        "Deprecated alias for execute_query — use execute_query instead. "
-        "Executes a read-only OQL query."
-    ),
-)

@@ -1,6 +1,6 @@
 from typing import Any
 
-from pydantic import AliasChoices, BaseModel, Field
+from pydantic import BaseModel, Field
 
 from ontoforge_server.core.schemas import (
     ExportEntityType,
@@ -104,11 +104,9 @@ class DocumentEditResponse(BaseModel):
 
 
 class QueryRequest(BaseModel):
-    """OQL query request. ``cypher`` is a deprecated alias for ``query``."""
+    """OQL query request."""
 
-    query: str = Field(
-        ..., min_length=1, validation_alias=AliasChoices("query", "cypher"),
-    )
+    query: str = Field(..., min_length=1)
 
     model_config = {"populate_by_name": True}
 
@@ -139,8 +137,6 @@ class AiQueryRequest(BaseModel):
 class AiQueryResponse(BaseModel):
     answer: str
     query: str | None = None
-    # Deprecated mirror of ``query``; removed after the deprecation window.
-    cypher: str | None = None
     results: dict | None = None
 
 

@@ -149,11 +149,10 @@ async def test_ai_query_returns_query_and_results(integration_client, test_ontol
     })
     assert resp.status_code == 200
     data = resp.json()
-    # The executed query should be captured from the tool call, and the
-    # deprecated "cypher" field must mirror it during the deprecation window.
+    # The executed query should be captured from the tool call.
     if data["query"] is not None:
         assert isinstance(data["query"], str)
-    assert data["cypher"] == data["query"]
+    assert "cypher" not in data
     if data["results"] is not None:
         assert "columns" in data["results"]
         assert "results" in data["results"]

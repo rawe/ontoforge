@@ -30,7 +30,6 @@ from ontoforge_server.runtime.tool_names import (
     TOOL_RUN_SAVED_QUERY,
     TOOL_SEARCH_SAVED_QUERIES,
     TOOL_SEMANTIC_SEARCH,
-    normalize_tool_name,
 )
 
 logger = logging.getLogger(__name__)
@@ -408,8 +407,6 @@ async def ai_query(
     return {
         "answer": result.output,
         "query": query_used,
-        # Deprecated mirror of "query"; removed after the deprecation window.
-        "cypher": query_used,
         "results": query_results,
     }
 
@@ -572,10 +569,8 @@ async def run_agent_chat(
     _embedding_tools = {TOOL_SEMANTIC_SEARCH, TOOL_SEARCH_SAVED_QUERIES}
 
     if agent_config.tools is not None:
-        # Stored agent configs may still use deprecated tool names.
-        normalized = [normalize_tool_name(t) for t in agent_config.tools]
         available_tools = [
-            t for t in normalized
+            t for t in agent_config.tools
             if t in ALL_TOOLS and (t not in _embedding_tools or get_embedding_provider() is not None)
         ]
     else:

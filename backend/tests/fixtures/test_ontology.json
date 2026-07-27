@@ -1,5 +1,5 @@
 {
-  "formatVersion": "2.0",
+  "formatVersion": "3.0",
   "entityTypes": [
     {
       "key": "person",

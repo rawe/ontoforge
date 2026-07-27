@@ -26,7 +26,7 @@ MOCK_QUERY = {
     "key": "find-people",
     "name": "Find People",
     "description": "Find people by name",
-    "steps": '[{"name": "main", "type": "cypher", "cypher": "MATCH (p:person) WHERE p.name CONTAINS $name RETURN p"}]',
+    "steps": '[{"name": "main", "type": "oql", "oql": "MATCH (p:person) WHERE p.name CONTAINS $name RETURN p"}]',
     "parameters": '[{"name": "name", "description": "Name to search for", "dataType": "string"}]',
     "createdAt": NOW,
     "updatedAt": NOW,

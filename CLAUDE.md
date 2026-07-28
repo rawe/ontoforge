@@ -27,7 +27,7 @@ Monorepo with two main parts:
 
 - **KISS** — Keep it simple. Prefer the simplest solution that meets the requirement.
 - **YAGNI** — You ain't gonna need it. Don't build for hypothetical future requirements.
-- **Every architectural decision requires user approval.** Never settle a design or architectural choice silently — always ask the user first.
+- **Every architectural decision requires user approval.** Never settle a design or architectural choice silently — always ask the user first. Once approved, record it in two places: state the resulting rule in [docs/decisions.md](docs/decisions.md), and add an immutable record of the reasoning and the alternatives weighed in [docs/adr/](docs/adr/). Never edit an existing record — supersede it.
 
 ## Documentation Principles
 
@@ -36,7 +36,9 @@ Monorepo with two main parts:
 3. **Progressive disclosure.** Layer documents from overview to detail. High-level docs link to deeper docs, not duplicate their content.
 4. **When redundancy exists, maintain consistency.** Brief summaries referencing detail docs are acceptable. But if two places state the same fact, both must stay in sync. When they diverge, flag it.
 5. **Don't document what the code makes obvious.** Reference code by semantic anchors (module names, class names, section names) — never by file:line numbers. Feature docs should weave code references into prose, not be bare reference lists. Avoid code blocks in docs unless needed to illustrate a major pattern.
-6. **Respect document lifecycle.** Documents form a directed chain: PRD → Architecture → Code. Later documents may reference earlier ones, never the reverse. Place information where it belongs in this lifecycle.
+6. **Respect document lifecycle.** Documents form a directed chain: concepts → architecture → capabilities → code. Later documents may reference earlier ones, never the reverse. Place information where it belongs in this lifecycle.
+7. **Status quo only.** `docs/` describes the system as it is. No history, no dates, no "planned", no migration notes, no rejected alternatives — those belong in `docs/adr/`. Unbuilt ideas are not documented at all.
+8. **Technology-neutral above the adapter.** Everything in `docs/` except `storage-adapters.md` must hold for a reimplementation in another language. No library names, no file paths, no class or function names.
 
 ## Git Commits
 
@@ -44,13 +46,17 @@ Monorepo with two main parts:
 - Do NOT reference the AI model in commit messages.
 - Write commit messages as if authored solely by the developer.
 
-## Testing with Agent Teams
+## Workflows
 
-When running multi-agent test-and-bugfix cycles, follow the strategy in [docs/testing-strategy.md](docs/testing-strategy.md). It defines agent roles (tester, dev, team lead), sequential execution flow, fresh-state protocol, handover formats, and test plans for backend and frontend.
+Procedures live in [docs/workflows/](docs/workflows/) — they are instructions to follow,
+not documentation of the system.
 
-## Releasing
+- **Testing** — [docs/workflows/testing.md](docs/workflows/testing.md): running unit and integration tests, prerequisites, conventions.
+- **Multi-agent test-and-fix cycles** — [docs/workflows/test-cycle.md](docs/workflows/test-cycle.md): agent roles, execution flow, fresh-state protocol, handover formats.
+- **Releasing** — [docs/workflows/releasing.md](docs/workflows/releasing.md). Read it before tagging a release.
 
-Before tagging a release, read [docs/releasing.md](docs/releasing.md).
+Documentation of a single script stays beside that script (`scripts/USAGE.md`,
+`backend/scripts/bench.md`).
 
 ## Local Development Setup
 
@@ -67,13 +73,18 @@ cd frontend && npm run dev
 
 The backend runs on `http://localhost:8000`, the frontend on `http://localhost:5173`.
 
-## Key Concepts
+## Documentation
 
-- **Schema** — the global set of entity types, relation types, and property definitions. The ground truth, independent of any ontology.
-- **Ontology** — a named lens over the schema. Unscoped ontologies expose everything; scoped ontologies filter to specific types and properties via `INCLUDES_TYPE` edges.
-- **Modeling mode** — designing and managing the global schema and ontology scopes
-- **Runtime mode** — querying and mutating knowledge data through an ontology lens
-- **REST API** — HTTP interface for both modeling and runtime operations
-- **MCP interface** — Model Context Protocol server for AI-driven interactions
-- **OQL** — the OntoForge Query Language: the read-only, openCypher-shaped graph pattern language (anchored to ISO GQL/GPML) used by the query endpoint, saved queries, and AI query generation
-- **Persistence port** — all database access goes through `core/ports.py`; Neo4j is the current adapter (`adapters/neo4j/`)
+Start at [docs/README.md](docs/README.md) — concepts, glossary and the map of everything
+else. Do not restate its definitions here; this file is about how to *work* in the repo,
+not what the system is.
+
+| Need | Read |
+|---|---|
+| Concepts and vocabulary | [docs/README.md](docs/README.md) |
+| How it is put together | [docs/architecture.md](docs/architecture.md) |
+| What a capability does and its rules | [docs/capabilities/](docs/capabilities/) |
+| Every endpoint and MCP tool | [docs/interfaces.md](docs/interfaces.md) |
+| Implementing a storage backend | [docs/storage-adapters.md](docs/storage-adapters.md) |
+| What the web client offers | [docs/product-surface.md](docs/product-surface.md) |
+| Rules you may not violate | [docs/decisions.md](docs/decisions.md) |

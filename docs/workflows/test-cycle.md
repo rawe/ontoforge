@@ -108,7 +108,7 @@ Sequential test groups — each group depends on data from previous groups:
 
 ## Frontend Test Plan (Chrome Extension)
 
-Flows run against the current UI (v3, `frontend/`): the schema flows below live in the Studio surface (`/studio`, `/studio/ontologies`); data flows live in the Workbench (`/w/{ontologyKey}`). See `docs/runtime-ui-architecture.md` for the route map.
+Schema flows live in the Studio surface (`/studio`, `/studio/ontologies`); data flows live in the Workbench (`/w/{ontologyKey}`). See [../product-surface.md](../product-surface.md) for the route map and the full capability inventory.
 
 Sequential UI flows — each step builds on the previous:
 

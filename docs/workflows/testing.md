@@ -40,7 +40,15 @@ Integration tests require external services to be running. Tests auto-skip when 
 
 ### Neo4j
 
-Required by: `test_semantic_search.py`, `test_ai.py`
+Required by all five integration modules:
+
+| Module | Also needs |
+|---|---|
+| `test_semantic_search.py` | embedding model |
+| `test_ai.py` | tool-calling model |
+| `test_store_errors.py` | embedding model |
+| `test_vector_index_drift.py` | embedding model |
+| `test_reserved_type_keys.py` | — |
 
 ```bash
 docker compose up -d
@@ -48,9 +56,13 @@ docker compose up -d
 
 Default connection: `bolt://localhost:7687` (user: `neo4j`, password: `ontoforge_dev`)
 
+`test_store_errors.py` and `test_vector_index_drift.py` deliberately reach past the
+persistence port — inducing a genuine driver failure means putting the database into a
+state the code never produces on its own. They are the only adapter-specific tests.
+
 ### Ollama (Embedding)
 
-Required by: `test_semantic_search.py`
+Required by: `test_semantic_search.py`, `test_store_errors.py`, `test_vector_index_drift.py`
 
 ```bash
 ollama pull nomic-embed-text
@@ -63,16 +75,17 @@ The embedding model (`nomic-embed-text`) must be pulled. Tests check for availab
 Required by: `test_ai.py`
 
 ```bash
-ollama pull qwen3.5
+ollama pull qwen3:14b
 ```
 
 AI integration tests need a model that supports **tool calling** (function calling). Not all Ollama models support this. Verified models:
 
-- `qwen3.5` (9.7B) — recommended, good tool calling
-- `qwen3:14b` — larger, better quality
+- `qwen3:14b` — what the tests pin, good tool calling
+- `qwen3:8b` — the server default; smaller and faster, less reliable under tool use
 - `llama3.1` — works but less reliable for structured output
 
-The model name is defined in `tests/integration/test_ai.py` as `AI_MODEL`.
+The model name is defined in `tests/integration/test_ai.py` as `AI_MODEL`. Changing it
+there is the only place it needs changing.
 
 **Note on AI test flakiness:** AI integration tests interact with a real LLM, so results are non-deterministic. Tests are written to validate structure and basic correctness rather than exact output. Occasional failures from LLM variability are expected — re-run before investigating.
 
@@ -84,7 +97,7 @@ docker compose up -d
 
 # 2. Ensure Ollama models are available
 ollama pull nomic-embed-text
-ollama pull qwen3.5
+ollama pull qwen3:14b
 
 # 3. Run integration tests
 uv run pytest -m integration -v

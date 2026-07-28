@@ -105,7 +105,7 @@ The parser covers the flat YAML subset OKF uses: plain/quoted scalars, numbers, 
 ## Limitations
 
 - One document property per concept: additional document properties on the same type have no OKF representation and are skipped on pull, left untouched on push.
-- Markdown links between concepts are preserved inside the body but are **not** materialized as OntoForge relations (bundle-level link extraction is a planned follow-up — see `docs/feature-ideas/okf-sync.md`).
+- Markdown links between concepts are preserved inside the body but are **not** materialized as OntoForge relations.
 - Whole-bundle import/export, `index.md` generation, and schema bootstrap are Layer 3 of that same proposal, not part of this skill yet.
 
 ## Testing

@@ -5,7 +5,8 @@ The OntoForge frontend (v3) — a single-page app with two surfaces:
 - **Workbench** (`/w/:ontologyKey`) — work with instance data through one ontology lens: overview dashboard, schema-driven type tables, entity detail, Explorer canvas, OQL query workbench, AI assistant.
 - **Studio** (`/studio`) — design the global schema: entity/relation type editors, ontology scope configuration, agents, saved queries, export/import.
 
-Architecture overview: `docs/runtime-ui-architecture.md` (repo root).
+What the surfaces offer: [../docs/product-surface.md](../docs/product-surface.md).
+System architecture: [../docs/architecture.md](../docs/architecture.md).
 
 ## Stack
 

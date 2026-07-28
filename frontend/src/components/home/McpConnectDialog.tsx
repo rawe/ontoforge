@@ -15,7 +15,7 @@ function snippetUrlBased(origin: string, ontologyKey: string): string {
   return JSON.stringify(
     {
       mcpServers: {
-        'ontoforge-modeling': { type: 'http', url: `${origin}/mcp/model/${ontologyKey}` },
+        'ontoforge-modeling': { type: 'http', url: `${origin}/mcp/model` },
         'ontoforge-runtime': { type: 'http', url: `${origin}/mcp/runtime/${ontologyKey}` },
       },
     },
@@ -31,7 +31,6 @@ function snippetHeaderBased(origin: string, ontologyKey: string): string {
         'ontoforge-modeling': {
           type: 'http',
           url: `${origin}/mcp/model`,
-          headers: { 'X-Ontology-Key': ontologyKey },
         },
         'ontoforge-runtime': {
           type: 'http',

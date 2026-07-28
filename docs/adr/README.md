@@ -1,24 +1,32 @@
 # Architecture Decision Records
 
-An archive of the decisions taken on OntoForge, kept for the reasoning behind them and the
-alternatives already weighed against them. It is history, not current documentation — a
-record here describes what was decided at the time it was decided, in the vocabulary of
-that time.
+Records of decisions where real alternatives were weighed. Their purpose is narrow: to
+stop a settled argument from being reopened. If a record does not tell you what was
+rejected and why, it should not exist.
 
-**The current binding rules live in [`../decisions.md`](../decisions.md).** That file is
-authoritative. Where a record here and a rule there disagree, the rule wins and the record
-is simply the older state.
+**The rules themselves live in [`../decisions.md`](../decisions.md)**, which is
+authoritative and current. A record here never restates a rule — it records the
+deliberation that produced one, and links to it. Where a record and a rule appear to
+disagree, the rule wins; the record is simply the older state.
 
-Because records are immutable, some cite documents, modules or route shapes that have
-since been renamed or removed. Those references are left as written — correcting them
-would rewrite the record. Read them as evidence of what existed at the time, and take the
-current documentation set as the description of what exists now.
+## When to write one
+
+Most decisions need no record. State the rule in `../decisions.md`, with the reason it
+exists, and stop.
+
+Write a record here only when the answer to this is yes:
+
+> Will someone plausibly re-propose the option we rejected?
+
+That is the whole test. "Both MCP servers run in one process" needs no record — the rule
+and its reason say everything. "A retryable-503 error taxonomy was rejected as
+speculative" does, because it is a reasonable idea that will come back, and the next
+person deserves to know it was already considered rather than overlooked.
 
 ## Naming
 
-One file per decision, `NNNN-kebab-title.md`, with the number zero-padded to four digits.
-The numbers are the original decision-log numbers and are permanent — other documents cite
-them.
+One file per decision, `NNNN-kebab-title.md`, zero-padded to four digits. Numbers are
+permanent and never reused — other documents cite them.
 
 ## Template
 
@@ -26,31 +34,36 @@ them.
 # NNNN. <Title>
 
 - **Status:** Accepted
-- **Date:** <approval date, if one was recorded>
+- **Date:** <when it was settled>
 
 ## Context
 
-<The problem or force that made a decision necessary.>
-
-## Decision
-
-<What was decided.>
-
-## Consequences
-
-<What follows — constraints imposed, and what was given up.>
+<The force that made a decision necessary.>
 
 ## Alternatives considered
 
-<What was rejected and why. Omitted when none were recorded.>
-```
+<What was weighed, and why each was rejected. This is the reason the record exists.>
 
-The `Date` line is omitted where the source recorded no approval date. The
-`Alternatives considered` section is omitted where none were recorded.
+## Outcome
+
+<One line naming the rule this produced, linking to ../decisions.md. Not a restatement
+of the rule.>
+```
 
 ## Records are immutable
 
 A record is never edited to reflect a change of mind. When a decision changes, write a new
 record that supersedes it and set the old record's status to `Superseded by NNNN`. This
-keeps the reasoning of the superseded decision — and the alternatives it weighed —
-readable alongside the one that replaced it.
+keeps the rejected alternatives readable alongside the decision that replaced them.
+
+Because of that, some records cite documents, modules or route shapes that have since been
+renamed or removed. Those references are left as written. Read them as evidence of what
+existed at the time, and take the current documentation set as the description of what
+exists now.
+
+## Records 0001–0013
+
+These predate the convention above. They were converted from an earlier decision log in
+which every decision got an entry, so several carry no alternatives and restate their rule
+— which the current convention would not produce. They are kept as written rather than
+rewritten to fit a rule adopted after them.

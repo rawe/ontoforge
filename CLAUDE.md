@@ -27,7 +27,7 @@ Monorepo with two main parts:
 
 - **KISS** — Keep it simple. Prefer the simplest solution that meets the requirement.
 - **YAGNI** — You ain't gonna need it. Don't build for hypothetical future requirements.
-- **Every architectural decision requires user approval.** Never settle a design or architectural choice silently — always ask the user first. Once approved, record it in two places: state the resulting rule in [docs/decisions.md](docs/decisions.md), and add an immutable record of the reasoning and the alternatives weighed in [docs/adr/](docs/adr/). Never edit an existing record — supersede it.
+- **Every architectural decision requires user approval.** Never settle a design or architectural choice silently — always ask the user first. Record the outcome as a rule in [docs/decisions.md](docs/decisions.md). Write a record in [docs/adr/](docs/adr/) **only** when alternatives were seriously weighed and would otherwise be re-proposed later — that record carries the deliberation, never the rule, and links to it. Most decisions need only the rule.
 
 ## Documentation Principles
 

@@ -24,6 +24,7 @@ import {
   AiAgentConfigUpsert,
   EntityTypeCreate,
   EntityTypeUpdate,
+  ExportPayload,
   IncludeTypeRequest,
   OntologyCreate,
   OntologyUpdate,
@@ -509,6 +510,35 @@ export function createModelingMcpServer(): McpServer {
       return textResult(
         `Property '${args.property_key}' deleted from ${args.type_kind} '${args.type_key}'.`,
       );
+    }),
+  );
+
+  server.registerTool(
+    "export_schema",
+    {
+      description: "Export the full schema in OntoForge v2.0 transfer format (JSON).",
+      inputSchema: {},
+    },
+    wrap("export_schema", async () => {
+      const result = await service.getSchemaExport(getModelingStore());
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "import_schema",
+    {
+      description:
+        "Import a v2.0 schema payload. Creates entity types, relation types, " +
+        "and ontologies with scope configuration.",
+      inputSchema: {
+        payload: z.record(z.string(), z.unknown()),
+      },
+    },
+    wrap("import_schema", async (args: { payload: Record<string, unknown> }) => {
+      const parsed = ExportPayload.parse(args.payload);
+      const result = await service.importSchema(parsed, getModelingStore());
+      return jsonResult(result);
     }),
   );
 

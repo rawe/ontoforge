@@ -72,7 +72,7 @@ beforeEach(async () => {
 });
 
 describe("tool surface", () => {
-  it("lists exactly the twenty-five tools of sessions 02–09 — and NO update-inclusion tool", async () => {
+  it("lists exactly the twenty-seven tools of sessions 02–10 — and NO update-inclusion tool", async () => {
     const tools = await client.listTools();
     expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
       "add_entity_type_to_ontology",
@@ -87,7 +87,9 @@ describe("tool surface", () => {
       "delete_property",
       "delete_relation_type",
       "delete_saved_query",
+      "export_schema",
       "get_schema",
+      "import_schema",
       "list_ai_agents",
       "list_saved_queries",
       "remove_entity_type_from_ontology",

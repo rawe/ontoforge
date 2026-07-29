@@ -438,6 +438,12 @@ export class Neo4jModelingStore {
     );
   }
 
+  async listAiAgentsForExport(ontologyId: string): Promise<Row[]> {
+    return runSession(this.driver, (session) =>
+      queries.listAiAgentsForExport(session, ontologyId),
+    );
+  }
+
   async deleteAiAgent(ontologyId: string, agentKey: string): Promise<boolean> {
     return runSession(this.driver, (session) =>
       queries.deleteAiAgent(session, ontologyId, agentKey),
@@ -450,6 +456,12 @@ export class Neo4jModelingStore {
 
   async listSavedQueries(ontologyId: string): Promise<Row[]> {
     return runSession(this.driver, (session) => queries.listSavedQueries(session, ontologyId));
+  }
+
+  async listSavedQueriesForExport(ontologyId: string): Promise<Row[]> {
+    return runSession(this.driver, (session) =>
+      queries.listSavedQueriesForExport(session, ontologyId),
+    );
   }
 
   async upsertSavedQuery(

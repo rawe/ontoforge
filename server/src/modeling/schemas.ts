@@ -226,6 +226,106 @@ export const SavedQueryResponse = z.object({
   updatedAt: z.iso.datetime(),
 });
 
+// --- Transfer format (export / import) ---
+// Field names ported verbatim from the Python transfer payload models
+// (`backend/src/ontoforge_server/core/schemas.py`) — the aliases there ARE
+// the format. Keys are unconstrained strings at parse time: import
+// validates them itself so every offending key is COLLECTED and reported
+// in one response (approved divergence #1/#4) instead of failing at the
+// request shape. Data types are deliberately NOT checked against the enum
+// (`docs/capabilities/transfer.md`) — the schema-validation operation is
+// what catches those later.
+
+/** Current transfer format version — informational, never dispatched on. */
+export const TRANSFER_FORMAT_VERSION = "3.0";
+
+export const ExportProperty = z.object({
+  key: z.string(),
+  displayName: z.string(),
+  description: z.string().nullable().optional(),
+  dataType: z.string(),
+  required: z.boolean(),
+  defaultValue: z.string().nullable().optional(),
+});
+
+export const ExportEntityType = z.object({
+  key: z.string(),
+  displayName: z.string(),
+  description: z.string().nullable().optional(),
+  properties: z.array(ExportProperty).default([]),
+});
+
+export const ExportRelationType = z.object({
+  key: z.string(),
+  displayName: z.string(),
+  description: z.string().nullable().optional(),
+  fromEntityTypeKey: z.string(),
+  toEntityTypeKey: z.string(),
+  properties: z.array(ExportProperty).default([]),
+});
+
+export const ExportOntologyInclusion = z.object({
+  key: z.string(),
+  properties: z.array(z.string()).nullable().optional(),
+});
+
+export const ExportOntologyInclusions = z.object({
+  entityTypes: z.array(ExportOntologyInclusion).default([]),
+  relationTypes: z.array(ExportOntologyInclusion).default([]),
+});
+
+export const ExportAiAgent = z.object({
+  key: z.string(),
+  name: z.string(),
+  description: z.string().nullable().optional(),
+  systemPrompt: z.string().nullable().optional(),
+  tools: z.array(z.string()).nullable().optional(),
+});
+
+export const ExportSavedQueryParameter = z.object({
+  name: z.string(),
+  description: z.string(),
+  dataType: z.string(),
+});
+
+/** Saved-query step in the transfer format — laxer than the definition-time
+ * `StepSchema` (any name, any type, any limit): import re-checks each step
+ * against the definition-time rules itself, collecting the failures. */
+export const ExportSavedQueryStep = z.object({
+  name: z.string(),
+  type: z.string(),
+  oql: z.string().nullable().optional(),
+  entityTypeKey: z.string().nullable().optional(),
+  query: z.string().nullable().optional(),
+  limit: z.number().int().nullable().optional(),
+  minScore: z.number().nullable().optional(),
+  bindings: z.record(z.string(), z.string()).nullable().optional(),
+});
+
+export const ExportSavedQuery = z.object({
+  key: z.string(),
+  name: z.string(),
+  description: z.string(),
+  steps: z.array(ExportSavedQueryStep),
+  parameters: z.array(ExportSavedQueryParameter).default([]),
+});
+
+export const ExportOntology = z.object({
+  key: z.string(),
+  name: z.string(),
+  description: z.string().nullable().optional(),
+  includes: ExportOntologyInclusions.nullable().optional(),
+  aiAgents: z.array(ExportAiAgent).default([]),
+  savedQueries: z.array(ExportSavedQuery).default([]),
+});
+
+export const ExportPayload = z.object({
+  formatVersion: z.string().optional().default(TRANSFER_FORMAT_VERSION),
+  entityTypes: z.array(ExportEntityType).default([]),
+  relationTypes: z.array(ExportRelationType).default([]),
+  ontologies: z.array(ExportOntology).default([]),
+});
+
 export type OntologyCreateInput = z.infer<typeof OntologyCreate>;
 export type OntologyUpdateInput = z.infer<typeof OntologyUpdate>;
 export type OntologyResponseBody = z.infer<typeof OntologyResponse>;
@@ -249,3 +349,9 @@ export type SavedQueryParameterInput = z.infer<typeof SavedQueryParameterSchema>
 export type SavedQueryUpsertInput = z.infer<typeof SavedQueryUpsert>;
 export type StepResponseBody = z.infer<typeof StepResponse>;
 export type SavedQueryResponseBody = z.infer<typeof SavedQueryResponse>;
+export type ExportPayloadInput = z.infer<typeof ExportPayload>;
+export type ExportEntityTypeInput = z.infer<typeof ExportEntityType>;
+export type ExportRelationTypeInput = z.infer<typeof ExportRelationType>;
+export type ExportOntologyInput = z.infer<typeof ExportOntology>;
+export type ExportSavedQueryInput = z.infer<typeof ExportSavedQuery>;
+export type ExportSavedQueryStepInput = z.infer<typeof ExportSavedQueryStep>;

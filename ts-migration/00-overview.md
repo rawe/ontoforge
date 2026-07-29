@@ -115,7 +115,7 @@ Update the Status column when a session completes.
 | 07 | [07-oql.md](07-oql.md) | OQL parser, validation, Neo4j compiler, `/query` | Done (2026-07-29) |
 | 08 | [08-semantic-search.md](08-semantic-search.md) | Embedding provider, vector indexes, semantic search, rebuild | Done (2026-07-29) |
 | 09 | [09-saved-queries-agents.md](09-saved-queries-agents.md) | Saved queries (define + run + search), agent configs | Done (2026-07-29) |
-| 10 | [10-transfer.md](10-transfer.md) | Schema export / import | — |
+| 10 | [10-transfer.md](10-transfer.md) | Schema export / import | Done (2026-07-29) |
 | 11 | [11-ai-agents.md](11-ai-agents.md) | AI query/extract/chat, A2A (LangGraph), final parity sweep | — |
 
 Dependency notes: 07 needs 04–05 for meaningful tests; 08 needs 06 (chunk search); 09

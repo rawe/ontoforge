@@ -21,6 +21,7 @@ import {
   EntityTypeCreate,
   EntityTypeResponse,
   EntityTypeUpdate,
+  ExportPayload,
   IncludeTypeRequest,
   IncludeTypeResponse,
   IncludeTypeUpdate,
@@ -306,6 +307,28 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async () => service.validateAll(getModelingStore()),
+  );
+
+  // --- Export / Import (transfer format) ---
+
+  app.get(
+    "/export",
+    { schema: { tags: ["modeling"] } },
+    async () => service.getSchemaExport(getModelingStore()),
+  );
+
+  app.post(
+    "/import",
+    {
+      schema: {
+        tags: ["modeling"],
+        body: ExportPayload,
+      },
+    },
+    async (request, reply) => {
+      const result = await service.importSchema(request.body, getModelingStore());
+      return reply.status(201).send(result);
+    },
   );
 
   // --- Entity Types (Global) ---

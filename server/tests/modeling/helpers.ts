@@ -70,9 +70,11 @@ export interface MockModelingStore {
   removePropertyFromIncludesLists: Mock;
   deleteChunksForTypeProperty: Mock;
   listAiAgents: Mock;
+  listAiAgentsForExport: Mock;
   upsertAiAgent: Mock;
   deleteAiAgent: Mock;
   listSavedQueries: Mock;
+  listSavedQueriesForExport: Mock;
   upsertSavedQuery: Mock;
   deleteSavedQuery: Mock;
   getFullSchema: Mock;
@@ -136,9 +138,11 @@ export function createMockModelingStore(): MockModelingStore {
     removePropertyFromIncludesLists: vi.fn(async () => 0),
     deleteChunksForTypeProperty: vi.fn(async () => undefined),
     listAiAgents: vi.fn(async () => []),
+    listAiAgentsForExport: vi.fn(async () => []),
     upsertAiAgent: vi.fn(),
     deleteAiAgent: vi.fn(async () => false),
     listSavedQueries: vi.fn(async () => []),
+    listSavedQueriesForExport: vi.fn(async () => []),
     upsertSavedQuery: vi.fn(),
     deleteSavedQuery: vi.fn(async () => false),
     getFullSchema: vi.fn(async () => ({ entityTypes: [], relationTypes: [], ontologies: [] })),

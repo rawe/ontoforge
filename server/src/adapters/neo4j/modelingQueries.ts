@@ -995,6 +995,30 @@ export async function upsertAiAgent(
   return [convertNeo4jProperties(record.get("agent") as Row), record.get("created") as boolean];
 }
 
+/** List agents in the transfer shape (key, name, description, systemPrompt,
+ * tools) — no ids, no timestamps. */
+export async function listAiAgentsForExport(
+  session: Session,
+  ontologyId: string,
+): Promise<Row[]> {
+  const result = await session.run(
+    `
+    MATCH (o:Ontology {ontologyId: $ontologyId})-[:HAS_AI_AGENT]->(ac:AiAgentConfig)
+    RETURN ac.key AS key, ac.name AS name, ac.description AS description,
+           ac.systemPrompt AS systemPrompt, ac.tools AS tools
+    ORDER BY ac.name
+    `,
+    { ontologyId },
+  );
+  return result.records.map((record) => ({
+    key: record.get("key"),
+    name: record.get("name"),
+    description: record.get("description"),
+    systemPrompt: record.get("systemPrompt"),
+    tools: record.get("tools"),
+  }));
+}
+
 export async function deleteAiAgent(
   session: Session,
   ontologyId: string,
@@ -1023,6 +1047,30 @@ export async function listSavedQueries(session: Session, ontologyId: string): Pr
     { ontologyId },
   );
   return result.records.map((record) => convertNeo4jProperties(record.get("query") as Row));
+}
+
+/** List saved queries in the transfer shape (key, name, description, plus
+ * the stored steps/parameters JSON text) — no ids, no timestamps. */
+export async function listSavedQueriesForExport(
+  session: Session,
+  ontologyId: string,
+): Promise<Row[]> {
+  const result = await session.run(
+    `
+    MATCH (o:Ontology {ontologyId: $ontologyId})-[:HAS_SAVED_QUERY]->(sq:SavedQuery)
+    RETURN sq.key AS key, sq.name AS name, sq.description AS description,
+           sq.steps AS steps, sq.parameters AS parameters
+    ORDER BY sq.name
+    `,
+    { ontologyId },
+  );
+  return result.records.map((record) => ({
+    key: record.get("key"),
+    name: record.get("name"),
+    description: record.get("description"),
+    steps: record.get("steps"),
+    parameters: record.get("parameters"),
+  }));
 }
 
 /** MERGE-based upsert. Steps and parameters arrive as serialized text this

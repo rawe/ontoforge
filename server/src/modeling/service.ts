@@ -13,6 +13,8 @@
 
 import { randomUUID } from "node:crypto";
 
+import { z } from "zod";
+
 import { getEmbeddingProvider } from "../core/embedding.js";
 import {
   CascadeRequiredError,
@@ -23,7 +25,7 @@ import {
 } from "../core/exceptions.js";
 import { parseAndValidate } from "../core/oql/index.js";
 import type { ModelingStore, RuntimeStore } from "../core/ports.js";
-import { DATA_TYPES } from "../core/schemas.js";
+import { DATA_TYPES, KEY_PATTERN } from "../core/schemas.js";
 import { buildTextRepr } from "../runtime/embedding.js";
 import {
   invalidateLoadedSchemaCache,
@@ -32,8 +34,13 @@ import {
 } from "../runtime/schemaCache.js";
 import { syncDocumentChunks } from "../runtime/service.js";
 import { VALID_AGENT_TOOLS } from "../runtime/toolNames.js";
-import { AGENT_KEY_PATTERN } from "./schemas.js";
+import {
+  AGENT_KEY_PATTERN,
+  StepSchema as StepZodSchema,
+  TRANSFER_FORMAT_VERSION,
+} from "./schemas.js";
 import type {
+  ExportPayloadInput,
   AiAgentConfigResponseBody,
   AiAgentConfigUpsertInput,
   EntityTypeCreateInput,
@@ -1195,13 +1202,25 @@ export async function* rebuildEmbeddings(
 
 // --- Whole-schema read (transfer format) ---
 
+/** Stored steps/parameters JSON text → parsed list (tolerates absent). */
+function parseStoredJsonList(raw: unknown): Row[] {
+  if (!raw) {
+    return [];
+  }
+  return (typeof raw === "string" ? JSON.parse(raw) : raw) as Row[];
+}
+
 /**
  * The whole global schema in the transfer format
- * (`docs/capabilities/transfer.md`) — the payload the modeling MCP
- * `get_schema` tool returns. Built from the store's full-schema snapshot.
+ * (`docs/capabilities/transfer.md`): entity types, relation types,
+ * ontologies with their inclusions, and each lens's agents and saved
+ * queries — no timestamps, no internal ids, no instance data. This is both
+ * the REST export payload and what the modeling MCP `get_schema` and
+ * `export_schema` tools return.
  *
- * `ontologies` is empty until session 10 delivers export; session 10
- * asserts this payload equals the export payload exactly.
+ * The `includes` key is ABSENT for an unscoped lens ("absent entirely",
+ * `docs/capabilities/transfer.md`; the Python reference serializes an
+ * explicit `null` there — docs win, flagged for the parity sweep).
  */
 export async function getSchemaExport(store: ModelingStore): Promise<Row> {
   const schema = await store.getFullSchema();
@@ -1231,12 +1250,407 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
     properties: ((rt.properties as Row[] | undefined) ?? []).map(exportProperty),
   }));
 
+  const ontologies: Row[] = [];
+  for (const ont of schema.ontologies as Row[]) {
+    const entityInclusions = (ont.entityInclusions as Row[] | undefined) ?? [];
+    const relationInclusions = (ont.relationInclusions as Row[] | undefined) ?? [];
+
+    const exported: Row = {
+      key: ont.key,
+      name: ont.name,
+      description: optString(ont.description),
+    };
+    if (entityInclusions.length > 0 || relationInclusions.length > 0) {
+      const exportInclusion = (inc: Row): Row => ({
+        key: inc.key,
+        properties: (inc.properties as string[] | null | undefined) ?? null,
+      });
+      exported.includes = {
+        entityTypes: entityInclusions.map(exportInclusion),
+        relationTypes: relationInclusions.map(exportInclusion),
+      };
+    }
+
+    const agentRows = await store.listAiAgentsForExport(ont.ontologyId as string);
+    exported.aiAgents = agentRows.map((ag) => ({
+      key: ag.key,
+      name: ag.name,
+      description: optString(ag.description),
+      systemPrompt: optString(ag.systemPrompt),
+      tools: (ag.tools as string[] | null | undefined) ?? null,
+    }));
+
+    const queryRows = await store.listSavedQueriesForExport(ont.ontologyId as string);
+    exported.savedQueries = queryRows.map((sq) => ({
+      key: sq.key,
+      name: sq.name,
+      description: sq.description,
+      // Stored sparse; exported with every field, absent ones as explicit
+      // null — the Python export models serialize the same way.
+      steps: parseStoredJsonList(sq.steps).map(toStepResponse),
+      parameters: parseStoredJsonList(sq.parameters).map((p) => ({
+        name: p.name,
+        description: p.description,
+        dataType: p.dataType,
+      })),
+    }));
+
+    ontologies.push(exported);
+  }
+
   return {
-    formatVersion: "3.0",
+    formatVersion: TRANSFER_FORMAT_VERSION,
     entityTypes,
     relationTypes,
-    ontologies: [],
+    ontologies,
   };
+}
+
+// --- Import (transfer format) ---
+
+/**
+ * Import a transfer payload: create the types globally, then the lenses
+ * with their inclusions, agents and saved queries.
+ *
+ * Validate-then-write (approved divergence #4): the ENTIRE payload is
+ * validated before anything is written — every rule violation collected
+ * into one 422, every key conflict into one 409 — and a rejected import
+ * leaves the database untouched. Rule violations are reported before
+ * conflicts: they are intrinsic to the payload file, while conflicts
+ * depend on the target. Only a clean payload starts writing; a crash
+ * mid-write can still leave partial state (accepted residual — index DDL,
+ * data writes and embedding calls cannot share one transaction).
+ *
+ * Approved divergence #1: every imported key is validated against the same
+ * patterns the interactive paths enforce, closing the `_id`-property hole
+ * `docs/architecture.md` documents. Property data types are deliberately
+ * NOT checked against the enum — the schema-validation operation catches
+ * that later (`docs/capabilities/transfer.md`).
+ *
+ * The payload version is informational: old, unknown and missing versions
+ * process identically.
+ */
+export async function importSchema(
+  payload: ExportPayloadInput,
+  store: ModelingStore,
+): Promise<Row> {
+  // ---- Phase 1: payload-intrinsic validation (collect everything) ----
+  const errors: string[] = [];
+
+  const pushReserved = (reject: () => void): void => {
+    try {
+      reject();
+    } catch (exc) {
+      if (exc instanceof ValidationError) {
+        errors.push(exc.message);
+      } else {
+        throw exc;
+      }
+    }
+  };
+  const badKey = (kind: string, key: string, pattern: string): string =>
+    `Import error: invalid ${kind} key '${key}'. Must match pattern: ${pattern}`;
+  const typeKeyPattern = KEY_PATTERN.source;
+
+  for (const et of payload.entityTypes) {
+    if (!KEY_PATTERN.test(et.key)) {
+      errors.push(badKey("entity type", et.key, typeKeyPattern));
+    }
+    pushReserved(() => rejectReservedEntityTypeKey(store, et.key, "Import error: "));
+    for (const prop of et.properties) {
+      if (!KEY_PATTERN.test(prop.key)) {
+        errors.push(
+          `Import error: invalid property key '${prop.key}' on entity type ` +
+            `'${et.key}'. Must match pattern: ${typeKeyPattern}`,
+        );
+      }
+    }
+  }
+
+  const payloadEtKeys = new Set(payload.entityTypes.map((et) => et.key));
+  for (const rt of payload.relationTypes) {
+    if (!KEY_PATTERN.test(rt.key)) {
+      errors.push(badKey("relation type", rt.key, typeKeyPattern));
+    }
+    pushReserved(() => rejectReservedRelationTypeKey(store, rt.key, "Import error: "));
+    // Endpoints must be present in the SAME payload — a type existing only
+    // in the target would have conflicted anyway.
+    if (!payloadEtKeys.has(rt.fromEntityTypeKey)) {
+      errors.push(
+        `Import error: source entity type key '${rt.fromEntityTypeKey}' not found`,
+      );
+    }
+    if (!payloadEtKeys.has(rt.toEntityTypeKey)) {
+      errors.push(
+        `Import error: target entity type key '${rt.toEntityTypeKey}' not found`,
+      );
+    }
+    for (const prop of rt.properties) {
+      if (!KEY_PATTERN.test(prop.key)) {
+        errors.push(
+          `Import error: invalid property key '${prop.key}' on relation type ` +
+            `'${rt.key}'. Must match pattern: ${typeKeyPattern}`,
+        );
+      }
+      if (prop.dataType === "document") {
+        errors.push(
+          `Import error: property '${prop.key}' on relation type '${rt.key}' ` +
+            "has data type 'document'; document properties are only supported " +
+            "on entity types",
+        );
+      }
+    }
+  }
+
+  for (const ont of payload.ontologies) {
+    if (!KEY_PATTERN.test(ont.key)) {
+      errors.push(badKey("ontology", ont.key, typeKeyPattern));
+    }
+    for (const ag of ont.aiAgents) {
+      if (!AGENT_KEY_REGEX.test(ag.key)) {
+        errors.push(badKey("agent", ag.key, AGENT_KEY_PATTERN));
+      }
+      const tools = ag.tools ?? null;
+      if (tools !== null) {
+        const unknown = tools.filter((t) => !VALID_AGENT_TOOLS.has(t));
+        if (unknown.length > 0) {
+          const available = [...VALID_AGENT_TOOLS].sort();
+          errors.push(
+            `Import error: agent '${ag.key}' references unknown tool(s): ` +
+              `${pyList(unknown)}. Available tools: ${pyList(available)}`,
+          );
+        }
+      }
+    }
+    for (const sq of ont.savedQueries) {
+      if (!AGENT_KEY_REGEX.test(sq.key)) {
+        errors.push(badKey("saved query", sq.key, AGENT_KEY_PATTERN));
+      }
+      let stepsKnown = true;
+      for (const s of sq.steps) {
+        if (s.type !== "oql" && s.type !== "semantic_search") {
+          errors.push(
+            `Import error: saved query '${sq.key}' has step '${s.name}' with ` +
+              `unknown type '${s.type}'; expected oql or semantic_search`,
+          );
+          stepsKnown = false;
+        }
+      }
+      for (const p of sq.parameters) {
+        if (p.dataType === "document") {
+          errors.push(
+            `Import error: parameter '${p.name}' of saved query '${sq.key}' ` +
+              "has data type 'document'; parameters must be scalar types",
+          );
+        }
+      }
+      if (stepsKnown) {
+        // Structural validation identical to definition time — but NO OQL
+        // lens check: an imported pipeline may fail at first run.
+        const parsed = z.array(StepZodSchema).safeParse(sq.steps);
+        if (!parsed.success) {
+          for (const issue of parsed.error.issues) {
+            errors.push(
+              `Import error: saved query '${sq.key}' steps[${issue.path.join(".")}]: ` +
+                issue.message,
+            );
+          }
+        } else {
+          try {
+            validatePipeline(
+              parsed.data,
+              sq.parameters.map((p) => p.name),
+              sq.key,
+            );
+          } catch (exc) {
+            if (exc instanceof ValidationError) {
+              const detailErrors = (exc.details?.errors as unknown[] | undefined) ?? [];
+              errors.push(
+                detailErrors.length > 0
+                  ? `${exc.message}: ${detailErrors.map(String).join("; ")}`
+                  : exc.message,
+              );
+            } else {
+              throw exc;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new ValidationError(errors.join("; "), { errors });
+  }
+
+  // ---- Phase 2: conflicts — all-or-fail, naming EVERY conflicting key ----
+  // An intra-payload duplicate reports the same conflict the Python
+  // reference's sequential writes would have produced.
+  const conflicts: string[] = [];
+
+  const seenEtKeys = new Set<string>();
+  for (const et of payload.entityTypes) {
+    if (seenEtKeys.has(et.key) || (await store.getEntityTypeByKey(et.key))) {
+      conflicts.push(`Entity type with key '${et.key}' already exists`);
+    }
+    seenEtKeys.add(et.key);
+  }
+  const seenRtKeys = new Set<string>();
+  for (const rt of payload.relationTypes) {
+    if (seenRtKeys.has(rt.key) || (await store.getRelationTypeByKey(rt.key))) {
+      conflicts.push(`Relation type with key '${rt.key}' already exists`);
+    }
+    seenRtKeys.add(rt.key);
+  }
+  const seenOntKeys = new Set<string>();
+  for (const ont of payload.ontologies) {
+    if (seenOntKeys.has(ont.key) || (await store.getOntologyByKey(ont.key))) {
+      conflicts.push(`Ontology with key '${ont.key}' already exists`);
+    }
+    seenOntKeys.add(ont.key);
+  }
+
+  if (conflicts.length > 0) {
+    throw new ConflictError(conflicts.join("; "));
+  }
+
+  // ---- Phase 3: write (internal ids regenerated, keys preserved) ----
+  const provider = getEmbeddingProvider();
+
+  for (const et of payload.entityTypes) {
+    const etId = randomUUID();
+    await store.createEntityType(etId, et.key, et.displayName, et.description ?? null);
+    for (const prop of et.properties) {
+      await store.createProperty(
+        etId,
+        "EntityType",
+        randomUUID(),
+        prop.key,
+        prop.displayName,
+        prop.description ?? null,
+        prop.dataType,
+        prop.required,
+        prop.defaultValue ?? null,
+      );
+    }
+    // Vector indexes for this entity type: non-document properties become
+    // in-index filter properties; each document property gets its own
+    // chunk index. Skipped entirely without a provider.
+    if (provider) {
+      const filterProps = et.properties
+        .filter((prop) => prop.dataType !== "document")
+        .map((prop) => prop.key);
+      await store.createVectorIndex(et.key, provider.dimensions, filterProps);
+      for (const prop of et.properties) {
+        if (prop.dataType === "document") {
+          await store.createDocumentVectorIndex(et.key, prop.key, provider.dimensions);
+        }
+      }
+    }
+  }
+
+  for (const rt of payload.relationTypes) {
+    const rtId = randomUUID();
+    await store.createRelationType(
+      rtId,
+      rt.key,
+      rt.displayName,
+      rt.description ?? null,
+      rt.fromEntityTypeKey,
+      rt.toEntityTypeKey,
+    );
+    for (const prop of rt.properties) {
+      await store.createProperty(
+        rtId,
+        "RelationType",
+        randomUUID(),
+        prop.key,
+        prop.displayName,
+        prop.description ?? null,
+        prop.dataType,
+        prop.required,
+        prop.defaultValue ?? null,
+      );
+    }
+  }
+
+  const createdOntologies: OntologyResponseBody[] = [];
+  for (const ont of payload.ontologies) {
+    const ontId = randomUUID();
+    const ontData = await store.createOntology(ontId, ont.key, ont.name, ont.description ?? null);
+
+    // Inclusions are written WITHOUT the four inclusion rules — lens
+    // validation reports any damage (`docs/capabilities/transfer.md`).
+    if (ont.includes) {
+      for (const inc of ont.includes.entityTypes) {
+        await store.addIncludesType(ontId, "EntityType", inc.key, inc.properties ?? null);
+      }
+      for (const inc of ont.includes.relationTypes) {
+        await store.addIncludesType(ontId, "RelationType", inc.key, inc.properties ?? null);
+      }
+    }
+
+    for (const ag of ont.aiAgents) {
+      await store.upsertAiAgent(
+        ontId,
+        randomUUID(),
+        ag.key,
+        ag.name,
+        ag.description ?? null,
+        ag.systemPrompt ?? null,
+        ag.tools ?? null,
+      );
+    }
+
+    for (const sq of ont.savedQueries) {
+      const stepsJson = JSON.stringify(
+        sq.steps.map((s) => ({
+          name: s.name,
+          type: s.type,
+          ...(s.oql ? { oql: s.oql } : {}),
+          ...(s.entityTypeKey ? { entityTypeKey: s.entityTypeKey } : {}),
+          ...(s.query ? { query: s.query } : {}),
+          ...(s.limit !== null && s.limit !== undefined ? { limit: s.limit } : {}),
+          ...(s.minScore !== null && s.minScore !== undefined ? { minScore: s.minScore } : {}),
+          ...(s.bindings && Object.keys(s.bindings).length > 0 ? { bindings: s.bindings } : {}),
+        })),
+      );
+      const paramsJson = JSON.stringify(
+        sq.parameters.map((p) => ({
+          name: p.name,
+          description: p.description,
+          dataType: p.dataType,
+        })),
+      );
+      // Each description is embedded as it is written, so imported queries
+      // are semantically discoverable immediately.
+      let embedding: number[] | null = null;
+      if (provider) {
+        embedding = await provider.embed(sq.description);
+      }
+      await store.upsertSavedQuery(
+        ontId,
+        randomUUID(),
+        sq.key,
+        sq.name,
+        sq.description,
+        stepsJson,
+        paramsJson,
+        ont.key,
+        embedding,
+      );
+    }
+
+    createdOntologies.push(toOntologyResponse(ontData));
+  }
+
+  // The shared saved-query index is ensured once at the end.
+  if (provider) {
+    await store.ensureSavedQueryVectorIndex(provider.dimensions);
+  }
+
+  invalidateLoadedSchemaCache();
+  return { ontologies: createdOntologies };
 }
 
 // --- AI Agent Config ---

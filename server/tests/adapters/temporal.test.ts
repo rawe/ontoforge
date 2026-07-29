@@ -21,6 +21,13 @@ describe("driver values to port values", () => {
     expect((converted as Date).toISOString()).toBe("2026-07-29T12:30:05.123Z");
   });
 
+  it("a driver LocalDateTime is treated as UTC (naive datetimes are UTC)", () => {
+    const local = new neo4j.types.LocalDateTime<number>(2024, 1, 15, 10, 30, 0, 250000000);
+    const converted = fromNeo4jValue(local);
+    expect(converted).toBeInstanceOf(Date);
+    expect((converted as Date).toISOString()).toBe("2024-01-15T10:30:00.250Z");
+  });
+
   it("a driver Date becomes an ISO YYYY-MM-DD string", () => {
     expect(fromNeo4jValue(new neo4j.types.Date<number>(2026, 7, 29))).toBe("2026-07-29");
     expect(fromNeo4jValue(new neo4j.types.Date<number>(2026, 1, 2))).toBe("2026-01-02");

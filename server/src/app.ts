@@ -29,7 +29,7 @@ import {
 } from "./core/exceptions.js";
 import { mountMcp } from "./mcp/mount.js";
 import { modelingRouter } from "./modeling/router.js";
-import { runtimeGlobalRouter } from "./runtime/router.js";
+import { runtimeGlobalRouter, runtimeRouter } from "./runtime/router.js";
 
 function sendError(
   reply: FastifyReply,
@@ -161,9 +161,10 @@ export async function createApp(): Promise<FastifyInstance> {
 
   await app.register(modelingRouter, { prefix: "/api/model" });
   await app.register(runtimeGlobalRouter, { prefix: "/api/runtime" });
+  await app.register(runtimeRouter, { prefix: "/api/runtime" });
 
-  // Startup step 6: the MCP servers share the process and call the same
-  // services as REST. Modeling is mounted here; runtime follows in its slice.
+  // Startup step 6: both MCP servers share the process and call the same
+  // services as REST.
   mountMcp(app);
 
   return app;

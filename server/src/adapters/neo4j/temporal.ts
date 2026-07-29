@@ -11,13 +11,22 @@
  */
 
 import neo4j from "neo4j-driver";
-import type { Date as Neo4jDateGeneric, DateTime as Neo4jDateTimeGeneric } from "neo4j-driver";
+import type {
+  Date as Neo4jDateGeneric,
+  DateTime as Neo4jDateTimeGeneric,
+  LocalDateTime as Neo4jLocalDateTimeGeneric,
+} from "neo4j-driver";
 
 type Neo4jDateTime = Neo4jDateTimeGeneric<number>;
+type Neo4jLocalDateTime = Neo4jLocalDateTimeGeneric<number>;
 type Neo4jDate = Neo4jDateGeneric<number>;
 
 function isNeo4jDateTime(value: unknown): value is Neo4jDateTime {
   return value instanceof neo4j.types.DateTime;
+}
+
+function isNeo4jLocalDateTime(value: unknown): value is Neo4jLocalDateTime {
+  return value instanceof neo4j.types.LocalDateTime;
 }
 
 function isNeo4jDate(value: unknown): value is Neo4jDate {
@@ -31,6 +40,22 @@ export function fromNeo4jValue(value: unknown): unknown {
     // toStandardDate() interprets a missing offset as UTC-relative via the
     // driver; the result is a JS Date, which is inherently UTC-based.
     return value.toStandardDate();
+  }
+  if (isNeo4jLocalDateTime(value)) {
+    // A stored local (offset-less) datetime is treated as UTC — matching
+    // the Python reference, whose read conversion stamps UTC onto any
+    // datetime that carries no timezone.
+    return new Date(
+      Date.UTC(
+        value.year,
+        value.month - 1,
+        value.day,
+        value.hour,
+        value.minute,
+        value.second,
+        Math.round(value.nanosecond / 1_000_000),
+      ),
+    );
   }
   if (isNeo4jDate(value)) {
     // A calendar date has no time component; its port form is the ISO

@@ -109,7 +109,7 @@ Update the Status column when a session completes.
 | 01 | [01-skeleton.md](01-skeleton.md) | Server skeleton, config, error model, persistence port, Neo4j adapter foundation, `/features` | Done (2026-07-29) |
 | 02 | [02-schema-modeling.md](02-schema-modeling.md) | Global types & properties (REST + modeling MCP server) | Done (2026-07-29) |
 | 03 | [03-ontology-lenses.md](03-ontology-lenses.md) | Ontologies, inclusions, cascade protocol, validation | Done (2026-07-29) |
-| 04 | [04-runtime-entities.md](04-runtime-entities.md) | Schema cache, introspection, entity CRUD & listing (+ runtime MCP server) | — |
+| 04 | [04-runtime-entities.md](04-runtime-entities.md) | Schema cache, introspection, entity CRUD & listing (+ runtime MCP server) | Done (2026-07-29) |
 | 05 | [05-relations-traversal.md](05-relations-traversal.md) | Relations CRUD, neighbors | — |
 | 06 | [06-documents.md](06-documents.md) | Document reads, partial writes, chunker | — |
 | 07 | [07-oql.md](07-oql.md) | OQL parser, validation, Neo4j compiler, `/query` | — |

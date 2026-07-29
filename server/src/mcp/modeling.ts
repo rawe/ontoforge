@@ -23,6 +23,9 @@ import type { ModelingStore } from "../core/ports.js";
 import {
   EntityTypeCreate,
   EntityTypeUpdate,
+  IncludeTypeRequest,
+  OntologyCreate,
+  OntologyUpdate,
   PropertyDefinitionCreate,
   PropertyDefinitionUpdate,
   RelationTypeCreate,
@@ -142,6 +145,17 @@ async function resolveProperty(
   const data = await store.getPropertyByKey(ownerId, ownerLabel, propertyKey);
   if (!data) {
     throw new NotFoundError(`Property '${propertyKey}' not found`);
+  }
+  return data;
+}
+
+async function resolveOntologyByKey(
+  store: ModelingStore,
+  ontologyKey: string,
+): Promise<Record<string, unknown>> {
+  const data = await store.getOntologyByKey(ontologyKey);
+  if (!data) {
+    throw new NotFoundError(`Ontology '${ontologyKey}' not found`);
   }
   return data;
 }
@@ -492,6 +506,226 @@ export function createModelingMcpServer(): McpServer {
       return textResult(
         `Property '${args.property_key}' deleted from ${args.type_kind} '${args.type_key}'.`,
       );
+    }),
+  );
+
+  server.registerTool(
+    "validate_schema",
+    {
+      description: "Check the global schema + all scoped ontologies for consistency.",
+      inputSchema: {},
+    },
+    wrap("validate_schema", async () => {
+      const result = await service.validateAll(getModelingStore());
+      return jsonResult(result);
+    }),
+  );
+
+  // --- Ontology Management ---
+
+  server.registerTool(
+    "create_ontology",
+    {
+      description: "Create a new ontology (named lens over the schema).",
+      inputSchema: {
+        key: z.string(),
+        name: z.string(),
+        description: z.string().optional(),
+      },
+    },
+    wrap("create_ontology", async (args: {
+      key: string;
+      name: string;
+      description?: string | undefined;
+    }) => {
+      const body = OntologyCreate.parse({
+        key: args.key,
+        name: args.name,
+        description: args.description ?? null,
+      });
+      const result = await service.createOntology(body, getModelingStore());
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "update_ontology",
+    {
+      description: "Update an ontology's display name or description.",
+      inputSchema: {
+        ontology_key: z.string(),
+        name: z.string().optional(),
+        description: z.string().optional(),
+      },
+    },
+    wrap("update_ontology", async (args: {
+      ontology_key: string;
+      name?: string | undefined;
+      description?: string | undefined;
+    }) => {
+      const store = getModelingStore();
+      const ontology = await resolveOntologyByKey(store, args.ontology_key);
+      const body = OntologyUpdate.parse({
+        name: args.name ?? null,
+        description: args.description ?? null,
+      });
+      const result = await service.updateOntology(ontology.ontologyId as string, body, store);
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "delete_ontology",
+    {
+      description: "Delete an ontology. Does not affect the schema or other ontologies.",
+      inputSchema: {
+        ontology_key: z.string(),
+      },
+    },
+    wrap("delete_ontology", async (args: { ontology_key: string }) => {
+      const store = getModelingStore();
+      const ontology = await resolveOntologyByKey(store, args.ontology_key);
+      await service.deleteOntology(ontology.ontologyId as string, store);
+      return textResult(`Ontology '${args.ontology_key}' deleted successfully.`);
+    }),
+  );
+
+  // There is deliberately no update-inclusion tool: adding an inclusion
+  // again with a different allowlist is how an allowlist is changed over
+  // MCP, which works because adding is an upsert.
+
+  server.registerTool(
+    "add_entity_type_to_ontology",
+    {
+      description:
+        "Add an entity type to an ontology's scope. Properties=null means all " +
+        "properties. Properties=[...] means only listed properties are exposed.",
+      inputSchema: {
+        ontology_key: z.string(),
+        entity_type_key: z.string(),
+        properties: z.array(z.string()).optional(),
+      },
+    },
+    wrap("add_entity_type_to_ontology", async (args: {
+      ontology_key: string;
+      entity_type_key: string;
+      properties?: string[] | undefined;
+    }) => {
+      const store = getModelingStore();
+      const ontology = await resolveOntologyByKey(store, args.ontology_key);
+      const body = IncludeTypeRequest.parse({
+        key: args.entity_type_key,
+        properties: args.properties ?? null,
+      });
+      const result = await service.addIncludesEntityType(
+        ontology.ontologyId as string,
+        body,
+        store,
+      );
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "remove_entity_type_from_ontology",
+    {
+      description: "Remove an entity type from an ontology's scope.",
+      inputSchema: {
+        ontology_key: z.string(),
+        entity_type_key: z.string(),
+      },
+    },
+    wrap("remove_entity_type_from_ontology", async (args: {
+      ontology_key: string;
+      entity_type_key: string;
+    }) => {
+      const store = getModelingStore();
+      const ontology = await resolveOntologyByKey(store, args.ontology_key);
+      const et = await resolveEntityType(store, args.entity_type_key);
+      await service.removeIncludesEntityType(
+        ontology.ontologyId as string,
+        et.entityTypeId as string,
+        store,
+      );
+      return textResult(
+        `Entity type '${args.entity_type_key}' removed from ontology '${args.ontology_key}'.`,
+      );
+    }),
+  );
+
+  server.registerTool(
+    "add_relation_type_to_ontology",
+    {
+      description:
+        "Add a relation type to an ontology's scope. Properties=null means all " +
+        "properties. Properties=[...] means only listed properties are exposed.",
+      inputSchema: {
+        ontology_key: z.string(),
+        relation_type_key: z.string(),
+        properties: z.array(z.string()).optional(),
+      },
+    },
+    wrap("add_relation_type_to_ontology", async (args: {
+      ontology_key: string;
+      relation_type_key: string;
+      properties?: string[] | undefined;
+    }) => {
+      const store = getModelingStore();
+      const ontology = await resolveOntologyByKey(store, args.ontology_key);
+      const body = IncludeTypeRequest.parse({
+        key: args.relation_type_key,
+        properties: args.properties ?? null,
+      });
+      const result = await service.addIncludesRelationType(
+        ontology.ontologyId as string,
+        body,
+        store,
+      );
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "remove_relation_type_from_ontology",
+    {
+      description: "Remove a relation type from an ontology's scope.",
+      inputSchema: {
+        ontology_key: z.string(),
+        relation_type_key: z.string(),
+      },
+    },
+    wrap("remove_relation_type_from_ontology", async (args: {
+      ontology_key: string;
+      relation_type_key: string;
+    }) => {
+      const store = getModelingStore();
+      const ontology = await resolveOntologyByKey(store, args.ontology_key);
+      const rt = await resolveRelationType(store, args.relation_type_key);
+      await service.removeIncludesRelationType(
+        ontology.ontologyId as string,
+        rt.relationTypeId as string,
+        store,
+      );
+      return textResult(
+        `Relation type '${args.relation_type_key}' removed from ontology '${args.ontology_key}'.`,
+      );
+    }),
+  );
+
+  server.registerTool(
+    "validate_ontology",
+    {
+      description:
+        "Validate a single ontology's INCLUDES_TYPE configuration against the schema.",
+      inputSchema: {
+        ontology_key: z.string(),
+      },
+    },
+    wrap("validate_ontology", async (args: { ontology_key: string }) => {
+      const store = getModelingStore();
+      const ontology = await resolveOntologyByKey(store, args.ontology_key);
+      const result = await service.validateOntology(ontology.ontologyId as string, store);
+      return jsonResult(result);
     }),
   );
 

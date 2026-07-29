@@ -20,17 +20,25 @@ import {
   ValidationError,
 } from "../core/exceptions.js";
 import type { ModelingStore } from "../core/ports.js";
+import { DATA_TYPES } from "../core/schemas.js";
 import { invalidateLoadedSchemaCache } from "../runtime/schemaCache.js";
 import type {
   EntityTypeCreateInput,
   EntityTypeResponseBody,
   EntityTypeUpdateInput,
+  IncludeTypeRequestInput,
+  IncludeTypeResponseBody,
+  IncludeTypeUpdateInput,
+  OntologyCreateInput,
+  OntologyResponseBody,
+  OntologyUpdateInput,
   PropertyDefinitionCreateInput,
   PropertyDefinitionResponseBody,
   PropertyDefinitionUpdateInput,
   RelationTypeCreateInput,
   RelationTypeResponseBody,
   RelationTypeUpdateInput,
+  ValidationResultBody,
 } from "./schemas.js";
 import {
   onEntityTypeCreated,
@@ -115,6 +123,85 @@ function rejectReservedRelationTypeKey(store: ModelingStore, key: string, contex
         [...reserved].sort().join(", "),
     );
   }
+}
+
+function toOntologyResponse(data: Row): OntologyResponseBody {
+  return {
+    ontologyId: data.ontologyId as string,
+    key: data.key as string,
+    name: data.name as string,
+    description: optString(data.description),
+    createdAt: toIso(data.createdAt),
+    updatedAt: toIso(data.updatedAt),
+  };
+}
+
+// --- Ontology ---
+
+export async function createOntology(
+  body: OntologyCreateInput,
+  store: ModelingStore,
+): Promise<OntologyResponseBody> {
+  const existingKey = await store.getOntologyByKey(body.key);
+  if (existingKey) {
+    throw new ConflictError(`Ontology with key '${body.key}' already exists`);
+  }
+  const existing = await store.getOntologyByName(body.name);
+  if (existing) {
+    throw new ConflictError(`Ontology with name '${body.name}' already exists`);
+  }
+  const ontologyId = randomUUID();
+  const data = await store.createOntology(ontologyId, body.key, body.name, body.description ?? null);
+  invalidateLoadedSchemaCache();
+  return toOntologyResponse(data);
+}
+
+export async function listOntologies(store: ModelingStore): Promise<OntologyResponseBody[]> {
+  const rows = await store.listOntologies();
+  return rows.map(toOntologyResponse);
+}
+
+export async function getOntology(
+  ontologyId: string,
+  store: ModelingStore,
+): Promise<OntologyResponseBody> {
+  const data = await store.getOntology(ontologyId);
+  if (!data) {
+    throw new NotFoundError(`Ontology '${ontologyId}' not found`);
+  }
+  return toOntologyResponse(data);
+}
+
+export async function updateOntology(
+  ontologyId: string,
+  body: OntologyUpdateInput,
+  store: ModelingStore,
+): Promise<OntologyResponseBody> {
+  if (body.name !== null && body.name !== undefined) {
+    const existing = await store.getOntologyByName(body.name);
+    if (existing && existing.ontologyId !== ontologyId) {
+      throw new ConflictError(`Ontology with name '${body.name}' already exists`);
+    }
+  }
+  const data = await store.updateOntology(ontologyId, body.name ?? null, body.description ?? null);
+  if (!data) {
+    throw new NotFoundError(`Ontology '${ontologyId}' not found`);
+  }
+  invalidateLoadedSchemaCache();
+  return toOntologyResponse(data);
+}
+
+/**
+ * Lens deletion is always permitted: it cascades to nothing but the lens's
+ * own agent configurations and saved queries (handled in the store), needs
+ * no consent, and leaves the schema and every instance untouched.
+ */
+export async function deleteOntology(ontologyId: string, store: ModelingStore): Promise<void> {
+  const deleted = await store.deleteOntology(ontologyId);
+  if (!deleted) {
+    throw new NotFoundError(`Ontology '${ontologyId}' not found`);
+  }
+  invalidateLoadedSchemaCache();
 }
 
 // --- Entity Type (Global) ---
@@ -443,6 +530,482 @@ export async function deleteProperty(
   if (ownerLabel === "EntityType") {
     await onEntityTypePropertyDeleted(store, ownerId, prop);
   }
+}
+
+// --- Scope Management (inclusions) ---
+
+async function resolveOntology(store: ModelingStore, ontologyId: string): Promise<Row> {
+  const data = await store.getOntology(ontologyId);
+  if (!data) {
+    throw new NotFoundError(`Ontology '${ontologyId}' not found`);
+  }
+  return data;
+}
+
+function toIncludeResponse(data: Row): IncludeTypeResponseBody {
+  return {
+    key: data.key as string,
+    properties: (data.properties as string[] | null) ?? null,
+  };
+}
+
+export async function addIncludesEntityType(
+  ontologyId: string,
+  body: IncludeTypeRequestInput,
+  store: ModelingStore,
+): Promise<IncludeTypeResponseBody> {
+  await resolveOntology(store, ontologyId);
+  const et = await store.getEntityTypeByKey(body.key);
+  if (!et) {
+    throw new NotFoundError(`Entity type '${body.key}' not found`);
+  }
+  const properties = body.properties ?? null;
+  if (properties !== null) {
+    const etProps = await store.listProperties(et.entityTypeId as string, "EntityType");
+    const validKeys = new Set(etProps.map((p) => p.key as string));
+    for (const pk of properties) {
+      if (!validKeys.has(pk)) {
+        throw new ValidationError(`Property '${pk}' not found on entity type '${body.key}'`);
+      }
+    }
+    // Every required property without a default must be in the allowlist —
+    // otherwise creates through the lens could never satisfy it.
+    for (const p of etProps) {
+      if (
+        p.required &&
+        (p.defaultValue === null || p.defaultValue === undefined) &&
+        !properties.includes(p.key as string)
+      ) {
+        throw new ValidationError(
+          `Required property '${p.key}' without default must be included ` +
+            `in the property list for entity type '${body.key}'`,
+        );
+      }
+    }
+  }
+  const data = await store.addIncludesType(ontologyId, "EntityType", body.key, properties);
+  if (!data) {
+    throw new NotFoundError(`Failed to add inclusion for entity type '${body.key}'`);
+  }
+  invalidateLoadedSchemaCache();
+  return toIncludeResponse(data);
+}
+
+export async function listIncludesEntityTypes(
+  ontologyId: string,
+  store: ModelingStore,
+): Promise<IncludeTypeResponseBody[]> {
+  await resolveOntology(store, ontologyId);
+  const rows = await store.listIncludesTypes(ontologyId, "EntityType");
+  return rows.map(toIncludeResponse);
+}
+
+export async function updateIncludesEntityType(
+  ontologyId: string,
+  typeId: string,
+  body: IncludeTypeUpdateInput,
+  store: ModelingStore,
+): Promise<IncludeTypeResponseBody> {
+  await resolveOntology(store, ontologyId);
+  const et = await store.getEntityType(typeId);
+  if (!et) {
+    throw new NotFoundError(`Entity type '${typeId}' not found`);
+  }
+  const properties = body.properties ?? null;
+  if (properties !== null) {
+    const etProps = await store.listProperties(typeId, "EntityType");
+    const validKeys = new Set(etProps.map((p) => p.key as string));
+    for (const pk of properties) {
+      if (!validKeys.has(pk)) {
+        throw new ValidationError(`Property '${pk}' not found on entity type '${et.key}'`);
+      }
+    }
+    for (const p of etProps) {
+      if (
+        p.required &&
+        (p.defaultValue === null || p.defaultValue === undefined) &&
+        !properties.includes(p.key as string)
+      ) {
+        throw new ValidationError(`Required property '${p.key}' without default must be included`);
+      }
+    }
+  }
+  const data = await store.updateIncludesType(ontologyId, "EntityType", typeId, properties);
+  if (!data) {
+    throw new NotFoundError(`Entity type '${typeId}' is not included in this ontology`);
+  }
+  invalidateLoadedSchemaCache();
+  return toIncludeResponse(data);
+}
+
+export async function removeIncludesEntityType(
+  ontologyId: string,
+  typeId: string,
+  store: ModelingStore,
+): Promise<void> {
+  await resolveOntology(store, ontologyId);
+  const deleted = await store.removeIncludesType(ontologyId, "EntityType", typeId);
+  if (!deleted) {
+    throw new NotFoundError(`Entity type '${typeId}' is not included in this ontology`);
+  }
+  invalidateLoadedSchemaCache();
+}
+
+export async function addIncludesRelationType(
+  ontologyId: string,
+  body: IncludeTypeRequestInput,
+  store: ModelingStore,
+): Promise<IncludeTypeResponseBody> {
+  await resolveOntology(store, ontologyId);
+  const rt = await store.getRelationTypeByKey(body.key);
+  if (!rt) {
+    throw new NotFoundError(`Relation type '${body.key}' not found`);
+  }
+  // Endpoint check applies only when the lens ALREADY has entity inclusions
+  // — a deliberately preserved ordering hazard: a lens with no entity
+  // inclusions yet accepts any relation type inclusion unchecked, and
+  // adding entity inclusions afterwards can leave an included relation
+  // type whose endpoints are not exposed. Validation reports it; the
+  // runtime still loads it.
+  const entityInclusions = await store.listIncludesTypes(ontologyId, "EntityType");
+  if (entityInclusions.length > 0) {
+    const includedEtKeys = new Set(entityInclusions.map((inc) => inc.key as string));
+    if (!includedEtKeys.has(rt.sourceEntityTypeKey as string)) {
+      throw new ValidationError(
+        `Source entity type '${rt.sourceEntityTypeKey}' of relation type '${body.key}' ` +
+          "is not included in this ontology",
+      );
+    }
+    if (!includedEtKeys.has(rt.targetEntityTypeKey as string)) {
+      throw new ValidationError(
+        `Target entity type '${rt.targetEntityTypeKey}' of relation type '${body.key}' ` +
+          "is not included in this ontology",
+      );
+    }
+  }
+  const properties = body.properties ?? null;
+  if (properties !== null) {
+    const rtProps = await store.listProperties(rt.relationTypeId as string, "RelationType");
+    const validKeys = new Set(rtProps.map((p) => p.key as string));
+    for (const pk of properties) {
+      if (!validKeys.has(pk)) {
+        throw new ValidationError(`Property '${pk}' not found on relation type '${body.key}'`);
+      }
+    }
+    for (const p of rtProps) {
+      if (
+        p.required &&
+        (p.defaultValue === null || p.defaultValue === undefined) &&
+        !properties.includes(p.key as string)
+      ) {
+        throw new ValidationError(
+          `Required property '${p.key}' without default must be included ` +
+            `in the property list for relation type '${body.key}'`,
+        );
+      }
+    }
+  }
+  const data = await store.addIncludesType(ontologyId, "RelationType", body.key, properties);
+  if (!data) {
+    throw new NotFoundError(`Failed to add inclusion for relation type '${body.key}'`);
+  }
+  invalidateLoadedSchemaCache();
+  return toIncludeResponse(data);
+}
+
+export async function listIncludesRelationTypes(
+  ontologyId: string,
+  store: ModelingStore,
+): Promise<IncludeTypeResponseBody[]> {
+  await resolveOntology(store, ontologyId);
+  const rows = await store.listIncludesTypes(ontologyId, "RelationType");
+  return rows.map(toIncludeResponse);
+}
+
+export async function updateIncludesRelationType(
+  ontologyId: string,
+  typeId: string,
+  body: IncludeTypeUpdateInput,
+  store: ModelingStore,
+): Promise<IncludeTypeResponseBody> {
+  await resolveOntology(store, ontologyId);
+  const rt = await store.getRelationType(typeId);
+  if (!rt) {
+    throw new NotFoundError(`Relation type '${typeId}' not found`);
+  }
+  const properties = body.properties ?? null;
+  if (properties !== null) {
+    const rtProps = await store.listProperties(typeId, "RelationType");
+    const validKeys = new Set(rtProps.map((p) => p.key as string));
+    for (const pk of properties) {
+      if (!validKeys.has(pk)) {
+        throw new ValidationError(`Property '${pk}' not found on relation type '${rt.key}'`);
+      }
+    }
+    for (const p of rtProps) {
+      if (
+        p.required &&
+        (p.defaultValue === null || p.defaultValue === undefined) &&
+        !properties.includes(p.key as string)
+      ) {
+        throw new ValidationError(`Required property '${p.key}' without default must be included`);
+      }
+    }
+  }
+  const data = await store.updateIncludesType(ontologyId, "RelationType", typeId, properties);
+  if (!data) {
+    throw new NotFoundError(`Relation type '${typeId}' is not included in this ontology`);
+  }
+  invalidateLoadedSchemaCache();
+  return toIncludeResponse(data);
+}
+
+export async function removeIncludesRelationType(
+  ontologyId: string,
+  typeId: string,
+  store: ModelingStore,
+): Promise<void> {
+  await resolveOntology(store, ontologyId);
+  const deleted = await store.removeIncludesType(ontologyId, "RelationType", typeId);
+  if (!deleted) {
+    throw new NotFoundError(`Relation type '${typeId}' is not included in this ontology`);
+  }
+  invalidateLoadedSchemaCache();
+}
+
+// --- Schema Validation ---
+
+interface SchemaValidationErrorItem {
+  path: string;
+  message: string;
+}
+
+/**
+ * Validate the global schema half: the same four conditions the create
+ * paths already prevent — duplicate type keys, duplicate property keys
+ * within one type, an unknown data type, and a relation endpoint that does
+ * not exist. The pass earns its place because import does not check them.
+ */
+export async function validateSchema(store: ModelingStore): Promise<ValidationResultBody> {
+  const schema = await store.getFullSchema();
+
+  const errors: SchemaValidationErrorItem[] = [];
+  const validDataTypes = new Set<string>(DATA_TYPES);
+
+  const etKeys = new Set<string>();
+  for (const et of schema.entityTypes as Row[]) {
+    const etKey = et.key as string;
+    if (etKeys.has(etKey)) {
+      errors.push({
+        path: `entityTypes.${etKey}`,
+        message: `Duplicate entity type key '${etKey}'`,
+      });
+    }
+    etKeys.add(etKey);
+    const propKeys = new Set<string>();
+    for (const p of (et.properties as Row[] | undefined) ?? []) {
+      const pKey = p.key as string;
+      if (propKeys.has(pKey)) {
+        errors.push({
+          path: `entityTypes.${etKey}.properties.${pKey}`,
+          message: `Duplicate property key '${pKey}'`,
+        });
+      }
+      propKeys.add(pKey);
+      if (!validDataTypes.has(p.dataType as string)) {
+        errors.push({
+          path: `entityTypes.${etKey}.properties.${pKey}`,
+          message: `Invalid data type '${p.dataType}'`,
+        });
+      }
+    }
+  }
+
+  const rtKeys = new Set<string>();
+  for (const rt of schema.relationTypes as Row[]) {
+    const rtKey = rt.key as string;
+    if (rtKeys.has(rtKey)) {
+      errors.push({
+        path: `relationTypes.${rtKey}`,
+        message: `Duplicate relation type key '${rtKey}'`,
+      });
+    }
+    rtKeys.add(rtKey);
+    if (!etKeys.has(rt.sourceKey as string)) {
+      errors.push({
+        path: `relationTypes.${rtKey}`,
+        message: `Source entity type '${rt.sourceKey}' does not exist`,
+      });
+    }
+    if (!etKeys.has(rt.targetKey as string)) {
+      errors.push({
+        path: `relationTypes.${rtKey}`,
+        message: `Target entity type '${rt.targetKey}' does not exist`,
+      });
+    }
+    const propKeys = new Set<string>();
+    for (const p of (rt.properties as Row[] | undefined) ?? []) {
+      const pKey = p.key as string;
+      if (propKeys.has(pKey)) {
+        errors.push({
+          path: `relationTypes.${rtKey}.properties.${pKey}`,
+          message: `Duplicate property key '${pKey}'`,
+        });
+      }
+      propKeys.add(pKey);
+      if (!validDataTypes.has(p.dataType as string)) {
+        errors.push({
+          path: `relationTypes.${rtKey}.properties.${pKey}`,
+          message: `Invalid data type '${p.dataType}'`,
+        });
+      }
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Validate one lens's declarations against the schema. An unscoped lens —
+ * no inclusions — is valid by definition. Always answers, never raises
+ * (except for an unknown lens id).
+ */
+export async function validateOntology(
+  ontologyId: string,
+  store: ModelingStore,
+): Promise<ValidationResultBody> {
+  const ont = await store.getOntology(ontologyId);
+  if (!ont) {
+    throw new NotFoundError(`Ontology '${ontologyId}' not found`);
+  }
+
+  const schema = await store.getFullSchema();
+
+  const errors: SchemaValidationErrorItem[] = [];
+  const ontologyKey = ont.key as string;
+
+  const ontData = (schema.ontologies as Row[]).find((o) => o.ontologyId === ontologyId);
+  if (!ontData) {
+    return { valid: true, errors: [] };
+  }
+
+  const entityInclusions = (ontData.entityInclusions as Row[] | undefined) ?? [];
+  const relationInclusions = (ontData.relationInclusions as Row[] | undefined) ?? [];
+
+  if (entityInclusions.length === 0 && relationInclusions.length === 0) {
+    return { valid: true, errors: [] };
+  }
+
+  const etMap = new Map((schema.entityTypes as Row[]).map((et) => [et.key as string, et]));
+  const rtMap = new Map((schema.relationTypes as Row[]).map((rt) => [rt.key as string, rt]));
+
+  const includedEtKeys = new Set<string>();
+  for (const inc of entityInclusions) {
+    const incKey = inc.key as string;
+    const et = etMap.get(incKey);
+    if (!et) {
+      errors.push({
+        path: `ontologies.${ontologyKey}.includes.entityTypes.${incKey}`,
+        message: `Entity type '${incKey}' does not exist`,
+      });
+      continue;
+    }
+    includedEtKeys.add(incKey);
+    const allowlist = (inc.properties as string[] | null) ?? null;
+    if (allowlist !== null) {
+      const etProps = (et.properties as Row[] | undefined) ?? [];
+      const validProps = new Set(etProps.map((p) => p.key as string));
+      for (const pk of allowlist) {
+        if (!validProps.has(pk)) {
+          errors.push({
+            path: `ontologies.${ontologyKey}.includes.entityTypes.${incKey}.properties`,
+            message: `Property '${pk}' does not exist on entity type '${incKey}'`,
+          });
+        }
+      }
+      for (const p of etProps) {
+        if (
+          p.required &&
+          (p.defaultValue === null || p.defaultValue === undefined) &&
+          !allowlist.includes(p.key as string)
+        ) {
+          errors.push({
+            path: `ontologies.${ontologyKey}.includes.entityTypes.${incKey}.properties`,
+            message: `Required property '${p.key}' without default must be included`,
+          });
+        }
+      }
+    }
+  }
+
+  for (const inc of relationInclusions) {
+    const incKey = inc.key as string;
+    const rt = rtMap.get(incKey);
+    if (!rt) {
+      errors.push({
+        path: `ontologies.${ontologyKey}.includes.relationTypes.${incKey}`,
+        message: `Relation type '${incKey}' does not exist`,
+      });
+      continue;
+    }
+    // Endpoint exposure re-checked here — the one place the ordering
+    // hazard from addIncludesRelationType is reported.
+    if (includedEtKeys.size > 0) {
+      if (!includedEtKeys.has(rt.sourceKey as string)) {
+        errors.push({
+          path: `ontologies.${ontologyKey}.includes.relationTypes.${incKey}`,
+          message: `Source entity type '${rt.sourceKey}' is not included`,
+        });
+      }
+      if (!includedEtKeys.has(rt.targetKey as string)) {
+        errors.push({
+          path: `ontologies.${ontologyKey}.includes.relationTypes.${incKey}`,
+          message: `Target entity type '${rt.targetKey}' is not included`,
+        });
+      }
+    }
+    const allowlist = (inc.properties as string[] | null) ?? null;
+    if (allowlist !== null) {
+      const rtProps = (rt.properties as Row[] | undefined) ?? [];
+      const validProps = new Set(rtProps.map((p) => p.key as string));
+      for (const pk of allowlist) {
+        if (!validProps.has(pk)) {
+          errors.push({
+            path: `ontologies.${ontologyKey}.includes.relationTypes.${incKey}.properties`,
+            message: `Property '${pk}' does not exist on relation type '${incKey}'`,
+          });
+        }
+      }
+      for (const p of rtProps) {
+        if (
+          p.required &&
+          (p.defaultValue === null || p.defaultValue === undefined) &&
+          !allowlist.includes(p.key as string)
+        ) {
+          errors.push({
+            path: `ontologies.${ontologyKey}.includes.relationTypes.${incKey}.properties`,
+            message: `Required property '${p.key}' without default must be included`,
+          });
+        }
+      }
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+/** Validate the global schema and then every lens: one combined list. */
+export async function validateAll(store: ModelingStore): Promise<ValidationResultBody> {
+  const schemaResult = await validateSchema(store);
+  const errors = [...schemaResult.errors];
+
+  const ontologies = await store.listOntologies();
+  for (const ont of ontologies) {
+    const ontResult = await validateOntology(ont.ontologyId as string, store);
+    errors.push(...ontResult.errors);
+  }
+
+  return { valid: errors.length === 0, errors };
 }
 
 // --- Whole-schema read (transfer format) ---

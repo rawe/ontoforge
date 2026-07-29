@@ -9,6 +9,59 @@ import { z } from "zod";
 
 import { DATA_TYPES, KEY_PATTERN } from "../core/schemas.js";
 
+// --- Ontology ---
+
+export const OntologyCreate = z.object({
+  key: z.string().regex(KEY_PATTERN),
+  name: z.string(),
+  description: z.string().nullable().optional(),
+});
+
+/** Sparse update; the key is immutable and absent from this surface. */
+export const OntologyUpdate = z.object({
+  name: z.string().nullable().optional(),
+  description: z.string().nullable().optional(),
+});
+
+export const OntologyResponse = z.object({
+  ontologyId: z.string(),
+  key: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+});
+
+// --- Scope Management ---
+
+/** Adding an inclusion names the type by KEY in the body. */
+export const IncludeTypeRequest = z.object({
+  key: z.string(),
+  // Absent (or explicit null) means "all properties" — not the same as [].
+  properties: z.array(z.string()).nullable().optional(),
+});
+
+export const IncludeTypeUpdate = z.object({
+  properties: z.array(z.string()).nullable().optional(),
+});
+
+export const IncludeTypeResponse = z.object({
+  key: z.string(),
+  properties: z.array(z.string()).nullable(),
+});
+
+// --- Validation ---
+
+export const SchemaValidationErrorItem = z.object({
+  path: z.string(),
+  message: z.string(),
+});
+
+export const ValidationResult = z.object({
+  valid: z.boolean(),
+  errors: z.array(SchemaValidationErrorItem),
+});
+
 // --- Entity Type ---
 
 export const EntityTypeCreate = z.object({
@@ -94,6 +147,13 @@ export const PropertyDefinitionResponse = z.object({
   updatedAt: z.iso.datetime(),
 });
 
+export type OntologyCreateInput = z.infer<typeof OntologyCreate>;
+export type OntologyUpdateInput = z.infer<typeof OntologyUpdate>;
+export type OntologyResponseBody = z.infer<typeof OntologyResponse>;
+export type IncludeTypeRequestInput = z.infer<typeof IncludeTypeRequest>;
+export type IncludeTypeUpdateInput = z.infer<typeof IncludeTypeUpdate>;
+export type IncludeTypeResponseBody = z.infer<typeof IncludeTypeResponse>;
+export type ValidationResultBody = z.infer<typeof ValidationResult>;
 export type EntityTypeCreateInput = z.infer<typeof EntityTypeCreate>;
 export type EntityTypeUpdateInput = z.infer<typeof EntityTypeUpdate>;
 export type EntityTypeResponseBody = z.infer<typeof EntityTypeResponse>;

@@ -15,15 +15,24 @@ import {
   EntityTypeCreate,
   EntityTypeResponse,
   EntityTypeUpdate,
+  IncludeTypeRequest,
+  IncludeTypeResponse,
+  IncludeTypeUpdate,
+  OntologyCreate,
+  OntologyResponse,
+  OntologyUpdate,
   PropertyDefinitionCreate,
   PropertyDefinitionResponse,
   PropertyDefinitionUpdate,
   RelationTypeCreate,
   RelationTypeResponse,
   RelationTypeUpdate,
+  ValidationResult,
 } from "./schemas.js";
 import * as service from "./service.js";
 
+const OntologyIdParams = z.object({ ontologyId: z.string() });
+const OntologyTypeParams = z.object({ ontologyId: z.string(), typeId: z.string() });
 const EntityTypeIdParams = z.object({ entityTypeId: z.string() });
 const RelationTypeIdParams = z.object({ relationTypeId: z.string() });
 const EntityTypePropertyParams = z.object({
@@ -46,6 +55,245 @@ const CascadeQuery = z.object({
 
 /** Routes mounted at `/api/model`. */
 export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
+  // --- Ontologies ---
+
+  app.post(
+    "/ontologies",
+    {
+      schema: {
+        tags: ["modeling"],
+        body: OntologyCreate,
+        response: { 201: OntologyResponse },
+      },
+    },
+    async (request, reply) => {
+      const result = await service.createOntology(request.body, getModelingStore());
+      return reply.status(201).send(result);
+    },
+  );
+
+  app.get(
+    "/ontologies",
+    {
+      schema: {
+        tags: ["modeling"],
+        response: { 200: z.array(OntologyResponse) },
+      },
+    },
+    async () => service.listOntologies(getModelingStore()),
+  );
+
+  app.get(
+    "/ontologies/:ontologyId",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: OntologyIdParams,
+        response: { 200: OntologyResponse },
+      },
+    },
+    async (request) => service.getOntology(request.params.ontologyId, getModelingStore()),
+  );
+
+  app.put(
+    "/ontologies/:ontologyId",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: OntologyIdParams,
+        body: OntologyUpdate,
+        response: { 200: OntologyResponse },
+      },
+    },
+    async (request) =>
+      service.updateOntology(request.params.ontologyId, request.body, getModelingStore()),
+  );
+
+  app.delete(
+    "/ontologies/:ontologyId",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: OntologyIdParams,
+      },
+    },
+    async (request, reply) => {
+      await service.deleteOntology(request.params.ontologyId, getModelingStore());
+      return reply.status(204).send();
+    },
+  );
+
+  // --- Scope Management ---
+  // Adding an inclusion names the type by KEY in the body; updating or
+  // removing one names it by INTERNAL IDENTIFIER in the path.
+
+  app.post(
+    "/ontologies/:ontologyId/includes/entity-types",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: OntologyIdParams,
+        body: IncludeTypeRequest,
+        response: { 201: IncludeTypeResponse },
+      },
+    },
+    async (request, reply) => {
+      const result = await service.addIncludesEntityType(
+        request.params.ontologyId,
+        request.body,
+        getModelingStore(),
+      );
+      return reply.status(201).send(result);
+    },
+  );
+
+  app.get(
+    "/ontologies/:ontologyId/includes/entity-types",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: OntologyIdParams,
+        response: { 200: z.array(IncludeTypeResponse) },
+      },
+    },
+    async (request) =>
+      service.listIncludesEntityTypes(request.params.ontologyId, getModelingStore()),
+  );
+
+  app.put(
+    "/ontologies/:ontologyId/includes/entity-types/:typeId",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: OntologyTypeParams,
+        body: IncludeTypeUpdate,
+        response: { 200: IncludeTypeResponse },
+      },
+    },
+    async (request) =>
+      service.updateIncludesEntityType(
+        request.params.ontologyId,
+        request.params.typeId,
+        request.body,
+        getModelingStore(),
+      ),
+  );
+
+  app.delete(
+    "/ontologies/:ontologyId/includes/entity-types/:typeId",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: OntologyTypeParams,
+      },
+    },
+    async (request, reply) => {
+      await service.removeIncludesEntityType(
+        request.params.ontologyId,
+        request.params.typeId,
+        getModelingStore(),
+      );
+      return reply.status(204).send();
+    },
+  );
+
+  app.post(
+    "/ontologies/:ontologyId/includes/relation-types",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: OntologyIdParams,
+        body: IncludeTypeRequest,
+        response: { 201: IncludeTypeResponse },
+      },
+    },
+    async (request, reply) => {
+      const result = await service.addIncludesRelationType(
+        request.params.ontologyId,
+        request.body,
+        getModelingStore(),
+      );
+      return reply.status(201).send(result);
+    },
+  );
+
+  app.get(
+    "/ontologies/:ontologyId/includes/relation-types",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: OntologyIdParams,
+        response: { 200: z.array(IncludeTypeResponse) },
+      },
+    },
+    async (request) =>
+      service.listIncludesRelationTypes(request.params.ontologyId, getModelingStore()),
+  );
+
+  app.put(
+    "/ontologies/:ontologyId/includes/relation-types/:typeId",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: OntologyTypeParams,
+        body: IncludeTypeUpdate,
+        response: { 200: IncludeTypeResponse },
+      },
+    },
+    async (request) =>
+      service.updateIncludesRelationType(
+        request.params.ontologyId,
+        request.params.typeId,
+        request.body,
+        getModelingStore(),
+      ),
+  );
+
+  app.delete(
+    "/ontologies/:ontologyId/includes/relation-types/:typeId",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: OntologyTypeParams,
+      },
+    },
+    async (request, reply) => {
+      await service.removeIncludesRelationType(
+        request.params.ontologyId,
+        request.params.typeId,
+        getModelingStore(),
+      );
+      return reply.status(204).send();
+    },
+  );
+
+  // --- Validation ---
+  // Both operations always answer 200 with {valid, errors[]} — they
+  // report, they never raise.
+
+  app.post(
+    "/ontologies/:ontologyId/validate",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: OntologyIdParams,
+        response: { 200: ValidationResult },
+      },
+    },
+    async (request) => service.validateOntology(request.params.ontologyId, getModelingStore()),
+  );
+
+  app.post(
+    "/schema/validate",
+    {
+      schema: {
+        tags: ["modeling"],
+        response: { 200: ValidationResult },
+      },
+    },
+    async () => service.validateAll(getModelingStore()),
+  );
+
   // --- Entity Types (Global) ---
 
   app.post(

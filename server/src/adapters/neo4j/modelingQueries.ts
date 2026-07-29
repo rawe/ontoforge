@@ -57,6 +57,110 @@ export async function findReservedTypeKeysInUse(
   }));
 }
 
+// --- Ontology ---
+
+export async function createOntology(
+  session: Session,
+  ontologyId: string,
+  key: string,
+  name: string,
+  description: string | null,
+): Promise<Row> {
+  const result = await session.run(
+    `
+    CREATE (o:Ontology {
+        ontologyId: $ontologyId,
+        key: $key,
+        name: $name,
+        description: $description,
+        createdAt: datetime(),
+        updatedAt: datetime()
+    })
+    RETURN o {.*} AS ontology
+    `,
+    { ontologyId, key, name, description },
+  );
+  return convertNeo4jProperties(result.records[0]?.get("ontology") as Row);
+}
+
+export async function listOntologies(session: Session): Promise<Row[]> {
+  const result = await session.run(
+    "MATCH (o:Ontology) RETURN o {.*} AS ontology ORDER BY o.name",
+  );
+  return result.records.map((record) => convertNeo4jProperties(record.get("ontology") as Row));
+}
+
+export async function getOntology(session: Session, ontologyId: string): Promise<Row | null> {
+  const result = await session.run(
+    "MATCH (o:Ontology {ontologyId: $ontologyId}) RETURN o {.*} AS ontology",
+    { ontologyId },
+  );
+  const record = result.records[0];
+  return record ? convertNeo4jProperties(record.get("ontology") as Row) : null;
+}
+
+export async function getOntologyByName(session: Session, name: string): Promise<Row | null> {
+  const result = await session.run(
+    "MATCH (o:Ontology {name: $name}) RETURN o {.*} AS ontology",
+    { name },
+  );
+  const record = result.records[0];
+  return record ? convertNeo4jProperties(record.get("ontology") as Row) : null;
+}
+
+export async function getOntologyByKey(session: Session, key: string): Promise<Row | null> {
+  const result = await session.run(
+    "MATCH (o:Ontology {key: $key}) RETURN o {.*} AS ontology",
+    { key },
+  );
+  const record = result.records[0];
+  return record ? convertNeo4jProperties(record.get("ontology") as Row) : null;
+}
+
+export async function updateOntology(
+  session: Session,
+  ontologyId: string,
+  name: string | null,
+  description: string | null,
+): Promise<Row | null> {
+  const setClauses = ["o.updatedAt = datetime()"];
+  const params: Row = { ontologyId };
+  if (name !== null) {
+    setClauses.push("o.name = $name");
+    params.name = name;
+  }
+  if (description !== null) {
+    setClauses.push("o.description = $description");
+    params.description = description;
+  }
+
+  const result = await session.run(
+    `
+    MATCH (o:Ontology {ontologyId: $ontologyId})
+    SET ${setClauses.join(", ")}
+    RETURN o {.*} AS ontology
+    `,
+    params,
+  );
+  const record = result.records[0];
+  return record ? convertNeo4jProperties(record.get("ontology") as Row) : null;
+}
+
+/** Delete ontology and cascade to agent configs and saved queries. */
+export async function deleteOntology(session: Session, ontologyId: string): Promise<boolean> {
+  const result = await session.run(
+    `
+    MATCH (o:Ontology {ontologyId: $ontologyId})
+    OPTIONAL MATCH (o)-[:HAS_AI_AGENT]->(ac:AiAgentConfig)
+    OPTIONAL MATCH (o)-[:HAS_SAVED_QUERY]->(sq:SavedQuery)
+    DETACH DELETE o, ac, sq
+    RETURN count(o) AS deleted
+    `,
+    { ontologyId },
+  );
+  return (result.records[0]?.get("deleted") as number) > 0;
+}
+
 // --- Entity Type (Global) ---
 
 export async function createEntityType(
@@ -457,6 +561,126 @@ export async function deleteProperty(
     RETURN count(p) AS deleted
     `,
     { ownerId, propertyId },
+  );
+  return (result.records[0]?.get("deleted") as number) > 0;
+}
+
+// --- Scope Management (INCLUDES_TYPE) ---
+
+type IncludeRow = {
+  key: string;
+  typeId: string;
+  properties: string[] | null;
+};
+
+function toIncludeRow(record: {
+  get: (key: string) => unknown;
+}): IncludeRow {
+  return {
+    key: record.get("key") as string,
+    typeId: record.get("typeId") as string,
+    // Absent allowlist (edge property missing) reads back as null; an
+    // empty allowlist reads back as [] — the distinction is preserved.
+    properties: (record.get("properties") as string[] | null) ?? null,
+  };
+}
+
+/**
+ * MERGE an INCLUDES_TYPE edge from ontology to a type node — adding the
+ * same type again is an upsert that replaces the allowlist. Setting
+ * `properties` to null removes the edge property (allowlist absent);
+ * an empty array is stored as an empty list (allowlist empty).
+ */
+export async function addIncludesType(
+  session: Session,
+  ontologyId: string,
+  typeLabel: OwnerLabel,
+  typeKey: string,
+  properties: string[] | null,
+): Promise<IncludeRow | null> {
+  const result = await session.run(
+    `
+    MATCH (o:Ontology {ontologyId: $ontologyId})
+    MATCH (t:${typeLabel} {key: $typeKey})
+    MERGE (o)-[r:INCLUDES_TYPE]->(t)
+    SET r.properties = $properties
+    RETURN t.key AS key, t.${idField(typeLabel)} AS typeId, r.properties AS properties
+    `,
+    { ontologyId, typeKey, properties },
+  );
+  const record = result.records[0];
+  return record ? toIncludeRow(record) : null;
+}
+
+/** List all INCLUDES_TYPE edges from ontology to a given type label. */
+export async function listIncludesTypes(
+  session: Session,
+  ontologyId: string,
+  typeLabel: OwnerLabel,
+): Promise<IncludeRow[]> {
+  const result = await session.run(
+    `
+    MATCH (o:Ontology {ontologyId: $ontologyId})-[r:INCLUDES_TYPE]->(t:${typeLabel})
+    RETURN t.key AS key, t.${idField(typeLabel)} AS typeId, r.properties AS properties
+    ORDER BY t.key
+    `,
+    { ontologyId },
+  );
+  return result.records.map(toIncludeRow);
+}
+
+/** Get a single INCLUDES_TYPE edge. */
+export async function getIncludesType(
+  session: Session,
+  ontologyId: string,
+  typeLabel: OwnerLabel,
+  typeId: string,
+): Promise<IncludeRow | null> {
+  const result = await session.run(
+    `
+    MATCH (o:Ontology {ontologyId: $ontologyId})-[r:INCLUDES_TYPE]->(t:${typeLabel} {${idField(typeLabel)}: $typeId})
+    RETURN t.key AS key, t.${idField(typeLabel)} AS typeId, r.properties AS properties
+    `,
+    { ontologyId, typeId },
+  );
+  const record = result.records[0];
+  return record ? toIncludeRow(record) : null;
+}
+
+/** Replace the properties allowlist on an INCLUDES_TYPE edge. */
+export async function updateIncludesType(
+  session: Session,
+  ontologyId: string,
+  typeLabel: OwnerLabel,
+  typeId: string,
+  properties: string[] | null,
+): Promise<IncludeRow | null> {
+  const result = await session.run(
+    `
+    MATCH (o:Ontology {ontologyId: $ontologyId})-[r:INCLUDES_TYPE]->(t:${typeLabel} {${idField(typeLabel)}: $typeId})
+    SET r.properties = $properties
+    RETURN t.key AS key, t.${idField(typeLabel)} AS typeId, r.properties AS properties
+    `,
+    { ontologyId, typeId, properties },
+  );
+  const record = result.records[0];
+  return record ? toIncludeRow(record) : null;
+}
+
+/** Remove an INCLUDES_TYPE edge. */
+export async function removeIncludesType(
+  session: Session,
+  ontologyId: string,
+  typeLabel: OwnerLabel,
+  typeId: string,
+): Promise<boolean> {
+  const result = await session.run(
+    `
+    MATCH (o:Ontology {ontologyId: $ontologyId})-[r:INCLUDES_TYPE]->(t:${typeLabel} {${idField(typeLabel)}: $typeId})
+    DELETE r
+    RETURN count(r) AS deleted
+    `,
+    { ontologyId, typeId },
   );
   return (result.records[0]?.get("deleted") as number) > 0;
 }

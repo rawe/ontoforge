@@ -32,6 +32,18 @@ export interface MockModelingStore {
   reservedEntityTypeKeys: Mock;
   reservedRelationTypeKeys: Mock;
   findReservedTypeKeysInUse: Mock;
+  createOntology: Mock;
+  listOntologies: Mock;
+  getOntology: Mock;
+  getOntologyByName: Mock;
+  getOntologyByKey: Mock;
+  updateOntology: Mock;
+  deleteOntology: Mock;
+  addIncludesType: Mock;
+  listIncludesTypes: Mock;
+  getIncludesType: Mock;
+  updateIncludesType: Mock;
+  removeIncludesType: Mock;
   createEntityType: Mock;
   listEntityTypes: Mock;
   getEntityType: Mock;
@@ -68,6 +80,18 @@ export function createMockModelingStore(): MockModelingStore {
     reservedEntityTypeKeys: vi.fn(() => new Set(RESERVED_ENTITY_TYPE_KEYS)),
     reservedRelationTypeKeys: vi.fn(() => new Set(RESERVED_RELATION_TYPE_KEYS)),
     findReservedTypeKeysInUse: vi.fn(async () => []),
+    createOntology: vi.fn(),
+    listOntologies: vi.fn(async () => []),
+    getOntology: vi.fn(async () => null),
+    getOntologyByName: vi.fn(async () => null),
+    getOntologyByKey: vi.fn(async () => null),
+    updateOntology: vi.fn(async () => null),
+    deleteOntology: vi.fn(async () => false),
+    addIncludesType: vi.fn(async () => null),
+    listIncludesTypes: vi.fn(async () => []),
+    getIncludesType: vi.fn(async () => null),
+    updateIncludesType: vi.fn(async () => null),
+    removeIncludesType: vi.fn(async () => false),
     createEntityType: vi.fn(),
     listEntityTypes: vi.fn(async () => []),
     getEntityType: vi.fn(async () => null),

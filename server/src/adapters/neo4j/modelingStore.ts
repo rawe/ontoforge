@@ -45,6 +45,51 @@ export class Neo4jModelingStore {
   }
 
   // ------------------------------------------------------------------
+  // Ontologies
+  // ------------------------------------------------------------------
+
+  async createOntology(
+    ontologyId: string,
+    key: string,
+    name: string,
+    description: string | null,
+  ): Promise<Row> {
+    return runSession(this.driver, (session) =>
+      queries.createOntology(session, ontologyId, key, name, description),
+    );
+  }
+
+  async listOntologies(): Promise<Row[]> {
+    return runSession(this.driver, (session) => queries.listOntologies(session));
+  }
+
+  async getOntology(ontologyId: string): Promise<Row | null> {
+    return runSession(this.driver, (session) => queries.getOntology(session, ontologyId));
+  }
+
+  async getOntologyByName(name: string): Promise<Row | null> {
+    return runSession(this.driver, (session) => queries.getOntologyByName(session, name));
+  }
+
+  async getOntologyByKey(key: string): Promise<Row | null> {
+    return runSession(this.driver, (session) => queries.getOntologyByKey(session, key));
+  }
+
+  async updateOntology(
+    ontologyId: string,
+    name: string | null,
+    description: string | null,
+  ): Promise<Row | null> {
+    return runSession(this.driver, (session) =>
+      queries.updateOntology(session, ontologyId, name, description),
+    );
+  }
+
+  async deleteOntology(ontologyId: string): Promise<boolean> {
+    return runSession(this.driver, (session) => queries.deleteOntology(session, ontologyId));
+  }
+
+  // ------------------------------------------------------------------
   // Entity types
   // ------------------------------------------------------------------
 
@@ -241,7 +286,59 @@ export class Neo4jModelingStore {
   }
 
   // ------------------------------------------------------------------
-  // Scope inclusions (cascade-protocol support; lens CRUD is session 03)
+  // Scope inclusions (lifecycle)
+  // ------------------------------------------------------------------
+
+  async addIncludesType(
+    ontologyId: string,
+    typeLabel: OwnerLabel,
+    typeKey: string,
+    properties: string[] | null,
+  ): Promise<Row | null> {
+    return runSession(this.driver, (session) =>
+      queries.addIncludesType(session, ontologyId, typeLabel, typeKey, properties),
+    );
+  }
+
+  async listIncludesTypes(ontologyId: string, typeLabel: OwnerLabel): Promise<Row[]> {
+    return runSession(this.driver, (session) =>
+      queries.listIncludesTypes(session, ontologyId, typeLabel),
+    );
+  }
+
+  async getIncludesType(
+    ontologyId: string,
+    typeLabel: OwnerLabel,
+    typeId: string,
+  ): Promise<Row | null> {
+    return runSession(this.driver, (session) =>
+      queries.getIncludesType(session, ontologyId, typeLabel, typeId),
+    );
+  }
+
+  async updateIncludesType(
+    ontologyId: string,
+    typeLabel: OwnerLabel,
+    typeId: string,
+    properties: string[] | null,
+  ): Promise<Row | null> {
+    return runSession(this.driver, (session) =>
+      queries.updateIncludesType(session, ontologyId, typeLabel, typeId, properties),
+    );
+  }
+
+  async removeIncludesType(
+    ontologyId: string,
+    typeLabel: OwnerLabel,
+    typeId: string,
+  ): Promise<boolean> {
+    return runSession(this.driver, (session) =>
+      queries.removeIncludesType(session, ontologyId, typeLabel, typeId),
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Scope inclusions (cascade-protocol support)
   // ------------------------------------------------------------------
 
   async removeAllIncludesForType(typeLabel: OwnerLabel, typeId: string): Promise<number> {

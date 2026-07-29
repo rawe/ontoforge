@@ -48,6 +48,9 @@ beforeAll(async () => {
     { schema: { body: z.object({ name: z.string() }) } },
     async () => ({ ok: true }),
   );
+  // A route that declares no body (like the validate POSTs and every
+  // DELETE): an empty JSON body must be tolerated, as FastAPI does.
+  app.post("/boom/bodyless", async () => ({ ok: true }));
 
   await app.ready();
 });
@@ -141,6 +144,17 @@ describe("framework-level failures answer in the envelope", () => {
     expect(res.json()).toEqual({
       error: { code: "INVALID_JSON", message: "Request body is not valid JSON" },
     });
+  });
+
+  it("an empty JSON body on a body-less route is tolerated (FastAPI parity)", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/boom/bodyless",
+      headers: { "content-type": "application/json" },
+      body: "",
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ok: true });
   });
 
   it("a request-shape failure -> 422 VALIDATION_ERROR in the envelope (divergence #3)", async () => {

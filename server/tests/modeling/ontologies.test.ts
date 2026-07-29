@@ -1,0 +1,187 @@
+/**
+ * Ontology (lens) CRUD over a mocked store. Ported from the Python suite
+ * (`backend/tests/modeling/test_ontologies.py`) — same scenarios, same
+ * expected wire shapes — plus the key-immutability and key-pattern rules
+ * the spec calls out.
+ */
+
+import type { FastifyInstance } from "fastify";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { createMockModelingStore, NOW, type MockModelingStore } from "./helpers.js";
+
+const holder: { store: MockModelingStore } = { store: createMockModelingStore() };
+
+vi.mock("../../src/core/ports.js", () => ({
+  getModelingStore: () => holder.store,
+  getRuntimeStore: () => ({}),
+}));
+
+const ONTOLOGY_DATA = {
+  ontologyId: "ont-1",
+  key: "test_ontology",
+  name: "Test Ontology",
+  description: "A test ontology",
+  createdAt: NOW,
+  updatedAt: NOW,
+};
+
+let app: FastifyInstance;
+
+beforeAll(async () => {
+  const { createApp } = await import("../../src/app.js");
+  app = await createApp();
+  await app.ready();
+});
+
+afterAll(async () => {
+  await app.close();
+});
+
+beforeEach(() => {
+  holder.store = createMockModelingStore();
+});
+
+describe("ontology CRUD", () => {
+  it("create answers 201 with the id-bearing response shape", async () => {
+    holder.store.createOntology.mockResolvedValue(ONTOLOGY_DATA);
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/model/ontologies",
+      payload: { key: "test_ontology", name: "Test Ontology", description: "A test ontology" },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(body.ontologyId).toBe("ont-1");
+    expect(body.key).toBe("test_ontology");
+    expect(body.name).toBe("Test Ontology");
+  });
+
+  it("a duplicate key answers 409 RESOURCE_CONFLICT", async () => {
+    holder.store.getOntologyByKey.mockResolvedValue(ONTOLOGY_DATA);
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/model/ontologies",
+      payload: { key: "test_ontology", name: "Other Name" },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.code).toBe("RESOURCE_CONFLICT");
+    expect(res.json().error.message).toContain("key 'test_ontology'");
+  });
+
+  it("a duplicate name answers 409 RESOURCE_CONFLICT — names are unique too", async () => {
+    holder.store.getOntologyByName.mockResolvedValue(ONTOLOGY_DATA);
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/model/ontologies",
+      payload: { key: "other_key", name: "Test Ontology" },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.code).toBe("RESOURCE_CONFLICT");
+    expect(res.json().error.message).toContain("name 'Test Ontology'");
+  });
+
+  it("a key violating the pattern is rejected 422", async () => {
+    for (const key of ["BadKey", "1starts_with_digit", "has-dash", "_underscore_first"]) {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/model/ontologies",
+        payload: { key, name: "Whatever" },
+      });
+      expect(res.statusCode).toBe(422);
+      expect(res.json().error.code).toBe("VALIDATION_ERROR");
+    }
+  });
+
+  it("list returns every stored lens", async () => {
+    holder.store.listOntologies.mockResolvedValue([ONTOLOGY_DATA]);
+    const res = await app.inject({ method: "GET", url: "/api/model/ontologies" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toHaveLength(1);
+    expect(res.json()[0].key).toBe("test_ontology");
+  });
+
+  it("read by id answers the stored lens", async () => {
+    holder.store.getOntology.mockResolvedValue(ONTOLOGY_DATA);
+    const res = await app.inject({ method: "GET", url: "/api/model/ontologies/ont-1" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().ontologyId).toBe("ont-1");
+  });
+
+  it("read of a missing id answers 404", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/model/ontologies/nonexistent",
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error.code).toBe("RESOURCE_NOT_FOUND");
+  });
+
+  it("update changes the name", async () => {
+    holder.store.updateOntology.mockResolvedValue({ ...ONTOLOGY_DATA, name: "Updated Name" });
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/model/ontologies/ont-1",
+      payload: { name: "Updated Name" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().name).toBe("Updated Name");
+  });
+
+  it("update to a name held by another lens answers 409", async () => {
+    holder.store.getOntologyByName.mockResolvedValue({ ...ONTOLOGY_DATA, ontologyId: "ont-2" });
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/model/ontologies/ont-1",
+      payload: { name: "Test Ontology" },
+    });
+    expect(res.statusCode).toBe(409);
+  });
+
+  it("update keeping one's own name is not a conflict", async () => {
+    holder.store.getOntologyByName.mockResolvedValue(ONTOLOGY_DATA);
+    holder.store.updateOntology.mockResolvedValue(ONTOLOGY_DATA);
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/model/ontologies/ont-1",
+      payload: { name: "Test Ontology" },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("update of a missing id answers 404", async () => {
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/model/ontologies/nonexistent",
+      payload: { name: "Whatever" },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("the key is immutable — absent from the update surface, ignored if sent", async () => {
+    holder.store.updateOntology.mockResolvedValue(ONTOLOGY_DATA);
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/model/ontologies/ont-1",
+      payload: { key: "new_key", name: "Test Ontology" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().key).toBe("test_ontology");
+    // The store never receives a key argument on update.
+    expect(holder.store.updateOntology).toHaveBeenCalledWith("ont-1", "Test Ontology", null);
+  });
+
+  it("delete answers 204 — always permitted, no consent step", async () => {
+    holder.store.deleteOntology.mockResolvedValue(true);
+    const res = await app.inject({ method: "DELETE", url: "/api/model/ontologies/ont-1" });
+    expect(res.statusCode).toBe(204);
+  });
+
+  it("delete of a missing id answers 404", async () => {
+    const res = await app.inject({
+      method: "DELETE",
+      url: "/api/model/ontologies/nonexistent",
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});

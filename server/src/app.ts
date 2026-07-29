@@ -51,6 +51,40 @@ export async function createApp(): Promise<FastifyInstance> {
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 
+  // FastAPI ignores the body entirely on routes that declare none, so a
+  // client sending `content-type: application/json` with an empty body to
+  // a body-less route (a validate POST, any DELETE) must succeed. Fastify's
+  // default parser would reject that before the route's declaration is
+  // consulted. Routes that DO declare a body keep the session-01 contract:
+  // an empty body answers 400 INVALID_JSON.
+  app.addContentTypeParser(
+    "application/json",
+    { parseAs: "string" },
+    (request, body, done) => {
+      const text = body as string;
+      if (text.trim() === "") {
+        if (request.routeOptions?.schema?.body) {
+          const error = new Error(
+            "Body cannot be empty when content-type is set to 'application/json'",
+          ) as Error & { code: string; statusCode: number };
+          error.code = "FST_ERR_CTP_EMPTY_JSON_BODY";
+          error.statusCode = 400;
+          done(error, undefined);
+        } else {
+          done(null, undefined);
+        }
+        return;
+      }
+      try {
+        done(null, JSON.parse(text));
+      } catch (err) {
+        const error = err as Error & { statusCode?: number };
+        error.statusCode = 400;
+        done(error, undefined);
+      }
+    },
+  );
+
   // CORS allow-all, matching the Python reference: origins, methods and
   // headers unrestricted, credentials allowed (the origin is reflected).
   await app.register(cors, {

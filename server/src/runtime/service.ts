@@ -24,9 +24,11 @@ import { SYSTEM_PROPERTIES, getReturnVariables, parseAndValidate } from "../core
 import type { RuntimeStore } from "../core/ports.js";
 import { chunkDocument } from "./chunking.js";
 import { cpIndexOf, cpLength, cpSlice, countOccurrences } from "./codePoints.js";
+import { buildTextRepr } from "./embedding.js";
 import {
   loadSchema,
   type EntityTypeDef,
+  type LoadedSchema,
   type PropertyDef,
   type RelationTypeDef,
   type SchemaCacheValue,
@@ -437,11 +439,26 @@ export async function createEntity(
     }
   }
 
+  // Embed the composed entity text (FULL schema, never the lens). A failed
+  // embedding call yields null and the write proceeds without a vector.
+  let embedding: number[] | null = null;
+  const provider = getEmbeddingProvider();
+  if (provider && fullEt !== undefined) {
+    store.validateVectorIndexedProperties(
+      entityTypeKey,
+      coerced,
+      Object.keys(fullEt.properties).filter((k) => !docKeys.has(k)),
+    );
+    const text = buildTextRepr(entityTypeKey, coerced, fullEt.properties);
+    embedding = await provider.embed(text);
+  }
+
   const entity = await store.createEntity(
     entityTypeKey,
     entityId,
     coerced,
     fullEt?.properties ?? {},
+    embedding,
   );
 
   // Chunk + embed document properties (no-op without embedding provider).
@@ -573,12 +590,50 @@ export async function updateEntity(
     }
   }
 
+  // Re-embed only when the update touches a string property — from the
+  // merged post-update state, not the submitted fragment. `hasEmbedding`
+  // distinguishes "no new vector" from "store null".
+  let embedding: number[] | null = null;
+  let hasEmbeddingUpdate = false;
+  const provider = getEmbeddingProvider();
+  if (provider && fullEt !== undefined) {
+    const hasStringChanges = Object.keys(coerced).some(
+      (k) => k in fullEt.properties && fullEt.properties[k]!.dataType === "string",
+    );
+    if (hasStringChanges) {
+      const current = await store.getEntity(entityTypeKey, entityId);
+      if (current !== null) {
+        const merged: Row = {};
+        for (const [k, v] of Object.entries(current)) {
+          if (!k.startsWith("_")) {
+            merged[k] = v;
+          }
+        }
+        Object.assign(merged, setProps);
+        for (const k of removeProps) {
+          delete merged[k];
+        }
+        store.validateVectorIndexedProperties(
+          entityTypeKey,
+          merged,
+          Object.keys(fullEt.properties).filter((k) => !docKeys.has(k)),
+          entityId,
+        );
+        const text = buildTextRepr(entityTypeKey, merged, fullEt.properties);
+        embedding = await provider.embed(text);
+        hasEmbeddingUpdate = true;
+      }
+    }
+  }
+
   const entity = await store.updateEntity(
     entityTypeKey,
     entityId,
     setProps,
     removeProps,
     fullEt?.properties ?? {},
+    embedding,
+    hasEmbeddingUpdate,
   );
   if (entity === null) {
     throw new NotFoundError(`Entity '${entityId}' not found`);
@@ -1205,6 +1260,470 @@ export async function getNeighbors(
   }
 
   return { entity, neighbors: filteredNeighbors };
+}
+
+// ---------------------------------------------------------------------------
+// Semantic search
+// ---------------------------------------------------------------------------
+
+const SEARCH_IN_VALUES = ["entities", "documents", "all"] as const;
+const RRF_K = 60;
+const SNIPPET_CHARS = 200;
+
+export interface SemanticSearchOptions {
+  filters?: Record<string, string> | null;
+  fields?: string[] | null;
+  searchIn?: string;
+  snippets?: boolean;
+}
+
+/**
+ * Semantic retrieval over one lens (`docs/capabilities/search.md`).
+ *
+ * Ranks entities (per-type or cross-type index), document passages
+ * (per-property chunk indexes, deduped to parents), or both fused by
+ * reciprocal rank fusion. Rejected with `details.code: "FEATURE_DISABLED"`
+ * when no embedding provider is configured.
+ */
+export async function semanticSearch(
+  ontologyKey: string,
+  query: string,
+  entityTypeKey: string | null,
+  limit: number,
+  minScore: number | null,
+  store: RuntimeStore,
+  options: SemanticSearchOptions = {},
+): Promise<Row> {
+  const loaded = await loadSchema(ontologyKey, store);
+
+  const provider = getEmbeddingProvider();
+  if (!provider) {
+    throw new ValidationError(
+      "Semantic search requires EMBEDDING_PROVIDER to be configured",
+      { code: "FEATURE_DISABLED" },
+    );
+  }
+
+  const searchIn = options.searchIn ?? "all";
+  if (!(SEARCH_IN_VALUES as readonly string[]).includes(searchIn)) {
+    throw new ValidationError(
+      `Invalid searchIn value: '${searchIn}'. Must be one of: ${SEARCH_IN_VALUES.join(", ")}`,
+      { fields: { searchIn: `Invalid value '${searchIn}'` } },
+    );
+  }
+
+  const filters = options.filters ?? {};
+  const fields = options.fields ?? null;
+  const snippets = options.snippets ?? true;
+
+  let scopedEt: EntityTypeDef | null = null;
+  if (entityTypeKey !== null) {
+    scopedEt = loaded.scoped.entityTypes[entityTypeKey] ?? null;
+    if (scopedEt === null) {
+      throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
+    }
+  } else if (Object.keys(filters).length > 0) {
+    const fieldErrors: Record<string, string> = {};
+    for (const k of Object.keys(filters)) {
+      fieldErrors[k] = "Requires 'type'";
+    }
+    throw new ValidationError(
+      "Property filters require 'type' — filters are defined per entity type",
+      { fields: fieldErrors },
+    );
+  }
+
+  // Reject __contains — not supported by in-index WHERE (SEARCH clause).
+  // Use the entity list endpoint for substring filtering.
+  for (const filterKey of Object.keys(filters)) {
+    if (filterKey.endsWith("__contains")) {
+      throw new ValidationError(
+        "The '__contains' filter is not supported on semantic search. " +
+          "Use exact match or range operators (=, __gt, __gte, __lt, __lte).",
+        { fields: { [filterKey]: "Not supported on semantic search" } },
+      );
+    }
+  }
+
+  const queryEmbedding = await provider.embed(query);
+  if (queryEmbedding === null) {
+    throw new ValidationError("Failed to generate embedding for search query");
+  }
+
+  let entityRanking: Row[] = [];
+  if (searchIn === "entities" || searchIn === "all") {
+    if (entityTypeKey === null) {
+      entityRanking = await semanticSearchAllTypes(
+        loaded,
+        queryEmbedding,
+        limit,
+        minScore,
+        store,
+        fields,
+      );
+    } else {
+      entityRanking = await semanticSearchSingleType(
+        entityTypeKey,
+        scopedEt!,
+        queryEmbedding,
+        limit,
+        minScore,
+        filters,
+        store,
+        fields,
+      );
+    }
+  }
+
+  let documentRanking: Row[] = [];
+  if (searchIn === "documents" || searchIn === "all") {
+    documentRanking = await semanticSearchDocuments(
+      loaded,
+      entityTypeKey,
+      queryEmbedding,
+      limit,
+      minScore,
+      filters,
+      snippets,
+      store,
+      fields,
+    );
+  }
+
+  let results: Row[];
+  if (searchIn === "entities") {
+    results = entityRanking.map((r) => ({
+      entity: r.entity,
+      score: r.score,
+      matchedVia: { source: "entity", similarity: r.score },
+    }));
+  } else if (searchIn === "documents") {
+    results = documentRanking;
+  } else {
+    results = rrfFuse(entityRanking, documentRanking, limit);
+  }
+
+  if (fields !== null) {
+    const always = entityTypeKey !== null ? ENTITY_ALWAYS_FIELDS : ENTITY_NEIGHBOR_ALWAYS_FIELDS;
+    for (const r of results) {
+      r.entity = applyFieldProjection(r.entity as Row, fields, always);
+    }
+  }
+
+  return { results, query, total: results.length };
+}
+
+/** Rank entities of a single type via its per-type vector index. */
+async function semanticSearchSingleType(
+  entityTypeKey: string,
+  scopedEt: EntityTypeDef,
+  queryEmbedding: number[],
+  limit: number,
+  minScore: number | null,
+  filters: Record<string, string>,
+  store: RuntimeStore,
+  fields: string[] | null,
+): Promise<Row[]> {
+  const results = await store.semanticSearch(
+    entityTypeKey,
+    scopedEt.properties,
+    queryEmbedding,
+    limit,
+    minScore,
+    Object.keys(filters).length > 0 ? filters : null,
+  );
+
+  // Filter result properties to the scoped schema.
+  for (const r of results) {
+    r.entity = filterEntityProperties(r.entity as Row, scopedEt, fields);
+  }
+  return results;
+}
+
+/**
+ * Search the shared cross-type entity vector index across all scoped
+ * entity types. The in-index WHERE cannot express membership in a set of
+ * type keys, so scoped ontologies over-fetch and filter to scoped types
+ * here. The candidate pool is capped, so a heavily restricted scope may
+ * return fewer than `limit` results even when more matches exist.
+ */
+async function semanticSearchAllTypes(
+  loaded: LoadedSchema,
+  queryEmbedding: number[],
+  limit: number,
+  minScore: number | null,
+  store: RuntimeStore,
+  fields: string[] | null,
+): Promise<Row[]> {
+  const scopedTypeKeys = new Set(Object.keys(loaded.scoped.entityTypes));
+  if (scopedTypeKeys.size === 0) {
+    return [];
+  }
+
+  const fullTypeKeys = new Set(Object.keys(loaded.full.entityTypes));
+  const isRestricted =
+    scopedTypeKeys.size !== fullTypeKeys.size ||
+    [...scopedTypeKeys].some((k) => !fullTypeKeys.has(k));
+  const fetchLimit = isRestricted ? Math.min(limit * 5, 500) : limit;
+
+  const raw = await store.semanticSearchAll(queryEmbedding, fetchLimit, minScore);
+
+  const results: Row[] = [];
+  for (const r of raw) {
+    const entity = r.entity as Row;
+    const scopedEt = loaded.scoped.entityTypes[entity._entityTypeKey as string];
+    if (scopedEt === undefined) {
+      continue;
+    }
+    r.entity = filterEntityProperties(entity, scopedEt, fields);
+    results.push(r);
+    if (results.length >= limit) {
+      break;
+    }
+  }
+  return results;
+}
+
+/** Compare two coerced/stored values with a list-filter operator. Dates
+ * cross the port as ISO strings and datetimes as JS `Date`s; both are
+ * reduced to comparable primitives first. */
+function compareFilterValues(op: string, actual: unknown, expected: unknown): boolean {
+  let a = actual;
+  let b = expected;
+  if (a instanceof Date) a = a.getTime();
+  if (b instanceof Date) b = b.getTime();
+  if (typeof a !== typeof b) {
+    return false; // Python raises TypeError on cross-type compare -> False
+  }
+  switch (op) {
+    case "eq":
+      return a === b;
+    case "gt":
+      return (a as number | string) > (b as number | string);
+    case "gte":
+      return (a as number | string) >= (b as number | string);
+    case "lt":
+      return (a as number | string) < (b as number | string);
+    case "lte":
+      return (a as number | string) <= (b as number | string);
+    default:
+      return false;
+  }
+}
+
+const DOC_FILTER_OPERATORS = new Set(["gt", "gte", "lt", "lte"]);
+
+/**
+ * Evaluate list-endpoint-style property filters against an entity in
+ * process. Used for document-chunk hits, where filters cannot be applied
+ * in-index. `__contains` is rejected upstream; supported operators mirror
+ * the in-index ones (=, __gt, __gte, __lt, __lte).
+ */
+export function entityMatchesFilters(
+  entity: Row,
+  filters: Record<string, string>,
+  propertyDefs: Record<string, PropertyDef>,
+  typeKey: string,
+): boolean {
+  for (const [filterExpr, rawValue] of Object.entries(filters)) {
+    let propKey: string;
+    let opName: string | null;
+    const splitAt = filterExpr.lastIndexOf("__");
+    if (splitAt >= 0) {
+      propKey = filterExpr.slice(0, splitAt);
+      opName = filterExpr.slice(splitAt + 2);
+    } else {
+      propKey = filterExpr;
+      opName = null;
+    }
+
+    const propDef = propertyDefs[propKey];
+    if (propDef === undefined) {
+      throw new ValidationError(`Unknown filter property: '${propKey}'`, {
+        fields: { [propKey]: `Not defined in type '${typeKey}'` },
+      });
+    }
+    if (opName !== null && !DOC_FILTER_OPERATORS.has(opName)) {
+      throw new ValidationError(`Unknown filter operator: '${opName}'`, {
+        fields: { [filterExpr]: `Unsupported operator '${opName}'` },
+      });
+    }
+
+    let expected: unknown;
+    try {
+      expected = coerceValue(rawValue, propDef.dataType, propKey);
+    } catch (error) {
+      if (!(error instanceof CoercionError)) throw error;
+      throw new ValidationError(`Invalid filter value for '${propKey}'`, {
+        fields: { [propKey]: error.message },
+      });
+    }
+
+    const actual = entity[propKey];
+    if (actual === null || actual === undefined) {
+      return false;
+    }
+    if (!compareFilterValues(opName ?? "eq", actual, expected)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Rank entities by their best-matching document chunk.
+ *
+ * Queries each in-scope (entity type, document property) virtual index,
+ * merges chunk hits by raw score, and dedupes to parent entities — the
+ * best chunk per entity wins and provides `matchedVia`.
+ */
+async function semanticSearchDocuments(
+  loaded: LoadedSchema,
+  entityTypeKey: string | null,
+  queryEmbedding: number[],
+  limit: number,
+  minScore: number | null,
+  filters: Record<string, string>,
+  snippets: boolean,
+  store: RuntimeStore,
+  fields: string[] | null,
+): Promise<Row[]> {
+  const typeKeys =
+    entityTypeKey !== null ? [entityTypeKey] : Object.keys(loaded.scoped.entityTypes);
+
+  const pairs: [string, string][] = [];
+  for (const tk of typeKeys) {
+    const etDef = loaded.scoped.entityTypes[tk];
+    if (etDef === undefined) {
+      continue;
+    }
+    for (const pk of Object.keys(etDef.properties)) {
+      if (etDef.properties[pk]!.dataType === "document") {
+        pairs.push([tk, pk]);
+      }
+    }
+  }
+
+  if (pairs.length === 0) {
+    return [];
+  }
+
+  const chunkHits: Row[] = [];
+  for (const [tk, pk] of pairs) {
+    const hits = await store.searchDocumentChunks(tk, pk, queryEmbedding, limit);
+    chunkHits.push(...hits);
+  }
+
+  // Dedupe to parent entities: the best chunk per entity wins.
+  const bestPerEntity = new Map<string, Row>();
+  for (const hit of chunkHits) {
+    if (minScore !== null && (hit.score as number) < minScore) {
+      continue;
+    }
+    const parentId = (hit.chunk as Row)._entityId as string | undefined;
+    if (!parentId) {
+      continue;
+    }
+    const current = bestPerEntity.get(parentId);
+    if (current === undefined || (hit.score as number) > (current.score as number)) {
+      bestPerEntity.set(parentId, hit);
+    }
+  }
+
+  if (bestPerEntity.size === 0) {
+    return [];
+  }
+
+  const ranked = [...bestPerEntity.values()].sort(
+    (a, b) => (b.score as number) - (a.score as number),
+  );
+
+  const entities = await store.getEntitiesByIds(
+    ranked.map((h) => (h.chunk as Row)._entityId as string),
+  );
+
+  const results: Row[] = [];
+  for (const hit of ranked) {
+    const chunk = hit.chunk as Row;
+    const entity = entities[chunk._entityId as string];
+    if (entity === undefined) {
+      continue;
+    }
+    const etKey = entity._entityTypeKey as string;
+    const scopedEt = loaded.scoped.entityTypes[etKey];
+    if (scopedEt === undefined) {
+      continue;
+    }
+    if (
+      Object.keys(filters).length > 0 &&
+      !entityMatchesFilters(entity, filters, scopedEt.properties, etKey)
+    ) {
+      continue;
+    }
+
+    const matchedVia: Row = {
+      source: "document",
+      propertyKey: chunk._propertyKey,
+      charOffset: chunk.startChar,
+      charLength: chunk.charLength,
+      similarity: hit.score,
+    };
+    if (snippets) {
+      matchedVia.snippet = cpSlice(chunk.text as string, 0, SNIPPET_CHARS);
+    }
+
+    results.push({
+      entity: filterEntityProperties(entity, scopedEt, fields),
+      score: hit.score,
+      matchedVia,
+    });
+    if (results.length >= limit) {
+      break;
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Reciprocal Rank Fusion over entity and document rankings.
+ *
+ * `score = Σ 1/(K + rank)` with K=60. Document `matchedVia` wins when an
+ * entity appears in both rankings (it carries retrieval coordinates).
+ */
+function rrfFuse(entityRanking: Row[], documentRanking: Row[], limit: number): Row[] {
+  const fused = new Map<string, Row>();
+
+  entityRanking.forEach((r, index) => {
+    const rank = index + 1;
+    const eid = (r.entity as Row)._id as string;
+    let item = fused.get(eid);
+    if (item === undefined) {
+      item = { entity: r.entity, score: 0, matchedVia: null };
+      fused.set(eid, item);
+    }
+    item.score = (item.score as number) + 1 / (RRF_K + rank);
+    if (item.matchedVia === null) {
+      item.matchedVia = { source: "entity", similarity: r.score };
+    }
+  });
+
+  documentRanking.forEach((r, index) => {
+    const rank = index + 1;
+    const eid = (r.entity as Row)._id as string;
+    let item = fused.get(eid);
+    if (item === undefined) {
+      item = { entity: r.entity, score: 0, matchedVia: null };
+      fused.set(eid, item);
+    }
+    item.score = (item.score as number) + 1 / (RRF_K + rank);
+    item.matchedVia = r.matchedVia;
+  });
+
+  return [...fused.values()]
+    .sort((a, b) => (b.score as number) - (a.score as number))
+    .slice(0, limit);
 }
 
 // ---------------------------------------------------------------------------

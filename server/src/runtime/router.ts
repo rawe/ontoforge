@@ -72,6 +72,28 @@ const ListQuery = z.looseObject({
 
 const ReadQuery = z.looseObject({ fields: FieldsParam });
 
+/** FastAPI-compatible boolean query parameter: accepts true/false, 1/0,
+ * yes/no, on/off in any case (the Python router's `bool` coercion). */
+const BoolParam = z.preprocess((value) => {
+  if (typeof value !== "string") return value;
+  const lowered = value.toLowerCase();
+  if (["true", "1", "yes", "on"].includes(lowered)) return true;
+  if (["false", "0", "no", "off"].includes(lowered)) return false;
+  return value;
+}, z.boolean());
+
+/** `GET /search/semantic` — the Python router's exact bounds and defaults,
+ * including the documented `min_score` snake_case irregularity. */
+const SemanticSearchQuery = z.looseObject({
+  q: z.string().min(1),
+  type: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(10),
+  min_score: z.coerce.number().min(0).max(1).optional(),
+  fields: FieldsParam,
+  searchIn: z.enum(["entities", "documents", "all"]).default("all"),
+  snippets: BoolParam.default(true),
+});
+
 /** Arbitrary property payloads: shape is decided by the schema at runtime,
  * so the only static rule is "a JSON object". */
 const PropertyPayload = z.record(z.string(), z.unknown());
@@ -176,6 +198,26 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
     { schema: { tags: ["runtime"], params: TypeKeyParams } },
     async (request) =>
       service.getRelationType(request.params.ontologyKey, request.params.key, getRuntimeStore()),
+  );
+
+  // --- Semantic search ---
+
+  app.get(
+    "/:ontologyKey/search/semantic",
+    { schema: { tags: ["runtime"], params: OntologyParams, querystring: SemanticSearchQuery } },
+    async (request) => {
+      const { q, type, limit, min_score, fields, searchIn, snippets } = request.query;
+      const filters = parseFilters(request.query as Record<string, unknown>);
+      return service.semanticSearch(
+        request.params.ontologyKey,
+        q,
+        type ?? null,
+        limit,
+        min_score ?? null,
+        getRuntimeStore(),
+        { filters, fields: fields ?? null, searchIn, snippets },
+      );
+    },
   );
 
   // --- Entity instance CRUD ---

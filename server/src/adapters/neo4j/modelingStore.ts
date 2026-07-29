@@ -9,6 +9,7 @@
 
 import type { Driver } from "neo4j-driver";
 
+import * as ddl from "./ddl.js";
 import { reservedEntityTypeKeys, reservedRelationTypeKeys } from "./ddl.js";
 import { runSession } from "./errors.js";
 import * as queries from "./modelingQueries.js";
@@ -404,5 +405,69 @@ export class Neo4jModelingStore {
 
   async getFullSchema(): Promise<Row> {
     return runSession(this.driver, (session) => queries.getFullSchema(session));
+  }
+
+  // ------------------------------------------------------------------
+  // Embedding maintenance (rebuild support)
+  // ------------------------------------------------------------------
+
+  async getEntityTypesWithProperties(): Promise<Row[]> {
+    return runSession(this.driver, (session) => queries.getEntityTypesWithProperties(session));
+  }
+
+  async setEntityEmbedding(entityId: string, embedding: number[]): Promise<void> {
+    return runSession(this.driver, (session) =>
+      queries.setEntityEmbedding(session, entityId, embedding),
+    );
+  }
+
+  async listSavedQueryRefs(): Promise<Row[]> {
+    return runSession(this.driver, (session) => queries.listSavedQueryRefs(session));
+  }
+
+  async setSavedQueryEmbedding(savedQueryId: string, embedding: number[]): Promise<void> {
+    return runSession(this.driver, (session) =>
+      queries.setSavedQueryEmbedding(session, savedQueryId, embedding),
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Vector-index DDL
+  // ------------------------------------------------------------------
+
+  async createVectorIndex(
+    entityTypeKey: string,
+    dimensions: number,
+    filterProperties: string[] | null = null,
+  ): Promise<void> {
+    await ddl.createVectorIndex(this.driver, entityTypeKey, dimensions, filterProperties);
+  }
+
+  async dropVectorIndex(entityTypeKey: string): Promise<void> {
+    await ddl.dropVectorIndex(this.driver, entityTypeKey);
+  }
+
+  async rebuildVectorIndex(entityTypeKey: string, dimensions: number): Promise<void> {
+    await ddl.rebuildVectorIndex(this.driver, entityTypeKey, dimensions);
+  }
+
+  async createDocumentVectorIndex(
+    entityTypeKey: string,
+    propertyKey: string,
+    dimensions: number,
+  ): Promise<void> {
+    await ddl.createDocumentVectorIndex(this.driver, entityTypeKey, propertyKey, dimensions);
+  }
+
+  async dropDocumentVectorIndex(entityTypeKey: string, propertyKey: string): Promise<void> {
+    await ddl.dropDocumentVectorIndex(this.driver, entityTypeKey, propertyKey);
+  }
+
+  async ensureSavedQueryVectorIndex(dimensions: number): Promise<void> {
+    await ddl.ensureSavedQueryVectorIndex(this.driver, dimensions);
+  }
+
+  async ensureVectorIndexes(dimensions: number, recreateOnMismatch = false): Promise<void> {
+    await ddl.ensureVectorIndexes(this.driver, dimensions, recreateOnMismatch);
   }
 }

@@ -1,5 +1,5 @@
 /**
- * Neo4j naming conventions and schema-object DDL.
+ * Neo4j naming conventions, vector-index DDL, and index-metadata limits.
  *
  * Adapter-private. Labels, index names, and the PascalCase/UPPER_SNAKE_CASE
  * conventions are implementation details of this adapter and must not leak
@@ -7,10 +7,12 @@
  * exception: they cross the port as plain type keys (never as labels), so
  * the modeling service can reject colliding keys without knowing why they
  * collide.
- *
- * Vector-index DDL is not part of this module yet (semantic search is a
- * later slice); only the unconditional constraints and indexes live here.
  */
+
+import type { Driver } from "neo4j-driver";
+
+import { ValidationError } from "../../core/exceptions.js";
+import { runSession } from "./errors.js";
 
 /** Node labels this adapter uses to store schema objects. */
 export const SCHEMA_LABELS: ReadonlySet<string> = new Set([
@@ -60,6 +62,11 @@ export function documentVirtualLabel(entityTypeKey: string, propertyKey: string)
   return `${toPascalCase(entityTypeKey)}Document${toPascalCase(propertyKey)}`;
 }
 
+/** Vector index name for a document property's chunks. */
+export function documentIndexName(entityTypeKey: string, propertyKey: string): string {
+  return `${entityTypeKey}_document_${propertyKey}_embedding`;
+}
+
 /**
  * Entity type keys whose physical label would collide with a schema label.
  *
@@ -97,3 +104,424 @@ export const CONSTRAINTS: readonly string[] = [
   "CREATE CONSTRAINT agent_config_id_unique IF NOT EXISTS FOR (ac:AiAgentConfig) REQUIRE ac.agentConfigId IS UNIQUE",
   "CREATE CONSTRAINT saved_query_id_unique IF NOT EXISTS FOR (sq:SavedQuery) REQUIRE sq.savedQueryId IS UNIQUE",
 ];
+
+// ---------------------------------------------------------------------------
+// Vector-index metadata limits
+// ---------------------------------------------------------------------------
+
+/** The engine's indexed-property size ceiling: a per-type vector index
+ * stores property values as filter metadata, so indexed string values may
+ * not exceed it (`docs/storage-adapters.md`, engine constraints). */
+export const MAX_VECTOR_FILTER_VALUE_BYTES = 32766;
+
+export const ENTITY_VECTOR_INDEX_NAME = "entity_embedding";
+
+/**
+ * Reject string values too large for vector-index filter metadata.
+ *
+ * Raised as a domain validation error naming the property, never the
+ * engine — enforced only when an embedding provider is configured, since
+ * the constraint exists to protect the index.
+ */
+export function validateVectorIndexedProperties(
+  entityTypeKey: string,
+  properties: Record<string, unknown>,
+  filterProperties: string[],
+  entityId: string | null = null,
+): void {
+  for (const propertyKey of filterProperties) {
+    const value = properties[propertyKey];
+    if (value === null || value === undefined || typeof value !== "string") {
+      continue;
+    }
+    const valueBytes = Buffer.byteLength(value, "utf8");
+    if (valueBytes <= MAX_VECTOR_FILTER_VALUE_BYTES) {
+      continue;
+    }
+
+    const entityRef = entityId ? ` on entity '${entityId}'` : "";
+    throw new ValidationError(
+      `Property '${propertyKey}'${entityRef} is too large for semantic indexing ` +
+        `on type '${entityTypeKey}' (${valueBytes} bytes > ` +
+        `${MAX_VECTOR_FILTER_VALUE_BYTES} bytes)`,
+      {
+        fields: {
+          [propertyKey]:
+            "Value exceeds the indexed property size limit " +
+            `(${valueBytes} bytes > ${MAX_VECTOR_FILTER_VALUE_BYTES} bytes)`,
+        },
+      },
+    );
+  }
+}
+
+async function validateExistingVectorIndexedProperties(
+  driver: Driver,
+  pascalLabel: string,
+  entityTypeKey: string,
+  filterProperties: string[],
+): Promise<void> {
+  if (filterProperties.length === 0) {
+    return;
+  }
+
+  await runSession(driver, async (session) => {
+    const result = await session.run(
+      `MATCH (n:${pascalLabel}) RETURN n._id AS entity_id, n {.*} AS properties`,
+    );
+    for (const record of result.records) {
+      validateVectorIndexedProperties(
+        entityTypeKey,
+        (record.get("properties") as Record<string, unknown>) ?? {},
+        filterProperties,
+        record.get("entity_id") as string,
+      );
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Vector-index lifecycle
+// ---------------------------------------------------------------------------
+
+/** A failed index is silently useless: a create-if-absent would skip over
+ * it forever, so it is dropped before recreate. */
+async function dropFailedIndexIfExists(driver: Driver, indexName: string): Promise<void> {
+  await runSession(driver, async (session) => {
+    const result = await session.run(
+      "SHOW INDEXES YIELD name, state WHERE name = $name RETURN state",
+      { name: indexName },
+    );
+    const record = result.records[0];
+    if (record !== undefined && record.get("state") === "FAILED") {
+      await session.run(`DROP INDEX ${indexName} IF EXISTS`);
+      console.warn(`Dropped failed vector index before recreate: ${indexName}`);
+    }
+  });
+}
+
+/** The vector width an existing index is configured for, or null if absent. */
+export async function existingVectorIndexDimensions(
+  driver: Driver,
+  indexName: string,
+): Promise<number | null> {
+  return runSession(driver, async (session) => {
+    const result = await session.run(
+      "SHOW VECTOR INDEXES YIELD name, options WHERE name = $name RETURN options",
+      { name: indexName },
+    );
+    const record = result.records[0];
+    if (record === undefined) {
+      return null;
+    }
+    const options = (record.get("options") as Record<string, unknown> | null) ?? {};
+    const indexConfig = (options.indexConfig as Record<string, unknown> | undefined) ?? {};
+    const configured = indexConfig["vector.dimensions"];
+    return configured === null || configured === undefined ? null : Number(configured);
+  });
+}
+
+/**
+ * Handle an existing index whose width no longer matches the model.
+ *
+ * A vector index fixes its width at creation, and `CREATE ... IF NOT
+ * EXISTS` is a no-op against one that already exists — so changing the
+ * embedding model leaves an index that rejects every vector the new model
+ * produces. Nothing else notices: the index is ONLINE, so the failed-index
+ * check above does not see it, and the symptom only appears later, as a
+ * storage failure on the first semantic search.
+ *
+ * On startup this only warns: dropping an index destroys the vectors it
+ * holds, and that is the operator's call. The rebuild path passes
+ * `recreateOnMismatch`, because there the drop is followed immediately by
+ * regeneration at the new width — the operator asked for exactly that.
+ *
+ * The messages describe indexes the way the API does — by entity type,
+ * document property, or search scope — never by index name: physical
+ * naming is this adapter's own business.
+ */
+export async function reconcileIndexDimensions(
+  driver: Driver,
+  indexName: string,
+  describes: string,
+  dimensions: number,
+  recreateOnMismatch: boolean,
+): Promise<void> {
+  const existing = await existingVectorIndexDimensions(driver, indexName);
+  if (existing === null || existing === dimensions) {
+    return;
+  }
+
+  if (!recreateOnMismatch) {
+    console.warn(
+      `The semantic index for ${describes} holds ${existing}-dimensional ` +
+        `vectors, but the configured embedding model produces ${dimensions}. ` +
+        "Semantic search over it fails until the widths agree. Run " +
+        "POST /api/model/rebuild-embeddings to recreate it at the model's " +
+        "width and regenerate its vectors.",
+    );
+    return;
+  }
+
+  await runSession(driver, async (session) => {
+    await session.run(`DROP INDEX ${indexName} IF EXISTS`);
+  });
+  console.info(
+    `Recreating the semantic index for ${describes} at ${dimensions} ` +
+      `dimensions (was ${existing}) to match the configured embedding model; ` +
+      "its vectors are regenerated by this rebuild.",
+  );
+}
+
+/**
+ * Create vector indexes for all existing entity types (IF NOT EXISTS).
+ *
+ * New indexes include a WITH clause listing all current non-document
+ * properties for in-index filtering. Existing indexes are left untouched
+ * unless their width no longer matches `dimensions`, in which case they
+ * are reported — or, with `recreateOnMismatch`, dropped and recreated.
+ * See `reconcileIndexDimensions`.
+ */
+export async function ensureVectorIndexes(
+  driver: Driver,
+  dimensions: number,
+  recreateOnMismatch = false,
+): Promise<void> {
+  const entityTypes = await runSession(driver, async (session) => {
+    const result = await session.run(
+      `
+      MATCH (et:EntityType)
+      OPTIONAL MATCH (et)-[:HAS_PROPERTY]->(p:PropertyDefinition)
+      WHERE p.dataType <> 'document'
+      RETURN et.key AS key, collect(p.key) AS property_keys
+      `,
+    );
+    return result.records.map((record) => ({
+      key: record.get("key") as string,
+      propertyKeys: record.get("property_keys") as string[],
+    }));
+  });
+
+  for (const et of entityTypes) {
+    await createVectorIndex(driver, et.key, dimensions, et.propertyKeys, recreateOnMismatch);
+  }
+
+  // Chunk vector indexes for document properties (one per virtual type).
+  const documentProperties = await runSession(driver, async (session) => {
+    const result = await session.run(
+      `
+      MATCH (et:EntityType)-[:HAS_PROPERTY]->(p:PropertyDefinition {dataType: 'document'})
+      RETURN et.key AS entity_type_key, p.key AS property_key
+      `,
+    );
+    return result.records.map((record) => ({
+      entityTypeKey: record.get("entity_type_key") as string,
+      propertyKey: record.get("property_key") as string,
+    }));
+  });
+
+  for (const { entityTypeKey, propertyKey } of documentProperties) {
+    await createDocumentVectorIndex(
+      driver,
+      entityTypeKey,
+      propertyKey,
+      dimensions,
+      recreateOnMismatch,
+    );
+  }
+
+  // Cross-type entity vector index (semantic search across all types).
+  await ensureEntityVectorIndex(driver, dimensions, recreateOnMismatch);
+
+  // Saved-query vector index (semantic search over descriptions).
+  await ensureSavedQueryVectorIndex(driver, dimensions, recreateOnMismatch);
+}
+
+/**
+ * Create the cross-type vector index on the shared `_Entity` label
+ * (IF NOT EXISTS). Type/scope filtering happens in the service layer, so
+ * no in-index filter properties are needed.
+ */
+export async function ensureEntityVectorIndex(
+  driver: Driver,
+  dimensions: number,
+  recreateOnMismatch = false,
+): Promise<void> {
+  await dropFailedIndexIfExists(driver, ENTITY_VECTOR_INDEX_NAME);
+  await reconcileIndexDimensions(
+    driver,
+    ENTITY_VECTOR_INDEX_NAME,
+    "search across all entity types",
+    dimensions,
+    recreateOnMismatch,
+  );
+  const query =
+    `CREATE VECTOR INDEX ${ENTITY_VECTOR_INDEX_NAME} IF NOT EXISTS ` +
+    "FOR (n:_Entity) ON (n._embedding) " +
+    `OPTIONS {indexConfig: {\`vector.dimensions\`: ${dimensions}, ` +
+    "`vector.similarity_function`: 'cosine'}}";
+  await runSession(driver, async (session) => {
+    await session.run(query);
+  });
+  console.info(`Vector index ensured: ${ENTITY_VECTOR_INDEX_NAME}`);
+}
+
+/**
+ * Create the vector index for SavedQuery descriptions (IF NOT EXISTS).
+ * `_ontologyKey` is an in-index filter property so a description search
+ * can be scoped to one ontology in a single query.
+ */
+export async function ensureSavedQueryVectorIndex(
+  driver: Driver,
+  dimensions: number,
+  recreateOnMismatch = false,
+): Promise<void> {
+  await reconcileIndexDimensions(
+    driver,
+    "saved_query_embedding",
+    "saved-query descriptions",
+    dimensions,
+    recreateOnMismatch,
+  );
+  const query =
+    "CREATE VECTOR INDEX saved_query_embedding IF NOT EXISTS " +
+    "FOR (sq:SavedQuery) ON (sq._embedding) " +
+    "WITH [sq._ontologyKey] " +
+    `OPTIONS {indexConfig: {\`vector.dimensions\`: ${dimensions}, ` +
+    "`vector.similarity_function`: 'cosine'}}";
+  await runSession(driver, async (session) => {
+    await session.run(query);
+  });
+  console.info("Vector index ensured: saved_query_embedding");
+}
+
+/**
+ * Create a vector index for the given entity type label. When
+ * `filterProperties` is provided, the index is created with a WITH clause
+ * so those properties are stored alongside vectors for in-index filtering.
+ */
+export async function createVectorIndex(
+  driver: Driver,
+  entityTypeKey: string,
+  dimensions: number,
+  filterProperties: string[] | null = null,
+  recreateOnMismatch = false,
+): Promise<void> {
+  const pascalLabel = toPascalCase(entityTypeKey);
+  const indexName = `${entityTypeKey}_embedding`;
+  const selectedProperties = (filterProperties ?? []).filter((p) => p);
+  await validateExistingVectorIndexedProperties(
+    driver,
+    pascalLabel,
+    entityTypeKey,
+    selectedProperties,
+  );
+  await dropFailedIndexIfExists(driver, indexName);
+  await reconcileIndexDimensions(
+    driver,
+    indexName,
+    `entity type '${entityTypeKey}'`,
+    dimensions,
+    recreateOnMismatch,
+  );
+  let withClause = "";
+  if (selectedProperties.length > 0) {
+    const props = selectedProperties.map((p) => `n.${p}`).join(", ");
+    withClause = `WITH [${props}] `;
+  }
+  const query =
+    `CREATE VECTOR INDEX ${indexName} IF NOT EXISTS ` +
+    `FOR (n:${pascalLabel}) ON (n._embedding) ` +
+    withClause +
+    `OPTIONS {indexConfig: {\`vector.dimensions\`: ${dimensions}, ` +
+    "`vector.similarity_function`: 'cosine'}}";
+  await runSession(driver, async (session) => {
+    await session.run(query);
+  });
+  console.info(`Vector index ensured: ${indexName}`);
+}
+
+/** Create the vector index for a document property's chunk nodes. */
+export async function createDocumentVectorIndex(
+  driver: Driver,
+  entityTypeKey: string,
+  propertyKey: string,
+  dimensions: number,
+  recreateOnMismatch = false,
+): Promise<void> {
+  const indexName = documentIndexName(entityTypeKey, propertyKey);
+  const virtualLabel = documentVirtualLabel(entityTypeKey, propertyKey);
+  await dropFailedIndexIfExists(driver, indexName);
+  await reconcileIndexDimensions(
+    driver,
+    indexName,
+    `document property '${propertyKey}' on entity type '${entityTypeKey}'`,
+    dimensions,
+    recreateOnMismatch,
+  );
+  const query =
+    `CREATE VECTOR INDEX ${indexName} IF NOT EXISTS ` +
+    `FOR (c:${virtualLabel}) ON (c._embedding) ` +
+    `OPTIONS {indexConfig: {\`vector.dimensions\`: ${dimensions}, ` +
+    "`vector.similarity_function`: 'cosine'}}";
+  await runSession(driver, async (session) => {
+    await session.run(query);
+  });
+  console.info(`Vector index ensured: ${indexName}`);
+}
+
+/** Drop the vector index for a document property's chunk nodes. */
+export async function dropDocumentVectorIndex(
+  driver: Driver,
+  entityTypeKey: string,
+  propertyKey: string,
+): Promise<void> {
+  const indexName = documentIndexName(entityTypeKey, propertyKey);
+  await runSession(driver, async (session) => {
+    await session.run(`DROP INDEX ${indexName} IF EXISTS`);
+  });
+  console.info(`Vector index dropped: ${indexName}`);
+}
+
+/** Drop the vector index for the given entity type. */
+export async function dropVectorIndex(driver: Driver, entityTypeKey: string): Promise<void> {
+  const indexName = `${entityTypeKey}_embedding`;
+  await runSession(driver, async (session) => {
+    await session.run(`DROP INDEX ${indexName} IF EXISTS`);
+  });
+  console.info(`Vector index dropped: ${indexName}`);
+}
+
+/**
+ * Drop and recreate the vector index with current properties. Called when
+ * properties are added or removed from an entity type so that the
+ * in-index filter properties stay in sync with the schema.
+ */
+export async function rebuildVectorIndex(
+  driver: Driver,
+  entityTypeKey: string,
+  dimensions: number,
+): Promise<void> {
+  const propertyKeys = await runSession(driver, async (session) => {
+    const result = await session.run(
+      `
+      MATCH (et:EntityType {key: $key})
+      OPTIONAL MATCH (et)-[:HAS_PROPERTY]->(p:PropertyDefinition)
+      WHERE p.dataType <> 'document'
+      RETURN collect(p.key) AS property_keys
+      `,
+      { key: entityTypeKey },
+    );
+    const record = result.records[0];
+    return record === undefined ? [] : (record.get("property_keys") as string[]);
+  });
+
+  await validateExistingVectorIndexedProperties(
+    driver,
+    toPascalCase(entityTypeKey),
+    entityTypeKey,
+    propertyKeys,
+  );
+  await dropVectorIndex(driver, entityTypeKey);
+  await createVectorIndex(driver, entityTypeKey, dimensions, propertyKeys);
+}

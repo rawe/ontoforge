@@ -1,0 +1,270 @@
+/**
+ * Rebuild streaming and vector-index width drift — ported from
+ * `backend/tests/integration/test_vector_index_drift.py` and
+ * `test_store_errors.py`, plus the NDJSON stream-shape assertions.
+ *
+ * Drift is induced past the port (rebuilding real indexes at a wrong
+ * width); what is asserted is port-level behaviour: startup REPORTS and
+ * changes nothing, the rebuild operation REPAIRS. Altered indexes are
+ * restored even on failure — the Neo4j instance is shared.
+ * SKIPPED when Ollama or the model is unavailable.
+ */
+
+import type { FastifyInstance } from "fastify";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { createApp } from "../../../src/app.js";
+import { ENTITY_VECTOR_INDEX_NAME } from "../../../src/adapters/neo4j/ddl.js";
+import { getEmbeddingProvider } from "../../../src/core/embedding.js";
+import {
+  closeStores,
+  ensureSemanticIndexes,
+  initStores,
+  wipeDatabase,
+} from "../../../src/core/ports.js";
+import { invalidateLoadedSchemaCache } from "../../../src/runtime/schemaCache.js";
+import {
+  checkOllamaModel,
+  disableProvider,
+  enableOllamaProvider,
+  indexDimensions,
+  rebuildIndexAt,
+  waitForIndexOnline,
+} from "./support.js";
+
+type Row = Record<string, unknown>;
+
+const ollamaUp = await checkOllamaModel();
+
+/** Any width the embedding model does not produce. */
+const MISMATCHED_DIMENSIONS = 1024;
+
+/** The two index-creation paths the reconcile has to be wired into: the
+ * cross-type index and the per-entity-type one. */
+const DRIFTING_INDEXES = [ENTITY_VECTOR_INDEX_NAME, "person_embedding"];
+
+let app: FastifyInstance;
+
+describe.skipIf(!ollamaUp)("rebuild and width drift (Ollama)", () => {
+  beforeAll(async () => {
+    await initStores();
+    await wipeDatabase();
+    enableOllamaProvider();
+    app = await createApp();
+    await app.ready();
+  });
+
+  afterAll(async () => {
+    disableProvider();
+    await wipeDatabase();
+    await app.close();
+    await closeStores();
+  });
+
+  async function post(url: string, payload: Row): Promise<Row> {
+    const res = await app.inject({ method: "POST", url, payload });
+    expect(res.statusCode, `POST ${url}: ${res.body}`).toBe(201);
+    return res.json() as Row;
+  }
+
+  /** Ontology `index_drift_test` with one person type and one entity;
+   * indexes exist at the provider width (768). */
+  async function buildDriftFixture(): Promise<void> {
+    await post("/api/model/ontologies", { key: "index_drift_test", name: "Index Drift Test" });
+    const et = await post("/api/model/entity-types", { key: "person", displayName: "Person" });
+    await post(`/api/model/entity-types/${et.entityTypeId as string}/properties`, {
+      key: "name",
+      displayName: "Name",
+      dataType: "string",
+      required: true,
+    });
+    await ensureSemanticIndexes(getEmbeddingProvider()!.dimensions);
+    await post("/api/runtime/index_drift_test/entities/person", { name: "Alice Chen" });
+  }
+
+  /** Run `work` with both indexes drifted; restore even on failure. */
+  async function withDriftedIndexes(work: () => Promise<void>): Promise<void> {
+    for (const indexName of DRIFTING_INDEXES) {
+      await rebuildIndexAt(indexName, MISMATCHED_DIMENSIONS);
+    }
+    try {
+      await work();
+    } finally {
+      const width = getEmbeddingProvider()!.dimensions;
+      for (const indexName of DRIFTING_INDEXES) {
+        if ((await indexDimensions(indexName)) !== width) {
+          await rebuildIndexAt(indexName, width);
+        }
+      }
+    }
+  }
+
+  beforeEach(async () => {
+    await wipeDatabase();
+    invalidateLoadedSchemaCache();
+  });
+
+  it("startup reports the drift and changes nothing", async () => {
+    await buildDriftFixture();
+    await withDriftedIndexes(async () => {
+      const warnings: string[] = [];
+      const spy = vi
+        .spyOn(console, "warn")
+        .mockImplementation((...args: unknown[]) => warnings.push(args.map(String).join(" ")));
+      try {
+        await ensureSemanticIndexes(getEmbeddingProvider()!.dimensions);
+      } finally {
+        spy.mockRestore();
+      }
+
+      const driftWarnings = warnings.filter((w) => w.includes("semantic index"));
+      expect(driftWarnings, warnings.join("\n")).toHaveLength(DRIFTING_INDEXES.length);
+      const reported = driftWarnings.join("\n");
+      expect(reported).toContain("entity type 'person'");
+      expect(reported).toContain("search across all entity types");
+      expect(reported).toContain(String(MISMATCHED_DIMENSIONS));
+      expect(reported).toContain(String(getEmbeddingProvider()!.dimensions));
+      expect(reported).toContain("/api/model/rebuild-embeddings");
+
+      // Operator-facing text stays in API vocabulary: no vendor, no
+      // physical index name.
+      for (const leak of ["eo4j", "Cypher", "VECTOR INDEX", "Person", ...DRIFTING_INDEXES]) {
+        expect(reported, `'${leak}' leaked into the warning`).not.toContain(leak);
+      }
+
+      for (const indexName of DRIFTING_INDEXES) {
+        expect(await indexDimensions(indexName)).toBe(MISMATCHED_DIMENSIONS);
+      }
+    });
+  });
+
+  it("a drifted index surfaces as a structured storage error, leaking nothing", async () => {
+    await buildDriftFixture();
+    await withDriftedIndexes(async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/runtime/index_drift_test/search/semantic?q=Alice&searchIn=entities&type=person",
+      });
+
+      expect(res.statusCode, "expected the drift to break search").toBe(500);
+      const body = res.json() as { error: { code: string; message: string; details: Row } };
+      expect(body.error.code).toBe("STORAGE_ERROR");
+      expect(body.error.message).toBe("A storage operation failed");
+      expect(body.error.details.errorId).toBeTruthy();
+
+      for (const leak of [
+        "eo4j",
+        "Cypher",
+        "person_embedding",
+        "dimensionality",
+        "Vector index",
+        "Internal Server Error",
+        String(MISMATCHED_DIMENSIONS),
+      ]) {
+        expect(res.body, `driver detail '${leak}' reached the client`).not.toContain(leak);
+      }
+    });
+  });
+
+  it("rebuild repairs the drift and semantic search works again", async () => {
+    await buildDriftFixture();
+    await withDriftedIndexes(async () => {
+      const before = await app.inject({
+        method: "GET",
+        url: "/api/runtime/index_drift_test/search/semantic?q=Alice&searchIn=entities&type=person",
+      });
+      expect(before.statusCode, "expected the drift to break search first").toBe(500);
+
+      const rebuild = await app.inject({ method: "POST", url: "/api/model/rebuild-embeddings" });
+      expect(rebuild.statusCode, rebuild.body).toBe(200);
+
+      const width = getEmbeddingProvider()!.dimensions;
+      for (const indexName of DRIFTING_INDEXES) {
+        await waitForIndexOnline(indexName);
+        expect(await indexDimensions(indexName)).toBe(width);
+      }
+
+      const after = await app.inject({
+        method: "GET",
+        url: "/api/runtime/index_drift_test/search/semantic?q=Alice&searchIn=entities&type=person",
+      });
+      expect(after.statusCode, after.body).toBe(200);
+      expect((after.json() as { total: number }).total).toBeGreaterThan(0);
+    });
+  });
+
+  it("streams NDJSON progress records and a final summary", async () => {
+    await buildDriftFixture();
+    await post("/api/runtime/index_drift_test/entities/person", { name: "Bob Smith" });
+
+    const res = await app.inject({ method: "POST", url: "/api/model/rebuild-embeddings" });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.headers["content-type"]).toContain("application/x-ndjson");
+
+    const lines = res.body.trim().split("\n").map((line) => JSON.parse(line) as Row);
+    expect(lines.length).toBeGreaterThanOrEqual(3); // 2 entities + summary
+
+    const progress = lines.filter((l) => l.type === "progress");
+    for (const record of progress) {
+      expect(Object.keys(record).sort()).toEqual(["entityTypeKey", "processed", "total", "type"]);
+      expect(record.entityTypeKey).toBe("person");
+      expect(typeof record.processed).toBe("number");
+      expect(record.total).toBe(2);
+    }
+    // Counts advance to the group total.
+    expect(progress.map((p) => p.processed)).toEqual([1, 2]);
+
+    const summary = lines[lines.length - 1]!;
+    expect(summary.type).toBe("summary");
+    expect(Object.keys(summary).sort()).toEqual([
+      "entityTypes",
+      "savedQueriesFailed",
+      "savedQueriesProcessed",
+      "totalFailed",
+      "totalProcessed",
+      "type",
+    ]);
+    expect(summary.entityTypes).toEqual([{ entityTypeKey: "person", processed: 2, failed: 0 }]);
+    expect(summary.savedQueriesProcessed).toBe(0);
+    expect(summary.savedQueriesFailed).toBe(0);
+    expect(summary.totalProcessed).toBe(2);
+    expect(summary.totalFailed).toBe(0);
+  });
+
+  it("rebuild embeds entities created while no provider was configured", async () => {
+    await buildDriftFixture();
+
+    // Create an entity with the provider absent: it stays vector-less and
+    // invisible to semantic search.
+    disableProvider();
+    try {
+      await post("/api/runtime/index_drift_test/entities/person", { name: "Grace Hopper" });
+    } finally {
+      enableOllamaProvider();
+    }
+
+    const rebuild = await app.inject({ method: "POST", url: "/api/model/rebuild-embeddings" });
+    expect(rebuild.statusCode, rebuild.body).toBe(200);
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/runtime/index_drift_test/search/semantic?q=Grace%20Hopper&type=person&searchIn=entities",
+    });
+    expect(res.statusCode).toBe(200);
+    const data = res.json() as { results: Row[] };
+    expect(data.results.some((r) => (r.entity as Row).name === "Grace Hopper")).toBe(true);
+  });
+
+  it("rebuild is refused without a provider", async () => {
+    disableProvider();
+    try {
+      const res = await app.inject({ method: "POST", url: "/api/model/rebuild-embeddings" });
+      expect(res.statusCode).toBe(422);
+      const body = res.json() as { error: { code: string; message: string } };
+      expect(body.error.code).toBe("VALIDATION_ERROR");
+      expect(body.error.message).toContain("EMBEDDING_PROVIDER");
+    } finally {
+      enableOllamaProvider();
+    }
+  });
+});

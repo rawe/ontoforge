@@ -884,3 +884,61 @@ export async function getFullSchema(session: Session): Promise<Row> {
 
   return { entityTypes, relationTypes, ontologies };
 }
+
+// --- Embedding maintenance (rebuild support) ---
+
+/** List all entity type keys with their raw property definition rows. */
+export async function getEntityTypesWithProperties(session: Session): Promise<Row[]> {
+  const result = await session.run(
+    `
+    MATCH (et:EntityType)
+    OPTIONAL MATCH (et)-[:HAS_PROPERTY]->(p:PropertyDefinition)
+    WITH et, p ORDER BY et.key, p.key
+    WITH et, collect(p {.*}) AS properties
+    RETURN et.key AS key, properties
+    ORDER BY et.key
+    `,
+  );
+  return result.records.map((record) => ({
+    key: record.get("key") as string,
+    properties: (record.get("properties") as Row[])
+      .filter((p) => p)
+      .map((p) => convertNeo4jProperties(p)),
+  }));
+}
+
+/** Set the embedding vector on a single entity instance. */
+export async function setEntityEmbedding(
+  session: Session,
+  entityId: string,
+  embedding: number[],
+): Promise<void> {
+  await session.run("MATCH (n:_Entity {_id: $id}) SET n._embedding = $embedding", {
+    id: entityId,
+    embedding,
+  });
+}
+
+/** List all saved queries (id + description) across all ontologies. */
+export async function listSavedQueryRefs(session: Session): Promise<Row[]> {
+  const result = await session.run(
+    "MATCH (sq:SavedQuery) " +
+      "RETURN sq.savedQueryId AS savedQueryId, sq.description AS description",
+  );
+  return result.records.map((record) => ({
+    savedQueryId: record.get("savedQueryId"),
+    description: record.get("description"),
+  }));
+}
+
+/** Set the embedding vector on a single saved query. */
+export async function setSavedQueryEmbedding(
+  session: Session,
+  savedQueryId: string,
+  embedding: number[],
+): Promise<void> {
+  await session.run(
+    "MATCH (sq:SavedQuery {savedQueryId: $savedQueryId}) SET sq._embedding = $embedding",
+    { savedQueryId, embedding },
+  );
+}

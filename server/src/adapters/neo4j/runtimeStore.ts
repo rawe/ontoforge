@@ -19,7 +19,14 @@ import neo4j, { type Driver } from "neo4j-driver";
 
 import type { ValidatedQuery } from "../../core/oql/index.js";
 import type { PropertyDef } from "../../runtime/schemaCache.js";
-import { documentVirtualLabel, toPascalCase, toUpperSnakeCase } from "./ddl.js";
+import {
+  ENTITY_VECTOR_INDEX_NAME,
+  documentIndexName,
+  documentVirtualLabel,
+  toPascalCase,
+  toUpperSnakeCase,
+  validateVectorIndexedProperties,
+} from "./ddl.js";
 import { runSession } from "./errors.js";
 import { buildFilterClauses, buildSearchClause, toNeo4jParameter } from "./filters.js";
 import { compileQuery } from "./oqlCompiler.js";
@@ -68,6 +75,21 @@ export class Neo4jRuntimeStore {
   }
 
   // ------------------------------------------------------------------
+  // Vector-index metadata validation
+  // ------------------------------------------------------------------
+
+  /** Reject string values too large for vector-index filter metadata.
+   * Synchronous; raises the domain `ValidationError` (see `ddl.ts`). */
+  validateVectorIndexedProperties(
+    entityTypeKey: string,
+    properties: Row,
+    filterProperties: string[],
+    entityId: string | null = null,
+  ): void {
+    validateVectorIndexedProperties(entityTypeKey, properties, filterProperties, entityId);
+  }
+
+  // ------------------------------------------------------------------
   // Entity instances
   // ------------------------------------------------------------------
 
@@ -76,6 +98,7 @@ export class Neo4jRuntimeStore {
     entityId: string,
     properties: Row,
     propertyDefs: Record<string, PropertyDef>,
+    embedding: number[] | null = null,
   ): Promise<Row> {
     return runSession(this.driver, (session) =>
       queries.createEntity(
@@ -84,6 +107,7 @@ export class Neo4jRuntimeStore {
         toPascalCase(entityTypeKey),
         entityId,
         toWriteProperties(properties, propertyDefs),
+        embedding,
       ),
     );
   }
@@ -136,6 +160,8 @@ export class Neo4jRuntimeStore {
     setProperties: Row,
     removeProperties: string[],
     propertyDefs: Record<string, PropertyDef>,
+    embedding: number[] | null = null,
+    hasEmbeddingUpdate = false,
   ): Promise<Row | null> {
     return runSession(this.driver, (session) =>
       queries.updateEntity(
@@ -144,6 +170,8 @@ export class Neo4jRuntimeStore {
         entityId,
         toWriteProperties(setProperties, propertyDefs),
         removeProperties,
+        embedding,
+        hasEmbeddingUpdate,
       ),
     );
   }
@@ -193,6 +221,79 @@ export class Neo4jRuntimeStore {
         entityId,
         documentVirtualLabel(entityTypeKey, propertyKey),
         rows,
+      ),
+    );
+  }
+
+  async searchDocumentChunks(
+    entityTypeKey: string,
+    propertyKey: string,
+    queryEmbedding: number[],
+    limit: number,
+  ): Promise<Row[]> {
+    return runSession(this.driver, (session) =>
+      queries.searchDocumentChunks(
+        session,
+        documentVirtualLabel(entityTypeKey, propertyKey),
+        documentIndexName(entityTypeKey, propertyKey),
+        queryEmbedding,
+        limit,
+      ),
+    );
+  }
+
+  async getEntitiesByIds(entityIds: string[]): Promise<Record<string, Row>> {
+    return runSession(this.driver, (session) => queries.getEntitiesByIds(session, entityIds));
+  }
+
+  // ------------------------------------------------------------------
+  // Semantic search
+  // ------------------------------------------------------------------
+
+  async semanticSearch(
+    entityTypeKey: string,
+    propertyDefs: Record<string, PropertyDef>,
+    queryEmbedding: number[],
+    limit: number,
+    minScore: number | null,
+    filters: Record<string, string> | null = null,
+  ): Promise<Row[]> {
+    let whereClauses: string[] = [];
+    let filterParams: Row = {};
+    if (filters !== null && Object.keys(filters).length > 0) {
+      [whereClauses, filterParams] = buildFilterClauses(filters, propertyDefs, entityTypeKey, "n");
+    }
+    return runSession(this.driver, (session) =>
+      queries.semanticSearch(
+        session,
+        toPascalCase(entityTypeKey),
+        entityTypeKey,
+        queryEmbedding,
+        limit,
+        minScore,
+        whereClauses.length > 0 ? whereClauses : null,
+        Object.keys(filterParams).length > 0 ? filterParams : null,
+      ),
+    );
+  }
+
+  /** Search the shared cross-type entity vector index. */
+  async semanticSearchAll(
+    queryEmbedding: number[],
+    limit: number,
+    minScore: number | null,
+  ): Promise<Row[]> {
+    return runSession(this.driver, (session) =>
+      queries.semanticSearch(
+        session,
+        "_Entity",
+        "",
+        queryEmbedding,
+        limit,
+        minScore,
+        null,
+        null,
+        ENTITY_VECTOR_INDEX_NAME,
       ),
     );
   }

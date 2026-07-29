@@ -9,6 +9,11 @@ import type { FastifyInstance } from "fastify";
 
 import { createApp } from "./app.js";
 import { settings } from "./config.js";
+import {
+  closeEmbeddingProvider,
+  getEmbeddingProvider,
+  initEmbeddingProvider,
+} from "./core/embedding.js";
 import { closeStores, ensureSemanticIndexes, getModelingStore, initStores } from "./core/ports.js";
 
 /**
@@ -32,16 +37,6 @@ export async function warnAboutReservedTypeKeysInUse(): Promise<void> {
 }
 
 /**
- * Embedding-provider initialization (startup step 3).
- *
- * Seam: the embedding slice replaces this with real provider setup. Until
- * then no provider is ever configured, and this returns `null`.
- */
-async function initEmbeddingProvider(): Promise<{ dimensions: number } | null> {
-  return null;
-}
-
-/**
  * Language-model initialization (startup step 4).
  *
  * Seam: the AI slice replaces this with real model setup.
@@ -53,17 +48,19 @@ function initAiModel(): void {}
  *
  * 1. Connect storage, verify reachability, ensure constraints and indexes.
  * 2. Report any stored type key that the adapter now reserves.
- * 3. Initialize the embedding provider, if configured (seam).
+ * 3. Initialize the embedding provider, if configured.
  * 4. Initialize the language-model provider, if configured (seam).
- * 5. If embeddings are enabled, reconcile vector index widths (seam).
- * 6. Start both MCP servers (modeling is mounted inside `createApp`; the
- *    runtime MCP server arrives with the runtime slice).
+ * 5. If embeddings are enabled, reconcile vector index widths against the
+ *    provider — every mismatch is WARNED about and nothing is repaired
+ *    (`docs/decisions.md#behaviour`); rebuild is where repair happens.
+ * 6. Start both MCP servers (mounted inside `createApp`).
  */
 export async function startServer(): Promise<FastifyInstance> {
   await initStores();
   await warnAboutReservedTypeKeysInUse();
-  const embeddingProvider = await initEmbeddingProvider();
+  initEmbeddingProvider();
   initAiModel();
+  const embeddingProvider = getEmbeddingProvider();
   if (embeddingProvider) {
     await ensureSemanticIndexes(embeddingProvider.dimensions);
   }
@@ -73,6 +70,7 @@ export async function startServer(): Promise<FastifyInstance> {
 
 export async function shutdownServer(app: FastifyInstance): Promise<void> {
   await app.close();
+  closeEmbeddingProvider();
   await closeStores();
 }
 

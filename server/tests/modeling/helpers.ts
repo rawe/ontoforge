@@ -70,6 +70,17 @@ export interface MockModelingStore {
   removePropertyFromIncludesLists: Mock;
   deleteChunksForTypeProperty: Mock;
   getFullSchema: Mock;
+  getEntityTypesWithProperties: Mock;
+  setEntityEmbedding: Mock;
+  listSavedQueryRefs: Mock;
+  setSavedQueryEmbedding: Mock;
+  createVectorIndex: Mock;
+  dropVectorIndex: Mock;
+  rebuildVectorIndex: Mock;
+  createDocumentVectorIndex: Mock;
+  dropDocumentVectorIndex: Mock;
+  ensureSavedQueryVectorIndex: Mock;
+  ensureVectorIndexes: Mock;
 }
 
 /**
@@ -119,6 +130,17 @@ export function createMockModelingStore(): MockModelingStore {
     removePropertyFromIncludesLists: vi.fn(async () => 0),
     deleteChunksForTypeProperty: vi.fn(async () => undefined),
     getFullSchema: vi.fn(async () => ({ entityTypes: [], relationTypes: [], ontologies: [] })),
+    getEntityTypesWithProperties: vi.fn(async () => []),
+    setEntityEmbedding: vi.fn(async () => undefined),
+    listSavedQueryRefs: vi.fn(async () => []),
+    setSavedQueryEmbedding: vi.fn(async () => undefined),
+    createVectorIndex: vi.fn(async () => undefined),
+    dropVectorIndex: vi.fn(async () => undefined),
+    rebuildVectorIndex: vi.fn(async () => undefined),
+    createDocumentVectorIndex: vi.fn(async () => undefined),
+    dropDocumentVectorIndex: vi.fn(async () => undefined),
+    ensureSavedQueryVectorIndex: vi.fn(async () => undefined),
+    ensureVectorIndexes: vi.fn(async () => undefined),
   };
 }
 

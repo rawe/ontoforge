@@ -149,19 +149,21 @@ export async function createEntity(
   pascalLabel: string,
   entityId: string,
   properties: Row,
+  embedding: number[] | null = null,
 ): Promise<Row> {
+  const embeddingClause = embedding !== null ? ",\n        _embedding: $embedding" : "";
   const result = await session.run(
     `
     CREATE (n:_Entity:${pascalLabel} {
         _id: $entityId,
         _entityTypeKey: $entityTypeKey,
         _createdAt: datetime(),
-        _updatedAt: datetime()
+        _updatedAt: datetime()${embeddingClause}
     })
     SET n += $properties
     RETURN n {.*} AS entity
     `,
-    { entityId, entityTypeKey, properties },
+    { entityId, entityTypeKey, properties, embedding },
   );
   return toEntityRow(result.records[0]?.get("entity"));
 }
@@ -240,11 +242,16 @@ export async function updateEntity(
   entityId: string,
   setProperties: Row,
   removeProperties: string[],
+  embedding: number[] | null = null,
+  hasEmbeddingUpdate = false,
 ): Promise<Row | null> {
-  const setClause =
+  let setClause =
     Object.keys(setProperties).length > 0
       ? "SET n += $setProperties, n._updatedAt = datetime()"
       : "SET n._updatedAt = datetime()";
+  if (hasEmbeddingUpdate) {
+    setClause += ", n._embedding = $embedding";
+  }
   const removeClause = removeProperties.map((k) => `REMOVE n.${k}`).join(" ");
 
   const result = await session.run(
@@ -254,7 +261,7 @@ export async function updateEntity(
     ${removeClause}
     RETURN n {.*} AS entity
     `,
-    { entityId, setProperties },
+    { entityId, setProperties, embedding },
   );
   const record = result.records[0];
   return record === undefined ? null : toEntityRow(record.get("entity"));
@@ -561,6 +568,101 @@ export async function createDocumentChunks(
     `,
     { entityId, chunks },
   );
+}
+
+/** Semantic search over one document property's chunk vector index. */
+export async function searchDocumentChunks(
+  session: Session,
+  virtualLabel: string,
+  indexName: string,
+  queryEmbedding: number[],
+  limit: number,
+): Promise<Row[]> {
+  const query =
+    `MATCH (c:${virtualLabel}) ` +
+    "SEARCH c IN (" +
+    `VECTOR INDEX ${indexName} ` +
+    "FOR $query_embedding " +
+    "LIMIT $limit" +
+    ") SCORE AS score " +
+    "RETURN c {.*} AS chunk, score";
+  const result = await session.run(query, {
+    query_embedding: queryEmbedding,
+    limit: neo4j.int(limit),
+  });
+  return result.records.map((record) => ({
+    chunk: stripEmbedding(convertNeo4jProperties({ ...(record.get("chunk") as Row) })),
+    score: record.get("score") as number,
+  }));
+}
+
+/** Fetch entities by `_id`. Returns a map of `_id` -> entity row. */
+export async function getEntitiesByIds(
+  session: Session,
+  entityIds: string[],
+): Promise<Record<string, Row>> {
+  if (entityIds.length === 0) {
+    return {};
+  }
+  const result = await session.run(
+    "MATCH (n:_Entity) WHERE n._id IN $entity_ids RETURN n {.*} AS entity",
+    { entity_ids: entityIds },
+  );
+  const entities: Record<string, Row> = {};
+  for (const record of result.records) {
+    const entity = toEntityRow(record.get("entity"));
+    entities[entity._id as string] = entity;
+  }
+  return entities;
+}
+
+/** Semantic search via the Cypher 25 SEARCH clause with in-index filtering. */
+export async function semanticSearch(
+  session: Session,
+  pascalLabel: string,
+  entityTypeKey: string,
+  queryEmbedding: number[],
+  limit: number,
+  minScore: number | null,
+  whereClauses: string[] | null = null,
+  filterParams: Row | null = null,
+  indexName: string | null = null,
+): Promise<Row[]> {
+  const index = indexName ?? `${entityTypeKey}_embedding`;
+
+  const params: Row = {
+    query_embedding: queryEmbedding,
+    limit: neo4j.int(limit),
+  };
+
+  let inIndexWhere = "";
+  if (whereClauses !== null && whereClauses.length > 0) {
+    inIndexWhere = "WHERE " + whereClauses.join(" AND ");
+    Object.assign(params, filterParams ?? {});
+  }
+
+  const query =
+    `MATCH (n:${pascalLabel}) ` +
+    "SEARCH n IN (" +
+    `VECTOR INDEX ${index} ` +
+    "FOR $query_embedding " +
+    `${inIndexWhere} ` +
+    "LIMIT $limit" +
+    ") SCORE AS score " +
+    "RETURN n {.*} AS entity, score";
+
+  const result = await session.run(query, params);
+
+  const items: Row[] = [];
+  for (const record of result.records) {
+    const entity = toEntityRow(record.get("entity"));
+    const score = record.get("score") as number;
+    if (minScore !== null && score < minScore) {
+      continue;
+    }
+    items.push({ entity, score });
+  }
+  return items;
 }
 
 /** Delete an entity, its attached relations (DETACH) and its chunks. */

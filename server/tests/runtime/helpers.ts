@@ -173,6 +173,11 @@ export interface MockRuntimeStore {
   getChunkEmbeddingsForEntityProperty: Mock;
   deleteChunksForEntityProperty: Mock;
   createDocumentChunks: Mock;
+  validateVectorIndexedProperties: Mock;
+  searchDocumentChunks: Mock;
+  getEntitiesByIds: Mock;
+  semanticSearch: Mock;
+  semanticSearchAll: Mock;
   createRelation: Mock;
   listRelations: Mock;
   getRelation: Mock;
@@ -197,6 +202,11 @@ export function createMockRuntimeStore(): MockRuntimeStore {
     getChunkEmbeddingsForEntityProperty: vi.fn(async () => ({})),
     deleteChunksForEntityProperty: vi.fn(async () => undefined),
     createDocumentChunks: vi.fn(async () => undefined),
+    validateVectorIndexedProperties: vi.fn(() => undefined),
+    searchDocumentChunks: vi.fn(async () => []),
+    getEntitiesByIds: vi.fn(async () => ({})),
+    semanticSearch: vi.fn(async () => []),
+    semanticSearchAll: vi.fn(async () => []),
     createRelation: vi.fn(),
     listRelations: vi.fn(async () => [[], 0]),
     getRelation: vi.fn(async () => null),

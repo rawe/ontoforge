@@ -7,10 +7,14 @@
  * `service.ts`, shared with the modeling MCP server.
  */
 
+import { Readable } from "node:stream";
+
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 
-import { getModelingStore } from "../core/ports.js";
+import { getEmbeddingProvider } from "../core/embedding.js";
+import { ValidationError } from "../core/exceptions.js";
+import { getModelingStore, getRuntimeStore } from "../core/ports.js";
 import {
   EntityTypeCreate,
   EntityTypeResponse,
@@ -604,6 +608,27 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
         getModelingStore(),
       );
       return reply.status(204).send();
+    },
+  );
+
+  // --- Rebuild embeddings ---
+
+  app.post(
+    "/rebuild-embeddings",
+    { schema: { tags: ["modeling"] } },
+    async (request, reply) => {
+      // Refused before any streaming starts, so the refusal reaches the
+      // client in the standard error envelope (the Python router performs
+      // the same pre-check ahead of its StreamingResponse).
+      if (!getEmbeddingProvider()) {
+        throw new ValidationError(
+          "Embedding provider is not configured. Set EMBEDDING_PROVIDER to enable semantic search.",
+        );
+      }
+      const stream = Readable.from(
+        service.rebuildEmbeddings(getModelingStore(), getRuntimeStore()),
+      );
+      return reply.type("application/x-ndjson").send(stream);
     },
   );
 };

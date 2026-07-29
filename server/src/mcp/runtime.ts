@@ -583,5 +583,72 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
     }),
   );
 
+  server.registerTool(
+    "semantic_search",
+    {
+      description:
+        "Search entity instances by semantic similarity to a natural language query. " +
+        "Returns entities ranked by relevance. " +
+        "entity_type_key is optional — omit it to search across all entity types " +
+        "at once (each result carries _entityTypeKey), or set it to search a " +
+        "single type. 'search_in' selects the ranking: 'entities' (entity " +
+        "embeddings), 'documents' (passage-level matches inside document " +
+        "properties), or 'all' (default — both, fused via reciprocal rank " +
+        "fusion). Every hit carries 'matchedVia': document hits include the " +
+        "property key, charOffset/charLength (usable with get_document), a " +
+        "~200-char snippet (disable with snippets=false), and the raw cosine " +
+        "'similarity'; entity hits carry only source and similarity. " +
+        "Use 'filters' for property-based filtering on results " +
+        "(requires entity_type_key): exact match " +
+        '("location": "Berlin"), operators ("age__gt": "25", "__gte", "__lt", ' +
+        '"__lte"). Use \'fields\' to select which entity properties to include — ' +
+        "only listed fields plus _id (and _entityTypeKey for cross-type search) " +
+        "are returned. Omit for all fields.",
+      inputSchema: {
+        query: z.string(),
+        entity_type_key: z.string().optional(),
+        limit: z.number().optional(),
+        filters: z.record(z.string(), z.unknown()).optional(),
+        fields: z.array(z.string()).optional(),
+        search_in: z.string().optional(),
+        snippets: z.boolean().optional(),
+      },
+    },
+    wrap("semantic_search", async (args: {
+      query: string;
+      entity_type_key?: string | undefined;
+      limit?: number | undefined;
+      filters?: Record<string, unknown> | undefined;
+      fields?: string[] | undefined;
+      search_in?: string | undefined;
+      snippets?: boolean | undefined;
+    }) => {
+      // No min_score on the MCP tool — the documented difference
+      // (`docs/capabilities/search.md#through-the-interfaces`): a model
+      // that needs a threshold applies it to the reported similarity.
+      const limit = clamp(args.limit ?? 10, 1, 100);
+      const strFilters: Record<string, string> = {};
+      for (const [k, v] of Object.entries(args.filters ?? {})) {
+        // Python `str(v)`: booleans capitalize, everything else stringifies.
+        strFilters[k] = typeof v === "boolean" ? (v ? "True" : "False") : String(v);
+      }
+      const result = await service.semanticSearch(
+        ontologyKey,
+        args.query,
+        args.entity_type_key ?? null,
+        limit,
+        null,
+        getRuntimeStore(),
+        {
+          filters: strFilters,
+          fields: args.fields ?? null,
+          searchIn: args.search_in ?? "all",
+          snippets: args.snippets ?? true,
+        },
+      );
+      return jsonResult(result);
+    }),
+  );
+
   return server;
 }

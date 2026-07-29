@@ -7,6 +7,7 @@
  * imported from anywhere else in the server.
  */
 
+import { ensureVectorIndexes } from "./ddl.js";
 import { closeDriver, getDriver, initDriver } from "./driver.js";
 import { runSession } from "./errors.js";
 import { Neo4jModelingStore } from "./modelingStore.js";
@@ -25,11 +26,13 @@ export async function closeStores(): Promise<void> {
 /**
  * Ensure all vector indexes exist for the configured dimensions.
  *
- * Startup seam: vector-index DDL belongs to the semantic-search slice; until
- * it lands there is nothing to ensure, and this is deliberately a no-op.
+ * The startup path (architecture step 5): width mismatches are REPORTED and
+ * nothing is repaired — only the rebuild operation recreates a drifted
+ * index, immediately before regenerating the vectors that fill it
+ * (`docs/decisions.md#behaviour`).
  */
 export async function ensureSemanticIndexes(dimensions: number): Promise<void> {
-  void dimensions;
+  await ensureVectorIndexes(getDriver(), dimensions, false);
 }
 
 /** Delete all stored data. Test support only — never used by the app. */

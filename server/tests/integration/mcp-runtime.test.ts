@@ -147,7 +147,7 @@ describe("lens resolution", () => {
 });
 
 describe("tool surface", () => {
-  it("lists exactly the twelve session-04/05 tools", async () => {
+  it("lists exactly the fifteen session-04/05/06 tools", async () => {
     const client = await connectClient(`${baseUrl}/mcp/runtime/test_ontology`);
     try {
       const tools = await client.listTools();
@@ -156,6 +156,8 @@ describe("tool surface", () => {
         "create_relation",
         "delete_entity",
         "delete_relation",
+        "edit_document",
+        "get_document",
         "get_entity",
         "get_neighbors",
         "get_relation",
@@ -164,7 +166,193 @@ describe("tool surface", () => {
         "list_relations",
         "update_entity",
         "update_relation",
+        "write_document",
       ]);
+    } finally {
+      await client.close();
+    }
+  });
+});
+
+describe("document tools", () => {
+  /** The fixture has no document property; declare one on person. */
+  async function addBioProperty(): Promise<void> {
+    const list = await app.inject({ method: "GET", url: "/api/model/entity-types" });
+    const person = (list.json() as { entityTypeId: string; key: string }[]).find(
+      (et) => et.key === "person",
+    )!;
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/model/entity-types/${person.entityTypeId}/properties`,
+      payload: { key: "bio", displayName: "Bio", dataType: "document" },
+    });
+    expect(res.statusCode).toBe(201);
+  }
+
+  it("get_document reads whole documents and clamped slices", async () => {
+    await addBioProperty();
+    const client = await connectClient(`${baseUrl}/mcp/runtime/test_ontology`);
+    try {
+      const created = json(
+        await call(client, "create_entity", {
+          entity_type_key: "person",
+          properties: { name: "Ada", bio: "# Title\n\nBody text of the bio." },
+        }),
+      );
+      // The stub, never the content, in the create result.
+      expect(created.bio).toEqual({ document: true, length: 30 });
+      const entityId = created._id as string;
+
+      const full = json(
+        await call(client, "get_document", {
+          entity_type_key: "person",
+          entity_id: entityId,
+          property_key: "bio",
+        }),
+      );
+      expect(full).toEqual({
+        propertyKey: "bio",
+        content: "# Title\n\nBody text of the bio.",
+        offset: 0,
+        length: 30,
+        totalLength: 30,
+      });
+
+      const slice = json(
+        await call(client, "get_document", {
+          entity_type_key: "person",
+          entity_id: entityId,
+          property_key: "bio",
+          offset: 9,
+          limit: 4,
+        }),
+      );
+      expect(slice.content).toBe("Body");
+
+      // MCP clamps where REST rejects: negative offset -> 0, limit 0 -> 1.
+      const clamped = json(
+        await call(client, "get_document", {
+          entity_type_key: "person",
+          entity_id: entityId,
+          property_key: "bio",
+          offset: -5,
+          limit: 0,
+        }),
+      );
+      expect(clamped.offset).toBe(0);
+      expect(clamped.content).toBe("#");
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("edit_document replaces exactly and reports ambiguity as a tool error", async () => {
+    await addBioProperty();
+    const client = await connectClient(`${baseUrl}/mcp/runtime/test_ontology`);
+    try {
+      const created = json(
+        await call(client, "create_entity", {
+          entity_type_key: "person",
+          properties: { name: "Ada", bio: "one two one two" },
+        }),
+      );
+      const entityId = created._id as string;
+
+      const ambiguous = await call(client, "edit_document", {
+        entity_type_key: "person",
+        entity_id: entityId,
+        property_key: "bio",
+        old_string: "two",
+        new_string: "three",
+      });
+      expect(ambiguous.isError).toBe(true);
+      expect(text(ambiguous)).toContain("2 times");
+
+      const replaced = json(
+        await call(client, "edit_document", {
+          entity_type_key: "person",
+          entity_id: entityId,
+          property_key: "bio",
+          old_string: "two",
+          new_string: "three",
+          replace_all: true,
+        }),
+      );
+      expect(replaced.replacements).toBe(2);
+      expect(replaced.totalLength).toBe("one three one three".length);
+      expect(replaced.context).toBe("one three one three");
+
+      const readBack = json(
+        await call(client, "get_document", {
+          entity_type_key: "person",
+          entity_id: entityId,
+          property_key: "bio",
+        }),
+      );
+      expect(readBack.content).toBe("one three one three");
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("write_document overwrites ranges and surfaces the expect conflict", async () => {
+    await addBioProperty();
+    const client = await connectClient(`${baseUrl}/mcp/runtime/test_ontology`);
+    try {
+      const created = json(
+        await call(client, "create_entity", {
+          entity_type_key: "person",
+          properties: { name: "Ada", bio: "Hello world" },
+        }),
+      );
+      const entityId = created._id as string;
+
+      // Append at offset == totalLength.
+      const appended = json(
+        await call(client, "write_document", {
+          entity_type_key: "person",
+          entity_id: entityId,
+          property_key: "bio",
+          offset: 11,
+          length: 0,
+          content: "!",
+        }),
+      );
+      expect(appended.totalLength).toBe(12);
+
+      const conflict = await call(client, "write_document", {
+        entity_type_key: "person",
+        entity_id: entityId,
+        property_key: "bio",
+        offset: 6,
+        length: 5,
+        content: "docs",
+        expect: "stale",
+      });
+      expect(conflict.isError).toBe(true);
+      expect(text(conflict)).toContain("expect mismatch");
+
+      const overwritten = json(
+        await call(client, "write_document", {
+          entity_type_key: "person",
+          entity_id: entityId,
+          property_key: "bio",
+          offset: 6,
+          length: 5,
+          content: "docs",
+          expect: "world",
+        }),
+      );
+      expect(overwritten.totalLength).toBe("Hello docs!".length);
+
+      const readBack = json(
+        await call(client, "get_document", {
+          entity_type_key: "person",
+          entity_id: entityId,
+          property_key: "bio",
+        }),
+      );
+      expect(readBack.content).toBe("Hello docs!");
     } finally {
       await client.close();
     }

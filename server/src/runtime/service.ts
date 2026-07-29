@@ -16,9 +16,13 @@
 
 import { randomUUID } from "node:crypto";
 
+import { settings } from "../config.js";
 import { CoercionError, coerceValue } from "../core/dataTypes.js";
-import { NotFoundError, ValidationError } from "../core/exceptions.js";
+import { getEmbeddingProvider } from "../core/embedding.js";
+import { ConflictError, NotFoundError, ValidationError } from "../core/exceptions.js";
 import type { RuntimeStore } from "../core/ports.js";
+import { chunkDocument } from "./chunking.js";
+import { cpIndexOf, cpLength, cpSlice, countOccurrences } from "./codePoints.js";
 import {
   loadSchema,
   type EntityTypeDef,
@@ -102,7 +106,7 @@ export function validateProperties(
 }
 
 // ---------------------------------------------------------------------------
-// Document properties (stub read model; routes arrive in session 06)
+// Document properties (stub read model)
 // ---------------------------------------------------------------------------
 
 const DOC_LENGTH_PREFIX = "_doc_";
@@ -156,7 +160,7 @@ function stubDocumentProperties(
     }
     let length = lengths[key];
     if (length === null || length === undefined) {
-      length = typeof value === "string" ? value.length : 0;
+      length = typeof value === "string" ? cpLength(value) : 0;
     }
     result[key] = { document: true, length };
   }
@@ -419,10 +423,15 @@ export async function createEntity(
 
   // Document properties: store character counts alongside the values.
   const docKeys = fullEt !== undefined ? documentPropertyKeys(fullEt.properties) : new Set<string>();
-  for (const k of docKeys) {
-    const v = coerced[k];
-    if (typeof v === "string") {
-      coerced[docLengthKey(k)] = v.length;
+  const docValues: Row = {};
+  for (const [k, v] of Object.entries(coerced)) {
+    if (docKeys.has(k)) {
+      docValues[k] = v;
+    }
+  }
+  for (const [k, v] of Object.entries(docValues)) {
+    if (v !== null && v !== undefined) {
+      coerced[docLengthKey(k)] = cpLength(v as string);
     }
   }
 
@@ -432,6 +441,9 @@ export async function createEntity(
     coerced,
     fullEt?.properties ?? {},
   );
+
+  // Chunk + embed document properties (no-op without embedding provider).
+  await syncDocumentChunks(store, entityTypeKey, entityId, docValues);
 
   return filterEntityProperties(entity, scopedEt);
 }
@@ -546,11 +558,13 @@ export async function updateEntity(
 
   // Document properties: maintain stored lengths for changed values.
   const docKeys = fullEt !== undefined ? documentPropertyKeys(fullEt.properties) : new Set<string>();
+  const docChanges: Row = {};
   for (const k of docKeys) {
     if (k in coerced) {
+      docChanges[k] = coerced[k];
       const v = coerced[k];
       if (typeof v === "string") {
-        setProps[docLengthKey(k)] = v.length;
+        setProps[docLengthKey(k)] = cpLength(v);
       } else {
         removeProps.push(docLengthKey(k));
       }
@@ -567,6 +581,9 @@ export async function updateEntity(
   if (entity === null) {
     throw new NotFoundError(`Entity '${entityId}' not found`);
   }
+
+  // Re-chunk changed document properties only (no-op without provider).
+  await syncDocumentChunks(store, entityTypeKey, entityId, docChanges);
 
   return filterEntityProperties(entity, scopedEt);
 }
@@ -591,6 +608,296 @@ export async function deleteEntity(
   if (!deleted) {
     throw new NotFoundError(`Entity '${entityId}' not found`);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Document properties: chunk sync, slice read, partial writes
+// ---------------------------------------------------------------------------
+
+/**
+ * Replace the chunk nodes for the given document property values.
+ *
+ * For each property: delete its existing chunks, then (for non-null values)
+ * re-chunk, embed, and write new chunk nodes. No-op when no embedding
+ * provider is configured.
+ */
+export async function syncDocumentChunks(
+  store: RuntimeStore,
+  entityTypeKey: string,
+  entityId: string,
+  docValues: Row,
+): Promise<void> {
+  if (Object.keys(docValues).length === 0) {
+    return;
+  }
+  const provider = getEmbeddingProvider();
+  if (!provider) {
+    return;
+  }
+
+  for (const [propertyKey, value] of Object.entries(docValues)) {
+    // Reuse embeddings of chunks whose text is unchanged — after a partial
+    // edit the chunker re-synchronizes on the same boundaries, so most
+    // chunks keep their exact text (at shifted offsets) and only the
+    // chunks overlapping the edit need a fresh embedding.
+    const reusable = await store.getChunkEmbeddingsForEntityProperty(entityId, propertyKey);
+    await store.deleteChunksForEntityProperty(entityId, propertyKey);
+    if (!value) {
+      continue;
+    }
+
+    const chunks = chunkDocument(
+      value as string,
+      settings.DOCUMENT_CHUNK_SIZE,
+      settings.DOCUMENT_CHUNK_OVERLAP,
+    );
+    const rows: Row[] = [];
+    for (let index = 0; index < chunks.length; index++) {
+      const chunk = chunks[index]!;
+      const row: Row = {
+        _id: randomUUID(),
+        _entityId: entityId,
+        _entityTypeKey: entityTypeKey,
+        _propertyKey: propertyKey,
+        _index: index,
+        startChar: chunk.startChar,
+        charLength: chunk.charLength,
+        text: chunk.text,
+      };
+      let chunkEmbedding = reusable[chunk.text] ?? null;
+      if (chunkEmbedding === null) {
+        chunkEmbedding = await provider.embed(chunk.text);
+      }
+      if (chunkEmbedding !== null) {
+        row._embedding = chunkEmbedding;
+      }
+      rows.push(row);
+    }
+
+    await store.createDocumentChunks(entityId, entityTypeKey, propertyKey, rows);
+  }
+}
+
+/**
+ * Resolve a scoped document property and return its current value plus the
+ * loaded schema. Raises NotFoundError for unknown/out-of-scope types or
+ * properties, non-document properties, and missing entities. An unset value
+ * reads as "".
+ */
+async function loadDocumentValue(
+  ontologyKey: string,
+  entityTypeKey: string,
+  entityId: string,
+  propertyKey: string,
+  store: RuntimeStore,
+): Promise<{ value: string; loaded: Awaited<ReturnType<typeof loadSchema>> }> {
+  const loaded = await loadSchema(ontologyKey, store);
+  const scopedEt = loaded.scoped.entityTypes[entityTypeKey];
+  if (scopedEt === undefined) {
+    throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
+  }
+
+  const propDef = scopedEt.properties[propertyKey];
+  if (propDef === undefined || propDef.dataType !== "document") {
+    throw new NotFoundError(
+      `Document property '${propertyKey}' not found on entity type '${entityTypeKey}'`,
+    );
+  }
+
+  const entity = await store.getEntity(entityTypeKey, entityId);
+  if (entity === null) {
+    throw new NotFoundError(`Entity '${entityId}' not found`);
+  }
+
+  const value = entity[propertyKey];
+  return { value: typeof value === "string" ? value : "", loaded };
+}
+
+/**
+ * Read (a slice of) a document property value. `offset`/`limit` are
+ * character-based (code points); without them the full document is
+ * returned. Slicing is forgiving: past-end offsets yield empty content,
+ * over-long limits are truncated.
+ */
+export async function getDocument(
+  ontologyKey: string,
+  entityTypeKey: string,
+  entityId: string,
+  propertyKey: string,
+  offset: number,
+  limit: number | null,
+  store: RuntimeStore,
+): Promise<Row> {
+  const { value } = await loadDocumentValue(
+    ontologyKey,
+    entityTypeKey,
+    entityId,
+    propertyKey,
+    store,
+  );
+
+  const content = limit === null ? cpSlice(value, offset) : cpSlice(value, offset, offset + limit);
+
+  return {
+    propertyKey,
+    content,
+    offset,
+    length: cpLength(content),
+    totalLength: cpLength(value),
+  };
+}
+
+/** One partial-write operation on a document property. `str_replace` needs
+ * `oldString`/`newString`; `replace_range` needs `offset`/`length`/`content`
+ * (plus optional `expect` as a guard against stale offsets). Per-op field
+ * validation happens in the service, matching the Python request model. */
+export interface DocumentEditBody {
+  op: "str_replace" | "replace_range";
+  oldString?: string | null | undefined;
+  newString?: string | null | undefined;
+  replaceAll?: boolean | undefined;
+  offset?: number | null | undefined;
+  length?: number | null | undefined;
+  content?: string | null | undefined;
+  expect?: string | null | undefined;
+}
+
+// Characters returned around an edit so callers can verify without re-reading.
+const EDIT_CONTEXT_CHARS = 200;
+
+/** Returns [newValue, editOffset, editLength, replacements]. */
+function applyStrReplace(value: string, body: DocumentEditBody): [string, number, number, number] {
+  const old = body.oldString ?? null;
+  const replacement = body.newString ?? null;
+  if (!old) {
+    throw new ValidationError("oldString must be a non-empty string");
+  }
+  if (replacement === null) {
+    throw new ValidationError("newString is required for str_replace");
+  }
+  if (old === replacement) {
+    throw new ValidationError("newString must differ from oldString");
+  }
+
+  const count = countOccurrences(value, old);
+  if (count === 0) {
+    throw new ValidationError("oldString not found in document");
+  }
+  if (count > 1 && !body.replaceAll) {
+    throw new ValidationError(
+      `oldString matches ${count} times — provide a longer, unique string ` +
+        "or set replaceAll to true",
+    );
+  }
+
+  const first = cpIndexOf(value, old);
+  if (body.replaceAll) {
+    return [value.replaceAll(old, replacement), first, cpLength(replacement), count];
+  }
+  const firstUnits = value.indexOf(old);
+  return [
+    value.slice(0, firstUnits) + replacement + value.slice(firstUnits + old.length),
+    first,
+    cpLength(replacement),
+    1,
+  ];
+}
+
+/** Returns [newValue, editOffset, editLength, replacements]. */
+function applyReplaceRange(
+  value: string,
+  body: DocumentEditBody,
+): [string, number, number, number] {
+  const offset = body.offset ?? null;
+  const length = body.length ?? null;
+  const content = body.content ?? null;
+  if (offset === null || length === null || content === null) {
+    throw new ValidationError("replace_range requires offset, length, and content");
+  }
+  if (offset < 0 || length < 0) {
+    throw new ValidationError("offset and length must be >= 0");
+  }
+  const total = cpLength(value);
+  if (offset > total) {
+    throw new ValidationError(`offset ${offset} is beyond the document end (${total} chars)`);
+  }
+  if (offset + length > total) {
+    throw new ValidationError(
+      `range [${offset}, ${offset + length}) exceeds the document end (${total} chars)`,
+    );
+  }
+  const expect = body.expect ?? null;
+  if (expect !== null && cpSlice(value, offset, offset + length) !== expect) {
+    throw new ConflictError(
+      `expect mismatch at [${offset}, ${offset + length}) — the document ` +
+        "changed since it was read; re-read before editing",
+    );
+  }
+  return [
+    cpSlice(value, 0, offset) + content + cpSlice(value, offset + length),
+    offset,
+    cpLength(content),
+    1,
+  ];
+}
+
+/**
+ * Apply one partial-write operation to a document property.
+ *
+ * `str_replace` swaps an exact, unique string (or all occurrences with
+ * `replaceAll`); `replace_range` overwrites the character range
+ * `[offset, offset+length)` with `content` (insert with length 0, append
+ * at `offset == totalLength`). The changed value is persisted whole and the
+ * property's chunks are re-synced — unchanged chunk texts keep their
+ * embeddings, so only chunks overlapping the edit are re-embedded.
+ */
+export async function editDocument(
+  ontologyKey: string,
+  entityTypeKey: string,
+  entityId: string,
+  propertyKey: string,
+  body: DocumentEditBody,
+  store: RuntimeStore,
+): Promise<Row> {
+  const { value, loaded } = await loadDocumentValue(
+    ontologyKey,
+    entityTypeKey,
+    entityId,
+    propertyKey,
+    store,
+  );
+
+  const [newValue, offset, length, replacements] =
+    body.op === "str_replace" ? applyStrReplace(value, body) : applyReplaceRange(value, body);
+
+  const setProps: Row = {
+    [propertyKey]: newValue,
+    [docLengthKey(propertyKey)]: cpLength(newValue),
+  };
+  const fullEt = loaded.full.entityTypes[entityTypeKey];
+  const entity = await store.updateEntity(
+    entityTypeKey,
+    entityId,
+    setProps,
+    [],
+    fullEt?.properties ?? {},
+  );
+  if (entity === null) {
+    throw new NotFoundError(`Entity '${entityId}' not found`);
+  }
+
+  await syncDocumentChunks(store, entityTypeKey, entityId, { [propertyKey]: newValue });
+
+  const contextStart = Math.max(0, offset - EDIT_CONTEXT_CHARS);
+  const contextEnd = Math.min(cpLength(newValue), offset + length + EDIT_CONTEXT_CHARS);
+  return {
+    propertyKey,
+    totalLength: cpLength(newValue),
+    editedRange: { offset, length },
+    replacements,
+    context: cpSlice(newValue, contextStart, contextEnd),
+    contextOffset: contextStart,
+  };
 }
 
 // ---------------------------------------------------------------------------

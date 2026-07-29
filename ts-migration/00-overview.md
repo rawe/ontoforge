@@ -111,7 +111,7 @@ Update the Status column when a session completes.
 | 03 | [03-ontology-lenses.md](03-ontology-lenses.md) | Ontologies, inclusions, cascade protocol, validation | Done (2026-07-29) |
 | 04 | [04-runtime-entities.md](04-runtime-entities.md) | Schema cache, introspection, entity CRUD & listing (+ runtime MCP server) | Done (2026-07-29) |
 | 05 | [05-relations-traversal.md](05-relations-traversal.md) | Relations CRUD, neighbors | Done (2026-07-29) |
-| 06 | [06-documents.md](06-documents.md) | Document reads, partial writes, chunker | — |
+| 06 | [06-documents.md](06-documents.md) | Document reads, partial writes, chunker | Done (2026-07-29) |
 | 07 | [07-oql.md](07-oql.md) | OQL parser, validation, Neo4j compiler, `/query` | — |
 | 08 | [08-semantic-search.md](08-semantic-search.md) | Embedding provider, vector indexes, semantic search, rebuild | — |
 | 09 | [09-saved-queries-agents.md](09-saved-queries-agents.md) | Saved queries (define + run + search), agent configs | — |

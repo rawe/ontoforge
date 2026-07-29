@@ -76,6 +76,34 @@ const ReadQuery = z.looseObject({ fields: FieldsParam });
  * so the only static rule is "a JSON object". */
 const PropertyPayload = z.record(z.string(), z.unknown());
 
+const DocumentParams = z.object({
+  ontologyKey: z.string(),
+  entityTypeKey: z.string(),
+  entityId: z.string(),
+  propertyKey: z.string(),
+});
+
+const DocumentReadQuery = z.looseObject({
+  offset: z.coerce.number().int().min(0).default(0),
+  limit: z.coerce.number().int().min(1).optional(),
+});
+
+/** One partial-write operation, discriminated by `op` — the Python request
+ * model's field names and both operation shapes (`runtime/schemas.py`).
+ * Per-op field validation happens in the service. */
+const DocumentEditPayload = z.looseObject({
+  op: z.enum(["str_replace", "replace_range"]),
+  // str_replace
+  oldString: z.string().nullish(),
+  newString: z.string().nullish(),
+  replaceAll: z.boolean().default(false),
+  // replace_range
+  offset: z.number().int().nullish(),
+  length: z.number().int().nullish(),
+  content: z.string().nullish(),
+  expect: z.string().nullish(),
+});
+
 const RelationTypeParams = z.object({ ontologyKey: z.string(), relationTypeKey: z.string() });
 const RelationParams = z.object({
   ontologyKey: z.string(),
@@ -222,6 +250,37 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
       );
       return reply.status(204).send();
     },
+  );
+
+  // --- Document properties ---
+
+  app.get(
+    "/:ontologyKey/entities/:entityTypeKey/:entityId/documents/:propertyKey",
+    { schema: { tags: ["runtime"], params: DocumentParams, querystring: DocumentReadQuery } },
+    async (request) =>
+      service.getDocument(
+        request.params.ontologyKey,
+        request.params.entityTypeKey,
+        request.params.entityId,
+        request.params.propertyKey,
+        request.query.offset,
+        request.query.limit ?? null,
+        getRuntimeStore(),
+      ),
+  );
+
+  app.patch(
+    "/:ontologyKey/entities/:entityTypeKey/:entityId/documents/:propertyKey",
+    { schema: { tags: ["runtime"], params: DocumentParams, body: DocumentEditPayload } },
+    async (request) =>
+      service.editDocument(
+        request.params.ontologyKey,
+        request.params.entityTypeKey,
+        request.params.entityId,
+        request.params.propertyKey,
+        request.body,
+        getRuntimeStore(),
+      ),
   );
 
   // --- Graph traversal ---

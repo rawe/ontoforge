@@ -68,6 +68,7 @@ export interface MockModelingStore {
   findOntologiesWithExplicitProperty: Mock;
   addPropertyToIncludesLists: Mock;
   removePropertyFromIncludesLists: Mock;
+  deleteChunksForTypeProperty: Mock;
   getFullSchema: Mock;
 }
 
@@ -116,6 +117,7 @@ export function createMockModelingStore(): MockModelingStore {
     findOntologiesWithExplicitProperty: vi.fn(async () => []),
     addPropertyToIncludesLists: vi.fn(async () => 0),
     removePropertyFromIncludesLists: vi.fn(async () => 0),
+    deleteChunksForTypeProperty: vi.fn(async () => undefined),
     getFullSchema: vi.fn(async () => ({ entityTypes: [], relationTypes: [], ontologies: [] })),
   };
 }

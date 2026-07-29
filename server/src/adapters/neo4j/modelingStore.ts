@@ -387,6 +387,18 @@ export class Neo4jModelingStore {
   }
 
   // ------------------------------------------------------------------
+  // Document-property cleanup
+  // ------------------------------------------------------------------
+
+  /** Delete every chunk of one (entity type, document property) pair.
+   * Invoked when the property, or its owning type, is removed. */
+  async deleteChunksForTypeProperty(entityTypeKey: string, propertyKey: string): Promise<void> {
+    return runSession(this.driver, (session) =>
+      queries.deleteChunksForTypeProperty(session, entityTypeKey, propertyKey),
+    );
+  }
+
+  // ------------------------------------------------------------------
   // Full schema (get_schema now; validation and export later)
   // ------------------------------------------------------------------
 

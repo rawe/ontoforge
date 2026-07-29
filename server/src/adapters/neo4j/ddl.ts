@@ -54,6 +54,12 @@ export function toUpperSnakeCase(key: string): string {
   return key.toUpperCase();
 }
 
+/** Virtual chunk label for a document property.
+ * E.g. ('person', 'bio') -> 'PersonDocumentBio'. */
+export function documentVirtualLabel(entityTypeKey: string, propertyKey: string): string {
+  return `${toPascalCase(entityTypeKey)}Document${toPascalCase(propertyKey)}`;
+}
+
 /**
  * Entity type keys whose physical label would collide with a schema label.
  *

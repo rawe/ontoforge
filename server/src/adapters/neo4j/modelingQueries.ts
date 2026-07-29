@@ -782,6 +782,27 @@ export async function removePropertyFromIncludesLists(
   return result.records[0]?.get("updated") as number;
 }
 
+// --- Document Property Cascade ---
+
+/**
+ * Delete all chunk nodes of a (entity type, document property) virtual
+ * type. Modeling-side cascade for dropping a document property or its
+ * entity type.
+ */
+export async function deleteChunksForTypeProperty(
+  session: Session,
+  entityTypeKey: string,
+  propertyKey: string,
+): Promise<void> {
+  await session.run(
+    `
+    MATCH (c:_Chunk {_entityTypeKey: $entityTypeKey, _propertyKey: $propertyKey})
+    DETACH DELETE c
+    `,
+    { entityTypeKey, propertyKey },
+  );
+}
+
 // --- Full Schema (one coherent snapshot) ---
 
 /** Load the entire global schema plus every ontology with its inclusions. */

@@ -18,7 +18,7 @@
 import neo4j, { type Driver } from "neo4j-driver";
 
 import type { PropertyDef } from "../../runtime/schemaCache.js";
-import { toPascalCase, toUpperSnakeCase } from "./ddl.js";
+import { documentVirtualLabel, toPascalCase, toUpperSnakeCase } from "./ddl.js";
 import { runSession } from "./errors.js";
 import { buildFilterClauses, buildSearchClause, toNeo4jParameter } from "./filters.js";
 import * as queries from "./runtimeQueries.js";
@@ -149,6 +149,49 @@ export class Neo4jRuntimeStore {
   async deleteEntity(entityTypeKey: string, entityId: string): Promise<boolean> {
     return runSession(this.driver, (session) =>
       queries.deleteEntity(session, toPascalCase(entityTypeKey), entityId),
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Document chunks
+  // ------------------------------------------------------------------
+
+  async getChunkEmbeddingsForEntityProperty(
+    entityId: string,
+    propertyKey: string,
+  ): Promise<Record<string, number[]>> {
+    return runSession(this.driver, (session) =>
+      queries.getChunkEmbeddingsForEntityProperty(session, entityId, propertyKey),
+    );
+  }
+
+  async deleteChunksForEntityProperty(entityId: string, propertyKey: string): Promise<void> {
+    return runSession(this.driver, (session) =>
+      queries.deleteChunksForEntityProperty(session, entityId, propertyKey),
+    );
+  }
+
+  async createDocumentChunks(
+    entityId: string,
+    entityTypeKey: string,
+    propertyKey: string,
+    chunks: Row[],
+  ): Promise<void> {
+    // Ordinals and coordinates are integers; the driver would otherwise
+    // store plain JS numbers as floats.
+    const rows = chunks.map((chunk) => ({
+      ...chunk,
+      _index: neo4j.int(chunk._index as number),
+      startChar: neo4j.int(chunk.startChar as number),
+      charLength: neo4j.int(chunk.charLength as number),
+    }));
+    return runSession(this.driver, (session) =>
+      queries.createDocumentChunks(
+        session,
+        entityId,
+        documentVirtualLabel(entityTypeKey, propertyKey),
+        rows,
+      ),
     );
   }
 

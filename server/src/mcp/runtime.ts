@@ -184,6 +184,46 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
   );
 
   server.registerTool(
+    "get_document",
+    {
+      description:
+        "Read (a slice of) a document property's content. Document properties " +
+        "hold large Markdown text and are never returned inline by other tools " +
+        '— they appear as {"document": true, "length": N} stubs. ' +
+        "'offset' and 'limit' are character-based; omit both to read the full " +
+        "document. Use the charOffset/charLength from a semantic search hit's " +
+        "matchedVia to read exactly the matching passage.",
+      inputSchema: {
+        entity_type_key: z.string(),
+        entity_id: z.string(),
+        property_key: z.string(),
+        offset: z.number().optional(),
+        limit: z.number().optional(),
+      },
+    },
+    wrap("get_document", async (args: {
+      entity_type_key: string;
+      entity_id: string;
+      property_key: string;
+      offset?: number | undefined;
+      limit?: number | undefined;
+    }) => {
+      const offset = Math.max(0, args.offset ?? 0);
+      const limit = args.limit === undefined || args.limit === null ? null : Math.max(1, args.limit);
+      const result = await service.getDocument(
+        ontologyKey,
+        args.entity_type_key,
+        args.entity_id,
+        args.property_key,
+        offset,
+        limit,
+        getRuntimeStore(),
+      );
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
     "update_entity",
     {
       description:
@@ -207,6 +247,98 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
         args.entity_type_key,
         args.entity_id,
         args.properties,
+        getRuntimeStore(),
+      );
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "edit_document",
+    {
+      description:
+        "Edit a document property by exact string replacement — the preferred " +
+        "way to change part of a document. old_string must match the current " +
+        "content exactly and uniquely; if it matches more than once, provide a " +
+        "longer string with surrounding context, or set replace_all to true to " +
+        "replace every occurrence. Returns the new totalLength, the edited " +
+        "range, and ~200 chars of context around the edit for verification.",
+      inputSchema: {
+        entity_type_key: z.string(),
+        entity_id: z.string(),
+        property_key: z.string(),
+        old_string: z.string(),
+        new_string: z.string(),
+        replace_all: z.boolean().optional(),
+      },
+    },
+    wrap("edit_document", async (args: {
+      entity_type_key: string;
+      entity_id: string;
+      property_key: string;
+      old_string: string;
+      new_string: string;
+      replace_all?: boolean | undefined;
+    }) => {
+      const result = await service.editDocument(
+        ontologyKey,
+        args.entity_type_key,
+        args.entity_id,
+        args.property_key,
+        {
+          op: "str_replace",
+          oldString: args.old_string,
+          newString: args.new_string,
+          replaceAll: args.replace_all ?? false,
+        },
+        getRuntimeStore(),
+      );
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "write_document",
+    {
+      description:
+        "Overwrite a character range of a document property: replaces " +
+        "[offset, offset+length) with content. Insert with length=0; append " +
+        "with offset=totalLength and length=0. Offsets pair with get_document " +
+        "reads and the charOffset/charLength of semantic search hits. Pass " +
+        "'expect' (the text currently in the range) to fail safely if the " +
+        "document changed since it was read. Returns the new totalLength, the " +
+        "edited range, and ~200 chars of context around the edit.",
+      inputSchema: {
+        entity_type_key: z.string(),
+        entity_id: z.string(),
+        property_key: z.string(),
+        offset: z.number(),
+        length: z.number(),
+        content: z.string(),
+        expect: z.string().optional(),
+      },
+    },
+    wrap("write_document", async (args: {
+      entity_type_key: string;
+      entity_id: string;
+      property_key: string;
+      offset: number;
+      length: number;
+      content: string;
+      expect?: string | undefined;
+    }) => {
+      const result = await service.editDocument(
+        ontologyKey,
+        args.entity_type_key,
+        args.entity_id,
+        args.property_key,
+        {
+          op: "replace_range",
+          offset: args.offset,
+          length: args.length,
+          content: args.content,
+          expect: args.expect ?? null,
+        },
         getRuntimeStore(),
       );
       return jsonResult(result);

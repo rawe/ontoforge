@@ -491,6 +491,78 @@ export async function getNeighbors(
   return result.records.map((record) => toNeighborEntry(record, direction));
 }
 
+// --- Document chunks ---
+
+/**
+ * Map chunk text → embedding for one document property on one entity.
+ *
+ * Used to reuse embeddings of unchanged chunk texts when re-chunking after
+ * a (partial) document write. Chunks without an embedding are skipped.
+ */
+export async function getChunkEmbeddingsForEntityProperty(
+  session: Session,
+  entityId: string,
+  propertyKey: string,
+): Promise<Record<string, number[]>> {
+  const result = await session.run(
+    `
+    MATCH (n:_Entity {_id: $entityId})-[:_HAS_CHUNK]->(c:_Chunk {_propertyKey: $propertyKey})
+    WHERE c._embedding IS NOT NULL
+    RETURN c.text AS text, c._embedding AS embedding
+    `,
+    { entityId, propertyKey },
+  );
+  const map: Record<string, number[]> = {};
+  for (const record of result.records) {
+    map[record.get("text") as string] = record.get("embedding") as number[];
+  }
+  return map;
+}
+
+/** Delete all chunk nodes of one document property on one entity. */
+export async function deleteChunksForEntityProperty(
+  session: Session,
+  entityId: string,
+  propertyKey: string,
+): Promise<void> {
+  await session.run(
+    `
+    MATCH (n:_Entity {_id: $entityId})-[:_HAS_CHUNK]->(c:_Chunk {_propertyKey: $propertyKey})
+    DETACH DELETE c
+    `,
+    { entityId, propertyKey },
+  );
+}
+
+/**
+ * Create chunk nodes for a document property and link them to the entity.
+ *
+ * Each chunk row carries: _id, _entityId, _entityTypeKey, _propertyKey,
+ * _index, startChar, charLength, text, and optionally _embedding. The
+ * caller (the store) has already converted the integer fields to driver
+ * integers.
+ */
+export async function createDocumentChunks(
+  session: Session,
+  entityId: string,
+  virtualLabel: string,
+  chunks: Row[],
+): Promise<void> {
+  if (chunks.length === 0) {
+    return;
+  }
+  await session.run(
+    `
+    MATCH (n:_Entity {_id: $entityId})
+    UNWIND $chunks AS chunk
+    CREATE (c:_Chunk:${virtualLabel})
+    SET c = chunk
+    CREATE (n)-[:_HAS_CHUNK]->(c)
+    `,
+    { entityId, chunks },
+  );
+}
+
 /** Delete an entity, its attached relations (DETACH) and its chunks. */
 export async function deleteEntity(
   session: Session,

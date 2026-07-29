@@ -27,6 +27,8 @@ import {
   StoreError,
   ValidationError,
 } from "./core/exceptions.js";
+import { mountMcp } from "./mcp/mount.js";
+import { modelingRouter } from "./modeling/router.js";
 import { runtimeGlobalRouter } from "./runtime/router.js";
 
 function sendError(
@@ -123,7 +125,12 @@ export async function createApp(): Promise<FastifyInstance> {
     return reply.status(500).header("content-type", "text/plain").send("Internal Server Error");
   });
 
+  await app.register(modelingRouter, { prefix: "/api/model" });
   await app.register(runtimeGlobalRouter, { prefix: "/api/runtime" });
+
+  // Startup step 6: the MCP servers share the process and call the same
+  // services as REST. Modeling is mounted here; runtime follows in its slice.
+  mountMcp(app);
 
   return app;
 }

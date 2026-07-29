@@ -107,7 +107,7 @@ Update the Status column when a session completes.
 | # | Spec | Delivers | Status |
 |---|---|---|---|
 | 01 | [01-skeleton.md](01-skeleton.md) | Server skeleton, config, error model, persistence port, Neo4j adapter foundation, `/features` | Done (2026-07-29) |
-| 02 | [02-schema-modeling.md](02-schema-modeling.md) | Global types & properties (REST + modeling MCP server) | — |
+| 02 | [02-schema-modeling.md](02-schema-modeling.md) | Global types & properties (REST + modeling MCP server) | Done (2026-07-29) |
 | 03 | [03-ontology-lenses.md](03-ontology-lenses.md) | Ontologies, inclusions, cascade protocol, validation | — |
 | 04 | [04-runtime-entities.md](04-runtime-entities.md) | Schema cache, introspection, entity CRUD & listing (+ runtime MCP server) | — |
 | 05 | [05-relations-traversal.md](05-relations-traversal.md) | Relations CRUD, neighbors | — |

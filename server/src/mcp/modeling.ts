@@ -1,0 +1,499 @@
+/**
+ * Modeling MCP server: the global schema surface over MCP.
+ *
+ * Global by design — no ontology key anywhere; the schema belongs to no
+ * lens. Tools take KEYS (never internal identifiers) plus a `type_kind`
+ * discriminator for properties, and resolve keys to internal ids per call
+ * (never cached). Tool parameters are snake_case on the wire
+ * (`docs/interfaces.md`, "JSON shape").
+ *
+ * Tools call the modeling services directly — never HTTP to the REST
+ * routes; a second path would be a second contract. Failures are reported
+ * as tool errors; because a tool error is a single string, per-field
+ * detail is flattened into the message text (ported from the Python
+ * reference's `_format_validation_error`).
+ */
+
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z, ZodError } from "zod";
+
+import { NotFoundError, ValidationError } from "../core/exceptions.js";
+import { getModelingStore } from "../core/ports.js";
+import type { ModelingStore } from "../core/ports.js";
+import {
+  EntityTypeCreate,
+  EntityTypeUpdate,
+  PropertyDefinitionCreate,
+  PropertyDefinitionUpdate,
+  RelationTypeCreate,
+  RelationTypeUpdate,
+} from "../modeling/schemas.js";
+import * as service from "../modeling/service.js";
+import type { OwnerLabel } from "../modeling/service.js";
+
+// ---------------------------------------------------------------------------
+// Error flattening
+// ---------------------------------------------------------------------------
+
+/**
+ * Flatten an error into one message string. Ports the Python
+ * `_format_validation_error`: `details.fields` and `details.errors` are
+ * appended to the message so a model still sees every offending field in
+ * one response. Zod issues (request-shape failures inside a tool) are
+ * joined the same way.
+ */
+export function formatToolError(error: unknown): string {
+  if (error instanceof ZodError) {
+    return error.issues
+      .map((issue) => `${issue.path.join(".") || "value"}: ${issue.message}`)
+      .join("; ");
+  }
+  if (error instanceof ValidationError) {
+    const message = error.message;
+    const details = error.details;
+    if (!details) {
+      return message;
+    }
+    if ("fields" in details) {
+      const fields = details.fields as Record<string, unknown>;
+      const fieldErrors = Object.entries(fields)
+        .map(([key, value]) => `${key}: ${String(value)}`)
+        .join("; ");
+      return `${message} — ${fieldErrors}`;
+    }
+    if ("errors" in details) {
+      const errors = details.errors as unknown[];
+      return `${message} — ${errors.map(String).join("; ")}`;
+    }
+    return message;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
+// ---------------------------------------------------------------------------
+// Result and handler plumbing
+// ---------------------------------------------------------------------------
+
+interface ToolResult {
+  content: { type: "text"; text: string }[];
+  isError?: boolean;
+  [key: string]: unknown;
+}
+
+function jsonResult(value: unknown): ToolResult {
+  return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }] };
+}
+
+function textResult(text: string): ToolResult {
+  return { content: [{ type: "text", text }] };
+}
+
+/** Run a tool body; any failure becomes a flattened tool error. */
+function wrap<Args>(
+  name: string,
+  fn: (args: Args) => Promise<ToolResult>,
+): (args: Args) => Promise<ToolResult> {
+  return async (args: Args) => {
+    try {
+      return await fn(args);
+    } catch (error) {
+      return {
+        content: [
+          { type: "text", text: `Error executing tool ${name}: ${formatToolError(error)}` },
+        ],
+        isError: true,
+      };
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Key resolution (per call, never cached)
+// ---------------------------------------------------------------------------
+
+async function resolveEntityType(
+  store: ModelingStore,
+  entityTypeKey: string,
+): Promise<Record<string, unknown>> {
+  const data = await store.getEntityTypeByKey(entityTypeKey);
+  if (!data) {
+    throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
+  }
+  return data;
+}
+
+async function resolveRelationType(
+  store: ModelingStore,
+  relationTypeKey: string,
+): Promise<Record<string, unknown>> {
+  const data = await store.getRelationTypeByKey(relationTypeKey);
+  if (!data) {
+    throw new NotFoundError(`Relation type '${relationTypeKey}' not found`);
+  }
+  return data;
+}
+
+async function resolveProperty(
+  store: ModelingStore,
+  ownerId: string,
+  ownerLabel: OwnerLabel,
+  propertyKey: string,
+): Promise<Record<string, unknown>> {
+  const data = await store.getPropertyByKey(ownerId, ownerLabel, propertyKey);
+  if (!data) {
+    throw new NotFoundError(`Property '${propertyKey}' not found`);
+  }
+  return data;
+}
+
+function resolveOwnerLabel(typeKind: string): OwnerLabel {
+  if (typeKind === "entity_type") {
+    return "EntityType";
+  }
+  if (typeKind === "relation_type") {
+    return "RelationType";
+  }
+  throw new ValidationError(
+    `Invalid type_kind '${typeKind}'. Must be 'entity_type' or 'relation_type'.`,
+  );
+}
+
+async function resolveOwner(
+  store: ModelingStore,
+  typeKind: string,
+  typeKey: string,
+): Promise<[string, OwnerLabel]> {
+  const ownerLabel = resolveOwnerLabel(typeKind);
+  if (ownerLabel === "EntityType") {
+    const owner = await resolveEntityType(store, typeKey);
+    return [owner.entityTypeId as string, ownerLabel];
+  }
+  const owner = await resolveRelationType(store, typeKey);
+  return [owner.relationTypeId as string, ownerLabel];
+}
+
+// ---------------------------------------------------------------------------
+// Server factory (stateless transport: one server per request)
+// ---------------------------------------------------------------------------
+
+export function createModelingMcpServer(): McpServer {
+  const server = new McpServer({ name: "OntoForge Modeling", version: "0.1.0" });
+
+  server.registerTool(
+    "get_schema",
+    {
+      description:
+        "Get the current state of the global schema. Returns all entity types, " +
+        "relation types, and their properties.",
+      inputSchema: {},
+    },
+    wrap("get_schema", async () => {
+      const result = await service.getSchemaExport(getModelingStore());
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "create_entity_type",
+    {
+      description:
+        "Add a new entity type to the global schema. Key must be snake_case, globally unique.",
+      inputSchema: {
+        key: z.string(),
+        display_name: z.string(),
+        description: z.string().optional(),
+      },
+    },
+    wrap("create_entity_type", async (args: {
+      key: string;
+      display_name: string;
+      description?: string | undefined;
+    }) => {
+      const body = EntityTypeCreate.parse({
+        key: args.key,
+        displayName: args.display_name,
+        description: args.description ?? null,
+      });
+      const result = await service.createEntityType(body, getModelingStore());
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "update_entity_type",
+    {
+      description: "Update an entity type's display name or description. Key is immutable.",
+      inputSchema: {
+        entity_type_key: z.string(),
+        display_name: z.string().optional(),
+        description: z.string().optional(),
+      },
+    },
+    wrap("update_entity_type", async (args: {
+      entity_type_key: string;
+      display_name?: string | undefined;
+      description?: string | undefined;
+    }) => {
+      const store = getModelingStore();
+      const et = await resolveEntityType(store, args.entity_type_key);
+      const body = EntityTypeUpdate.parse({
+        displayName: args.display_name ?? null,
+        description: args.description ?? null,
+      });
+      const result = await service.updateEntityType(et.entityTypeId as string, body, store);
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "delete_entity_type",
+    {
+      description:
+        "Remove an entity type and its properties. Use cascade=True to auto-remove " +
+        "from any scoped ontologies. Fails if any relation type references it.",
+      inputSchema: {
+        entity_type_key: z.string(),
+        cascade: z.boolean().optional(),
+      },
+    },
+    wrap("delete_entity_type", async (args: {
+      entity_type_key: string;
+      cascade?: boolean | undefined;
+    }) => {
+      const store = getModelingStore();
+      const et = await resolveEntityType(store, args.entity_type_key);
+      await service.deleteEntityType(et.entityTypeId as string, args.cascade ?? false, store);
+      return textResult(`Entity type '${args.entity_type_key}' deleted successfully.`);
+    }),
+  );
+
+  server.registerTool(
+    "create_relation_type",
+    {
+      description:
+        "Add a new relation type connecting two entity types. Source and target are " +
+        "specified by entity type key.",
+      inputSchema: {
+        key: z.string(),
+        display_name: z.string(),
+        source_entity_type_key: z.string(),
+        target_entity_type_key: z.string(),
+        description: z.string().optional(),
+      },
+    },
+    wrap("create_relation_type", async (args: {
+      key: string;
+      display_name: string;
+      source_entity_type_key: string;
+      target_entity_type_key: string;
+      description?: string | undefined;
+    }) => {
+      const body = RelationTypeCreate.parse({
+        key: args.key,
+        displayName: args.display_name,
+        description: args.description ?? null,
+        sourceEntityTypeKey: args.source_entity_type_key,
+        targetEntityTypeKey: args.target_entity_type_key,
+      });
+      const result = await service.createRelationType(body, getModelingStore());
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "update_relation_type",
+    {
+      description:
+        "Update a relation type's display name or description. Source/target " +
+        "endpoints are immutable.",
+      inputSchema: {
+        relation_type_key: z.string(),
+        display_name: z.string().optional(),
+        description: z.string().optional(),
+      },
+    },
+    wrap("update_relation_type", async (args: {
+      relation_type_key: string;
+      display_name?: string | undefined;
+      description?: string | undefined;
+    }) => {
+      const store = getModelingStore();
+      const rt = await resolveRelationType(store, args.relation_type_key);
+      const body = RelationTypeUpdate.parse({
+        displayName: args.display_name ?? null,
+        description: args.description ?? null,
+      });
+      const result = await service.updateRelationType(rt.relationTypeId as string, body, store);
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "delete_relation_type",
+    {
+      description:
+        "Remove a relation type and its properties. Use cascade=True to auto-remove " +
+        "from any scoped ontologies.",
+      inputSchema: {
+        relation_type_key: z.string(),
+        cascade: z.boolean().optional(),
+      },
+    },
+    wrap("delete_relation_type", async (args: {
+      relation_type_key: string;
+      cascade?: boolean | undefined;
+    }) => {
+      const store = getModelingStore();
+      const rt = await resolveRelationType(store, args.relation_type_key);
+      await service.deleteRelationType(
+        rt.relationTypeId as string,
+        args.cascade ?? false,
+        store,
+      );
+      return textResult(`Relation type '${args.relation_type_key}' deleted successfully.`);
+    }),
+  );
+
+  server.registerTool(
+    "add_property",
+    {
+      description:
+        "Add a property definition to an entity type or relation type. " +
+        "type_kind must be 'entity_type' or 'relation_type'. " +
+        "data_type must be one of: string, integer, float, boolean, date, " +
+        "datetime, document. The 'document' type holds large text interpreted " +
+        "as Markdown; it is chunked for passage-level semantic search when " +
+        "embeddings are enabled and is returned as a stub (never inline) by " +
+        "runtime reads. Document properties are only allowed on entity types " +
+        "— on relation types they are rejected. " +
+        "Use cascade=True to auto-add required properties to scoped ontology property lists.",
+      inputSchema: {
+        type_kind: z.string(),
+        type_key: z.string(),
+        key: z.string(),
+        display_name: z.string(),
+        data_type: z.string(),
+        required: z.boolean().optional(),
+        default_value: z.string().optional(),
+        description: z.string().optional(),
+        cascade: z.boolean().optional(),
+      },
+    },
+    wrap("add_property", async (args: {
+      type_kind: string;
+      type_key: string;
+      key: string;
+      display_name: string;
+      data_type: string;
+      required?: boolean | undefined;
+      default_value?: string | undefined;
+      description?: string | undefined;
+      cascade?: boolean | undefined;
+    }) => {
+      const store = getModelingStore();
+      const [ownerId, ownerLabel] = await resolveOwner(store, args.type_kind, args.type_key);
+      const body = PropertyDefinitionCreate.parse({
+        key: args.key,
+        displayName: args.display_name,
+        description: args.description ?? null,
+        dataType: args.data_type,
+        required: args.required ?? false,
+        defaultValue: args.default_value ?? null,
+      });
+      const result = await service.createProperty(
+        ownerId,
+        ownerLabel,
+        body,
+        args.cascade ?? false,
+        store,
+      );
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "update_property",
+    {
+      description:
+        "Update a property's metadata. Key and data type are immutable after creation. " +
+        "type_kind must be 'entity_type' or 'relation_type'.",
+      inputSchema: {
+        type_kind: z.string(),
+        type_key: z.string(),
+        property_key: z.string(),
+        display_name: z.string().optional(),
+        required: z.boolean().optional(),
+        default_value: z.string().optional(),
+        description: z.string().optional(),
+      },
+    },
+    wrap("update_property", async (args: {
+      type_kind: string;
+      type_key: string;
+      property_key: string;
+      display_name?: string | undefined;
+      required?: boolean | undefined;
+      default_value?: string | undefined;
+      description?: string | undefined;
+    }) => {
+      const store = getModelingStore();
+      const [ownerId, ownerLabel] = await resolveOwner(store, args.type_kind, args.type_key);
+      const prop = await resolveProperty(store, ownerId, ownerLabel, args.property_key);
+      // Parity wart preserved from the Python reference: the tool argument
+      // shape cannot distinguish an omitted default_value from an explicit
+      // null, and Python treats both as the explicit-null clear.
+      const body = PropertyDefinitionUpdate.parse({
+        displayName: args.display_name ?? null,
+        description: args.description ?? null,
+        required: args.required ?? null,
+        defaultValue: args.default_value ?? null,
+      });
+      const result = await service.updateProperty(
+        ownerId,
+        ownerLabel,
+        prop.propertyId as string,
+        body,
+        store,
+      );
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "delete_property",
+    {
+      description:
+        "Remove a property definition from an entity type or relation type. " +
+        "type_kind must be 'entity_type' or 'relation_type'. " +
+        "Use cascade=True to auto-remove from scoped ontology property lists.",
+      inputSchema: {
+        type_kind: z.string(),
+        type_key: z.string(),
+        property_key: z.string(),
+        cascade: z.boolean().optional(),
+      },
+    },
+    wrap("delete_property", async (args: {
+      type_kind: string;
+      type_key: string;
+      property_key: string;
+      cascade?: boolean | undefined;
+    }) => {
+      const store = getModelingStore();
+      const [ownerId, ownerLabel] = await resolveOwner(store, args.type_kind, args.type_key);
+      const prop = await resolveProperty(store, ownerId, ownerLabel, args.property_key);
+      await service.deleteProperty(
+        ownerId,
+        ownerLabel,
+        prop.propertyId as string,
+        args.cascade ?? false,
+        store,
+      );
+      return textResult(
+        `Property '${args.property_key}' deleted from ${args.type_kind} '${args.type_key}'.`,
+      );
+    }),
+  );
+
+  return server;
+}

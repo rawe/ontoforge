@@ -56,7 +56,8 @@ function initAiModel(): void {}
  * 3. Initialize the embedding provider, if configured (seam).
  * 4. Initialize the language-model provider, if configured (seam).
  * 5. If embeddings are enabled, reconcile vector index widths (seam).
- * 6. Start both MCP servers (seam — MCP arrives with the modeling slice).
+ * 6. Start both MCP servers (modeling is mounted inside `createApp`; the
+ *    runtime MCP server arrives with the runtime slice).
  */
 export async function startServer(): Promise<FastifyInstance> {
   await initStores();
@@ -66,7 +67,7 @@ export async function startServer(): Promise<FastifyInstance> {
   if (embeddingProvider) {
     await ensureSemanticIndexes(embeddingProvider.dimensions);
   }
-  // Step 6 (MCP servers) mounts inside createApp once the MCP slice lands.
+  // Step 6: the MCP mounts are part of createApp.
   return createApp();
 }
 

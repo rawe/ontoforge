@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
-    "test:integration:embedding": "vitest run --config vitest.integration.embedding.config.ts"
+    "test:integration:embedding": "vitest run --config vitest.integration.embedding.config.ts",
+    "test:integration:ai": "vitest run --config vitest.integration.ai.config.ts"
   },
   "engines": {
     "node": ">=22"
@@ -21,6 +22,9 @@
     "@fastify/cors": "^11.3.0",
     "@fastify/swagger": "^9.8.1",
     "@fastify/swagger-ui": "^6.1.1",
+    "@langchain/core": "^1.2.3",
+    "@langchain/langgraph": "^1.4.8",
+    "@langchain/openai": "^1.5.5",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "antlr4ng": "^3.0.16",
     "fastify": "^5.10.0",

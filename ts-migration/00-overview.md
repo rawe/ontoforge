@@ -33,7 +33,7 @@ the user** (per `CLAUDE.md` consistency rule) — one known case is already deci
 Everything else is strict behavioral parity — including documented warts (the neighbors
 direction budget, the per-process schema cache, the `__` filter suffix rule, MCP clamping
 limits where REST rejects them, …). These are **behavior, not bugs**; preserve them.
-Exactly five divergences are approved:
+Exactly six divergences are approved:
 
 1. **Import validates key patterns** (session 10). The Python import path skips the
    `^[a-z][a-z0-9_]*$` check, letting a hand-edited payload define a property named `_id`
@@ -63,9 +63,13 @@ Exactly five divergences are approved:
    same family as divergence #3. The TS server answers
    `404 {"error": {"code": "RESOURCE_NOT_FOUND", "message": "Not Found"}}`. Docs-over-
    implementation; unreachable for the frontend.
+6. **Chat keeps the system prompt on follow-up turns** (session 11, approved 2026-07-29).
+   pydantic-ai sends no system prompt when caller-supplied history is non-empty, so the
+   schema description vanishes after turn one. The docs state the schema is in the prompt
+   either way; the TS server sends the schema-bearing system prompt on every turn.
 
 `docs/` describes the running Python system and stays untouched during the migration.
-When `backend/` is retired (the user's call, after session 11), the five divergences
+When `backend/` is retired (the user's call, after session 11), the six divergences
 above must be folded into `docs/` — session 11's parity sweep lists the exact edits.
 
 ## Repository layout
@@ -116,7 +120,7 @@ Update the Status column when a session completes.
 | 08 | [08-semantic-search.md](08-semantic-search.md) | Embedding provider, vector indexes, semantic search, rebuild | Done (2026-07-29) |
 | 09 | [09-saved-queries-agents.md](09-saved-queries-agents.md) | Saved queries (define + run + search), agent configs | Done (2026-07-29) |
 | 10 | [10-transfer.md](10-transfer.md) | Schema export / import | Done (2026-07-29) |
-| 11 | [11-ai-agents.md](11-ai-agents.md) | AI query/extract/chat, A2A (LangGraph), final parity sweep | — |
+| 11 | [11-ai-agents.md](11-ai-agents.md) | AI query/extract/chat, A2A (LangGraph), final parity sweep | Done (2026-07-29) |
 
 Dependency notes: 07 needs 04–05 for meaningful tests; 08 needs 06 (chunk search); 09
 needs 07 + 08; 10 needs 09 (transfer carries agents and saved queries); 11 needs 09.

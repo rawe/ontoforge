@@ -29,6 +29,7 @@ import {
 } from "./core/exceptions.js";
 import { mountMcp } from "./mcp/mount.js";
 import { modelingRouter } from "./modeling/router.js";
+import { aiRouter } from "./runtime/aiRouter.js";
 import { runtimeGlobalRouter, runtimeRouter } from "./runtime/router.js";
 
 function sendError(
@@ -162,6 +163,7 @@ export async function createApp(): Promise<FastifyInstance> {
   await app.register(modelingRouter, { prefix: "/api/model" });
   await app.register(runtimeGlobalRouter, { prefix: "/api/runtime" });
   await app.register(runtimeRouter, { prefix: "/api/runtime" });
+  await app.register(aiRouter, { prefix: "/api/runtime" });
 
   // Startup step 6: both MCP servers share the process and call the same
   // services as REST.

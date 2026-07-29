@@ -9,6 +9,7 @@ import type { FastifyInstance } from "fastify";
 
 import { createApp } from "./app.js";
 import { settings } from "./config.js";
+import { closeAiModel, initAiModel } from "./core/ai.js";
 import {
   closeEmbeddingProvider,
   getEmbeddingProvider,
@@ -37,19 +38,12 @@ export async function warnAboutReservedTypeKeysInUse(): Promise<void> {
 }
 
 /**
- * Language-model initialization (startup step 4).
- *
- * Seam: the AI slice replaces this with real model setup.
- */
-function initAiModel(): void {}
-
-/**
  * Run the ordered startup sequence and return the ready-to-listen app.
  *
  * 1. Connect storage, verify reachability, ensure constraints and indexes.
  * 2. Report any stored type key that the adapter now reserves.
  * 3. Initialize the embedding provider, if configured.
- * 4. Initialize the language-model provider, if configured (seam).
+ * 4. Initialize the language-model provider, if configured.
  * 5. If embeddings are enabled, reconcile vector index widths against the
  *    provider — every mismatch is WARNED about and nothing is repaired
  *    (`docs/decisions.md#behaviour`); rebuild is where repair happens.
@@ -71,6 +65,7 @@ export async function startServer(): Promise<FastifyInstance> {
 export async function shutdownServer(app: FastifyInstance): Promise<void> {
   await app.close();
   closeEmbeddingProvider();
+  closeAiModel();
   await closeStores();
 }
 

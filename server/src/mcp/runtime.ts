@@ -235,5 +235,197 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
     }),
   );
 
+  server.registerTool(
+    "create_relation",
+    {
+      description:
+        "Create a relation between two entities. The entity types must match the " +
+        "relation type's source/target definition.",
+      inputSchema: {
+        relation_type_key: z.string(),
+        from_entity_id: z.string(),
+        to_entity_id: z.string(),
+        properties: z.record(z.string(), z.unknown()).optional(),
+      },
+    },
+    wrap("create_relation", async (args: {
+      relation_type_key: string;
+      from_entity_id: string;
+      to_entity_id: string;
+      properties?: Record<string, unknown> | undefined;
+    }) => {
+      const result = await service.createRelation(
+        ontologyKey,
+        args.relation_type_key,
+        args.from_entity_id,
+        args.to_entity_id,
+        args.properties ?? {},
+        getRuntimeStore(),
+      );
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "list_relations",
+    {
+      description:
+        "List relations of a type. Optionally filter by source or target entity.",
+      inputSchema: {
+        relation_type_key: z.string(),
+        from_entity_id: z.string().optional(),
+        to_entity_id: z.string().optional(),
+        filters: z.record(z.string(), z.unknown()).optional(),
+        sort: z.string().optional(),
+        order: z.string().optional(),
+        limit: z.number().optional(),
+        offset: z.number().optional(),
+      },
+    },
+    wrap("list_relations", async (args: {
+      relation_type_key: string;
+      from_entity_id?: string | undefined;
+      to_entity_id?: string | undefined;
+      filters?: Record<string, unknown> | undefined;
+      sort?: string | undefined;
+      order?: string | undefined;
+      limit?: number | undefined;
+      offset?: number | undefined;
+    }) => {
+      const strFilters: Record<string, string> = {};
+      for (const [k, v] of Object.entries(args.filters ?? {})) {
+        // Python `str(v)`: booleans capitalize, everything else stringifies.
+        strFilters[k] = typeof v === "boolean" ? (v ? "True" : "False") : String(v);
+      }
+      const limit = clamp(args.limit ?? 50, 1, 200);
+      const offset = Math.max(0, args.offset ?? 0);
+      const result = await service.listRelations(
+        ontologyKey,
+        args.relation_type_key,
+        limit,
+        offset,
+        args.sort ?? "_createdAt",
+        args.order ?? "asc",
+        args.from_entity_id ?? null,
+        args.to_entity_id ?? null,
+        strFilters,
+        getRuntimeStore(),
+      );
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "get_relation",
+    {
+      description: "Retrieve a specific relation by its _id.",
+      inputSchema: {
+        relation_type_key: z.string(),
+        relation_id: z.string(),
+      },
+    },
+    wrap("get_relation", async (args: { relation_type_key: string; relation_id: string }) => {
+      const result = await service.getRelation(
+        ontologyKey,
+        args.relation_type_key,
+        args.relation_id,
+        getRuntimeStore(),
+      );
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "update_relation",
+    {
+      description:
+        "Partial update of relation properties. Cannot change connected entities — " +
+        "delete and recreate instead.",
+      inputSchema: {
+        relation_type_key: z.string(),
+        relation_id: z.string(),
+        properties: z.record(z.string(), z.unknown()),
+      },
+    },
+    wrap("update_relation", async (args: {
+      relation_type_key: string;
+      relation_id: string;
+      properties: Record<string, unknown>;
+    }) => {
+      const result = await service.updateRelation(
+        ontologyKey,
+        args.relation_type_key,
+        args.relation_id,
+        args.properties,
+        getRuntimeStore(),
+      );
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "delete_relation",
+    {
+      description: "Delete a relation. Connected entities are unaffected.",
+      inputSchema: {
+        relation_type_key: z.string(),
+        relation_id: z.string(),
+      },
+    },
+    wrap("delete_relation", async (args: { relation_type_key: string; relation_id: string }) => {
+      await service.deleteRelation(
+        ontologyKey,
+        args.relation_type_key,
+        args.relation_id,
+        getRuntimeStore(),
+      );
+      return jsonResult({ message: `Relation '${args.relation_id}' deleted successfully.` });
+    }),
+  );
+
+  server.registerTool(
+    "get_neighbors",
+    {
+      description:
+        "Explore an entity's local neighborhood — discover what it's connected to " +
+        "and how. Returns the center entity plus all connected entities with their " +
+        "connecting relations. Use 'fields' to project entity properties (neighbor " +
+        "entities always include _entityTypeKey). Use 'relation_fields' to project " +
+        "relation properties.",
+      inputSchema: {
+        entity_type_key: z.string(),
+        entity_id: z.string(),
+        direction: z.string().optional(),
+        relation_type_key: z.string().optional(),
+        limit: z.number().optional(),
+        fields: z.array(z.string()).optional(),
+        relation_fields: z.array(z.string()).optional(),
+      },
+    },
+    wrap("get_neighbors", async (args: {
+      entity_type_key: string;
+      entity_id: string;
+      direction?: string | undefined;
+      relation_type_key?: string | undefined;
+      limit?: number | undefined;
+      fields?: string[] | undefined;
+      relation_fields?: string[] | undefined;
+    }) => {
+      const limit = clamp(args.limit ?? 50, 1, 200);
+      const result = await service.getNeighbors(
+        ontologyKey,
+        args.entity_type_key,
+        args.entity_id,
+        args.direction ?? "both",
+        args.relation_type_key ?? null,
+        limit,
+        getRuntimeStore(),
+        args.fields ?? null,
+        args.relation_fields ?? null,
+      );
+      return jsonResult(result);
+    }),
+  );
+
   return server;
 }

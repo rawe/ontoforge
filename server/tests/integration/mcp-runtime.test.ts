@@ -147,17 +147,23 @@ describe("lens resolution", () => {
 });
 
 describe("tool surface", () => {
-  it("lists exactly the six session-04 tools", async () => {
+  it("lists exactly the twelve session-04/05 tools", async () => {
     const client = await connectClient(`${baseUrl}/mcp/runtime/test_ontology`);
     try {
       const tools = await client.listTools();
       expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
         "create_entity",
+        "create_relation",
         "delete_entity",
+        "delete_relation",
         "get_entity",
+        "get_neighbors",
+        "get_relation",
         "get_schema",
         "list_entities",
+        "list_relations",
         "update_entity",
+        "update_relation",
       ]);
     } finally {
       await client.close();
@@ -258,6 +264,154 @@ describe("entity tools", () => {
       expect(message).toContain("name");
       expect(message).toContain("age");
       expect(message).toContain("nickname");
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("relation tools round-trip create, list, get, update, delete", async () => {
+    const client = await connectClient(`${baseUrl}/mcp/runtime/test_ontology`);
+    try {
+      const alice = json(
+        await call(client, "create_entity", {
+          entity_type_key: "person",
+          properties: { name: "Alice" },
+        }),
+      );
+      const acme = json(
+        await call(client, "create_entity", {
+          entity_type_key: "company",
+          properties: { name: "Acme" },
+        }),
+      );
+
+      const created = json(
+        await call(client, "create_relation", {
+          relation_type_key: "works_for",
+          from_entity_id: alice._id,
+          to_entity_id: acme._id,
+          properties: { role: "Engineer", since: "2024-01-15" },
+        }),
+      );
+      expect(created.fromEntityId).toBe(alice._id);
+      expect(created.toEntityId).toBe(acme._id);
+      expect(created.role).toBe("Engineer");
+      const relId = created._id as string;
+
+      const listed = json(
+        await call(client, "list_relations", {
+          relation_type_key: "works_for",
+          from_entity_id: alice._id,
+        }),
+      );
+      expect(listed.total).toBe(1);
+
+      // Limit clamps into range where REST rejects.
+      const clamped = json(
+        await call(client, "list_relations", { relation_type_key: "works_for", limit: 999 }),
+      );
+      expect(clamped.limit).toBe(200);
+
+      const fetched = json(
+        await call(client, "get_relation", {
+          relation_type_key: "works_for",
+          relation_id: relId,
+        }),
+      );
+      expect(fetched.role).toBe("Engineer");
+
+      const updated = json(
+        await call(client, "update_relation", {
+          relation_type_key: "works_for",
+          relation_id: relId,
+          properties: { role: "Manager", fromEntityId: "ignored" },
+        }),
+      );
+      expect(updated.role).toBe("Manager");
+      expect(updated.fromEntityId).toBe(alice._id); // endpoint silently kept
+
+      const deleted = json(
+        await call(client, "delete_relation", {
+          relation_type_key: "works_for",
+          relation_id: relId,
+        }),
+      );
+      expect(deleted.message).toContain("deleted successfully");
+
+      const gone = await call(client, "get_relation", {
+        relation_type_key: "works_for",
+        relation_id: relId,
+      });
+      expect(gone.isError).toBe(true);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("create_relation reports endpoint and property errors together as a tool error", async () => {
+    const client = await connectClient(`${baseUrl}/mcp/runtime/test_ontology`);
+    try {
+      const result = await call(client, "create_relation", {
+        relation_type_key: "works_for",
+        from_entity_id: "no-such",
+        to_entity_id: "also-missing",
+        properties: { bogus: "x" },
+      });
+      expect(result.isError).toBe(true);
+      const message = text(result);
+      expect(message).toContain("fromEntityId");
+      expect(message).toContain("toEntityId");
+      expect(message).toContain("bogus");
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("get_neighbors round-trips with projections and clamps its limit", async () => {
+    const client = await connectClient(`${baseUrl}/mcp/runtime/test_ontology`);
+    try {
+      const alice = json(
+        await call(client, "create_entity", {
+          entity_type_key: "person",
+          properties: { name: "Alice", email: "a@b.com" },
+        }),
+      );
+      const acme = json(
+        await call(client, "create_entity", {
+          entity_type_key: "company",
+          properties: { name: "Acme" },
+        }),
+      );
+      await call(client, "create_relation", {
+        relation_type_key: "works_for",
+        from_entity_id: alice._id,
+        to_entity_id: acme._id,
+        properties: { role: "Engineer" },
+      });
+
+      const hood = json(
+        await call(client, "get_neighbors", {
+          entity_type_key: "person",
+          entity_id: alice._id,
+          fields: ["name"],
+          relation_fields: ["role"],
+          limit: 9999, // clamped, not rejected
+        }),
+      );
+      const entity = hood.entity as Record<string, unknown>;
+      expect(Object.keys(entity).sort()).toEqual(["_id", "name"]);
+      const neighbors = hood.neighbors as Record<string, unknown>[];
+      expect(neighbors).toHaveLength(1);
+      const relation = neighbors[0]!.relation as Record<string, unknown>;
+      expect(Object.keys(relation).sort()).toEqual([
+        "_id",
+        "_relationTypeKey",
+        "direction",
+        "role",
+      ]);
+      expect(relation.direction).toBe("outgoing");
+      const neighborEntity = neighbors[0]!.entity as Record<string, unknown>;
+      expect(neighborEntity._entityTypeKey).toBe("company");
     } finally {
       await client.close();
     }

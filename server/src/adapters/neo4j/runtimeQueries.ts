@@ -260,6 +260,237 @@ export async function updateEntity(
   return record === undefined ? null : toEntityRow(record.get("entity"));
 }
 
+// --- Relation instance CRUD ---
+
+/** Convert a raw relation map and attach its endpoint ids — the documented
+ * exception to the underscore convention (`docs/architecture.md`). */
+function toRelationRow(record: {
+  get(key: string): unknown;
+}): Row {
+  const rel = convertNeo4jProperties(record.get("relation") as Row);
+  rel.fromEntityId = record.get("fromEntityId");
+  rel.toEntityId = record.get("toEntityId");
+  return rel;
+}
+
+/** Create a relation as a native relationship between two entity nodes.
+ * System properties are set by the database, not the caller. */
+export async function createRelation(
+  session: Session,
+  relationTypeKey: string,
+  relTypeUpper: string,
+  relationId: string,
+  fromEntityId: string,
+  toEntityId: string,
+  properties: Row,
+): Promise<Row> {
+  const result = await session.run(
+    `
+    MATCH (from:_Entity {_id: $fromEntityId})
+    MATCH (to:_Entity {_id: $toEntityId})
+    CREATE (from)-[r:${relTypeUpper} {
+        _id: $relationId,
+        _relationTypeKey: $relationTypeKey,
+        _createdAt: datetime(),
+        _updatedAt: datetime()
+    }]->(to)
+    SET r += $properties
+    RETURN r {.*} AS relation,
+           from._id AS fromEntityId,
+           to._id AS toEntityId
+    `,
+    { fromEntityId, toEntityId, relationId, relationTypeKey, properties },
+  );
+  return toRelationRow(result.records[0]!);
+}
+
+/** List relations with filtering (including endpoint filters, pre-built
+ * into the WHERE clauses), sorting, and pagination. */
+export async function listRelations(
+  session: Session,
+  relTypeUpper: string,
+  relationTypeKey: string,
+  whereClauses: string[],
+  params: Record<string, unknown>,
+  sortField: string,
+  order: string,
+  limit: number,
+  offset: number,
+): Promise<[Row[], number]> {
+  const baseWhere = "r._relationTypeKey = $relation_type_key";
+  const whereStr =
+    whereClauses.length > 0
+      ? `WHERE ${baseWhere} AND ${whereClauses.join(" AND ")}`
+      : `WHERE ${baseWhere}`;
+
+  params.relation_type_key = relationTypeKey;
+
+  const countResult = await session.run(
+    `
+    MATCH (from:_Entity)-[r:${relTypeUpper}]->(to:_Entity)
+    ${whereStr}
+    RETURN count(r) AS total
+    `,
+    params,
+  );
+  const total = countResult.records[0]?.get("total") as number;
+
+  if (total === 0) {
+    return [[], 0];
+  }
+
+  params.offset = neo4j.int(offset);
+  params.limit = neo4j.int(limit);
+  const dataResult = await session.run(
+    `
+    MATCH (from:_Entity)-[r:${relTypeUpper}]->(to:_Entity)
+    ${whereStr}
+    RETURN r {.*} AS relation,
+           from._id AS fromEntityId,
+           to._id AS toEntityId
+    ORDER BY r.${sortField} ${order}
+    SKIP $offset LIMIT $limit
+    `,
+    params,
+  );
+  const items = dataResult.records.map((record) => toRelationRow(record));
+  return [items, total];
+}
+
+/** Read one relation by id. Community Edition has no relationship property
+ * indexes, so this scans the relationships of the type — documented and
+ * accepted. */
+export async function getRelation(
+  session: Session,
+  relTypeUpper: string,
+  relationId: string,
+): Promise<Row | null> {
+  const result = await session.run(
+    `
+    MATCH (from:_Entity)-[r:${relTypeUpper} {_id: $relationId}]->(to:_Entity)
+    RETURN r {.*} AS relation,
+           from._id AS fromEntityId,
+           to._id AS toEntityId
+    `,
+    { relationId },
+  );
+  const record = result.records[0];
+  return record === undefined ? null : toRelationRow(record);
+}
+
+export async function updateRelation(
+  session: Session,
+  relTypeUpper: string,
+  relationId: string,
+  setProperties: Row,
+  removeProperties: string[],
+): Promise<Row | null> {
+  const setClause =
+    Object.keys(setProperties).length > 0
+      ? "SET r += $setProperties, r._updatedAt = datetime()"
+      : "SET r._updatedAt = datetime()";
+  const removeClause = removeProperties.map((k) => `REMOVE r.${k}`).join(" ");
+
+  const result = await session.run(
+    `
+    MATCH (from:_Entity)-[r:${relTypeUpper} {_id: $relationId}]->(to:_Entity)
+    ${setClause}
+    ${removeClause}
+    RETURN r {.*} AS relation,
+           from._id AS fromEntityId,
+           to._id AS toEntityId
+    `,
+    { relationId, setProperties },
+  );
+  const record = result.records[0];
+  return record === undefined ? null : toRelationRow(record);
+}
+
+/** Delete one relation; neither endpoint is touched. */
+export async function deleteRelation(
+  session: Session,
+  relTypeUpper: string,
+  relationId: string,
+): Promise<boolean> {
+  const result = await session.run(
+    `MATCH ()-[r:${relTypeUpper} {_id: $relationId}]->() DELETE r RETURN count(*) AS deleted`,
+    { relationId },
+  );
+  const deleted = result.records[0]?.get("deleted") as number;
+  return deleted > 0;
+}
+
+// --- Graph traversal ---
+
+function toNeighborEntry(record: { get(key: string): unknown }, direction: string): Row {
+  const rel = convertNeo4jProperties({ ...(record.get("relation") as Row) });
+  rel.direction = direction;
+  return {
+    relation: rel,
+    entity: stripEmbedding(convertNeo4jProperties({ ...(record.get("neighbor_entity") as Row) })),
+  };
+}
+
+/**
+ * Adjacent relations paired with the entities at the far end. For `both`
+ * the limit is ONE shared budget: outgoing edges are taken first, up to
+ * the whole limit, and incoming edges receive only the remainder — the
+ * documented trap (`docs/capabilities/instance-data.md#traversal`).
+ */
+export async function getNeighbors(
+  session: Session,
+  entityId: string,
+  direction: string,
+  relationTypeFilter: string | null,
+  limit: number,
+): Promise<Row[]> {
+  const relPattern = relationTypeFilter ? `[r:${relationTypeFilter}]` : "[r]";
+
+  if (direction === "both") {
+    const outResult = await session.run(
+      `
+      MATCH (n:_Entity {_id: $entityId})-${relPattern}->(neighbor:_Entity)
+      RETURN r {.*} AS relation, neighbor {.*} AS neighbor_entity
+      LIMIT $limit
+      `,
+      { entityId, limit: neo4j.int(limit) },
+    );
+    const results = outResult.records.map((record) => toNeighborEntry(record, "outgoing"));
+
+    const remaining = limit - results.length;
+    if (remaining > 0) {
+      const inResult = await session.run(
+        `
+        MATCH (n:_Entity {_id: $entityId})<-${relPattern}-(neighbor:_Entity)
+        RETURN r {.*} AS relation, neighbor {.*} AS neighbor_entity
+        LIMIT $remainingLimit
+        `,
+        { entityId, remainingLimit: neo4j.int(remaining) },
+      );
+      for (const record of inResult.records) {
+        results.push(toNeighborEntry(record, "incoming"));
+      }
+    }
+
+    return results;
+  }
+
+  const matchClause =
+    direction === "outgoing"
+      ? `MATCH (n:_Entity {_id: $entityId})-${relPattern}->(neighbor:_Entity)`
+      : `MATCH (n:_Entity {_id: $entityId})<-${relPattern}-(neighbor:_Entity)`;
+
+  const result = await session.run(
+    `
+    ${matchClause}
+    RETURN r {.*} AS relation, neighbor {.*} AS neighbor_entity
+    LIMIT $limit
+    `,
+    { entityId, limit: neo4j.int(limit) },
+  );
+  return result.records.map((record) => toNeighborEntry(record, direction));
+}
+
 /** Delete an entity, its attached relations (DETACH) and its chunks. */
 export async function deleteEntity(
   session: Session,

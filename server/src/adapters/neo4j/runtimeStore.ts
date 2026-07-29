@@ -18,7 +18,7 @@
 import neo4j, { type Driver } from "neo4j-driver";
 
 import type { PropertyDef } from "../../runtime/schemaCache.js";
-import { toPascalCase } from "./ddl.js";
+import { toPascalCase, toUpperSnakeCase } from "./ddl.js";
 import { runSession } from "./errors.js";
 import { buildFilterClauses, buildSearchClause, toNeo4jParameter } from "./filters.js";
 import * as queries from "./runtimeQueries.js";
@@ -149,6 +149,117 @@ export class Neo4jRuntimeStore {
   async deleteEntity(entityTypeKey: string, entityId: string): Promise<boolean> {
     return runSession(this.driver, (session) =>
       queries.deleteEntity(session, toPascalCase(entityTypeKey), entityId),
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Relation instances
+  // ------------------------------------------------------------------
+
+  async createRelation(
+    relationTypeKey: string,
+    relationId: string,
+    fromEntityId: string,
+    toEntityId: string,
+    properties: Row,
+    propertyDefs: Record<string, PropertyDef>,
+  ): Promise<Row> {
+    return runSession(this.driver, (session) =>
+      queries.createRelation(
+        session,
+        relationTypeKey,
+        toUpperSnakeCase(relationTypeKey),
+        relationId,
+        fromEntityId,
+        toEntityId,
+        toWriteProperties(properties, propertyDefs),
+      ),
+    );
+  }
+
+  async listRelations(
+    relationTypeKey: string,
+    propertyDefs: Record<string, PropertyDef>,
+    filters: Record<string, string>,
+    fromEntityId: string | null,
+    toEntityId: string | null,
+    sortField: string,
+    order: string,
+    limit: number,
+    offset: number,
+  ): Promise<[Row[], number]> {
+    const [whereClauses, params] = buildFilterClauses(
+      filters,
+      propertyDefs,
+      relationTypeKey,
+      "r",
+    );
+    if (fromEntityId) {
+      whereClauses.push("from._id = $from_entity_id_filter");
+      params.from_entity_id_filter = fromEntityId;
+    }
+    if (toEntityId) {
+      whereClauses.push("to._id = $to_entity_id_filter");
+      params.to_entity_id_filter = toEntityId;
+    }
+    return runSession(this.driver, (session) =>
+      queries.listRelations(
+        session,
+        toUpperSnakeCase(relationTypeKey),
+        relationTypeKey,
+        whereClauses,
+        params,
+        sortField,
+        order,
+        limit,
+        offset,
+      ),
+    );
+  }
+
+  async getRelation(relationTypeKey: string, relationId: string): Promise<Row | null> {
+    return runSession(this.driver, (session) =>
+      queries.getRelation(session, toUpperSnakeCase(relationTypeKey), relationId),
+    );
+  }
+
+  async updateRelation(
+    relationTypeKey: string,
+    relationId: string,
+    setProperties: Row,
+    removeProperties: string[],
+    propertyDefs: Record<string, PropertyDef>,
+  ): Promise<Row | null> {
+    return runSession(this.driver, (session) =>
+      queries.updateRelation(
+        session,
+        toUpperSnakeCase(relationTypeKey),
+        relationId,
+        toWriteProperties(setProperties, propertyDefs),
+        removeProperties,
+      ),
+    );
+  }
+
+  async deleteRelation(relationTypeKey: string, relationId: string): Promise<boolean> {
+    return runSession(this.driver, (session) =>
+      queries.deleteRelation(session, toUpperSnakeCase(relationTypeKey), relationId),
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Graph traversal
+  // ------------------------------------------------------------------
+
+  async getNeighbors(
+    entityId: string,
+    direction: string,
+    relationTypeKey: string | null,
+    limit: number,
+  ): Promise<Row[]> {
+    const relTypeFilter = relationTypeKey ? toUpperSnakeCase(relationTypeKey) : null;
+    return runSession(this.driver, (session) =>
+      queries.getNeighbors(session, entityId, direction, relTypeFilter, limit),
     );
   }
 }

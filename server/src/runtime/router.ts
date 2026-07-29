@@ -76,6 +76,40 @@ const ReadQuery = z.looseObject({ fields: FieldsParam });
  * so the only static rule is "a JSON object". */
 const PropertyPayload = z.record(z.string(), z.unknown());
 
+const RelationTypeParams = z.object({ ontologyKey: z.string(), relationTypeKey: z.string() });
+const RelationParams = z.object({
+  ontologyKey: z.string(),
+  relationTypeKey: z.string(),
+  relationId: z.string(),
+});
+
+/** Relation creation names its two endpoints; everything else in the body
+ * is a property value. */
+const RelationCreatePayload = z.looseObject({
+  fromEntityId: z.string(),
+  toEntityId: z.string(),
+});
+
+/** Relation lists take NO free-text `q` and NO `fields` projection — only
+ * paging, sorting, the `filter.*` family, and the endpoint filters that
+ * are the one way to count/page one entity's relations. */
+const RelationListQuery = z.looseObject({
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+  sort: z.string().default("_createdAt"),
+  order: z.enum(["asc", "desc"]).default("asc"),
+  fromEntityId: z.string().optional(),
+  toEntityId: z.string().optional(),
+});
+
+const NeighborsQuery = z.looseObject({
+  relationTypeKey: z.string().optional(),
+  direction: z.enum(["outgoing", "incoming", "both"]).default("both"),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  fields: FieldsParam,
+  relationFields: FieldsParam,
+});
+
 /** Routes mounted at `/api/runtime` that address one lens by key. */
 export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
   // --- Schema introspection (read-only, already filtered to the lens) ---
@@ -184,6 +218,108 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         request.params.ontologyKey,
         request.params.entityTypeKey,
         request.params.entityId,
+        getRuntimeStore(),
+      );
+      return reply.status(204).send();
+    },
+  );
+
+  // --- Graph traversal ---
+
+  app.get(
+    "/:ontologyKey/entities/:entityTypeKey/:entityId/neighbors",
+    { schema: { tags: ["runtime"], params: EntityParams, querystring: NeighborsQuery } },
+    async (request) => {
+      const { relationTypeKey, direction, limit, fields, relationFields } = request.query;
+      return service.getNeighbors(
+        request.params.ontologyKey,
+        request.params.entityTypeKey,
+        request.params.entityId,
+        direction,
+        relationTypeKey ?? null,
+        limit,
+        getRuntimeStore(),
+        fields ?? null,
+        relationFields ?? null,
+      );
+    },
+  );
+
+  // --- Relation instance CRUD ---
+
+  app.post(
+    "/:ontologyKey/relations/:relationTypeKey",
+    {
+      schema: { tags: ["runtime"], params: RelationTypeParams, body: RelationCreatePayload },
+    },
+    async (request, reply) => {
+      const { fromEntityId, toEntityId, ...userProps } = request.body;
+      const result = await service.createRelation(
+        request.params.ontologyKey,
+        request.params.relationTypeKey,
+        fromEntityId,
+        toEntityId,
+        userProps,
+        getRuntimeStore(),
+      );
+      return reply.status(201).send(result);
+    },
+  );
+
+  app.get(
+    "/:ontologyKey/relations/:relationTypeKey",
+    { schema: { tags: ["runtime"], params: RelationTypeParams, querystring: RelationListQuery } },
+    async (request) => {
+      const { limit, offset, sort, order, fromEntityId, toEntityId } = request.query;
+      const filters = parseFilters(request.query as Record<string, unknown>);
+      return service.listRelations(
+        request.params.ontologyKey,
+        request.params.relationTypeKey,
+        limit,
+        offset,
+        sort,
+        order,
+        fromEntityId ?? null,
+        toEntityId ?? null,
+        filters,
+        getRuntimeStore(),
+      );
+    },
+  );
+
+  app.get(
+    "/:ontologyKey/relations/:relationTypeKey/:relationId",
+    { schema: { tags: ["runtime"], params: RelationParams } },
+    async (request) =>
+      service.getRelation(
+        request.params.ontologyKey,
+        request.params.relationTypeKey,
+        request.params.relationId,
+        getRuntimeStore(),
+      ),
+  );
+
+  app.patch(
+    "/:ontologyKey/relations/:relationTypeKey/:relationId",
+    { schema: { tags: ["runtime"], params: RelationParams, body: PropertyPayload } },
+    async (request) =>
+      service.updateRelation(
+        request.params.ontologyKey,
+        request.params.relationTypeKey,
+        request.params.relationId,
+        request.body,
+        getRuntimeStore(),
+      ),
+  );
+
+  app.delete(
+    "/:ontologyKey/relations/:relationTypeKey/:relationId",
+    { schema: { tags: ["runtime"], params: RelationParams } },
+    async (request, reply) => {
+      await service.deleteRelation(
+        request.params.ontologyKey,
+        request.params.relationTypeKey,
+        request.params.relationId,
         getRuntimeStore(),
       );
       return reply.status(204).send();

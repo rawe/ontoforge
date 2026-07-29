@@ -139,6 +139,27 @@ export function makeEntity(
   };
 }
 
+/** Build a raw relation row as returned by the adapter. */
+export function makeRelation(
+  userProps: Row = {},
+  options?: {
+    relationTypeKey?: string;
+    relationId?: string;
+    fromEntityId?: string;
+    toEntityId?: string;
+  },
+): Row {
+  return {
+    _id: options?.relationId ?? "rel-1",
+    _relationTypeKey: options?.relationTypeKey ?? "works_for",
+    _createdAt: NOW,
+    _updatedAt: NOW,
+    fromEntityId: options?.fromEntityId ?? "ent-1",
+    toEntityId: options?.toEntityId ?? "ent-2",
+    ...userProps,
+  };
+}
+
 export interface MockRuntimeStore {
   getFullSchema: Mock;
   getAiAgentConfigs: Mock;
@@ -149,6 +170,12 @@ export interface MockRuntimeStore {
   getEntityById: Mock;
   updateEntity: Mock;
   deleteEntity: Mock;
+  createRelation: Mock;
+  listRelations: Mock;
+  getRelation: Mock;
+  updateRelation: Mock;
+  deleteRelation: Mock;
+  getNeighbors: Mock;
 }
 
 /** A mock store whose reads default to "nothing stored". */
@@ -163,6 +190,12 @@ export function createMockRuntimeStore(): MockRuntimeStore {
     getEntityById: vi.fn(async () => null),
     updateEntity: vi.fn(async () => null),
     deleteEntity: vi.fn(async () => false),
+    createRelation: vi.fn(),
+    listRelations: vi.fn(async () => [[], 0]),
+    getRelation: vi.fn(async () => null),
+    updateRelation: vi.fn(async () => null),
+    deleteRelation: vi.fn(async () => false),
+    getNeighbors: vi.fn(async () => []),
   };
 }
 

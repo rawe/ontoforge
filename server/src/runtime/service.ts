@@ -184,6 +184,31 @@ function filterEntityProperties(
 }
 
 const ENTITY_ALWAYS_FIELDS: ReadonlySet<string> = new Set(["_id"]);
+const ENTITY_NEIGHBOR_ALWAYS_FIELDS: ReadonlySet<string> = new Set(["_id", "_entityTypeKey"]);
+const RELATION_ALWAYS_FIELDS: ReadonlySet<string> = new Set([
+  "_id",
+  "_relationTypeKey",
+  "direction",
+]);
+
+/** Filter relation properties to the scoped schema. Endpoint ids — the
+ * documented exception to the underscore convention — and the computed
+ * `direction` always survive. */
+function filterRelationProperties(relation: Row, scopedRt: RelationTypeDef): Row {
+  const filtered: Row = {};
+  for (const [k, v] of Object.entries(relation)) {
+    if (
+      k.startsWith("_") ||
+      k in scopedRt.properties ||
+      k === "fromEntityId" ||
+      k === "toEntityId" ||
+      k === "direction"
+    ) {
+      filtered[k] = v;
+    }
+  }
+  return filtered;
+}
 
 function applyFieldProjection(
   data: Row,
@@ -566,4 +591,309 @@ export async function deleteEntity(
   if (!deleted) {
     throw new NotFoundError(`Entity '${entityId}' not found`);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Relation instance CRUD
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a relation: validate properties against the SCOPED definitions,
+ * apply defaults from the FULL schema, and check that both endpoints exist
+ * and their entity types equal the relation type's declared source/target —
+ * checked against the FULL schema, not the lens, so a narrow lens cannot
+ * create an edge that is invalid under a wider one. Endpoint errors are
+ * collected alongside property errors in ONE response.
+ */
+export async function createRelation(
+  ontologyKey: string,
+  relationTypeKey: string,
+  fromEntityId: string,
+  toEntityId: string,
+  userProps: Row,
+  store: RuntimeStore,
+): Promise<Row> {
+  const loaded = await loadSchema(ontologyKey, store);
+  const scopedRt = loaded.scoped.relationTypes[relationTypeKey];
+  if (scopedRt === undefined) {
+    throw new NotFoundError(`Relation type '${relationTypeKey}' not found`);
+  }
+
+  const [coerced, errors] = validateProperties(userProps, scopedRt.properties, relationTypeKey);
+
+  // Defaults from the full schema for properties not supplied.
+  const fullRt = loaded.full.relationTypes[relationTypeKey];
+  if (fullRt !== undefined) {
+    for (const [propKey, propDef] of Object.entries(fullRt.properties)) {
+      if (!(propKey in coerced) && propDef.defaultValue !== null) {
+        try {
+          coerced[propKey] = coerceValue(propDef.defaultValue, propDef.dataType, propKey);
+        } catch (error) {
+          if (!(error instanceof CoercionError)) throw error;
+          // Skip defaults that fail coercion.
+        }
+      }
+    }
+  }
+
+  // Endpoint validation against the FULL schema's declared source/target.
+  const fullRtForValidation = fullRt ?? scopedRt;
+  const fromEntity = await store.getEntityById(fromEntityId);
+  if (fromEntity === null) {
+    errors.fromEntityId = `Source entity '${fromEntityId}' not found`;
+  } else if (fromEntity._entityTypeKey !== fullRtForValidation.fromEntityTypeKey) {
+    errors.fromEntityId =
+      `Source entity type mismatch: expected '${fullRtForValidation.fromEntityTypeKey}', ` +
+      `got '${fromEntity._entityTypeKey}'`;
+  }
+
+  const toEntity = await store.getEntityById(toEntityId);
+  if (toEntity === null) {
+    errors.toEntityId = `Target entity '${toEntityId}' not found`;
+  } else if (toEntity._entityTypeKey !== fullRtForValidation.toEntityTypeKey) {
+    errors.toEntityId =
+      `Target entity type mismatch: expected '${fullRtForValidation.toEntityTypeKey}', ` +
+      `got '${toEntity._entityTypeKey}'`;
+  }
+
+  if (Object.keys(errors).length > 0) {
+    throw new ValidationError("Instance validation failed", { fields: errors });
+  }
+
+  const relationId = randomUUID();
+
+  const relation = await store.createRelation(
+    relationTypeKey,
+    relationId,
+    fromEntityId,
+    toEntityId,
+    coerced,
+    fullRtForValidation.properties,
+  );
+
+  return filterRelationProperties(relation, scopedRt);
+}
+
+export async function listRelations(
+  ontologyKey: string,
+  relationTypeKey: string,
+  limit: number,
+  offset: number,
+  sort: string,
+  order: string,
+  fromEntityId: string | null,
+  toEntityId: string | null,
+  filters: Record<string, string>,
+  store: RuntimeStore,
+): Promise<PaginatedResult> {
+  const loaded = await loadSchema(ontologyKey, store);
+  const scopedRt = loaded.scoped.relationTypes[relationTypeKey];
+  if (scopedRt === undefined) {
+    throw new NotFoundError(`Relation type '${relationTypeKey}' not found`);
+  }
+
+  const sortField = validateSortField(sort, scopedRt.properties);
+
+  const [rawItems, total] = await store.listRelations(
+    relationTypeKey,
+    scopedRt.properties,
+    filters,
+    fromEntityId,
+    toEntityId,
+    sortField,
+    order,
+    limit,
+    offset,
+  );
+
+  const items = rawItems.map((r) => filterRelationProperties(r, scopedRt));
+
+  return { items, total, limit, offset };
+}
+
+export async function getRelation(
+  ontologyKey: string,
+  relationTypeKey: string,
+  relationId: string,
+  store: RuntimeStore,
+): Promise<Row> {
+  const loaded = await loadSchema(ontologyKey, store);
+  const scopedRt = loaded.scoped.relationTypes[relationTypeKey];
+  if (scopedRt === undefined) {
+    throw new NotFoundError(`Relation type '${relationTypeKey}' not found`);
+  }
+
+  const relation = await store.getRelation(relationTypeKey, relationId);
+  if (relation === null) {
+    throw new NotFoundError(`Relation '${relationId}' not found`);
+  }
+  return filterRelationProperties(relation, scopedRt);
+}
+
+/**
+ * Partial update of relation properties. ENDPOINTS ARE IMMUTABLE: payload
+ * keys `fromEntityId` / `toEntityId` are dropped SILENTLY — no error — and
+ * properties in the same payload still apply.
+ */
+export async function updateRelation(
+  ontologyKey: string,
+  relationTypeKey: string,
+  relationId: string,
+  body: Row,
+  store: RuntimeStore,
+): Promise<Row> {
+  const loaded = await loadSchema(ontologyKey, store);
+  const scopedRt = loaded.scoped.relationTypes[relationTypeKey];
+  if (scopedRt === undefined) {
+    throw new NotFoundError(`Relation type '${relationTypeKey}' not found`);
+  }
+
+  const properties: Row = { ...body };
+  delete properties.fromEntityId;
+  delete properties.toEntityId;
+
+  const [coerced, errors] = validateProperties(
+    properties,
+    scopedRt.properties,
+    relationTypeKey,
+    true,
+  );
+  if (Object.keys(errors).length > 0) {
+    throw new ValidationError("Instance validation failed", { fields: errors });
+  }
+
+  const setProps: Row = {};
+  const removeProps: string[] = [];
+  for (const [k, v] of Object.entries(coerced)) {
+    if (v === null) {
+      removeProps.push(k);
+    } else {
+      setProps[k] = v;
+    }
+  }
+
+  if (Object.keys(setProps).length === 0 && removeProps.length === 0) {
+    return getRelation(ontologyKey, relationTypeKey, relationId, store);
+  }
+
+  const fullRt = loaded.full.relationTypes[relationTypeKey];
+
+  const relation = await store.updateRelation(
+    relationTypeKey,
+    relationId,
+    setProps,
+    removeProps,
+    fullRt?.properties ?? scopedRt.properties,
+  );
+  if (relation === null) {
+    throw new NotFoundError(`Relation '${relationId}' not found`);
+  }
+  return filterRelationProperties(relation, scopedRt);
+}
+
+/** Delete a relation; neither endpoint is touched. */
+export async function deleteRelation(
+  ontologyKey: string,
+  relationTypeKey: string,
+  relationId: string,
+  store: RuntimeStore,
+): Promise<void> {
+  const loaded = await loadSchema(ontologyKey, store);
+  if (!(relationTypeKey in loaded.scoped.relationTypes)) {
+    throw new NotFoundError(`Relation type '${relationTypeKey}' not found`);
+  }
+
+  const deleted = await store.deleteRelation(relationTypeKey, relationId);
+  if (!deleted) {
+    throw new NotFoundError(`Relation '${relationId}' not found`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Graph traversal
+// ---------------------------------------------------------------------------
+
+export interface NeighborhoodResult {
+  entity: Row;
+  neighbors: Row[];
+}
+
+/**
+ * One entity plus its immediate neighbourhood. Relations whose type the
+ * lens does not expose are dropped together with their neighbour. A
+ * neighbour is filtered to the lens only when its own entity type is in
+ * scope — an out-of-scope neighbour escapes property stripping (the
+ * documented leak), though its document values are still stubbed.
+ */
+export async function getNeighbors(
+  ontologyKey: string,
+  entityTypeKey: string,
+  entityId: string,
+  direction: string,
+  relationTypeKey: string | null,
+  limit: number,
+  store: RuntimeStore,
+  fields?: string[] | null,
+  relationFields?: string[] | null,
+): Promise<NeighborhoodResult> {
+  const loaded = await loadSchema(ontologyKey, store);
+  const scopedEt = loaded.scoped.entityTypes[entityTypeKey];
+  if (scopedEt === undefined) {
+    throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
+  }
+
+  let entity = await store.getEntity(entityTypeKey, entityId);
+  if (entity === null) {
+    throw new NotFoundError(`Entity '${entityId}' not found`);
+  }
+
+  const neighbors = await store.getNeighbors(entityId, direction, relationTypeKey, limit);
+
+  // Filter neighbors by scoped relation types.
+  const filteredNeighbors: Row[] = [];
+  for (const n of neighbors) {
+    const rel = n.relation as Row;
+    const rtKey = rel._relationTypeKey as string | undefined;
+    if (rtKey && rtKey in loaded.scoped.relationTypes) {
+      const scopedRt = loaded.scoped.relationTypes[rtKey]!;
+      n.relation = filterRelationProperties(rel, scopedRt);
+      // Filter neighbor entity properties only when its own type is in scope.
+      const neighborEntity = n.entity as Row;
+      const neighborEtKey = neighborEntity._entityTypeKey as string | undefined;
+      if (neighborEtKey && neighborEtKey in loaded.scoped.entityTypes) {
+        n.entity = filterEntityProperties(
+          neighborEntity,
+          loaded.scoped.entityTypes[neighborEtKey]!,
+          fields,
+        );
+      } else if (neighborEtKey && neighborEtKey in loaded.full.entityTypes) {
+        // Type not in scope — still stub document values (never inline).
+        n.entity = stubDocumentProperties(
+          neighborEntity,
+          loaded.full.entityTypes[neighborEtKey]!.properties,
+          fields,
+        );
+      }
+      filteredNeighbors.push(n);
+    } else if (!rtKey) {
+      filteredNeighbors.push(n);
+    }
+  }
+
+  // Filter the centre entity.
+  entity = filterEntityProperties(entity, scopedEt, fields);
+
+  if (fields !== null && fields !== undefined) {
+    entity = applyFieldProjection(entity, fields, ENTITY_ALWAYS_FIELDS);
+    for (const n of filteredNeighbors) {
+      n.entity = applyFieldProjection(n.entity as Row, fields, ENTITY_NEIGHBOR_ALWAYS_FIELDS);
+    }
+  }
+  if (relationFields !== null && relationFields !== undefined) {
+    for (const n of filteredNeighbors) {
+      n.relation = applyFieldProjection(n.relation as Row, relationFields, RELATION_ALWAYS_FIELDS);
+    }
+  }
+
+  return { entity, neighbors: filteredNeighbors };
 }

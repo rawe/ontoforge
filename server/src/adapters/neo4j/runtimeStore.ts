@@ -17,10 +17,12 @@
 
 import neo4j, { type Driver } from "neo4j-driver";
 
+import type { ValidatedQuery } from "../../core/oql/index.js";
 import type { PropertyDef } from "../../runtime/schemaCache.js";
 import { documentVirtualLabel, toPascalCase, toUpperSnakeCase } from "./ddl.js";
 import { runSession } from "./errors.js";
 import { buildFilterClauses, buildSearchClause, toNeo4jParameter } from "./filters.js";
+import { compileQuery } from "./oqlCompiler.js";
 import * as queries from "./runtimeQueries.js";
 
 type Row = Record<string, unknown>;
@@ -287,6 +289,26 @@ export class Neo4jRuntimeStore {
   async deleteRelation(relationTypeKey: string, relationId: string): Promise<boolean> {
     return runSession(this.driver, (session) =>
       queries.deleteRelation(session, toUpperSnakeCase(relationTypeKey), relationId),
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // OQL
+  // ------------------------------------------------------------------
+
+  /**
+   * Compile a validated OQL query to Cypher and execute it read-only.
+   * The validated query crosses the port opaque (`core/ports.ts` rule 1);
+   * parameters arrive separately as a map (empty for ad-hoc queries —
+   * binding is a saved-query concern).
+   */
+  async executeOql(
+    validated: ValidatedQuery,
+    params: Row = {},
+  ): Promise<[string[], Row[]]> {
+    const cypher = compileQuery(validated);
+    return runSession(this.driver, (session) =>
+      queries.executeCypherRead(session, cypher, params),
     );
   }
 

@@ -12,7 +12,7 @@
 
 import neo4j, { type Session } from "neo4j-driver";
 
-import { convertNeo4jProperties } from "./temporal.js";
+import { convertNeo4jProperties, fromNeo4jValue } from "./temporal.js";
 
 type Row = Record<string, unknown>;
 
@@ -580,4 +580,60 @@ export async function deleteEntity(
   );
   const deleted = result.records[0]?.get("deleted") as number;
   return deleted > 0;
+}
+
+// --- OQL query execution ---
+
+/**
+ * Convert a single record value to a JSON-friendly, port-safe value.
+ *
+ * Nodes and relationships become plain property maps (a relationship's
+ * endpoints are NOT included — `docs/capabilities/oql.md#relation-endpoints-are-not-returned`),
+ * `_embedding` vectors are stripped from nodes, temporals are converted
+ * via `temporal.ts`, and lists/maps are deep-converted so nothing
+ * driver-shaped survives at any depth.
+ */
+function convertRecordValue(value: unknown): unknown {
+  if (neo4j.isNode(value)) {
+    return stripEmbedding(convertNeo4jProperties(value.properties as Row));
+  }
+  if (neo4j.isRelationship(value)) {
+    return convertNeo4jProperties(value.properties as Row);
+  }
+  if (Array.isArray(value)) {
+    return value.map(convertRecordValue);
+  }
+  if (value !== null && typeof value === "object" && value.constructor === Object) {
+    const result: Row = {};
+    for (const [k, v] of Object.entries(value)) {
+      result[k] = convertRecordValue(v);
+    }
+    return result;
+  }
+  return fromNeo4jValue(value);
+}
+
+/**
+ * Execute a read-only Cypher query and return `[columns, rows]`.
+ *
+ * Each row is a map of column names to converted values. Read-only is
+ * guaranteed by OQL validation upstream, not by a transaction mode —
+ * mirroring the Python reference.
+ */
+export async function executeCypherRead(
+  session: Session,
+  cypher: string,
+  params: Row,
+): Promise<[string[], Row[]]> {
+  const result = session.run(cypher, params);
+  const columns = await result.keys();
+  const { records } = await result;
+  const rows: Row[] = records.map((record) => {
+    const row: Row = {};
+    for (const col of columns) {
+      row[col] = convertRecordValue(record.get(col));
+    }
+    return row;
+  });
+  return [columns, rows];
 }

@@ -20,6 +20,7 @@ import { settings } from "../config.js";
 import { CoercionError, coerceValue } from "../core/dataTypes.js";
 import { getEmbeddingProvider } from "../core/embedding.js";
 import { ConflictError, NotFoundError, ValidationError } from "../core/exceptions.js";
+import { SYSTEM_PROPERTIES, getReturnVariables, parseAndValidate } from "../core/oql/index.js";
 import type { RuntimeStore } from "../core/ports.js";
 import { chunkDocument } from "./chunking.js";
 import { cpIndexOf, cpLength, cpSlice, countOccurrences } from "./codePoints.js";
@@ -28,6 +29,7 @@ import {
   type EntityTypeDef,
   type PropertyDef,
   type RelationTypeDef,
+  type SchemaCacheValue,
 } from "./schemaCache.js";
 
 type Row = Record<string, unknown>;
@@ -1203,4 +1205,142 @@ export async function getNeighbors(
   }
 
   return { entity, neighbors: filteredNeighbors };
+}
+
+// ---------------------------------------------------------------------------
+// OQL query execution
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate, compile, and execute a read-only OQL query.
+ *
+ * Returns `{columns, results}` with properties filtered to the scoped
+ * ontology schema. Parsing and validation happen here, above the port;
+ * the adapter compiles the validated query to its native dialect at
+ * execution time. Ad-hoc queries run with NO parameter values —
+ * placeholders parse, but binding is a saved-query concern.
+ */
+export async function executeQuery(
+  ontologyKey: string,
+  query: string,
+  store: RuntimeStore,
+): Promise<{ columns: string[]; results: Row[] }> {
+  const loaded = await loadSchema(ontologyKey, store);
+  const scoped = loaded.scoped;
+
+  // Map variables → schema keys (uses original type keys).
+  const varMap = getReturnVariables(query, scoped);
+
+  // Validate against the scoped schema; the adapter compiles the
+  // validated query to its native dialect at execution time.
+  const validated = parseAndValidate(query, scoped);
+
+  const [columns, rows] = await store.executeOql(validated);
+
+  // Post-process: filter out-of-scope properties and stub document values.
+  postprocessQueryRows(rows, varMap, scoped);
+
+  return { columns, results: rows };
+}
+
+function isPlainObject(value: unknown): value is Row {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    !(value instanceof Date)
+  );
+}
+
+/**
+ * Filter out-of-scope properties and stub document values (in place).
+ *
+ * Node/relationship maps are stripped to scoped properties with document
+ * values stubbed — per column, exactly as a read result is
+ * (`docs/capabilities/ontology-lenses.md#what-scoping-cuts`). Scalar
+ * columns of the form `var.property` that reference a document property
+ * are stubbed as well; an ALIASED projection of a document property is
+ * not of that form and returns the full text — the documented exception.
+ */
+function postprocessQueryRows(
+  rows: Row[],
+  varMap: Map<string, string | null>,
+  scoped: SchemaCacheValue,
+): void {
+  for (const row of rows) {
+    for (const [col, value] of Object.entries(row)) {
+      if (isPlainObject(value)) {
+        const typeKey = resolveTypeKeyForValue(col, value, varMap, scoped);
+        if (typeKey === null) {
+          continue;
+        }
+        row[col] = stripOutOfScopeProps(value, typeKey, scoped);
+      } else if (typeof value === "string" && col.includes(".")) {
+        // Scalar projection like `RETURN p.bio` — stub document values.
+        const dot = col.indexOf(".");
+        const variable = col.slice(0, dot).trim();
+        const prop = col.slice(dot + 1).trim();
+        const typeKey = varMap.get(variable);
+        if (typeKey === null || typeKey === undefined) {
+          continue;
+        }
+        const etDef = scoped.entityTypes[typeKey];
+        if (etDef === undefined) {
+          continue;
+        }
+        const propDef = etDef.properties[prop];
+        if (propDef !== undefined && propDef.dataType === "document") {
+          row[col] = { document: true, length: cpLength(value) };
+        }
+      }
+    }
+  }
+}
+
+/** Figure out the schema type key for a map returned by the store. */
+function resolveTypeKeyForValue(
+  column: string,
+  value: Row,
+  varMap: Map<string, string | null>,
+  schema: SchemaCacheValue,
+): string | null {
+  // If the column is a known variable, use the pre-built mapping.
+  if (varMap.has(column)) {
+    return varMap.get(column)!;
+  }
+  // Fallback: inspect _entityTypeKey or _relationTypeKey in the value.
+  const etk = value._entityTypeKey;
+  if (typeof etk === "string" && etk in schema.entityTypes) {
+    return etk;
+  }
+  const rtk = value._relationTypeKey;
+  if (typeof rtk === "string" && rtk in schema.relationTypes) {
+    return rtk;
+  }
+  return null;
+}
+
+/** Remove properties not in the scoped schema and stub documents. Unlike
+ * entity reads, only the SYSTEM properties survive here — other
+ * underscore-prefixed bookkeeping is stripped (Python parity). */
+function stripOutOfScopeProps(value: Row, typeKey: string, schema: SchemaCacheValue): Row {
+  let allowed: Set<string>;
+  let result = value;
+  const etDef = schema.entityTypes[typeKey];
+  const rtDef = schema.relationTypes[typeKey];
+  if (etDef !== undefined) {
+    allowed = new Set([...Object.keys(etDef.properties), ...SYSTEM_PROPERTIES]);
+    // Stub document values before the helper `_doc_*_length` keys are stripped.
+    result = stubDocumentProperties(value, etDef.properties);
+  } else if (rtDef !== undefined) {
+    allowed = new Set([...Object.keys(rtDef.properties), ...SYSTEM_PROPERTIES]);
+  } else {
+    return value;
+  }
+  for (const key of Object.keys(result)) {
+    if (!allowed.has(key)) {
+      delete result[key];
+    }
+  }
+  return result;
 }

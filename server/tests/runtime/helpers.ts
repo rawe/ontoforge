@@ -179,6 +179,7 @@ export interface MockRuntimeStore {
   updateRelation: Mock;
   deleteRelation: Mock;
   getNeighbors: Mock;
+  executeOql: Mock;
 }
 
 /** A mock store whose reads default to "nothing stored". */
@@ -202,6 +203,7 @@ export function createMockRuntimeStore(): MockRuntimeStore {
     updateRelation: vi.fn(async () => null),
     deleteRelation: vi.fn(async () => false),
     getNeighbors: vi.fn(async () => []),
+    executeOql: vi.fn(async () => [[], []]),
   };
 }
 

@@ -104,6 +104,9 @@ const DocumentEditPayload = z.looseObject({
   expect: z.string().nullish(),
 });
 
+/** OQL query request: the query text, nothing else (`docs/interfaces.md`). */
+const QueryPayload = z.looseObject({ query: z.string().min(1) });
+
 const RelationTypeParams = z.object({ ontologyKey: z.string(), relationTypeKey: z.string() });
 const RelationParams = z.object({
   ontologyKey: z.string(),
@@ -302,6 +305,15 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         relationFields ?? null,
       );
     },
+  );
+
+  // --- OQL query ---
+
+  app.post(
+    "/:ontologyKey/query",
+    { schema: { tags: ["runtime"], params: OntologyParams, body: QueryPayload } },
+    async (request) =>
+      service.executeQuery(request.params.ontologyKey, request.body.query, getRuntimeStore()),
   );
 
   // --- Relation instance CRUD ---

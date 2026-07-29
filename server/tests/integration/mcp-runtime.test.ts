@@ -147,7 +147,7 @@ describe("lens resolution", () => {
 });
 
 describe("tool surface", () => {
-  it("lists exactly the fifteen session-04/05/06 tools", async () => {
+  it("lists exactly the sixteen session-04/05/06/07 tools", async () => {
     const client = await connectClient(`${baseUrl}/mcp/runtime/test_ontology`);
     try {
       const tools = await client.listTools();
@@ -157,6 +157,7 @@ describe("tool surface", () => {
         "delete_entity",
         "delete_relation",
         "edit_document",
+        "execute_query",
         "get_document",
         "get_entity",
         "get_neighbors",

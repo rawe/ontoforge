@@ -559,5 +559,29 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
     }),
   );
 
+  server.registerTool(
+    "execute_query",
+    {
+      description:
+        "Execute a read-only OQL query (openCypher-style graph pattern syntax) " +
+        "against the ontology's scoped schema. " +
+        "Use schema entity type keys (snake_case) as node labels and relation type " +
+        "keys as relationship types. Only MATCH/RETURN queries are allowed — no " +
+        "writes, no CALL. " +
+        "All node patterns must include a label. Available types and properties can " +
+        "be discovered via the get_schema tool. System properties (_id, " +
+        "_entityTypeKey, _relationTypeKey, _createdAt, _updatedAt) are always " +
+        "available. " +
+        "Example: MATCH (p:person)-[r:works_for]->(c:company) WHERE p.name = 'Alice' RETURN p, c LIMIT 10",
+      inputSchema: {
+        query: z.string(),
+      },
+    },
+    wrap("execute_query", async (args: { query: string }) => {
+      const result = await service.executeQuery(ontologyKey, args.query, getRuntimeStore());
+      return jsonResult(result);
+    }),
+  );
+
   return server;
 }

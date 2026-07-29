@@ -18,14 +18,24 @@ import {
   CascadeRequiredError,
   ConflictError,
   NotFoundError,
+  StoreError,
   ValidationError,
 } from "../core/exceptions.js";
+import { parseAndValidate } from "../core/oql/index.js";
 import type { ModelingStore, RuntimeStore } from "../core/ports.js";
 import { DATA_TYPES } from "../core/schemas.js";
 import { buildTextRepr } from "../runtime/embedding.js";
-import { invalidateLoadedSchemaCache, type PropertyDef } from "../runtime/schemaCache.js";
+import {
+  invalidateLoadedSchemaCache,
+  loadSchema,
+  type PropertyDef,
+} from "../runtime/schemaCache.js";
 import { syncDocumentChunks } from "../runtime/service.js";
+import { VALID_AGENT_TOOLS } from "../runtime/toolNames.js";
+import { AGENT_KEY_PATTERN } from "./schemas.js";
 import type {
+  AiAgentConfigResponseBody,
+  AiAgentConfigUpsertInput,
   EntityTypeCreateInput,
   EntityTypeResponseBody,
   EntityTypeUpdateInput,
@@ -41,6 +51,10 @@ import type {
   RelationTypeCreateInput,
   RelationTypeResponseBody,
   RelationTypeUpdateInput,
+  SavedQueryResponseBody,
+  SavedQueryUpsertInput,
+  StepInput,
+  StepResponseBody,
   ValidationResultBody,
 } from "./schemas.js";
 import {
@@ -1137,7 +1151,7 @@ export async function* rebuildEmbeddings(
     totalFailed += failed;
   }
 
-  // Re-embed saved queries (empty list until session 09 stores them).
+  // Re-embed every saved-query description.
   const savedQueries = await store.listSavedQueryRefs();
 
   const sqTotal = savedQueries.length;
@@ -1223,4 +1237,366 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
     relationTypes,
     ontologies: [],
   };
+}
+
+// --- AI Agent Config ---
+
+const AGENT_KEY_REGEX = new RegExp(AGENT_KEY_PATTERN);
+
+/** Python list repr for message parity: `['a', 'b']`. */
+function pyList(items: string[]): string {
+  return `[${items.map((item) => `'${item}'`).join(", ")}]`;
+}
+
+async function resolveOntologyByKey(store: ModelingStore, ontologyKey: string): Promise<Row> {
+  const ont = await store.getOntologyByKey(ontologyKey);
+  if (!ont) {
+    throw new NotFoundError(`Ontology '${ontologyKey}' not found`);
+  }
+  return ont;
+}
+
+function toAiAgentResponse(data: Row): AiAgentConfigResponseBody {
+  return {
+    key: data.key as string,
+    name: data.name as string,
+    description: optString(data.description),
+    systemPrompt: optString(data.systemPrompt),
+    tools: (data.tools as string[] | null | undefined) ?? null,
+    createdAt: toIso(data.createdAt),
+    updatedAt: toIso(data.updatedAt),
+  };
+}
+
+export async function listAiAgents(
+  ontologyKey: string,
+  store: ModelingStore,
+): Promise<AiAgentConfigResponseBody[]> {
+  const ont = await resolveOntologyByKey(store, ontologyKey);
+  const rows = await store.listAiAgents(ont.ontologyId as string);
+  return rows.map(toAiAgentResponse);
+}
+
+/** Upsert by key. Returns `[response, created]`. */
+export async function upsertAiAgent(
+  ontologyKey: string,
+  agentKey: string,
+  body: AiAgentConfigUpsertInput,
+  store: ModelingStore,
+): Promise<[AiAgentConfigResponseBody, boolean]> {
+  if (!AGENT_KEY_REGEX.test(agentKey)) {
+    throw new ValidationError(
+      `Invalid agent key '${agentKey}'. Must match pattern: ${AGENT_KEY_PATTERN}`,
+    );
+  }
+  if (agentKey === "_default") {
+    throw new ValidationError("Agent key '_default' is reserved");
+  }
+
+  // The allowlist is validated against the fixed grantable set: an unknown
+  // name is rejected and the error names the valid set.
+  const tools = body.tools ?? null;
+  if (tools !== null) {
+    const unknown = tools.filter((t) => !VALID_AGENT_TOOLS.has(t));
+    if (unknown.length > 0) {
+      const available = [...VALID_AGENT_TOOLS].sort();
+      throw new ValidationError(
+        `Unknown tool(s): ${pyList(unknown)}. Available tools: ${pyList(available)}`,
+      );
+    }
+  }
+
+  const ont = await resolveOntologyByKey(store, ontologyKey);
+  const agentConfigId = randomUUID();
+  const [data, created] = await store.upsertAiAgent(
+    ont.ontologyId as string,
+    agentConfigId,
+    agentKey,
+    body.name,
+    body.description ?? null,
+    body.systemPrompt ?? null,
+    tools,
+  );
+  invalidateLoadedSchemaCache();
+  return [toAiAgentResponse(data), created];
+}
+
+export async function deleteAiAgent(
+  ontologyKey: string,
+  agentKey: string,
+  store: ModelingStore,
+): Promise<void> {
+  const ont = await resolveOntologyByKey(store, ontologyKey);
+  const deleted = await store.deleteAiAgent(ont.ontologyId as string, agentKey);
+  if (!deleted) {
+    throw new NotFoundError(`AI agent '${agentKey}' not found`);
+  }
+  invalidateLoadedSchemaCache();
+}
+
+// --- Saved Query Config ---
+
+const BINDING_PATTERN = /^\{\{(\w+)\.(\w+)\}\}$/;
+const PARAM_REF_PATTERN = /\$([a-zA-Z_]\w*)/g;
+
+function toStepResponse(s: Row): StepResponseBody {
+  return {
+    name: s.name as string,
+    type: s.type as string,
+    oql: (s.oql as string | undefined) ?? null,
+    entityTypeKey: (s.entityTypeKey as string | undefined) ?? null,
+    query: (s.query as string | undefined) ?? null,
+    limit: (s.limit as number | undefined) ?? null,
+    minScore: (s.minScore as number | undefined) ?? null,
+    bindings: (s.bindings as Record<string, string> | undefined) ?? null,
+  };
+}
+
+/** Convert a store row to the response shape, deserializing the JSON text
+ * the store holds uninterpreted. */
+function toSavedQueryResponse(data: Row): SavedQueryResponseBody {
+  const paramsRaw = data.parameters ?? "[]";
+  const paramsList = (
+    typeof paramsRaw === "string" ? JSON.parse(paramsRaw) : (paramsRaw ?? [])
+  ) as Row[];
+  const stepsRaw = data.steps ?? "[]";
+  const stepsList = (
+    typeof stepsRaw === "string" ? JSON.parse(stepsRaw) : (stepsRaw ?? [])
+  ) as Row[];
+  return {
+    key: data.key as string,
+    name: data.name as string,
+    description: data.description as string,
+    steps: stepsList.map(toStepResponse),
+    parameters: paramsList.map((p) => ({
+      name: p.name as string,
+      description: p.description as string,
+      dataType: p.dataType as never,
+    })),
+    createdAt: toIso(data.createdAt),
+    updatedAt: toIso(data.updatedAt),
+  };
+}
+
+/**
+ * Definition-time pipeline validation. Structural and cross-check failures
+ * are COLLECTED and reported together (`docs/capabilities/saved-queries.md`).
+ */
+function validatePipeline(steps: StepInput[], paramNames: string[], queryKey: string): void {
+  const errors: string[] = [];
+  const declaredParams = new Set(paramNames);
+  const seenStepNames = new Map<string, number>();
+
+  steps.forEach((step, i) => {
+    const prefix = `steps[${i}]`;
+
+    // Step name uniqueness.
+    if (seenStepNames.has(step.name)) {
+      errors.push(
+        `${prefix}.name: '${step.name}' already used by steps[${seenStepNames.get(step.name)}]`,
+      );
+    }
+    seenStepNames.set(step.name, i);
+
+    // Type-specific required fields.
+    if (step.type === "oql") {
+      if (!step.oql) {
+        errors.push(`${prefix}.oql: Required for oql steps`);
+      }
+    } else if (step.type === "semantic_search") {
+      if (!step.entityTypeKey) {
+        errors.push(`${prefix}.entityTypeKey: Required for semantic_search steps`);
+      }
+      if (!step.query) {
+        errors.push(`${prefix}.query: Required for semantic_search steps`);
+      }
+    }
+
+    // Bindings must match the reference form exactly and reference a step
+    // declared STRICTLY earlier — self and forward references are rejected.
+    if (step.bindings) {
+      for (const [paramName, expr] of Object.entries(step.bindings)) {
+        const match = BINDING_PATTERN.exec(expr);
+        if (!match) {
+          errors.push(
+            `${prefix}.bindings.${paramName}: Invalid expression '${expr}'. ` +
+              "Must be {{stepName.fieldName}}",
+          );
+          continue;
+        }
+        const refStep = match[1]!;
+        if (!seenStepNames.has(refStep) || seenStepNames.get(refStep)! >= i) {
+          errors.push(
+            `${prefix}.bindings.${paramName}: References step '${refStep}' ` +
+              "which does not exist before this step",
+          );
+        }
+      }
+    }
+  });
+
+  // Cross-check parameters against $param references across all oql steps.
+  const allQueryParams = new Set<string>();
+  const allBindingNames = new Set<string>();
+  for (const step of steps) {
+    if (step.bindings) {
+      for (const name of Object.keys(step.bindings)) {
+        allBindingNames.add(name);
+      }
+    }
+    if (step.type === "oql" && step.oql) {
+      for (const m of step.oql.matchAll(PARAM_REF_PATTERN)) {
+        allQueryParams.add(m[1]!);
+      }
+    }
+  }
+
+  // Params needed from the caller = all $refs minus those a binding supplies.
+  const neededFromUser = new Set([...allQueryParams].filter((p) => !allBindingNames.has(p)));
+  // $param refs in semantic_search query fields are always caller-supplied.
+  for (const step of steps) {
+    if (step.type === "semantic_search" && step.query) {
+      for (const m of step.query.matchAll(PARAM_REF_PATTERN)) {
+        neededFromUser.add(m[1]!);
+      }
+    }
+  }
+
+  const referencedNotDeclared = [...neededFromUser].filter((p) => !declaredParams.has(p)).sort();
+  const declaredNotUsed = [...declaredParams].filter((p) => !neededFromUser.has(p)).sort();
+  if (referencedNotDeclared.length > 0) {
+    errors.push(
+      `Parameters referenced in steps but not declared: ${pyList(referencedNotDeclared)}`,
+    );
+  }
+  if (declaredNotUsed.length > 0) {
+    errors.push(
+      `Parameters declared but not referenced in any step: ${pyList(declaredNotUsed)}`,
+    );
+  }
+
+  if (errors.length > 0) {
+    throw new ValidationError(`Saved query '${queryKey}' validation failed`, { errors });
+  }
+}
+
+export async function listSavedQueries(
+  ontologyKey: string,
+  store: ModelingStore,
+): Promise<SavedQueryResponseBody[]> {
+  const ont = await resolveOntologyByKey(store, ontologyKey);
+  const rows = await store.listSavedQueries(ont.ontologyId as string);
+  return rows.map(toSavedQueryResponse);
+}
+
+/** Upsert by key. Returns `[response, created]`. */
+export async function upsertSavedQuery(
+  ontologyKey: string,
+  queryKey: string,
+  body: SavedQueryUpsertInput,
+  store: ModelingStore,
+  runtimeStore: RuntimeStore,
+): Promise<[SavedQueryResponseBody, boolean]> {
+  if (!AGENT_KEY_REGEX.test(queryKey)) {
+    throw new ValidationError(
+      `Invalid query key '${queryKey}'. Must match pattern: ${AGENT_KEY_PATTERN}`,
+    );
+  }
+
+  // Parameters are scalars: any data type except document.
+  for (const p of body.parameters) {
+    if (p.dataType === "document") {
+      throw new ValidationError(
+        `Saved query parameter '${p.name}' has data type 'document'; ` +
+          "parameters must be scalar types",
+      );
+    }
+  }
+
+  // Validate pipeline structure and parameter cross-checks (collect-all).
+  validatePipeline(
+    body.steps,
+    body.parameters.map((p) => p.name),
+    queryKey,
+  );
+
+  const ont = await resolveOntologyByKey(store, ontologyKey);
+
+  // Validate each oql step against the lens's schema — skipped ONLY when
+  // that schema cannot be loaded (the run-time check still applies then).
+  try {
+    const loaded = await loadSchema(ontologyKey, runtimeStore);
+    for (const step of body.steps) {
+      if (step.type === "oql" && step.oql) {
+        parseAndValidate(step.oql, loaded.scoped);
+      }
+    }
+  } catch (exc) {
+    if (exc instanceof NotFoundError) {
+      // Ontology has no runtime schema loaded yet.
+    } else if (exc instanceof ValidationError || exc instanceof StoreError) {
+      // A storage failure loading the schema is not a problem with the
+      // submitted query; a validation failure IS one — both pass through.
+      throw exc;
+    } else {
+      throw new ValidationError(
+        `Query validation failed: ${exc instanceof Error ? exc.message : String(exc)}`,
+      );
+    }
+  }
+
+  const stepsJson = JSON.stringify(
+    body.steps.map((s) => ({
+      name: s.name,
+      type: s.type,
+      ...(s.oql ? { oql: s.oql } : {}),
+      ...(s.entityTypeKey ? { entityTypeKey: s.entityTypeKey } : {}),
+      ...(s.query ? { query: s.query } : {}),
+      ...(s.limit !== null && s.limit !== undefined ? { limit: s.limit } : {}),
+      ...(s.minScore !== null && s.minScore !== undefined ? { minScore: s.minScore } : {}),
+      ...(s.bindings && Object.keys(s.bindings).length > 0 ? { bindings: s.bindings } : {}),
+    })),
+  );
+  const paramsJson = JSON.stringify(
+    body.parameters.map((p) => ({
+      name: p.name,
+      description: p.description,
+      dataType: p.dataType,
+    })),
+  );
+
+  // Embed the description for semantic discovery over saved queries.
+  let embedding: number[] | null = null;
+  const provider = getEmbeddingProvider();
+  if (provider) {
+    embedding = await provider.embed(body.description);
+  }
+
+  const savedQueryId = randomUUID();
+  const [data, created] = await store.upsertSavedQuery(
+    ont.ontologyId as string,
+    savedQueryId,
+    queryKey,
+    body.name,
+    body.description,
+    stepsJson,
+    paramsJson,
+    ontologyKey,
+    embedding,
+  );
+  invalidateLoadedSchemaCache();
+  return [toSavedQueryResponse(data), created];
+}
+
+export async function deleteSavedQuery(
+  ontologyKey: string,
+  queryKey: string,
+  store: ModelingStore,
+): Promise<void> {
+  const ont = await resolveOntologyByKey(store, ontologyKey);
+  const deleted = await store.deleteSavedQuery(ont.ontologyId as string, queryKey);
+  if (!deleted) {
+    throw new NotFoundError(`Saved query '${queryKey}' not found`);
+  }
+  invalidateLoadedSchemaCache();
 }

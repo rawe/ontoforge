@@ -665,6 +665,52 @@ export async function semanticSearch(
   return items;
 }
 
+/**
+ * Semantic search over SavedQuery descriptions via the shared
+ * `saved_query_embedding` vector index, scoped to one ontology through
+ * in-index filtering on the denormalized `_ontologyKey`.
+ */
+export async function searchSavedQueries(
+  session: Session,
+  queryEmbedding: number[],
+  ontologyKey: string,
+  limit: number,
+  minScore: number | null,
+): Promise<Row[]> {
+  const query =
+    "MATCH (sq:SavedQuery) " +
+    "SEARCH sq IN (" +
+    "VECTOR INDEX saved_query_embedding " +
+    "FOR $query_embedding " +
+    "WHERE sq._ontologyKey = $ontology_key " +
+    "LIMIT $limit" +
+    ") SCORE AS score " +
+    "RETURN sq.key AS key, sq.name AS name, sq.description AS description, " +
+    "sq.parameters AS parameters, score";
+
+  const result = await session.run(query, {
+    query_embedding: queryEmbedding,
+    ontology_key: ontologyKey,
+    limit: neo4j.int(limit),
+  });
+
+  const items: Row[] = [];
+  for (const record of result.records) {
+    const score = record.get("score") as number;
+    if (minScore !== null && score < minScore) {
+      continue;
+    }
+    items.push({
+      key: record.get("key"),
+      name: record.get("name"),
+      description: record.get("description"),
+      parameters: record.get("parameters"),
+      score,
+    });
+  }
+  return items;
+}
+
 /** Delete an entity, its attached relations (DETACH) and its chunks. */
 export async function deleteEntity(
   session: Session,

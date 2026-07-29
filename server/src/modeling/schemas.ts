@@ -147,6 +147,85 @@ export const PropertyDefinitionResponse = z.object({
   updatedAt: z.iso.datetime(),
 });
 
+// --- AI Agent Config ---
+
+/**
+ * Agent and saved-query keys: hyphens allowed, unlike type and property
+ * keys. Kept as a STRING so validation-error messages can carry the exact
+ * pattern text the Python reference interpolates.
+ */
+export const AGENT_KEY_PATTERN = "^[a-z][a-z0-9_-]*$";
+
+export const AiAgentConfigUpsert = z.object({
+  name: z.string(),
+  description: z.string().nullable().optional(),
+  systemPrompt: z.string().nullable().optional(),
+  tools: z.array(z.string()).nullable().optional(),
+});
+
+export const AiAgentConfigResponse = z.object({
+  key: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  systemPrompt: z.string().nullable(),
+  tools: z.array(z.string()).nullable(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+});
+
+// --- Saved Query Config ---
+
+export const STEP_NAME_PATTERN = /^[a-zA-Z_]\w*$/;
+
+/** One saved-query step. `oql` steps carry the query text in `oql`;
+ * `semantic_search` steps carry their search text in `query`. */
+export const StepSchema = z.object({
+  name: z.string().regex(STEP_NAME_PATTERN),
+  type: z.enum(["oql", "semantic_search"]),
+  oql: z.string().nullable().optional(),
+  entityTypeKey: z.string().nullable().optional(),
+  query: z.string().nullable().optional(),
+  limit: z.number().int().min(1).max(100).nullable().optional(),
+  minScore: z.number().min(0).max(1).nullable().optional(),
+  bindings: z.record(z.string(), z.string()).nullable().optional(),
+});
+
+export const SavedQueryParameterSchema = z.object({
+  name: z.string().regex(STEP_NAME_PATTERN),
+  description: z.string(),
+  dataType: z.enum(DATA_TYPES),
+});
+
+export const SavedQueryUpsert = z.object({
+  name: z.string(),
+  description: z.string(),
+  steps: z.array(StepSchema).min(1),
+  parameters: z.array(SavedQueryParameterSchema).default([]),
+});
+
+/** Response steps carry every field, absent ones as explicit null —
+ * matching the Python response model's serialization. */
+export const StepResponse = z.object({
+  name: z.string(),
+  type: z.string(),
+  oql: z.string().nullable(),
+  entityTypeKey: z.string().nullable(),
+  query: z.string().nullable(),
+  limit: z.number().nullable(),
+  minScore: z.number().nullable(),
+  bindings: z.record(z.string(), z.string()).nullable(),
+});
+
+export const SavedQueryResponse = z.object({
+  key: z.string(),
+  name: z.string(),
+  description: z.string(),
+  steps: z.array(StepResponse),
+  parameters: z.array(SavedQueryParameterSchema),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+});
+
 export type OntologyCreateInput = z.infer<typeof OntologyCreate>;
 export type OntologyUpdateInput = z.infer<typeof OntologyUpdate>;
 export type OntologyResponseBody = z.infer<typeof OntologyResponse>;
@@ -163,3 +242,10 @@ export type RelationTypeResponseBody = z.infer<typeof RelationTypeResponse>;
 export type PropertyDefinitionCreateInput = z.infer<typeof PropertyDefinitionCreate>;
 export type PropertyDefinitionUpdateInput = z.infer<typeof PropertyDefinitionUpdate>;
 export type PropertyDefinitionResponseBody = z.infer<typeof PropertyDefinitionResponse>;
+export type AiAgentConfigUpsertInput = z.infer<typeof AiAgentConfigUpsert>;
+export type AiAgentConfigResponseBody = z.infer<typeof AiAgentConfigResponse>;
+export type StepInput = z.infer<typeof StepSchema>;
+export type SavedQueryParameterInput = z.infer<typeof SavedQueryParameterSchema>;
+export type SavedQueryUpsertInput = z.infer<typeof SavedQueryUpsert>;
+export type StepResponseBody = z.infer<typeof StepResponse>;
+export type SavedQueryResponseBody = z.infer<typeof SavedQueryResponse>;

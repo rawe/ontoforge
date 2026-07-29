@@ -5,7 +5,7 @@
  * store's own schema reads (runtime never calls modeling; the schema is a
  * VALUE to runtime, which is what makes this cache possible) and held in
  * memory: its scoped schema, the full schema, and its agent configurations
- * and saved queries (loaded but untyped until session 09).
+ * and saved queries (typed values from `core/ai.ts`).
  *
  * The cache is per process and cleared WHOLESALE by any modeling mutation —
  * every mutating modeling service path calls `invalidateLoadedSchemaCache`
@@ -18,6 +18,7 @@
  * longer resolve.
  */
 
+import type { AgentConfig, SavedQueryConfig, SavedQueryParameter, StepConfig } from "../core/ai.js";
 import { NotFoundError } from "../core/exceptions.js";
 import type { RuntimeStore } from "../core/ports.js";
 
@@ -60,10 +61,10 @@ export interface LoadedSchema {
   scoped: SchemaCacheValue;
   /** All types and properties — consulted for defaults and endpoint checks. */
   full: SchemaCacheValue;
-  /** Raw agent-config rows keyed by agent key (typed in session 09). */
-  agentConfigs: Record<string, Record<string, unknown>>;
-  /** Raw saved-query rows keyed by query key (typed in session 09). */
-  savedQueries: Record<string, Record<string, unknown>>;
+  /** Agent configurations keyed by agent key. */
+  agentConfigs: Record<string, AgentConfig>;
+  /** Saved-query pipelines keyed by query key. */
+  savedQueries: Record<string, SavedQueryConfig>;
 }
 
 type Row = Record<string, unknown>;
@@ -110,20 +111,61 @@ export async function loadSchema(
   );
 
   const agentRows = await store.getAiAgentConfigs(ontologyKey);
-  const agentConfigs: Record<string, Row> = {};
+  const agentConfigs: Record<string, AgentConfig> = {};
   for (const row of agentRows) {
-    agentConfigs[row.key as string] = row;
+    agentConfigs[row.key as string] = {
+      key: row.key as string,
+      name: row.name as string,
+      description: (row.description as string | undefined) ?? null,
+      systemPrompt: (row.systemPrompt as string | undefined) ?? null,
+      tools: (row.tools as string[] | undefined) ?? null,
+    };
   }
 
   const queryRows = await store.getSavedQueries(ontologyKey);
-  const savedQueries: Record<string, Row> = {};
+  const savedQueries: Record<string, SavedQueryConfig> = {};
   for (const row of queryRows) {
-    savedQueries[row.key as string] = row;
+    savedQueries[row.key as string] = toSavedQueryConfig(row);
   }
 
   const loaded: LoadedSchema = { scoped, full, agentConfigs, savedQueries };
   loadedSchemaCache.set(ontologyKey, loaded);
   return loaded;
+}
+
+/** Deserialize one stored saved-query row: `steps` and `parameters` are
+ * held as serialized text the store does not interpret. */
+function toSavedQueryConfig(row: Row): SavedQueryConfig {
+  const stepsRaw = row.steps ?? "[]";
+  const stepsList = (
+    typeof stepsRaw === "string" ? JSON.parse(stepsRaw) : (stepsRaw ?? [])
+  ) as Row[];
+  const paramsRaw = row.parameters ?? "[]";
+  const paramsList = (
+    typeof paramsRaw === "string" ? JSON.parse(paramsRaw) : (paramsRaw ?? [])
+  ) as Row[];
+  const steps: StepConfig[] = stepsList.map((s) => ({
+    name: s.name as string,
+    type: s.type as string,
+    oql: (s.oql as string | undefined) ?? null,
+    entityTypeKey: (s.entityTypeKey as string | undefined) ?? null,
+    query: (s.query as string | undefined) ?? null,
+    limit: (s.limit as number | undefined) ?? null,
+    minScore: (s.minScore as number | undefined) ?? null,
+    bindings: (s.bindings as Record<string, string> | undefined) ?? null,
+  }));
+  const parameters: SavedQueryParameter[] = paramsList.map((p) => ({
+    name: p.name as string,
+    description: p.description as string,
+    dataType: p.dataType as string,
+  }));
+  return {
+    key: row.key as string,
+    name: row.name as string,
+    description: row.description as string,
+    steps,
+    parameters,
+  };
 }
 
 function toPropertyDefs(rows: Row[] | undefined): Record<string, PropertyDef> {

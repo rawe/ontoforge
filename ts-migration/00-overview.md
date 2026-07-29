@@ -114,7 +114,7 @@ Update the Status column when a session completes.
 | 06 | [06-documents.md](06-documents.md) | Document reads, partial writes, chunker | Done (2026-07-29) |
 | 07 | [07-oql.md](07-oql.md) | OQL parser, validation, Neo4j compiler, `/query` | Done (2026-07-29) |
 | 08 | [08-semantic-search.md](08-semantic-search.md) | Embedding provider, vector indexes, semantic search, rebuild | Done (2026-07-29) |
-| 09 | [09-saved-queries-agents.md](09-saved-queries-agents.md) | Saved queries (define + run + search), agent configs | — |
+| 09 | [09-saved-queries-agents.md](09-saved-queries-agents.md) | Saved queries (define + run + search), agent configs | Done (2026-07-29) |
 | 10 | [10-transfer.md](10-transfer.md) | Schema export / import | — |
 | 11 | [11-ai-agents.md](11-ai-agents.md) | AI query/extract/chat, A2A (LangGraph), final parity sweep | — |
 

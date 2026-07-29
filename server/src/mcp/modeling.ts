@@ -18,9 +18,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z, ZodError } from "zod";
 
 import { NotFoundError, ValidationError } from "../core/exceptions.js";
-import { getModelingStore } from "../core/ports.js";
+import { getModelingStore, getRuntimeStore } from "../core/ports.js";
 import type { ModelingStore } from "../core/ports.js";
 import {
+  AiAgentConfigUpsert,
   EntityTypeCreate,
   EntityTypeUpdate,
   IncludeTypeRequest,
@@ -30,9 +31,11 @@ import {
   PropertyDefinitionUpdate,
   RelationTypeCreate,
   RelationTypeUpdate,
+  SavedQueryUpsert,
 } from "../modeling/schemas.js";
 import * as service from "../modeling/service.js";
 import type { OwnerLabel } from "../modeling/service.js";
+import { VALID_AGENT_TOOLS_CSV } from "../runtime/toolNames.js";
 
 // ---------------------------------------------------------------------------
 // Error flattening
@@ -726,6 +729,166 @@ export function createModelingMcpServer(): McpServer {
       const ontology = await resolveOntologyByKey(store, args.ontology_key);
       const result = await service.validateOntology(ontology.ontologyId as string, store);
       return jsonResult(result);
+    }),
+  );
+
+  // --- AI Agent Config Tools ---
+
+  server.registerTool(
+    "list_ai_agents",
+    {
+      description: "List all AI agent configurations for an ontology.",
+      inputSchema: {
+        ontology_key: z.string(),
+      },
+    },
+    wrap("list_ai_agents", async (args: { ontology_key: string }) => {
+      const results = await service.listAiAgents(args.ontology_key, getModelingStore());
+      return jsonResult(results);
+    }),
+  );
+
+  server.registerTool(
+    "set_ai_agent",
+    {
+      description:
+        "Create or update an AI agent configuration for an ontology. " +
+        "Key must match pattern ^[a-z][a-z0-9_-]*$ and cannot be '_default'. " +
+        `Tools must be valid tool names (${VALID_AGENT_TOOLS_CSV}). ` +
+        "Set tools=null to allow all tools.",
+      inputSchema: {
+        ontology_key: z.string(),
+        key: z.string(),
+        name: z.string(),
+        description: z.string().optional(),
+        system_prompt: z.string().optional(),
+        tools: z.array(z.string()).optional(),
+      },
+    },
+    wrap("set_ai_agent", async (args: {
+      ontology_key: string;
+      key: string;
+      name: string;
+      description?: string | undefined;
+      system_prompt?: string | undefined;
+      tools?: string[] | undefined;
+    }) => {
+      const body = AiAgentConfigUpsert.parse({
+        name: args.name,
+        description: args.description ?? null,
+        systemPrompt: args.system_prompt ?? null,
+        tools: args.tools ?? null,
+      });
+      const [result, created] = await service.upsertAiAgent(
+        args.ontology_key,
+        args.key,
+        body,
+        getModelingStore(),
+      );
+      return jsonResult({ ...result, created });
+    }),
+  );
+
+  server.registerTool(
+    "delete_ai_agent",
+    {
+      description: "Delete an AI agent configuration from an ontology.",
+      inputSchema: {
+        ontology_key: z.string(),
+        agent_key: z.string(),
+      },
+    },
+    wrap("delete_ai_agent", async (args: { ontology_key: string; agent_key: string }) => {
+      await service.deleteAiAgent(args.ontology_key, args.agent_key, getModelingStore());
+      return textResult(
+        `AI agent '${args.agent_key}' deleted from ontology '${args.ontology_key}'.`,
+      );
+    }),
+  );
+
+  // --- Saved Query Config Tools ---
+
+  server.registerTool(
+    "list_saved_queries",
+    {
+      description: "List all saved queries for an ontology.",
+      inputSchema: {
+        ontology_key: z.string(),
+      },
+    },
+    wrap("list_saved_queries", async (args: { ontology_key: string }) => {
+      const results = await service.listSavedQueries(args.ontology_key, getModelingStore());
+      return jsonResult(results);
+    }),
+  );
+
+  server.registerTool(
+    "set_saved_query",
+    {
+      description:
+        "Create or update a saved query pipeline for an ontology. " +
+        "Key must match pattern ^[a-z][a-z0-9_-]*$. " +
+        "Steps is an ordered array of pipeline steps. Each step requires a unique 'name' and a 'type'. " +
+        "Step types: " +
+        "'oql' — needs 'oql' field with a read-only OQL query (openCypher-style " +
+        "pattern syntax over entity/relation type keys) using $param placeholders. " +
+        "'semantic_search' — needs 'entityTypeKey' and 'query' (use $param_name to reference a declared parameter). " +
+        "Optional: 'limit' (default 10), 'minScore'. " +
+        "Data flow: steps can have 'bindings' dict mapping param names to '{{prevStepName.fieldName}}' " +
+        "which collects that field from all rows of a previous step's output into a list. " +
+        "Parameters define top-level $param placeholders. " +
+        "Each parameter needs: name, description, dataType (string/integer/float/boolean/date/datetime). " +
+        "Example: steps=[{name:'skills', type:'semantic_search', entityTypeKey:'skill', query:'$q', limit:5}, " +
+        "{name:'results', type:'oql', oql:'MATCH (p:person)-[:has_skill]->(s:skill) " +
+        "WHERE s._id IN $ids RETURN p', bindings:{ids:'{{skills._id}}'}}], parameters=[{name:'q', ...}]",
+      inputSchema: {
+        ontology_key: z.string(),
+        key: z.string(),
+        name: z.string(),
+        description: z.string(),
+        steps: z.array(z.record(z.string(), z.unknown())),
+        parameters: z.array(z.record(z.string(), z.unknown())).optional(),
+      },
+    },
+    wrap("set_saved_query", async (args: {
+      ontology_key: string;
+      key: string;
+      name: string;
+      description: string;
+      steps: Record<string, unknown>[];
+      parameters?: Record<string, unknown>[] | undefined;
+    }) => {
+      const body = SavedQueryUpsert.parse({
+        name: args.name,
+        description: args.description,
+        steps: args.steps,
+        parameters: args.parameters ?? [],
+      });
+      const [result, created] = await service.upsertSavedQuery(
+        args.ontology_key,
+        args.key,
+        body,
+        getModelingStore(),
+        getRuntimeStore(),
+      );
+      return jsonResult({ ...result, created });
+    }),
+  );
+
+  server.registerTool(
+    "delete_saved_query",
+    {
+      description: "Delete a saved query from an ontology.",
+      inputSchema: {
+        ontology_key: z.string(),
+        query_key: z.string(),
+      },
+    },
+    wrap("delete_saved_query", async (args: { ontology_key: string; query_key: string }) => {
+      await service.deleteSavedQuery(args.ontology_key, args.query_key, getModelingStore());
+      return textResult(
+        `Saved query '${args.query_key}' deleted from ontology '${args.ontology_key}'.`,
+      );
     }),
   );
 

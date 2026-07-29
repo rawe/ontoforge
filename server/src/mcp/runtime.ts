@@ -650,5 +650,70 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
     }),
   );
 
+  server.registerTool(
+    "list_saved_queries",
+    {
+      description:
+        "Discover available pre-defined queries and their required parameters. " +
+        "Each saved query has a key, name, description, and parameter definitions " +
+        "with name, description, and dataType.",
+      inputSchema: {},
+    },
+    wrap("list_saved_queries", async () => {
+      const result = await service.listSavedQueries(ontologyKey, getRuntimeStore());
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "run_saved_query",
+    {
+      description:
+        "Execute a saved query by name with parameter values. " +
+        "Use list_saved_queries to discover available queries and their required " +
+        "parameters first.",
+      inputSchema: {
+        query_key: z.string(),
+        params: z.record(z.string(), z.unknown()).optional(),
+      },
+    },
+    wrap("run_saved_query", async (args: {
+      query_key: string;
+      params?: Record<string, unknown> | undefined;
+    }) => {
+      const result = await service.executeSavedQuery(
+        ontologyKey,
+        args.query_key,
+        args.params ?? {},
+        getRuntimeStore(),
+      );
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "search_saved_queries",
+    {
+      description:
+        "Search saved queries by semantic similarity to a natural language " +
+        "description. Returns the most relevant saved queries ranked by how well " +
+        "their description matches. Use this to find the right saved query for a " +
+        "user's intent.",
+      inputSchema: {
+        query: z.string(),
+      },
+    },
+    wrap("search_saved_queries", async (args: { query: string }) => {
+      const result = await service.searchSavedQueries(
+        ontologyKey,
+        args.query,
+        3,
+        0.7,
+        getRuntimeStore(),
+      );
+      return jsonResult(result);
+    }),
+  );
+
   return server;
 }

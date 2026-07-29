@@ -408,6 +408,84 @@ export class Neo4jModelingStore {
   }
 
   // ------------------------------------------------------------------
+  // AI agent configs
+  // ------------------------------------------------------------------
+
+  async listAiAgents(ontologyId: string): Promise<Row[]> {
+    return runSession(this.driver, (session) => queries.listAiAgents(session, ontologyId));
+  }
+
+  async upsertAiAgent(
+    ontologyId: string,
+    agentConfigId: string,
+    key: string,
+    name: string,
+    description: string | null,
+    systemPrompt: string | null,
+    tools: string[] | null,
+  ): Promise<[Row, boolean]> {
+    return runSession(this.driver, (session) =>
+      queries.upsertAiAgent(
+        session,
+        ontologyId,
+        agentConfigId,
+        key,
+        name,
+        description,
+        systemPrompt,
+        tools,
+      ),
+    );
+  }
+
+  async deleteAiAgent(ontologyId: string, agentKey: string): Promise<boolean> {
+    return runSession(this.driver, (session) =>
+      queries.deleteAiAgent(session, ontologyId, agentKey),
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Saved query configs
+  // ------------------------------------------------------------------
+
+  async listSavedQueries(ontologyId: string): Promise<Row[]> {
+    return runSession(this.driver, (session) => queries.listSavedQueries(session, ontologyId));
+  }
+
+  async upsertSavedQuery(
+    ontologyId: string,
+    savedQueryId: string,
+    key: string,
+    name: string,
+    description: string,
+    stepsJson: string,
+    parametersJson: string,
+    ontologyKey: string | null = null,
+    embedding: number[] | null = null,
+  ): Promise<[Row, boolean]> {
+    return runSession(this.driver, (session) =>
+      queries.upsertSavedQuery(
+        session,
+        ontologyId,
+        savedQueryId,
+        key,
+        name,
+        description,
+        stepsJson,
+        parametersJson,
+        ontologyKey,
+        embedding,
+      ),
+    );
+  }
+
+  async deleteSavedQuery(ontologyId: string, queryKey: string): Promise<boolean> {
+    return runSession(this.driver, (session) =>
+      queries.deleteSavedQuery(session, ontologyId, queryKey),
+    );
+  }
+
+  // ------------------------------------------------------------------
   // Embedding maintenance (rebuild support)
   // ------------------------------------------------------------------
 

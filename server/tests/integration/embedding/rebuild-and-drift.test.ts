@@ -193,26 +193,42 @@ describe.skipIf(!ollamaUp)("rebuild and width drift (Ollama)", () => {
     });
   });
 
-  it("streams NDJSON progress records and a final summary", async () => {
+  it("streams NDJSON progress records and a final summary, saved queries included", async () => {
     await buildDriftFixture();
     await post("/api/runtime/index_drift_test/entities/person", { name: "Bob Smith" });
+    const defined = await app.inject({
+      method: "PUT",
+      url: "/api/model/ontologies/index_drift_test/saved-queries/everyone",
+      payload: {
+        name: "Everyone",
+        description: "List every person by name",
+        steps: [{ name: "main", type: "oql", oql: "MATCH (p:person) RETURN p.name AS name" }],
+        parameters: [],
+      },
+    });
+    expect(defined.statusCode, defined.body).toBe(201);
 
     const res = await app.inject({ method: "POST", url: "/api/model/rebuild-embeddings" });
     expect(res.statusCode, res.body).toBe(200);
     expect(res.headers["content-type"]).toContain("application/x-ndjson");
 
     const lines = res.body.trim().split("\n").map((line) => JSON.parse(line) as Row);
-    expect(lines.length).toBeGreaterThanOrEqual(3); // 2 entities + summary
+    expect(lines.length).toBeGreaterThanOrEqual(4); // 2 entities + 1 saved query + summary
 
     const progress = lines.filter((l) => l.type === "progress");
     for (const record of progress) {
       expect(Object.keys(record).sort()).toEqual(["entityTypeKey", "processed", "total", "type"]);
-      expect(record.entityTypeKey).toBe("person");
       expect(typeof record.processed).toBe("number");
-      expect(record.total).toBe(2);
     }
+    const personProgress = progress.filter((p) => p.entityTypeKey === "person");
     // Counts advance to the group total.
-    expect(progress.map((p) => p.processed)).toEqual([1, 2]);
+    expect(personProgress.map((p) => p.processed)).toEqual([1, 2]);
+    expect(personProgress.every((p) => p.total === 2)).toBe(true);
+
+    // The saved-query re-embed pass reports under its own group key.
+    const sqProgress = progress.filter((p) => p.entityTypeKey === "saved_queries");
+    expect(sqProgress.map((p) => p.processed)).toEqual([1]);
+    expect(sqProgress[0]!.total).toBe(1);
 
     const summary = lines[lines.length - 1]!;
     expect(summary.type).toBe("summary");
@@ -225,10 +241,56 @@ describe.skipIf(!ollamaUp)("rebuild and width drift (Ollama)", () => {
       "type",
     ]);
     expect(summary.entityTypes).toEqual([{ entityTypeKey: "person", processed: 2, failed: 0 }]);
-    expect(summary.savedQueriesProcessed).toBe(0);
+    expect(summary.savedQueriesProcessed).toBe(1);
     expect(summary.savedQueriesFailed).toBe(0);
-    expect(summary.totalProcessed).toBe(2);
+    expect(summary.totalProcessed).toBe(3);
     expect(summary.totalFailed).toBe(0);
+  });
+
+  it("rebuild re-embeds saved-query descriptions stored while no provider was configured", async () => {
+    await buildDriftFixture();
+
+    // Define a saved query with the provider absent: its description is
+    // stored without a vector and semantic discovery cannot see it.
+    disableProvider();
+    try {
+      const res = await app.inject({
+        method: "PUT",
+        url: "/api/model/ontologies/index_drift_test/saved-queries/find-people",
+        payload: {
+          name: "Find People",
+          description: "Find people and employees working at the company by their name",
+          steps: [{ name: "main", type: "oql", oql: "MATCH (p:person) RETURN p.name AS name" }],
+          parameters: [],
+        },
+      });
+      expect(res.statusCode, res.body).toBe(201);
+    } finally {
+      enableOllamaProvider();
+    }
+
+    const before = await app.inject({
+      method: "GET",
+      url:
+        "/api/runtime/index_drift_test/saved-queries/search?q=" +
+        encodeURIComponent("which people work here") +
+        "&min_score=0.1",
+    });
+    expect(before.statusCode).toBe(200);
+    expect((before.json() as Row[]).map((h) => h.key)).not.toContain("find-people");
+
+    const rebuild = await app.inject({ method: "POST", url: "/api/model/rebuild-embeddings" });
+    expect(rebuild.statusCode, rebuild.body).toBe(200);
+
+    const after = await app.inject({
+      method: "GET",
+      url:
+        "/api/runtime/index_drift_test/saved-queries/search?q=" +
+        encodeURIComponent("which people work here") +
+        "&min_score=0.1",
+    });
+    expect(after.statusCode).toBe(200);
+    expect((after.json() as Row[]).map((h) => h.key)).toContain("find-people");
   });
 
   it("rebuild embeds entities created while no provider was configured", async () => {

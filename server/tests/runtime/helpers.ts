@@ -178,6 +178,7 @@ export interface MockRuntimeStore {
   getEntitiesByIds: Mock;
   semanticSearch: Mock;
   semanticSearchAll: Mock;
+  searchSavedQueries: Mock;
   createRelation: Mock;
   listRelations: Mock;
   getRelation: Mock;
@@ -207,6 +208,7 @@ export function createMockRuntimeStore(): MockRuntimeStore {
     getEntitiesByIds: vi.fn(async () => ({})),
     semanticSearch: vi.fn(async () => []),
     semanticSearchAll: vi.fn(async () => []),
+    searchSavedQueries: vi.fn(async () => []),
     createRelation: vi.fn(),
     listRelations: vi.fn(async () => [[], 0]),
     getRelation: vi.fn(async () => null),

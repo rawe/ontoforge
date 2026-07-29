@@ -129,6 +129,21 @@ const DocumentEditPayload = z.looseObject({
 /** OQL query request: the query text, nothing else (`docs/interfaces.md`). */
 const QueryPayload = z.looseObject({ query: z.string().min(1) });
 
+const SavedQueryRunParams = z.object({ ontologyKey: z.string(), queryKey: z.string() });
+
+/** Saved-query run request: parameter values keyed by name. */
+const SavedQueryRunPayload = z.looseObject({
+  params: z.record(z.string(), z.unknown()).default({}),
+});
+
+/** `GET /saved-queries/search` — the Python router's exact bounds and
+ * defaults, including the `min_score` snake_case irregularity. */
+const SavedQuerySearchQuery = z.looseObject({
+  q: z.string().min(1),
+  limit: z.coerce.number().int().min(1).max(20).default(3),
+  min_score: z.coerce.number().min(0).max(1).default(0.7),
+});
+
 const RelationTypeParams = z.object({ ontologyKey: z.string(), relationTypeKey: z.string() });
 const RelationParams = z.object({
   ontologyKey: z.string(),
@@ -356,6 +371,40 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
     { schema: { tags: ["runtime"], params: OntologyParams, body: QueryPayload } },
     async (request) =>
       service.executeQuery(request.params.ontologyKey, request.body.query, getRuntimeStore()),
+  );
+
+  // --- Saved queries (runtime: list from the cache, search, run) ---
+
+  app.get(
+    "/:ontologyKey/saved-queries",
+    { schema: { tags: ["runtime"], params: OntologyParams } },
+    async (request) =>
+      service.listSavedQueries(request.params.ontologyKey, getRuntimeStore()),
+  );
+
+  app.get(
+    "/:ontologyKey/saved-queries/search",
+    { schema: { tags: ["runtime"], params: OntologyParams, querystring: SavedQuerySearchQuery } },
+    async (request) =>
+      service.searchSavedQueries(
+        request.params.ontologyKey,
+        request.query.q,
+        request.query.limit,
+        request.query.min_score,
+        getRuntimeStore(),
+      ),
+  );
+
+  app.post(
+    "/:ontologyKey/saved-queries/:queryKey/run",
+    { schema: { tags: ["runtime"], params: SavedQueryRunParams, body: SavedQueryRunPayload } },
+    async (request) =>
+      service.executeSavedQuery(
+        request.params.ontologyKey,
+        request.params.queryKey,
+        request.body.params,
+        getRuntimeStore(),
+      ),
   );
 
   // --- Relation instance CRUD ---

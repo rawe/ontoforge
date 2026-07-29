@@ -1839,6 +1839,272 @@ function resolveTypeKeyForValue(
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Saved-query execution
+// ---------------------------------------------------------------------------
+
+const BINDING_RE = /^\{\{(\w+)\.(\w+)\}\}$/;
+const PARAM_REF_RE = /\$([a-zA-Z_]\w*)/g;
+
+/** Python list repr for message parity: `['a', 'b']`. */
+function pyList(items: string[]): string {
+  return `[${items.map((item) => `'${item}'`).join(", ")}]`;
+}
+
+/** Python `str()` for a coerced parameter value in textual substitution. */
+function pyStr(value: unknown): string {
+  if (value === null || value === undefined) return "None";
+  if (typeof value === "boolean") return value ? "True" : "False";
+  if (value instanceof Date) return value.toISOString();
+  return String(value);
+}
+
+/**
+ * Resolve binding expressions against earlier step outputs: `fieldName`
+ * collected from every row IN ROW ORDER into a flat list. A row lacking
+ * the field is skipped; an empty list is not an error and flows on.
+ */
+export function resolveBindings(
+  bindings: Record<string, string>,
+  stepResults: Record<string, Row[]>,
+): Record<string, unknown[]> {
+  const resolved: Record<string, unknown[]> = {};
+  for (const [paramName, expr] of Object.entries(bindings)) {
+    const match = BINDING_RE.exec(expr);
+    if (!match) {
+      throw new ValidationError(`Invalid binding expression: ${expr}`);
+    }
+    const stepName = match[1]!;
+    const fieldName = match[2]!;
+    const rows = stepResults[stepName] ?? [];
+    resolved[paramName] = rows.filter((row) => fieldName in row).map((row) => row[fieldName]);
+  }
+  return resolved;
+}
+
+/** Replace `$name` references textually; an unmatched `$name` is left in
+ * the text verbatim. */
+export function substituteParams(template: string, params: Row): string {
+  return template.replace(PARAM_REF_RE, (whole, name: string) =>
+    name in params ? pyStr(params[name]) : whole,
+  );
+}
+
+/**
+ * Execute a saved query pipeline by key with parameter values
+ * (`docs/capabilities/saved-queries.md#execution`): exact parameter match,
+ * strict coercion (collect-all), steps in order, bindings resolved before
+ * each step, the LAST step's output returned post-processed like an ad-hoc
+ * query. Nothing proactively invalidates stored pipelines — a schema
+ * change surfaces here, at the next run.
+ */
+export async function executeSavedQuery(
+  ontologyKey: string,
+  queryKey: string,
+  params: Row,
+  store: RuntimeStore,
+): Promise<Row> {
+  const loaded = await loadSchema(ontologyKey, store);
+  const config = loaded.savedQueries[queryKey];
+  if (config === undefined) {
+    throw new NotFoundError(`Saved query '${queryKey}' not found`);
+  }
+
+  // Exact match: no optionals, no defaults; missing and unrecognized
+  // parameters are collected and reported together.
+  const declaredNames = new Set(config.parameters.map((p) => p.name));
+  const providedNames = new Set(Object.keys(params));
+  const missing = [...declaredNames].filter((n) => !providedNames.has(n)).sort();
+  const extra = [...providedNames].filter((n) => !declaredNames.has(n)).sort();
+  const errors: string[] = [];
+  if (missing.length > 0) {
+    errors.push(`Missing required parameters: ${pyList(missing)}`);
+  }
+  if (extra.length > 0) {
+    errors.push(`Unknown parameters: ${pyList(extra)}`);
+  }
+  if (errors.length > 0) {
+    throw new ValidationError(`Parameter validation failed: ${errors.join("; ")}`, { errors });
+  }
+
+  // Coerce values to their declared types with the same strict coercion as
+  // instance writes; all failures reported together, keyed by parameter.
+  const coercedParams: Row = {};
+  const coercionErrors: Record<string, string> = {};
+  for (const paramDef of config.parameters) {
+    try {
+      coercedParams[paramDef.name] = coerceValue(
+        params[paramDef.name],
+        paramDef.dataType,
+        paramDef.name,
+      );
+    } catch (exc) {
+      if (exc instanceof CoercionError) {
+        coercionErrors[paramDef.name] = exc.message;
+      } else {
+        throw exc;
+      }
+    }
+  }
+  if (Object.keys(coercionErrors).length > 0) {
+    throw new ValidationError("Parameter type coercion failed", { fields: coercionErrors });
+  }
+
+  const scoped = loaded.scoped;
+  const stepResults: Record<string, Row[]> = {};
+  let lastOutput: Row = { columns: [], results: [] };
+
+  for (const step of config.steps) {
+    // Resolve bindings from previous step outputs.
+    let resolvedBindings: Record<string, unknown> = {};
+    if (step.bindings) {
+      resolvedBindings = resolveBindings(step.bindings, stepResults);
+    }
+
+    if (step.type === "oql") {
+      // Every coerced parameter is passed to every oql step, plus that
+      // step's resolved bindings — the binding wins on a name collision.
+      const queryParams = { ...coercedParams, ...resolvedBindings };
+
+      const varMap = getReturnVariables(step.oql!, scoped);
+      const validated = parseAndValidate(step.oql!, scoped);
+
+      const [columns, rows] = await store.executeOql(validated, queryParams);
+
+      // Post-process exactly like an ad-hoc query: strip out-of-scope
+      // properties and stub document values.
+      postprocessQueryRows(rows, varMap, scoped);
+
+      stepResults[step.name] = rows;
+      lastOutput = { columns, results: rows };
+    } else if (step.type === "semantic_search") {
+      // Bindings are resolved but IGNORED here — only declared parameters
+      // reach the search text, textually substituted.
+      const queryText = substituteParams(step.query!, coercedParams);
+
+      const limit = step.limit || 10;
+      const minScore = step.minScore ?? null;
+
+      const result = await semanticSearch(
+        ontologyKey,
+        queryText,
+        step.entityTypeKey!,
+        limit,
+        minScore,
+        store,
+      );
+
+      // Flatten for bindings: each hit's entity map becomes a row, with
+      // the similarity score available under `_score`.
+      const results = (result.results as Row[] | undefined) ?? [];
+      const rows = results.map((r) => {
+        const row = r.entity as Row;
+        row._score = r._score ?? r.score;
+        return row;
+      });
+
+      stepResults[step.name] = rows;
+      lastOutput = result;
+    }
+  }
+
+  return lastOutput;
+}
+
+// ---------------------------------------------------------------------------
+// Saved-query discovery
+// ---------------------------------------------------------------------------
+
+/** One saved query in the runtime listing's wire shape: absent step fields
+ * are OMITTED (the Python router's conditional serialization). */
+function savedQueryToWire(sq: {
+  key: string;
+  name: string;
+  description: string;
+  steps: {
+    name: string;
+    type: string;
+    oql?: string | null;
+    entityTypeKey?: string | null;
+    query?: string | null;
+    limit?: number | null;
+    minScore?: number | null;
+    bindings?: Record<string, string> | null;
+  }[];
+  parameters: { name: string; description: string; dataType: string }[];
+}): Row {
+  return {
+    key: sq.key,
+    name: sq.name,
+    description: sq.description,
+    steps: sq.steps.map((s) => ({
+      name: s.name,
+      type: s.type,
+      ...(s.oql ? { oql: s.oql } : {}),
+      ...(s.entityTypeKey ? { entityTypeKey: s.entityTypeKey } : {}),
+      ...(s.query ? { query: s.query } : {}),
+      ...(s.limit !== null && s.limit !== undefined ? { limit: s.limit } : {}),
+      ...(s.minScore !== null && s.minScore !== undefined ? { minScore: s.minScore } : {}),
+      ...(s.bindings && Object.keys(s.bindings).length > 0 ? { bindings: s.bindings } : {}),
+    })),
+    parameters: sq.parameters.map((p) => ({
+      name: p.name,
+      description: p.description,
+      dataType: p.dataType,
+    })),
+  };
+}
+
+/** The lens's saved queries, served FROM THE SCHEMA CACHE — the runtime
+ * listing reflects the state of the process that answers it. */
+export async function listSavedQueries(ontologyKey: string, store: RuntimeStore): Promise<Row[]> {
+  const loaded = await loadSchema(ontologyKey, store);
+  return Object.values(loaded.savedQueries).map(savedQueryToWire);
+}
+
+/**
+ * Semantic search over saved-query DESCRIPTIONS — nothing else is
+ * embedded. Returns key/name/description/parameters/score, never steps.
+ * Requires an embedding provider (`details.code: FEATURE_DISABLED`).
+ */
+export async function searchSavedQueries(
+  ontologyKey: string,
+  query: string,
+  limit: number,
+  minScore: number | null,
+  store: RuntimeStore,
+): Promise<Row[]> {
+  const provider = getEmbeddingProvider();
+  if (!provider) {
+    throw new ValidationError(
+      "Semantic search requires EMBEDDING_PROVIDER to be configured",
+      { code: "FEATURE_DISABLED" },
+    );
+  }
+
+  const queryEmbedding = await provider.embed(query);
+  if (queryEmbedding === null) {
+    throw new ValidationError("Failed to generate embedding for search query");
+  }
+
+  const results = await store.searchSavedQueries(queryEmbedding, ontologyKey, limit, minScore);
+
+  // Deserialize the stored parameters JSON for each hit.
+  for (const r of results) {
+    const paramsRaw = r.parameters ?? "[]";
+    const paramsList = (
+      typeof paramsRaw === "string" ? JSON.parse(paramsRaw) : (paramsRaw ?? [])
+    ) as Row[];
+    r.parameters = paramsList.map((p) => ({
+      name: p.name,
+      description: p.description,
+      dataType: p.dataType,
+    }));
+  }
+
+  return results;
+}
+
 /** Remove properties not in the scoped schema and stub documents. Unlike
  * entity reads, only the SYSTEM properties survive here — other
  * underscore-prefixed bookkeeping is stripped (Python parity). */

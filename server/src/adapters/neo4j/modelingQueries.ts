@@ -942,3 +942,154 @@ export async function setSavedQueryEmbedding(
     { savedQueryId, embedding },
   );
 }
+
+// --- AI Agent Config ---
+
+export async function listAiAgents(session: Session, ontologyId: string): Promise<Row[]> {
+  const result = await session.run(
+    `
+    MATCH (o:Ontology {ontologyId: $ontologyId})-[:HAS_AI_AGENT]->(ac:AiAgentConfig)
+    RETURN ac {.*} AS agent
+    ORDER BY ac.name
+    `,
+    { ontologyId },
+  );
+  return result.records.map((record) => convertNeo4jProperties(record.get("agent") as Row));
+}
+
+/** MERGE-based upsert. Returns `[record, created]` — created is detected by
+ * whether ON CREATE stamped this call's fresh id onto the node. */
+export async function upsertAiAgent(
+  session: Session,
+  ontologyId: string,
+  agentConfigId: string,
+  key: string,
+  name: string,
+  description: string | null,
+  systemPrompt: string | null,
+  tools: string[] | null,
+): Promise<[Row, boolean]> {
+  const result = await session.run(
+    `
+    MATCH (o:Ontology {ontologyId: $ontologyId})
+    MERGE (o)-[:HAS_AI_AGENT]->(ac:AiAgentConfig {key: $key})
+    ON CREATE SET
+        ac.agentConfigId = $agentConfigId,
+        ac.name = $name,
+        ac.description = $description,
+        ac.systemPrompt = $systemPrompt,
+        ac.tools = $tools,
+        ac.createdAt = datetime(),
+        ac.updatedAt = datetime()
+    ON MATCH SET
+        ac.name = $name,
+        ac.description = $description,
+        ac.systemPrompt = $systemPrompt,
+        ac.tools = $tools,
+        ac.updatedAt = datetime()
+    RETURN ac {.*} AS agent, ac.agentConfigId = $agentConfigId AS created
+    `,
+    { ontologyId, agentConfigId, key, name, description, systemPrompt, tools },
+  );
+  const record = result.records[0]!;
+  return [convertNeo4jProperties(record.get("agent") as Row), record.get("created") as boolean];
+}
+
+export async function deleteAiAgent(
+  session: Session,
+  ontologyId: string,
+  agentKey: string,
+): Promise<boolean> {
+  const result = await session.run(
+    `
+    MATCH (o:Ontology {ontologyId: $ontologyId})-[:HAS_AI_AGENT]->(ac:AiAgentConfig {key: $agentKey})
+    DETACH DELETE ac
+    RETURN count(ac) AS deleted
+    `,
+    { ontologyId, agentKey },
+  );
+  return ((result.records[0]?.get("deleted") as number) ?? 0) > 0;
+}
+
+// --- Saved Query Config ---
+
+export async function listSavedQueries(session: Session, ontologyId: string): Promise<Row[]> {
+  const result = await session.run(
+    `
+    MATCH (o:Ontology {ontologyId: $ontologyId})-[:HAS_SAVED_QUERY]->(sq:SavedQuery)
+    RETURN sq {.*} AS query
+    ORDER BY sq.name
+    `,
+    { ontologyId },
+  );
+  return result.records.map((record) => convertNeo4jProperties(record.get("query") as Row));
+}
+
+/** MERGE-based upsert. Steps and parameters arrive as serialized text this
+ * store does not interpret; the denormalized `_ontologyKey` and the
+ * description embedding support in-index scoping of saved-query search. */
+export async function upsertSavedQuery(
+  session: Session,
+  ontologyId: string,
+  savedQueryId: string,
+  key: string,
+  name: string,
+  description: string,
+  stepsJson: string,
+  parametersJson: string,
+  ontologyKey: string | null = null,
+  embedding: number[] | null = null,
+): Promise<[Row, boolean]> {
+  const embeddingClause = embedding !== null ? ", sq._embedding = $embedding" : "";
+  const ontologyKeyClause = ontologyKey !== null ? ", sq._ontologyKey = $ontologyKey" : "";
+  const result = await session.run(
+    `
+    MATCH (o:Ontology {ontologyId: $ontologyId})
+    MERGE (o)-[:HAS_SAVED_QUERY]->(sq:SavedQuery {key: $key})
+    ON CREATE SET
+        sq.savedQueryId = $savedQueryId,
+        sq.name = $name,
+        sq.description = $description,
+        sq.steps = $stepsJson,
+        sq.parameters = $parametersJson,
+        sq.createdAt = datetime(),
+        sq.updatedAt = datetime()${ontologyKeyClause}${embeddingClause}
+    ON MATCH SET
+        sq.name = $name,
+        sq.description = $description,
+        sq.steps = $stepsJson,
+        sq.parameters = $parametersJson,
+        sq.updatedAt = datetime()${ontologyKeyClause}${embeddingClause}
+    RETURN sq {.*} AS query, sq.savedQueryId = $savedQueryId AS created
+    `,
+    {
+      ontologyId,
+      savedQueryId,
+      key,
+      name,
+      description,
+      stepsJson,
+      parametersJson,
+      ontologyKey,
+      embedding,
+    },
+  );
+  const record = result.records[0]!;
+  return [convertNeo4jProperties(record.get("query") as Row), record.get("created") as boolean];
+}
+
+export async function deleteSavedQuery(
+  session: Session,
+  ontologyId: string,
+  queryKey: string,
+): Promise<boolean> {
+  const result = await session.run(
+    `
+    MATCH (o:Ontology {ontologyId: $ontologyId})-[:HAS_SAVED_QUERY]->(sq:SavedQuery {key: $queryKey})
+    DETACH DELETE sq
+    RETURN count(sq) AS deleted
+    `,
+    { ontologyId, queryKey },
+  );
+  return ((result.records[0]?.get("deleted") as number) ?? 0) > 0;
+}

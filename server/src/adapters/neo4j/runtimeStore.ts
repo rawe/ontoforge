@@ -298,6 +298,18 @@ export class Neo4jRuntimeStore {
     );
   }
 
+  /** Rank SavedQuery descriptions for one lens by vector similarity. */
+  async searchSavedQueries(
+    queryEmbedding: number[],
+    ontologyKey: string,
+    limit: number,
+    minScore: number | null,
+  ): Promise<Row[]> {
+    return runSession(this.driver, (session) =>
+      queries.searchSavedQueries(session, queryEmbedding, ontologyKey, limit, minScore),
+    );
+  }
+
   // ------------------------------------------------------------------
   // Relation instances
   // ------------------------------------------------------------------

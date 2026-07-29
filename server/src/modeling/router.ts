@@ -16,6 +16,8 @@ import { getEmbeddingProvider } from "../core/embedding.js";
 import { ValidationError } from "../core/exceptions.js";
 import { getModelingStore, getRuntimeStore } from "../core/ports.js";
 import {
+  AiAgentConfigResponse,
+  AiAgentConfigUpsert,
   EntityTypeCreate,
   EntityTypeResponse,
   EntityTypeUpdate,
@@ -31,6 +33,8 @@ import {
   RelationTypeCreate,
   RelationTypeResponse,
   RelationTypeUpdate,
+  SavedQueryResponse,
+  SavedQueryUpsert,
   ValidationResult,
 } from "./schemas.js";
 import * as service from "./service.js";
@@ -47,6 +51,12 @@ const RelationTypePropertyParams = z.object({
   relationTypeId: z.string(),
   propertyId: z.string(),
 });
+
+// Agent configs and saved queries are the modeling exceptions addressed by
+// KEY, not internal identifier (`docs/interfaces.md`).
+const OntologyKeyParams = z.object({ ontologyKey: z.string() });
+const AgentKeyParams = z.object({ ontologyKey: z.string(), agentKey: z.string() });
+const QueryKeyParams = z.object({ ontologyKey: z.string(), queryKey: z.string() });
 
 // `cascade` arrives as a query-string token; accept the boolean spellings
 // the Python server accepts from its clients.
@@ -605,6 +615,107 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
         "RelationType",
         request.params.propertyId,
         request.query.cascade,
+        getModelingStore(),
+      );
+      return reply.status(204).send();
+    },
+  );
+
+  // --- AI Agent Configs (addressed by ontology key + agent key) ---
+
+  app.get(
+    "/ontologies/:ontologyKey/ai-agents",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: OntologyKeyParams,
+        response: { 200: z.array(AiAgentConfigResponse) },
+      },
+    },
+    async (request) => service.listAiAgents(request.params.ontologyKey, getModelingStore()),
+  );
+
+  app.put(
+    "/ontologies/:ontologyKey/ai-agents/:agentKey",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: AgentKeyParams,
+        body: AiAgentConfigUpsert,
+        response: { 200: AiAgentConfigResponse, 201: AiAgentConfigResponse },
+      },
+    },
+    async (request, reply) => {
+      const [result, created] = await service.upsertAiAgent(
+        request.params.ontologyKey,
+        request.params.agentKey,
+        request.body,
+        getModelingStore(),
+      );
+      return reply.status(created ? 201 : 200).send(result);
+    },
+  );
+
+  app.delete(
+    "/ontologies/:ontologyKey/ai-agents/:agentKey",
+    {
+      schema: { tags: ["modeling"], params: AgentKeyParams },
+    },
+    async (request, reply) => {
+      await service.deleteAiAgent(
+        request.params.ontologyKey,
+        request.params.agentKey,
+        getModelingStore(),
+      );
+      return reply.status(204).send();
+    },
+  );
+
+  // --- Saved Queries (addressed by ontology key + query key) ---
+
+  app.get(
+    "/ontologies/:ontologyKey/saved-queries",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: OntologyKeyParams,
+        response: { 200: z.array(SavedQueryResponse) },
+      },
+    },
+    async (request) => service.listSavedQueries(request.params.ontologyKey, getModelingStore()),
+  );
+
+  app.put(
+    "/ontologies/:ontologyKey/saved-queries/:queryKey",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: QueryKeyParams,
+        body: SavedQueryUpsert,
+        response: { 200: SavedQueryResponse, 201: SavedQueryResponse },
+      },
+    },
+    async (request, reply) => {
+      const [result, created] = await service.upsertSavedQuery(
+        request.params.ontologyKey,
+        request.params.queryKey,
+        request.body,
+        getModelingStore(),
+        getRuntimeStore(),
+      );
+      return reply.status(created ? 201 : 200).send(result);
+    },
+  );
+
+  app.delete(
+    "/ontologies/:ontologyKey/saved-queries/:queryKey",
+    {
+      schema: { tags: ["modeling"], params: QueryKeyParams },
+    },
+    async (request, reply) => {
+      await service.deleteSavedQuery(
+        request.params.ontologyKey,
+        request.params.queryKey,
         getModelingStore(),
       );
       return reply.status(204).send();

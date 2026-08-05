@@ -218,6 +218,33 @@ describe("tool failures", () => {
     expect(result.reply).toBe("fixed");
   });
 
+  it("schema-invalid tool arguments become the tool result and the run continues", async () => {
+    // The exact shape a real model emitted: filters must map strings to
+    // strings, but the model sent an array under "anyOf".
+    const fake = installFake([
+      toolCallMessage("list_entities", {
+        entity_type_key: "person",
+        filters: { anyOf: [{ name__contains: "Alice" }] },
+      }),
+      new AIMessage("recovered"),
+    ]);
+
+    const result = await aiChat("full_ontology", "find Alice", asRuntimeStore(store), null, true);
+
+    expect(result.reply).toBe("recovered");
+    // The second model call sees the parse failure as the tool's result.
+    const toolMessages = fake.calls[1]!.filter((m) => m instanceof ToolMessage);
+    expect(toolMessages).toHaveLength(1);
+    expect(String(toolMessages[0]!.content)).toContain("Invalid arguments for list_entities");
+    // The rejected call still appears in the trace.
+    expect(result.toolCalls).toEqual([
+      {
+        tool: "list_entities",
+        args: { entity_type_key: "person", filters: { anyOf: [{ name__contains: "Alice" }] } },
+      },
+    ]);
+  });
+
   it("any other error aborts the run", async () => {
     installFake([
       toolCallMessage("list_entities", { entity_type_key: "person" }),

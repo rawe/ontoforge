@@ -16,8 +16,14 @@
 import { randomUUID } from "node:crypto";
 
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
-import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from "@langchain/core/messages";
-import { tool, type StructuredToolInterface } from "@langchain/core/tools";
+import {
+  AIMessage,
+  HumanMessage,
+  SystemMessage,
+  ToolMessage,
+  type BaseMessage,
+} from "@langchain/core/messages";
+import { tool, ToolInputParsingException, type StructuredToolInterface } from "@langchain/core/tools";
 import { ToolNode, createReactAgent } from "@langchain/langgraph/prebuilt";
 import { z } from "zod";
 
@@ -341,8 +347,10 @@ export const ALL_TOOL_NAMES: ReadonlySet<string> = new Set(AGENT_TOOL_DEFS_BY_NA
 /**
  * Instantiate the named tools bound to one lens and one recorder. A tool
  * failure that is a not-found or validation error becomes the tool's
- * result (`{"error": message}`) so the model self-corrects; anything else
- * is rethrown and aborts the run.
+ * result (`{"error": message}`) so the model self-corrects; model-supplied
+ * arguments that fail the tool's schema are fed back the same way (the
+ * Python reference returns a retry prompt for those). Anything else is
+ * rethrown and aborts the run.
  */
 export function buildTools(
   ontologyKey: string,
@@ -356,29 +364,67 @@ export function buildTools(
     if (def === undefined) {
       continue;
     }
-    tools.push(
-      tool(
-        async (args: unknown) => {
-          const record: ToolCallRecord = { tool: def.name, args: (args ?? {}) as Row };
-          recorder.push(record);
-          let result: unknown;
-          try {
-            result = await def.run(ontologyKey, store, (args ?? {}) as Row);
-          } catch (error) {
-            if (error instanceof NotFoundError || error instanceof ValidationError) {
-              result = { error: error.message };
-            } else {
-              throw error;
-            }
+    const structured = tool(
+      async (args: unknown) => {
+        const record: ToolCallRecord = { tool: def.name, args: (args ?? {}) as Row };
+        recorder.push(record);
+        let result: unknown;
+        try {
+          result = await def.run(ontologyKey, store, (args ?? {}) as Row);
+        } catch (error) {
+          if (error instanceof NotFoundError || error instanceof ValidationError) {
+            result = { error: error.message };
+          } else {
+            throw error;
           }
-          record.result = result;
-          return typeof result === "string" ? result : JSON.stringify(result);
-        },
-        { name: def.name, description: def.description, schema: def.schema },
-      ) as StructuredToolInterface,
-    );
+        }
+        record.result = result;
+        return typeof result === "string" ? result : JSON.stringify(result);
+      },
+      { name: def.name, description: def.description, schema: def.schema },
+    ) as StructuredToolInterface;
+    tools.push(withArgumentSelfCorrection(structured, def.name, recorder));
   }
   return tools;
+}
+
+/**
+ * Argument parsing happens inside the tool's `invoke`, before the handler
+ * runs, so a schema-invalid tool call from the model would escape the
+ * self-correction path in `buildTools` and abort the run. Catch it there
+ * and return the validation failure as the tool's result instead.
+ */
+function withArgumentSelfCorrection(
+  structured: StructuredToolInterface,
+  toolName: string,
+  recorder: ToolCallRecord[],
+): StructuredToolInterface {
+  const baseInvoke = structured.invoke.bind(structured);
+  structured.invoke = async (...invokeArgs: Parameters<typeof baseInvoke>) => {
+    try {
+      return await baseInvoke(...invokeArgs);
+    } catch (error) {
+      if (!(error instanceof ToolInputParsingException)) {
+        throw error;
+      }
+      const [input] = invokeArgs;
+      const isToolCall =
+        input !== null && typeof input === "object" && "args" in (input as object);
+      const args = ((isToolCall ? (input as { args?: unknown }).args : input) ?? {}) as Row;
+      const result = { error: `Invalid arguments for ${toolName}: ${error.message}` };
+      recorder.push({ tool: toolName, args, result });
+      const content = JSON.stringify(result);
+      if (isToolCall) {
+        return new ToolMessage({
+          content,
+          name: toolName,
+          tool_call_id: String((input as { id?: unknown }).id ?? ""),
+        });
+      }
+      return content;
+    }
+  };
+  return structured;
 }
 
 // ---------------------------------------------------------------------------
@@ -428,9 +474,9 @@ const RECURSION_LIMIT = 100;
 
 /**
  * One ReAct-style run: system prompt, the given messages, the given tools.
- * Tool errors outside the self-correction pair abort (`handleToolErrors`
- * off — the wrapper in `buildTools` already fed domain errors back).
- * Returns the final reply text.
+ * Tool errors outside the self-correction paths abort (`handleToolErrors`
+ * off — the wrappers in `buildTools` already feed domain and argument
+ * errors back). Returns the final reply text.
  */
 async function runReactAgent(
   model: BaseChatModel,

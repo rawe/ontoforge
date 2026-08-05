@@ -9,7 +9,7 @@
 |------|---------------|-------|----------|
 | **Team Lead** | Coordinates flow, relays context between agents, spawns/assigns agents, wipes DB, restarts services | SendMessage, TaskCreate/Update, Bash (infra only) | Write code, run tests |
 | **Tester** (one per layer) | Executes test plan, reports PASS/FAIL with details, stands by for re-test | curl (backend) or Chrome extension (frontend) | Fix bugs, touch code |
-| **Dev Agent** | Fixes bugs reported by team lead, adds regression unit tests, runs unit test suite | Code editing, `uv run pytest` | Run integration/E2E tests, commit |
+| **Dev Agent** | Fixes bugs reported by team lead, adds regression unit tests, runs unit test suite | Code editing, `npm test` | Run integration/E2E tests, commit |
 
 ## Execution Flow
 
@@ -34,7 +34,7 @@
 - **Never run testers in parallel.** Backend must fully pass before frontend testing starts.
 - **Never run tester and dev agent on the same layer simultaneously.** Tester stands by while dev fixes.
 - **Always start from a clean state.** Wipe the DB before every test run — no leftover data, no race conditions.
-- **Server must reflect latest code.** After dev fixes, verify the server has reloaded (use `--reload` flag or restart manually) before re-testing.
+- **Server must reflect latest code.** After dev fixes, verify the server has reloaded (the dev server watches for changes; restart it manually if in doubt) before re-testing.
 
 ## Fresh State Protocol
 
@@ -89,7 +89,7 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/docs
 
 - Files changed (list)
 - New tests added (count and names)
-- Full pytest output (pass/fail count)
+- Full unit-test output (pass/fail count)
 
 ## Backend Test Plan (curl)
 

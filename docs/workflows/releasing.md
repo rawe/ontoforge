@@ -8,15 +8,15 @@ OntoForge uses two levels of versioning:
 
 - **System version** — the git tag (e.g., `v0.2.0`). Represents the overall OntoForge release and triggers the CI pipeline.
 - **Component versions** — defined in each component's package file:
-  - Backend: `version` in `backend/pyproject.toml`
+  - Backend: `version` in `server/package.json`
   - Frontend: `version` in `frontend/package.json`
 
-Component versions are embedded in container image labels during the build. Both components version in lockstep with the system version: the git tag `v{x.y.z}` always matches `version` in `backend/pyproject.toml` and `frontend/package.json`.
+Component versions are embedded in container image labels during the build. Both components version in lockstep with the system version: the git tag `v{x.y.z}` always matches `version` in `server/package.json` and `frontend/package.json`.
 
 ## Release Process
 
-1. Bump component versions in `backend/pyproject.toml` and `frontend/package.json`
-2. Sync lock files: `cd backend && uv sync` and `cd frontend && npm install --package-lock-only`
+1. Bump component versions in `server/package.json` and `frontend/package.json`
+2. Sync lock files: `npm install --package-lock-only` in `server/` and `frontend/`
 3. Commit the version bump (include both manifests and lock files)
 4. Tag: `git tag v{version}` (e.g., `git tag v0.2.0`)
 5. Push: `git push origin main --tags`

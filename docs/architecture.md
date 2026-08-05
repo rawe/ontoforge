@@ -130,12 +130,8 @@ Enforced in the service layer on every write path, whichever interface it arrive
 is the summary; each one is stated with its consequences in
 [capabilities/schema-modeling.md](capabilities/schema-modeling.md).
 
-- Type and property keys match `^[a-z][a-z0-9_]*$` when set through the modeling
-  interfaces. **Import does not re-check the pattern.** A hand-edited transfer payload can
-  therefore define a property key beginning with an underscore, defeating the namespace
-  separation above: entity creation applies user properties as a merge *after* setting the
-  system fields, so a property named `_id` lets an ordinary write overwrite the entity's
-  own identity. A reimplementation should validate keys on the import path too.
+- Type and property keys match `^[a-z][a-z0-9_]*$` on every path that sets them — the
+  modeling interfaces and import alike.
 - Entity type keys, relation type keys, ontology keys and ontology names are globally
   unique. Property keys are unique within their owning type.
 - A relation type may only be created if both endpoint entity types exist.
@@ -231,13 +227,8 @@ Two refinements:
 
 **`details.code` narrows, it does not replace.** Where it appears, the top-level code
 stays one of the six. A request for semantic search or saved-query search with no
-embedding provider configured answers `422 VALIDATION_ERROR` with `details.code` of
-`FEATURE_DISABLED`.
-
-This is not applied uniformly: an AI request with no language-model provider configured
-answers a plain `422 VALIDATION_ERROR` carrying no `details.code`. A client cannot
-currently distinguish "this capability is switched off" from "your input was wrong" on
-that path.
+embedding provider configured — or an AI request with no language-model provider
+configured — answers `422 VALIDATION_ERROR` with `details.code` of `FEATURE_DISABLED`.
 
 **`STORAGE_ERROR` carries an id, not a cause.** A driver message names the vendor and its
 physical objects, which must not reach a client. The adapter logs the original against a

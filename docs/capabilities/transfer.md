@@ -47,7 +47,8 @@ future use, not as a dispatch key.
 
 Import refuses to touch anything that already exists. If any entity type key, relation
 type key or ontology key in the payload is already present, the import fails with a
-conflict naming that key. There is no merge, no skip-existing and no per-object choice.
+conflict naming every such key. There is no merge, no skip-existing and no per-object
+choice.
 
 Two consequences:
 
@@ -55,10 +56,11 @@ Two consequences:
   present in the same payload; referring to an entity type that exists only in the target
   is rejected. In practice this is not a restriction, because such a type would have
   triggered a conflict anyway.
-- **Import is not atomic.** Objects created before the conflicting one are already
-  written and stay written. A failed import leaves a partial schema, and retrying the same
-  payload will then conflict on the objects the first attempt created. Recovery is manual:
-  delete what landed, then import again.
+- **Import validates before it writes.** The entire payload is checked first — every key
+  conflict and rule violation is reported together, and a rejected payload writes
+  nothing. Only a clean payload starts writing. The residual risk is a crash mid-write,
+  which can leave a partial schema; a retry after cleanup then behaves like a fresh
+  import.
 
 ### Replacing an existing schema
 

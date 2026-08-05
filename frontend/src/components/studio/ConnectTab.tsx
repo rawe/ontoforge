@@ -36,7 +36,7 @@ export function ConnectTab({ ontology }: { ontology: Ontology }) {
   const urlSnippet = JSON.stringify(
     {
       mcpServers: {
-        'ontoforge-modeling': { type: 'http', url: `${origin}/mcp/model/${key}` },
+        'ontoforge-modeling': { type: 'http', url: `${origin}/mcp/model` },
         'ontoforge-runtime': { type: 'http', url: `${origin}/mcp/runtime/${key}` },
       },
     },
@@ -50,7 +50,6 @@ export function ConnectTab({ ontology }: { ontology: Ontology }) {
         'ontoforge-modeling': {
           type: 'http',
           url: `${origin}/mcp/model`,
-          headers: { 'X-Ontology-Key': key },
         },
         'ontoforge-runtime': {
           type: 'http',
@@ -68,16 +67,19 @@ export function ConnectTab({ ontology }: { ontology: Ontology }) {
       <div className="rounded-xl border bg-card p-4">
         <h3 className="text-[13px] font-semibold">MCP — URL-based</h3>
         <p className="mb-3 mt-0.5 text-[12px] text-muted-foreground">
-          Point AI clients (Claude Code, Claude Desktop, …) at this ontology. The
-          ontology key <span className="font-mono">{key}</span> is part of the URL.
+          Point AI clients (Claude Code, Claude Desktop, …) at this ontology. The runtime
+          server is bound to <span className="font-mono">{key}</span> by its URL. The
+          modeling server is global — it works on the whole schema and takes the ontology
+          as a tool argument, so no key appears in its address.
         </p>
         <CodeBlock code={urlSnippet} label="URL-based MCP config" />
       </div>
       <div className="rounded-xl border bg-card p-4">
         <h3 className="text-[13px] font-semibold">MCP — header-based</h3>
         <p className="mb-3 mt-0.5 text-[12px] text-muted-foreground">
-          Same servers, with the ontology selected via the{' '}
-          <span className="font-mono">X-Ontology-Key</span> header instead of the URL.
+          Same servers, with the runtime ontology selected via the{' '}
+          <span className="font-mono">X-Ontology-Key</span> header instead of the URL. The
+          modeling server stays global either way.
         </p>
         <CodeBlock code={headerSnippet} label="Header-based MCP config" />
       </div>

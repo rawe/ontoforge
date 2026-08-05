@@ -12,9 +12,13 @@ import {
 import { toast } from 'sonner'
 import { useFeatures, useOntologies } from '@/api/hooks'
 import * as runtime from '@/api/runtime'
-import type { JsonValue, QueryResult, SavedQuery, SchemaRelationType } from '@/api/types'
+import type { JsonValue, QueryResult, SchemaRelationType } from '@/api/types'
 import { EmptyState } from '@/components/EmptyState'
-import { useDebouncedValue, useSavedQuerySearch } from '@/components/palette/usePaletteSearch'
+import {
+  useDebouncedValue,
+  useSavedQuerySearch,
+  type SavedQueryHit,
+} from '@/components/palette/usePaletteSearch'
 import { coerceTypedValue } from '@/components/studio/lib'
 import { TypedValueInput } from '@/components/studio/TypedValueInput'
 import { Badge } from '@/components/ui/badge'
@@ -35,7 +39,8 @@ function RunPanel({
   autoRun,
 }: {
   ontologyKey: string
-  query: SavedQuery
+  /** Full query or step-less search hit — running only needs key + parameters. */
+  query: SavedQueryHit
   relationTypes: readonly SchemaRelationType[]
   /** Fire the run immediately on mount (palette `?run=` hand-off). */
   autoRun: boolean
@@ -147,7 +152,10 @@ function RunPanel({
 
 /* ----------------------------------- cards ----------------------------------- */
 
-function stepBadges(query: SavedQuery) {
+function stepBadges(query: SavedQueryHit) {
+  // Semantic-search hits carry no steps (the search endpoint never returns
+  // them) — render those cards without step badges.
+  if (!('steps' in query)) return []
   const queryCount = query.steps.filter((s) => s.type === 'oql').length
   const semanticCount = query.steps.filter((s) => s.type === 'semantic_search').length
   const badges: string[] = []

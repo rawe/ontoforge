@@ -20,6 +20,7 @@ import type {
   RelationInstance,
   RuntimeSchema,
   SavedQuery,
+  SavedQuerySearchHit,
   SchemaEntityType,
   SchemaRelationType,
   SemanticSearchResponse,
@@ -239,7 +240,7 @@ export const searchSavedQueries = (
   ontologyKey: string,
   params: { q: string; limit?: number; minScore?: number },
 ) =>
-  request<SavedQuery[]>(
+  request<SavedQuerySearchHit[]>(
     `${base(ontologyKey)}/saved-queries/search${buildQuery({
       q: params.q,
       limit: params.limit,

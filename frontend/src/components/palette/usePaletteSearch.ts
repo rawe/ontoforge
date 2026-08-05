@@ -6,7 +6,12 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import * as runtime from '@/api/runtime'
-import type { EntityInstance, SavedQuery, SearchMatchedVia } from '@/api/types'
+import type {
+  EntityInstance,
+  SavedQuery,
+  SavedQuerySearchHit,
+  SearchMatchedVia,
+} from '@/api/types'
 
 export function useDebouncedValue<T>(value: T, delayMs: number): T {
   const [debounced, setDebounced] = useState(value)
@@ -99,8 +104,16 @@ export function useEntitySearch({
 }
 
 /**
+ * One row of a saved-query lookup: a full `SavedQuery` when it came from the
+ * listing (or substring fallback), a step-less `SavedQuerySearchHit` when it
+ * came from semantic search — narrow with `'steps' in hit` before using steps.
+ */
+export type SavedQueryHit = SavedQuery | SavedQuerySearchHit
+
+/**
  * Saved-query lookup for the `?` palette mode. Empty query → full list;
  * otherwise semantic search when available, substring filter when not.
+ * Semantic hits carry no steps (the search endpoint never returns them).
  */
 export function useSavedQuerySearch(
   ontologyKey: string,
@@ -112,7 +125,7 @@ export function useSavedQuerySearch(
     queryKey: ['palette', 'savedQuerySearch', ontologyKey, q, semantic],
     enabled,
     placeholderData: keepPreviousData,
-    queryFn: async (): Promise<SavedQuery[]> => {
+    queryFn: async (): Promise<SavedQueryHit[]> => {
       if (q === '') return runtime.listSavedQueries(ontologyKey)
       if (semantic && q.length >= 2) {
         return runtime.searchSavedQueries(ontologyKey, { q, limit: 10, minScore: 0.3 })

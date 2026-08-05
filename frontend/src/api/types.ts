@@ -95,6 +95,20 @@ export interface SavedQuery {
   parameters: SavedQueryParameter[]
 }
 
+/**
+ * A hit from semantic saved-query search. Discovery search deliberately
+ * returns the query *without* its steps (only key, name, description,
+ * parameters and a relevance score) — see docs/capabilities/saved-queries.md,
+ * "Discovery". Use the full listing when steps are needed.
+ */
+export interface SavedQuerySearchHit {
+  key: string
+  name: string
+  description: string | null
+  parameters: SavedQueryParameter[]
+  score: number
+}
+
 export interface AiAgent {
   key: string
   name: string
@@ -365,6 +379,7 @@ export const AGENT_TOOL_NAMES = [
   'semantic_search',
   'execute_query',
   'list_saved_queries',
+  'search_saved_queries',
   'run_saved_query',
 ] as const
 export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number]

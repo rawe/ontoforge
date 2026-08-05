@@ -32,7 +32,7 @@ GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 # Component versions (from their respective package files)
-SERVER_VERSION := $(shell grep -m1 'version' backend/pyproject.toml | cut -d'"' -f2)
+SERVER_VERSION := $(shell grep -m1 '"version"' server/package.json | cut -d'"' -f4)
 UI_VERSION := $(shell grep -m1 '"version"' frontend/package.json | cut -d'"' -f4)
 
 # Default target
@@ -55,9 +55,9 @@ help:
 #   No PUSH (local): --load into local daemon, no registry interaction, works offline.
 #
 # Cache strategy: Each image has a :buildcache tag in GHCR that stores cached layers.
-# The Dockerfiles copy dependency files (pyproject.toml/package.json) before source code,
-# so dependency-install layers are cache hits when only source code changes. The UI image
-# is multi-stage (Node build → nginx), so mode=max is used to cache all stages.
+# The Dockerfiles copy dependency files (package.json/package-lock.json) before source
+# code, so dependency-install layers are cache hits when only source code changes. Both
+# images are multi-stage, so mode=max is used to cache all stages.
 
 release: _check-version release-server release-ui
 	@echo ""
@@ -97,9 +97,9 @@ ifdef PUSH
 		--cache-to type=registry,ref=$(IMAGE_SERVER):buildcache,mode=max \
 		-t $(IMAGE_SERVER):$(VERSION) \
 		-t $(IMAGE_SERVER):latest \
-		-f backend/Dockerfile \
+		-f server/Dockerfile \
 		--push \
-		backend
+		server
 else
 	docker buildx build \
 		--build-arg VERSION=$(VERSION) \
@@ -108,9 +108,9 @@ else
 		--build-arg BUILD_DATE=$(BUILD_DATE) \
 		-t $(IMAGE_SERVER):$(VERSION) \
 		-t $(IMAGE_SERVER):latest \
-		-f backend/Dockerfile \
+		-f server/Dockerfile \
 		--load \
-		backend
+		server
 endif
 
 release-ui: _check-version

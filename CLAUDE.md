@@ -6,22 +6,11 @@ OntoForge is a graph-native ontology studio for designing graph schemas and usin
 
 Monorepo with two main parts:
 
-- **Frontend** — React (npm)
-- **Backend** — Python
+- **Frontend** — React (`frontend/`)
+- **Backend** — TypeScript on Node.js (`server/`)
 
-## Python: uv (NOT pip)
-
-**This project uses [uv](https://docs.astral.sh/uv/) for all Python dependency and environment management.**
-
-- Do NOT use `pip install`, `pip freeze`, or `pip` commands directly.
-- Use `uv run` to execute scripts and commands within the project environment.
-- Use `uv add` / `uv remove` to manage dependencies.
-- Use `uv sync` to install dependencies from the lockfile.
-- The virtual environment lives in `.venv/` and is managed by uv automatically.
-
-## Frontend: npm
-
-- Use `npm install`, `npm run`, etc. for frontend tasks.
+Both are npm projects: use `npm install`, `npm run`, etc. There is no Python in this
+repository.
 
 ## Design Principles
 
@@ -55,8 +44,7 @@ not documentation of the system.
 - **Multi-agent test-and-fix cycles** — [docs/workflows/test-cycle.md](docs/workflows/test-cycle.md): agent roles, execution flow, fresh-state protocol, handover formats.
 - **Releasing** — [docs/workflows/releasing.md](docs/workflows/releasing.md). Read it before tagging a release.
 
-Documentation of a single script stays beside that script (`scripts/USAGE.md`,
-`backend/scripts/bench.md`).
+Documentation of a single script stays beside that script (`scripts/USAGE.md`).
 
 ## Local Development Setup
 
@@ -65,7 +53,7 @@ Documentation of a single script stays beside that script (`scripts/USAGE.md`,
 docker compose up -d
 
 # 2. Start the backend (serves both modeling and runtime APIs)
-cd backend && uv run uvicorn ontoforge_server.main:app --host 0.0.0.0 --port 8000
+cd server && npm run dev
 
 # 3. Start the frontend (in a separate terminal)
 cd frontend && npm run dev

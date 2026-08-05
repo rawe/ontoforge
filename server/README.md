@@ -1,9 +1,8 @@
-# OntoForge Server (TypeScript)
+# OntoForge Server
 
-The TypeScript implementation of the OntoForge backend: modeling API, runtime API,
-both MCP servers, and the OpenAPI description — one process, serving everything.
-It is a drop-in replacement for the Python backend in `backend/`; both implement
-the same API described in [docs/](../docs/README.md).
+The OntoForge backend: modeling API, runtime API, both MCP servers, and the
+OpenAPI description — one process, serving everything. It implements the API
+described in [docs/](../docs/README.md).
 
 ## Prerequisites
 

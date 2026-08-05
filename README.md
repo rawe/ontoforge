@@ -142,8 +142,7 @@ For local development with hot reload, run Neo4j in Docker and the backend/front
 ### Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) and Docker Compose
-- [uv](https://docs.astral.sh/uv/) (Python package manager)
-- [Node.js](https://nodejs.org/) 18+ and npm
+- [Node.js](https://nodejs.org/) ≥ 22 LTS and npm
 
 ### 1. Start Neo4j
 
@@ -154,9 +153,9 @@ docker compose up -d neo4j
 ### 2. Start the Backend
 
 ```bash
-cd backend
-uv sync
-uv run uvicorn ontoforge_server.main:app --reload --port 8000
+cd server
+npm install
+npm run dev
 ```
 
 The API is available at `http://localhost:8000`. On startup it creates Neo4j constraints. The runtime schema cache is loaded lazily on first request per ontology.
@@ -177,8 +176,8 @@ Open `http://localhost:5173` in your browser.
 ### Run Tests
 
 ```bash
-cd backend
-uv run pytest -v
+cd server
+npm test
 ```
 
 This runs the unit tests only — they are mocked and need no running services.
@@ -216,13 +215,14 @@ ontoforge/
 │   └── docker-compose.yml          # Full stack: Neo4j + backend + frontend
 ├── examples/
 │   └── docker-compose/             # Run OntoForge from pre-built images
-├── backend/
+├── server/
 │   ├── Dockerfile
-│   ├── pyproject.toml              # Python deps (uv-managed)
-│   ├── src/ontoforge_server/
-│   │   ├── main.py                 # FastAPI app, mounts both routers
-│   │   ├── config.py               # Environment-based settings
-│   │   ├── core/                   # Shared: persistence port, exceptions, schema models
+│   ├── package.json                # TypeScript backend (Node.js + Fastify)
+│   ├── src/
+│   │   ├── main.ts                 # Server startup
+│   │   ├── app.ts                  # Fastify app, mounts routes and MCP servers
+│   │   ├── config.ts               # Environment-based settings
+│   │   ├── core/                   # Shared: persistence port, exceptions, OQL, AI
 │   │   ├── adapters/               # Database adapters (Neo4j)
 │   │   ├── modeling/               # Schema CRUD, validation, export/import
 │   │   ├── runtime/                # Instance CRUD, search, graph traversal
@@ -247,7 +247,7 @@ ontoforge/
 
 ## Configuration
 
-The backend reads settings from environment variables (or a `.env` file in `backend/`):
+The backend reads settings from environment variables (or a `.env` file in `server/`):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -314,7 +314,7 @@ git tag v1.0.0 && git push origin v1.0.0
 
 | Image | Description |
 |-------|-------------|
-| `ghcr.io/rawe/ontoforge-server:1.0.0` | Python FastAPI backend |
+| `ghcr.io/rawe/ontoforge-server:1.0.0` | Backend server (Node.js) |
 | `ghcr.io/rawe/ontoforge-ui:1.0.0` | React frontend (nginx) |
 
 Each image is also tagged `:latest`. See `Makefile` for manual builds and [`examples/docker-compose/`](examples/docker-compose/) for a ready-to-use setup.

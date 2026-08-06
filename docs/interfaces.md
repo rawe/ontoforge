@@ -423,7 +423,7 @@ lens or reach across two.
 
 | Tool | Purpose |
 |---|---|
-| `get_schema` | The whole global schema: types, relation types, properties |
+| `get_schema` | The whole global schema — types, relation types, properties, and every lens with its inclusions, agents and saved queries. Identical to `export_schema`, and the only way to enumerate lenses: there is no `list_ontologies` |
 | `create_entity_type` | Add an entity type |
 | `update_entity_type` | Change display name or description; the key is immutable |
 | `delete_entity_type` | Remove an entity type and its properties |

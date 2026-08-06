@@ -694,12 +694,52 @@ function pyStr(value: unknown): string {
   return String(value);
 }
 
-/** Create a stable key from match properties for entity lookup. */
-function matchKey(props: Row): string {
-  return Object.keys(props)
-    .sort()
-    .map((k) => `${k}=${pyStr(props[k])}`)
-    .join("|");
+/** One entity created during a persisting extraction, with the type it was
+ * created as — the endpoint resolver needs both. */
+interface CreatedEntity {
+  entityTypeKey: string;
+  entity: Row;
+}
+
+/** Normalize a value for endpoint comparison. The match map comes from the
+ * model as raw JSON while the entity's properties have been through the
+ * write pipeline, so `28` must equal `"28"` and a coerced datetime must
+ * equal the ISO string the model wrote. */
+function matchValue(value: unknown): string {
+  if (value instanceof Date) return value.toISOString();
+  return pyStr(value);
+}
+
+/**
+ * Resolve one relation endpoint against the entities created in this call.
+ *
+ * The match map is a SUBSET of the entity's written properties: an endpoint
+ * naming `{name}` resolves an entity that also carries an age. Comparison is
+ * against what the write pipeline stored, not what the model proposed, so
+ * coercion cannot cause a near-miss.
+ *
+ * Two endpoints never resolve: one that matches nothing, and one that
+ * matches more than one entity. An ambiguous endpoint is dropped rather than
+ * guessed — a relation attached to the wrong entity is worse than a missing
+ * one, because nothing downstream can tell it was wrong. An empty match map
+ * matches nothing for the same reason.
+ */
+function resolveEndpoint(
+  created: CreatedEntity[],
+  endpoint: ExtractedRelationEndpoint,
+): { entity: Row } | { reason: string } {
+  const wanted = Object.entries(endpoint.match);
+  if (wanted.length === 0) return { reason: "carried no match properties" };
+
+  const matches = created.filter(
+    (candidate) =>
+      candidate.entityTypeKey === endpoint.entityTypeKey &&
+      wanted.every(([key, value]) => matchValue(candidate.entity[key]) === matchValue(value)),
+  );
+
+  if (matches.length === 1) return { entity: matches[0]!.entity };
+  if (matches.length === 0) return { reason: "matched no entity created in this call" };
+  return { reason: `matched ${matches.length} entities created in this call` };
 }
 
 /** Extract entities and relations from text using the ontology schema. */
@@ -744,12 +784,13 @@ export async function aiExtract(
       properties: r.properties,
     })),
     created: false,
+    droppedRelations: [],
   };
 
   if (create) {
     // Entities first; relation endpoints resolve ONLY against entities
     // created in this same call. No dedup against existing data.
-    const createdEntities = new Map<string, Row>();
+    const createdEntities: CreatedEntity[] = [];
     for (const entity of extraction.entities) {
       const created = await service.createEntity(
         ontologyKey,
@@ -757,29 +798,44 @@ export async function aiExtract(
         entity.properties,
         store,
       );
-      createdEntities.set(`${entity.entityTypeKey}:${matchKey(entity.properties)}`, created);
+      createdEntities.push({ entityTypeKey: entity.entityTypeKey, entity: created });
     }
 
+    // An unresolvable endpoint drops its relation without failing the call,
+    // but never silently: every drop is reported with the reason, so a run
+    // that wrote entities and no relations says so instead of looking clean.
+    const dropped: Row[] = [];
     for (const relation of extraction.relations) {
-      const source = createdEntities.get(
-        `${relation.source.entityTypeKey}:${matchKey(relation.source.match)}`,
-      );
-      const target = createdEntities.get(
-        `${relation.target.entityTypeKey}:${matchKey(relation.target.match)}`,
-      );
-      // A relation whose endpoints do not both resolve is silently dropped.
-      if (source && target) {
-        await service.createRelation(
-          ontologyKey,
-          relation.relationTypeKey,
-          source._id as string,
-          target._id as string,
-          relation.properties,
-          store,
-        );
+      const source = resolveEndpoint(createdEntities, relation.source);
+      const target = resolveEndpoint(createdEntities, relation.target);
+
+      if ("reason" in source || "reason" in target) {
+        dropped.push({
+          relationTypeKey: relation.relationTypeKey,
+          source: { entityTypeKey: relation.source.entityTypeKey, match: relation.source.match },
+          target: { entityTypeKey: relation.target.entityTypeKey, match: relation.target.match },
+          reason: [
+            "reason" in source ? `source ${source.reason}` : null,
+            "reason" in target ? `target ${target.reason}` : null,
+          ]
+            .filter((part) => part !== null)
+            .join("; "),
+        });
+        continue;
       }
+
+      await service.createRelation(
+        ontologyKey,
+        relation.relationTypeKey,
+        source.entity._id as string,
+        target.entity._id as string,
+        relation.properties,
+        store,
+      );
     }
+
     response.created = true;
+    response.droppedRelations = dropped;
   }
 
   return response;

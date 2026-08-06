@@ -315,7 +315,9 @@ const EXTRACTION = {
   relations: [
     {
       relationTypeKey: "works_for",
-      source: { entityTypeKey: "person", match: { name: "Charlie", age: 28 } },
+      // A SUBSET of Charlie's properties — the shape a model actually emits,
+      // and the shape a full-property-equality lookup cannot resolve.
+      source: { entityTypeKey: "person", match: { name: "Charlie" } },
       target: { entityTypeKey: "company", match: { name: "DataFlow" } },
       properties: {},
     },
@@ -390,7 +392,7 @@ describe("aiExtract", () => {
     expect(toId).toBe(dataflow._id);
   });
 
-  it("silently drops a relation whose endpoints do not both resolve", async () => {
+  it("drops a relation whose endpoint resolves to nothing, and reports it", async () => {
     installExtractFake({
       ...EXTRACTION,
       relations: [
@@ -412,8 +414,72 @@ describe("aiExtract", () => {
       true,
     );
 
+    // The write still succeeds — a dropped endpoint is not an error.
     expect(result.created).toBe(true);
     expect(store.createRelation).not.toHaveBeenCalled();
+
+    const dropped = result.droppedRelations as Row[];
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0]!.relationTypeKey).toBe("works_for");
+    expect(dropped[0]!.reason).toBe("source matched no entity created in this call");
+  });
+
+  it("drops an ambiguous endpoint rather than guessing between candidates", async () => {
+    installExtractFake({
+      entities: [
+        { entityTypeKey: "person", properties: { name: "Charlie", age: 28 } },
+        { entityTypeKey: "person", properties: { name: "Charlie", age: 41 } },
+        { entityTypeKey: "company", properties: { name: "DataFlow" } },
+      ],
+      relations: [
+        {
+          relationTypeKey: "works_for",
+          source: { entityTypeKey: "person", match: { name: "Charlie" } },
+          target: { entityTypeKey: "company", match: { name: "DataFlow" } },
+          properties: {},
+        },
+      ],
+    });
+    wireCreation();
+
+    const result = await aiExtract("full_ontology", "two Charlies", asRuntimeStore(store), null, true);
+
+    expect(store.createEntity).toHaveBeenCalledTimes(3);
+    expect(store.createRelation).not.toHaveBeenCalled();
+    const dropped = result.droppedRelations as Row[];
+    expect(dropped[0]!.reason).toBe("source matched 2 entities created in this call");
+  });
+
+  it("an empty match map resolves nothing, even with one candidate of the type", async () => {
+    installExtractFake({
+      entities: [{ entityTypeKey: "person", properties: { name: "Charlie", age: 28 } }],
+      relations: [
+        {
+          relationTypeKey: "works_for",
+          source: { entityTypeKey: "person", match: {} },
+          target: { entityTypeKey: "company", match: {} },
+          properties: {},
+        },
+      ],
+    });
+    wireCreation();
+
+    const result = await aiExtract("full_ontology", "vague", asRuntimeStore(store), null, true);
+
+    expect(store.createRelation).not.toHaveBeenCalled();
+    expect((result.droppedRelations as Row[])[0]!.reason).toBe(
+      "source carried no match properties; target carried no match properties",
+    );
+  });
+
+  it("reports no drops when every endpoint resolves", async () => {
+    installExtractFake(EXTRACTION);
+    wireCreation();
+
+    const result = await aiExtract("full_ontology", "Charlie ...", asRuntimeStore(store), null, true);
+
+    expect(store.createRelation).toHaveBeenCalledTimes(1);
+    expect(result.droppedRelations).toEqual([]);
   });
 
   it("does not deduplicate: the same entity twice is created twice", async () => {

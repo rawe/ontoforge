@@ -50,7 +50,15 @@ are resolved. The rules there are narrow and worth stating plainly:
 
 - Endpoints are given as `match` maps of property values. They are resolved **only against
   the entities created in this same call**, never against data already in the graph.
-- A relation whose endpoints do not both resolve is silently dropped — no error.
+- A match map is a **subset** of the entity's properties: an endpoint naming only a name
+  resolves an entity that also carries an age. It is compared against what was written,
+  after coercion, so a value the write pipeline converted still matches.
+- An endpoint that matches **more than one** created entity does not resolve. Neither does
+  an empty match map. Ambiguity is never guessed: a relation attached to the wrong entity
+  is worse than a missing one, because nothing downstream can tell it was wrong.
+- A relation whose endpoints do not both resolve is dropped. The call still succeeds — an
+  unresolvable endpoint is not an error — but the response **lists every dropped relation
+  with the reason**, so a run that wrote entities and no relations says so.
 - Created entities are not deduplicated against anything. Running the same text twice
   creates two sets of entities.
 

@@ -24,7 +24,7 @@ LABEL org.opencontainers.image.title="OntoForge UI" \
       ontoforge.component.version="${COMPONENT_VERSION}"
 
 # nginx template is processed by envsubst on container start — BACKEND_URL
-# must point to the OntoForge server (e.g. http://backend:8000 in Docker).
+# must point to the OntoForge server (e.g. http://server:8000 in Docker).
 COPY default.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /app/dist /usr/share/nginx/html
 ENV BACKEND_URL=http://localhost:8000

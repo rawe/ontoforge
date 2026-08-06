@@ -1,6 +1,6 @@
 # nginx template — processed by envsubst on container start.
 # BACKEND_URL must be set to the internal URL of the OntoForge server
-# (e.g. http://backend:8000). In development the Vite dev server handles
+# (e.g. http://server:8000). In development the Vite dev server handles
 # proxying; in Docker this nginx config takes over that role.
 
 server {

@@ -1,9 +1,7 @@
 /**
- * Property-definition REST behavior over a mocked store. Ported from the
- * Python suite (`backend/tests/modeling/test_properties.py`) — same
- * scenarios, same expected wire shapes — plus the spec's traps: sparse
- * updates with the clear-default exception, `document` rejected on
- * relation types, defaults not validated at definition time.
+ * Property-definition REST behavior over a mocked store, including the
+ * traps: sparse updates with the clear-default exception, `document`
+ * rejected on relation types, defaults not validated at definition time.
  */
 
 import type { FastifyInstance } from "fastify";

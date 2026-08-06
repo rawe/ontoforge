@@ -330,7 +330,7 @@ describe("document properties in results", () => {
 
 describe("MCP execute_query", () => {
   async function connectClient(url: string): Promise<Client> {
-    const client = new Client({ name: "session-07-tests", version: "0.0.1" });
+    const client = new Client({ name: "oql-tests", version: "0.0.1" });
     await client.connect(new StreamableHTTPClientTransport(new URL(url)));
     return client;
   }

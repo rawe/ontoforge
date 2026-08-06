@@ -1,7 +1,6 @@
 /**
  * Partial document writes: str_replace, replace_range, chunk re-sync and
- * embedding reuse. Ported from `tests/runtime/test_document_edits.py`,
- * plus the code-point (emoji) scenarios the migration spec requires.
+ * embedding reuse, including the code-point (emoji) scenarios.
  */
 
 import type { FastifyInstance } from "fastify";

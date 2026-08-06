@@ -1,19 +1,19 @@
 /**
- * Schema transfer against the real Neo4j: the Python-export fixture as the
- * cross-implementation parity anchor, the export→wipe→import→export fixed
- * point, validate-then-write leaving the database untouched on conflict,
- * and the modeling MCP pair (`get_schema` ≡ export).
+ * Schema transfer against the real Neo4j: the export→wipe→import→export
+ * fixed point, validate-then-write leaving the database untouched on
+ * conflict, the modeling MCP pair (`get_schema` ≡ export), and backward
+ * compatibility with payloads written by the previous implementation.
  *
- * `tests/fixtures/python-export.json` was produced by the RUNNING Python
- * backend (GET /api/model/export) over the same design this suite imports.
- * Two normalizations are needed to compare across the implementations:
+ * `tests/fixtures/python-export.json` is a real `GET /api/model/export`
+ * payload from that implementation, over the same design this suite
+ * imports. It is kept because such files exist in users' hands: importing
+ * one must keep working. Two normalizations make the comparison meaningful:
  *
- * - Property and inclusion arrays are sorted by key: the shared full-schema
- *   query collects them WITHOUT an ORDER BY, so their order is storage
- *   order in both implementations — real but not deterministic.
- * - The Python payload carries `"includes": null` for an unscoped lens;
- *   the TS export omits the key entirely, per the docs' "absent entirely"
- *   (flagged divergence, see the service).
+ * - Property and inclusion arrays are sorted by key: the full-schema query
+ *   collects them WITHOUT an ORDER BY, so their order is storage order —
+ *   real, but not deterministic.
+ * - The legacy payload spells an unscoped lens as `"includes": null`; this
+ *   export omits the key entirely, per the docs' "absent entirely".
  */
 
 import { readFileSync } from "node:fs";
@@ -32,8 +32,8 @@ const PYTHON_EXPORT = JSON.parse(
   readFileSync(new URL("../fixtures/python-export.json", import.meta.url), "utf8"),
 ) as Row;
 
-/** Order-normalize a payload and drop `includes: null` (Python's spelling
- * of "absent" — the TS export omits the key). */
+/** Order-normalize a payload and drop `includes: null` (the legacy
+ * spelling of "absent" — this export omits the key). */
 function normalize(payload: Row): Row {
   const clone = JSON.parse(JSON.stringify(payload)) as Row;
   const byKey = (a: Row, b: Row) => String(a.key).localeCompare(String(b.key));
@@ -90,8 +90,8 @@ beforeEach(async () => {
   await wipeDatabase();
 });
 
-describe("round-trip against the Python export", () => {
-  it("imports the Python payload and re-exports it identically", async () => {
+describe("round-trip against a legacy export", () => {
+  it("imports the legacy payload and re-exports it identically", async () => {
     const res = await importPayload(PYTHON_EXPORT);
     expect(res.statusCode, res.body).toBe(201);
     const created = (res.json() as { ontologies: Row[] }).ontologies;

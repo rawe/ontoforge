@@ -1,8 +1,6 @@
 /**
- * Entity embedding text composition. Ports the Python reference
- * (`backend/src/ontoforge_server/runtime/embedding.py`) exactly — the
- * composition rules are normative in
- * `docs/capabilities/search.md#what-gets-embedded`:
+ * Entity embedding text composition. The composition rules are normative
+ * in `docs/capabilities/search.md#what-gets-embedded`:
  *
  * - only `string` properties contribute (never document/numeric/temporal);
  * - `key=value` pairs in schema declaration order;

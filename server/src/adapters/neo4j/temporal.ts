@@ -6,8 +6,7 @@
  * types. These helpers are the single place the conversion happens, in both
  * directions; every store method uses them.
  *
- * Naive driver datetimes (no timezone) are treated as UTC, matching the
- * Python reference (`adapters/neo4j/runtime_queries._convert_neo4j_types`).
+ * Naive driver datetimes (no timezone) are treated as UTC.
  */
 
 import neo4j from "neo4j-driver";
@@ -42,9 +41,8 @@ export function fromNeo4jValue(value: unknown): unknown {
     return value.toStandardDate();
   }
   if (isNeo4jLocalDateTime(value)) {
-    // A stored local (offset-less) datetime is treated as UTC — matching
-    // the Python reference, whose read conversion stamps UTC onto any
-    // datetime that carries no timezone.
+    // A stored local (offset-less) datetime is treated as UTC: the read
+    // conversion stamps UTC onto any datetime carrying no timezone.
     return new Date(
       Date.UTC(
         value.year,
@@ -59,7 +57,7 @@ export function fromNeo4jValue(value: unknown): unknown {
   }
   if (isNeo4jDate(value)) {
     // A calendar date has no time component; its port form is the ISO
-    // string, which serializes identically to Python's `datetime.date`.
+    // `YYYY-MM-DD` string.
     return value.toString();
   }
   if (neo4j.isInt(value)) {

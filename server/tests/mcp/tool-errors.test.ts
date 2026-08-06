@@ -1,8 +1,7 @@
 /**
  * MCP tool-error flattening: because a tool error is a single string, the
  * per-field detail REST returns under `details.fields` is folded into the
- * message text. Ported from the Python reference's
- * `_format_validation_error`.
+ * message text.
  */
 
 import { describe, expect, it } from "vitest";

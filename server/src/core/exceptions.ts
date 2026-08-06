@@ -1,7 +1,6 @@
 /**
- * Exception taxonomy. Semantics match the Python reference
- * (`backend/src/ontoforge_server/core/exceptions.py`); the interface layer
- * maps each class to its HTTP status and envelope code (see `app.ts`).
+ * Exception taxonomy. The interface layer maps each class to its HTTP
+ * status and envelope code (see `app.ts`).
  */
 
 import { randomBytes } from "node:crypto";

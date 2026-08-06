@@ -87,8 +87,7 @@ export function reservedRelationTypeKeys(): ReadonlySet<string> {
 }
 
 /**
- * Constraints and indexes created unconditionally at startup. Names and
- * definitions match the Python reference (`adapters/neo4j/driver.py`).
+ * Constraints and indexes created unconditionally at startup.
  */
 export const CONSTRAINTS: readonly string[] = [
   "CREATE CONSTRAINT ontology_id_unique IF NOT EXISTS FOR (o:Ontology) REQUIRE o.ontologyId IS UNIQUE",

@@ -1,7 +1,6 @@
 /**
  * Shared unit-test support for the runtime surface: a fully mocked runtime
- * store and the canonical schema fixtures ported from the Python suite's
- * `tests/runtime/conftest.py`.
+ * store and the canonical schema fixtures.
  */
 
 import { vi, type Mock } from "vitest";

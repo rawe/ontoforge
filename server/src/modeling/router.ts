@@ -59,8 +59,8 @@ const OntologyKeyParams = z.object({ ontologyKey: z.string() });
 const AgentKeyParams = z.object({ ontologyKey: z.string(), agentKey: z.string() });
 const QueryKeyParams = z.object({ ontologyKey: z.string(), queryKey: z.string() });
 
-// `cascade` arrives as a query-string token; accept the boolean spellings
-// the Python server accepts from its clients.
+// `cascade` arrives as a query-string token; accept the usual boolean
+// spellings clients send.
 const CascadeQuery = z.object({
   cascade: z
     .enum(["true", "false", "1", "0"])
@@ -752,8 +752,7 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
     { schema: { tags: ["modeling"] } },
     async (request, reply) => {
       // Refused before any streaming starts, so the refusal reaches the
-      // client in the standard error envelope (the Python router performs
-      // the same pre-check ahead of its StreamingResponse).
+      // client in the standard error envelope rather than mid-stream.
       if (!getEmbeddingProvider()) {
         throw new ValidationError(
           "Embedding provider is not configured. Set EMBEDDING_PROVIDER to enable semantic search.",

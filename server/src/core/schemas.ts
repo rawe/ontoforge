@@ -1,7 +1,6 @@
 /**
  * Core schema vocabulary shared by modeling and runtime: the data-type
- * enumeration and the key pattern. Mirrors the Python reference
- * (`backend/src/ontoforge_server/core/schemas.py`).
+ * enumeration and the key pattern.
  */
 
 /** The seven data types a property definition can declare. */

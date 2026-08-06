@@ -1,8 +1,6 @@
 /**
- * Scope inclusion behavior over a mocked store. Ported from the Python
- * suite (`backend/tests/modeling/test_scope_management.py`) — same
- * scenarios, same expected wire shapes — plus the spec's explicit unit
- * anchors: upsert-on-re-add, absent-vs-empty allowlist round-trip, and the
+ * Scope inclusion behavior over a mocked store, including
+ * upsert-on-re-add, the absent-vs-empty allowlist round-trip, and the
  * id-vs-key addressing asymmetry.
  */
 

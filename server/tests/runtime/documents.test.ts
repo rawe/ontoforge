@@ -1,8 +1,7 @@
 /**
  * Document properties: coercion, stubs, chunk sync, and the document read
- * endpoint. Ported from `tests/runtime/test_documents.py` (minus the
- * entity-embedding scenarios — session 08), plus the code-point scenarios
- * the migration spec requires.
+ * endpoint, including the code-point scenarios. Entity embedding is
+ * covered in the embedding suites.
  */
 
 import type { FastifyInstance } from "fastify";

@@ -18,7 +18,7 @@
  *
  * With none of the three the request is refused with 400 — a model never
  * chooses a lens and can never reach across two. The environment variable
- * is read per request, matching the Python reference (`mcp/mount.py`).
+ * is read per request.
  */
 
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";

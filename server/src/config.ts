@@ -1,8 +1,6 @@
 /**
- * Env-driven settings. Variable names and defaults match the Python
- * reference (`backend/src/ontoforge_server/config.py`) exactly; a `.env`
- * file in the working directory is honoured, with real environment
- * variables taking precedence (same semantics as pydantic's `env_file`).
+ * Env-driven settings. A `.env` file in the working directory is honoured,
+ * with real environment variables taking precedence over it.
  */
 
 export interface Settings {
@@ -28,9 +26,9 @@ export interface Settings {
 
   PUBLIC_URL: string | null;
 
-  /** Fallback ontology key for runtime-MCP connections (read from env in
-   * the Python reference's `mcp/mount.py`; surfaced here so every consumer
-   * shares one settings object). */
+  /** Fallback ontology key for runtime-MCP connections. Read per request in
+   * `mcp/mount.ts`; surfaced here so every consumer shares one settings
+   * object. */
   DEFAULT_MCP_ONTOLOGY_KEY: string | null;
 }
 
@@ -93,8 +91,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
 }
 
 // Load a `.env` file if one exists in the working directory. `loadEnvFile`
-// does not override variables already set in the real environment, matching
-// pydantic-settings precedence.
+// does not override variables already set in the real environment.
 try {
   process.loadEnvFile();
 } catch {

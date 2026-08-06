@@ -1,8 +1,6 @@
 /**
  * Runtime saved-query execution, listing, and search at the service level
- * over a mocked store. Ported from the Python suite
- * (`backend/tests/runtime/test_saved_queries.py`) — same scenarios — plus
- * the spec-mandated extras: exact-match and coercion failures collected,
+ * over a mocked store, including: exact-match and coercion failures collected,
  * binding resolution rules (flat row-order list, skipped rows, empty list
  * flows on), binding-wins-collision, textual substitution with unmatched
  * `$name` left verbatim, `_score` as a binding field, and the
@@ -115,7 +113,7 @@ describe("substituteParams", () => {
     expect(substituteParams("find $topic and $other", { topic: "x" })).toBe("find x and $other");
   });
 
-  it("stringifies booleans in Python form (stored parity)", () => {
+  it("stringifies booleans capitalized, as stored", () => {
     expect(substituteParams("active: $flag", { flag: true })).toBe("active: True");
   });
 });

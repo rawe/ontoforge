@@ -1,7 +1,5 @@
 /**
- * Saved-query modeling endpoints over mocked stores. Ported from the
- * Python suite (`backend/tests/modeling/test_saved_queries.py`) — same
- * scenarios, same expected wire shapes — plus the spec-mandated extras:
+ * Saved-query modeling endpoints over mocked stores, including:
  * collect-all reporting across mixed failures, BOTH parameter cross-check
  * directions including the binding-name-must-not-be-declared consequence,
  * self-reference rejection, the definition-time OQL lens check (run and
@@ -68,8 +66,7 @@ afterAll(async () => {
 beforeEach(() => {
   holder.store = createMockModelingStore();
   // The default runtime store has no schema: the definition-time OQL check
-  // is SKIPPED (the lens's schema cannot be loaded), like the Python tests
-  // patching `_load_schema` to raise NotFoundError.
+  // is SKIPPED, because the lens's schema cannot be loaded.
   holder.runtimeStore = createMockRuntimeStore();
   invalidateLoadedSchemaCache();
   setEmbeddingProvider(null);

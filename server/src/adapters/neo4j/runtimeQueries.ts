@@ -3,8 +3,7 @@
  *
  * Adapter-private. Every function takes a `Session` as its first argument
  * and is invoked exclusively by `Neo4jRuntimeStore`, which owns the
- * session lifecycle and the physical naming. Cypher text ports the Python
- * reference (`adapters/neo4j/runtime_queries.py`) one-to-one; driver
+ * session lifecycle and the physical naming. Driver
  * temporals are converted to port-safe values at this boundary via
  * `temporal.ts`, and `_embedding` vectors are stripped so they never
  * appear in any response.
@@ -765,8 +764,7 @@ function convertRecordValue(value: unknown): unknown {
  * Execute a read-only Cypher query and return `[columns, rows]`.
  *
  * Each row is a map of column names to converted values. Read-only is
- * guaranteed by OQL validation upstream, not by a transaction mode —
- * mirroring the Python reference.
+ * guaranteed by OQL validation upstream, not by a transaction mode.
  */
 export async function executeCypherRead(
   session: Session,

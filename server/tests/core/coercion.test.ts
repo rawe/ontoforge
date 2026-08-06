@@ -1,7 +1,6 @@
 /**
  * Every accept/reject cell of the seven-type coercion table
- * (`docs/capabilities/schema-modeling.md#data-types`), ported from the
- * behavior of the Python reference's `coerce_value`. Coercion is strict —
+ * (`docs/capabilities/schema-modeling.md#data-types`). Coercion is strict —
  * values are converted, never guessed — and a boolean is rejected for
  * integer and float BEFORE any numeric conversion.
  */
@@ -36,7 +35,7 @@ describe("string — accepts any JSON scalar, stringified; rejects nothing", () 
     expect(coerceValue(30, "string", "k")).toBe("30");
     expect(coerceValue(1.5, "string", "k")).toBe("1.5");
   });
-  it("stringifies booleans (Python str() capitalization, for parity)", () => {
+  it("stringifies booleans capitalized", () => {
     expect(coerceValue(true, "string", "k")).toBe("True");
     expect(coerceValue(false, "string", "k")).toBe("False");
   });
@@ -148,7 +147,7 @@ describe("datetime — ISO date-time strings; naive means UTC", () => {
     const result = coerceValue("2024-01-15T10:30:00+02:00", "datetime", "k") as Date;
     expect(result.toISOString()).toBe("2024-01-15T08:30:00.000Z");
   });
-  it("accepts a bare date as midnight (fromisoformat parity)", () => {
+  it("accepts a bare date as midnight", () => {
     const result = coerceValue("2024-01-15", "datetime", "k") as Date;
     expect(result.toISOString()).toBe("2024-01-15T00:00:00.000Z");
   });

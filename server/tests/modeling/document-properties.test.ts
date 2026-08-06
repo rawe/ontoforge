@@ -1,10 +1,7 @@
 /**
- * Modeling-side document property lifecycle: the chunk cascade. Ported
- * from `tests/modeling/test_document_properties.py` — the vector-index
- * halves of those scenarios (create/drop of the per-document index)
- * activate in session 08; chunk cleanup is unconditional and lives here.
- * (`document` rejected on relation types is covered in
- * `properties.test.ts`; the import path arrives in session 10.)
+ * Modeling-side document property lifecycle: the chunk cascade. Chunk
+ * cleanup is unconditional and lives here; `document` rejected on relation
+ * types is covered in `properties.test.ts`.
  */
 
 import type { FastifyInstance } from "fastify";

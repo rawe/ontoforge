@@ -1,9 +1,7 @@
 /**
- * Semantic search service layer — ported from
- * `backend/tests/test_semantic_search_service.py`. Uses the real
- * `Neo4jRuntimeStore` over a mocked query module (the Python suite's
- * `runtime_queries` patching), so filter-to-WHERE-clause conversion and
- * the over-fetch arithmetic are exercised for real.
+ * Semantic search service layer. Uses the real `Neo4jRuntimeStore` over a
+ * mocked query module, so filter-to-WHERE-clause conversion and the
+ * over-fetch arithmetic are exercised for real.
  */
 
 import type { Driver } from "neo4j-driver";
@@ -37,7 +35,7 @@ const mockedGetFullSchema = queries.getFullSchema as unknown as Mock;
 const mockedSemanticSearch = queries.semanticSearch as unknown as Mock;
 const mockedSearchChunks = queries.searchDocumentChunks as unknown as Mock;
 
-/** Raw full-schema payload matching the Python `_make_cache` fixture:
+/** Raw full-schema payload:
  * `person` gets name (string, required), age (integer), location (string);
  * every other key gets name only. */
 function rawSchema(entityTypeKeys: string[] = ["person"], scopedKeys?: string[]): Row {

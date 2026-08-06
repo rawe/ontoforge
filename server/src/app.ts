@@ -5,8 +5,7 @@
  * `{"error": {"code", "message", "details?"}}` with exactly six codes —
  * see the error model in `docs/architecture.md`. Framework-level failures
  * are mapped into the same envelope: an unparsable JSON body answers
- * `400 INVALID_JSON`, a request-shape failure `422 VALIDATION_ERROR`
- * (approved divergence #3 in `ts-migration/00-overview.md`).
+ * `400 INVALID_JSON`, a request-shape failure `422 VALIDATION_ERROR`.
  */
 
 import cors from "@fastify/cors";
@@ -52,12 +51,11 @@ export async function createApp(): Promise<FastifyInstance> {
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 
-  // FastAPI ignores the body entirely on routes that declare none, so a
-  // client sending `content-type: application/json` with an empty body to
-  // a body-less route (a validate POST, any DELETE) must succeed. Fastify's
-  // default parser would reject that before the route's declaration is
-  // consulted. Routes that DO declare a body keep the session-01 contract:
-  // an empty body answers 400 INVALID_JSON.
+  // A client sending `content-type: application/json` with an empty body to
+  // a route that declares no body (a validate POST, any DELETE) must
+  // succeed. Fastify's default parser would reject that before the route's
+  // declaration is consulted. Routes that DO declare a body keep the
+  // contract: an empty body answers 400 INVALID_JSON.
   app.addContentTypeParser(
     "application/json",
     { parseAs: "string" },
@@ -86,8 +84,8 @@ export async function createApp(): Promise<FastifyInstance> {
     },
   );
 
-  // CORS allow-all, matching the Python reference: origins, methods and
-  // headers unrestricted, credentials allowed (the origin is reflected).
+  // CORS allow-all: origins, methods and headers unrestricted, credentials
+  // allowed (the origin is reflected).
   await app.register(cors, {
     origin: true,
     credentials: true,
@@ -105,9 +103,8 @@ export async function createApp(): Promise<FastifyInstance> {
   app.get("/openapi.json", { schema: { hide: true } }, async () => app.swagger());
 
   // An unknown route is a resource that does not exist; it answers in the
-  // standard envelope like every other error (the Python server leaks the
-  // framework's `{"detail": "Not Found"}` here — same family as approved
-  // divergence #3, flagged in the migration notes).
+  // standard envelope like every other error, rather than leaking the
+  // framework's own not-found shape.
   app.setNotFoundHandler((request, reply) => {
     sendError(reply, 404, "RESOURCE_NOT_FOUND", "Not Found");
   });
@@ -143,8 +140,7 @@ export async function createApp(): Promise<FastifyInstance> {
     ) {
       return sendError(reply, 400, "INVALID_JSON", "Request body is not valid JSON");
     }
-    // Framework-level request-shape failures map into the standard envelope
-    // (approved divergence #3).
+    // Framework-level request-shape failures map into the standard envelope.
     if (hasZodFastifySchemaValidationErrors(error)) {
       return sendError(reply, 422, "VALIDATION_ERROR", "Request validation failed", {
         errors: error.validation.map((issue) => ({
@@ -154,7 +150,7 @@ export async function createApp(): Promise<FastifyInstance> {
       });
     }
     // Anything else is a bug. Log it server-side and answer a bare 500 with
-    // no detail, matching the Python server's behaviour for unhandled errors.
+    // no detail — an unhandled error never describes itself to a client.
     request.log?.error?.(error);
     console.error("Unhandled error:", error);
     return reply.status(500).header("content-type", "text/plain").send("Internal Server Error");

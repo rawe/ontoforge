@@ -1,7 +1,6 @@
 /**
- * Integration fixture: recreates the shape of the Python suite's
- * `backend/tests/fixtures/test_ontology.json` through the modeling API
- * (import arrives in session 10) — person/company/works_for, an unscoped
+ * Integration fixture, built through the modeling API:
+ * person/company/works_for, an unscoped
  * lens `test_ontology`, and a scoped lens `hr_view` (person narrowed to
  * name+email, company whole, works_for included).
  */

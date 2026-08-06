@@ -1,7 +1,6 @@
 /**
  * Shared unit-test support for the modeling surface: a fully mocked
- * modeling store (the Python suite's equivalent of patching the adapter
- * query module) and the canonical fixture rows.
+ * modeling store and the canonical fixture rows.
  */
 
 import { vi, type Mock } from "vitest";

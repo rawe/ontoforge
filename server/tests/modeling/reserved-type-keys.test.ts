@@ -1,10 +1,7 @@
 /**
  * Type keys reserved by the storage adapter are rejected at creation time.
- * Ported from the service-path portion of the Python suite
- * (`backend/tests/modeling/test_reserved_type_keys.py`); the
- * adapter-declared sets themselves are pinned in
- * `tests/adapters/reserved-keys.test.ts`, and the import path arrives with
- * session 10.
+ * The adapter-declared sets themselves are pinned in
+ * `tests/adapters/reserved-keys.test.ts`.
  */
 
 import type { FastifyInstance } from "fastify";

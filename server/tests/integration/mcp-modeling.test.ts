@@ -57,7 +57,7 @@ beforeAll(async () => {
     throw new Error("Expected a bound TCP port");
   }
   baseUrl = `http://127.0.0.1:${address.port}`;
-  client = await connectClient("session-02-tests");
+  client = await connectClient("modeling-mcp-tests");
 });
 
 afterAll(async () => {
@@ -299,7 +299,7 @@ describe("tool errors", () => {
   });
 });
 
-describe("ontology lenses over MCP (session 03)", () => {
+describe("ontology lenses over MCP", () => {
   it("full lens lifecycle by key: create, update, include, validate, delete", async () => {
     await call(client, "create_entity_type", { key: "person", display_name: "Person" });
     await call(client, "add_property", {
@@ -481,7 +481,7 @@ describe("ontology lenses over MCP (session 03)", () => {
     expect(refused.content).toHaveLength(1);
     expect(text(refused)).not.toContain("affectedOntologies");
 
-    // The cascade flag on the session-02 tool now works end-to-end.
+    // The cascade flag works end-to-end.
     const consented = await call(client, "delete_entity_type", {
       entity_type_key: "person",
       cascade: true,

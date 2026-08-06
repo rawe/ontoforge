@@ -59,7 +59,7 @@ afterEach(() => {
   settings.PUBLIC_URL = null;
 });
 
-describe("FEATURE_DISABLED without a provider (approved divergence #2)", () => {
+describe("FEATURE_DISABLED without a provider", () => {
   const cases: [string, string, Record<string, unknown>][] = [
     ["query", "/api/runtime/test_onto/ai/query", { question: "How many?" }],
     ["extract", "/api/runtime/test_onto/ai/extract", { text: "Some text" }],

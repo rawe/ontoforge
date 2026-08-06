@@ -1,10 +1,9 @@
 /**
  * Shared support for the embedding integration suite: Ollama availability
- * probing (the suite SKIPS when the provider or model is absent, like the
- * Python suite), per-file provider enablement via `settings` mutation
- * (config is read at process start, so tests mutate and restore — the same
- * pattern as `backend/tests/integration/test_semantic_search.py`), and
- * vector-index helpers for the drift scenarios.
+ * probing (the suite SKIPS when the provider or model is absent),
+ * per-file provider enablement via `settings` mutation (config is read at
+ * process start, so tests mutate and restore), and vector-index helpers
+ * for the drift scenarios.
  */
 
 import { settings } from "../../../src/config.js";

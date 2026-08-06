@@ -2,8 +2,7 @@
  * Driver failures are translated at the persistence-port boundary.
  *
  * Port contract rule 4 (`core/ports.ts`): driver exceptions never cross the
- * port. Ported from the Python suite (`backend/tests/test_store_errors.py`)
- * — same scenarios, same guarantees.
+ * port.
  */
 
 import { readdirSync, readFileSync } from "node:fs";
@@ -57,8 +56,8 @@ describe("the translation itself", () => {
   });
 
   it("a client-side driver failure becomes StoreError", async () => {
-    // In the JS driver, connectivity failures are Neo4jError instances with
-    // a service-unavailable code — one hierarchy, unlike Python's two.
+    // Connectivity failures are Neo4jError instances carrying a
+    // service-unavailable code.
     vi.spyOn(console, "error").mockImplementation(() => {});
     const promise = runSession(fakeDriver(), async () => {
       throw new Neo4jError(

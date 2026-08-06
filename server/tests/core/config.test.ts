@@ -5,7 +5,7 @@ import { loadSettings } from "../../src/config.js";
 describe("config defaults", () => {
   const settings = loadSettings({});
 
-  it("matches the Python reference defaults exactly", () => {
+  it("has the documented defaults", () => {
     expect(settings.DB_BACKEND).toBe("neo4j");
     expect(settings.DB_URI).toBe("bolt://localhost:7687");
     expect(settings.DB_USER).toBe("neo4j");

@@ -1,9 +1,7 @@
 /**
- * AI agent configuration modeling endpoints over a mocked store. Ported
- * from the Python suite (`backend/tests/modeling/test_ai_agents.py`,
- * config parts) — same scenarios, same expected wire shapes — plus the
- * spec-mandated allowlist assertions: an unknown tool name is rejected
- * and the error names the exact ten-name grantable set.
+ * AI agent configuration modeling endpoints over a mocked store, including
+ * the allowlist assertions: an unknown tool name is rejected and the error
+ * names the exact ten-name grantable set.
  */
 
 import type { FastifyInstance } from "fastify";

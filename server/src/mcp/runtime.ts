@@ -131,7 +131,7 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
     }) => {
       const strFilters: Record<string, string> = {};
       for (const [k, v] of Object.entries(args.filters ?? {})) {
-        // Python `str(v)`: booleans capitalize, everything else stringifies.
+        // Filter values travel as strings; booleans capitalize.
         strFilters[k] = typeof v === "boolean" ? (v ? "True" : "False") : String(v);
       }
       const limit = clamp(args.limit ?? 50, 1, 200);
@@ -361,8 +361,8 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
         args.entity_id,
         getRuntimeStore(),
       );
-      // The Python tool returns a message DICT here (unlike the modeling
-      // delete tools, which return bare strings) — preserved for parity.
+      // This tool returns a message OBJECT, unlike the modeling delete
+      // tools, which return bare strings. Wire contract — do not unify.
       return jsonResult({ message: `Entity '${args.entity_id}' deleted successfully.` });
     }),
   );
@@ -426,7 +426,7 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
     }) => {
       const strFilters: Record<string, string> = {};
       for (const [k, v] of Object.entries(args.filters ?? {})) {
-        // Python `str(v)`: booleans capitalize, everything else stringifies.
+        // Filter values travel as strings; booleans capitalize.
         strFilters[k] = typeof v === "boolean" ? (v ? "True" : "False") : String(v);
       }
       const limit = clamp(args.limit ?? 50, 1, 200);
@@ -629,7 +629,7 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
       const limit = clamp(args.limit ?? 10, 1, 100);
       const strFilters: Record<string, string> = {};
       for (const [k, v] of Object.entries(args.filters ?? {})) {
-        // Python `str(v)`: booleans capitalize, everything else stringifies.
+        // Filter values travel as strings; booleans capitalize.
         strFilters[k] = typeof v === "boolean" ? (v ? "True" : "False") : String(v);
       }
       const result = await service.semanticSearch(

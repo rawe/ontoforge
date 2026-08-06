@@ -27,7 +27,7 @@ let app: FastifyInstance;
 let baseUrl: string;
 
 async function connectClient(url: string, headers?: Record<string, string>): Promise<Client> {
-  const client = new Client({ name: "session-04-tests", version: "0.0.1" });
+  const client = new Client({ name: "runtime-mcp-tests", version: "0.0.1" });
   await client.connect(
     new StreamableHTTPClientTransport(new URL(url), {
       requestInit: headers ? { headers } : undefined,
@@ -147,7 +147,7 @@ describe("lens resolution", () => {
 });
 
 describe("tool surface", () => {
-  it("lists exactly the twenty session-04..09 tools", async () => {
+  it("lists exactly the twenty runtime tools", async () => {
     const client = await connectClient(`${baseUrl}/mcp/runtime/test_ontology`);
     try {
       const tools = await client.listTools();

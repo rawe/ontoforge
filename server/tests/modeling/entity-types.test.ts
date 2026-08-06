@@ -1,8 +1,6 @@
 /**
- * Entity-type REST behavior over a mocked store. Ported from the Python
- * suite (`backend/tests/modeling/test_entity_types.py`) — same scenarios,
- * same expected wire shapes — plus the key-pattern rejections the spec
- * calls out.
+ * Entity-type REST behavior over a mocked store, including the key-pattern
+ * rejections.
  */
 
 import type { FastifyInstance } from "fastify";

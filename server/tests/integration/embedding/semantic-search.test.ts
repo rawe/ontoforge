@@ -48,7 +48,7 @@ describe.skipIf(!ollamaUp)("semantic search (Ollama)", () => {
     return res.json() as Row;
   }
 
-  /** The Python fixture: ontology `search_test`, entity type `person` with
+  /** Ontology `search_test`, entity type `person` with
    * name/role/bio (strings) and age (integer). */
   async function buildSearchFixture(): Promise<{ etId: string }> {
     await post("/api/model/ontologies", {
@@ -143,8 +143,7 @@ describe.skipIf(!ollamaUp)("semantic search (Ollama)", () => {
   it("cross-type search spans multiple entity types", async () => {
     await buildSearchFixture();
     // The shared _Entity index is ensured at real startup; the test app
-    // boots without the startup sequence, so ensure it explicitly (the
-    // Python test does the same).
+    // boots without the startup sequence, so ensure it explicitly.
     await ensureEntityVectorIndex(getDriver(), getEmbeddingProvider()!.dimensions);
 
     const company = await post("/api/model/entity-types", {

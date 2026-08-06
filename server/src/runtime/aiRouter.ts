@@ -1,9 +1,8 @@
 /**
  * AI runtime routes, mounted at `/api/runtime` alongside the runtime
  * router: ask, extract, chat (default and per-agent), agent discovery,
- * and the A2A card and task endpoints. Ported from the Python reference
- * (`runtime/ai_router.py`). Routers parse and shape only; every rule
- * lives in `aiService.ts`.
+ * and the A2A card and task endpoints. Routers parse and shape only;
+ * every rule lives in `aiService.ts`.
  *
  * There are deliberately NO MCP tools for ask/extract/chat — an MCP
  * client is itself a language model and gets the underlying tools
@@ -28,8 +27,8 @@ const AiQueryPayload = z.looseObject({
   question: z.string().min(1),
 });
 
-/** The Python request models accept both the camelCase alias and the
- * snake_case field name (`populate_by_name`); both are honoured here. */
+/** Both the camelCase alias and the snake_case field name are accepted —
+ * clients send either. */
 const AiExtractPayload = z.looseObject({
   text: z.string().min(1),
   entityTypes: z.array(z.string()).nullish(),
@@ -50,7 +49,7 @@ const AiChatPayload = z.looseObject({
 });
 
 /** A2A task submissions carry a JSON-RPC 2.0 object; it is handed to the
- * service raw, exactly as the Python router passes `request.json()`. */
+ * service raw, unshaped. */
 const A2aPayload = z.record(z.string(), z.unknown());
 
 /** Resolve the advertised base URL: `PUBLIC_URL` when configured, else the

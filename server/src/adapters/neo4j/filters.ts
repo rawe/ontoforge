@@ -50,8 +50,8 @@ export function toNeo4jParameter(value: unknown, dataType: string): unknown {
  * The operator is the segment after the LAST double underscore — so a
  * property whose own key contains `__` cannot be filtered (documented
  * trap). Unknown properties, unknown operators, and uncoercible values
- * raise the same `ValidationError`s the Python service raises, in the same
- * order: property, then value, then operator.
+ * raise `ValidationError`, checked in that order: property, then value,
+ * then operator.
  */
 export function buildFilterClauses(
   filters: Record<string, string>,

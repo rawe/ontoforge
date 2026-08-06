@@ -1,9 +1,7 @@
 /**
  * AI-powered runtime operations (`docs/capabilities/ai-agents.md`): ask,
- * extract, chat, agent discovery, and A2A cards and tasks. Ported from the
- * Python reference (`runtime/ai_service.py`) with prompt texts verbatim;
- * the engine is LangChain.js / LangGraph.js (approved stack) instead of
- * pydantic-ai.
+ * extract, chat, agent discovery, and A2A cards and tasks. The engine is
+ * LangChain.js / LangGraph.js (approved stack).
  *
  * Each operation builds a fresh agent per request with a scoped tool
  * subset. Tools invoke the same runtime service functions the MCP tools
@@ -341,16 +339,15 @@ const AGENT_TOOL_DEFS_BY_NAME: ReadonlyMap<string, AgentToolDef> = new Map(
   AGENT_TOOL_DEFS.map((def) => [def.name, def]),
 );
 
-/** Every instantiable tool name (the Python reference's `ALL_TOOLS`). */
+/** Every instantiable tool name. */
 export const ALL_TOOL_NAMES: ReadonlySet<string> = new Set(AGENT_TOOL_DEFS_BY_NAME.keys());
 
 /**
  * Instantiate the named tools bound to one lens and one recorder. A tool
  * failure that is a not-found or validation error becomes the tool's
  * result (`{"error": message}`) so the model self-corrects; model-supplied
- * arguments that fail the tool's schema are fed back the same way (the
- * Python reference returns a retry prompt for those). Anything else is
- * rethrown and aborts the run.
+ * arguments that fail the tool's schema are fed back the same way.
+ * Anything else is rethrown and aborts the run.
  */
 export function buildTools(
   ontologyKey: string,
@@ -431,8 +428,7 @@ function withArgumentSelfCorrection(
 // Agent runner
 // ---------------------------------------------------------------------------
 
-/** The active model, or the FEATURE_DISABLED rejection (approved
- * divergence #2: Python omits the details code). */
+/** The active model, or the FEATURE_DISABLED rejection. */
 function requireModel(): BaseChatModel {
   const model = getAiModel();
   if (model === null) {
@@ -468,8 +464,8 @@ function messageText(message: BaseMessage | undefined): string {
   return "";
 }
 
-// Roughly pydantic-ai's default request budget (50 model calls; one
-// LangGraph step per model call plus one per tool batch).
+// A budget of roughly 50 model calls: one LangGraph step per model call
+// plus one per tool batch.
 const RECURSION_LIMIT = 100;
 
 /**
@@ -541,8 +537,8 @@ export async function aiQuery(
     [new HumanMessage(question)],
   );
 
-  // Extract the executed query and results from the recorded tool calls
-  // (the last call wins, as in the Python reference's message scan).
+  // Extract the executed query and results from the recorded tool calls —
+  // the last call wins.
   let queryUsed: unknown = null;
   let queryResults: unknown = null;
   for (const record of recorder) {
@@ -583,8 +579,8 @@ export interface ExtractionResult {
   relations: ExtractedRelation[];
 }
 
-/** The structured-output contract shown to the model — the JSON-schema
- * equivalent of the Python reference's `ExtractionResult` (by alias). */
+/** The structured-output contract shown to the model — the JSON schema of
+ * one `ExtractionResult` endpoint, by alias. */
 const EXTRACTION_ENDPOINT_SCHEMA = {
   type: "object",
   properties: {
@@ -657,8 +653,8 @@ function normalizeEndpoint(raw: unknown): ExtractedRelationEndpoint {
 }
 
 /** Validate the model's raw structured output into an `ExtractionResult`.
- * Like the Python pydantic model, both the alias (`entityTypeKey`) and the
- * field name (`entity_type_key`) are accepted. */
+ * Both the alias (`entityTypeKey`) and the snake_case field name
+ * (`entity_type_key`) are accepted, because models emit either. */
 export function normalizeExtraction(raw: unknown): ExtractionResult {
   if (!isPlainObject(raw)) malformed();
   const entitiesRaw = raw.entities ?? [];
@@ -690,7 +686,8 @@ export function normalizeExtraction(raw: unknown): ExtractionResult {
   return { entities, relations };
 }
 
-/** Python `str()` for a match-map value (`_match_key` parity). */
+/** Stringify a match-map value for the lookup key: `None` for nothing,
+ * capitalized booleans. */
 function pyStr(value: unknown): string {
   if (value === null || value === undefined) return "None";
   if (typeof value === "boolean") return value ? "True" : "False";
@@ -722,9 +719,9 @@ export async function aiExtract(
   }
 
   const model = requireModel();
-  // `jsonSchema` constrains the response server-side (Ollama and OpenAI
-  // both support it), the closest equivalent of pydantic-ai's validated
-  // output type.
+  // `jsonSchema` constrains the response server-side — Ollama and OpenAI
+  // both support it, so the model cannot return a shape we then have to
+  // repair.
   const structured = model.withStructuredOutput(
     EXTRACTION_JSON_SCHEMA as unknown as Record<string, unknown>,
     { method: "jsonSchema" },

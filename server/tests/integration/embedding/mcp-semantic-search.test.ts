@@ -68,7 +68,7 @@ describe.skipIf(!ollamaUp)("MCP semantic_search (Ollama)", () => {
       age: 51,
     });
 
-    client = new Client({ name: "session-08-tests", version: "0.0.1" });
+    client = new Client({ name: "semantic-search-mcp-tests", version: "0.0.1" });
     await client.connect(
       new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp/runtime/mcp_search`)),
     );

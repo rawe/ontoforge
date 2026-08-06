@@ -1,7 +1,6 @@
 /**
  * Shared tool-name constants for the runtime MCP server and AI agent
- * allowlists. Ports the Python reference (`runtime/tool_names.py`): the
- * grantable set is exactly ten names — the read-only subset MINUS
+ * allowlists. The grantable set is exactly ten names — the read-only subset MINUS
  * `get_document` and `get_relation`, which are read-only but deliberately
  * not grantable (`docs/interfaces.md#runtime-tools`).
  */

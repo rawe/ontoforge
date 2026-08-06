@@ -1,7 +1,6 @@
 /**
- * Relation CRUD through scoped and unscoped lenses over a mocked store.
- * Ported from `tests/runtime/test_relations.py`, plus the pipeline cases
- * the session-05 spec lists: endpoint type mismatch checked against the
+ * Relation CRUD through scoped and unscoped lenses over a mocked store,
+ * including the pipeline cases: endpoint type mismatch checked against the
  * FULL schema through a narrow lens, endpoint + property errors collected
  * in ONE response, silent endpoint-ignore on update, and endpoint filters
  * on listing.

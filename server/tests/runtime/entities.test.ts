@@ -1,8 +1,7 @@
 /**
- * Entity CRUD through scoped and unscoped lenses over a mocked store.
- * Ported from `tests/runtime/test_entities.py` (minus the embedding
- * scenarios — session 08), plus the pipeline cases the session-04 spec
- * lists: collect-all, default-from-hidden-property, both bad-default
+ * Entity CRUD through scoped and unscoped lenses over a mocked store,
+ * including the pipeline cases: collect-all,
+ * default-from-hidden-property, both bad-default
  * failure modes, null-removal semantics, no-change updates, and the
  * stub + projection interplay.
  */

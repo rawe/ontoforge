@@ -1,8 +1,8 @@
 /**
  * Runtime service: schema introspection through a lens, and the entity
- * instance lifecycle with the validating write pipeline. Ported from the
- * entity portions of the Python reference (`runtime/service.py`); REST and
- * the runtime MCP server are two entrances to these same functions.
+ * instance lifecycle with the validating write pipeline. REST and the
+ * runtime MCP server are two entrances to these same functions, so no rule
+ * may live in a router.
  *
  * The two contractual properties of the write pipeline
  * (`docs/architecture.md#request-lifecycle`):
@@ -240,8 +240,8 @@ function applyFieldProjection(
 // Filter / sort helpers (list endpoints)
 // ---------------------------------------------------------------------------
 
-/** Extract `filter.<key>` query parameters; repeated parameters keep the
- * last value, matching the Python router's `dict(request.query_params)`. */
+/** Extract `filter.<key>` query parameters; a repeated parameter keeps its
+ * last value. */
 export function parseFilters(queryParams: Record<string, unknown>): Record<string, string> {
   const filters: Record<string, string> = {};
   for (const [paramName, value] of Object.entries(queryParams)) {
@@ -807,7 +807,7 @@ export async function getDocument(
 /** One partial-write operation on a document property. `str_replace` needs
  * `oldString`/`newString`; `replace_range` needs `offset`/`length`/`content`
  * (plus optional `expect` as a guard against stale offsets). Per-op field
- * validation happens in the service, matching the Python request model. */
+ * validation happens in the service, not in the request schema. */
 export interface DocumentEditBody {
   op: "str_replace" | "replace_range";
   oldString?: string | null | undefined;
@@ -1846,12 +1846,13 @@ function resolveTypeKeyForValue(
 const BINDING_RE = /^\{\{(\w+)\.(\w+)\}\}$/;
 const PARAM_REF_RE = /\$([a-zA-Z_]\w*)/g;
 
-/** Python list repr for message parity: `['a', 'b']`. */
+/** Render a list the way error messages spell one: `['a', 'b']`. */
 function pyList(items: string[]): string {
   return `[${items.map((item) => `'${item}'`).join(", ")}]`;
 }
 
-/** Python `str()` for a coerced parameter value in textual substitution. */
+/** Stringify a coerced parameter for textual substitution: `None` for
+ * nothing, capitalized booleans, ISO for dates. */
 function pyStr(value: unknown): string {
   if (value === null || value === undefined) return "None";
   if (typeof value === "boolean") return value ? "True" : "False";
@@ -2016,7 +2017,7 @@ export async function executeSavedQuery(
 // ---------------------------------------------------------------------------
 
 /** One saved query in the runtime listing's wire shape: absent step fields
- * are OMITTED (the Python router's conditional serialization). */
+ * are OMITTED, not serialized as null. */
 function savedQueryToWire(sq: {
   key: string;
   name: string;
@@ -2107,7 +2108,7 @@ export async function searchSavedQueries(
 
 /** Remove properties not in the scoped schema and stub documents. Unlike
  * entity reads, only the SYSTEM properties survive here — other
- * underscore-prefixed bookkeeping is stripped (Python parity). */
+ * underscore-prefixed bookkeeping is stripped. */
 function stripOutOfScopeProps(value: Row, typeKey: string, schema: SchemaCacheValue): Row {
   let allowed: Set<string>;
   let result = value;

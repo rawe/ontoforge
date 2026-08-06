@@ -290,7 +290,7 @@ describe("aiQuery", () => {
     expect(result.results).toBeNull();
   });
 
-  it("a failed query yields the error dict as results (Python parity)", async () => {
+  it("a failed query yields the error object as results", async () => {
     installFake([
       toolCallMessage("execute_query", { query: "MATCH (x:unknown_type) RETURN x" }),
       new AIMessage("That failed."),
@@ -440,7 +440,7 @@ describe("aiExtract", () => {
     expect(String(system.content)).toContain("Focus on these entity types: person, company");
   });
 
-  it("accepts snake_case field names from the model (pydantic alias parity)", () => {
+  it("accepts snake_case field names from the model", () => {
     const normalized = normalizeExtraction({
       entities: [{ entity_type_key: "person", properties: { name: "X" } }],
       relations: [

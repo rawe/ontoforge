@@ -1,6 +1,5 @@
 /**
- * Chunker unit tests, ported from `tests/runtime/test_chunking.py`, plus
- * the code-point scenarios the migration spec requires (emoji documents)
+ * Chunker unit tests, including the code-point scenarios (emoji documents)
  * and a property-style reassembly sweep.
  */
 
@@ -8,7 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import { chunkDocument, type Chunk } from "../../src/runtime/chunking.js";
 
-/** Code-point slice, for asserting chunk coordinates Python-style. */
+/** Code-point slice, for asserting chunk coordinates. */
 function cpSlice(text: string, start: number, end: number): string {
   return Array.from(text).slice(start, end).join("");
 }
@@ -135,7 +134,7 @@ describe("boundary preference", () => {
   });
 
   it("midpoint rule: the backwards search never passes the chunk midpoint", () => {
-    // Verified against the Python reference: a whitespace AT the midpoint
+    // A whitespace AT the midpoint
     // index (minEnd = 50 for size 100) is taken — split after it — while
     // one strictly below the midpoint is out of the search window and the
     // chunk hard-splits at the target instead.

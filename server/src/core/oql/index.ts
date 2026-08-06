@@ -17,8 +17,7 @@
  * Every rejection carries self-correction hints naming the valid
  * candidates — contractual, not incidental: the primary caller composing
  * OQL is a language model, and the hint list lets its next attempt be
- * correct (`docs/capabilities/oql.md#self-correction-hints`). The hint
- * wording matches the Python reference verbatim.
+ * correct (`docs/capabilities/oql.md#self-correction-hints`).
  */
 
 import {

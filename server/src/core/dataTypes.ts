@@ -1,7 +1,6 @@
 /**
  * Data-type coercion for the runtime write path and the list-filter path.
  *
- * Ports `coerce_value` from the Python reference (`runtime/service.py`).
  * Coercion is strict: values are converted, never guessed
  * (`docs/capabilities/schema-modeling.md#data-types`). Two rules do not
  * follow from the table and are checked here explicitly:
@@ -13,13 +12,15 @@
  *   `adapters/neo4j/temporal.ts`), `datetime` to a JS `Date`; a naive
  *   datetime (no offset) is treated as UTC.
  *
- * Error messages mirror the Python reference, including its type names
- * (`str`, `int`, `float`, `bool`, `list`, `dict`), because they surface
- * verbatim in `details.fields` of validation errors.
+ * Error messages name the received type with Python's names (`str`, `int`,
+ * `float`, `bool`, `list`, `dict`) rather than JavaScript's. That is a wire
+ * contract, not an oversight: the text surfaces verbatim in `details.fields`
+ * of validation errors, so renaming a type here changes what every client
+ * reads.
  */
 
 /** A value that cannot be coerced. Callers catch this and collect the
- * message as a field error — mirroring Python's `ValueError`. */
+ * message as a field error. */
 export class CoercionError extends Error {}
 
 /** The Python type name a JSON value would carry — used in error text. */
@@ -115,10 +116,10 @@ function parseIsoDateTime(value: string, key: string): Date {
   return new Date(epoch);
 }
 
-/** Python `str()` for the JSON values a string property can receive. */
+/** Coerce a JSON value into what a string property stores. */
 function stringify(value: unknown): string {
-  // Python's `str(True)` is "True"; preserved for parity, since the stored
-  // value is what every later read returns.
+  // A boolean stores capitalized — "True", not "true". The stored value is
+  // what every later read returns, so this spelling is a wire contract.
   if (typeof value === "boolean") return value ? "True" : "False";
   return String(value);
 }

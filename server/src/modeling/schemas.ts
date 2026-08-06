@@ -1,8 +1,7 @@
 /**
- * Zod schemas for the modeling REST surface. Wire shapes mirror the Python
- * reference models (`backend/src/ontoforge_server/modeling/schemas.py`):
- * camelCase field names, internal identifiers exposed by design, nullable
- * optionals serialized as explicit `null`.
+ * Zod schemas for the modeling REST surface: camelCase field names,
+ * internal identifiers exposed by design, nullable optionals serialized as
+ * explicit `null`.
  */
 
 import { z } from "zod";
@@ -151,8 +150,8 @@ export const PropertyDefinitionResponse = z.object({
 
 /**
  * Agent and saved-query keys: hyphens allowed, unlike type and property
- * keys. Kept as a STRING so validation-error messages can carry the exact
- * pattern text the Python reference interpolates.
+ * keys. Kept as a STRING so validation-error messages can interpolate the
+ * exact pattern text.
  */
 export const AGENT_KEY_PATTERN = "^[a-z][a-z0-9_-]*$";
 
@@ -203,8 +202,7 @@ export const SavedQueryUpsert = z.object({
   parameters: z.array(SavedQueryParameterSchema).default([]),
 });
 
-/** Response steps carry every field, absent ones as explicit null —
- * matching the Python response model's serialization. */
+/** Response steps carry every field, absent ones as explicit null. */
 export const StepResponse = z.object({
   name: z.string(),
   type: z.string(),
@@ -227,12 +225,11 @@ export const SavedQueryResponse = z.object({
 });
 
 // --- Transfer format (export / import) ---
-// Field names ported verbatim from the Python transfer payload models
-// (`backend/src/ontoforge_server/core/schemas.py`) — the aliases there ARE
-// the format. Keys are unconstrained strings at parse time: import
-// validates them itself so every offending key is COLLECTED and reported
-// in one response (approved divergence #1/#4) instead of failing at the
-// request shape. Data types are deliberately NOT checked against the enum
+// These field names ARE the interchange format — renaming one invalidates
+// every payload already written. Keys are unconstrained strings at parse
+// time: import validates them itself so every offending key is COLLECTED
+// and reported in one response instead of failing at the request shape.
+// Data types are deliberately NOT checked against the enum
 // (`docs/capabilities/transfer.md`) — the schema-validation operation is
 // what catches those later.
 

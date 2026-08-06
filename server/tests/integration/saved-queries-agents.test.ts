@@ -44,7 +44,7 @@ interface ToolCallResult {
 }
 
 async function connectClient(url: string): Promise<Client> {
-  const c = new Client({ name: "session-09-tests", version: "0.0.1" });
+  const c = new Client({ name: "saved-queries-agents-tests", version: "0.0.1" });
   await c.connect(new StreamableHTTPClientTransport(new URL(url)));
   return c;
 }

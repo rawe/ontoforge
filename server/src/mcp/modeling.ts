@@ -10,8 +10,7 @@
  * Tools call the modeling services directly — never HTTP to the REST
  * routes; a second path would be a second contract. Failures are reported
  * as tool errors; because a tool error is a single string, per-field
- * detail is flattened into the message text (ported from the Python
- * reference's `_format_validation_error`).
+ * detail is flattened into the message text.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -43,11 +42,10 @@ import { VALID_AGENT_TOOLS_CSV } from "../runtime/toolNames.js";
 // ---------------------------------------------------------------------------
 
 /**
- * Flatten an error into one message string. Ports the Python
- * `_format_validation_error`: `details.fields` and `details.errors` are
- * appended to the message so a model still sees every offending field in
- * one response. Zod issues (request-shape failures inside a tool) are
- * joined the same way.
+ * Flatten an error into one message string: `details.fields` and
+ * `details.errors` are appended to the message so a model still sees every
+ * offending field in one response. Zod issues (request-shape failures
+ * inside a tool) are joined the same way.
  */
 export function formatToolError(error: unknown): string {
   if (error instanceof ZodError) {
@@ -457,9 +455,8 @@ export function createModelingMcpServer(): McpServer {
       const store = getModelingStore();
       const [ownerId, ownerLabel] = await resolveOwner(store, args.type_kind, args.type_key);
       const prop = await resolveProperty(store, ownerId, ownerLabel, args.property_key);
-      // Parity wart preserved from the Python reference: the tool argument
-      // shape cannot distinguish an omitted default_value from an explicit
-      // null, and Python treats both as the explicit-null clear.
+      // Known wart: the tool argument shape cannot distinguish an omitted
+      // default_value from an explicit null, so both clear the default.
       const body = PropertyDefinitionUpdate.parse({
         displayName: args.display_name ?? null,
         description: args.description ?? null,

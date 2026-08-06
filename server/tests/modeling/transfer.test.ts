@@ -1,9 +1,8 @@
 /**
- * Schema transfer (export / import) over a mocked store. Ported from the
- * Python suite (`test_schema_operations.py`, transfer portion) and
- * extended for the two approved divergences this session lands:
- * import validates key patterns (#1) and import is validate-then-write
- * with collect-all reporting (#4) — a rejected payload writes NOTHING.
+ * Schema transfer (export / import) over a mocked store, including the two
+ * import guarantees: key patterns are validated, and import is
+ * validate-then-write with collect-all reporting — a rejected payload
+ * writes NOTHING.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -403,7 +402,7 @@ describe("import conflicts", () => {
     });
     expect(res.statusCode).toBe(409);
     expect(res.json().error.message).toContain("company");
-    // The clean first object was NOT written (Python would have stranded it).
+    // The clean first object was NOT written — no partial import.
     expect(holder.store.createEntityType).not.toHaveBeenCalled();
   });
 
@@ -618,7 +617,7 @@ describe("import validations", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Import — key patterns (approved divergence #1)
+// Import — key patterns
 // ---------------------------------------------------------------------------
 
 describe("import key patterns", () => {

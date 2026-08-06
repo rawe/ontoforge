@@ -1,7 +1,7 @@
 /**
  * Unit-test support for the AI slice: a scripted tool-calling chat model
  * (the "mock the model" seam — installed via `setAiModel`) plus the
- * canonical loaded-schema fixture used by the ported Python AI tests.
+ * canonical loaded-schema fixture the AI tests share.
  */
 
 import {

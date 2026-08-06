@@ -239,7 +239,7 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
     const { StreamableHTTPClientTransport } = await import(
       "@modelcontextprotocol/sdk/client/streamableHttp.js"
     );
-    const client = new Client({ name: "session-09-embedding-tests", version: "0.0.1" });
+    const client = new Client({ name: "saved-queries-embedding-tests", version: "0.0.1" });
     await client.connect(
       new StreamableHTTPClientTransport(
         new URL(`http://127.0.0.1:${address.port}/mcp/runtime/sq_test`),

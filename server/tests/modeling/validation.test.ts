@@ -1,10 +1,7 @@
 /**
- * The two validation operations over a mocked store. Ported from the
- * Python suites (`test_scope_management.py` validation portion and
- * `test_schema_operations.py` validation portion), plus the ordering
- * hazard the spec singles out: a relation inclusion accepted before any
- * entity inclusions existed is reported invalid once entity inclusions
- * appear.
+ * The two validation operations over a mocked store, including the
+ * ordering hazard: a relation inclusion accepted before any entity
+ * inclusions existed is reported invalid once entity inclusions appear.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -149,7 +146,7 @@ describe("validate one lens", () => {
     // The state the interactive path can reach: the relation inclusion was
     // accepted while the lens had no entity inclusions; entity inclusions
     // were added afterwards. Validation reports it; the runtime still
-    // loads and serves the lens (untested here — session 04).
+    // loads and serves the lens (untested here).
     holder.store.getOntology.mockResolvedValue(ONTOLOGY_DATA);
     holder.store.getFullSchema.mockResolvedValue({
       entityTypes: [

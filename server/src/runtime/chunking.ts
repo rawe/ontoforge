@@ -1,6 +1,5 @@
 /**
- * Character-based document chunking with overlap. Faithful port of the
- * Python reference (`runtime/chunking.py`).
+ * Character-based document chunking with overlap.
  *
  * Splits large document property values into fixed-size chunks, preferring
  * paragraph, then sentence, then whitespace boundaries near the target

@@ -1,7 +1,6 @@
 /**
  * Schema-mutation lifecycle hooks: document-chunk cleanup and
- * vector-index DDL, called by the modeling service at the same points the
- * Python service performs them (`modeling/service.py`).
+ * vector-index DDL, called by the modeling service on every mutating path.
  *
  * Chunk cleanup is UNCONDITIONAL — the stored chunks of a dropped document
  * property (or entity type) are deleted whether or not an embedding

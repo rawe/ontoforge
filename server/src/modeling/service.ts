@@ -1,14 +1,11 @@
 /**
  * Modeling service: every domain rule for the global schema — entity
- * types, relation types, property definitions. Ported from the type and
- * property portions of the Python reference
- * (`backend/src/ontoforge_server/modeling/service.py`); REST and MCP are
- * two entrances to these same functions, so no rule may live in a router.
+ * types, relation types, property definitions. REST and MCP are two
+ * entrances to these same functions, so no rule may live in a router.
  *
- * Two seams are called on every mutating path at the same points the
- * Python service calls them: schema-cache invalidation
- * (`runtime/schemaCache.ts`, filled in session 04) and the vector-index
- * lifecycle hooks (`vectorHooks.ts`, filled in session 08).
+ * Two seams are called on every mutating path: schema-cache invalidation
+ * (`runtime/schemaCache.ts`) and the vector-index lifecycle hooks
+ * (`vectorHooks.ts`).
  */
 
 import { randomUUID } from "node:crypto";
@@ -297,8 +294,7 @@ export async function deleteEntityType(
       `Entity type '${entityTypeId}' is referenced by one or more relation types`,
     );
   }
-  // Included by scoped lenses: the cascade protocol (lenses arrive in
-  // session 03; without them this can never trigger).
+  // Included by scoped lenses: the cascade protocol.
   const affected = await store.findOntologiesIncludingType("EntityType", entityTypeId);
   if (affected.length > 0 && !cascade) {
     throw new CascadeRequiredError(
@@ -540,8 +536,8 @@ export async function deleteProperty(
   }
   // Deleting a property never triggers the cascade protocol — without
   // cascade, allowlists are left holding an unresolvable key (harmless at
-  // runtime, reported by lens validation). The Python service performs the
-  // same lookup without acting on its result; kept for behavioral parity.
+  // runtime, reported by lens validation). The lookup runs anyway so the
+  // call fails here if the owner has vanished; its result is not acted on.
   await store.findOntologiesIncludingType(ownerLabel, ownerId);
   if (cascade) {
     await store.removePropertyFromIncludesLists(ownerLabel, ownerId, prop.key as string);
@@ -1218,9 +1214,8 @@ function parseStoredJsonList(raw: unknown): Row[] {
  * the REST export payload and what the modeling MCP `get_schema` and
  * `export_schema` tools return.
  *
- * The `includes` key is ABSENT for an unscoped lens ("absent entirely",
- * `docs/capabilities/transfer.md`; the Python reference serializes an
- * explicit `null` there — docs win, flagged for the parity sweep).
+ * The `includes` key is ABSENT for an unscoped lens — "absent entirely",
+ * not an explicit `null` (`docs/capabilities/transfer.md`).
  */
 export async function getSchemaExport(store: ModelingStore): Promise<Row> {
   const schema = await store.getFullSchema();
@@ -1286,7 +1281,7 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
       name: sq.name,
       description: sq.description,
       // Stored sparse; exported with every field, absent ones as explicit
-      // null — the Python export models serialize the same way.
+      // null.
       steps: parseStoredJsonList(sq.steps).map(toStepResponse),
       parameters: parseStoredJsonList(sq.parameters).map((p) => ({
         name: p.name,
@@ -1312,7 +1307,7 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
  * Import a transfer payload: create the types globally, then the lenses
  * with their inclusions, agents and saved queries.
  *
- * Validate-then-write (approved divergence #4): the ENTIRE payload is
+ * Validate-then-write: the ENTIRE payload is
  * validated before anything is written — every rule violation collected
  * into one 422, every key conflict into one 409 — and a rejected import
  * leaves the database untouched. Rule violations are reported before
@@ -1321,8 +1316,8 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
  * mid-write can still leave partial state (accepted residual — index DDL,
  * data writes and embedding calls cannot share one transaction).
  *
- * Approved divergence #1: every imported key is validated against the same
- * patterns the interactive paths enforce, closing the `_id`-property hole
+ * Every imported key is validated against the same patterns the
+ * interactive paths enforce, closing the `_id`-property hole
  * `docs/architecture.md` documents. Property data types are deliberately
  * NOT checked against the enum — the schema-validation operation catches
  * that later (`docs/capabilities/transfer.md`).
@@ -1484,8 +1479,8 @@ export async function importSchema(
   }
 
   // ---- Phase 2: conflicts — all-or-fail, naming EVERY conflicting key ----
-  // An intra-payload duplicate reports the same conflict the Python
-  // reference's sequential writes would have produced.
+  // An intra-payload duplicate reports the same conflict a sequential
+  // write of the payload would have produced.
   const conflicts: string[] = [];
 
   const seenEtKeys = new Set<string>();
@@ -1657,7 +1652,7 @@ export async function importSchema(
 
 const AGENT_KEY_REGEX = new RegExp(AGENT_KEY_PATTERN);
 
-/** Python list repr for message parity: `['a', 'b']`. */
+/** Render a list the way error messages spell one: `['a', 'b']`. */
 function pyList(items: string[]): string {
   return `[${items.map((item) => `'${item}'`).join(", ")}]`;
 }

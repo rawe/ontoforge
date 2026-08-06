@@ -33,7 +33,7 @@ function prop(key: string, dataType: string, required = false): Row {
   return { key, displayName: key, description: null, dataType, required, defaultValue: null };
 }
 
-/** Minimal scoped schema for testing (the Python `_schema()` fixture). */
+/** Minimal scoped schema for testing. */
 function schema(): SchemaCacheValue {
   return {
     ontologyId: "ont-1",

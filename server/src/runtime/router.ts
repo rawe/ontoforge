@@ -59,8 +59,8 @@ const FieldsParam = z
   .transform((value) => (value === undefined ? undefined : Array.isArray(value) ? value : [value]));
 
 // Unknown keys (the `filter.*` family) pass through untyped and are picked
-// up by `parseFilters`; the declared parameters carry the Python router's
-// exact bounds and defaults.
+// up by `parseFilters`; the declared parameters carry the bounds and
+// defaults documented in `docs/interfaces.md`.
 const ListQuery = z.looseObject({
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
@@ -72,8 +72,8 @@ const ListQuery = z.looseObject({
 
 const ReadQuery = z.looseObject({ fields: FieldsParam });
 
-/** FastAPI-compatible boolean query parameter: accepts true/false, 1/0,
- * yes/no, on/off in any case (the Python router's `bool` coercion). */
+/** Boolean query parameter: accepts true/false, 1/0, yes/no, on/off in any
+ * case. */
 const BoolParam = z.preprocess((value) => {
   if (typeof value !== "string") return value;
   const lowered = value.toLowerCase();
@@ -82,7 +82,7 @@ const BoolParam = z.preprocess((value) => {
   return value;
 }, z.boolean());
 
-/** `GET /search/semantic` — the Python router's exact bounds and defaults,
+/** `GET /search/semantic` — bounds and defaults per `docs/interfaces.md`,
  * including the documented `min_score` snake_case irregularity. */
 const SemanticSearchQuery = z.looseObject({
   q: z.string().min(1),
@@ -110,9 +110,8 @@ const DocumentReadQuery = z.looseObject({
   limit: z.coerce.number().int().min(1).optional(),
 });
 
-/** One partial-write operation, discriminated by `op` — the Python request
- * model's field names and both operation shapes (`runtime/schemas.py`).
- * Per-op field validation happens in the service. */
+/** One partial-write operation, discriminated by `op`, carrying both
+ * operation shapes. Per-op field validation happens in the service. */
 const DocumentEditPayload = z.looseObject({
   op: z.enum(["str_replace", "replace_range"]),
   // str_replace
@@ -136,8 +135,8 @@ const SavedQueryRunPayload = z.looseObject({
   params: z.record(z.string(), z.unknown()).default({}),
 });
 
-/** `GET /saved-queries/search` — the Python router's exact bounds and
- * defaults, including the `min_score` snake_case irregularity. */
+/** `GET /saved-queries/search` — bounds and defaults per
+ * `docs/interfaces.md`, including the `min_score` snake_case irregularity. */
 const SavedQuerySearchQuery = z.looseObject({
   q: z.string().min(1),
   limit: z.coerce.number().int().min(1).max(20).default(3),

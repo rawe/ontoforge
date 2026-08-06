@@ -3,9 +3,6 @@
  * repairs, the sorted lens keys in `details.affectedOntologies`, and the
  * two deliberate asymmetries — property deletion never triggers it, and
  * changing an existing property is never checked.
- *
- * The trigger checks were plumbed in session 02; this suite is the
- * session-03 completion anchor over the full lens machinery.
  */
 
 import type { FastifyInstance } from "fastify";

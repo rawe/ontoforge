@@ -2,9 +2,7 @@
  * Runtime schema cache: lazy assembly, the four-row scoping matrix with
  * the inferred-relations rule and its cliff edge, silent skipping of dead
  * inclusion keys, and wholesale invalidation via the seam every modeling
- * mutation calls. Ported from `tests/runtime/test_schema_cache.py` and
- * `tests/modeling/test_runtime_cache_invalidation.py`, plus the matrix
- * cases the session-04 spec lists.
+ * mutation calls.
  */
 
 import { beforeEach, describe, expect, it } from "vitest";

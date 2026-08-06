@@ -1,9 +1,9 @@
 /**
  * Shared support for the AI integration suite: Ollama availability probing
- * (the suite SKIPS when the provider or model is absent, like the Python
- * suite) and per-file provider enablement via `settings` mutation (config
- * is read at process start, so tests mutate and restore — the same pattern
- * as the embedding suite and `backend/tests/integration/test_ai.py`).
+ * (the suite SKIPS when the provider or model is absent) and per-file
+ * provider enablement via `settings` mutation (config is read at process
+ * start, so tests mutate and restore — the same pattern as the embedding
+ * suite).
  */
 
 import { settings } from "../../../src/config.js";

@@ -3,10 +3,8 @@
  *
  * Adapter-private. Every function takes a `Session` as its first argument
  * and is invoked exclusively by `Neo4jModelingStore`, which owns the
- * session lifecycle. Cypher text ports the Python reference
- * (`backend/src/ontoforge_server/adapters/neo4j/modeling_queries.py`)
- * one-to-one; driver temporals are converted to port-safe values at this
- * boundary via `temporal.ts`.
+ * session lifecycle. Driver temporals are converted to port-safe values at
+ * this boundary via `temporal.ts`.
  */
 
 import type { Session } from "neo4j-driver";

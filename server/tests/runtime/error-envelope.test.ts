@@ -1,8 +1,8 @@
 /**
  * Every error answers in the one envelope `{"error": {code, message,
  * details?}}` with its exact status and code — including framework-level
- * failures (approved divergence #3: request-shape errors use the envelope,
- * unlike the Python server's FastAPI leak).
+ * failures: request-shape errors use the envelope too, never the
+ * framework's own error shape.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -49,7 +49,7 @@ beforeAll(async () => {
     async () => ({ ok: true }),
   );
   // A route that declares no body (like the validate POSTs and every
-  // DELETE): an empty JSON body must be tolerated, as FastAPI does.
+  // DELETE): an empty JSON body must be tolerated.
   app.post("/boom/bodyless", async () => ({ ok: true }));
 
   await app.ready();
@@ -133,7 +133,7 @@ describe("framework-level failures answer in the envelope", () => {
     });
   });
 
-  it("an empty JSON body -> 400 INVALID_JSON (parity with the Python handler)", async () => {
+  it("an empty JSON body -> 400 INVALID_JSON", async () => {
     const res = await app.inject({
       method: "POST",
       url: "/boom/shape",
@@ -146,7 +146,7 @@ describe("framework-level failures answer in the envelope", () => {
     });
   });
 
-  it("an empty JSON body on a body-less route is tolerated (FastAPI parity)", async () => {
+  it("an empty JSON body on a body-less route is tolerated", async () => {
     const res = await app.inject({
       method: "POST",
       url: "/boom/bodyless",
@@ -169,7 +169,7 @@ describe("framework-level failures answer in the envelope", () => {
     expect(body.error.code).toBe("VALIDATION_ERROR");
     expect(Array.isArray(body.error.details.errors)).toBe(true);
     expect(body.error.details.errors.length).toBeGreaterThan(0);
-    // No FastAPI-style top-level "detail" leak.
+    // No framework-style top-level "detail" leak.
     expect(body.detail).toBeUndefined();
   });
 

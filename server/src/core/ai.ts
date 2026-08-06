@@ -1,18 +1,15 @@
 /**
  * AI configuration value types shared by modeling and runtime — agent
- * configurations and saved-query pipelines, ported from the dataclass
- * block of the Python reference (`core/ai.py`) — plus the language-model
+ * configurations and saved-query pipelines — plus the language-model
  * provider seam.
  *
  * Two providers, both via OpenAI-compatible chat endpoints: `ollama` and
  * `openai` (`{AI_BASE_URL}/v1`; the openai provider additionally requires
  * `AI_API_KEY`). The engine is LangChain's `ChatOpenAI` (approved stack:
- * LangChain.js / LangGraph.js, replacing the Python reference's
- * pydantic-ai). With no `AI_PROVIDER` configured, no model is installed
- * and every model-running route answers `422 VALIDATION_ERROR` with
- * `details.code: "FEATURE_DISABLED"` (approved divergence #2); listing
- * agents and serving cards keep working. Tests inject a fake model via
- * `setAiModel`.
+ * LangChain.js / LangGraph.js). With no `AI_PROVIDER` configured, no model
+ * is installed and every model-running route answers `422 VALIDATION_ERROR`
+ * with `details.code: "FEATURE_DISABLED"`; listing agents and serving cards
+ * keep working. Tests inject a fake model via `setAiModel`.
  */
 
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";

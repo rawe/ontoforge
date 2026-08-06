@@ -1,7 +1,6 @@
 /**
  * Embedding provider seam and implementations (`core/embedding` in the
- * module layout). Ports the Python reference
- * (`backend/src/ontoforge_server/core/embedding.py`).
+ * module layout).
  *
  * Two providers: `ollama` (native embeddings endpoint) and `openai`
  * (OpenAI-compatible `/v1/embeddings` — works with OpenAI, Azure, vLLM,

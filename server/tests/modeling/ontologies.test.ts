@@ -1,8 +1,6 @@
 /**
- * Ontology (lens) CRUD over a mocked store. Ported from the Python suite
- * (`backend/tests/modeling/test_ontologies.py`) — same scenarios, same
- * expected wire shapes — plus the key-immutability and key-pattern rules
- * the spec calls out.
+ * Ontology (lens) CRUD over a mocked store, including the key-immutability
+ * and key-pattern rules.
  */
 
 import type { FastifyInstance } from "fastify";

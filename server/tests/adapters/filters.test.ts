@@ -1,6 +1,5 @@
 /**
- * The adapter predicate builder (port of the Python `filters.py`): values
- * always cross into Cypher as bound parameters, identifiers come only from
+ * The adapter predicate builder: values always cross into Cypher as bound parameters, identifiers come only from
  * the stored schema, the operator is the segment after the LAST `__`, and
  * coercion follows the property's declared type (`__contains` is textual).
  */
@@ -134,7 +133,7 @@ describe("rejections — each names the filter in details.fields", () => {
 
   it("the operator is the segment after the LAST __ — a key containing __ cannot be filtered", () => {
     // `notes__raw` parses as property `notes` + operator `raw`; the
-    // property lookup fails first, exactly as in the Python reference.
+    // property lookup fails first.
     try {
       buildFilterClauses({ notes__raw: "x" }, DEFS, "person");
       expect.unreachable();

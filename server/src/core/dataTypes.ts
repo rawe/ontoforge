@@ -5,39 +5,31 @@
  * (`docs/capabilities/schema-modeling.md#data-types`). Two rules do not
  * follow from the table and are checked here explicitly:
  *
- * - A boolean is not a number: `true` is rejected for integer and float
- *   BEFORE any numeric conversion.
+ * - A boolean is not a number: `true` is rejected for integer and float,
+ *   never coerced to 1.
  * - Temporals are real values, not text: `date` coerces to a validated ISO
  *   `YYYY-MM-DD` string (the port-safe calendar-date form, see
  *   `adapters/neo4j/temporal.ts`), `datetime` to a JS `Date`; a naive
  *   datetime (no offset) is treated as UTC.
  *
- * Error messages name the received type with Python's names (`str`, `int`,
- * `float`, `bool`, `list`, `dict`) rather than JavaScript's. That is a wire
- * contract, not an oversight: the text surfaces verbatim in `details.fields`
- * of validation errors, so renaming a type here changes what every client
- * reads.
+ * The two halves of a rejection message speak two different type systems,
+ * deliberately. The expected half names an OntoForge data type, because
+ * that is what the schema declared. The received half names the JSON type
+ * of what arrived, because what arrived is a JSON value. Neither names a
+ * type as this server's implementation language spells it: the text
+ * surfaces verbatim in `details.fields` of validation errors, and a caller
+ * is never told what the server is written in (`docs/decisions.md`).
  */
 
 /** A value that cannot be coerced. Callers catch this and collect the
  * message as a field error. */
 export class CoercionError extends Error {}
 
-/** The Python type name a JSON value would carry — used in error text. */
-function pythonTypeName(value: unknown): string {
-  if (Array.isArray(value)) return "list";
-  switch (typeof value) {
-    case "string":
-      return "str";
-    case "boolean":
-      return "bool";
-    case "number":
-      return Number.isInteger(value) ? "int" : "float";
-    case "object":
-      return "dict";
-    default:
-      return typeof value;
-  }
+/** The JSON type name of a received value — used in error text. */
+function jsonTypeName(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
 }
 
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -144,11 +136,13 @@ export function coerceValue(value: unknown, dataType: string, key: string): unkn
       return stringify(value);
 
     case "integer": {
-      if (typeof value === "boolean") {
-        throw new CoercionError(`Expected integer for '${key}', got boolean`);
-      }
-      if (typeof value === "number" && Number.isInteger(value)) {
-        return value;
+      if (typeof value === "number") {
+        if (Number.isInteger(value)) {
+          return value;
+        }
+        // JSON has one number type, so naming it would say nothing. The
+        // rejected value itself is what the caller needs to see.
+        throw new CoercionError(`Expected integer for '${key}', got '${value}'`);
       }
       if (typeof value === "string") {
         const trimmed = value.trim();
@@ -157,15 +151,10 @@ export function coerceValue(value: unknown, dataType: string, key: string): unkn
         }
         throw new CoercionError(`Expected integer for '${key}', got '${value}'`);
       }
-      throw new CoercionError(
-        `Expected integer for '${key}', got ${pythonTypeName(value)}`,
-      );
+      throw new CoercionError(`Expected integer for '${key}', got ${jsonTypeName(value)}`);
     }
 
     case "float": {
-      if (typeof value === "boolean") {
-        throw new CoercionError(`Expected float for '${key}', got boolean`);
-      }
       if (typeof value === "number") {
         return value;
       }
@@ -177,7 +166,7 @@ export function coerceValue(value: unknown, dataType: string, key: string): unkn
         }
         throw new CoercionError(`Expected float for '${key}', got '${value}'`);
       }
-      throw new CoercionError(`Expected float for '${key}', got ${pythonTypeName(value)}`);
+      throw new CoercionError(`Expected float for '${key}', got ${jsonTypeName(value)}`);
     }
 
     case "boolean": {
@@ -190,7 +179,7 @@ export function coerceValue(value: unknown, dataType: string, key: string): unkn
         throw new CoercionError(`Expected boolean for '${key}', got '${value}'`);
       }
       throw new CoercionError(
-        `Expected boolean for '${key}', got ${pythonTypeName(value)}`,
+        `Expected boolean for '${key}', got ${jsonTypeName(value)}`,
       );
     }
 
@@ -199,7 +188,7 @@ export function coerceValue(value: unknown, dataType: string, key: string): unkn
         return parseIsoDate(value, key);
       }
       throw new CoercionError(
-        `Expected ISO date string for '${key}', got ${pythonTypeName(value)}`,
+        `Expected ISO date string for '${key}', got ${jsonTypeName(value)}`,
       );
     }
 
@@ -208,7 +197,7 @@ export function coerceValue(value: unknown, dataType: string, key: string): unkn
         return parseIsoDateTime(value, key);
       }
       throw new CoercionError(
-        `Expected ISO datetime string for '${key}', got ${pythonTypeName(value)}`,
+        `Expected ISO datetime string for '${key}', got ${jsonTypeName(value)}`,
       );
     }
 

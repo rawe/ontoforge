@@ -59,20 +59,20 @@ describe("integer — a boolean is not a number", () => {
     expect(coerceValue("30", "integer", "k")).toBe(30);
     expect(coerceValue("-12", "integer", "k")).toBe(-12);
   });
-  it("rejects booleans BEFORE numeric conversion", () => {
+  it("rejects booleans, never coercing them to 1", () => {
     expect(rejects(true, "integer")).toBe("Expected integer for 'k', got boolean");
     expect(rejects(false, "integer")).toBe("Expected integer for 'k', got boolean");
   });
-  it("rejects a JSON float", () => {
-    expect(rejects(30.5, "integer")).toBe("Expected integer for 'k', got float");
+  it("rejects a JSON float, naming the value rather than its type", () => {
+    expect(rejects(30.5, "integer")).toBe("Expected integer for 'k', got '30.5'");
   });
   it("rejects an unparsable string", () => {
     expect(rejects("abc", "integer")).toBe("Expected integer for 'k', got 'abc'");
     expect(rejects("30.5", "integer")).toBe("Expected integer for 'k', got '30.5'");
   });
   it("rejects structured values", () => {
-    expect(rejects([1], "integer")).toBe("Expected integer for 'k', got list");
-    expect(rejects({ a: 1 }, "integer")).toBe("Expected integer for 'k', got dict");
+    expect(rejects([1], "integer")).toBe("Expected integer for 'k', got array");
+    expect(rejects({ a: 1 }, "integer")).toBe("Expected integer for 'k', got object");
   });
 });
 
@@ -85,7 +85,7 @@ describe("float — a boolean is not a number", () => {
     expect(coerceValue("2.5", "float", "k")).toBe(2.5);
     expect(coerceValue("3", "float", "k")).toBe(3);
   });
-  it("rejects booleans BEFORE numeric conversion", () => {
+  it("rejects booleans, never coercing them to 1", () => {
     expect(rejects(true, "float")).toBe("Expected float for 'k', got boolean");
   });
   it("rejects an unparsable string", () => {
@@ -93,7 +93,7 @@ describe("float — a boolean is not a number", () => {
     expect(rejects("", "float")).toBe("Expected float for 'k', got ''");
   });
   it("rejects structured values", () => {
-    expect(rejects({}, "float")).toBe("Expected float for 'k', got dict");
+    expect(rejects({}, "float")).toBe("Expected float for 'k', got object");
   });
 });
 
@@ -108,8 +108,8 @@ describe("boolean — JSON boolean or the strings true/false, case-insensitive",
     expect(coerceValue("False", "boolean", "k")).toBe(false);
   });
   it("rejects numbers", () => {
-    expect(rejects(1, "boolean")).toBe("Expected boolean for 'k', got int");
-    expect(rejects(0.5, "boolean")).toBe("Expected boolean for 'k', got float");
+    expect(rejects(1, "boolean")).toBe("Expected boolean for 'k', got number");
+    expect(rejects(0.5, "boolean")).toBe("Expected boolean for 'k', got number");
   });
   it("rejects any other string", () => {
     expect(rejects("yes", "boolean")).toBe("Expected boolean for 'k', got 'yes'");
@@ -129,8 +129,8 @@ describe("date — ISO calendar date strings only", () => {
     expect(rejects("2024-02-30", "date")).toContain("Expected ISO date for 'k'");
   });
   it("rejects non-strings", () => {
-    expect(rejects(20240115, "date")).toBe("Expected ISO date string for 'k', got int");
-    expect(rejects(true, "date")).toBe("Expected ISO date string for 'k', got bool");
+    expect(rejects(20240115, "date")).toBe("Expected ISO date string for 'k', got number");
+    expect(rejects(true, "date")).toBe("Expected ISO date string for 'k', got boolean");
   });
 });
 
@@ -163,7 +163,7 @@ describe("datetime — ISO date-time strings; naive means UTC", () => {
   });
   it("rejects non-strings", () => {
     expect(rejects(1705315800, "datetime")).toBe(
-      "Expected ISO datetime string for 'k', got int",
+      "Expected ISO datetime string for 'k', got number",
     );
   });
 });

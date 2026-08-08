@@ -42,10 +42,13 @@ by internal identifier, and only agent configurations and saved queries by key. 
 schema-design surface used by a client that has just listed the resource it is about to
 address, so the identifier is always at hand.
 
-**No vendor vocabulary anywhere a caller can see.**
+**No vendor or implementation-language vocabulary anywhere a caller can see.**
 Not in route names, field names, tool names or error messages. The query endpoint takes a
-`query`; the query language is OQL; storage errors name no database. The storage backend
-is exchangeable, so a public surface naming one would be a leak, not a convenience.
+`query`; the query language is OQL; storage errors name no database. A rejected value is
+described by its JSON type, never by the name the server's own language gives that type.
+The storage backend is exchangeable and so is the language, so a public surface naming
+either would be a leak, not a convenience. Deliberation on the type-vocabulary half:
+[adr/0014](adr/0014-received-values-named-by-their-json-type.md).
 
 ## Storage
 

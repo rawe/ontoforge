@@ -108,11 +108,20 @@ function parseIsoDateTime(value: string, key: string): Date {
   return new Date(epoch);
 }
 
-/** Coerce a JSON value into what a string property stores. */
-function stringify(value: unknown): string {
-  // A boolean stores capitalized — "True", not "true". The stored value is
-  // what every later read returns, so this spelling is a wire contract.
-  if (typeof value === "boolean") return value ? "True" : "False";
+/**
+ * Render a value as text — in JSON's spelling, since JSON is what arrives.
+ *
+ * This is the single answer to "what does this value look like as text",
+ * and every caller uses it: what a `string` property stores, what a filter
+ * value is compared as, what a saved-query parameter substitutes to. Those
+ * have to agree character for character — a boolean stored as text and the
+ * same boolean searched for as text must produce the same characters — so
+ * they share one function rather than each spelling it out.
+ */
+export function valueToText(value: unknown): string {
+  if (value === null || value === undefined) return "null";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (value instanceof Date) return value.toISOString();
   return String(value);
 }
 
@@ -133,7 +142,7 @@ export function coerceValue(value: unknown, dataType: string, key: string): unkn
   switch (dataType) {
     case "string":
     case "document":
-      return stringify(value);
+      return valueToText(value);
 
     case "integer": {
       if (typeof value === "number") {

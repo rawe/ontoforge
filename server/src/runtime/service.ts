@@ -17,7 +17,7 @@
 import { randomUUID } from "node:crypto";
 
 import { settings } from "../config.js";
-import { CoercionError, coerceValue } from "../core/dataTypes.js";
+import { CoercionError, coerceValue, valueToText } from "../core/dataTypes.js";
 import { getEmbeddingProvider } from "../core/embedding.js";
 import { ConflictError, NotFoundError, ValidationError } from "../core/exceptions.js";
 import { SYSTEM_PROPERTIES, getReturnVariables, parseAndValidate } from "../core/oql/index.js";
@@ -1851,15 +1851,6 @@ function pyList(items: string[]): string {
   return `[${items.map((item) => `'${item}'`).join(", ")}]`;
 }
 
-/** Stringify a coerced parameter for textual substitution: `None` for
- * nothing, capitalized booleans, ISO for dates. */
-function pyStr(value: unknown): string {
-  if (value === null || value === undefined) return "None";
-  if (typeof value === "boolean") return value ? "True" : "False";
-  if (value instanceof Date) return value.toISOString();
-  return String(value);
-}
-
 /**
  * Resolve binding expressions against earlier step outputs: `fieldName`
  * collected from every row IN ROW ORDER into a flat list. A row lacking
@@ -1887,7 +1878,7 @@ export function resolveBindings(
  * the text verbatim. */
 export function substituteParams(template: string, params: Row): string {
   return template.replace(PARAM_REF_RE, (whole, name: string) =>
-    name in params ? pyStr(params[name]) : whole,
+    name in params ? valueToText(params[name]) : whole,
   );
 }
 

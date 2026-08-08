@@ -16,6 +16,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
+import { valueToText } from "../core/dataTypes.js";
 import { getRuntimeStore } from "../core/ports.js";
 import * as service from "../runtime/service.js";
 import { formatToolError } from "./modeling.js";
@@ -131,8 +132,9 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
     }) => {
       const strFilters: Record<string, string> = {};
       for (const [k, v] of Object.entries(args.filters ?? {})) {
-        // Filter values travel as strings; booleans capitalize.
-        strFilters[k] = typeof v === "boolean" ? (v ? "True" : "False") : String(v);
+        // Filter values travel as strings, in the same spelling the write
+        // path stores them in.
+        strFilters[k] = valueToText(v);
       }
       const limit = clamp(args.limit ?? 50, 1, 200);
       const offset = Math.max(0, args.offset ?? 0);
@@ -426,8 +428,9 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
     }) => {
       const strFilters: Record<string, string> = {};
       for (const [k, v] of Object.entries(args.filters ?? {})) {
-        // Filter values travel as strings; booleans capitalize.
-        strFilters[k] = typeof v === "boolean" ? (v ? "True" : "False") : String(v);
+        // Filter values travel as strings, in the same spelling the write
+        // path stores them in.
+        strFilters[k] = valueToText(v);
       }
       const limit = clamp(args.limit ?? 50, 1, 200);
       const offset = Math.max(0, args.offset ?? 0);
@@ -629,8 +632,9 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
       const limit = clamp(args.limit ?? 10, 1, 100);
       const strFilters: Record<string, string> = {};
       for (const [k, v] of Object.entries(args.filters ?? {})) {
-        // Filter values travel as strings; booleans capitalize.
-        strFilters[k] = typeof v === "boolean" ? (v ? "True" : "False") : String(v);
+        // Filter values travel as strings, in the same spelling the write
+        // path stores them in.
+        strFilters[k] = valueToText(v);
       }
       const result = await service.semanticSearch(
         ontologyKey,

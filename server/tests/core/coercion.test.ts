@@ -35,9 +35,9 @@ describe("string — accepts any JSON scalar, stringified; rejects nothing", () 
     expect(coerceValue(30, "string", "k")).toBe("30");
     expect(coerceValue(1.5, "string", "k")).toBe("1.5");
   });
-  it("stringifies booleans capitalized", () => {
-    expect(coerceValue(true, "string", "k")).toBe("True");
-    expect(coerceValue(false, "string", "k")).toBe("False");
+  it("stringifies booleans in JSON's spelling", () => {
+    expect(coerceValue(true, "string", "k")).toBe("true");
+    expect(coerceValue(false, "string", "k")).toBe("false");
   });
 });
 

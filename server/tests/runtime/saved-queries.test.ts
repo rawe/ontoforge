@@ -113,8 +113,8 @@ describe("substituteParams", () => {
     expect(substituteParams("find $topic and $other", { topic: "x" })).toBe("find x and $other");
   });
 
-  it("stringifies booleans capitalized, as stored", () => {
-    expect(substituteParams("active: $flag", { flag: true })).toBe("active: True");
+  it("stringifies booleans in the same spelling the write path stores", () => {
+    expect(substituteParams("active: $flag", { flag: true })).toBe("active: true");
   });
 });
 

@@ -26,6 +26,7 @@ import { ToolNode, createReactAgent } from "@langchain/langgraph/prebuilt";
 import { z } from "zod";
 
 import { DEFAULT_AGENT_CONFIG, getAiModel, type AgentConfig } from "../core/ai.js";
+import { valueToText } from "../core/dataTypes.js";
 import { getEmbeddingProvider } from "../core/embedding.js";
 import { NotFoundError, ValidationError } from "../core/exceptions.js";
 import type { RuntimeStore } from "../core/ports.js";
@@ -686,28 +687,11 @@ export function normalizeExtraction(raw: unknown): ExtractionResult {
   return { entities, relations };
 }
 
-/** Stringify a match-map value for the lookup key: `None` for nothing,
- * capitalized booleans. */
-function pyStr(value: unknown): string {
-  if (value === null || value === undefined) return "None";
-  if (typeof value === "boolean") return value ? "True" : "False";
-  return String(value);
-}
-
 /** One entity created during a persisting extraction, with the type it was
  * created as — the endpoint resolver needs both. */
 interface CreatedEntity {
   entityTypeKey: string;
   entity: Row;
-}
-
-/** Normalize a value for endpoint comparison. The match map comes from the
- * model as raw JSON while the entity's properties have been through the
- * write pipeline, so `28` must equal `"28"` and a coerced datetime must
- * equal the ISO string the model wrote. */
-function matchValue(value: unknown): string {
-  if (value instanceof Date) return value.toISOString();
-  return pyStr(value);
 }
 
 /**
@@ -734,7 +718,11 @@ function resolveEndpoint(
   const matches = created.filter(
     (candidate) =>
       candidate.entityTypeKey === endpoint.entityTypeKey &&
-      wanted.every(([key, value]) => matchValue(candidate.entity[key]) === matchValue(value)),
+      // Compared as text: the match map comes from the model as raw JSON
+      // while the entity's properties have been through the write pipeline,
+      // so `28` must equal `"28"` and a coerced datetime must equal the ISO
+      // string the model wrote.
+      wanted.every(([key, value]) => valueToText(candidate.entity[key]) === valueToText(value)),
   );
 
   if (matches.length === 1) return { entity: matches[0]!.entity };

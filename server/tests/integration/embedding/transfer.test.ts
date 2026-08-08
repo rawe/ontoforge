@@ -18,8 +18,8 @@ import { checkOllamaModel, disableProvider, enableOllamaProvider, indexDimension
 
 type Row = Record<string, unknown>;
 
-const PYTHON_EXPORT = JSON.parse(
-  readFileSync(new URL("../../fixtures/python-export.json", import.meta.url), "utf8"),
+const LEGACY_EXPORT = JSON.parse(
+  readFileSync(new URL("../../fixtures/legacy-export.json", import.meta.url), "utf8"),
 ) as Row;
 
 const ollamaUp = await checkOllamaModel();
@@ -36,7 +36,7 @@ describe.skipIf(!ollamaUp)("schema import (Ollama)", () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/model/import",
-      payload: PYTHON_EXPORT,
+      payload: LEGACY_EXPORT,
     });
     expect(res.statusCode, res.body).toBe(201);
   });

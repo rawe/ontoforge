@@ -1,6 +1,6 @@
 # OntoForge
 
-OntoForge is a graph-native ontology studio for designing graph schemas and using them through generic, schema-driven APIs. Storage sits behind an exchangeable database adapter — Neo4j is the current adapter. The schema (entity types, relation types, properties) is global and independent. Ontologies are named lenses over this schema — either unscoped (full schema access) or scoped to a filtered subset of types and properties. The system provides dedicated REST and MCP interfaces for modeling and runtime, stores schema and data together in one database (Neo4j adapter today) behind a persistence port, and supports JSON-based export and import.
+OntoForge is a graph-native ontology studio for designing graph schemas and using them through generic, schema-driven APIs. Storage sits behind an exchangeable database adapter. The schema (entity types, relation types, properties) is global and independent. Ontologies are named lenses over this schema — either unscoped (full schema access) or scoped to a filtered subset of types and properties. The system provides dedicated REST and MCP interfaces for modeling and runtime, stores schema and data together in one database behind a persistence port, and supports JSON-based export and import.
 
 ## Project Structure
 
@@ -16,6 +16,7 @@ OntoForge is a graph-native ontology studio for designing graph schemas and usin
 
 1. **Consistency first.** All docs, code, and architecture must be consistent with each other. If an inconsistency is detected, STOP and ask the user — never silently resolve or ignore it.
 2. **Single source of truth.** Each piece of information belongs in exactly one place. Avoid redundancy by default. When a fact is needed elsewhere, reference the source — don't copy it.
+
 The remaining principles for writing under `docs/` — progressive disclosure, redundancy,
 document lifecycle, status quo only, technology neutrality — live in
 [docs/CLAUDE.md](docs/CLAUDE.md), which loads when working there.
@@ -44,9 +45,8 @@ Start Neo4j (`docker compose up -d`) before running `npm run dev` in `server/` a
 
 ## Documentation
 
-Start at [docs/README.md](docs/README.md) — concepts, glossary and the map of everything
-else. Do not restate its definitions here; this file is about how to *work* in the repo,
-not what the system is.
+Start at [docs/README.md](docs/README.md) for the full picture — concepts, glossary and
+the map of everything else.
 
 | Need | Read |
 |---|---|

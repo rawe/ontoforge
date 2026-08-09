@@ -4,13 +4,7 @@ OntoForge is a graph-native ontology studio for designing graph schemas and usin
 
 ## Project Structure
 
-Monorepo with two main parts:
-
-- **Frontend** — React (`frontend/`)
-- **Backend** — TypeScript on Node.js (`server/`)
-
-Both are npm projects: use `npm install`, `npm run`, etc. There is no Python in this
-repository.
+`frontend/` and `server/` are independent npm projects — there is no workspace root.
 
 ## Design Principles
 
@@ -22,12 +16,9 @@ repository.
 
 1. **Consistency first.** All docs, code, and architecture must be consistent with each other. If an inconsistency is detected, STOP and ask the user — never silently resolve or ignore it.
 2. **Single source of truth.** Each piece of information belongs in exactly one place. Avoid redundancy by default. When a fact is needed elsewhere, reference the source — don't copy it.
-3. **Progressive disclosure.** Layer documents from overview to detail. High-level docs link to deeper docs, not duplicate their content.
-4. **When redundancy exists, maintain consistency.** Brief summaries referencing detail docs are acceptable. But if two places state the same fact, both must stay in sync. When they diverge, flag it.
-5. **Don't document what the code makes obvious.** Reference code by semantic anchors (module names, class names, section names) — never by file:line numbers. Feature docs should weave code references into prose, not be bare reference lists. Avoid code blocks in docs unless needed to illustrate a major pattern.
-6. **Respect document lifecycle.** Documents form a directed chain: concepts → architecture → capabilities → code. Later documents may reference earlier ones, never the reverse. Place information where it belongs in this lifecycle.
-7. **Status quo only.** `docs/` describes the system as it is. No history, no dates, no "planned", no migration notes, no rejected alternatives — those belong in `docs/adr/`. Unbuilt ideas are not documented at all.
-8. **Technology-neutral above the adapter.** Everything in `docs/` except `storage-adapters.md` must hold for a reimplementation in another language. No library names, no file paths, no class or function names.
+The remaining principles for writing under `docs/` — progressive disclosure, redundancy,
+document lifecycle, status quo only, technology neutrality — live in
+[docs/CLAUDE.md](docs/CLAUDE.md), which loads when working there.
 
 ## Git Commits
 
@@ -48,18 +39,8 @@ Documentation of a single script stays beside that script (`scripts/USAGE.md`).
 
 ## Local Development Setup
 
-```bash
-# 1. Start Neo4j
-docker compose up -d
-
-# 2. Start the backend (serves both modeling and runtime APIs)
-cd server && npm run dev
-
-# 3. Start the frontend (in a separate terminal)
-cd frontend && npm run dev
-```
-
-The backend runs on `http://localhost:8000`, the frontend on `http://localhost:5173`.
+Start Neo4j (`docker compose up -d`) before running `npm run dev` in `server/` and
+`frontend/`. The backend runs on `http://localhost:8000`.
 
 ## Documentation
 

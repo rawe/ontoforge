@@ -1493,7 +1493,7 @@ function compareFilterValues(op: string, actual: unknown, expected: unknown): bo
   if (a instanceof Date) a = a.getTime();
   if (b instanceof Date) b = b.getTime();
   if (typeof a !== typeof b) {
-    return false; // Python raises TypeError on cross-type compare -> False
+    return false; // Values of different types never compare equal or ordered
   }
   switch (op) {
     case "eq":

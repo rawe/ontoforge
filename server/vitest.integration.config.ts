@@ -9,8 +9,7 @@ import { defineConfig } from "vitest/config";
 // running with no provider. Run them separately via
 // `npm run test:integration:embedding` (requires Ollama with
 // nomic-embed-text) and `npm run test:integration:ai` (requires Ollama
-// with the `AI_MODEL` default) — mirroring the Python suite's marker
-// split.
+// with the `AI_MODEL` default).
 export default defineConfig({
   test: {
     include: ["tests/integration/**/*.test.ts"],

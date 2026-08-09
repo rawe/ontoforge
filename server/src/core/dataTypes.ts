@@ -35,8 +35,7 @@ function jsonTypeName(value: unknown): string {
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 // ISO date-time: date part, optional time (T or space separator), optional
-// fractional seconds, optional offset — the common subset of what Python's
-// `datetime.fromisoformat` accepts.
+// fractional seconds, optional offset.
 const DATETIME_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|z|[+-]\d{2}(?::?\d{2})?)?)?$/;
 

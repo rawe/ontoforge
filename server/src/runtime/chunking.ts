@@ -6,8 +6,8 @@
  * size. Each chunk records its exact character coordinates in the original
  * document so passages can be retrieved via the document read endpoint.
  *
- * All indices are Unicode CODE POINTS (Python `str` semantics), never
- * UTF-16 code units — the algorithm operates on a code-point array.
+ * All indices are Unicode CODE POINTS, never UTF-16 code units — the
+ * algorithm operates on a code-point array.
  */
 
 /** A chunk of a document with exact character coordinates. */
@@ -22,12 +22,14 @@ export interface Chunk {
 const SENTENCE_ENDINGS: readonly string[] = [". ", "! ", "? ", ".\n", "!\n", "?\n"];
 
 /**
- * Python `str.isspace()` for one code point. `\s` plus the C0/C1 controls
- * Python counts as whitespace, minus the BOM (which Python does not).
+ * Whitespace test for one code point: JS `\s` plus the C0/C1 separator and
+ * NEL controls, minus the BOM. Chunk boundaries depend on this set, and
+ * stored chunk offsets depend on those boundaries \u2014 widening or narrowing
+ * it invalidates already-indexed documents.
  */
 function isSpace(ch: string): boolean {
   if (ch === "\uFEFF") {
-    return false; // JS \s counts the BOM as whitespace; Python does not.
+    return false; // A zero-width mark, not a separator, despite JS \s.
   }
   return /\s/.test(ch) || (ch >= "\u001C" && ch <= "\u001F") || ch === "\u0085";
 }
@@ -44,8 +46,7 @@ function findSplitPoint(cps: readonly string[], start: number, targetEnd: number
   const minEnd = start + Math.floor((targetEnd - start) / 2);
 
   // 1. Paragraph boundary ("\n\n") — split after the blank line. The match
-  //    must lie entirely within [minEnd, targetEnd), as Python's rfind
-  //    bounds it.
+  //    must lie entirely within [minEnd, targetEnd).
   for (let i = targetEnd - 2; i >= minEnd; i--) {
     if (cps[i] === "\n" && cps[i + 1] === "\n") {
       return i + 2;

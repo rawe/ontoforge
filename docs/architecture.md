@@ -1,557 +1,281 @@
-# OntoForge — Architecture
+# Architecture
 
-> System-wide architecture for the OntoForge project.
-> For detailed endpoint specs, see `api-contracts/`.
+How OntoForge is put together. Concepts and vocabulary: [README.md](README.md). The rules
+this document obeys: [decisions.md](decisions.md).
 
-## 1. System Overview
+This document is deliberately free of language and framework detail. Everything here
+should hold for a reimplementation in any language.
 
-OntoForge consists of:
+## Components
 
-- **ontoforge-server** — a Python application that serves both modeling and runtime routes from a single process
-- **frontend** — React app for schema design, ontology scope configuration, and runtime data management
-- **MCP layer** — two MCP servers: modeling (global schema) and runtime (data access through an ontology)
-- **Database** — a single graph database holding the global schema and instance data, accessed through the persistence port — Neo4j is the current adapter
+Four parts, two processes.
 
-The server uses one database and always mounts both the modeling API (`/api/model`) and the runtime API (`/api/runtime/{ontologyKey}/...`). Schema objects and instance data coexist in the same database (see section 4); how they are physically separated is an adapter concern (see `neo4j-adapter.md`). Frontends communicate with the backend via REST only. The MCP layer wraps the same service layer used by the REST API.
+**Server** — one deployable unit. Serves the modeling API, the runtime API, both MCP
+servers and the OpenAPI description. There is no mode switch and no partial deployment:
+every instance serves everything.
 
-## 2. Naming Conventions
+**Web client** — a separate static application talking to the server over REST only. It
+holds no privileged path; anything it does can be done over the API.
 
-| Layer | Component | Name |
-|-------|-----------|------|
-| Backend app | Python application | `ontoforge-server` |
-| Backend module | Schema CRUD, validation, export/import | `modeling` |
-| Backend module | Instance CRUD, search, traversal | `runtime` |
-| Backend module | Shared infrastructure | `core` |
-| Backend package | Database adapters | `adapters` |
-| API route | Schema modeling | `/api/model` |
-| API route | Runtime operations | `/api/runtime/{ontologyKey}` |
-| Frontend app | Schema design UI | `modeling` |
-| Frontend app | Instance management UI | `runtime` |
-| MCP | Adapter layer | TBD — likely `modeling-mcp`, `runtime-mcp` |
-| Infrastructure | Database (Neo4j adapter) | `neo4j` |
+**Database** — one instance, holding schema and instance data together. Reached only
+through the persistence port.
 
-Physical database naming — labels, relationship-type spellings, index names, and the PascalCase/UPPER_SNAKE_CASE conventions — is internal to the Neo4j adapter and documented in `neo4j-adapter.md`.
-
-## 3. Backend
-
-### 3.1 Module Structure
-
-The `ontoforge-server` is a modular monolith. At startup, both the modeling and runtime routers are mounted, and the persistence adapter selected via `DB_BACKEND` is initialized.
-
-- **core** — shared infrastructure: the persistence port, configuration, error handling, Pydantic models for the ontology schema (used by both modules)
-- **adapters** — one package per database adapter; `adapters/neo4j/` is the reference adapter (see `neo4j-adapter.md`)
-- **modeling** — schema management (CRUD, validation, export/import). Routes under `/api/model`.
-- **runtime** — instance management (entity/relation CRUD, schema introspection). Routes under `/api/runtime/{ontologyKey}`.
-
-All database access goes through the persistence port in `core/ports.py`: `get_modeling_store()` and `get_runtime_store()` return the stores of the adapter selected via `DB_BACKEND` (default `neo4j`). Services, routers, and MCP handlers speak ontology vocabulary only — type keys, property keys, instance UUIDs, structured filters — and never see driver types, query text, or physical naming. The runtime module reuses schema Pydantic models from `core/` to read ontology data. It does **not** import from or depend on the `modeling` module.
-
-**Python package structure:**
+**Storage adapter** — the single active implementation of that port. See
+[storage-adapters.md](storage-adapters.md).
 
 ```
-backend/src/ontoforge_server/
-├── __init__.py
-├── main.py              # FastAPI app factory, mounts both routers
-├── config.py            # Pydantic Settings from environment (incl. DB_BACKEND)
-├── core/
-│   ├── __init__.py
-│   ├── ports.py         # Persistence port: store accessors, adapter selection
-│   ├── exceptions.py    # Domain exceptions → HTTP mapping
-│   └── schemas.py       # Shared Pydantic models (ontology schema, export format)
-├── adapters/
-│   └── neo4j/
-│       ├── driver.py           # Driver lifecycle, schema constraints
-│       ├── ddl.py              # Index DDL, naming conventions, index limits
-│       ├── modeling_store.py   # Neo4jModelingStore
-│       ├── runtime_store.py    # Neo4jRuntimeStore
-│       ├── modeling_queries.py # Schema persistence queries
-│       └── runtime_queries.py  # Instance persistence queries
-├── modeling/
-│   ├── __init__.py
-│   ├── router.py         # FastAPI router, /api/model
-│   ├── service.py        # Business logic, validation, export/import
-│   └── schemas.py        # Modeling-specific request/response models
-└── runtime/
-    ├── __init__.py
-    ├── router.py         # FastAPI router, /api/runtime/{ontologyKey}
-    ├── ai_router.py      # FastAPI router, AI agent endpoints
-    ├── service.py        # Instance CRUD, validation, schema introspection
-    └── schemas.py        # Runtime-specific request/response models
+   web client ────┐
+   REST clients ──┤
+   MCP clients ───┤
+                  ▼
+        ┌───────────────────────────────────────┐
+        │  server                               │
+        │                                       │
+        │   REST routers      MCP servers       │
+        │        └──────┬──────────┘            │
+        │          service layer                │
+        │        modeling │ runtime             │
+        │               ▼                       │
+        │        persistence port               │
+        └───────────────┬───────────────────────┘
+                        ▼
+                  storage adapter
+                        ▼
+                    database
 ```
 
-**Shared code boundary:** The export/import Pydantic models (`ExportPayload`, `ExportOntology`, `ExportEntityType`, etc.) live in `core/schemas.py`. Both modules use these models: the modeling module for its export/import endpoints, the runtime module for schema introspection.
+## Layers
 
-**Web framework:** FastAPI. Chosen for async support, Pydantic integration, and automatic OpenAPI docs.
+Four layers, each with one job. Requests only ever move downward.
 
-### 3.2 Modeling Module
+| Layer | Responsibility | Must not |
+|---|---|---|
+| Interface | Parse and shape requests; map errors to responses | Contain domain rules |
+| Service | Enforce every domain rule and invariant | Know the storage technology |
+| Port | Define the storage contract | Contain logic |
+| Adapter | Speak one database | Be referenced from above the port |
 
-Owns all schema operations. Has a narrow dependency on the runtime module: after every mutation, the modeling service calls `invalidate_loaded_schema_cache()` to clear the runtime's in-memory cache. This is the only coupling between the two modules.
+The rule that matters most: **domain rules live in the service layer only.** REST and MCP
+are two entrances to the same services, so a rule enforced in a router would apply to one
+entrance and not the other. This is why MCP calls services directly rather than calling
+REST — a second path would be a second contract.
 
-- Global entity type and relation type CRUD
-- Property definition CRUD
-- Ontology CRUD and scope management (INCLUDES_TYPE edges with optional property filtering)
-- Schema validation
-- Export/import via a database-independent JSON transfer format (v3.0)
+## Bounded contexts
 
-**Layer responsibilities:**
-
-| Layer | Responsibility |
-|-------|---------------|
-| `router.py` | HTTP handling, path/query params, delegates to service |
-| `schemas.py` | Pydantic models for request validation and response serialization |
-| `service.py` | Business logic, cross-entity validation, orchestrates store calls |
-| store (adapter) | Persistence operations behind the port, returns dicts/primitives |
-
-The service layer raises domain exceptions (from `core/exceptions.py`). The exception handler in `main.py` maps these to HTTP responses.
-
-### 3.3 Runtime Module
-
-Owns all instance operations. Reads schema data directly from the same database where the modeling module stores it. All operations are scoped through an ontology lens — the ontology key determines which types and properties are visible.
-
-- Schema introspection (read-only — returns types and properties visible through the ontology)
-- Entity instance CRUD (create, read, update, delete, list with filtering)
-- Relation instance CRUD (create, read, update, delete, list with filtering)
-- Neighborhood exploration (graph traversal from a given entity)
-- Instance validation against the scoped schema
-
-The runtime module reads schema data using the same Pydantic models as the modeling module's export. These shared models live in `core/schemas.py`. The runtime module has **no dependency** on the modeling module — it only depends on `core/`.
-
-**Schema cache:** The runtime lazily loads the schema for each ontology into an in-memory `LoadedSchema` structure (containing both full and scoped `SchemaCache` instances), keyed by ontology key. The cache is invalidated by the modeling service after any schema or scope mutation. Unscoped ontologies (no `INCLUDES_TYPE` edges) expose the full schema; scoped ontologies expose only the included types and their selected properties.
-
-**Validation:** Every write operation validates properties against the schema cache before any store call. All validation errors are collected and returned at once (not fail-fast). The validation pipeline checks type existence, required properties, unknown properties, and data type coercion.
-
-**Filters and temporals:** Filtering, search, and sorting inputs cross the persistence port as structured values, never as query fragments; the adapter compiles them to its native query form. Temporal values cross the port as plain Python `date`/`datetime` — driver-specific temporal types stay inside the adapter. How the adapter constructs its queries safely from schema-derived type keys is described in `neo4j-adapter.md`.
-
-### 3.4 MCP Layer
-
-Two MCP server endpoints are embedded in the FastAPI application, providing AI-assisted access to the same service layer used by the REST API. See `mcp-architecture.md` for the full design, tool catalog, and client configuration.
-
-## 4. Logical Data Model
-
-A single database instance holds both ontology schemas and instance data. Multiple ontologies coexist in the same database, each with their own schema objects and instance data. Entity and relation type keys colliding with reserved internal names are rejected by the modeling service, so user-defined types can never clash with the system's own storage structures. The physical representation of this model — labels, relationship storage, constraints, indexes — is the Neo4j adapter's concern and is documented in `neo4j-adapter.md`.
-
-### 4.1 Schema Representation
-
-All schema objects are stored as records connected by typed relationships.
-
-**Ontology**
-
-| Property | Type | Notes |
-|----------|------|-------|
-| `ontologyId` | String (UUID) | Stable identifier, immutable after creation |
-| `name` | String | Display name, unique across all ontologies |
-| `key` | String | URL-safe identifier (`^[a-z][a-z0-9_]*$`), unique, immutable after creation |
-| `description` | String | Optional |
-| `createdAt` | DateTime | Set on creation |
-| `updatedAt` | DateTime | Updated on every mutation |
-
-The `key` field is used in runtime URL paths (`/api/runtime/{ontologyKey}/...`). It follows the same snake_case pattern as entity and relation type keys.
-
-**EntityType**
-
-| Property | Type | Notes |
-|----------|------|-------|
-| `entityTypeId` | String (UUID) | Stable identifier |
-| `key` | String | Globally unique |
-| `displayName` | String | Human-readable name |
-| `description` | String | Optional |
-| `createdAt` | DateTime | |
-| `updatedAt` | DateTime | |
-
-**RelationType**
-
-| Property | Type | Notes |
-|----------|------|-------|
-| `relationTypeId` | String (UUID) | Stable identifier |
-| `key` | String | Globally unique |
-| `displayName` | String | Human-readable name |
-| `description` | String | Optional |
-| `createdAt` | DateTime | |
-| `updatedAt` | DateTime | |
-
-Connected to its source and target entity types via `RELATES_FROM` and `RELATES_TO` relationships.
-
-**PropertyDefinition**
-
-| Property | Type | Notes |
-|----------|------|-------|
-| `propertyId` | String (UUID) | Stable identifier |
-| `key` | String | Unique within owning type |
-| `displayName` | String | Human-readable name |
-| `description` | String | Optional |
-| `dataType` | String | One of: `string`, `integer`, `float`, `boolean`, `date`, `datetime`, `document` |
-| `required` | Boolean | Whether instances must provide this property |
-| `defaultValue` | String | Optional, stored as string, interpreted by dataType |
-| `createdAt` | DateTime | Set on creation |
-| `updatedAt` | DateTime | Updated on every mutation |
-
-The `document` data type holds large text content interpreted as Markdown. It is only valid on entity type properties — the modeling layer rejects document properties on relation types, since the chunk/stub machinery is anchored to entity instances. Its logical behavior (stubs, chunking, passage search) is described under Document Chunks in §4.2; the physical chunk storage lives in `neo4j-adapter.md`.
-
-**AiAgentConfig**
-
-| Property | Type | Notes |
-|----------|------|-------|
-| `agentConfigId` | String (UUID) | Stable identifier |
-| `key` | String | Unique within owning ontology (`^[a-z][a-z0-9_]*$`) |
-| `name` | String | Display name |
-| `description` | String | Optional |
-| `systemPrompt` | String | Optional, custom system prompt for this agent |
-| `tools` | List of String | Tool names available to this agent |
-| `createdAt` | DateTime | Set on creation |
-| `updatedAt` | DateTime | Updated on every mutation |
-
-Connected to its owning ontology via a `HAS_AI_AGENT` relationship.
-
-**SavedQuery**
-
-| Property | Type | Notes |
-|----------|------|-------|
-| `savedQueryId` | String (UUID) | Stable identifier, immutable after creation |
-| `key` | String | Unique within owning ontology, pattern `^[a-z][a-z0-9_-]*$` |
-| `name` | String | Display name |
-| `description` | String | Required description |
-| `steps` | String (JSON) | Serialized step pipeline: `oql` steps carry query text in `oql`, `semantic_search` steps carry their search text in `query` (see `api-contracts/modeling-api.md`) |
-| `parameters` | String (JSON) | Serialized list of `{name, description, dataType}` |
-| `_ontologyKey` | String | Owning ontology key — denormalized for in-index filtering (see `neo4j-adapter.md`) |
-| `_embedding` | List of Float | Vector embedding of the description field |
-| `createdAt` | DateTime | Set on creation |
-| `updatedAt` | DateTime | Updated on every mutation |
-
-Connected to its owning ontology via a `HAS_SAVED_QUERY` relationship.
-
-**Relationships:**
+Three modules, with a deliberately acyclic dependency graph:
 
 ```
-(Ontology)-[:INCLUDES_TYPE {properties: [...] | null}]->(EntityType)    # scoped ontology only
-(Ontology)-[:INCLUDES_TYPE {properties: [...] | null}]->(RelationType)  # scoped ontology only
-(Ontology)-[:HAS_AI_AGENT]->(AiAgentConfig)
-(Ontology)-[:HAS_SAVED_QUERY]->(SavedQuery)
-(EntityType)-[:HAS_PROPERTY]->(PropertyDefinition)
-(RelationType)-[:HAS_PROPERTY]->(PropertyDefinition)
-(RelationType)-[:RELATES_FROM]->(EntityType)
-(RelationType)-[:RELATES_TO]->(EntityType)
+   modeling ──▶ core ◀── runtime
 ```
 
-An ontology without any `INCLUDES_TYPE` edges is unscoped and exposes the full schema. An ontology with `INCLUDES_TYPE` edges is scoped — only the referenced types are visible. The `properties` attribute on `INCLUDES_TYPE` controls which properties are exposed: `null` means all properties, a list means only those properties.
+**Modeling** owns the global schema: types, properties, lens definitions, cascade rules,
+schema validation, transfer, embedding rebuild.
 
-**Constraints and Indexes:**
+**Runtime** owns instance data: entity and relation lifecycle, traversal, documents,
+search, query execution, saved-query pipelines, agents.
 
-Uniqueness of all IDs, names, and keys above — and of entity instance IDs — is enforced by database constraints, created on startup together with the supporting indexes. Entity type and relation type keys are globally unique. The concrete DDL is adapter-internal; see `neo4j-adapter.md`.
+**Core** owns what both need and neither should define twice: the persistence port, the
+exception taxonomy, the transfer format, the data-type enumeration, the embedding
+provider abstraction, and OQL parsing and validation.
 
-When an embedding provider is configured, semantic-search indexes are additionally ensured on startup: one per entity type, a shared cross-type index for search without a type filter, one for saved-query descriptions, and one per document property (kept in sync with the schema lifecycle — created when a document property is added, dropped when the property or its entity type is deleted). Physical index names and layouts are documented in `neo4j-adapter.md`.
+**Runtime never depends on modeling.** Everything runtime needs about the schema, it
+reads through the port. This keeps the schema a *value* to runtime rather than a service
+it calls, which is what makes the schema cache possible.
 
-A semantic index is built for the vector width of the embedding model configured when it was created, so changing that model leaves indexes the new model's vectors cannot be searched against. Startup names each such index — by entity type, document property, or search scope — in a warning giving both widths and the remedy, but repairs nothing: rebuilding an index discards the vectors it holds, and that is the operator's decision. `POST /api/model/rebuild-embeddings` performs the repair, rebuilding the index at the model's width and regenerating its vectors (decision 013).
+## Logical data model
 
-**Cascading Deletes:**
+Physical representation is the adapter's business; this is the logical shape.
 
-- Deleting an **Ontology** removes its `INCLUDES_TYPE` edges and deletes all associated `AiAgentConfig` records (via `HAS_AI_AGENT`) and `SavedQuery` records (via `HAS_SAVED_QUERY`). Entity types, relation types, and properties are not affected (they are global).
-- Deleting an **EntityType** fails with 409 Conflict if any relation type references it as source or target. With `cascade=true`, it also removes `INCLUDES_TYPE` edges from all ontologies. Its property definitions are deleted.
-- Deleting a **RelationType** deletes its property definitions. With `cascade=true`, it also removes `INCLUDES_TYPE` edges from all ontologies.
-- Deleting a **PropertyDefinition** is always allowed. With `cascade=true`, it also removes the property key from scoped ontology property lists.
+### Schema level
 
-### 4.2 Instance Representation
+| Kind | Identity | Notable fields |
+|---|---|---|
+| Ontology | id, unique `key`, unique name | name, description, timestamps |
+| Entity type | id, globally unique `key` | display name, description, timestamps |
+| Relation type | id, globally unique `key` | display name, source and target entity type keys |
+| Property definition | id, `key` unique within its owner | data type, required, default; owned by exactly one entity type or relation type |
+| Inclusion | ontology + type | optional property allowlist; absent means all properties |
+| Agent config | ontology + `key` | name, description, system prompt, tool allowlist |
+| Saved query | ontology + `key` | name, description, ordered steps, parameters, bindings |
 
-Instance data lives in the same database as schema data. Entity instances are graph nodes typed by their entity type key; relation instances are graph edges typed by their relation type key, connecting two entity instances. How the adapter maps type keys onto its physical storage is described in `neo4j-adapter.md`.
+Ontologies, agent configs and saved queries are the three things that belong *to a lens*.
+Types and properties never do.
 
-#### Entity Instances
+### Instance level
 
-**System properties** (underscore-prefixed, never collide with user properties which must start lowercase):
+| Kind | Identity | Notable fields |
+|---|---|---|
+| Entity | `_id` | its type key, plus the properties its type defines |
+| Relation | `_id` | its type key, its two endpoint ids, plus its properties |
+| Chunk | internal | fragment of one document property, with its offset and length |
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `_id` | String (UUID) | Stable instance identifier, generated on creation |
-| `_entityTypeKey` | String | Schema entity type key (e.g., `person`) |
-| `_createdAt` | DateTime | Creation timestamp |
-| `_updatedAt` | DateTime | Last-modified timestamp |
-| `_embedding` | List of Float | Vector embedding of string properties, excluding document properties (only when an embedding provider is configured; never returned by the API) |
-| `_doc_{key}_length` | Integer | Character count of the document property `{key}`, maintained at write time so reads can build stubs without loading the value (only on entities with document properties) |
+System properties are server-managed, always readable, never writable: `_id`,
+`_createdAt`, `_updatedAt`, plus `_entityTypeKey` on entities and `_relationTypeKey` on
+relations. They are distinguished by a leading underscore, and since no user-defined key
+may begin with one, the namespaces cannot collide.
 
-**User-defined properties** are stored as individually typed values keyed by their property definition key — not serialized into a JSON blob. This enables native filtering, ordering, and indexing on property values. The mapping of schema data types to physical storage types is adapter-internal (see `neo4j-adapter.md`).
+That separation rests entirely on the key pattern being enforced, and one entry point does
+not enforce it — see the invariants below.
 
-A `document` value is stored inline on the entity like any string, but it is treated specially everywhere else: it is excluded from the entity's `_embedding`, excluded from semantic-index filter metadata (and from the indexed property size limit that applies to indexed string properties), never returned inline in entity reads (a stub with the character length is returned instead), and — when an embedding provider is configured — chunked into dedicated chunk records for passage-level semantic search (see Document Chunks below). The API shapes for stubs, document reads, and search hits are defined in `api-contracts/runtime-api.md`.
+Relation endpoint ids are the exception to the underscore convention: reads return them as
+`fromEntityId` and `toEntityId`, without a prefix, even though they are as
+server-managed as any other system property.
 
-#### Document Chunks
+Embedding vectors and document length bookkeeping are internal. They are stored, but
+never appear in a response.
 
-When an embedding provider is configured, each write of a document property synchronously replaces that property's chunks: the text is split into overlapping fixed-size character chunks (paragraph/sentence/whitespace boundaries preferred; sizes configured via `DOCUMENT_CHUNK_SIZE` and `DOCUMENT_CHUNK_OVERLAP`), each chunk is embedded — reusing the stored embedding when a chunk's text is unchanged, so partial writes only re-embed the chunks they touch — and the chunks are written as records linked to their owning entity. Without an embedding provider no chunks exist and `document` behaves as a plain long-text property.
+### Invariants
 
-Chunks store their character coordinates (`startChar`, `charLength`), the chunk text, the chunk vector, and denormalized owner references (`_entityId`, `_entityTypeKey`, `_propertyKey`) for direct index-to-entity resolution. Each (entity type, document property) pair gets its own vector index. There is no cross-type chunk index — cross-type document search queries the in-scope per-property indexes and merges by score. Physical chunk storage (marker labels, virtual labels, index names) is documented in `neo4j-adapter.md`.
+Enforced in the service layer on every write path, whichever interface it arrived by. This
+is the summary; each one is stated with its consequences in
+[capabilities/schema-modeling.md](capabilities/schema-modeling.md).
 
-**Lifecycle:** chunks are kept in sync on entity write (only the changed property's chunks are replaced); deleted together with their entity; dropped together with their vector index when the document property definition or its entity type is deleted; and rebuilt in full by the rebuild-embeddings operation. Chunks are internal derived data: hidden from the schema API, rejected by the OQL validator, and never exported — after an import they are regenerated by rebuild-embeddings.
+- Type and property keys match `^[a-z][a-z0-9_]*$` on every path that sets them — the
+  modeling interfaces and import alike.
+- Entity type keys, relation type keys, ontology keys and ontology names are globally
+  unique. Property keys are unique within their owning type.
+- A relation type may only be created if both endpoint entity types exist.
+- An entity type cannot be deleted while any relation type references it.
+- `document` properties are permitted on entity types only, on creation and on import.
+- Type keys that would collide with the active adapter's own schema objects are rejected.
+  The adapter declares the reserved set; the service enforces it. Pre-existing collisions
+  are reported at startup, never silently rewritten.
+- Relation endpoints are fixed at creation. Properties may change; endpoints may not.
 
-#### Relation Instances
+## Ontology scoping
 
-Each relation instance connects exactly two entity instances and is typed by its relation type key.
+A lens with no inclusions exposes the whole schema. A lens with inclusions exposes
+exactly what it declares, with one inference: naming entity types alone also admits the
+relation types whose *both* endpoints are in scope, because a relation with an invisible
+endpoint would be unusable. The full rules are in
+[capabilities/ontology-lenses.md](capabilities/ontology-lenses.md).
 
-**System properties** on the relation:
+Scoping cuts in three places: schema reads omit what is out of scope, writes reject it,
+and read results are filtered — including individual columns of a query result.
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `_id` | String (UUID) | Stable instance identifier |
-| `_relationTypeKey` | String | Schema relation type key (e.g., `works_for`) |
-| `_createdAt` | DateTime | Creation timestamp |
-| `_updatedAt` | DateTime | Last-modified timestamp |
+One asymmetry is deliberate and easy to get wrong when reimplementing:
 
-**User-defined properties** are stored directly on the relation, with the same typed-value semantics as entity properties. The Neo4j adapter stores relations as native relationships — the rationale and its trade-offs are documented in `neo4j-adapter.md`.
+> **Writes validate against the scoped schema, but apply defaults from the full schema.**
 
-#### Reserved Names
+Relation endpoint types are checked against the full schema for the same reason. The rule
+and what it buys are in [decisions.md](decisions.md#behaviour); the three operations that
+consult the full schema instead of the lens, and what each one costs a caller, are in
+[capabilities/ontology-lenses.md](capabilities/ontology-lenses.md#the-lensfull-schema-asymmetry).
 
-Entity and relation type keys that would collide with reserved internal names are rejected by the modeling service, on every write path — type creation and schema import alike. This keeps user-defined instance data structurally separate from the system's schema objects and internal storage structures. The concrete reserved set is derived from the adapter's physical naming and reaches the modeling service through the persistence port as plain type keys, so the service rejects a colliding key without knowing why it collides; an adapter with no such collisions reserves nothing (see `neo4j-adapter.md`).
+## Schema cache
 
-Types created before the check existed are left in place — renaming a type key is destructive and is the operator's decision — but the server names each one in a startup warning, because their only other symptom is a failing modeling read once instance data exists under them.
+Runtime reads the schema on nearly every request, so each lens is assembled once and held
+in memory: its scoped schema, the full schema, its agent configurations and its saved
+queries.
 
-### 4.3 Ontology Scoping
+The cache is built lazily per lens and cleared wholesale by any modeling mutation.
+Wholesale rather than selective, because a single schema change can affect many lenses
+and the cost of rebuilding is small.
 
-Multiple ontologies coexist in the same database as lenses over a shared global schema. Unscoped ontologies expose all types and properties. Scoped ontologies use `INCLUDES_TYPE` edges to expose a subset.
+It is **per process**. Multiple server instances against one database will not see each
+other's schema changes until each rebuilds — a real constraint on horizontal scaling that
+no interface currently exposes.
 
-Instance data is shared — all ontologies see the same entities and relations. The ontology key in the runtime URL (`/api/runtime/{ontologyKey}/...`) determines which types and properties are visible for validation and response filtering. An entity created through one ontology is accessible through any other ontology that includes its type.
+## Request lifecycle
 
-### 4.4 JSON Transfer Format
+A runtime write, which is the longest path:
 
-The export/import format is a self-contained JSON document:
+```
+  request
+    → parse and validate shape
+    → resolve ontology key to its lens
+    → load lens from schema cache (build on miss)
+    → reject unknown properties; check required; apply defaults
+    → coerce each value to its declared data type
+    → embed text if a provider is configured
+    → cross the persistence port
+    → adapter compiles and executes
+    → filter response to the scoped properties
+    → stub documents, apply field projection
+  response
+```
+
+Two properties of the validation step are contractual rather than incidental, and both are
+rules rather than implementation choices:
+
+**All errors are collected, not the first one** — [decisions.md](decisions.md#behaviour).
+
+**Coercion is strict.** Values are converted, never guessed. What each data type converts
+and what it refuses is in
+[capabilities/schema-modeling.md](capabilities/schema-modeling.md#data-types).
+
+## Error model
+
+Every error response has the same envelope:
 
 ```json
-{
-  "formatVersion": "3.0",
-  "entityTypes": [
-    {
-      "key": "string",
-      "displayName": "string",
-      "description": "string",
-      "properties": [
-        {
-          "key": "string",
-          "displayName": "string",
-          "description": "string",
-          "dataType": "string",
-          "required": true,
-          "defaultValue": null
-        }
-      ]
-    }
-  ],
-  "relationTypes": [
-    {
-      "key": "string",
-      "displayName": "string",
-      "description": "string",
-      "fromEntityTypeKey": "string",
-      "toEntityTypeKey": "string",
-      "properties": []
-    }
-  ],
-  "ontologies": [
-    {
-      "key": "string",
-      "name": "string",
-      "description": "string",
-      "includes": null,
-      "aiAgents": []
-    },
-    {
-      "key": "string",
-      "name": "string",
-      "description": "string",
-      "includes": {
-        "entityTypes": [
-          {"key": "string", "properties": null},
-          {"key": "string", "properties": ["prop1", "prop2"]}
-        ],
-        "relationTypes": [
-          {"key": "string", "properties": null}
-        ]
-      },
-      "aiAgents": [
-        {
-          "key": "string",
-          "name": "string",
-          "description": "string",
-          "systemPrompt": "string",
-          "tools": ["string"]
-        }
-      ],
-      "savedQueries": [
-        {
-          "key": "string",
-          "name": "string",
-          "description": "string",
-          "steps": [
-            {
-              "name": "string",
-              "type": "oql",
-              "oql": "MATCH (p:person) WHERE p.name = $name RETURN p"
-            }
-          ],
-          "parameters": [
-            {
-              "name": "string",
-              "description": "string",
-              "dataType": "string"
-            }
-          ]
-        }
-      ]
-    }
-  ]
-}
+{ "error": { "code": "...", "message": "...", "details": { } } }
 ```
 
-Entity types and relation types are global — not nested under any ontology. Ontologies are separate entries with optional `includes` for scoping. An ontology with `"includes": null` is unscoped (exposes the full schema). A scoped ontology lists the types it includes; `"properties": null` means all properties, a list means only those properties. UUIDs are not included in the export — they are regenerated on import.
+There are exactly six top-level codes:
 
-Saved-query steps are either `oql` steps (query text in the `oql` field) or `semantic_search` steps (search text in the `query` field). Import expects the current format; payloads from earlier formats are not converted.
+| Condition | Status | Code | `details` |
+|---|---|---|---|
+| Resource does not exist | 404 | `RESOURCE_NOT_FOUND` | — |
+| Uniqueness or referential conflict | 409 | `RESOURCE_CONFLICT` | — |
+| Input rejected | 422 | `VALIDATION_ERROR` | `fields` map or `errors` list |
+| Change requires explicit cascade | 409 | `CASCADE_REQUIRED` | `affectedOntologies` |
+| Unexpected storage failure | 500 | `STORAGE_ERROR` | `errorId` |
+| Malformed request body | 400 | `INVALID_JSON` | — |
 
-## 5. API Design
+Two refinements:
 
-### 5.1 Common Conventions
+**`details.code` narrows, it does not replace.** Where it appears, the top-level code
+stays one of the six. A request for semantic search or saved-query search with no
+embedding provider configured — or an AI request with no language-model provider
+configured — answers `422 VALIDATION_ERROR` with `details.code` of `FEATURE_DISABLED`.
 
-**API scoping:** The modeling API operates on the global schema under `/api/model/...` — entity types, relation types, and properties are not scoped to any ontology. Ontologies and their scope configuration are managed as separate resources under `/api/model/ontologies/...`. The runtime API scopes all routes under `/api/runtime/{ontologyKey}/...` using the ontology's unique key.
+**`STORAGE_ERROR` carries an id, not a cause.** A driver message names the vendor and its
+physical objects, which must not reach a client. The adapter logs the original against a
+generated `errorId` and returns only that id, so a reported failure can still be traced to
+its server-side record.
 
-**Error response format:**
+## Startup
 
-```json
-{
-  "error": {
-    "code": "RESOURCE_NOT_FOUND",
-    "message": "Entity type with key 'person' not found in ontology 'acme'",
-    "details": {}
-  }
-}
-```
+Ordered, and failure at any step prevents serving:
 
-**HTTP status codes:**
+1. Connect storage, verify reachability, ensure constraints and indexes exist.
+2. Report any stored type key that the adapter now reserves.
+3. Initialize the embedding provider, if configured.
+4. Initialize the language-model provider, if configured.
+5. If embeddings are enabled, reconcile vector index widths against the provider and warn
+   on mismatch — see [capabilities/search.md](capabilities/search.md).
+6. Start both MCP servers.
 
-| Status | Usage |
-|--------|-------|
-| 200 | Successful read or update |
-| 201 | Successful creation |
-| 204 | Successful deletion |
-| 400 | Malformed request (invalid JSON, missing fields) |
-| 404 | Resource not found |
-| 409 | Conflict (duplicate name/key, referenced entity in use) |
-| 422 | Semantic validation error (schema inconsistency) |
-| 500 | Storage failure (`STORAGE_ERROR`, with an `errorId` for log correlation) |
+Note step 5 warns and does not repair — deliberately, for the reason given in
+[decisions.md](decisions.md#behaviour). Rebuild is where repair happens.
 
-**Validation errors** (400/422) include details:
+## Configuration
 
-```json
-{
-  "error": {
-    "code": "VALIDATION_ERROR",
-    "message": "Request validation failed",
-    "details": {
-      "fields": {
-        "key": "Key must contain only lowercase letters, numbers, and underscores"
-      }
-    }
-  }
-}
-```
+Environment supplies all configuration. There is no configuration file and no per-tenant
+configuration.
 
-### 5.2 Modeling API
+| Group | Purpose | Absent means |
+|---|---|---|
+| Storage | Which adapter, and how to reach the database | Server cannot start |
+| Embedding | Provider, model, endpoint, credential, vector width | Semantic search unavailable |
+| Documents | Chunk size and overlap | Defaults apply |
+| Language model | Provider, model, endpoint, credential | AI capabilities unavailable |
+| MCP | Fallback ontology key | Clients must supply a key themselves |
+| Public URL | Base address advertised in agent cards | Cards advertise a local address |
 
-Base path: `/api/model`
+Exact variable names are in the repository README; they are deployment surface, not
+architecture.
 
-Full contract: see `api-contracts/modeling-api.md`
+## What the architecture does not provide
 
-### 5.3 Runtime API
+Stated plainly, because their absence is a design position and not an oversight:
 
-Base path: `/api/runtime/{ontologyKey}`
+- **No authentication or authorization.** Every caller has full access. OntoForge is
+  deployed behind something that provides this, or on a trusted network.
+- **No multi-tenancy.** One schema, one dataset per deployment.
+- **No cross-process cache coherence**, as described above.
 
-The runtime API is generic and schema-driven — endpoints use type keys from the ontology as path parameters. It covers schema introspection, entity and relation instance CRUD, graph traversal, and instance data management. Additional endpoints for semantic search, OQL queries, saved queries, and AI interaction are documented in the full contract.
-
-**Endpoint summary (core data access):**
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/runtime/{ontologyKey}/schema` | Schema introspection (scoped to ontology) |
-| `GET` | `/api/runtime/{ontologyKey}/schema/entity-types` | List entity types |
-| `GET` | `/api/runtime/{ontologyKey}/schema/entity-types/{key}` | Get entity type with properties |
-| `GET` | `/api/runtime/{ontologyKey}/schema/relation-types` | List relation types |
-| `GET` | `/api/runtime/{ontologyKey}/schema/relation-types/{key}` | Get relation type with properties |
-| `POST` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}` | Create entity instance |
-| `GET` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}` | List/search entity instances |
-| `GET` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}` | Get entity instance |
-| `PATCH` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}` | Partial update entity instance |
-| `DELETE` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}` | Delete entity instance |
-| `GET` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}/neighbors` | Graph traversal |
-| `GET` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}/documents/{propertyKey}` | Read (a slice of) a document property |
-| `PATCH` | `/api/runtime/{ontologyKey}/entities/{entityTypeKey}/{id}/documents/{propertyKey}` | Partial write to a document property |
-| `POST` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}` | Create relation instance |
-| `GET` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}` | List relation instances |
-| `GET` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}/{id}` | Get relation instance |
-| `PATCH` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}/{id}` | Partial update relation instance |
-| `DELETE` | `/api/runtime/{ontologyKey}/relations/{relationTypeKey}/{id}` | Delete relation instance |
-
-Full contract: see `api-contracts/runtime-api.md`
-
-## 6. Frontend
-
-React + TypeScript + Vite single-page application (`frontend/`) with two surfaces:
-
-- **Studio** — schema design against the modeling API: entity/relation type editors with property management, ontology scoping, agents, saved queries, validation, export/import.
-- **Workbench** — instance data work through one ontology lens against the runtime API: schema-driven type tables, entity detail, Explorer canvas, query workbench, AI assistant.
-
-See `docs/runtime-ui-architecture.md` for the frontend architecture.
-
-## 7. Data Flow
-
-**Request lifecycle (modeling):**
-
-```
-HTTP Request
-  → FastAPI router (path params, body parsing)
-    → Pydantic schema validation (request model)
-      → Service layer (business logic, cross-entity checks)
-        → Store (persistence port)
-          → Database adapter
-        ← Store returns dict
-      ← Service returns domain object
-    ← Pydantic schema serialization (response model)
-  ← HTTP Response (JSON)
-```
-
-The runtime module follows the same layered pattern against the same database, with an additional schema cache lookup step before validation.
-
-**Error propagation:**
-
-The adapter maps driver errors to domain exceptions (or returns `None` for missing records) → Service raises a domain exception (e.g., `NotFoundError`, `ConflictError`) → Exception handler in `main.py` maps to HTTP response with structured error body. Driver exception types never cross the persistence port.
-
-Failures no domain exception describes — connection loss, timeouts, index state problems — become `StoreError`, so an unexpected storage failure is still answered with a structured body rather than a bare 500. Its message is deliberately empty of detail; the adapter logs the originating failure against the `errorId` the response carries, which is what ties a reported error to its server-side stack.
-
-**Domain exceptions:**
-
-| Exception | HTTP Status | Error Code |
-|-----------|-------------|------------|
-| `NotFoundError` | 404 | `RESOURCE_NOT_FOUND` |
-| `ConflictError` | 409 | `RESOURCE_CONFLICT` |
-| `CascadeRequiredError` | 409 | `CASCADE_REQUIRED` |
-| `ValidationError` | 422 | `VALIDATION_ERROR` |
-| `StoreError` | 500 | `STORAGE_ERROR` |
-
-## 8. Local Development
-
-Dependencies are managed via Docker Compose. The default deployment runs the Neo4j adapter, so the compose stack provides a Neo4j instance as the current adapter's infrastructure.
-
-**Docker Compose services:**
-- `neo4j` — single database for both schema and instance data (ports 7474/7687), used by the Neo4j adapter
-
-**Configuration:** The backend reads connection settings from environment variables.
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `DB_BACKEND` | `neo4j` | Persistence adapter selection (`neo4j` is the only built-in adapter) |
-| `DB_URI` | `bolt://localhost:7687` | Database endpoint (Neo4j adapter) |
-| `DB_USER` | `neo4j` | Database username (Neo4j adapter) |
-| `DB_PASSWORD` | `ontoforge_dev` | Database password (Neo4j adapter) |
-| `PORT` | `8000` | HTTP listen port |
-| `DEFAULT_MCP_ONTOLOGY_KEY` | *(unset)* | MCP default ontology key (used when key is not in URL or header) |
-
-**Running locally:**
-
-```bash
-# Start the database (Neo4j adapter)
-docker compose up -d
-
-# Start the server (serves both modeling and runtime)
-uv run ontoforge-server
-```
-
-**Database bootstrap:** On startup, the adapter ensures all required constraints and indexes exist — both schema constraints (ontology, entity type, etc.) and instance constraints (entity `_id` uniqueness, entity type key index). The runtime schema cache is loaded lazily on first request per ontology, not at startup.
+Absences in the API surface itself — no health probe, no bulk write, no instance-data
+export — are listed with their consequences in
+[interfaces.md](interfaces.md#what-is-not-exposed).

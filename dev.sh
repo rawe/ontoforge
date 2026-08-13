@@ -82,8 +82,9 @@ fi
 
 # --- Backend ---
 echo "Starting backend..."
-cd "$ROOT_DIR/backend"
-uv run uvicorn ontoforge_server.main:app --reload --host 0.0.0.0 --port 8000 &
+cd "$ROOT_DIR/server"
+[ -d node_modules ] || npm install
+npm run dev &
 BACKEND_PID=$!
 
 # Wait for backend to respond

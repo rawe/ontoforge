@@ -4,13 +4,13 @@ Exports all entities and relations from an OntoForge ontology into structured JS
 
 ## Prerequisites
 
-- [uv](https://docs.astral.sh/uv/) installed
+- [Node.js](https://nodejs.org/) >= 18 installed (no packages needed)
 - OntoForge server running
 
 ## Usage
 
 ```bash
-uv run export_ontology.py <ontology_key> -o <output_dir> [--base-url <url>]
+node export_ontology.mjs <ontology_key> -o <output_dir> [--base-url <url>]
 ```
 
 ### Server URL
@@ -26,10 +26,10 @@ export ONTOFORGE_BASE_URL=http://my-server:9000
 
 ```bash
 # Export to current directory (creates data_wacker_pi_planning_2026-03-05_101500/ inside)
-uv run export_ontology.py wacker_pi_planning -o .
+node export_ontology.mjs wacker_pi_planning -o .
 
 # Override server URL for a single run
-uv run export_ontology.py wacker_pi_planning -o ./exports --base-url http://my-server:9000
+node export_ontology.mjs wacker_pi_planning -o ./exports --base-url http://my-server:9000
 ```
 
 ## Output Structure

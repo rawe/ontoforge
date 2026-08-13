@@ -1,7 +1,7 @@
 /**
- * Wire types for the OntoForge backend.
- * Field names are the exact wire names (pydantic camelCase aliases) — see
- * the API contract. Runtime addresses by ontology/type KEY, modeling by UUID.
+ * Wire types for the OntoForge server.
+ * Field names are the exact camelCase wire names — see the API contract.
+ * Runtime addresses by ontology/type KEY, modeling by UUID.
  */
 
 /* ----------------------------------- misc ---------------------------------- */

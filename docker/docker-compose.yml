@@ -17,9 +17,9 @@ services:
       retries: 5
       start_period: 30s
 
-  backend:
-    build: ../backend
-    container_name: ontoforge-backend
+  server:
+    build: ../server
+    container_name: ontoforge-server
     ports:
       - "8000:8000"
     environment:
@@ -60,10 +60,10 @@ services:
     ports:
       - "3000:80"
     environment:
-      # Internal URL of the backend service — nginx proxies /api and /mcp here
-      BACKEND_URL: http://backend:8000
+      # Internal URL of the server service — nginx proxies /api and /mcp here
+      BACKEND_URL: http://server:8000
     depends_on:
-      - backend
+      - server
 
   # Ollama provider (optional — uncomment to run Ollama in Docker)
   # After first start, pull the models you need:

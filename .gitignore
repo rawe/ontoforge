@@ -1,19 +1,6 @@
 # Dependencies
 node_modules/
 
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.egg-info/
-*.egg
-dist/
-build/
-.eggs/
-
-# uv
-.venv/
-
 # Environment variables
 .env
 .env.*
@@ -31,13 +18,12 @@ build/
 Thumbs.db
 
 # Build output
+dist/
+build/
 *.tgz
 
 # Testing
 coverage/
-htmlcov/
-.coverage
-.pytest_cache/
 
 # Logs
 *.log

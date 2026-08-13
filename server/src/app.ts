@@ -1,0 +1,169 @@
+/**
+ * Fastify application factory: routes, error handlers, CORS, OpenAPI.
+ *
+ * Every error response uses the one envelope
+ * `{"error": {"code", "message", "details?"}}` with exactly six codes —
+ * see the error model in `docs/architecture.md`. Framework-level failures
+ * are mapped into the same envelope: an unparsable JSON body answers
+ * `400 INVALID_JSON`, a request-shape failure `422 VALIDATION_ERROR`.
+ */
+
+import cors from "@fastify/cors";
+import swagger from "@fastify/swagger";
+import swaggerUi from "@fastify/swagger-ui";
+import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
+import {
+  hasZodFastifySchemaValidationErrors,
+  jsonSchemaTransform,
+  serializerCompiler,
+  validatorCompiler,
+} from "fastify-type-provider-zod";
+
+import {
+  CascadeRequiredError,
+  ConflictError,
+  NotFoundError,
+  StoreError,
+  ValidationError,
+} from "./core/exceptions.js";
+import { mountMcp } from "./mcp/mount.js";
+import { modelingRouter } from "./modeling/router.js";
+import { aiRouter } from "./runtime/aiRouter.js";
+import { runtimeGlobalRouter, runtimeRouter } from "./runtime/router.js";
+
+function sendError(
+  reply: FastifyReply,
+  status: number,
+  code: string,
+  message: string,
+  details?: Record<string, unknown> | null,
+): FastifyReply {
+  const error: Record<string, unknown> = { code, message };
+  if (details) {
+    error.details = details;
+  }
+  return reply.status(status).send({ error });
+}
+
+export async function createApp(): Promise<FastifyInstance> {
+  const app = Fastify({ logger: false });
+
+  app.setValidatorCompiler(validatorCompiler);
+  app.setSerializerCompiler(serializerCompiler);
+
+  // A client sending `content-type: application/json` with an empty body to
+  // a route that declares no body (a validate POST, any DELETE) must
+  // succeed. Fastify's default parser would reject that before the route's
+  // declaration is consulted. Routes that DO declare a body keep the
+  // contract: an empty body answers 400 INVALID_JSON.
+  app.addContentTypeParser(
+    "application/json",
+    { parseAs: "string" },
+    (request, body, done) => {
+      const text = body as string;
+      if (text.trim() === "") {
+        if (request.routeOptions?.schema?.body) {
+          const error = new Error(
+            "Body cannot be empty when content-type is set to 'application/json'",
+          ) as Error & { code: string; statusCode: number };
+          error.code = "FST_ERR_CTP_EMPTY_JSON_BODY";
+          error.statusCode = 400;
+          done(error, undefined);
+        } else {
+          done(null, undefined);
+        }
+        return;
+      }
+      try {
+        done(null, JSON.parse(text));
+      } catch (err) {
+        const error = err as Error & { statusCode?: number };
+        error.statusCode = 400;
+        done(error, undefined);
+      }
+    },
+  );
+
+  // CORS allow-all: origins, methods and headers unrestricted, credentials
+  // allowed (the origin is reflected).
+  await app.register(cors, {
+    origin: true,
+    credentials: true,
+    methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
+  });
+
+  await app.register(swagger, {
+    openapi: {
+      info: { title: "OntoForge", version: "0.1.0" },
+    },
+    transform: jsonSchemaTransform,
+  });
+  await app.register(swaggerUi, { routePrefix: "/docs" });
+
+  app.get("/openapi.json", { schema: { hide: true } }, async () => app.swagger());
+
+  // An unknown route is a resource that does not exist; it answers in the
+  // standard envelope like every other error, rather than leaking the
+  // framework's own not-found shape.
+  app.setNotFoundHandler((request, reply) => {
+    sendError(reply, 404, "RESOURCE_NOT_FOUND", "Not Found");
+  });
+
+  app.setErrorHandler((error, request, reply) => {
+    if (error instanceof NotFoundError) {
+      return sendError(reply, 404, "RESOURCE_NOT_FOUND", error.message);
+    }
+    if (error instanceof ConflictError) {
+      return sendError(reply, 409, "RESOURCE_CONFLICT", error.message);
+    }
+    if (error instanceof ValidationError) {
+      return sendError(reply, 422, "VALIDATION_ERROR", error.message, error.details);
+    }
+    if (error instanceof CascadeRequiredError) {
+      return sendError(reply, 409, "CASCADE_REQUIRED", error.message, {
+        affectedOntologies: error.affectedOntologies,
+      });
+    }
+    if (error instanceof StoreError) {
+      // The adapter has already logged the originating failure against this
+      // id; the response carries the id and nothing else about the storage.
+      return sendError(reply, 500, "STORAGE_ERROR", error.message, {
+        errorId: error.errorId,
+      });
+    }
+    // An unparsable request body (framework-level JSON parse failure).
+    const frameworkError = error as { code?: string; statusCode?: number };
+    if (
+      frameworkError.code === "FST_ERR_CTP_INVALID_JSON_BODY" ||
+      frameworkError.code === "FST_ERR_CTP_EMPTY_JSON_BODY" ||
+      (error instanceof SyntaxError && frameworkError.statusCode === 400)
+    ) {
+      return sendError(reply, 400, "INVALID_JSON", "Request body is not valid JSON");
+    }
+    // Framework-level request-shape failures map into the standard envelope.
+    if (hasZodFastifySchemaValidationErrors(error)) {
+      return sendError(reply, 422, "VALIDATION_ERROR", "Request validation failed", {
+        errors: error.validation.map((issue) => ({
+          path: issue.instancePath,
+          message: issue.message ?? "Invalid value",
+        })),
+      });
+    }
+    // Anything else is a bug. Log it server-side and answer a bare 500 with
+    // no detail — an unhandled error never describes itself to a client.
+    request.log?.error?.(error);
+    console.error("Unhandled error:", error);
+    return reply.status(500).header("content-type", "text/plain").send("Internal Server Error");
+  });
+
+  await app.register(modelingRouter, { prefix: "/api/model" });
+  await app.register(runtimeGlobalRouter, { prefix: "/api/runtime" });
+  await app.register(runtimeRouter, { prefix: "/api/runtime" });
+  await app.register(aiRouter, { prefix: "/api/runtime" });
+
+  // Startup step 6: both MCP servers share the process and call the same
+  // services as REST.
+  mountMcp(app);
+
+  return app;
+}

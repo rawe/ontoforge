@@ -20,12 +20,12 @@ docker compose stop
 | Service | URL |
 |---------|-----|
 | Frontend | http://localhost:3000 |
-| Backend API | http://localhost:8000 |
+| Server API | http://localhost:8000 |
 | API docs | http://localhost:8000/docs |
 | Neo4j Browser | http://localhost:7474 |
 
 ## Configuration
 
-Change the Neo4j password by replacing `changeme` in both the `neo4j` and `backend` service definitions.
+Change the Neo4j password by replacing `changeme` in both the `neo4j` and `ontoforge-server` service definitions.
 
-See the main project README for backend environment variables.
+See the main project README for server environment variables.

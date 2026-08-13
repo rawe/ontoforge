@@ -1,0 +1,42 @@
+{
+  "name": "ontoforge-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "OntoForge server (TypeScript)",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "generate:oql": "antlr-ng -D language=TypeScript -o src/core/oql/generated grammar/CypherLexer.g4 grammar/CypherParser.g4",
+    "start": "node dist/main.js",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:integration:embedding": "vitest run --config vitest.integration.embedding.config.ts",
+    "test:integration:ai": "vitest run --config vitest.integration.ai.config.ts"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.3.0",
+    "@fastify/swagger": "^9.8.1",
+    "@fastify/swagger-ui": "^6.1.1",
+    "@langchain/core": "^1.2.3",
+    "@langchain/langgraph": "^1.4.8",
+    "@langchain/openai": "^1.5.5",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "antlr4ng": "^3.0.16",
+    "fastify": "^5.10.0",
+    "fastify-type-provider-zod": "^7.0.0",
+    "neo4j-driver": "^6.2.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "antlr-ng": "^1.0.10",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}

@@ -1,8 +1,8 @@
 /**
- * Fetch wrapper + query-string builders for the OntoForge backend.
+ * Fetch wrapper + query-string builders for the OntoForge server.
  *
- * Error envelope: `{"error": {"code", "message", "details"?}}`.
- * FastAPI body-validation errors use the default `{"detail": [...]}` shape.
+ * Every error answers in one envelope: `{"error": {"code", "message",
+ * "details"?}}`. Anything else is reported as a bare `HTTP_ERROR`.
  * 204 responses resolve to `undefined`.
  */
 
@@ -61,23 +61,6 @@ async function parseError(res: Response): Promise<ApiError> {
         e.message ?? `${res.status} ${res.statusText}`,
         e.details,
       )
-    }
-    // FastAPI default validation shape: {"detail": [...] | "..."}
-    const detail = (body as { detail?: unknown }).detail
-    if (detail !== undefined) {
-      const message =
-        typeof detail === 'string'
-          ? detail
-          : Array.isArray(detail)
-            ? detail
-                .map((d) =>
-                  d && typeof d === 'object' && 'msg' in d
-                    ? String((d as { msg: unknown }).msg)
-                    : JSON.stringify(d),
-                )
-                .join('; ')
-            : JSON.stringify(detail)
-      return new ApiError(res.status, 'VALIDATION_ERROR', message)
     }
   }
   return new ApiError(res.status, 'HTTP_ERROR', `${res.status} ${res.statusText}`)

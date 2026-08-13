@@ -133,7 +133,7 @@ Once connected to the runtime server, an AI assistant can work with your knowled
 
 Every write is validated against the ontology — the assistant cannot invent entity types, add undefined properties, or write structurally invalid data.
 
-See `docs/mcp-architecture.md` for the full tool catalog and design details.
+See [docs/interfaces.md](docs/interfaces.md) for the full tool catalog.
 
 ## Development Setup
 
@@ -142,8 +142,7 @@ For local development with hot reload, run Neo4j in Docker and the backend/front
 ### Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) and Docker Compose
-- [uv](https://docs.astral.sh/uv/) (Python package manager)
-- [Node.js](https://nodejs.org/) 18+ and npm
+- [Node.js](https://nodejs.org/) ≥ 22 LTS and npm
 
 ### 1. Start Neo4j
 
@@ -154,9 +153,9 @@ docker compose up -d neo4j
 ### 2. Start the Backend
 
 ```bash
-cd backend
-uv sync
-uv run uvicorn ontoforge_server.main:app --reload --port 8000
+cd server
+npm install
+npm run dev
 ```
 
 The API is available at `http://localhost:8000`. On startup it creates Neo4j constraints. The runtime schema cache is loaded lazily on first request per ontology.
@@ -177,24 +176,35 @@ Open `http://localhost:5173` in your browser.
 ### Run Tests
 
 ```bash
-cd backend
-uv run pytest -v
+cd server
+npm test
 ```
 
-Tests are mocked — no running Neo4j instance required.
+This runs the unit tests only — they are mocked and need no running services.
+Integration tests are opt-in and do require Neo4j and Ollama; see
+[docs/workflows/testing.md](docs/workflows/testing.md).
 
 ## Architecture
 
-OntoForge is a modular monolith backed by a single graph database that holds both schema and instance data. All database access goes through a persistence port; Neo4j is the current adapter.
+OntoForge is a modular monolith backed by a single graph database holding both schema and
+instance data. All database access goes through a persistence port; Neo4j is the current
+adapter.
 
-- **Modeling module** — global schema CRUD, ontology scope management, validation, JSON export/import (`/api/model`)
-- **Runtime module** — schema-driven instance CRUD, validation, search, graph traversal through ontology lenses (`/api/runtime/{ontologyKey}`)
-- **Frontend** — React UI with two surfaces: Workbench (data work through an ontology lens) and Studio (schema design, ontology scoping) — see `docs/runtime-ui-architecture.md`
-- **MCP layer** — two MCP servers: modeling (global schema) and runtime (data access through an ontology)
+- **Modeling** — the global schema, ontology scopes, validation, export/import (`/api/model`)
+- **Runtime** — schema-driven instance data through an ontology lens (`/api/runtime/{ontologyKey}`)
+- **MCP** — two servers, modeling and runtime, for AI clients
+- **Frontend** — two surfaces: Workbench for data, Studio for schema design
 
-Schema objects and instance data coexist in the same database. The runtime validates every write against an in-memory schema cache (lazily loaded, invalidated on modeling changes), ensuring instance data always conforms to the schema as seen through the selected ontology.
+Full documentation starts at **[docs/README.md](docs/README.md)**:
 
-See `docs/architecture.md` for the full system design.
+| | |
+|---|---|
+| [architecture.md](docs/architecture.md) | How the system is put together |
+| [capabilities/](docs/capabilities/) | One document per capability, end to end |
+| [interfaces.md](docs/interfaces.md) | Every REST endpoint and MCP tool |
+| [storage-adapters.md](docs/storage-adapters.md) | What a storage backend must implement |
+| [product-surface.md](docs/product-surface.md) | What the web client offers |
+| [decisions.md](docs/decisions.md) | Rules that constrain the design |
 
 ## Project Structure
 
@@ -205,13 +215,14 @@ ontoforge/
 │   └── docker-compose.yml          # Full stack: Neo4j + backend + frontend
 ├── examples/
 │   └── docker-compose/             # Run OntoForge from pre-built images
-├── backend/
+├── server/
 │   ├── Dockerfile
-│   ├── pyproject.toml              # Python deps (uv-managed)
-│   ├── src/ontoforge_server/
-│   │   ├── main.py                 # FastAPI app, mounts both routers
-│   │   ├── config.py               # Environment-based settings
-│   │   ├── core/                   # Shared: persistence port, exceptions, schema models
+│   ├── package.json                # TypeScript backend (Node.js + Fastify)
+│   ├── src/
+│   │   ├── main.ts                 # Server startup
+│   │   ├── app.ts                  # Fastify app, mounts routes and MCP servers
+│   │   ├── config.ts               # Environment-based settings
+│   │   ├── core/                   # Shared: persistence port, exceptions, OQL, AI
 │   │   ├── adapters/               # Database adapters (Neo4j)
 │   │   ├── modeling/               # Schema CRUD, validation, export/import
 │   │   ├── runtime/                # Instance CRUD, search, graph traversal
@@ -223,19 +234,20 @@ ontoforge/
 │   ├── package.json                # UI v3 (Workbench + Studio): React 19 + TypeScript + Vite
 │   └── src/
 └── docs/
-    ├── prd.md                      # Product requirements
-    ├── architecture.md             # System architecture, logical data model
-    ├── neo4j-adapter.md            # Neo4j adapter internals (physical storage)
-    ├── mcp-architecture.md         # MCP integration architecture
-    ├── api-contracts/              # REST endpoint specifications
-    ├── decisions.md                # Architectural decision log
-    ├── feature-ideas/              # Future extension proposals
-    └── releasing.md                # Release checklist
+    ├── README.md                   # Concepts, glossary, documentation map
+    ├── architecture.md             # Components, data model, error model
+    ├── capabilities/               # One document per capability
+    ├── interfaces.md               # Every REST endpoint and MCP tool
+    ├── storage-adapters.md         # The persistence port contract
+    ├── product-surface.md          # What the web client offers
+    ├── decisions.md                # Binding design rules
+    ├── adr/                        # Decision records (archive)
+    └── workflows/                  # Procedures: testing, release, test cycles
 ```
 
 ## Configuration
 
-The backend reads settings from environment variables (or a `.env` file in `backend/`):
+The backend reads settings from environment variables (or a `.env` file in `server/`):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -302,7 +314,7 @@ git tag v1.0.0 && git push origin v1.0.0
 
 | Image | Description |
 |-------|-------------|
-| `ghcr.io/rawe/ontoforge-server:1.0.0` | Python FastAPI backend |
+| `ghcr.io/rawe/ontoforge-server:1.0.0` | Backend server (Node.js) |
 | `ghcr.io/rawe/ontoforge-ui:1.0.0` | React frontend (nginx) |
 
 Each image is also tagged `:latest`. See `Makefile` for manual builds and [`examples/docker-compose/`](examples/docker-compose/) for a ready-to-use setup.

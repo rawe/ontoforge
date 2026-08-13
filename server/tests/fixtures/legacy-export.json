@@ -1,0 +1,228 @@
+{
+    "formatVersion": "3.0",
+    "entityTypes": [
+        {
+            "key": "company",
+            "displayName": "Company",
+            "description": "A business organization",
+            "properties": [
+                {
+                    "key": "employee_count",
+                    "displayName": "Employee Count",
+                    "description": null,
+                    "dataType": "integer",
+                    "required": false,
+                    "defaultValue": null
+                },
+                {
+                    "key": "founded",
+                    "displayName": "Founded",
+                    "description": "Date of founding",
+                    "dataType": "date",
+                    "required": false,
+                    "defaultValue": null
+                },
+                {
+                    "key": "name",
+                    "displayName": "Name",
+                    "description": null,
+                    "dataType": "string",
+                    "required": true,
+                    "defaultValue": null
+                }
+            ]
+        },
+        {
+            "key": "person",
+            "displayName": "Person",
+            "description": "A human being",
+            "properties": [
+                {
+                    "key": "bio",
+                    "displayName": "Bio",
+                    "description": "Biography",
+                    "dataType": "document",
+                    "required": false,
+                    "defaultValue": null
+                },
+                {
+                    "key": "active",
+                    "displayName": "Active",
+                    "description": null,
+                    "dataType": "boolean",
+                    "required": false,
+                    "defaultValue": "true"
+                },
+                {
+                    "key": "email",
+                    "displayName": "Email",
+                    "description": null,
+                    "dataType": "string",
+                    "required": false,
+                    "defaultValue": null
+                },
+                {
+                    "key": "age",
+                    "displayName": "Age",
+                    "description": null,
+                    "dataType": "integer",
+                    "required": false,
+                    "defaultValue": null
+                },
+                {
+                    "key": "name",
+                    "displayName": "Name",
+                    "description": null,
+                    "dataType": "string",
+                    "required": true,
+                    "defaultValue": null
+                }
+            ]
+        }
+    ],
+    "relationTypes": [
+        {
+            "key": "works_for",
+            "displayName": "Works For",
+            "description": "Employment relationship",
+            "fromEntityTypeKey": "person",
+            "toEntityTypeKey": "company",
+            "properties": [
+                {
+                    "key": "role",
+                    "displayName": "Role",
+                    "description": null,
+                    "dataType": "string",
+                    "required": false,
+                    "defaultValue": null
+                },
+                {
+                    "key": "since",
+                    "displayName": "Since",
+                    "description": null,
+                    "dataType": "date",
+                    "required": false,
+                    "defaultValue": null
+                }
+            ]
+        }
+    ],
+    "ontologies": [
+        {
+            "key": "hr_view",
+            "name": "HR View",
+            "description": "HR-scoped view for testing",
+            "includes": {
+                "entityTypes": [
+                    {
+                        "key": "company",
+                        "properties": null
+                    },
+                    {
+                        "key": "person",
+                        "properties": [
+                            "name",
+                            "email"
+                        ]
+                    }
+                ],
+                "relationTypes": [
+                    {
+                        "key": "works_for",
+                        "properties": null
+                    }
+                ]
+            },
+            "aiAgents": [
+                {
+                    "key": "assistant",
+                    "name": "HR Assistant",
+                    "description": "Answers HR questions",
+                    "systemPrompt": "You are an HR assistant.",
+                    "tools": [
+                        "execute_query",
+                        "get_entity",
+                        "semantic_search"
+                    ]
+                },
+                {
+                    "key": "unrestricted",
+                    "name": "Unrestricted",
+                    "description": null,
+                    "systemPrompt": null,
+                    "tools": null
+                }
+            ],
+            "savedQueries": [
+                {
+                    "key": "people-by-name",
+                    "name": "People By Name",
+                    "description": "Find people whose name is in a given list",
+                    "steps": [
+                        {
+                            "name": "main",
+                            "type": "oql",
+                            "oql": "MATCH (p:person) WHERE p.name IN $names RETURN p",
+                            "entityTypeKey": null,
+                            "query": null,
+                            "limit": null,
+                            "minScore": null,
+                            "bindings": null
+                        }
+                    ],
+                    "parameters": [
+                        {
+                            "name": "names",
+                            "description": "Names to match",
+                            "dataType": "string"
+                        }
+                    ]
+                },
+                {
+                    "key": "similar-then-fetch",
+                    "name": "Similar Then Fetch",
+                    "description": "Semantic person search feeding an OQL fetch",
+                    "steps": [
+                        {
+                            "name": "people",
+                            "type": "semantic_search",
+                            "oql": null,
+                            "entityTypeKey": "person",
+                            "query": "$q",
+                            "limit": 5,
+                            "minScore": 0.5,
+                            "bindings": null
+                        },
+                        {
+                            "name": "results",
+                            "type": "oql",
+                            "oql": "MATCH (p:person) WHERE p._id IN $ids RETURN p.name",
+                            "entityTypeKey": null,
+                            "query": null,
+                            "limit": null,
+                            "minScore": null,
+                            "bindings": {
+                                "ids": "{{people._id}}"
+                            }
+                        }
+                    ],
+                    "parameters": [
+                        {
+                            "name": "q",
+                            "description": "Search text",
+                            "dataType": "string"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "key": "test_ontology",
+            "name": "Test Ontology",
+            "description": "Person/Company ontology for testing",
+            "includes": null,
+            "aiAgents": [],
+            "savedQueries": []
+        }
+    ]
+}

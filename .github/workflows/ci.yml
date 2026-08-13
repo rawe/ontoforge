@@ -1,9 +1,13 @@
 # Continuous Integration
 #
 # Runs on every push to main and on pull requests:
-#   - Server: typecheck, unit tests, integration tests (against a Neo4j
-#     service container), container image build (no push)
+#   - Server: typecheck, unit tests, container image build (no push)
 #   - Frontend: lint, production build
+#
+# Everything here is adapter-agnostic on purpose: no step assumes a
+# particular storage backend. Integration tests and their Neo4j service
+# container are disabled below — see the comments at each site. They remain
+# part of the test suite and are run locally.
 
 name: CI
 
@@ -17,19 +21,30 @@ jobs:
     name: Server
     runs-on: ubuntu-latest
 
-    services:
-      neo4j:
-        image: neo4j:2026.02.2
-        ports:
-          - 7687:7687
-        env:
-          NEO4J_AUTH: neo4j/ontoforge_dev
-        options: >-
-          --health-cmd "cypher-shell -u neo4j -p ontoforge_dev 'RETURN 1'"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-          --health-start-period 30s
+    # DISABLED — Neo4j service container.
+    #
+    # Booting a Neo4j container here hard-wires CI to one specific storage
+    # adapter. Storage sits behind an exchangeable persistence port, so a
+    # pipeline that can only verify Neo4j would have to grow a service block
+    # per adapter and would silently privilege one of them. Re-enable only as
+    # part of an adapter-agnostic strategy (e.g. a matrix over adapters, or a
+    # port-conformance suite each adapter runs against its own backing store).
+    #
+    # Cost while enabled: ~40s to pull and healthcheck the container.
+    #
+    # services:
+    #   neo4j:
+    #     image: neo4j:2026.02.2
+    #     ports:
+    #       - 7687:7687
+    #     env:
+    #       NEO4J_AUTH: neo4j/ontoforge_dev
+    #     options: >-
+    #       --health-cmd "cypher-shell -u neo4j -p ontoforge_dev 'RETURN 1'"
+    #       --health-interval 10s
+    #       --health-timeout 5s
+    #       --health-retries 10
+    #       --health-start-period 30s
 
     steps:
       - name: Checkout repository
@@ -54,9 +69,18 @@ jobs:
         working-directory: server
         run: npm test
 
-      - name: Integration tests
-        working-directory: server
-        run: npm run test:integration
+      # DISABLED — integration tests, together with the Neo4j service
+      # container above. The suite drives the real database through the
+      # adapter, so it cannot run without one and is adapter-specific by
+      # nature. Run it locally against docker-compose Neo4j:
+      #
+      #   docker compose up -d && cd server && npm run test:integration
+      #
+      # Cost while enabled: ~46s.
+      #
+      # - name: Integration tests
+      #   working-directory: server
+      #   run: npm run test:integration
 
       - name: Build container image
         run: docker build -t ontoforge-server:ci server

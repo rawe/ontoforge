@@ -57,3 +57,17 @@ the map of everything else.
 | Implementing a storage backend | [docs/storage-adapters.md](docs/storage-adapters.md) |
 | What the web client offers | [docs/product-surface.md](docs/product-surface.md) |
 | Rules you may not violate | [docs/decisions.md](docs/decisions.md) |
+
+## Agent skills
+
+### Issue tracker
+
+Issues live as local markdown files under `.scratch/<feature>/`, gitignored. See [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
+
+### Triage labels
+
+Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See [docs/agents/triage-labels.md](docs/agents/triage-labels.md).
+
+### Domain docs
+
+Single-context; glossary and decision records live in the existing `docs/` tree. See [docs/agents/domain.md](docs/agents/domain.md).

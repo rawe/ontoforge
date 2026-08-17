@@ -137,17 +137,17 @@ See [docs/interfaces.md](docs/interfaces.md) for the full tool catalog.
 
 ## Development Setup
 
-For local development with hot reload, run Neo4j in Docker and the backend/frontend natively — either manually as below, or all at once with `./dev.sh`.
+For local development with hot reload, run PostgreSQL in Docker and the backend/frontend natively — either manually as below, or all at once with `./dev.sh`.
 
 ### Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) and Docker Compose
 - [Node.js](https://nodejs.org/) ≥ 22 LTS and npm
 
-### 1. Start Neo4j
+### 1. Start PostgreSQL
 
 ```bash
-docker compose up -d neo4j
+docker compose up -d
 ```
 
 ### 2. Start the Backend
@@ -158,7 +158,7 @@ npm install
 npm run dev
 ```
 
-The API is available at `http://localhost:8000`. On startup it creates Neo4j constraints. The runtime schema cache is loaded lazily on first request per ontology.
+The API is available at `http://localhost:8000`. On startup it initializes the database schema. The runtime schema cache is loaded lazily on first request per ontology.
 
 - Modeling endpoints: `/api/model/...`
 - Runtime endpoints: `/api/runtime/{ontologyKey}/...`
@@ -210,7 +210,7 @@ Full documentation starts at **[docs/README.md](docs/README.md)**:
 
 ```
 ontoforge/
-├── docker-compose.yml              # Neo4j only (for local development)
+├── docker-compose.yml              # PostgreSQL only (for local development)
 ├── docker/
 │   └── docker-compose.yml          # Full stack: Neo4j + backend + frontend
 ├── examples/
@@ -228,7 +228,7 @@ ontoforge/
 │   │   ├── runtime/                # Instance CRUD, search, graph traversal
 │   │   └── mcp/                    # MCP servers (modeling + runtime tools)
 │   └── tests/
-├── dev.sh                          # Start Neo4j + backend + frontend for local development
+├── dev.sh                          # Start PostgreSQL + backend + frontend for local development
 ├── frontend/
 │   ├── Dockerfile
 │   ├── package.json                # UI v3 (Workbench + Studio): React 19 + TypeScript + Vite

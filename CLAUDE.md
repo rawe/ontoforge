@@ -40,7 +40,7 @@ Documentation of a single script stays beside that script (`scripts/USAGE.md`).
 
 ## Local Development Setup
 
-Start Neo4j (`docker compose up -d`) before running `npm run dev` in `server/` and
+Start PostgreSQL (`docker compose up -d`) before running `npm run dev` in `server/` and
 `frontend/`. The backend runs on `http://localhost:8000`.
 
 ## Documentation

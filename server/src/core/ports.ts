@@ -32,10 +32,12 @@
  *    the modeling service can reject a colliding key without knowing why it
  *    collides. An adapter with no such collisions returns empty sets.
  *
- * The `ModelingStore` and `RuntimeStore` interfaces below are the
- * authoritative method surface. An adapter implements both (the Neo4j
- * reference implementation is `adapters/neo4j/modelingStore.ts` and
- * `adapters/neo4j/runtimeStore.ts`) and is registered in `initStores`.
+ * The `ModelingStore` and `RuntimeStore` interfaces below, together with
+ * the conformance suite, are the authoritative contract — adapters are
+ * peers under it; none is the reference implementation. An adapter
+ * implements both interfaces (the Neo4j adapter does so in
+ * `adapters/neo4j/modelingStore.ts` and `adapters/neo4j/runtimeStore.ts`)
+ * and is registered in `initStores`.
  */
 
 import { settings } from "../config.js";
@@ -336,8 +338,8 @@ export interface ModelingStore {
  * Capability grouping follows `docs/storage-adapters.md` ("The two store
  * surfaces"); the section comments below mirror it.
  *
- * Approved signature amendments, landing in M3 together with their
- * implementations (postgres-adapter build, tickets 11 and 12):
+ * Approved signature amendments, landing at M3 of the postgres-adapter
+ * build together with their implementations:
  *
  * - The filter-taking methods (`listEntities`, `listRelations`, and the
  *   per-type entity search via `semanticSearch`) will no longer receive

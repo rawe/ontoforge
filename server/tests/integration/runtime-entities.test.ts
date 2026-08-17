@@ -189,6 +189,86 @@ describe("entity CRUD through the unscoped lens", () => {
     const fields = res.json().error.details.fields;
     expect(Object.keys(fields).sort()).toEqual(["active", "age", "name", "nickname"]);
   });
+
+  it("a garbage id answers not-found on read, update and delete", async () => {
+    // Off-format ids short-circuit to not-found — indistinguishable from
+    // a well-formed id that matches nothing, on every backend.
+    for (const id of ["not-a-uuid", "4F2D8A31-0000-4000-8000-000000000000"]) {
+      const read = await app.inject({
+        method: "GET",
+        url: `/api/runtime/test_ontology/entities/person/${id}`,
+      });
+      expect(read.statusCode).toBe(404);
+
+      const patched = await app.inject({
+        method: "PATCH",
+        url: `/api/runtime/test_ontology/entities/person/${id}`,
+        payload: { name: "Ghost" },
+      });
+      expect(patched.statusCode).toBe(404);
+
+      const deleted = await app.inject({
+        method: "DELETE",
+        url: `/api/runtime/test_ontology/entities/person/${id}`,
+      });
+      expect(deleted.statusCode).toBe(404);
+    }
+  });
+
+  it("every declared data type round-trips exactly through create and read", async () => {
+    const measurement = await app.inject({
+      method: "POST",
+      url: "/api/model/entity-types",
+      payload: { key: "measurement", displayName: "Measurement" },
+    });
+    expect(measurement.statusCode).toBe(201);
+    const typeId = measurement.json().entityTypeId as string;
+    for (const prop of [
+      { key: "label", displayName: "Label", dataType: "string" },
+      { key: "count", displayName: "Count", dataType: "integer" },
+      { key: "reading", displayName: "Reading", dataType: "float" },
+      { key: "valid", displayName: "Valid", dataType: "boolean" },
+      { key: "taken_on", displayName: "Taken On", dataType: "date" },
+      { key: "taken_at", displayName: "Taken At", dataType: "datetime" },
+    ]) {
+      const created = await app.inject({
+        method: "POST",
+        url: `/api/model/entity-types/${typeId}/properties`,
+        payload: prop,
+      });
+      expect(created.statusCode, created.body).toBe(201);
+    }
+    invalidateLoadedSchemaCache();
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runtime/test_ontology/entities/measurement",
+      payload: {
+        label: "probe-1",
+        count: 9007199254740991, // the enforced global integer maximum
+        reading: 3.14,
+        valid: false,
+        taken_on: "2024-02-29",
+        taken_at: "2024-01-15T10:30:00Z",
+      },
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    const created = res.json();
+
+    const read = await app.inject({
+      method: "GET",
+      url: `/api/runtime/test_ontology/entities/measurement/${created._id}`,
+    });
+    expect(read.statusCode).toBe(200);
+    for (const body of [created, read.json()]) {
+      expect(body.label).toBe("probe-1");
+      expect(body.count).toBe(9007199254740991);
+      expect(body.reading).toBe(3.14);
+      expect(body.valid).toBe(false);
+      expect(body.taken_on).toBe("2024-02-29");
+      expect(String(body.taken_at)).toBe("2024-01-15T10:30:00.000Z");
+    }
+  });
 });
 
 describe("entity CRUD through the scoped lens", () => {
@@ -310,6 +390,71 @@ describe("listing with q + filters + sort + paging", () => {
     });
     expect(res.statusCode).toBe(422);
     expect(res.json().error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("rows without the sort property go last ascending, first descending", async () => {
+    // Single-case data only: both backends order it identically.
+    await app.inject({
+      method: "GET",
+      url: "/api/runtime/test_ontology/entities/person", // warm the lens
+    });
+    const listed = await app.inject({
+      method: "GET",
+      url: "/api/runtime/test_ontology/entities/person?sort=name&order=asc&limit=10",
+    });
+    const byName = new Map(
+      (listed.json().items as Row[]).map((p) => [p.name as string, p._id as string]),
+    );
+    for (const [name, email] of [
+      ["Alice", "alice@x.com"],
+      ["Bob", "bob@x.com"],
+    ]) {
+      const res = await app.inject({
+        method: "PATCH",
+        url: `/api/runtime/test_ontology/entities/person/${byName.get(name!)}`,
+        payload: { email },
+      });
+      expect(res.statusCode).toBe(200);
+    }
+
+    const asc = await app.inject({
+      method: "GET",
+      url: "/api/runtime/test_ontology/entities/person?sort=email&order=asc&limit=10",
+    });
+    const ascEmails = (asc.json().items as Row[]).map((p) => p.email ?? null);
+    expect(ascEmails).toEqual(["alice@x.com", "bob@x.com", null, null]);
+
+    const desc = await app.inject({
+      method: "GET",
+      url: "/api/runtime/test_ontology/entities/person?sort=email&order=desc&limit=10",
+    });
+    const descEmails = (desc.json().items as Row[]).map((p) => p.email ?? null);
+    expect(descEmails).toEqual([null, null, "bob@x.com", "alice@x.com"]);
+  });
+
+  it("contains matches every row on the empty string; a missing property never matches", async () => {
+    const withEmail = await app.inject({
+      method: "GET",
+      url: "/api/runtime/test_ontology/entities/person?limit=10",
+    });
+    const anna = (withEmail.json().items as Row[]).find((p) => p.name === "Anna")!;
+    const alice = (withEmail.json().items as Row[]).find((p) => p.name === "Alice")!;
+    const patched = await app.inject({
+      method: "PATCH",
+      url: `/api/runtime/test_ontology/entities/person/${alice._id}`,
+      payload: { email: "alice@x.com" },
+    });
+    expect(patched.statusCode).toBe(200);
+
+    // The empty search string matches every row that HAS the property;
+    // rows without it are excluded — Anna and the rest carry no email.
+    const empty = await app.inject({
+      method: "GET",
+      url: "/api/runtime/test_ontology/entities/person?filter.email__contains=",
+    });
+    expect(empty.json().total).toBe(1);
+    expect(empty.json().items[0]._id).toBe(alice._id);
+    expect((empty.json().items as Row[]).map((p) => p._id)).not.toContain(anna._id);
   });
 
   it("q is restricted to in-scope string properties", async () => {

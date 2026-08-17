@@ -247,6 +247,52 @@ describe("relation CRUD round trip", () => {
     expect(filtered.json().items[0].role).toBe("Advisor");
   });
 
+  it("a garbage relation id answers not-found on read, update and delete", async () => {
+    for (const id of ["not-a-uuid", "4F2D8A31-0000-4000-8000-000000000000"]) {
+      const read = await app.inject({
+        method: "GET",
+        url: `/api/runtime/test_ontology/relations/works_for/${id}`,
+      });
+      expect(read.statusCode).toBe(404);
+
+      const patched = await app.inject({
+        method: "PATCH",
+        url: `/api/runtime/test_ontology/relations/works_for/${id}`,
+        payload: { role: "Ghost" },
+      });
+      expect(patched.statusCode).toBe(404);
+
+      const deleted = await app.inject({
+        method: "DELETE",
+        url: `/api/runtime/test_ontology/relations/works_for/${id}`,
+      });
+      expect(deleted.statusCode).toBe(404);
+    }
+  });
+
+  it("a garbage endpoint filter yields the empty page, never an error", async () => {
+    const alice = await createEntity("test_ontology", "person", { name: "Alice" });
+    const acme = await createEntity("test_ontology", "company", { name: "Acme" });
+    await createRelation("test_ontology", "works_for", {
+      fromEntityId: alice._id,
+      toEntityId: acme._id,
+    });
+
+    for (const query of [
+      "fromEntityId=not-a-uuid",
+      "toEntityId=not-a-uuid",
+      `fromEntityId=${alice._id}&toEntityId=not-a-uuid`,
+    ]) {
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/runtime/test_ontology/relations/works_for?${query}`,
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().total).toBe(0);
+      expect(res.json().items).toEqual([]);
+    }
+  });
+
   it("the scoped lens hides relation properties its inclusion excludes", async () => {
     // Narrow works_for in hr_view to role only.
     const narrowed = await app.inject({
@@ -327,6 +373,14 @@ describe("neighbours", () => {
     });
     expect(incoming.json().neighbors).toHaveLength(1);
     expect((incoming.json().neighbors[0].relation as Row)._relationTypeKey).toBe("founded_by");
+  });
+
+  it("a garbage root entity id answers not-found", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/runtime/test_ontology/entities/person/not-a-uuid/neighbors",
+    });
+    expect(res.statusCode).toBe(404);
   });
 
   it("filters by relation type; an unknown key yields no neighbours, not an error", async () => {

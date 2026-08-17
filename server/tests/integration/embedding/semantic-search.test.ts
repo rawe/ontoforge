@@ -1,22 +1,27 @@
 /**
- * Semantic search end-to-end against the docker-compose Neo4j and a local
- * Ollama — ported from `backend/tests/integration/test_semantic_search.py`,
- * plus the oversized-indexed-string rejection and `/features` truthfulness.
- * SKIPPED when Ollama or the model is unavailable.
+ * Semantic search end-to-end against the docker-compose database and a
+ * local Ollama — ported from
+ * `backend/tests/integration/test_semantic_search.py`, plus `/features`
+ * truthfulness. SKIPPED when Ollama or the model is unavailable.
+ *
+ * The oversized-indexed-string tests (a Neo4j write constraint) live in
+ * `neo4j/semantic-search.test.ts`.
  */
 
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../../../src/app.js";
-import { MAX_VECTOR_FILTER_VALUE_BYTES } from "../../../src/adapters/neo4j/ddl.js";
-import { getDriver } from "../../../src/adapters/neo4j/driver.js";
-import { ensureEntityVectorIndex } from "../../../src/adapters/neo4j/ddl.js";
 import {
   getEmbeddingProvider,
   setEmbeddingProvider,
 } from "../../../src/core/embedding.js";
-import { closeStores, initStores, wipeDatabase } from "../../../src/core/ports.js";
+import {
+  closeStores,
+  ensureSemanticIndexes,
+  initStores,
+  wipeDatabase,
+} from "../../../src/core/ports.js";
 import { invalidateLoadedSchemaCache } from "../../../src/runtime/schemaCache.js";
 import { checkOllamaModel, disableProvider, enableOllamaProvider } from "./support.js";
 
@@ -142,9 +147,9 @@ describe.skipIf(!ollamaUp)("semantic search (Ollama)", () => {
 
   it("cross-type search spans multiple entity types", async () => {
     await buildSearchFixture();
-    // The shared _Entity index is ensured at real startup; the test app
+    // The shared cross-type index is ensured at real startup; the test app
     // boots without the startup sequence, so ensure it explicitly.
-    await ensureEntityVectorIndex(getDriver(), getEmbeddingProvider()!.dimensions);
+    await ensureSemanticIndexes(getEmbeddingProvider()!.dimensions);
 
     const company = await post("/api/model/entity-types", {
       key: "company",
@@ -208,41 +213,4 @@ describe.skipIf(!ollamaUp)("semantic search (Ollama)", () => {
     }
   });
 
-  it("rejects an oversized indexed string value, naming the property", async () => {
-    await buildSearchFixture();
-    const oversized = "x".repeat(MAX_VECTOR_FILTER_VALUE_BYTES + 1);
-
-    const res = await app.inject({
-      method: "POST",
-      url: "/api/runtime/search_test/entities/person",
-      payload: { name: "Alice", bio: oversized },
-    });
-
-    expect(res.statusCode).toBe(422);
-    const body = res.json() as { error: { code: string; message: string; details: Row } };
-    expect(body.error.code).toBe("VALIDATION_ERROR");
-    expect(body.error.message).toContain("'bio'");
-    expect(body.error.message).not.toMatch(/eo4j/); // never the engine
-    expect((body.error.details.fields as Row).bio).toBeDefined();
-  });
-
-  it("document values are exempt from the indexed-string size limit", async () => {
-    await buildSearchFixture();
-    const et = await app.inject({ method: "GET", url: "/api/model/entity-types" });
-    const person = (et.json() as Row[]).find((t) => t.key === "person")!;
-    await post(`/api/model/entity-types/${person.entityTypeId as string}/properties`, {
-      key: "notes",
-      displayName: "Notes",
-      dataType: "document",
-    });
-
-    const oversized = "y".repeat(MAX_VECTOR_FILTER_VALUE_BYTES + 10);
-    const res = await app.inject({
-      method: "POST",
-      url: "/api/runtime/search_test/entities/person",
-      payload: { name: "Alice", notes: oversized },
-    });
-
-    expect(res.statusCode, res.body).toBe(201);
-  });
 });

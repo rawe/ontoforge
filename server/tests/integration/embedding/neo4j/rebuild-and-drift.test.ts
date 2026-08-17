@@ -7,30 +7,26 @@
  * width); what is asserted is port-level behaviour: startup REPORTS and
  * changes nothing, the rebuild operation REPAIRS. Altered indexes are
  * restored even on failure — the Neo4j instance is shared.
- * SKIPPED when Ollama or the model is unavailable.
+ * SKIPPED when Ollama or the model is unavailable, and on any other
+ * DB_BACKEND (the drift staging is Neo4j-specific).
  */
 
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createApp } from "../../../src/app.js";
-import { ENTITY_VECTOR_INDEX_NAME } from "../../../src/adapters/neo4j/ddl.js";
-import { getEmbeddingProvider } from "../../../src/core/embedding.js";
+import { ENTITY_VECTOR_INDEX_NAME } from "../../../../src/adapters/neo4j/ddl.js";
+import { createApp } from "../../../../src/app.js";
+import { settings } from "../../../../src/config.js";
+import { getEmbeddingProvider } from "../../../../src/core/embedding.js";
 import {
   closeStores,
   ensureSemanticIndexes,
   initStores,
   wipeDatabase,
-} from "../../../src/core/ports.js";
-import { invalidateLoadedSchemaCache } from "../../../src/runtime/schemaCache.js";
-import {
-  checkOllamaModel,
-  disableProvider,
-  enableOllamaProvider,
-  indexDimensions,
-  rebuildIndexAt,
-  waitForIndexOnline,
-} from "./support.js";
+} from "../../../../src/core/ports.js";
+import { invalidateLoadedSchemaCache } from "../../../../src/runtime/schemaCache.js";
+import { checkOllamaModel, disableProvider, enableOllamaProvider } from "../support.js";
+import { indexDimensions, rebuildIndexAt, waitForIndexOnline } from "./support.js";
 
 type Row = Record<string, unknown>;
 
@@ -45,7 +41,7 @@ const DRIFTING_INDEXES = [ENTITY_VECTOR_INDEX_NAME, "person_embedding"];
 
 let app: FastifyInstance;
 
-describe.skipIf(!ollamaUp)("rebuild and width drift (Ollama)", () => {
+describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width drift (Neo4j, Ollama)", () => {
   beforeAll(async () => {
     await initStores();
     await wipeDatabase();

@@ -566,7 +566,7 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
     "execute_query",
     {
       description:
-        "Execute a read-only OQL query (openCypher-style graph pattern syntax) " +
+        "Execute a read-only OQL query (OQL-style graph pattern syntax) " +
         "against the ontology's scoped schema. " +
         "Use schema entity type keys (snake_case) as node labels and relation type " +
         "keys as relationship types. Only MATCH/RETURN queries are allowed — no " +

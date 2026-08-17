@@ -857,7 +857,7 @@ export function createModelingMcpServer(): McpServer {
         "Key must match pattern ^[a-z][a-z0-9_-]*$. " +
         "Steps is an ordered array of pipeline steps. Each step requires a unique 'name' and a 'type'. " +
         "Step types: " +
-        "'oql' — needs 'oql' field with a read-only OQL query (openCypher-style " +
+        "'oql' — needs 'oql' field with a read-only OQL query (OQL-style " +
         "pattern syntax over entity/relation type keys) using $param placeholders. " +
         "'semantic_search' — needs 'entityTypeKey' and 'query' (use $param_name to reference a declared parameter). " +
         "Optional: 'limit' (default 10), 'minScore'. " +

@@ -1,131 +1,91 @@
 /**
- * Session-01 integration suite — requires the docker-compose Neo4j at
- * bolt://localhost:7687 (credentials per `src/config.ts` defaults).
+ * Skeleton contract, database-blind — runs against whichever adapter
+ * `DB_BACKEND` selects. Covers: the adapter lifecycle (close→init cycle,
+ * idempotent close), the wipe contract exercised end-to-end through the
+ * API, and the features/docs routes on a fully booted server.
  *
- * Covers: boot creates all constraints/indexes and is idempotent, wipe
- * empties the store, the features route through a fully booted app, and
- * the startup warning for stored types whose key is now reserved.
+ * The Neo4j-physical assertions (constraint/index names, raw seeding, raw
+ * wipe probe) live in `tests/integration/neo4j/skeleton.test.ts`.
  */
 
-import type { FastifyInstance } from "fastify";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { getDriver } from "../../src/adapters/neo4j/driver.js";
-import { runSession } from "../../src/adapters/neo4j/errors.js";
-import { closeStores, initStores, wipeDatabase } from "../../src/core/ports.js";
-import { shutdownServer, startServer, warnAboutReservedTypeKeysInUse } from "../../src/main.js";
+import { createApp } from "../../src/app.js";
+import {
+  closeStores,
+  getModelingStore,
+  initStores,
+  wipeDatabase,
+} from "../../src/core/ports.js";
+import { shutdownServer, startServer } from "../../src/main.js";
 
-const EXPECTED_CONSTRAINTS = [
-  "ontology_id_unique",
-  "ontology_key_unique",
-  "ontology_name_unique",
-  "entity_type_id_unique",
-  "entity_type_key_unique",
-  "relation_type_id_unique",
-  "relation_type_key_unique",
-  "property_id_unique",
-  "entity_instance_id_unique",
-  "agent_config_id_unique",
-  "saved_query_id_unique",
-];
+beforeAll(async () => {
+  await initStores();
+  await wipeDatabase();
+});
 
-async function showNames(query: string): Promise<string[]> {
-  return runSession(getDriver(), async (session) => {
-    const result = await session.run(query);
-    return result.records.map((record) => record.get("name") as string);
-  });
-}
-
-async function assertSchemaObjectsPresent(): Promise<void> {
-  const constraints = await showNames("SHOW CONSTRAINTS YIELD name RETURN name");
-  for (const name of EXPECTED_CONSTRAINTS) {
-    expect(constraints).toContain(name);
-  }
-  const indexes = await showNames("SHOW INDEXES YIELD name RETURN name");
-  expect(indexes).toContain("entity_type_key_index");
-}
+beforeEach(async () => {
+  await wipeDatabase();
+});
 
 afterAll(async () => {
+  await wipeDatabase();
   await closeStores();
 });
 
-describe("adapter boot", () => {
-  it("creates all constraints and indexes, and is idempotent on second boot", async () => {
-    await initStores();
-    await assertSchemaObjectsPresent();
-
+describe("adapter lifecycle", () => {
+  it("survives a close→init cycle, and close is idempotent", async () => {
     await closeStores();
-    await initStores(); // second boot against the already-constrained store
-    await assertSchemaObjectsPresent();
-  });
-
-  it("wipe empties the store", async () => {
-    await runSession(getDriver(), async (session) => {
-      await session.run("CREATE (:WipeProbe {name: 'x'})");
-    });
-    await wipeDatabase();
-    const count = await runSession(getDriver(), async (session) => {
-      const result = await session.run("MATCH (n) RETURN count(n) AS c");
-      return result.records[0]?.get("c") as number;
-    });
-    expect(count).toBe(0);
+    await closeStores(); // the port contract's "Close. Idempotent."
+    await initStores(); // boot again against the same store
+    expect(await getModelingStore().listOntologies()).toEqual([]);
   });
 });
 
-describe("startup reserved-key report", () => {
-  it("a stored type with a now-reserved key triggers the startup warning", async () => {
-    // Seed directly via the driver: types that predate the reserved-key check.
-    await runSession(getDriver(), async (session) => {
-      await session.run(
-        "CREATE (:EntityType {entityTypeId: 'et-legacy', key: 'ontology'})",
-      );
-      await session.run(
-        "CREATE (:RelationType {relationTypeId: 'rt-legacy', key: 'has_property'})",
-      );
-    });
-    await closeStores();
-
-    const warnings: string[] = [];
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
-      warnings.push(args.map(String).join(" "));
-    });
-
-    let app: FastifyInstance | null = null;
+describe("wipe contract", () => {
+  it("wipeDatabase removes everything the API can see", async () => {
+    const app = await createApp();
+    await app.ready();
     try {
-      app = await startServer(); // boot runs the report
+      const et = await app.inject({
+        method: "POST",
+        url: "/api/model/entity-types",
+        payload: { key: "person", displayName: "Person" },
+      });
+      expect(et.statusCode).toBe(201);
+      const etId = (et.json() as { entityTypeId: string }).entityTypeId;
+      const ont = await app.inject({
+        method: "POST",
+        url: "/api/model/ontologies",
+        payload: { key: "hr", name: "Human Resources" },
+      });
+      expect(ont.statusCode).toBe(201);
 
-      const reservedWarnings = warnings.filter((line) => line.includes("reserved key"));
-      expect(reservedWarnings).toHaveLength(2);
-      expect(reservedWarnings.some((w) => w.includes("EntityType 'ontology'"))).toBe(true);
-      expect(
-        reservedWarnings.some((w) => w.includes("RelationType 'has_property'")),
-      ).toBe(true);
-    } finally {
-      warnSpy.mockRestore();
       await wipeDatabase();
-      if (app) {
-        await shutdownServer(app);
-      }
-    }
-  });
 
-  it("reports nothing when no stored key is reserved", async () => {
-    await initStores();
-    const warnings: string[] = [];
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
-      warnings.push(args.map(String).join(" "));
-    });
-    try {
-      await warnAboutReservedTypeKeysInUse();
-      expect(warnings.filter((line) => line.includes("reserved key"))).toHaveLength(0);
+      const types = await app.inject({ method: "GET", url: "/api/model/entity-types" });
+      expect(types.json()).toEqual([]);
+      const ontologies = await app.inject({ method: "GET", url: "/api/model/ontologies" });
+      expect(ontologies.json()).toEqual([]);
+      const gone = await app.inject({ method: "GET", url: `/api/model/entity-types/${etId}` });
+      expect(gone.statusCode).toBe(404);
     } finally {
-      warnSpy.mockRestore();
-      await closeStores();
+      await app.close();
     }
   });
 });
 
 describe("features route on a fully booted server", () => {
+  // `startServer` boots its own adapter; bracket the file-global stores
+  // around each test so both lifecycles stay single-owner.
+  beforeEach(async () => {
+    await closeStores();
+  });
+
+  afterEach(async () => {
+    await initStores();
+  });
+
   it("answers both capabilities false with the exact field names", async () => {
     const app = await startServer();
     try {

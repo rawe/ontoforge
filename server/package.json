@@ -31,6 +31,7 @@
     "fastify-type-provider-zod": "^7.0.0",
     "neo4j-driver": "^6.2.0",
     "pg": "^8.23.0",
+    "pgvector": "^0.3.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

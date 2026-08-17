@@ -1,19 +1,86 @@
 /**
- * `ModelingStore` on PostgreSQL — M1 skeleton.
+ * `ModelingStore` on PostgreSQL.
  *
  * The reserved-key surface is final: under the jsonb mapping a type key
  * is only ever a value in a `type_key` column, never a table, column, or
  * index name, so both reserved sets are provably empty and
  * `findReservedTypeKeysInUse` answers without touching the database.
  *
- * Every other method throws until its operations land (M2.5 modeling
- * operations, M4.2 vector-index lifecycle) — never a silent no-op.
+ * Operation mapping:
+ *
+ * - Every method is a single statement through the `runQuery` door; the
+ *   one exception is `getFullSchema`, whose coherent-snapshot obligation
+ *   is honoured with one REPEATABLE READ transaction through
+ *   `withTransaction`.
+ * - Deletes are one `DELETE` each, `rowCount > 0` as the boolean —
+ *   `ON DELETE CASCADE` carries what the reference adapter needed
+ *   explicit fan-out for (property definitions, inclusions, agents,
+ *   saved queries), and the endpoint FKs' `ON DELETE RESTRICT` backs the
+ *   service's in-use rule.
+ * - Upserts (agents, saved queries, re-added inclusions) ride
+ *   `INSERT … ON CONFLICT … DO UPDATE` on the composite uniques, with
+ *   `RETURNING (id = $freshId) AS created` as the created-detection.
+ * - Every UPDATE sets `updated_at = now()` explicitly where the
+ *   reference adapter stamps `updatedAt` (no triggers; advances on no-op
+ *   updates). The two embedding setters deliberately do not — the
+ *   reference adapter leaves `updatedAt` untouched there.
+ * - Ids from the wire pass the strict `isUuid()` guard (`rows.ts`)
+ *   before any statement; off-format input short-circuits to the
+ *   method's not-found shape.
+ *
+ * The seven vector-index lifecycle methods land at M4.
  */
 
+import { toSql } from "pgvector";
+
 import type { ModelingStore, ReservedTypeKeyInUse, Row } from "../../core/ports.js";
+import type { TypeKind } from "../../core/schemas.js";
+import { runQuery, withTransaction } from "./errors.js";
 import { notImplemented } from "./notImplemented.js";
+import { camelizeRow, camelizeRows, isUuid } from "./rows.js";
 
 const NO_RESERVED_KEYS: ReadonlySet<string> = new Set();
+
+// Read column lists — the port-visible shape of each object; owner ids,
+// denormalized keys, and embeddings stay out of returned rows.
+const ONTOLOGY_COLS = "ontology_id, key, name, description, created_at, updated_at";
+const ENTITY_TYPE_COLS = "entity_type_id, key, display_name, description, created_at, updated_at";
+const RELATION_TYPE_COLS =
+  "relation_type_id, key, display_name, description, " +
+  "source_entity_type_key, target_entity_type_key, created_at, updated_at";
+const PROPERTY_COLS =
+  "property_id, key, display_name, description, data_type, required, default_value, " +
+  "created_at, updated_at";
+const AGENT_COLS =
+  "agent_config_id, key, name, description, system_prompt, tools, created_at, updated_at";
+const SAVED_QUERY_COLS =
+  "saved_query_id, key, name, description, steps, parameters, created_at, updated_at";
+
+/** The polymorphic-owner column the port's `typeKind` selects. */
+function ownerColumn(typeKind: TypeKind): "entity_type_id" | "relation_type_id" {
+  return typeKind === "EntityType" ? "entity_type_id" : "relation_type_id";
+}
+
+/** The type table a `typeKind` names. */
+function typeTable(typeKind: TypeKind): "entity_type" | "relation_type" {
+  return typeKind === "EntityType" ? "entity_type" : "relation_type";
+}
+
+function firstRowOrNull(rows: Row[]): Row | null {
+  const row = rows[0];
+  return row ? camelizeRow(row) : null;
+}
+
+/** The `{key, typeId, properties}` shape of one scope inclusion. An
+ * absent allowlist reads back as null; an empty one as `[]` — the
+ * distinction is contract. */
+function toIncludeRow(row: Row): Row {
+  return {
+    key: row.key as string,
+    typeId: row.type_id as string,
+    properties: (row.properties as string[] | null) ?? null,
+  };
+}
 
 export class PostgresModelingStore implements ModelingStore {
   // ------------------------------------------------------------------
@@ -36,240 +103,878 @@ export class PostgresModelingStore implements ModelingStore {
   // Ontologies
   // ------------------------------------------------------------------
 
-  createOntology(): Promise<Row> {
-    return notImplemented("createOntology");
+  async createOntology(
+    ontologyId: string,
+    key: string,
+    name: string,
+    description: string | null,
+  ): Promise<Row> {
+    const result = await runQuery(
+      `INSERT INTO ontology (ontology_id, key, name, description)
+       VALUES ($1, $2, $3, $4)
+       RETURNING ${ONTOLOGY_COLS}`,
+      [ontologyId, key, name, description],
+    );
+    return camelizeRow(result.rows[0]!);
   }
 
-  listOntologies(): Promise<Row[]> {
-    return notImplemented("listOntologies");
+  async listOntologies(): Promise<Row[]> {
+    const result = await runQuery(`SELECT ${ONTOLOGY_COLS} FROM ontology ORDER BY name`);
+    return camelizeRows(result.rows);
   }
 
-  getOntology(): Promise<Row | null> {
-    return notImplemented("getOntology");
+  async getOntology(ontologyId: string): Promise<Row | null> {
+    if (!isUuid(ontologyId)) {
+      return null;
+    }
+    const result = await runQuery(
+      `SELECT ${ONTOLOGY_COLS} FROM ontology WHERE ontology_id = $1`,
+      [ontologyId],
+    );
+    return firstRowOrNull(result.rows);
   }
 
-  getOntologyByName(): Promise<Row | null> {
-    return notImplemented("getOntologyByName");
+  async getOntologyByName(name: string): Promise<Row | null> {
+    const result = await runQuery(`SELECT ${ONTOLOGY_COLS} FROM ontology WHERE name = $1`, [
+      name,
+    ]);
+    return firstRowOrNull(result.rows);
   }
 
-  getOntologyByKey(): Promise<Row | null> {
-    return notImplemented("getOntologyByKey");
+  async getOntologyByKey(key: string): Promise<Row | null> {
+    const result = await runQuery(`SELECT ${ONTOLOGY_COLS} FROM ontology WHERE key = $1`, [key]);
+    return firstRowOrNull(result.rows);
   }
 
-  updateOntology(): Promise<Row | null> {
-    return notImplemented("updateOntology");
+  async updateOntology(
+    ontologyId: string,
+    name: string | null,
+    description: string | null,
+  ): Promise<Row | null> {
+    if (!isUuid(ontologyId)) {
+      return null;
+    }
+    const sets = ["updated_at = now()"];
+    const params: unknown[] = [ontologyId];
+    if (name !== null) {
+      params.push(name);
+      sets.push(`name = $${params.length}`);
+    }
+    if (description !== null) {
+      params.push(description);
+      sets.push(`description = $${params.length}`);
+    }
+    const result = await runQuery(
+      `UPDATE ontology SET ${sets.join(", ")} WHERE ontology_id = $1 RETURNING ${ONTOLOGY_COLS}`,
+      params,
+    );
+    return firstRowOrNull(result.rows);
   }
 
-  deleteOntology(): Promise<boolean> {
-    return notImplemented("deleteOntology");
+  /** One `DELETE`: agents, saved queries and inclusions go via CASCADE. */
+  async deleteOntology(ontologyId: string): Promise<boolean> {
+    if (!isUuid(ontologyId)) {
+      return false;
+    }
+    const result = await runQuery(`DELETE FROM ontology WHERE ontology_id = $1`, [ontologyId]);
+    return result.rowCount > 0;
   }
 
   // ------------------------------------------------------------------
   // Entity types
   // ------------------------------------------------------------------
 
-  createEntityType(): Promise<Row> {
-    return notImplemented("createEntityType");
+  async createEntityType(
+    entityTypeId: string,
+    key: string,
+    displayName: string,
+    description: string | null,
+  ): Promise<Row> {
+    const result = await runQuery(
+      `INSERT INTO entity_type (entity_type_id, key, display_name, description)
+       VALUES ($1, $2, $3, $4)
+       RETURNING ${ENTITY_TYPE_COLS}`,
+      [entityTypeId, key, displayName, description],
+    );
+    return camelizeRow(result.rows[0]!);
   }
 
-  listEntityTypes(): Promise<Row[]> {
-    return notImplemented("listEntityTypes");
+  async listEntityTypes(): Promise<Row[]> {
+    const result = await runQuery(`SELECT ${ENTITY_TYPE_COLS} FROM entity_type ORDER BY key`);
+    return camelizeRows(result.rows);
   }
 
-  getEntityType(): Promise<Row | null> {
-    return notImplemented("getEntityType");
+  async getEntityType(entityTypeId: string): Promise<Row | null> {
+    if (!isUuid(entityTypeId)) {
+      return null;
+    }
+    const result = await runQuery(
+      `SELECT ${ENTITY_TYPE_COLS} FROM entity_type WHERE entity_type_id = $1`,
+      [entityTypeId],
+    );
+    return firstRowOrNull(result.rows);
   }
 
-  getEntityTypeByKey(): Promise<Row | null> {
-    return notImplemented("getEntityTypeByKey");
+  async getEntityTypeByKey(key: string): Promise<Row | null> {
+    const result = await runQuery(
+      `SELECT ${ENTITY_TYPE_COLS} FROM entity_type WHERE key = $1`,
+      [key],
+    );
+    return firstRowOrNull(result.rows);
   }
 
-  updateEntityType(): Promise<Row | null> {
-    return notImplemented("updateEntityType");
+  async updateEntityType(
+    entityTypeId: string,
+    displayName: string | null,
+    description: string | null,
+  ): Promise<Row | null> {
+    if (!isUuid(entityTypeId)) {
+      return null;
+    }
+    const sets = ["updated_at = now()"];
+    const params: unknown[] = [entityTypeId];
+    if (displayName !== null) {
+      params.push(displayName);
+      sets.push(`display_name = $${params.length}`);
+    }
+    if (description !== null) {
+      params.push(description);
+      sets.push(`description = $${params.length}`);
+    }
+    const result = await runQuery(
+      `UPDATE entity_type SET ${sets.join(", ")}
+       WHERE entity_type_id = $1 RETURNING ${ENTITY_TYPE_COLS}`,
+      params,
+    );
+    return firstRowOrNull(result.rows);
   }
 
-  deleteEntityType(): Promise<boolean> {
-    return notImplemented("deleteEntityType");
+  /** One `DELETE`: property definitions and inclusions go via CASCADE;
+   * the endpoint FKs' RESTRICT backs the service's in-use rule. */
+  async deleteEntityType(entityTypeId: string): Promise<boolean> {
+    if (!isUuid(entityTypeId)) {
+      return false;
+    }
+    const result = await runQuery(`DELETE FROM entity_type WHERE entity_type_id = $1`, [
+      entityTypeId,
+    ]);
+    return result.rowCount > 0;
   }
 
-  isEntityTypeReferenced(): Promise<boolean> {
-    return notImplemented("isEntityTypeReferenced");
+  async isEntityTypeReferenced(entityTypeId: string): Promise<boolean> {
+    if (!isUuid(entityTypeId)) {
+      return false;
+    }
+    const result = await runQuery(
+      `SELECT EXISTS (
+         SELECT 1
+         FROM relation_type rt
+         JOIN entity_type et
+           ON et.key IN (rt.source_entity_type_key, rt.target_entity_type_key)
+         WHERE et.entity_type_id = $1
+       ) AS referenced`,
+      [entityTypeId],
+    );
+    return result.rows[0]!.referenced as boolean;
   }
 
   // ------------------------------------------------------------------
   // Relation types
   // ------------------------------------------------------------------
 
-  createRelationType(): Promise<Row> {
-    return notImplemented("createRelationType");
+  async createRelationType(
+    relationTypeId: string,
+    key: string,
+    displayName: string,
+    description: string | null,
+    sourceEntityTypeKey: string,
+    targetEntityTypeKey: string,
+  ): Promise<Row> {
+    const result = await runQuery(
+      `INSERT INTO relation_type
+         (relation_type_id, key, display_name, description,
+          source_entity_type_key, target_entity_type_key)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING ${RELATION_TYPE_COLS}`,
+      [relationTypeId, key, displayName, description, sourceEntityTypeKey, targetEntityTypeKey],
+    );
+    return camelizeRow(result.rows[0]!);
   }
 
-  listRelationTypes(): Promise<Row[]> {
-    return notImplemented("listRelationTypes");
+  async listRelationTypes(): Promise<Row[]> {
+    const result = await runQuery(
+      `SELECT ${RELATION_TYPE_COLS} FROM relation_type ORDER BY key`,
+    );
+    return camelizeRows(result.rows);
   }
 
-  getRelationType(): Promise<Row | null> {
-    return notImplemented("getRelationType");
+  async getRelationType(relationTypeId: string): Promise<Row | null> {
+    if (!isUuid(relationTypeId)) {
+      return null;
+    }
+    const result = await runQuery(
+      `SELECT ${RELATION_TYPE_COLS} FROM relation_type WHERE relation_type_id = $1`,
+      [relationTypeId],
+    );
+    return firstRowOrNull(result.rows);
   }
 
-  getRelationTypeByKey(): Promise<Row | null> {
-    return notImplemented("getRelationTypeByKey");
+  async getRelationTypeByKey(key: string): Promise<Row | null> {
+    const result = await runQuery(
+      `SELECT ${RELATION_TYPE_COLS} FROM relation_type WHERE key = $1`,
+      [key],
+    );
+    return firstRowOrNull(result.rows);
   }
 
-  updateRelationType(): Promise<Row | null> {
-    return notImplemented("updateRelationType");
+  async updateRelationType(
+    relationTypeId: string,
+    displayName: string | null,
+    description: string | null,
+  ): Promise<Row | null> {
+    if (!isUuid(relationTypeId)) {
+      return null;
+    }
+    const sets = ["updated_at = now()"];
+    const params: unknown[] = [relationTypeId];
+    if (displayName !== null) {
+      params.push(displayName);
+      sets.push(`display_name = $${params.length}`);
+    }
+    if (description !== null) {
+      params.push(description);
+      sets.push(`description = $${params.length}`);
+    }
+    const result = await runQuery(
+      `UPDATE relation_type SET ${sets.join(", ")}
+       WHERE relation_type_id = $1 RETURNING ${RELATION_TYPE_COLS}`,
+      params,
+    );
+    return firstRowOrNull(result.rows);
   }
 
-  deleteRelationType(): Promise<boolean> {
-    return notImplemented("deleteRelationType");
+  /** One `DELETE`: property definitions and inclusions go via CASCADE. */
+  async deleteRelationType(relationTypeId: string): Promise<boolean> {
+    if (!isUuid(relationTypeId)) {
+      return false;
+    }
+    const result = await runQuery(`DELETE FROM relation_type WHERE relation_type_id = $1`, [
+      relationTypeId,
+    ]);
+    return result.rowCount > 0;
   }
 
   // ------------------------------------------------------------------
   // Property definitions
   // ------------------------------------------------------------------
 
-  createProperty(): Promise<Row> {
-    return notImplemented("createProperty");
+  async createProperty(
+    ownerId: string,
+    typeKind: TypeKind,
+    propertyId: string,
+    key: string,
+    displayName: string,
+    description: string | null,
+    dataType: string,
+    required: boolean,
+    defaultValue: string | null,
+  ): Promise<Row> {
+    const result = await runQuery(
+      `INSERT INTO property_def
+         (property_id, entity_type_id, relation_type_id, key, display_name,
+          description, data_type, required, default_value)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING ${PROPERTY_COLS}`,
+      [
+        propertyId,
+        typeKind === "EntityType" ? ownerId : null,
+        typeKind === "RelationType" ? ownerId : null,
+        key,
+        displayName,
+        description,
+        dataType,
+        required,
+        defaultValue,
+      ],
+    );
+    return camelizeRow(result.rows[0]!);
   }
 
-  listProperties(): Promise<Row[]> {
-    return notImplemented("listProperties");
+  async listProperties(ownerId: string, typeKind: TypeKind): Promise<Row[]> {
+    if (!isUuid(ownerId)) {
+      return [];
+    }
+    const result = await runQuery(
+      `SELECT ${PROPERTY_COLS} FROM property_def
+       WHERE ${ownerColumn(typeKind)} = $1 ORDER BY key`,
+      [ownerId],
+    );
+    return camelizeRows(result.rows);
   }
 
-  getProperty(): Promise<Row | null> {
-    return notImplemented("getProperty");
+  async getProperty(
+    ownerId: string,
+    typeKind: TypeKind,
+    propertyId: string,
+  ): Promise<Row | null> {
+    if (!isUuid(ownerId) || !isUuid(propertyId)) {
+      return null;
+    }
+    const result = await runQuery(
+      `SELECT ${PROPERTY_COLS} FROM property_def
+       WHERE ${ownerColumn(typeKind)} = $1 AND property_id = $2`,
+      [ownerId, propertyId],
+    );
+    return firstRowOrNull(result.rows);
   }
 
-  getPropertyByKey(): Promise<Row | null> {
-    return notImplemented("getPropertyByKey");
+  async getPropertyByKey(ownerId: string, typeKind: TypeKind, key: string): Promise<Row | null> {
+    if (!isUuid(ownerId)) {
+      return null;
+    }
+    const result = await runQuery(
+      `SELECT ${PROPERTY_COLS} FROM property_def
+       WHERE ${ownerColumn(typeKind)} = $1 AND key = $2`,
+      [ownerId, key],
+    );
+    return firstRowOrNull(result.rows);
   }
 
-  updateProperty(): Promise<Row | null> {
-    return notImplemented("updateProperty");
+  async updateProperty(
+    ownerId: string,
+    typeKind: TypeKind,
+    propertyId: string,
+    displayName: string | null,
+    description: string | null,
+    required: boolean | null,
+    defaultValue: string | null,
+    clearDefault: boolean,
+  ): Promise<Row | null> {
+    if (!isUuid(ownerId) || !isUuid(propertyId)) {
+      return null;
+    }
+    const sets = ["updated_at = now()"];
+    const params: unknown[] = [ownerId, propertyId];
+    if (displayName !== null) {
+      params.push(displayName);
+      sets.push(`display_name = $${params.length}`);
+    }
+    if (description !== null) {
+      params.push(description);
+      sets.push(`description = $${params.length}`);
+    }
+    if (required !== null) {
+      params.push(required);
+      sets.push(`required = $${params.length}`);
+    }
+    if (clearDefault) {
+      sets.push("default_value = NULL");
+    } else if (defaultValue !== null) {
+      params.push(defaultValue);
+      sets.push(`default_value = $${params.length}`);
+    }
+    const result = await runQuery(
+      `UPDATE property_def SET ${sets.join(", ")}
+       WHERE ${ownerColumn(typeKind)} = $1 AND property_id = $2
+       RETURNING ${PROPERTY_COLS}`,
+      params,
+    );
+    return firstRowOrNull(result.rows);
   }
 
-  deleteProperty(): Promise<boolean> {
-    return notImplemented("deleteProperty");
+  async deleteProperty(ownerId: string, typeKind: TypeKind, propertyId: string): Promise<boolean> {
+    if (!isUuid(ownerId) || !isUuid(propertyId)) {
+      return false;
+    }
+    const result = await runQuery(
+      `DELETE FROM property_def WHERE property_id = $2 AND ${ownerColumn(typeKind)} = $1`,
+      [ownerId, propertyId],
+    );
+    return result.rowCount > 0;
   }
 
   // ------------------------------------------------------------------
   // Scope inclusions (lifecycle)
   // ------------------------------------------------------------------
 
-  addIncludesType(): Promise<Row | null> {
-    return notImplemented("addIncludesType");
+  /** Upsert on the composite unique — re-adding the same type replaces
+   * the allowlist. Answers null when the ontology or type is missing
+   * (the `INSERT … SELECT` finds no source row). */
+  async addIncludesType(
+    ontologyId: string,
+    typeKind: TypeKind,
+    typeKey: string,
+    properties: string[] | null,
+  ): Promise<Row | null> {
+    if (!isUuid(ontologyId)) {
+      return null;
+    }
+    const owner = ownerColumn(typeKind);
+    const result = await runQuery(
+      `INSERT INTO ontology_includes (ontology_id, ${owner}, properties)
+       SELECT o.ontology_id, t.${owner}, $3::text[]
+       FROM ontology o
+       JOIN ${typeTable(typeKind)} t ON t.key = $2
+       WHERE o.ontology_id = $1
+       ON CONFLICT (ontology_id, ${owner}) DO UPDATE SET properties = EXCLUDED.properties
+       RETURNING ${owner} AS type_id, properties`,
+      [ontologyId, typeKey, properties],
+    );
+    const row = result.rows[0];
+    return row ? toIncludeRow({ ...row, key: typeKey }) : null;
   }
 
-  listIncludesTypes(): Promise<Row[]> {
-    return notImplemented("listIncludesTypes");
+  async listIncludesTypes(ontologyId: string, typeKind: TypeKind): Promise<Row[]> {
+    if (!isUuid(ontologyId)) {
+      return [];
+    }
+    const owner = ownerColumn(typeKind);
+    const result = await runQuery(
+      `SELECT t.key AS key, t.${owner} AS type_id, oi.properties AS properties
+       FROM ontology_includes oi
+       JOIN ${typeTable(typeKind)} t ON t.${owner} = oi.${owner}
+       WHERE oi.ontology_id = $1
+       ORDER BY t.key`,
+      [ontologyId],
+    );
+    return result.rows.map(toIncludeRow);
   }
 
-  updateIncludesType(): Promise<Row | null> {
-    return notImplemented("updateIncludesType");
+  /** Replace the properties allowlist on one inclusion. */
+  async updateIncludesType(
+    ontologyId: string,
+    typeKind: TypeKind,
+    typeId: string,
+    properties: string[] | null,
+  ): Promise<Row | null> {
+    if (!isUuid(ontologyId) || !isUuid(typeId)) {
+      return null;
+    }
+    const owner = ownerColumn(typeKind);
+    const result = await runQuery(
+      `UPDATE ontology_includes oi
+       SET properties = $3::text[]
+       FROM ${typeTable(typeKind)} t
+       WHERE oi.ontology_id = $1 AND oi.${owner} = $2 AND t.${owner} = oi.${owner}
+       RETURNING t.key AS key, oi.${owner} AS type_id, oi.properties AS properties`,
+      [ontologyId, typeId, properties],
+    );
+    const row = result.rows[0];
+    return row ? toIncludeRow(row) : null;
   }
 
-  removeIncludesType(): Promise<boolean> {
-    return notImplemented("removeIncludesType");
+  async removeIncludesType(
+    ontologyId: string,
+    typeKind: TypeKind,
+    typeId: string,
+  ): Promise<boolean> {
+    if (!isUuid(ontologyId) || !isUuid(typeId)) {
+      return false;
+    }
+    const result = await runQuery(
+      `DELETE FROM ontology_includes
+       WHERE ontology_id = $1 AND ${ownerColumn(typeKind)} = $2`,
+      [ontologyId, typeId],
+    );
+    return result.rowCount > 0;
   }
 
   // ------------------------------------------------------------------
   // Scope inclusions (cascade-protocol support)
   // ------------------------------------------------------------------
 
-  removeAllIncludesForType(): Promise<number> {
-    return notImplemented("removeAllIncludesForType");
+  async removeAllIncludesForType(typeKind: TypeKind, typeId: string): Promise<number> {
+    if (!isUuid(typeId)) {
+      return 0;
+    }
+    const result = await runQuery(
+      `DELETE FROM ontology_includes WHERE ${ownerColumn(typeKind)} = $1`,
+      [typeId],
+    );
+    return result.rowCount;
   }
 
-  findOntologiesIncludingType(): Promise<string[]> {
-    return notImplemented("findOntologiesIncludingType");
+  async findOntologiesIncludingType(typeKind: TypeKind, typeId: string): Promise<string[]> {
+    if (!isUuid(typeId)) {
+      return [];
+    }
+    const result = await runQuery(
+      `SELECT o.key FROM ontology_includes oi
+       JOIN ontology o ON o.ontology_id = oi.ontology_id
+       WHERE oi.${ownerColumn(typeKind)} = $1
+       ORDER BY o.key`,
+      [typeId],
+    );
+    return result.rows.map((row) => row.key as string);
   }
 
-  findOntologiesWithExplicitProperty(): Promise<string[]> {
-    return notImplemented("findOntologiesWithExplicitProperty");
+  /** Ontology keys whose explicit allowlist for the type does NOT carry
+   * the property key; lenses without an allowlist track automatically
+   * and are never affected. */
+  async findOntologiesWithExplicitProperty(
+    typeKind: TypeKind,
+    typeId: string,
+    propertyKey: string,
+  ): Promise<string[]> {
+    if (!isUuid(typeId)) {
+      return [];
+    }
+    const result = await runQuery(
+      `SELECT o.key FROM ontology_includes oi
+       JOIN ontology o ON o.ontology_id = oi.ontology_id
+       WHERE oi.${ownerColumn(typeKind)} = $1
+         AND oi.properties IS NOT NULL
+         AND NOT (oi.properties @> ARRAY[$2::text])
+       ORDER BY o.key`,
+      [typeId, propertyKey],
+    );
+    return result.rows.map((row) => row.key as string);
   }
 
-  addPropertyToIncludesLists(): Promise<number> {
-    return notImplemented("addPropertyToIncludesLists");
+  async addPropertyToIncludesLists(
+    typeKind: TypeKind,
+    typeId: string,
+    propertyKey: string,
+  ): Promise<number> {
+    if (!isUuid(typeId)) {
+      return 0;
+    }
+    const result = await runQuery(
+      `UPDATE ontology_includes SET properties = properties || $2::text
+       WHERE ${ownerColumn(typeKind)} = $1
+         AND properties IS NOT NULL
+         AND NOT (properties @> ARRAY[$2::text])`,
+      [typeId, propertyKey],
+    );
+    return result.rowCount;
   }
 
-  removePropertyFromIncludesLists(): Promise<number> {
-    return notImplemented("removePropertyFromIncludesLists");
+  async removePropertyFromIncludesLists(
+    typeKind: TypeKind,
+    typeId: string,
+    propertyKey: string,
+  ): Promise<number> {
+    if (!isUuid(typeId)) {
+      return 0;
+    }
+    const result = await runQuery(
+      `UPDATE ontology_includes SET properties = array_remove(properties, $2::text)
+       WHERE ${ownerColumn(typeKind)} = $1
+         AND properties IS NOT NULL
+         AND properties @> ARRAY[$2::text]`,
+      [typeId, propertyKey],
+    );
+    return result.rowCount;
   }
 
   // ------------------------------------------------------------------
   // Document-property cleanup
   // ------------------------------------------------------------------
 
-  deleteChunksForTypeProperty(): Promise<void> {
-    return notImplemented("deleteChunksForTypeProperty");
+  /** The chunk schema-cascade: called by the service's vector hook after
+   * `deleteProperty`; type keys carry no FK by design, so this is the
+   * one statement that removes a dropped document property's chunks. */
+  async deleteChunksForTypeProperty(entityTypeKey: string, propertyKey: string): Promise<void> {
+    await runQuery(
+      `DELETE FROM document_chunk WHERE entity_type_key = $1 AND property_key = $2`,
+      [entityTypeKey, propertyKey],
+    );
   }
 
   // ------------------------------------------------------------------
   // Full schema
   // ------------------------------------------------------------------
 
-  getFullSchema(): Promise<Row> {
-    return notImplemented("getFullSchema");
+  /** The entire global schema plus every lens with its inclusions, read
+   * as one coherent snapshot: a single REPEATABLE READ transaction. */
+  async getFullSchema(): Promise<Row> {
+    return withTransaction(async (querier) => {
+      const ets = await querier.query(
+        `SELECT ${ENTITY_TYPE_COLS} FROM entity_type ORDER BY key`,
+      );
+      const rts = await querier.query(
+        `SELECT relation_type_id, key, display_name, description, created_at, updated_at,
+                source_entity_type_key AS source_key, target_entity_type_key AS target_key
+         FROM relation_type ORDER BY key`,
+      );
+      const props = await querier.query(
+        `SELECT ${PROPERTY_COLS}, entity_type_id, relation_type_id
+         FROM property_def ORDER BY key`,
+      );
+      const onts = await querier.query(`SELECT ${ONTOLOGY_COLS} FROM ontology ORDER BY name`);
+      const incs = await querier.query(
+        `SELECT oi.ontology_id, oi.entity_type_id, oi.relation_type_id, oi.properties,
+                et.key AS entity_type_key, rt.key AS relation_type_key
+         FROM ontology_includes oi
+         LEFT JOIN entity_type et ON et.entity_type_id = oi.entity_type_id
+         LEFT JOIN relation_type rt ON rt.relation_type_id = oi.relation_type_id
+         ORDER BY et.key, rt.key`,
+      );
+
+      const propsByEntityType = new Map<string, Row[]>();
+      const propsByRelationType = new Map<string, Row[]>();
+      for (const raw of props.rows) {
+        const { entityTypeId, relationTypeId, ...property } = camelizeRow(raw);
+        if (entityTypeId !== null) {
+          const bucket = propsByEntityType.get(entityTypeId as string) ?? [];
+          bucket.push(property);
+          propsByEntityType.set(entityTypeId as string, bucket);
+        } else {
+          const bucket = propsByRelationType.get(relationTypeId as string) ?? [];
+          bucket.push(property);
+          propsByRelationType.set(relationTypeId as string, bucket);
+        }
+      }
+
+      const entityTypes = ets.rows.map((raw) => {
+        const et = camelizeRow(raw);
+        et.properties = propsByEntityType.get(et.entityTypeId as string) ?? [];
+        return et;
+      });
+      const relationTypes = rts.rows.map((raw) => {
+        const rt = camelizeRow(raw);
+        rt.properties = propsByRelationType.get(rt.relationTypeId as string) ?? [];
+        return rt;
+      });
+
+      const entityInclusions = new Map<string, Row[]>();
+      const relationInclusions = new Map<string, Row[]>();
+      for (const raw of incs.rows) {
+        const ontologyId = raw.ontology_id as string;
+        const entry: Row = { properties: (raw.properties as string[] | null) ?? null };
+        if (raw.entity_type_id !== null) {
+          entry.key = raw.entity_type_key;
+          const bucket = entityInclusions.get(ontologyId) ?? [];
+          bucket.push(entry);
+          entityInclusions.set(ontologyId, bucket);
+        } else {
+          entry.key = raw.relation_type_key;
+          const bucket = relationInclusions.get(ontologyId) ?? [];
+          bucket.push(entry);
+          relationInclusions.set(ontologyId, bucket);
+        }
+      }
+
+      const ontologies = onts.rows.map((raw) => {
+        const ont = camelizeRow(raw);
+        ont.entityInclusions = entityInclusions.get(ont.ontologyId as string) ?? [];
+        ont.relationInclusions = relationInclusions.get(ont.ontologyId as string) ?? [];
+        return ont;
+      });
+
+      return { entityTypes, relationTypes, ontologies };
+    }, "REPEATABLE READ");
   }
 
   // ------------------------------------------------------------------
   // AI agent configs
   // ------------------------------------------------------------------
 
-  listAiAgents(): Promise<Row[]> {
-    return notImplemented("listAiAgents");
+  async listAiAgents(ontologyId: string): Promise<Row[]> {
+    if (!isUuid(ontologyId)) {
+      return [];
+    }
+    const result = await runQuery(
+      `SELECT ${AGENT_COLS} FROM ai_agent_config WHERE ontology_id = $1 ORDER BY name`,
+      [ontologyId],
+    );
+    return camelizeRows(result.rows);
   }
 
-  upsertAiAgent(): Promise<[Row, boolean]> {
-    return notImplemented("upsertAiAgent");
+  /** Upsert on the `(ontology_id, key)` arbiter. `created` is detected
+   * by whether the insert stamped this call's fresh id onto the row. */
+  async upsertAiAgent(
+    ontologyId: string,
+    agentConfigId: string,
+    key: string,
+    name: string,
+    description: string | null,
+    systemPrompt: string | null,
+    tools: string[] | null,
+  ): Promise<[Row, boolean]> {
+    const result = await runQuery(
+      `INSERT INTO ai_agent_config
+         (agent_config_id, ontology_id, key, name, description, system_prompt, tools)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (ontology_id, key) DO UPDATE SET
+         name = EXCLUDED.name,
+         description = EXCLUDED.description,
+         system_prompt = EXCLUDED.system_prompt,
+         tools = EXCLUDED.tools,
+         updated_at = now()
+       RETURNING ${AGENT_COLS}, (agent_config_id = $1) AS created`,
+      [agentConfigId, ontologyId, key, name, description, systemPrompt, tools],
+    );
+    const { created, ...row } = camelizeRow(result.rows[0]!);
+    return [row, created as boolean];
   }
 
-  listAiAgentsForExport(): Promise<Row[]> {
-    return notImplemented("listAiAgentsForExport");
+  /** Agents in the transfer shape — no ids, no timestamps. */
+  async listAiAgentsForExport(ontologyId: string): Promise<Row[]> {
+    if (!isUuid(ontologyId)) {
+      return [];
+    }
+    const result = await runQuery(
+      `SELECT key, name, description, system_prompt, tools
+       FROM ai_agent_config WHERE ontology_id = $1 ORDER BY name`,
+      [ontologyId],
+    );
+    return camelizeRows(result.rows);
   }
 
-  deleteAiAgent(): Promise<boolean> {
-    return notImplemented("deleteAiAgent");
+  async deleteAiAgent(ontologyId: string, agentKey: string): Promise<boolean> {
+    if (!isUuid(ontologyId)) {
+      return false;
+    }
+    const result = await runQuery(
+      `DELETE FROM ai_agent_config WHERE ontology_id = $1 AND key = $2`,
+      [ontologyId, agentKey],
+    );
+    return result.rowCount > 0;
   }
 
   // ------------------------------------------------------------------
   // Saved query configs
   // ------------------------------------------------------------------
 
-  listSavedQueries(): Promise<Row[]> {
-    return notImplemented("listSavedQueries");
+  async listSavedQueries(ontologyId: string): Promise<Row[]> {
+    if (!isUuid(ontologyId)) {
+      return [];
+    }
+    const result = await runQuery(
+      `SELECT ${SAVED_QUERY_COLS} FROM saved_query WHERE ontology_id = $1 ORDER BY name`,
+      [ontologyId],
+    );
+    return camelizeRows(result.rows);
   }
 
-  listSavedQueriesForExport(): Promise<Row[]> {
-    return notImplemented("listSavedQueriesForExport");
+  /** Saved queries in the transfer shape (key, name, description, plus
+   * the stored steps/parameters JSON text) — no ids, no timestamps. */
+  async listSavedQueriesForExport(ontologyId: string): Promise<Row[]> {
+    if (!isUuid(ontologyId)) {
+      return [];
+    }
+    const result = await runQuery(
+      `SELECT key, name, description, steps, parameters
+       FROM saved_query WHERE ontology_id = $1 ORDER BY name`,
+      [ontologyId],
+    );
+    return camelizeRows(result.rows);
   }
 
-  upsertSavedQuery(): Promise<[Row, boolean]> {
-    return notImplemented("upsertSavedQuery");
+  /** Upsert on the `(ontology_id, key)` arbiter. Steps and parameters
+   * arrive as serialized text this store does not interpret. A null
+   * `ontologyKey` or `embedding` leaves the stored value untouched
+   * (COALESCE), mirroring the reference adapter's conditional SET. */
+  async upsertSavedQuery(
+    ontologyId: string,
+    savedQueryId: string,
+    key: string,
+    name: string,
+    description: string,
+    stepsJson: string,
+    parametersJson: string,
+    ontologyKey: string | null = null,
+    embedding: number[] | null = null,
+  ): Promise<[Row, boolean]> {
+    const result = await runQuery(
+      `INSERT INTO saved_query
+         (saved_query_id, ontology_id, ontology_key, key, name, description,
+          steps, parameters, embedding)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::vector)
+       ON CONFLICT (ontology_id, key) DO UPDATE SET
+         name = EXCLUDED.name,
+         description = EXCLUDED.description,
+         steps = EXCLUDED.steps,
+         parameters = EXCLUDED.parameters,
+         ontology_key = COALESCE(EXCLUDED.ontology_key, saved_query.ontology_key),
+         embedding = COALESCE(EXCLUDED.embedding, saved_query.embedding),
+         updated_at = now()
+       RETURNING ${SAVED_QUERY_COLS}, (saved_query_id = $1) AS created`,
+      [
+        savedQueryId,
+        ontologyId,
+        ontologyKey,
+        key,
+        name,
+        description,
+        stepsJson,
+        parametersJson,
+        embedding === null ? null : toSql(embedding),
+      ],
+    );
+    const { created, ...row } = camelizeRow(result.rows[0]!);
+    return [row, created as boolean];
   }
 
-  deleteSavedQuery(): Promise<boolean> {
-    return notImplemented("deleteSavedQuery");
+  async deleteSavedQuery(ontologyId: string, queryKey: string): Promise<boolean> {
+    if (!isUuid(ontologyId)) {
+      return false;
+    }
+    const result = await runQuery(
+      `DELETE FROM saved_query WHERE ontology_id = $1 AND key = $2`,
+      [ontologyId, queryKey],
+    );
+    return result.rowCount > 0;
   }
 
   // ------------------------------------------------------------------
   // Embedding maintenance (rebuild support)
   // ------------------------------------------------------------------
 
-  getEntityTypesWithProperties(): Promise<Row[]> {
-    return notImplemented("getEntityTypesWithProperties");
+  /** Every entity type key with its property definitions, aggregated in
+   * one statement (jsonb) so the read stays on door one. */
+  async getEntityTypesWithProperties(): Promise<Row[]> {
+    const result = await runQuery(
+      `SELECT et.key,
+              coalesce(
+                jsonb_agg(
+                  jsonb_build_object(
+                    'propertyId', p.property_id,
+                    'key', p.key,
+                    'displayName', p.display_name,
+                    'description', p.description,
+                    'dataType', p.data_type,
+                    'required', p.required,
+                    'defaultValue', p.default_value
+                  ) ORDER BY p.key
+                ) FILTER (WHERE p.property_id IS NOT NULL),
+                '[]'::jsonb
+              ) AS properties
+       FROM entity_type et
+       LEFT JOIN property_def p ON p.entity_type_id = et.entity_type_id
+       GROUP BY et.key
+       ORDER BY et.key`,
+    );
+    return result.rows;
   }
 
-  setEntityEmbedding(): Promise<void> {
-    return notImplemented("setEntityEmbedding");
+  /** No `updated_at` stamp: re-embedding is not a content change, and the
+   * reference adapter leaves the timestamp untouched here too. */
+  async setEntityEmbedding(entityId: string, embedding: number[]): Promise<void> {
+    if (!isUuid(entityId)) {
+      return;
+    }
+    await runQuery(`UPDATE entity SET embedding = $2::vector WHERE id = $1`, [
+      entityId,
+      toSql(embedding),
+    ]);
   }
 
-  listSavedQueryRefs(): Promise<Row[]> {
-    return notImplemented("listSavedQueryRefs");
+  async listSavedQueryRefs(): Promise<Row[]> {
+    const result = await runQuery(`SELECT saved_query_id, description FROM saved_query`);
+    return camelizeRows(result.rows);
   }
 
-  setSavedQueryEmbedding(): Promise<void> {
-    return notImplemented("setSavedQueryEmbedding");
+  /** No `updated_at` stamp — as `setEntityEmbedding`. */
+  async setSavedQueryEmbedding(savedQueryId: string, embedding: number[]): Promise<void> {
+    if (!isUuid(savedQueryId)) {
+      return;
+    }
+    await runQuery(`UPDATE saved_query SET embedding = $2::vector WHERE saved_query_id = $1`, [
+      savedQueryId,
+      toSql(embedding),
+    ]);
   }
 
   // ------------------------------------------------------------------

@@ -1,9 +1,13 @@
 /**
- * Session-06 integration suite — document properties against the
- * docker-compose Neo4j: slice paging, partial writes with read-back, the
- * compare-and-swap guard, code-point offsets, and the chunk lifecycle
- * verified directly in the store (a fake embedding provider activates the
- * sync; its `embed` returns null, so chunk rows carry no vectors).
+ * Session-06 integration suite — document properties, database-blind:
+ * slice paging, partial writes with read-back, the compare-and-swap
+ * guard, code-point offsets, and the chunk lifecycle verified through the
+ * persistence port (a fake embedding provider activates the sync and
+ * returns a fixed vector, so every chunk row carries one and the port's
+ * text→vector map sees it).
+ *
+ * The physical chunk-row assertions (virtual label, raw coordinates) live
+ * in `tests/integration/neo4j/documents.test.ts`.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -11,8 +15,12 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 
 import { createApp } from "../../src/app.js";
 import { setEmbeddingProvider } from "../../src/core/embedding.js";
-import { closeStores, initStores, wipeDatabase } from "../../src/core/ports.js";
-import { getDriver } from "../../src/adapters/neo4j/driver.js";
+import {
+  closeStores,
+  getRuntimeStore,
+  initStores,
+  wipeDatabase,
+} from "../../src/core/ports.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 
 type Row = Record<string, unknown>;
@@ -102,25 +110,12 @@ async function readDocument(entityId: string, propertyKey: string, query = ""): 
   return res.json() as Row;
 }
 
-/** Raw chunk rows for one (entity, property), straight from the store. */
-async function chunkRows(entityId: string, propertyKey: string): Promise<Row[]> {
-  const session = getDriver().session();
-  try {
-    const result = await session.run(
-      `
-      MATCH (c:_Chunk {_entityId: $entityId, _propertyKey: $propertyKey})
-      RETURN c {.*} AS chunk, labels(c) AS labels
-      ORDER BY c._index
-      `,
-      { entityId, propertyKey },
-    );
-    return result.records.map((record) => ({
-      ...(record.get("chunk") as Row),
-      labels: record.get("labels") as string[],
-    }));
-  } finally {
-    await session.close();
-  }
+/** Chunk texts for one (entity, property), read through the port. The
+ * provider stores a vector on every chunk, so the text→vector map lists
+ * exactly the stored chunks (fixtures keep chunk texts distinct). */
+async function chunkTexts(entityId: string, propertyKey: string): Promise<string[]> {
+  const map = await getRuntimeStore().getChunkEmbeddingsForEntityProperty(entityId, propertyKey);
+  return Object.keys(map);
 }
 
 describe("slice reads", () => {
@@ -350,28 +345,26 @@ describe("partial writes", () => {
   });
 });
 
-describe("chunk lifecycle (fake provider, no vectors)", () => {
+describe("chunk lifecycle (fake provider, fixed vector)", () => {
+  const VECTOR = [0.5, 0.25, 0.125, 0.0625];
+
   beforeEach(() => {
-    // Activates chunk sync; `embed` yields no vector, so rows store none.
-    setEmbeddingProvider({ dimensions: 8, embed: async () => null });
+    // Activates chunk sync; the fixed vector puts every chunk row into the
+    // port's text→vector map.
+    setEmbeddingProvider({ dimensions: 4, embed: async () => VECTOR });
   });
 
-  it("creating an entity writes chunk rows with exact coordinates", async () => {
+  it("creating an entity writes one chunk per slice of the value", async () => {
     const entity = await createArticle({ title: "T", body: BODY });
-    const rows = await chunkRows(entity._id as string, "body");
+    const texts = await chunkTexts(entity._id as string, "body");
 
-    expect(rows.length).toBeGreaterThan(1);
-    rows.forEach((row, index) => {
-      expect(row._index).toBe(index);
-      expect(row._entityTypeKey).toBe("article");
-      expect(row._propertyKey).toBe("body");
-      expect(row.labels).toContain("_Chunk");
-      expect(row.labels).toContain("ArticleDocumentBody"); // virtual label
-      expect(row).not.toHaveProperty("_embedding"); // vectors absent
-      const start = row.startChar as number;
-      const length = row.charLength as number;
-      expect(BODY.slice(start, start + length)).toBe(row.text);
-    });
+    expect(texts.length).toBeGreaterThan(1);
+    for (const text of texts) {
+      expect(BODY).toContain(text); // every chunk is a verbatim slice
+    }
+    // The chunks jointly span the value: one starts it, one ends it.
+    expect(texts.some((text) => BODY.startsWith(text))).toBe(true);
+    expect(texts.some((text) => BODY.endsWith(text))).toBe(true);
   });
 
   it("an edit re-synchronizes the chunks to the new value", async () => {
@@ -385,21 +378,19 @@ describe("chunk lifecycle (fake provider, no vectors)", () => {
     });
     expect(res.statusCode).toBe(200);
 
-    const rows = await chunkRows(entityId, "body");
+    const texts = await chunkTexts(entityId, "body");
     const newValue = BODY.replace("Paragraph 3:", "Chapter 3 —");
-    expect(rows.map((r) => r.text).join("").includes("Chapter 3 —")).toBe(true);
-    rows.forEach((row) => {
-      const start = row.startChar as number;
-      const length = row.charLength as number;
-      expect(newValue.slice(start, start + length)).toBe(row.text);
-    });
+    expect(texts.some((text) => text.includes("Chapter 3 —"))).toBe(true);
+    for (const text of texts) {
+      expect(newValue).toContain(text); // no chunk of the old value survives
+    }
   });
 
   it("nulling the value deletes its chunks; the sibling property keeps its own", async () => {
     const entity = await createArticle({ title: "T", body: BODY, notes: BODY });
     const entityId = entity._id as string;
-    expect((await chunkRows(entityId, "body")).length).toBeGreaterThan(0);
-    expect((await chunkRows(entityId, "notes")).length).toBeGreaterThan(0);
+    expect((await chunkTexts(entityId, "body")).length).toBeGreaterThan(0);
+    expect((await chunkTexts(entityId, "notes")).length).toBeGreaterThan(0);
 
     const res = await app.inject({
       method: "PATCH",
@@ -408,14 +399,14 @@ describe("chunk lifecycle (fake provider, no vectors)", () => {
     });
     expect(res.statusCode).toBe(200);
 
-    expect(await chunkRows(entityId, "body")).toHaveLength(0);
-    expect((await chunkRows(entityId, "notes")).length).toBeGreaterThan(0); // isolation
+    expect(await chunkTexts(entityId, "body")).toHaveLength(0);
+    expect((await chunkTexts(entityId, "notes")).length).toBeGreaterThan(0); // isolation
   });
 
   it("deleting the entity removes all of its chunks", async () => {
     const entity = await createArticle({ title: "T", body: BODY, notes: BODY });
     const entityId = entity._id as string;
-    expect((await chunkRows(entityId, "body")).length).toBeGreaterThan(0);
+    expect((await chunkTexts(entityId, "body")).length).toBeGreaterThan(0);
 
     const res = await app.inject({
       method: "DELETE",
@@ -423,8 +414,8 @@ describe("chunk lifecycle (fake provider, no vectors)", () => {
     });
     expect(res.statusCode).toBe(204);
 
-    expect(await chunkRows(entityId, "body")).toHaveLength(0);
-    expect(await chunkRows(entityId, "notes")).toHaveLength(0);
+    expect(await chunkTexts(entityId, "body")).toHaveLength(0);
+    expect(await chunkTexts(entityId, "notes")).toHaveLength(0);
   });
 
   it("deleting the property definition drops that property's chunks only", async () => {
@@ -437,8 +428,8 @@ describe("chunk lifecycle (fake provider, no vectors)", () => {
     });
     expect(res.statusCode).toBe(204);
 
-    expect(await chunkRows(entityId, "notes")).toHaveLength(0);
-    expect((await chunkRows(entityId, "body")).length).toBeGreaterThan(0); // isolation
+    expect(await chunkTexts(entityId, "notes")).toHaveLength(0);
+    expect((await chunkTexts(entityId, "body")).length).toBeGreaterThan(0); // isolation
   });
 
   it("deleting the entity type drops the chunks of each document property", async () => {
@@ -452,28 +443,22 @@ describe("chunk lifecycle (fake provider, no vectors)", () => {
     });
     expect(res.statusCode, res.body).toBe(204);
 
-    expect(await chunkRows(entityId, "body")).toHaveLength(0);
-    expect(await chunkRows(entityId, "notes")).toHaveLength(0);
+    expect(await chunkTexts(entityId, "body")).toHaveLength(0);
+    expect(await chunkTexts(entityId, "notes")).toHaveLength(0);
   });
 
   it("the chunk-embedding map reads back stored vectors for reuse", async () => {
-    // A provider that DOES produce vectors: the store keeps them and the
-    // text→vector map returns them (the reuse path's storage half).
-    setEmbeddingProvider({
-      dimensions: 4,
-      embed: async () => [0.5, 0.25, 0.125, 0.0625],
-    });
+    // The store keeps the provider's vectors and the text→vector map
+    // returns them (the reuse path's storage half).
     const entity = await createArticle({ title: "T", body: BODY });
     const entityId = entity._id as string;
 
-    const { getRuntimeStore } = await import("../../src/core/ports.js");
     const map = await getRuntimeStore().getChunkEmbeddingsForEntityProperty(entityId, "body");
-    const rows = await chunkRows(entityId, "body");
-    expect(Object.keys(map).length).toBe(rows.length);
+    expect(Object.keys(map).length).toBeGreaterThan(1);
     for (const vector of Object.values(map)) {
-      expect(vector).toEqual([0.5, 0.25, 0.125, 0.0625]);
+      expect(vector).toEqual(VECTOR);
     }
-    // The raw rows carry the vector internally, but reads through the API
+    // The rows carry the vector internally, but reads through the API
     // never expose it — spot-check the fields projection.
     const projected = await app.inject({
       method: "GET",

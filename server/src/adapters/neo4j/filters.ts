@@ -16,7 +16,7 @@ import neo4j from "neo4j-driver";
 
 import { CoercionError, coerceValue } from "../../core/dataTypes.js";
 import { ValidationError } from "../../core/exceptions.js";
-import type { PropertyDef } from "../../runtime/schemaCache.js";
+import type { PropertyDef } from "../../core/schemas.js";
 import { toNeo4jDate, toNeo4jDateTime } from "./temporal.js";
 
 const OPERATORS: Record<string, string> = {

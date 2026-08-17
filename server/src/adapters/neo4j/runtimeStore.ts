@@ -18,7 +18,7 @@
 import neo4j, { type Driver } from "neo4j-driver";
 
 import type { ValidatedQuery } from "../../core/oql/index.js";
-import type { PropertyDef } from "../../runtime/schemaCache.js";
+import type { PropertyDef } from "../../core/schemas.js";
 import {
   ENTITY_VECTOR_INDEX_NAME,
   documentIndexName,

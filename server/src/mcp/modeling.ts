@@ -19,6 +19,7 @@ import { z, ZodError } from "zod";
 import { NotFoundError, ValidationError } from "../core/exceptions.js";
 import { getModelingStore, getRuntimeStore } from "../core/ports.js";
 import type { ModelingStore } from "../core/ports.js";
+import type { TypeKind } from "../core/schemas.js";
 import {
   AiAgentConfigUpsert,
   EntityTypeCreate,
@@ -34,7 +35,6 @@ import {
   SavedQueryUpsert,
 } from "../modeling/schemas.js";
 import * as service from "../modeling/service.js";
-import type { OwnerLabel } from "../modeling/service.js";
 import { VALID_AGENT_TOOLS_CSV } from "../runtime/toolNames.js";
 
 // ---------------------------------------------------------------------------
@@ -141,10 +141,10 @@ async function resolveRelationType(
 async function resolveProperty(
   store: ModelingStore,
   ownerId: string,
-  ownerLabel: OwnerLabel,
+  typeKind: TypeKind,
   propertyKey: string,
 ): Promise<Record<string, unknown>> {
-  const data = await store.getPropertyByKey(ownerId, ownerLabel, propertyKey);
+  const data = await store.getPropertyByKey(ownerId, typeKind, propertyKey);
   if (!data) {
     throw new NotFoundError(`Property '${propertyKey}' not found`);
   }
@@ -162,30 +162,32 @@ async function resolveOntologyByKey(
   return data;
 }
 
-function resolveOwnerLabel(typeKind: string): OwnerLabel {
-  if (typeKind === "entity_type") {
+/** Map the MCP wire value (`entity_type`/`relation_type`) to the port's
+ * owner-kind vocabulary. */
+function resolveTypeKind(wireTypeKind: string): TypeKind {
+  if (wireTypeKind === "entity_type") {
     return "EntityType";
   }
-  if (typeKind === "relation_type") {
+  if (wireTypeKind === "relation_type") {
     return "RelationType";
   }
   throw new ValidationError(
-    `Invalid type_kind '${typeKind}'. Must be 'entity_type' or 'relation_type'.`,
+    `Invalid type_kind '${wireTypeKind}'. Must be 'entity_type' or 'relation_type'.`,
   );
 }
 
 async function resolveOwner(
   store: ModelingStore,
-  typeKind: string,
+  wireTypeKind: string,
   typeKey: string,
-): Promise<[string, OwnerLabel]> {
-  const ownerLabel = resolveOwnerLabel(typeKind);
-  if (ownerLabel === "EntityType") {
+): Promise<[string, TypeKind]> {
+  const typeKind = resolveTypeKind(wireTypeKind);
+  if (typeKind === "EntityType") {
     const owner = await resolveEntityType(store, typeKey);
-    return [owner.entityTypeId as string, ownerLabel];
+    return [owner.entityTypeId as string, typeKind];
   }
   const owner = await resolveRelationType(store, typeKey);
-  return [owner.relationTypeId as string, ownerLabel];
+  return [owner.relationTypeId as string, typeKind];
 }
 
 // ---------------------------------------------------------------------------
@@ -407,7 +409,7 @@ export function createModelingMcpServer(): McpServer {
       cascade?: boolean | undefined;
     }) => {
       const store = getModelingStore();
-      const [ownerId, ownerLabel] = await resolveOwner(store, args.type_kind, args.type_key);
+      const [ownerId, typeKind] = await resolveOwner(store, args.type_kind, args.type_key);
       const body = PropertyDefinitionCreate.parse({
         key: args.key,
         displayName: args.display_name,
@@ -418,7 +420,7 @@ export function createModelingMcpServer(): McpServer {
       });
       const result = await service.createProperty(
         ownerId,
-        ownerLabel,
+        typeKind,
         body,
         args.cascade ?? false,
         store,
@@ -453,8 +455,8 @@ export function createModelingMcpServer(): McpServer {
       description?: string | undefined;
     }) => {
       const store = getModelingStore();
-      const [ownerId, ownerLabel] = await resolveOwner(store, args.type_kind, args.type_key);
-      const prop = await resolveProperty(store, ownerId, ownerLabel, args.property_key);
+      const [ownerId, typeKind] = await resolveOwner(store, args.type_kind, args.type_key);
+      const prop = await resolveProperty(store, ownerId, typeKind, args.property_key);
       // Known wart: the tool argument shape cannot distinguish an omitted
       // default_value from an explicit null, so both clear the default.
       const body = PropertyDefinitionUpdate.parse({
@@ -465,7 +467,7 @@ export function createModelingMcpServer(): McpServer {
       });
       const result = await service.updateProperty(
         ownerId,
-        ownerLabel,
+        typeKind,
         prop.propertyId as string,
         body,
         store,
@@ -495,11 +497,11 @@ export function createModelingMcpServer(): McpServer {
       cascade?: boolean | undefined;
     }) => {
       const store = getModelingStore();
-      const [ownerId, ownerLabel] = await resolveOwner(store, args.type_kind, args.type_key);
-      const prop = await resolveProperty(store, ownerId, ownerLabel, args.property_key);
+      const [ownerId, typeKind] = await resolveOwner(store, args.type_kind, args.type_key);
+      const prop = await resolveProperty(store, ownerId, typeKind, args.property_key);
       await service.deleteProperty(
         ownerId,
-        ownerLabel,
+        typeKind,
         prop.propertyId as string,
         args.cascade ?? false,
         store,

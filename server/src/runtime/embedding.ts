@@ -10,8 +10,8 @@
  * - deterministic.
  */
 
+import type { PropertyDef } from "../core/schemas.js";
 import { cpLength, cpSlice } from "./codePoints.js";
-import type { PropertyDef } from "./schemaCache.js";
 
 // nomic-embed-text has an 8192-token limit; ~4 chars/token → 30000 chars
 // as a safe threshold.

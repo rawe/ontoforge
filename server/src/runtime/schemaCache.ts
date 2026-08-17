@@ -21,15 +21,7 @@
 import type { AgentConfig, SavedQueryConfig, SavedQueryParameter, StepConfig } from "../core/ai.js";
 import { NotFoundError } from "../core/exceptions.js";
 import type { RuntimeStore } from "../core/ports.js";
-
-export interface PropertyDef {
-  key: string;
-  displayName: string;
-  description: string | null;
-  dataType: string;
-  required: boolean;
-  defaultValue: string | null;
-}
+import type { PropertyDef } from "../core/schemas.js";
 
 export interface EntityTypeDef {
   key: string;

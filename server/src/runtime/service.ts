@@ -22,6 +22,7 @@ import { getEmbeddingProvider } from "../core/embedding.js";
 import { ConflictError, NotFoundError, ValidationError } from "../core/exceptions.js";
 import { SYSTEM_PROPERTIES, getReturnVariables, parseAndValidate } from "../core/oql/index.js";
 import type { RuntimeStore } from "../core/ports.js";
+import type { PropertyDef } from "../core/schemas.js";
 import { chunkDocument } from "./chunking.js";
 import { cpIndexOf, cpLength, cpSlice, countOccurrences } from "./codePoints.js";
 import { buildTextRepr } from "./embedding.js";
@@ -29,7 +30,6 @@ import {
   loadSchema,
   type EntityTypeDef,
   type LoadedSchema,
-  type PropertyDef,
   type RelationTypeDef,
   type SchemaCacheValue,
 } from "./schemaCache.js";

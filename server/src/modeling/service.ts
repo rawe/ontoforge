@@ -22,13 +22,9 @@ import {
 } from "../core/exceptions.js";
 import { parseAndValidate } from "../core/oql/index.js";
 import type { ModelingStore, RuntimeStore } from "../core/ports.js";
-import { DATA_TYPES, KEY_PATTERN } from "../core/schemas.js";
+import { DATA_TYPES, KEY_PATTERN, type PropertyDef, type TypeKind } from "../core/schemas.js";
 import { buildTextRepr } from "../runtime/embedding.js";
-import {
-  invalidateLoadedSchemaCache,
-  loadSchema,
-  type PropertyDef,
-} from "../runtime/schemaCache.js";
+import { invalidateLoadedSchemaCache, loadSchema } from "../runtime/schemaCache.js";
 import { syncDocumentChunks } from "../runtime/service.js";
 import { VALID_AGENT_TOOLS } from "../runtime/toolNames.js";
 import {
@@ -67,9 +63,6 @@ import {
   onEntityTypePropertyCreated,
   onEntityTypePropertyDeleted,
 } from "./vectorHooks.js";
-
-/** The two property owners, in the port's owner-kind vocabulary. */
-export type OwnerLabel = "EntityType" | "RelationType";
 
 type Row = Record<string, unknown>;
 
@@ -415,9 +408,9 @@ export async function deleteRelationType(
 async function ensureOwnerExists(
   store: ModelingStore,
   ownerId: string,
-  ownerLabel: OwnerLabel,
+  typeKind: TypeKind,
 ): Promise<void> {
-  if (ownerLabel === "EntityType") {
+  if (typeKind === "EntityType") {
     const data = await store.getEntityType(ownerId);
     if (!data) {
       throw new NotFoundError(`Entity type '${ownerId}' not found`);
@@ -432,16 +425,16 @@ async function ensureOwnerExists(
 
 export async function createProperty(
   ownerId: string,
-  ownerLabel: OwnerLabel,
+  typeKind: TypeKind,
   body: PropertyDefinitionCreateInput,
   cascade: boolean,
   store: ModelingStore,
 ): Promise<PropertyDefinitionResponseBody> {
-  if (ownerLabel === "RelationType" && body.dataType === "document") {
+  if (typeKind === "RelationType" && body.dataType === "document") {
     throw new ValidationError("Document properties are only supported on entity types");
   }
-  await ensureOwnerExists(store, ownerId, ownerLabel);
-  const existing = await store.getPropertyByKey(ownerId, ownerLabel, body.key);
+  await ensureOwnerExists(store, ownerId, typeKind);
+  const existing = await store.getPropertyByKey(ownerId, typeKind, body.key);
   if (existing) {
     throw new ConflictError(`Property with key '${body.key}' already exists on this type`);
   }
@@ -449,7 +442,7 @@ export async function createProperty(
   // every lens whose explicit allowlist for this type omits the new key.
   if (body.required && (body.defaultValue === null || body.defaultValue === undefined)) {
     const affected = await store.findOntologiesWithExplicitProperty(
-      ownerLabel,
+      typeKind,
       ownerId,
       body.key,
     );
@@ -462,13 +455,13 @@ export async function createProperty(
       );
     }
     if (affected.length > 0) {
-      await store.addPropertyToIncludesLists(ownerLabel, ownerId, body.key);
+      await store.addPropertyToIncludesLists(typeKind, ownerId, body.key);
     }
   }
   const propertyId = randomUUID();
   const data = await store.createProperty(
     ownerId,
-    ownerLabel,
+    typeKind,
     propertyId,
     body.key,
     body.displayName,
@@ -478,7 +471,7 @@ export async function createProperty(
     body.defaultValue ?? null,
   );
   invalidateLoadedSchemaCache();
-  if (ownerLabel === "EntityType") {
+  if (typeKind === "EntityType") {
     await onEntityTypePropertyCreated(store, ownerId, data);
   }
   return toPropertyResponse(data);
@@ -486,28 +479,28 @@ export async function createProperty(
 
 export async function listProperties(
   ownerId: string,
-  ownerLabel: OwnerLabel,
+  typeKind: TypeKind,
   store: ModelingStore,
 ): Promise<PropertyDefinitionResponseBody[]> {
-  await ensureOwnerExists(store, ownerId, ownerLabel);
-  const rows = await store.listProperties(ownerId, ownerLabel);
+  await ensureOwnerExists(store, ownerId, typeKind);
+  const rows = await store.listProperties(ownerId, typeKind);
   return rows.map(toPropertyResponse);
 }
 
 export async function updateProperty(
   ownerId: string,
-  ownerLabel: OwnerLabel,
+  typeKind: TypeKind,
   propertyId: string,
   body: PropertyDefinitionUpdateInput,
   store: ModelingStore,
 ): Promise<PropertyDefinitionResponseBody> {
-  await ensureOwnerExists(store, ownerId, ownerLabel);
+  await ensureOwnerExists(store, ownerId, typeKind);
   // An explicitly null defaultValue clears the default — the one exception
   // to sparse-update semantics. Omitted (`undefined`) means unchanged.
   const clearDefault = body.defaultValue === null;
   const data = await store.updateProperty(
     ownerId,
-    ownerLabel,
+    typeKind,
     propertyId,
     body.displayName ?? null,
     body.description ?? null,
@@ -524,13 +517,13 @@ export async function updateProperty(
 
 export async function deleteProperty(
   ownerId: string,
-  ownerLabel: OwnerLabel,
+  typeKind: TypeKind,
   propertyId: string,
   cascade: boolean,
   store: ModelingStore,
 ): Promise<void> {
-  await ensureOwnerExists(store, ownerId, ownerLabel);
-  const prop = await store.getProperty(ownerId, ownerLabel, propertyId);
+  await ensureOwnerExists(store, ownerId, typeKind);
+  const prop = await store.getProperty(ownerId, typeKind, propertyId);
   if (!prop) {
     throw new NotFoundError(`Property '${propertyId}' not found on this type`);
   }
@@ -538,16 +531,16 @@ export async function deleteProperty(
   // cascade, allowlists are left holding an unresolvable key (harmless at
   // runtime, reported by lens validation). The lookup runs anyway so the
   // call fails here if the owner has vanished; its result is not acted on.
-  await store.findOntologiesIncludingType(ownerLabel, ownerId);
+  await store.findOntologiesIncludingType(typeKind, ownerId);
   if (cascade) {
-    await store.removePropertyFromIncludesLists(ownerLabel, ownerId, prop.key as string);
+    await store.removePropertyFromIncludesLists(typeKind, ownerId, prop.key as string);
   }
-  const deleted = await store.deleteProperty(ownerId, ownerLabel, propertyId);
+  const deleted = await store.deleteProperty(ownerId, typeKind, propertyId);
   if (!deleted) {
     throw new NotFoundError(`Property '${propertyId}' not found on this type`);
   }
   invalidateLoadedSchemaCache();
-  if (ownerLabel === "EntityType") {
+  if (typeKind === "EntityType") {
     await onEntityTypePropertyDeleted(store, ownerId, prop);
   }
 }

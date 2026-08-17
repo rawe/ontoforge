@@ -887,12 +887,20 @@ export function validate(analysis: Analysis, schema: SchemaCacheValue): string[]
  * A parsed and schema-validated OQL query.
  *
  * Opaque to services; database adapters compile it to their native
- * dialect (token stream + analysis carry everything a compiler needs).
+ * dialect. The object carries everything a compiler needs: the parse
+ * tree, the token stream, the analysis, and the scoped schema the query
+ * was validated against.
  */
 export interface ValidatedQuery {
+  /** The original query text — diagnostics and logging only. An adapter
+   * must never compile from it. */
   text: string;
   tokenStream: CommonTokenStream;
+  /** The parse tree the analysis was collected from. */
+  tree: ScriptContext;
   analysis: Analysis;
+  /** The scoped schema the query was validated against. */
+  schema: SchemaCacheValue;
 }
 
 /**
@@ -906,7 +914,7 @@ export function parseAndValidate(query: string, schema: SchemaCacheValue): Valid
   if (errors.length > 0) {
     throw new ValidationError("Query validation failed", { errors });
   }
-  return { text: query, tokenStream, analysis };
+  return { text: query, tokenStream, tree, analysis, schema };
 }
 
 /**

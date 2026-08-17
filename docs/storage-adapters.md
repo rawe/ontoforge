@@ -282,9 +282,10 @@ be interpolated into generated query text — they originate from the stored sch
 from request input — but values never may.
 
 **Compiling a validated query.** The adapter turns the validated query into its native
-dialect and runs it read-only. The only transformation required is rewriting the type-key
-tokens into the adapter's physical names; everything else the object carries passes
-through. Parameters are supplied separately and bound, never spliced.
+dialect and runs it read-only. How it compiles is its own business — rewriting tokens in
+place or walking the parse tree and emitting a fresh statement — but every type key and
+property key must be mapped to the adapter's physical names, and the query's meaning must
+be preserved exactly. Parameters are supplied separately and bound, never spliced.
 
 **Translating errors.** Every path to the database goes through one place that catches
 driver failures and converts them, so that no route into the store can bypass the
@@ -307,19 +308,23 @@ The adapter **may** assume, without re-checking:
 - No write clause and no procedure call is present.
 - No node pattern is unlabelled, and no internal label or internal relationship type
   appears.
-- The object carries everything a compiler needs: the token stream and the analysis that
-  locates every type-key token and marks whether it names a node or a relationship.
+- The object carries everything a compiler needs: the parse tree, the token stream, the
+  analysis that locates every type-key token and marks whether it names a node or a
+  relationship, the scoped schema it was validated against, and the original query text
+  for diagnostics.
 
 The adapter **must not** assume:
 
-- That the query is a string it may manipulate textually. Rewriting happens through the
-  token positions the analysis provides.
+- That the query is a string it may manipulate textually. The text the object carries is
+  for diagnostics and logging only; compilation works from the parse tree or the token
+  positions the analysis provides.
 - That any value in the query is a parameter. Parameters arrive separately, as a map.
 - That the object is serializable, or survives leaving the process.
 - That validation implies anything about cost. Limits and timeouts, if wanted, are the
   adapter's to impose.
 
-Correspondingly, the adapter **must** leave everything except the type-key tokens intact.
+Correspondingly, whatever the compilation style, the compiled statement must ask the
+database exactly what the validated query asks — only the names are translated.
 Results come back in ontology vocabulary, so no reverse translation of names is required —
 the compiled query returns whatever the caller asked for, converted per the value rules
 above.

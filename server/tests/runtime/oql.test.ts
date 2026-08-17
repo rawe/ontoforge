@@ -16,6 +16,7 @@ import {
   getReturnVariables,
   hasLabellessNodes,
   parse,
+  parseAndValidate,
   validate,
   type ValidatedQuery,
 } from "../../src/core/oql/index.js";
@@ -651,12 +652,39 @@ describe("surface acceptance", () => {
 });
 
 // ---------------------------------------------------------------------------
+// The ValidatedQuery contract (M0.3)
+// ---------------------------------------------------------------------------
+
+describe("ValidatedQuery contract", () => {
+  it("carries the parse tree and the scoped schema it was validated against", () => {
+    const s = schema();
+    const validated = parseAndValidate("MATCH (p:person) RETURN p", s);
+    expect(validated.tree).toBeDefined();
+    expect(validated.schema).toBe(s);
+    expect(validated.text).toBe("MATCH (p:person) RETURN p");
+    expect(validated.tokenStream).toBeDefined();
+    expect(validated.analysis.allLabels).toEqual(new Set(["person"]));
+  });
+
+  it("the carried tree is the tree the analysis was collected from", () => {
+    const validated = parseAndValidate("MATCH (p:person) RETURN p", schema());
+    expect(analyze(validated.tree).allLabels).toEqual(validated.analysis.allLabels);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Rewriting
 // ---------------------------------------------------------------------------
 
 function compileText(query: string): string {
   const { tokenStream, tree } = parse(query);
-  const validated: ValidatedQuery = { text: "", tokenStream, analysis: analyze(tree) };
+  const validated: ValidatedQuery = {
+    text: "",
+    tokenStream,
+    tree,
+    analysis: analyze(tree),
+    schema: schema(),
+  };
   return compileQuery(validated);
 }
 

@@ -276,7 +276,7 @@ describe("validation", () => {
     expect(errors).toContain(
       "Write operations are not allowed: DELETE, SET. " +
         "Only read queries are supported (MATCH, WHERE, RETURN, " +
-        "ORDER BY, LIMIT, SKIP, OPTIONAL MATCH, WITH, UNWIND).",
+        "ORDER BY, LIMIT, SKIP, OPTIONAL MATCH, WITH).",
     );
   });
 
@@ -339,6 +339,314 @@ describe("validation", () => {
       "_relationTypeKey",
       "_updatedAt",
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The closed day-one surface (M0.2) — analysis-level detection
+// ---------------------------------------------------------------------------
+
+describe("surface analysis", () => {
+  it("detects a variable-length pattern (rangeLit)", () => {
+    const analysis = analyzeQuery("MATCH (p:person)-[:works_for*1..3]->(c:company) RETURN p");
+    expect(analysis.unsupported.has("variable-length")).toBe(true);
+  });
+
+  it("UNION parses after the grammar fix", () => {
+    expect(() =>
+      parse("MATCH (p:person) RETURN p UNION MATCH (c:company) RETURN c"),
+    ).not.toThrow();
+  });
+
+  it("detects UNION", () => {
+    const analysis = analyzeQuery("MATCH (p:person) RETURN p UNION MATCH (c:company) RETURN c");
+    expect(analysis.unsupported.has("union")).toBe(true);
+  });
+
+  it("collects function names verbatim", () => {
+    const analysis = analyzeQuery(
+      "MATCH (p:person) RETURN count(p), apoc.text.join(p.name, ',')",
+    );
+    expect(analysis.functionCalls.has("count")).toBe(true);
+    expect(analysis.functionCalls.has("apoc.text.join")).toBe(true);
+  });
+
+  it("extracts inline-map keys against the owning node label", () => {
+    const analysis = analyzeQuery("MATCH (:person {name: 'Alice', salary: 100}) RETURN 1");
+    expect(analysis.inlineMaps).toEqual([
+      { ownerTypeKey: "person", isRelationship: false, keys: ["name", "salary"] },
+    ]);
+  });
+
+  it("extracts inline-map keys against the owning relationship type", () => {
+    const analysis = analyzeQuery(
+      "MATCH (:person)-[r:works_for {role: 'x'}]->(:company) RETURN r",
+    );
+    expect(analysis.inlineMaps).toEqual([
+      { ownerTypeKey: "works_for", isRelationship: true, keys: ["role"] },
+    ]);
+  });
+
+  it("records an untyped owner for a map on an unlabeled node", () => {
+    const analysis = analyzeQuery("MATCH ({salary: 100}) RETURN 1");
+    expect(analysis.inlineMaps).toEqual([
+      { ownerTypeKey: null, isRelationship: false, keys: ["salary"] },
+    ]);
+  });
+
+  it("detects a pattern comprehension", () => {
+    const analysis = analyzeQuery(
+      "MATCH (p:person) RETURN [(a:person)-[:works_for]->(b:company) | a.name]",
+    );
+    expect(analysis.unsupported.has("comprehension")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The closed day-one surface (M0.2) — exact rejection wording per row
+// ---------------------------------------------------------------------------
+
+describe("surface rejections", () => {
+  it("variable-length pattern", () => {
+    expect(validateQuery("MATCH (p:person)-[:works_for*]->(c:company) RETURN p")).toContain(
+      "Variable-length relationship patterns are not supported. " +
+        "Write each hop as an explicit relationship pattern.",
+    );
+  });
+
+  it("UNION", () => {
+    expect(
+      validateQuery("MATCH (p:person) RETURN p UNION MATCH (c:company) RETURN c"),
+    ).toContain("UNION is not supported. Run separate queries and combine the results in the caller.");
+  });
+
+  it("CASE", () => {
+    expect(
+      validateQuery("MATCH (p:person) RETURN CASE WHEN p.age > 1 THEN 'a' ELSE 'b' END"),
+    ).toContain(
+      "CASE expressions are not supported. Filter with WHERE, or compute the distinction in the caller.",
+    );
+  });
+
+  it("list comprehension", () => {
+    expect(validateQuery("MATCH (p:person) RETURN [x IN p.name | x]")).toContain(
+      "List and pattern comprehensions are not supported. " +
+        "Use MATCH with WHERE, and collect(...) to build lists.",
+    );
+  });
+
+  it("quantified predicates", () => {
+    expect(
+      validateQuery("MATCH (p:person) WHERE any(x IN p.name WHERE x = 'a') RETURN p"),
+    ).toContain(
+      "Quantified predicates (ALL, ANY, NONE, SINGLE) are not supported. " +
+        "Express the condition with MATCH patterns and WHERE.",
+    );
+  });
+
+  it("REDUCE", () => {
+    expect(validateQuery("MATCH (p:person) RETURN reduce(p.age)")).toContain(
+      "REDUCE is not supported. Aggregate with the supported functions: " +
+        "avg, collect, count, max, min, sum.",
+    );
+  });
+
+  it("EXISTS subquery", () => {
+    expect(
+      validateQuery("MATCH (p:person) WHERE EXISTS { (p)-[:works_for]->(:company) } RETURN p"),
+    ).toContain(
+      "EXISTS subqueries are not supported. " +
+        "Match the pattern directly, or use OPTIONAL MATCH with IS NOT NULL.",
+    );
+  });
+
+  it("named path", () => {
+    expect(
+      validateQuery("MATCH path = (p:person)-[:works_for]->(c:company) RETURN p"),
+    ).toContain("Named paths are not supported. Bind the nodes and relationships you need with variables.");
+  });
+
+  it("multi-label node pattern", () => {
+    expect(validateQuery("MATCH (n:person:company) RETURN n")).toContain(
+      "Multi-label node patterns are not supported. A node pattern names exactly one entity type.",
+    );
+  });
+
+  it("relationship-type union", () => {
+    expect(validateQuery("MATCH ()-[r:works_for|works_for]->() RETURN r")).toContain(
+      "Relationship-type unions ([:a|b]) are not supported. Match each relationship type separately.",
+    );
+  });
+
+  it("map projection", () => {
+    // No production of the vendored grammar yields a map projection, so the
+    // Collector can never record one from a parse; the message row is pinned
+    // against a regenerated grammar ever admitting the construct.
+    const analysis = analyzeQuery("MATCH (p:person) RETURN p");
+    analysis.unsupported.add("map-projection");
+    expect(validate(analysis, schema())).toContain(
+      "Map projections are not supported. Return each property explicitly.",
+    );
+  });
+
+  it("arithmetic", () => {
+    expect(validateQuery("MATCH (p:person) RETURN p.age + 1")).toContain(
+      "Arithmetic expressions are not supported. Compute derived values in the caller.",
+    );
+    expect(validateQuery("MATCH (p:person) WHERE p.age % 2 = 0 RETURN p")).toContain(
+      "Arithmetic expressions are not supported. Compute derived values in the caller.",
+    );
+  });
+
+  it("STARTS WITH / ENDS WITH", () => {
+    const message = "STARTS WITH and ENDS WITH are not supported. Use CONTAINS to match substrings.";
+    expect(validateQuery("MATCH (p:person) WHERE p.name STARTS WITH 'A' RETURN p")).toContain(message);
+    expect(validateQuery("MATCH (p:person) WHERE p.name ENDS WITH 'e' RETURN p")).toContain(message);
+  });
+
+  it("DISTINCT in both positions", () => {
+    const message = "DISTINCT is not supported. Deduplicate in the caller, or aggregate with collect(...).";
+    expect(validateQuery("MATCH (p:person) RETURN DISTINCT p")).toContain(message);
+    expect(validateQuery("MATCH (p:person) RETURN count(DISTINCT p)")).toContain(message);
+  });
+
+  it("unknown function", () => {
+    expect(validateQuery("MATCH (p:person) RETURN randomUUID()")).toContain(
+      "Unknown function: 'randomUUID'. Available functions: avg, collect, count, max, min, sum.",
+    );
+  });
+
+  it("vendor namespaces are rejected as unknown functions", () => {
+    expect(validateQuery("MATCH (p:person) RETURN apoc.text.join(p.name, ',')")).toContain(
+      "Unknown function: 'apoc.text.join'. Available functions: avg, collect, count, max, min, sum.",
+    );
+  });
+
+  it("XOR", () => {
+    expect(validateQuery("MATCH (p:person) WHERE p.age = 1 XOR p.age = 2 RETURN p")).toContain(
+      "XOR is not supported. Express the condition with AND, OR and NOT.",
+    );
+  });
+
+  it("nested aggregates", () => {
+    expect(validateQuery("MATCH (p:person) RETURN avg(count(p))")).toContain(
+      "Aggregate functions cannot be nested. Compute the inner aggregate in a WITH clause first.",
+    );
+    expect(validateQuery("MATCH (p:person) RETURN avg(count(*))")).toContain(
+      "Aggregate functions cannot be nested. Compute the inner aggregate in a WITH clause first.",
+    );
+  });
+
+  it("ORDER BY on a node or relationship variable", () => {
+    const message = "Cannot order by a node or relationship — order by one of its properties instead.";
+    expect(validateQuery("MATCH (p:person) RETURN p ORDER BY p")).toContain(message);
+    expect(validateQuery("MATCH ()-[r:works_for]->() RETURN r ORDER BY r")).toContain(message);
+  });
+
+  it("ORDER BY on a constant or parameter", () => {
+    const message =
+      "Cannot order by a constant or a parameter — order by a property, an alias, or an aggregate instead.";
+    expect(validateQuery("MATCH (p:person) RETURN p ORDER BY 1")).toContain(message);
+    expect(validateQuery("MATCH (p:person) RETURN p ORDER BY $rank")).toContain(message);
+  });
+
+  it("SKIP/LIMIT operands", () => {
+    const message = "SKIP/LIMIT take a non-negative integer or a $parameter.";
+    expect(validateQuery("MATCH (p:person) RETURN p LIMIT p.age")).toContain(message);
+    expect(validateQuery("MATCH (p:person) RETURN p SKIP -1")).toContain(message);
+  });
+
+  it("chained property access", () => {
+    expect(validateQuery("MATCH (p:person) WHERE p.name.foo = 1 RETURN p")).toContain(
+      "Nested property access is not supported — properties hold scalar values.",
+    );
+  });
+
+  it("inline-map key unknown on the owner's type reuses the property message", () => {
+    expect(validateQuery("MATCH (p:person {salary: 100}) RETURN p")).toContain(
+      "Unknown property 'salary' on entity type 'person'. " +
+        "Available: age, name, _createdAt, _entityTypeKey, _id, _relationTypeKey, _updatedAt",
+    );
+    expect(validateQuery("MATCH (:person)-[r:works_for {rating: 5}]->(:company) RETURN r")).toContain(
+      "Unknown property 'rating' on relation type 'works_for'. " +
+        "Available: role, _createdAt, _entityTypeKey, _id, _relationTypeKey, _updatedAt",
+    );
+  });
+
+  it("inline map on an untyped owner", () => {
+    const message =
+      "An inline property map needs a typed owner — add a label to the node " +
+        "(or a type to the relationship) so its keys can be validated.";
+    expect(validateQuery("MATCH ({salary: 100}) RETURN 1")).toContain(message);
+    expect(validateQuery("MATCH (:person)-[r {role: 'x'}]->(:company) RETURN r")).toContain(message);
+  });
+
+  it("RETURN * with no variables in scope", () => {
+    expect(validateQuery("RETURN *")).toContain(
+      "RETURN * is not allowed when there are no variables in scope.",
+    );
+  });
+
+  it("UNWIND", () => {
+    expect(validateQuery("MATCH (p:person) UNWIND p.name AS x RETURN x")).toContain(
+      "UNWIND is not supported. Match the rows you need directly with MATCH and WHERE.",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The closed day-one surface (M0.2) — acceptance
+// ---------------------------------------------------------------------------
+
+describe("surface acceptance", () => {
+  it("the seven aggregates and count(*) pass", () => {
+    expect(validateQuery("MATCH (p:person) RETURN count(*)")).toEqual([]);
+    expect(validateQuery("MATCH (p:person) RETURN count(p)")).toEqual([]);
+    expect(validateQuery("MATCH (p:person) RETURN sum(p.age)")).toEqual([]);
+    expect(validateQuery("MATCH (p:person) RETURN avg(p.age)")).toEqual([]);
+    expect(validateQuery("MATCH (p:person) RETURN min(p.age)")).toEqual([]);
+    expect(validateQuery("MATCH (p:person) RETURN max(p.age)")).toEqual([]);
+    expect(validateQuery("MATCH (p:person) RETURN collect(p.name)")).toEqual([]);
+  });
+
+  it("function-name comparison is case-insensitive", () => {
+    expect(validateQuery("MATCH (p:person) RETURN COUNT(p)")).toEqual([]);
+  });
+
+  it("an in-lens inline map passes", () => {
+    expect(validateQuery("MATCH (p:person {name: 'Alice'}) RETURN p")).toEqual([]);
+    expect(validateQuery("MATCH (:person)-[r:works_for {role: 'x'}]->(:company) RETURN r")).toEqual([]);
+  });
+
+  it("system properties are permitted as inline-map keys", () => {
+    expect(validateQuery("MATCH (p:person {_id: 'abc'}) RETURN p")).toEqual([]);
+  });
+
+  it("anonymous patterns without maps stay permitted", () => {
+    expect(validateQuery("MATCH (:person)-[]->() RETURN 1")).toEqual([]);
+  });
+
+  it("integer literals and parameters pass SKIP/LIMIT", () => {
+    expect(validateQuery("MATCH (p:person) RETURN p SKIP 5 LIMIT 10")).toEqual([]);
+    expect(validateQuery("MATCH (p:person) RETURN p LIMIT $n")).toEqual([]);
+  });
+
+  it("ORDER BY on properties, aliases and aggregates passes", () => {
+    expect(validateQuery("MATCH (p:person) RETURN p ORDER BY p.name DESC")).toEqual([]);
+    expect(
+      validateQuery("MATCH (p:person) RETURN p.name AS n ORDER BY n"),
+    ).toEqual([]);
+    expect(
+      validateQuery("MATCH (p:person) RETURN p.name AS n, count(*) AS c ORDER BY count(*)"),
+    ).toEqual([]);
+  });
+
+  it("RETURN * with variables in scope passes", () => {
+    expect(validateQuery("MATCH (p:person) RETURN *")).toEqual([]);
+  });
+
+  it("bare map literals are in-surface literals, not property references", () => {
+    expect(validateQuery("MATCH (p:person) WHERE p.name IN ['a', 'b'] RETURN {a: 1}")).toEqual([]);
   });
 });
 

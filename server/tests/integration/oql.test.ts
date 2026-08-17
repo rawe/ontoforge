@@ -5,10 +5,12 @@
  * MCP `execute_query` round trip.
  *
  * Covers the spec's scenarios: multi-hop traversal, aggregation,
- * ORDER BY/SKIP/LIMIT, OPTIONAL MATCH, UNWIND; per-column stripping
- * through a scoped lens; document stub vs aliased-projection full text;
- * a scoped lens rejecting a globally valid type identically to a
- * nonexistent one; and a validation failure carrying hints over MCP.
+ * ORDER BY/SKIP/LIMIT, OPTIONAL MATCH; per-column stripping through a
+ * scoped lens; document stub vs aliased-projection full text; a scoped
+ * lens rejecting a globally valid type identically to a nonexistent one;
+ * out-of-surface constructs (variable-length patterns) and inline-map
+ * lens violations rejected end-to-end; and a validation failure carrying
+ * hints over MCP.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -172,14 +174,32 @@ describe("query execution (unscoped lens)", () => {
     expect(globex._id).toBeDefined();
   });
 
-  it("UNWIND expands collected lists", async () => {
+  it("rejects a variable-length pattern at validation", async () => {
     await seedGraph();
     const body = await query(
       "test_ontology",
-      "MATCH (p:person) WITH collect(p.name) AS names UNWIND names AS n " +
-        "RETURN n ORDER BY n",
+      "MATCH (p:person)-[:works_for*1..2]->(c:company) RETURN p",
+      422,
     );
-    expect(body.results).toEqual([{ n: "Alice" }, { n: "Bob" }, { n: "Carol" }]);
+    const errors = ((body.error as Row).details as Row).errors as string[];
+    expect(errors).toContain(
+      "Variable-length relationship patterns are not supported. " +
+        "Write each hop as an explicit relationship pattern.",
+    );
+  });
+
+  it("rejects an inline map on an untyped owner", async () => {
+    await seedGraph();
+    const body = await query(
+      "test_ontology",
+      "MATCH ({name: 'Alice'})-[r:works_for]->(c:company) RETURN c",
+      422,
+    );
+    const errors = ((body.error as Row).details as Row).errors as string[];
+    expect(errors).toContain(
+      "An inline property map needs a typed owner — add a label to the node " +
+        "(or a type to the relationship) so its keys can be validated.",
+    );
   });
 
   it("whole nodes come back as flat property maps with system properties", async () => {
@@ -246,6 +266,18 @@ describe("scoped lens", () => {
     expect((errors.errors as string[]).some((e) => e.includes("Unknown property 'age'"))).toBe(
       true,
     );
+  });
+
+  it("rejects an out-of-lens inline-map key", async () => {
+    const body = await query(
+      "hr_view",
+      "MATCH (p:person {age: 30}) RETURN p",
+      422,
+    );
+    const errors = ((body.error as Row).details as Row).errors as string[];
+    expect(
+      errors.some((e) => e.includes("Unknown property 'age' on entity type 'person'")),
+    ).toBe(true);
   });
 
   it("rejects a globally valid type identically to a nonexistent one", async () => {

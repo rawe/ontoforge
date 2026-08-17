@@ -12,8 +12,8 @@ import {
   MAX_VECTOR_FILTER_VALUE_BYTES,
   reconcileIndexDimensions,
   validateVectorIndexedProperties,
-} from "../../src/adapters/neo4j/ddl.js";
-import { ValidationError } from "../../src/core/exceptions.js";
+} from "../../../src/adapters/neo4j/ddl.js";
+import { ValidationError } from "../../../src/core/exceptions.js";
 
 describe("validateVectorIndexedProperties", () => {
   it("accepts short strings and non-string values", () => {

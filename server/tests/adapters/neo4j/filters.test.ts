@@ -7,12 +7,12 @@
 import neo4j from "neo4j-driver";
 import { describe, expect, it } from "vitest";
 
-import { ValidationError } from "../../src/core/exceptions.js";
+import { ValidationError } from "../../../src/core/exceptions.js";
 import {
   buildFilterClauses,
   buildSearchClause,
-} from "../../src/adapters/neo4j/filters.js";
-import type { PropertyDef } from "../../src/core/schemas.js";
+} from "../../../src/adapters/neo4j/filters.js";
+import type { PropertyDef } from "../../../src/core/schemas.js";
 
 function prop(key: string, dataType: string): PropertyDef {
   return { key, displayName: key, description: null, dataType, required: false, defaultValue: null };

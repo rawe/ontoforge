@@ -9,15 +9,14 @@
 
 import type { Driver } from "neo4j-driver";
 
+import type { ModelingStore, ReservedTypeKeyInUse, Row } from "../../core/ports.js";
+import type { TypeKind } from "../../core/schemas.js";
 import * as ddl from "./ddl.js";
 import { reservedEntityTypeKeys, reservedRelationTypeKeys } from "./ddl.js";
 import { runSession } from "./errors.js";
 import * as queries from "./modelingQueries.js";
-import type { OwnerLabel, ReservedTypeKeyInUse } from "./modelingQueries.js";
 
-type Row = Record<string, unknown>;
-
-export class Neo4jModelingStore {
+export class Neo4jModelingStore implements ModelingStore {
   constructor(private readonly driver: Driver) {}
 
   // ------------------------------------------------------------------
@@ -200,7 +199,7 @@ export class Neo4jModelingStore {
 
   async createProperty(
     ownerId: string,
-    ownerLabel: OwnerLabel,
+    typeKind: TypeKind,
     propertyId: string,
     key: string,
     displayName: string,
@@ -213,7 +212,7 @@ export class Neo4jModelingStore {
       queries.createProperty(
         session,
         ownerId,
-        ownerLabel,
+        typeKind,
         propertyId,
         key,
         displayName,
@@ -225,35 +224,35 @@ export class Neo4jModelingStore {
     );
   }
 
-  async listProperties(ownerId: string, ownerLabel: OwnerLabel): Promise<Row[]> {
+  async listProperties(ownerId: string, typeKind: TypeKind): Promise<Row[]> {
     return runSession(this.driver, (session) =>
-      queries.listProperties(session, ownerId, ownerLabel),
+      queries.listProperties(session, ownerId, typeKind),
     );
   }
 
   async getProperty(
     ownerId: string,
-    ownerLabel: OwnerLabel,
+    typeKind: TypeKind,
     propertyId: string,
   ): Promise<Row | null> {
     return runSession(this.driver, (session) =>
-      queries.getProperty(session, ownerId, ownerLabel, propertyId),
+      queries.getProperty(session, ownerId, typeKind, propertyId),
     );
   }
 
   async getPropertyByKey(
     ownerId: string,
-    ownerLabel: OwnerLabel,
+    typeKind: TypeKind,
     key: string,
   ): Promise<Row | null> {
     return runSession(this.driver, (session) =>
-      queries.getPropertyByKey(session, ownerId, ownerLabel, key),
+      queries.getPropertyByKey(session, ownerId, typeKind, key),
     );
   }
 
   async updateProperty(
     ownerId: string,
-    ownerLabel: OwnerLabel,
+    typeKind: TypeKind,
     propertyId: string,
     displayName: string | null,
     description: string | null,
@@ -265,7 +264,7 @@ export class Neo4jModelingStore {
       queries.updateProperty(
         session,
         ownerId,
-        ownerLabel,
+        typeKind,
         propertyId,
         displayName,
         description,
@@ -278,11 +277,11 @@ export class Neo4jModelingStore {
 
   async deleteProperty(
     ownerId: string,
-    ownerLabel: OwnerLabel,
+    typeKind: TypeKind,
     propertyId: string,
   ): Promise<boolean> {
     return runSession(this.driver, (session) =>
-      queries.deleteProperty(session, ownerId, ownerLabel, propertyId),
+      queries.deleteProperty(session, ownerId, typeKind, propertyId),
     );
   }
 
@@ -292,49 +291,39 @@ export class Neo4jModelingStore {
 
   async addIncludesType(
     ontologyId: string,
-    typeLabel: OwnerLabel,
+    typeKind: TypeKind,
     typeKey: string,
     properties: string[] | null,
   ): Promise<Row | null> {
     return runSession(this.driver, (session) =>
-      queries.addIncludesType(session, ontologyId, typeLabel, typeKey, properties),
+      queries.addIncludesType(session, ontologyId, typeKind, typeKey, properties),
     );
   }
 
-  async listIncludesTypes(ontologyId: string, typeLabel: OwnerLabel): Promise<Row[]> {
+  async listIncludesTypes(ontologyId: string, typeKind: TypeKind): Promise<Row[]> {
     return runSession(this.driver, (session) =>
-      queries.listIncludesTypes(session, ontologyId, typeLabel),
-    );
-  }
-
-  async getIncludesType(
-    ontologyId: string,
-    typeLabel: OwnerLabel,
-    typeId: string,
-  ): Promise<Row | null> {
-    return runSession(this.driver, (session) =>
-      queries.getIncludesType(session, ontologyId, typeLabel, typeId),
+      queries.listIncludesTypes(session, ontologyId, typeKind),
     );
   }
 
   async updateIncludesType(
     ontologyId: string,
-    typeLabel: OwnerLabel,
+    typeKind: TypeKind,
     typeId: string,
     properties: string[] | null,
   ): Promise<Row | null> {
     return runSession(this.driver, (session) =>
-      queries.updateIncludesType(session, ontologyId, typeLabel, typeId, properties),
+      queries.updateIncludesType(session, ontologyId, typeKind, typeId, properties),
     );
   }
 
   async removeIncludesType(
     ontologyId: string,
-    typeLabel: OwnerLabel,
+    typeKind: TypeKind,
     typeId: string,
   ): Promise<boolean> {
     return runSession(this.driver, (session) =>
-      queries.removeIncludesType(session, ontologyId, typeLabel, typeId),
+      queries.removeIncludesType(session, ontologyId, typeKind, typeId),
     );
   }
 
@@ -342,48 +331,48 @@ export class Neo4jModelingStore {
   // Scope inclusions (cascade-protocol support)
   // ------------------------------------------------------------------
 
-  async removeAllIncludesForType(typeLabel: OwnerLabel, typeId: string): Promise<number> {
+  async removeAllIncludesForType(typeKind: TypeKind, typeId: string): Promise<number> {
     return runSession(this.driver, (session) =>
-      queries.removeAllIncludesForType(session, typeLabel, typeId),
+      queries.removeAllIncludesForType(session, typeKind, typeId),
     );
   }
 
   async findOntologiesIncludingType(
-    typeLabel: OwnerLabel,
+    typeKind: TypeKind,
     typeId: string,
   ): Promise<string[]> {
     return runSession(this.driver, (session) =>
-      queries.findOntologiesIncludingType(session, typeLabel, typeId),
+      queries.findOntologiesIncludingType(session, typeKind, typeId),
     );
   }
 
   async findOntologiesWithExplicitProperty(
-    typeLabel: OwnerLabel,
+    typeKind: TypeKind,
     typeId: string,
     propertyKey: string,
   ): Promise<string[]> {
     return runSession(this.driver, (session) =>
-      queries.findOntologiesWithExplicitProperty(session, typeLabel, typeId, propertyKey),
+      queries.findOntologiesWithExplicitProperty(session, typeKind, typeId, propertyKey),
     );
   }
 
   async addPropertyToIncludesLists(
-    typeLabel: OwnerLabel,
+    typeKind: TypeKind,
     typeId: string,
     propertyKey: string,
   ): Promise<number> {
     return runSession(this.driver, (session) =>
-      queries.addPropertyToIncludesLists(session, typeLabel, typeId, propertyKey),
+      queries.addPropertyToIncludesLists(session, typeKind, typeId, propertyKey),
     );
   }
 
   async removePropertyFromIncludesLists(
-    typeLabel: OwnerLabel,
+    typeKind: TypeKind,
     typeId: string,
     propertyKey: string,
   ): Promise<number> {
     return runSession(this.driver, (session) =>
-      queries.removePropertyFromIncludesLists(session, typeLabel, typeId, propertyKey),
+      queries.removePropertyFromIncludesLists(session, typeKind, typeId, propertyKey),
     );
   }
 

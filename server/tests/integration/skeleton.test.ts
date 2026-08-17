@@ -96,9 +96,9 @@ describe("startup reserved-key report", () => {
 
       const reservedWarnings = warnings.filter((line) => line.includes("reserved key"));
       expect(reservedWarnings).toHaveLength(2);
-      expect(reservedWarnings.some((w) => w.includes("entityType 'ontology'"))).toBe(true);
+      expect(reservedWarnings.some((w) => w.includes("EntityType 'ontology'"))).toBe(true);
       expect(
-        reservedWarnings.some((w) => w.includes("relationType 'has_property'")),
+        reservedWarnings.some((w) => w.includes("RelationType 'has_property'")),
       ).toBe(true);
     } finally {
       warnSpy.mockRestore();

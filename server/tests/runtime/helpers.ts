@@ -159,33 +159,8 @@ export function makeRelation(
   };
 }
 
-export interface MockRuntimeStore {
-  getFullSchema: Mock;
-  getAiAgentConfigs: Mock;
-  getSavedQueries: Mock;
-  createEntity: Mock;
-  listEntities: Mock;
-  getEntity: Mock;
-  getEntityById: Mock;
-  updateEntity: Mock;
-  deleteEntity: Mock;
-  getChunkEmbeddingsForEntityProperty: Mock;
-  deleteChunksForEntityProperty: Mock;
-  createDocumentChunks: Mock;
-  validateVectorIndexedProperties: Mock;
-  searchDocumentChunks: Mock;
-  getEntitiesByIds: Mock;
-  semanticSearch: Mock;
-  semanticSearchAll: Mock;
-  searchSavedQueries: Mock;
-  createRelation: Mock;
-  listRelations: Mock;
-  getRelation: Mock;
-  updateRelation: Mock;
-  deleteRelation: Mock;
-  getNeighbors: Mock;
-  executeOql: Mock;
-}
+/** Every port method as a mock — completeness is compiler-enforced. */
+export type MockRuntimeStore = { [K in keyof RuntimeStore]: Mock };
 
 /** A mock store whose reads default to "nothing stored". */
 export function createMockRuntimeStore(): MockRuntimeStore {
@@ -219,5 +194,5 @@ export function createMockRuntimeStore(): MockRuntimeStore {
 }
 
 export function asRuntimeStore(mock: MockRuntimeStore): RuntimeStore {
-  return mock as unknown as RuntimeStore;
+  return mock;
 }

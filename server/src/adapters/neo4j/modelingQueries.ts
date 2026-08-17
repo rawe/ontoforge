@@ -9,20 +9,16 @@
 
 import type { Session } from "neo4j-driver";
 
+import type { ReservedTypeKeyInUse, Row } from "../../core/ports.js";
+import type { TypeKind } from "../../core/schemas.js";
 import { convertNeo4jProperties } from "./temporal.js";
 
-type Row = Record<string, unknown>;
+// The port's `TypeKind` values coincide with this adapter's schema node
+// labels (`EntityType`/`RelationType`), so a type kind is interpolated
+// directly wherever a schema label is needed.
 
-/** The two schema labels that can own a property definition. */
-export type OwnerLabel = "EntityType" | "RelationType";
-
-function idField(ownerLabel: OwnerLabel): string {
-  return ownerLabel === "EntityType" ? "entityTypeId" : "relationTypeId";
-}
-
-export interface ReservedTypeKeyInUse {
-  kind: "entityType" | "relationType";
-  key: string;
+function idField(typeKind: TypeKind): string {
+  return typeKind === "EntityType" ? "entityTypeId" : "relationTypeId";
 }
 
 /**
@@ -41,11 +37,11 @@ export async function findReservedTypeKeysInUse(
     `
     MATCH (et:EntityType)
     WHERE et.entityTypeId IS NOT NULL AND et.key IN $entityTypeKeys
-    RETURN 'entityType' AS kind, et.key AS key
+    RETURN 'EntityType' AS kind, et.key AS key
     UNION
     MATCH (rt:RelationType)
     WHERE rt.relationTypeId IS NOT NULL AND rt.key IN $relationTypeKeys
-    RETURN 'relationType' AS kind, rt.key AS key
+    RETURN 'RelationType' AS kind, rt.key AS key
     `,
     { entityTypeKeys, relationTypeKeys },
   );
@@ -423,7 +419,7 @@ export async function deleteRelationType(
 export async function createProperty(
   session: Session,
   ownerId: string,
-  ownerLabel: OwnerLabel,
+  typeKind: TypeKind,
   propertyId: string,
   key: string,
   displayName: string,
@@ -434,7 +430,7 @@ export async function createProperty(
 ): Promise<Row> {
   const result = await session.run(
     `
-    MATCH (owner:${ownerLabel} {${idField(ownerLabel)}: $ownerId})
+    MATCH (owner:${typeKind} {${idField(typeKind)}: $ownerId})
     CREATE (owner)-[:HAS_PROPERTY]->(p:PropertyDefinition {
         propertyId: $propertyId,
         key: $key,
@@ -456,11 +452,11 @@ export async function createProperty(
 export async function listProperties(
   session: Session,
   ownerId: string,
-  ownerLabel: OwnerLabel,
+  typeKind: TypeKind,
 ): Promise<Row[]> {
   const result = await session.run(
     `
-    MATCH (owner:${ownerLabel} {${idField(ownerLabel)}: $ownerId})-[:HAS_PROPERTY]->(p:PropertyDefinition)
+    MATCH (owner:${typeKind} {${idField(typeKind)}: $ownerId})-[:HAS_PROPERTY]->(p:PropertyDefinition)
     RETURN p {.*} AS property ORDER BY p.key
     `,
     { ownerId },
@@ -471,12 +467,12 @@ export async function listProperties(
 export async function getProperty(
   session: Session,
   ownerId: string,
-  ownerLabel: OwnerLabel,
+  typeKind: TypeKind,
   propertyId: string,
 ): Promise<Row | null> {
   const result = await session.run(
     `
-    MATCH (owner:${ownerLabel} {${idField(ownerLabel)}: $ownerId})-[:HAS_PROPERTY]->(p:PropertyDefinition {propertyId: $propertyId})
+    MATCH (owner:${typeKind} {${idField(typeKind)}: $ownerId})-[:HAS_PROPERTY]->(p:PropertyDefinition {propertyId: $propertyId})
     RETURN p {.*} AS property
     `,
     { ownerId, propertyId },
@@ -488,12 +484,12 @@ export async function getProperty(
 export async function getPropertyByKey(
   session: Session,
   ownerId: string,
-  ownerLabel: OwnerLabel,
+  typeKind: TypeKind,
   key: string,
 ): Promise<Row | null> {
   const result = await session.run(
     `
-    MATCH (owner:${ownerLabel} {${idField(ownerLabel)}: $ownerId})-[:HAS_PROPERTY]->(p:PropertyDefinition {key: $key})
+    MATCH (owner:${typeKind} {${idField(typeKind)}: $ownerId})-[:HAS_PROPERTY]->(p:PropertyDefinition {key: $key})
     RETURN p {.*} AS property
     `,
     { ownerId, key },
@@ -505,7 +501,7 @@ export async function getPropertyByKey(
 export async function updateProperty(
   session: Session,
   ownerId: string,
-  ownerLabel: OwnerLabel,
+  typeKind: TypeKind,
   propertyId: string,
   displayName: string | null,
   description: string | null,
@@ -536,7 +532,7 @@ export async function updateProperty(
 
   const result = await session.run(
     `
-    MATCH (owner:${ownerLabel} {${idField(ownerLabel)}: $ownerId})-[:HAS_PROPERTY]->(p:PropertyDefinition {propertyId: $propertyId})
+    MATCH (owner:${typeKind} {${idField(typeKind)}: $ownerId})-[:HAS_PROPERTY]->(p:PropertyDefinition {propertyId: $propertyId})
     SET ${setClauses.join(", ")}
     RETURN p {.*} AS property
     `,
@@ -549,12 +545,12 @@ export async function updateProperty(
 export async function deleteProperty(
   session: Session,
   ownerId: string,
-  ownerLabel: OwnerLabel,
+  typeKind: TypeKind,
   propertyId: string,
 ): Promise<boolean> {
   const result = await session.run(
     `
-    MATCH (owner:${ownerLabel} {${idField(ownerLabel)}: $ownerId})-[:HAS_PROPERTY]->(p:PropertyDefinition {propertyId: $propertyId})
+    MATCH (owner:${typeKind} {${idField(typeKind)}: $ownerId})-[:HAS_PROPERTY]->(p:PropertyDefinition {propertyId: $propertyId})
     DETACH DELETE p
     RETURN count(p) AS deleted
     `,
@@ -592,17 +588,17 @@ function toIncludeRow(record: {
 export async function addIncludesType(
   session: Session,
   ontologyId: string,
-  typeLabel: OwnerLabel,
+  typeKind: TypeKind,
   typeKey: string,
   properties: string[] | null,
 ): Promise<IncludeRow | null> {
   const result = await session.run(
     `
     MATCH (o:Ontology {ontologyId: $ontologyId})
-    MATCH (t:${typeLabel} {key: $typeKey})
+    MATCH (t:${typeKind} {key: $typeKey})
     MERGE (o)-[r:INCLUDES_TYPE]->(t)
     SET r.properties = $properties
-    RETURN t.key AS key, t.${idField(typeLabel)} AS typeId, r.properties AS properties
+    RETURN t.key AS key, t.${idField(typeKind)} AS typeId, r.properties AS properties
     `,
     { ontologyId, typeKey, properties },
   );
@@ -614,12 +610,12 @@ export async function addIncludesType(
 export async function listIncludesTypes(
   session: Session,
   ontologyId: string,
-  typeLabel: OwnerLabel,
+  typeKind: TypeKind,
 ): Promise<IncludeRow[]> {
   const result = await session.run(
     `
-    MATCH (o:Ontology {ontologyId: $ontologyId})-[r:INCLUDES_TYPE]->(t:${typeLabel})
-    RETURN t.key AS key, t.${idField(typeLabel)} AS typeId, r.properties AS properties
+    MATCH (o:Ontology {ontologyId: $ontologyId})-[r:INCLUDES_TYPE]->(t:${typeKind})
+    RETURN t.key AS key, t.${idField(typeKind)} AS typeId, r.properties AS properties
     ORDER BY t.key
     `,
     { ontologyId },
@@ -627,37 +623,19 @@ export async function listIncludesTypes(
   return result.records.map(toIncludeRow);
 }
 
-/** Get a single INCLUDES_TYPE edge. */
-export async function getIncludesType(
-  session: Session,
-  ontologyId: string,
-  typeLabel: OwnerLabel,
-  typeId: string,
-): Promise<IncludeRow | null> {
-  const result = await session.run(
-    `
-    MATCH (o:Ontology {ontologyId: $ontologyId})-[r:INCLUDES_TYPE]->(t:${typeLabel} {${idField(typeLabel)}: $typeId})
-    RETURN t.key AS key, t.${idField(typeLabel)} AS typeId, r.properties AS properties
-    `,
-    { ontologyId, typeId },
-  );
-  const record = result.records[0];
-  return record ? toIncludeRow(record) : null;
-}
-
 /** Replace the properties allowlist on an INCLUDES_TYPE edge. */
 export async function updateIncludesType(
   session: Session,
   ontologyId: string,
-  typeLabel: OwnerLabel,
+  typeKind: TypeKind,
   typeId: string,
   properties: string[] | null,
 ): Promise<IncludeRow | null> {
   const result = await session.run(
     `
-    MATCH (o:Ontology {ontologyId: $ontologyId})-[r:INCLUDES_TYPE]->(t:${typeLabel} {${idField(typeLabel)}: $typeId})
+    MATCH (o:Ontology {ontologyId: $ontologyId})-[r:INCLUDES_TYPE]->(t:${typeKind} {${idField(typeKind)}: $typeId})
     SET r.properties = $properties
-    RETURN t.key AS key, t.${idField(typeLabel)} AS typeId, r.properties AS properties
+    RETURN t.key AS key, t.${idField(typeKind)} AS typeId, r.properties AS properties
     `,
     { ontologyId, typeId, properties },
   );
@@ -669,12 +647,12 @@ export async function updateIncludesType(
 export async function removeIncludesType(
   session: Session,
   ontologyId: string,
-  typeLabel: OwnerLabel,
+  typeKind: TypeKind,
   typeId: string,
 ): Promise<boolean> {
   const result = await session.run(
     `
-    MATCH (o:Ontology {ontologyId: $ontologyId})-[r:INCLUDES_TYPE]->(t:${typeLabel} {${idField(typeLabel)}: $typeId})
+    MATCH (o:Ontology {ontologyId: $ontologyId})-[r:INCLUDES_TYPE]->(t:${typeKind} {${idField(typeKind)}: $typeId})
     DELETE r
     RETURN count(r) AS deleted
     `,
@@ -688,12 +666,12 @@ export async function removeIncludesType(
 /** Remove all INCLUDES_TYPE edges pointing to a type (cascade delete). */
 export async function removeAllIncludesForType(
   session: Session,
-  typeLabel: OwnerLabel,
+  typeKind: TypeKind,
   typeId: string,
 ): Promise<number> {
   const result = await session.run(
     `
-    MATCH (o:Ontology)-[r:INCLUDES_TYPE]->(t:${typeLabel} {${idField(typeLabel)}: $typeId})
+    MATCH (o:Ontology)-[r:INCLUDES_TYPE]->(t:${typeKind} {${idField(typeKind)}: $typeId})
     DELETE r
     RETURN count(r) AS deleted
     `,
@@ -705,12 +683,12 @@ export async function removeAllIncludesForType(
 /** Ontology keys with INCLUDES_TYPE edges to a specific type. */
 export async function findOntologiesIncludingType(
   session: Session,
-  typeLabel: OwnerLabel,
+  typeKind: TypeKind,
   typeId: string,
 ): Promise<string[]> {
   const result = await session.run(
     `
-    MATCH (o:Ontology)-[:INCLUDES_TYPE]->(t:${typeLabel} {${idField(typeLabel)}: $typeId})
+    MATCH (o:Ontology)-[:INCLUDES_TYPE]->(t:${typeKind} {${idField(typeKind)}: $typeId})
     RETURN o.key AS key
     ORDER BY o.key
     `,
@@ -726,13 +704,13 @@ export async function findOntologiesIncludingType(
  */
 export async function findOntologiesWithExplicitProperty(
   session: Session,
-  typeLabel: OwnerLabel,
+  typeKind: TypeKind,
   typeId: string,
   propertyKey: string,
 ): Promise<string[]> {
   const result = await session.run(
     `
-    MATCH (o:Ontology)-[r:INCLUDES_TYPE]->(t:${typeLabel} {${idField(typeLabel)}: $typeId})
+    MATCH (o:Ontology)-[r:INCLUDES_TYPE]->(t:${typeKind} {${idField(typeKind)}: $typeId})
     WHERE r.properties IS NOT NULL AND NOT $propertyKey IN r.properties
     RETURN o.key AS key
     ORDER BY o.key
@@ -745,13 +723,13 @@ export async function findOntologiesWithExplicitProperty(
 /** Append a property key to every explicit allowlist for a type. */
 export async function addPropertyToIncludesLists(
   session: Session,
-  typeLabel: OwnerLabel,
+  typeKind: TypeKind,
   typeId: string,
   propertyKey: string,
 ): Promise<number> {
   const result = await session.run(
     `
-    MATCH (o:Ontology)-[r:INCLUDES_TYPE]->(t:${typeLabel} {${idField(typeLabel)}: $typeId})
+    MATCH (o:Ontology)-[r:INCLUDES_TYPE]->(t:${typeKind} {${idField(typeKind)}: $typeId})
     WHERE r.properties IS NOT NULL AND NOT $propertyKey IN r.properties
     SET r.properties = r.properties + $propertyKey
     RETURN count(r) AS updated
@@ -764,13 +742,13 @@ export async function addPropertyToIncludesLists(
 /** Remove a property key from every explicit allowlist for a type. */
 export async function removePropertyFromIncludesLists(
   session: Session,
-  typeLabel: OwnerLabel,
+  typeKind: TypeKind,
   typeId: string,
   propertyKey: string,
 ): Promise<number> {
   const result = await session.run(
     `
-    MATCH (o:Ontology)-[r:INCLUDES_TYPE]->(t:${typeLabel} {${idField(typeLabel)}: $typeId})
+    MATCH (o:Ontology)-[r:INCLUDES_TYPE]->(t:${typeKind} {${idField(typeKind)}: $typeId})
     WHERE r.properties IS NOT NULL AND $propertyKey IN r.properties
     SET r.properties = [p IN r.properties WHERE p <> $propertyKey]
     RETURN count(r) AS updated

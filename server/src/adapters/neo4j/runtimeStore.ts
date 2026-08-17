@@ -18,6 +18,7 @@
 import neo4j, { type Driver } from "neo4j-driver";
 
 import type { ValidatedQuery } from "../../core/oql/index.js";
+import type { Row, RuntimeStore } from "../../core/ports.js";
 import type { PropertyDef } from "../../core/schemas.js";
 import {
   ENTITY_VECTOR_INDEX_NAME,
@@ -31,8 +32,6 @@ import { runSession } from "./errors.js";
 import { buildFilterClauses, buildSearchClause, toNeo4jParameter } from "./filters.js";
 import { compileQuery } from "./oqlCompiler.js";
 import * as queries from "./runtimeQueries.js";
-
-type Row = Record<string, unknown>;
 
 /** Convert a property map to driver-native parameter values. Internal
  * `_doc_*_length` counters are integers; everything else follows its
@@ -53,7 +52,7 @@ function toWriteProperties(
   return converted;
 }
 
-export class Neo4jRuntimeStore {
+export class Neo4jRuntimeStore implements RuntimeStore {
   constructor(private readonly driver: Driver) {}
 
   // ------------------------------------------------------------------

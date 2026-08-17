@@ -13,7 +13,6 @@
 import { TokenStreamRewriter } from "antlr4ng";
 
 import { parseAndValidate, type ValidatedQuery } from "../../core/oql/index.js";
-import type { SchemaCacheValue } from "../../runtime/schemaCache.js";
 import { toPascalCase, toUpperSnakeCase } from "./ddl.js";
 
 /** Return the Cypher text for a validated OQL query. */
@@ -29,6 +28,6 @@ export function compileQuery(validated: ValidatedQuery): string {
 }
 
 /** Convenience: parse + validate OQL, then compile to Cypher. */
-export function validateAndCompile(query: string, schema: SchemaCacheValue): string {
+export function validateAndCompile(query: string, schema: ValidatedQuery["schema"]): string {
   return compileQuery(parseAndValidate(query, schema));
 }

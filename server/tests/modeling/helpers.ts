@@ -27,68 +27,8 @@ export const RESERVED_RELATION_TYPE_KEYS = [
   "has_saved_query",
 ];
 
-export interface MockModelingStore {
-  reservedEntityTypeKeys: Mock;
-  reservedRelationTypeKeys: Mock;
-  findReservedTypeKeysInUse: Mock;
-  createOntology: Mock;
-  listOntologies: Mock;
-  getOntology: Mock;
-  getOntologyByName: Mock;
-  getOntologyByKey: Mock;
-  updateOntology: Mock;
-  deleteOntology: Mock;
-  addIncludesType: Mock;
-  listIncludesTypes: Mock;
-  getIncludesType: Mock;
-  updateIncludesType: Mock;
-  removeIncludesType: Mock;
-  createEntityType: Mock;
-  listEntityTypes: Mock;
-  getEntityType: Mock;
-  getEntityTypeByKey: Mock;
-  updateEntityType: Mock;
-  deleteEntityType: Mock;
-  isEntityTypeReferenced: Mock;
-  createRelationType: Mock;
-  listRelationTypes: Mock;
-  getRelationType: Mock;
-  getRelationTypeByKey: Mock;
-  updateRelationType: Mock;
-  deleteRelationType: Mock;
-  createProperty: Mock;
-  listProperties: Mock;
-  getProperty: Mock;
-  getPropertyByKey: Mock;
-  updateProperty: Mock;
-  deleteProperty: Mock;
-  removeAllIncludesForType: Mock;
-  findOntologiesIncludingType: Mock;
-  findOntologiesWithExplicitProperty: Mock;
-  addPropertyToIncludesLists: Mock;
-  removePropertyFromIncludesLists: Mock;
-  deleteChunksForTypeProperty: Mock;
-  listAiAgents: Mock;
-  listAiAgentsForExport: Mock;
-  upsertAiAgent: Mock;
-  deleteAiAgent: Mock;
-  listSavedQueries: Mock;
-  listSavedQueriesForExport: Mock;
-  upsertSavedQuery: Mock;
-  deleteSavedQuery: Mock;
-  getFullSchema: Mock;
-  getEntityTypesWithProperties: Mock;
-  setEntityEmbedding: Mock;
-  listSavedQueryRefs: Mock;
-  setSavedQueryEmbedding: Mock;
-  createVectorIndex: Mock;
-  dropVectorIndex: Mock;
-  rebuildVectorIndex: Mock;
-  createDocumentVectorIndex: Mock;
-  dropDocumentVectorIndex: Mock;
-  ensureSavedQueryVectorIndex: Mock;
-  ensureVectorIndexes: Mock;
-}
+/** Every port method as a mock — completeness is compiler-enforced. */
+export type MockModelingStore = { [K in keyof ModelingStore]: Mock };
 
 /**
  * A mock store whose reads default to "nothing stored" and whose reserved
@@ -108,7 +48,6 @@ export function createMockModelingStore(): MockModelingStore {
     deleteOntology: vi.fn(async () => false),
     addIncludesType: vi.fn(async () => null),
     listIncludesTypes: vi.fn(async () => []),
-    getIncludesType: vi.fn(async () => null),
     updateIncludesType: vi.fn(async () => null),
     removeIncludesType: vi.fn(async () => false),
     createEntityType: vi.fn(),
@@ -160,5 +99,5 @@ export function createMockModelingStore(): MockModelingStore {
 }
 
 export function asModelingStore(mock: MockModelingStore): ModelingStore {
-  return mock as unknown as ModelingStore;
+  return mock;
 }

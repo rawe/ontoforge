@@ -287,16 +287,9 @@ describe("tool errors", () => {
     expect(message.split(";").length).toBeGreaterThanOrEqual(2);
   });
 
-  it("a reserved type key is rejected with the vendor-free reserved-set message", async () => {
-    const rejected = await call(client, "create_entity_type", {
-      key: "ontology",
-      display_name: "Injected",
-    });
-    expect(rejected.isError).toBe(true);
-    const message = text(rejected);
-    expect(message).toContain("reserved");
-    expect(message.toLowerCase()).not.toContain("neo4j");
-  });
+  // The reserved-type-key rejection is adapter-specific (only the Neo4j
+  // adapter reserves keys) and lives in
+  // `tests/integration/neo4j/mcp-modeling.test.ts`.
 });
 
 describe("ontology lenses over MCP", () => {

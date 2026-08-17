@@ -47,6 +47,23 @@ import type { PropertyDef, TypeKind } from "./schemas.js";
 /** A raw store row: one entity, relation, or schema object as a plain map. */
 export type Row = Record<string, unknown>;
 
+/** The closed filter-operator vocabulary; a bare filter key means `eq`. */
+export type FilterOperator = "eq" | "gt" | "gte" | "lt" | "lte" | "contains";
+
+/**
+ * One parsed, coerced filter condition. Built by the runtime service —
+ * which validates the property, coerces the value, and checks the
+ * operator above the port — so adapters receive only valid input and do
+ * pure predicate assembly. The value is already coerced to the declared
+ * data type (`contains` compares textually and carries the string form).
+ */
+export interface FilterCondition {
+  key: string;
+  dataType: string;
+  op: FilterOperator;
+  value: unknown;
+}
+
 /** One stored type whose key the active adapter now reserves. */
 export interface ReservedTypeKeyInUse {
   kind: TypeKind;
@@ -338,17 +355,13 @@ export interface ModelingStore {
  * Capability grouping follows `docs/storage-adapters.md` ("The two store
  * surfaces"); the section comments below mirror it.
  *
- * Approved signature amendments, landing at M3 of the postgres-adapter
- * build together with their implementations:
- *
- * - The filter-taking methods (`listEntities`, `listRelations`, and the
- *   per-type entity search via `semanticSearch`) will no longer receive
- *   the raw `filters: Record<string, string>` map; they will receive
- *   parsed, coerced conditions `{key, dataType, op, value}` built by the
- *   service — filter validation moves above the port, and adapters
- *   receive only valid input and raise no validation errors.
- * - The read methods (point reads and `getNeighbors`) will gain
- *   `PropertyDefs` for row decoding; listing paths already have them.
+ * Filter-taking methods (`listEntities`, `listRelations`, and the
+ * per-type entity search via `semanticSearch`) receive parsed, coerced
+ * `FilterCondition`s built by the service — filter validation happens
+ * above the port, so adapters receive only valid input and raise no
+ * validation errors. Read methods carry the property definitions for row
+ * decoding (an adapter whose storage is self-describing may ignore
+ * them); listing paths carry them for the same reason.
  */
 export interface RuntimeStore {
   // ------------------------------------------------------------------
@@ -390,7 +403,7 @@ export interface RuntimeStore {
   listEntities(
     entityTypeKey: string,
     propertyDefs: Record<string, PropertyDef>,
-    filters: Record<string, string>,
+    filters: FilterCondition[],
     search: string | null,
     searchPropertyKeys: string[],
     sortField: string,
@@ -401,7 +414,10 @@ export interface RuntimeStore {
 
   getEntity(entityTypeKey: string, entityId: string): Promise<Row | null>;
 
-  getEntityById(entityId: string): Promise<Row | null>;
+  getEntityById(
+    entityId: string,
+    propertyDefs: Record<string, PropertyDef>,
+  ): Promise<Row | null>;
 
   updateEntity(
     entityTypeKey: string,
@@ -440,7 +456,10 @@ export interface RuntimeStore {
     limit: number,
   ): Promise<Row[]>;
 
-  getEntitiesByIds(entityIds: string[]): Promise<Record<string, Row>>;
+  getEntitiesByIds(
+    entityIds: string[],
+    propertyDefs: Record<string, PropertyDef>,
+  ): Promise<Record<string, Row>>;
 
   // ------------------------------------------------------------------
   // Semantic search
@@ -452,7 +471,7 @@ export interface RuntimeStore {
     queryEmbedding: number[],
     limit: number,
     minScore: number | null,
-    filters?: Record<string, string> | null,
+    filters?: FilterCondition[] | null,
   ): Promise<Row[]>;
 
   /** Search across all entity types at once. */
@@ -486,7 +505,7 @@ export interface RuntimeStore {
   listRelations(
     relationTypeKey: string,
     propertyDefs: Record<string, PropertyDef>,
-    filters: Record<string, string>,
+    filters: FilterCondition[],
     fromEntityId: string | null,
     toEntityId: string | null,
     sortField: string,
@@ -528,6 +547,7 @@ export interface RuntimeStore {
     direction: string,
     relationTypeKey: string | null,
     limit: number,
+    propertyDefsByType: Record<string, Record<string, PropertyDef>>,
   ): Promise<Row[]>;
 }
 

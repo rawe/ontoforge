@@ -13,12 +13,17 @@
  * converted to driver-native types here, guided by the property
  * definitions the service supplies — the driver would otherwise store
  * every number as a float and every temporal as a string.
+ *
+ * The property definitions the read methods carry are the row-decoding
+ * aid for adapters whose storage does not distinguish temporals from
+ * text. Neo4j stores native temporals and reads them back as such, so
+ * this adapter ignores those parameters.
  */
 
 import neo4j, { type Driver } from "neo4j-driver";
 
 import type { ValidatedQuery } from "../../core/oql/index.js";
-import type { Row, RuntimeStore } from "../../core/ports.js";
+import type { FilterCondition, Row, RuntimeStore } from "../../core/ports.js";
 import type { PropertyDef } from "../../core/schemas.js";
 import {
   ENTITY_VECTOR_INDEX_NAME,
@@ -113,8 +118,8 @@ export class Neo4jRuntimeStore implements RuntimeStore {
 
   async listEntities(
     entityTypeKey: string,
-    propertyDefs: Record<string, PropertyDef>,
-    filters: Record<string, string>,
+    _propertyDefs: Record<string, PropertyDef>,
+    filters: FilterCondition[],
     search: string | null,
     searchPropertyKeys: string[],
     sortField: string,
@@ -122,7 +127,7 @@ export class Neo4jRuntimeStore implements RuntimeStore {
     limit: number,
     offset: number,
   ): Promise<[Row[], number]> {
-    const [whereClauses, params] = buildFilterClauses(filters, propertyDefs, entityTypeKey);
+    const [whereClauses, params] = buildFilterClauses(filters);
     if (search !== null && search !== undefined && searchPropertyKeys.length > 0) {
       const [clause, searchParams] = buildSearchClause(search, searchPropertyKeys);
       whereClauses.push(clause);
@@ -149,7 +154,10 @@ export class Neo4jRuntimeStore implements RuntimeStore {
     );
   }
 
-  async getEntityById(entityId: string): Promise<Row | null> {
+  async getEntityById(
+    entityId: string,
+    _propertyDefs: Record<string, PropertyDef>,
+  ): Promise<Row | null> {
     return runSession(this.driver, (session) => queries.getEntityById(session, entityId));
   }
 
@@ -241,7 +249,10 @@ export class Neo4jRuntimeStore implements RuntimeStore {
     );
   }
 
-  async getEntitiesByIds(entityIds: string[]): Promise<Record<string, Row>> {
+  async getEntitiesByIds(
+    entityIds: string[],
+    _propertyDefs: Record<string, PropertyDef>,
+  ): Promise<Record<string, Row>> {
     return runSession(this.driver, (session) => queries.getEntitiesByIds(session, entityIds));
   }
 
@@ -251,16 +262,16 @@ export class Neo4jRuntimeStore implements RuntimeStore {
 
   async semanticSearch(
     entityTypeKey: string,
-    propertyDefs: Record<string, PropertyDef>,
+    _propertyDefs: Record<string, PropertyDef>,
     queryEmbedding: number[],
     limit: number,
     minScore: number | null,
-    filters: Record<string, string> | null = null,
+    filters: FilterCondition[] | null = null,
   ): Promise<Row[]> {
     let whereClauses: string[] = [];
     let filterParams: Row = {};
-    if (filters !== null && Object.keys(filters).length > 0) {
-      [whereClauses, filterParams] = buildFilterClauses(filters, propertyDefs, entityTypeKey, "n");
+    if (filters !== null && filters.length > 0) {
+      [whereClauses, filterParams] = buildFilterClauses(filters, "n");
     }
     return runSession(this.driver, (session) =>
       queries.semanticSearch(
@@ -336,8 +347,8 @@ export class Neo4jRuntimeStore implements RuntimeStore {
 
   async listRelations(
     relationTypeKey: string,
-    propertyDefs: Record<string, PropertyDef>,
-    filters: Record<string, string>,
+    _propertyDefs: Record<string, PropertyDef>,
+    filters: FilterCondition[],
     fromEntityId: string | null,
     toEntityId: string | null,
     sortField: string,
@@ -345,12 +356,7 @@ export class Neo4jRuntimeStore implements RuntimeStore {
     limit: number,
     offset: number,
   ): Promise<[Row[], number]> {
-    const [whereClauses, params] = buildFilterClauses(
-      filters,
-      propertyDefs,
-      relationTypeKey,
-      "r",
-    );
+    const [whereClauses, params] = buildFilterClauses(filters, "r");
     if (fromEntityId) {
       whereClauses.push("from._id = $from_entity_id_filter");
       params.from_entity_id_filter = fromEntityId;
@@ -433,6 +439,7 @@ export class Neo4jRuntimeStore implements RuntimeStore {
     direction: string,
     relationTypeKey: string | null,
     limit: number,
+    _propertyDefsByType: Record<string, Record<string, PropertyDef>>,
   ): Promise<Row[]> {
     const relTypeFilter = relationTypeKey ? toUpperSnakeCase(relationTypeKey) : null;
     return runSession(this.driver, (session) =>

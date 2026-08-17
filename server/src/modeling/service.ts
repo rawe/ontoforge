@@ -1088,8 +1088,8 @@ export async function* rebuildEmbeddings(
     for (;;) {
       const [items, total] = await runtimeStore.listEntities(
         etKey,
-        {},
-        {},
+        propertyDefs,
+        [],
         null,
         [],
         "_createdAt",

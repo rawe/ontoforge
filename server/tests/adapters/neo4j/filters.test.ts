@@ -1,45 +1,43 @@
 /**
- * The adapter predicate builder: values always cross into Cypher as bound parameters, identifiers come only from
- * the stored schema, the operator is the segment after the LAST `__`, and
- * coercion follows the property's declared type (`__contains` is textual).
+ * The adapter predicate builder: pure fragment assembly over the parsed
+ * conditions the service supplies. Values always cross into Cypher as
+ * bound parameters — converted to driver-native forms per the condition's
+ * data type — and identifiers come only from the stored schema's keys.
+ * Validation happens above the port; the builder raises nothing.
  */
 
 import neo4j from "neo4j-driver";
 import { describe, expect, it } from "vitest";
 
-import { ValidationError } from "../../../src/core/exceptions.js";
 import {
   buildFilterClauses,
   buildSearchClause,
 } from "../../../src/adapters/neo4j/filters.js";
-import type { PropertyDef } from "../../../src/core/schemas.js";
+import type { FilterCondition } from "../../../src/core/ports.js";
 
-function prop(key: string, dataType: string): PropertyDef {
-  return { key, displayName: key, description: null, dataType, required: false, defaultValue: null };
+function cond(
+  key: string,
+  dataType: string,
+  op: FilterCondition["op"],
+  value: unknown,
+): FilterCondition {
+  return { key, dataType, op, value };
 }
 
-const DEFS: Record<string, PropertyDef> = {
-  name: prop("name", "string"),
-  age: prop("age", "integer"),
-  score: prop("score", "float"),
-  active: prop("active", "boolean"),
-  founded: prop("founded", "date"),
-  seen_at: prop("seen_at", "datetime"),
-};
-
 describe("clause construction", () => {
-  it("no suffix means equality, with the value bound — never interpolated", () => {
-    const [clauses, params] = buildFilterClauses({ name: "Alice" }, DEFS, "person");
+  it("eq binds the value — never interpolated", () => {
+    const [clauses, params] = buildFilterClauses([cond("name", "string", "eq", "Alice")]);
     expect(clauses).toEqual(["n.name = $flt_0"]);
     expect(params.flt_0).toBe("Alice");
   });
 
-  it("comparison suffixes map to their operators", () => {
-    const [clauses] = buildFilterClauses(
-      { age__gt: "1", age__gte: "2", age__lt: "3", age__lte: "4" },
-      DEFS,
-      "person",
-    );
+  it("comparison operators map to their Cypher forms", () => {
+    const [clauses] = buildFilterClauses([
+      cond("age", "integer", "gt", 1),
+      cond("age", "integer", "gte", 2),
+      cond("age", "integer", "lt", 3),
+      cond("age", "integer", "lte", 4),
+    ]);
     expect(clauses).toEqual([
       "n.age > $flt_0",
       "n.age >= $flt_1",
@@ -48,99 +46,46 @@ describe("clause construction", () => {
     ]);
   });
 
-  it("__contains compares as lowered text and skips type coercion", () => {
-    // An integer property under __contains accepts a non-numeric value.
-    const [clauses, params] = buildFilterClauses({ age__contains: "3x" }, DEFS, "person");
+  it("contains compares as lowered text and binds the string form untouched", () => {
+    const [clauses, params] = buildFilterClauses([cond("age", "integer", "contains", "3x")]);
     expect(clauses).toEqual(["toLower(toString(n.age)) CONTAINS toLower($flt_0)"]);
     expect(params.flt_0).toBe("3x");
   });
 
   it("a custom node alias is honoured", () => {
-    const [clauses] = buildFilterClauses({ name: "A" }, DEFS, "person", "r");
+    const [clauses] = buildFilterClauses([cond("name", "string", "eq", "A")], "r");
     expect(clauses).toEqual(["r.name = $flt_0"]);
   });
 });
 
-describe("coercion per declared type", () => {
+describe("driver-native parameter conversion per data type", () => {
   it("integer values become driver integers", () => {
-    const [, params] = buildFilterClauses({ age: "30" }, DEFS, "person");
+    const [, params] = buildFilterClauses([cond("age", "integer", "eq", 30)]);
     expect(neo4j.isInt(params.flt_0)).toBe(true);
     expect((params.flt_0 as { toNumber(): number }).toNumber()).toBe(30);
   });
 
   it("float values stay numbers", () => {
-    const [, params] = buildFilterClauses({ score__gte: "2.5" }, DEFS, "person");
+    const [, params] = buildFilterClauses([cond("score", "float", "gte", 2.5)]);
     expect(params.flt_0).toBe(2.5);
   });
 
-  it("boolean values coerce from their string form", () => {
-    const [, params] = buildFilterClauses({ active: "true" }, DEFS, "person");
+  it("boolean values pass through", () => {
+    const [, params] = buildFilterClauses([cond("active", "boolean", "eq", true)]);
     expect(params.flt_0).toBe(true);
   });
 
   it("date values become driver dates", () => {
-    const [, params] = buildFilterClauses({ founded__lt: "2020-01-01" }, DEFS, "person");
+    const [, params] = buildFilterClauses([cond("founded", "date", "lt", "2020-01-01")]);
     expect(params.flt_0).toBeInstanceOf(neo4j.types.Date);
     expect(String(params.flt_0)).toBe("2020-01-01");
   });
 
   it("datetime values become driver datetimes", () => {
-    const [, params] = buildFilterClauses(
-      { seen_at__gte: "2024-01-15T10:30:00Z" },
-      DEFS,
-      "person",
-    );
+    const [, params] = buildFilterClauses([
+      cond("seen_at", "datetime", "gte", new Date("2024-01-15T10:30:00Z")),
+    ]);
     expect(params.flt_0).toBeInstanceOf(neo4j.types.DateTime);
-  });
-});
-
-describe("rejections — each names the filter in details.fields", () => {
-  it("an unknown property", () => {
-    expect(() => buildFilterClauses({ ghost: "x" }, DEFS, "person")).toThrowError(
-      ValidationError,
-    );
-    try {
-      buildFilterClauses({ ghost: "x" }, DEFS, "person");
-    } catch (error) {
-      expect((error as ValidationError).details).toEqual({
-        fields: { ghost: "Not defined in type 'person'" },
-      });
-    }
-  });
-
-  it("an unknown operator suffix", () => {
-    try {
-      buildFilterClauses({ age__between: "1" }, DEFS, "person");
-      expect.unreachable();
-    } catch (error) {
-      expect(error).toBeInstanceOf(ValidationError);
-      expect((error as ValidationError).details).toEqual({
-        fields: { age__between: "Unsupported operator 'between'" },
-      });
-    }
-  });
-
-  it("an uncoercible value", () => {
-    try {
-      buildFilterClauses({ age: "abc" }, DEFS, "person");
-      expect.unreachable();
-    } catch (error) {
-      expect(error).toBeInstanceOf(ValidationError);
-      expect(((error as ValidationError).details as { fields: Record<string, string> }).fields.age)
-        .toContain("Expected integer");
-    }
-  });
-
-  it("the operator is the segment after the LAST __ — a key containing __ cannot be filtered", () => {
-    // `notes__raw` parses as property `notes` + operator `raw`; the
-    // property lookup fails first.
-    try {
-      buildFilterClauses({ notes__raw: "x" }, DEFS, "person");
-      expect.unreachable();
-    } catch (error) {
-      expect(error).toBeInstanceOf(ValidationError);
-      expect((error as ValidationError).message).toBe("Unknown filter property: 'notes'");
-    }
   });
 });
 

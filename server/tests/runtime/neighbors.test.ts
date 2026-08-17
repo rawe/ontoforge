@@ -284,7 +284,13 @@ describe("addressing", () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(holder.store.getNeighbors).toHaveBeenCalledWith("ent-1", "outgoing", "works_for", 5);
+    expect(holder.store.getNeighbors).toHaveBeenCalledWith(
+      "ent-1",
+      "outgoing",
+      "works_for",
+      5,
+      expect.any(Object), // the full-schema per-type-key defs map, for row decoding
+    );
   });
 
   it("an unknown relationTypeKey yields no neighbours, not an error", async () => {

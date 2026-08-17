@@ -33,9 +33,10 @@ belonging to a particular database client. Datetimes carry a timezone; naive val
 treated as UTC.
 
 **Filters, sorts and searches cross as structured values, never as query text.** A filter
-is a map of expressions to raw values; a sort is a property key plus a direction; a text
-search is a string plus the list of property keys to match it against. No fragment of any
-query language enters or leaves the port. The one exception is the validated query object,
+is a list of parsed conditions — property key, declared data type, operator, and the value
+already coerced to that type; a sort is a property key plus a direction; a text search is
+a string plus the list of property keys to match it against. No fragment of any query
+language enters or leaves the port. The one exception is the validated query object,
 described below, which is opaque rather than textual.
 
 **Driver exceptions never escape.** Every failure the adapter cannot express as a domain
@@ -150,14 +151,17 @@ all when no ontology has that key, which is how an unknown lens is detected.
 **Entity lifecycle.** Create with the type key, a caller-supplied instance id, the
 validated property map and an optional embedding vector. Read by type key and id; read by
 id alone, when the type is not known; read a batch by ids, returned as a map keyed by id.
-Update takes the properties to set and the property keys to remove as two separate inputs,
+The by-id reads carry property definitions alongside — the adapter's guide for converting
+stored values back to their port forms on the way out, mirroring the definitions every
+write already carries for the conversion inward; an adapter whose storage distinguishes
+those forms natively may ignore them. Update takes the properties to set and the property keys to remove as two separate inputs,
 plus an optional embedding and an explicit flag saying whether the embedding is part of
 this update — again because "no new vector" and "clear the vector" must be
 distinguishable. Delete by type key and id, returning whether anything was deleted, and
 removing the entity's document chunks with it.
 
 Listing is the one read with real machinery. It takes the type key, the scoped property
-definitions, the structured filter map, an optional text-search string with the string
+definitions, the parsed filter conditions, an optional text-search string with the string
 property keys to match, a validated sort property and direction, and a limit and offset.
 It returns the page together with the total matching count — both, from one call.
 
@@ -179,8 +183,9 @@ leaving a given entity, or arriving at one, or both. Every relation read returns
 endpoint ids alongside its properties; endpoints are never updatable.
 
 **Traversal.** Given an entity id, a direction of incoming, outgoing or both, an optional
-relation type key filter and a limit, return the adjacent relations paired with the
-entities at the far end. Each result is marked with the direction it was traversed. For
+relation type key filter, a limit, and property definitions keyed by type key — the same
+row-conversion guide the by-id reads carry, covering whatever types the neighbourhood may
+touch — return the adjacent relations paired with the entities at the far end. Each result is marked with the direction it was traversed. For
 the combined direction the limit is a single budget: outgoing edges are taken first and
 incoming edges receive only what remains, so the two are not independently limited. What
 that costs a caller is in
@@ -202,12 +207,12 @@ the port.
 
 | Kind | Input | Returns |
 |---|---|---|
-| Entities | A query vector, and either one entity type key with its scoped property definitions and an optional structured filter, or nothing — meaning all types at once | Entities with scores |
+| Entities | A query vector, and either one entity type key with its scoped property definitions and optional filter conditions, or nothing — meaning all types at once | Entities with scores |
 | Document chunks | A query vector, an entity type key and a document property key | Chunks with scores |
 | Saved queries | A query vector and an ontology key | Saved-query summaries with scores |
 
-The per-type entity search accepts the same structured filter map that listing does and
-must apply it as part of the search, not after it, so that the limit counts filtered hits.
+The per-type entity search accepts the same parsed filter conditions that listing does and
+must apply them as part of the search, not after it, so that the limit counts filtered hits.
 Cross-type entity search takes no filter; narrowing to a lens happens above the port.
 Saved-query search is always narrowed to a single ontology.
 
@@ -265,21 +270,22 @@ path, which passes an explicit recreate flag, drop and recreate at the new width
 report must describe the index the way the API does — by entity type, by document property,
 or by search scope — and never by its physical name.
 
-**Building predicates from structured filters.** A filter map arrives keyed by a property
-key and an operator, and the adapter must turn every entry into a predicate the database
-can evaluate. The operator vocabulary is fixed by the caller-facing surface, not by the
-adapter, and is enumerated once in
-[interfaces.md](interfaces.md#listing-sorting-filtering); an adapter supports all of it and
-invents none of it. Values arrive as raw strings and the adapter coerces each to the
-declared data type of the property, using the scoped property definitions passed alongside;
-the substring operator is the exception, comparing case-insensitively on the string form of
-both sides. Four faults are the adapter's to raise, as domain validation errors and not
-storage errors: an unknown property, an unknown operator, a value that will not coerce,
-and — Neo4j-specific, raised on the write path through the write-value constraint above —
-an indexed value exceeding the 32766-byte ceiling, in an error naming the property.
-Every value must reach the database as a bound parameter. Type keys and property keys may
-be interpolated into generated query text — they originate from the stored schema, never
-from request input — but values never may.
+**Building predicates from structured filters.** Filters arrive as parsed conditions, and
+the adapter must turn every condition into a predicate the database can evaluate. The
+operator vocabulary is fixed by the caller-facing surface, not by the adapter, and is
+enumerated once in [interfaces.md](interfaces.md#listing-sorting-filtering); an adapter
+supports all of it and invents none of it. Validation happens above the port: the three
+filter faults — an unknown property, an unknown operator, a value that will not coerce —
+are raised there as domain validation errors, identically on every backend, so the adapter
+receives only valid conditions and raises no filter validation error of its own. Each
+condition's value is already coerced to the property's declared data type; the substring
+operator is the exception, comparing case-insensitively on the string form of both sides
+and carrying that string form as its value. One fault remains the adapter's to raise, as a
+domain validation error and not a storage error — Neo4j-specific, raised on the write path
+through the write-value constraint above: an indexed value exceeding the 32766-byte
+ceiling, in an error naming the property. Every value must reach the database as a bound
+parameter. Type keys and property keys may be interpolated into generated query text —
+they originate from the stored schema, never from request input — but values never may.
 
 **Compiling a validated query.** The adapter turns the validated query into its native
 dialect and runs it read-only. How it compiles is its own business — rewriting tokens in

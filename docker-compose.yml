@@ -1,20 +1,44 @@
 services:
-  neo4j:
-    image: neo4j:2026.02.2
-    container_name: ontoforge-neo4j-dev
+  postgres:
+    image: pgvector/pgvector:0.8.6-pg18-trixie
+    container_name: ontoforge-postgres-dev
     ports:
-      - "7474:7474"
-      - "7687:7687"
+      - "5432:5432"
     environment:
-      NEO4J_AUTH: neo4j/ontoforge_dev
+      # User stays the image default (postgres) — no init script needed.
+      POSTGRES_PASSWORD: ontoforge_dev
+      POSTGRES_DB: ontoforge
     volumes:
-      - neo4j-data:/data
+      # PG 18+ images declare the volume at /var/lib/postgresql (not …/data);
+      # mounting the old path silently loses persistence.
+      - postgres-data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "ontoforge_dev", "RETURN 1"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ontoforge"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
 
+  # Neo4j — the behavioural reference. Commented out during PostgreSQL adapter
+  # development; uncomment for conformance runs (both databases run side by side),
+  # then select the backend in server/.env.
+  # neo4j:
+  #   image: neo4j:2026.02.2
+  #   container_name: ontoforge-neo4j-dev
+  #   ports:
+  #     - "7474:7474"
+  #     - "7687:7687"
+  #   environment:
+  #     NEO4J_AUTH: neo4j/ontoforge_dev
+  #   volumes:
+  #     - neo4j-data:/data
+  #   healthcheck:
+  #     test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "ontoforge_dev", "RETURN 1"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #     start_period: 30s
+
 volumes:
+  postgres-data:
   neo4j-data:

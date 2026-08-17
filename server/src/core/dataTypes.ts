@@ -140,12 +140,24 @@ export function coerceValue(value: unknown, dataType: string, key: string): unkn
 
   switch (dataType) {
     case "string":
-    case "document":
-      return valueToText(value);
+    case "document": {
+      const text = valueToText(value);
+      // PostgreSQL text cannot hold NUL; Neo4j happens to accept it. The
+      // rejection keeps every adapter identical (only craftable input).
+      if (text.includes("\u0000")) {
+        throw new CoercionError(
+          `String value for '${key}' must not contain the NUL character`,
+        );
+      }
+      return text;
+    }
 
     case "integer": {
+      // The global maximum is ±(2^53−1) — the ceiling of the service
+      // layer's own number type, never adapter-dependent: a larger value
+      // is corrupted before any adapter could see it.
       if (typeof value === "number") {
-        if (Number.isInteger(value)) {
+        if (Number.isSafeInteger(value)) {
           return value;
         }
         // JSON has one number type, so naming it would say nothing. The
@@ -155,7 +167,10 @@ export function coerceValue(value: unknown, dataType: string, key: string): unkn
       if (typeof value === "string") {
         const trimmed = value.trim();
         if (INTEGER_PATTERN.test(trimmed)) {
-          return Number.parseInt(trimmed, 10);
+          const parsed = Number.parseInt(trimmed, 10);
+          if (Number.isSafeInteger(parsed)) {
+            return parsed;
+          }
         }
         throw new CoercionError(`Expected integer for '${key}', got '${value}'`);
       }
@@ -169,7 +184,10 @@ export function coerceValue(value: unknown, dataType: string, key: string): unkn
       if (typeof value === "string") {
         const trimmed = value.trim();
         const parsed = trimmed === "" ? Number.NaN : Number(trimmed);
-        if (!Number.isNaN(parsed)) {
+        // Non-finite spellings ("Infinity", "1e400") are rejected: JSON
+        // literals cannot carry non-finite values, so text is the only
+        // ingress — and a non-finite number would stringify to null.
+        if (Number.isFinite(parsed)) {
           return parsed;
         }
         throw new CoercionError(`Expected float for '${key}', got '${value}'`);

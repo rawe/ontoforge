@@ -39,6 +39,11 @@ describe("string — accepts any JSON scalar, stringified; rejects nothing", () 
     expect(coerceValue(true, "string", "k")).toBe("true");
     expect(coerceValue(false, "string", "k")).toBe("false");
   });
+  it("rejects the NUL character — craftable input no adapter must be asked to store", () => {
+    expect(rejects("a\u0000b", "string")).toBe(
+      "String value for 'k' must not contain the NUL character",
+    );
+  });
 });
 
 describe("document — behaves as string at coercion time", () => {
@@ -47,6 +52,11 @@ describe("document — behaves as string at coercion time", () => {
   });
   it("stringifies numbers", () => {
     expect(coerceValue(42, "document", "k")).toBe("42");
+  });
+  it("rejects the NUL character like string does", () => {
+    expect(rejects("doc\u0000", "document")).toBe(
+      "String value for 'k' must not contain the NUL character",
+    );
   });
 });
 
@@ -74,6 +84,25 @@ describe("integer — a boolean is not a number", () => {
     expect(rejects([1], "integer")).toBe("Expected integer for 'k', got array");
     expect(rejects({ a: 1 }, "integer")).toBe("Expected integer for 'k', got object");
   });
+  it("accepts the global maximum ±(2^53−1) exactly", () => {
+    expect(coerceValue(9007199254740991, "integer", "k")).toBe(9007199254740991);
+    expect(coerceValue(-9007199254740991, "integer", "k")).toBe(-9007199254740991);
+    expect(coerceValue("9007199254740991", "integer", "k")).toBe(9007199254740991);
+  });
+  it("rejects values beyond ±(2^53−1) — the global ceiling, not an adapter's", () => {
+    expect(rejects(9007199254740992, "integer")).toBe(
+      "Expected integer for 'k', got '9007199254740992'",
+    );
+    expect(rejects(-9007199254740992, "integer")).toBe(
+      "Expected integer for 'k', got '-9007199254740992'",
+    );
+  });
+  it("rejects integer strings beyond the range — never silently rounded", () => {
+    expect(rejects("9007199254740993", "integer")).toContain("Expected integer for 'k'");
+    expect(rejects("123456789012345678901234567890", "integer")).toContain(
+      "Expected integer for 'k'",
+    );
+  });
 });
 
 describe("float — a boolean is not a number", () => {
@@ -94,6 +123,14 @@ describe("float — a boolean is not a number", () => {
   });
   it("rejects structured values", () => {
     expect(rejects({}, "float")).toBe("Expected float for 'k', got object");
+  });
+  it("rejects non-finite spellings — JSON literals cannot carry them, so text is the only ingress", () => {
+    expect(rejects("Infinity", "float")).toBe("Expected float for 'k', got 'Infinity'");
+    expect(rejects("-Infinity", "float")).toBe("Expected float for 'k', got '-Infinity'");
+    expect(rejects("1e400", "float")).toBe("Expected float for 'k', got '1e400'");
+  });
+  it("still accepts numeric-looking text", () => {
+    expect(coerceValue("3", "float", "k")).toBe(3);
   });
 });
 

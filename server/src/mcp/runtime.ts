@@ -114,7 +114,8 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
         search: z.string().optional(),
         filters: z.record(z.string(), z.unknown()).optional(),
         sort: z.string().optional(),
-        order: z.string().optional(),
+        // A closed enum, matching REST: the direction is never caller text.
+        order: z.enum(["asc", "desc"]).optional(),
         limit: z.number().optional(),
         offset: z.number().optional(),
         fields: z.array(z.string()).optional(),
@@ -125,7 +126,7 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
       search?: string | undefined;
       filters?: Record<string, unknown> | undefined;
       sort?: string | undefined;
-      order?: string | undefined;
+      order?: "asc" | "desc" | undefined;
       limit?: number | undefined;
       offset?: number | undefined;
       fields?: string[] | undefined;
@@ -411,7 +412,8 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
         to_entity_id: z.string().optional(),
         filters: z.record(z.string(), z.unknown()).optional(),
         sort: z.string().optional(),
-        order: z.string().optional(),
+        // A closed enum, matching REST: the direction is never caller text.
+        order: z.enum(["asc", "desc"]).optional(),
         limit: z.number().optional(),
         offset: z.number().optional(),
       },
@@ -422,7 +424,7 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
       to_entity_id?: string | undefined;
       filters?: Record<string, unknown> | undefined;
       sort?: string | undefined;
-      order?: string | undefined;
+      order?: "asc" | "desc" | undefined;
       limit?: number | undefined;
       offset?: number | undefined;
     }) => {

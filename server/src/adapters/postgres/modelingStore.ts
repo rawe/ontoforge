@@ -71,6 +71,23 @@ function firstRowOrNull(rows: Row[]): Row | null {
   return row ? camelizeRow(row) : null;
 }
 
+/** The optional-SET builder shared by the four update methods: starts
+ * from the `updated_at = now()` stamp, then for each non-null field
+ * pushes its value onto `params` and adds `col = $n` in field order. */
+function buildUpdateSets(
+  params: unknown[],
+  fields: [column: string, value: unknown][],
+): string[] {
+  const sets = ["updated_at = now()"];
+  for (const [column, value] of fields) {
+    if (value !== null) {
+      params.push(value);
+      sets.push(`${column} = $${params.length}`);
+    }
+  }
+  return sets;
+}
+
 /** The `{key, typeId, properties}` shape of one scope inclusion. An
  * absent allowlist reads back as null; an empty one as `[]` — the
  * distinction is contract. */
@@ -154,16 +171,11 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(ontologyId)) {
       return null;
     }
-    const sets = ["updated_at = now()"];
     const params: unknown[] = [ontologyId];
-    if (name !== null) {
-      params.push(name);
-      sets.push(`name = $${params.length}`);
-    }
-    if (description !== null) {
-      params.push(description);
-      sets.push(`description = $${params.length}`);
-    }
+    const sets = buildUpdateSets(params, [
+      ["name", name],
+      ["description", description],
+    ]);
     const result = await runQuery(
       `UPDATE ontology SET ${sets.join(", ")} WHERE ontology_id = $1 RETURNING ${ONTOLOGY_COLS}`,
       params,
@@ -231,16 +243,11 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(entityTypeId)) {
       return null;
     }
-    const sets = ["updated_at = now()"];
     const params: unknown[] = [entityTypeId];
-    if (displayName !== null) {
-      params.push(displayName);
-      sets.push(`display_name = $${params.length}`);
-    }
-    if (description !== null) {
-      params.push(description);
-      sets.push(`description = $${params.length}`);
-    }
+    const sets = buildUpdateSets(params, [
+      ["display_name", displayName],
+      ["description", description],
+    ]);
     const result = await runQuery(
       `UPDATE entity_type SET ${sets.join(", ")}
        WHERE entity_type_id = $1 RETURNING ${ENTITY_TYPE_COLS}`,
@@ -335,16 +342,11 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(relationTypeId)) {
       return null;
     }
-    const sets = ["updated_at = now()"];
     const params: unknown[] = [relationTypeId];
-    if (displayName !== null) {
-      params.push(displayName);
-      sets.push(`display_name = $${params.length}`);
-    }
-    if (description !== null) {
-      params.push(description);
-      sets.push(`description = $${params.length}`);
-    }
+    const sets = buildUpdateSets(params, [
+      ["display_name", displayName],
+      ["description", description],
+    ]);
     const result = await runQuery(
       `UPDATE relation_type SET ${sets.join(", ")}
        WHERE relation_type_id = $1 RETURNING ${RELATION_TYPE_COLS}`,
@@ -453,25 +455,15 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(ownerId) || !isUuid(propertyId)) {
       return null;
     }
-    const sets = ["updated_at = now()"];
     const params: unknown[] = [ownerId, propertyId];
-    if (displayName !== null) {
-      params.push(displayName);
-      sets.push(`display_name = $${params.length}`);
-    }
-    if (description !== null) {
-      params.push(description);
-      sets.push(`description = $${params.length}`);
-    }
-    if (required !== null) {
-      params.push(required);
-      sets.push(`required = $${params.length}`);
-    }
+    const sets = buildUpdateSets(params, [
+      ["display_name", displayName],
+      ["description", description],
+      ["required", required],
+      ["default_value", clearDefault ? null : defaultValue],
+    ]);
     if (clearDefault) {
       sets.push("default_value = NULL");
-    } else if (defaultValue !== null) {
-      params.push(defaultValue);
-      sets.push(`default_value = $${params.length}`);
     }
     const result = await runQuery(
       `UPDATE property_def SET ${sets.join(", ")}

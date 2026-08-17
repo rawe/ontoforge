@@ -16,31 +16,7 @@ import {
   buildOrderBy,
   buildSearchClause,
 } from "../../../src/adapters/postgres/filters.js";
-import type { FilterCondition } from "../../../src/core/ports.js";
-import type { PropertyDef } from "../../../src/core/schemas.js";
-
-function cond(
-  key: string,
-  dataType: string,
-  op: FilterCondition["op"],
-  value: unknown,
-): FilterCondition {
-  return { key, dataType, op, value };
-}
-
-function prop(key: string, dataType: string): PropertyDef {
-  return { key, displayName: key, description: null, dataType, required: false, defaultValue: null };
-}
-
-const DEFS: Record<string, PropertyDef> = {
-  name: prop("name", "string"),
-  age: prop("age", "integer"),
-  score: prop("score", "float"),
-  active: prop("active", "boolean"),
-  founded: prop("founded", "date"),
-  seen_at: prop("seen_at", "datetime"),
-  bio: prop("bio", "document"),
-};
+import { cond, DEFS } from "../../propertyDefs.js";
 
 describe("operator x type mapping — key and value both bound", () => {
   it("string equality reads the text accessor", () => {

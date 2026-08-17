@@ -44,6 +44,7 @@ import {
 import { fromJson, toJson } from "./json.js";
 import { camelizeRow, isUuid } from "./rows.js";
 import { notImplemented } from "./notImplemented.js";
+import { ONTOLOGY_COLS, readTypesWithProperties, splitInclusions } from "./schemaRead.js";
 
 type PropertyDefs = Record<string, PropertyDef>;
 
@@ -52,11 +53,6 @@ const NO_DEFS: PropertyDefs = {};
 // Read column lists — `embedding` is deliberately absent from both.
 const ENTITY_COLS = "id, type_key, props, created_at, updated_at";
 const RELATION_COLS = "id, type_key, from_id, to_id, props, created_at, updated_at";
-
-// Schema-read column lists (the lens view's building blocks).
-const ONTOLOGY_COLS = "ontology_id, key, name, description, created_at, updated_at";
-const PROPERTY_COLS =
-  "property_id, key, display_name, description, data_type, required, default_value";
 
 /** One `entity` row → the port shape: system columns as underscore keys,
  * user properties spread from `props` (datetimes decoded per the defs). */
@@ -110,39 +106,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
       const ontology = camelizeRow(ontRow);
       const ontologyId = ontology.ontologyId as string;
 
-      const props = await querier.query(
-        `SELECT ${PROPERTY_COLS}, entity_type_id, relation_type_id
-         FROM property_def ORDER BY key`,
-      );
-      const propsByOwner = new Map<string, Row[]>();
-      for (const raw of props.rows) {
-        const { entityTypeId, relationTypeId, ...property } = camelizeRow(raw);
-        const ownerId = (entityTypeId ?? relationTypeId) as string;
-        const bucket = propsByOwner.get(ownerId) ?? [];
-        bucket.push(property);
-        propsByOwner.set(ownerId, bucket);
-      }
-
-      const ets = await querier.query(
-        `SELECT entity_type_id, key, display_name, description, created_at, updated_at
-         FROM entity_type ORDER BY key`,
-      );
-      const entityTypes = ets.rows.map((raw) => {
-        const et = camelizeRow(raw);
-        et.properties = propsByOwner.get(et.entityTypeId as string) ?? [];
-        return et;
-      });
-
-      const rts = await querier.query(
-        `SELECT relation_type_id, key, display_name, description, created_at, updated_at,
-                source_entity_type_key AS source_key, target_entity_type_key AS target_key
-         FROM relation_type ORDER BY key`,
-      );
-      const relationTypes = rts.rows.map((raw) => {
-        const rt = camelizeRow(raw);
-        rt.properties = propsByOwner.get(rt.relationTypeId as string) ?? [];
-        return rt;
-      });
+      const { entityTypes, relationTypes } = await readTypesWithProperties(querier, false);
 
       const incs = await querier.query(
         `SELECT oi.properties, et.key AS entity_type_key, rt.key AS relation_type_key
@@ -152,16 +116,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
          WHERE oi.ontology_id = $1`,
         [ontologyId],
       );
-      const entityInclusions: Row[] = [];
-      const relationInclusions: Row[] = [];
-      for (const raw of incs.rows) {
-        const properties = (raw.properties as string[] | null) ?? null;
-        if (raw.entity_type_key !== null) {
-          entityInclusions.push({ key: raw.entity_type_key, properties });
-        } else {
-          relationInclusions.push({ key: raw.relation_type_key, properties });
-        }
-      }
+      const { entityInclusions, relationInclusions } = splitInclusions(incs.rows);
 
       return { ontology, entityTypes, relationTypes, entityInclusions, relationInclusions };
     }, "REPEATABLE READ");

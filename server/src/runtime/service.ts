@@ -1296,13 +1296,15 @@ export async function getNeighbors(
   }
 
   // Per-type-key defs for row decoding, from the FULL schema — neighbours
-  // and their relations may be of types the lens does not expose.
+  // and their relations may be of types the lens does not expose. Relation
+  // defs go in first; entity defs shadow them on a shared type key.
   const propertyDefsByType: Record<string, Record<string, PropertyDef>> = {};
   for (const [typeKey, rtDef] of Object.entries(loaded.full.relationTypes)) {
-    propertyDefsByType[typeKey] = rtDef.properties;
+    propertyDefsByType[typeKey] = { ...rtDef.properties };
   }
   for (const [typeKey, etDef] of Object.entries(loaded.full.entityTypes)) {
-    propertyDefsByType[typeKey] = { ...propertyDefsByType[typeKey], ...etDef.properties };
+    const defs = (propertyDefsByType[typeKey] ??= {});
+    Object.assign(defs, etDef.properties);
   }
 
   const neighbors = await store.getNeighbors(

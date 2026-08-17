@@ -8,21 +8,7 @@
 import { describe, expect, it } from "vitest";
 
 import { fromJson, toJson } from "../../../src/adapters/postgres/json.js";
-import type { PropertyDef } from "../../../src/core/schemas.js";
-
-function prop(key: string, dataType: string): PropertyDef {
-  return { key, displayName: key, description: null, dataType, required: false, defaultValue: null };
-}
-
-const DEFS: Record<string, PropertyDef> = {
-  name: prop("name", "string"),
-  age: prop("age", "integer"),
-  score: prop("score", "float"),
-  active: prop("active", "boolean"),
-  founded: prop("founded", "date"),
-  seen_at: prop("seen_at", "datetime"),
-  bio: prop("bio", "document"),
-};
+import { DEFS } from "../../propertyDefs.js";
 
 describe("toJson — the write conversion", () => {
   it("converts datetime Dates to their toISOString text", () => {

@@ -13,16 +13,7 @@ import {
   buildFilterClauses,
   buildSearchClause,
 } from "../../../src/adapters/neo4j/filters.js";
-import type { FilterCondition } from "../../../src/core/ports.js";
-
-function cond(
-  key: string,
-  dataType: string,
-  op: FilterCondition["op"],
-  value: unknown,
-): FilterCondition {
-  return { key, dataType, op, value };
-}
+import { cond } from "../../propertyDefs.js";
 
 describe("clause construction", () => {
   it("eq binds the value — never interpolated", () => {

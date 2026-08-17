@@ -8,21 +8,8 @@
 import { describe, expect, it } from "vitest";
 
 import { ValidationError } from "../../src/core/exceptions.js";
-import type { PropertyDef } from "../../src/core/schemas.js";
 import { parseFilterConditions } from "../../src/runtime/service.js";
-
-function prop(key: string, dataType: string): PropertyDef {
-  return { key, displayName: key, description: null, dataType, required: false, defaultValue: null };
-}
-
-const DEFS: Record<string, PropertyDef> = {
-  name: prop("name", "string"),
-  age: prop("age", "integer"),
-  score: prop("score", "float"),
-  active: prop("active", "boolean"),
-  founded: prop("founded", "date"),
-  seen_at: prop("seen_at", "datetime"),
-};
+import { DEFS } from "../propertyDefs.js";
 
 describe("parsed conditions", () => {
   it("a bare key parses as equality with the value coerced to the declared type", () => {

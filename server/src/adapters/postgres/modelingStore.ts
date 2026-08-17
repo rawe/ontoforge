@@ -38,12 +38,13 @@ import type { TypeKind } from "../../core/schemas.js";
 import { runQuery, withTransaction } from "./errors.js";
 import { notImplemented } from "./notImplemented.js";
 import { camelizeRow, camelizeRows, isUuid } from "./rows.js";
+import { ONTOLOGY_COLS, readTypesWithProperties, splitInclusions } from "./schemaRead.js";
 
 const NO_RESERVED_KEYS: ReadonlySet<string> = new Set();
 
 // Read column lists — the port-visible shape of each object; owner ids,
 // denormalized keys, and embeddings stay out of returned rows.
-const ONTOLOGY_COLS = "ontology_id, key, name, description, created_at, updated_at";
+// (`ONTOLOGY_COLS` comes from `schemaRead.ts`, shared with the runtime store.)
 const ENTITY_TYPE_COLS = "entity_type_id, key, display_name, description, created_at, updated_at";
 const RELATION_TYPE_COLS =
   "relation_type_id, key, display_name, description, " +
@@ -681,21 +682,11 @@ export class PostgresModelingStore implements ModelingStore {
    * as one coherent snapshot: a single REPEATABLE READ transaction. */
   async getFullSchema(): Promise<Row> {
     return withTransaction(async (querier) => {
-      const ets = await querier.query(
-        `SELECT ${ENTITY_TYPE_COLS} FROM entity_type ORDER BY key`,
-      );
-      const rts = await querier.query(
-        `SELECT relation_type_id, key, display_name, description, created_at, updated_at,
-                source_entity_type_key AS source_key, target_entity_type_key AS target_key
-         FROM relation_type ORDER BY key`,
-      );
-      const props = await querier.query(
-        `SELECT ${PROPERTY_COLS}, entity_type_id, relation_type_id
-         FROM property_def ORDER BY key`,
-      );
+      const { entityTypes, relationTypes } = await readTypesWithProperties(querier, true);
+
       const onts = await querier.query(`SELECT ${ONTOLOGY_COLS} FROM ontology ORDER BY name`);
       const incs = await querier.query(
-        `SELECT oi.ontology_id, oi.entity_type_id, oi.relation_type_id, oi.properties,
+        `SELECT oi.ontology_id, oi.properties,
                 et.key AS entity_type_key, rt.key AS relation_type_key
          FROM ontology_includes oi
          LEFT JOIN entity_type et ON et.entity_type_id = oi.entity_type_id
@@ -703,54 +694,21 @@ export class PostgresModelingStore implements ModelingStore {
          ORDER BY et.key, rt.key`,
       );
 
-      const propsByEntityType = new Map<string, Row[]>();
-      const propsByRelationType = new Map<string, Row[]>();
-      for (const raw of props.rows) {
-        const { entityTypeId, relationTypeId, ...property } = camelizeRow(raw);
-        if (entityTypeId !== null) {
-          const bucket = propsByEntityType.get(entityTypeId as string) ?? [];
-          bucket.push(property);
-          propsByEntityType.set(entityTypeId as string, bucket);
-        } else {
-          const bucket = propsByRelationType.get(relationTypeId as string) ?? [];
-          bucket.push(property);
-          propsByRelationType.set(relationTypeId as string, bucket);
-        }
-      }
-
-      const entityTypes = ets.rows.map((raw) => {
-        const et = camelizeRow(raw);
-        et.properties = propsByEntityType.get(et.entityTypeId as string) ?? [];
-        return et;
-      });
-      const relationTypes = rts.rows.map((raw) => {
-        const rt = camelizeRow(raw);
-        rt.properties = propsByRelationType.get(rt.relationTypeId as string) ?? [];
-        return rt;
-      });
-
-      const entityInclusions = new Map<string, Row[]>();
-      const relationInclusions = new Map<string, Row[]>();
+      const incsByOntology = new Map<string, Row[]>();
       for (const raw of incs.rows) {
         const ontologyId = raw.ontology_id as string;
-        const entry: Row = { properties: (raw.properties as string[] | null) ?? null };
-        if (raw.entity_type_id !== null) {
-          entry.key = raw.entity_type_key;
-          const bucket = entityInclusions.get(ontologyId) ?? [];
-          bucket.push(entry);
-          entityInclusions.set(ontologyId, bucket);
-        } else {
-          entry.key = raw.relation_type_key;
-          const bucket = relationInclusions.get(ontologyId) ?? [];
-          bucket.push(entry);
-          relationInclusions.set(ontologyId, bucket);
-        }
+        const bucket = incsByOntology.get(ontologyId) ?? [];
+        bucket.push(raw);
+        incsByOntology.set(ontologyId, bucket);
       }
 
       const ontologies = onts.rows.map((raw) => {
         const ont = camelizeRow(raw);
-        ont.entityInclusions = entityInclusions.get(ont.ontologyId as string) ?? [];
-        ont.relationInclusions = relationInclusions.get(ont.ontologyId as string) ?? [];
+        const { entityInclusions, relationInclusions } = splitInclusions(
+          incsByOntology.get(ont.ontologyId as string) ?? [],
+        );
+        ont.entityInclusions = entityInclusions;
+        ont.relationInclusions = relationInclusions;
         return ont;
       });
 

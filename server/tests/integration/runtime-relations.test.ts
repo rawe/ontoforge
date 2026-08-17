@@ -293,6 +293,30 @@ describe("relation CRUD round trip", () => {
     }
   });
 
+  it("an empty-string endpoint filter behaves as filter-absent — the unfiltered listing", async () => {
+    const alice = await createEntity("test_ontology", "person", { name: "Alice" });
+    const bob = await createEntity("test_ontology", "person", { name: "Bob" });
+    const acme = await createEntity("test_ontology", "company", { name: "Acme" });
+    await createRelation("test_ontology", "works_for", {
+      fromEntityId: alice._id,
+      toEntityId: acme._id,
+    });
+    await createRelation("test_ontology", "works_for", {
+      fromEntityId: bob._id,
+      toEntityId: acme._id,
+    });
+
+    for (const query of ["fromEntityId=", "toEntityId=", "fromEntityId=&toEntityId="]) {
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/runtime/test_ontology/relations/works_for?${query}`,
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().total).toBe(2);
+      expect(res.json().items).toHaveLength(2);
+    }
+  });
+
   it("the scoped lens hides relation properties its inclusion excludes", async () => {
     // Narrow works_for in hr_view to role only.
     const narrowed = await app.inject({

@@ -359,9 +359,11 @@ export interface ModelingStore {
  * per-type entity search via `semanticSearch`) receive parsed, coerced
  * `FilterCondition`s built by the service — filter validation happens
  * above the port, so adapters receive only valid input and raise no
- * validation errors. Read methods carry the property definitions for row
- * decoding (an adapter whose storage is self-describing may ignore
- * them); listing paths carry them for the same reason.
+ * validation errors. Three reads carry the property definitions for row
+ * decoding — `getEntityById`, `getEntitiesByIds`, and `getNeighbors` (an
+ * adapter whose storage is self-describing may ignore them); listing
+ * paths carry them for the same reason. `getEntity` and `getRelation`
+ * carry none.
  */
 export interface RuntimeStore {
   // ------------------------------------------------------------------

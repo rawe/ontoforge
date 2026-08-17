@@ -30,7 +30,10 @@ returns materialised data.
 representation the driver uses is the adapter's private business, converted in both
 directions at the boundary. A service must never receive a value it has to recognise as
 belonging to a particular database client. Datetimes carry a timezone; naive values are
-treated as UTC.
+treated as UTC. The outward conversion is guaranteed on the reads that carry property
+definitions to guide it. The two point reads by type key and instance id carry none, and
+there one deviation exists — PostgreSQL-specific: datetime values return as the stored
+ISO text, whose wire serialization is byte-identical.
 
 **Filters, sorts and searches cross as structured values, never as query text.** A filter
 is a list of parsed conditions — property key, declared data type, operator, and the value

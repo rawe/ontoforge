@@ -50,16 +50,14 @@ permanent and never reused — other documents cite them.
 of the rule.>
 ```
 
-## Records are immutable
+## Records are corrected or deleted
 
-A record is never edited to reflect a change of mind. When a decision changes, write a new
-record that supersedes it and set the old record's status to `Superseded by NNNN`. This
-keeps the rejected alternatives readable alongside the decision that replaced them.
-
-Because of that, some records cite documents, modules or route shapes that have since been
-renamed or removed. Those references are left as written. Read them as evidence of what
-existed at the time, and take the current documentation set as the description of what
-exists now.
+A record that no longer matches reality is corrected or deleted — a stale reference is
+not left as written. Immutability is the wider custom for decision records, but here the
+owner may correct a record; heavy history tracking is a deliberate non-goal. When a
+decision is genuinely reversed, prefer a new record that supersedes the old one, with the
+old record's status set to `Superseded by NNNN`, so the rejected alternatives stay
+readable alongside the decision that replaced them.
 
 ## Records 0001–0013
 

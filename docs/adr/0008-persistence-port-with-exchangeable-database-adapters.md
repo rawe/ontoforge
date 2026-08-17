@@ -11,7 +11,7 @@ product to one database and makes the storage backend impossible to exchange.
 
 ## Decision
 
-The backend accesses the database only through a persistence port (`core/ports.py`): a
+The backend accesses the database only through a persistence port (`core/ports.ts`): a
 `ModelingStore` and a `RuntimeStore`, selected via `DB_BACKEND`. Everything
 database-specific — driver, connections, query text, physical naming (labels,
 PascalCase/UPPER_SNAKE_CASE), index DDL, driver temporal types — lives in an adapter
@@ -21,6 +21,4 @@ package (`adapters/neo4j/`).
 
 Services, routers, and MCP handlers speak ontology vocabulary — type keys, property keys,
 instance UUIDs, structured filters — and never see driver types or query fragments. Neo4j
-is the reference adapter and the default deployment. No second adapter is built until one
-is needed (YAGNI); a PostgreSQL mapping is documented in
-`feature-ideas/database-independence.md`.
+is the reference adapter and the default deployment.

@@ -6,12 +6,12 @@
 
 import { z } from "zod";
 
-import { DATA_TYPES, KEY_PATTERN } from "../core/schemas.js";
+import { DATA_TYPES, KEY_PATTERN, MAX_KEY_LENGTH } from "../core/schemas.js";
 
 // --- Ontology ---
 
 export const OntologyCreate = z.object({
-  key: z.string().regex(KEY_PATTERN),
+  key: z.string().regex(KEY_PATTERN).max(MAX_KEY_LENGTH),
   name: z.string(),
   description: z.string().nullable().optional(),
 });
@@ -64,7 +64,7 @@ export const ValidationResult = z.object({
 // --- Entity Type ---
 
 export const EntityTypeCreate = z.object({
-  key: z.string().regex(KEY_PATTERN),
+  key: z.string().regex(KEY_PATTERN).max(MAX_KEY_LENGTH),
   displayName: z.string(),
   description: z.string().nullable().optional(),
 });
@@ -86,7 +86,7 @@ export const EntityTypeResponse = z.object({
 // --- Relation Type ---
 
 export const RelationTypeCreate = z.object({
-  key: z.string().regex(KEY_PATTERN),
+  key: z.string().regex(KEY_PATTERN).max(MAX_KEY_LENGTH),
   displayName: z.string(),
   description: z.string().nullable().optional(),
   sourceEntityTypeKey: z.string(),
@@ -112,7 +112,7 @@ export const RelationTypeResponse = z.object({
 // --- Property Definition ---
 
 export const PropertyDefinitionCreate = z.object({
-  key: z.string().regex(KEY_PATTERN),
+  key: z.string().regex(KEY_PATTERN).max(MAX_KEY_LENGTH),
   displayName: z.string(),
   description: z.string().nullable().optional(),
   dataType: z.enum(DATA_TYPES),

@@ -91,6 +91,18 @@ describe("ontology CRUD", () => {
     }
   });
 
+  // The cap is 64 characters, uniformly on every key kind.
+  it("a key longer than 64 characters is rejected 422", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/model/ontologies",
+      payload: { key: "k".repeat(65), name: "Whatever" },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe("VALIDATION_ERROR");
+    expect(holder.store.createOntology).not.toHaveBeenCalled();
+  });
+
   it("list returns every stored lens", async () => {
     holder.store.listOntologies.mockResolvedValue([ONTOLOGY_DATA]);
     const res = await app.inject({ method: "GET", url: "/api/model/ontologies" });

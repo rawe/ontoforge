@@ -175,6 +175,33 @@ describe("key validation", () => {
     expect(res.statusCode).toBe(201);
   });
 
+  // The cap is 64 characters, uniformly on every key kind.
+  it("a key longer than 64 characters is rejected 422 naming the cap", async () => {
+    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    const res = await app.inject({
+      method: "PUT",
+      url: `/api/model/ontologies/test_onto/ai-agents/${"k".repeat(65)}`,
+      payload: { name: "Test" },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.message).toContain("64");
+    expect(holder.store.upsertAiAgent).not.toHaveBeenCalled();
+  });
+
+  it("a key of exactly 64 characters is accepted", async () => {
+    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.upsertAiAgent.mockResolvedValue([
+      { ...MOCK_AGENT, key: "k".repeat(64) },
+      true,
+    ]);
+    const res = await app.inject({
+      method: "PUT",
+      url: `/api/model/ontologies/test_onto/ai-agents/${"k".repeat(64)}`,
+      payload: { name: "Test" },
+    });
+    expect(res.statusCode).toBe(201);
+  });
+
   it("the reserved '_default' key is rejected 422", async () => {
     holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
     const res = await app.inject({

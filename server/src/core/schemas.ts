@@ -25,6 +25,14 @@ export type DataType = (typeof DATA_TYPES)[number];
 export const KEY_PATTERN = /^[a-z][a-z0-9_]*$/;
 
 /**
+ * Maximum length for every key kind — entity type, relation type, ontology,
+ * property, agent, saved query. Boundary hygiene, not a physical limit: an
+ * absurd key dies as a clean 422 at validation instead of deep inside
+ * adapter DDL, and derived physical names stay legible.
+ */
+export const MAX_KEY_LENGTH = 64;
+
+/**
  * The two kinds of schema type that can own a property definition or be
  * included in an ontology's scope. These exact values are the port's
  * owner-kind vocabulary (normative); the MCP wire values

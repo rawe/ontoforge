@@ -22,7 +22,13 @@ import {
 } from "../core/exceptions.js";
 import { parseAndValidate } from "../core/oql/index.js";
 import type { ModelingStore, RuntimeStore } from "../core/ports.js";
-import { DATA_TYPES, KEY_PATTERN, type PropertyDef, type TypeKind } from "../core/schemas.js";
+import {
+  DATA_TYPES,
+  KEY_PATTERN,
+  MAX_KEY_LENGTH,
+  type PropertyDef,
+  type TypeKind,
+} from "../core/schemas.js";
 import { buildTextRepr } from "../runtime/embedding.js";
 import { invalidateLoadedSchemaCache, loadSchema } from "../runtime/schemaCache.js";
 import { syncDocumentChunks } from "../runtime/service.js";
@@ -1338,11 +1344,17 @@ export async function importSchema(
   };
   const badKey = (kind: string, key: string, pattern: string): string =>
     `Import error: invalid ${kind} key '${key}'. Must match pattern: ${pattern}`;
+  const longKey = (kind: string, key: string): string =>
+    `Import error: invalid ${kind} key '${key}'. ` +
+    `Maximum length is ${MAX_KEY_LENGTH} characters`;
   const typeKeyPattern = KEY_PATTERN.source;
 
   for (const et of payload.entityTypes) {
     if (!KEY_PATTERN.test(et.key)) {
       errors.push(badKey("entity type", et.key, typeKeyPattern));
+    }
+    if (et.key.length > MAX_KEY_LENGTH) {
+      errors.push(longKey("entity type", et.key));
     }
     pushReserved(() => rejectReservedEntityTypeKey(store, et.key, "Import error: "));
     for (const prop of et.properties) {
@@ -1352,6 +1364,12 @@ export async function importSchema(
             `'${et.key}'. Must match pattern: ${typeKeyPattern}`,
         );
       }
+      if (prop.key.length > MAX_KEY_LENGTH) {
+        errors.push(
+          `Import error: invalid property key '${prop.key}' on entity type ` +
+            `'${et.key}'. Maximum length is ${MAX_KEY_LENGTH} characters`,
+        );
+      }
     }
   }
 
@@ -1359,6 +1377,9 @@ export async function importSchema(
   for (const rt of payload.relationTypes) {
     if (!KEY_PATTERN.test(rt.key)) {
       errors.push(badKey("relation type", rt.key, typeKeyPattern));
+    }
+    if (rt.key.length > MAX_KEY_LENGTH) {
+      errors.push(longKey("relation type", rt.key));
     }
     pushReserved(() => rejectReservedRelationTypeKey(store, rt.key, "Import error: "));
     // Endpoints must be present in the SAME payload — a type existing only
@@ -1380,6 +1401,12 @@ export async function importSchema(
             `'${rt.key}'. Must match pattern: ${typeKeyPattern}`,
         );
       }
+      if (prop.key.length > MAX_KEY_LENGTH) {
+        errors.push(
+          `Import error: invalid property key '${prop.key}' on relation type ` +
+            `'${rt.key}'. Maximum length is ${MAX_KEY_LENGTH} characters`,
+        );
+      }
       if (prop.dataType === "document") {
         errors.push(
           `Import error: property '${prop.key}' on relation type '${rt.key}' ` +
@@ -1394,9 +1421,15 @@ export async function importSchema(
     if (!KEY_PATTERN.test(ont.key)) {
       errors.push(badKey("ontology", ont.key, typeKeyPattern));
     }
+    if (ont.key.length > MAX_KEY_LENGTH) {
+      errors.push(longKey("ontology", ont.key));
+    }
     for (const ag of ont.aiAgents) {
       if (!AGENT_KEY_REGEX.test(ag.key)) {
         errors.push(badKey("agent", ag.key, AGENT_KEY_PATTERN));
+      }
+      if (ag.key.length > MAX_KEY_LENGTH) {
+        errors.push(longKey("agent", ag.key));
       }
       const tools = ag.tools ?? null;
       if (tools !== null) {
@@ -1413,6 +1446,9 @@ export async function importSchema(
     for (const sq of ont.savedQueries) {
       if (!AGENT_KEY_REGEX.test(sq.key)) {
         errors.push(badKey("saved query", sq.key, AGENT_KEY_PATTERN));
+      }
+      if (sq.key.length > MAX_KEY_LENGTH) {
+        errors.push(longKey("saved query", sq.key));
       }
       let stepsKnown = true;
       for (const s of sq.steps) {
@@ -1691,6 +1727,11 @@ export async function upsertAiAgent(
       `Invalid agent key '${agentKey}'. Must match pattern: ${AGENT_KEY_PATTERN}`,
     );
   }
+  if (agentKey.length > MAX_KEY_LENGTH) {
+    throw new ValidationError(
+      `Invalid agent key '${agentKey}'. Maximum length is ${MAX_KEY_LENGTH} characters`,
+    );
+  }
   if (agentKey === "_default") {
     throw new ValidationError("Agent key '_default' is reserved");
   }
@@ -1902,6 +1943,11 @@ export async function upsertSavedQuery(
   if (!AGENT_KEY_REGEX.test(queryKey)) {
     throw new ValidationError(
       `Invalid query key '${queryKey}'. Must match pattern: ${AGENT_KEY_PATTERN}`,
+    );
+  }
+  if (queryKey.length > MAX_KEY_LENGTH) {
+    throw new ValidationError(
+      `Invalid query key '${queryKey}'. Maximum length is ${MAX_KEY_LENGTH} characters`,
     );
   }
 

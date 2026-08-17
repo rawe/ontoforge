@@ -37,7 +37,7 @@
  * peers under it; none is the reference implementation. An adapter
  * implements both interfaces (the Neo4j adapter does so in
  * `adapters/neo4j/modelingStore.ts` and `adapters/neo4j/runtimeStore.ts`)
- * and is registered in `initStores`.
+ * and its package is registered as one thunk line in `ADAPTERS`.
  */
 
 import { settings } from "../config.js";
@@ -531,27 +531,53 @@ export interface RuntimeStore {
   ): Promise<Row[]>;
 }
 
+/**
+ * The lifecycle surface every adapter package exports. The module IS the
+ * namespace import — no wrapper object, no default export, no factory
+ * class; TypeScript checks each `import()` result structurally at the
+ * registry literal below.
+ */
+export interface AdapterModule {
+  createStores(): Promise<[ModelingStore, RuntimeStore]>;
+  closeStores(): Promise<void>;
+  ensureSemanticIndexes(dimensions: number): Promise<void>;
+  wipe(): Promise<void>;
+}
+
+/**
+ * The adapter registry: one thunk per backend, keyed by the `DB_BACKEND`
+ * value. Registry values are thunks, so only the selected backend's
+ * module and driver ever load.
+ */
+const ADAPTERS: Record<string, () => Promise<AdapterModule>> = {
+  neo4j: () => import("../adapters/neo4j/index.js"),
+  postgres: () => import("../adapters/postgres/index.js"),
+};
+
 let modelingStore: ModelingStore | null = null;
 let runtimeStore: RuntimeStore | null = null;
+let activeAdapter: AdapterModule | null = null;
 
 function unknownBackend(): never {
-  throw new Error(`Unknown DB_BACKEND '${settings.DB_BACKEND}' (supported: neo4j)`);
+  throw new Error(
+    `Unknown DB_BACKEND '${settings.DB_BACKEND}' ` +
+      `(supported: ${Object.keys(ADAPTERS).join(", ")})`,
+  );
 }
 
 /** Initialize the configured persistence adapter and its stores. */
 export async function initStores(): Promise<void> {
-  if (settings.DB_BACKEND === "neo4j") {
-    const adapter = await import("../adapters/neo4j/index.js");
-    [modelingStore, runtimeStore] = await adapter.createStores();
-  } else {
-    unknownBackend();
-  }
+  const loadAdapter = ADAPTERS[settings.DB_BACKEND] ?? unknownBackend();
+  const adapter = await loadAdapter();
+  [modelingStore, runtimeStore] = await adapter.createStores();
+  activeAdapter = adapter;
 }
 
+/** Close the active adapter; no-op if none. Never consults `DB_BACKEND`. */
 export async function closeStores(): Promise<void> {
-  if (settings.DB_BACKEND === "neo4j") {
-    const adapter = await import("../adapters/neo4j/index.js");
-    await adapter.closeStores();
+  if (activeAdapter !== null) {
+    await activeAdapter.closeStores();
+    activeAdapter = null;
   }
   modelingStore = null;
   runtimeStore = null;
@@ -559,22 +585,18 @@ export async function closeStores(): Promise<void> {
 
 /** Ensure the adapter's semantic-search indexes exist (startup hook). */
 export async function ensureSemanticIndexes(dimensions: number): Promise<void> {
-  if (settings.DB_BACKEND === "neo4j") {
-    const adapter = await import("../adapters/neo4j/index.js");
-    await adapter.ensureSemanticIndexes(dimensions);
-  } else {
-    unknownBackend();
+  if (activeAdapter === null) {
+    throw new Error("Stores not initialized");
   }
+  await activeAdapter.ensureSemanticIndexes(dimensions);
 }
 
 /** Delete all stored data via the active adapter. Test support only. */
 export async function wipeDatabase(): Promise<void> {
-  if (settings.DB_BACKEND === "neo4j") {
-    const adapter = await import("../adapters/neo4j/index.js");
-    await adapter.wipe();
-  } else {
-    unknownBackend();
+  if (activeAdapter === null) {
+    throw new Error("Stores not initialized");
   }
+  await activeAdapter.wipe();
 }
 
 export function getModelingStore(): ModelingStore {

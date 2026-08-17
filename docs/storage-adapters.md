@@ -100,13 +100,14 @@ and a default of nothing are different intentions.
 **Scope inclusion management.** An inclusion joins one ontology to one type and optionally
 carries a property allowlist; an absent allowlist means all properties, and is not the
 same as an empty one. Add an inclusion, list the inclusions of one kind for an ontology,
-read one, update its allowlist, remove one. Beyond the plain lifecycle, four operations
+update its allowlist, remove one. Beyond the plain lifecycle, four operations
 exist purely to serve the cascade protocol and must be provided:
 
 - Remove every inclusion referring to a given type, across all ontologies.
 - List the ontology keys that include a given type.
-- List the ontology keys whose inclusion for a given type names a given property
-  *explicitly* — ontologies with no allowlist are not affected and must not be reported.
+- List the ontology keys whose inclusion for a given type carries an explicit allowlist
+  that does **not** name a given property — ontologies with no allowlist auto-track the
+  type's properties and must not be reported.
 - Add, or remove, a property key across every explicit allowlist that names a given type,
   returning how many were changed.
 
@@ -164,6 +165,12 @@ The adapter must set and maintain the system properties on every write: the inst
 the type key, the creation timestamp on create, and the update timestamp on create and on
 every update. Stored embedding vectors must never appear in a returned row.
 
+**Write-value constraints.** Before a write whose property values will become
+vector-index filter metadata, one operation lets the adapter reject a value it cannot
+store, as a domain validation error naming the property. An adapter whose storage imposes
+no such limit treats the operation as a no-op — the same pattern as reserved keys: the
+constraint is the adapter's, the enforcement point is shared.
+
 **Relation lifecycle.** Create with the relation type key, an instance id, the two
 endpoint entity ids and the property map. Read by type key and id. Update, with the same
 set/remove split as entities. Delete. List, taking the same filter, sort, pagination and
@@ -189,7 +196,9 @@ offset and character length, its text, and optionally its vector. The adapter st
 payload as given and returns it unchanged except for stripping the vector.
 
 **Search.** Three kinds, all by vector, all returning a similarity score with each hit and
-honouring an optional minimum score and a result limit.
+honouring a result limit. Entity search and saved-query search also honour an optional
+minimum score; document-chunk search takes none at the port — its floor is applied above
+the port.
 
 | Kind | Input | Returns |
 |---|---|---|
@@ -215,7 +224,7 @@ recursively so nothing driver-shaped survives at any depth.
 
 ## Obligations beyond storage
 
-An adapter is not only a set of writes and reads. Six responsibilities sit entirely inside
+An adapter is not only a set of writes and reads. Seven responsibilities sit entirely inside
 it, and a new adapter that implements the operations but skips these is not a working
 adapter.
 
@@ -264,8 +273,10 @@ adapter, and is enumerated once in
 invents none of it. Values arrive as raw strings and the adapter coerces each to the
 declared data type of the property, using the scoped property definitions passed alongside;
 the substring operator is the exception, comparing case-insensitively on the string form of
-both sides. Three faults are the adapter's to raise, as domain validation errors and not
-storage errors: an unknown property, an unknown operator, and a value that will not coerce.
+both sides. Four faults are the adapter's to raise, as domain validation errors and not
+storage errors: an unknown property, an unknown operator, a value that will not coerce,
+and — Neo4j-specific, raised on the write path through the write-value constraint above —
+an indexed value exceeding the 32766-byte ceiling, in an error naming the property.
 Every value must reach the database as a bound parameter. Type keys and property keys may
 be interpolated into generated query text — they originate from the stored schema, never
 from request input — but values never may.

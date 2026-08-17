@@ -36,8 +36,25 @@ transaction mode. Four categories:
 | A node pattern that binds a variable but carries no label | Such a pattern matches every stored record, including internal ones the lens was never meant to expose. Requiring a label is what makes lens validation total. |
 | Internal labels and internal relationship types | The names the system uses for its own records, including document passage storage. Rejected explicitly and with their own message, so that naming one is a clear error rather than a confusing "unknown type". |
 
-Everything else the grammar accepts is permitted: pattern matching, optional matching,
-filtering, intermediate projection, list expansion, aggregation, ordering and paging.
+## Supported surface
+
+The language is a closed enumeration: what is named here is the whole surface. Any
+construct or function the grammar parses but this enumeration does not name is rejected
+at validation with a hint naming the supported alternative, identically for every
+storage backend. The rule this enforces is in
+[../decisions.md](../decisions.md#behaviour).
+
+- **Clauses.** MATCH, OPTIONAL MATCH, WHERE, WITH, RETURN, ORDER BY with ASC and DESC,
+  SKIP, LIMIT, and AS aliases.
+- **Patterns.** Labeled and anonymous nodes; directed, reversed and undirected
+  relationships; relationship variables and anonymous typed relationships;
+  comma-separated pattern parts; inline property maps.
+- **Predicates and expressions.** The comparisons `=`, `<>`, `<`, `<=`, `>`, `>=`;
+  AND, OR and NOT, with parentheses; CONTAINS; IN; IS NULL and IS NOT NULL; literals,
+  including lists and maps; parameter placeholders; backticked identifiers; comments;
+  system properties.
+- **Functions.** The seven aggregates — `count(*)`, `count(x)`, `avg`, `collect`,
+  `max`, `min`, `sum` — and no others.
 
 Two boundaries are worth knowing rather than discovering:
 

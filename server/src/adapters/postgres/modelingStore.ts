@@ -28,15 +28,16 @@
  *   before any statement; off-format input short-circuits to the
  *   method's not-found shape.
  *
- * The seven vector-index lifecycle methods land at M4.
+ * The seven vector-index lifecycle methods are `ddl.ts`'s — physical
+ * naming and index DDL live there, beside the init DDL.
  */
 
 import { toSql } from "pgvector";
 
 import type { ModelingStore, ReservedTypeKeyInUse, Row } from "../../core/ports.js";
 import type { TypeKind } from "../../core/schemas.js";
+import * as vectorDdl from "./ddl.js";
 import { runQuery, withTransaction } from "./errors.js";
-import { notImplemented } from "./notImplemented.js";
 import { camelizeRow, camelizeRows, isUuid } from "./rows.js";
 import { ONTOLOGY_COLS, readTypesWithProperties, splitInclusions } from "./schemaRead.js";
 
@@ -928,34 +929,42 @@ export class PostgresModelingStore implements ModelingStore {
   }
 
   // ------------------------------------------------------------------
-  // Vector-index DDL (M4.2)
+  // Vector-index DDL — every method is `ddl.ts`'s, unchanged
   // ------------------------------------------------------------------
 
-  createVectorIndex(): Promise<void> {
-    return notImplemented("createVectorIndex");
+  createVectorIndex(
+    entityTypeKey: string,
+    dimensions: number,
+    filterProperties?: string[] | null,
+  ): Promise<void> {
+    return vectorDdl.createVectorIndex(entityTypeKey, dimensions, filterProperties);
   }
 
-  dropVectorIndex(): Promise<void> {
-    return notImplemented("dropVectorIndex");
+  dropVectorIndex(entityTypeKey: string): Promise<void> {
+    return vectorDdl.dropVectorIndex(entityTypeKey);
   }
 
-  rebuildVectorIndex(): Promise<void> {
-    return notImplemented("rebuildVectorIndex");
+  rebuildVectorIndex(entityTypeKey: string, dimensions: number): Promise<void> {
+    return vectorDdl.rebuildVectorIndex(entityTypeKey, dimensions);
   }
 
-  createDocumentVectorIndex(): Promise<void> {
-    return notImplemented("createDocumentVectorIndex");
+  createDocumentVectorIndex(
+    entityTypeKey: string,
+    propertyKey: string,
+    dimensions: number,
+  ): Promise<void> {
+    return vectorDdl.createDocumentVectorIndex(entityTypeKey, propertyKey, dimensions);
   }
 
-  dropDocumentVectorIndex(): Promise<void> {
-    return notImplemented("dropDocumentVectorIndex");
+  dropDocumentVectorIndex(entityTypeKey: string, propertyKey: string): Promise<void> {
+    return vectorDdl.dropDocumentVectorIndex(entityTypeKey, propertyKey);
   }
 
-  ensureSavedQueryVectorIndex(): Promise<void> {
-    return notImplemented("ensureSavedQueryVectorIndex");
+  ensureSavedQueryVectorIndex(dimensions: number): Promise<void> {
+    return vectorDdl.ensureSavedQueryVectorIndex(dimensions);
   }
 
-  ensureVectorIndexes(): Promise<void> {
-    return notImplemented("ensureVectorIndexes");
+  ensureVectorIndexes(dimensions: number, recreateOnMismatch?: boolean): Promise<void> {
+    return vectorDdl.ensureVectorIndexes(dimensions, recreateOnMismatch);
   }
 }

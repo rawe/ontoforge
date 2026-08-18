@@ -1,5 +1,5 @@
 /**
- * Init DDL and `wipe()`.
+ * Init DDL, `wipe()`, and the vector-index lifecycle.
  *
  * `initSchema` runs the whole ten-table set — schema side and instance
  * side together — as one all-or-nothing transaction at adapter init.
@@ -13,9 +13,11 @@
  * with no backstop CHECKs. The `entity`/`relation` `type_key` columns get
  * no FK to the schema tables: deleting a type deliberately orphans its
  * instances. The `embedding` columns are dimensionless, so init is
- * provider-independent — the width lives only in the HNSW indexes (M4).
+ * provider-independent — the width lives only in the HNSW indexes, whose
+ * lifecycle is the second half of this module.
  */
 
+import type { Querier } from "./errors.js";
 import { withTransaction } from "./errors.js";
 
 /** Executed in order at adapter init, idempotent. */
@@ -192,13 +194,467 @@ export async function initSchema(): Promise<void> {
 export async function wipe(): Promise<void> {
   await withTransaction(async (querier) => {
     await querier.query(`TRUNCATE ${ALL_TABLES.join(", ")}`);
-    const result = await querier.query(
-      `SELECT indexname FROM pg_indexes
-       WHERE schemaname = current_schema() AND indexname LIKE 'vec\\_%'`,
-    );
-    for (const row of result.rows) {
-      const name = row["indexname"] as string;
-      await querier.query(`DROP INDEX IF EXISTS "${name.replaceAll('"', '""')}"`);
+    for (const name of await dynamicIndexNames(querier)) {
+      await dropIndex(querier, quoteIdentifier(name));
     }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Vector-index lifecycle
+// ---------------------------------------------------------------------------
+
+/*
+ * Every vector index is a cast-expression HNSW over the dimensionless
+ * `embedding` column — `(embedding::vector(D)) vector_cosine_ops`, cosine
+ * mirroring the reference adapter's similarity function. Because the
+ * column carries no width, there is no ALTER and no absent-then-added
+ * state: the column is always there, NULL until written, and the width
+ * lives only in the index. Queries must repeat the same cast expression
+ * or the planner ignores the index; the width for that cast comes from
+ * the reconciliation read below.
+ *
+ * Names: dynamic indexes are `vec_<table>_<id>`, where `<id>` is the
+ * 32-hex uuid (hyphens stripped) of the schema row that causes the index
+ * to exist — the `entity_type` row, or the property-definition row for a
+ * document property's chunks. The mapping is mechanically reversible in
+ * both directions, which is what makes the orphan sweep possible; index
+ * names are therefore never stored. The two full-table indexes are fixed
+ * objects outside the `vec_` prefix.
+ *
+ * Build mode is plain `CREATE INDEX`, never `CONCURRENTLY`: index DDL
+ * joins the surrounding transaction, and a failed or interrupted build
+ * leaves nothing behind — this engine has no failed-index state to sweep.
+ * Writers to the one table wait during a build; builds happen only on
+ * schema changes and provider setup.
+ */
+
+/** Cross-type entity search — full-table, fixed name. */
+const ENTITY_ALL_INDEX = "entity_embedding_all_idx";
+
+/** Saved-query descriptions — full-table, fixed name. */
+const SAVED_QUERY_INDEX = "saved_query_embedding_idx";
+
+/** The 32-hex form of a schema row's uuid: the reversible half of a name. */
+function indexUuid(rowId: string): string {
+  return rowId.replaceAll("-", "");
+}
+
+function entityIndexName(entityTypeId: string): string {
+  return `vec_entity_${indexUuid(entityTypeId)}`;
+}
+
+function chunkIndexName(propertyId: string): string {
+  return `vec_document_chunk_${indexUuid(propertyId)}`;
+}
+
+/** A key as a SQL literal. Keys reach DDL only here — DDL binds no
+ * parameters — and `KEY_PATTERN` already excludes quoting hazards, so
+ * this is defense in depth. */
+function literal(key: string): string {
+  return `'${key.replaceAll("'", "''")}'`;
+}
+
+/** A catalog-read index name as a quoted identifier (it never came from
+ * this module's naming rule, so nothing about it is assumed). */
+function quoteIdentifier(name: string): string {
+  return `"${name.replaceAll('"', '""')}"`;
+}
+
+/** The vector width for a cast expression. It is the only number this
+ * module interpolates into DDL, so it is checked at the seam. */
+function castWidth(dimensions: number): number {
+  if (!Number.isSafeInteger(dimensions) || dimensions <= 0) {
+    throw new Error(`Invalid embedding width: ${dimensions}`);
+  }
+  return dimensions;
+}
+
+function createHnsw(
+  indexName: string,
+  table: string,
+  dimensions: number,
+  predicate: string | null,
+): string {
+  const where = predicate === null ? "" : ` WHERE ${predicate}`;
+  return (
+    `CREATE INDEX IF NOT EXISTS ${indexName} ON ${table} ` +
+    `USING hnsw ((embedding::vector(${castWidth(dimensions)})) vector_cosine_ops)${where}`
+  );
+}
+
+async function dropIndex(querier: Querier, indexName: string): Promise<void> {
+  await querier.query(`DROP INDEX IF EXISTS ${indexName}`);
+}
+
+/**
+ * The width an existing index is built for, or null if it does not exist.
+ *
+ * Read from the index's own column type in the catalog — `format_type`
+ * over its `pg_attribute` row yields `vector(D)` for the cast expression,
+ * which is what `pg_get_indexdef` would show without any text parsing.
+ */
+async function existingIndexWidth(querier: Querier, indexName: string): Promise<number | null> {
+  const result = await querier.query(
+    `SELECT format_type(att.atttypid, att.atttypmod) AS coltype
+     FROM pg_attribute att
+     JOIN pg_class idx ON idx.oid = att.attrelid
+     JOIN pg_namespace nsp ON nsp.oid = idx.relnamespace
+     WHERE nsp.nspname = current_schema() AND idx.relkind = 'i'
+       AND idx.relname = $1 AND att.attnum = 1`,
+    [indexName],
+  );
+  const row = result.rows[0];
+  if (row === undefined) {
+    return null;
+  }
+  const match = /^vector\((\d+)\)$/.exec(row["coltype"] as string);
+  return match === null ? null : Number(match[1]);
+}
+
+/**
+ * Handle an existing index whose width no longer matches the model.
+ *
+ * An index fixes its width when it is created and a create-if-absent is a
+ * no-op against one that exists, so changing the embedding model leaves
+ * an index that rejects every vector the new model produces. On the
+ * startup and per-type create paths this only reports: dropping an index
+ * destroys the vectors it holds, and that is the operator's call. The
+ * rebuild path passes `recreateOnMismatch`, because there the drop is
+ * followed immediately by regeneration at the new width.
+ *
+ * Reports describe the index the way the API does — by entity type, by
+ * document property, or by search scope — never by its physical name.
+ */
+async function reconcileIndexWidth(
+  querier: Querier,
+  indexName: string,
+  describes: string,
+  dimensions: number,
+  recreateOnMismatch: boolean,
+): Promise<void> {
+  const existing = await existingIndexWidth(querier, indexName);
+  if (existing === null || existing === dimensions) {
+    return;
+  }
+
+  if (!recreateOnMismatch) {
+    console.warn(
+      `The semantic index for ${describes} holds ${existing}-dimensional ` +
+        `vectors, but the configured embedding model produces ${dimensions}. ` +
+        "Semantic search over it fails until the widths agree. Run " +
+        "POST /api/model/rebuild-embeddings to recreate it at the model's " +
+        "width and regenerate its vectors.",
+    );
+    return;
+  }
+
+  await dropIndex(querier, indexName);
+  console.info(
+    `Recreating the semantic index for ${describes} at ${dimensions} ` +
+      `dimensions (was ${existing}) to match the configured embedding model; ` +
+      "its vectors are regenerated by this rebuild.",
+  );
+}
+
+/** Reconcile the width of an index, then create it if absent. */
+async function ensureIndex(
+  querier: Querier,
+  indexName: string,
+  describes: string,
+  table: string,
+  predicate: string | null,
+  dimensions: number,
+  recreateOnMismatch: boolean,
+): Promise<void> {
+  await reconcileIndexWidth(querier, indexName, describes, dimensions, recreateOnMismatch);
+  await querier.query(createHnsw(indexName, table, dimensions, predicate));
+}
+
+/** The uuid of the `entity_type` row a key names, or null if it is gone. */
+async function entityTypeIdOf(querier: Querier, entityTypeKey: string): Promise<string | null> {
+  const result = await querier.query(`SELECT entity_type_id FROM entity_type WHERE key = $1`, [
+    entityTypeKey,
+  ]);
+  const row = result.rows[0];
+  return row === undefined ? null : (row["entity_type_id"] as string);
+}
+
+/** The uuid of the property-definition row a (type, property) pair names
+ * — 1:1 with the pair — or null if it is gone. */
+async function documentPropertyIdOf(
+  querier: Querier,
+  entityTypeKey: string,
+  propertyKey: string,
+): Promise<string | null> {
+  const result = await querier.query(
+    `SELECT p.property_id FROM property_def p
+     JOIN entity_type et ON et.entity_type_id = p.entity_type_id
+     WHERE et.key = $1 AND p.key = $2`,
+    [entityTypeKey, propertyKey],
+  );
+  const row = result.rows[0];
+  return row === undefined ? null : (row["property_id"] as string);
+}
+
+/** Every dynamically named index currently in the schema. */
+async function dynamicIndexNames(querier: Querier): Promise<string[]> {
+  const result = await querier.query(
+    `SELECT indexname FROM pg_indexes
+     WHERE schemaname = current_schema() AND indexname LIKE 'vec\\_%'`,
+  );
+  return result.rows.map((row) => row["indexname"] as string);
+}
+
+/**
+ * Drop every dynamic index whose uuid matches no schema row.
+ *
+ * This is the reverse direction of the naming rule: name → uuid → schema
+ * row. It collects the indexes of deleted types and document properties
+ * (whose drop hooks run after the row is gone, leaving the name
+ * underivable), import-regenerated ids, and the stale-predicate case — a
+ * re-created type key gets a fresh uuid, while the old index's
+ * `WHERE type_key = …` predicate would still match its rows.
+ */
+async function sweepOrphanIndexes(querier: Querier): Promise<void> {
+  const names = await dynamicIndexNames(querier);
+  if (names.length === 0) {
+    return;
+  }
+  const entityTypeIds = await querier.query(`SELECT entity_type_id FROM entity_type`);
+  const knownTypes = new Set(
+    entityTypeIds.rows.map((row) => indexUuid(row["entity_type_id"] as string)),
+  );
+  const propertyIds = await querier.query(`SELECT property_id FROM property_def`);
+  const knownProperties = new Set(
+    propertyIds.rows.map((row) => indexUuid(row["property_id"] as string)),
+  );
+
+  for (const name of names) {
+    const entity = /^vec_entity_([0-9a-f]{32})$/.exec(name);
+    if (entity !== null && knownTypes.has(entity[1]!)) {
+      continue;
+    }
+    const chunk = /^vec_document_chunk_([0-9a-f]{32})$/.exec(name);
+    if (chunk !== null && knownProperties.has(chunk[1]!)) {
+      continue;
+    }
+    await dropIndex(querier, quoteIdentifier(name));
+  }
+}
+
+/**
+ * The cross-type entity index. A fixed object with no port method of its
+ * own — the schema lifecycle never names it, so nothing above the port
+ * has anything to say about it.
+ */
+async function ensureCrossTypeIndex(
+  querier: Querier,
+  dimensions: number,
+  recreateOnMismatch: boolean,
+): Promise<void> {
+  await ensureIndex(
+    querier,
+    ENTITY_ALL_INDEX,
+    "search across all entity types",
+    "entity",
+    null,
+    dimensions,
+    recreateOnMismatch,
+  );
+}
+
+/** The saved-query description index. Ontology scoping is a plain
+ * query-time predicate, so the index needs no scoping of its own. */
+async function ensureSavedQueryIndex(
+  querier: Querier,
+  dimensions: number,
+  recreateOnMismatch: boolean,
+): Promise<void> {
+  await ensureIndex(
+    querier,
+    SAVED_QUERY_INDEX,
+    "saved-query descriptions",
+    "saved_query",
+    null,
+    dimensions,
+    recreateOnMismatch,
+  );
+}
+
+/**
+ * Create the vector index for one entity type.
+ *
+ * `filterProperties` is accepted and ignored: the index covers the cast
+ * expression alone, so it is vector-only either way. Semantic search
+ * composes with filters on every property regardless — they are ordinary
+ * predicates beside the vector scan, needing no declaration and no
+ * rebuild.
+ */
+export async function createVectorIndex(
+  entityTypeKey: string,
+  dimensions: number,
+  _filterProperties?: string[] | null,
+): Promise<void> {
+  await withTransaction(async (querier) => {
+    const entityTypeId = await entityTypeIdOf(querier, entityTypeKey);
+    if (entityTypeId === null) {
+      return;
+    }
+    await ensureIndex(
+      querier,
+      entityIndexName(entityTypeId),
+      `entity type '${entityTypeKey}'`,
+      "entity",
+      `type_key = ${literal(entityTypeKey)}`,
+      dimensions,
+      false,
+    );
+  });
+}
+
+/**
+ * Drop the vector index of one entity type.
+ *
+ * The name is re-derived from the schema row. Callers that have already
+ * deleted the row leave the index behind as an orphan — `ensureVectorIndexes`
+ * sweeps it on the next startup or rebuild.
+ */
+export async function dropVectorIndex(entityTypeKey: string): Promise<void> {
+  await withTransaction(async (querier) => {
+    const entityTypeId = await entityTypeIdOf(querier, entityTypeKey);
+    if (entityTypeId === null) {
+      return;
+    }
+    await dropIndex(querier, entityIndexName(entityTypeId));
+  });
+}
+
+/**
+ * Rebuild an entity type's vector index against its current properties.
+ *
+ * Width-only here: properties are never part of the index, so the rebuild
+ * has nothing to pick up from a property change and the call is a
+ * harmless no-op on those paths. The drop and the create share one
+ * transaction.
+ */
+export async function rebuildVectorIndex(
+  entityTypeKey: string,
+  dimensions: number,
+): Promise<void> {
+  await withTransaction(async (querier) => {
+    const entityTypeId = await entityTypeIdOf(querier, entityTypeKey);
+    if (entityTypeId === null) {
+      return;
+    }
+    const indexName = entityIndexName(entityTypeId);
+    await dropIndex(querier, indexName);
+    await querier.query(
+      createHnsw(indexName, "entity", dimensions, `type_key = ${literal(entityTypeKey)}`),
+    );
+  });
+}
+
+/** Create the chunk vector index of one document property. */
+export async function createDocumentVectorIndex(
+  entityTypeKey: string,
+  propertyKey: string,
+  dimensions: number,
+): Promise<void> {
+  await withTransaction(async (querier) => {
+    const propertyId = await documentPropertyIdOf(querier, entityTypeKey, propertyKey);
+    if (propertyId === null) {
+      return;
+    }
+    await ensureIndex(
+      querier,
+      chunkIndexName(propertyId),
+      `document property '${propertyKey}' on entity type '${entityTypeKey}'`,
+      "document_chunk",
+      `entity_type_key = ${literal(entityTypeKey)} AND property_key = ${literal(propertyKey)}`,
+      dimensions,
+      false,
+    );
+  });
+}
+
+/** Drop the chunk vector index of one document property. As with
+ * `dropVectorIndex`, a vanished property row leaves an orphan for the
+ * sweep. */
+export async function dropDocumentVectorIndex(
+  entityTypeKey: string,
+  propertyKey: string,
+): Promise<void> {
+  await withTransaction(async (querier) => {
+    const propertyId = await documentPropertyIdOf(querier, entityTypeKey, propertyKey);
+    if (propertyId === null) {
+      return;
+    }
+    await dropIndex(querier, chunkIndexName(propertyId));
+  });
+}
+
+/** Ensure the saved-query description index exists. */
+export async function ensureSavedQueryVectorIndex(dimensions: number): Promise<void> {
+  await withTransaction(async (querier) => {
+    await ensureSavedQueryIndex(querier, dimensions, false);
+  });
+}
+
+/**
+ * Ensure the whole vector-index inventory, in one all-or-nothing
+ * transaction: sweep the orphans, then reconcile and create the per-type
+ * indexes, the chunk indexes of every document property, the cross-type
+ * index, and the saved-query index.
+ *
+ * `recreateOnMismatch` is the rebuild path's flag — the one path allowed
+ * to repair a width mismatch, because it regenerates the vectors it drops.
+ */
+export async function ensureVectorIndexes(
+  dimensions: number,
+  recreateOnMismatch = false,
+): Promise<void> {
+  await withTransaction(async (querier) => {
+    await sweepOrphanIndexes(querier);
+
+    const entityTypes = await querier.query(
+      `SELECT entity_type_id, key FROM entity_type ORDER BY key`,
+    );
+    for (const row of entityTypes.rows) {
+      const key = row["key"] as string;
+      await ensureIndex(
+        querier,
+        entityIndexName(row["entity_type_id"] as string),
+        `entity type '${key}'`,
+        "entity",
+        `type_key = ${literal(key)}`,
+        dimensions,
+        recreateOnMismatch,
+      );
+    }
+
+    const documentProperties = await querier.query(
+      `SELECT p.property_id, p.key AS property_key, et.key AS entity_type_key
+       FROM property_def p
+       JOIN entity_type et ON et.entity_type_id = p.entity_type_id
+       WHERE p.data_type = 'document'
+       ORDER BY et.key, p.key`,
+    );
+    for (const row of documentProperties.rows) {
+      const entityTypeKey = row["entity_type_key"] as string;
+      const propertyKey = row["property_key"] as string;
+      await ensureIndex(
+        querier,
+        chunkIndexName(row["property_id"] as string),
+        `document property '${propertyKey}' on entity type '${entityTypeKey}'`,
+        "document_chunk",
+        `entity_type_key = ${literal(entityTypeKey)} AND property_key = ${literal(propertyKey)}`,
+        dimensions,
+        recreateOnMismatch,
+      );
+    }
+
+    await ensureCrossTypeIndex(querier, dimensions, recreateOnMismatch);
+    await ensureSavedQueryIndex(querier, dimensions, recreateOnMismatch);
   });
 }

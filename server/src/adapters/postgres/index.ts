@@ -6,12 +6,13 @@
  * text, physical naming, index DDL — lives inside this package and must
  * not be imported from anywhere else in the server.
  *
- * M1 skeleton state: lifecycle, init DDL, the error/transaction doors,
- * and `wipe()` are complete; store operations throw until they land
- * (M2.5 modeling, M3 runtime CRUD, M4 vectors and documents).
+ * Build state: lifecycle, init DDL, the error/transaction doors,
+ * `wipe()`, the modeling store, runtime CRUD, and the vector-index
+ * lifecycle are complete; the remaining runtime store operations throw
+ * until they land (M4 semantic search and document chunks, M5 OQL).
  */
 
-import { initSchema, wipe as wipeAll } from "./ddl.js";
+import { ensureVectorIndexes, initSchema, wipe as wipeAll } from "./ddl.js";
 import { closePool, initPool } from "./errors.js";
 import { PostgresModelingStore } from "./modelingStore.js";
 import { PostgresRuntimeStore } from "./runtimeStore.js";
@@ -28,12 +29,15 @@ export async function closeStores(): Promise<void> {
 }
 
 /**
- * Deliberate no-op until M4.2's index lifecycle lands, so the server
- * boots cleanly against PostgreSQL with an embedding provider
- * configured — the one sanctioned exception to "stubs throw".
+ * Ensure all vector indexes exist for the configured dimensions.
+ *
+ * The startup path: width mismatches are REPORTED and nothing is
+ * repaired — only the rebuild operation recreates a drifted index,
+ * immediately before regenerating the vectors that fill it
+ * (`docs/decisions.md#behaviour`).
  */
-export async function ensureSemanticIndexes(_dimensions: number): Promise<void> {
-  // No-op until M4.2.
+export async function ensureSemanticIndexes(dimensions: number): Promise<void> {
+  await ensureVectorIndexes(dimensions, false);
 }
 
 /** Delete all stored data. Test support only — never used by the app. */

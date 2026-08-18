@@ -15,5 +15,5 @@
  * anything but one SELECT, and every value is a bound parameter.
  */
 
-export { bindValues, compileOql, type Bind, type CompiledQuery } from "./compile.js";
-export { convertRows, type ColumnConversion } from "./conversion.js";
+export { bindValues, compileOql } from "./compile.js";
+export { convertRows } from "./conversion.js";

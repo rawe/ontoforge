@@ -35,7 +35,6 @@ import type {
 } from "../../../core/oql/generated/CypherParser.js";
 import { stripBackticks, type ValidatedQuery } from "../../../core/oql/index.js";
 import type { Row } from "../../../core/ports.js";
-import type { SchemaCacheValue } from "../../../runtime/schemaCache.js";
 import {
   carriedColumns,
   col,
@@ -148,7 +147,7 @@ class Compiler implements CompileState {
   stage: Stage = { from: [], where: [], scope: new Map() };
 
   constructor(
-    readonly schema: SchemaCacheValue,
+    readonly schema: ValidatedQuery["schema"],
     private readonly tokenStream: CommonTokenStream,
   ) {}
 

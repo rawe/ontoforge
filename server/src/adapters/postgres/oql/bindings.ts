@@ -15,7 +15,7 @@
  * expression walker both build on it through `CompileState`.
  */
 
-import type { SchemaCacheValue } from "../../../runtime/schemaCache.js";
+import type { ValidatedQuery } from "../../../core/oql/index.js";
 import type { ColumnConversion } from "./conversion.js";
 
 export type TableKind = "entity" | "relation";
@@ -125,7 +125,7 @@ export interface Stage {
  * machine: the open stage, the bind plan, and alias allocation.
  */
 export interface CompileState {
-  readonly schema: SchemaCacheValue;
+  readonly schema: ValidatedQuery["schema"];
   stage: Stage;
   /** Bind a literal value; returns its `$n` placeholder. */
   bindValue(value: unknown): string;

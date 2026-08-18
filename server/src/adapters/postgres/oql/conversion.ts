@@ -20,7 +20,7 @@
  */
 
 import type { Row } from "../../../core/ports.js";
-import type { SchemaCacheValue } from "../../../runtime/schemaCache.js";
+import type { ValidatedQuery } from "../../../core/oql/index.js";
 import type { TableBinding } from "./bindings.js";
 
 export type ColumnConversion =
@@ -32,7 +32,7 @@ export type ColumnConversion =
 /** The plan for a projected node or relationship: its type's declared
  * datetime properties, plus the two system timestamps. */
 export function objectConversion(
-  schema: SchemaCacheValue,
+  schema: ValidatedQuery["schema"],
   binding: TableBinding,
 ): ColumnConversion {
   const { kind, typeKey } = binding;

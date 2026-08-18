@@ -26,14 +26,24 @@
  * - The runtime `getFullSchema` (lens view) is one REPEATABLE READ
  *   transaction (M2.3's coherent-snapshot obligation).
  *
- * Vectors, document chunks and semantic search land at M4; `executeOql`
- * lands at M5.
+ * - Semantic search and the chunk primitives are M4's: the four search
+ *   paths go through `search.ts`'s vector-query door (iterative scan,
+ *   the index's own cast width, the pinned similarity), and the floor,
+ *   where the path has one, is applied here on the returned page.
+ *
+ * `executeOql` lands at M5.
  */
 
-import { toSql } from "pgvector";
+import { fromSql, toSql } from "pgvector";
 
 import type { FilterCondition, Row, RuntimeStore } from "../../core/ports.js";
 import type { PropertyDef } from "../../core/schemas.js";
+import {
+  chunkIndexNameOf,
+  entityIndexNameOf,
+  ENTITY_ALL_INDEX,
+  SAVED_QUERY_INDEX,
+} from "./ddl.js";
 import { runQuery, withTransaction, type Querier } from "./errors.js";
 import {
   buildEndpointClauses,
@@ -45,14 +55,29 @@ import { fromJson, toJson } from "./json.js";
 import { camelizeRow, isUuid } from "./rows.js";
 import { notImplemented } from "./notImplemented.js";
 import { ONTOLOGY_COLS, readTypesWithProperties, splitInclusions } from "./schemaRead.js";
+import {
+  distance,
+  minScoreFloor,
+  similarity,
+  vectorParams,
+  vectorSearch,
+} from "./search.js";
 
 type PropertyDefs = Record<string, PropertyDef>;
 
 const NO_DEFS: PropertyDefs = {};
 
-// Read column lists — `embedding` is deliberately absent from both.
+// Read column lists — `embedding` is deliberately absent from all three.
 const ENTITY_COLS = "id, type_key, props, created_at, updated_at";
 const RELATION_COLS = "id, type_key, from_id, to_id, props, created_at, updated_at";
+const CHUNK_COLS =
+  "id, entity_id, entity_type_key, property_key, chunk_index, start_char, char_length, text";
+
+/** Only rows the search indexes can hold. The reference adapter's vector
+ * indexes contain nothing without a vector, so an un-embedded row is
+ * invisible to search there; here the predicate says so explicitly,
+ * because a plan that does not use the index would otherwise see them. */
+const EMBEDDED = "embedding IS NOT NULL";
 
 /** One `entity` row → the port shape: system columns as underscore keys,
  * user properties spread from `props` (datetimes decoded per the defs). */
@@ -77,6 +102,21 @@ function relationRow(row: Row, propertyDefs: PropertyDefs): Row {
     fromEntityId: row.from_id,
     toEntityId: row.to_id,
     ...fromJson(row.props as Row, propertyDefs),
+  };
+}
+
+/** One `document_chunk` row → the port's chunk shape. Chunks carry no
+ * timestamps, and their ids are internal — never addressable. */
+function chunkRow(row: Row): Row {
+  return {
+    _id: row.id,
+    _entityId: row.entity_id,
+    _entityTypeKey: row.entity_type_key,
+    _propertyKey: row.property_key,
+    _index: row.chunk_index,
+    startChar: row.start_char,
+    charLength: row.char_length,
+    text: row.text,
   };
 }
 
@@ -299,20 +339,101 @@ export class PostgresRuntimeStore implements RuntimeStore {
   // Document chunks
   // ------------------------------------------------------------------
 
-  getChunkEmbeddingsForEntityProperty(): Promise<Record<string, number[]>> {
-    return notImplemented("getChunkEmbeddingsForEntityProperty");
+  /** The text→vector map behind chunk-embedding reuse: embedded chunks
+   * only, keyed by text (chunk texts of one property are distinct). The
+   * one port method that deliberately returns vectors. */
+  async getChunkEmbeddingsForEntityProperty(
+    entityId: string,
+    propertyKey: string,
+  ): Promise<Record<string, number[]>> {
+    if (!isUuid(entityId)) {
+      return {};
+    }
+    const result = await runQuery(
+      `SELECT text, embedding::text AS embedding FROM document_chunk
+       WHERE entity_id = $1 AND property_key = $2 AND ${EMBEDDED}`,
+      [entityId, propertyKey],
+    );
+    const map: Record<string, number[]> = {};
+    for (const row of result.rows) {
+      // `WHERE embedding IS NOT NULL` over a dense `vector` column: the
+      // parse can only yield the coordinate list.
+      map[row.text as string] = fromSql(row.embedding as string) as number[];
+    }
+    return map;
   }
 
-  deleteChunksForEntityProperty(): Promise<void> {
-    return notImplemented("deleteChunksForEntityProperty");
+  async deleteChunksForEntityProperty(entityId: string, propertyKey: string): Promise<void> {
+    if (!isUuid(entityId)) {
+      return;
+    }
+    await runQuery(`DELETE FROM document_chunk WHERE entity_id = $1 AND property_key = $2`, [
+      entityId,
+      propertyKey,
+    ]);
   }
 
-  createDocumentChunks(): Promise<void> {
-    return notImplemented("createDocumentChunks");
+  /**
+   * Write one batch of chunks — the service has already deleted what they
+   * replace, so this only inserts. The batch travels as one jsonb
+   * document expanded by `jsonb_to_recordset`, which keeps the statement
+   * single and its parameter count independent of the document's length.
+   * The three values shared by every chunk are bound once. An empty batch
+   * touches nothing.
+   */
+  async createDocumentChunks(
+    entityId: string,
+    entityTypeKey: string,
+    propertyKey: string,
+    chunks: Row[],
+  ): Promise<void> {
+    if (chunks.length === 0) {
+      return;
+    }
+    const batch = chunks.map((chunk) => {
+      // A chunk the provider could not embed arrives without the key and
+      // is stored without a vector, as the reference adapter stores it.
+      const vector = chunk._embedding as number[] | undefined;
+      return {
+        id: chunk._id,
+        chunk_index: chunk._index,
+        start_char: chunk.startChar,
+        char_length: chunk.charLength,
+        text: chunk.text,
+        embedding: vector === undefined ? null : toSql(vector),
+      };
+    });
+    await runQuery(
+      `INSERT INTO document_chunk (id, entity_id, entity_type_key, property_key,
+                                   chunk_index, start_char, char_length, text, embedding)
+       SELECT c.id, $1, $2, $3, c.chunk_index, c.start_char, c.char_length, c.text,
+              c.embedding::vector
+       FROM jsonb_to_recordset($4::jsonb) AS c(id uuid, chunk_index int, start_char int,
+                                               char_length int, text text, embedding text)`,
+      [entityId, entityTypeKey, propertyKey, JSON.stringify(batch)],
+    );
   }
 
-  searchDocumentChunks(): Promise<Row[]> {
-    return notImplemented("searchDocumentChunks");
+  /** One document property's chunks, ranked. The floor lives in the
+   * service for this path — the port method takes no `minScore`. */
+  async searchDocumentChunks(
+    entityTypeKey: string,
+    propertyKey: string,
+    queryEmbedding: number[],
+    limit: number,
+  ): Promise<Row[]> {
+    const params = vectorParams(queryEmbedding);
+    params.push(entityTypeKey, propertyKey, limit);
+    const rows = await vectorSearch(
+      (querier) => chunkIndexNameOf(querier, entityTypeKey, propertyKey),
+      queryEmbedding,
+      params,
+      (width) =>
+        `SELECT ${CHUNK_COLS}, ${similarity(width)} FROM document_chunk
+         WHERE entity_type_key = $2 AND property_key = $3 AND ${EMBEDDED}
+         ORDER BY ${distance(width)} LIMIT $4`,
+    );
+    return rows.map((row) => ({ chunk: chunkRow(row), score: row.score }));
   }
 
   /** Off-format ids are dropped from the batch (they can match no row);
@@ -341,16 +462,79 @@ export class PostgresRuntimeStore implements RuntimeStore {
   // Semantic search
   // ------------------------------------------------------------------
 
-  semanticSearch(): Promise<Row[]> {
-    return notImplemented("semanticSearch");
+  /**
+   * One entity type, ranked by similarity, on that type's partial index.
+   *
+   * Filters are M3.3's ordinary `WHERE` fragments beside the vector scan
+   * — every property of the type filters, whatever the index was created
+   * with, because the index holds the vector and nothing else.
+   */
+  async semanticSearch(
+    entityTypeKey: string,
+    propertyDefs: PropertyDefs,
+    queryEmbedding: number[],
+    limit: number,
+    minScore: number | null,
+    filters: FilterCondition[] | null = null,
+  ): Promise<Row[]> {
+    const params = vectorParams(queryEmbedding);
+    params.push(entityTypeKey);
+    const where = ["type_key = $2", EMBEDDED, ...buildFilterClauses(filters ?? [], params)];
+    params.push(limit);
+    const limitP = params.length;
+    const rows = await vectorSearch(
+      (querier) => entityIndexNameOf(querier, entityTypeKey),
+      queryEmbedding,
+      params,
+      (width) =>
+        `SELECT ${ENTITY_COLS}, ${similarity(width)} FROM entity
+         WHERE ${where.join(" AND ")}
+         ORDER BY ${distance(width)} LIMIT $${limitP}`,
+    );
+    return entityHits(rows, propertyDefs, minScore);
   }
 
-  semanticSearchAll(): Promise<Row[]> {
-    return notImplemented("semanticSearchAll");
+  /** Every entity type at once, on the full-table index. No property
+   * definitions cross this read, so datetime values stay the stored ISO
+   * text — as on `getEntity`. */
+  async semanticSearchAll(
+    queryEmbedding: number[],
+    limit: number,
+    minScore: number | null,
+  ): Promise<Row[]> {
+    const params = vectorParams(queryEmbedding);
+    params.push(limit);
+    const rows = await vectorSearch(
+      () => Promise.resolve(ENTITY_ALL_INDEX),
+      queryEmbedding,
+      params,
+      (width) =>
+        `SELECT ${ENTITY_COLS}, ${similarity(width)} FROM entity
+         WHERE ${EMBEDDED} ORDER BY ${distance(width)} LIMIT $2`,
+    );
+    return entityHits(rows, NO_DEFS, minScore);
   }
 
-  searchSavedQueries(): Promise<Row[]> {
-    return notImplemented("searchSavedQueries");
+  /** Saved-query descriptions for one lens. The lens is a plain
+   * query-time predicate: the index carries no scoping of its own. */
+  async searchSavedQueries(
+    queryEmbedding: number[],
+    ontologyKey: string,
+    limit: number,
+    minScore: number | null,
+  ): Promise<Row[]> {
+    const params = vectorParams(queryEmbedding);
+    params.push(ontologyKey, limit);
+    const rows = await vectorSearch(
+      () => Promise.resolve(SAVED_QUERY_INDEX),
+      queryEmbedding,
+      params,
+      (width) =>
+        `SELECT key, name, description, parameters, ${similarity(width)} FROM saved_query
+         WHERE ontology_key = $2 AND ${EMBEDDED}
+         ORDER BY ${distance(width)} LIMIT $3`,
+    );
+    return minScoreFloor(rows, minScore);
   }
 
   // ------------------------------------------------------------------
@@ -531,6 +715,14 @@ export class PostgresRuntimeStore implements RuntimeStore {
       propertyDefsByType,
     );
   }
+}
+
+/** Scored `entity` rows → the `{entity, score}` port shape, floored. */
+function entityHits(rows: Row[], propertyDefs: PropertyDefs, minScore: number | null): Row[] {
+  return minScoreFloor(
+    rows.map((row) => ({ entity: entityRow(row, propertyDefs), score: row.score })),
+    minScore,
+  );
 }
 
 /** `count(*)` over one FROM/WHERE fragment; bigint arrives as text. */

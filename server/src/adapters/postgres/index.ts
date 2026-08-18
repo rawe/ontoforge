@@ -7,9 +7,9 @@
  * not be imported from anywhere else in the server.
  *
  * Build state: lifecycle, init DDL, the error/transaction doors,
- * `wipe()`, the modeling store, runtime CRUD, and the vector-index
- * lifecycle are complete; the remaining runtime store operations throw
- * until they land (M4 semantic search and document chunks, M5 OQL).
+ * `wipe()`, the modeling store, runtime CRUD, the vector-index
+ * lifecycle, semantic search and the document chunks are complete;
+ * `executeOql` throws until the compiler lands (M5).
  */
 
 import { ensureVectorIndexes, initSchema, wipe as wipeAll } from "./ddl.js";

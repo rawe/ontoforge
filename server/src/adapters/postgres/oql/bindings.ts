@@ -63,6 +63,26 @@ export function carriedColumns(binding: TableBinding): readonly string[] {
   return binding.kind === "entity" ? ENTITY_COLUMNS : RELATION_COLUMNS;
 }
 
+/** An entity or relation type as the scoped schema holds it. */
+type TypeDefinition =
+  | ValidatedQuery["schema"]["entityTypes"][string]
+  | ValidatedQuery["schema"]["relationTypes"][string];
+
+/** The schema definition a binding names — the one place the two type
+ * tables are chosen between. Undefined for an element written without a
+ * label or relationship type (the untyped case), and for a key the lens
+ * no longer resolves. */
+export function typeDefinition(
+  schema: ValidatedQuery["schema"],
+  binding: TableBinding,
+): TypeDefinition | undefined {
+  const { kind, typeKey } = binding;
+  if (typeKey === null) {
+    return undefined;
+  }
+  return kind === "entity" ? schema.entityTypes[typeKey] : schema.relationTypes[typeKey];
+}
+
 /** One column of a table binding, in whichever form the binding is in. */
 export function col(binding: TableBinding, column: string): string {
   return binding.carried

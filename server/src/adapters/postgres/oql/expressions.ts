@@ -58,6 +58,7 @@ import { jsonAccessor } from "../filters.js";
 import {
   col,
   projectedObject,
+  typeDefinition,
   type Binding,
   type CompileState,
   type TableBinding,
@@ -269,7 +270,7 @@ export class ExpressionWalker {
     if (binding.typeKey === null) {
       pendingSurface("property access on an untyped pattern element");
     }
-    const definitions = propertiesOf(this.state, binding, binding.typeKey);
+    const definitions = propertiesOf(this.state, binding);
     const definition = definitions[property];
     if (definition === undefined) {
       reject(unknownPropertyMessage(binding.kind, binding.typeKey, property, definitions));
@@ -555,14 +556,9 @@ function quoteLiteral(text: string): string {
 
 function propertiesOf(
   state: CompileState,
-  binding: Binding & { kind: "entity" | "relation" },
-  typeKey: string,
+  binding: TableBinding,
 ): Record<string, PropertyDef> {
-  const definition =
-    binding.kind === "entity"
-      ? state.schema.entityTypes[typeKey]
-      : state.schema.relationTypes[typeKey];
-  return definition?.properties ?? {};
+  return typeDefinition(state.schema, binding)?.properties ?? {};
 }
 
 function unknownVariable(variable: string, scope: ReadonlyMap<string, Binding>): string {

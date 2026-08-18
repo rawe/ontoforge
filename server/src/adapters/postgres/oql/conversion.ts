@@ -21,7 +21,7 @@
 
 import type { Row } from "../../../core/ports.js";
 import type { ValidatedQuery } from "../../../core/oql/index.js";
-import type { TableBinding } from "./bindings.js";
+import { typeDefinition, type TableBinding } from "./bindings.js";
 
 export type ColumnConversion =
   | { kind: "entity" | "relation"; typeKey: string | null; datetimeKeys: readonly string[] }
@@ -36,13 +36,7 @@ export function objectConversion(
   binding: TableBinding,
 ): ColumnConversion {
   const { kind, typeKey } = binding;
-  const definition =
-    typeKey === null
-      ? undefined
-      : kind === "entity"
-        ? schema.entityTypes[typeKey]
-        : schema.relationTypes[typeKey];
-  const declared = Object.values(definition?.properties ?? {})
+  const declared = Object.values(typeDefinition(schema, binding)?.properties ?? {})
     .filter((property) => property.dataType === "datetime")
     .map((property) => property.key)
     .sort();

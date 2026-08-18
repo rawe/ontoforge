@@ -203,7 +203,7 @@ export async function wipe(): Promise<void> {
   await withTransaction(async (querier) => {
     await querier.query(`TRUNCATE ${ALL_TABLES.join(", ")}`);
     for (const name of await dynamicIndexNames(querier)) {
-      await dropIndex(querier, quoteIdentifier(name));
+      await dropIndex(querier, name);
     }
   });
 }
@@ -263,8 +263,9 @@ function literal(key: string): string {
   return `'${key.replaceAll("'", "''")}'`;
 }
 
-/** A catalog-read index name as a quoted identifier (it never came from
- * this module's naming rule, so nothing about it is assumed). */
+/** An index name as a quoted identifier. Applied to every name that
+ * reaches a statement, because some are read back from the catalog and
+ * nothing about those may be assumed. */
 function quoteIdentifier(name: string): string {
   return `"${name.replaceAll('"', '""')}"`;
 }
@@ -299,8 +300,11 @@ function createHnsw(
   );
 }
 
+/** Drop one index. Callers pass a plain name — derived from a schema row
+ * or read from the catalog, it makes no difference here — and the quoting
+ * happens once, at this seam. */
 async function dropIndex(querier: Querier, indexName: string): Promise<void> {
-  await querier.query(`DROP INDEX IF EXISTS ${indexName}`);
+  await querier.query(`DROP INDEX IF EXISTS ${quoteIdentifier(indexName)}`);
 }
 
 /**
@@ -473,7 +477,7 @@ async function sweepOrphanIndexes(querier: Querier): Promise<void> {
     if (chunk !== null && knownProperties.has(chunk[1]!)) {
       continue;
     }
-    await dropIndex(querier, quoteIdentifier(name));
+    await dropIndex(querier, name);
   }
 }
 

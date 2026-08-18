@@ -485,6 +485,38 @@ describe("the clause and expression matrix", () => {
       expect(body.results).toEqual([{ name: "Bob" }, { name: "Alice" }]);
     });
 
+    it("aggregates the rows a WITH ordered", async () => {
+      await seedGraph();
+      // The order *inside* a collected list is deliberately not asserted:
+      // aggregation collapses the rows the sort key belonged to, and SQL
+      // promises a subquery's ORDER BY only for the LIMIT it feeds.
+      const collected = await query(
+        "test_ontology",
+        "MATCH (p:person) WITH p ORDER BY p.age DESC LIMIT 2 RETURN collect(p.name) AS top",
+      );
+      const top = (collected.results as Row[])[0]!.top as string[];
+      expect([...top].sort()).toEqual(["Alice", "Bob"]);
+
+      const counted = await query(
+        "test_ontology",
+        "MATCH (p:person) WITH p ORDER BY p.age RETURN count(*) AS n",
+      );
+      expect(counted.results).toEqual([{ n: 3 }]);
+
+      const grouped = await query(
+        "test_ontology",
+        "MATCH (p:person)-[:works_for]->(c:company) WITH p, c ORDER BY p.age " +
+          "RETURN c.name AS company, count(*) AS n",
+      );
+      const rows = [...(grouped.results as Row[])].sort((l, r) =>
+        String(l.company).localeCompare(String(r.company)),
+      );
+      expect(rows).toEqual([
+        { company: "Acme", n: 2 },
+        { company: "Globex", n: 1 },
+      ]);
+    });
+
     it("expands RETURN * to every variable in scope, in one fixed order", async () => {
       await seedGraph();
       const body = await query(

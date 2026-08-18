@@ -141,7 +141,8 @@ class Compiler implements CompileState {
   private readonly walker = new ExpressionWalker(this);
   private anonymous = 0;
   /** The last stage's ordering, expressed over its CTE — re-emitted on
-   * the outermost SELECT when the RETURN carries no ordering of its own. */
+   * the outermost SELECT when the RETURN carries no ordering of its own
+   * and does not aggregate the rows the keys belong to. */
   private carriedOrder: OrderKey[] = [];
 
   stage: Stage = { from: [], where: [], scope: new Map() };
@@ -396,7 +397,14 @@ class Compiler implements CompileState {
     const select = items.map((item) => `${item.sql} AS ${quoteIdent(item.name)}`);
     const projectedNames = new Set(items.map((item) => item.name));
     const own = this.orderKeys(body, projectedNames);
-    let sql = this.statement(select, groupBy, own.length > 0 ? own : this.carriedOrder, body);
+    // A carried sort key is a column of the rows the projection reads. An
+    // aggregating projection collapses those rows, so the key is neither
+    // grouped nor aggregated and re-emitting it is invalid SQL — and row
+    // identity does not survive aggregation in Cypher either, so there is
+    // no ordering left to preserve. Only the RETURN's own keys apply.
+    const aggregating = items.some((item) => item.isAggregate);
+    const carried = aggregating ? [] : this.carriedOrder;
+    let sql = this.statement(select, groupBy, own.length > 0 ? own : carried, body);
     if (this.ctes.length > 0) {
       sql = `WITH ${this.ctes.join(",\n")}\n${sql}`;
     }

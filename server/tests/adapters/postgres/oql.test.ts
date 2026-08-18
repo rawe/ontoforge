@@ -613,6 +613,37 @@ describe("ordering and paging", () => {
     );
   });
 
+  it("drops the carried ordering when the RETURN aggregates", () => {
+    // Aggregation collapses the rows the sort key belonged to: the key is
+    // neither grouped nor aggregated, so re-emitting it is invalid SQL —
+    // and row identity does not survive aggregation in the reference
+    // adapter either.
+    expect(sql("MATCH (a:person) WITH a ORDER BY a.age DESC LIMIT 3 RETURN collect(a.name) AS top"))
+      .toBe(
+        [
+          "WITH s0 AS (",
+          "SELECT a.id AS a__id, a.type_key AS a__type_key, a.props AS a__props," +
+            " a.created_at AS a__created_at, a.updated_at AS a__updated_at," +
+            " (a.props->'age')::numeric AS __ord0",
+          "FROM entity a",
+          "WHERE a.type_key = $1",
+          "ORDER BY (a.props->'age')::numeric DESC",
+          "LIMIT 3",
+          ")",
+          "SELECT COALESCE(jsonb_agg(s0.a__props->'name')" +
+            " FILTER (WHERE s0.a__props->>'name' IS NOT NULL), '[]'::jsonb) AS top",
+          "FROM s0",
+        ].join("\n"),
+      );
+    expect(sql("MATCH (a:person) WITH a ORDER BY a.age RETURN count(*) AS n")).not.toContain(
+      "ORDER BY s0.__ord0",
+    );
+    // The grouped form: `__ord0` is in no GROUP BY either.
+    expect(
+      sql("MATCH (a:person) WITH a ORDER BY a.age RETURN a.name AS name, count(*) AS n"),
+    ).not.toContain("ORDER BY s0.__ord0");
+  });
+
   it("lets the RETURN's own ordering win over the carried one", () => {
     const emitted = sql("MATCH (a:person) WITH a ORDER BY a.age RETURN a.name ORDER BY a.name");
     expect(emitted).toContain("FROM s0\nORDER BY s0.a__props->>'name'");

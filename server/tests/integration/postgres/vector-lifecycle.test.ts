@@ -369,6 +369,25 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
       expect(indexes.has("entity_embedding_all_idx")).toBe(true);
     });
 
+    it("collects the chunk index of a property that is no longer a document", async () => {
+      const store = getModelingStore();
+      await store.ensureVectorIndexes(MODEL_WIDTH);
+      expect(await widthOf(chunkIndex)).toBe(MODEL_WIDTH);
+
+      // Staged directly: no port method converts a property's data type
+      // in place. The index is what makes the state interesting — the
+      // row survives, only its membership of the inventory does not.
+      await runQuery(`UPDATE property_def SET data_type = 'string' WHERE property_id = $1`, [
+        documentPropertyId,
+      ]);
+
+      await store.ensureVectorIndexes(MODEL_WIDTH);
+
+      const indexes = await catalog();
+      expect(indexes.has(chunkIndex)).toBe(false);
+      expect(indexes.has(entityIndex)).toBe(true);
+    });
+
     it("leaves the fixed indexes alone", async () => {
       await getModelingStore().ensureVectorIndexes(MODEL_WIDTH);
       await getModelingStore().ensureVectorIndexes(MODEL_WIDTH);

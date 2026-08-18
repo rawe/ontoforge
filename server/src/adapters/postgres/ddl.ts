@@ -488,6 +488,20 @@ export async function chunkIndexNameOf(
   return propertyId === null ? null : chunkIndexName(propertyId);
 }
 
+/**
+ * The rows a chunk index exists for: document properties owned by an
+ * entity type.
+ *
+ * Shared verbatim by the create loop and the orphan sweep, because the
+ * two must agree on exactly one set. Read wider by the sweep, a property
+ * that stopped being a document keeps its index forever — never
+ * recreated, never collected; read narrower, the sweep drops indexes the
+ * inventory just built.
+ */
+const DOCUMENT_PROPERTY_ROWS = `FROM property_def p
+     JOIN entity_type et ON et.entity_type_id = p.entity_type_id
+     WHERE p.data_type = 'document'`;
+
 /** Every dynamically named index currently in the schema. */
 async function dynamicIndexNames(querier: Querier): Promise<string[]> {
   const result = await querier.query(
@@ -506,6 +520,10 @@ async function dynamicIndexNames(querier: Querier): Promise<string[]> {
  * underivable), import-regenerated ids, and the stale-predicate case — a
  * re-created type key gets a fresh uuid, while the old index's
  * `WHERE type_key = …` predicate would still match its rows.
+ *
+ * "Matches a schema row" means the inventory's row, not any row: a
+ * property that is no longer a document is no longer in the inventory,
+ * so its chunk index is an orphan like any other.
  */
 async function sweepOrphanIndexes(querier: Querier): Promise<void> {
   const names = await dynamicIndexNames(querier);
@@ -516,7 +534,7 @@ async function sweepOrphanIndexes(querier: Querier): Promise<void> {
   const knownTypes = new Set(
     entityTypeIds.rows.map((row) => indexUuid(row["entity_type_id"] as string)),
   );
-  const propertyIds = await querier.query(`SELECT property_id FROM property_def`);
+  const propertyIds = await querier.query(`SELECT p.property_id ${DOCUMENT_PROPERTY_ROWS}`);
   const knownProperties = new Set(
     propertyIds.rows.map((row) => indexUuid(row["property_id"] as string)),
   );
@@ -672,10 +690,8 @@ export async function ensureVectorIndexes(
 
     const documentProperties = await querier.query(
       `SELECT p.property_id, p.key AS property_key, et.key AS entity_type_key
-       FROM property_def p
-       JOIN entity_type et ON et.entity_type_id = p.entity_type_id
-       WHERE p.data_type = 'document'
-       ORDER BY et.key, p.key`,
+     ${DOCUMENT_PROPERTY_ROWS}
+     ORDER BY et.key, p.key`,
     );
     for (const row of documentProperties.rows) {
       await ensureIndex(

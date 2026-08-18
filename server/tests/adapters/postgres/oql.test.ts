@@ -378,10 +378,15 @@ describe("WITH", () => {
     );
   });
 
-  it("groups by every non-aggregate projection item", () => {
+  it("groups by every non-aggregate projection item, in both its forms", () => {
+    // The sort form of a grouped property must itself be a grouping key
+    // — `ORDER BY a.name` reads the cast, not the projection form.
     expect(sql("MATCH (a:person) WITH a.name AS n, count(*) AS c RETURN n, c")).toContain(
-      "GROUP BY a.props->'name'",
+      "GROUP BY a.props->'name', a.props->>'name'",
     );
+    expect(
+      sql("MATCH (a:person) RETURN a.name AS n, count(*) AS c ORDER BY a.name"),
+    ).toContain("GROUP BY a.props->'name', a.props->>'name'\nORDER BY a.props->>'name'");
   });
 
   it("re-matches a carried variable off the CTE columns", () => {
@@ -562,6 +567,37 @@ describe("ordering and paging", () => {
     expect(sql("MATCH (a:person) RETURN a.name AS n ORDER BY a.age")).toContain(
       "ORDER BY (a.props->'age')::numeric",
     );
+  });
+
+  it("re-emits a WITH's ordering on the outermost SELECT", () => {
+    expect(sql("MATCH (a:person) WITH a ORDER BY a.age DESC LIMIT 2 RETURN a.name")).toBe(
+      [
+        "WITH s0 AS (",
+        "SELECT a.id AS a__id, a.type_key AS a__type_key, a.props AS a__props," +
+          " a.created_at AS a__created_at, a.updated_at AS a__updated_at," +
+          " (a.props->'age')::numeric AS __ord0",
+        "FROM entity a",
+        "WHERE a.type_key = $1",
+        "ORDER BY (a.props->'age')::numeric DESC",
+        "LIMIT 2",
+        ")",
+        "SELECT s0.a__props->'name' AS \"a.name\"",
+        "FROM s0",
+        "ORDER BY s0.__ord0 DESC",
+      ].join("\n"),
+    );
+  });
+
+  it("reaches a WITH's ordering through the alias when it has one", () => {
+    expect(sql("MATCH (a:person) WITH a.name AS n ORDER BY n RETURN n")).toContain(
+      "FROM s0\nORDER BY s0.n",
+    );
+  });
+
+  it("lets the RETURN's own ordering win over the carried one", () => {
+    const emitted = sql("MATCH (a:person) WITH a ORDER BY a.age RETURN a.name ORDER BY a.name");
+    expect(emitted).toContain("FROM s0\nORDER BY s0.a__props->>'name'");
+    expect(emitted).not.toContain("__ord0 DESC");
   });
 
   it("pages on a $parameter, marking the bind for the value check", () => {

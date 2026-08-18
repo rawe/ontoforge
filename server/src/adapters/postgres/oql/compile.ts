@@ -112,11 +112,23 @@ interface ProjectedItem {
   name: string;
   /** The projection form — what the SELECT list carries. */
   sql: string;
+  /** The predicate and sort form, where it differs from the projection
+   * form (a property access carries its cast there). */
+  sortSql?: string;
   isAggregate: boolean;
   dataType: string | null;
   binding?: TableBinding;
   /** An explicit conversion plan the expression already knows. */
   conversion?: ColumnConversion;
+}
+
+/** One ORDER BY key: its SQL, its direction, and the output alias it
+ * names where it names one (that alias is how the next stage reaches
+ * it). */
+interface OrderKey {
+  sql: string;
+  descending: boolean;
+  alias: string | null;
 }
 
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -128,6 +140,9 @@ class Compiler implements CompileState {
   private readonly aliases = new Set<string>();
   private readonly walker = new ExpressionWalker(this);
   private anonymous = 0;
+  /** The last stage's ordering, expressed over its CTE — re-emitted on
+   * the outermost SELECT when the RETURN carries no ordering of its own. */
+  private carriedOrder: OrderKey[] = [];
 
   stage: Stage = { from: [], where: [], scope: new Map() };
 
@@ -259,6 +274,7 @@ class Compiler implements CompileState {
             ? this.verbatim(item.expression())
             : stripBackticks(aliasCtx.getText()),
         sql: compiled.raw,
+        sortSql: compiled.sql,
         isAggregate: compiled.isAggregate,
         dataType: compiled.dataType,
         binding: compiled.binding,
@@ -277,7 +293,14 @@ class Compiler implements CompileState {
         // key alone would do, but PostgreSQL only infers functional
         // dependency for a base table, never for a CTE.
         if (item.binding === undefined) {
+          // Both forms of the same property: a grouped property must
+          // stay a grouping key when ORDER BY or WHERE reads it through
+          // its cast, and the two forms determine each other, so the
+          // groups are the same ones either way.
           groupBy.push(item.sql);
+          if (item.sortSql !== undefined && item.sortSql !== item.sql) {
+            groupBy.push(item.sortSql);
+          }
         } else {
           for (const column of carriedColumns(item.binding)) {
             groupBy.push(col(item.binding, column));
@@ -345,7 +368,25 @@ class Compiler implements CompileState {
     }
 
     const projectedNames = new Set(items.map((item) => item.name));
-    this.ctes.push(`${name} AS (\n${this.statement(select, groupBy, body, projectedNames)}\n)`);
+    const keys = this.orderKeys(body, projectedNames);
+    // Neo4j preserves the pipeline's last ordering all the way out, but
+    // SQL does not promise a CTE's order survives the outer SELECT — so
+    // every sort key is carried out of the stage (an output column of
+    // its own where it is an expression) for the RETURN to re-order on.
+    this.carriedOrder = keys.map((key, index) => {
+      if (key.alias !== null) {
+        return {
+          sql: `${name}.${quoteIdent(key.alias)}`,
+          descending: key.descending,
+          alias: null,
+        };
+      }
+      const column = `__ord${index}`;
+      select.push(`${key.sql} AS ${column}`);
+      return { sql: `${name}.${column}`, descending: key.descending, alias: null };
+    });
+
+    this.ctes.push(`${name} AS (\n${this.statement(select, groupBy, keys, body)}\n)`);
     this.stage = { from: [name], where: [], scope };
   }
 
@@ -354,7 +395,8 @@ class Compiler implements CompileState {
     const { items, groupBy } = this.projection(body);
     const select = items.map((item) => `${item.sql} AS ${quoteIdent(item.name)}`);
     const projectedNames = new Set(items.map((item) => item.name));
-    let sql = this.statement(select, groupBy, body, projectedNames);
+    const own = this.orderKeys(body, projectedNames);
+    let sql = this.statement(select, groupBy, own.length > 0 ? own : this.carriedOrder, body);
     if (this.ctes.length > 0) {
       sql = `WITH ${this.ctes.join(",\n")}\n${sql}`;
     }
@@ -371,8 +413,8 @@ class Compiler implements CompileState {
   private statement(
     select: string[],
     groupBy: string[],
+    order: OrderKey[],
     body: ProjectionBodyContext,
-    projectedNames: Set<string>,
   ): string {
     const lines = [`SELECT ${select.join(", ")}`, `FROM ${this.stage.from.join("\n")}`];
     if (this.stage.where.length > 0) {
@@ -381,21 +423,8 @@ class Compiler implements CompileState {
     if (groupBy.length > 0) {
       lines.push(`GROUP BY ${groupBy.join(", ")}`);
     }
-
-    const order = body.orderSt();
-    if (order !== null) {
-      const keys = order.orderItem().map((item) => {
-        const text = this.verbatim(item.expression());
-        // A sort key naming an output alias of this very projection is
-        // not an expression to walk — SQL resolves a bare output name in
-        // ORDER BY against the SELECT list, exactly as Cypher does.
-        const key =
-          IDENTIFIER.test(text) && projectedNames.has(text) && !this.stage.scope.has(text)
-            ? quoteIdent(text)
-            : this.walker.compile(item.expression()).sql;
-        const descending = item.DESC() !== null || item.DESCENDING() !== null;
-        return descending ? `${key} DESC` : key;
-      });
+    if (order.length > 0) {
+      const keys = order.map((key) => (key.descending ? `${key.sql} DESC` : key.sql));
       lines.push(`ORDER BY ${keys.join(", ")}`);
     }
     // LIMIT before OFFSET is the PostgreSQL convention; the two clauses
@@ -409,6 +438,27 @@ class Compiler implements CompileState {
       lines.push(`OFFSET ${this.pagingOperand(skip.expression())}`);
     }
     return lines.join("\n");
+  }
+
+  /** The sort keys of one projection body, compiled in the stage that
+   * owns them. A key naming an output alias of this very projection is
+   * not an expression to walk — SQL resolves a bare output name in ORDER
+   * BY against the SELECT list, exactly as Cypher does. */
+  private orderKeys(body: ProjectionBodyContext, projectedNames: Set<string>): OrderKey[] {
+    const order = body.orderSt();
+    if (order === null) {
+      return [];
+    }
+    return order.orderItem().map((item) => {
+      const text = this.verbatim(item.expression());
+      const isAlias =
+        IDENTIFIER.test(text) && projectedNames.has(text) && !this.stage.scope.has(text);
+      return {
+        sql: isAlias ? quoteIdent(text) : this.walker.compile(item.expression()).sql,
+        descending: item.DESC() !== null || item.DESCENDING() !== null,
+        alias: isAlias ? text : null,
+      };
+    });
   }
 
   /** A non-negative integer literal (inlined — it carries no user text)

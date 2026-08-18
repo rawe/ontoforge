@@ -87,21 +87,6 @@ async function search(limit: number, minScore: number | null): Promise<Row[]> {
   return getRuntimeStore().semanticSearch(TYPE_KEY, DEFS, query(), limit, minScore);
 }
 
-/**
- * Wait until every stored vector is retrievable. A vector index is
- * populated asynchronously on some backends and the port exposes no
- * readiness signal, so the first complete page is what "ready" means.
- */
-async function waitForVectors(): Promise<void> {
-  const deadline = Date.now() + 15_000;
-  for (;;) {
-    if ((await search(CASES.length, null)).length === CASES.length || Date.now() > deadline) {
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-}
-
 describe.skipIf(!ollamaUp)("semantic-search score", () => {
   beforeAll(async () => {
     await initStores();
@@ -135,8 +120,9 @@ describe.skipIf(!ollamaUp)("semantic-search score", () => {
         pattern(Math.round(testCase.plus * width), testCase.scale),
       );
     }
-
-    await waitForVectors();
+    // Nothing to wait for: a write that has returned is searchable. The
+    // port commits the vector with the entity, and every backend indexes
+    // it in that same transaction.
   });
 
   afterAll(async () => {

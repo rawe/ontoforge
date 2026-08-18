@@ -287,15 +287,71 @@ export function castExpression(width: number): string {
   return `embedding::vector(${width})`;
 }
 
-function createHnsw(
-  indexName: string,
-  table: string,
-  dimensions: number,
-  predicate: string | null,
-): string {
-  const where = predicate === null ? "" : ` WHERE ${predicate}`;
+/**
+ * One index of the inventory, minus its width: what it is called, what
+ * the API calls it, and what it covers.
+ *
+ * The four members are one fact each and always travel together — every
+ * one of them is derivable from the schema row that causes the index to
+ * exist plus the keys that row carries, so they are derived once, here,
+ * and never written out at a call site.
+ */
+interface IndexSpec {
+  name: string;
+  describes: string;
+  table: string;
+  predicate: string | null;
+}
+
+/** The index of one entity type. */
+function entityIndexSpec(entityTypeId: string, entityTypeKey: string): IndexSpec {
+  return {
+    name: entityIndexName(entityTypeId),
+    describes: entityTypeScope(entityTypeKey),
+    table: "entity",
+    predicate: `type_key = ${literal(entityTypeKey)}`,
+  };
+}
+
+/** The chunk index of one document property. */
+function chunkIndexSpec(
+  propertyId: string,
+  entityTypeKey: string,
+  propertyKey: string,
+): IndexSpec {
+  return {
+    name: chunkIndexName(propertyId),
+    describes: documentPropertyScope(entityTypeKey, propertyKey),
+    table: "document_chunk",
+    predicate:
+      `entity_type_key = ${literal(entityTypeKey)} ` +
+      `AND property_key = ${literal(propertyKey)}`,
+  };
+}
+
+/** Cross-type entity search: no schema row, no predicate — and no port
+ * method of its own, since the schema lifecycle never names it and
+ * nothing above the port has anything to say about it. */
+const CROSS_TYPE_SPEC: IndexSpec = {
+  name: ENTITY_ALL_INDEX,
+  describes: ALL_ENTITY_TYPES_SCOPE,
+  table: "entity",
+  predicate: null,
+};
+
+/** Saved-query descriptions. Ontology scoping is a plain query-time
+ * predicate, so the index needs no scoping of its own. */
+const SAVED_QUERY_SPEC: IndexSpec = {
+  name: SAVED_QUERY_INDEX,
+  describes: SAVED_QUERY_SCOPE,
+  table: "saved_query",
+  predicate: null,
+};
+
+function createHnsw(spec: IndexSpec, dimensions: number): string {
+  const where = spec.predicate === null ? "" : ` WHERE ${spec.predicate}`;
   return (
-    `CREATE INDEX IF NOT EXISTS ${indexName} ON ${table} ` +
+    `CREATE INDEX IF NOT EXISTS ${spec.name} ON ${spec.table} ` +
     `USING hnsw ((${castExpression(dimensions)}) vector_cosine_ops)${where}`
   );
 }
@@ -375,15 +431,12 @@ async function reconcileIndexWidth(
 /** Reconcile the width of an index, then create it if absent. */
 async function ensureIndex(
   querier: Querier,
-  indexName: string,
-  describes: string,
-  table: string,
-  predicate: string | null,
+  spec: IndexSpec,
   dimensions: number,
   recreateOnMismatch: boolean,
 ): Promise<void> {
-  await reconcileIndexWidth(querier, indexName, describes, dimensions, recreateOnMismatch);
-  await querier.query(createHnsw(indexName, table, dimensions, predicate));
+  await reconcileIndexWidth(querier, spec.name, spec.describes, dimensions, recreateOnMismatch);
+  await querier.query(createHnsw(spec, dimensions));
 }
 
 /** The uuid of the `entity_type` row a key names, or null if it is gone. */
@@ -482,45 +535,6 @@ async function sweepOrphanIndexes(querier: Querier): Promise<void> {
 }
 
 /**
- * The cross-type entity index. A fixed object with no port method of its
- * own — the schema lifecycle never names it, so nothing above the port
- * has anything to say about it.
- */
-async function ensureCrossTypeIndex(
-  querier: Querier,
-  dimensions: number,
-  recreateOnMismatch: boolean,
-): Promise<void> {
-  await ensureIndex(
-    querier,
-    ENTITY_ALL_INDEX,
-    ALL_ENTITY_TYPES_SCOPE,
-    "entity",
-    null,
-    dimensions,
-    recreateOnMismatch,
-  );
-}
-
-/** The saved-query description index. Ontology scoping is a plain
- * query-time predicate, so the index needs no scoping of its own. */
-async function ensureSavedQueryIndex(
-  querier: Querier,
-  dimensions: number,
-  recreateOnMismatch: boolean,
-): Promise<void> {
-  await ensureIndex(
-    querier,
-    SAVED_QUERY_INDEX,
-    SAVED_QUERY_SCOPE,
-    "saved_query",
-    null,
-    dimensions,
-    recreateOnMismatch,
-  );
-}
-
-/**
  * Create the vector index for one entity type.
  *
  * `filterProperties` is accepted and ignored: the index covers the cast
@@ -539,15 +553,7 @@ export async function createVectorIndex(
     if (entityTypeId === null) {
       return;
     }
-    await ensureIndex(
-      querier,
-      entityIndexName(entityTypeId),
-      entityTypeScope(entityTypeKey),
-      "entity",
-      `type_key = ${literal(entityTypeKey)}`,
-      dimensions,
-      false,
-    );
+    await ensureIndex(querier, entityIndexSpec(entityTypeId, entityTypeKey), dimensions, false);
   });
 }
 
@@ -585,11 +591,11 @@ export async function rebuildVectorIndex(
     if (entityTypeId === null) {
       return;
     }
-    const indexName = entityIndexName(entityTypeId);
-    await dropIndex(querier, indexName);
-    await querier.query(
-      createHnsw(indexName, "entity", dimensions, `type_key = ${literal(entityTypeKey)}`),
-    );
+    const spec = entityIndexSpec(entityTypeId, entityTypeKey);
+    await dropIndex(querier, spec.name);
+    // Not `ensureIndex`: the index is gone, so there is nothing left to
+    // reconcile — only a catalog read that could answer nothing.
+    await querier.query(createHnsw(spec, dimensions));
   });
 }
 
@@ -606,10 +612,7 @@ export async function createDocumentVectorIndex(
     }
     await ensureIndex(
       querier,
-      chunkIndexName(propertyId),
-      documentPropertyScope(entityTypeKey, propertyKey),
-      "document_chunk",
-      `entity_type_key = ${literal(entityTypeKey)} AND property_key = ${literal(propertyKey)}`,
+      chunkIndexSpec(propertyId, entityTypeKey, propertyKey),
       dimensions,
       false,
     );
@@ -635,7 +638,7 @@ export async function dropDocumentVectorIndex(
 /** Ensure the saved-query description index exists. */
 export async function ensureSavedQueryVectorIndex(dimensions: number): Promise<void> {
   await withTransaction(async (querier) => {
-    await ensureSavedQueryIndex(querier, dimensions, false);
+    await ensureIndex(querier, SAVED_QUERY_SPEC, dimensions, false);
   });
 }
 
@@ -659,13 +662,9 @@ export async function ensureVectorIndexes(
       `SELECT entity_type_id, key FROM entity_type ORDER BY key`,
     );
     for (const row of entityTypes.rows) {
-      const key = row["key"] as string;
       await ensureIndex(
         querier,
-        entityIndexName(row["entity_type_id"] as string),
-        entityTypeScope(key),
-        "entity",
-        `type_key = ${literal(key)}`,
+        entityIndexSpec(row["entity_type_id"] as string, row["key"] as string),
         dimensions,
         recreateOnMismatch,
       );
@@ -679,20 +678,19 @@ export async function ensureVectorIndexes(
        ORDER BY et.key, p.key`,
     );
     for (const row of documentProperties.rows) {
-      const entityTypeKey = row["entity_type_key"] as string;
-      const propertyKey = row["property_key"] as string;
       await ensureIndex(
         querier,
-        chunkIndexName(row["property_id"] as string),
-        documentPropertyScope(entityTypeKey, propertyKey),
-        "document_chunk",
-        `entity_type_key = ${literal(entityTypeKey)} AND property_key = ${literal(propertyKey)}`,
+        chunkIndexSpec(
+          row["property_id"] as string,
+          row["entity_type_key"] as string,
+          row["property_key"] as string,
+        ),
         dimensions,
         recreateOnMismatch,
       );
     }
 
-    await ensureCrossTypeIndex(querier, dimensions, recreateOnMismatch);
-    await ensureSavedQueryIndex(querier, dimensions, recreateOnMismatch);
+    await ensureIndex(querier, CROSS_TYPE_SPEC, dimensions, recreateOnMismatch);
+    await ensureIndex(querier, SAVED_QUERY_SPEC, dimensions, recreateOnMismatch);
   });
 }

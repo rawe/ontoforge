@@ -703,15 +703,15 @@ describe("lists, maps and membership", () => {
 
   it("compiles IN as containment with Cypher's three-valued outcome", () => {
     expect(sql("MATCH (a:person) WHERE a.name IN ['Ada', 'Bob'] RETURN a.name")).toContain(
-      "WHERE a.type_key = $1 AND CASE WHEN $2::jsonb @> a.props->'name' THEN true" +
-        " WHEN a.props->'name' IS NULL OR $2::jsonb IS NULL" +
-        " OR $2::jsonb @> 'null'::jsonb THEN NULL ELSE false END",
+      "WHERE a.type_key = $1 AND CASE WHEN ($2::jsonb) @> (a.props->'name') THEN true" +
+        " WHEN (a.props->'name') IS NULL OR ($2::jsonb) IS NULL" +
+        " OR ($2::jsonb) @> 'null'::jsonb THEN NULL ELSE false END",
     );
   });
 
   it("takes a list parameter as one JSON-encoded bind, and no other", () => {
     const compiled = compile("MATCH (a:person) WHERE a._id IN $ids RETURN a.name");
-    expect(compiled.sql).toContain("$2::jsonb @> to_jsonb(a.id::text)");
+    expect(compiled.sql).toContain("($2::jsonb) @> (to_jsonb(a.id::text))");
     expect(compiled.binds).toEqual([
       { kind: "value", value: "person" },
       { kind: "param", name: "ids", json: true },

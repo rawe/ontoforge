@@ -286,10 +286,15 @@ export class ExpressionWalker {
    * miss over a null-free list is false.
    */
   private membership(value: CompiledExpr, list: CompiledExpr): CompiledExpr {
+    // Both operands are parenthesized: PostgreSQL gives every operator
+    // outside its built-in set one flat precedence, so `a @> b->'k'`
+    // would associate left into `(a @> b)->'k'`.
+    const haystack = `(${list.json()})`;
+    const needle = `(${value.json()})`;
     return scalar(
-      `CASE WHEN ${list.json()} @> ${value.json()} THEN true` +
-        ` WHEN ${value.json()} IS NULL OR ${list.json()} IS NULL` +
-        ` OR ${list.json()} @> 'null'::jsonb THEN NULL` +
+      `CASE WHEN ${haystack} @> ${needle} THEN true` +
+        ` WHEN ${needle} IS NULL OR ${haystack} IS NULL` +
+        ` OR ${haystack} @> 'null'::jsonb THEN NULL` +
         ` ELSE false END`,
       "boolean",
     );

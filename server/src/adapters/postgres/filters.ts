@@ -32,23 +32,33 @@ const OPERATORS: Record<Exclude<FilterCondition["op"], "contains">, string> = {
   lte: "<=",
 };
 
-/** The typed jsonb accessor for a data type, with the key bound at the
- * given placeholder (the encoding table's SQL read-back column). */
-function accessor(dataType: string, keyPlaceholder: number): string {
+/**
+ * The typed jsonb accessor for a data type — the encoding table's SQL
+ * read-back form, in one place. `container` is the jsonb column
+ * expression and `key` the SQL for the property key: a bound placeholder
+ * here at the port, an inlined schema key in the OQL compiler.
+ */
+export function jsonAccessor(dataType: string, container: string, key: string): string {
   switch (dataType) {
     case "integer":
-      return `(props->$${keyPlaceholder})::numeric`;
+      return `(${container}->${key})::numeric`;
     case "float":
-      return `(props->$${keyPlaceholder})::float8`;
+      return `(${container}->${key})::float8`;
     case "boolean":
-      return `(props->$${keyPlaceholder})::boolean`;
+      return `(${container}->${key})::boolean`;
     case "date":
-      return `(props->>$${keyPlaceholder})::date`;
+      return `(${container}->>${key})::date`;
     case "datetime":
-      return `(props->>$${keyPlaceholder})::timestamptz`;
+      return `(${container}->>${key})::timestamptz`;
     default: // string, document — text under the default collation
-      return `props->>$${keyPlaceholder}`;
+      return `${container}->>${key}`;
   }
+}
+
+/** The accessor over this module's own `props` column, key bound at the
+ * given placeholder. */
+function accessor(dataType: string, keyPlaceholder: number): string {
+  return jsonAccessor(dataType, "props", `$${keyPlaceholder}`);
 }
 
 /** Append one value to the params array, returning its placeholder number. */

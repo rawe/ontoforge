@@ -6,10 +6,10 @@
  * text, physical naming, index DDL — lives inside this package and must
  * not be imported from anywhere else in the server.
  *
- * Build state: lifecycle, init DDL, the error/transaction doors,
- * `wipe()`, the modeling store, runtime CRUD, the vector-index
- * lifecycle, semantic search and the document chunks are complete;
- * `executeOql` throws until the compiler lands (M5).
+ * Build state: complete — lifecycle, init DDL, the error/transaction
+ * doors, `wipe()`, the modeling store, runtime CRUD, the vector-index
+ * lifecycle, semantic search, the document chunks, and the OQL→SQL
+ * compiler behind `executeOql`.
  */
 
 import { ensureVectorIndexes, initSchema, wipe as wipeAll } from "./ddl.js";

@@ -8,9 +8,8 @@
  * of the two lines refused.
  *
  * `pendingSurface` is not a user-facing refusal at all: it names a
- * construct the validator admits and this compiler does not emit yet, so
- * the remaining work is greppable and never a silently wrong answer (the
- * mirror of the store's `notImplemented` stub).
+ * construct the validator admits and this compiler does not emit, so the
+ * gap is greppable and never a silently wrong answer.
  */
 
 import { ValidationError } from "../../../core/exceptions.js";

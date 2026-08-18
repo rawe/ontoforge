@@ -31,11 +31,14 @@
  *   the index's own cast width, the pinned similarity), and the floor,
  *   where the path has one, is applied here on the returned page.
  *
- * `executeOql` lands at M5.
+ * - `executeOql` compiles the validated query to one SQL SELECT
+ *   (`oql/`) and runs it through the array-mode door; the compiled plan
+ *   names the columns and drives the value conversion.
  */
 
 import { fromSql, toSql } from "pgvector";
 
+import type { ValidatedQuery } from "../../core/oql/index.js";
 import type { FilterCondition, Row, RuntimeStore } from "../../core/ports.js";
 import type { PropertyDef } from "../../core/schemas.js";
 import {
@@ -44,7 +47,8 @@ import {
   ENTITY_ALL_INDEX,
   SAVED_QUERY_INDEX,
 } from "./ddl.js";
-import { runQuery, withTransaction, type Querier } from "./errors.js";
+import { runArrayQuery, runQuery, withTransaction, type Querier } from "./errors.js";
+import { bindValues, compileOql, convertRows } from "./oql/index.js";
 import {
   buildEndpointClauses,
   buildFilterClauses,
@@ -53,7 +57,6 @@ import {
 } from "./filters.js";
 import { fromJson, toJson } from "./json.js";
 import { camelizeRow, isUuid } from "./rows.js";
-import { notImplemented } from "./notImplemented.js";
 import { ONTOLOGY_COLS, readTypesWithProperties, splitInclusions } from "./schemaRead.js";
 import {
   distance,
@@ -653,8 +656,21 @@ export class PostgresRuntimeStore implements RuntimeStore {
   // OQL
   // ------------------------------------------------------------------
 
-  executeOql(): Promise<[string[], Row[]]> {
-    return notImplemented("executeOql");
+  /**
+   * Compile a validated OQL query to one SQL SELECT and run it bare
+   * through door one — a single statement needs no transaction, and the
+   * compiler has no code path that emits anything but a SELECT, so
+   * read-only holds by construction rather than by a session mode.
+   *
+   * The validated query crosses the port opaque (`core/ports.ts` rule 1);
+   * parameters arrive separately as a map (empty for ad-hoc queries —
+   * binding is a saved-query concern) and are resolved against the
+   * compiled bind plan here, never spliced into the text.
+   */
+  async executeOql(validated: ValidatedQuery, params: Row = {}): Promise<[string[], Row[]]> {
+    const compiled = compileOql(validated);
+    const rows = await runArrayQuery(compiled.sql, bindValues(compiled, params));
+    return [compiled.columns, convertRows(compiled, rows)];
   }
 
   // ------------------------------------------------------------------

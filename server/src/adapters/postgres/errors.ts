@@ -6,7 +6,9 @@
  * `pg` — it owns the connection pool and exports exactly two query
  * doors:
  *
- * - `runQuery(sql, params)` — a single statement via `pool.query`.
+ * - `runQuery(sql, params)` — a single statement via `pool.query`, plus
+ *   `runArrayQuery`, the same door in `rowMode: "array"` for the OQL
+ *   compiler's positional result contract.
  * - `withTransaction(work)` — `pool.connect()`, `BEGIN` … `COMMIT`, with
  *   `ROLLBACK` + `release()` on failure. Any method issuing two or more
  *   statements uses it, reads included; there is deliberately no bare
@@ -103,6 +105,22 @@ export async function runQuery(text: string, params?: unknown[]): Promise<DbResu
   try {
     const result = await active.query(text, params);
     return { rows: result.rows as Row[], rowCount: result.rowCount ?? 0 };
+  } catch (exc) {
+    throw translate(exc);
+  }
+}
+
+/**
+ * Door one in `rowMode: "array"`: positional rows instead of key/value
+ * ones. The OQL compiler names its own columns — several of them may
+ * repeat, and only the compiled plan knows which is which — so the
+ * result rows must arrive in projection order, unkeyed.
+ */
+export async function runArrayQuery(text: string, params?: unknown[]): Promise<unknown[][]> {
+  const active = getPool();
+  try {
+    const result = await active.query({ text, values: params, rowMode: "array" });
+    return result.rows as unknown[][];
   } catch (exc) {
     throw translate(exc);
   }

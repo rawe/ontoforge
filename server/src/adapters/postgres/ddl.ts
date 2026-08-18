@@ -230,10 +230,10 @@ export async function wipe(): Promise<void> {
  */
 
 /** Cross-type entity search — full-table, fixed name. */
-const ENTITY_ALL_INDEX = "entity_embedding_all_idx";
+export const ENTITY_ALL_INDEX = "entity_embedding_all_idx";
 
 /** Saved-query descriptions — full-table, fixed name. */
-const SAVED_QUERY_INDEX = "saved_query_embedding_idx";
+export const SAVED_QUERY_INDEX = "saved_query_embedding_idx";
 
 /** The 32-hex form of a schema row's uuid: the reversible half of a name. */
 function indexUuid(rowId: string): string {
@@ -293,8 +293,12 @@ async function dropIndex(querier: Querier, indexName: string): Promise<void> {
  * Read from the index's own column type in the catalog — `format_type`
  * over its `pg_attribute` row yields `vector(D)` for the cast expression,
  * which is what `pg_get_indexdef` would show without any text parsing.
+ *
+ * Exported because a vector query needs the same number: it has to
+ * repeat the index's cast expression verbatim or the planner ignores the
+ * index (`search.ts`).
  */
-async function existingIndexWidth(querier: Querier, indexName: string): Promise<number | null> {
+export async function indexWidth(querier: Querier, indexName: string): Promise<number | null> {
   const result = await querier.query(
     `SELECT format_type(att.atttypid, att.atttypmod) AS coltype
      FROM pg_attribute att
@@ -333,7 +337,7 @@ async function reconcileIndexWidth(
   dimensions: number,
   recreateOnMismatch: boolean,
 ): Promise<void> {
-  const existing = await existingIndexWidth(querier, indexName);
+  const existing = await indexWidth(querier, indexName);
   if (existing === null || existing === dimensions) {
     return;
   }
@@ -395,6 +399,29 @@ async function documentPropertyIdOf(
   );
   const row = result.rows[0];
   return row === undefined ? null : (row["property_id"] as string);
+}
+
+/**
+ * The entity-type index a key names, or null when the type is gone (and
+ * with it the name's only derivation). A vector query asks for it to
+ * learn the width its cast must use — see `indexWidth`.
+ */
+export async function entityIndexNameOf(
+  querier: Querier,
+  entityTypeKey: string,
+): Promise<string | null> {
+  const entityTypeId = await entityTypeIdOf(querier, entityTypeKey);
+  return entityTypeId === null ? null : entityIndexName(entityTypeId);
+}
+
+/** The chunk index a (type, property) pair names, or null if it is gone. */
+export async function chunkIndexNameOf(
+  querier: Querier,
+  entityTypeKey: string,
+  propertyKey: string,
+): Promise<string | null> {
+  const propertyId = await documentPropertyIdOf(querier, entityTypeKey, propertyKey);
+  return propertyId === null ? null : chunkIndexName(propertyId);
 }
 
 /** Every dynamically named index currently in the schema. */

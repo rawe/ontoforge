@@ -29,6 +29,8 @@
  *   outer `ON`; pattern-internal conditions sit on the inner joins. When
  *   the pattern is wholly pre-bound it emits nothing at all: there is no
  *   variable to null out, and an OPTIONAL MATCH never removes a row.
+ *   When it *opens* a stage there is no left-hand relation to outer-join
+ *   and no row to preserve, so it emits the join tree of a plain MATCH.
  */
 
 import type {
@@ -114,6 +116,15 @@ export function attachOptional(
     // outer-join and no variable to null out. An OPTIONAL MATCH never
     // removes a row, so the degenerate form is a no-op — its conditions
     // and its WHERE are deliberately dropped rather than filtered on.
+    return;
+  }
+  if (state.stage.from.length === 0) {
+    // The clause opens the stage: there is no left-hand relation to hang
+    // a LEFT JOIN off (`FROM LEFT JOIN …` is a syntax error) and no row
+    // to preserve, so the pattern emits the join tree a plain MATCH
+    // emits. Nothing is pre-bound in an empty stage, so no condition
+    // needs the outer placement a LEFT JOIN would give it.
+    attachRequired(state, emitted, whereSql);
     return;
   }
   // The leftmost operand has no inner ON to carry its conditions;

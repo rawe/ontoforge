@@ -331,6 +331,25 @@ describe("OPTIONAL MATCH", () => {
       sql("MATCH (a:person) OPTIONAL MATCH (a)-[r:knows]->(a) RETURN a.name"),
     ).toContain("LEFT JOIN relation r ON r.type_key = $2 AND r.from_id = a.id AND r.to_id = a.id");
   });
+
+  it("opens a stage as a plain FROM — a LEFT JOIN has nothing to hang off", () => {
+    expect(sql("OPTIONAL MATCH (a:person) RETURN a.name")).toBe(
+      ["SELECT a.props->'name' AS \"a.name\"", "FROM entity a", "WHERE a.type_key = $1"].join("\n"),
+    );
+    expect(sql("OPTIONAL MATCH (a:person)-[r:works_for]->(b:company) RETURN a.name")).toBe(
+      [
+        "SELECT a.props->'name' AS \"a.name\"",
+        "FROM entity a",
+        "JOIN relation r ON r.type_key = $2 AND r.from_id = a.id",
+        "JOIN entity b ON b.type_key = $3 AND b.id = r.to_id",
+        "WHERE a.type_key = $1",
+      ].join("\n"),
+    );
+    // With no row to preserve there is nothing an OPTIONAL MATCH can add.
+    expect(sql("OPTIONAL MATCH (a:person) WHERE a.age > 5 RETURN a.name")).toBe(
+      sql("MATCH (a:person) WHERE a.age > 5 RETURN a.name"),
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

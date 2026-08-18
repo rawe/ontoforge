@@ -174,6 +174,22 @@ describe("query execution (unscoped lens)", () => {
     expect(globex._id).toBeDefined();
   });
 
+  it("answers a query whose first clause is OPTIONAL MATCH", async () => {
+    await seedGraph();
+    const plain = await query(
+      "test_ontology",
+      "OPTIONAL MATCH (p:person) RETURN p.name AS name ORDER BY p.name",
+    );
+    expect(plain.results).toEqual([{ name: "Alice" }, { name: "Bob" }, { name: "Carol" }]);
+
+    const traversal = await query(
+      "test_ontology",
+      "OPTIONAL MATCH (p:person)-[:works_for]->(c:company) WHERE c.name = 'Acme' " +
+        "RETURN p.name AS name ORDER BY p.name",
+    );
+    expect(traversal.results).toEqual([{ name: "Alice" }, { name: "Bob" }]);
+  });
+
   it("rejects a variable-length pattern at validation", async () => {
     await seedGraph();
     const body = await query(

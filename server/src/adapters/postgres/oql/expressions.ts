@@ -46,7 +46,7 @@ import type {
   UnaryAddSubExpressionContext,
   XorExpressionContext,
 } from "../../../core/oql/generated/CypherParser.js";
-import { SYSTEM_PROPERTIES, stripBackticks } from "../../../core/oql/index.js";
+import { stripBackticks, unknownPropertyMessage } from "../../../core/oql/index.js";
 import type { PropertyDef } from "../../../core/schemas.js";
 import { jsonAccessor } from "../filters.js";
 import {
@@ -266,7 +266,7 @@ export class ExpressionWalker {
     const definitions = propertiesOf(this.state, binding, binding.typeKey);
     const definition = definitions[property];
     if (definition === undefined) {
-      reject(unknownProperty(binding.kind, binding.typeKey, property, definitions));
+      reject(unknownPropertyMessage(binding.kind, binding.typeKey, property, definitions));
     }
     const props = col(binding, "props");
     const key = `'${property}'`;
@@ -559,25 +559,8 @@ function propertiesOf(
   return definition?.properties ?? {};
 }
 
-function sorted(values: Iterable<string>): string[] {
-  return [...values].sort();
-}
-
 function unknownVariable(variable: string, scope: ReadonlyMap<string, Binding>): string {
-  return `Unknown variable '${variable}'. Available: ${sorted(scope.keys()).join(", ")}`;
-}
-
-function unknownProperty(
-  kind: "entity" | "relation",
-  typeKey: string,
-  property: string,
-  definitions: Record<string, PropertyDef>,
-): string {
-  const available = [...sorted(Object.keys(definitions)), ...sorted(SYSTEM_PROPERTIES)];
-  return (
-    `Unknown property '${property}' on ${kind} type '${typeKey}'. ` +
-    `Available: ${available.join(", ")}`
-  );
+  return `Unknown variable '${variable}'. Available: ${[...scope.keys()].sort().join(", ")}`;
 }
 
 /** A numeric literal, inlined into the SQL (it carries no user text) and

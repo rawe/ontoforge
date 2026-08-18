@@ -663,6 +663,29 @@ function sorted(values: Iterable<string>): string[] {
   return [...values].sort();
 }
 
+/**
+ * The one wording for a property that does not resolve on its type, with
+ * the self-correction hint every rejection owes its caller.
+ *
+ * Validation raises it for what the query text alone settles; an adapter
+ * compiler raises the same sentence again where its own resolution finds
+ * a property the pattern-local inference could not check. The text is
+ * contract-visible, so it is written once here rather than mirrored
+ * across the module boundary.
+ */
+export function unknownPropertyMessage(
+  kind: "entity" | "relation",
+  typeKey: string,
+  property: string,
+  definitions: Readonly<Record<string, unknown>>,
+): string {
+  const available = [...sorted(Object.keys(definitions)), ...sorted(SYSTEM_PROPERTIES)];
+  return (
+    `Unknown property '${property}' on ${kind} type '${typeKey}'. ` +
+    `Available: ${available.join(", ")}`
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Parse → Analyze → Validate pipeline
 // ---------------------------------------------------------------------------
@@ -816,20 +839,12 @@ export function validate(analysis: Analysis, schema: SchemaCacheValue): string[]
     if (etKey !== undefined) {
       const etProps = schema.entityTypes[etKey]!.properties;
       if (!(pa.propertyName in etProps)) {
-        const available = [...sorted(Object.keys(etProps)), ...sorted(SYSTEM_PROPERTIES)];
-        errors.push(
-          `Unknown property '${pa.propertyName}' on entity type '${etKey}'. ` +
-            `Available: ${available.join(", ")}`,
-        );
+        errors.push(unknownPropertyMessage("entity", etKey, pa.propertyName, etProps));
       }
     } else if (rtKey !== undefined) {
       const rtProps = schema.relationTypes[rtKey]!.properties;
       if (!(pa.propertyName in rtProps)) {
-        const available = [...sorted(Object.keys(rtProps)), ...sorted(SYSTEM_PROPERTIES)];
-        errors.push(
-          `Unknown property '${pa.propertyName}' on relation type '${rtKey}'. ` +
-            `Available: ${available.join(", ")}`,
-        );
+        errors.push(unknownPropertyMessage("relation", rtKey, pa.propertyName, rtProps));
       }
     }
     // Variables not in either map (e.g. WITH aliases) are not validated.
@@ -855,11 +870,7 @@ export function validate(analysis: Analysis, schema: SchemaCacheValue): string[]
         if (SYSTEM_PROPERTIES.has(key) || key in et.properties) {
           continue;
         }
-        const available = [...sorted(Object.keys(et.properties)), ...sorted(SYSTEM_PROPERTIES)];
-        errors.push(
-          `Unknown property '${key}' on entity type '${im.ownerTypeKey}'. ` +
-            `Available: ${available.join(", ")}`,
-        );
+        errors.push(unknownPropertyMessage("entity", im.ownerTypeKey, key, et.properties));
       }
     } else {
       const rt = schema.relationTypes[im.ownerTypeKey];
@@ -870,11 +881,7 @@ export function validate(analysis: Analysis, schema: SchemaCacheValue): string[]
         if (SYSTEM_PROPERTIES.has(key) || key in rt.properties) {
           continue;
         }
-        const available = [...sorted(Object.keys(rt.properties)), ...sorted(SYSTEM_PROPERTIES)];
-        errors.push(
-          `Unknown property '${key}' on relation type '${im.ownerTypeKey}'. ` +
-            `Available: ${available.join(", ")}`,
-        );
+        errors.push(unknownPropertyMessage("relation", im.ownerTypeKey, key, rt.properties));
       }
     }
   }

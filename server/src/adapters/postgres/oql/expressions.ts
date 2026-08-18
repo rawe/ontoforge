@@ -27,11 +27,17 @@
  * forms), and otherwise it is an unresolved symbol and the query is
  * rejected. `-5` and `1.5` do arrive as literals; `-5` is one token.
  *
- * Nothing user-originated ever reaches the SQL text: parameters and
- * literals alike become positional binds. Property keys are inlined —
- * they are schema keys, matched against the scoped schema first (which
- * is also what closes the validator's blind spot on WITH aliases) and
- * constrained to `[a-z][a-z0-9_]*` by the modeling surface.
+ * No user *text* ever reaches the SQL, but not everything binds. A
+ * string literal, every parameter, and a wholly constant list or map
+ * (one jsonb bind, JSON encoded here) become positional binds. Numerics,
+ * booleans and NULL are inlined — never as written, but as the
+ * canonicalized form the walker computed for them (`1_000` and `0x1f`
+ * become `1000` and `31`, `TRUE` becomes `true`), so what lands in the
+ * statement is the compiler's own token, not the query's. Property keys
+ * are inlined too — they are schema keys, matched against the scoped
+ * schema first (which is also what closes the validator's blind spot on
+ * WITH aliases) and constrained to `[a-z][a-z0-9_]*` by the modeling
+ * surface.
  */
 
 import type {

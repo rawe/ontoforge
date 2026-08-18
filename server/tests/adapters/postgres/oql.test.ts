@@ -510,7 +510,7 @@ describe("symbol-atom disambiguation", () => {
 // ---------------------------------------------------------------------------
 
 describe("the bind plan", () => {
-  it("binds type keys, string literals and parameters, and inlines nothing", () => {
+  it("binds type keys, string literals and parameters", () => {
     const query =
       "MATCH (a:person)-[r:works_for]->(b:company) WHERE a.name = 'Ada' AND b.name = $co " +
       "RETURN a.name";

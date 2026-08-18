@@ -32,7 +32,7 @@
 import { toSql } from "pgvector";
 
 import type { Row } from "../../core/ports.js";
-import { indexWidth } from "./ddl.js";
+import { castExpression, indexWidth } from "./ddl.js";
 import { withTransaction, type Querier } from "./errors.js";
 
 /** Resolves the physical index a query rides, or null when none exists. */
@@ -44,9 +44,10 @@ export function vectorParams(queryEmbedding: number[]): unknown[] {
   return [toSql(queryEmbedding)];
 }
 
-/** The distance expression, character-identical to the index's key. */
+/** The distance expression. Its left side is the index's own key,
+ * built by the DDL module so the two cannot drift apart. */
 export function distance(width: number): string {
-  return `embedding::vector(${width}) <=> $1::vector`;
+  return `${castExpression(width)} <=> $1::vector`;
 }
 
 /** The pinned similarity as a select-list column. */

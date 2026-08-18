@@ -269,13 +269,21 @@ function quoteIdentifier(name: string): string {
   return `"${name.replaceAll('"', '""')}"`;
 }
 
-/** The vector width for a cast expression. It is the only number this
- * module interpolates into DDL, so it is checked at the seam. */
-function castWidth(dimensions: number): number {
-  if (!Number.isSafeInteger(dimensions) || dimensions <= 0) {
-    throw new Error(`Invalid embedding width: ${dimensions}`);
+/**
+ * The indexed expression: the dimensionless `embedding` column cast to
+ * one width.
+ *
+ * An HNSW index over it is usable only by a query that repeats the
+ * expression verbatim, so index and query must build it from the same
+ * place — hence the export, which `search.ts` consumes. The width is the
+ * only number either side interpolates into SQL, so it is checked here,
+ * at the one seam both go through.
+ */
+export function castExpression(width: number): string {
+  if (!Number.isSafeInteger(width) || width <= 0) {
+    throw new Error(`Invalid embedding width: ${width}`);
   }
-  return dimensions;
+  return `embedding::vector(${width})`;
 }
 
 function createHnsw(
@@ -287,7 +295,7 @@ function createHnsw(
   const where = predicate === null ? "" : ` WHERE ${predicate}`;
   return (
     `CREATE INDEX IF NOT EXISTS ${indexName} ON ${table} ` +
-    `USING hnsw ((embedding::vector(${castWidth(dimensions)})) vector_cosine_ops)${where}`
+    `USING hnsw ((${castExpression(dimensions)}) vector_cosine_ops)${where}`
   );
 }
 

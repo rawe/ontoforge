@@ -143,13 +143,15 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL physical catalog
     const ext = await runQuery(`SELECT extname FROM pg_extension WHERE extname = 'vector'`);
     expect(ext.rowCount).toBe(1);
     // atttypmod -1 = no declared width; the width lives only in the HNSW
-    // indexes (M4), keeping init provider-independent.
+    // indexes, keeping init provider-independent. Ordinary tables only:
+    // an HNSW index over the cast expression carries a column of the same
+    // name, and that one is width-bearing on purpose (M4.1).
     const cols = await runQuery(
       `SELECT rel.relname AS table, att.atttypmod AS typmod
        FROM pg_attribute att
        JOIN pg_class rel ON rel.oid = att.attrelid
        JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
-       WHERE nsp.nspname = current_schema()
+       WHERE nsp.nspname = current_schema() AND rel.relkind = 'r'
          AND att.attname = 'embedding' AND NOT att.attisdropped`,
     );
     expect(cols.rows.map((row) => row.table).sort()).toEqual([

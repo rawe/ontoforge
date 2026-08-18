@@ -649,7 +649,10 @@ const SURFACE_REJECTIONS: readonly (readonly [string, string])[] = [
 // Helpers
 // ---------------------------------------------------------------------------
 
-function stripBackticks(name: string): string {
+/** A possibly backtick-quoted identifier → its bare name. Adapter
+ * compilers read the same identifiers off the parse tree and must strip
+ * them identically. */
+export function stripBackticks(name: string): string {
   if (name.startsWith("`") && name.endsWith("`")) {
     return name.slice(1, -1);
   }

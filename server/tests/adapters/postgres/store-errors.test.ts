@@ -312,8 +312,16 @@ describe("bypass prevention", () => {
       dirname(fileURLToPath(import.meta.url)),
       "../../../src/adapters/postgres",
     );
-    const offenders = readdirSync(adapterDir)
-      .filter((name) => name.endsWith(".ts") && name !== "errors.ts")
+    const sources = (dir: string, prefix = ""): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+        entry.isDirectory()
+          ? sources(join(dir, entry.name), `${prefix}${entry.name}/`)
+          : entry.name.endsWith(".ts")
+            ? [`${prefix}${entry.name}`]
+            : [],
+      );
+    const offenders = sources(adapterDir)
+      .filter((name) => name !== "errors.ts")
       .filter((name) => readFileSync(join(adapterDir, name), "utf8").includes('from "pg"'));
     expect(offenders).toEqual([]);
   });

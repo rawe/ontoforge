@@ -128,7 +128,7 @@ describe("per-entity-type index", () => {
   it("drops by re-deriving the name from the schema row", async () => {
     answer([{ entity_type_id: ENTITY_TYPE_ID }]);
     await store.dropVectorIndex("person");
-    expect(only("DROP INDEX")).toBe(`DROP INDEX IF EXISTS "${ENTITY_INDEX}"`);
+    expect(only("DROP INDEX")).toBe(`DROP INDEX IF EXISTS ${ENTITY_INDEX}`);
   });
 
   it("drops nothing once the schema row is gone — the orphan sweep collects it", async () => {
@@ -144,7 +144,7 @@ describe("per-entity-type index", () => {
     const sql = statements();
     expect(sql[0]).toBe("BEGIN");
     expect(sql[sql.length - 1]).toBe("COMMIT");
-    expect(only("DROP INDEX")).toBe(`DROP INDEX IF EXISTS "${ENTITY_INDEX}"`);
+    expect(only("DROP INDEX")).toBe(`DROP INDEX IF EXISTS ${ENTITY_INDEX}`);
     expect(only("CREATE INDEX")).toContain("embedding::vector(1024)");
     expect(sql.indexOf(only("DROP INDEX"))).toBeLessThan(sql.indexOf(only("CREATE INDEX")));
   });
@@ -166,7 +166,7 @@ describe("per-document-property chunk index", () => {
   it("drops by re-deriving the name, and nothing once the property row is gone", async () => {
     answer([{ property_id: PROPERTY_ID }], "FROM property_def");
     await store.dropDocumentVectorIndex("person", "bio");
-    expect(only("DROP INDEX")).toBe(`DROP INDEX IF EXISTS "${CHUNK_INDEX}"`);
+    expect(only("DROP INDEX")).toBe(`DROP INDEX IF EXISTS ${CHUNK_INDEX}`);
 
     fakeDb.reset();
     answer([], "FROM property_def");
@@ -295,7 +295,7 @@ describe("width drift", () => {
       captured.restore();
     }
 
-    const dropped = statements().filter((sql) => sql.includes(`DROP INDEX IF EXISTS "${ENTITY_INDEX}"`));
+    const dropped = statements().filter((sql) => sql.includes(`DROP INDEX IF EXISTS ${ENTITY_INDEX}`));
     expect(dropped).toHaveLength(1);
     expect(statements().filter((sql) => sql.includes("CREATE INDEX")).join("\n")).toContain(
       "embedding::vector(768)",

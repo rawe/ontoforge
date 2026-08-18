@@ -27,6 +27,7 @@ import {
 } from "../../core/vectorDrift.js";
 import type { Querier } from "./errors.js";
 import { withTransaction } from "./errors.js";
+import { quoteIdent } from "./oql/bindings.js";
 
 /** Executed in order at adapter init, idempotent. */
 const DDL_STATEMENTS: string[] = [
@@ -263,13 +264,6 @@ function literal(key: string): string {
   return `'${key.replaceAll("'", "''")}'`;
 }
 
-/** An index name as a quoted identifier. Applied to every name that
- * reaches a statement, because some are read back from the catalog and
- * nothing about those may be assumed. */
-function quoteIdentifier(name: string): string {
-  return `"${name.replaceAll('"', '""')}"`;
-}
-
 /**
  * The indexed expression: the dimensionless `embedding` column cast to
  * one width.
@@ -358,9 +352,11 @@ function createHnsw(spec: IndexSpec, dimensions: number): string {
 
 /** Drop one index. Callers pass a plain name — derived from a schema row
  * or read from the catalog, it makes no difference here — and the quoting
- * happens once, at this seam. */
+ * happens once, at this seam, through the package's one quoter: a name
+ * read back from the catalog may be anything, and nothing about it is
+ * assumed. */
 async function dropIndex(querier: Querier, indexName: string): Promise<void> {
-  await querier.query(`DROP INDEX IF EXISTS ${quoteIdentifier(indexName)}`);
+  await querier.query(`DROP INDEX IF EXISTS ${quoteIdent(indexName)}`);
 }
 
 /**

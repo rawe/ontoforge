@@ -20,6 +20,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { initPool } from "../../../src/adapters/postgres/errors.js";
 import { PostgresModelingStore } from "../../../src/adapters/postgres/modelingStore.js";
+import { captureLogs, DRIFT_SCOPES, POSTGRES_LEAKS } from "../../vectorDrift.js";
 import { fakeDb } from "./support.js";
 
 vi.mock("pg", async (importOriginal) => {
@@ -78,23 +79,6 @@ function existingWidth(
       return { rows: entityRows, rowCount: entityRows.length };
     }
     return { rows: [], rowCount: 0 };
-  };
-}
-
-function capturedWarnings(): { lines: string[]; restore: () => void } {
-  const lines: string[] = [];
-  const warn = vi
-    .spyOn(console, "warn")
-    .mockImplementation((...args: unknown[]) => lines.push(args.map(String).join(" ")));
-  const info = vi
-    .spyOn(console, "info")
-    .mockImplementation((...args: unknown[]) => lines.push(args.map(String).join(" ")));
-  return {
-    lines,
-    restore: () => {
-      warn.mockRestore();
-      info.mockRestore();
-    },
   };
 }
 
@@ -264,7 +248,7 @@ describe("ensureVectorIndexes", () => {
 describe("width drift", () => {
   it("startup warns per mismatched scope and changes nothing", async () => {
     existingWidth(1024, [{ entity_type_id: ENTITY_TYPE_ID, key: "person" }]);
-    const captured = capturedWarnings();
+    const captured = captureLogs();
     try {
       await store.createVectorIndex("person", 768);
     } finally {
@@ -286,7 +270,7 @@ describe("width drift", () => {
       [{ property_id: PROPERTY_ID, entity_type_key: "person", property_key: "bio" }],
     );
 
-    const captured = capturedWarnings();
+    const captured = captureLogs();
     try {
       await store.ensureVectorIndexes(768);
     } finally {
@@ -294,29 +278,17 @@ describe("width drift", () => {
     }
 
     const reported = captured.lines.join("\n");
-    for (const scope of [
-      "entity type 'person'",
-      "document property 'bio' on entity type 'person'",
-      "search across all entity types",
-      "saved-query descriptions",
-    ]) {
+    for (const scope of DRIFT_SCOPES) {
       expect(reported, `scope '${scope}' missing`).toContain(scope);
     }
-    for (const leak of [
-      "vec_",
-      "entity_embedding_all_idx",
-      "saved_query_embedding_idx",
-      "PostgreSQL",
-      "hnsw",
-      "CREATE INDEX",
-    ]) {
+    for (const leak of POSTGRES_LEAKS) {
       expect(reported, `'${leak}' leaked into the report`).not.toContain(leak);
     }
   });
 
   it("repairs on the recreate flag: drop then recreate at the model's width", async () => {
     existingWidth(1024, [{ entity_type_id: ENTITY_TYPE_ID, key: "person" }]);
-    const captured = capturedWarnings();
+    const captured = captureLogs();
     try {
       await store.ensureVectorIndexes(768, true);
     } finally {
@@ -333,7 +305,7 @@ describe("width drift", () => {
 
   it("stays silent when the widths already agree", async () => {
     existingWidth(768, [{ entity_type_id: ENTITY_TYPE_ID }]);
-    const captured = capturedWarnings();
+    const captured = captureLogs();
     try {
       await store.createVectorIndex("person", 768);
     } finally {

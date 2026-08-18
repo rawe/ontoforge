@@ -15,7 +15,7 @@
 
 import { randomUUID } from "node:crypto";
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { runQuery } from "../../../src/adapters/postgres/errors.js";
 import { settings } from "../../../src/config.js";
@@ -26,6 +26,7 @@ import {
   initStores,
   wipeDatabase,
 } from "../../../src/core/ports.js";
+import { DRIFT_SCOPES, logsOf, POSTGRES_LEAKS } from "../../vectorDrift.js";
 
 /** The configured model's width, and a width no model in play produces. */
 const MODEL_WIDTH = 768;
@@ -66,34 +67,6 @@ async function widthOf(indexName: string): Promise<number | null> {
 /** The 32-hex half of a dynamic index name. */
 function nameId(rowId: string): string {
   return rowId.replaceAll("-", "");
-}
-
-function captureLogs(): { lines: string[]; restore: () => void } {
-  const lines: string[] = [];
-  const warn = vi
-    .spyOn(console, "warn")
-    .mockImplementation((...args: unknown[]) => lines.push(args.map(String).join(" ")));
-  const info = vi
-    .spyOn(console, "info")
-    .mockImplementation((...args: unknown[]) => lines.push(args.map(String).join(" ")));
-  return {
-    lines,
-    restore: () => {
-      warn.mockRestore();
-      info.mockRestore();
-    },
-  };
-}
-
-/** Run `work` with the logs captured, and return what it wrote. */
-async function logsOf(work: () => Promise<void>): Promise<string> {
-  const captured = captureLogs();
-  try {
-    await work();
-  } finally {
-    captured.restore();
-  }
-  return captured.lines.join("\n");
 }
 
 describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lifecycle", () => {
@@ -254,19 +227,14 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
       // The startup hook itself — the path that must never repair.
       const reported = await logsOf(() => ensureSemanticIndexes(MODEL_WIDTH));
 
-      for (const scope of [
-        "entity type 'person'",
-        "document property 'bio' on entity type 'person'",
-        "search across all entity types",
-        "saved-query descriptions",
-      ]) {
+      for (const scope of DRIFT_SCOPES) {
         expect(reported, `scope '${scope}' not reported`).toContain(scope);
       }
       expect(reported).toContain(String(DRIFTED_WIDTH));
       expect(reported).toContain(String(MODEL_WIDTH));
       expect(reported).toContain("/api/model/rebuild-embeddings");
       // API vocabulary only: no vendor, no physical name.
-      for (const leak of ["vec_", "_idx", "PostgreSQL", "hnsw", "pgvector", "CREATE INDEX"]) {
+      for (const leak of POSTGRES_LEAKS) {
         expect(reported, `'${leak}' leaked into the report`).not.toContain(leak);
       }
 

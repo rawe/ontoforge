@@ -20,12 +20,56 @@
  */
 
 import type { Row } from "../../../core/ports.js";
+import type { SchemaCacheValue } from "../../../runtime/schemaCache.js";
+import type { TableBinding } from "./bindings.js";
 
 export type ColumnConversion =
   | { kind: "entity" | "relation"; typeKey: string | null; datetimeKeys: readonly string[] }
   | { kind: "number" }
   | { kind: "datetime" }
   | { kind: "none" };
+
+/** The plan for a projected node or relationship: its type's declared
+ * datetime properties, plus the two system timestamps. */
+export function objectConversion(
+  schema: SchemaCacheValue,
+  binding: TableBinding,
+): ColumnConversion {
+  const { kind, typeKey } = binding;
+  const definition =
+    typeKey === null
+      ? undefined
+      : kind === "entity"
+        ? schema.entityTypes[typeKey]
+        : schema.relationTypes[typeKey];
+  const declared = Object.values(definition?.properties ?? {})
+    .filter((property) => property.dataType === "datetime")
+    .map((property) => property.key)
+    .sort();
+  return { kind, typeKey, datetimeKeys: ["_createdAt", "_updatedAt", ...declared] };
+}
+
+/** The plan for a scalar column of a known declared data type. The
+ * projection form is raw jsonb, which the driver already parses back —
+ * only datetimes need rebuilding into a JS `Date`. */
+export function scalarConversion(dataType: string | null): ColumnConversion {
+  return dataType === "datetime" ? { kind: "datetime" } : { kind: "none" };
+}
+
+/**
+ * The plan for an aggregate column. `pg` hands back `int8` and `numeric`
+ * as strings, so every numeric aggregate is folded to a JS number; a
+ * `min`/`max` over a temporal cast already arrives as a `Date`.
+ */
+export function aggregateConversion(dataType: string | null): ColumnConversion {
+  if (dataType === "integer" || dataType === "float") {
+    return { kind: "number" };
+  }
+  if (dataType === "datetime" || dataType === "date") {
+    return { kind: "datetime" };
+  }
+  return { kind: "none" };
+}
 
 /** Array-mode rows → the port's `[columns, rows]` row maps. */
 export function convertRows(

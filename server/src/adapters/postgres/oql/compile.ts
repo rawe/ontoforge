@@ -39,6 +39,7 @@ import type { SchemaCacheValue } from "../../../runtime/schemaCache.js";
 import {
   carriedColumns,
   col,
+  projectedObject,
   quoteIdent,
   type Binding,
   type CompileState,
@@ -46,13 +47,27 @@ import {
   type TableBinding,
   type TableKind,
 } from "./bindings.js";
-import type { ColumnConversion } from "./conversion.js";
+import {
+  objectConversion,
+  scalarConversion,
+  type ColumnConversion,
+} from "./conversion.js";
 import { ExpressionWalker } from "./expressions.js";
 import { attachOptional, attachRequired, emitPattern } from "./patterns.js";
 import { pendingSurface, reject } from "./rejections.js";
 
-/** One positional placeholder: a literal, or a named OQL parameter. */
-export type Bind = { kind: "value"; value: unknown } | { kind: "param"; name: string };
+/**
+ * One positional placeholder: a literal, or a named OQL parameter.
+ *
+ * A parameter carries how its argument must be shaped on the wire —
+ * `json` for a list or map operand (the driver would otherwise send an
+ * array literal), `paging` for a SKIP/LIMIT operand, whose value is the
+ * one thing the validator could not check because it is not in the query
+ * text.
+ */
+export type Bind =
+  | { kind: "value"; value: unknown }
+  | { kind: "param"; name: string; json?: boolean; paging?: boolean };
 
 /** A compiled query: one SELECT, its bind plan, and the result contract. */
 export interface CompiledQuery {
@@ -76,8 +91,20 @@ export function bindValues(compiled: CompiledQuery, params: Row): unknown[] {
     if (!(bind.name in params)) {
       throw new StoreError(`Expected parameter: $${bind.name}`);
     }
-    return params[bind.name];
+    const value = params[bind.name];
+    if (bind.paging === true && !isPagingCount(value)) {
+      throw new StoreError(`SKIP/LIMIT takes a non-negative integer: $${bind.name}`);
+    }
+    return bind.json === true ? JSON.stringify(value ?? null) : value;
   });
+}
+
+/** A SKIP/LIMIT argument, in either of the shapes a caller supplies. */
+function isPagingCount(value: unknown): boolean {
+  if (typeof value === "string") {
+    return /^\d+$/.test(value.trim());
+  }
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
 /** One projection item, already compiled. */
@@ -88,6 +115,8 @@ interface ProjectedItem {
   isAggregate: boolean;
   dataType: string | null;
   binding?: TableBinding;
+  /** An explicit conversion plan the expression already knows. */
+  conversion?: ColumnConversion;
 }
 
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -115,12 +144,23 @@ class Compiler implements CompileState {
   }
 
   bindParam(name: string): string {
-    const existing = this.paramPositions.get(name);
+    return this.parameter(name, false);
+  }
+
+  bindParamJson(name: string): string {
+    return this.parameter(name, true);
+  }
+
+  /** One position per (parameter, wire shape) pair: the same name used
+   * both as a scalar and as a list needs two, encoded differently. */
+  private parameter(name: string, asJson: boolean): string {
+    const key = asJson ? `json:${name}` : name;
+    const existing = this.paramPositions.get(key);
     if (existing !== undefined) {
       return `$${existing}`;
     }
-    this.binds.push({ kind: "param", name });
-    this.paramPositions.set(name, this.binds.length);
+    this.binds.push(asJson ? { kind: "param", name, json: true } : { kind: "param", name });
+    this.paramPositions.set(key, this.binds.length);
     return `$${this.binds.length}`;
   }
 
@@ -184,7 +224,7 @@ class Compiler implements CompileState {
       pendingSurface("a reading clause other than MATCH");
     }
     const patternWhere = match.patternWhere();
-    const emitted = emitPattern(patternWhere.pattern(), this);
+    const emitted = emitPattern(patternWhere.pattern(), this, this.walker);
     const where = patternWhere.where();
     const whereSql = where === null ? null : this.walker.compile(where.expression()).sql;
     if (match.OPTIONAL() === null) {
@@ -201,13 +241,19 @@ class Compiler implements CompileState {
     groupBy: string[];
   } {
     const itemsCtx = body.projectionItems();
+    const items: ProjectedItem[] = [];
     if (itemsCtx.MULT() !== null) {
-      pendingSurface("RETURN * / WITH *");
+      // `RETURN *` / `WITH *`: every variable in scope, named after
+      // itself, in the reference adapter's alphabetical order. Anonymous
+      // pattern elements never enter the scope, so they never expand.
+      for (const name of [...this.stage.scope.keys()].sort()) {
+        items.push(this.scopeItem(name));
+      }
     }
-    const items = itemsCtx.projectionItem().map((item): ProjectedItem => {
+    for (const item of itemsCtx.projectionItem()) {
       const aliasCtx = item.symbol();
       const compiled = this.walker.compile(item.expression());
-      return {
+      items.push({
         name:
           aliasCtx === null
             ? this.verbatim(item.expression())
@@ -216,8 +262,9 @@ class Compiler implements CompileState {
         isAggregate: compiled.isAggregate,
         dataType: compiled.dataType,
         binding: compiled.binding,
-      };
-    });
+        conversion: compiled.conversion,
+      });
+    }
 
     const groupBy: string[] = [];
     if (items.some((item) => item.isAggregate)) {
@@ -241,6 +288,27 @@ class Compiler implements CompileState {
     return { items, groupBy };
   }
 
+  /** One in-scope variable, projected under its own name. */
+  private scopeItem(name: string): ProjectedItem {
+    const binding = this.stage.scope.get(name)!;
+    if (binding.kind === "scalar") {
+      return {
+        name,
+        sql: binding.sqlExpr,
+        isAggregate: false,
+        dataType: binding.dataType,
+        conversion: binding.conversion,
+      };
+    }
+    return {
+      name,
+      sql: projectedObject(binding),
+      isAggregate: false,
+      dataType: null,
+      binding,
+    };
+  }
+
   /** A WITH: close the open stage into a CTE and open the next over it. */
   private closeIntoCte(body: ProjectionBodyContext): void {
     const { items, groupBy } = this.projection(body);
@@ -258,6 +326,7 @@ class Compiler implements CompileState {
           kind: "scalar",
           dataType: item.dataType,
           sqlExpr: `${name}.${quoteIdent(item.name)}`,
+          conversion: this.conversionFor(item),
         });
       } else {
         // A node or relationship variable survives a WITH as its
@@ -317,11 +386,15 @@ class Compiler implements CompileState {
     if (order !== null) {
       const keys = order.orderItem().map((item) => {
         const text = this.verbatim(item.expression());
-        if (IDENTIFIER.test(text) && projectedNames.has(text) && !this.stage.scope.has(text)) {
-          pendingSurface("ORDER BY on an output alias of the same projection");
-        }
+        // A sort key naming an output alias of this very projection is
+        // not an expression to walk — SQL resolves a bare output name in
+        // ORDER BY against the SELECT list, exactly as Cypher does.
+        const key =
+          IDENTIFIER.test(text) && projectedNames.has(text) && !this.stage.scope.has(text)
+            ? quoteIdent(text)
+            : this.walker.compile(item.expression()).sql;
         const descending = item.DESC() !== null || item.DESCENDING() !== null;
-        return this.walker.compile(item.expression()).sql + (descending ? " DESC" : "");
+        return descending ? `${key} DESC` : key;
       });
       lines.push(`ORDER BY ${keys.join(", ")}`);
     }
@@ -338,36 +411,34 @@ class Compiler implements CompileState {
     return lines.join("\n");
   }
 
+  /** A non-negative integer literal (inlined — it carries no user text)
+   * or a `$parameter` (a bind whose value the validator could not see,
+   * so it is checked when the argument map arrives). */
   private pagingOperand(ctx: Parameters<ExpressionWalker["compile"]>[0]): string {
     const compiled = this.walker.compile(ctx);
-    if (!/^\d+$/.test(compiled.sql)) {
-      pendingSurface("a $parameter as a SKIP/LIMIT operand");
+    if (/^\d+$/.test(compiled.sql)) {
+      return compiled.sql;
     }
+    const position = /^\$(\d+)$/.exec(compiled.sql);
+    if (position === null) {
+      pendingSurface("a SKIP/LIMIT operand that is neither an integer nor a $parameter");
+    }
+    const bind = this.binds[Number(position[1]) - 1]!;
+    if (bind.kind !== "param") {
+      pendingSurface("a SKIP/LIMIT operand that is neither an integer nor a $parameter");
+    }
+    bind.paging = true;
     return compiled.sql;
   }
 
   private conversionFor(item: ProjectedItem): ColumnConversion {
+    if (item.conversion !== undefined) {
+      return item.conversion;
+    }
     if (item.binding !== undefined) {
-      const { kind, typeKey } = item.binding;
-      const definition =
-        typeKey === null
-          ? undefined
-          : kind === "entity"
-            ? this.schema.entityTypes[typeKey]
-            : this.schema.relationTypes[typeKey];
-      const declared = Object.values(definition?.properties ?? {})
-        .filter((property) => property.dataType === "datetime")
-        .map((property) => property.key)
-        .sort();
-      return { kind, typeKey, datetimeKeys: ["_createdAt", "_updatedAt", ...declared] };
+      return objectConversion(this.schema, item.binding);
     }
-    if (item.dataType === "count") {
-      return { kind: "number" };
-    }
-    if (item.dataType === "datetime") {
-      return { kind: "datetime" };
-    }
-    return { kind: "none" };
+    return scalarConversion(item.dataType);
   }
 
   /** The verbatim source text of a parse-tree slice — the result

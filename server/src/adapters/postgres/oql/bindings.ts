@@ -16,6 +16,7 @@
  */
 
 import type { SchemaCacheValue } from "../../../runtime/schemaCache.js";
+import type { ColumnConversion } from "./conversion.js";
 
 export type TableKind = "entity" | "relation";
 
@@ -38,6 +39,10 @@ export interface ScalarBinding {
   kind: "scalar";
   dataType: string | null;
   sqlExpr: string;
+  /** The conversion the value needed in the stage that computed it —
+   * carried across the WITH so `RETURN collect(a) AS xs` still rebuilds
+   * the collected objects' dates. */
+  conversion: ColumnConversion;
 }
 
 export type Binding = TableBinding | ScalarBinding;
@@ -126,6 +131,11 @@ export interface CompileState {
   bindValue(value: unknown): string;
   /** Bind a named OQL parameter (deduplicated); returns its `$n`. */
   bindParam(name: string): string;
+  /** Bind a named OQL parameter in **jsonb** form — the value is JSON
+   * encoded at bind time so a list or map argument arrives as jsonb
+   * rather than as the driver's array literal. Deduplicated separately
+   * from the scalar form; returns its `$n`. */
+  bindParamJson(name: string): string;
   /** A fresh table alias for a variable, or for an anonymous element. */
   newAlias(kind: TableKind, variable: string | null): string;
 }

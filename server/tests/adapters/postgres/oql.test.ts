@@ -9,9 +9,9 @@
  * event, exactly as the validator's exact-wording tests are.
  *
  * Covers the module layout and emitter seam, the pinned compilation
- * model, and the compiler-side property-name enforcement. The clause
- * semantics matrix, the single-SELECT invariant and conformance land with
- * the rest of the milestone.
+ * model, the compiler-side property-name enforcement, the whole clause
+ * and expression matrix, and the single-SELECT invariant. Live behaviour
+ * on both backends stays the conformance suite's job.
  */
 
 import { describe, expect, it } from "vitest";
@@ -538,6 +538,337 @@ describe("ordering and paging", () => {
     expect(sql("MATCH (a:person) RETURN a.name ORDER BY a.age, a.name DESC")).toContain(
       "ORDER BY (a.props->'age')::numeric, a.props->>'name' DESC",
     );
+  });
+
+  it("sorts on an output alias of the same projection by name", () => {
+    expect(sql("MATCH (a:person) RETURN a.name AS n ORDER BY n DESC")).toBe(
+      [
+        "SELECT a.props->'name' AS n",
+        "FROM entity a",
+        "WHERE a.type_key = $1",
+        "ORDER BY n DESC",
+      ].join("\n"),
+    );
+  });
+
+  it("sorts on an aggregate alias alongside a plain one", () => {
+    expect(sql("MATCH (a:person) RETURN a.name AS n, count(*) AS c ORDER BY c DESC, n")).toContain(
+      "ORDER BY c DESC, n",
+    );
+  });
+
+  it("prefers the pattern variable when an alias does not shadow it", () => {
+    // `a.age` is an expression, not a bare output name — it walks.
+    expect(sql("MATCH (a:person) RETURN a.name AS n ORDER BY a.age")).toContain(
+      "ORDER BY (a.props->'age')::numeric",
+    );
+  });
+
+  it("pages on a $parameter, marking the bind for the value check", () => {
+    const compiled = compile("MATCH (a:person) RETURN a.name SKIP $off LIMIT $top");
+    expect(compiled.sql).toContain("LIMIT $2\nOFFSET $3");
+    expect(compiled.binds).toEqual([
+      { kind: "value", value: "person" },
+      { kind: "param", name: "top", paging: true },
+      { kind: "param", name: "off", paging: true },
+    ]);
+    expect(bindValues(compiled, { off: 5, top: "10" })).toEqual(["person", "10", 5]);
+  });
+
+  it("refuses a paging argument that is not a non-negative integer", () => {
+    const compiled = compile("MATCH (a:person) RETURN a.name LIMIT $top");
+    for (const top of [-1, 1.5, "x", null]) {
+      expect(() => bindValues(compiled, { top })).toThrow(StoreError);
+      expect(() => bindValues(compiled, { top })).toThrow(
+        "SKIP/LIMIT takes a non-negative integer: $top",
+      );
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RETURN * / WITH *
+// ---------------------------------------------------------------------------
+
+describe("the star projection", () => {
+  it("expands every in-scope variable, alphabetically, under its own name", () => {
+    expect(
+      compile("MATCH (zebra:person)-[rel:knows]->(apple:person) RETURN *").columns,
+    ).toEqual(["apple", "rel", "zebra"]);
+  });
+
+  it("projects each expanded variable as its whole object", () => {
+    expect(sql("MATCH (a:person) RETURN *")).toBe(
+      [`SELECT ${PERSON_OBJECT} AS a`, "FROM entity a", "WHERE a.type_key = $1"].join("\n"),
+    );
+  });
+
+  it("keeps explicit items after the expansion", () => {
+    expect(compile("MATCH (a:person) RETURN *, a.name AS n").columns).toEqual(["a", "n"]);
+  });
+
+  it("expands scalar aliases carried across a WITH too", () => {
+    const compiled = compile("MATCH (a:person) WITH a, count(*) AS n RETURN *");
+    expect(compiled.columns).toEqual(["a", "n"]);
+    expect(compiled.conversions[1]).toEqual({ kind: "number" });
+    expect(compiled.sql).toContain("|| s0.a__props END AS a, s0.n AS n");
+  });
+
+  it("carries every variable through a WITH *", () => {
+    expect(sql("MATCH (a:person) WITH * RETURN a.name")).toBe(
+      [
+        "WITH s0 AS (",
+        "SELECT a.id AS a__id, a.type_key AS a__type_key, a.props AS a__props," +
+          " a.created_at AS a__created_at, a.updated_at AS a__updated_at",
+        "FROM entity a",
+        "WHERE a.type_key = $1",
+        ")",
+        "SELECT s0.a__props->'name' AS \"a.name\"",
+        "FROM s0",
+      ].join("\n"),
+    );
+  });
+
+  it("never expands an anonymous pattern element — it is not in scope", () => {
+    expect(compile("MATCH (a:person)-[:works_for]->(:company) RETURN *").columns).toEqual(["a"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Lists, maps and IN
+// ---------------------------------------------------------------------------
+
+describe("lists, maps and membership", () => {
+  it("folds a wholly constant list into one jsonb bind", () => {
+    const compiled = compile("MATCH (a:person) RETURN [1, 'x', true, null] AS xs");
+    expect(compiled.sql).toContain("SELECT $2::jsonb AS xs");
+    expect(compiled.binds[1]).toEqual({ kind: "value", value: '[1,"x",true,null]' });
+  });
+
+  it("composes a list with a non-constant element", () => {
+    expect(sql("MATCH (a:person) RETURN [1, a.age] AS xs")).toContain(
+      "SELECT jsonb_build_array(to_jsonb(1), a.props->'age') AS xs",
+    );
+  });
+
+  it("folds and composes map literals the same way", () => {
+    const compiled = compile("MATCH (a:person) RETURN {k: 'v'} AS m, {k: a.name} AS m2");
+    expect(compiled.sql).toContain(
+      "SELECT $2::jsonb AS m, jsonb_build_object('k', a.props->'name') AS m2",
+    );
+    expect(compiled.binds[1]).toEqual({ kind: "value", value: '{"k":"v"}' });
+  });
+
+  it("compares lists as whole jsonb values, not element by element", () => {
+    expect(sql("MATCH (a:person) WHERE [1, 2.5] = [1, 2.5] RETURN a.name")).toContain(
+      "WHERE a.type_key = $1 AND $2::jsonb = $3::jsonb",
+    );
+  });
+
+  it("compiles IN as containment with Cypher's three-valued outcome", () => {
+    expect(sql("MATCH (a:person) WHERE a.name IN ['Ada', 'Bob'] RETURN a.name")).toContain(
+      "WHERE a.type_key = $1 AND CASE WHEN $2::jsonb @> a.props->'name' THEN true" +
+        " WHEN a.props->'name' IS NULL OR $2::jsonb IS NULL" +
+        " OR $2::jsonb @> 'null'::jsonb THEN NULL ELSE false END",
+    );
+  });
+
+  it("takes a list parameter as one JSON-encoded bind, and no other", () => {
+    const compiled = compile("MATCH (a:person) WHERE a._id IN $ids RETURN a.name");
+    expect(compiled.sql).toContain("$2::jsonb @> to_jsonb(a.id::text)");
+    expect(compiled.binds).toEqual([
+      { kind: "value", value: "person" },
+      { kind: "param", name: "ids", json: true },
+    ]);
+    expect(bindValues(compiled, { ids: ["e1", "e2"] })).toEqual(["person", '["e1","e2"]']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The seven aggregates
+// ---------------------------------------------------------------------------
+
+describe("aggregates", () => {
+  const projected = (expr: string) =>
+    sql(`MATCH (a:person) RETURN ${expr}`).split("\n")[0]!.replace("SELECT ", "");
+  const converted = (expr: string) =>
+    compile(`MATCH (a:person) RETURN ${expr}`).conversions[0];
+
+  it("bends sum's empty group to Cypher's 0", () => {
+    expect(projected("sum(a.age) AS s")).toBe("COALESCE(sum((a.props->'age')::numeric), 0) AS s");
+    expect(converted("sum(a.age)")).toEqual({ kind: "number" });
+  });
+
+  it("leaves avg, min and max on SQL's native NULL", () => {
+    expect(projected("avg(a.age) AS a1")).toBe("avg((a.props->'age')::numeric) AS a1");
+    expect(projected("min(a.name) AS m1")).toBe("min(a.props->>'name') AS m1");
+    expect(projected("max(a.seen_at) AS m2")).toBe("max((a.props->>'seen_at')::timestamptz) AS m2");
+    expect(converted("avg(a.age)")).toEqual({ kind: "number" });
+    expect(converted("min(a.name)")).toEqual({ kind: "none" });
+    expect(converted("max(a.seen_at)")).toEqual({ kind: "datetime" });
+  });
+
+  it("bends collect's empty group to [] and drops its nulls", () => {
+    expect(projected("collect(a.name) AS c")).toBe(
+      "COALESCE(jsonb_agg(a.props->'name') FILTER (WHERE a.props->>'name' IS NOT NULL)," +
+        " '[]'::jsonb) AS c",
+    );
+  });
+
+  it("collects whole nodes and keeps their conversion plan", () => {
+    expect(projected("collect(a) AS c")).toBe(
+      `COALESCE(jsonb_agg(${PERSON_OBJECT}) FILTER (WHERE a.id IS NOT NULL), '[]'::jsonb) AS c`,
+    );
+    expect(converted("collect(a)")).toEqual({
+      kind: "entity",
+      typeKey: "person",
+      datetimeKeys: ["_createdAt", "_updatedAt", "seen_at"],
+    });
+  });
+
+  it("carries a collected object's conversion across a WITH", () => {
+    expect(compile("MATCH (a:person) WITH collect(a) AS xs RETURN xs").conversions).toEqual([
+      { kind: "entity", typeKey: "person", datetimeKeys: ["_createdAt", "_updatedAt", "seen_at"] },
+    ]);
+  });
+
+  it("converts a collected list element by element", () => {
+    const compiled = compile("MATCH (a:person) RETURN collect(a.seen_at) AS c");
+    expect(convertRows(compiled, [[["2024-01-02T03:04:05+00:00"]]])).toEqual([
+      { c: [new Date("2024-01-02T03:04:05Z")] },
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Inline property maps
+// ---------------------------------------------------------------------------
+
+describe("inline property maps", () => {
+  it("emits one cast equality per key, in written order", () => {
+    expect(sql("MATCH (a:person {name: 'Ada', age: 30}) RETURN a.name")).toBe(
+      [
+        "SELECT a.props->'name' AS \"a.name\"",
+        "FROM entity a",
+        "WHERE a.type_key = $1 AND a.props->>'name' = $2 AND (a.props->'age')::numeric = 30",
+      ].join("\n"),
+    );
+  });
+
+  it("puts a relationship's keys on the relationship's own join", () => {
+    expect(
+      sql("MATCH (a:person)-[r:works_for {role: 'Eng'}]->(b:company {name: 'Acme'}) RETURN a.name"),
+    ).toBe(
+      [
+        "SELECT a.props->'name' AS \"a.name\"",
+        "FROM entity a",
+        "JOIN relation r ON r.type_key = $2 AND r.props->>'role' = $3 AND r.from_id = a.id",
+        "JOIN entity b ON b.type_key = $4 AND b.props->>'name' = $5 AND b.id = r.to_id",
+        "WHERE a.type_key = $1",
+      ].join("\n"),
+    );
+  });
+
+  it("resolves a system property key off its own column", () => {
+    expect(sql("MATCH (a:person {_id: 'e1'}) RETURN a.name")).toContain(
+      "WHERE a.type_key = $1 AND a.id::text = $2",
+    );
+  });
+
+  it("resolves its keys through the same schema lookup a predicate uses", () => {
+    // The lens check happens at validation and again here, so a key that
+    // stopped resolving refuses rather than quietly matching nothing.
+    expect(sql("MATCH (a:person {seen_at: '2024-01-01'}) RETURN a.name")).toContain(
+      "(a.props->>'seen_at')::timestamptz = $2",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Undirected relationships
+// ---------------------------------------------------------------------------
+
+describe("undirected relationships", () => {
+  it("matches both readings of the edge in one condition on the later table", () => {
+    expect(sql("MATCH (a:person)-[r:knows]-(b:person) RETURN a.name, b.name")).toBe(
+      [
+        "SELECT a.props->'name' AS \"a.name\", b.props->'name' AS \"b.name\"",
+        "FROM entity a",
+        "JOIN relation r ON r.type_key = $2",
+        "JOIN entity b ON b.type_key = $3 AND (r.from_id = a.id AND r.to_id = b.id" +
+          " OR r.from_id = b.id AND r.to_id = a.id)",
+        "WHERE a.type_key = $1",
+      ].join("\n"),
+    );
+  });
+
+  it("collapses to one reading when both ends are the same variable", () => {
+    expect(sql("MATCH (a:person)-[r:knows]-(a) RETURN a.name")).toContain(
+      "JOIN relation r ON r.type_key = $2 AND (r.from_id = a.id AND r.to_id = a.id" +
+        " OR r.from_id = a.id AND r.to_id = a.id)",
+    );
+  });
+
+  it("rides the outer ON of an OPTIONAL MATCH like any link condition", () => {
+    expect(
+      sql("MATCH (a:person) OPTIONAL MATCH (a)-[r:knows]-(b:person) RETURN a.name, b.name"),
+    ).toContain(
+      "LEFT JOIN (relation r JOIN entity b ON b.type_key = $3)" +
+        " ON r.type_key = $2 AND (r.from_id = a.id AND r.to_id = b.id" +
+        " OR r.from_id = b.id AND r.to_id = a.id)",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The degenerate OPTIONAL MATCH
+// ---------------------------------------------------------------------------
+
+describe("an OPTIONAL MATCH that introduces no variable", () => {
+  it("emits nothing at all — an OPTIONAL MATCH never removes a row", () => {
+    const plain = sql("MATCH (a:person) RETURN a.name");
+    expect(sql("MATCH (a:person) OPTIONAL MATCH (a) RETURN a.name")).toBe(plain);
+    expect(sql("MATCH (a:person) OPTIONAL MATCH (a:company) RETURN a.name")).toBe(plain);
+    expect(sql("MATCH (a:person) OPTIONAL MATCH (a) WHERE a.age > 5 RETURN a.name")).toBe(plain);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M5.5 — read-only by construction
+// ---------------------------------------------------------------------------
+
+describe("the single-SELECT invariant", () => {
+  const CORPUS = [
+    "MATCH (a:person) RETURN a",
+    "MATCH (a:person)-[r:works_for]->(b:company) WHERE a.name = $n RETURN a, r, b",
+    "MATCH (a:person) OPTIONAL MATCH (a)-[r:knows]-(b:person) RETURN a.name, b.name",
+    "MATCH (a:person {name: 'Ada'}) WITH a, count(*) AS n WHERE n > 0 RETURN *",
+    "MATCH (a:person) WHERE a.name IN ['x'] AND a.bio CONTAINS 'y' RETURN collect(a) AS c",
+    "MATCH (a:person) RETURN a.name AS n ORDER BY n DESC SKIP $s LIMIT $l",
+  ];
+  const WRITE_VERBS =
+    /\b(insert|update|delete|merge|create|drop|alter|truncate|grant|revoke|copy|call)\b/i;
+
+  it("emits exactly one statement, one SELECT per stage, and no write verb", () => {
+    for (const query of CORPUS) {
+      const emitted = sql(query);
+      expect(emitted, query).not.toContain(";");
+      expect(emitted, query).toMatch(/^(SELECT|WITH )/);
+      expect(WRITE_VERBS.test(emitted), query).toBe(false);
+      // One SELECT for the outermost statement, one per stage CTE.
+      const selects = emitted.match(/\bSELECT\b/g)!.length;
+      const ctes = emitted.match(/ AS \(\n/g)?.length ?? 0;
+      expect(selects, query).toBe(ctes + 1);
+    }
+  });
+
+  it("carries every user-originated value as a bind, never as SQL text", () => {
+    const compiled = compile(
+      "MATCH (a:person {name: 'Ada'}) WHERE a.bio CONTAINS 'sec\\'ret' RETURN a.name",
+    );
+    expect(compiled.sql).not.toContain("Ada");
+    expect(compiled.sql).not.toContain("sec");
+    expect(compiled.binds).toContainEqual({ kind: "value", value: "sec'ret" });
   });
 });
 

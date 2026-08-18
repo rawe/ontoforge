@@ -16,21 +16,30 @@
  * - A repeated variable reuses its alias and degenerates into extra ON
  *   conditions; a self-reference becomes both conditions on one alias;
  *   disconnected pattern parts become a filtered cartesian join.
+ * - An undirected relationship is one condition carrying both readings
+ *   of the edge, so a two-ended match binds each row twice and a
+ *   self-loop binds once — the reference adapter's row counts.
+ * - An inline property map is one cast equality per key, on the join of
+ *   the element that carries it.
  * - An OPTIONAL MATCH is ONE `LEFT JOIN` over the parenthesized
  *   inner-join tree of the pattern's new tables. That is what makes the
  *   match atomic — the whole pattern binds, or every variable is NULL.
  *   Naive LEFT JOIN chaining leaks partial matches on dirty data. Its
  *   WHERE and any condition referencing a pre-bound variable sit in the
- *   outer `ON`; pattern-internal conditions sit on the inner joins.
+ *   outer `ON`; pattern-internal conditions sit on the inner joins. When
+ *   the pattern is wholly pre-bound it emits nothing at all: there is no
+ *   variable to null out, and an OPTIONAL MATCH never removes a row.
  */
 
 import type {
   NodePatternContext,
   PatternContext,
   PatternElemContext,
+  PropertiesContext,
 } from "../../../core/oql/generated/CypherParser.js";
 import { stripBackticks } from "../../../core/oql/index.js";
 import { col, quoteIdent, type CompileState, type TableBinding, type TableKind } from "./bindings.js";
+import type { ExpressionWalker } from "./expressions.js";
 import { pendingSurface, reject } from "./rejections.js";
 
 /** A join condition, and whether it names a variable bound before this
@@ -56,12 +65,16 @@ export interface EmittedPattern {
 
 /** Walk one MATCH pattern into table entries. Binds every new variable
  * into the open stage's scope as a side effect. */
-export function emitPattern(pattern: PatternContext, state: CompileState): EmittedPattern {
+export function emitPattern(
+  pattern: PatternContext,
+  state: CompileState,
+  walker: ExpressionWalker,
+): EmittedPattern {
   const emitted: EmittedPattern = { entries: [], loose: [] };
   /** Aliases this pattern introduces — everything else is pre-bound. */
   const fresh = new Set<string>();
   for (const part of pattern.patternPart()) {
-    walkChain(part.patternElem(), emitted, fresh, state);
+    walkChain(part.patternElem(), emitted, fresh, state, walker);
   }
   return emitted;
 }
@@ -97,7 +110,11 @@ export function attachOptional(
 ): void {
   const [first, ...rest] = emitted.entries;
   if (first === undefined) {
-    pendingSurface("OPTIONAL MATCH whose pattern introduces no new variable");
+    // Every element was already bound, so the pattern brings no table to
+    // outer-join and no variable to null out. An OPTIONAL MATCH never
+    // removes a row, so the degenerate form is a no-op — its conditions
+    // and its WHERE are deliberately dropped rather than filtered on.
+    return;
   }
   // The leftmost operand has no inner ON to carry its conditions;
   // hoisting them to the outer ON is equivalent under LEFT JOIN.
@@ -129,10 +146,11 @@ function walkChain(
   emitted: EmittedPattern,
   fresh: Set<string>,
   state: CompileState,
+  walker: ExpressionWalker,
 ): void {
   const parenthesized = elem.patternElem();
   if (parenthesized !== null) {
-    walkChain(parenthesized, emitted, fresh, state);
+    walkChain(parenthesized, emitted, fresh, state, walker);
     return;
   }
   const node = elem.nodePattern();
@@ -140,13 +158,10 @@ function walkChain(
     pendingSurface("a function invocation in pattern position");
   }
 
-  let left = bindNode(node, emitted, fresh, state).binding;
+  let left = bindNode(node, emitted, fresh, state, walker).binding;
   for (const link of elem.patternElemChain()) {
     const relPattern = link.relationshipPattern();
     const detail = relPattern.relationDetail();
-    if (detail !== null && detail.properties() !== null) {
-      pendingSurface("an inline property map on a relationship pattern");
-    }
 
     const typesCtx = detail === null ? null : detail.relationshipTypes();
     const typeNames = typesCtx === null ? [] : typesCtx.name();
@@ -159,29 +174,53 @@ function walkChain(
 
     const toRight = relPattern.GT() !== null;
     const toLeft = relPattern.LT() !== null;
-    if (toRight === toLeft) {
-      pendingSurface("an undirected or double-headed relationship pattern");
+    if (toRight && toLeft) {
+      pendingSurface("a double-headed relationship pattern");
     }
+    const undirected = !toRight && !toLeft;
 
     const symbolCtx = detail === null ? null : detail.symbol();
     const variable = symbolCtx === null ? null : stripBackticks(symbolCtx.getText());
     const rel = newBinding(state, "relation", typeKey, variable);
     fresh.add(rel.alias);
 
-    const leftColumn = toRight ? "from_id" : "to_id";
-    const rightColumn = toRight ? "to_id" : "from_id";
     const conds: JoinCondition[] = [];
     if (typeKey !== null) {
       conds.push({ sql: `${col(rel, "type_key")} = ${state.bindValue(typeKey)}`, outer: false });
     }
-    conds.push({
-      sql: `${col(rel, leftColumn)} = ${col(left, "id")}`,
-      outer: !fresh.has(left.alias),
-    });
+    if (detail !== null) {
+      conds.push(...inlineConditions(detail.properties(), rel, state, walker, false));
+    }
     const relEntry: TableEntry = { table: `relation ${quoteIdent(rel.alias)}`, conds };
     emitted.entries.push(relEntry);
 
-    const right = bindNode(link.nodePattern(), emitted, fresh, state, rel, rightColumn);
+    if (undirected) {
+      // Both readings of one edge, as one condition — it names the left
+      // node, the relationship and the right node, so it can only attach
+      // once the right node is joined. For `a = b` the two disjuncts are
+      // the same test, which is what makes a self-loop bind once.
+      const right = bindNode(link.nodePattern(), emitted, fresh, state, walker);
+      const twoWay = {
+        sql:
+          `(${col(rel, "from_id")} = ${col(left, "id")}` +
+          ` AND ${col(rel, "to_id")} = ${col(right.binding, "id")}` +
+          ` OR ${col(rel, "from_id")} = ${col(right.binding, "id")}` +
+          ` AND ${col(rel, "to_id")} = ${col(left, "id")})`,
+        outer: !fresh.has(left.alias) || !fresh.has(right.binding.alias),
+      };
+      (right.rebound ? relEntry.conds : right.entry!.conds).push(twoWay);
+      left = right.binding;
+      continue;
+    }
+
+    const leftColumn = toRight ? "from_id" : "to_id";
+    const rightColumn = toRight ? "to_id" : "from_id";
+    relEntry.conds.push({
+      sql: `${col(rel, leftColumn)} = ${col(left, "id")}`,
+      outer: !fresh.has(left.alias),
+    });
+
+    const right = bindNode(link.nodePattern(), emitted, fresh, state, walker, rel, rightColumn);
     if (right.rebound) {
       // The right table was joined earlier (or is carried) — its link
       // condition belongs to the relationship's entry.
@@ -194,6 +233,34 @@ function walkChain(
   }
 }
 
+/**
+ * An inline property map → one equality per key, in written order, over
+ * the encoding table's casts. The keys are lens-checked at validation and
+ * again by the walker's own resolution, so a key that no longer resolves
+ * refuses rather than silently matching nothing.
+ */
+function inlineConditions(
+  propertiesCtx: PropertiesContext | null,
+  binding: TableBinding,
+  state: CompileState,
+  walker: ExpressionWalker,
+  outer: boolean,
+): JoinCondition[] {
+  if (propertiesCtx === null) {
+    return [];
+  }
+  const map = propertiesCtx.mapLit();
+  if (map === null) {
+    // `(:person $props)` — a whole map behind one parameter cannot be
+    // lens-checked at validation, so it never reaches here supported.
+    pendingSurface("a parameter as an inline property map");
+  }
+  return map.mapPair().map((pair) => {
+    const property = walker.propertyOf(binding, stripBackticks(pair.name().getText()));
+    return { sql: `${property.sql} = ${walker.compile(pair.expression()).sql}`, outer };
+  });
+}
+
 /** Bind — or re-find — a node pattern's variable. A new node gets its own
  * table entry carrying its type condition and, when it was reached
  * through a relationship, the link condition to it. */
@@ -202,12 +269,10 @@ function bindNode(
   emitted: EmittedPattern,
   fresh: Set<string>,
   state: CompileState,
+  walker: ExpressionWalker,
   viaRel?: TableBinding,
   viaRelColumn?: string,
-): { binding: TableBinding; rebound: boolean } {
-  if (node.properties() !== null) {
-    pendingSurface("an inline property map on a node pattern");
-  }
+): { binding: TableBinding; rebound: boolean; entry?: TableEntry } {
   const symbolCtx = node.symbol();
   const variable = symbolCtx === null ? null : stripBackticks(symbolCtx.getText());
   const labelsCtx = node.nodeLabels();
@@ -222,14 +287,16 @@ function bindNode(
     if (existing.kind !== "entity") {
       reject(`'${variable!}' is already bound to something that is not a node.`);
     }
+    const outer = !fresh.has(existing.alias);
     if (typeKey !== null) {
       // A repeated label narrows the same alias — a contradicting one
       // matches nothing, exactly as a second label would.
       emitted.loose.push({
         sql: `${col(existing, "type_key")} = ${state.bindValue(typeKey)}`,
-        outer: !fresh.has(existing.alias),
+        outer,
       });
     }
+    emitted.loose.push(...inlineConditions(node.properties(), existing, state, walker, outer));
     return { binding: existing, rebound: true };
   }
 
@@ -239,11 +306,13 @@ function bindNode(
   if (typeKey !== null) {
     conds.push({ sql: `${col(binding, "type_key")} = ${state.bindValue(typeKey)}`, outer: false });
   }
+  conds.push(...inlineConditions(node.properties(), binding, state, walker, false));
   if (viaRel !== undefined && viaRelColumn !== undefined) {
     conds.push({ sql: `${col(binding, "id")} = ${col(viaRel, viaRelColumn)}`, outer: false });
   }
-  emitted.entries.push({ table: `entity ${quoteIdent(binding.alias)}`, conds });
-  return { binding, rebound: false };
+  const entry: TableEntry = { table: `entity ${quoteIdent(binding.alias)}`, conds };
+  emitted.entries.push(entry);
+  return { binding, rebound: false, entry };
 }
 
 function newBinding(

@@ -1,7 +1,7 @@
 /**
  * The expression walker.
  *
- * Every expression compiles to **two** forms from one schema lookup:
+ * Every expression compiles to **three** forms from one schema lookup:
  *
  * - `sql` — predicate and sort form. Property access carries the
  *   encoding table's cast (`(props->'age')::numeric`).
@@ -10,6 +10,13 @@
  *   because the port caps them at ±2^53, and a `::numeric` projection
  *   would come back from `pg` as a *string*. A node or relationship
  *   variable projects as its full object.
+ * - `json` — jsonb form, read only where a list is involved: `IN`, list
+ *   and map literals, list equality. It is computed on demand because a
+ *   parameter's jsonb form costs a bind position of its own.
+ *
+ * The seven aggregates live here too. Two of them bend SQL's empty-group
+ * answer to Cypher's — `sum` yields 0, `collect` yields `[]` — and
+ * `collect` additionally drops nulls, which `jsonb_agg` does not.
  *
  * **Symbol-atom disambiguation is the named first step.** Bare integers
  * parse as *symbols*, not literals — `10` and `1_000` lex as `Integer`,
@@ -33,6 +40,8 @@ import type {
   ComparisonExpressionContext,
   ExpressionContext,
   FunctionInvocationContext,
+  ListLitContext,
+  MapLitContext,
   PropertyOrLabelExpressionContext,
   UnaryAddSubExpressionContext,
   XorExpressionContext,
@@ -47,25 +56,43 @@ import {
   type CompileState,
   type TableBinding,
 } from "./bindings.js";
+import {
+  aggregateConversion,
+  objectConversion,
+  scalarConversion,
+  type ColumnConversion,
+} from "./conversion.js";
 import { pendingSurface, reject } from "./rejections.js";
 
-/** A compiled expression in its two forms, plus what the stage machine
+/** A compiled expression in its three forms, plus what the stage machine
  * needs to know about it. */
 export interface CompiledExpr {
   /** Predicate / sort form. */
   sql: string;
   /** Value / projection form. */
   raw: string;
-  /** The declared data type where one is known; `"count"` marks an
-   * aggregate column the driver returns as a string. */
+  /** jsonb form — what `IN`, list literals and map literals compose
+   * from, so that list membership and list equality are the structural
+   * jsonb ones, with jsonb's numeric normalization. Computed on
+   * demand: a parameter's jsonb form needs a bind position of its own
+   * (the argument is JSON encoded rather than sent as an array literal),
+   * and that position must not exist unless something reads the form. */
+  json: () => string;
+  /** The declared data type where one is known. */
   dataType: string | null;
   /** Set when the expression IS a bare node/relationship variable. */
   binding?: TableBinding;
   isAggregate: boolean;
+  /** An explicit result-conversion plan, where the expression knows one
+   * the stage machine could not infer from `dataType` alone. */
+  conversion?: ColumnConversion;
+  /** The compile-time value of a constant literal — what lets a wholly
+   * constant list or map fold into a single jsonb bind. */
+  constant?: { value: unknown };
 }
 
-function scalar(sql: string, dataType: string | null): CompiledExpr {
-  return { sql, raw: sql, dataType, isAggregate: false };
+function scalar(sql: string, dataType: string | null, json?: () => string): CompiledExpr {
+  return { sql, raw: sql, json: json ?? (() => `to_jsonb(${sql})`), dataType, isAggregate: false };
 }
 
 export class ExpressionWalker {
@@ -134,7 +161,7 @@ export class ExpressionWalker {
     if (!/^-?\d+(\.\d+)?$/.test(inner.sql)) {
       pendingSurface("unary minus on a non-literal");
     }
-    return scalar(`-${inner.sql}`, inner.dataType);
+    return numberExpr({ sql: `-${inner.sql}`, dataType: inner.dataType ?? "integer" });
   }
 
   private atomic(ctx: AtomicExpressionContext): CompiledExpr {
@@ -142,11 +169,17 @@ export class ExpressionWalker {
     const strings = ctx.stringExpression();
     const nulls = ctx.nullExpression();
     const lists = ctx.listExpression();
-    if (lists.length > 0) {
-      pendingSurface("IN and list indexing");
-    }
-    if (strings.length + nulls.length > 1) {
+    if (strings.length + nulls.length + lists.length > 1) {
       pendingSurface("a chained postfix expression");
+    }
+    const listExp = lists[0];
+    if (listExp !== undefined) {
+      if (listExp.IN() === null) {
+        // Indexing and slicing (`xs[0]`, `xs[1..3]`) parse, but the
+        // documented OQL surface names neither.
+        pendingSurface("list indexing");
+      }
+      return this.membership(base, this.propertyOrLabel(listExp.propertyOrLabelExpression()!));
     }
     const stringExp = strings[0];
     if (stringExp !== undefined) {
@@ -205,7 +238,12 @@ export class ExpressionWalker {
     if (binding.kind === "scalar") {
       reject(`'${variable}' is not a node or relationship, so it has no properties.`);
     }
+    return this.propertyOf(binding, property);
+  }
 
+  /** The same access from a binding already in hand — what an inline
+   * property map in a pattern reads its left-hand sides through. */
+  propertyOf(binding: TableBinding, property: string): CompiledExpr {
     // System properties are columns of their own, not `props` keys.
     if (property === "_id") {
       // Compared as text: garbage input must be a no-match, never a
@@ -235,9 +273,26 @@ export class ExpressionWalker {
     return {
       sql: jsonAccessor(definition.dataType, props, key),
       raw: `${props}->${key}`,
+      json: () => `${props}->${key}`,
       dataType: definition.dataType,
       isAggregate: false,
     };
+  }
+
+  /**
+   * `x IN list` — structural jsonb containment, with Cypher's
+   * three-valued outcome spelled out: a hit is true, a miss over a list
+   * that carries a null (or a null on either side) is null, and only a
+   * miss over a null-free list is false.
+   */
+  private membership(value: CompiledExpr, list: CompiledExpr): CompiledExpr {
+    return scalar(
+      `CASE WHEN ${list.json()} @> ${value.json()} THEN true` +
+        ` WHEN ${value.json()} IS NULL OR ${list.json()} IS NULL` +
+        ` OR ${list.json()} @> 'null'::jsonb THEN NULL` +
+        ` ELSE false END`,
+      "boolean",
+    );
   }
 
   private atom(ctx: AtomContext): CompiledExpr {
@@ -249,26 +304,64 @@ export class ExpressionWalker {
       }
       const text = literal.stringLit() ?? literal.charLit();
       if (text !== null) {
-        return scalar(this.state.bindValue(unquote(text.getText())), "string");
+        const value = unquote(text.getText());
+        // The bind is allocated on first read, so a string inside a
+        // wholly constant list costs no position of its own — the list
+        // folds into one jsonb bind instead.
+        const state = this.state;
+        let placeholder: string | undefined;
+        const bind = (): string => (placeholder ??= state.bindValue(value));
+        return {
+          get sql() {
+            return bind();
+          },
+          get raw() {
+            return bind();
+          },
+          json: () => `to_jsonb(${bind()}::text)`,
+          dataType: "string",
+          isAggregate: false,
+          constant: { value },
+        };
       }
       const bool = literal.boolLit();
       if (bool !== null) {
-        return scalar(bool.getText().toLowerCase(), "boolean");
+        const value = bool.getText().toLowerCase() === "true";
+        return { ...scalar(String(value), "boolean"), constant: { value } };
       }
       if (literal.NULL_W() !== null) {
-        return scalar("NULL", null);
+        return { ...scalar("NULL", null, () => "NULL"), constant: { value: null } };
       }
-      pendingSurface("list and map literals");
+      const list = literal.listLit();
+      if (list !== null) {
+        return this.listLiteral(list);
+      }
+      return this.mapLiteral(literal.mapLit()!);
     }
 
     const parameter = ctx.parameter();
     if (parameter !== null) {
       const nameCtx = parameter.symbol() ?? parameter.numLit()!;
-      return scalar(this.state.bindParam(stripBackticks(nameCtx.getText())), null);
+      const name = stripBackticks(nameCtx.getText());
+      // Which wire shape a parameter needs is only known once a form is
+      // read, so each is allocated on first read: a `$list` used only as
+      // an `IN` operand takes the jsonb position and no other.
+      const state = this.state;
+      return {
+        get sql() {
+          return state.bindParam(name);
+        },
+        get raw() {
+          return state.bindParam(name);
+        },
+        json: () => `${state.bindParamJson(name)}::jsonb`,
+        dataType: null,
+        isAggregate: false,
+      };
     }
 
     if (ctx.countAll() !== null) {
-      return { sql: "count(*)", raw: "count(*)", dataType: "count", isAggregate: true };
+      return aggregate("count(*)", "integer", { kind: "number" });
     }
 
     const invocation = ctx.functionInvocation();
@@ -279,7 +372,12 @@ export class ExpressionWalker {
     const parenthesized = ctx.parenthesizedExpression();
     if (parenthesized !== null) {
       const inner = this.compile(parenthesized.expression());
-      return { ...inner, sql: `(${inner.sql})`, raw: `(${inner.raw})` };
+      return {
+        ...inner,
+        sql: `(${inner.sql})`,
+        raw: `(${inner.raw})`,
+        json: () => `(${inner.json()})`,
+      };
     }
 
     const symbol = ctx.symbol();
@@ -295,11 +393,12 @@ export class ExpressionWalker {
     const binding = this.state.stage.scope.get(text);
     if (binding !== undefined) {
       if (binding.kind === "scalar") {
-        return scalar(binding.sqlExpr, binding.dataType);
+        return { ...scalar(binding.sqlExpr, binding.dataType), conversion: binding.conversion };
       }
       return {
         sql: col(binding, "id"),
         raw: projectedObject(binding),
+        json: () => projectedObject(binding),
         dataType: null,
         binding,
         isAggregate: false,
@@ -307,7 +406,7 @@ export class ExpressionWalker {
     }
     const numeric = numericSql(text);
     if (numeric !== null) {
-      return scalar(numeric.sql, numeric.dataType);
+      return numberExpr(numeric);
     }
     reject(unknownVariable(text, this.state.stage.scope));
   }
@@ -317,9 +416,52 @@ export class ExpressionWalker {
     if (numeric === null) {
       pendingSurface(`the numeric literal '${text}'`);
     }
-    return scalar(numeric.sql, numeric.dataType);
+    return numberExpr(numeric);
   }
 
+  /** `[…]` — one jsonb bind when every element is constant, a composed
+   * `jsonb_build_array` when one is not. */
+  private listLiteral(ctx: ListLitContext): CompiledExpr {
+    const elements = (ctx.expressionChain()?.expression() ?? []).map((element) =>
+      this.compile(element),
+    );
+    const constants = elements.map((element) => element.constant);
+    if (constants.every((entry) => entry !== undefined)) {
+      const value = constants.map((entry) => entry!.value);
+      return this.jsonConstant(value);
+    }
+    return jsonExpr(
+      `jsonb_build_array(${elements.map((element) => element.json()).join(", ")})`,
+    );
+  }
+
+  /** `{…}` — the map mirror of `listLiteral`. */
+  private mapLiteral(ctx: MapLitContext): CompiledExpr {
+    const pairs = ctx.mapPair().map((pair) => ({
+      key: stripBackticks(pair.name().getText()),
+      value: this.compile(pair.expression()),
+    }));
+    if (pairs.every((pair) => pair.value.constant !== undefined)) {
+      const value: Record<string, unknown> = {};
+      for (const pair of pairs) {
+        value[pair.key] = pair.value.constant!.value;
+      }
+      return this.jsonConstant(value);
+    }
+    const arguments_ = pairs.flatMap((pair) => [quoteLiteral(pair.key), pair.value.json()]);
+    return jsonExpr(`jsonb_build_object(${arguments_.join(", ")})`);
+  }
+
+  /** A wholly constant list or map: one jsonb bind, JSON encoded here. */
+  private jsonConstant(value: unknown): CompiledExpr {
+    const placeholder = `${this.state.bindValue(JSON.stringify(value))}::jsonb`;
+    return { ...jsonExpr(placeholder), constant: { value } };
+  }
+
+  /** The seven aggregates. Cypher's empty-group answers differ from
+   * SQL's for two of them, and both bends are spelled out here: `sum`
+   * yields 0 rather than NULL, `collect` yields `[]` rather than NULL —
+   * and `collect` drops nulls, which SQL's `jsonb_agg` does not. */
   private functionCall(ctx: FunctionInvocationContext): CompiledExpr {
     const name = ctx
       .invocationName()
@@ -327,18 +469,42 @@ export class ExpressionWalker {
       .map((part) => stripBackticks(part.getText()))
       .join(".")
       .toLowerCase();
-    if (name !== "count") {
-      pendingSurface(`the ${name}() aggregate`);
-    }
     const args = ctx.expressionChain()?.expression() ?? [];
     if (args.length !== 1) {
-      pendingSurface("count() with anything but one argument");
+      pendingSurface(`${name}() with anything but one argument`);
     }
     const argument = this.compile(args[0]!);
-    // `count(x)` counts non-null matches — for a variable that is its id.
-    const operand = argument.binding === undefined ? argument.sql : col(argument.binding, "id");
-    const sql = `count(${operand})`;
-    return { sql, raw: sql, dataType: "count", isAggregate: true };
+    // A node or relationship is non-null exactly when its id is.
+    const presence = argument.binding === undefined ? argument.sql : col(argument.binding, "id");
+    switch (name) {
+      case "count":
+        return aggregate(`count(${presence})`, "integer", { kind: "number" });
+      case "sum":
+        return aggregate(`COALESCE(sum(${argument.sql}), 0)`, argument.dataType, {
+          kind: "number",
+        });
+      case "avg":
+        return aggregate(`avg(${argument.sql})`, argument.dataType, { kind: "number" });
+      case "min":
+      case "max":
+        return aggregate(
+          `${name}(${argument.sql})`,
+          argument.dataType,
+          aggregateConversion(argument.dataType),
+        );
+      case "collect":
+        // The projection form is what is collected, so a collected value
+        // is byte-identical to the same value projected on its own.
+        return aggregate(
+          `COALESCE(jsonb_agg(${argument.raw}) FILTER (WHERE ${presence} IS NOT NULL), '[]'::jsonb)`,
+          argument.dataType,
+          argument.binding === undefined
+            ? scalarConversion(argument.dataType)
+            : objectConversion(this.state.schema, argument.binding),
+        );
+      default:
+        pendingSurface(`the ${name}() aggregate`);
+    }
   }
 }
 
@@ -354,6 +520,26 @@ function chain(operands: CompiledExpr[], operator: string): CompiledExpr {
     return operands[0]!;
   }
   return scalar(`(${operands.map((operand) => operand.sql).join(` ${operator} `)})`, "boolean");
+}
+
+/** An expression that is jsonb in every position — a list or map. */
+function jsonExpr(sql: string): CompiledExpr {
+  return { sql, raw: sql, json: () => sql, dataType: null, isAggregate: false };
+}
+
+/** An aggregate column, with the conversion `pg`'s wire types demand. */
+function aggregate(
+  sql: string,
+  dataType: string | null,
+  conversion: ColumnConversion,
+): CompiledExpr {
+  return { sql, raw: sql, json: () => sql, dataType, isAggregate: true, conversion };
+}
+
+/** A SQL string literal — used only for map keys, which are schema-shaped
+ * identifiers, never values. */
+function quoteLiteral(text: string): string {
+  return `'${text.replaceAll("'", "''")}'`;
 }
 
 function propertiesOf(
@@ -387,6 +573,12 @@ function unknownProperty(
     `Unknown property '${property}' on ${kind} type '${typeKey}'. ` +
     `Available: ${available.join(", ")}`
   );
+}
+
+/** A numeric literal, inlined into the SQL (it carries no user text) and
+ * known at compile time, so a constant list can fold around it. */
+function numberExpr(numeric: { sql: string; dataType: string }): CompiledExpr {
+  return { ...scalar(numeric.sql, numeric.dataType), constant: { value: Number(numeric.sql) } };
 }
 
 /** Cypher's integer and float literal forms → a bare SQL numeric. */

@@ -21,4 +21,7 @@ package (`adapters/neo4j/`).
 
 Services, routers, and MCP handlers speak ontology vocabulary — type keys, property keys,
 instance UUIDs, structured filters — and never see driver types or query fragments. Neo4j
-is the reference adapter and the default deployment.
+was the first adapter behind the port. *(Editorial correction: this sentence originally
+read "Neo4j is the reference adapter and the default deployment" — superseded by the
+peers rule in [../decisions.md](../decisions.md#storage): adapters are peers under one
+contract, and no adapter is the reference implementation.)*

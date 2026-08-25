@@ -19,7 +19,7 @@ services:
       retries: 5
       start_period: 30s
 
-  # Neo4j — the behavioural reference. Commented out during PostgreSQL adapter
+  # Neo4j — conformance baseline for side-by-side runs. Commented out during PostgreSQL adapter
   # development; uncomment for conformance runs (both databases run side by side),
   # then select the backend in server/.env.
   # neo4j:

@@ -22,7 +22,9 @@ every storage backend.
 persistence port, against the lens. Compiling a validated query into whatever dialect the
 active database speaks is the adapter's private business: invisible to callers, absent from
 error messages, and not part of this contract. Two deployments on different backends
-accept exactly the same queries.
+accept exactly the same queries and reject them with identical validation; where the
+execution of an accepted query is known to diverge between adapters, the divergence is
+enumerated in [../storage-adapters.md](../storage-adapters.md#where-the-adapters-diverge).
 
 ## The read-only guarantee
 
@@ -84,10 +86,10 @@ existence of what it hides.
 
 Type inference is **pattern-local**: a variable's type is known only from a label or
 relationship type written in the pattern that binds it. A variable introduced by an
-intermediate projection, or bound to a relationship pattern with no type, has no known
-type, and property accesses through it are not checked — they simply yield nothing if the
-property does not exist. That is a validation gap, not a scope leak: result stripping,
-below, still removes anything out of scope from what comes back.
+intermediate projection, or bound to a relationship pattern with no type, has no declared
+type, and reading a property through it is rejected — the query must name the type in the
+pattern that binds the variable. System properties remain readable through it, as through
+any variable.
 
 Violations are **collected, not raised one at a time**. A rejected query reports every
 violation it found, as a list in the error details, consistent with the collect-all rule in

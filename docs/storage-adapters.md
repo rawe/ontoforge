@@ -121,8 +121,8 @@ cross-cutting checks, and must be a coherent snapshot rather than a walk the cal
 stitches together.
 
 **Agent and saved-query storage.** Both belong to an ontology and are addressed by key
-within it. For each: list for an ontology, read one by key, upsert, delete, and a
-list-for-export variant that returns the full stored form rather than the summary. Upsert
+within it. For each: list for an ontology, upsert, delete, and a list-for-export variant
+that returns the full stored form rather than the summary. Upsert
 reports whether it created or updated, because the interface layer distinguishes the two.
 An agent carries name, description, system prompt and a tool allowlist. A saved query
 carries name, description, and its steps and parameters as serialized text — the store
@@ -226,8 +226,10 @@ any one of which matching admits the row. See
 **Validated-query execution.** Take a validated query object and an optional parameter
 map, compile, execute read-only, and return the ordered column names together with the
 rows. Each row maps column name to a converted value. Nodes and relationships become plain
-property maps; temporals are converted; vectors are stripped; lists and maps are converted
-recursively so nothing driver-shaped survives at any depth.
+property maps; temporals are converted; vectors are stripped; conversion recurses through
+lists of one element type, and nothing driver-shaped survives at any depth. What a map
+literal or a mixed list carries back is each adapter's own shape — recorded with the
+divergences below.
 
 ## Obligations beyond storage
 
@@ -336,6 +338,51 @@ database exactly what the validated query asks — only the names are translated
 Results come back in ontology vocabulary, so no reverse translation of names is required —
 the compiled query returns whatever the caller asked for, converted per the value rules
 above.
+
+---
+
+# Where the adapters diverge
+
+Parsing and validation happen above the port, so the Neo4j and PostgreSQL adapters accept
+exactly the same queries and reject invalid ones identically. Beyond acceptance, the known
+divergences between them are enumerated here. Two deviations stand with the rules they
+attach to in Part 1 rather than here: the datetime text form on the two point reads
+(PostgreSQL), and the indexed-value size ceiling (Neo4j).
+
+- **Decoding through a shared type key.** An entity type and a relation type may share a
+  key; if both declare the same property key at different data types, the traversal read
+  and the batch read behind cross-type document search can decode the value through the
+  wrong definition, silently. A known limitation, accepted.
+- **Vector-index removal on drop.** On PostgreSQL, a dropped entity type's or document
+  property's vector index survives as an orphan until the next ensure-all pass sweeps it;
+  on Neo4j the drop removes it immediately.
+- **Width drift blocks writes, not just search.** While a vector index of a stale width
+  stands, PostgreSQL rejects every write that carries a vector — entity or chunk, of any
+  type — until the widths are reconciled; on Neo4j the mismatched vector is left
+  unindexed and the write succeeds.
+- **Faults only execution can see.** A query fault the compiler itself detects — an
+  un-aliased `WITH` item that is not a plain variable, a missing parameter, a variable
+  used as a node or relationship when it is bound to neither — is a domain validation
+  error on PostgreSQL; Neo4j surfaces the same query as a storage error. A clean client
+  error on one adapter is a generic failure on the other.
+- **Aggregates versus projection on temporal properties.** On PostgreSQL, `min` and `max`
+  over a date or datetime property return a decoded temporal value where a plain
+  projection of the same property returns its stored text — the two forms disagree about
+  the property's type; on Neo4j they agree.
+- **Map literals and mixed lists in query results.** Conversion recurses through lists of
+  one element type only; a map literal, or a list mixing element types, comes back in
+  each adapter's own shape — converted temporals on Neo4j, the stored text on PostgreSQL.
+  The conformance suite pins both shapes.
+- **An empty leading `OPTIONAL MATCH`.** When it matches nothing, Neo4j returns one row
+  of nulls; PostgreSQL returns no row.
+- **Out-of-range float literals.** A float literal beyond double range, such as `1e400`,
+  executes with correct comparison semantics on PostgreSQL; Neo4j refuses the query with
+  a storage error, its engine rejecting the value as out of range.
+
+One gap is shared rather than divergent: a float literal whose fraction is a bare
+trailing zero, such as `1.0`, cannot be written — it parses as a property access and is
+rejected — so an equality across the integer/float divide written as `1 = 1.0` is
+inexpressible on both adapters alike. `1.5` is unaffected.
 
 ---
 

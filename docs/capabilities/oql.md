@@ -47,12 +47,18 @@ storage backend. The rule this enforces is in
 [../decisions.md](../decisions.md#behaviour).
 
 - **Clauses.** MATCH, OPTIONAL MATCH, WHERE, WITH, RETURN, ORDER BY with ASC and DESC,
-  SKIP, LIMIT, and AS aliases.
+  SKIP, LIMIT, and AS aliases. A query carries at most one WITH, so a pipeline is at
+  most two stages. ORDER BY sort keys are properties, aliases and aggregates — not
+  nodes, constants or parameters. SKIP and LIMIT each take a non-negative integer
+  literal or a parameter placeholder.
 - **Patterns.** Labeled and anonymous nodes; directed, reversed and undirected
-  relationships; relationship variables and anonymous typed relationships;
-  comma-separated pattern parts; inline property maps.
+  relationships — an undirected pattern matches in both directions; relationship
+  variables and anonymous typed relationships; comma-separated pattern parts; inline
+  property maps.
 - **Predicates and expressions.** The comparisons `=`, `<>`, `<`, `<=`, `>`, `>=`;
-  AND, OR and NOT, with parentheses; CONTAINS; IN; IS NULL and IS NOT NULL; literals,
+  AND, OR and NOT, with parentheses — XOR is among the rejections; CONTAINS, which is
+  case-sensitive, deliberately unlike the case-insensitive substring filter on the list
+  operations; IN; IS NULL and IS NOT NULL; literals,
   including lists and maps; parameter placeholders; backticked identifiers; comments;
   system properties.
 - **Functions.** The seven aggregates — `count(*)`, `count(x)`, `avg`, `collect`,
@@ -63,7 +69,9 @@ Two boundaries are worth knowing rather than discovering:
 - The label requirement binds node patterns that **introduce a variable**. A fully
   anonymous node pattern, and a relationship pattern with no type, are not flagged. They
   widen what a pattern traverses, but nothing can be projected from them without a
-  variable, so they do not widen what is exposed.
+  variable, so they do not widen what is exposed. An inline property map, though,
+  requires an owner with a known type: the map's keys are property accesses, validated
+  against the owner's type within the lens exactly as any other property access.
 - Parameter placeholders parse, but an ad-hoc query is executed with **no parameter values
   supplied**. Write literal values; parameterization is what saved queries are for
   ([saved-queries.md](saved-queries.md)).
@@ -85,11 +93,11 @@ suggestions. The lens is a complete horizon, not a permission filter that leaks 
 existence of what it hides.
 
 Type inference is **pattern-local**: a variable's type is known only from a label or
-relationship type written in the pattern that binds it. A variable introduced by an
-intermediate projection, or bound to a relationship pattern with no type, has no declared
-type, and reading a property through it is rejected — the query must name the type in the
-pattern that binds the variable. System properties remain readable through it, as through
-any variable.
+relationship type written in the pattern that binds it. A variable bound to a
+relationship pattern with no type has no declared type, and reading a property through
+it is rejected — the query must name the type in the pattern that binds the variable.
+Reading a property of a `WITH` alias that cannot be verified against the schema is an
+error. System properties remain readable through any variable.
 
 Violations are **collected, not raised one at a time**. A rejected query reports every
 violation it found, as a list in the error details, consistent with the collect-all rule in
@@ -143,6 +151,12 @@ Expressed in the language — ordering by an expression, skipping, limiting — 
 parameters of the operation. There is no server-imposed default limit and no cap: an
 unbounded query returns every matching row. Bounding a query is the caller's
 responsibility.
+
+Predicates follow three-valued logic: a comparison against a null or missing value is
+unknown, not false, and only rows whose predicate holds are returned. In ordering,
+nulls sort last ascending and first descending, on every backend. String comparison
+in WHERE and string ordering in ORDER BY follow the database's default collation —
+the same carve-out the list operations state.
 
 ## Through the interfaces
 

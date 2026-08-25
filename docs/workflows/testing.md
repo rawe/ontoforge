@@ -9,39 +9,56 @@ All commands are run from `server/`.
 | Command | Suite | External deps |
 |---|---|---|
 | `npm test` | Unit | None |
-| `npm run test:integration` | Integration | Neo4j |
-| `npm run test:integration:embedding` | Semantic search | Neo4j + Ollama (embedding model) |
-| `npm run test:integration:ai` | AI (slow, real model) | Neo4j + Ollama (tool-calling model) |
+| `npm run test:integration` | Integration | The selected database |
+| `npm run test:integration:embedding` | Semantic search | The selected database + Ollama (embedding model) |
+| `npm run test:integration:ai` | AI (slow, real model) | The selected database + Ollama (tool-calling model) |
 
 **Unit tests** (`tests/`, excluding `tests/integration/`) mock all external
-dependencies (Neo4j driver, embedding providers, AI models). They run fast and require
-no infrastructure.
+dependencies (database drivers, embedding providers, AI models). They run fast and
+require no infrastructure.
 
 **Integration tests** (`tests/integration/`) hit real services and run serially — they
-wipe the database between files. The embedding suite (`tests/integration/embedding/`)
-and the AI suite (`tests/integration/ai/`) are separate because they configure live
-providers, while the plain integration suite's feature-disabled assertions depend on
-running with *no* provider configured.
+wipe the database between files. The integration suite *is* the conformance suite: the
+same tests run against whichever adapter `DB_BACKEND` selects, and nothing is renamed
+per backend. The embedding suite (`tests/integration/embedding/`) and the AI suite
+(`tests/integration/ai/`) are separate because they configure live providers, while the
+plain integration suite's feature-disabled assertions depend on running with *no*
+provider configured.
+
+The embedding and AI suites auto-skip when their optional provider (Ollama) is
+unavailable. The integration suite does not: it requires a running database and fails
+loudly by design when the selected one is down.
 
 `npm run typecheck` runs the TypeScript compiler without emitting.
 
 ## Integration Test Requirements
 
-Tests auto-skip when their required services are unavailable.
+### The two databases
 
-### Neo4j
-
-Required by all integration suites:
+The dev compose file carries both databases. PostgreSQL — the default — starts with:
 
 ```bash
 docker compose up -d
 ```
 
-Default connection: `bolt://localhost:7687` (user: `neo4j`, password: `ontoforge_dev`)
+A Neo4j run additionally needs the `neo4j` service block in `docker-compose.yml`
+uncommented; both databases run side by side with no port conflicts.
 
-The store-error and vector-index-drift tests deliberately reach past the persistence
-port — inducing a genuine driver failure means putting the database into a state the
-code never produces on its own. They are the only adapter-specific tests.
+### Selecting the adapter
+
+- **PostgreSQL (the default):** no `.env` needed — the built-in defaults
+  (`DB_BACKEND=postgres`, `postgresql://localhost:5432/ontoforge`) match the dev
+  compose service.
+- **Neo4j:** set the four values explicitly in `server/.env`:
+
+  ```
+  DB_BACKEND=neo4j
+  DB_URI=bolt://localhost:7687
+  DB_USER=neo4j
+  DB_PASSWORD=ontoforge_dev
+  ```
+
+Run the embedding suite on both adapters whenever search behaviour is touched.
 
 ### Ollama (Embedding)
 
@@ -70,7 +87,7 @@ before investigating.
 ### Running Everything
 
 ```bash
-# 1. Start Neo4j
+# 1. Start the database
 docker compose up -d
 
 # 2. Ensure Ollama models are available
@@ -97,8 +114,15 @@ npm run test:integration:ai
 
 - Place in `tests/integration/` — plain suite, or `embedding/` / `ai/` when the test
   configures a live provider
-- Include availability checks that skip when services are down (see each suite's
-  `support.ts`)
+- Adapter-specific tests live in per-adapter folders beside the shared files —
+  `tests/integration/neo4j/`, `tests/integration/postgres/`,
+  `tests/integration/embedding/neo4j/`, and the adapter-internal unit folders
+  `tests/adapters/neo4j/` and `tests/adapters/postgres/` — gated so they skip when the
+  other backend is selected. The store-error and vector-drift tests among them
+  deliberately reach past the persistence port: inducing a genuine driver failure means
+  putting the database into a state the code never produces on its own.
+- The embedding and AI suites include availability checks that skip when their provider
+  is down (see each suite's `support.ts`)
 - Create and clean up test data (ontologies, entities) within fixtures
 - Set configuration overrides in setup and restore them in teardown
 

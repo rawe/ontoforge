@@ -41,11 +41,15 @@
 Before every test run, the team lead executes:
 
 ```bash
-# 1. Wipe model DB
-curl -s -X POST http://localhost:7474/db/neo4j/tx/commit \
-  -H "Content-Type: application/json" \
-  -u neo4j:ontoforge_dev \
-  -d '{"statements":[{"statement":"MATCH (n) DETACH DELETE n"}]}'
+# 1. Wipe the database (PostgreSQL, the default)
+docker compose exec postgres psql -U postgres -d ontoforge -c \
+  'TRUNCATE ontology, entity_type, relation_type, property_def, ontology_includes, ai_agent_config, saved_query, entity, relation, document_chunk'
+
+# For a run flipped to Neo4j, wipe it instead with:
+# curl -s -X POST http://localhost:7474/db/neo4j/tx/commit \
+#   -H "Content-Type: application/json" \
+#   -u neo4j:ontoforge_dev \
+#   -d '{"statements":[{"statement":"MATCH (n) DETACH DELETE n"}]}'
 
 # 2. Verify server is up and running latest code
 curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/docs

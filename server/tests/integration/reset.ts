@@ -1,16 +1,25 @@
 /**
- * Test-harness database reset — deliberately outside the persistence
- * port: an adapter ships no test-only surface, so the wipe
+ * Two-level test reset — harness code, deliberately outside the
+ * persistence port: an adapter ships no test-only surface, so the reset
  * implementations live here, one per adapter, dispatched on `DB_BACKEND`.
  *
- * `wipeDatabase` is the per-file fast reset every integration file runs
- * between tests. It needs the adapter initialized (`initStores`) and
- * deletes all stored data while keeping schema objects.
+ * - `hardReset` — run once per suite invocation by `global-setup.ts`,
+ *   before any test file: a virgin database, so nothing an earlier
+ *   invocation left behind — the width imprint of a fixed vector index,
+ *   for one — can leak into this one. PostgreSQL drops and recreates the
+ *   database and runs the boot DDL; Neo4j Community has no
+ *   `DROP DATABASE`, so its hard reset is the full wipe.
+ * - `wipeDatabase` — the per-file fast reset every integration file runs
+ *   between tests. It needs the adapter initialized (`initStores`) and
+ *   deletes all stored data while keeping schema objects.
  */
 
-import { getDriver } from "../../src/adapters/neo4j/driver.js";
+import pg from "pg";
+
+import { closeDriver, getDriver, initDriver } from "../../src/adapters/neo4j/driver.js";
 import { runSession } from "../../src/adapters/neo4j/errors.js";
-import { withTransaction } from "../../src/adapters/postgres/errors.js";
+import { initSchema } from "../../src/adapters/postgres/ddl.js";
+import { closePool, initPool, withTransaction } from "../../src/adapters/postgres/errors.js";
 import { quoteIdent } from "../../src/adapters/postgres/oql/bindings.js";
 import { settings } from "../../src/config.js";
 
@@ -68,6 +77,63 @@ export async function wipeDatabase(): Promise<void> {
       return;
     case "neo4j":
       await wipeNeo4j();
+      return;
+    default:
+      throw new Error(`Unknown DB_BACKEND '${settings.DB_BACKEND}'`);
+  }
+}
+
+/**
+ * `DROP DATABASE … WITH (FORCE)` + `CREATE DATABASE` on a maintenance
+ * connection to the `postgres` database, then the boot DDL with the
+ * adapter pool opened and closed around it. Runs before any worker opens
+ * a pool, so no connection of ours holds the database being dropped;
+ * FORCE clears out anything else.
+ */
+async function hardResetPostgres(): Promise<void> {
+  const url = new URL(settings.DB_URI);
+  const database = url.pathname.replace(/^\//, "");
+  const maintenance = new pg.Client({
+    host: url.hostname,
+    port: url.port === "" ? 5432 : Number(url.port),
+    database: "postgres",
+    user: settings.DB_USER,
+    password: settings.DB_PASSWORD,
+  });
+  await maintenance.connect();
+  try {
+    await maintenance.query(`DROP DATABASE IF EXISTS ${quoteIdent(database)} WITH (FORCE)`);
+    await maintenance.query(`CREATE DATABASE ${quoteIdent(database)}`);
+  } finally {
+    await maintenance.end();
+  }
+  await initPool();
+  try {
+    await initSchema();
+  } finally {
+    await closePool();
+  }
+}
+
+/** The full wipe, on a driver of its own (no stores exist yet). */
+async function hardResetNeo4j(): Promise<void> {
+  await initDriver();
+  try {
+    await wipeNeo4j();
+  } finally {
+    await closeDriver();
+  }
+}
+
+/** Suite-level hard reset: guarantee a virgin database, once per suite
+ * invocation, from `global-setup.ts`. */
+export async function hardReset(): Promise<void> {
+  switch (settings.DB_BACKEND) {
+    case "postgres":
+      await hardResetPostgres();
+      return;
+    case "neo4j":
+      await hardResetNeo4j();
       return;
     default:
       throw new Error(`Unknown DB_BACKEND '${settings.DB_BACKEND}'`);

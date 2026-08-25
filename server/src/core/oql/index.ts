@@ -123,6 +123,11 @@ export interface Analysis {
   /** Bare variables used as ORDER BY sort keys (checked against the
    * node/relationship variables in `validate()`). */
   orderBySymbols: string[];
+  /** Names of `$parameters` used as SKIP/LIMIT operands. The Neo4j
+   * adapter must send exactly these as driver integers — a plain JS
+   * number crosses the wire as a Float, which the server rejects as a
+   * paging count. */
+  skipLimitParams: Set<string>;
 }
 
 /** True if any node variable appears without a label and is never bound
@@ -174,6 +179,7 @@ class Collector extends CypherParserListener {
     functionCalls: new Set(),
     inlineMaps: [],
     orderBySymbols: [],
+    skipLimitParams: new Set(),
   };
 
   /** Nesting depth of aggregate function invocations (nested-aggregate check). */
@@ -480,10 +486,11 @@ class Collector extends CypherParserListener {
 
   private checkSkipLimitOperand(ctx: ExpressionContext): void {
     const shape = classifyExpression(ctx);
-    const ok =
-      shape.kind === "parameter" ||
-      (shape.kind === "constant" && /^[0-9]+$/.test(shape.text));
-    if (!ok) {
+    if (shape.kind === "parameter") {
+      this.analysis.skipLimitParams.add(shape.name);
+      return;
+    }
+    if (!(shape.kind === "constant" && /^[0-9]+$/.test(shape.text))) {
       this.analysis.unsupported.add("skip-limit");
     }
   }
@@ -515,7 +522,7 @@ function invocationNameText(ctx: FunctionInvocationContext): string {
 type ExpressionShape =
   | { kind: "variable"; name: string }
   | { kind: "constant"; text: string }
-  | { kind: "parameter" }
+  | { kind: "parameter"; name: string }
   | { kind: "property" }
   | { kind: "other" };
 
@@ -561,7 +568,11 @@ function classifyExpression(ctx: ExpressionContext): ExpressionShape {
 
   const atom = propertyCtx.atom();
   if (atom.literal() !== null) return { kind: "constant", text: atom.getText() };
-  if (atom.parameter() !== null) return { kind: "parameter" };
+  const parameterCtx = atom.parameter();
+  if (parameterCtx !== null) {
+    const nameCtx = parameterCtx.symbol() ?? parameterCtx.numLit()!;
+    return { kind: "parameter", name: stripBackticks(nameCtx.getText()) };
+  }
   const parenCtx = atom.parenthesizedExpression();
   if (parenCtx !== null) return classifyExpression(parenCtx.expression());
   const symbolCtx = atom.symbol();

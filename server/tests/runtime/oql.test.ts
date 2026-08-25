@@ -194,6 +194,20 @@ describe("analysis", () => {
     expect(analysis.nodeVariables).toEqual(new Map([["p", new Set(["person"])]]));
     expect(analysis.propertyAccesses).toContainEqual({ variable: "p", propertyName: "name" });
   });
+
+  it("records the names of $parameters used as SKIP/LIMIT operands", () => {
+    const analysis = analyzeQuery(
+      "MATCH (p:person) RETURN p.name AS name SKIP $offset LIMIT $page_size",
+    );
+    expect(analysis.skipLimitParams).toEqual(new Set(["offset", "page_size"]));
+  });
+
+  it("records no SKIP/LIMIT operand for literals or parameters used elsewhere", () => {
+    const analysis = analyzeQuery(
+      "MATCH (p:person) WHERE p.age > $min_age RETURN p.name AS name SKIP 1 LIMIT 2",
+    );
+    expect(analysis.skipLimitParams).toEqual(new Set());
+  });
 });
 
 // ---------------------------------------------------------------------------

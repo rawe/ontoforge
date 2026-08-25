@@ -659,11 +659,11 @@ describe("ordering and paging", () => {
     );
   });
 
-  it("drops the carried ordering when the RETURN aggregates", () => {
-    // Aggregation collapses the rows the sort key belonged to: the key is
-    // neither grouped nor aggregated, so re-emitting it is invalid SQL —
-    // and row identity does not survive aggregation in the reference
-    // adapter either.
+  it("moves the carried ordering inside collect when the RETURN aggregates", () => {
+    // Aggregation collapses the rows the sort key belonged to, so the
+    // statement-level ORDER BY is dropped — but collect's element order
+    // is contractual: SQL promises a CTE's ORDER BY only to the LIMIT it
+    // feeds, so the pipeline ordering is re-stated inside the aggregate.
     expect(sql("MATCH (a:person) WITH a ORDER BY a.age DESC LIMIT 3 RETURN collect(a.name) AS top"))
       .toBe(
         [
@@ -676,11 +676,12 @@ describe("ordering and paging", () => {
           "ORDER BY (a.props->'age')::numeric DESC",
           "LIMIT 3",
           ")",
-          "SELECT COALESCE(jsonb_agg(s0.a__props->'name')" +
+          "SELECT COALESCE(jsonb_agg(s0.a__props->'name' ORDER BY s0.__ord0 DESC)" +
             " FILTER (WHERE s0.a__props->>'name' IS NOT NULL), '[]'::jsonb) AS top",
           "FROM s0",
         ].join("\n"),
       );
+    // Order-insensitive aggregates carry nothing.
     expect(sql("MATCH (a:person) WITH a ORDER BY a.age RETURN count(*) AS n")).not.toContain(
       "ORDER BY s0.__ord0",
     );

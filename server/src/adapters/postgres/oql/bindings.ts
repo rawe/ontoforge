@@ -158,4 +158,10 @@ export interface CompileState {
   bindParamJson(name: string): string;
   /** A fresh table alias for a variable, or for an anonymous element. */
   newAlias(kind: TableKind, variable: string | null): string;
+  /** The ` ORDER BY …` tail an order-sensitive aggregate carries inside
+   * its own parentheses — the pipeline ordering of the rows being
+   * aggregated, or the empty string when the pipeline set none. SQL
+   * promises a CTE's ORDER BY only to the LIMIT it feeds, so collect
+   * must re-state the order to make it contractual. */
+  aggregateOrder(): string;
 }

@@ -526,15 +526,14 @@ describe("the clause and expression matrix", () => {
 
     it("aggregates the rows a WITH ordered", async () => {
       await seedGraph();
-      // The order *inside* a collected list is deliberately not asserted:
-      // aggregation collapses the rows the sort key belonged to, and SQL
-      // promises a subquery's ORDER BY only for the LIMIT it feeds.
+      // The order *inside* the collected list is contractual on both
+      // backends: the pipeline ordering is re-stated inside the
+      // aggregate, matching the reference adapter's preserved order.
       const collected = await query(
         "test_ontology",
         "MATCH (p:person) WITH p ORDER BY p.age DESC LIMIT 2 RETURN collect(p.name) AS top",
       );
-      const top = (collected.results as Row[])[0]!.top as string[];
-      expect([...top].sort()).toEqual(["Alice", "Bob"]);
+      expect((collected.results as Row[])[0]!.top).toEqual(["Bob", "Alice"]);
 
       const counted = await query(
         "test_ontology",

@@ -179,6 +179,14 @@ class Compiler implements CompileState {
     return `$${this.binds.length}`;
   }
 
+  aggregateOrder(): string {
+    if (this.carriedOrder.length === 0) {
+      return "";
+    }
+    const keys = this.carriedOrder.map((key) => (key.descending ? `${key.sql} DESC` : key.sql));
+    return ` ORDER BY ${keys.join(", ")}`;
+  }
+
   newAlias(kind: TableKind, variable: string | null): string {
     if (variable !== null) {
       this.aliases.add(variable);

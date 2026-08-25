@@ -534,9 +534,12 @@ export class ExpressionWalker {
         );
       case "collect":
         // The projection form is what is collected, so a collected value
-        // is byte-identical to the same value projected on its own.
+        // is byte-identical to the same value projected on its own. The
+        // pipeline ordering rides inside the aggregate — collect's
+        // element order is contractual.
         return aggregate(
-          `COALESCE(jsonb_agg(${argument.raw}) FILTER (WHERE ${presence} IS NOT NULL), '[]'::jsonb)`,
+          `COALESCE(jsonb_agg(${argument.raw}${this.state.aggregateOrder()})` +
+            ` FILTER (WHERE ${presence} IS NOT NULL), '[]'::jsonb)`,
           argument.dataType,
           argument.binding === undefined
             ? scalarConversion(argument.dataType)

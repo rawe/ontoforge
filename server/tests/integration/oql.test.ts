@@ -444,6 +444,29 @@ describe("the clause and expression matrix", () => {
       expect(body.results).toEqual([{ xs: ["Alice", "x"], m: { who: "Alice" } }]);
     });
 
+    it("pins the map-literal conversion divergence between the backends", async () => {
+      // Result conversion recurses through homogeneous lists only. A
+      // datetime inside a map literal is converted by the reference
+      // adapter (which recurses into plain objects and yields a Date,
+      // serialized in the Z form) but passes through PostgreSQL as the
+      // raw jsonb rendering of the timestamp column (offset form). Both
+      // carry the same instant; the shape is each backend's own.
+      const created = await createEntity("test_ontology", "person", { name: "Eve" });
+      const body = await query(
+        "test_ontology",
+        "MATCH (p:person) RETURN {t: p._createdAt} AS m",
+      );
+      const value = ((body.results as Row[])[0]!.m as Row).t as string;
+      expect(new Date(value).getTime()).toBe(
+        new Date(created._createdAt as string).getTime(),
+      );
+      if (settings.DB_BACKEND === "neo4j") {
+        expect(value).toBe(new Date(created._createdAt as string).toISOString());
+      } else {
+        expect(value).toMatch(/[+-]\d{2}:\d{2}$/);
+      }
+    });
+
     it("matches CONTAINS case-sensitively — unlike the list filter", async () => {
       await seedAges();
       // The two substring surfaces deliberately differ; both are pinned

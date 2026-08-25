@@ -1,6 +1,6 @@
 # OntoForge
 
-A graph-native ontology studio for designing graph schemas and using them through generic, schema-driven APIs. Storage sits behind an exchangeable database adapter — Neo4j is the current adapter and default deployment.
+A graph-native ontology studio for designing graph schemas and using them through generic, schema-driven APIs. Storage sits behind an exchangeable database adapter — PostgreSQL is the default deployment, Neo4j the alternative adapter.
 
 ## Motivation
 
@@ -22,7 +22,7 @@ The key idea: **no unstructured writes**. Every entity and relation that goes in
 
 ## Quick Start (Docker)
 
-Start the full stack — Neo4j, backend, and frontend — with a single command:
+Start the full stack — PostgreSQL, backend, and frontend — with a single command:
 
 ```bash
 cd docker
@@ -34,7 +34,6 @@ docker compose up -d --build
 | Frontend | http://localhost:3000 |
 | Backend API | http://localhost:8000 |
 | API docs | http://localhost:8000/docs |
-| Neo4j Browser | http://localhost:17474 |
 
 Stop everything (data is preserved):
 
@@ -181,14 +180,14 @@ npm test
 ```
 
 This runs the unit tests only — they are mocked and need no running services.
-Integration tests are opt-in and do require Neo4j and Ollama; see
+Integration tests are opt-in and do require a running database and Ollama; see
 [docs/workflows/testing.md](docs/workflows/testing.md).
 
 ## Architecture
 
-OntoForge is a modular monolith backed by a single graph database holding both schema and
-instance data. All database access goes through a persistence port; Neo4j is the current
-adapter.
+OntoForge is a modular monolith backed by a single database holding both schema and
+instance data. All database access goes through a persistence port; PostgreSQL is the
+default adapter, Neo4j the alternative.
 
 - **Modeling** — the global schema, ontology scopes, validation, export/import (`/api/model`)
 - **Runtime** — schema-driven instance data through an ontology lens (`/api/runtime/{ontologyKey}`)
@@ -212,7 +211,7 @@ Full documentation starts at **[docs/README.md](docs/README.md)**:
 ontoforge/
 ├── docker-compose.yml              # PostgreSQL only (for local development)
 ├── docker/
-│   └── docker-compose.yml          # Full stack: Neo4j + backend + frontend
+│   └── docker-compose.yml          # Full stack: PostgreSQL + backend + frontend
 ├── examples/
 │   └── docker-compose/             # Run OntoForge from pre-built images
 ├── server/
@@ -223,7 +222,7 @@ ontoforge/
 │   │   ├── app.ts                  # Fastify app, mounts routes and MCP servers
 │   │   ├── config.ts               # Environment-based settings
 │   │   ├── core/                   # Shared: persistence port, exceptions, OQL, AI
-│   │   ├── adapters/               # Database adapters (Neo4j)
+│   │   ├── adapters/               # Database adapters (PostgreSQL, Neo4j)
 │   │   ├── modeling/               # Schema CRUD, validation, export/import
 │   │   ├── runtime/                # Instance CRUD, search, graph traversal
 │   │   └── mcp/                    # MCP servers (modeling + runtime tools)
@@ -302,7 +301,7 @@ Natural language query, entity extraction from text, and conversational chat ove
 | ~16 GB | `qwen3:14b` | 14B dense | ~11 GB |
 | ~32 GB+ | `qwen3:32b` | 32B dense | ~22 GB |
 
-Account for OS and other services (Docker, Neo4j) when choosing a model — pick one tier below your total RAM to leave headroom.
+Account for OS and other services (Docker, PostgreSQL) when choosing a model — pick one tier below your total RAM to leave headroom.
 
 ## Container Images
 

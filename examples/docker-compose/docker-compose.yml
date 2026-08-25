@@ -1,27 +1,51 @@
 services:
-  neo4j:
-    image: neo4j:2026.02.2
+  postgres:
+    image: pgvector/pgvector:0.8.6-pg18-trixie
     ports:
-      - "7474:7474"
-      - "7687:7687"
+      - "5432:5432"
     environment:
-      NEO4J_AUTH: neo4j/changeme
+      # User stays the image default (postgres) — no init script needed.
+      POSTGRES_PASSWORD: changeme
+      POSTGRES_DB: ontoforge
     volumes:
-      - neo4j-data:/data
+      # PG 18+ images declare the volume at /var/lib/postgresql (not …/data);
+      # mounting the old path silently loses persistence.
+      - postgres-data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "changeme", "RETURN 1"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ontoforge"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
+
+  # Neo4j — the alternative adapter. Uncomment to run OntoForge on Neo4j and
+  # set the ontoforge-server service's DB_* environment to the Neo4j values.
+  # neo4j:
+  #   image: neo4j:2026.02.2
+  #   ports:
+  #     - "7474:7474"
+  #     - "7687:7687"
+  #   environment:
+  #     NEO4J_AUTH: neo4j/changeme
+  #   volumes:
+  #     - neo4j-data:/data
+  #   healthcheck:
+  #     test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "changeme", "RETURN 1"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #     start_period: 30s
 
   ontoforge-server:
     image: ghcr.io/rawe/ontoforge-server:${VERSION:-latest}
     ports:
       - "8000:8000"
     environment:
-      DB_URI: bolt://neo4j:7687
-      DB_USER: neo4j
+      DB_BACKEND: postgres
+      # DB_URI uses Docker-internal networking (the postgres service name)
+      DB_URI: postgresql://postgres:5432/ontoforge
+      DB_USER: postgres
+      # Mirrors POSTGRES_PASSWORD on the postgres service
       DB_PASSWORD: changeme
       # Semantic search (optional — remove comments to enable)
       # EMBEDDING_PROVIDER: ollama
@@ -47,7 +71,7 @@ services:
       # MCP default ontology key (optional — used when no key in URL path or header)
       # DEFAULT_MCP_ONTOLOGY_KEY: my_ontology
     depends_on:
-      neo4j:
+      postgres:
         condition: service_healthy
 
   ontoforge-ui:
@@ -72,5 +96,6 @@ services:
   #     - ollama-data:/root/.ollama
 
 volumes:
+  postgres-data:
   neo4j-data:
   # ollama-data:

@@ -64,9 +64,9 @@ function optInt(env: NodeJS.ProcessEnv, name: string): number | null {
 
 export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
   return {
-    DB_BACKEND: str(env, "DB_BACKEND", "neo4j"),
-    DB_URI: str(env, "DB_URI", "bolt://localhost:7687"),
-    DB_USER: str(env, "DB_USER", "neo4j"),
+    DB_BACKEND: str(env, "DB_BACKEND", "postgres"),
+    DB_URI: str(env, "DB_URI", "postgresql://localhost:5432/ontoforge"),
+    DB_USER: str(env, "DB_USER", "postgres"),
     DB_PASSWORD: str(env, "DB_PASSWORD", "ontoforge_dev"),
     PORT: int(env, "PORT", 8000),
 

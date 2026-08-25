@@ -6,9 +6,9 @@ describe("config defaults", () => {
   const settings = loadSettings({});
 
   it("has the documented defaults", () => {
-    expect(settings.DB_BACKEND).toBe("neo4j");
-    expect(settings.DB_URI).toBe("bolt://localhost:7687");
-    expect(settings.DB_USER).toBe("neo4j");
+    expect(settings.DB_BACKEND).toBe("postgres");
+    expect(settings.DB_URI).toBe("postgresql://localhost:5432/ontoforge");
+    expect(settings.DB_USER).toBe("postgres");
     expect(settings.DB_PASSWORD).toBe("ontoforge_dev");
     expect(settings.PORT).toBe(8000);
 

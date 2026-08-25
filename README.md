@@ -251,14 +251,14 @@ The backend reads settings from environment variables (or a `.env` file in `serv
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DB_BACKEND` | `neo4j` | Persistence adapter selection (`neo4j` is the only built-in adapter) |
-| `DB_URI` | `bolt://localhost:7687` | Database connection (Neo4j adapter) |
-| `DB_USER` | `neo4j` | Database username (Neo4j adapter) |
-| `DB_PASSWORD` | `ontoforge_dev` | Database password (Neo4j adapter) |
+| `DB_BACKEND` | `postgres` | Persistence adapter selection (`postgres` or `neo4j`) |
+| `DB_URI` | `postgresql://localhost:5432/ontoforge` | Database connection — the DSN carries host, port and database |
+| `DB_USER` | `postgres` | Database username |
+| `DB_PASSWORD` | `ontoforge_dev` | Database password |
 | `PORT` | `8000` | HTTP listen port |
 | `DEFAULT_MCP_ONTOLOGY_KEY` | *(unset)* | MCP default ontology key — used when no key is in the URL or header |
 
-In Docker, `DB_URI` is set to `bolt://neo4j:7687` automatically via `docker-compose.yml`.
+In Docker, `DB_URI` is set to `postgresql://postgres:5432/ontoforge` automatically via `docker-compose.yml`.
 
 ## Optional Features
 

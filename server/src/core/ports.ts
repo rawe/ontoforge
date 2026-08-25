@@ -563,7 +563,6 @@ export interface AdapterModule {
   createStores(): Promise<[ModelingStore, RuntimeStore]>;
   closeStores(): Promise<void>;
   ensureSemanticIndexes(dimensions: number): Promise<void>;
-  wipe(): Promise<void>;
 }
 
 /**
@@ -611,14 +610,6 @@ export async function ensureSemanticIndexes(dimensions: number): Promise<void> {
     throw new Error("Stores not initialized");
   }
   await activeAdapter.ensureSemanticIndexes(dimensions);
-}
-
-/** Delete all stored data via the active adapter. Test support only. */
-export async function wipeDatabase(): Promise<void> {
-  if (activeAdapter === null) {
-    throw new Error("Stores not initialized");
-  }
-  await activeAdapter.wipe();
 }
 
 export function getModelingStore(): ModelingStore {

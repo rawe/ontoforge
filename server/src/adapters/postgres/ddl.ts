@@ -1,5 +1,5 @@
 /**
- * Init DDL, `wipe()`, and the vector-index lifecycle.
+ * Init DDL and the vector-index lifecycle.
  *
  * `initSchema` runs the whole ten-table set — schema side and instance
  * side together — as one all-or-nothing transaction at adapter init.
@@ -169,42 +169,11 @@ const DDL_STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS document_chunk_entity_property_idx ON document_chunk (entity_id, property_key)`,
 ];
 
-/** All ten tables, for `wipe()` — kept in step with the DDL above. */
-const ALL_TABLES = [
-  "ontology",
-  "entity_type",
-  "relation_type",
-  "property_def",
-  "ontology_includes",
-  "ai_agent_config",
-  "saved_query",
-  "entity",
-  "relation",
-  "document_chunk",
-];
-
 /** Create every table and index if absent, in one transaction. */
 export async function initSchema(): Promise<void> {
   await withTransaction(async (querier) => {
     for (const statement of DDL_STATEMENTS) {
       await querier.query(statement);
-    }
-  });
-}
-
-/**
- * Delete all stored data: one `TRUNCATE` across all ten tables plus a
- * drop of every `vec_`-prefixed index, in one transaction. The index
- * drop is load-bearing: a re-created type key gets a fresh uuid-named
- * index while an orphan's `WHERE type_key = …` predicate would still
- * match new rows. The five fixed B-tree indexes and the two fixed vector
- * indexes survive — neither carries the `vec_` prefix.
- */
-export async function wipe(): Promise<void> {
-  await withTransaction(async (querier) => {
-    await querier.query(`TRUNCATE ${ALL_TABLES.join(", ")}`);
-    for (const name of await dynamicIndexNames(querier)) {
-      await dropIndex(querier, name);
     }
   });
 }

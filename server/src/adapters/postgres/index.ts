@@ -7,12 +7,12 @@
  * not be imported from anywhere else in the server.
  *
  * Build state: complete — lifecycle, init DDL, the error/transaction
- * doors, `wipe()`, the modeling store, runtime CRUD, the vector-index
- * lifecycle, semantic search, the document chunks, and the OQL→SQL
- * compiler behind `executeOql`.
+ * doors, the modeling store, runtime CRUD, the vector-index lifecycle,
+ * semantic search, the document chunks, and the OQL→SQL compiler behind
+ * `executeOql`.
  */
 
-import { ensureVectorIndexes, initSchema, wipe as wipeAll } from "./ddl.js";
+import { ensureVectorIndexes, initSchema } from "./ddl.js";
 import { closePool, initPool } from "./errors.js";
 import { PostgresModelingStore } from "./modelingStore.js";
 import { PostgresRuntimeStore } from "./runtimeStore.js";
@@ -38,9 +38,4 @@ export async function closeStores(): Promise<void> {
  */
 export async function ensureSemanticIndexes(dimensions: number): Promise<void> {
   await ensureVectorIndexes(dimensions, false);
-}
-
-/** Delete all stored data. Test support only — never used by the app. */
-export async function wipe(): Promise<void> {
-  await wipeAll();
 }

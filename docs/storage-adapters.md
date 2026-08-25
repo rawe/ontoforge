@@ -67,7 +67,6 @@ physical objects that way; a new adapter accepts them and maps them to whatever 
 | Initialize | Open connections, verify the database is reachable, create every constraint and index the adapter needs, and return the two store surfaces. Failure prevents the server from serving. |
 | Close | Release connections. Idempotent. |
 | Ensure semantic indexes | Given a vector width, create every vector index the current schema implies. Called at startup only when an embedding provider is configured. |
-| Wipe | Delete all stored data. Test support only; nothing in the running system calls it. |
 
 ## The two store surfaces
 

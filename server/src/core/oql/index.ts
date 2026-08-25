@@ -1038,8 +1038,22 @@ export function validate(analysis: Analysis, schema: SchemaCacheValue): string[]
       if (!(pa.propertyName in rtProps)) {
         errors.push(unknownPropertyMessage("relation", rtKey, pa.propertyName, rtProps));
       }
+    } else if (
+      !analysis.nodeVariables.has(pa.variable) &&
+      !analysis.relVariables.has(pa.variable) &&
+      !analysis.unlabeledVars.has(pa.variable)
+    ) {
+      // The variable declares no type anywhere: a relationship pattern
+      // written without a type, a projection alias, or an unbound name.
+      // Nothing can check the property against the lens, so the access
+      // is rejected on every backend. (A variable whose declared type
+      // is itself invalid, and an unlabeled node variable, already
+      // carry their own rejection above.)
+      errors.push(
+        "Properties cannot be read through a variable with no declared type. " +
+          "Name the type in the pattern that binds it.",
+      );
     }
-    // Variables not in either map (e.g. WITH aliases) are not validated.
   }
 
   // 8. Inline property maps — keys resolve against the owning type

@@ -346,6 +346,23 @@ describe("validation", () => {
     expect(errors.some((e) => e.includes("Unknown property 'salary'"))).toBe(true);
   });
 
+  it("rejects property access through a variable with no declared type", () => {
+    const message =
+      "Properties cannot be read through a variable with no declared type. " +
+      "Name the type in the pattern that binds it.";
+    // A relationship bound with no type.
+    expect(validateQuery("MATCH (p:person)-[r]->(c:company) RETURN r.role")).toContain(message);
+    // A WITH alias — the intermediate projection declares no type.
+    expect(validateQuery("MATCH (p:person) WITH p AS x RETURN x.name")).toContain(message);
+    // An unbound variable.
+    expect(validateQuery("MATCH (p:person) RETURN q.name")).toContain(message);
+  });
+
+  it("system properties stay readable through any variable", () => {
+    expect(validateQuery("MATCH (p:person)-[r]->(c:company) RETURN r._id")).toEqual([]);
+    expect(validateQuery("MATCH (p:person) WITH p AS x RETURN x._id")).toEqual([]);
+  });
+
   it("system property set matches the contract", () => {
     expect([...SYSTEM_PROPERTIES].sort()).toEqual([
       "_createdAt",

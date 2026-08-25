@@ -205,6 +205,20 @@ describe("query execution (unscoped lens)", () => {
     );
   });
 
+  it("rejects property access through a variable with no declared type", async () => {
+    await seedGraph();
+    const body = await query(
+      "test_ontology",
+      "MATCH (p:person)-[r]->(c:company) RETURN r.role",
+      422,
+    );
+    const errors = ((body.error as Row).details as Row).errors as string[];
+    expect(errors).toContain(
+      "Properties cannot be read through a variable with no declared type. " +
+        "Name the type in the pattern that binds it.",
+    );
+  });
+
   it("rejects an inline map on an untyped owner", async () => {
     await seedGraph();
     const body = await query(

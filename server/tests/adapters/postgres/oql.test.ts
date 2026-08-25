@@ -964,38 +964,17 @@ describe("the single-SELECT invariant", () => {
 // ---------------------------------------------------------------------------
 
 describe("compiler-side property enforcement", () => {
-  it("rejects a property the validator never checked, with the validator's wording", () => {
-    expect(refusals("MATCH (a:person) WITH a AS x RETURN x.bogus")).toEqual([
-      "Unknown property 'bogus' on entity type 'person'. Available: active, age, bio, hired, " +
-        "name, score, seen_at, _createdAt, _entityTypeKey, _id, _relationTypeKey, _updatedAt",
-    ]);
-  });
-
-  it("names the relation type when the alias carries a relationship", () => {
-    expect(
-      refusals("MATCH (a:person)-[r:works_for]->(b:company) WITH r AS x RETURN x.bogus"),
-    ).toEqual([
-      "Unknown property 'bogus' on relation type 'works_for'. Available: role, since, " +
-        "_createdAt, _entityTypeKey, _id, _relationTypeKey, _updatedAt",
-    ]);
-  });
-
-  it("still compiles a resolvable alias access — scope tracks rebinds", () => {
-    expect(sql("MATCH (a:person) WITH a AS x RETURN x.name")).toContain("s0.x__props->'name'");
-  });
+  // Property access through a variable with no declared type — a WITH
+  // alias, an untyped relationship — is rejected at validation on every
+  // backend, so the compiler's second line only ever sees pattern-typed
+  // variables and system properties.
 
   it("allows system properties on any alias", () => {
     expect(sql("MATCH (a:person) WITH a AS x RETURN x._id")).toContain("s0.x__id::text");
   });
 
-  it("refuses property access on a scalar alias", () => {
-    expect(refusals("MATCH (a:person) WITH count(*) AS c RETURN c.bogus")).toEqual([
-      "'c' is not a node or relationship, so it has no properties.",
-    ]);
-  });
-
   it("refuses through the message the OQL validation path uses", () => {
-    const refuse = () => compile("MATCH (a:person) WITH a AS x RETURN x.bogus");
+    const refuse = () => compile("MATCH (a:person) RETURN b");
     expect(refuse).toThrow(ValidationError);
     expect(refuse).toThrow("Query validation failed");
   });

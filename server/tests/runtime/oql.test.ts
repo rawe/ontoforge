@@ -607,6 +607,98 @@ describe("surface rejections", () => {
       "UNWIND is not supported. Match the rows you need directly with MATCH and WHERE.",
     );
   });
+
+  it("a parameter as a pattern property map", () => {
+    const message =
+      "A parameter cannot supply a pattern's property map. " +
+      "Write the properties as an explicit inline map.";
+    expect(validateQuery("MATCH (p:person $props) RETURN p")).toContain(message);
+    expect(validateQuery("MATCH (:person)-[r:works_for $props]->(:company) RETURN r")).toContain(
+      message,
+    );
+  });
+
+  it("a bare pattern as an expression", () => {
+    expect(
+      validateQuery("MATCH (p:person) WHERE (p)-[:works_for]->(:company) RETURN p"),
+    ).toContain(
+      "Bare patterns cannot be used as expressions. " +
+        "Match the pattern directly, or use OPTIONAL MATCH with IS NOT NULL.",
+    );
+  });
+
+  it("a pattern as a count() argument", () => {
+    expect(
+      validateQuery("MATCH (p:person) RETURN count((p)-[:works_for]->(:company))"),
+    ).toContain(
+      "count() cannot take a pattern as its argument. " +
+        "Match the pattern first and count a variable it binds.",
+    );
+  });
+
+  it("a label test in an expression", () => {
+    expect(validateQuery("MATCH (p:person) WHERE p:person RETURN p")).toContain(
+      "Label tests (WHERE p:person) are not supported. " +
+        "Name the label in the pattern that binds the variable.",
+    );
+  });
+
+  it("list indexing and slicing", () => {
+    const message =
+      "List indexing and slicing are not supported. " +
+      "Return the whole list and pick elements in the caller.";
+    expect(validateQuery("MATCH (p:person) RETURN [1, 2][0]")).toContain(message);
+    expect(validateQuery("MATCH (p:person) RETURN [1, 2][0..1]")).toContain(message);
+  });
+
+  it("a double-headed relationship pattern", () => {
+    expect(validateQuery("MATCH (a:person)<-[r:works_for]->(b:company) RETURN a")).toContain(
+      "Double-headed relationship patterns (<-[r]->) are not supported. " +
+        "Use an undirected pattern (-[r]-) or a single direction.",
+    );
+  });
+
+  it("a chained comparison", () => {
+    expect(validateQuery("MATCH (p:person) WHERE 1 < p.age < 100 RETURN p")).toContain(
+      "Chained comparisons are not supported. " +
+        "Write each comparison separately and combine them with AND.",
+    );
+  });
+
+  it("a postfix on a predicate", () => {
+    expect(
+      validateQuery("MATCH (p:person) WHERE p.name CONTAINS 'x' IS NULL RETURN p"),
+    ).toContain(
+      "IS NULL and IS NOT NULL apply to a property or variable, " +
+        "not to the result of another predicate.",
+    );
+  });
+
+  it("property access on a non-variable", () => {
+    expect(validateQuery("MATCH (p:person) WHERE $p.name = 'x' RETURN p")).toContain(
+      "Properties can be read only from a variable bound in a pattern.",
+    );
+  });
+
+  it("an aggregate with more than one argument", () => {
+    expect(validateQuery("MATCH (p:person) RETURN collect(p.name, p.age)")).toContain(
+      "An aggregate function takes exactly one argument. Aggregate each expression separately.",
+    );
+  });
+
+  it("a function call inside a MATCH pattern", () => {
+    expect(validateQuery("MATCH count(p) RETURN 1")).toContain(
+      "Function calls cannot appear inside a MATCH pattern. Call functions in WITH or RETURN.",
+    );
+  });
+
+  it("unary minus on a non-literal routes to the arithmetic row", () => {
+    expect(validateQuery("MATCH (p:person) WHERE -p.age > 5 RETURN p")).toContain(
+      "Arithmetic expressions are not supported. Compute derived values in the caller.",
+    );
+    // A negated numeric literal stays in-surface.
+    expect(validateQuery("MATCH (p:person) WHERE p.age > -5 RETURN p")).toEqual([]);
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -39,11 +39,15 @@ import type { SchemaCacheValue } from "../../runtime/schemaCache.js";
 import { CypherLexer } from "./generated/CypherLexer.js";
 import {
   CypherParser,
+  FunctionInvocationContext,
+  PatternElemContext,
   type AddSubExpressionContext,
+  type AtomicExpressionContext,
+  type ComparisonExpressionContext,
   type ExpressionContext,
-  type FunctionInvocationContext,
   type InvocationNameContext,
   type LimitStContext,
+  type ListExpressionContext,
   type MultDivExpressionContext,
   type NodePatternContext,
   type OrderItemContext,
@@ -54,10 +58,13 @@ import {
   type ProjectionItemContext,
   type ProjectionItemsContext,
   type PropertyExpressionContext,
+  type PropertyOrLabelExpressionContext,
   type RelationDetailContext,
+  type RelationshipPatternContext,
   type ScriptContext,
   type SkipStContext,
   type StringExpPrefixContext,
+  type UnaryAddSubExpressionContext,
   type XorExpressionContext,
 } from "./generated/CypherParser.js";
 import { CypherParserListener } from "./generated/CypherParserListener.js";
@@ -300,14 +307,20 @@ class Collector extends CypherParserListener {
     );
   };
 
-  /** Record the keys of an inline property map against its owning type. */
+  /** Record the keys of an inline property map against its owning type.
+   * A `$parameter` in map position cannot be lens-checked, so it is
+   * rejected rather than crossing the lens unvalidated. */
   private collectInlineMap(
     propertiesCtx: PropertiesContext | null,
     ownerTypeKey: string | null,
     isRelationship: boolean,
   ): void {
-    const mapCtx = propertiesCtx?.mapLit() ?? null;
+    if (propertiesCtx === null) {
+      return;
+    }
+    const mapCtx = propertiesCtx.mapLit();
     if (mapCtx === null) {
+      this.analysis.unsupported.add("pattern-param-map");
       return;
     }
     this.analysis.inlineMaps.push({
@@ -329,8 +342,14 @@ class Collector extends CypherParserListener {
       this.analysis.unsupported.add("chained-property");
       return;
     }
+    const symbolCtx = ctx.atom().symbol();
+    if (symbolCtx === null) {
+      // `$p.name`, `(…).name` — the owner is not a variable.
+      this.analysis.unsupported.add("property-on-non-variable");
+      return;
+    }
     this.analysis.propertyAccesses.push({
-      variable: stripBackticks(ctx.atom().getText()),
+      variable: stripBackticks(symbolCtx.getText()),
       propertyName: stripBackticks(names[0]!.getText()),
     });
   };
@@ -357,8 +376,87 @@ class Collector extends CypherParserListener {
     this.analysis.unsupported.add("comprehension");
   };
 
+  /** Nesting depth of pattern comprehensions — the chain pattern inside
+   * one belongs to the comprehension, not to expression position. */
+  private patternComprehensionDepth = 0;
+
   override enterPatternComprehension = (): void => {
     this.analysis.unsupported.add("comprehension");
+    this.patternComprehensionDepth += 1;
+  };
+
+  override exitPatternComprehension = (): void => {
+    this.patternComprehensionDepth -= 1;
+  };
+
+  override enterRelationshipsChainPattern = (): void => {
+    if (this.patternComprehensionDepth === 0) {
+      this.analysis.unsupported.add("pattern-expression");
+    }
+  };
+
+  /** Classify a pattern element by where it sits: a pattern given to a
+   * function is out of surface, and so is a function invocation sitting
+   * in a MATCH pattern. A parenthesized element classifies itself. */
+  override enterPatternElem = (ctx: PatternElemContext): void => {
+    if (ctx.patternElem() !== null) {
+      return;
+    }
+    let parent = ctx.parent;
+    while (parent instanceof PatternElemContext) {
+      parent = parent.parent;
+    }
+    if (parent instanceof FunctionInvocationContext) {
+      if (ctx.functionInvocation() === null) {
+        this.analysis.unsupported.add("pattern-argument");
+      }
+      // A function invocation that parsed through the pattern-element
+      // alternative is covered by the function rules instead.
+    } else if (ctx.functionInvocation() !== null) {
+      this.analysis.unsupported.add("function-in-pattern");
+    }
+  };
+
+  override enterPropertyOrLabelExpression = (ctx: PropertyOrLabelExpressionContext): void => {
+    if (ctx.nodeLabels() !== null) {
+      this.analysis.unsupported.add("label-test");
+    }
+  };
+
+  override enterListExpression = (ctx: ListExpressionContext): void => {
+    // The rule carries both postfix forms: `IN list` is in-surface,
+    // indexing and slicing (`xs[0]`, `xs[1..3]`) are not.
+    if (ctx.IN() === null) {
+      this.analysis.unsupported.add("list-index");
+    }
+  };
+
+  override enterRelationshipPattern = (ctx: RelationshipPatternContext): void => {
+    if (ctx.LT() !== null && ctx.GT() !== null) {
+      this.analysis.unsupported.add("double-headed");
+    }
+  };
+
+  override enterComparisonExpression = (ctx: ComparisonExpressionContext): void => {
+    if (ctx.addSubExpression().length > 2) {
+      this.analysis.unsupported.add("chained-comparison");
+    }
+  };
+
+  override enterAtomicExpression = (ctx: AtomicExpressionContext): void => {
+    const postfixes =
+      ctx.stringExpression().length + ctx.listExpression().length + ctx.nullExpression().length;
+    if (postfixes > 1) {
+      this.analysis.unsupported.add("postfix-predicate");
+    }
+  };
+
+  override enterUnaryAddSubExpression = (ctx: UnaryAddSubExpressionContext): void => {
+    // Unary minus is in-surface only on a numeric literal (`-5`); on
+    // anything else it is arithmetic. Unary plus is a no-op.
+    if (ctx.SUB() !== null && !isNumericLiteralShaped(ctx.atomicExpression())) {
+      this.analysis.unsupported.add("arithmetic");
+    }
   };
 
   override enterFilterWith = (): void => {
@@ -426,6 +524,13 @@ class Collector extends CypherParserListener {
         this.analysis.unsupported.add("nested-aggregate");
       }
       this.aggregateDepth += 1;
+      // A pattern argument is its own rejection (`enterPatternElem`).
+      if (ctx.patternElem() === null) {
+        const args = ctx.expressionChain()?.expression() ?? [];
+        if (args.length !== 1) {
+          this.analysis.unsupported.add("aggregate-arity");
+        }
+      }
     }
   };
 
@@ -508,6 +613,33 @@ const FUNCTION_ALLOWLIST: ReadonlySet<string> = new Set([
 
 function isAggregate(name: string): boolean {
   return FUNCTION_ALLOWLIST.has(name.toLowerCase());
+}
+
+/** True when an atomic expression is a bare numeric literal — the one
+ * operand unary minus applies to in-surface. Bare integers lex as
+ * symbols, not literals, so a digit-leading symbol counts as a number. */
+function isNumericLiteralShaped(ctx: AtomicExpressionContext): boolean {
+  if (
+    ctx.stringExpression().length > 0 ||
+    ctx.listExpression().length > 0 ||
+    ctx.nullExpression().length > 0
+  ) {
+    return false;
+  }
+  const polCtx = ctx.propertyOrLabelExpression();
+  if (polCtx.nodeLabels() !== null) {
+    return false;
+  }
+  const propertyCtx = polCtx.propertyExpression();
+  if (propertyCtx.name().length > 0) {
+    return false;
+  }
+  const atom = propertyCtx.atom();
+  if (atom.literal()?.numLit() != null) {
+    return true;
+  }
+  const symbolCtx = atom.symbol();
+  return symbolCtx !== null && /^[0-9]/.test(symbolCtx.getText());
 }
 
 function invocationNameText(ctx: FunctionInvocationContext): string {
@@ -654,6 +786,55 @@ const SURFACE_REJECTIONS: readonly (readonly [string, string])[] = [
     "Nested property access is not supported — properties hold scalar values.",
   ],
   ["star-without-scope", "RETURN * is not allowed when there are no variables in scope."],
+  [
+    "pattern-param-map",
+    "A parameter cannot supply a pattern's property map. " +
+      "Write the properties as an explicit inline map.",
+  ],
+  [
+    "pattern-expression",
+    "Bare patterns cannot be used as expressions. " +
+      "Match the pattern directly, or use OPTIONAL MATCH with IS NOT NULL.",
+  ],
+  [
+    "pattern-argument",
+    "count() cannot take a pattern as its argument. " +
+      "Match the pattern first and count a variable it binds.",
+  ],
+  [
+    "label-test",
+    "Label tests (WHERE p:person) are not supported. " +
+      "Name the label in the pattern that binds the variable.",
+  ],
+  [
+    "list-index",
+    "List indexing and slicing are not supported. " +
+      "Return the whole list and pick elements in the caller.",
+  ],
+  [
+    "double-headed",
+    "Double-headed relationship patterns (<-[r]->) are not supported. " +
+      "Use an undirected pattern (-[r]-) or a single direction.",
+  ],
+  [
+    "chained-comparison",
+    "Chained comparisons are not supported. " +
+      "Write each comparison separately and combine them with AND.",
+  ],
+  [
+    "postfix-predicate",
+    "IS NULL and IS NOT NULL apply to a property or variable, " +
+      "not to the result of another predicate.",
+  ],
+  ["property-on-non-variable", "Properties can be read only from a variable bound in a pattern."],
+  [
+    "aggregate-arity",
+    "An aggregate function takes exactly one argument. Aggregate each expression separately.",
+  ],
+  [
+    "function-in-pattern",
+    "Function calls cannot appear inside a MATCH pattern. Call functions in WITH or RETURN.",
+  ],
 ];
 
 // ---------------------------------------------------------------------------

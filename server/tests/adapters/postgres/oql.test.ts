@@ -17,6 +17,7 @@
 import { describe, expect, it } from "vitest";
 
 import { compileOql, bindValues, convertRows } from "../../../src/adapters/postgres/oql/index.js";
+import { pendingSurface } from "../../../src/adapters/postgres/oql/rejections.js";
 import { StoreError, ValidationError } from "../../../src/core/exceptions.js";
 import { parseAndValidate } from "../../../src/core/oql/index.js";
 import type { SchemaCacheValue } from "../../../src/runtime/schemaCache.js";
@@ -997,6 +998,18 @@ describe("compiler-side property enforcement", () => {
     const refuse = () => compile("MATCH (a:person) WITH a AS x RETURN x.bogus");
     expect(refuse).toThrow(ValidationError);
     expect(refuse).toThrow("Query validation failed");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The pending-surface guard
+// ---------------------------------------------------------------------------
+
+describe("the pending-surface guard", () => {
+  it("names the construct in a vendor-free sentence", () => {
+    expect(() => pendingSurface("a probe construct")).toThrow(
+      "OQL construct not compiled by this storage adapter yet: a probe construct",
+    );
   });
 });
 

@@ -19,5 +19,5 @@ export function reject(message: string): never {
 }
 
 export function pendingSurface(construct: string): never {
-  throw new Error(`OQL construct not compiled by the PostgreSQL adapter yet: ${construct}`);
+  throw new Error(`OQL construct not compiled by this storage adapter yet: ${construct}`);
 }

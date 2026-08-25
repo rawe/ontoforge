@@ -35,8 +35,7 @@
  * become `1000` and `31`, `TRUE` becomes `true`), so what lands in the
  * statement is the compiler's own token, not the query's. Property keys
  * are inlined too — they are schema keys, matched against the scoped
- * schema first (which is also what closes the validator's blind spot on
- * WITH aliases) and constrained to `[a-z][a-z0-9_]*` by the modeling
+ * schema first and constrained to `[a-z][a-z0-9_]*` by the modeling
  * surface.
  */
 
@@ -232,9 +231,10 @@ export class ExpressionWalker {
 
   /**
    * `variable.property`, in both forms, from one schema lookup — and the
-   * compiler's second line of defence: the validator skips variables it
-   * cannot map to a type (a WITH alias), so a property that resolves
-   * against no type in the scoped schema is refused here rather than
+   * compiler's second line of defence: validation already rejects
+   * property access through a variable with no declared type, so every
+   * access reaching here resolves through a binding — and one that still
+   * resolves against no type in the scoped schema is refused rather than
    * silently nulled, which would leak past the lens.
    */
   private propertyAccess(variable: string, property: string): CompiledExpr {

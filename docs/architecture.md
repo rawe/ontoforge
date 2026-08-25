@@ -130,8 +130,8 @@ Enforced in the service layer on every write path, whichever interface it arrive
 is the summary; each one is stated with its consequences in
 [capabilities/schema-modeling.md](capabilities/schema-modeling.md).
 
-- Type and property keys match `^[a-z][a-z0-9_]*$` on every path that sets them — the
-  modeling interfaces and import alike.
+- Type and property keys match `^[a-z][a-z0-9_]*$` and are at most 64 characters, on
+  every path that sets them — the modeling interfaces and import alike.
 - Entity type keys, relation type keys, ontology keys and ontology names are globally
   unique. Property keys are unique within their owning type.
 - A relation type may only be created if both endpoint entity types exist.

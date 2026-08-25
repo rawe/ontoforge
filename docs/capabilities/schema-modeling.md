@@ -48,7 +48,8 @@ something a reader would otherwise assume:
 ### Keys and immutability
 
 Type keys and property keys match `^[a-z][a-z0-9_]*$` — lower snake case, starting
-with a letter. The leading-letter requirement is load-bearing: system properties
+with a letter — and are at most 64 characters.
+The leading-letter requirement is load-bearing: system properties
 are distinguished by a leading underscore, so no user key can ever collide with
 one.
 
@@ -74,13 +75,13 @@ converted is a field error rather than a coerced approximation.
 
 | Data type | Accepts | Rejects |
 |---|---|---|
-| `string` | any JSON scalar, stringified | nothing |
-| `integer` | a JSON integer, or a string parsing as one | booleans, any JSON float, unparsable strings |
-| `float` | a JSON number, or a string parsing as one | booleans, unparsable strings |
+| `string` | any JSON scalar, stringified | a NUL character in the value |
+| `integer` | a JSON integer, or a string parsing as one | booleans, any JSON float, unparsable strings, magnitudes beyond 2^53 − 1 |
+| `float` | a JSON number, or a string parsing as one | booleans, unparsable strings, non-finite values |
 | `boolean` | a JSON boolean, or the strings `true`/`false`, case-insensitive | numbers, any other string |
 | `date` | an ISO calendar date string | non-strings, non-ISO strings |
 | `datetime` | an ISO date-time string | non-strings, non-ISO strings |
-| `document` | any JSON scalar, stringified | nothing |
+| `document` | any JSON scalar, stringified | a NUL character in the value |
 
 Two rules do not follow from the table:
 

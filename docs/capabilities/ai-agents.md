@@ -79,7 +79,7 @@ An **agent** is a named language-model configuration belonging to one lens:
 
 | Field | Meaning |
 |---|---|
-| Key | Addresses the agent within its lens. Matches `^[a-z][a-z0-9_-]*$` |
+| Key | Addresses the agent within its lens. Matches `^[a-z][a-z0-9_-]*$`, at most 64 characters |
 | Name | Human-readable label, also the name on its agent card |
 | Description | What it is for; also advertised on its card |
 | System prompt | Replaces the built-in chat prompt |

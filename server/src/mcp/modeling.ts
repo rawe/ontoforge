@@ -782,7 +782,7 @@ export function createModelingMcpServer(): McpServer {
     {
       description:
         "Create or update an AI agent configuration for an ontology. " +
-        "Key must match pattern ^[a-z][a-z0-9_-]*$ and cannot be '_default'. " +
+        "Key must match pattern ^[a-z][a-z0-9_-]*$, be at most 64 characters, and cannot be '_default'. " +
         `Tools must be valid tool names (${VALID_AGENT_TOOLS_CSV}). ` +
         "Set tools=null to allow all tools.",
       inputSchema: {
@@ -856,7 +856,7 @@ export function createModelingMcpServer(): McpServer {
     {
       description:
         "Create or update a saved query pipeline for an ontology. " +
-        "Key must match pattern ^[a-z][a-z0-9_-]*$. " +
+        "Key must match pattern ^[a-z][a-z0-9_-]*$ and be at most 64 characters. " +
         "Steps is an ordered array of pipeline steps. Each step requires a unique 'name' and a 'type'. " +
         "Step types: " +
         "'oql' — needs 'oql' field with a read-only OQL query (OQL-style " +

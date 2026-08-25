@@ -13,7 +13,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { MAX_VECTOR_FILTER_VALUE_BYTES } from "../../../../src/adapters/neo4j/ddl.js";
 import { createApp } from "../../../../src/app.js";
 import { settings } from "../../../../src/config.js";
-import { closeStores, initStores, wipeDatabase } from "../../../../src/core/ports.js";
+import { closeStores, initStores } from "../../../../src/core/ports.js";
+import { wipeDatabase } from "../../reset.js";
 import { invalidateLoadedSchemaCache } from "../../../../src/runtime/schemaCache.js";
 import { checkOllamaModel, disableProvider, enableOllamaProvider } from "../support.js";
 

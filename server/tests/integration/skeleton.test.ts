@@ -1,8 +1,8 @@
 /**
  * Skeleton contract, database-blind — runs against whichever adapter
  * `DB_BACKEND` selects. Covers: the adapter lifecycle (close→init cycle,
- * idempotent close), the wipe contract exercised end-to-end through the
- * API, and the features/docs routes on a fully booted server.
+ * idempotent close) and the features/docs routes on a fully booted
+ * server.
  *
  * The Neo4j-physical assertions (constraint/index names, raw seeding, raw
  * wipe probe) live in `tests/integration/neo4j/skeleton.test.ts`.
@@ -10,13 +10,12 @@
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { createApp } from "../../src/app.js";
 import {
   closeStores,
   getModelingStore,
   initStores,
-  wipeDatabase,
 } from "../../src/core/ports.js";
+import { wipeDatabase } from "./reset.js";
 import { shutdownServer, startServer } from "../../src/main.js";
 
 beforeAll(async () => {
@@ -39,39 +38,6 @@ describe("adapter lifecycle", () => {
     await closeStores(); // the port contract's "Close. Idempotent."
     await initStores(); // boot again against the same store
     expect(await getModelingStore().listOntologies()).toEqual([]);
-  });
-});
-
-describe("wipe contract", () => {
-  it("wipeDatabase removes everything the API can see", async () => {
-    const app = await createApp();
-    await app.ready();
-    try {
-      const et = await app.inject({
-        method: "POST",
-        url: "/api/model/entity-types",
-        payload: { key: "person", displayName: "Person" },
-      });
-      expect(et.statusCode).toBe(201);
-      const etId = (et.json() as { entityTypeId: string }).entityTypeId;
-      const ont = await app.inject({
-        method: "POST",
-        url: "/api/model/ontologies",
-        payload: { key: "hr", name: "Human Resources" },
-      });
-      expect(ont.statusCode).toBe(201);
-
-      await wipeDatabase();
-
-      const types = await app.inject({ method: "GET", url: "/api/model/entity-types" });
-      expect(types.json()).toEqual([]);
-      const ontologies = await app.inject({ method: "GET", url: "/api/model/ontologies" });
-      expect(ontologies.json()).toEqual([]);
-      const gone = await app.inject({ method: "GET", url: `/api/model/entity-types/${etId}` });
-      expect(gone.statusCode).toBe(404);
-    } finally {
-      await app.close();
-    }
   });
 });
 

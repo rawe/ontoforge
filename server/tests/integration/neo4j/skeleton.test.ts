@@ -14,7 +14,8 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { getDriver } from "../../../src/adapters/neo4j/driver.js";
 import { runSession } from "../../../src/adapters/neo4j/errors.js";
 import { settings } from "../../../src/config.js";
-import { closeStores, initStores, wipeDatabase } from "../../../src/core/ports.js";
+import { closeStores, initStores } from "../../../src/core/ports.js";
+import { wipeDatabase } from "../reset.js";
 import { shutdownServer, startServer, warnAboutReservedTypeKeysInUse } from "../../../src/main.js";
 
 const EXPECTED_CONSTRAINTS = [

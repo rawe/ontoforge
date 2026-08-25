@@ -36,8 +36,8 @@ import {
   getModelingStore,
   getRuntimeStore,
   initStores,
-  wipeDatabase,
 } from "../../../src/core/ports.js";
+import { wipeDatabase } from "../reset.js";
 import type { PropertyDef } from "../../../src/core/schemas.js";
 import { checkOllamaModel, disableProvider, enableOllamaProvider } from "./support.js";
 

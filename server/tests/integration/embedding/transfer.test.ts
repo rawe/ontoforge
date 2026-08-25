@@ -14,7 +14,8 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createApp } from "../../../src/app.js";
-import { closeStores, initStores, wipeDatabase } from "../../../src/core/ports.js";
+import { closeStores, initStores } from "../../../src/core/ports.js";
+import { wipeDatabase } from "../reset.js";
 import { checkOllamaModel, disableProvider, enableOllamaProvider } from "./support.js";
 
 type Row = Record<string, unknown>;

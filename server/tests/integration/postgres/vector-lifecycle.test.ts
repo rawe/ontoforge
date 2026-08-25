@@ -24,8 +24,8 @@ import {
   ensureSemanticIndexes,
   getModelingStore,
   initStores,
-  wipeDatabase,
 } from "../../../src/core/ports.js";
+import { wipeDatabase } from "../reset.js";
 import { DRIFT_SCOPES, logsOf, POSTGRES_LEAKS } from "../../vectorDrift.js";
 
 /** The configured model's width, and a width no model in play produces. */

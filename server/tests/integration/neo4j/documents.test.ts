@@ -16,7 +16,8 @@ import { getDriver } from "../../../src/adapters/neo4j/driver.js";
 import { createApp } from "../../../src/app.js";
 import { settings } from "../../../src/config.js";
 import { setEmbeddingProvider } from "../../../src/core/embedding.js";
-import { closeStores, initStores, wipeDatabase } from "../../../src/core/ports.js";
+import { closeStores, initStores } from "../../../src/core/ports.js";
+import { wipeDatabase } from "../reset.js";
 import { invalidateLoadedSchemaCache } from "../../../src/runtime/schemaCache.js";
 
 type Row = Record<string, unknown>;

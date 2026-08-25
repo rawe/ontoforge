@@ -12,7 +12,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { runQuery } from "../../../src/adapters/postgres/errors.js";
 import { settings } from "../../../src/config.js";
-import { closeStores, initStores, wipeDatabase } from "../../../src/core/ports.js";
+import { closeStores, initStores } from "../../../src/core/ports.js";
+import { wipeDatabase } from "../reset.js";
 
 const ALL_TABLES = [
   "ontology",

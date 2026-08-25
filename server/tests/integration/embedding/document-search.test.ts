@@ -14,8 +14,8 @@ import {
   closeStores,
   getRuntimeStore,
   initStores,
-  wipeDatabase,
 } from "../../../src/core/ports.js";
+import { wipeDatabase } from "../reset.js";
 import { invalidateLoadedSchemaCache } from "../../../src/runtime/schemaCache.js";
 import {
   checkOllamaModel,

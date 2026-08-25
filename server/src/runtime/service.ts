@@ -17,7 +17,7 @@
 import { randomUUID } from "node:crypto";
 
 import { settings } from "../config.js";
-import { CoercionError, coerceValue, valueToText } from "../core/dataTypes.js";
+import { CoercionError, assertNoNulCharacter, coerceValue, valueToText } from "../core/dataTypes.js";
 import { getEmbeddingProvider } from "../core/embedding.js";
 import { ConflictError, NotFoundError, ValidationError } from "../core/exceptions.js";
 import { SYSTEM_PROPERTIES, getReturnVariables, parseAndValidate } from "../core/oql/index.js";
@@ -300,7 +300,9 @@ export function parseFilterConditions(
     let value: unknown;
     try {
       if (opName === "contains") {
-        value = String(rawValue); // substring comparison is textual
+        const text = String(rawValue); // substring comparison is textual
+        assertNoNulCharacter(text, propKey);
+        value = text;
       } else {
         value = coerceValue(rawValue, propDef.dataType, propKey);
       }
@@ -557,6 +559,17 @@ export async function listEntities(
   const scopedEt = loaded.scoped.entityTypes[entityTypeKey];
   if (scopedEt === undefined) {
     throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
+  }
+
+  // The free-text term crosses the port as-is, so it carries the same
+  // NUL rejection stored strings do — identically for every adapter.
+  if (q !== null) {
+    try {
+      assertNoNulCharacter(q, "q");
+    } catch (error) {
+      if (!(error instanceof CoercionError)) throw error;
+      throw new ValidationError(error.message);
+    }
   }
 
   // The free-text term matches over in-scope string properties; when there

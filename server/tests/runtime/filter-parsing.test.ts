@@ -35,6 +35,19 @@ describe("parsed conditions", () => {
     ]);
   });
 
+  it("__contains rejects the NUL character with the coercion wording", () => {
+    try {
+      parseFilterConditions({ name__contains: "a\u0000b" }, DEFS, "person");
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      expect((error as ValidationError).message).toBe("Invalid filter value for 'name'");
+      expect(
+        ((error as ValidationError).details as { fields: Record<string, string> }).fields.name,
+      ).toBe("String value for 'name' must not contain the NUL character");
+    }
+  });
+
   it("values coerce per declared type: float, boolean, date, datetime", () => {
     const conditions = parseFilterConditions(
       {

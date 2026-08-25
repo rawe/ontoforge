@@ -203,6 +203,21 @@ describe("free-text search and filters", () => {
     expect(call[4]).toEqual(["name", "email"]); // scoped string props only
   });
 
+  it("q rejects the NUL character before crossing the port", async () => {
+    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/runtime/full_ontology/entities/person?q=%00",
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.message).toBe(
+      "String value for 'q' must not contain the NUL character",
+    );
+    expect(holder.store.listEntities).not.toHaveBeenCalled();
+  });
+
   it("q with no string property in scope is passed with an empty search set (silently ignored)", async () => {
     const { makeFullSchema } = await import("./helpers.js");
     holder.store.getFullSchema.mockResolvedValue(

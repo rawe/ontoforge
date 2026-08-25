@@ -127,6 +127,19 @@ export function valueToText(value: unknown): string {
 const INTEGER_PATTERN = /^[+-]?\d+$/;
 
 /**
+ * Reject a NUL character in any text bound for storage or comparison.
+ * PostgreSQL text cannot hold NUL; Neo4j happens to accept it. The one
+ * rejection keeps every adapter identical (only craftable input) — the
+ * same wording guards stored strings, `contains` filter values and the
+ * free-text search term.
+ */
+export function assertNoNulCharacter(text: string, key: string): void {
+  if (text.includes("\u0000")) {
+    throw new CoercionError(`String value for '${key}' must not contain the NUL character`);
+  }
+}
+
+/**
  * Coerce a JSON value to its declared data type, or throw `CoercionError`.
  *
  * `date` yields a validated ISO `YYYY-MM-DD` string; `datetime` a JS
@@ -142,13 +155,7 @@ export function coerceValue(value: unknown, dataType: string, key: string): unkn
     case "string":
     case "document": {
       const text = valueToText(value);
-      // PostgreSQL text cannot hold NUL; Neo4j happens to accept it. The
-      // rejection keeps every adapter identical (only craftable input).
-      if (text.includes("\u0000")) {
-        throw new CoercionError(
-          `String value for '${key}' must not contain the NUL character`,
-        );
-      }
+      assertNoNulCharacter(text, key);
       return text;
     }
 

@@ -350,6 +350,26 @@ describe("listing with q + filters + sort + paging", () => {
     expect(secondPage.json().items[0].name).toBe("Alice");
   });
 
+  it("rejects a NUL character in a contains filter and in q, identically on every backend", async () => {
+    const filtered = await app.inject({
+      method: "GET",
+      url: "/api/runtime/test_ontology/entities/person?filter.name__contains=%00",
+    });
+    expect(filtered.statusCode).toBe(422);
+    expect(filtered.json().error.details.fields.name).toBe(
+      "String value for 'name' must not contain the NUL character",
+    );
+
+    const searched = await app.inject({
+      method: "GET",
+      url: "/api/runtime/test_ontology/entities/person?q=%00",
+    });
+    expect(searched.statusCode).toBe(422);
+    expect(searched.json().error.message).toBe(
+      "String value for 'q' must not contain the NUL character",
+    );
+  });
+
   it("filters coerce per declared type and reject uncoercible values", async () => {
     const exact = await app.inject({
       method: "GET",

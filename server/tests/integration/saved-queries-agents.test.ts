@@ -325,6 +325,42 @@ describe("runtime run (no provider)", () => {
     expect(body.results).toEqual([{ name: "Bob" }]);
   });
 
+  it("pages with $parameter SKIP and LIMIT operands", async () => {
+    await inject("PUT", "/api/model/ontologies/test_ontology/saved-queries/people-page", {
+      name: "People page",
+      description: "People ordered by age, one page at a time",
+      steps: [
+        {
+          name: "main",
+          type: "oql",
+          oql:
+            "MATCH (p:person) RETURN p.name AS name " +
+            "ORDER BY p.age SKIP $offset LIMIT $page_size",
+        },
+      ],
+      parameters: [
+        { name: "offset", description: "Rows to skip", dataType: "integer" },
+        { name: "page_size", description: "Rows per page", dataType: "integer" },
+      ],
+    });
+
+    const first = await inject(
+      "POST",
+      "/api/runtime/test_ontology/saved-queries/people-page/run",
+      { params: { offset: 0, page_size: 1 } },
+    );
+    expect(first.statusCode, JSON.stringify(first.body)).toBe(200);
+    expect((first.body as { results: Row[] }).results).toEqual([{ name: "Alice" }]);
+
+    const second = await inject(
+      "POST",
+      "/api/runtime/test_ontology/saved-queries/people-page/run",
+      { params: { offset: 1, page_size: 1 } },
+    );
+    expect(second.statusCode, JSON.stringify(second.body)).toBe(200);
+    expect((second.body as { results: Row[] }).results).toEqual([{ name: "Bob" }]);
+  });
+
   it("runs a two-step oql -> oql pipeline through a binding", async () => {
     await inject("PUT", "/api/model/ontologies/test_ontology/saved-queries/company-staff", {
       name: "Company staff",

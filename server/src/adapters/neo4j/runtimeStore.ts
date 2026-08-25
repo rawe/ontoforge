@@ -418,15 +418,24 @@ export class Neo4jRuntimeStore implements RuntimeStore {
    * Compile a validated OQL query to Cypher and execute it read-only.
    * The validated query crosses the port opaque (`core/ports.ts` rule 1);
    * parameters arrive separately as a map (empty for ad-hoc queries —
-   * binding is a saved-query concern).
+   * binding is a saved-query concern). Parameters the analysis recorded
+   * as SKIP/LIMIT operands are wrapped as driver integers — a plain JS
+   * number crosses the wire as a Float, which the server rejects as a
+   * paging count.
    */
   async executeOql(
     validated: ValidatedQuery,
     params: Row = {},
   ): Promise<[string[], Row[]]> {
     const cypher = compileQuery(validated);
+    const converted: Row = { ...params };
+    for (const name of validated.analysis.skipLimitParams) {
+      if (name in converted) {
+        converted[name] = neo4j.int(converted[name] as number);
+      }
+    }
     return runSession(this.driver, (session) =>
-      queries.executeCypherRead(session, cypher, params),
+      queries.executeCypherRead(session, cypher, converted),
     );
   }
 

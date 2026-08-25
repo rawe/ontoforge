@@ -1,15 +1,18 @@
 services:
-  neo4j:
-    image: neo4j:2026.02.2
+  postgres:
+    image: pgvector/pgvector:0.8.6-pg18-trixie
     ports:
-      - "7474:7474"
-      - "7687:7687"
+      - "5432:5432"
     environment:
-      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-changeme}
+      # User stays the image default (postgres) — no init script needed.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ontoforge
     volumes:
-      - neo4j-data:/data
+      # PG 18+ images declare the volume at /var/lib/postgresql (not …/data);
+      # mounting the old path silently loses persistence.
+      - postgres-data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "${NEO4J_PASSWORD:-changeme}", "RETURN 1"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ontoforge"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -20,9 +23,11 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DB_URI: bolt://neo4j:7687
-      DB_USER: neo4j
-      DB_PASSWORD: ${NEO4J_PASSWORD:-changeme}
+      DB_BACKEND: postgres
+      # DB_URI uses Docker-internal networking (the postgres service name)
+      DB_URI: postgresql://postgres:5432/ontoforge
+      DB_USER: postgres
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
       # Semantic search (optional — uncomment to enable)
       # EMBEDDING_PROVIDER: ollama
       # EMBEDDING_MODEL: nomic-embed-text
@@ -38,7 +43,7 @@ services:
       # MCP default ontology key (optional)
       # DEFAULT_MCP_ONTOLOGY_KEY: my_ontology
     depends_on:
-      neo4j:
+      postgres:
         condition: service_healthy
 
   ontoforge-ui:
@@ -66,5 +71,5 @@ services:
   #     - ollama-data:/root/.ollama
 
 volumes:
-  neo4j-data:
+  postgres-data:
   # ollama-data:

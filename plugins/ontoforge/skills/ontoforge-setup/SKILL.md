@@ -5,7 +5,7 @@ description: "Bootstrap a project with OntoForge. Use when the user wants to set
 
 # Goal
 
-Help the user set up OntoForge in their project by generating the necessary configuration files: Docker Compose for Neo4j and OntoForge services, environment variables, and `.mcp.json` for MCP integration.
+Help the user set up OntoForge in their project by generating the necessary configuration files: Docker Compose for PostgreSQL and OntoForge services, environment variables, and `.mcp.json` for MCP integration.
 
 This skill uses **templates** shipped with the plugin. Never invent environment variable names — only use the variables documented below.
 
@@ -13,7 +13,7 @@ This skill uses **templates** shipped with the plugin. Never invent environment 
 
 The Docker Compose stack consists of three core services:
 
-- **neo4j** — Graph database used by the current storage adapter. Stores both schema and instance data.
+- **postgres** — PostgreSQL database (with pgvector) used by the default storage adapter. Stores both schema and instance data.
 - **ontoforge-server** — Backend: REST API and MCP servers. All environment variables documented below apply to this service.
 - **ontoforge-ui** — Frontend: web UI served on port 3000. Requires `BACKEND_URL` pointing to the backend's Docker-internal URL so nginx can proxy `/api` and `/mcp` requests.
 
@@ -44,14 +44,14 @@ Ask the user:
    - `openai` — OpenAI-compatible API (requires API key)
    - None — skip AI configuration
 4. **Ollama deployment** (if ollama chosen for embeddings or AI) — whether Ollama runs on the host machine or should be added as a Docker container in the compose file.
-5. **Neo4j password** — the password for the Neo4j database (default: `changeme`).
-6. **Port conflicts** — whether the default ports (7474, 7687, 8000, 3000) conflict with other services.
+5. **Database password** — the password for the PostgreSQL database (default: `changeme`).
+6. **Port conflicts** — whether the default ports (5432, 8000, 3000) conflict with other services.
 
 ### 2. Generate Docker Compose
 
 Read the template from `templates/docker-compose.yml` and adapt it based on the user's answers:
 
-- Set the Neo4j password in `NEO4J_AUTH` and `DB_PASSWORD`.
+- Set the database password in `POSTGRES_PASSWORD` and `DB_PASSWORD`.
 - If the user wants embeddings, uncomment and configure the `EMBEDDING_*` environment variables on the `ontoforge-server` service.
 - If the user wants Ollama in Docker, uncomment the `ollama` service.
 - If the user wants Ollama on the host (common setup), set `EMBEDDING_BASE_URL` and/or `AI_BASE_URL` to `http://host.docker.internal:11434` (Docker connects to the host's Ollama). The `ollama` service in the compose file is not needed in this case.
@@ -78,9 +78,9 @@ Write the result as `.mcp.json` in the project root. If a `.mcp.json` already ex
 If the user needs a `.env` file for local (non-Docker) development or to store secrets like `EMBEDDING_API_KEY`, generate one. Use this as a reference for the variable names and defaults:
 
 ```env
-# Neo4j connection
-DB_URI=bolt://localhost:7687
-DB_USER=neo4j
+# PostgreSQL connection (the DSN carries host, port and database)
+DB_URI=postgresql://localhost:5432/ontoforge
+DB_USER=postgres
 DB_PASSWORD=changeme
 
 # Semantic search (optional — omit EMBEDDING_PROVIDER to disable)
@@ -118,9 +118,10 @@ These are the **only** environment variables recognized by the `ontoforge-server
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `DB_URI` | yes | `bolt://localhost:7687` | Neo4j Bolt connection URI |
-| `DB_USER` | yes | `neo4j` | Neo4j username |
-| `DB_PASSWORD` | yes | `ontoforge_dev` | Neo4j password |
+| `DB_BACKEND` | no | `postgres` | Storage adapter selection (`postgres` or `neo4j`) |
+| `DB_URI` | yes | `postgresql://localhost:5432/ontoforge` | PostgreSQL connection DSN (carries host, port and database) |
+| `DB_USER` | yes | `postgres` | Database username |
+| `DB_PASSWORD` | yes | `ontoforge_dev` | Database password |
 | `PORT` | no | `8000` | HTTP server port |
 | `EMBEDDING_PROVIDER` | no | *(disabled)* | `ollama` or `openai` — omit to disable semantic search |
 | `EMBEDDING_MODEL` | no | `nomic-embed-text` | Embedding model name |
@@ -137,7 +138,7 @@ These are the **only** environment variables recognized by the `ontoforge-server
 
 | Image | Description |
 |---|---|
-| `neo4j:2026.02.2` | Neo4j 2026.x |
+| `pgvector/pgvector:0.8.6-pg18-trixie` | PostgreSQL 18 with pgvector |
 | `ghcr.io/rawe/ontoforge-server:latest` | OntoForge backend (REST API + MCP) |
 | `ghcr.io/rawe/ontoforge-ui:latest` | OntoForge frontend |
 | `ollama/ollama:latest` | Ollama (optional, for local embeddings and AI) |
@@ -154,7 +155,7 @@ OntoForge exposes two MCP servers:
 After generating the files, remind the user:
 
 1. Run `docker compose up -d` to start the services.
-2. Wait for Neo4j to become healthy (check `docker compose ps`).
+2. Wait for PostgreSQL to become healthy (check `docker compose ps`).
 3. Access the OntoForge UI at `http://localhost:3000`.
 4. Access the API at `http://localhost:8000`.
 5. If using Ollama in Docker, pull the required models:

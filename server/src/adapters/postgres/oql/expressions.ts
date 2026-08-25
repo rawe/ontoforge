@@ -627,6 +627,18 @@ function numberExpr(state: CompileState, numeric: { sql: string; dataType: strin
   };
 }
 
+/** The canonical decimal digits of a non-negative integer literal —
+ * any surface form (underscores, hex, octal), BigInt-exact at any
+ * magnitude — or null when the text is not one. SKIP/LIMIT inlines
+ * these (see `pagingOperand`). */
+export function integerLiteralDigits(text: string): string | null {
+  const numeric = numericSql(text);
+  if (numeric === null || numeric.dataType !== "integer" || numeric.sql.startsWith("-")) {
+    return null;
+  }
+  return numeric.sql;
+}
+
 /** Cypher's integer and float literal forms → their canonical text. */
 function numericSql(text: string): { sql: string; dataType: string } | null {
   const clean = text.replaceAll("_", "");

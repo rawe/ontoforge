@@ -51,7 +51,7 @@ import {
   scalarConversion,
   type ColumnConversion,
 } from "./conversion.js";
-import { ExpressionWalker } from "./expressions.js";
+import { ExpressionWalker, integerLiteralDigits } from "./expressions.js";
 import { attachOptional, attachRequired, emitPattern } from "./patterns.js";
 import { pendingSurface, reject } from "./rejections.js";
 
@@ -476,16 +476,17 @@ class Compiler implements CompileState {
     });
   }
 
-  /** A non-negative integer literal (inlined — the count position is
-   * not a value position, and the canonical integer carries no user
-   * text) or a `$parameter` (a bind whose value the validator could not
-   * see, so it is checked when the argument map arrives). */
+  /** A non-negative integer literal (inlined as its canonical decimal
+   * digits, exact at any magnitude — the count position is not a value
+   * position, and the canonical integer carries no user text) or a
+   * `$parameter` (a bind whose value the validator could not see, so it
+   * is checked when the argument map arrives). */
   private pagingOperand(ctx: Parameters<ExpressionWalker["compile"]>[0]): string {
-    const compiled = this.walker.compile(ctx);
-    const constant = compiled.constant?.value;
-    if (typeof constant === "number" && Number.isSafeInteger(constant) && constant >= 0) {
-      return String(constant);
+    const digits = integerLiteralDigits(ctx.getText());
+    if (digits !== null) {
+      return digits;
     }
+    const compiled = this.walker.compile(ctx);
     const position = /^\$(\d+)$/.exec(compiled.sql);
     if (position === null) {
       pendingSurface("a SKIP/LIMIT operand that is neither an integer nor a $parameter");

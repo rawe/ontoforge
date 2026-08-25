@@ -504,6 +504,15 @@ describe("symbol-atom disambiguation", () => {
     expect(sql("MATCH (a:person) RETURN a.name SKIP 0o17")).toContain("OFFSET 15");
   });
 
+  it("inlines a paging literal beyond 2^53 with its exact digits", () => {
+    expect(limit("9007199254740993")).toBe("LIMIT 9007199254740993");
+    expect(limit("9_007_199_254_740_993")).toBe("LIMIT 9007199254740993");
+    expect(limit("0x20000000000001")).toBe("LIMIT 9007199254740993");
+    expect(sql("MATCH (a:person) RETURN a.name SKIP 9007199254740993")).toContain(
+      "OFFSET 9007199254740993",
+    );
+  });
+
   it("reads hexadecimal and octal integer literals", () => {
     const values = (expr: string) => binds(`MATCH (a:person) WHERE ${expr} RETURN a.name`);
     expect(values("a.age > 0x1f")).toEqual(["person", "31"]);

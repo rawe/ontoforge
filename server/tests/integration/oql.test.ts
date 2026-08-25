@@ -19,6 +19,7 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../../src/app.js";
+import { settings } from "../../src/config.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
@@ -377,6 +378,29 @@ describe("the clause and expression matrix", () => {
       );
       expect(body.results).toEqual([]);
     });
+
+    it.skipIf(settings.DB_BACKEND !== "postgres")(
+      "answers a non-finite float literal as a comparison, never a 500",
+      async () => {
+        await seedAges();
+        // 1e400 canonicalizes to Infinity, which the compiler binds as a
+        // value SQL numeric accepts — the spliced-Infinity 500 is closed
+        // by construction. PostgreSQL-only: Neo4j's own server refuses
+        // the literal outright (22003, numeric value out of range), so
+        // there is no reference behaviour to match.
+        const above = await query(
+          "test_ontology",
+          "MATCH (p:person) WHERE p.age > 1e400 RETURN p.name AS name",
+        );
+        expect(above.results).toEqual([]);
+
+        const below = await query(
+          "test_ontology",
+          "MATCH (p:person) WHERE p.age < 1e400 RETURN p.name AS name ORDER BY p.name",
+        );
+        expect(below.results).toEqual([{ name: "Alice" }, { name: "Bob" }]);
+      },
+    );
 
     it("sorts nulls last ascending and first descending", async () => {
       await seedAges();

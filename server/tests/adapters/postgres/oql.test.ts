@@ -173,10 +173,14 @@ describe("property access", () => {
       sql(`MATCH (a:person) WHERE ${expr} RETURN a.name`).split("\n")[2];
     expect(where("a.name = 'x'")).toBe("WHERE a.type_key = $1 AND a.props->>'name' = $2");
     expect(where("a.bio = 'x'")).toBe("WHERE a.type_key = $1 AND a.props->>'bio' = $2");
-    expect(where("a.age > 1")).toBe("WHERE a.type_key = $1 AND (a.props->'age')::numeric > 1");
-    expect(where("a.score > 1")).toBe("WHERE a.type_key = $1 AND (a.props->'score')::float8 > 1");
+    expect(where("a.age > 1")).toBe(
+      "WHERE a.type_key = $1 AND (a.props->'age')::numeric > $2::numeric",
+    );
+    expect(where("a.score > 1")).toBe(
+      "WHERE a.type_key = $1 AND (a.props->'score')::float8 > $2::numeric",
+    );
     expect(where("a.active = true")).toBe(
-      "WHERE a.type_key = $1 AND (a.props->'active')::boolean = true",
+      "WHERE a.type_key = $1 AND (a.props->'active')::boolean = $2::boolean",
     );
     expect(where("a.hired > '2020-01-01'")).toBe(
       "WHERE a.type_key = $1 AND (a.props->>'hired')::date > $2",
@@ -393,7 +397,7 @@ describe("WITH", () => {
         ")",
         "SELECT s0.a__props->'name' AS \"a.name\", s0.n AS n",
         "FROM s0",
-        "WHERE s0.n > 1",
+        "WHERE s0.n > $2::numeric",
       ].join("\n"),
     );
   });
@@ -432,25 +436,26 @@ describe("expressions", () => {
 
   it("parenthesizes every boolean chain so it composes into the stage WHERE", () => {
     expect(where("a.age > 1 AND a.name = 'x'")).toBe(
-      "a.type_key = $1 AND ((a.props->'age')::numeric > 1 AND a.props->>'name' = $2)",
+      "a.type_key = $1 AND ((a.props->'age')::numeric > $2::numeric AND a.props->>'name' = $3)",
     );
     expect(where("a.age > 1 OR a.age < 9")).toBe(
-      "a.type_key = $1 AND ((a.props->'age')::numeric > 1 OR (a.props->'age')::numeric < 9)",
+      "a.type_key = $1 AND ((a.props->'age')::numeric > $2::numeric" +
+        " OR (a.props->'age')::numeric < $3::numeric)",
     );
     expect(where("NOT a.name = 'x'")).toBe("a.type_key = $1 AND NOT (a.props->>'name' = $2)");
   });
 
   it("keeps OR below AND without losing the precedence the parser gave", () => {
     expect(where("a.age > 1 AND a.name = 'x' OR a.active = true")).toBe(
-      "a.type_key = $1 AND (((a.props->'age')::numeric > 1 AND a.props->>'name' = $2)" +
-        " OR (a.props->'active')::boolean = true)",
+      "a.type_key = $1 AND (((a.props->'age')::numeric > $2::numeric AND a.props->>'name' = $3)" +
+        " OR (a.props->'active')::boolean = $4::boolean)",
     );
   });
 
   it("maps every comparison sign", () => {
-    expect(where("a.age <> 1")).toContain("<> 1");
-    expect(where("a.age <= 1")).toContain("<= 1");
-    expect(where("a.age >= 1")).toContain(">= 1");
+    expect(where("a.age <> 1")).toContain("<> $2::numeric");
+    expect(where("a.age <= 1")).toContain("<= $2::numeric");
+    expect(where("a.age >= 1")).toContain(">= $2::numeric");
   });
 
   it("compiles CONTAINS case-sensitively, unlike the port's substring filter", () => {
@@ -467,7 +472,9 @@ describe("expressions", () => {
   });
 
   it("keeps parenthesized expressions parenthesized", () => {
-    expect(where("(a.age > 1)")).toBe("a.type_key = $1 AND ((a.props->'age')::numeric > 1)");
+    expect(where("(a.age > 1)")).toBe(
+      "a.type_key = $1 AND ((a.props->'age')::numeric > $2::numeric)",
+    );
   });
 });
 
@@ -485,7 +492,10 @@ describe("symbol-atom disambiguation", () => {
   it("reads bare integers that lex as symbols as literals", () => {
     expect(limit("0")).toBe("LIMIT 0");
     expect(limit("10")).toBe("LIMIT 10");
-    expect(sql("MATCH (a:person) WHERE a.age > 1_000 RETURN a.name")).toContain("> 1000");
+    expect(binds("MATCH (a:person) WHERE a.age > 1_000 RETURN a.name")).toEqual([
+      "person",
+      "1000",
+    ]);
   });
 
   it("pages on every integer-literal form the language accepts", () => {
@@ -495,16 +505,16 @@ describe("symbol-atom disambiguation", () => {
   });
 
   it("reads hexadecimal and octal integer literals", () => {
-    const where = (expr: string) => sql(`MATCH (a:person) WHERE ${expr} RETURN a.name`);
-    expect(where("a.age > 0x1f")).toContain("> 31");
-    expect(where("a.age > 0o17")).toContain("> 15");
-    expect(where("a.age > 007")).toContain("> 7");
+    const values = (expr: string) => binds(`MATCH (a:person) WHERE ${expr} RETURN a.name`);
+    expect(values("a.age > 0x1f")).toEqual(["person", "31"]);
+    expect(values("a.age > 0o17")).toEqual(["person", "15"]);
+    expect(values("a.age > 007")).toEqual(["person", "7"]);
   });
 
   it("reads signed and fractional literals that arrive as DIGIT tokens", () => {
-    const where = (expr: string) => sql(`MATCH (a:person) WHERE ${expr} RETURN a.name`);
-    expect(where("a.age > -5")).toContain("> -5");
-    expect(where("a.score > 1.5")).toContain("> 1.5");
+    const values = (expr: string) => binds(`MATCH (a:person) WHERE ${expr} RETURN a.name`);
+    expect(values("a.age > -5")).toEqual(["person", "-5"]);
+    expect(values("a.score > 1.5")).toEqual(["person", "1.5"]);
   });
 
   it("rejects a symbol that resolves to neither scope nor a number", () => {
@@ -531,8 +541,37 @@ describe("the bind plan", () => {
     ).toEqual(["person", "$n"]);
   });
 
-  it("compiles booleans and NULL as SQL keywords, not binds", () => {
-    expect(binds("MATCH (a:person) WHERE a.active = true RETURN a.name")).toEqual(["person"]);
+  it("binds numeric literals as their canonical text, cast on the placeholder", () => {
+    const compiled = compile("MATCH (a:person) WHERE a.age > 30 RETURN a.name");
+    expect(compiled.sql).toContain("(a.props->'age')::numeric > $2::numeric");
+    expect(compiled.binds).toEqual([
+      { kind: "value", value: "person" },
+      { kind: "value", value: "30" },
+    ]);
+  });
+
+  it("binds boolean literals, cast on the placeholder", () => {
+    const compiled = compile("MATCH (a:person) WHERE a.active = true RETURN a.name");
+    expect(compiled.sql).toContain("(a.props->'active')::boolean = $2::boolean");
+    expect(compiled.binds).toEqual([
+      { kind: "value", value: "person" },
+      { kind: "value", value: true },
+    ]);
+  });
+
+  it("keeps NULL an inline SQL keyword — a bound null cannot be typed", () => {
+    const compiled = compile("MATCH (a:person) WHERE a.name = null RETURN a.name");
+    expect(compiled.sql).toContain("a.props->>'name' = NULL");
+    expect(compiled.binds).toEqual([{ kind: "value", value: "person" }]);
+  });
+
+  it("binds a non-finite float spelling instead of splicing Infinity", () => {
+    const compiled = compile("MATCH (a:person) WHERE a.score > 1e400 RETURN a.name");
+    expect(compiled.sql).not.toContain("Infinity");
+    expect(compiled.binds).toEqual([
+      { kind: "value", value: "person" },
+      { kind: "value", value: "Infinity" },
+    ]);
   });
 
   it("resolves the bind plan against supplied parameter values", () => {
@@ -740,7 +779,7 @@ describe("lists, maps and membership", () => {
 
   it("composes a list with a non-constant element", () => {
     expect(sql("MATCH (a:person) RETURN [1, a.age] AS xs")).toContain(
-      "SELECT jsonb_build_array(to_jsonb(1), a.props->'age') AS xs",
+      "SELECT jsonb_build_array(to_jsonb($2::numeric), a.props->'age') AS xs",
     );
   });
 
@@ -843,7 +882,8 @@ describe("inline property maps", () => {
       [
         "SELECT a.props->'name' AS \"a.name\"",
         "FROM entity a",
-        "WHERE a.type_key = $1 AND a.props->>'name' = $2 AND (a.props->'age')::numeric = 30",
+        "WHERE a.type_key = $1 AND a.props->>'name' = $2" +
+          " AND (a.props->'age')::numeric = $3::numeric",
       ].join("\n"),
     );
   });
@@ -957,11 +997,19 @@ describe("the single-SELECT invariant", () => {
 
   it("carries every user-originated value as a bind, never as SQL text", () => {
     const compiled = compile(
-      "MATCH (a:person {name: 'Ada'}) WHERE a.bio CONTAINS 'sec\\'ret' RETURN a.name",
+      "MATCH (a:person {name: 'Ada', age: 30}) " +
+        "WHERE a.bio CONTAINS 'sec\\'ret' AND a.score > 1.5 AND a.active = true " +
+        "RETURN a.name",
     );
     expect(compiled.sql).not.toContain("Ada");
     expect(compiled.sql).not.toContain("sec");
+    expect(compiled.sql).not.toContain("30");
+    expect(compiled.sql).not.toContain("1.5");
+    expect(compiled.sql).not.toContain("true");
     expect(compiled.binds).toContainEqual({ kind: "value", value: "sec'ret" });
+    expect(compiled.binds).toContainEqual({ kind: "value", value: "30" });
+    expect(compiled.binds).toContainEqual({ kind: "value", value: "1.5" });
+    expect(compiled.binds).toContainEqual({ kind: "value", value: true });
   });
 });
 

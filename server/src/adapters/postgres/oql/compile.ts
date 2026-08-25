@@ -468,13 +468,15 @@ class Compiler implements CompileState {
     });
   }
 
-  /** A non-negative integer literal (inlined — it carries no user text)
-   * or a `$parameter` (a bind whose value the validator could not see,
-   * so it is checked when the argument map arrives). */
+  /** A non-negative integer literal (inlined — the count position is
+   * not a value position, and the canonical integer carries no user
+   * text) or a `$parameter` (a bind whose value the validator could not
+   * see, so it is checked when the argument map arrives). */
   private pagingOperand(ctx: Parameters<ExpressionWalker["compile"]>[0]): string {
     const compiled = this.walker.compile(ctx);
-    if (/^\d+$/.test(compiled.sql)) {
-      return compiled.sql;
+    const constant = compiled.constant?.value;
+    if (typeof constant === "number" && Number.isSafeInteger(constant) && constant >= 0) {
+      return String(constant);
     }
     const position = /^\$(\d+)$/.exec(compiled.sql);
     if (position === null) {

@@ -27,16 +27,19 @@
  * forms), and otherwise it is an unresolved symbol and the query is
  * rejected. `-5` and `1.5` do arrive as literals; `-5` is one token.
  *
- * No user *text* ever reaches the SQL, but not everything binds. A
- * string literal, every parameter, and a wholly constant list or map
- * (one jsonb bind, JSON encoded here) become positional binds. Numerics,
- * booleans and NULL are inlined — never as written, but as the
- * canonicalized form the walker computed for them (`1_000` and `0x1f`
- * become `1000` and `31`, `TRUE` becomes `true`), so what lands in the
- * statement is the compiler's own token, not the query's. Property keys
- * are inlined too — they are schema keys, matched against the scoped
- * schema first and constrained to `[a-z][a-z0-9_]*` by the modeling
- * surface.
+ * No user *text* ever reaches the SQL, and every user-originated value
+ * binds. A string literal, every parameter, and a wholly constant list
+ * or map (one jsonb bind, JSON encoded here) become positional binds;
+ * numeric and boolean literals bind too — never as written, but as the
+ * canonicalized value the walker computed (`1_000` and `0x1f` bind as
+ * `1000` and `31`), with the placeholder cast (`::numeric`,
+ * `::boolean`) the jsonb and comparison sites need. `NULL` is the one
+ * literal that stays inlined: a bound null cannot be typed, and the
+ * keyword carries no user text — as does a SKIP/LIMIT integer literal,
+ * whose count position is not a value position (see `pagingOperand`).
+ * Property keys are inlined too — they are schema keys, matched against
+ * the scoped schema first and constrained to `[a-z][a-z0-9_]*` by the
+ * modeling surface.
  */
 
 import type {
@@ -160,14 +163,17 @@ export class ExpressionWalker {
   }
 
   private unary(ctx: UnaryAddSubExpressionContext): CompiledExpr {
-    const inner = this.atomic(ctx.atomicExpression());
     if (ctx.SUB() === null) {
-      return inner;
+      return this.atomic(ctx.atomicExpression());
     }
-    if (!/^-?\d+(\.\d+)?$/.test(inner.sql)) {
+    // Validation routes unary minus on a non-literal to the arithmetic
+    // rejection, so only a negated numeric literal reaches this line.
+    const numeric = numericSql(ctx.atomicExpression().getText());
+    if (numeric === null) {
       pendingSurface("unary minus on a non-literal");
     }
-    return numberExpr({ sql: `-${inner.sql}`, dataType: inner.dataType ?? "integer" });
+    const negated = numeric.sql.startsWith("-") ? numeric.sql.slice(1) : `-${numeric.sql}`;
+    return numberExpr(this.state, { sql: negated, dataType: numeric.dataType });
   }
 
   private atomic(ctx: AtomicExpressionContext): CompiledExpr {
@@ -338,10 +344,32 @@ export class ExpressionWalker {
       }
       const bool = literal.boolLit();
       if (bool !== null) {
+        // Bound like a number: the placeholder cast is what `to_jsonb`
+        // and the boolean positions need; allocation is lazy so a
+        // boolean inside a wholly constant list folds with the list.
         const value = bool.getText().toLowerCase() === "true";
-        return { ...scalar(String(value), "boolean"), constant: { value } };
+        const state = this.state;
+        let placeholder: string | undefined;
+        const bind = (): string => (placeholder ??= `${state.bindValue(value)}::boolean`);
+        return {
+          get sql() {
+            return bind();
+          },
+          get raw() {
+            return bind();
+          },
+          json: () => `to_jsonb(${bind()})`,
+          dataType: "boolean",
+          isAggregate: false,
+          constant: { value },
+        };
       }
       if (literal.NULL_W() !== null) {
+        // The one literal that stays inlined: a bound null cannot be
+        // given a type — NULL is polymorphic, and what it must be
+        // depends on the position (boolean under WHERE, jsonb inside a
+        // list, anything in a comparison) — and the keyword carries no
+        // user text.
         return { ...scalar("NULL", null, () => "NULL"), constant: { value: null } };
       }
       const list = literal.listLit();
@@ -418,7 +446,7 @@ export class ExpressionWalker {
     }
     const numeric = numericSql(text);
     if (numeric !== null) {
-      return numberExpr(numeric);
+      return numberExpr(this.state, numeric);
     }
     reject(unknownVariable(text, this.state.stage.scope));
   }
@@ -428,7 +456,7 @@ export class ExpressionWalker {
     if (numeric === null) {
       pendingSurface(`the numeric literal '${text}'`);
     }
-    return numberExpr(numeric);
+    return numberExpr(this.state, numeric);
   }
 
   /** `[…]` — one jsonb bind when every element is constant, a composed
@@ -565,13 +593,38 @@ function unknownVariable(variable: string, scope: ReadonlyMap<string, Binding>):
   return `Unknown variable '${variable}'. Available: ${[...scope.keys()].sort().join(", ")}`;
 }
 
-/** A numeric literal, inlined into the SQL (it carries no user text) and
- * known at compile time, so a constant list can fold around it. */
-function numberExpr(numeric: { sql: string; dataType: string }): CompiledExpr {
-  return { ...scalar(numeric.sql, numeric.dataType), constant: { value: Number(numeric.sql) } };
+/**
+ * A numeric literal: its canonical text — the walker's own rendering,
+ * never the query's spelling — becomes one positional bind, cast on the
+ * placeholder the way string literals solved `::text`: `to_jsonb` needs
+ * a typed operand, and `::numeric` also carries a non-finite spelling
+ * (`1e400` canonicalizes to `Infinity`), which numeric accepts as a
+ * value where the spliced bare token would parse as a column. Binding
+ * the text keeps integers beyond 2^53 exact. The bind is allocated on
+ * first read, so a literal inside a wholly constant list still folds
+ * into the list's single jsonb bind.
+ */
+function numberExpr(state: CompileState, numeric: { sql: string; dataType: string }): CompiledExpr {
+  let placeholder: string | undefined;
+  const bind = (): string => (placeholder ??= `${state.bindValue(numeric.sql)}::numeric`);
+  return {
+    get sql() {
+      return bind();
+    },
+    get raw() {
+      return bind();
+    },
+    json: () => `to_jsonb(${bind()})`,
+    dataType: numeric.dataType,
+    isAggregate: false,
+    // `pg` returns numeric as a string, so a projected literal carries
+    // its way back to a number.
+    conversion: { kind: "number" },
+    constant: { value: Number(numeric.sql) },
+  };
 }
 
-/** Cypher's integer and float literal forms → a bare SQL numeric. */
+/** Cypher's integer and float literal forms → their canonical text. */
 function numericSql(text: string): { sql: string; dataType: string } | null {
   const clean = text.replaceAll("_", "");
   const negative = clean.startsWith("-");

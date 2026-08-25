@@ -488,6 +488,12 @@ describe("symbol-atom disambiguation", () => {
     expect(sql("MATCH (a:person) WHERE a.age > 1_000 RETURN a.name")).toContain("> 1000");
   });
 
+  it("pages on every integer-literal form the language accepts", () => {
+    expect(limit("1_000")).toBe("LIMIT 1000");
+    expect(limit("0x10")).toBe("LIMIT 16");
+    expect(sql("MATCH (a:person) RETURN a.name SKIP 0o17")).toContain("OFFSET 15");
+  });
+
   it("reads hexadecimal and octal integer literals", () => {
     const where = (expr: string) => sql(`MATCH (a:person) WHERE ${expr} RETURN a.name`);
     expect(where("a.age > 0x1f")).toContain("> 31");

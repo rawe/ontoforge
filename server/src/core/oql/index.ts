@@ -595,7 +595,7 @@ class Collector extends CypherParserListener {
       this.analysis.skipLimitParams.add(shape.name);
       return;
     }
-    if (!(shape.kind === "constant" && /^[0-9]+$/.test(shape.text))) {
+    if (!(shape.kind === "constant" && isIntegerLiteral(shape.text))) {
       this.analysis.unsupported.add("skip-limit");
     }
   }
@@ -613,6 +613,16 @@ const FUNCTION_ALLOWLIST: ReadonlySet<string> = new Set([
 
 function isAggregate(name: string): boolean {
   return FUNCTION_ALLOWLIST.has(name.toLowerCase());
+}
+
+/** Every non-negative integer-literal form the language accepts —
+ * decimal with underscores, hex, octal — the same forms the compilers
+ * read, so the one literal is legal in every integer position. */
+function isIntegerLiteral(text: string): boolean {
+  const clean = text.replaceAll("_", "");
+  return (
+    /^[0-9]+$/.test(clean) || /^0[xX][0-9a-fA-F]+$/.test(clean) || /^0[oO][0-7]+$/.test(clean)
+  );
 }
 
 /** True when an atomic expression is a bare numeric literal — the one

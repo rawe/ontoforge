@@ -755,6 +755,12 @@ describe("surface acceptance", () => {
     expect(validateQuery("MATCH (p:person) RETURN p LIMIT $n")).toEqual([]);
   });
 
+  it("every integer-literal form passes SKIP/LIMIT", () => {
+    expect(validateQuery("MATCH (p:person) RETURN p LIMIT 1_000")).toEqual([]);
+    expect(validateQuery("MATCH (p:person) RETURN p LIMIT 0x10")).toEqual([]);
+    expect(validateQuery("MATCH (p:person) RETURN p SKIP 0o17 LIMIT 007")).toEqual([]);
+  });
+
   it("ORDER BY on properties, aliases and aggregates passes", () => {
     expect(validateQuery("MATCH (p:person) RETURN p ORDER BY p.name DESC")).toEqual([]);
     expect(

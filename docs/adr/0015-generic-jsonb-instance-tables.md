@@ -54,4 +54,6 @@ execute against a live database.
 ## Outcome
 
 Option A — two generic jsonb tables (`entity`, `relation`) with `uuid` primary keys —
-is the PostgreSQL adapter's instance mapping.
+is the PostgreSQL adapter's instance mapping. The binding rule lives in
+[../decisions.md](../decisions.md#storage); the physical mapping is described in
+[../storage-adapters.md](../storage-adapters.md).

@@ -93,6 +93,13 @@ adapter, below the port. PostgreSQL accepts such values. No ceiling exists above
 the port — deployments are adapter-bound for life, so no deployment ever sees
 both behaviours.
 
+**PostgreSQL instance mapping: two generic jsonb tables.** The PostgreSQL adapter
+stores all instance data in two generic tables — `entity` and `relation`, with `uuid`
+primary keys and properties as jsonb — never a table per type. A schema change stays
+pure data; no DDL runs against a live database. The physical mapping is described in
+[storage-adapters.md](storage-adapters.md); deliberation:
+[adr/0015](adr/0015-generic-jsonb-instance-tables.md).
+
 **Storage DDL enforces structure only.** Adapter DDL carries identity,
 referential integrity, exactly-one-owner and uniqueness — nothing else. Business
 rules (for example, document properties only on entity types, the data-type

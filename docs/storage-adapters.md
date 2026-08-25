@@ -9,10 +9,12 @@ This document is the contract an adapter must satisfy. Concepts and vocabulary:
 [architecture.md](architecture.md). The rules that put it there:
 [decisions.md](decisions.md).
 
-**Two parts, and the difference matters.** Part 1 is normative: it binds every adapter.
-Part 2 describes the reference adapter and binds nothing — it is named technology,
-included so the contract has a worked example. Nothing in Part 2 may be relied on by code
-above the port, and nothing in it constrains a second adapter.
+**One part binds; two describe.** Part 1 is normative: it binds every adapter. Parts 2
+and 3 describe the two shipped adapters — PostgreSQL, the default deployment, and Neo4j
+— in named technology. They bind nothing: nothing in an adapter part may be relied on by
+code above the port, and nothing in one constrains another adapter. The known divergences
+in observable behaviour between the two are enumerated in one place, between the contract
+and the adapter parts.
 
 ---
 
@@ -353,6 +355,14 @@ attach to in Part 1 rather than here: the datetime text form on the two point re
   key; if both declare the same property key at different data types, the traversal read
   and the batch read behind cross-type document search can decode the value through the
   wrong definition, silently. A known limitation, accepted.
+- **Substring matching against non-string values.** The substring filter compares text
+  forms. PostgreSQL renders them as the documented behaviour states — numbers as
+  printed, booleans as `true`/`false`, datetimes as their ISO-8601 string — while
+  Neo4j's temporal and float rendering is its own, so a substring match against a
+  non-string value can differ between the adapters.
+- **String sort order.** PostgreSQL sorts strings by the database's default collation,
+  dictionary-style, as the documented behaviour states; Neo4j sorts by Unicode code
+  points, capitals before lowercase.
 - **Vector-index removal on drop.** On PostgreSQL, a dropped entity type's or document
   property's vector index survives as an orphan until the next ensure-all pass sweeps it;
   on Neo4j the drop removes it immediately.
@@ -365,6 +375,9 @@ attach to in Part 1 rather than here: the datetime text form on the two point re
   used as a node or relationship when it is bound to neither — is a domain validation
   error on PostgreSQL; Neo4j surfaces the same query as a storage error. A clean client
   error on one adapter is a generic failure on the other.
+- **Reading a property of a `WITH` alias that cannot be verified against the schema.**
+  An error on PostgreSQL, per the documented behaviour; Neo4j does not reject it — the
+  access silently yields null, leaking past the lens.
 - **Aggregates versus projection on temporal properties.** On PostgreSQL, `min` and `max`
   over a date or datetime property return a decoded temporal value where a plain
   projection of the same property returns its stored text — the two forms disagree about
@@ -386,11 +399,127 @@ inexpressible on both adapters alike. `1.5` is unaffected.
 
 ---
 
-# Part 2 — The reference adapter (non-normative)
+# Part 2 — The PostgreSQL adapter (non-normative)
 
-> Everything below describes how the one shipped adapter, built on **Neo4j**, satisfies
-> Part 1. It is illustration, not contract. No name, convention or structure in this part
-> is part of the port, and a different adapter is free to share none of it.
+> Everything below describes how the **PostgreSQL** adapter — the default deployment —
+> satisfies Part 1. It is illustration, not contract. No name, convention or structure in
+> this part is part of the port, and a different adapter is free to share none of it.
+
+## Logical to physical mapping
+
+Schema objects are plain relational tables, one per object kind, joined by foreign keys:
+
+| Logical | Table | Joined by |
+|---|---|---|
+| Ontology | `ontology` | referenced by its inclusions, agents and saved queries |
+| Entity type | `entity_type` | referenced by its property definitions and inclusions |
+| Relation type | `relation_type` | endpoint entity type keys as deletion-restricted references to `entity_type`; referenced by its property definitions and inclusions |
+| Property definition | `property_def` | exactly one of two owner columns — entity type or relation type — enforced by a check constraint |
+| Scope inclusion | `ontology_includes` | its ontology plus exactly one of two type columns; the optional property allowlist is an array column, and an absent allowlist is stored as null, never as an empty array |
+| Agent configuration | `ai_agent_config` | its ontology |
+| Saved query | `saved_query` | its ontology, with the denormalized ontology key alongside |
+
+Every schema row carries a `uuid` primary key. That is load-bearing beyond identity: the
+name of a dynamically created vector index embeds the uuid of the schema row that causes
+it to exist (naming, below).
+
+Deleting a schema object cascades through the foreign keys — property definitions,
+inclusions, agents and saved queries die with their owner. The DDL carries structure
+only, per the rule in [decisions.md](decisions.md#storage): identity, referential
+integrity, exactly-one-owner and uniqueness, with no backstop for the business rules the
+service validates.
+
+## Naming transformations
+
+There is no naming transformation. A type key never becomes a table, column or index
+name — it is a value in a `type_key` column, appearing at most as a quoted literal
+inside a partial-index predicate. Both reserved key sets are therefore empty: no key can
+collide with an adapter object.
+
+The one mechanical naming rule covers the dynamically created vector indexes:
+`vec_<table>_<id>`, where `<id>` is the 32-hex-character uuid, hyphens stripped, of the
+schema row that causes the index to exist — the entity type row for a per-type index,
+the property-definition row for a document property's chunk index. The name is
+reversible in both directions with no registry: name to uuid to schema row to type key,
+and type to uuid to name, so index names are never stored. The `vec_` prefix is barred
+to every fixed adapter object, keeping the dynamic and static namespaces disjoint by
+construction — the two fixed vector indexes live outside it.
+
+## How instance data is stored
+
+Two generic tables hold all instance data, however many types the schema declares:
+`entity` and `relation`. Each row carries its `uuid` id, its type key, its user
+properties as one `jsonb` document, and its timestamps; an entity row additionally
+carries its embedding vector in a dedicated dimensionless column, never inside the
+properties document. A schema change — a new type, a new property — is therefore pure
+data: no DDL ever runs against a live database. The deliberation behind this mapping is
+[adr/0015](adr/0015-generic-jsonb-instance-tables.md); the binding rule is in
+[decisions.md](decisions.md#storage).
+
+Chunks live in a third table, `document_chunk` — one row per passage with its owning
+entity, type and property keys, ordinal, offsets, text and optional vector.
+
+The silent-cascade contract on entity deletion is translated into foreign keys:
+relations reference their two endpoint entities, and chunks their owning entity, all
+with cascading deletes. Deleting an entity removes its relations in either direction and
+its chunks in the same statement, and a dangling endpoint is unrepresentable. The
+instance tables' type-key columns carry no foreign key to the schema tables — deleting a
+type deliberately orphans its instances, matching the documented deletion behaviour.
+
+Five B-tree indexes back the hot paths: entity rows by type key; relation rows by type
+key, by source entity and by target entity; chunk rows by owning entity and property
+key. Filters, sorts and text search evaluate jsonb expressions that cast a property to
+its declared data type; property keys and values are both bound parameters, never SQL
+text.
+
+## Index inventory
+
+Created only when an embedding provider is configured — all HNSW over the embedding
+column cast to the provider's width, all cosine:
+
+| Vector index | Form | Scope |
+|---|---|---|
+| One per entity type | partial index on `entity`, predicated on the type key | that type's rows |
+| One per document property | partial index on `document_chunk`, predicated on the entity type key and property key | that property's passages |
+| One across all entity types | full-table on `entity`, fixed name | cross-type entity search |
+| One for saved queries | full-table on `saved_query`, fixed name | description search |
+
+An index's width is read back from its own indexed column type in the catalog — the
+`vector(D)` of the cast expression — and that is what width reconciliation compares.
+Builds are plain, transactional index creation; a failed or interrupted build leaves
+nothing behind, so no failed-index defence exists or is needed. The filterable-property
+list a caller may pass on index creation is accepted and ignored: property values are
+never index metadata here, so every property filters semantic search, always, with no
+declaration and no rebuild.
+
+Search behaviour: the similarity returned is `1 − cosine_distance / 2` — algebraically
+identical to the Neo4j adapter's cosine index score, the same 0-to-1 scale, pinned by a
+fixed-vector conformance case. Every vector query runs as a strict-order iterative scan,
+so a result limit counts rows that passed the filters, delivered in exact distance
+order. A minimum score is applied after the limit, so a page may shrink — including when
+the iterative scan gives up at its tuple cap.
+
+## Engine constraints worth knowing
+
+**A row's properties are one jsonb value, bounded at roughly 255 MB.** The bound is the
+engine's, sits far beyond any practical property map, and is the only size limit on a
+property document — the documents capability rightly states none.
+
+**Listing order is fully deterministic.** Every listing's ordering carries a trailing
+tie-break on the row id, so pagination among equal sort values is stable. That
+determinism is this adapter's own; the port does not promise it.
+
+**String ordering follows the database's default collation.** No collation is ever set
+explicitly; strings sort dictionary-style under the deployment's default collation,
+which is the behaviour the shared documentation states.
+
+---
+
+# Part 3 — The Neo4j adapter (non-normative)
+
+> Everything below describes how the **Neo4j** adapter satisfies Part 1. It is
+> illustration, not contract. No name, convention or structure in this part is part of
+> the port, and a different adapter is free to share none of it.
 
 ## Logical to physical mapping
 

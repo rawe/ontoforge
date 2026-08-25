@@ -132,8 +132,7 @@ exist. This is a known limit of cross-type search, not an error condition.
 
 - **Filters require a type.** Cross-type search rejects them, because property definitions
   are per entity type and a filter key means nothing without one.
-- **Substring containment is rejected.** The entity ranking evaluates its filters inside
-  the vector index, where substring matching cannot be expressed. Equality and the ordered
+- **Substring containment is rejected.** Equality and the ordered
   comparisons are supported; for substring filtering, use the entity list operation.
 - Everything else matches the list operation's filter syntax, including validation against
   the scoped property set and coercion to the declared data type.
@@ -169,11 +168,6 @@ The rules behind that line are what a reimplementation has to match:
 - The composed text is capped at 30 000 characters and truncated at the cap.
 - Composition is deterministic, so re-embedding an unchanged entity reproduces the same
   text.
-
-A storage adapter may additionally impose a ceiling on the size of an individual string
-value it keeps as filter metadata alongside a vector. Where it does, a write carrying an
-oversized value is rejected as a validation error naming the property — and only when an
-embedding provider is configured, since the constraint exists to protect the index.
 
 ## Keeping embeddings current
 
@@ -224,7 +218,7 @@ A vector index fixes its vector width when it is created. Changing the embedding
 its configured width, makes the provider emit vectors of a different width, which an
 existing index refuses. Nothing about the index looks wrong to the database — it stays
 healthy and online — so the failure does not appear at startup. It appears as a storage
-error on the first search that touches the index.
+error on the first operation that touches the index.
 
 Startup detects the condition rather than the symptom: with a provider configured, each
 semantic index's configured width is compared against the provider's, and every mismatch

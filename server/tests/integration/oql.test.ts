@@ -192,6 +192,22 @@ describe("query execution (unscoped lens)", () => {
     expect(traversal.results).toEqual([{ name: "Alice" }, { name: "Bob" }]);
   });
 
+  it("pins the empty leading OPTIONAL MATCH divergence between the backends", async () => {
+    // No person rows exist. The reference adapter preserves Cypher's
+    // single null row; the SQL emission opens the stage as a plain FROM
+    // (there is no left-hand relation to outer-join) and yields zero
+    // rows. Both sides are pinned so neither drifts unnoticed.
+    const body = await query(
+      "test_ontology",
+      "OPTIONAL MATCH (p:person) RETURN p.name AS name",
+    );
+    if (settings.DB_BACKEND === "neo4j") {
+      expect(body.results).toEqual([{ name: null }]);
+    } else {
+      expect(body.results).toEqual([]);
+    }
+  });
+
   it("rejects a variable-length pattern at validation", async () => {
     await seedGraph();
     const body = await query(

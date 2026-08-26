@@ -154,6 +154,22 @@ invalid under a wider one.
 A change that would invalidate a lens is refused, and names the lenses it would affect.
 It proceeds only when the caller asks for it a second time, explicitly.
 
+**Exactly one env file is read, and it is always named.**
+`ENV_FILE` names it; without that it is `.env` in the working directory. Files never
+layer: a second file cannot quietly supply what the first omits, and a named file that is
+missing fails the boot rather than falling back to the built-in defaults. A variable
+already set in the real environment still wins, because that is what a shell variable is
+for. Development presets are committed under `env/` and passed to `./dev.sh`, so no
+launcher script carries configuration values of its own — a value that decides how the
+system runs must be readable in a file, not buried in a script that silently outranks one.
+
+**Model thinking effort is one deployment setting, not a per-agent one.**
+`AI_REASONING_EFFORT` fixes how hard the model thinks for every AI call the server makes,
+and is validated at startup rather than per request — an unknown level is a boot failure,
+not a failed inference. Effort is a property of the deployment's latency and cost budget,
+not of any one lens or agent, and a level a given model ignores would otherwise look like
+a broken agent configuration rather than a model limitation.
+
 **Vector index width drift is reported at startup and repaired only on request.**
 An index fixes its width when created, so a changed embedding model leaves indexes that
 cannot accept vectors at the new width. Startup warns per mismatch and names the remedy.

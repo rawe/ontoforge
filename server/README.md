@@ -37,6 +37,10 @@ commented list. The defaults match the docker-compose dev stack, so no
 configuration is needed for local development. To enable semantic search and AI,
 set `EMBEDDING_PROVIDER=ollama` and `AI_PROVIDER=ollama` (e.g. in a local `.env`).
 
+Exactly one env file is read: the one `ENV_FILE` names, otherwise `.env` in the
+working directory. A variable already set in the environment wins over the file,
+and a named file that is missing fails the boot rather than falling back.
+
 ## Tests
 
 | Command | Suite | Needs |

@@ -47,27 +47,27 @@ services:
       DB_USER: postgres
       # Mirrors POSTGRES_PASSWORD on the postgres service
       DB_PASSWORD: changeme
-      # Semantic search (optional — remove comments to enable)
+      # Semantic search — Ollama on the host machine.
       # EMBEDDING_PROVIDER: ollama
       # EMBEDDING_MODEL: nomic-embed-text
-      # If Ollama runs on the host machine:
       # EMBEDDING_BASE_URL: http://host.docker.internal:11434
       # If Ollama runs as a container in this compose (see ollama service below):
       # EMBEDDING_BASE_URL: http://ollama:11434
       # For OpenAI-compatible providers: set EMBEDDING_PROVIDER to "openai"
       # EMBEDDING_API_KEY: sk-...
       # EMBEDDING_DIMENSIONS: 1536
-      # AI-powered runtime (optional — remove comments to enable)
+      # AI-powered runtime — Ollama on the host machine.
       # Requires a model with tool calling support. Recommended Ollama models:
-      #   qwen3:8b (~6 GB RAM), qwen3:14b (~11 GB), qwen3:32b (~22 GB)
+      #   gemma4:12b-mlx (~8 GB RAM, Apple Silicon), qwen3:8b (~6 GB), qwen3:32b (~22 GB)
       # AI_PROVIDER: ollama
-      # AI_MODEL: qwen3:8b
-      # If Ollama runs on the host machine:
+      # AI_MODEL: gemma4:12b-mlx
       # AI_BASE_URL: http://host.docker.internal:11434
       # If Ollama runs as a container in this compose (see ollama service below):
       # AI_BASE_URL: http://ollama:11434
       # For OpenAI-compatible providers: set AI_PROVIDER to "openai"
       # AI_API_KEY: sk-...
+      # Model thinking effort: none, low, medium or high (unset = model default)
+      # AI_REASONING_EFFORT: medium
       # MCP default ontology key (optional — used when no key in URL path or header)
       # DEFAULT_MCP_ONTOLOGY_KEY: my_ontology
     depends_on:
@@ -84,10 +84,10 @@ services:
     depends_on:
       - ontoforge-server
 
-  # Ollama provider (optional — uncomment to run Ollama in Docker)
+  # Ollama provider (optional — uncomment to run Ollama in Docker instead of on the host)
   # After first start, pull the models you need:
   #   docker exec ollama ollama pull nomic-embed-text   (for semantic search)
-  #   docker exec ollama ollama pull qwen3:8b            (for AI features)
+  #   docker exec ollama ollama pull gemma4:12b-mlx     (for AI features)
   # ollama:
   #   image: ollama/ollama:latest
   #   ports:

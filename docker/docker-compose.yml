@@ -72,6 +72,8 @@ services:
       # AI_BASE_URL: http://ollama:11434
       # For OpenAI-compatible providers: set AI_PROVIDER to "openai"
       # AI_API_KEY: sk-...
+      # Model thinking effort: none, low, medium or high (unset = model default)
+      # AI_REASONING_EFFORT: medium
       # MCP default ontology key (optional — used when no key in URL path or header)
       # DEFAULT_MCP_ONTOLOGY_KEY: my_ontology
     depends_on:

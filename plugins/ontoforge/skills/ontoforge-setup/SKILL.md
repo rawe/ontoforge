@@ -95,6 +95,7 @@ DB_PASSWORD=changeme
 # AI_MODEL=qwen3:8b
 # AI_BASE_URL=http://localhost:11434
 # AI_API_KEY=
+# AI_REASONING_EFFORT=
 
 # MCP default ontology key (optional)
 # DEFAULT_MCP_ONTOLOGY_KEY=my_ontology
@@ -132,6 +133,7 @@ These are the **only** environment variables recognized by the `ontoforge-server
 | `AI_MODEL` | no | `qwen3:8b` | AI model name (must support tool calling) |
 | `AI_BASE_URL` | no | `http://localhost:11434` | AI provider API base URL |
 | `AI_API_KEY` | no | *(none)* | API key — **required** when `AI_PROVIDER=openai` |
+| `AI_REASONING_EFFORT` | no | *(model default)* | `none`, `low`, `medium` or `high` — how hard the model thinks |
 | `DEFAULT_MCP_ONTOLOGY_KEY` | no | *(none)* | Fallback ontology key for MCP when not in URL/header |
 
 ## Container Images

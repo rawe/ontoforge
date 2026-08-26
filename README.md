@@ -138,6 +138,19 @@ See [docs/interfaces.md](docs/interfaces.md) for the full tool catalog.
 
 For local development with hot reload, run PostgreSQL in Docker and the backend/frontend natively — either manually as below, or all at once with `./dev.sh`.
 
+Configuration comes from exactly one env file. `./dev.sh` uses `server/.env`; naming a
+file uses that one instead, and nothing else is read:
+
+```bash
+./dev.sh                    # server/.env
+./dev.sh env/ollama.env     # committed preset — everything on Ollama
+AI_MODEL=qwen3:8b ./dev.sh  # a shell variable still wins over the file
+```
+
+Running the server directly honours the same rule: `ENV_FILE=<path> npm run dev` reads
+that file, and plain `npm run dev` reads `server/.env`. A named file that does not exist
+fails the boot rather than falling back to defaults.
+
 ### Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) and Docker Compose
@@ -228,6 +241,7 @@ ontoforge/
 │   │   └── mcp/                    # MCP servers (modeling + runtime tools)
 │   └── tests/
 ├── dev.sh                          # Start PostgreSQL + backend + frontend for local development
+├── env/                            # Committed configuration presets for ./dev.sh
 ├── frontend/
 │   ├── Dockerfile
 │   ├── package.json                # UI v3 (Workbench + Studio): React 19 + TypeScript + Vite
@@ -292,6 +306,7 @@ Natural language query, entity extraction from text, and conversational chat ove
 | `AI_MODEL` | `qwen3:8b` | AI model name (must support tool calling) |
 | `AI_BASE_URL` | `http://localhost:11434` | AI model API endpoint |
 | `AI_API_KEY` | *(unset)* | API key (required for `openai` provider) |
+| `AI_REASONING_EFFORT` | *(unset — model default)* | `none`, `low`, `medium` or `high` — how hard the model thinks |
 
 **Recommended Ollama models** by available RAM (Apple Silicon / unified memory):
 

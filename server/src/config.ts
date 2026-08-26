@@ -23,6 +23,7 @@ export interface Settings {
   AI_MODEL: string;
   AI_BASE_URL: string;
   AI_API_KEY: string | null;
+  AI_REASONING_EFFORT: string | null;
 
   PUBLIC_URL: string | null;
 
@@ -62,6 +63,26 @@ function optInt(env: NodeJS.ProcessEnv, name: string): number | null {
   return parsed;
 }
 
+/** Accepted `AI_REASONING_EFFORT` levels. `none` switches model thinking off;
+ * leaving the variable unset sends nothing and leaves the model at its own
+ * default, which is not the same thing. */
+const AI_REASONING_EFFORTS = ["none", "low", "medium", "high"];
+
+function optOneOf(
+  env: NodeJS.ProcessEnv,
+  name: string,
+  allowed: string[],
+): string | null {
+  const value = env[name];
+  if (value === undefined || value === "") return null;
+  if (!allowed.includes(value)) {
+    throw new Error(
+      `Environment variable ${name} must be one of ${allowed.join(", ")}: '${value}'`,
+    );
+  }
+  return value;
+}
+
 export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
   return {
     DB_BACKEND: str(env, "DB_BACKEND", "postgres"),
@@ -83,6 +104,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
     AI_MODEL: str(env, "AI_MODEL", "qwen3:8b"),
     AI_BASE_URL: str(env, "AI_BASE_URL", "http://localhost:11434"),
     AI_API_KEY: optStr(env, "AI_API_KEY"),
+    AI_REASONING_EFFORT: optOneOf(env, "AI_REASONING_EFFORT", AI_REASONING_EFFORTS),
 
     PUBLIC_URL: optStr(env, "PUBLIC_URL"),
 
@@ -90,12 +112,20 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
   };
 }
 
-// Load a `.env` file if one exists in the working directory. `loadEnvFile`
-// does not override variables already set in the real environment.
-try {
-  process.loadEnvFile();
-} catch {
-  // No .env file — fine.
+// Exactly one env file is read: the one `ENV_FILE` names, or `.env` from the
+// working directory when it does not. `loadEnvFile` never overwrites a
+// variable already set in the real environment, so a shell variable still
+// wins over both. A named file that is missing is a boot failure — a typo
+// must not quietly fall through to the defaults above.
+const envFile = process.env.ENV_FILE;
+if (envFile !== undefined && envFile !== "") {
+  process.loadEnvFile(envFile);
+} else {
+  try {
+    process.loadEnvFile();
+  } catch {
+    // No .env file — fine.
+  }
 }
 
 export const settings: Settings = loadSettings();

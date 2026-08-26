@@ -10,6 +10,10 @@
  * is installed and every model-running route answers `422 VALIDATION_ERROR`
  * with `details.code: "FEATURE_DISABLED"`; listing agents and serving cards
  * keep working. Tests inject a fake model via `setAiModel`.
+ *
+ * `AI_REASONING_EFFORT` optionally fixes how hard the model thinks — `none`,
+ * `low`, `medium` or `high`, validated at config load. It is sent verbatim to
+ * both providers; unset sends nothing and leaves the model at its own default.
  */
 
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
@@ -76,6 +80,13 @@ export function createAiModel(
   baseUrl: string,
 ): BaseChatModel {
   const base = baseUrl.replace(/\/+$/, "");
+  // `reasoning_effort` rides in `modelKwargs`, which is spread verbatim into
+  // the request: LangChain only lets its typed `reasoning` field through for
+  // OpenAI's own reasoning models (`o*`, `gpt-5*`) and silently drops it for
+  // every other model name, local ones included.
+  const effort = settings.AI_REASONING_EFFORT;
+  const reasoning =
+    effort === null ? {} : { modelKwargs: { reasoning_effort: effort } };
   if (provider === "ollama") {
     // Ollama's OpenAI-compatible endpoint ignores the API key, but the
     // client requires one to be present.
@@ -83,6 +94,7 @@ export function createAiModel(
       model: modelName,
       apiKey: "ollama",
       configuration: { baseURL: `${base}/v1` },
+      ...reasoning,
     });
   }
   if (provider === "openai") {
@@ -94,6 +106,7 @@ export function createAiModel(
       model: modelName,
       apiKey,
       configuration: { baseURL: `${base}/v1` },
+      ...reasoning,
     });
   }
   throw new Error(`Unknown AI provider: '${provider}'`);
@@ -108,9 +121,11 @@ export function initAiModel(): void {
     return;
   }
   model = createAiModel(settings.AI_PROVIDER, settings.AI_MODEL, settings.AI_BASE_URL);
+  const effort = settings.AI_REASONING_EFFORT;
   console.info(
     `AI model initialized: ${settings.AI_MODEL} ` +
-      `(${settings.AI_PROVIDER} via ${settings.AI_BASE_URL})`,
+      `(${settings.AI_PROVIDER} via ${settings.AI_BASE_URL}` +
+      `${effort === null ? "" : `, reasoning effort ${effort}`})`,
   );
 }
 

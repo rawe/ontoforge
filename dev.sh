@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: ./dev.sh [ollama|openai]
+# Usage: ./dev.sh [env-file]      (default: server/.env)
+#
+# The named file is the whole configuration for this run. Presets live in
+# env/ — e.g. ./dev.sh env/ollama.env
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKEND_PID=""
@@ -34,35 +37,31 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
-# --- Embedding preset ---
-EMBED_MODE="${1:-ollama}"
+# --- Configuration ---------------------------------------------------------
+# One file provides the whole configuration; the server reads it and nothing
+# else (server/src/config.ts honours ENV_FILE). A variable already set in your
+# shell still wins, so `AI_MODEL=x ./dev.sh` works.
+ENV_FILE_ARG="${1:-$ROOT_DIR/server/.env}"
 
-case "$EMBED_MODE" in
-    ollama)
-        export EMBEDDING_PROVIDER=ollama
-        export EMBEDDING_MODEL=nomic-embed-text
-        export EMBEDDING_BASE_URL=http://localhost:11434
-        export EMBEDDING_DIMENSIONS=768
-        ;;
-    openai)
-        export EMBEDDING_PROVIDER=openai
-        export EMBEDDING_MODEL=nomic-embed-text
-        export EMBEDDING_BASE_URL=http://localhost:11434
-        export EMBEDDING_API_KEY=ollama
-        export EMBEDDING_DIMENSIONS=768
-        ;;
-    *)
-        echo "Unknown embedding mode: $EMBED_MODE (use 'ollama' or 'openai')"
-        exit 1
-        ;;
-esac
-echo "Embedding: $EMBED_MODE ($EMBEDDING_MODEL)"
+if [ ! -f "$ENV_FILE_ARG" ]; then
+    echo "Config file not found: $ENV_FILE_ARG"
+    echo ""
+    echo "Presets:"
+    for preset in "$ROOT_DIR"/env/*.env; do
+        [ -f "$preset" ] && echo "  ./dev.sh env/$(basename "$preset")"
+    done
+    echo ""
+    echo "Or copy server/.env.example to server/.env and run ./dev.sh with no argument."
+    exit 1
+fi
 
-# --- AI preset (Ollama) ---
-export AI_PROVIDER="${AI_PROVIDER:-ollama}"
-export AI_MODEL="${AI_MODEL:-qwen3:8b}"
-export AI_BASE_URL="${AI_BASE_URL:-http://localhost:11434}"
-echo "AI: $AI_PROVIDER ($AI_MODEL)"
+# Absolute, so the path stays valid after this script changes directory.
+ENV_FILE="$(cd "$(dirname "$ENV_FILE_ARG")" && pwd)/$(basename "$ENV_FILE_ARG")"
+export ENV_FILE
+
+echo "Config: $ENV_FILE"
+grep -E '^(DB_BACKEND|EMBEDDING_PROVIDER|AI_PROVIDER|AI_MODEL|AI_REASONING_EFFORT)=' \
+    "$ENV_FILE" | sed 's|^|  |' || true
 
 # --- PostgreSQL ---
 if docker compose -f "$ROOT_DIR/docker-compose.yml" ps postgres 2>/dev/null | grep -q "running"; then

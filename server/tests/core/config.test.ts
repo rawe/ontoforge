@@ -25,6 +25,7 @@ describe("config defaults", () => {
     expect(settings.AI_MODEL).toBe("qwen3:8b");
     expect(settings.AI_BASE_URL).toBe("http://localhost:11434");
     expect(settings.AI_API_KEY).toBeNull();
+    expect(settings.AI_REASONING_EFFORT).toBeNull();
 
     expect(settings.PUBLIC_URL).toBeNull();
     expect(settings.DEFAULT_MCP_ONTOLOGY_KEY).toBeNull();
@@ -50,6 +51,7 @@ describe("config env overrides", () => {
       AI_MODEL: "gpt",
       AI_BASE_URL: "http://ai:4321",
       AI_API_KEY: "akey",
+      AI_REASONING_EFFORT: "high",
       PUBLIC_URL: "https://onto.example.com",
       DEFAULT_MCP_ONTOLOGY_KEY: "my_ontology",
     });
@@ -70,6 +72,7 @@ describe("config env overrides", () => {
     expect(settings.AI_MODEL).toBe("gpt");
     expect(settings.AI_BASE_URL).toBe("http://ai:4321");
     expect(settings.AI_API_KEY).toBe("akey");
+    expect(settings.AI_REASONING_EFFORT).toBe("high");
     expect(settings.PUBLIC_URL).toBe("https://onto.example.com");
     expect(settings.DEFAULT_MCP_ONTOLOGY_KEY).toBe("my_ontology");
   });
@@ -78,6 +81,22 @@ describe("config env overrides", () => {
     expect(() => loadSettings({ PORT: "eight thousand" })).toThrow(/PORT/);
     expect(() => loadSettings({ EMBEDDING_DIMENSIONS: "wide" })).toThrow(
       /EMBEDDING_DIMENSIONS/,
+    );
+  });
+
+  it("accepts every reasoning effort level and rejects anything else", () => {
+    for (const level of ["none", "low", "medium", "high"]) {
+      expect(loadSettings({ AI_REASONING_EFFORT: level }).AI_REASONING_EFFORT).toBe(
+        level,
+      );
+    }
+    // A typo must fail the boot, not every inference: the provider answers
+    // 400 for an unknown level.
+    expect(() => loadSettings({ AI_REASONING_EFFORT: "hight" })).toThrow(
+      /AI_REASONING_EFFORT/,
+    );
+    expect(() => loadSettings({ AI_REASONING_EFFORT: "minimal" })).toThrow(
+      /AI_REASONING_EFFORT/,
     );
   });
 });

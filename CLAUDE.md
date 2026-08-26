@@ -41,7 +41,12 @@ Documentation of a single script stays beside that script (`scripts/USAGE.md`).
 ## Local Development Setup
 
 Start PostgreSQL (`docker compose up -d`) before running `npm run dev` in `server/` and
-`frontend/`. The backend runs on `http://localhost:8000`.
+`frontend/`. The backend runs on `http://localhost:8000`. `./dev.sh [env-file]` does all
+three at once.
+
+Configuration comes from exactly one env file — the one `ENV_FILE` names, otherwise
+`server/.env`. Presets live in `env/`. A variable already set in the shell wins over the
+file; a named file that is missing fails the boot.
 
 ## Documentation
 

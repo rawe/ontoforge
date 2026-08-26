@@ -203,6 +203,21 @@ describe("free-text search and filters", () => {
     expect(call[4]).toEqual(["name", "email"]); // scoped string props only
   });
 
+  it("q rejects the NUL character before crossing the port", async () => {
+    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/runtime/full_ontology/entities/person?q=%00",
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.message).toBe(
+      "String value for 'q' must not contain the NUL character",
+    );
+    expect(holder.store.listEntities).not.toHaveBeenCalled();
+  });
+
   it("q with no string property in scope is passed with an empty search set (silently ignored)", async () => {
     const { makeFullSchema } = await import("./helpers.js");
     holder.store.getFullSchema.mockResolvedValue(
@@ -226,7 +241,7 @@ describe("free-text search and filters", () => {
     expect(call[4]).toEqual([]); // the adapter adds no clause for an empty set
   });
 
-  it("filter.* parameters are parsed into the structured filter map", async () => {
+  it("filter.* parameters cross the port as parsed, coerced conditions", async () => {
     holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
     holder.store.listEntities.mockResolvedValue([[], 0]);
 
@@ -236,7 +251,10 @@ describe("free-text search and filters", () => {
     });
 
     const call = holder.store.listEntities.mock.calls[0]!;
-    expect(call[2]).toEqual({ age__gte: "30", name: "Alice" });
+    expect(call[2]).toEqual([
+      { key: "age", dataType: "integer", op: "gte", value: 30 },
+      { key: "name", dataType: "string", op: "eq", value: "Alice" },
+    ]);
   });
 
   it("a repeated filter parameter keeps the last value", async () => {
@@ -248,6 +266,21 @@ describe("free-text search and filters", () => {
       url: "/api/runtime/full_ontology/entities/person?filter.name=Alice&filter.name=Bob",
     });
 
-    expect(holder.store.listEntities.mock.calls[0]![2]).toEqual({ name: "Bob" });
+    expect(holder.store.listEntities.mock.calls[0]![2]).toEqual([
+      { key: "name", dataType: "string", op: "eq", value: "Bob" },
+    ]);
+  });
+
+  it("an invalid filter answers 422 before the store is consulted", async () => {
+    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/runtime/full_ontology/entities/person?filter.age=abc",
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details.fields.age).toContain("Expected integer");
+    expect(holder.store.listEntities).not.toHaveBeenCalled();
   });
 });

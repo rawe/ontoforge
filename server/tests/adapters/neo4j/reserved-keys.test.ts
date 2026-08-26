@@ -15,7 +15,7 @@ import {
   toUpperSnakeCase,
   SCHEMA_LABELS,
   SCHEMA_RELATIONSHIP_TYPES,
-} from "../../src/adapters/neo4j/ddl.js";
+} from "../../../src/adapters/neo4j/ddl.js";
 
 describe("naming transformations", () => {
   it("snake_case to PascalCase", () => {

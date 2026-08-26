@@ -227,6 +227,20 @@ describe("key validation", () => {
     });
     expect(res.statusCode).toBe(422);
   });
+
+  // The cap is 64 characters, uniformly on every key kind.
+  it("a key longer than 64 characters is rejected 422 naming the cap", async () => {
+    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    const res = await put("k".repeat(65), {
+      name: "Test",
+      description: "test",
+      steps: [{ name: "main", type: "oql", oql: "MATCH (n:person) RETURN n" }],
+      parameters: [],
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.message).toContain("64");
+    expect(holder.store.upsertSavedQuery).not.toHaveBeenCalled();
+  });
 });
 
 describe("parameter cross-checks (both directions)", () => {

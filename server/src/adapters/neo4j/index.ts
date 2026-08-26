@@ -9,7 +9,6 @@
 
 import { ensureVectorIndexes } from "./ddl.js";
 import { closeDriver, getDriver, initDriver } from "./driver.js";
-import { runSession } from "./errors.js";
 import { Neo4jModelingStore } from "./modelingStore.js";
 import { Neo4jRuntimeStore } from "./runtimeStore.js";
 
@@ -33,11 +32,4 @@ export async function closeStores(): Promise<void> {
  */
 export async function ensureSemanticIndexes(dimensions: number): Promise<void> {
   await ensureVectorIndexes(getDriver(), dimensions, false);
-}
-
-/** Delete all stored data. Test support only — never used by the app. */
-export async function wipe(): Promise<void> {
-  await runSession(getDriver(), async (session) => {
-    await session.run("MATCH (n) DETACH DELETE n");
-  });
 }

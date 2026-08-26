@@ -42,6 +42,12 @@ by internal identifier, and only agent configurations and saved queries by key. 
 schema-design surface used by a client that has just listed the resource it is about to
 address, so the identifier is always at hand.
 
+**Key length cap.** Every key — entity type, relation type, ontology, property,
+agent, saved query — is at most 64 characters (`MAX_KEY_LENGTH`), enforced at
+validation alongside the key pattern. Keys are human-typed identifiers; the cap
+keeps adapter-derived physical names legible and rejects absurd input at the
+boundary rather than deep inside an adapter.
+
 **No vendor or implementation-language vocabulary anywhere a caller can see.**
 Not in route names, field names, tool names or error messages. The query endpoint takes a
 `query`; the query language is OQL; storage errors name no database. A rejected value is
@@ -73,8 +79,35 @@ Encoding those names above the port would tie database-agnostic code to one data
 enforcing them inside the adapter would deliver the error from the wrong layer and make
 every future adapter reimplement it.
 
-**A second adapter is not built until one is needed.**
-One adapter is the reference implementation and the default deployment.
+**Adapters are peers under one contract; one is the default deployment.**
+The port contract and the conformance suite define behaviour — no adapter is the
+reference implementation. Every shipped adapter is fully supported, each with its own
+physical mapping described in [storage-adapters.md](storage-adapters.md). Which adapter
+is the default, and what each specializes in, is deployment surface recorded there and
+in the repository README, not here. A new adapter is still built only when a deployment
+needs one.
+
+**Oversized-string ceiling is adapter-specific.** The 32766-byte oversized-string
+rejection is a Neo4j index limit, not a system rule; it applies only on the Neo4j
+adapter, below the port. PostgreSQL accepts such values. No ceiling exists above
+the port — deployments are adapter-bound for life, so no deployment ever sees
+both behaviours.
+
+**PostgreSQL instance mapping: two generic jsonb tables.** The PostgreSQL adapter
+stores all instance data in two generic tables — `entity` and `relation`, with `uuid`
+primary keys and properties as jsonb — never a table per type. A schema change stays
+pure data; no DDL runs against a live database. The physical mapping is described in
+[storage-adapters.md](storage-adapters.md); deliberation:
+[adr/0015](adr/0015-generic-jsonb-instance-tables.md).
+
+**Storage DDL enforces structure only.** Adapter DDL carries identity,
+referential integrity, exactly-one-owner and uniqueness — nothing else. Business
+rules (for example, document properties only on entity types, the data-type
+enumeration) validate in the service; the database provides no backstop for them.
+
+**Documentation above the port describes the behaviour of the default
+deployment.** Adapter-specific deviations are documented with that adapter in
+storage-adapters.md, never as hedges in the shared documents.
 
 ## Interfaces
 
@@ -101,6 +134,13 @@ Its normative reference is ISO GQL and its GPML pattern sublanguage — not any 
 dialect. Parsing and validation are storage-independent; compiling to a native dialect is
 the adapter's private business. Where the two disagree, the standard wins.
 
+**OQL feature surface.** The surface is a closed enumeration in
+`capabilities/oql.md` ("Supported surface"), enforced fail-closed at validation,
+above the persistence port: any construct or function the grammar parses but the
+enumeration does not name is rejected with a self-correction hint. Every backend
+accepts exactly the same queries. Widening the surface is a deliberate, non-breaking
+addition; narrowing it is a breaking change.
+
 **Validation collects every error before answering.**
 A rejected write names all offending fields at once, so a caller can correct in one round
 trip rather than discovering faults one at a time.
@@ -116,10 +156,10 @@ It proceeds only when the caller asks for it a second time, explicitly.
 
 **Vector index width drift is reported at startup and repaired only on request.**
 An index fixes its width when created, so a changed embedding model leaves indexes that
-reject every new vector. Startup warns per mismatch and names the remedy. It does not
-repair, because dropping an index destroys the vectors it holds — trading a loud failure
-for a silently empty answer. The rebuild operation does repair, because there the drop is
-immediately followed by regeneration at the new width.
+cannot accept vectors at the new width. Startup warns per mismatch and names the remedy.
+It does not repair, because repair means dropping and rebuilding at the new width — a
+destructive act no adapter may take unbidden. The rebuild operation does repair, because
+there the caller has asked for exactly that.
 
 ## Scope
 

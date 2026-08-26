@@ -1,21 +1,44 @@
 services:
-  neo4j:
-    image: neo4j:2026.02.2
-    container_name: ontoforge-neo4j
+  postgres:
+    image: pgvector/pgvector:0.8.6-pg18-trixie
+    container_name: ontoforge-postgres
     ports:
-      # External ports differ from dev (7474/7687) to avoid conflicts
-      - "17474:7474"
-      - "17687:7687"
+      # External port differs from dev (5432) to avoid conflicts
+      - "15432:5432"
     environment:
-      NEO4J_AUTH: neo4j/ontoforge_dev
+      # User stays the image default (postgres) — no init script needed.
+      POSTGRES_PASSWORD: ontoforge_dev
+      POSTGRES_DB: ontoforge
     volumes:
-      - neo4j-data:/data
+      # PG 18+ images declare the volume at /var/lib/postgresql (not …/data);
+      # mounting the old path silently loses persistence.
+      - postgres-data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "ontoforge_dev", "RETURN 1"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ontoforge"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
+
+  # Neo4j — the alternative adapter. Uncomment to run the stack on Neo4j and
+  # set the server service's DB_* environment to the Neo4j values.
+  # neo4j:
+  #   image: neo4j:2026.02.2
+  #   container_name: ontoforge-neo4j
+  #   ports:
+  #     # External ports differ from dev (7474/7687) to avoid conflicts
+  #     - "17474:7474"
+  #     - "17687:7687"
+  #   environment:
+  #     NEO4J_AUTH: neo4j/ontoforge_dev
+  #   volumes:
+  #     - neo4j-data:/data
+  #   healthcheck:
+  #     test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "ontoforge_dev", "RETURN 1"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #     start_period: 30s
 
   server:
     build: ../server
@@ -23,9 +46,10 @@ services:
     ports:
       - "8000:8000"
     environment:
+      DB_BACKEND: postgres
       # DB_URI uses Docker-internal networking — not affected by external port mapping
-      DB_URI: bolt://neo4j:7687
-      DB_USER: neo4j
+      DB_URI: postgresql://postgres:5432/ontoforge
+      DB_USER: postgres
       DB_PASSWORD: ontoforge_dev
       # Semantic search (optional — remove comments to enable)
       # EMBEDDING_PROVIDER: ollama
@@ -51,7 +75,7 @@ services:
       # MCP default ontology key (optional — used when no key in URL path or header)
       # DEFAULT_MCP_ONTOLOGY_KEY: my_ontology
     depends_on:
-      neo4j:
+      postgres:
         condition: service_healthy
 
   frontend:
@@ -78,5 +102,6 @@ services:
   #     - ollama-data:/root/.ollama
 
 volumes:
+  postgres-data:
   neo4j-data:
   # ollama-data:

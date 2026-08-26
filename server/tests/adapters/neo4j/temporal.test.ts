@@ -11,7 +11,7 @@ import {
   fromNeo4jValue,
   toNeo4jDate,
   toNeo4jDateTime,
-} from "../../src/adapters/neo4j/temporal.js";
+} from "../../../src/adapters/neo4j/temporal.js";
 
 describe("driver values to port values", () => {
   it("a driver DateTime becomes a JS Date at the same instant", () => {

@@ -22,7 +22,9 @@ every storage backend.
 persistence port, against the lens. Compiling a validated query into whatever dialect the
 active database speaks is the adapter's private business: invisible to callers, absent from
 error messages, and not part of this contract. Two deployments on different backends
-accept exactly the same queries.
+accept exactly the same queries and reject them with identical validation; where the
+execution of an accepted query is known to diverge between adapters, the divergence is
+enumerated in [../storage-adapters.md](../storage-adapters.md#where-the-adapters-diverge).
 
 ## The read-only guarantee
 
@@ -36,15 +38,40 @@ transaction mode. Four categories:
 | A node pattern that binds a variable but carries no label | Such a pattern matches every stored record, including internal ones the lens was never meant to expose. Requiring a label is what makes lens validation total. |
 | Internal labels and internal relationship types | The names the system uses for its own records, including document passage storage. Rejected explicitly and with their own message, so that naming one is a clear error rather than a confusing "unknown type". |
 
-Everything else the grammar accepts is permitted: pattern matching, optional matching,
-filtering, intermediate projection, list expansion, aggregation, ordering and paging.
+## Supported surface
+
+The language is a closed enumeration: what is named here is the whole surface. Any
+construct or function the grammar parses but this enumeration does not name is rejected
+at validation with a hint naming the supported alternative, identically for every
+storage backend. The rule this enforces is in
+[../decisions.md](../decisions.md#behaviour).
+
+- **Clauses.** MATCH, OPTIONAL MATCH, WHERE, WITH, RETURN, ORDER BY with ASC and DESC,
+  SKIP, LIMIT, and AS aliases. A query carries at most one WITH, so a pipeline is at
+  most two stages. ORDER BY sort keys are properties, aliases and aggregates — not
+  nodes, constants or parameters. SKIP and LIMIT each take a non-negative integer
+  literal or a parameter placeholder.
+- **Patterns.** Labeled and anonymous nodes; directed, reversed and undirected
+  relationships — an undirected pattern matches in both directions; relationship
+  variables and anonymous typed relationships; comma-separated pattern parts; inline
+  property maps.
+- **Predicates and expressions.** The comparisons `=`, `<>`, `<`, `<=`, `>`, `>=`;
+  AND, OR and NOT, with parentheses — XOR is among the rejections; CONTAINS, which is
+  case-sensitive, deliberately unlike the case-insensitive substring filter on the list
+  operations; IN; IS NULL and IS NOT NULL; literals,
+  including lists and maps; parameter placeholders; backticked identifiers; comments;
+  system properties.
+- **Functions.** The seven aggregates — `count(*)`, `count(x)`, `avg`, `collect`,
+  `max`, `min`, `sum` — and no others.
 
 Two boundaries are worth knowing rather than discovering:
 
 - The label requirement binds node patterns that **introduce a variable**. A fully
   anonymous node pattern, and a relationship pattern with no type, are not flagged. They
   widen what a pattern traverses, but nothing can be projected from them without a
-  variable, so they do not widen what is exposed.
+  variable, so they do not widen what is exposed. An inline property map, though,
+  requires an owner with a known type: the map's keys are property accesses, validated
+  against the owner's type within the lens exactly as any other property access.
 - Parameter placeholders parse, but an ad-hoc query is executed with **no parameter values
   supplied**. Write literal values; parameterization is what saved queries are for
   ([saved-queries.md](saved-queries.md)).
@@ -66,11 +93,11 @@ suggestions. The lens is a complete horizon, not a permission filter that leaks 
 existence of what it hides.
 
 Type inference is **pattern-local**: a variable's type is known only from a label or
-relationship type written in the pattern that binds it. A variable introduced by an
-intermediate projection, or bound to a relationship pattern with no type, has no known
-type, and property accesses through it are not checked — they simply yield nothing if the
-property does not exist. That is a validation gap, not a scope leak: result stripping,
-below, still removes anything out of scope from what comes back.
+relationship type written in the pattern that binds it. A variable bound to a
+relationship pattern with no type has no declared type, and reading a property through
+it is rejected — the query must name the type in the pattern that binds the variable.
+Reading a property of a `WITH` alias that cannot be verified against the schema is an
+error. System properties remain readable through any variable.
 
 Violations are **collected, not raised one at a time**. A rejected query reports every
 violation it found, as a list in the error details, consistent with the collect-all rule in
@@ -124,6 +151,12 @@ Expressed in the language — ordering by an expression, skipping, limiting — 
 parameters of the operation. There is no server-imposed default limit and no cap: an
 unbounded query returns every matching row. Bounding a query is the caller's
 responsibility.
+
+Predicates follow three-valued logic: a comparison against a null or missing value is
+unknown, not false, and only rows whose predicate holds are returned. In ordering,
+nulls sort last ascending and first descending, on every backend. String comparison
+in WHERE and string ordering in ORDER BY follow the database's default collation —
+the same carve-out the list operations state.
 
 ## Through the interfaces
 

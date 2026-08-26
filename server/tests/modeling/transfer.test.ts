@@ -691,6 +691,73 @@ describe("import key patterns", () => {
     expect(holder.store.createOntology).not.toHaveBeenCalled();
   });
 
+  // The cap is 64 characters, uniformly on every key kind; import collects
+  // every over-long key like it collects pattern violations.
+  it("collects every over-long key across kinds in one response, cap stated", async () => {
+    const long = (prefix: string): string => prefix + "k".repeat(65 - prefix.length);
+    const res = await postImport({
+      entityTypes: [
+        {
+          key: long("et"),
+          displayName: "Long ET",
+          properties: [
+            { key: long("etp"), displayName: "Long Prop", dataType: "string", required: false },
+          ],
+        },
+        { key: "anchor", displayName: "Anchor", properties: [] },
+      ],
+      relationTypes: [
+        {
+          key: long("rt"),
+          displayName: "Long RT",
+          fromEntityTypeKey: "anchor",
+          toEntityTypeKey: "anchor",
+          properties: [
+            { key: long("rtp"), displayName: "Long Prop", dataType: "string", required: false },
+          ],
+        },
+      ],
+      ontologies: [
+        {
+          key: long("ont"),
+          name: "Long Lens",
+          aiAgents: [{ key: long("agent"), name: "Long Agent" }],
+          savedQueries: [
+            {
+              key: long("sq"),
+              name: "Long Query",
+              description: "Long key",
+              steps: [{ name: "main", type: "oql", oql: "MATCH (p:anchor) RETURN p" }],
+            },
+          ],
+        },
+      ],
+    });
+    expect(res.statusCode).toBe(422);
+    const body = res.json();
+    const errors = body.error.details.errors as string[];
+    expect(errors).toHaveLength(7);
+    for (const kind of ["et", "etp", "rt", "rtp", "ont", "agent", "sq"]) {
+      expect(errors.some((e) => e.includes(`'${long(kind)}'`))).toBe(true);
+    }
+    for (const e of errors) {
+      expect(e).toContain("64");
+    }
+    expect(holder.store.createEntityType).not.toHaveBeenCalled();
+    expect(holder.store.createOntology).not.toHaveBeenCalled();
+  });
+
+  it("a 64-character key of every kind passes the length check", async () => {
+    const exact = (prefix: string): string => prefix + "k".repeat(64 - prefix.length);
+    holder.store.createOntology.mockResolvedValue(ONT_DATA);
+    const res = await postImport({
+      entityTypes: [{ key: exact("et"), displayName: "ET", properties: [] }],
+      relationTypes: [],
+      ontologies: [{ key: exact("ont"), name: "Lens" }],
+    });
+    expect(res.statusCode).toBe(201);
+  });
+
   it("reports pattern violations, structural rules and reserved keys together", async () => {
     const res = await postImport({
       entityTypes: [{ key: "_bad", displayName: "Bad", properties: [] }],

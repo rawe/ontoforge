@@ -13,8 +13,8 @@ validation pipeline above it.
 ## Decision
 
 The adapter derives its reserved sets from its physical naming and exposes them through
-the persistence port as plain type keys — `reserved_entity_type_keys()` and
-`reserved_relation_type_keys()` on the modeling store. The modeling service rejects a
+the persistence port as plain type keys — `reservedEntityTypeKeys()` and
+`reservedRelationTypeKeys()` on the modeling store. The modeling service rejects a
 colliding key on every write path with a `VALIDATION_ERROR` that names neither the vendor
 nor the physical name.
 

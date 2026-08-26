@@ -1,6 +1,6 @@
 # OntoForge
 
-A graph-native ontology studio for designing graph schemas and using them through generic, schema-driven APIs. Storage sits behind an exchangeable database adapter — Neo4j is the current adapter and default deployment.
+A graph-native ontology studio for designing graph schemas and using them through generic, schema-driven APIs. Storage sits behind an exchangeable database adapter — PostgreSQL is the default deployment, Neo4j the alternative adapter.
 
 ## Motivation
 
@@ -22,7 +22,7 @@ The key idea: **no unstructured writes**. Every entity and relation that goes in
 
 ## Quick Start (Docker)
 
-Start the full stack — Neo4j, backend, and frontend — with a single command:
+Start the full stack — PostgreSQL, backend, and frontend — with a single command:
 
 ```bash
 cd docker
@@ -34,7 +34,6 @@ docker compose up -d --build
 | Frontend | http://localhost:3000 |
 | Backend API | http://localhost:8000 |
 | API docs | http://localhost:8000/docs |
-| Neo4j Browser | http://localhost:17474 |
 
 Stop everything (data is preserved):
 
@@ -137,17 +136,17 @@ See [docs/interfaces.md](docs/interfaces.md) for the full tool catalog.
 
 ## Development Setup
 
-For local development with hot reload, run Neo4j in Docker and the backend/frontend natively — either manually as below, or all at once with `./dev.sh`.
+For local development with hot reload, run PostgreSQL in Docker and the backend/frontend natively — either manually as below, or all at once with `./dev.sh`.
 
 ### Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) and Docker Compose
 - [Node.js](https://nodejs.org/) ≥ 22 LTS and npm
 
-### 1. Start Neo4j
+### 1. Start PostgreSQL
 
 ```bash
-docker compose up -d neo4j
+docker compose up -d
 ```
 
 ### 2. Start the Backend
@@ -158,7 +157,7 @@ npm install
 npm run dev
 ```
 
-The API is available at `http://localhost:8000`. On startup it creates Neo4j constraints. The runtime schema cache is loaded lazily on first request per ontology.
+The API is available at `http://localhost:8000`. On startup it initializes the database schema. The runtime schema cache is loaded lazily on first request per ontology.
 
 - Modeling endpoints: `/api/model/...`
 - Runtime endpoints: `/api/runtime/{ontologyKey}/...`
@@ -181,14 +180,14 @@ npm test
 ```
 
 This runs the unit tests only — they are mocked and need no running services.
-Integration tests are opt-in and do require Neo4j and Ollama; see
+Integration tests are opt-in and do require a running database and Ollama; see
 [docs/workflows/testing.md](docs/workflows/testing.md).
 
 ## Architecture
 
-OntoForge is a modular monolith backed by a single graph database holding both schema and
-instance data. All database access goes through a persistence port; Neo4j is the current
-adapter.
+OntoForge is a modular monolith backed by a single database holding both schema and
+instance data. All database access goes through a persistence port; PostgreSQL is the
+default adapter, Neo4j the alternative.
 
 - **Modeling** — the global schema, ontology scopes, validation, export/import (`/api/model`)
 - **Runtime** — schema-driven instance data through an ontology lens (`/api/runtime/{ontologyKey}`)
@@ -210,9 +209,9 @@ Full documentation starts at **[docs/README.md](docs/README.md)**:
 
 ```
 ontoforge/
-├── docker-compose.yml              # Neo4j only (for local development)
+├── docker-compose.yml              # PostgreSQL only (for local development)
 ├── docker/
-│   └── docker-compose.yml          # Full stack: Neo4j + backend + frontend
+│   └── docker-compose.yml          # Full stack: PostgreSQL + backend + frontend
 ├── examples/
 │   └── docker-compose/             # Run OntoForge from pre-built images
 ├── server/
@@ -223,12 +222,12 @@ ontoforge/
 │   │   ├── app.ts                  # Fastify app, mounts routes and MCP servers
 │   │   ├── config.ts               # Environment-based settings
 │   │   ├── core/                   # Shared: persistence port, exceptions, OQL, AI
-│   │   ├── adapters/               # Database adapters (Neo4j)
+│   │   ├── adapters/               # Database adapters (PostgreSQL, Neo4j)
 │   │   ├── modeling/               # Schema CRUD, validation, export/import
 │   │   ├── runtime/                # Instance CRUD, search, graph traversal
 │   │   └── mcp/                    # MCP servers (modeling + runtime tools)
 │   └── tests/
-├── dev.sh                          # Start Neo4j + backend + frontend for local development
+├── dev.sh                          # Start PostgreSQL + backend + frontend for local development
 ├── frontend/
 │   ├── Dockerfile
 │   ├── package.json                # UI v3 (Workbench + Studio): React 19 + TypeScript + Vite
@@ -251,14 +250,14 @@ The backend reads settings from environment variables (or a `.env` file in `serv
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DB_BACKEND` | `neo4j` | Persistence adapter selection (`neo4j` is the only built-in adapter) |
-| `DB_URI` | `bolt://localhost:7687` | Database connection (Neo4j adapter) |
-| `DB_USER` | `neo4j` | Database username (Neo4j adapter) |
-| `DB_PASSWORD` | `ontoforge_dev` | Database password (Neo4j adapter) |
+| `DB_BACKEND` | `postgres` | Persistence adapter selection (`postgres` or `neo4j`) |
+| `DB_URI` | `postgresql://localhost:5432/ontoforge` | Database connection — the DSN carries host, port and database |
+| `DB_USER` | `postgres` | Database username |
+| `DB_PASSWORD` | `ontoforge_dev` | Database password |
 | `PORT` | `8000` | HTTP listen port |
 | `DEFAULT_MCP_ONTOLOGY_KEY` | *(unset)* | MCP default ontology key — used when no key is in the URL or header |
 
-In Docker, `DB_URI` is set to `bolt://neo4j:7687` automatically via `docker-compose.yml`.
+In Docker, `DB_URI` is set to `postgresql://postgres:5432/ontoforge` automatically via `docker-compose.yml`.
 
 ## Optional Features
 
@@ -302,7 +301,7 @@ Natural language query, entity extraction from text, and conversational chat ove
 | ~16 GB | `qwen3:14b` | 14B dense | ~11 GB |
 | ~32 GB+ | `qwen3:32b` | 32B dense | ~22 GB |
 
-Account for OS and other services (Docker, Neo4j) when choosing a model — pick one tier below your total RAM to leave headroom.
+Account for OS and other services (Docker, PostgreSQL) when choosing a model — pick one tier below your total RAM to leave headroom.
 
 ## Container Images
 

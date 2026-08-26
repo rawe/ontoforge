@@ -275,9 +275,8 @@ describe("list relations", () => {
     });
 
     expect(res.statusCode).toBe(200);
-    // No search machinery for relations: filters stay empty.
-    const filters = holder.store.listRelations.mock.calls[0]![2] as Record<string, string>;
-    expect(filters).toEqual({});
+    // No search machinery for relations: no filter condition crosses.
+    expect(holder.store.listRelations.mock.calls[0]![2]).toEqual([]);
   });
 
   it("out-of-range limit answers 422 on REST", async () => {

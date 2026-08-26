@@ -14,6 +14,8 @@ export default defineConfig({
   test: {
     include: ["tests/integration/**/*.test.ts"],
     exclude: ["tests/integration/embedding/**", "tests/integration/ai/**", "node_modules/**"],
+    // Suite-level hard reset: a virgin database, once per invocation.
+    globalSetup: ["tests/integration/global-setup.ts"],
     // The suite wipes the database and reboots the adapter; run serially.
     fileParallelism: false,
   },

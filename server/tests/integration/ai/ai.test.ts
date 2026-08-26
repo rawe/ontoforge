@@ -6,14 +6,15 @@
  * chat with a restricted agent whose trace shows only allowlisted tools,
  * and an A2A task round-trip against the default and a named agent.
  *
- * Skips when Neo4j or the Ollama model is unavailable.
+ * Skips when the database or the Ollama model is unavailable.
  */
 
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createApp } from "../../../src/app.js";
-import { closeStores, initStores, wipeDatabase } from "../../../src/core/ports.js";
+import { closeStores, initStores } from "../../../src/core/ports.js";
+import { wipeDatabase } from "../reset.js";
 import { checkOllamaAiModel, disableAiProvider, enableOllamaAiProvider } from "./support.js";
 
 type Row = Record<string, unknown>;
@@ -55,7 +56,7 @@ async function post(url: string, payload: Row, expected = 201): Promise<Row> {
 
 beforeAll(async () => {
   if (!(await checkDatabase())) {
-    console.warn("Neo4j not available — skipping AI integration tests");
+    console.warn("Database not available — skipping AI integration tests");
     return;
   }
   if (!(await checkOllamaAiModel())) {

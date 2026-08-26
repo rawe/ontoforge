@@ -15,8 +15,8 @@ import {
   closeStores,
   ensureSemanticIndexes,
   initStores,
-  wipeDatabase,
 } from "../../../src/core/ports.js";
+import { wipeDatabase } from "../reset.js";
 import { checkOllamaModel, disableProvider, enableOllamaProvider } from "./support.js";
 
 type Row = Record<string, unknown>;

@@ -7,16 +7,15 @@
  * lifecycle with the absent-vs-empty allowlist distinction preserved by
  * real storage, upsert-on-re-add, the ordering hazard end-to-end, every
  * cascade trigger and repair end-to-end, property-delete cleanup, and
- * schema validation over invalid state seeded directly in the store (the
- * state import can produce and the create paths cannot).
+ * schema validation answering valid over a clean schema.
  */
 
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { getDriver } from "../../src/adapters/neo4j/driver.js";
 import { createApp } from "../../src/app.js";
-import { closeStores, initStores, wipeDatabase } from "../../src/core/ports.js";
+import { closeStores, initStores } from "../../src/core/ports.js";
+import { wipeDatabase } from "./reset.js";
 
 let app: FastifyInstance;
 
@@ -495,75 +494,7 @@ describe("cascade protocol end-to-end", () => {
   });
 });
 
-describe("schema validation over seeded-invalid state", () => {
-  it("catches an invalid data type written past the create checks (what import can produce)", async () => {
-    const etId = await createEntityType("person", "Person");
-    // Seed directly in the store — no interactive path accepts this.
-    const session = getDriver().session();
-    try {
-      await session.run(
-        `
-        MATCH (et:EntityType {entityTypeId: $etId})
-        CREATE (et)-[:HAS_PROPERTY]->(:PropertyDefinition {
-            propertyId: 'seeded-1',
-            key: 'age',
-            displayName: 'Age',
-            dataType: 'uuid',
-            required: false,
-            createdAt: datetime(),
-            updatedAt: datetime()
-        })
-        `,
-        { etId },
-      );
-    } finally {
-      await session.close();
-    }
-
-    const res = await app.inject({ method: "POST", url: "/api/model/schema/validate" });
-    expect(res.statusCode).toBe(200);
-    const body = res.json();
-    expect(body.valid).toBe(false);
-    expect(body.errors).toContainEqual({
-      path: "entityTypes.person.properties.age",
-      message: "Invalid data type 'uuid'",
-    });
-  });
-
-  it("catches a duplicate property key seeded directly on one type", async () => {
-    const etId = await createEntityType("person", "Person");
-    await addProperty(etId, "name");
-    const session = getDriver().session();
-    try {
-      await session.run(
-        `
-        MATCH (et:EntityType {entityTypeId: $etId})
-        CREATE (et)-[:HAS_PROPERTY]->(:PropertyDefinition {
-            propertyId: 'seeded-2',
-            key: 'name',
-            displayName: 'Name Again',
-            dataType: 'string',
-            required: false,
-            createdAt: datetime(),
-            updatedAt: datetime()
-        })
-        `,
-        { etId },
-      );
-    } finally {
-      await session.close();
-    }
-
-    const res = await app.inject({ method: "POST", url: "/api/model/schema/validate" });
-    const body = res.json();
-    expect(body.valid).toBe(false);
-    expect(
-      body.errors.some(
-        (e: { message: string }) => e.message === "Duplicate property key 'name'",
-      ),
-    ).toBe(true);
-  });
-
+describe("schema validation", () => {
   it("a clean schema with a valid scoped lens answers valid", async () => {
     const etId = await createEntityType("person", "Person");
     await addProperty(etId, "full_name", { required: true });

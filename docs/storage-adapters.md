@@ -9,10 +9,12 @@ This document is the contract an adapter must satisfy. Concepts and vocabulary:
 [architecture.md](architecture.md). The rules that put it there:
 [decisions.md](decisions.md).
 
-**Two parts, and the difference matters.** Part 1 is normative: it binds every adapter.
-Part 2 describes the reference adapter and binds nothing — it is named technology,
-included so the contract has a worked example. Nothing in Part 2 may be relied on by code
-above the port, and nothing in it constrains a second adapter.
+**One part binds; two describe.** Part 1 is normative: it binds every adapter. Parts 2
+and 3 describe the two shipped adapters — PostgreSQL, the default deployment, and Neo4j
+— in named technology. They bind nothing: nothing in an adapter part may be relied on by
+code above the port, and nothing in one constrains another adapter. The known divergences
+in observable behaviour between the two are enumerated in one place, between the contract
+and the adapter parts.
 
 ---
 
@@ -30,12 +32,16 @@ returns materialised data.
 representation the driver uses is the adapter's private business, converted in both
 directions at the boundary. A service must never receive a value it has to recognise as
 belonging to a particular database client. Datetimes carry a timezone; naive values are
-treated as UTC.
+treated as UTC. The outward conversion is guaranteed on the reads that carry property
+definitions to guide it. The two point reads by type key and instance id carry none, and
+there one deviation exists — PostgreSQL-specific: datetime values return as the stored
+ISO text, whose wire serialization is byte-identical.
 
 **Filters, sorts and searches cross as structured values, never as query text.** A filter
-is a map of expressions to raw values; a sort is a property key plus a direction; a text
-search is a string plus the list of property keys to match it against. No fragment of any
-query language enters or leaves the port. The one exception is the validated query object,
+is a list of parsed conditions — property key, declared data type, operator, and the value
+already coerced to that type; a sort is a property key plus a direction; a text search is
+a string plus the list of property keys to match it against. No fragment of any query
+language enters or leaves the port. The one exception is the validated query object,
 described below, which is opaque rather than textual.
 
 **Driver exceptions never escape.** Every failure the adapter cannot express as a domain
@@ -63,7 +69,6 @@ physical objects that way; a new adapter accepts them and maps them to whatever 
 | Initialize | Open connections, verify the database is reachable, create every constraint and index the adapter needs, and return the two store surfaces. Failure prevents the server from serving. |
 | Close | Release connections. Idempotent. |
 | Ensure semantic indexes | Given a vector width, create every vector index the current schema implies. Called at startup only when an embedding provider is configured. |
-| Wipe | Delete all stored data. Test support only; nothing in the running system calls it. |
 
 ## The two store surfaces
 
@@ -100,13 +105,14 @@ and a default of nothing are different intentions.
 **Scope inclusion management.** An inclusion joins one ontology to one type and optionally
 carries a property allowlist; an absent allowlist means all properties, and is not the
 same as an empty one. Add an inclusion, list the inclusions of one kind for an ontology,
-read one, update its allowlist, remove one. Beyond the plain lifecycle, four operations
+update its allowlist, remove one. Beyond the plain lifecycle, four operations
 exist purely to serve the cascade protocol and must be provided:
 
 - Remove every inclusion referring to a given type, across all ontologies.
 - List the ontology keys that include a given type.
-- List the ontology keys whose inclusion for a given type names a given property
-  *explicitly* — ontologies with no allowlist are not affected and must not be reported.
+- List the ontology keys whose inclusion for a given type carries an explicit allowlist
+  that does **not** name a given property — ontologies with no allowlist auto-track the
+  type's properties and must not be reported.
 - Add, or remove, a property key across every explicit allowlist that names a given type,
   returning how many were changed.
 
@@ -117,8 +123,8 @@ cross-cutting checks, and must be a coherent snapshot rather than a walk the cal
 stitches together.
 
 **Agent and saved-query storage.** Both belong to an ontology and are addressed by key
-within it. For each: list for an ontology, read one by key, upsert, delete, and a
-list-for-export variant that returns the full stored form rather than the summary. Upsert
+within it. For each: list for an ontology, upsert, delete, and a list-for-export variant
+that returns the full stored form rather than the summary. Upsert
 reports whether it created or updated, because the interface layer distinguishes the two.
 An agent carries name, description, system prompt and a tool allowlist. A saved query
 carries name, description, and its steps and parameters as serialized text — the store
@@ -149,20 +155,29 @@ all when no ontology has that key, which is how an unknown lens is detected.
 **Entity lifecycle.** Create with the type key, a caller-supplied instance id, the
 validated property map and an optional embedding vector. Read by type key and id; read by
 id alone, when the type is not known; read a batch by ids, returned as a map keyed by id.
-Update takes the properties to set and the property keys to remove as two separate inputs,
+The by-id reads carry property definitions alongside — the adapter's guide for converting
+stored values back to their port forms on the way out, mirroring the definitions every
+write already carries for the conversion inward; an adapter whose storage distinguishes
+those forms natively may ignore them. Update takes the properties to set and the property keys to remove as two separate inputs,
 plus an optional embedding and an explicit flag saying whether the embedding is part of
 this update — again because "no new vector" and "clear the vector" must be
 distinguishable. Delete by type key and id, returning whether anything was deleted, and
 removing the entity's document chunks with it.
 
 Listing is the one read with real machinery. It takes the type key, the scoped property
-definitions, the structured filter map, an optional text-search string with the string
+definitions, the parsed filter conditions, an optional text-search string with the string
 property keys to match, a validated sort property and direction, and a limit and offset.
 It returns the page together with the total matching count — both, from one call.
 
 The adapter must set and maintain the system properties on every write: the instance id,
 the type key, the creation timestamp on create, and the update timestamp on create and on
 every update. Stored embedding vectors must never appear in a returned row.
+
+**Write-value constraints.** Before a write whose property values will become
+vector-index filter metadata, one operation lets the adapter reject a value it cannot
+store, as a domain validation error naming the property. An adapter whose storage imposes
+no such limit treats the operation as a no-op — the same pattern as reserved keys: the
+constraint is the adapter's, the enforcement point is shared.
 
 **Relation lifecycle.** Create with the relation type key, an instance id, the two
 endpoint entity ids and the property map. Read by type key and id. Update, with the same
@@ -172,8 +187,9 @@ leaving a given entity, or arriving at one, or both. Every relation read returns
 endpoint ids alongside its properties; endpoints are never updatable.
 
 **Traversal.** Given an entity id, a direction of incoming, outgoing or both, an optional
-relation type key filter and a limit, return the adjacent relations paired with the
-entities at the far end. Each result is marked with the direction it was traversed. For
+relation type key filter, a limit, and property definitions keyed by type key — the same
+row-conversion guide the by-id reads carry, covering whatever types the neighbourhood may
+touch — return the adjacent relations paired with the entities at the far end. Each result is marked with the direction it was traversed. For
 the combined direction the limit is a single budget: outgoing edges are taken first and
 incoming edges receive only what remains, so the two are not independently limited. What
 that costs a caller is in
@@ -189,16 +205,18 @@ offset and character length, its text, and optionally its vector. The adapter st
 payload as given and returns it unchanged except for stripping the vector.
 
 **Search.** Three kinds, all by vector, all returning a similarity score with each hit and
-honouring an optional minimum score and a result limit.
+honouring a result limit. Entity search and saved-query search also honour an optional
+minimum score; document-chunk search takes none at the port — its floor is applied above
+the port.
 
 | Kind | Input | Returns |
 |---|---|---|
-| Entities | A query vector, and either one entity type key with its scoped property definitions and an optional structured filter, or nothing — meaning all types at once | Entities with scores |
+| Entities | A query vector, and either one entity type key with its scoped property definitions and optional filter conditions, or nothing — meaning all types at once | Entities with scores |
 | Document chunks | A query vector, an entity type key and a document property key | Chunks with scores |
 | Saved queries | A query vector and an ontology key | Saved-query summaries with scores |
 
-The per-type entity search accepts the same structured filter map that listing does and
-must apply it as part of the search, not after it, so that the limit counts filtered hits.
+The per-type entity search accepts the same parsed filter conditions that listing does and
+must apply them as part of the search, not after it, so that the limit counts filtered hits.
 Cross-type entity search takes no filter; narrowing to a lens happens above the port.
 Saved-query search is always narrowed to a single ontology.
 
@@ -210,12 +228,14 @@ any one of which matching admits the row. See
 **Validated-query execution.** Take a validated query object and an optional parameter
 map, compile, execute read-only, and return the ordered column names together with the
 rows. Each row maps column name to a converted value. Nodes and relationships become plain
-property maps; temporals are converted; vectors are stripped; lists and maps are converted
-recursively so nothing driver-shaped survives at any depth.
+property maps; temporals are converted; vectors are stripped; conversion recurses through
+lists of one element type, and nothing driver-shaped survives at any depth. What a map
+literal or a mixed list carries back is each adapter's own shape — recorded with the
+divergences below.
 
 ## Obligations beyond storage
 
-An adapter is not only a set of writes and reads. Six responsibilities sit entirely inside
+An adapter is not only a set of writes and reads. Seven responsibilities sit entirely inside
 it, and a new adapter that implements the operations but skips these is not a working
 adapter.
 
@@ -256,24 +276,28 @@ path, which passes an explicit recreate flag, drop and recreate at the new width
 report must describe the index the way the API does — by entity type, by document property,
 or by search scope — and never by its physical name.
 
-**Building predicates from structured filters.** A filter map arrives keyed by a property
-key and an operator, and the adapter must turn every entry into a predicate the database
-can evaluate. The operator vocabulary is fixed by the caller-facing surface, not by the
-adapter, and is enumerated once in
-[interfaces.md](interfaces.md#listing-sorting-filtering); an adapter supports all of it and
-invents none of it. Values arrive as raw strings and the adapter coerces each to the
-declared data type of the property, using the scoped property definitions passed alongside;
-the substring operator is the exception, comparing case-insensitively on the string form of
-both sides. Three faults are the adapter's to raise, as domain validation errors and not
-storage errors: an unknown property, an unknown operator, and a value that will not coerce.
-Every value must reach the database as a bound parameter. Type keys and property keys may
-be interpolated into generated query text — they originate from the stored schema, never
-from request input — but values never may.
+**Building predicates from structured filters.** Filters arrive as parsed conditions, and
+the adapter must turn every condition into a predicate the database can evaluate. The
+operator vocabulary is fixed by the caller-facing surface, not by the adapter, and is
+enumerated once in [interfaces.md](interfaces.md#listing-sorting-filtering); an adapter
+supports all of it and invents none of it. Validation happens above the port: the three
+filter faults — an unknown property, an unknown operator, a value that will not coerce —
+are raised there as domain validation errors, identically on every backend, so the adapter
+receives only valid conditions and raises no filter validation error of its own. Each
+condition's value is already coerced to the property's declared data type; the substring
+operator is the exception, comparing case-insensitively on the string form of both sides
+and carrying that string form as its value. One fault remains the adapter's to raise, as a
+domain validation error and not a storage error — Neo4j-specific, raised on the write path
+through the write-value constraint above: an indexed value exceeding the 32766-byte
+ceiling, in an error naming the property. Every value must reach the database as a bound
+parameter. Type keys and property keys may be interpolated into generated query text —
+they originate from the stored schema, never from request input — but values never may.
 
 **Compiling a validated query.** The adapter turns the validated query into its native
-dialect and runs it read-only. The only transformation required is rewriting the type-key
-tokens into the adapter's physical names; everything else the object carries passes
-through. Parameters are supplied separately and bound, never spliced.
+dialect and runs it read-only. How it compiles is its own business — rewriting tokens in
+place or walking the parse tree and emitting a fresh statement — but every type key and
+property key must be mapped to the adapter's physical names, and the query's meaning must
+be preserved exactly. Parameters are supplied separately and bound, never spliced.
 
 **Translating errors.** Every path to the database goes through one place that catches
 driver failures and converts them, so that no route into the store can bypass the
@@ -296,30 +320,206 @@ The adapter **may** assume, without re-checking:
 - No write clause and no procedure call is present.
 - No node pattern is unlabelled, and no internal label or internal relationship type
   appears.
-- The object carries everything a compiler needs: the token stream and the analysis that
-  locates every type-key token and marks whether it names a node or a relationship.
+- The object carries everything a compiler needs: the parse tree, the token stream, the
+  analysis that locates every type-key token and marks whether it names a node or a
+  relationship, the scoped schema it was validated against, and the original query text
+  for diagnostics.
 
 The adapter **must not** assume:
 
-- That the query is a string it may manipulate textually. Rewriting happens through the
-  token positions the analysis provides.
+- That the query is a string it may manipulate textually. The text the object carries is
+  for diagnostics and logging only; compilation works from the parse tree or the token
+  positions the analysis provides.
 - That any value in the query is a parameter. Parameters arrive separately, as a map.
 - That the object is serializable, or survives leaving the process.
 - That validation implies anything about cost. Limits and timeouts, if wanted, are the
   adapter's to impose.
 
-Correspondingly, the adapter **must** leave everything except the type-key tokens intact.
+Correspondingly, whatever the compilation style, the compiled statement must ask the
+database exactly what the validated query asks — only the names are translated.
 Results come back in ontology vocabulary, so no reverse translation of names is required —
 the compiled query returns whatever the caller asked for, converted per the value rules
 above.
 
 ---
 
-# Part 2 — The reference adapter (non-normative)
+# Where the adapters diverge
 
-> Everything below describes how the one shipped adapter, built on **Neo4j**, satisfies
-> Part 1. It is illustration, not contract. No name, convention or structure in this part
-> is part of the port, and a different adapter is free to share none of it.
+Parsing and validation happen above the port, so the Neo4j and PostgreSQL adapters accept
+exactly the same queries and reject invalid ones identically. Beyond acceptance, the known
+divergences between them are enumerated here. Two deviations stand with the rules they
+attach to in Part 1 rather than here: the datetime text form on the two point reads
+(PostgreSQL), and the indexed-value size ceiling (Neo4j).
+
+- **Decoding through a shared type key.** An entity type and a relation type may share a
+  key; if both declare the same property key at different data types, the traversal read
+  and the batch read behind cross-type document search can decode the value through the
+  wrong definition, silently. A known limitation, accepted.
+- **Substring matching against non-string values.** The substring filter compares text
+  forms. PostgreSQL renders them as the documented behaviour states — numbers as
+  printed, booleans as `true`/`false`, datetimes as their ISO-8601 string — while
+  Neo4j's temporal and float rendering is its own, so a substring match against a
+  non-string value can differ between the adapters.
+- **String sort order.** PostgreSQL sorts strings by the database's default collation,
+  dictionary-style, as the documented behaviour states; Neo4j sorts by Unicode code
+  points, capitals before lowercase.
+- **Vector-index removal on drop.** On PostgreSQL, a dropped entity type's or document
+  property's vector index survives as an orphan until the next ensure-all pass sweeps it;
+  on Neo4j the drop removes it immediately.
+- **Width drift blocks writes, not just search.** While a vector index of a stale width
+  stands, PostgreSQL rejects every write that carries a vector — entity or chunk, of any
+  type — until the widths are reconciled; on Neo4j the mismatched vector is left
+  unindexed and the write succeeds.
+- **Faults only execution can see.** A query fault the compiler itself detects — an
+  un-aliased `WITH` item that is not a plain variable, a missing parameter, a variable
+  used as a node or relationship when it is bound to neither — is a domain validation
+  error on PostgreSQL; Neo4j surfaces the same query as a storage error. A clean client
+  error on one adapter is a generic failure on the other.
+- **Reading a property of a `WITH` alias that cannot be verified against the schema.**
+  An error on PostgreSQL, per the documented behaviour; Neo4j does not reject it — the
+  access silently yields null, leaking past the lens.
+- **Aggregates versus projection on temporal properties.** On PostgreSQL, `min` and `max`
+  over a date or datetime property return a decoded temporal value where a plain
+  projection of the same property returns its stored text — the two forms disagree about
+  the property's type; on Neo4j they agree.
+- **Map literals and mixed lists in query results.** Conversion recurses through lists of
+  one element type only; a map literal, or a list mixing element types, comes back in
+  each adapter's own shape — converted temporals on Neo4j, the stored text on PostgreSQL.
+  The conformance suite pins both shapes.
+- **An empty leading `OPTIONAL MATCH`.** When it matches nothing, Neo4j returns one row
+  of nulls; PostgreSQL returns no row.
+- **Out-of-range float literals.** A float literal beyond double range, such as `1e400`,
+  executes with correct comparison semantics on PostgreSQL; Neo4j refuses the query with
+  a storage error, its engine rejecting the value as out of range.
+
+One gap is shared rather than divergent: a float literal whose fraction is a bare
+trailing zero, such as `1.0`, cannot be written — it parses as a property access and is
+rejected — so an equality across the integer/float divide written as `1 = 1.0` is
+inexpressible on both adapters alike. `1.5` is unaffected.
+
+---
+
+# Part 2 — The PostgreSQL adapter (non-normative)
+
+> Everything below describes how the **PostgreSQL** adapter — the default deployment —
+> satisfies Part 1. It is illustration, not contract. No name, convention or structure in
+> this part is part of the port, and a different adapter is free to share none of it.
+
+## Logical to physical mapping
+
+Schema objects are plain relational tables, one per object kind, joined by foreign keys:
+
+| Logical | Table | Joined by |
+|---|---|---|
+| Ontology | `ontology` | referenced by its inclusions, agents and saved queries |
+| Entity type | `entity_type` | referenced by its property definitions and inclusions |
+| Relation type | `relation_type` | endpoint entity type keys as deletion-restricted references to `entity_type`; referenced by its property definitions and inclusions |
+| Property definition | `property_def` | exactly one of two owner columns — entity type or relation type — enforced by a check constraint |
+| Scope inclusion | `ontology_includes` | its ontology plus exactly one of two type columns; the optional property allowlist is an array column, and an absent allowlist is stored as null, never as an empty array |
+| Agent configuration | `ai_agent_config` | its ontology |
+| Saved query | `saved_query` | its ontology, with the denormalized ontology key alongside |
+
+Every schema row carries a `uuid` primary key. That is load-bearing beyond identity: the
+name of a dynamically created vector index embeds the uuid of the schema row that causes
+it to exist (naming, below).
+
+Deleting a schema object cascades through the foreign keys — property definitions,
+inclusions, agents and saved queries die with their owner. The DDL carries structure
+only, per the rule in [decisions.md](decisions.md#storage): identity, referential
+integrity, exactly-one-owner and uniqueness, with no backstop for the business rules the
+service validates.
+
+## Naming transformations
+
+There is no naming transformation. A type key never becomes a table, column or index
+name — it is a value in a `type_key` column, appearing at most as a quoted literal
+inside a partial-index predicate. Both reserved key sets are therefore empty: no key can
+collide with an adapter object.
+
+The one mechanical naming rule covers the dynamically created vector indexes:
+`vec_<table>_<id>`, where `<id>` is the 32-hex-character uuid, hyphens stripped, of the
+schema row that causes the index to exist — the entity type row for a per-type index,
+the property-definition row for a document property's chunk index. The name is
+reversible in both directions with no registry: name to uuid to schema row to type key,
+and type to uuid to name, so index names are never stored. The `vec_` prefix is barred
+to every fixed adapter object, keeping the dynamic and static namespaces disjoint by
+construction — the two fixed vector indexes live outside it.
+
+## How instance data is stored
+
+Two generic tables hold all instance data, however many types the schema declares:
+`entity` and `relation`. Each row carries its `uuid` id, its type key, its user
+properties as one `jsonb` document, and its timestamps; an entity row additionally
+carries its embedding vector in a dedicated dimensionless column, never inside the
+properties document. A schema change — a new type, a new property — is therefore pure
+data: no DDL ever runs against a live database. The deliberation behind this mapping is
+[adr/0015](adr/0015-generic-jsonb-instance-tables.md); the binding rule is in
+[decisions.md](decisions.md#storage).
+
+Chunks live in a third table, `document_chunk` — one row per passage with its owning
+entity, type and property keys, ordinal, offsets, text and optional vector.
+
+The silent-cascade contract on entity deletion is translated into foreign keys:
+relations reference their two endpoint entities, and chunks their owning entity, all
+with cascading deletes. Deleting an entity removes its relations in either direction and
+its chunks in the same statement, and a dangling endpoint is unrepresentable. The
+instance tables' type-key columns carry no foreign key to the schema tables — deleting a
+type deliberately orphans its instances, matching the documented deletion behaviour.
+
+Five B-tree indexes back the hot paths: entity rows by type key; relation rows by type
+key, by source entity and by target entity; chunk rows by owning entity and property
+key. Filters, sorts and text search evaluate jsonb expressions that cast a property to
+its declared data type; property keys and values are both bound parameters, never SQL
+text.
+
+## Index inventory
+
+Created only when an embedding provider is configured — all HNSW over the embedding
+column cast to the provider's width, all cosine:
+
+| Vector index | Form | Scope |
+|---|---|---|
+| One per entity type | partial index on `entity`, predicated on the type key | that type's rows |
+| One per document property | partial index on `document_chunk`, predicated on the entity type key and property key | that property's passages |
+| One across all entity types | full-table on `entity`, fixed name | cross-type entity search |
+| One for saved queries | full-table on `saved_query`, fixed name | description search |
+
+An index's width is read back from its own indexed column type in the catalog — the
+`vector(D)` of the cast expression — and that is what width reconciliation compares.
+Builds are plain, transactional index creation; a failed or interrupted build leaves
+nothing behind, so no failed-index defence exists or is needed. The filterable-property
+list a caller may pass on index creation is accepted and ignored: property values are
+never index metadata here, so every property filters semantic search, always, with no
+declaration and no rebuild.
+
+Search behaviour: the similarity returned is `1 − cosine_distance / 2` — algebraically
+identical to the Neo4j adapter's cosine index score, the same 0-to-1 scale, pinned by a
+fixed-vector conformance case. Every vector query runs as a strict-order iterative scan,
+so a result limit counts rows that passed the filters, delivered in exact distance
+order. A minimum score is applied after the limit, so a page may shrink — including when
+the iterative scan gives up at its tuple cap.
+
+## Engine constraints worth knowing
+
+**A row's properties are one jsonb value, bounded at roughly 255 MB.** The bound is the
+engine's, sits far beyond any practical property map, and is the only size limit on a
+property document — the documents capability rightly states none.
+
+**Listing order is fully deterministic.** Every listing's ordering carries a trailing
+tie-break on the row id, so pagination among equal sort values is stable. That
+determinism is this adapter's own; the port does not promise it.
+
+**String ordering follows the database's default collation.** No collation is ever set
+explicitly; strings sort dictionary-style under the deployment's default collation,
+which is the behaviour the shared documentation states.
+
+---
+
+# Part 3 — The Neo4j adapter (non-normative)
+
+> Everything below describes how the **Neo4j** adapter satisfies Part 1. It is
+> illustration, not contract. No name, convention or structure in this part is part of
+> the port, and a different adapter is free to share none of it.
 
 ## Logical to physical mapping
 

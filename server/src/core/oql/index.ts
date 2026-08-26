@@ -10,9 +10,12 @@
  * the ANTLR parser generated from the vendored Cypher grammar
  * (`grammar/*.g4`, `npm run generate:oql`), validates entity/relation
  * type keys and properties against the scoped ontology schema, and
- * rejects write operations / CALL. The result of `parseAndValidate` is a
- * `ValidatedQuery` that a database adapter compiles to its native dialect
- * (e.g. `adapters/neo4j/oqlCompiler.ts`).
+ * enforces the closed OQL surface fail-closed: write operations, CALL,
+ * and every construct or function the grammar parses but the enumeration
+ * in `docs/capabilities/oql.md` ("Supported surface") does not name are
+ * rejected at validation, identically on every backend. The result of
+ * `parseAndValidate` is a `ValidatedQuery` that a database adapter
+ * compiles to its native dialect (e.g. `adapters/neo4j/oqlCompiler.ts`).
  *
  * Every rejection carries self-correction hints naming the valid
  * candidates — contractual, not incidental: the primary caller composing
@@ -36,10 +39,33 @@ import type { SchemaCacheValue } from "../../runtime/schemaCache.js";
 import { CypherLexer } from "./generated/CypherLexer.js";
 import {
   CypherParser,
+  FunctionInvocationContext,
+  PatternElemContext,
+  type AddSubExpressionContext,
+  type AtomicExpressionContext,
+  type ComparisonExpressionContext,
+  type ExpressionContext,
+  type InvocationNameContext,
+  type LimitStContext,
+  type ListExpressionContext,
+  type MultDivExpressionContext,
   type NodePatternContext,
+  type OrderItemContext,
+  type PatternPartContext,
+  type PowerExpressionContext,
+  type ProjectionBodyContext,
+  type PropertiesContext,
+  type ProjectionItemContext,
+  type ProjectionItemsContext,
   type PropertyExpressionContext,
+  type PropertyOrLabelExpressionContext,
   type RelationDetailContext,
+  type RelationshipPatternContext,
   type ScriptContext,
+  type SkipStContext,
+  type StringExpPrefixContext,
+  type UnaryAddSubExpressionContext,
+  type XorExpressionContext,
 } from "./generated/CypherParser.js";
 import { CypherParserListener } from "./generated/CypherParserListener.js";
 
@@ -75,6 +101,15 @@ export interface PropertyAccess {
   propertyName: string;
 }
 
+/** An inline property map found in a pattern, keyed to its owning type. */
+export interface InlineMap {
+  /** Label / relationship type written on the owning pattern, or null when
+   * the owner carries none (untyped owner — rejected at validation). */
+  ownerTypeKey: string | null;
+  isRelationship: boolean;
+  keys: string[];
+}
+
 /** Collected information from walking the parse tree. */
 export interface Analysis {
   nodeVariables: Map<string, Set<string>>;
@@ -86,6 +121,20 @@ export interface Analysis {
   allLabels: Set<string>;
   allRelTypes: Set<string>;
   unlabeledVars: Set<string>;
+  /** Identifiers of out-of-surface constructs encountered (fail-closed). */
+  unsupported: Set<string>;
+  /** Every function invocation name, verbatim (allowlist-checked). */
+  functionCalls: Set<string>;
+  /** Inline property maps in patterns, lens-checked against their owner. */
+  inlineMaps: InlineMap[];
+  /** Bare variables used as ORDER BY sort keys (checked against the
+   * node/relationship variables in `validate()`). */
+  orderBySymbols: string[];
+  /** Names of `$parameters` used as SKIP/LIMIT operands. The Neo4j
+   * adapter must send exactly these as driver integers — a plain JS
+   * number crosses the wire as a Float, which the server rejects as a
+   * paging count. */
+  skipLimitParams: Set<string>;
 }
 
 /** True if any node variable appears without a label and is never bound
@@ -133,7 +182,19 @@ class Collector extends CypherParserListener {
     allLabels: new Set(),
     allRelTypes: new Set(),
     unlabeledVars: new Set(),
+    unsupported: new Set(),
+    functionCalls: new Set(),
+    inlineMaps: [],
+    orderBySymbols: [],
+    skipLimitParams: new Set(),
   };
+
+  /** Nesting depth of aggregate function invocations (nested-aggregate check). */
+  private aggregateDepth = 0;
+
+  /** Every variable or alias bound so far, in walk (document) order —
+   * consulted when a `RETURN *` / `WITH *` is encountered. */
+  private readonly scopeVariables = new Set<string>();
 
   // -- write clauses --
 
@@ -172,10 +233,17 @@ class Collector extends CypherParserListener {
   override enterNodePattern = (ctx: NodePatternContext): void => {
     const symbolCtx = ctx.symbol();
     const variable = symbolCtx === null ? null : stripBackticks(symbolCtx.getText());
+    if (variable !== null) {
+      this.scopeVariables.add(variable);
+    }
 
     const labelsCtx = ctx.nodeLabels();
-    if (labelsCtx !== null) {
-      for (const nameCtx of labelsCtx.name()) {
+    const labelNames = labelsCtx === null ? [] : labelsCtx.name();
+    if (labelNames.length > 1) {
+      this.analysis.unsupported.add("multi-label");
+    }
+    if (labelNames.length > 0) {
+      for (const nameCtx of labelNames) {
         const label = stripBackticks(nameCtx.getText());
         this.analysis.allLabels.add(label);
         this.analysis.labelTokens.push({
@@ -197,6 +265,12 @@ class Collector extends CypherParserListener {
       // hasn't been bound to a label elsewhere (re-reference is OK).
       this.analysis.unlabeledVars.add(variable);
     }
+
+    this.collectInlineMap(
+      ctx.properties(),
+      labelNames.length > 0 ? stripBackticks(labelNames[0]!.getText()) : null,
+      false,
+    );
   };
 
   // -- relationship types --
@@ -204,42 +278,583 @@ class Collector extends CypherParserListener {
   override enterRelationDetail = (ctx: RelationDetailContext): void => {
     const symbolCtx = ctx.symbol();
     const variable = symbolCtx === null ? null : stripBackticks(symbolCtx.getText());
+    if (variable !== null) {
+      this.scopeVariables.add(variable);
+    }
 
     const typesCtx = ctx.relationshipTypes();
-    if (typesCtx !== null) {
-      for (const nameCtx of typesCtx.name()) {
-        const relType = stripBackticks(nameCtx.getText());
-        this.analysis.allRelTypes.add(relType);
-        this.analysis.labelTokens.push({
-          tokenIndex: nameCtx.start!.tokenIndex,
-          text: relType,
-          isRelationship: true,
-        });
-        if (variable !== null) {
-          this.analysis.relVariables.set(variable, relType);
+    const typeNames = typesCtx === null ? [] : typesCtx.name();
+    if (typeNames.length > 1) {
+      this.analysis.unsupported.add("rel-type-union");
+    }
+    for (const nameCtx of typeNames) {
+      const relType = stripBackticks(nameCtx.getText());
+      this.analysis.allRelTypes.add(relType);
+      this.analysis.labelTokens.push({
+        tokenIndex: nameCtx.start!.tokenIndex,
+        text: relType,
+        isRelationship: true,
+      });
+      if (variable !== null) {
+        this.analysis.relVariables.set(variable, relType);
+      }
+    }
+
+    this.collectInlineMap(
+      ctx.properties(),
+      typeNames.length > 0 ? stripBackticks(typeNames[0]!.getText()) : null,
+      true,
+    );
+  };
+
+  /** Record the keys of an inline property map against its owning type.
+   * A `$parameter` in map position cannot be lens-checked, so it is
+   * rejected rather than crossing the lens unvalidated. */
+  private collectInlineMap(
+    propertiesCtx: PropertiesContext | null,
+    ownerTypeKey: string | null,
+    isRelationship: boolean,
+  ): void {
+    if (propertiesCtx === null) {
+      return;
+    }
+    const mapCtx = propertiesCtx.mapLit();
+    if (mapCtx === null) {
+      this.analysis.unsupported.add("pattern-param-map");
+      return;
+    }
+    this.analysis.inlineMaps.push({
+      ownerTypeKey,
+      isRelationship,
+      keys: mapCtx.mapPair().map((pair) => stripBackticks(pair.name().getText())),
+    });
+  }
+
+  // -- property access (variable.property) --
+
+  override enterPropertyExpression = (ctx: PropertyExpressionContext): void => {
+    const names = ctx.name();
+    if (names.length === 0) {
+      return;
+    }
+    if (names.length > 1) {
+      // `p.a.b` — chained access; rejected as a whole, not attributed to `p`.
+      this.analysis.unsupported.add("chained-property");
+      return;
+    }
+    const symbolCtx = ctx.atom().symbol();
+    if (symbolCtx === null) {
+      // `$p.name`, `(…).name` — the owner is not a variable.
+      this.analysis.unsupported.add("property-on-non-variable");
+      return;
+    }
+    this.analysis.propertyAccesses.push({
+      variable: stripBackticks(symbolCtx.getText()),
+      propertyName: stripBackticks(names[0]!.getText()),
+    });
+  };
+
+  // -- out-of-surface constructs (fail-closed enumeration) --
+
+  override enterRangeLit = (): void => {
+    this.analysis.unsupported.add("variable-length");
+  };
+
+  override enterUnionSt = (): void => {
+    this.analysis.unsupported.add("union");
+  };
+
+  override enterUnwindSt = (): void => {
+    this.analysis.unsupported.add("unwind");
+  };
+
+  override enterCaseExpression = (): void => {
+    this.analysis.unsupported.add("case");
+  };
+
+  override enterListComprehension = (): void => {
+    this.analysis.unsupported.add("comprehension");
+  };
+
+  /** Nesting depth of pattern comprehensions — the chain pattern inside
+   * one belongs to the comprehension, not to expression position. */
+  private patternComprehensionDepth = 0;
+
+  override enterPatternComprehension = (): void => {
+    this.analysis.unsupported.add("comprehension");
+    this.patternComprehensionDepth += 1;
+  };
+
+  override exitPatternComprehension = (): void => {
+    this.patternComprehensionDepth -= 1;
+  };
+
+  override enterRelationshipsChainPattern = (): void => {
+    if (this.patternComprehensionDepth === 0) {
+      this.analysis.unsupported.add("pattern-expression");
+    }
+  };
+
+  /** Classify a pattern element by where it sits: a pattern given to a
+   * function is out of surface, and so is a function invocation sitting
+   * in a MATCH pattern. A parenthesized element classifies itself. */
+  override enterPatternElem = (ctx: PatternElemContext): void => {
+    if (ctx.patternElem() !== null) {
+      return;
+    }
+    let parent = ctx.parent;
+    while (parent instanceof PatternElemContext) {
+      parent = parent.parent;
+    }
+    if (parent instanceof FunctionInvocationContext) {
+      if (ctx.functionInvocation() === null) {
+        this.analysis.unsupported.add("pattern-argument");
+      }
+      // A function invocation that parsed through the pattern-element
+      // alternative is covered by the function rules instead.
+    } else if (ctx.functionInvocation() !== null) {
+      this.analysis.unsupported.add("function-in-pattern");
+    }
+  };
+
+  override enterPropertyOrLabelExpression = (ctx: PropertyOrLabelExpressionContext): void => {
+    if (ctx.nodeLabels() !== null) {
+      this.analysis.unsupported.add("label-test");
+    }
+  };
+
+  override enterListExpression = (ctx: ListExpressionContext): void => {
+    // The rule carries both postfix forms: `IN list` is in-surface,
+    // indexing and slicing (`xs[0]`, `xs[1..3]`) are not.
+    if (ctx.IN() === null) {
+      this.analysis.unsupported.add("list-index");
+    }
+  };
+
+  override enterRelationshipPattern = (ctx: RelationshipPatternContext): void => {
+    if (ctx.LT() !== null && ctx.GT() !== null) {
+      this.analysis.unsupported.add("double-headed");
+    }
+  };
+
+  override enterComparisonExpression = (ctx: ComparisonExpressionContext): void => {
+    if (ctx.addSubExpression().length > 2) {
+      this.analysis.unsupported.add("chained-comparison");
+    }
+  };
+
+  override enterAtomicExpression = (ctx: AtomicExpressionContext): void => {
+    const postfixes =
+      ctx.stringExpression().length + ctx.listExpression().length + ctx.nullExpression().length;
+    if (postfixes > 1) {
+      this.analysis.unsupported.add("postfix-predicate");
+    }
+  };
+
+  override enterUnaryAddSubExpression = (ctx: UnaryAddSubExpressionContext): void => {
+    // Unary minus is in-surface only on a numeric literal (`-5`); on
+    // anything else it is arithmetic. Unary plus is a no-op.
+    if (ctx.SUB() !== null && !isNumericLiteralShaped(ctx.atomicExpression())) {
+      this.analysis.unsupported.add("arithmetic");
+    }
+  };
+
+  override enterFilterWith = (): void => {
+    this.analysis.unsupported.add("quantifier");
+  };
+
+  override enterSubqueryExist = (): void => {
+    this.analysis.unsupported.add("exists");
+  };
+
+  override enterPatternPart = (ctx: PatternPartContext): void => {
+    if (ctx.symbol() !== null) {
+      this.analysis.unsupported.add("named-path");
+    }
+  };
+
+  override enterXorExpression = (ctx: XorExpressionContext): void => {
+    // The rule sits in the precedence chain and fires for every
+    // expression; only ≥2 operands mean an actual XOR.
+    if (ctx.andExpression().length > 1) {
+      this.analysis.unsupported.add("xor");
+    }
+  };
+
+  override enterAddSubExpression = (ctx: AddSubExpressionContext): void => {
+    if (ctx.multDivExpression().length > 1) {
+      this.analysis.unsupported.add("arithmetic");
+    }
+  };
+
+  override enterMultDivExpression = (ctx: MultDivExpressionContext): void => {
+    if (ctx.powerExpression().length > 1) {
+      this.analysis.unsupported.add("arithmetic");
+    }
+  };
+
+  override enterPowerExpression = (ctx: PowerExpressionContext): void => {
+    if (ctx.unaryAddSubExpression().length > 1) {
+      this.analysis.unsupported.add("arithmetic");
+    }
+  };
+
+  override enterStringExpPrefix = (ctx: StringExpPrefixContext): void => {
+    if (ctx.STARTS() !== null || ctx.ENDS() !== null) {
+      this.analysis.unsupported.add("starts-ends-with");
+    }
+  };
+
+  // -- DISTINCT (both positions: projection and function call) --
+
+  override enterProjectionBody = (ctx: ProjectionBodyContext): void => {
+    if (ctx.DISTINCT() !== null) {
+      this.analysis.unsupported.add("distinct");
+    }
+  };
+
+  // -- functions (allowlist names, nested aggregates) --
+
+  override enterFunctionInvocation = (ctx: FunctionInvocationContext): void => {
+    if (ctx.DISTINCT() !== null) {
+      this.analysis.unsupported.add("distinct");
+    }
+    if (isAggregate(invocationNameText(ctx))) {
+      if (this.aggregateDepth > 0) {
+        this.analysis.unsupported.add("nested-aggregate");
+      }
+      this.aggregateDepth += 1;
+      // A pattern argument is its own rejection (`enterPatternElem`).
+      if (ctx.patternElem() === null) {
+        const args = ctx.expressionChain()?.expression() ?? [];
+        if (args.length !== 1) {
+          this.analysis.unsupported.add("aggregate-arity");
         }
       }
     }
   };
 
-  // -- property access (variable.property) --
-
-  override enterPropertyExpression = (ctx: PropertyExpressionContext): void => {
-    const variable = stripBackticks(ctx.atom().getText());
-    for (const nameCtx of ctx.name()) {
-      this.analysis.propertyAccesses.push({
-        variable,
-        propertyName: stripBackticks(nameCtx.getText()),
-      });
+  override exitFunctionInvocation = (ctx: FunctionInvocationContext): void => {
+    if (isAggregate(invocationNameText(ctx))) {
+      this.aggregateDepth -= 1;
     }
   };
+
+  override enterCountAll = (): void => {
+    if (this.aggregateDepth > 0) {
+      this.analysis.unsupported.add("nested-aggregate");
+    }
+  };
+
+  override enterInvocationName = (ctx: InvocationNameContext): void => {
+    this.analysis.functionCalls.add(
+      ctx
+        .symbol_()
+        .map((part) => stripBackticks(part.getText()))
+        .join("."),
+    );
+  };
+
+  // -- projections: aliases, `RETURN *` / `WITH *` scope check --
+
+  override enterProjectionItem = (ctx: ProjectionItemContext): void => {
+    const aliasCtx = ctx.symbol();
+    if (aliasCtx !== null) {
+      this.scopeVariables.add(stripBackticks(aliasCtx.getText()));
+    }
+  };
+
+  override enterProjectionItems = (ctx: ProjectionItemsContext): void => {
+    if (ctx.MULT() !== null && this.scopeVariables.size === 0) {
+      this.analysis.unsupported.add("star-without-scope");
+    }
+  };
+
+  // -- ORDER BY sort keys, SKIP/LIMIT operands --
+
+  override enterOrderItem = (ctx: OrderItemContext): void => {
+    const shape = classifyExpression(ctx.expression());
+    if (shape.kind === "variable") {
+      this.analysis.orderBySymbols.push(shape.name);
+    } else if (shape.kind === "constant" || shape.kind === "parameter") {
+      this.analysis.unsupported.add("order-by-constant");
+    }
+  };
+
+  override enterSkipSt = (ctx: SkipStContext): void => {
+    this.checkSkipLimitOperand(ctx.expression());
+  };
+
+  override enterLimitSt = (ctx: LimitStContext): void => {
+    this.checkSkipLimitOperand(ctx.expression());
+  };
+
+  private checkSkipLimitOperand(ctx: ExpressionContext): void {
+    const shape = classifyExpression(ctx);
+    if (shape.kind === "parameter") {
+      this.analysis.skipLimitParams.add(shape.name);
+      return;
+    }
+    if (!(shape.kind === "constant" && isIntegerLiteral(shape.text))) {
+      this.analysis.unsupported.add("skip-limit");
+    }
+  }
 }
+
+/** The allowlisted aggregate function names (case-insensitive). */
+const FUNCTION_ALLOWLIST: ReadonlySet<string> = new Set([
+  "count",
+  "sum",
+  "avg",
+  "min",
+  "max",
+  "collect",
+]);
+
+function isAggregate(name: string): boolean {
+  return FUNCTION_ALLOWLIST.has(name.toLowerCase());
+}
+
+/** Every non-negative integer-literal form the language accepts —
+ * decimal with underscores, hex, octal — the same forms the compilers
+ * read, so the one literal is legal in every integer position. */
+function isIntegerLiteral(text: string): boolean {
+  const clean = text.replaceAll("_", "");
+  return (
+    /^[0-9]+$/.test(clean) || /^0[xX][0-9a-fA-F]+$/.test(clean) || /^0[oO][0-7]+$/.test(clean)
+  );
+}
+
+/** True when an atomic expression is a bare numeric literal — the one
+ * operand unary minus applies to in-surface. Bare integers lex as
+ * symbols, not literals, so a digit-leading symbol counts as a number. */
+function isNumericLiteralShaped(ctx: AtomicExpressionContext): boolean {
+  if (
+    ctx.stringExpression().length > 0 ||
+    ctx.listExpression().length > 0 ||
+    ctx.nullExpression().length > 0
+  ) {
+    return false;
+  }
+  const polCtx = ctx.propertyOrLabelExpression();
+  if (polCtx.nodeLabels() !== null) {
+    return false;
+  }
+  const propertyCtx = polCtx.propertyExpression();
+  if (propertyCtx.name().length > 0) {
+    return false;
+  }
+  const atom = propertyCtx.atom();
+  if (atom.literal()?.numLit() != null) {
+    return true;
+  }
+  const symbolCtx = atom.symbol();
+  return symbolCtx !== null && /^[0-9]/.test(symbolCtx.getText());
+}
+
+function invocationNameText(ctx: FunctionInvocationContext): string {
+  return ctx
+    .invocationName()
+    .symbol_()
+    .map((part) => stripBackticks(part.getText()))
+    .join(".");
+}
+
+/** The shape of a single expression, for sort-key and operand checks. */
+type ExpressionShape =
+  | { kind: "variable"; name: string }
+  | { kind: "constant"; text: string }
+  | { kind: "parameter"; name: string }
+  | { kind: "property" }
+  | { kind: "other" };
+
+/**
+ * Descend an expression's single-operand precedence chain and classify
+ * what sits at the bottom. Any operator on the way down (a second
+ * operand, NOT, a unary sign, a string/list/null postfix, a label tail)
+ * classifies as "other" — those carry their own rejection rules.
+ */
+function classifyExpression(ctx: ExpressionContext): ExpressionShape {
+  const other: ExpressionShape = { kind: "other" };
+
+  const xorOperands = ctx.xorExpression();
+  if (xorOperands.length !== 1) return other;
+  const andOperands = xorOperands[0]!.andExpression();
+  if (andOperands.length !== 1) return other;
+  const notOperands = andOperands[0]!.notExpression();
+  if (notOperands.length !== 1) return other;
+  const notCtx = notOperands[0]!;
+  if (notCtx.NOT().length > 0) return other;
+  const addSubOperands = notCtx.comparisonExpression().addSubExpression();
+  if (addSubOperands.length !== 1) return other;
+  const multDivOperands = addSubOperands[0]!.multDivExpression();
+  if (multDivOperands.length !== 1) return other;
+  const powerOperands = multDivOperands[0]!.powerExpression();
+  if (powerOperands.length !== 1) return other;
+  const unaryOperands = powerOperands[0]!.unaryAddSubExpression();
+  if (unaryOperands.length !== 1) return other;
+  const unaryCtx = unaryOperands[0]!;
+  if (unaryCtx.PLUS() !== null || unaryCtx.SUB() !== null) return other;
+  const atomicCtx = unaryCtx.atomicExpression();
+  if (
+    atomicCtx.stringExpression().length > 0 ||
+    atomicCtx.listExpression().length > 0 ||
+    atomicCtx.nullExpression().length > 0
+  ) {
+    return other;
+  }
+  const polCtx = atomicCtx.propertyOrLabelExpression();
+  if (polCtx.nodeLabels() !== null) return other;
+  const propertyCtx = polCtx.propertyExpression();
+  if (propertyCtx.name().length > 0) return { kind: "property" };
+
+  const atom = propertyCtx.atom();
+  if (atom.literal() !== null) return { kind: "constant", text: atom.getText() };
+  const parameterCtx = atom.parameter();
+  if (parameterCtx !== null) {
+    const nameCtx = parameterCtx.symbol() ?? parameterCtx.numLit()!;
+    return { kind: "parameter", name: stripBackticks(nameCtx.getText()) };
+  }
+  const parenCtx = atom.parenthesizedExpression();
+  if (parenCtx !== null) return classifyExpression(parenCtx.expression());
+  const symbolCtx = atom.symbol();
+  if (symbolCtx !== null) {
+    const text = stripBackticks(symbolCtx.getText());
+    // Positive integers lex as `Integer` and reach the parser as symbols,
+    // not literals — a leading digit means a number, never a variable.
+    if (/^[0-9]/.test(text)) return { kind: "constant", text };
+    return { kind: "variable", name: text };
+  }
+  return other;
+}
+
+/**
+ * Construct → rejection message, one row per out-of-surface construct.
+ * The OQL surface is a closed enumeration (`docs/capabilities/oql.md`,
+ * "Supported surface"); everything here parses but is outside it. Every
+ * message is pinned character-for-character by exact-wording tests.
+ */
+const SURFACE_REJECTIONS: readonly (readonly [string, string])[] = [
+  [
+    "variable-length",
+    "Variable-length relationship patterns are not supported. " +
+      "Write each hop as an explicit relationship pattern.",
+  ],
+  ["union", "UNION is not supported. Run separate queries and combine the results in the caller."],
+  ["unwind", "UNWIND is not supported. Match the rows you need directly with MATCH and WHERE."],
+  [
+    "case",
+    "CASE expressions are not supported. Filter with WHERE, or compute the distinction in the caller.",
+  ],
+  [
+    "comprehension",
+    "List and pattern comprehensions are not supported. " +
+      "Use MATCH with WHERE, and collect(...) to build lists.",
+  ],
+  [
+    "quantifier",
+    "Quantified predicates (ALL, ANY, NONE, SINGLE) are not supported. " +
+      "Express the condition with MATCH patterns and WHERE.",
+  ],
+  [
+    "exists",
+    "EXISTS subqueries are not supported. " +
+      "Match the pattern directly, or use OPTIONAL MATCH with IS NOT NULL.",
+  ],
+  ["named-path", "Named paths are not supported. Bind the nodes and relationships you need with variables."],
+  [
+    "multi-label",
+    "Multi-label node patterns are not supported. A node pattern names exactly one entity type.",
+  ],
+  [
+    "rel-type-union",
+    "Relationship-type unions ([:a|b]) are not supported. Match each relationship type separately.",
+  ],
+  ["map-projection", "Map projections are not supported. Return each property explicitly."],
+  ["arithmetic", "Arithmetic expressions are not supported. Compute derived values in the caller."],
+  [
+    "starts-ends-with",
+    "STARTS WITH and ENDS WITH are not supported. Use CONTAINS to match substrings.",
+  ],
+  ["distinct", "DISTINCT is not supported. Deduplicate in the caller, or aggregate with collect(...)."],
+  ["xor", "XOR is not supported. Express the condition with AND, OR and NOT."],
+  [
+    "nested-aggregate",
+    "Aggregate functions cannot be nested. Compute the inner aggregate in a WITH clause first.",
+  ],
+  [
+    "order-by-entity",
+    "Cannot order by a node or relationship — order by one of its properties instead.",
+  ],
+  [
+    "order-by-constant",
+    "Cannot order by a constant or a parameter — order by a property, an alias, or an aggregate instead.",
+  ],
+  ["skip-limit", "SKIP/LIMIT take a non-negative integer or a $parameter."],
+  [
+    "chained-property",
+    "Nested property access is not supported — properties hold scalar values.",
+  ],
+  ["star-without-scope", "RETURN * is not allowed when there are no variables in scope."],
+  [
+    "pattern-param-map",
+    "A parameter cannot supply a pattern's property map. " +
+      "Write the properties as an explicit inline map.",
+  ],
+  [
+    "pattern-expression",
+    "Bare patterns cannot be used as expressions. " +
+      "Match the pattern directly, or use OPTIONAL MATCH with IS NOT NULL.",
+  ],
+  [
+    "pattern-argument",
+    "count() cannot take a pattern as its argument. " +
+      "Match the pattern first and count a variable it binds.",
+  ],
+  [
+    "label-test",
+    "Label tests (WHERE p:person) are not supported. " +
+      "Name the label in the pattern that binds the variable.",
+  ],
+  [
+    "list-index",
+    "List indexing and slicing are not supported. " +
+      "Return the whole list and pick elements in the caller.",
+  ],
+  [
+    "double-headed",
+    "Double-headed relationship patterns (<-[r]->) are not supported. " +
+      "Use an undirected pattern (-[r]-) or a single direction.",
+  ],
+  [
+    "chained-comparison",
+    "Chained comparisons are not supported. " +
+      "Write each comparison separately and combine them with AND.",
+  ],
+  [
+    "postfix-predicate",
+    "IS NULL and IS NOT NULL apply to a property or variable, " +
+      "not to the result of another predicate.",
+  ],
+  ["property-on-non-variable", "Properties can be read only from a variable bound in a pattern."],
+  [
+    "aggregate-arity",
+    "An aggregate function takes exactly one argument. Aggregate each expression separately.",
+  ],
+  [
+    "function-in-pattern",
+    "Function calls cannot appear inside a MATCH pattern. Call functions in WITH or RETURN.",
+  ],
+];
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function stripBackticks(name: string): string {
+/** A possibly backtick-quoted identifier → its bare name. Adapter
+ * compilers read the same identifiers off the parse tree and must strip
+ * them identically. */
+export function stripBackticks(name: string): string {
   if (name.startsWith("`") && name.endsWith("`")) {
     return name.slice(1, -1);
   }
@@ -248,6 +863,29 @@ function stripBackticks(name: string): string {
 
 function sorted(values: Iterable<string>): string[] {
   return [...values].sort();
+}
+
+/**
+ * The one wording for a property that does not resolve on its type, with
+ * the self-correction hint every rejection owes its caller.
+ *
+ * Validation raises it for what the query text alone settles; an adapter
+ * compiler raises the same sentence again where its own resolution finds
+ * a property the pattern-local inference could not check. The text is
+ * contract-visible, so it is written once here rather than mirrored
+ * across the module boundary.
+ */
+export function unknownPropertyMessage(
+  kind: "entity" | "relation",
+  typeKey: string,
+  property: string,
+  definitions: Readonly<Record<string, unknown>>,
+): string {
+  const available = [...sorted(Object.keys(definitions)), ...sorted(SYSTEM_PROPERTIES)];
+  return (
+    `Unknown property '${property}' on ${kind} type '${typeKey}'. ` +
+    `Available: ${available.join(", ")}`
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -296,7 +934,7 @@ export function validate(analysis: Analysis, schema: SchemaCacheValue): string[]
     errors.push(
       `Write operations are not allowed: ${clauses}. ` +
         "Only read queries are supported (MATCH, WHERE, RETURN, " +
-        "ORDER BY, LIMIT, SKIP, OPTIONAL MATCH, WITH, UNWIND).",
+        "ORDER BY, LIMIT, SKIP, OPTIONAL MATCH, WITH).",
     );
   }
 
@@ -305,7 +943,38 @@ export function validate(analysis: Analysis, schema: SchemaCacheValue): string[]
     errors.push("CALL procedures are not allowed. Use MATCH patterns to query data.");
   }
 
-  // 3. Labelless nodes (scope leak)
+  // 3. Out-of-surface constructs (the closed surface, fail-closed), then
+  //    the function allowlist.
+  const violations = new Set(analysis.unsupported);
+  for (const name of analysis.orderBySymbols) {
+    if (
+      analysis.nodeVariables.has(name) ||
+      analysis.unlabeledVars.has(name) ||
+      analysis.relVariables.has(name)
+    ) {
+      violations.add("order-by-entity");
+    }
+  }
+  for (const [construct, message] of SURFACE_REJECTIONS) {
+    if (violations.has(construct)) {
+      errors.push(message);
+    }
+  }
+  for (const name of sorted(analysis.functionCalls)) {
+    const lower = name.toLowerCase();
+    if (lower === "reduce") {
+      errors.push(
+        "REDUCE is not supported. Aggregate with the supported functions: " +
+          "avg, collect, count, max, min, sum.",
+      );
+    } else if (!FUNCTION_ALLOWLIST.has(lower)) {
+      errors.push(
+        `Unknown function: '${name}'. Available functions: avg, collect, count, max, min, sum.`,
+      );
+    }
+  }
+
+  // 4. Labelless nodes (scope leak)
   if (hasLabellessNodes(analysis)) {
     const available = sorted(Object.keys(schema.entityTypes));
     errors.push(
@@ -314,7 +983,7 @@ export function validate(analysis: Analysis, schema: SchemaCacheValue): string[]
     );
   }
 
-  // 4. Node labels
+  // 5. Node labels
   const validEntityKeys = new Set(Object.keys(schema.entityTypes));
   for (const label of sorted(analysis.allLabels)) {
     if (INTERNAL_LABELS.has(label)) {
@@ -329,7 +998,7 @@ export function validate(analysis: Analysis, schema: SchemaCacheValue): string[]
     }
   }
 
-  // 5. Relationship types
+  // 6. Relationship types
   const validRelKeys = new Set(Object.keys(schema.relationTypes));
   for (const relType of sorted(analysis.allRelTypes)) {
     if (INTERNAL_REL_TYPES.has(relType)) {
@@ -344,7 +1013,7 @@ export function validate(analysis: Analysis, schema: SchemaCacheValue): string[]
     }
   }
 
-  // 6. Property accesses (pattern-local type inference only)
+  // 7. Property accesses (pattern-local type inference only)
   const varToEntity = new Map<string, string>();
   for (const [variable, labels] of analysis.nodeVariables) {
     for (const label of labels) {
@@ -372,23 +1041,65 @@ export function validate(analysis: Analysis, schema: SchemaCacheValue): string[]
     if (etKey !== undefined) {
       const etProps = schema.entityTypes[etKey]!.properties;
       if (!(pa.propertyName in etProps)) {
-        const available = [...sorted(Object.keys(etProps)), ...sorted(SYSTEM_PROPERTIES)];
-        errors.push(
-          `Unknown property '${pa.propertyName}' on entity type '${etKey}'. ` +
-            `Available: ${available.join(", ")}`,
-        );
+        errors.push(unknownPropertyMessage("entity", etKey, pa.propertyName, etProps));
       }
     } else if (rtKey !== undefined) {
       const rtProps = schema.relationTypes[rtKey]!.properties;
       if (!(pa.propertyName in rtProps)) {
-        const available = [...sorted(Object.keys(rtProps)), ...sorted(SYSTEM_PROPERTIES)];
-        errors.push(
-          `Unknown property '${pa.propertyName}' on relation type '${rtKey}'. ` +
-            `Available: ${available.join(", ")}`,
-        );
+        errors.push(unknownPropertyMessage("relation", rtKey, pa.propertyName, rtProps));
+      }
+    } else if (
+      !analysis.nodeVariables.has(pa.variable) &&
+      !analysis.relVariables.has(pa.variable) &&
+      !analysis.unlabeledVars.has(pa.variable)
+    ) {
+      // The variable declares no type anywhere: a relationship pattern
+      // written without a type, a projection alias, or an unbound name.
+      // Nothing can check the property against the lens, so the access
+      // is rejected on every backend. (A variable whose declared type
+      // is itself invalid, and an unlabeled node variable, already
+      // carry their own rejection above.)
+      errors.push(
+        "Properties cannot be read through a variable with no declared type. " +
+          "Name the type in the pattern that binds it.",
+      );
+    }
+  }
+
+  // 8. Inline property maps — keys resolve against the owning type
+  //    directly (label-direct, not via the variable→type map); an owner
+  //    with no type in the pattern is rejected outright.
+  for (const im of analysis.inlineMaps) {
+    if (im.ownerTypeKey === null) {
+      errors.push(
+        "An inline property map needs a typed owner — add a label to the node " +
+          "(or a type to the relationship) so its keys can be validated.",
+      );
+      continue;
+    }
+    if (!im.isRelationship) {
+      const et = schema.entityTypes[im.ownerTypeKey];
+      if (et === undefined) {
+        continue; // the label itself was already reported above
+      }
+      for (const key of im.keys) {
+        if (SYSTEM_PROPERTIES.has(key) || key in et.properties) {
+          continue;
+        }
+        errors.push(unknownPropertyMessage("entity", im.ownerTypeKey, key, et.properties));
+      }
+    } else {
+      const rt = schema.relationTypes[im.ownerTypeKey];
+      if (rt === undefined) {
+        continue; // the relationship type itself was already reported above
+      }
+      for (const key of im.keys) {
+        if (SYSTEM_PROPERTIES.has(key) || key in rt.properties) {
+          continue;
+        }
+        errors.push(unknownPropertyMessage("relation", im.ownerTypeKey, key, rt.properties));
       }
     }
-    // Variables not in either map (e.g. WITH aliases) are not validated.
   }
 
   return errors;
@@ -402,12 +1113,20 @@ export function validate(analysis: Analysis, schema: SchemaCacheValue): string[]
  * A parsed and schema-validated OQL query.
  *
  * Opaque to services; database adapters compile it to their native
- * dialect (token stream + analysis carry everything a compiler needs).
+ * dialect. The object carries everything a compiler needs: the parse
+ * tree, the token stream, the analysis, and the scoped schema the query
+ * was validated against.
  */
 export interface ValidatedQuery {
+  /** The original query text — diagnostics and logging only. An adapter
+   * must never compile from it. */
   text: string;
   tokenStream: CommonTokenStream;
+  /** The parse tree the analysis was collected from. */
+  tree: ScriptContext;
   analysis: Analysis;
+  /** The scoped schema the query was validated against. */
+  schema: SchemaCacheValue;
 }
 
 /**
@@ -421,7 +1140,7 @@ export function parseAndValidate(query: string, schema: SchemaCacheValue): Valid
   if (errors.length > 0) {
     throw new ValidationError("Query validation failed", { errors });
   }
-  return { text: query, tokenStream, analysis };
+  return { text: query, tokenStream, tree, analysis, schema };
 }
 
 /**

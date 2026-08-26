@@ -2,29 +2,29 @@
  * WHERE-clause construction for the Neo4j runtime adapter.
  *
  * Turns the structured filter/search inputs that cross the persistence
- * port (filter dicts, search strings) into Cypher WHERE fragments plus
- * bound parameters. Adapter-private — query fragments never leave this
- * package.
+ * port (parsed filter conditions, search strings) into Cypher WHERE
+ * fragments plus bound parameters. Adapter-private — query fragments
+ * never leave this package.
  *
- * Injection posture (binding, per the session-04 spec): VALUES are always
- * bound parameters; the only interpolated identifiers are property keys
- * taken from the STORED schema's definitions (`propertyDefs`), never from
- * request input — an unknown key is rejected before any text is built.
+ * Validation happens above the port: the service parses, checks, and
+ * coerces every filter, so what arrives here is valid by construction
+ * and the builder is pure fragment assembly. VALUES are always bound
+ * parameters; the only interpolated identifiers are property keys taken
+ * from the STORED schema via the parsed conditions, never from raw
+ * request input.
  */
 
 import neo4j from "neo4j-driver";
 
-import { CoercionError, coerceValue } from "../../core/dataTypes.js";
-import { ValidationError } from "../../core/exceptions.js";
-import type { PropertyDef } from "../../runtime/schemaCache.js";
+import type { FilterCondition } from "../../core/ports.js";
 import { toNeo4jDate, toNeo4jDateTime } from "./temporal.js";
 
 const OPERATORS: Record<string, string> = {
+  eq: "=",
   gt: ">",
   gte: ">=",
   lt: "<",
   lte: "<=",
-  contains: "CONTAINS",
 };
 
 /** Convert a coerced port value to its driver-native parameter form. */
@@ -44,75 +44,30 @@ export function toNeo4jParameter(value: unknown, dataType: string): unknown {
   }
 }
 
-/**
- * Build WHERE fragments and parameters from a list-endpoint filter dict.
- *
- * The operator is the segment after the LAST double underscore — so a
- * property whose own key contains `__` cannot be filtered (documented
- * trap). Unknown properties, unknown operators, and uncoercible values
- * raise `ValidationError`, checked in that order: property, then value,
- * then operator.
- */
+/** Build WHERE fragments and parameters from parsed filter conditions. */
 export function buildFilterClauses(
-  filters: Record<string, string>,
-  propertyDefs: Record<string, PropertyDef>,
-  typeKey: string,
+  conditions: FilterCondition[],
   nodeAlias = "n",
 ): [string[], Record<string, unknown>] {
   const whereClauses: string[] = [];
   const params: Record<string, unknown> = {};
 
-  for (const [filterExpr, rawValue] of Object.entries(filters)) {
-    let propKey: string;
-    let opName: string | null;
-    const splitAt = filterExpr.lastIndexOf("__");
-    if (splitAt >= 0) {
-      propKey = filterExpr.slice(0, splitAt);
-      opName = filterExpr.slice(splitAt + 2);
-    } else {
-      propKey = filterExpr;
-      opName = null;
-    }
-
-    const propDef = propertyDefs[propKey];
-    if (propDef === undefined) {
-      throw new ValidationError(`Unknown filter property: '${propKey}'`, {
-        fields: { [propKey]: `Not defined in type '${typeKey}'` },
-      });
-    }
-
-    let coercedValue: unknown;
-    try {
-      if (opName === "contains") {
-        coercedValue = String(rawValue); // substring comparison is textual
-      } else {
-        coercedValue = coerceValue(rawValue, propDef.dataType, propKey);
-      }
-    } catch (error) {
-      if (!(error instanceof CoercionError)) throw error;
-      throw new ValidationError(`Invalid filter value for '${propKey}'`, {
-        fields: { [propKey]: error.message },
-      });
-    }
-
+  for (const condition of conditions) {
     const paramName = `flt_${Object.keys(params).length}`;
 
-    if (opName === null) {
-      whereClauses.push(`${nodeAlias}.${propKey} = $${paramName}`);
-    } else if (opName === "contains") {
+    if (condition.op === "contains") {
+      // Substring comparison is textual — the parsed value is already the
+      // string form and crosses untouched.
       whereClauses.push(
-        `toLower(toString(${nodeAlias}.${propKey})) CONTAINS toLower($${paramName})`,
+        `toLower(toString(${nodeAlias}.${condition.key})) CONTAINS toLower($${paramName})`,
       );
-    } else if (opName in OPERATORS) {
-      whereClauses.push(`${nodeAlias}.${propKey} ${OPERATORS[opName]} $${paramName}`);
+      params[paramName] = condition.value;
     } else {
-      throw new ValidationError(`Unknown filter operator: '${opName}'`, {
-        fields: { [filterExpr]: `Unsupported operator '${opName}'` },
-      });
+      whereClauses.push(
+        `${nodeAlias}.${condition.key} ${OPERATORS[condition.op]} $${paramName}`,
+      );
+      params[paramName] = toNeo4jParameter(condition.value, condition.dataType);
     }
-
-    params[paramName] =
-      opName === "contains" ? coercedValue : toNeo4jParameter(coercedValue, propDef.dataType);
   }
 
   return [whereClauses, params];

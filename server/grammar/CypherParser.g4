@@ -46,7 +46,7 @@ query
     ;
 
 regularQuery
-    : singleQuery unionSt*
+    : singleQuery (SP? unionSt)*
     ;
 
 singleQuery

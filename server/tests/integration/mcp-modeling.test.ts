@@ -14,7 +14,8 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../../src/app.js";
-import { closeStores, initStores, wipeDatabase } from "../../src/core/ports.js";
+import { closeStores, initStores } from "../../src/core/ports.js";
+import { wipeDatabase } from "./reset.js";
 
 interface ToolCallResult {
   content: { type: string; text: string }[];
@@ -287,16 +288,9 @@ describe("tool errors", () => {
     expect(message.split(";").length).toBeGreaterThanOrEqual(2);
   });
 
-  it("a reserved type key is rejected with the vendor-free reserved-set message", async () => {
-    const rejected = await call(client, "create_entity_type", {
-      key: "ontology",
-      display_name: "Injected",
-    });
-    expect(rejected.isError).toBe(true);
-    const message = text(rejected);
-    expect(message).toContain("reserved");
-    expect(message.toLowerCase()).not.toContain("neo4j");
-  });
+  // The reserved-type-key rejection is adapter-specific (only the Neo4j
+  // adapter reserves keys) and lives in
+  // `tests/integration/neo4j/mcp-modeling.test.ts`.
 });
 
 describe("ontology lenses over MCP", () => {

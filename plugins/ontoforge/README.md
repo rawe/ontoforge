@@ -29,7 +29,7 @@ Bootstrap a project with OntoForge: Docker Compose, environment variables, and M
 
 When invoked, the skill interactively gathers requirements and generates:
 
-1. **`docker-compose.yml`** — Neo4j (the database used by OntoForge's current storage adapter), OntoForge server, and OntoForge UI, with optional Ollama for local embeddings.
+1. **`docker-compose.yml`** — PostgreSQL (the database used by OntoForge's default storage adapter), OntoForge server, and OntoForge UI, with optional Ollama for local embeddings.
 2. **`.mcp.json`** — Claude Code MCP configuration pointing to the OntoForge modeling and runtime servers.
 3. **`.env`** (optional) — Environment variables for secrets and local overrides.
 
@@ -63,7 +63,7 @@ The plugin ships two templates under `skills/ontoforge-setup/templates/`:
 
 | File | Contents |
 | --- | --- |
-| `docker-compose.yml` | Full OntoForge stack (Neo4j + server + UI) with commented embedding and Ollama config |
+| `docker-compose.yml` | Full OntoForge stack (PostgreSQL + server + UI) with commented embedding and Ollama config |
 | `mcp.json` | MCP server entries for modeling and runtime |
 
 ## Environment Variables

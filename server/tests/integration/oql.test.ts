@@ -5,10 +5,12 @@
  * MCP `execute_query` round trip.
  *
  * Covers the spec's scenarios: multi-hop traversal, aggregation,
- * ORDER BY/SKIP/LIMIT, OPTIONAL MATCH, UNWIND; per-column stripping
- * through a scoped lens; document stub vs aliased-projection full text;
- * a scoped lens rejecting a globally valid type identically to a
- * nonexistent one; and a validation failure carrying hints over MCP.
+ * ORDER BY/SKIP/LIMIT, OPTIONAL MATCH; per-column stripping through a
+ * scoped lens; document stub vs aliased-projection full text; a scoped
+ * lens rejecting a globally valid type identically to a nonexistent one;
+ * out-of-surface constructs (variable-length patterns) and inline-map
+ * lens violations rejected end-to-end; and a validation failure carrying
+ * hints over MCP.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -17,7 +19,9 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../../src/app.js";
-import { closeStores, initStores, wipeDatabase } from "../../src/core/ports.js";
+import { settings } from "../../src/config.js";
+import { closeStores, initStores } from "../../src/core/ports.js";
+import { wipeDatabase } from "./reset.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { buildFixture } from "./fixture.js";
 
@@ -172,14 +176,78 @@ describe("query execution (unscoped lens)", () => {
     expect(globex._id).toBeDefined();
   });
 
-  it("UNWIND expands collected lists", async () => {
+  it("answers a query whose first clause is OPTIONAL MATCH", async () => {
+    await seedGraph();
+    const plain = await query(
+      "test_ontology",
+      "OPTIONAL MATCH (p:person) RETURN p.name AS name ORDER BY p.name",
+    );
+    expect(plain.results).toEqual([{ name: "Alice" }, { name: "Bob" }, { name: "Carol" }]);
+
+    const traversal = await query(
+      "test_ontology",
+      "OPTIONAL MATCH (p:person)-[:works_for]->(c:company) WHERE c.name = 'Acme' " +
+        "RETURN p.name AS name ORDER BY p.name",
+    );
+    expect(traversal.results).toEqual([{ name: "Alice" }, { name: "Bob" }]);
+  });
+
+  it("pins the empty leading OPTIONAL MATCH divergence between the backends", async () => {
+    // No person rows exist. The reference adapter preserves Cypher's
+    // single null row; the SQL emission opens the stage as a plain FROM
+    // (there is no left-hand relation to outer-join) and yields zero
+    // rows. Both sides are pinned so neither drifts unnoticed.
+    const body = await query(
+      "test_ontology",
+      "OPTIONAL MATCH (p:person) RETURN p.name AS name",
+    );
+    if (settings.DB_BACKEND === "neo4j") {
+      expect(body.results).toEqual([{ name: null }]);
+    } else {
+      expect(body.results).toEqual([]);
+    }
+  });
+
+  it("rejects a variable-length pattern at validation", async () => {
     await seedGraph();
     const body = await query(
       "test_ontology",
-      "MATCH (p:person) WITH collect(p.name) AS names UNWIND names AS n " +
-        "RETURN n ORDER BY n",
+      "MATCH (p:person)-[:works_for*1..2]->(c:company) RETURN p",
+      422,
     );
-    expect(body.results).toEqual([{ n: "Alice" }, { n: "Bob" }, { n: "Carol" }]);
+    const errors = ((body.error as Row).details as Row).errors as string[];
+    expect(errors).toContain(
+      "Variable-length relationship patterns are not supported. " +
+        "Write each hop as an explicit relationship pattern.",
+    );
+  });
+
+  it("rejects property access through a variable with no declared type", async () => {
+    await seedGraph();
+    const body = await query(
+      "test_ontology",
+      "MATCH (p:person)-[r]->(c:company) RETURN r.role",
+      422,
+    );
+    const errors = ((body.error as Row).details as Row).errors as string[];
+    expect(errors).toContain(
+      "Properties cannot be read through a variable with no declared type. " +
+        "Name the type in the pattern that binds it.",
+    );
+  });
+
+  it("rejects an inline map on an untyped owner", async () => {
+    await seedGraph();
+    const body = await query(
+      "test_ontology",
+      "MATCH ({name: 'Alice'})-[r:works_for]->(c:company) RETURN c",
+      422,
+    );
+    const errors = ((body.error as Row).details as Row).errors as string[];
+    expect(errors).toContain(
+      "An inline property map needs a typed owner — add a label to the node " +
+        "(or a type to the relationship) so its keys can be validated.",
+    );
   });
 
   it("whole nodes come back as flat property maps with system properties", async () => {
@@ -217,6 +285,364 @@ describe("query execution (unscoped lens)", () => {
   });
 });
 
+describe("the clause and expression matrix", () => {
+  /** Alice 30, Bob 40, Dana with no age at all. */
+  async function seedAges(): Promise<void> {
+    await createEntity("test_ontology", "person", { name: "Alice", age: 30 });
+    await createEntity("test_ontology", "person", { name: "Bob", age: 40 });
+    await createEntity("test_ontology", "person", { name: "Dana" });
+  }
+
+  describe("the seven aggregates", () => {
+    it("computes every cell over a non-empty group", async () => {
+      await seedAges();
+      const body = await query(
+        "test_ontology",
+        "MATCH (p:person) WHERE p.name <> 'Dana' " +
+          "RETURN count(*) AS rows, count(p.age) AS ages, sum(p.age) AS total, " +
+          "avg(p.age) AS mean, min(p.age) AS lowest, max(p.age) AS highest, " +
+          "collect(p.name) AS names",
+      );
+      const row = (body.results as Row[])[0]!;
+      expect(row.rows).toBe(2);
+      expect(row.ages).toBe(2);
+      expect(row.total).toBe(70);
+      expect(row.mean).toBe(35);
+      expect(row.lowest).toBe(30);
+      expect(row.highest).toBe(40);
+      expect([...(row.names as string[])].sort()).toEqual(["Alice", "Bob"]);
+    });
+
+    it("answers an empty group with Cypher's values, not SQL's", async () => {
+      await seedAges();
+      const body = await query(
+        "test_ontology",
+        "MATCH (p:person) WHERE p.name = 'Nobody' " +
+          "RETURN count(*) AS rows, sum(p.age) AS total, avg(p.age) AS mean, " +
+          "min(p.age) AS lowest, max(p.age) AS highest, collect(p.name) AS names",
+      );
+      expect(body.results).toEqual([
+        { rows: 0, total: 0, mean: null, lowest: null, highest: null, names: [] },
+      ]);
+    });
+
+    it("drops nulls from collect, and counts only non-null values", async () => {
+      await seedAges();
+      const body = await query(
+        "test_ontology",
+        "MATCH (p:person) RETURN count(*) AS rows, count(p.age) AS ages, " +
+          "collect(p.age) AS all_ages",
+      );
+      const row = (body.results as Row[])[0]!;
+      expect(row.rows).toBe(3);
+      expect(row.ages).toBe(2);
+      expect([...(row.all_ages as number[])].sort()).toEqual([30, 40]);
+    });
+
+    it("groups implicitly by every non-aggregate item", async () => {
+      await seedGraph();
+      const body = await query(
+        "test_ontology",
+        "MATCH (p:person)-[:works_for]->(c:company) " +
+          "RETURN c.name AS company, collect(p.name) AS staff ORDER BY c.name",
+      );
+      const rows = body.results as Row[];
+      expect(rows.map((row) => row.company)).toEqual(["Acme", "Globex"]);
+      expect([...(rows[0]!.staff as string[])].sort()).toEqual(["Alice", "Bob"]);
+    });
+  });
+
+  describe("null semantics", () => {
+    it("treats a comparison with a missing property as not-true", async () => {
+      await seedAges();
+      const above = await query(
+        "test_ontology",
+        "MATCH (p:person) WHERE p.age > 10 RETURN p.name AS name ORDER BY p.name",
+      );
+      expect(above.results).toEqual([{ name: "Alice" }, { name: "Bob" }]);
+
+      const negated = await query(
+        "test_ontology",
+        "MATCH (p:person) WHERE NOT p.age > 100 RETURN p.name AS name ORDER BY p.name",
+      );
+      expect(negated.results).toEqual([{ name: "Alice" }, { name: "Bob" }]);
+    });
+
+    it("tests presence with IS NULL and IS NOT NULL", async () => {
+      await seedAges();
+      const missing = await query(
+        "test_ontology",
+        "MATCH (p:person) WHERE p.age IS NULL RETURN p.name AS name",
+      );
+      expect(missing.results).toEqual([{ name: "Dana" }]);
+    });
+
+    it("answers IN over a list carrying a null exactly as Cypher does", async () => {
+      await seedAges();
+      const body = await query(
+        "test_ontology",
+        "MATCH (p:person) WHERE p.age IN [30, null] RETURN p.name AS name",
+      );
+      expect(body.results).toEqual([{ name: "Alice" }]);
+    });
+
+    it("answers CONTAINS with a missing operand as not-true", async () => {
+      await seedAges();
+      const body = await query(
+        "test_ontology",
+        "MATCH (p:person) WHERE p.email CONTAINS 'a' RETURN p.name AS name",
+      );
+      expect(body.results).toEqual([]);
+    });
+
+    it.skipIf(settings.DB_BACKEND !== "postgres")(
+      "answers a non-finite float literal as a comparison, never a 500",
+      async () => {
+        await seedAges();
+        // 1e400 canonicalizes to Infinity, which the compiler binds as a
+        // value SQL numeric accepts — the spliced-Infinity 500 is closed
+        // by construction. PostgreSQL-only: Neo4j's own server refuses
+        // the literal outright (22003, numeric value out of range), so
+        // there is no reference behaviour to match.
+        const above = await query(
+          "test_ontology",
+          "MATCH (p:person) WHERE p.age > 1e400 RETURN p.name AS name",
+        );
+        expect(above.results).toEqual([]);
+
+        const below = await query(
+          "test_ontology",
+          "MATCH (p:person) WHERE p.age < 1e400 RETURN p.name AS name ORDER BY p.name",
+        );
+        expect(below.results).toEqual([{ name: "Alice" }, { name: "Bob" }]);
+      },
+    );
+
+    it("sorts nulls last ascending and first descending", async () => {
+      await seedAges();
+      const ascending = await query(
+        "test_ontology",
+        "MATCH (p:person) RETURN p.name AS name ORDER BY p.age",
+      );
+      expect((ascending.results as Row[]).map((row) => row.name)).toEqual([
+        "Alice",
+        "Bob",
+        "Dana",
+      ]);
+      const descending = await query(
+        "test_ontology",
+        "MATCH (p:person) RETURN p.name AS name ORDER BY p.age DESC",
+      );
+      expect((descending.results as Row[]).map((row) => row.name)).toEqual([
+        "Dana",
+        "Bob",
+        "Alice",
+      ]);
+    });
+  });
+
+  describe("lists and strings", () => {
+    it("compares lists structurally", async () => {
+      await seedAges();
+      const body = await query(
+        "test_ontology",
+        "MATCH (p:person) WHERE [p.name, p.age] = ['Alice', 30] RETURN p.name AS name",
+      );
+      expect(body.results).toEqual([{ name: "Alice" }]);
+    });
+
+    it("returns list and map literals as values", async () => {
+      await seedAges();
+      const body = await query(
+        "test_ontology",
+        "MATCH (p:person) WHERE p.name = 'Alice' RETURN [p.name, 'x'] AS xs, {who: p.name} AS m",
+      );
+      expect(body.results).toEqual([{ xs: ["Alice", "x"], m: { who: "Alice" } }]);
+    });
+
+    it("pins the map-literal conversion divergence between the backends", async () => {
+      // Result conversion recurses through homogeneous lists only. A
+      // datetime inside a map literal is converted by the reference
+      // adapter (which recurses into plain objects and yields a Date,
+      // serialized in the Z form) but passes through PostgreSQL as the
+      // raw jsonb rendering of the timestamp column (offset form). Both
+      // carry the same instant; the shape is each backend's own.
+      const created = await createEntity("test_ontology", "person", { name: "Eve" });
+      const body = await query(
+        "test_ontology",
+        "MATCH (p:person) RETURN {t: p._createdAt} AS m",
+      );
+      const value = ((body.results as Row[])[0]!.m as Row).t as string;
+      expect(new Date(value).getTime()).toBe(
+        new Date(created._createdAt as string).getTime(),
+      );
+      if (settings.DB_BACKEND === "neo4j") {
+        expect(value).toBe(new Date(created._createdAt as string).toISOString());
+      } else {
+        expect(value).toMatch(/[+-]\d{2}:\d{2}$/);
+      }
+    });
+
+    it("matches CONTAINS case-sensitively — unlike the list filter", async () => {
+      await seedAges();
+      // The two substring surfaces deliberately differ; both are pinned
+      // so neither is ever "fixed" to match the other.
+      const oql = await query(
+        "test_ontology",
+        "MATCH (p:person) WHERE p.name CONTAINS 'ali' RETURN p.name AS name",
+      );
+      expect(oql.results).toEqual([]);
+
+      const filtered = await app.inject({
+        method: "GET",
+        url: "/api/runtime/test_ontology/entities/person?filter.name__contains=ali",
+      });
+      expect(filtered.json().total).toBe(1);
+    });
+  });
+
+  describe("patterns", () => {
+    async function addKnows(): Promise<void> {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/model/relation-types",
+        payload: {
+          key: "knows",
+          displayName: "Knows",
+          sourceEntityTypeKey: "person",
+          targetEntityTypeKey: "person",
+        },
+      });
+      expect(res.statusCode, res.body).toBe(201);
+      invalidateLoadedSchemaCache();
+    }
+
+    it("binds an undirected edge twice, and a self-loop once", async () => {
+      await addKnows();
+      const alice = await createEntity("test_ontology", "person", { name: "Alice" });
+      const bob = await createEntity("test_ontology", "person", { name: "Bob" });
+      await createRelation("test_ontology", "knows", {
+        fromEntityId: alice._id,
+        toEntityId: bob._id,
+      });
+      await createRelation("test_ontology", "knows", {
+        fromEntityId: alice._id,
+        toEntityId: alice._id,
+      });
+
+      const body = await query(
+        "test_ontology",
+        "MATCH (a:person)-[r:knows]-(b:person) RETURN a.name AS an, b.name AS bn " +
+          "ORDER BY a.name, b.name",
+      );
+      expect(body.results).toEqual([
+        { an: "Alice", bn: "Alice" },
+        { an: "Alice", bn: "Bob" },
+        { an: "Bob", bn: "Alice" },
+      ]);
+    });
+
+    it("matches inline property maps on both nodes and relationships", async () => {
+      await seedGraph();
+      const body = await query(
+        "test_ontology",
+        "MATCH (p:person)-[:works_for {role: 'Manager'}]->(c:company {name: 'Acme'}) " +
+          "RETURN p.name AS name",
+      );
+      expect(body.results).toEqual([{ name: "Bob" }]);
+    });
+  });
+
+  describe("the pipeline", () => {
+    it("keeps a WITH's ordering all the way out", async () => {
+      await seedGraph();
+      const body = await query(
+        "test_ontology",
+        "MATCH (p:person) WITH p ORDER BY p.age DESC LIMIT 2 RETURN p.name AS name",
+      );
+      expect(body.results).toEqual([{ name: "Bob" }, { name: "Alice" }]);
+    });
+
+    it("aggregates the rows a WITH ordered", async () => {
+      await seedGraph();
+      // The order *inside* the collected list is contractual on both
+      // backends: the pipeline ordering is re-stated inside the
+      // aggregate, matching the reference adapter's preserved order.
+      const collected = await query(
+        "test_ontology",
+        "MATCH (p:person) WITH p ORDER BY p.age DESC LIMIT 2 RETURN collect(p.name) AS top",
+      );
+      expect((collected.results as Row[])[0]!.top).toEqual(["Bob", "Alice"]);
+
+      const counted = await query(
+        "test_ontology",
+        "MATCH (p:person) WITH p ORDER BY p.age RETURN count(*) AS n",
+      );
+      expect(counted.results).toEqual([{ n: 3 }]);
+
+      const grouped = await query(
+        "test_ontology",
+        "MATCH (p:person)-[:works_for]->(c:company) WITH p, c ORDER BY p.age " +
+          "RETURN c.name AS company, count(*) AS n",
+      );
+      const rows = [...(grouped.results as Row[])].sort((l, r) =>
+        String(l.company).localeCompare(String(r.company)),
+      );
+      expect(rows).toEqual([
+        { company: "Acme", n: 2 },
+        { company: "Globex", n: 1 },
+      ]);
+    });
+
+    it("expands RETURN * to every variable in scope, in one fixed order", async () => {
+      await seedGraph();
+      const body = await query(
+        "test_ontology",
+        "MATCH (zebra:person)-[rel:works_for]->(apple:company) WHERE zebra.name = 'Alice' " +
+          "RETURN *",
+      );
+      expect(body.columns).toEqual(["apple", "rel", "zebra"]);
+      const row = (body.results as Row[])[0]!;
+      expect((row.apple as Row).name).toBe("Acme");
+      expect((row.rel as Row).role).toBe("Engineer");
+      expect((row.zebra as Row).name).toBe("Alice");
+    });
+
+    it("carries every variable through WITH *", async () => {
+      await seedGraph();
+      const body = await query(
+        "test_ontology",
+        "MATCH (p:person)-[r:works_for]->(c:company) WITH * " +
+          "RETURN p.name AS name, c.name AS company ORDER BY p.name",
+      );
+      expect(body.results).toEqual([
+        { name: "Alice", company: "Acme" },
+        { name: "Bob", company: "Acme" },
+        { name: "Carol", company: "Globex" },
+      ]);
+    });
+
+    it("sorts on an output alias of the same projection", async () => {
+      await seedGraph();
+      const body = await query(
+        "test_ontology",
+        "MATCH (p:person) RETURN p.name AS name ORDER BY name DESC",
+      );
+      expect(body.results).toEqual([{ name: "Carol" }, { name: "Bob" }, { name: "Alice" }]);
+    });
+
+    it("rejects a SKIP/LIMIT operand that is not a count", async () => {
+      const body = await query(
+        "test_ontology",
+        "MATCH (p:person) RETURN p.name LIMIT -1",
+        422,
+      );
+      const errors = ((body.error as Row).details as Row).errors as string[];
+      expect(errors).toContain("SKIP/LIMIT take a non-negative integer or a $parameter.");
+    });
+  });
+});
+
 describe("scoped lens", () => {
   it("strips out-of-scope properties per column", async () => {
     await seedGraph();
@@ -246,6 +672,18 @@ describe("scoped lens", () => {
     expect((errors.errors as string[]).some((e) => e.includes("Unknown property 'age'"))).toBe(
       true,
     );
+  });
+
+  it("rejects an out-of-lens inline-map key", async () => {
+    const body = await query(
+      "hr_view",
+      "MATCH (p:person {age: 30}) RETURN p",
+      422,
+    );
+    const errors = ((body.error as Row).details as Row).errors as string[];
+    expect(
+      errors.some((e) => e.includes("Unknown property 'age' on entity type 'person'")),
+    ).toBe(true);
   });
 
   it("rejects a globally valid type identically to a nonexistent one", async () => {

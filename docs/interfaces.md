@@ -77,7 +77,7 @@ Entity and relation list routes share one parameter vocabulary.
 | `filter.<propertyKey>[__<op>]` | Property filter, repeatable |
 
 A list response carries `items`, `total`, `limit` and `offset`. `total` is the count
-before paging.
+before paging. String sorting follows the database's default collation.
 
 The complete filter operator set:
 
@@ -91,7 +91,9 @@ The complete filter operator set:
 | `__contains` | Case-insensitive substring |
 
 Filter values arrive as text and are coerced to the property's declared data type before
-comparison; `__contains` is compared as text. An unknown property key, an unknown operator
+comparison; `__contains` is compared as text. Non-string values are matched against
+their text form — numbers as printed, booleans as `true`/`false`, datetimes as their
+ISO-8601 string. An unknown property key, an unknown operator
 suffix and an uncoercible value are each rejected. How a filter is evaluated, and the trap
 in the suffix rule, are in
 [capabilities/instance-data.md](capabilities/instance-data.md#listing). Relation lists

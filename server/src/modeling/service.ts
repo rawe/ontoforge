@@ -22,13 +22,15 @@ import {
 } from "../core/exceptions.js";
 import { parseAndValidate } from "../core/oql/index.js";
 import type { ModelingStore, RuntimeStore } from "../core/ports.js";
-import { DATA_TYPES, KEY_PATTERN } from "../core/schemas.js";
-import { buildTextRepr } from "../runtime/embedding.js";
 import {
-  invalidateLoadedSchemaCache,
-  loadSchema,
+  DATA_TYPES,
+  KEY_PATTERN,
+  MAX_KEY_LENGTH,
   type PropertyDef,
-} from "../runtime/schemaCache.js";
+  type TypeKind,
+} from "../core/schemas.js";
+import { buildTextRepr } from "../runtime/embedding.js";
+import { invalidateLoadedSchemaCache, loadSchema } from "../runtime/schemaCache.js";
 import { syncDocumentChunks } from "../runtime/service.js";
 import { VALID_AGENT_TOOLS } from "../runtime/toolNames.js";
 import {
@@ -67,9 +69,6 @@ import {
   onEntityTypePropertyCreated,
   onEntityTypePropertyDeleted,
 } from "./vectorHooks.js";
-
-/** The two property owners, in the port's owner-kind vocabulary. */
-export type OwnerLabel = "EntityType" | "RelationType";
 
 type Row = Record<string, unknown>;
 
@@ -415,9 +414,9 @@ export async function deleteRelationType(
 async function ensureOwnerExists(
   store: ModelingStore,
   ownerId: string,
-  ownerLabel: OwnerLabel,
+  typeKind: TypeKind,
 ): Promise<void> {
-  if (ownerLabel === "EntityType") {
+  if (typeKind === "EntityType") {
     const data = await store.getEntityType(ownerId);
     if (!data) {
       throw new NotFoundError(`Entity type '${ownerId}' not found`);
@@ -432,16 +431,16 @@ async function ensureOwnerExists(
 
 export async function createProperty(
   ownerId: string,
-  ownerLabel: OwnerLabel,
+  typeKind: TypeKind,
   body: PropertyDefinitionCreateInput,
   cascade: boolean,
   store: ModelingStore,
 ): Promise<PropertyDefinitionResponseBody> {
-  if (ownerLabel === "RelationType" && body.dataType === "document") {
+  if (typeKind === "RelationType" && body.dataType === "document") {
     throw new ValidationError("Document properties are only supported on entity types");
   }
-  await ensureOwnerExists(store, ownerId, ownerLabel);
-  const existing = await store.getPropertyByKey(ownerId, ownerLabel, body.key);
+  await ensureOwnerExists(store, ownerId, typeKind);
+  const existing = await store.getPropertyByKey(ownerId, typeKind, body.key);
   if (existing) {
     throw new ConflictError(`Property with key '${body.key}' already exists on this type`);
   }
@@ -449,7 +448,7 @@ export async function createProperty(
   // every lens whose explicit allowlist for this type omits the new key.
   if (body.required && (body.defaultValue === null || body.defaultValue === undefined)) {
     const affected = await store.findOntologiesWithExplicitProperty(
-      ownerLabel,
+      typeKind,
       ownerId,
       body.key,
     );
@@ -462,13 +461,13 @@ export async function createProperty(
       );
     }
     if (affected.length > 0) {
-      await store.addPropertyToIncludesLists(ownerLabel, ownerId, body.key);
+      await store.addPropertyToIncludesLists(typeKind, ownerId, body.key);
     }
   }
   const propertyId = randomUUID();
   const data = await store.createProperty(
     ownerId,
-    ownerLabel,
+    typeKind,
     propertyId,
     body.key,
     body.displayName,
@@ -478,7 +477,7 @@ export async function createProperty(
     body.defaultValue ?? null,
   );
   invalidateLoadedSchemaCache();
-  if (ownerLabel === "EntityType") {
+  if (typeKind === "EntityType") {
     await onEntityTypePropertyCreated(store, ownerId, data);
   }
   return toPropertyResponse(data);
@@ -486,28 +485,28 @@ export async function createProperty(
 
 export async function listProperties(
   ownerId: string,
-  ownerLabel: OwnerLabel,
+  typeKind: TypeKind,
   store: ModelingStore,
 ): Promise<PropertyDefinitionResponseBody[]> {
-  await ensureOwnerExists(store, ownerId, ownerLabel);
-  const rows = await store.listProperties(ownerId, ownerLabel);
+  await ensureOwnerExists(store, ownerId, typeKind);
+  const rows = await store.listProperties(ownerId, typeKind);
   return rows.map(toPropertyResponse);
 }
 
 export async function updateProperty(
   ownerId: string,
-  ownerLabel: OwnerLabel,
+  typeKind: TypeKind,
   propertyId: string,
   body: PropertyDefinitionUpdateInput,
   store: ModelingStore,
 ): Promise<PropertyDefinitionResponseBody> {
-  await ensureOwnerExists(store, ownerId, ownerLabel);
+  await ensureOwnerExists(store, ownerId, typeKind);
   // An explicitly null defaultValue clears the default — the one exception
   // to sparse-update semantics. Omitted (`undefined`) means unchanged.
   const clearDefault = body.defaultValue === null;
   const data = await store.updateProperty(
     ownerId,
-    ownerLabel,
+    typeKind,
     propertyId,
     body.displayName ?? null,
     body.description ?? null,
@@ -524,13 +523,13 @@ export async function updateProperty(
 
 export async function deleteProperty(
   ownerId: string,
-  ownerLabel: OwnerLabel,
+  typeKind: TypeKind,
   propertyId: string,
   cascade: boolean,
   store: ModelingStore,
 ): Promise<void> {
-  await ensureOwnerExists(store, ownerId, ownerLabel);
-  const prop = await store.getProperty(ownerId, ownerLabel, propertyId);
+  await ensureOwnerExists(store, ownerId, typeKind);
+  const prop = await store.getProperty(ownerId, typeKind, propertyId);
   if (!prop) {
     throw new NotFoundError(`Property '${propertyId}' not found on this type`);
   }
@@ -538,16 +537,16 @@ export async function deleteProperty(
   // cascade, allowlists are left holding an unresolvable key (harmless at
   // runtime, reported by lens validation). The lookup runs anyway so the
   // call fails here if the owner has vanished; its result is not acted on.
-  await store.findOntologiesIncludingType(ownerLabel, ownerId);
+  await store.findOntologiesIncludingType(typeKind, ownerId);
   if (cascade) {
-    await store.removePropertyFromIncludesLists(ownerLabel, ownerId, prop.key as string);
+    await store.removePropertyFromIncludesLists(typeKind, ownerId, prop.key as string);
   }
-  const deleted = await store.deleteProperty(ownerId, ownerLabel, propertyId);
+  const deleted = await store.deleteProperty(ownerId, typeKind, propertyId);
   if (!deleted) {
     throw new NotFoundError(`Property '${propertyId}' not found on this type`);
   }
   invalidateLoadedSchemaCache();
-  if (ownerLabel === "EntityType") {
+  if (typeKind === "EntityType") {
     await onEntityTypePropertyDeleted(store, ownerId, prop);
   }
 }
@@ -1089,8 +1088,8 @@ export async function* rebuildEmbeddings(
     for (;;) {
       const [items, total] = await runtimeStore.listEntities(
         etKey,
-        {},
-        {},
+        propertyDefs,
+        [],
         null,
         [],
         "_createdAt",
@@ -1345,11 +1344,17 @@ export async function importSchema(
   };
   const badKey = (kind: string, key: string, pattern: string): string =>
     `Import error: invalid ${kind} key '${key}'. Must match pattern: ${pattern}`;
+  const longKey = (kind: string, key: string): string =>
+    `Import error: invalid ${kind} key '${key}'. ` +
+    `Maximum length is ${MAX_KEY_LENGTH} characters`;
   const typeKeyPattern = KEY_PATTERN.source;
 
   for (const et of payload.entityTypes) {
     if (!KEY_PATTERN.test(et.key)) {
       errors.push(badKey("entity type", et.key, typeKeyPattern));
+    }
+    if (et.key.length > MAX_KEY_LENGTH) {
+      errors.push(longKey("entity type", et.key));
     }
     pushReserved(() => rejectReservedEntityTypeKey(store, et.key, "Import error: "));
     for (const prop of et.properties) {
@@ -1359,6 +1364,12 @@ export async function importSchema(
             `'${et.key}'. Must match pattern: ${typeKeyPattern}`,
         );
       }
+      if (prop.key.length > MAX_KEY_LENGTH) {
+        errors.push(
+          `Import error: invalid property key '${prop.key}' on entity type ` +
+            `'${et.key}'. Maximum length is ${MAX_KEY_LENGTH} characters`,
+        );
+      }
     }
   }
 
@@ -1366,6 +1377,9 @@ export async function importSchema(
   for (const rt of payload.relationTypes) {
     if (!KEY_PATTERN.test(rt.key)) {
       errors.push(badKey("relation type", rt.key, typeKeyPattern));
+    }
+    if (rt.key.length > MAX_KEY_LENGTH) {
+      errors.push(longKey("relation type", rt.key));
     }
     pushReserved(() => rejectReservedRelationTypeKey(store, rt.key, "Import error: "));
     // Endpoints must be present in the SAME payload — a type existing only
@@ -1387,6 +1401,12 @@ export async function importSchema(
             `'${rt.key}'. Must match pattern: ${typeKeyPattern}`,
         );
       }
+      if (prop.key.length > MAX_KEY_LENGTH) {
+        errors.push(
+          `Import error: invalid property key '${prop.key}' on relation type ` +
+            `'${rt.key}'. Maximum length is ${MAX_KEY_LENGTH} characters`,
+        );
+      }
       if (prop.dataType === "document") {
         errors.push(
           `Import error: property '${prop.key}' on relation type '${rt.key}' ` +
@@ -1401,9 +1421,15 @@ export async function importSchema(
     if (!KEY_PATTERN.test(ont.key)) {
       errors.push(badKey("ontology", ont.key, typeKeyPattern));
     }
+    if (ont.key.length > MAX_KEY_LENGTH) {
+      errors.push(longKey("ontology", ont.key));
+    }
     for (const ag of ont.aiAgents) {
       if (!AGENT_KEY_REGEX.test(ag.key)) {
         errors.push(badKey("agent", ag.key, AGENT_KEY_PATTERN));
+      }
+      if (ag.key.length > MAX_KEY_LENGTH) {
+        errors.push(longKey("agent", ag.key));
       }
       const tools = ag.tools ?? null;
       if (tools !== null) {
@@ -1420,6 +1446,9 @@ export async function importSchema(
     for (const sq of ont.savedQueries) {
       if (!AGENT_KEY_REGEX.test(sq.key)) {
         errors.push(badKey("saved query", sq.key, AGENT_KEY_PATTERN));
+      }
+      if (sq.key.length > MAX_KEY_LENGTH) {
+        errors.push(longKey("saved query", sq.key));
       }
       let stepsKnown = true;
       for (const s of sq.steps) {
@@ -1698,6 +1727,11 @@ export async function upsertAiAgent(
       `Invalid agent key '${agentKey}'. Must match pattern: ${AGENT_KEY_PATTERN}`,
     );
   }
+  if (agentKey.length > MAX_KEY_LENGTH) {
+    throw new ValidationError(
+      `Invalid agent key '${agentKey}'. Maximum length is ${MAX_KEY_LENGTH} characters`,
+    );
+  }
   if (agentKey === "_default") {
     throw new ValidationError("Agent key '_default' is reserved");
   }
@@ -1909,6 +1943,11 @@ export async function upsertSavedQuery(
   if (!AGENT_KEY_REGEX.test(queryKey)) {
     throw new ValidationError(
       `Invalid query key '${queryKey}'. Must match pattern: ${AGENT_KEY_PATTERN}`,
+    );
+  }
+  if (queryKey.length > MAX_KEY_LENGTH) {
+    throw new ValidationError(
+      `Invalid query key '${queryKey}'. Maximum length is ${MAX_KEY_LENGTH} characters`,
     );
   }
 

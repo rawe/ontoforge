@@ -9,7 +9,13 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../../../src/app.js";
-import { closeStores, initStores, wipeDatabase } from "../../../src/core/ports.js";
+import { getEmbeddingProvider } from "../../../src/core/embedding.js";
+import {
+  closeStores,
+  getRuntimeStore,
+  initStores,
+} from "../../../src/core/ports.js";
+import { wipeDatabase } from "../reset.js";
 import { invalidateLoadedSchemaCache } from "../../../src/runtime/schemaCache.js";
 import {
   checkOllamaModel,
@@ -120,6 +126,33 @@ describe.skipIf(!ollamaUp)("document semantic search (Ollama)", () => {
     expect(slice.statusCode).toBe(200);
     const sliceBody = slice.json() as { content: string };
     expect((mv.snippet as string).startsWith(sliceBody.content.slice(0, 50))).toBe(true);
+  });
+
+  it("search hits return the chunk payload unchanged (ordinal, offsets)", async () => {
+    const article = await post("/api/runtime/doc_search/entities/article", {
+      title: "Engines",
+      body: BODY,
+    });
+
+    const chunkCount = Object.keys(
+      await getRuntimeStore().getChunkEmbeddingsForEntityProperty(article._id as string, "body"),
+    ).length;
+    expect(chunkCount).toBeGreaterThan(1);
+
+    const embedding = await getEmbeddingProvider()!.embed("polynomial computation");
+    const hits = await getRuntimeStore().searchDocumentChunks("article", "body", embedding!, 5);
+    expect(hits.length).toBeGreaterThan(0);
+    for (const hit of hits) {
+      const chunk = hit.chunk as Row;
+      // The ordinal written at chunking time comes back on the hit.
+      expect(Number.isInteger(chunk._index)).toBe(true);
+      expect(chunk._index as number).toBeGreaterThanOrEqual(0);
+      expect(chunk._index as number).toBeLessThan(chunkCount);
+      // The offsets still slice the stored document to exactly this text.
+      const start = chunk.startChar as number;
+      const length = chunk.charLength as number;
+      expect(Array.from(BODY).slice(start, start + length).join("")).toBe(chunk.text);
+    }
   });
 
   it("suppressing snippets keeps the coordinates", async () => {

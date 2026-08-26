@@ -1,5 +1,5 @@
 /**
- * Persistence port: store accessors and adapter lifecycle.
+ * Persistence port: store interfaces, store accessors, adapter lifecycle.
  *
  * Services, routers, and MCP handlers obtain their store through this
  * module and speak ontology vocabulary only (type keys, property keys,
@@ -32,40 +32,573 @@
  *    the modeling service can reject a colliding key without knowing why it
  *    collides. An adapter with no such collisions returns empty sets.
  *
- * The reference implementation and the authoritative method list is the
- * Neo4j adapter: `adapters/neo4j/modelingStore.ts` and
- * `adapters/neo4j/runtimeStore.ts`. A future adapter implements the same
- * method surface and is registered in `initStores`.
+ * The `ModelingStore` and `RuntimeStore` interfaces below, together with
+ * the conformance suite, are the authoritative contract — adapters are
+ * peers under it; none is the reference implementation. An adapter
+ * implements both interfaces (the Neo4j adapter does so in
+ * `adapters/neo4j/modelingStore.ts` and `adapters/neo4j/runtimeStore.ts`)
+ * and its package is registered as one thunk line in `ADAPTERS`.
  */
 
 import { settings } from "../config.js";
-import type { Neo4jModelingStore } from "../adapters/neo4j/modelingStore.js";
-import type { Neo4jRuntimeStore } from "../adapters/neo4j/runtimeStore.js";
+import type { ValidatedQuery } from "./oql/index.js";
+import type { PropertyDef, TypeKind } from "./schemas.js";
 
-export type ModelingStore = Neo4jModelingStore;
-export type RuntimeStore = Neo4jRuntimeStore;
+/** A raw store row: one entity, relation, or schema object as a plain map. */
+export type Row = Record<string, unknown>;
+
+/** The closed filter-operator vocabulary; a bare filter key means `eq`. */
+export type FilterOperator = "eq" | "gt" | "gte" | "lt" | "lte" | "contains";
+
+/**
+ * One parsed, coerced filter condition. Built by the runtime service —
+ * which validates the property, coerces the value, and checks the
+ * operator above the port — so adapters receive only valid input and do
+ * pure predicate assembly. The value is already coerced to the declared
+ * data type (`contains` compares textually and carries the string form).
+ */
+export interface FilterCondition {
+  key: string;
+  dataType: string;
+  op: FilterOperator;
+  value: unknown;
+}
+
+/** One stored type whose key the active adapter now reserves. */
+export interface ReservedTypeKeyInUse {
+  kind: TypeKind;
+  key: string;
+}
+
+/**
+ * The modeling side of the persistence port: schema persistence.
+ *
+ * Capability grouping follows `docs/storage-adapters.md` ("The two store
+ * surfaces"); the section comments below mirror it.
+ */
+export interface ModelingStore {
+  // ------------------------------------------------------------------
+  // Reserved keys
+  // ------------------------------------------------------------------
+
+  /** Entity type keys this adapter cannot store (contract rule 5). */
+  reservedEntityTypeKeys(): ReadonlySet<string>;
+
+  /** Relation type keys this adapter cannot store (contract rule 5). */
+  reservedRelationTypeKeys(): ReadonlySet<string>;
+
+  /** Stored types with a now-reserved key, as `{kind, key}` rows. */
+  findReservedTypeKeysInUse(): Promise<ReservedTypeKeyInUse[]>;
+
+  // ------------------------------------------------------------------
+  // Ontologies
+  // ------------------------------------------------------------------
+
+  createOntology(
+    ontologyId: string,
+    key: string,
+    name: string,
+    description: string | null,
+  ): Promise<Row>;
+
+  listOntologies(): Promise<Row[]>;
+
+  getOntology(ontologyId: string): Promise<Row | null>;
+
+  getOntologyByName(name: string): Promise<Row | null>;
+
+  getOntologyByKey(key: string): Promise<Row | null>;
+
+  updateOntology(
+    ontologyId: string,
+    name: string | null,
+    description: string | null,
+  ): Promise<Row | null>;
+
+  deleteOntology(ontologyId: string): Promise<boolean>;
+
+  // ------------------------------------------------------------------
+  // Entity types
+  // ------------------------------------------------------------------
+
+  createEntityType(
+    entityTypeId: string,
+    key: string,
+    displayName: string,
+    description: string | null,
+  ): Promise<Row>;
+
+  listEntityTypes(): Promise<Row[]>;
+
+  getEntityType(entityTypeId: string): Promise<Row | null>;
+
+  getEntityTypeByKey(key: string): Promise<Row | null>;
+
+  updateEntityType(
+    entityTypeId: string,
+    displayName: string | null,
+    description: string | null,
+  ): Promise<Row | null>;
+
+  deleteEntityType(entityTypeId: string): Promise<boolean>;
+
+  isEntityTypeReferenced(entityTypeId: string): Promise<boolean>;
+
+  // ------------------------------------------------------------------
+  // Relation types
+  // ------------------------------------------------------------------
+
+  createRelationType(
+    relationTypeId: string,
+    key: string,
+    displayName: string,
+    description: string | null,
+    sourceEntityTypeKey: string,
+    targetEntityTypeKey: string,
+  ): Promise<Row>;
+
+  listRelationTypes(): Promise<Row[]>;
+
+  getRelationType(relationTypeId: string): Promise<Row | null>;
+
+  getRelationTypeByKey(key: string): Promise<Row | null>;
+
+  updateRelationType(
+    relationTypeId: string,
+    displayName: string | null,
+    description: string | null,
+  ): Promise<Row | null>;
+
+  deleteRelationType(relationTypeId: string): Promise<boolean>;
+
+  // ------------------------------------------------------------------
+  // Property definitions
+  // ------------------------------------------------------------------
+
+  createProperty(
+    ownerId: string,
+    typeKind: TypeKind,
+    propertyId: string,
+    key: string,
+    displayName: string,
+    description: string | null,
+    dataType: string,
+    required: boolean,
+    defaultValue: string | null,
+  ): Promise<Row>;
+
+  listProperties(ownerId: string, typeKind: TypeKind): Promise<Row[]>;
+
+  getProperty(ownerId: string, typeKind: TypeKind, propertyId: string): Promise<Row | null>;
+
+  getPropertyByKey(ownerId: string, typeKind: TypeKind, key: string): Promise<Row | null>;
+
+  updateProperty(
+    ownerId: string,
+    typeKind: TypeKind,
+    propertyId: string,
+    displayName: string | null,
+    description: string | null,
+    required: boolean | null,
+    defaultValue: string | null,
+    clearDefault: boolean,
+  ): Promise<Row | null>;
+
+  deleteProperty(ownerId: string, typeKind: TypeKind, propertyId: string): Promise<boolean>;
+
+  // ------------------------------------------------------------------
+  // Scope inclusions (lifecycle)
+  // ------------------------------------------------------------------
+
+  addIncludesType(
+    ontologyId: string,
+    typeKind: TypeKind,
+    typeKey: string,
+    properties: string[] | null,
+  ): Promise<Row | null>;
+
+  listIncludesTypes(ontologyId: string, typeKind: TypeKind): Promise<Row[]>;
+
+  updateIncludesType(
+    ontologyId: string,
+    typeKind: TypeKind,
+    typeId: string,
+    properties: string[] | null,
+  ): Promise<Row | null>;
+
+  removeIncludesType(ontologyId: string, typeKind: TypeKind, typeId: string): Promise<boolean>;
+
+  // ------------------------------------------------------------------
+  // Scope inclusions (cascade-protocol support)
+  // ------------------------------------------------------------------
+
+  removeAllIncludesForType(typeKind: TypeKind, typeId: string): Promise<number>;
+
+  findOntologiesIncludingType(typeKind: TypeKind, typeId: string): Promise<string[]>;
+
+  findOntologiesWithExplicitProperty(
+    typeKind: TypeKind,
+    typeId: string,
+    propertyKey: string,
+  ): Promise<string[]>;
+
+  addPropertyToIncludesLists(
+    typeKind: TypeKind,
+    typeId: string,
+    propertyKey: string,
+  ): Promise<number>;
+
+  removePropertyFromIncludesLists(
+    typeKind: TypeKind,
+    typeId: string,
+    propertyKey: string,
+  ): Promise<number>;
+
+  // ------------------------------------------------------------------
+  // Document-property cleanup
+  // ------------------------------------------------------------------
+
+  /** Delete every chunk of one (entity type, document property) pair.
+   * Invoked when the property, or its owning type, is removed. */
+  deleteChunksForTypeProperty(entityTypeKey: string, propertyKey: string): Promise<void>;
+
+  // ------------------------------------------------------------------
+  // Full schema (get_schema now; validation and export later)
+  // ------------------------------------------------------------------
+
+  getFullSchema(): Promise<Row>;
+
+  // ------------------------------------------------------------------
+  // AI agent configs
+  // ------------------------------------------------------------------
+
+  listAiAgents(ontologyId: string): Promise<Row[]>;
+
+  upsertAiAgent(
+    ontologyId: string,
+    agentConfigId: string,
+    key: string,
+    name: string,
+    description: string | null,
+    systemPrompt: string | null,
+    tools: string[] | null,
+  ): Promise<[Row, boolean]>;
+
+  listAiAgentsForExport(ontologyId: string): Promise<Row[]>;
+
+  deleteAiAgent(ontologyId: string, agentKey: string): Promise<boolean>;
+
+  // ------------------------------------------------------------------
+  // Saved query configs
+  // ------------------------------------------------------------------
+
+  listSavedQueries(ontologyId: string): Promise<Row[]>;
+
+  listSavedQueriesForExport(ontologyId: string): Promise<Row[]>;
+
+  upsertSavedQuery(
+    ontologyId: string,
+    savedQueryId: string,
+    key: string,
+    name: string,
+    description: string,
+    stepsJson: string,
+    parametersJson: string,
+    ontologyKey?: string | null,
+    embedding?: number[] | null,
+  ): Promise<[Row, boolean]>;
+
+  deleteSavedQuery(ontologyId: string, queryKey: string): Promise<boolean>;
+
+  // ------------------------------------------------------------------
+  // Embedding maintenance (rebuild support)
+  // ------------------------------------------------------------------
+
+  getEntityTypesWithProperties(): Promise<Row[]>;
+
+  setEntityEmbedding(entityId: string, embedding: number[]): Promise<void>;
+
+  listSavedQueryRefs(): Promise<Row[]>;
+
+  setSavedQueryEmbedding(savedQueryId: string, embedding: number[]): Promise<void>;
+
+  // ------------------------------------------------------------------
+  // Vector-index DDL
+  // ------------------------------------------------------------------
+
+  createVectorIndex(
+    entityTypeKey: string,
+    dimensions: number,
+    filterProperties?: string[] | null,
+  ): Promise<void>;
+
+  dropVectorIndex(entityTypeKey: string): Promise<void>;
+
+  rebuildVectorIndex(entityTypeKey: string, dimensions: number): Promise<void>;
+
+  createDocumentVectorIndex(
+    entityTypeKey: string,
+    propertyKey: string,
+    dimensions: number,
+  ): Promise<void>;
+
+  dropDocumentVectorIndex(entityTypeKey: string, propertyKey: string): Promise<void>;
+
+  ensureSavedQueryVectorIndex(dimensions: number): Promise<void>;
+
+  ensureVectorIndexes(dimensions: number, recreateOnMismatch?: boolean): Promise<void>;
+}
+
+/**
+ * The runtime side of the persistence port: instance-data persistence.
+ *
+ * Capability grouping follows `docs/storage-adapters.md` ("The two store
+ * surfaces"); the section comments below mirror it.
+ *
+ * Filter-taking methods (`listEntities`, `listRelations`, and the
+ * per-type entity search via `semanticSearch`) receive parsed, coerced
+ * `FilterCondition`s built by the service — filter validation happens
+ * above the port, so adapters receive only valid input and raise no
+ * validation errors. Three reads carry the property definitions for row
+ * decoding — `getEntityById`, `getEntitiesByIds`, and `getNeighbors` (an
+ * adapter whose storage is self-describing may ignore them); listing
+ * paths carry them for the same reason. `getEntity` and `getRelation`
+ * carry none.
+ */
+export interface RuntimeStore {
+  // ------------------------------------------------------------------
+  // Schema reading (for the runtime schema cache)
+  // ------------------------------------------------------------------
+
+  getFullSchema(ontologyKey: string): Promise<Row | null>;
+
+  getAiAgentConfigs(ontologyKey: string): Promise<Row[]>;
+
+  getSavedQueries(ontologyKey: string): Promise<Row[]>;
+
+  // ------------------------------------------------------------------
+  // Vector-index metadata validation
+  // ------------------------------------------------------------------
+
+  /** Reject property values the adapter's vector-index filter metadata
+   * cannot hold. Synchronous; raises the domain `ValidationError`. An
+   * adapter without such limits implements it as a no-op. */
+  validateVectorIndexedProperties(
+    entityTypeKey: string,
+    properties: Row,
+    filterProperties: string[],
+    entityId?: string | null,
+  ): void;
+
+  // ------------------------------------------------------------------
+  // Entity instances
+  // ------------------------------------------------------------------
+
+  createEntity(
+    entityTypeKey: string,
+    entityId: string,
+    properties: Row,
+    propertyDefs: Record<string, PropertyDef>,
+    embedding?: number[] | null,
+  ): Promise<Row>;
+
+  listEntities(
+    entityTypeKey: string,
+    propertyDefs: Record<string, PropertyDef>,
+    filters: FilterCondition[],
+    search: string | null,
+    searchPropertyKeys: string[],
+    sortField: string,
+    order: string,
+    limit: number,
+    offset: number,
+  ): Promise<[Row[], number]>;
+
+  getEntity(entityTypeKey: string, entityId: string): Promise<Row | null>;
+
+  getEntityById(
+    entityId: string,
+    propertyDefs: Record<string, PropertyDef>,
+  ): Promise<Row | null>;
+
+  updateEntity(
+    entityTypeKey: string,
+    entityId: string,
+    setProperties: Row,
+    removeProperties: string[],
+    propertyDefs: Record<string, PropertyDef>,
+    embedding?: number[] | null,
+    hasEmbeddingUpdate?: boolean,
+  ): Promise<Row | null>;
+
+  deleteEntity(entityTypeKey: string, entityId: string): Promise<boolean>;
+
+  // ------------------------------------------------------------------
+  // Document chunks
+  // ------------------------------------------------------------------
+
+  getChunkEmbeddingsForEntityProperty(
+    entityId: string,
+    propertyKey: string,
+  ): Promise<Record<string, number[]>>;
+
+  deleteChunksForEntityProperty(entityId: string, propertyKey: string): Promise<void>;
+
+  createDocumentChunks(
+    entityId: string,
+    entityTypeKey: string,
+    propertyKey: string,
+    chunks: Row[],
+  ): Promise<void>;
+
+  searchDocumentChunks(
+    entityTypeKey: string,
+    propertyKey: string,
+    queryEmbedding: number[],
+    limit: number,
+  ): Promise<Row[]>;
+
+  getEntitiesByIds(
+    entityIds: string[],
+    propertyDefs: Record<string, PropertyDef>,
+  ): Promise<Record<string, Row>>;
+
+  // ------------------------------------------------------------------
+  // Semantic search
+  // ------------------------------------------------------------------
+
+  semanticSearch(
+    entityTypeKey: string,
+    propertyDefs: Record<string, PropertyDef>,
+    queryEmbedding: number[],
+    limit: number,
+    minScore: number | null,
+    filters?: FilterCondition[] | null,
+  ): Promise<Row[]>;
+
+  /** Search across all entity types at once. */
+  semanticSearchAll(
+    queryEmbedding: number[],
+    limit: number,
+    minScore: number | null,
+  ): Promise<Row[]>;
+
+  /** Rank SavedQuery descriptions for one lens by vector similarity. */
+  searchSavedQueries(
+    queryEmbedding: number[],
+    ontologyKey: string,
+    limit: number,
+    minScore: number | null,
+  ): Promise<Row[]>;
+
+  // ------------------------------------------------------------------
+  // Relation instances
+  // ------------------------------------------------------------------
+
+  createRelation(
+    relationTypeKey: string,
+    relationId: string,
+    fromEntityId: string,
+    toEntityId: string,
+    properties: Row,
+    propertyDefs: Record<string, PropertyDef>,
+  ): Promise<Row>;
+
+  listRelations(
+    relationTypeKey: string,
+    propertyDefs: Record<string, PropertyDef>,
+    filters: FilterCondition[],
+    fromEntityId: string | null,
+    toEntityId: string | null,
+    sortField: string,
+    order: string,
+    limit: number,
+    offset: number,
+  ): Promise<[Row[], number]>;
+
+  getRelation(relationTypeKey: string, relationId: string): Promise<Row | null>;
+
+  updateRelation(
+    relationTypeKey: string,
+    relationId: string,
+    setProperties: Row,
+    removeProperties: string[],
+    propertyDefs: Record<string, PropertyDef>,
+  ): Promise<Row | null>;
+
+  deleteRelation(relationTypeKey: string, relationId: string): Promise<boolean>;
+
+  // ------------------------------------------------------------------
+  // OQL
+  // ------------------------------------------------------------------
+
+  /**
+   * Compile a validated OQL query to the adapter's native dialect and
+   * execute it read-only. The validated query crosses the port opaque
+   * (rule 1); parameters arrive separately as a map (empty for ad-hoc
+   * queries — binding is a saved-query concern).
+   */
+  executeOql(validated: ValidatedQuery, params?: Row): Promise<[string[], Row[]]>;
+
+  // ------------------------------------------------------------------
+  // Graph traversal
+  // ------------------------------------------------------------------
+
+  getNeighbors(
+    entityId: string,
+    direction: string,
+    relationTypeKey: string | null,
+    limit: number,
+    propertyDefsByType: Record<string, Record<string, PropertyDef>>,
+  ): Promise<Row[]>;
+}
+
+/**
+ * The lifecycle surface every adapter package exports. The module IS the
+ * namespace import — no wrapper object, no default export, no factory
+ * class; TypeScript checks each `import()` result structurally at the
+ * registry literal below.
+ */
+export interface AdapterModule {
+  createStores(): Promise<[ModelingStore, RuntimeStore]>;
+  closeStores(): Promise<void>;
+  ensureSemanticIndexes(dimensions: number): Promise<void>;
+}
+
+/**
+ * The adapter registry: one thunk per backend, keyed by the `DB_BACKEND`
+ * value. Registry values are thunks, so only the selected backend's
+ * module and driver ever load.
+ */
+const ADAPTERS: Record<string, () => Promise<AdapterModule>> = {
+  neo4j: () => import("../adapters/neo4j/index.js"),
+  postgres: () => import("../adapters/postgres/index.js"),
+};
 
 let modelingStore: ModelingStore | null = null;
 let runtimeStore: RuntimeStore | null = null;
+let activeAdapter: AdapterModule | null = null;
 
 function unknownBackend(): never {
-  throw new Error(`Unknown DB_BACKEND '${settings.DB_BACKEND}' (supported: neo4j)`);
+  throw new Error(
+    `Unknown DB_BACKEND '${settings.DB_BACKEND}' ` +
+      `(supported: ${Object.keys(ADAPTERS).join(", ")})`,
+  );
 }
 
 /** Initialize the configured persistence adapter and its stores. */
 export async function initStores(): Promise<void> {
-  if (settings.DB_BACKEND === "neo4j") {
-    const adapter = await import("../adapters/neo4j/index.js");
-    [modelingStore, runtimeStore] = await adapter.createStores();
-  } else {
-    unknownBackend();
-  }
+  const loadAdapter = ADAPTERS[settings.DB_BACKEND] ?? unknownBackend();
+  const adapter = await loadAdapter();
+  [modelingStore, runtimeStore] = await adapter.createStores();
+  activeAdapter = adapter;
 }
 
+/** Close the active adapter; no-op if none. Never consults `DB_BACKEND`. */
 export async function closeStores(): Promise<void> {
-  if (settings.DB_BACKEND === "neo4j") {
-    const adapter = await import("../adapters/neo4j/index.js");
-    await adapter.closeStores();
+  if (activeAdapter !== null) {
+    await activeAdapter.closeStores();
+    activeAdapter = null;
   }
   modelingStore = null;
   runtimeStore = null;
@@ -73,22 +606,10 @@ export async function closeStores(): Promise<void> {
 
 /** Ensure the adapter's semantic-search indexes exist (startup hook). */
 export async function ensureSemanticIndexes(dimensions: number): Promise<void> {
-  if (settings.DB_BACKEND === "neo4j") {
-    const adapter = await import("../adapters/neo4j/index.js");
-    await adapter.ensureSemanticIndexes(dimensions);
-  } else {
-    unknownBackend();
+  if (activeAdapter === null) {
+    throw new Error("Stores not initialized");
   }
-}
-
-/** Delete all stored data via the active adapter. Test support only. */
-export async function wipeDatabase(): Promise<void> {
-  if (settings.DB_BACKEND === "neo4j") {
-    const adapter = await import("../adapters/neo4j/index.js");
-    await adapter.wipe();
-  } else {
-    unknownBackend();
-  }
+  await activeAdapter.ensureSemanticIndexes(dimensions);
 }
 
 export function getModelingStore(): ModelingStore {

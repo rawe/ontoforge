@@ -9,7 +9,7 @@
 import type { Session } from "neo4j-driver";
 import { describe, expect, it, vi } from "vitest";
 
-import { getNeighbors } from "../../src/adapters/neo4j/runtimeQueries.js";
+import { getNeighbors } from "../../../src/adapters/neo4j/runtimeQueries.js";
 
 type Row = Record<string, unknown>;
 

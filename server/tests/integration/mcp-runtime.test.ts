@@ -14,7 +14,8 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../../src/app.js";
-import { closeStores, initStores, wipeDatabase } from "../../src/core/ports.js";
+import { closeStores, initStores } from "../../src/core/ports.js";
+import { wipeDatabase } from "./reset.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { buildFixture } from "./fixture.js";
 
@@ -440,6 +441,54 @@ describe("entity tools", () => {
         await call(client, "list_entities", { entity_type_key: "person", limit: 0 }),
       );
       expect(undersized.limit).toBe(1);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("refuses a sort direction outside asc/desc at the tool boundary", async () => {
+    const client = await connectClient(`${baseUrl}/mcp/runtime/test_ontology`);
+    try {
+      // A crafted tail must die at argument validation, never reach a query.
+      const entities = await call(client, "list_entities", {
+        entity_type_key: "person",
+        sort: "name",
+        order: "asc, n._embedding",
+      });
+      expect(entities.isError).toBe(true);
+      expect(text(entities)).toContain("Invalid arguments for tool list_entities");
+      expect(text(entities)).toContain("order");
+
+      const relations = await call(client, "list_relations", {
+        relation_type_key: "works_for",
+        order: "asc, r._createdAt",
+      });
+      expect(relations.isError).toBe(true);
+      expect(text(relations)).toContain("Invalid arguments for tool list_relations");
+      expect(text(relations)).toContain("order");
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("sorts descending when order is 'desc'", async () => {
+    const client = await connectClient(`${baseUrl}/mcp/runtime/test_ontology`);
+    try {
+      for (const name of ["Alice", "Bob"]) {
+        await call(client, "create_entity", {
+          entity_type_key: "person",
+          properties: { name },
+        });
+      }
+      const listed = json(
+        await call(client, "list_entities", {
+          entity_type_key: "person",
+          sort: "name",
+          order: "desc",
+        }),
+      );
+      const items = listed.items as { name: string }[];
+      expect(items.map((i) => i.name)).toEqual(["Bob", "Alice"]);
     } finally {
       await client.close();
     }

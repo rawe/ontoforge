@@ -17,11 +17,12 @@
 import { randomUUID } from "node:crypto";
 
 import { settings } from "../config.js";
-import { CoercionError, coerceValue, valueToText } from "../core/dataTypes.js";
+import { CoercionError, assertNoNulCharacter, coerceValue, valueToText } from "../core/dataTypes.js";
 import { getEmbeddingProvider } from "../core/embedding.js";
 import { ConflictError, NotFoundError, ValidationError } from "../core/exceptions.js";
 import { SYSTEM_PROPERTIES, getReturnVariables, parseAndValidate } from "../core/oql/index.js";
-import type { RuntimeStore } from "../core/ports.js";
+import type { FilterCondition, FilterOperator, RuntimeStore } from "../core/ports.js";
+import type { PropertyDef } from "../core/schemas.js";
 import { chunkDocument } from "./chunking.js";
 import { cpIndexOf, cpLength, cpSlice, countOccurrences } from "./codePoints.js";
 import { buildTextRepr } from "./embedding.js";
@@ -29,7 +30,6 @@ import {
   loadSchema,
   type EntityTypeDef,
   type LoadedSchema,
-  type PropertyDef,
   type RelationTypeDef,
   type SchemaCacheValue,
 } from "./schemaCache.js";
@@ -252,6 +252,82 @@ export function parseFilters(queryParams: Record<string, unknown>): Record<strin
     }
   }
   return filters;
+}
+
+const FILTER_OPERATORS: ReadonlySet<FilterOperator> = new Set([
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+  "contains",
+]);
+
+/**
+ * Parse a list-endpoint filter map into the conditions that cross the
+ * port. The operator is the segment after the LAST double underscore —
+ * so a property whose own key contains `__` cannot be filtered
+ * (documented trap). The three faults — unknown property, uncoercible
+ * value, unknown operator — raise `ValidationError`, checked in that
+ * order; they are raised here, above the port, identically for every
+ * backend. `contains` compares textually and skips type coercion.
+ */
+export function parseFilterConditions(
+  filters: Record<string, string>,
+  propertyDefs: Record<string, PropertyDef>,
+  typeKey: string,
+): FilterCondition[] {
+  const conditions: FilterCondition[] = [];
+
+  for (const [filterExpr, rawValue] of Object.entries(filters)) {
+    let propKey: string;
+    let opName: string | null;
+    const splitAt = filterExpr.lastIndexOf("__");
+    if (splitAt >= 0) {
+      propKey = filterExpr.slice(0, splitAt);
+      opName = filterExpr.slice(splitAt + 2);
+    } else {
+      propKey = filterExpr;
+      opName = null;
+    }
+
+    const propDef = propertyDefs[propKey];
+    if (propDef === undefined) {
+      throw new ValidationError(`Unknown filter property: '${propKey}'`, {
+        fields: { [propKey]: `Not defined in type '${typeKey}'` },
+      });
+    }
+
+    let value: unknown;
+    try {
+      if (opName === "contains") {
+        const text = String(rawValue); // substring comparison is textual
+        assertNoNulCharacter(text, propKey);
+        value = text;
+      } else {
+        value = coerceValue(rawValue, propDef.dataType, propKey);
+      }
+    } catch (error) {
+      if (!(error instanceof CoercionError)) throw error;
+      throw new ValidationError(`Invalid filter value for '${propKey}'`, {
+        fields: { [propKey]: error.message },
+      });
+    }
+
+    let op: FilterOperator;
+    if (opName === null) {
+      op = "eq";
+    } else if (FILTER_OPERATORS.has(opName as FilterOperator)) {
+      op = opName as FilterOperator;
+    } else {
+      throw new ValidationError(`Unknown filter operator: '${opName}'`, {
+        fields: { [filterExpr]: `Unsupported operator '${opName}'` },
+      });
+    }
+
+    conditions.push({ key: propKey, dataType: propDef.dataType, op, value });
+  }
+
+  return conditions;
 }
 
 const SYSTEM_SORT_FIELDS: Record<string, string> = {
@@ -485,6 +561,17 @@ export async function listEntities(
     throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
   }
 
+  // The free-text term crosses the port as-is, so it carries the same
+  // NUL rejection stored strings do — identically for every adapter.
+  if (q !== null) {
+    try {
+      assertNoNulCharacter(q, "q");
+    } catch (error) {
+      if (!(error instanceof CoercionError)) throw error;
+      throw new ValidationError(error.message);
+    }
+  }
+
   // The free-text term matches over in-scope string properties; when there
   // are none it is silently ignored (the adapter adds no clause).
   const stringProps = Object.values(scopedEt.properties)
@@ -492,11 +579,12 @@ export async function listEntities(
     .map((p) => p.key);
 
   const sortField = validateSortField(sort, scopedEt.properties);
+  const conditions = parseFilterConditions(filters, scopedEt.properties, entityTypeKey);
 
   const [rawItems, total] = await store.listEntities(
     entityTypeKey,
     scopedEt.properties,
-    filters,
+    conditions,
     q,
     stringProps,
     sortField,
@@ -1001,8 +1089,13 @@ export async function createRelation(
   }
 
   // Endpoint validation against the FULL schema's declared source/target.
+  // The defs passed along describe the declared endpoint type — the row
+  // decoder's best guide for the entity the id is expected to name.
   const fullRtForValidation = fullRt ?? scopedRt;
-  const fromEntity = await store.getEntityById(fromEntityId);
+  const fromEntity = await store.getEntityById(
+    fromEntityId,
+    loaded.full.entityTypes[fullRtForValidation.fromEntityTypeKey]?.properties ?? {},
+  );
   if (fromEntity === null) {
     errors.fromEntityId = `Source entity '${fromEntityId}' not found`;
   } else if (fromEntity._entityTypeKey !== fullRtForValidation.fromEntityTypeKey) {
@@ -1011,7 +1104,10 @@ export async function createRelation(
       `got '${fromEntity._entityTypeKey}'`;
   }
 
-  const toEntity = await store.getEntityById(toEntityId);
+  const toEntity = await store.getEntityById(
+    toEntityId,
+    loaded.full.entityTypes[fullRtForValidation.toEntityTypeKey]?.properties ?? {},
+  );
   if (toEntity === null) {
     errors.toEntityId = `Target entity '${toEntityId}' not found`;
   } else if (toEntity._entityTypeKey !== fullRtForValidation.toEntityTypeKey) {
@@ -1057,11 +1153,12 @@ export async function listRelations(
   }
 
   const sortField = validateSortField(sort, scopedRt.properties);
+  const conditions = parseFilterConditions(filters, scopedRt.properties, relationTypeKey);
 
   const [rawItems, total] = await store.listRelations(
     relationTypeKey,
     scopedRt.properties,
-    filters,
+    conditions,
     fromEntityId,
     toEntityId,
     sortField,
@@ -1211,7 +1308,25 @@ export async function getNeighbors(
     throw new NotFoundError(`Entity '${entityId}' not found`);
   }
 
-  const neighbors = await store.getNeighbors(entityId, direction, relationTypeKey, limit);
+  // Per-type-key defs for row decoding, from the FULL schema — neighbours
+  // and their relations may be of types the lens does not expose. Relation
+  // defs go in first; entity defs shadow them on a shared type key.
+  const propertyDefsByType: Record<string, Record<string, PropertyDef>> = {};
+  for (const [typeKey, rtDef] of Object.entries(loaded.full.relationTypes)) {
+    propertyDefsByType[typeKey] = { ...rtDef.properties };
+  }
+  for (const [typeKey, etDef] of Object.entries(loaded.full.entityTypes)) {
+    const defs = (propertyDefsByType[typeKey] ??= {});
+    Object.assign(defs, etDef.properties);
+  }
+
+  const neighbors = await store.getNeighbors(
+    entityId,
+    direction,
+    relationTypeKey,
+    limit,
+    propertyDefsByType,
+  );
 
   // Filter neighbors by scoped relation types.
   const filteredNeighbors: Row[] = [];
@@ -1424,13 +1539,15 @@ async function semanticSearchSingleType(
   store: RuntimeStore,
   fields: string[] | null,
 ): Promise<Row[]> {
+  const conditions = parseFilterConditions(filters, scopedEt.properties, entityTypeKey);
+
   const results = await store.semanticSearch(
     entityTypeKey,
     scopedEt.properties,
     queryEmbedding,
     limit,
     minScore,
-    Object.keys(filters).length > 0 ? filters : null,
+    conditions.length > 0 ? conditions : null,
   );
 
   // Filter result properties to the scoped schema.
@@ -1639,8 +1756,21 @@ async function semanticSearchDocuments(
     (a, b) => (b.score as number) - (a.score as number),
   );
 
+  // Scoped defs for row decoding: the named type's when the search is
+  // type-scoped, otherwise the union across the scoped entity types.
+  let batchDefs: Record<string, PropertyDef>;
+  if (entityTypeKey !== null) {
+    batchDefs = loaded.scoped.entityTypes[entityTypeKey]?.properties ?? {};
+  } else {
+    batchDefs = {};
+    for (const etDef of Object.values(loaded.scoped.entityTypes)) {
+      batchDefs = { ...batchDefs, ...etDef.properties };
+    }
+  }
+
   const entities = await store.getEntitiesByIds(
     ranked.map((h) => (h.chunk as Row)._entityId as string),
+    batchDefs,
   );
 
   const results: Row[] = [];

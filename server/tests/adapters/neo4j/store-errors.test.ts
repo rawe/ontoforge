@@ -13,9 +13,9 @@ import type { Driver } from "neo4j-driver";
 import { Neo4jError } from "neo4j-driver";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { runSession, toStoreError } from "../../src/adapters/neo4j/errors.js";
-import { Neo4jModelingStore } from "../../src/adapters/neo4j/modelingStore.js";
-import { NotFoundError, StoreError } from "../../src/core/exceptions.js";
+import { runSession, toStoreError } from "../../../src/adapters/neo4j/errors.js";
+import { Neo4jModelingStore } from "../../../src/adapters/neo4j/modelingStore.js";
+import { NotFoundError, StoreError } from "../../../src/core/exceptions.js";
 
 // The message the reproduction in issue #20 produced. Nothing from it may
 // reach the client: it names the vendor, the physical index, and the
@@ -139,7 +139,7 @@ describe("store methods are covered by it", () => {
     // the gap this guard closes, and no behavioural test would catch it.
     const adapterDir = join(
       dirname(fileURLToPath(import.meta.url)),
-      "../../src/adapters/neo4j",
+      "../../../src/adapters/neo4j",
     );
     const offenders = readdirSync(adapterDir)
       .filter((name) => name.endsWith(".ts") && name !== "errors.ts")

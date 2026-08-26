@@ -70,8 +70,8 @@ step are the matched entities' property maps with the similarity score added und
 
 ### Identity and ownership
 
-- Query keys match `^[a-z][a-z0-9_-]*$` — hyphens are allowed, unlike the type and
-  property keys described in [../README.md](../README.md).
+- Query keys match `^[a-z][a-z0-9_-]*$` at up to 64 characters — hyphens are allowed,
+  unlike the type and property keys described in [../README.md](../README.md).
 - A key is unique within its lens. Two lenses may each hold a `people_by_skill`.
 - Writing a saved query is an upsert on that key: it creates or replaces wholesale.
 - Saved queries belong to a lens ([ontology-lenses.md](ontology-lenses.md)). Deleting the

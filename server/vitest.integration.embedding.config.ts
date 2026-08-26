@@ -9,6 +9,8 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     include: ["tests/integration/embedding/**/*.test.ts"],
+    // Suite-level hard reset: a virgin database, once per invocation.
+    globalSetup: ["tests/integration/global-setup.ts"],
     // The suite wipes the database and mutates global provider state; run
     // serially.
     fileParallelism: false,

@@ -180,4 +180,29 @@ describe("key pattern", () => {
       expect(holder.store.createEntityType).not.toHaveBeenCalled();
     },
   );
+
+  // The cap is 64 characters, uniformly on every key kind.
+  it("rejects a 65-character key with 422", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/model/entity-types",
+      payload: { key: "k".repeat(65), displayName: "Person" },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe("VALIDATION_ERROR");
+    expect(holder.store.createEntityType).not.toHaveBeenCalled();
+  });
+
+  it("accepts a key of exactly 64 characters", async () => {
+    holder.store.createEntityType.mockResolvedValue({
+      ...ET_DATA,
+      key: "k".repeat(64),
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/model/entity-types",
+      payload: { key: "k".repeat(64), displayName: "Person" },
+    });
+    expect(res.statusCode).toBe(201);
+  });
 });

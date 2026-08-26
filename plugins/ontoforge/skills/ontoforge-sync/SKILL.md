@@ -125,7 +125,7 @@ Streams progress to stderr. On completion, prints a per-type summary. Returns a 
 # 1. Start OntoForge
 docker compose up -d
 
-# 2. Wait for Neo4j to be ready (health check)
+# 2. Wait for PostgreSQL to be ready (health check)
 
 # 3. Import schema
 node scripts/import-schema.mjs ./ontoforge/schema.json

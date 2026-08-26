@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKEND_PID=""
 FRONTEND_PID=""
-NEO4J_STARTED_BY_US=false
+POSTGRES_STARTED_BY_US=false
 
 cleanup() {
     echo ""
@@ -24,9 +24,9 @@ cleanup() {
         echo "  Backend stopped"
     fi
 
-    if [ "$NEO4J_STARTED_BY_US" = true ]; then
-        docker compose -f "$ROOT_DIR/docker-compose.yml" stop neo4j >/dev/null 2>&1
-        echo "  Neo4j stopped"
+    if [ "$POSTGRES_STARTED_BY_US" = true ]; then
+        docker compose -f "$ROOT_DIR/docker-compose.yml" stop postgres >/dev/null 2>&1
+        echo "  PostgreSQL stopped"
     fi
 
     echo "Done."
@@ -64,16 +64,16 @@ export AI_MODEL="${AI_MODEL:-qwen3:8b}"
 export AI_BASE_URL="${AI_BASE_URL:-http://localhost:11434}"
 echo "AI: $AI_PROVIDER ($AI_MODEL)"
 
-# --- Neo4j ---
-if docker compose -f "$ROOT_DIR/docker-compose.yml" ps neo4j 2>/dev/null | grep -q "running"; then
-    echo "Neo4j already running"
+# --- PostgreSQL ---
+if docker compose -f "$ROOT_DIR/docker-compose.yml" ps postgres 2>/dev/null | grep -q "running"; then
+    echo "PostgreSQL already running"
 else
-    echo "Starting Neo4j..."
-    docker compose -f "$ROOT_DIR/docker-compose.yml" up -d neo4j
-    NEO4J_STARTED_BY_US=true
+    echo "Starting PostgreSQL..."
+    docker compose -f "$ROOT_DIR/docker-compose.yml" up -d postgres
+    POSTGRES_STARTED_BY_US=true
 
-    echo -n "Waiting for Neo4j to be healthy"
-    until docker compose -f "$ROOT_DIR/docker-compose.yml" ps neo4j 2>/dev/null | grep -q "healthy"; do
+    echo -n "Waiting for PostgreSQL to be healthy"
+    until docker compose -f "$ROOT_DIR/docker-compose.yml" ps postgres 2>/dev/null | grep -q "healthy"; do
         echo -n "."
         sleep 2
     done
@@ -106,7 +106,7 @@ echo "All services running:"
 echo "  Frontend  http://localhost:5173"
 echo "  Backend   http://localhost:8000"
 echo "  API docs  http://localhost:8000/docs"
-echo "  Neo4j     http://localhost:7474"
+echo "  PostgreSQL localhost:5432"
 echo ""
 echo "Press Ctrl+C to stop all services."
 

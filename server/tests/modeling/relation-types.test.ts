@@ -210,4 +210,20 @@ describe("key pattern", () => {
       expect(holder.store.createRelationType).not.toHaveBeenCalled();
     },
   );
+
+  // The cap is 64 characters, uniformly on every key kind. Endpoints are
+  // mocked present so the key length is the only possible rejection cause.
+  it("rejects a 65-character key with 422", async () => {
+    holder.store.getEntityTypeByKey
+      .mockResolvedValueOnce(SOURCE_ET)
+      .mockResolvedValueOnce(TARGET_ET);
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/model/relation-types",
+      payload: { ...CREATE_PAYLOAD, key: "k".repeat(65) },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe("VALIDATION_ERROR");
+    expect(holder.store.createRelationType).not.toHaveBeenCalled();
+  });
 });

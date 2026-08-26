@@ -9,7 +9,7 @@ Vocabulary: [../README.md](../README.md). The schema it looks at:
 ## What a lens is
 
 A lens has a key, a unique name and an optional description. The key matches
-`^[a-z][a-z0-9_]*$`, is chosen at creation, is never updatable, and is what every
+`^[a-z][a-z0-9_]*$` at up to 64 characters, is chosen at creation, is never updatable, and is what every
 interface uses to address the lens. The name is unique too, but purely for
 display.
 

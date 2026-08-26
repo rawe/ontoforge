@@ -101,6 +101,19 @@ describe("entity type properties", () => {
     expect(res.statusCode).toBe(404);
   });
 
+  // The cap is 64 characters, uniformly on every key kind.
+  it("rejects a 65-character key with 422", async () => {
+    holder.store.getEntityType.mockResolvedValue(ET_DATA);
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/model/entity-types/et-1/properties",
+      payload: { key: "k".repeat(65), displayName: "Too Long", dataType: "string" },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe("VALIDATION_ERROR");
+    expect(holder.store.createProperty).not.toHaveBeenCalled();
+  });
+
   it("list returns the owner's properties", async () => {
     holder.store.getEntityType.mockResolvedValue(ET_DATA);
     holder.store.listProperties.mockResolvedValue([PROP_DATA]);

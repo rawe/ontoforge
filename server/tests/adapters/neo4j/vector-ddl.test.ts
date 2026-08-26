@@ -6,14 +6,15 @@
  */
 
 import type { Driver } from "neo4j-driver";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
   MAX_VECTOR_FILTER_VALUE_BYTES,
   reconcileIndexDimensions,
   validateVectorIndexedProperties,
-} from "../../src/adapters/neo4j/ddl.js";
-import { ValidationError } from "../../src/core/exceptions.js";
+} from "../../../src/adapters/neo4j/ddl.js";
+import { ValidationError } from "../../../src/core/exceptions.js";
+import { captureLogs, ENTITY_TYPE_SCOPE } from "../../vectorDrift.js";
 
 describe("validateVectorIndexedProperties", () => {
   it("accepts short strings and non-string values", () => {
@@ -95,22 +96,15 @@ async function reconcile(
   existingDimensions: number | null,
   recreate: boolean,
 ): Promise<{ statements: string[]; warnings: string[]; infos: string[] }> {
-  const warnings: string[] = [];
-  const infos: string[] = [];
-  vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) =>
-    warnings.push(args.map(String).join(" ")),
-  );
-  vi.spyOn(console, "info").mockImplementation((...args: unknown[]) =>
-    infos.push(args.map(String).join(" ")),
-  );
+  const captured = captureLogs();
   const { driver, session } = fakeDriver(existingDimensions);
-  await reconcileIndexDimensions(driver, "person_embedding", "entity type 'person'", 768, recreate);
-  return { statements: session.statements, warnings, infos };
+  try {
+    await reconcileIndexDimensions(driver, "person_embedding", ENTITY_TYPE_SCOPE, 768, recreate);
+  } finally {
+    captured.restore();
+  }
+  return { statements: session.statements, warnings: captured.warnings, infos: captured.infos };
 }
-
-afterEach(() => {
-  vi.restoreAllMocks();
-});
 
 describe("reconcileIndexDimensions", () => {
   it("leaves matching dimensions alone", async () => {
@@ -131,7 +125,7 @@ describe("reconcileIndexDimensions", () => {
     const { statements, warnings } = await reconcile(1024, false);
     expect(statements).toEqual([]);
     const text = warnings.join("\n");
-    expect(text).toContain("entity type 'person'");
+    expect(text).toContain(ENTITY_TYPE_SCOPE);
     expect(text).toContain("1024");
     expect(text).toContain("768");
     expect(text).toContain("/api/model/rebuild-embeddings");
@@ -149,6 +143,6 @@ describe("reconcileIndexDimensions", () => {
     const { statements, warnings, infos } = await reconcile(1024, true);
     expect(statements).toEqual(["DROP INDEX person_embedding IF EXISTS"]);
     expect(warnings).toEqual([]);
-    expect(infos.join("\n")).toContain("entity type 'person'");
+    expect(infos.join("\n")).toContain(ENTITY_TYPE_SCOPE);
   });
 });

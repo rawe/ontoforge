@@ -5,108 +5,76 @@ description: "Sync Markdown documents with YAML frontmatter (Google's Open Knowl
 
 # Goal
 
-Move single concept documents between an OKF bundle (a directory of Markdown files with YAML frontmatter) and OntoForge entities — without the document content ever passing through the LLM context. The agent edits files with its normal file tools and runs one command to sync; interactive queries and in-place edits stay on the OntoForge MCP tools.
+Move OKF concept documents between a bundle on disk and OntoForge entities without the document content ever passing through the LLM context. The agent edits files with its normal file tools and runs one command to sync; interactive queries and in-place edits stay on the OntoForge MCP tools.
 
-**Mapping** (one file = one entity):
+## Mapping
+
+One file, one entity.
 
 | OKF concept document | OntoForge entity |
 |----------------------|------------------|
-| File path without `.md` (the concept ID) | `conceptId` property (the natural key) |
-| Frontmatter `type` | Entity type key (via optional `typeMap`) |
-| Other frontmatter keys (`title`, `tags`, …) | Scalar properties of the same name |
+| File path without `.md`, relative to the bundle root — the **concept ID** | The concept-ID property (default `concept_id`) |
+| Frontmatter `type` | Entity type key, resolved through the `typeMap` in `okf.config.json` |
+| Other frontmatter keys | Scalar properties of the same name |
 | Markdown body | The entity type's `document` property |
 | `index.md`, `log.md` | Reserved by OKF — rejected as concepts |
 
+The concept ID alone identifies a document. Push and pull resolve it the same way, so the same file always reaches the same entity, and the same entity always returns to the same file.
+
 ## Prerequisites
 
-- **Node.js 18+** (built-in `fetch`, no external dependencies)
-- **OntoForge server running** at the configured base URL
-- **Entity types prepared for OKF** (see Schema Requirements below)
+- **Node.js 18+** — built-in `fetch`, no dependencies
+- **`ONTOFORGE_BASE_URL`** naming a running OntoForge server. It is per-developer, so it stays out of the bundle
+- **`okf.config.json` at the bundle root**, naming the ontology and mapping every `type` value to an entity type
+- **Entity types** carrying a concept-ID property and a document property
 
-## Environment
-
-All scripts resolve the server URL in this order:
-
-1. `--base-url <URL>` flag
-2. `ONTOFORGE_BASE_URL` environment variable
-3. Default: `http://localhost:8000`
-
-## Bundle Root and Config
-
-The concept ID is the file path **relative to the bundle root**, so root resolution matters. Scripts resolve it as: `--root` flag > directory containing `okf.config.json` (found by walking up from the pushed file, or from the current directory for pulls) > current directory.
-
-An optional `okf.config.json` at the bundle root holds the mapping config:
-
-```json
-{
-  "ontology": "main",
-  "conceptIdProperty": "conceptId",
-  "documentProperty": null,
-  "typeMap": { "table": "db_table" },
-  "listProperties": ["tags"],
-  "listDelimiter": ", "
-}
-```
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `ontology` | — | Ontology key for runtime API access (or pass `--ontology`) |
-| `conceptIdProperty` | `conceptId` | String property holding the concept ID (natural key) |
-| `documentProperty` | auto-detect | Which document property holds the body; only needed when a type has several |
-| `typeMap` | `{}` | Frontmatter `type` value → entity type key (identity when absent) |
-| `listProperties` | `["tags"]` | String properties serialized as YAML lists (joined/split with `listDelimiter`) |
-| `listDelimiter` | `", "` | Delimiter used to store list values in a string property |
+**Missing `okf.config.json`, or an ontology with no entity types for this bundle? → [references/setup.md](references/setup.md)**
 
 ## Commands
 
-All paths below are relative to this skill directory (`scripts/`).
+Both commands take a file path and locate the bundle from it: the nearest `okf.config.json` at or above the file's directory marks the bundle root, and the concept ID is the file path relative to that root. The working directory plays no part, so the same file always yields the same concept ID.
+
+Invoke the scripts by their path inside this skill directory.
 
 ### Push (file → entity)
 
 ```bash
-node scripts/okf-push.mjs <file.md> [<file.md> ...] [--ontology <key>] [--root <dir>] [--config <path>] [--type <entityTypeKey>] [--skip-unknown] [--base-url <url>]
+node scripts/okf-push.mjs <file.md> [<file.md> ...] [--skip-unknown]
 ```
 
-Parses the file, resolves the entity type from frontmatter `type` (or `--type` override), looks the entity up by concept ID, then creates it (`POST`) or updates it (`PATCH`). Idempotent — pushing the same file twice yields one entity.
+Parses each file, resolves the entity type from frontmatter `type`, looks the concept ID up across every mapped entity type, then creates (`POST`) or updates (`PATCH`). Pushing the same file twice yields one entity.
 
-- Frontmatter keys without a matching property definition fail the push with a list of the missing keys; `--skip-unknown` downgrades this to a warning and drops them.
-- On update, the file is treated as the **full representation**: declared properties absent from the frontmatter are cleared. Removing a required property's key from the frontmatter therefore fails server-side.
-- Multiple files are pushed in one invocation (shell globs work); failures are reported per file and the exit code is non-zero if any failed.
+- Frontmatter keys with no matching property fail the push, naming the missing keys. `--skip-unknown` downgrades this to a warning and drops those keys.
+- On update the file is the **full representation**: declared properties absent from the frontmatter are cleared. Removing a required property's key therefore fails server-side.
+- A concept ID already stored under a different entity type is a conflict. An entity cannot change type — delete the stored entity, then push again.
+- Several files go in one invocation (shell globs work). Failures are reported per file and the exit code is non-zero if any failed.
 
-**API used**: `GET /schema/entity-types/{key}`, `GET /entities/{type}?filter.<conceptIdProperty>=…`, `POST /entities/{type}`, `PATCH /entities/{type}/{id}` (all under `/api/runtime/{ontology}`)
+**API used**: `GET /schema/entity-types`, `GET /entities/{type}?filter.<concept-ID property>=…`, `POST /entities/{type}`, `PATCH /entities/{type}/{id}` (all under `/api/runtime/{ontology}`)
 
 ### Pull (entity → file)
 
 ```bash
-node scripts/okf-pull.mjs <conceptId|file.md> [--type <entityTypeKey>] [--ontology <key>] [--root <dir>] [-o <file>] [--base-url <url>]
-node scripts/okf-pull.mjs --id <entityId> --type <entityTypeKey> [...]
+node scripts/okf-pull.mjs <file.md>
 ```
 
-Finds the entity by concept ID (searching the given `--type`, or every entity type that has both a concept-ID and a document property), fetches it with a fields projection so the document value arrives raw instead of as a stub, and writes `<root>/<conceptId>.md`. Frontmatter keys are emitted in OKF's reserved order (`type`, `title`, `description`, `resource`, `tags`, `timestamp`) followed by extension keys alphabetically — output is deterministic, so repeated pulls produce clean git diffs.
+Derives the concept ID from the path, finds the entity across every mapped entity type, fetches it with a fields projection so the document value arrives raw instead of as a stub, and writes the file. The file need not exist yet. Frontmatter keys are written alphabetically, so repeated pulls of the same concept are byte-identical and produce clean git diffs.
 
-- If the same concept ID exists on several entity types, the pull aborts and lists the candidates — disambiguate with `--type`.
-- `--id` pulls a specific entity directly; the file path is derived from its concept-ID property.
-- `-o` overrides the output path.
+A concept ID that exists more than once aborts the pull and lists the entities, because the concept ID is meant to be unique.
 
 **API used**: `GET /schema/entity-types`, `GET /entities/{type}?filter.…&fields=_id`, `GET /entities/{type}/{id}?fields=…`
 
-## Schema Requirements
-
-Each entity type used for OKF concepts needs, in the modeling schema:
-
-1. A **string property for the concept ID** (default name `conceptId`), ideally required — it is the natural key for idempotent pushes.
-2. Exactly one **`document` property** for the Markdown body (or several plus `documentProperty` in the config).
-3. **One scalar property per frontmatter key** you want to store: `title`, `description`, `resource` as `string`; `tags` as `string` (stored delimited, rendered as a YAML list); `timestamp` as `datetime`; extension keys as needed.
-
 ## Frontmatter Support
 
-The parser covers the flat YAML subset OKF uses: plain/quoted scalars, numbers, booleans, `null`, inline lists (`[a, b]`), and block lists. Nested mappings and block scalars (`|`, `>`) are rejected with a clear error. Values are coerced against the property's declared data type; YAML lists are only accepted for string properties (joined with `listDelimiter`).
+The parser covers the flat YAML that OKF concepts use: plain and quoted scalars, numbers, booleans, `null`, inline lists (`[a, b]`) and block lists of scalars. Values are coerced against the property's declared data type; YAML lists map onto string properties, joined into one string with the configured delimiter.
+
+Nested mappings — `generated: { by: …, at: … }`, `sources:` with indented entries — raise an error naming the offending line. Block scalars (`|`, `>`) do the same.
 
 ## Limitations
 
-- One document property per concept: additional document properties on the same type have no OKF representation and are skipped on pull, left untouched on push.
-- Markdown links between concepts are preserved inside the body but are **not** materialized as OntoForge relations.
-- Whole-bundle import/export, `index.md` generation, and schema bootstrap are Layer 3 of that same proposal, not part of this skill yet.
+- One document property per concept. Further document properties on the same type are skipped on pull and left untouched on push.
+- Markdown links between concepts stay inside the body. They become no OntoForge relations.
+- Renaming or moving a file changes its concept ID, so the next push creates a second entity and leaves the first in place.
+- Whole-bundle import and export, `index.md` generation and schema bootstrap are not part of this skill.
 
 ## Testing
 
@@ -114,10 +82,10 @@ The parser covers the flat YAML subset OKF uses: plain/quoted scalars, numbers, 
 node --test scripts/codec.test.mjs
 ```
 
-Covers frontmatter parsing, payload mapping, serialization order/quoting, and byte-identical round-trips.
+Covers config validation, frontmatter parsing, payload mapping, serialization order and byte-identical round-trips.
 
 ## Related Skills
 
-- **ontoforge-sync** — Whole-database schema and instance-data export/import as JSON.
-- **ontoforge-setup** — Bootstrap a project with Docker Compose and MCP configuration.
-- **ontoforge-runtime-api** — Build against the OntoForge runtime REST API.
+- **ontoforge-sync** — whole-database schema and instance-data export/import as JSON.
+- **ontoforge-setup** — bootstrap a project with Docker Compose and MCP configuration.
+- **ontoforge-runtime-api** — build against the OntoForge runtime REST API.

@@ -6,11 +6,14 @@
 // plain/quoted scalars, numbers, booleans, null, inline lists [a, b] and
 // block lists. Nested mappings and block scalars (| >) are rejected.
 
+/** Named in errors when the caller has no resolved path (tests, direct use). */
+const CONFIG_LABEL = 'okf.config.json';
+
 export const DEFAULT_CONFIG = {
-  ontology: null,
-  conceptIdProperty: 'conceptId',
+  ontology: null, // required
+  conceptIdProperty: 'concept_id',
   documentProperty: null, // null = auto-detect the single document property
-  typeMap: {}, // frontmatter type value -> entity type key (identity if absent)
+  typeMap: {}, // required: frontmatter type value -> entity type key, one-to-one
   listProperties: ['tags'], // string properties serialized as YAML lists
   listDelimiter: ', ',
 };
@@ -19,11 +22,59 @@ export function mergeConfig(raw = {}) {
   const config = { ...DEFAULT_CONFIG, ...raw };
   config.typeMap = { ...(raw.typeMap || {}) };
   config.listProperties = raw.listProperties || [...DEFAULT_CONFIG.listProperties];
+  validateConfig(config);
   return config;
 }
 
+/**
+ * Reject a config that cannot produce a stable mapping, naming every fault at
+ * once. `typeMap` must be one-to-one because the pull reverses it to recover
+ * the frontmatter `type` value.
+ */
+function validateConfig(config) {
+  const errors = [];
+  if (!config.ontology) {
+    errors.push('"ontology" is missing — name the ontology key this bundle syncs with');
+  }
+  const entries = Object.entries(config.typeMap);
+  if (!entries.length) {
+    errors.push('"typeMap" is empty — every OKF type value needs an entity type key');
+  }
+  const seen = new Map();
+  for (const [typeValue, entityTypeKey] of entries) {
+    const first = seen.get(entityTypeKey);
+    if (first !== undefined) {
+      errors.push(
+        `"typeMap" maps both "${first}" and "${typeValue}" to "${entityTypeKey}" — entity type keys must be distinct`,
+      );
+    } else {
+      seen.set(entityTypeKey, typeValue);
+    }
+  }
+  if (errors.length) throw new Error(`okf.config.json is invalid: ${errors.join('; ')}`);
+}
+
+/** Resolve a frontmatter type value to an entity type key. */
+export function entityTypeKeyFor(typeValue, config, configPath = CONFIG_LABEL) {
+  const key = config.typeMap[typeValue];
+  if (!key) {
+    throw new Error(
+      `no "typeMap" entry for type "${typeValue}" — add it to ${configPath} (see references/setup.md)`,
+    );
+  }
+  return key;
+}
+
+/** Recover the frontmatter type value for an entity type key. */
+export function typeValueFor(entityTypeKey, config) {
+  const entry = Object.entries(config.typeMap).find(([, v]) => v === entityTypeKey);
+  if (!entry) {
+    throw new Error(`no "typeMap" entry maps to entity type "${entityTypeKey}"`);
+  }
+  return entry[0];
+}
+
 const RESERVED_BASENAMES = new Set(['index', 'log']);
-const RESERVED_ORDER = ['type', 'title', 'description', 'resource', 'tags', 'timestamp'];
 
 // --- Concept IDs ---
 
@@ -33,7 +84,7 @@ export function conceptIdFromPath(relPath) {
     throw new Error(`not a Markdown file: ${relPath}`);
   }
   if (posix.startsWith('../') || posix === '..') {
-    throw new Error(`file is outside the bundle root: ${relPath} (use --root)`);
+    throw new Error(`file is outside the bundle root: ${relPath}`);
   }
   const conceptId = posix.slice(0, -3);
   const basename = conceptId.split('/').pop();
@@ -41,10 +92,6 @@ export function conceptIdFromPath(relPath) {
     throw new Error(`"${basename}.md" is a reserved OKF filename, not a concept document`);
   }
   return conceptId;
-}
-
-export function pathFromConceptId(conceptId) {
-  return `${conceptId}.md`;
 }
 
 // --- Frontmatter parsing ---
@@ -157,15 +204,10 @@ function parseInlineList(raw) {
 
 // --- Frontmatter serialization ---
 
+/** Keys are written in alphabetical order, so repeated pulls are byte-identical. */
 export function serializeFrontmatter(fields) {
-  const keys = [
-    ...RESERVED_ORDER.filter((k) => k in fields),
-    ...Object.keys(fields)
-      .filter((k) => !RESERVED_ORDER.includes(k))
-      .sort(),
-  ];
   const lines = [];
-  for (const key of keys) {
+  for (const key of Object.keys(fields).sort()) {
     const value = fields[key];
     if (value === null || value === undefined) continue;
     if (Array.isArray(value)) {

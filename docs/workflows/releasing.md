@@ -19,7 +19,15 @@ Component versions are embedded in container image labels during the build. Both
 2. Sync lock files: `npm install --package-lock-only` in `server/` and `frontend/`
 3. Commit the version bump (include both manifests and lock files)
 4. Tag: `git tag v{version}` (e.g., `git tag v0.2.0`)
-5. Push: `git push origin main --tags`
+5. Push the branch, then that one tag by name:
+   ```bash
+   git push origin main
+   git push origin v{version}          # the tag from step 4 — never a hardcoded one
+   ```
+
+Never push with `--tags`. It publishes every local tag, and tags that exist only
+locally — milestone or working markers — must stay local. Only release tags belong on
+the remote.
 
 The tag push triggers the GitHub Actions workflow (`.github/workflows/release-images.yml`), which runs `make release` to build and push container images to GHCR.
 

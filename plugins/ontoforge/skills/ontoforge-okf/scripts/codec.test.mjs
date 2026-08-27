@@ -4,19 +4,21 @@ import { test } from 'node:test';
 
 import {
   conceptIdFromPath,
+  entityTypeKeyFor,
   fromEntity,
   mergeConfig,
   parseConceptDocument,
   serializeFrontmatter,
   toEntityPayload,
+  typeValueFor,
 } from './codec.mjs';
 
-const CONFIG = mergeConfig({});
+const CONFIG = mergeConfig({ ontology: 'main', typeMap: { note: 'note', Guide: 'guide' } });
 
 const NOTE_TYPE = {
   key: 'note',
   properties: [
-    { key: 'conceptId', dataType: 'string', required: true },
+    { key: 'concept_id', dataType: 'string', required: true },
     { key: 'title', dataType: 'string' },
     { key: 'description', dataType: 'string' },
     { key: 'resource', dataType: 'string' },
@@ -27,6 +29,33 @@ const NOTE_TYPE = {
     { key: 'content', dataType: 'document' },
   ],
 };
+
+test('mergeConfig requires an ontology and a type map', () => {
+  assert.throws(() => mergeConfig({}), /"ontology" is missing/);
+  assert.throws(() => mergeConfig({ ontology: 'main' }), /"typeMap" is empty/);
+});
+
+test('mergeConfig rejects a type map that is not one-to-one', () => {
+  assert.throws(
+    () => mergeConfig({ ontology: 'main', typeMap: { Table: 'tbl', View: 'tbl' } }),
+    /maps both "Table" and "View" to "tbl"/,
+  );
+});
+
+test('mergeConfig reports every fault at once', () => {
+  assert.throws(() => mergeConfig({}), (err) => {
+    assert.match(err.message, /"ontology" is missing/);
+    assert.match(err.message, /"typeMap" is empty/);
+    return true;
+  });
+});
+
+test('type values and entity type keys translate both ways', () => {
+  assert.equal(entityTypeKeyFor('Guide', CONFIG), 'guide');
+  assert.equal(typeValueFor('guide', CONFIG), 'Guide');
+  assert.throws(() => entityTypeKeyFor('Playbook', CONFIG), /no "typeMap" entry for type "Playbook"/);
+  assert.throws(() => typeValueFor('playbook', CONFIG), /no "typeMap" entry maps to entity type/);
+});
 
 test('conceptIdFromPath strips .md and normalizes separators', () => {
   assert.equal(conceptIdFromPath('tables/users.md'), 'tables/users');
@@ -96,7 +125,7 @@ test('toEntityPayload maps frontmatter, body, and concept ID', () => {
   assert.equal(documentProperty, 'content');
   assert.deepEqual(unknownKeys, []);
   assert.deepEqual(payload, {
-    conceptId: 'guides/setup',
+    concept_id: 'guides/setup',
     content: 'The body.\n',
     title: 'Setup guide',
     tags: 'a, b',
@@ -120,12 +149,12 @@ test('toEntityPayload validates data types', () => {
 test('toEntityPayload requires the concept-ID and document properties', () => {
   const doc = parseConceptDocument('---\ntype: note\n---\nbody');
   const noConcept = { key: 'note', properties: [{ key: 'content', dataType: 'document' }] };
-  assert.throws(() => toEntityPayload(doc, 'x', noConcept, CONFIG), /no "conceptId" property/);
-  const noDoc = { key: 'note', properties: [{ key: 'conceptId', dataType: 'string' }] };
+  assert.throws(() => toEntityPayload(doc, 'x', noConcept, CONFIG), /no "concept_id" property/);
+  const noDoc = { key: 'note', properties: [{ key: 'concept_id', dataType: 'string' }] };
   assert.throws(() => toEntityPayload(doc, 'x', noDoc, CONFIG), /no document property/);
 });
 
-test('serializeFrontmatter orders reserved keys first, quotes when needed', () => {
+test('serializeFrontmatter writes keys alphabetically, quotes when needed', () => {
   const out = serializeFrontmatter({
     zeta: 'plain value',
     type: 'note',
@@ -135,14 +164,14 @@ test('serializeFrontmatter orders reserved keys first, quotes when needed', () =
   });
   assert.equal(
     out,
-    ['type: note', 'title: "Needs: quoting"', 'tags:', '  - a', '  - b', 'count: 7', 'zeta: plain value'].join('\n'),
+    ['count: 7', 'tags:', '  - a', '  - b', 'title: "Needs: quoting"', 'type: note', 'zeta: plain value'].join('\n'),
   );
 });
 
 test('fromEntity renders frontmatter and body, splits list properties', () => {
   const entity = {
     _id: 'abc',
-    conceptId: 'guides/setup',
+    concept_id: 'guides/setup',
     title: 'Setup guide',
     tags: 'a, b',
     priority: 2,
@@ -151,25 +180,23 @@ test('fromEntity renders frontmatter and body, splits list properties', () => {
   const md = fromEntity(entity, NOTE_TYPE, CONFIG, 'note');
   assert.equal(
     md,
-    '---\ntype: note\ntitle: Setup guide\ntags:\n  - a\n  - b\npriority: 2\n---\n\nThe body.\n',
+    '---\npriority: 2\ntags:\n  - a\n  - b\ntitle: Setup guide\ntype: note\n---\n\nThe body.\n',
   );
 });
 
 test('fromEntity rejects document stubs', () => {
-  const entity = { conceptId: 'x', content: { document: true, length: 10 } };
+  const entity = { concept_id: 'x', content: { document: true, length: 10 } };
   assert.throws(() => fromEntity(entity, NOTE_TYPE, CONFIG, 'note'), /stub/);
 });
 
 test('round-trip: file -> payload -> file is stable', () => {
   const original =
-    '---\ntype: note\ntitle: Setup guide\ndescription: How to set things up\ntags:\n  - infra\n  - "how-to"\ntimestamp: "2026-07-01T12:00:00Z"\npriority: 2\narchived: false\n---\n\n# Setup\n\nSteps with a [link](/guides/other).\n';
+    '---\narchived: false\ndescription: How to set things up\npriority: 2\ntags:\n  - infra\n  - how-to\ntimestamp: "2026-07-01T12:00:00Z"\ntitle: Setup guide\ntype: note\n---\n\n# Setup\n\nSteps with a [link](/guides/other).\n';
   const doc = parseConceptDocument(original);
   const { payload } = toEntityPayload(doc, 'guides/setup', NOTE_TYPE, CONFIG);
   const md = fromEntity({ ...payload }, NOTE_TYPE, CONFIG, 'note');
+  assert.equal(md, original);
   const reparsed = parseConceptDocument(md);
   assert.deepEqual(reparsed.fields, { ...doc.fields, tags: ['infra', 'how-to'] });
   assert.equal(reparsed.body, doc.body);
-  // A second pass must be byte-identical (deterministic serialization).
-  const { payload: payload2 } = toEntityPayload(reparsed, 'guides/setup', NOTE_TYPE, CONFIG);
-  assert.equal(fromEntity({ ...payload2 }, NOTE_TYPE, CONFIG, 'note'), md);
 });

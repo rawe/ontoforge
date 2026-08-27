@@ -2,8 +2,8 @@
 // Push OKF concept documents (Markdown + YAML frontmatter) into OntoForge
 // entities. The frontmatter becomes scalar properties, the body becomes the
 // document property, and the file path (relative to the bundle root) becomes
-// the concept ID used as the natural key. Idempotent: existing entities are
-// updated, missing ones created.
+// the concept ID — the identity of the document. Idempotent: an existing
+// entity is updated, a missing one created.
 
 import { readFileSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
@@ -11,49 +11,30 @@ import { dirname, relative, resolve } from 'node:path';
 import {
   api,
   die,
-  findEntityIds,
+  findByConceptId,
   getBaseUrl,
+  loadMappedTypes,
   parseCliArgs,
-  requireOntology,
   resolveBundleContext,
 } from './lib.mjs';
-import { conceptIdFromPath, parseConceptDocument, toEntityPayload } from './codec.mjs';
+import { conceptIdFromPath, entityTypeKeyFor, parseConceptDocument, toEntityPayload } from './codec.mjs';
 
-const { flags, positional } = parseCliArgs(
-  {
-    baseUrl: ['--base-url'],
-    ontology: ['--ontology'],
-    config: ['--config'],
-    root: ['--root'],
-    type: ['--type'],
-  },
-  { skipUnknown: ['--skip-unknown'] },
-);
-
-if (!positional.length) {
-  die(
-    'usage: okf-push.mjs <file.md> [<file.md> ...] [--ontology <key>] [--root <dir>] [--config <okf.config.json>] [--type <entityTypeKey>] [--skip-unknown] [--base-url <url>]',
-  );
-}
-
-const typeCache = new Map();
-
-async function getEntityType(baseUrl, ontologyKey, typeKey) {
-  if (!typeCache.has(typeKey)) {
-    const path = `/api/runtime/${encodeURIComponent(ontologyKey)}/schema/entity-types/${encodeURIComponent(typeKey)}`;
-    typeCache.set(typeKey, await api(baseUrl, path));
-  }
-  return typeCache.get(typeKey);
-}
+const USAGE = 'usage: okf-push.mjs <file.md> [<file.md> ...] [--skip-unknown]';
 
 try {
-  let failures = 0;
-  for (const file of positional) {
-    const abs = resolve(file);
-    const { config, root } = resolveBundleContext(dirname(abs), flags);
-    const baseUrl = getBaseUrl(flags);
-    const ontologyKey = requireOntology(flags, config);
+  const { flags, positional } = parseCliArgs({ skipUnknown: ['--skip-unknown'] });
+  if (!positional.length) die(USAGE);
 
+  const files = positional.map((file) => resolve(file));
+  const { config, root, configPath } = resolveBundleContext(dirname(files[0]));
+  const baseUrl = getBaseUrl();
+  const ontologyKey = config.ontology;
+  const mappedTypes = await loadMappedTypes(baseUrl, ontologyKey, config, configPath);
+  const basePathFor = (entityTypeKey) =>
+    `/api/runtime/${encodeURIComponent(ontologyKey)}/entities/${encodeURIComponent(entityTypeKey)}`;
+
+  let failures = 0;
+  for (const abs of files) {
     try {
       const conceptId = conceptIdFromPath(relative(root, abs));
       const doc = parseConceptDocument(readFileSync(abs, 'utf8'));
@@ -62,8 +43,8 @@ try {
       if (typeof typeValue !== 'string' || !typeValue) {
         throw new Error('frontmatter has no "type" field (required by OKF)');
       }
-      const entityTypeKey = flags.type || config.typeMap[typeValue] || typeValue;
-      const entityType = await getEntityType(baseUrl, ontologyKey, entityTypeKey);
+      const entityTypeKey = entityTypeKeyFor(typeValue, config, configPath);
+      const entityType = mappedTypes.get(entityTypeKey);
 
       const { payload, unknownKeys } = toEntityPayload(doc, conceptId, entityType, config);
       if (unknownKeys.length) {
@@ -74,18 +55,22 @@ try {
         console.error(`  warning: skipping ${message}`);
       }
 
-      const ids = await findEntityIds(
-        baseUrl, ontologyKey, entityTypeKey, config.conceptIdProperty, conceptId,
-      );
-      if (ids.length > 1) {
+      // The concept ID alone identifies the document, so a match under a
+      // different entity type is a conflict, not a second concept.
+      const matches = await findByConceptId(baseUrl, ontologyKey, config, mappedTypes, conceptId);
+      if (matches.length > 1) {
+        const list = matches.map((m) => `${m.entityTypeKey} (${m.id})`).join(', ');
+        throw new Error(`concept ID "${conceptId}" already exists more than once: ${list} — resolve the duplicates first`);
+      }
+      if (matches.length === 1 && matches[0].entityTypeKey !== entityTypeKey) {
         throw new Error(
-          `more than one "${entityTypeKey}" entity has ${config.conceptIdProperty}="${conceptId}" — resolve the duplicates first`,
+          `concept ID "${conceptId}" is stored as "${matches[0].entityTypeKey}" but this document declares "${entityTypeKey}" — ` +
+            'an entity cannot change type; delete the stored entity first',
         );
       }
 
-      const basePath = `/api/runtime/${encodeURIComponent(ontologyKey)}/entities/${encodeURIComponent(entityTypeKey)}`;
-      if (ids.length === 0) {
-        const created = await api(baseUrl, basePath, {
+      if (matches.length === 0) {
+        const created = await api(baseUrl, basePathFor(entityTypeKey), {
           method: 'POST',
           body: JSON.stringify(payload),
         });
@@ -97,18 +82,18 @@ try {
           if (def.dataType === 'document' && !(def.key in payload)) continue;
           if (!(def.key in payload)) payload[def.key] = null;
         }
-        await api(baseUrl, `${basePath}/${encodeURIComponent(ids[0])}`, {
+        await api(baseUrl, `${basePathFor(entityTypeKey)}/${encodeURIComponent(matches[0].id)}`, {
           method: 'PATCH',
           body: JSON.stringify(payload),
         });
-        console.log(`updated  ${entityTypeKey}/${conceptId} (${ids[0]})`);
+        console.log(`updated  ${entityTypeKey}/${conceptId} (${matches[0].id})`);
       }
     } catch (err) {
       failures += 1;
-      console.error(`failed   ${file}: ${err.message}`);
+      console.error(`failed   ${abs}: ${err.message}`);
     }
   }
-  if (failures) die(`${failures} of ${positional.length} file(s) failed`);
+  if (failures) die(`${failures} of ${files.length} file(s) failed`);
 } catch (err) {
   die(err.message);
 }

@@ -10,41 +10,35 @@ export const CONFIG_FILENAME = 'okf.config.json';
 
 /**
  * Parse CLI arguments.
- * @param {Object<string, string[]>} flagDefs - Value flags: name to aliases
  * @param {Object<string, string[]>} boolDefs - Boolean flags: name to aliases
- * @returns {{ flags: Object<string, string|boolean>, positional: string[] }}
+ * @returns {{ flags: Object<string, boolean>, positional: string[] }}
  */
-export function parseCliArgs(flagDefs = {}, boolDefs = {}) {
+export function parseCliArgs(boolDefs = {}) {
   const raw = process.argv.slice(2);
   const flags = {};
   const positional = [];
-  const valueAliases = new Map();
   const boolAliases = new Map();
-  for (const [name, alts] of Object.entries(flagDefs)) {
-    for (const alt of alts) valueAliases.set(alt, name);
-  }
   for (const [name, alts] of Object.entries(boolDefs)) {
     for (const alt of alts) boolAliases.set(alt, name);
   }
-  for (let i = 0; i < raw.length; i++) {
-    if (valueAliases.has(raw[i])) {
-      flags[valueAliases.get(raw[i])] = raw[++i];
-    } else if (boolAliases.has(raw[i])) {
-      flags[boolAliases.get(raw[i])] = true;
-    } else if (!raw[i].startsWith('-')) {
-      positional.push(raw[i]);
+  for (const arg of raw) {
+    if (boolAliases.has(arg)) {
+      flags[boolAliases.get(arg)] = true;
+    } else if (arg.startsWith('-')) {
+      throw new Error(`unknown option: ${arg}`);
+    } else {
+      positional.push(arg);
     }
   }
   return { flags, positional };
 }
 
-/**
- * Resolve the OntoForge server base URL.
- * Priority: --base-url flag > ONTOFORGE_BASE_URL env > http://localhost:8000
- */
-export function getBaseUrl(flags) {
-  const url =
-    flags.baseUrl || process.env.ONTOFORGE_BASE_URL || 'http://localhost:8000';
+/** The OntoForge server URL. Per-developer, so it never lives in the bundle. */
+export function getBaseUrl() {
+  const url = process.env.ONTOFORGE_BASE_URL;
+  if (!url) {
+    throw new Error('ONTOFORGE_BASE_URL is not set — point it at your OntoForge server');
+  }
   return url.replace(/\/+$/, '');
 }
 
@@ -74,70 +68,90 @@ export async function api(baseUrl, path, options = {}) {
 }
 
 /**
- * Locate the bundle root and mapping config.
- * The bundle root is: --root flag > directory of the config file > cwd.
- * The config file is: --config flag > nearest okf.config.json walking up
- * from startDir > none (defaults apply).
- * @returns {{ config: object, root: string, configPath: string|null }}
+ * Load the bundle config. The directory holding okf.config.json IS the bundle
+ * root — concept IDs are file paths relative to it, so there is no other way
+ * to name it.
+ * @returns {{ config: object, root: string, configPath: string }}
  */
-export function resolveBundleContext(startDir, flags) {
+export function resolveBundleContext(startDir) {
+  let dir = resolve(startDir);
   let configPath = null;
-  let configDir = null;
-  if (flags.config) {
-    configPath = resolve(flags.config);
-    if (!existsSync(configPath)) {
-      throw new Error(`config file not found: ${flags.config}`);
+  for (;;) {
+    const candidate = join(dir, CONFIG_FILENAME);
+    if (existsSync(candidate)) {
+      configPath = candidate;
+      break;
     }
-    configDir = dirname(configPath);
-  } else {
-    let dir = resolve(startDir);
-    for (;;) {
-      const candidate = join(dir, CONFIG_FILENAME);
-      if (existsSync(candidate)) {
-        configPath = candidate;
-        configDir = dir;
-        break;
-      }
-      const parent = dirname(dir);
-      if (parent === dir) break;
-      dir = parent;
-    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
   }
-  let rawConfig = {};
-  if (configPath) {
-    try {
-      rawConfig = JSON.parse(readFileSync(configPath, 'utf8'));
-    } catch (err) {
-      throw new Error(`cannot parse ${configPath}: ${err.message}`);
-    }
-  }
-  const root = flags.root ? resolve(flags.root) : configDir || process.cwd();
-  return { config: mergeConfig(rawConfig), root, configPath };
-}
-
-/**
- * Resolve the ontology key: --ontology flag > config file > error.
- */
-export function requireOntology(flags, config) {
-  const key = flags.ontology || config.ontology;
-  if (!key) {
+  if (!configPath) {
     throw new Error(
-      'no ontology key — pass --ontology <key> or set "ontology" in okf.config.json',
+      `no ${CONFIG_FILENAME} found in ${resolve(startDir)} or any parent — see references/setup.md to create one`,
     );
   }
-  return key;
+  let raw;
+  try {
+    raw = JSON.parse(readFileSync(configPath, 'utf8'));
+  } catch (err) {
+    throw new Error(`cannot parse ${configPath}: ${err.message}`);
+  }
+  let config;
+  try {
+    config = mergeConfig(raw);
+  } catch (err) {
+    // mergeConfig is pure and cannot know which file it came from.
+    throw new Error(err.message.replace(/^okf\.config\.json/, configPath));
+  }
+  return { config, root: dir, configPath };
 }
 
 /**
- * Find entity IDs matching a property value (exact filter match).
- * Returns the matching IDs (at most 2 — enough to detect ambiguity).
+ * Fetch the entity types the config maps to, keyed by entity type key.
+ * A mapped type missing from the ontology is a config error, reported with
+ * every offender at once.
+ * @returns {Promise<Map<string, object>>}
  */
-export async function findEntityIds(baseUrl, ontologyKey, entityTypeKey, propertyKey, value) {
-  const path =
-    `/api/runtime/${encodeURIComponent(ontologyKey)}/entities/${encodeURIComponent(entityTypeKey)}` +
-    `?filter.${encodeURIComponent(propertyKey)}=${encodeURIComponent(value)}&limit=2&fields=_id`;
-  const page = await api(baseUrl, path);
-  return page.items.map((item) => item._id);
+export async function loadMappedTypes(baseUrl, ontologyKey, config, configPath) {
+  const all = await api(
+    baseUrl,
+    `/api/runtime/${encodeURIComponent(ontologyKey)}/schema/entity-types`,
+  );
+  const byKey = new Map(all.map((et) => [et.key, et]));
+  const mapped = new Map();
+  const missing = [];
+  for (const entityTypeKey of Object.values(config.typeMap)) {
+    const entityType = byKey.get(entityTypeKey);
+    if (entityType) mapped.set(entityTypeKey, entityType);
+    else missing.push(entityTypeKey);
+  }
+  if (missing.length) {
+    throw new Error(
+      `ontology "${ontologyKey}" has no entity type ${missing.map((k) => `"${k}"`).join(', ')} ` +
+        `— create ${missing.length > 1 ? 'them' : 'it'} or correct "typeMap" in ${configPath} ` +
+        '(see references/setup.md)',
+    );
+  }
+  return mapped;
+}
+
+/**
+ * Find every entity carrying this concept ID, across all mapped entity types.
+ * The concept ID alone is the identity of a document, so both push and pull
+ * resolve it the same way.
+ * @returns {Promise<Array<{ entityTypeKey: string, id: string }>>}
+ */
+export async function findByConceptId(baseUrl, ontologyKey, config, mappedTypes, conceptId) {
+  const matches = [];
+  for (const entityTypeKey of mappedTypes.keys()) {
+    const path =
+      `/api/runtime/${encodeURIComponent(ontologyKey)}/entities/${encodeURIComponent(entityTypeKey)}` +
+      `?filter.${encodeURIComponent(config.conceptIdProperty)}=${encodeURIComponent(conceptId)}&limit=2&fields=_id`;
+    const page = await api(baseUrl, path);
+    for (const item of page.items) matches.push({ entityTypeKey, id: item._id });
+  }
+  return matches;
 }
 
 /**

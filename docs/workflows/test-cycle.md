@@ -1,15 +1,19 @@
 # Multi-Agent Testing Strategy
 
-> Reusable strategy for test-and-bugfix cycles using agent teams.
+> Reusable strategy for test-and-bugfix cycles using one coordinating session and subagents.
 > Designed for sequential execution with clear role separation.
 
 ## Agent Roles
 
 | Role | Responsibility | Tools | Does NOT |
 |------|---------------|-------|----------|
-| **Team Lead** | Coordinates flow, relays context between agents, spawns/assigns agents, wipes DB, restarts services | SendMessage, TaskCreate/Update, Bash (infra only) | Write code, run tests |
+| **Team Lead** | Coordinates flow, relays context between agents, spawns subagents, wipes DB, restarts services | Agent (spawn), SendMessage (continue), Bash (infra only) | Write code, run tests |
 | **Tester** (one per layer) | Executes test plan, reports PASS/FAIL with details, stands by for re-test | curl (backend) or Chrome extension (frontend) | Fix bugs, touch code |
 | **Dev Agent** | Fixes bugs reported by team lead, adds regression unit tests, runs unit test suite | Code editing, `npm test` | Run integration/E2E tests, commit |
+
+The team lead is the coordinating session; testers and dev agents are its subagents.
+"Standby" means the subagent has reported and finished — the team lead continues the
+same subagent via SendMessage, with its context intact, for fixes and re-tests.
 
 ## Execution Flow
 

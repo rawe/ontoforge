@@ -1,26 +1,38 @@
 /**
- * AI runtime endpoints against the real docker-compose Neo4j and a local
- * Ollama model, ported from `backend/tests/integration/test_ai.py` plus
+ * AI runtime endpoints against the real docker-compose database and the
+ * configured language model, ported from `backend/tests/integration/test_ai.py` plus
  * the session-11 additions: ask over seeded data (OQL present, rows
  * non-empty), extract proposals shaped to the schema, extract-and-persist,
  * chat with a restricted agent whose trace shows only allowlisted tools,
  * and an A2A task round-trip against the default and a named agent.
  *
- * Skips when the database or the Ollama model is unavailable.
+ * Skips when the database is down, when `AI_TEST=1` is not set, or when
+ * the configured model is unreachable — see `support.ts` for the reasons.
  */
 
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createApp } from "../../../src/app.js";
+import { closeAiModel, initAiModel } from "../../../src/core/ai.js";
 import { closeStores, initStores } from "../../../src/core/ports.js";
 import { wipeDatabase } from "../reset.js";
-import { checkOllamaAiModel, disableAiProvider, enableOllamaAiProvider } from "./support.js";
+import { aiSuiteSkipReason } from "./support.js";
 
 type Row = Record<string, unknown>;
 
 let app: FastifyInstance | null = null;
 let available = false;
+let skipReason: string | null = null;
+
+// Vitest intercepts `console.*` and drops it for a file whose tests all skip,
+// so the reason would never reach the terminal. Writing to stderr directly
+// bypasses the interception and keeps the explanation visible — the whole
+// point of the skip messages.
+function reportSkip(reason: string): void {
+  skipReason = reason;
+  process.stderr.write(`\n${reason}\n\n`);
+}
 
 async function checkDatabase(): Promise<boolean> {
   try {
@@ -56,18 +68,22 @@ async function post(url: string, payload: Row, expected = 201): Promise<Row> {
 
 beforeAll(async () => {
   if (!(await checkDatabase())) {
-    console.warn("Database not available — skipping AI integration tests");
+    reportSkip(
+      "AI integration suite SKIPPED: the database is not reachable.\n" +
+        "  Start it with: docker compose up -d",
+    );
     return;
   }
-  if (!(await checkOllamaAiModel())) {
-    console.warn("Ollama or the AI model not available — skipping AI integration tests");
+  const reason = await aiSuiteSkipReason();
+  if (reason !== null) {
+    reportSkip(reason);
     await closeStores();
     return;
   }
   available = true;
 
   await wipeDatabase();
-  enableOllamaAiProvider();
+  initAiModel();
   app = await createApp();
   await app.ready();
 
@@ -139,7 +155,7 @@ afterAll(async () => {
   if (app !== null) {
     await app.close();
     await wipeDatabase();
-    disableAiProvider();
+    closeAiModel();
     await closeStores();
   }
 });
@@ -147,7 +163,8 @@ afterAll(async () => {
 const ifAvailable = (name: string, fn: () => Promise<void>) =>
   it(name, async (ctx) => {
     if (!available) {
-      ctx.skip();
+      // The note lands in Vitest's summary; the full reason went to stderr.
+      ctx.skip(skipReason?.split("\n")[0] ?? "AI suite unavailable");
       return;
     }
     await fn();

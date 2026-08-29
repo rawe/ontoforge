@@ -11,7 +11,7 @@ All commands are run from `server/`.
 | `npm test` | Unit | None |
 | `npm run test:integration` | Integration | The selected database |
 | `npm run test:integration:embedding` | Semantic search | The selected database + Ollama (embedding model) |
-| `npm run test:integration:ai` | AI (slow, real model) | The selected database + Ollama (tool-calling model) |
+| `AI_TEST=1 npm run test:integration:ai` | AI (slow, real model) | The selected database + an armed AI provider |
 
 **Unit tests** (`tests/`, excluding `tests/integration/`) mock all external
 dependencies (database drivers, embedding providers, AI models). They run fast and
@@ -25,9 +25,10 @@ per backend. The embedding suite (`tests/integration/embedding/`) and the AI sui
 plain integration suite's feature-disabled assertions depend on running with *no*
 provider configured.
 
-The embedding and AI suites auto-skip when their optional provider (Ollama) is
-unavailable. The integration suite does not: it requires a running database and fails
-loudly by design when the selected one is down.
+The embedding suite auto-skips when Ollama is unavailable. The AI suite skips unless
+`AI_TEST=1` is set *and* the configured model answers — see [The AI
+gate](#the-ai-gate). The integration suite does neither: it requires a running database
+and fails loudly by design when the selected one is down.
 
 `npm run typecheck` runs the TypeScript compiler without emitting.
 
@@ -68,16 +69,33 @@ Required by the embedding suite:
 ollama pull nomic-embed-text
 ```
 
-### Ollama (AI / Tool Calling)
+### The AI gate
 
-Required by the AI suite:
+The AI suite drives a **real** language model through whatever `AI_PROVIDER` names — so
+against a paid endpoint every run costs money. It therefore never runs unless asked:
 
 ```bash
-ollama pull qwen3:8b
+AI_TEST=1 npm run test:integration:ai
 ```
 
-AI tests need a model that supports **tool calling** (function calling); not all Ollama
-models do. The suite uses the `AI_MODEL` default from `src/config.ts` (`qwen3:8b`).
+`AI_TEST` is the only switch. Provider, model, base URL and key all come from the
+ordinary `AI_*` variables in the active env file, so the suite tests the provider you
+have actually configured. It is a test-only variable: it is read straight from
+`process.env` in the suite's `support.ts` and is absent from `Settings`, so nothing in
+`src/` can see it.
+
+`server/.env` carries it as `AI_TEST=0`. Arm it per run on the command line, as above —
+a shell variable wins over the env file — rather than editing the file, so paid runs
+stay deliberate.
+
+The suite skips with a message naming the exact cause and fix when `AI_TEST` is unset,
+when no provider is configured, or when the endpoint does not list `AI_MODEL`. It
+probes the OpenAI-compatible listing at `{AI_BASE_URL}/v1/models`, which OpenRouter and
+Ollama's compatibility layer both serve.
+
+The model must support **tool calling** (function calling); not all do. For a local
+Ollama run, `env/ollama.env` is already configured — `ollama pull qwen3:8b` (or
+whichever `AI_MODEL` names).
 
 **Note on AI test flakiness:** AI integration tests interact with a real LLM, so results
 are non-deterministic. Tests are written to validate structure and basic correctness
@@ -98,7 +116,7 @@ ollama pull qwen3:8b
 npm test
 npm run test:integration
 npm run test:integration:embedding
-npm run test:integration:ai
+AI_TEST=1 npm run test:integration:ai
 ```
 
 ## Writing Tests

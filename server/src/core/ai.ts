@@ -3,9 +3,12 @@
  * configurations and saved-query pipelines — plus the language-model
  * provider seam.
  *
- * Two providers, both via OpenAI-compatible chat endpoints: `ollama` and
- * `openai` (`{AI_BASE_URL}/v1`; the openai provider additionally requires
- * `AI_API_KEY`). The engine is LangChain's `ChatOpenAI` (approved stack:
+ * Two providers, both via OpenAI-compatible chat endpoints at
+ * `{AI_BASE_URL}/v1`: `ollama` and `openai`. The value `openai` names the
+ * wire protocol, not the vendor — any endpoint speaking it is reachable
+ * through it (OpenAI itself, OpenRouter, vLLM, LM Studio, …) by pointing
+ * `AI_BASE_URL` at the host that serves `/v1`; it additionally requires
+ * `AI_API_KEY`. The engine is LangChain's `ChatOpenAI` (approved stack:
  * LangChain.js / LangGraph.js). With no `AI_PROVIDER` configured, no model
  * is installed and every model-running route answers `422 VALIDATION_ERROR`
  * with `details.code: "FEATURE_DISABLED"`; listing agents and serving cards
@@ -81,9 +84,14 @@ export function createAiModel(
 ): BaseChatModel {
   const base = baseUrl.replace(/\/+$/, "");
   // `reasoning_effort` rides in `modelKwargs`, which is spread verbatim into
-  // the request: LangChain only lets its typed `reasoning` field through for
-  // OpenAI's own reasoning models (`o*`, `gpt-5*`) and silently drops it for
-  // every other model name, local ones included.
+  // the request body. This is the only path that reaches every endpoint:
+  // LangChain gates its typed `reasoning` field behind a model-name test
+  // (`o<digit>*` or `gpt-5*`) and silently drops the field for anything else
+  // — local Ollama names, and every OpenRouter slug too, since those are
+  // prefixed (`openai/gpt-5.6-luna`) and so never match. `reasoning_effort`
+  // is the OpenAI-compatible spelling and OpenRouter accepts it directly,
+  // normalizing it onto its own `reasoning.effort`; endpoints and models
+  // that do not support it ignore the field.
   const effort = settings.AI_REASONING_EFFORT;
   const reasoning =
     effort === null ? {} : { modelKwargs: { reasoning_effort: effort } };

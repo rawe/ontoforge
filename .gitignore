@@ -5,6 +5,9 @@ node_modules/
 .env
 .env.*
 !.env.example
+# Local overrides of the committed env/ presets — for credentials, which
+# must never enter a committed preset.
+env/*.local.env
 
 # IDE
 .idea/

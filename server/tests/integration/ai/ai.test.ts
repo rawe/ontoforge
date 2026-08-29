@@ -6,7 +6,8 @@
  * chat with a restricted agent whose trace shows only allowlisted tools,
  * and an A2A task round-trip against the default and a named agent.
  *
- * Skips when the database is down, when `AI_TEST=1` is not set, or when
+ * Configuration comes from the suite's own env file (`env/test-ai.env` via
+ * the npm script), never `server/.env`. Skips when the database is down or
  * the configured model is unreachable — see `support.ts` for the reasons.
  */
 

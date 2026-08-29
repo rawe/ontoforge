@@ -6,11 +6,11 @@
  * provider under test is exactly the configured one.
  *
  * The suite drives a REAL language model through whatever `AI_PROVIDER`
- * names, so a paid endpoint bills for every run. It therefore never runs by
- * accident: `AI_TEST=1` must be set explicitly, and everything else comes
- * from the ordinary `AI_*` configuration. `AI_TEST` is read straight from
- * `process.env` and is deliberately absent from `Settings` — it is a
- * test-only switch with no place in the production configuration surface.
+ * names. It gets that from its own env file — `env/test-ai.env`, selected by
+ * the npm script — which configures a local Ollama model and carries no
+ * credential, so a default run is free and `server/.env` is never read. A
+ * paid provider is reached only by naming an uncommitted file for that run:
+ * `ENV_FILE=../env/test-ai.local.env npm run test:integration:ai`.
  */
 
 import { settings } from "../../../src/config.js";
@@ -71,27 +71,13 @@ async function probeModel(): Promise<string | null> {
  * the test output can explain the skip without inspecting the code.
  */
 export async function aiSuiteSkipReason(): Promise<string | null> {
-  if (process.env.AI_TEST !== "1") {
-    return (
-      `AI integration suite SKIPPED: AI_TEST is not set to 1.\n` +
-      `  These tests run a REAL language model. When AI_PROVIDER points at a\n` +
-      `  paid endpoint (OpenRouter, OpenAI, …) every run costs money, so the\n` +
-      `  suite never runs by accident — it must be requested explicitly:\n` +
-      `    AI_TEST=1 npm run test:integration:ai\n` +
-      `  Provider, model, base URL and key all come from the AI_* variables in\n` +
-      `  the active env file; AI_TEST only decides whether the suite may run.\n` +
-      `  server/.env carries it as AI_TEST=0; arm it per run on the command\n` +
-      `  line rather than editing that file, so paid runs stay deliberate.\n` +
-      `  See docs/workflows/testing.md.`
-    );
-  }
   if (!settings.AI_PROVIDER) {
     return (
-      `AI integration suite SKIPPED: AI_TEST=1 is set but AI_PROVIDER is not.\n` +
-      `  Configure a provider in the active env file (ENV_FILE, otherwise\n` +
-      `  server/.env): AI_PROVIDER, AI_MODEL, AI_BASE_URL, and AI_API_KEY for\n` +
-      `  the 'openai' provider. The model must support tool calling.\n` +
-      `  See docs/workflows/testing.md.`
+      `AI integration suite SKIPPED: no AI_PROVIDER is configured.\n` +
+      `  The suite reads the env file the npm script names — env/test-ai.env by\n` +
+      `  default. Set AI_PROVIDER, AI_MODEL and AI_BASE_URL there (plus\n` +
+      `  AI_API_KEY for the 'openai' provider). The model must support tool\n` +
+      `  calling. See docs/workflows/testing.md.`
     );
   }
   return probeModel();

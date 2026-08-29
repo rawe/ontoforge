@@ -11,12 +11,12 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 
-function snippetUrlBased(origin: string, ontologyKey: string): string {
+function snippetUrlBased(origin: string, lensKey: string): string {
   return JSON.stringify(
     {
       mcpServers: {
         'ontoforge-modeling': { type: 'http', url: `${origin}/mcp/model` },
-        'ontoforge-runtime': { type: 'http', url: `${origin}/mcp/runtime/${ontologyKey}` },
+        'ontoforge-runtime': { type: 'http', url: `${origin}/mcp/runtime/${lensKey}` },
       },
     },
     null,
@@ -24,7 +24,7 @@ function snippetUrlBased(origin: string, ontologyKey: string): string {
   )
 }
 
-function snippetHeaderBased(origin: string, ontologyKey: string): string {
+function snippetHeaderBased(origin: string, lensKey: string): string {
   return JSON.stringify(
     {
       mcpServers: {
@@ -35,7 +35,7 @@ function snippetHeaderBased(origin: string, ontologyKey: string): string {
         'ontoforge-runtime': {
           type: 'http',
           url: `${origin}/mcp/runtime`,
-          headers: { 'X-Ontology-Key': ontologyKey },
+          headers: { 'X-Lens-Key': lensKey },
         },
       },
     },
@@ -79,13 +79,13 @@ function CodeBlock({ label, code }: { label: string; code: string }) {
 
 /**
  * "Connect AI clients" dialog: MCP config snippets (URL-based and
- * header-based) with the ontology key inlined, plus copy buttons.
+ * header-based) with the lens key inlined, plus copy buttons.
  */
 export function McpConnectDialog({
-  ontologyKey,
+  lensKey,
   trigger,
 }: {
-  ontologyKey: string
+  lensKey: string
   trigger: ReactNode
 }) {
   const origin = window.location.origin
@@ -96,19 +96,19 @@ export function McpConnectDialog({
         <DialogHeader>
           <DialogTitle>Connect AI clients</DialogTitle>
           <DialogDescription>
-            Point any MCP-capable client (Claude, IDEs, agents) at this ontology. Both
+            Point any MCP-capable client (Claude, IDEs, agents) at this lens. Both
             snippets expose the modeling and runtime servers for{' '}
-            <span className="font-mono text-foreground">{ontologyKey}</span>.
+            <span className="font-mono text-foreground">{lensKey}</span>.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <CodeBlock
-            label="Ontology key in the URL"
-            code={snippetUrlBased(origin, ontologyKey)}
+            label="Lens key in the URL"
+            code={snippetUrlBased(origin, lensKey)}
           />
           <CodeBlock
-            label="Ontology key as a header"
-            code={snippetHeaderBased(origin, ontologyKey)}
+            label="Lens key as a header"
+            code={snippetHeaderBased(origin, lensKey)}
           />
         </div>
       </DialogContent>

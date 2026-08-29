@@ -1,39 +1,39 @@
 import { ArrowRight, Layers, Plus } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useOntologies, useOntologyScope, useRuntimeSchema } from '@/api/hooks'
+import { useLenses, useLensScope, useRuntimeSchema } from '@/api/hooks'
 import { EmptyState } from '@/components/EmptyState'
 import { Logo } from '@/components/Logo'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { storageKeys, writeString } from '@/lib/storage'
-import type { Ontology } from '@/api/types'
+import type { Lens } from '@/api/types'
 
-function OntologyCard({ ontology }: { ontology: Ontology }) {
+function LensCard({ lens }: { lens: Lens }) {
   const navigate = useNavigate()
-  const schema = useRuntimeSchema(ontology.key)
-  const scope = useOntologyScope(ontology.ontologyId)
+  const schema = useRuntimeSchema(lens.key)
+  const scope = useLensScope(lens.lensId)
 
   return (
     <button
       onClick={() => {
-        writeString(storageKeys.lastOntology, ontology.key)
-        navigate(`/w/${ontology.key}`)
+        writeString(storageKeys.lastLens, lens.key)
+        navigate(`/w/${lens.key}`)
       }}
       className="group flex flex-col gap-3 rounded-xl border bg-card p-5 text-left transition-all duration-150 hover:border-ring/40 hover:shadow-[0_0_0_3px] hover:shadow-ring/10 focus-visible:outline-2 focus-visible:outline-ring/60"
     >
       <div className="flex w-full items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="truncate text-sm font-semibold tracking-tight">{ontology.name}</div>
+          <div className="truncate text-sm font-semibold tracking-tight">{lens.name}</div>
           <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
-            {ontology.key}
+            {lens.key}
           </div>
         </div>
         <ArrowRight className="mt-1 size-4 shrink-0 text-muted-foreground opacity-0 transition-all duration-150 group-hover:translate-x-0.5 group-hover:opacity-100" />
       </div>
-      {ontology.description !== null && ontology.description !== '' && (
+      {lens.description !== null && lens.description !== '' && (
         <p className="line-clamp-2 text-[13px] leading-snug text-muted-foreground">
-          {ontology.description}
+          {lens.description}
         </p>
       )}
       <div className="mt-auto flex items-center gap-2 pt-1">
@@ -61,9 +61,9 @@ function OntologyCard({ ontology }: { ontology: Ontology }) {
   )
 }
 
-/** `/welcome` — ontology picker; the app's first impression. */
+/** `/welcome` — lens picker; the app's first impression. */
 export function WelcomePage() {
-  const { data: ontologies, isPending, isError, error } = useOntologies()
+  const { data: lenses, isPending, isError, error } = useLenses()
 
   return (
     <div className="flex min-h-dvh flex-col items-center bg-background px-6 py-16">
@@ -73,7 +73,7 @@ export function WelcomePage() {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">OntoForge</h1>
             <p className="mt-1.5 text-sm text-muted-foreground">
-              Pick an ontology to open its workbench — a lens over your knowledge graph.
+              Pick a lens to open its workbench — a view over your knowledge graph.
             </p>
           </div>
         </div>
@@ -89,7 +89,7 @@ export function WelcomePage() {
           {isError && (
             <EmptyState
               icon={Layers}
-              title="Could not load ontologies"
+              title="Could not load lenses"
               description={error.message}
               action={
                 <Button size="sm" variant="outline" onClick={() => location.reload()}>
@@ -99,33 +99,33 @@ export function WelcomePage() {
             />
           )}
 
-          {ontologies !== undefined && ontologies.length === 0 && (
+          {lenses !== undefined && lenses.length === 0 && (
             <EmptyState
               icon={Layers}
-              title="No ontologies yet"
-              description="Create your first ontology in the Studio to start modeling and capturing knowledge."
+              title="No lenses yet"
+              description="Create your first lens in the Studio to start modeling and capturing knowledge."
               action={
                 <Button size="sm" asChild>
-                  <Link to="/studio/ontologies">
+                  <Link to="/studio/lenses">
                     <Plus className="size-4" />
-                    Create ontology
+                    Create lens
                   </Link>
                 </Button>
               }
             />
           )}
 
-          {ontologies !== undefined && ontologies.length > 0 && (
+          {lenses !== undefined && lenses.length > 0 && (
             <div className="grid gap-4 sm:grid-cols-2">
-              {ontologies.map((o) => (
-                <OntologyCard key={o.ontologyId} ontology={o} />
+              {lenses.map((o) => (
+                <LensCard key={o.lensId} lens={o} />
               ))}
               <Link
-                to="/studio/ontologies"
+                to="/studio/lenses"
                 className="flex min-h-36 flex-col items-center justify-center gap-2 rounded-xl border border-dashed p-5 text-muted-foreground transition-colors duration-150 hover:border-ring/40 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring/60"
               >
                 <Plus className="size-5" />
-                <span className="text-[13px] font-medium">Create ontology</span>
+                <span className="text-[13px] font-medium">Create lens</span>
               </Link>
             </div>
           )}

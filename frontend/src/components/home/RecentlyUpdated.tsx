@@ -16,17 +16,17 @@ const SHOW = 8
  * merged client-side and trimmed to the top 8 overall.
  */
 export function RecentlyUpdated({
-  ontologyKey,
+  lensKey,
   entityTypes,
 }: {
-  ontologyKey: string
+  lensKey: string
   entityTypes: readonly SchemaEntityType[]
 }) {
   const results = useQueries({
     queries: entityTypes.map((t) => ({
-      queryKey: ['entities', ontologyKey, t.key, { recent: PER_TYPE }] as const,
+      queryKey: ['entities', lensKey, t.key, { recent: PER_TYPE }] as const,
       queryFn: () =>
-        listEntities(ontologyKey, t.key, {
+        listEntities(lensKey, t.key, {
           limit: PER_TYPE,
           sort: '_updatedAt',
           order: 'desc',
@@ -66,7 +66,7 @@ export function RecentlyUpdated({
             {items.map((e) => (
               <li key={e._id}>
                 <Link
-                  to={`/w/${ontologyKey}/e/${e._entityTypeKey}/${e._id}`}
+                  to={`/w/${lensKey}/e/${e._entityTypeKey}/${e._id}`}
                   className="flex items-center gap-2.5 px-4 py-2 transition-colors hover:bg-muted/50"
                 >
                   <TypeChip

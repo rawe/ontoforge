@@ -16,11 +16,11 @@ import { closeStores, initStores } from "../../../src/core/ports.js";
 import { wipeDatabase } from "../reset.js";
 
 const ALL_TABLES = [
-  "ontology",
+  "lens",
   "entity_type",
   "relation_type",
   "property_def",
-  "ontology_includes",
+  "lens_includes",
   "ai_agent_config",
   "saved_query",
   "entity",
@@ -31,7 +31,7 @@ const ALL_TABLES = [
 // Named constraints from the init DDL, with their pg_constraint type:
 // p = primary key, u = unique, f = foreign key, c = check.
 const EXPECTED_CONSTRAINTS: Record<string, string> = {
-  ontology_pk: "p",
+  lens_pk: "p",
   entity_type_pk: "p",
   relation_type_pk: "p",
   property_def_pk: "p",
@@ -40,31 +40,31 @@ const EXPECTED_CONSTRAINTS: Record<string, string> = {
   entity_pk: "p",
   relation_pk: "p",
   document_chunk_pk: "p",
-  // no ontology_includes PK — identity rides its two composite uniques
-  ontology_key_unique: "u",
-  ontology_name_unique: "u",
+  // no lens_includes PK — identity rides its two composite uniques
+  lens_key_unique: "u",
+  lens_name_unique: "u",
   entity_type_key_unique: "u",
   relation_type_key_unique: "u",
   property_def_entity_key_unique: "u",
   property_def_relation_key_unique: "u",
-  ontology_includes_entity_unique: "u",
-  ontology_includes_relation_unique: "u",
+  lens_includes_entity_unique: "u",
+  lens_includes_relation_unique: "u",
   ai_agent_config_key_unique: "u",
   saved_query_key_unique: "u",
   relation_type_source_fk: "f",
   relation_type_target_fk: "f",
   property_def_entity_type_fk: "f",
   property_def_relation_type_fk: "f",
-  ontology_includes_ontology_fk: "f",
-  ontology_includes_entity_type_fk: "f",
-  ontology_includes_relation_type_fk: "f",
-  ai_agent_config_ontology_fk: "f",
-  saved_query_ontology_fk: "f",
+  lens_includes_lens_fk: "f",
+  lens_includes_entity_type_fk: "f",
+  lens_includes_relation_type_fk: "f",
+  ai_agent_config_lens_fk: "f",
+  saved_query_lens_fk: "f",
   relation_from_fk: "f",
   relation_to_fk: "f",
   document_chunk_entity_fk: "f",
   property_def_one_owner: "c",
-  ontology_includes_one_type: "c",
+  lens_includes_one_type: "c",
 };
 
 const FIXED_BTREE_INDEXES = [

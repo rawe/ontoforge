@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import { useState, type ComponentType, type ReactNode } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { useFeatures, useOntologies, useRuntimeSchema } from '@/api/hooks'
+import { useFeatures, useLenses, useRuntimeSchema } from '@/api/hooks'
 import { Logo } from '@/components/Logo'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { TypeDot } from '@/components/TypeChip'
@@ -75,18 +75,18 @@ function NavItem({ to, label, collapsed, icon: Icon, leading, end }: NavItemProp
   )
 }
 
-/* ----------------------------- ontology switcher ----------------------------- */
+/* ----------------------------- lens switcher ----------------------------- */
 
-function OntologySwitcher({
-  ontologyKey,
+function LensSwitcher({
+  lensKey,
   collapsed,
 }: {
-  ontologyKey: string
+  lensKey: string
   collapsed: boolean
 }) {
   const navigate = useNavigate()
-  const { data: ontologies } = useOntologies()
-  const current = ontologies?.find((o) => o.key === ontologyKey)
+  const { data: lenses } = useLenses()
+  const current = lenses?.find((o) => o.key === lensKey)
 
   return (
     <DropdownMenu>
@@ -98,17 +98,17 @@ function OntologySwitcher({
             'focus-visible:outline-2 focus-visible:outline-ring/60',
             collapsed && 'justify-center px-0',
           )}
-          aria-label="Switch ontology"
+          aria-label="Switch lens"
         >
           <Logo className="size-6 shrink-0 rounded-md" />
           {!collapsed && (
             <>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[13px] font-semibold leading-tight">
-                  {current?.name ?? ontologyKey}
+                  {current?.name ?? lensKey}
                 </span>
                 <span className="block truncate font-mono text-[10.5px] leading-tight text-muted-foreground">
-                  {ontologyKey}
+                  {lensKey}
                 </span>
               </span>
               <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
@@ -118,13 +118,13 @@ function OntologySwitcher({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-60">
         <DropdownMenuLabel className="text-[11px] uppercase tracking-wide text-muted-foreground">
-          Ontologies
+          Lenses
         </DropdownMenuLabel>
-        {(ontologies ?? []).map((o) => (
+        {(lenses ?? []).map((o) => (
           <DropdownMenuItem
-            key={o.ontologyId}
+            key={o.lensId}
             onSelect={() => {
-              writeString(storageKeys.lastOntology, o.key)
+              writeString(storageKeys.lastLens, o.key)
               navigate(`/w/${o.key}`)
             }}
             className="gap-2"
@@ -135,13 +135,13 @@ function OntologySwitcher({
                 {o.key}
               </span>
             </span>
-            {o.key === ontologyKey && <Check className="size-4 shrink-0" />}
+            {o.key === lensKey && <Check className="size-4 shrink-0" />}
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => navigate('/studio/ontologies')} className="gap-2">
+        <DropdownMenuItem onSelect={() => navigate('/studio/lenses')} className="gap-2">
           <Plus className="size-4" />
-          Manage ontologies
+          Manage lenses
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -151,10 +151,10 @@ function OntologySwitcher({
 /* ---------------------------------- sidebar ---------------------------------- */
 
 export function Sidebar({
-  ontologyKey,
+  lensKey,
   onSearch,
 }: {
-  ontologyKey: string
+  lensKey: string
   /** Opens the Cmd+K search palette (provided by WorkbenchLayout). */
   onSearch?: () => void
 }) {
@@ -162,7 +162,7 @@ export function Sidebar({
     () => readString(storageKeys.sidebar) === 'collapsed',
   )
   const { data: features } = useFeatures()
-  const schema = useRuntimeSchema(ontologyKey)
+  const schema = useRuntimeSchema(lensKey)
 
   const toggle = () => {
     setCollapsed((prev) => {
@@ -171,7 +171,7 @@ export function Sidebar({
     })
   }
 
-  const base = `/w/${ontologyKey}`
+  const base = `/w/${lensKey}`
 
   return (
     <aside
@@ -182,7 +182,7 @@ export function Sidebar({
       )}
     >
       <div className={cn('p-2', collapsed && 'px-1.5')}>
-        <OntologySwitcher ontologyKey={ontologyKey} collapsed={collapsed} />
+        <LensSwitcher lensKey={lensKey} collapsed={collapsed} />
       </div>
 
       {onSearch !== undefined && (

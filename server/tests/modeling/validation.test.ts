@@ -16,10 +16,10 @@ vi.mock("../../src/core/ports.js", () => ({
   getRuntimeStore: () => ({}),
 }));
 
-const ONTOLOGY_DATA = {
-  ontologyId: "ont-1",
-  key: "my_ontology",
-  name: "My Ontology",
+const LENS_DATA = {
+  lensId: "lens-1",
+  key: "my_lens",
+  name: "My Lens",
   description: null,
   createdAt: NOW,
   updatedAt: NOW,
@@ -43,7 +43,7 @@ beforeEach(() => {
 
 describe("validate one lens", () => {
   it("a valid scoped lens answers valid", async () => {
-    holder.store.getOntology.mockResolvedValue(ONTOLOGY_DATA);
+    holder.store.getLens.mockResolvedValue(LENS_DATA);
     holder.store.getFullSchema.mockResolvedValue({
       entityTypes: [
         {
@@ -56,11 +56,11 @@ describe("validate one lens", () => {
         },
       ],
       relationTypes: [],
-      ontologies: [
+      lenses: [
         {
-          ontologyId: "ont-1",
-          key: "my_ontology",
-          name: "My Ontology",
+          lensId: "lens-1",
+          key: "my_lens",
+          name: "My Lens",
           entityInclusions: [{ key: "person", properties: ["full_name"] }],
           relationInclusions: [],
         },
@@ -68,7 +68,7 @@ describe("validate one lens", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/ontologies/ont-1/validate",
+      url: "/api/model/lenses/lens-1/validate",
     });
     expect(res.statusCode).toBe(200);
     expect(res.json().valid).toBe(true);
@@ -76,7 +76,7 @@ describe("validate one lens", () => {
   });
 
   it("an allowlist omitting a required-no-default property is reported", async () => {
-    holder.store.getOntology.mockResolvedValue(ONTOLOGY_DATA);
+    holder.store.getLens.mockResolvedValue(LENS_DATA);
     holder.store.getFullSchema.mockResolvedValue({
       entityTypes: [
         {
@@ -89,11 +89,11 @@ describe("validate one lens", () => {
         },
       ],
       relationTypes: [],
-      ontologies: [
+      lenses: [
         {
-          ontologyId: "ont-1",
-          key: "my_ontology",
-          name: "My Ontology",
+          lensId: "lens-1",
+          key: "my_lens",
+          name: "My Lens",
           entityInclusions: [{ key: "person", properties: [] }],
           relationInclusions: [],
         },
@@ -101,7 +101,7 @@ describe("validate one lens", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/ontologies/ont-1/validate",
+      url: "/api/model/lenses/lens-1/validate",
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -112,15 +112,15 @@ describe("validate one lens", () => {
   });
 
   it("an unscoped lens is valid by definition", async () => {
-    holder.store.getOntology.mockResolvedValue(ONTOLOGY_DATA);
+    holder.store.getLens.mockResolvedValue(LENS_DATA);
     holder.store.getFullSchema.mockResolvedValue({
       entityTypes: [],
       relationTypes: [],
-      ontologies: [
+      lenses: [
         {
-          ontologyId: "ont-1",
-          key: "my_ontology",
-          name: "My Ontology",
+          lensId: "lens-1",
+          key: "my_lens",
+          name: "My Lens",
           entityInclusions: [],
           relationInclusions: [],
         },
@@ -128,7 +128,7 @@ describe("validate one lens", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/ontologies/ont-1/validate",
+      url: "/api/model/lenses/lens-1/validate",
     });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ valid: true, errors: [] });
@@ -137,7 +137,7 @@ describe("validate one lens", () => {
   it("an unknown lens id answers 404", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/ontologies/nonexistent/validate",
+      url: "/api/model/lenses/nonexistent/validate",
     });
     expect(res.statusCode).toBe(404);
   });
@@ -147,7 +147,7 @@ describe("validate one lens", () => {
     // accepted while the lens had no entity inclusions; entity inclusions
     // were added afterwards. Validation reports it; the runtime still
     // loads and serves the lens (untested here).
-    holder.store.getOntology.mockResolvedValue(ONTOLOGY_DATA);
+    holder.store.getLens.mockResolvedValue(LENS_DATA);
     holder.store.getFullSchema.mockResolvedValue({
       entityTypes: [
         { entityTypeId: "et-1", key: "person", displayName: "Person", properties: [] },
@@ -163,11 +163,11 @@ describe("validate one lens", () => {
           properties: [],
         },
       ],
-      ontologies: [
+      lenses: [
         {
-          ontologyId: "ont-1",
-          key: "my_ontology",
-          name: "My Ontology",
+          lensId: "lens-1",
+          key: "my_lens",
+          name: "My Lens",
           entityInclusions: [{ key: "person", properties: null }],
           relationInclusions: [{ key: "works_for", properties: null }],
         },
@@ -175,29 +175,29 @@ describe("validate one lens", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/ontologies/ont-1/validate",
+      url: "/api/model/lenses/lens-1/validate",
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.valid).toBe(false);
     expect(body.errors).toEqual([
       {
-        path: "ontologies.my_ontology.includes.relationTypes.works_for",
+        path: "lenses.my_lens.includes.relationTypes.works_for",
         message: "Target entity type 'company' is not included",
       },
     ]);
   });
 
   it("an inclusion naming a type that no longer exists is reported", async () => {
-    holder.store.getOntology.mockResolvedValue(ONTOLOGY_DATA);
+    holder.store.getLens.mockResolvedValue(LENS_DATA);
     holder.store.getFullSchema.mockResolvedValue({
       entityTypes: [],
       relationTypes: [],
-      ontologies: [
+      lenses: [
         {
-          ontologyId: "ont-1",
-          key: "my_ontology",
-          name: "My Ontology",
+          lensId: "lens-1",
+          key: "my_lens",
+          name: "My Lens",
           entityInclusions: [{ key: "ghost", properties: null }],
           relationInclusions: [],
         },
@@ -205,7 +205,7 @@ describe("validate one lens", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/ontologies/ont-1/validate",
+      url: "/api/model/lenses/lens-1/validate",
     });
     const body = res.json();
     expect(body.valid).toBe(false);
@@ -213,7 +213,7 @@ describe("validate one lens", () => {
   });
 
   it("a stale allowlist key (property deleted without cascade) is reported", async () => {
-    holder.store.getOntology.mockResolvedValue(ONTOLOGY_DATA);
+    holder.store.getLens.mockResolvedValue(LENS_DATA);
     holder.store.getFullSchema.mockResolvedValue({
       entityTypes: [
         {
@@ -224,11 +224,11 @@ describe("validate one lens", () => {
         },
       ],
       relationTypes: [],
-      ontologies: [
+      lenses: [
         {
-          ontologyId: "ont-1",
-          key: "my_ontology",
-          name: "My Ontology",
+          lensId: "lens-1",
+          key: "my_lens",
+          name: "My Lens",
           entityInclusions: [{ key: "person", properties: ["full_name", "deleted_prop"] }],
           relationInclusions: [],
         },
@@ -236,7 +236,7 @@ describe("validate one lens", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/ontologies/ont-1/validate",
+      url: "/api/model/lenses/lens-1/validate",
     });
     const body = res.json();
     expect(body.valid).toBe(false);
@@ -284,11 +284,11 @@ describe("validate the whole schema", () => {
         properties: [],
       },
     ],
-    ontologies: [
+    lenses: [
       {
-        ontologyId: "ont-1",
-        key: "test_ontology",
-        name: "Test Ontology",
+        lensId: "lens-1",
+        key: "test_lens",
+        name: "Test Lens",
         description: null,
         createdAt: NOW,
         updatedAt: NOW,
@@ -303,8 +303,8 @@ describe("validate the whole schema", () => {
 
   it("a consistent schema and lenses answer valid with no errors", async () => {
     holder.store.getFullSchema.mockResolvedValue(FULL_SCHEMA);
-    holder.store.listOntologies.mockResolvedValue(FULL_SCHEMA.ontologies);
-    holder.store.getOntology.mockResolvedValue(FULL_SCHEMA.ontologies[0]);
+    holder.store.listLenses.mockResolvedValue(FULL_SCHEMA.lenses);
+    holder.store.getLens.mockResolvedValue(FULL_SCHEMA.lenses[0]);
     const res = await app.inject({ method: "POST", url: "/api/model/schema/validate" });
     expect(res.statusCode).toBe(200);
     expect(res.json().valid).toBe(true);
@@ -331,10 +331,10 @@ describe("validate the whole schema", () => {
           properties: [],
         },
       ],
-      ontologies: [],
+      lenses: [],
     };
     holder.store.getFullSchema.mockResolvedValue(badSchema);
-    holder.store.listOntologies.mockResolvedValue([]);
+    holder.store.listLenses.mockResolvedValue([]);
     const res = await app.inject({ method: "POST", url: "/api/model/schema/validate" });
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -360,10 +360,10 @@ describe("validate the whole schema", () => {
         },
       ],
       relationTypes: [],
-      ontologies: [],
+      lenses: [],
     };
     holder.store.getFullSchema.mockResolvedValue(badSchema);
-    holder.store.listOntologies.mockResolvedValue([]);
+    holder.store.listLenses.mockResolvedValue([]);
     const res = await app.inject({ method: "POST", url: "/api/model/schema/validate" });
     const messages = res.json().errors.map((e: { message: string }) => e.message);
     expect(messages).toContain("Duplicate entity type key 'person'");
@@ -381,9 +381,9 @@ describe("validate the whole schema", () => {
         },
       ],
       relationTypes: [],
-      ontologies: [
+      lenses: [
         {
-          ontologyId: "ont-1",
+          lensId: "lens-1",
           key: "broken_lens",
           name: "Broken",
           entityInclusions: [{ key: "person", properties: [] }],
@@ -392,14 +392,14 @@ describe("validate the whole schema", () => {
       ],
     };
     holder.store.getFullSchema.mockResolvedValue(schema);
-    holder.store.listOntologies.mockResolvedValue(schema.ontologies);
-    holder.store.getOntology.mockResolvedValue(schema.ontologies[0]);
+    holder.store.listLenses.mockResolvedValue(schema.lenses);
+    holder.store.getLens.mockResolvedValue(schema.lenses[0]);
     const res = await app.inject({ method: "POST", url: "/api/model/schema/validate" });
     const body = res.json();
     expect(body.valid).toBe(false);
     expect(body.errors).toEqual([
       {
-        path: "ontologies.broken_lens.includes.entityTypes.person.properties",
+        path: "lenses.broken_lens.includes.entityTypes.person.properties",
         message: "Required property 'full_name' without default must be included",
       },
     ]);

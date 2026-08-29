@@ -18,17 +18,17 @@ export interface TypeCounts {
  * bulk mutations invalidate them too.
  */
 export function useTypeCounts(
-  ontologyKey: string | undefined,
+  lensKey: string | undefined,
   entityTypes: readonly SchemaEntityType[],
 ): TypeCounts {
   const results = useQueries({
     queries: entityTypes.map((t) => ({
-      queryKey: ['entities', ontologyKey ?? '', t.key, 'count'] as const,
+      queryKey: ['entities', lensKey ?? '', t.key, 'count'] as const,
       queryFn: async () => {
-        const res = await listEntities(ontologyKey!, t.key, { limit: 1 })
+        const res = await listEntities(lensKey!, t.key, { limit: 1 })
         return res.total
       },
-      enabled: ontologyKey !== undefined,
+      enabled: lensKey !== undefined,
       staleTime: 30_000,
     })),
   })

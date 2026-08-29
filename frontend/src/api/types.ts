@@ -1,7 +1,7 @@
 /**
  * Wire types for the OntoForge server.
  * Field names are the exact camelCase wire names — see the API contract.
- * Runtime addresses by ontology/type KEY, modeling by UUID.
+ * Runtime addresses by lens/type KEY, modeling by UUID.
  */
 
 /* ----------------------------------- misc ---------------------------------- */
@@ -118,7 +118,7 @@ export interface AiAgent {
   tools?: string[] | null
 }
 
-export interface SchemaOntology {
+export interface SchemaLens {
   key: string
   name: string
   description: string | null
@@ -129,7 +129,7 @@ export interface SchemaOntology {
 }
 
 export interface RuntimeSchema {
-  ontology: SchemaOntology
+  lens: SchemaLens
   entityTypes: SchemaEntityType[]
   relationTypes: SchemaRelationType[]
 }
@@ -269,8 +269,8 @@ export interface ChatResponse {
 
 /* --------------------------------- modeling --------------------------------- */
 
-export interface Ontology {
-  ontologyId: string
+export interface Lens {
+  lensId: string
   key: string
   name: string
   description: string | null
@@ -326,7 +326,7 @@ export interface ValidationResult {
 
 /* ------------------------------ modeling inputs ------------------------------ */
 
-export interface OntologyInput {
+export interface LensInput {
   key?: string
   name: string
   description?: string | null

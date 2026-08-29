@@ -48,9 +48,9 @@ import type {
   IncludeTypeRequestInput,
   IncludeTypeResponseBody,
   IncludeTypeUpdateInput,
-  OntologyCreateInput,
-  OntologyResponseBody,
-  OntologyUpdateInput,
+  LensCreateInput,
+  LensResponseBody,
+  LensUpdateInput,
   PropertyDefinitionCreateInput,
   PropertyDefinitionResponseBody,
   PropertyDefinitionUpdateInput,
@@ -145,9 +145,9 @@ function rejectReservedRelationTypeKey(store: ModelingStore, key: string, contex
   }
 }
 
-function toOntologyResponse(data: Row): OntologyResponseBody {
+function toLensResponse(data: Row): LensResponseBody {
   return {
-    ontologyId: data.ontologyId as string,
+    lensId: data.lensId as string,
     key: data.key as string,
     name: data.name as string,
     description: optString(data.description),
@@ -156,59 +156,59 @@ function toOntologyResponse(data: Row): OntologyResponseBody {
   };
 }
 
-// --- Ontology ---
+// --- Lens ---
 
-export async function createOntology(
-  body: OntologyCreateInput,
+export async function createLens(
+  body: LensCreateInput,
   store: ModelingStore,
-): Promise<OntologyResponseBody> {
-  const existingKey = await store.getOntologyByKey(body.key);
+): Promise<LensResponseBody> {
+  const existingKey = await store.getLensByKey(body.key);
   if (existingKey) {
-    throw new ConflictError(`Ontology with key '${body.key}' already exists`);
+    throw new ConflictError(`Lens with key '${body.key}' already exists`);
   }
-  const existing = await store.getOntologyByName(body.name);
+  const existing = await store.getLensByName(body.name);
   if (existing) {
-    throw new ConflictError(`Ontology with name '${body.name}' already exists`);
+    throw new ConflictError(`Lens with name '${body.name}' already exists`);
   }
-  const ontologyId = randomUUID();
-  const data = await store.createOntology(ontologyId, body.key, body.name, body.description ?? null);
+  const lensId = randomUUID();
+  const data = await store.createLens(lensId, body.key, body.name, body.description ?? null);
   invalidateLoadedSchemaCache();
-  return toOntologyResponse(data);
+  return toLensResponse(data);
 }
 
-export async function listOntologies(store: ModelingStore): Promise<OntologyResponseBody[]> {
-  const rows = await store.listOntologies();
-  return rows.map(toOntologyResponse);
+export async function listLenses(store: ModelingStore): Promise<LensResponseBody[]> {
+  const rows = await store.listLenses();
+  return rows.map(toLensResponse);
 }
 
-export async function getOntology(
-  ontologyId: string,
+export async function getLens(
+  lensId: string,
   store: ModelingStore,
-): Promise<OntologyResponseBody> {
-  const data = await store.getOntology(ontologyId);
+): Promise<LensResponseBody> {
+  const data = await store.getLens(lensId);
   if (!data) {
-    throw new NotFoundError(`Ontology '${ontologyId}' not found`);
+    throw new NotFoundError(`Lens '${lensId}' not found`);
   }
-  return toOntologyResponse(data);
+  return toLensResponse(data);
 }
 
-export async function updateOntology(
-  ontologyId: string,
-  body: OntologyUpdateInput,
+export async function updateLens(
+  lensId: string,
+  body: LensUpdateInput,
   store: ModelingStore,
-): Promise<OntologyResponseBody> {
+): Promise<LensResponseBody> {
   if (body.name !== null && body.name !== undefined) {
-    const existing = await store.getOntologyByName(body.name);
-    if (existing && existing.ontologyId !== ontologyId) {
-      throw new ConflictError(`Ontology with name '${body.name}' already exists`);
+    const existing = await store.getLensByName(body.name);
+    if (existing && existing.lensId !== lensId) {
+      throw new ConflictError(`Lens with name '${body.name}' already exists`);
     }
   }
-  const data = await store.updateOntology(ontologyId, body.name ?? null, body.description ?? null);
+  const data = await store.updateLens(lensId, body.name ?? null, body.description ?? null);
   if (!data) {
-    throw new NotFoundError(`Ontology '${ontologyId}' not found`);
+    throw new NotFoundError(`Lens '${lensId}' not found`);
   }
   invalidateLoadedSchemaCache();
-  return toOntologyResponse(data);
+  return toLensResponse(data);
 }
 
 /**
@@ -216,10 +216,10 @@ export async function updateOntology(
  * own agent configurations and saved queries (handled in the store), needs
  * no consent, and leaves the schema and every instance untouched.
  */
-export async function deleteOntology(ontologyId: string, store: ModelingStore): Promise<void> {
-  const deleted = await store.deleteOntology(ontologyId);
+export async function deleteLens(lensId: string, store: ModelingStore): Promise<void> {
+  const deleted = await store.deleteLens(lensId);
   if (!deleted) {
-    throw new NotFoundError(`Ontology '${ontologyId}' not found`);
+    throw new NotFoundError(`Lens '${lensId}' not found`);
   }
   invalidateLoadedSchemaCache();
 }
@@ -294,10 +294,10 @@ export async function deleteEntityType(
     );
   }
   // Included by scoped lenses: the cascade protocol.
-  const affected = await store.findOntologiesIncludingType("EntityType", entityTypeId);
+  const affected = await store.findLensesIncludingType("EntityType", entityTypeId);
   if (affected.length > 0 && !cascade) {
     throw new CascadeRequiredError(
-      `Entity type is included by ${affected.length} ontology(ies). Use ?cascade=true to remove.`,
+      `Entity type is included by ${affected.length} lens(es). Use ?cascade=true to remove.`,
       affected,
     );
   }
@@ -392,10 +392,10 @@ export async function deleteRelationType(
   cascade: boolean,
   store: ModelingStore,
 ): Promise<void> {
-  const affected = await store.findOntologiesIncludingType("RelationType", relationTypeId);
+  const affected = await store.findLensesIncludingType("RelationType", relationTypeId);
   if (affected.length > 0 && !cascade) {
     throw new CascadeRequiredError(
-      `Relation type is included by ${affected.length} ontology(ies). Use ?cascade=true to remove.`,
+      `Relation type is included by ${affected.length} lens(es). Use ?cascade=true to remove.`,
       affected,
     );
   }
@@ -447,7 +447,7 @@ export async function createProperty(
   // Cascade check: adding a required property without a default breaks
   // every lens whose explicit allowlist for this type omits the new key.
   if (body.required && (body.defaultValue === null || body.defaultValue === undefined)) {
-    const affected = await store.findOntologiesWithExplicitProperty(
+    const affected = await store.findLensesWithExplicitProperty(
       typeKind,
       ownerId,
       body.key,
@@ -455,7 +455,7 @@ export async function createProperty(
     if (affected.length > 0 && !cascade) {
       throw new CascadeRequiredError(
         `Adding required property '${body.key}' without default would break ` +
-          `${affected.length} ontology(ies). ` +
+          `${affected.length} lens(es). ` +
           "Use ?cascade=true to auto-add to explicit property lists.",
         affected,
       );
@@ -537,7 +537,7 @@ export async function deleteProperty(
   // cascade, allowlists are left holding an unresolvable key (harmless at
   // runtime, reported by lens validation). The lookup runs anyway so the
   // call fails here if the owner has vanished; its result is not acted on.
-  await store.findOntologiesIncludingType(typeKind, ownerId);
+  await store.findLensesIncludingType(typeKind, ownerId);
   if (cascade) {
     await store.removePropertyFromIncludesLists(typeKind, ownerId, prop.key as string);
   }
@@ -553,10 +553,10 @@ export async function deleteProperty(
 
 // --- Scope Management (inclusions) ---
 
-async function resolveOntology(store: ModelingStore, ontologyId: string): Promise<Row> {
-  const data = await store.getOntology(ontologyId);
+async function resolveLens(store: ModelingStore, lensId: string): Promise<Row> {
+  const data = await store.getLens(lensId);
   if (!data) {
-    throw new NotFoundError(`Ontology '${ontologyId}' not found`);
+    throw new NotFoundError(`Lens '${lensId}' not found`);
   }
   return data;
 }
@@ -569,11 +569,11 @@ function toIncludeResponse(data: Row): IncludeTypeResponseBody {
 }
 
 export async function addIncludesEntityType(
-  ontologyId: string,
+  lensId: string,
   body: IncludeTypeRequestInput,
   store: ModelingStore,
 ): Promise<IncludeTypeResponseBody> {
-  await resolveOntology(store, ontologyId);
+  await resolveLens(store, lensId);
   const et = await store.getEntityTypeByKey(body.key);
   if (!et) {
     throw new NotFoundError(`Entity type '${body.key}' not found`);
@@ -602,7 +602,7 @@ export async function addIncludesEntityType(
       }
     }
   }
-  const data = await store.addIncludesType(ontologyId, "EntityType", body.key, properties);
+  const data = await store.addIncludesType(lensId, "EntityType", body.key, properties);
   if (!data) {
     throw new NotFoundError(`Failed to add inclusion for entity type '${body.key}'`);
   }
@@ -611,21 +611,21 @@ export async function addIncludesEntityType(
 }
 
 export async function listIncludesEntityTypes(
-  ontologyId: string,
+  lensId: string,
   store: ModelingStore,
 ): Promise<IncludeTypeResponseBody[]> {
-  await resolveOntology(store, ontologyId);
-  const rows = await store.listIncludesTypes(ontologyId, "EntityType");
+  await resolveLens(store, lensId);
+  const rows = await store.listIncludesTypes(lensId, "EntityType");
   return rows.map(toIncludeResponse);
 }
 
 export async function updateIncludesEntityType(
-  ontologyId: string,
+  lensId: string,
   typeId: string,
   body: IncludeTypeUpdateInput,
   store: ModelingStore,
 ): Promise<IncludeTypeResponseBody> {
-  await resolveOntology(store, ontologyId);
+  await resolveLens(store, lensId);
   const et = await store.getEntityType(typeId);
   if (!et) {
     throw new NotFoundError(`Entity type '${typeId}' not found`);
@@ -649,33 +649,33 @@ export async function updateIncludesEntityType(
       }
     }
   }
-  const data = await store.updateIncludesType(ontologyId, "EntityType", typeId, properties);
+  const data = await store.updateIncludesType(lensId, "EntityType", typeId, properties);
   if (!data) {
-    throw new NotFoundError(`Entity type '${typeId}' is not included in this ontology`);
+    throw new NotFoundError(`Entity type '${typeId}' is not included in this lens`);
   }
   invalidateLoadedSchemaCache();
   return toIncludeResponse(data);
 }
 
 export async function removeIncludesEntityType(
-  ontologyId: string,
+  lensId: string,
   typeId: string,
   store: ModelingStore,
 ): Promise<void> {
-  await resolveOntology(store, ontologyId);
-  const deleted = await store.removeIncludesType(ontologyId, "EntityType", typeId);
+  await resolveLens(store, lensId);
+  const deleted = await store.removeIncludesType(lensId, "EntityType", typeId);
   if (!deleted) {
-    throw new NotFoundError(`Entity type '${typeId}' is not included in this ontology`);
+    throw new NotFoundError(`Entity type '${typeId}' is not included in this lens`);
   }
   invalidateLoadedSchemaCache();
 }
 
 export async function addIncludesRelationType(
-  ontologyId: string,
+  lensId: string,
   body: IncludeTypeRequestInput,
   store: ModelingStore,
 ): Promise<IncludeTypeResponseBody> {
-  await resolveOntology(store, ontologyId);
+  await resolveLens(store, lensId);
   const rt = await store.getRelationTypeByKey(body.key);
   if (!rt) {
     throw new NotFoundError(`Relation type '${body.key}' not found`);
@@ -686,19 +686,19 @@ export async function addIncludesRelationType(
   // adding entity inclusions afterwards can leave an included relation
   // type whose endpoints are not exposed. Validation reports it; the
   // runtime still loads it.
-  const entityInclusions = await store.listIncludesTypes(ontologyId, "EntityType");
+  const entityInclusions = await store.listIncludesTypes(lensId, "EntityType");
   if (entityInclusions.length > 0) {
     const includedEtKeys = new Set(entityInclusions.map((inc) => inc.key as string));
     if (!includedEtKeys.has(rt.sourceEntityTypeKey as string)) {
       throw new ValidationError(
         `Source entity type '${rt.sourceEntityTypeKey}' of relation type '${body.key}' ` +
-          "is not included in this ontology",
+          "is not included in this lens",
       );
     }
     if (!includedEtKeys.has(rt.targetEntityTypeKey as string)) {
       throw new ValidationError(
         `Target entity type '${rt.targetEntityTypeKey}' of relation type '${body.key}' ` +
-          "is not included in this ontology",
+          "is not included in this lens",
       );
     }
   }
@@ -724,7 +724,7 @@ export async function addIncludesRelationType(
       }
     }
   }
-  const data = await store.addIncludesType(ontologyId, "RelationType", body.key, properties);
+  const data = await store.addIncludesType(lensId, "RelationType", body.key, properties);
   if (!data) {
     throw new NotFoundError(`Failed to add inclusion for relation type '${body.key}'`);
   }
@@ -733,21 +733,21 @@ export async function addIncludesRelationType(
 }
 
 export async function listIncludesRelationTypes(
-  ontologyId: string,
+  lensId: string,
   store: ModelingStore,
 ): Promise<IncludeTypeResponseBody[]> {
-  await resolveOntology(store, ontologyId);
-  const rows = await store.listIncludesTypes(ontologyId, "RelationType");
+  await resolveLens(store, lensId);
+  const rows = await store.listIncludesTypes(lensId, "RelationType");
   return rows.map(toIncludeResponse);
 }
 
 export async function updateIncludesRelationType(
-  ontologyId: string,
+  lensId: string,
   typeId: string,
   body: IncludeTypeUpdateInput,
   store: ModelingStore,
 ): Promise<IncludeTypeResponseBody> {
-  await resolveOntology(store, ontologyId);
+  await resolveLens(store, lensId);
   const rt = await store.getRelationType(typeId);
   if (!rt) {
     throw new NotFoundError(`Relation type '${typeId}' not found`);
@@ -771,23 +771,23 @@ export async function updateIncludesRelationType(
       }
     }
   }
-  const data = await store.updateIncludesType(ontologyId, "RelationType", typeId, properties);
+  const data = await store.updateIncludesType(lensId, "RelationType", typeId, properties);
   if (!data) {
-    throw new NotFoundError(`Relation type '${typeId}' is not included in this ontology`);
+    throw new NotFoundError(`Relation type '${typeId}' is not included in this lens`);
   }
   invalidateLoadedSchemaCache();
   return toIncludeResponse(data);
 }
 
 export async function removeIncludesRelationType(
-  ontologyId: string,
+  lensId: string,
   typeId: string,
   store: ModelingStore,
 ): Promise<void> {
-  await resolveOntology(store, ontologyId);
-  const deleted = await store.removeIncludesType(ontologyId, "RelationType", typeId);
+  await resolveLens(store, lensId);
+  const deleted = await store.removeIncludesType(lensId, "RelationType", typeId);
   if (!deleted) {
-    throw new NotFoundError(`Relation type '${typeId}' is not included in this ontology`);
+    throw new NotFoundError(`Relation type '${typeId}' is not included in this lens`);
   }
   invalidateLoadedSchemaCache();
 }
@@ -889,27 +889,27 @@ export async function validateSchema(store: ModelingStore): Promise<ValidationRe
  * no inclusions — is valid by definition. Always answers, never raises
  * (except for an unknown lens id).
  */
-export async function validateOntology(
-  ontologyId: string,
+export async function validateLens(
+  lensId: string,
   store: ModelingStore,
 ): Promise<ValidationResultBody> {
-  const ont = await store.getOntology(ontologyId);
-  if (!ont) {
-    throw new NotFoundError(`Ontology '${ontologyId}' not found`);
+  const lens = await store.getLens(lensId);
+  if (!lens) {
+    throw new NotFoundError(`Lens '${lensId}' not found`);
   }
 
   const schema = await store.getFullSchema();
 
   const errors: SchemaValidationErrorItem[] = [];
-  const ontologyKey = ont.key as string;
+  const lensKey = lens.key as string;
 
-  const ontData = (schema.ontologies as Row[]).find((o) => o.ontologyId === ontologyId);
-  if (!ontData) {
+  const lensData = (schema.lenses as Row[]).find((o) => o.lensId === lensId);
+  if (!lensData) {
     return { valid: true, errors: [] };
   }
 
-  const entityInclusions = (ontData.entityInclusions as Row[] | undefined) ?? [];
-  const relationInclusions = (ontData.relationInclusions as Row[] | undefined) ?? [];
+  const entityInclusions = (lensData.entityInclusions as Row[] | undefined) ?? [];
+  const relationInclusions = (lensData.relationInclusions as Row[] | undefined) ?? [];
 
   if (entityInclusions.length === 0 && relationInclusions.length === 0) {
     return { valid: true, errors: [] };
@@ -924,7 +924,7 @@ export async function validateOntology(
     const et = etMap.get(incKey);
     if (!et) {
       errors.push({
-        path: `ontologies.${ontologyKey}.includes.entityTypes.${incKey}`,
+        path: `lenses.${lensKey}.includes.entityTypes.${incKey}`,
         message: `Entity type '${incKey}' does not exist`,
       });
       continue;
@@ -937,7 +937,7 @@ export async function validateOntology(
       for (const pk of allowlist) {
         if (!validProps.has(pk)) {
           errors.push({
-            path: `ontologies.${ontologyKey}.includes.entityTypes.${incKey}.properties`,
+            path: `lenses.${lensKey}.includes.entityTypes.${incKey}.properties`,
             message: `Property '${pk}' does not exist on entity type '${incKey}'`,
           });
         }
@@ -949,7 +949,7 @@ export async function validateOntology(
           !allowlist.includes(p.key as string)
         ) {
           errors.push({
-            path: `ontologies.${ontologyKey}.includes.entityTypes.${incKey}.properties`,
+            path: `lenses.${lensKey}.includes.entityTypes.${incKey}.properties`,
             message: `Required property '${p.key}' without default must be included`,
           });
         }
@@ -962,7 +962,7 @@ export async function validateOntology(
     const rt = rtMap.get(incKey);
     if (!rt) {
       errors.push({
-        path: `ontologies.${ontologyKey}.includes.relationTypes.${incKey}`,
+        path: `lenses.${lensKey}.includes.relationTypes.${incKey}`,
         message: `Relation type '${incKey}' does not exist`,
       });
       continue;
@@ -972,13 +972,13 @@ export async function validateOntology(
     if (includedEtKeys.size > 0) {
       if (!includedEtKeys.has(rt.sourceKey as string)) {
         errors.push({
-          path: `ontologies.${ontologyKey}.includes.relationTypes.${incKey}`,
+          path: `lenses.${lensKey}.includes.relationTypes.${incKey}`,
           message: `Source entity type '${rt.sourceKey}' is not included`,
         });
       }
       if (!includedEtKeys.has(rt.targetKey as string)) {
         errors.push({
-          path: `ontologies.${ontologyKey}.includes.relationTypes.${incKey}`,
+          path: `lenses.${lensKey}.includes.relationTypes.${incKey}`,
           message: `Target entity type '${rt.targetKey}' is not included`,
         });
       }
@@ -990,7 +990,7 @@ export async function validateOntology(
       for (const pk of allowlist) {
         if (!validProps.has(pk)) {
           errors.push({
-            path: `ontologies.${ontologyKey}.includes.relationTypes.${incKey}.properties`,
+            path: `lenses.${lensKey}.includes.relationTypes.${incKey}.properties`,
             message: `Property '${pk}' does not exist on relation type '${incKey}'`,
           });
         }
@@ -1002,7 +1002,7 @@ export async function validateOntology(
           !allowlist.includes(p.key as string)
         ) {
           errors.push({
-            path: `ontologies.${ontologyKey}.includes.relationTypes.${incKey}.properties`,
+            path: `lenses.${lensKey}.includes.relationTypes.${incKey}.properties`,
             message: `Required property '${p.key}' without default must be included`,
           });
         }
@@ -1018,10 +1018,10 @@ export async function validateAll(store: ModelingStore): Promise<ValidationResul
   const schemaResult = await validateSchema(store);
   const errors = [...schemaResult.errors];
 
-  const ontologies = await store.listOntologies();
-  for (const ont of ontologies) {
-    const ontResult = await validateOntology(ont.ontologyId as string, store);
-    errors.push(...ontResult.errors);
+  const lenses = await store.listLenses();
+  for (const lens of lenses) {
+    const lensResult = await validateLens(lens.lensId as string, store);
+    errors.push(...lensResult.errors);
   }
 
   return { valid: errors.length === 0, errors };
@@ -1208,7 +1208,7 @@ function parseStoredJsonList(raw: unknown): Row[] {
 /**
  * The whole global schema in the transfer format
  * (`docs/capabilities/transfer.md`): entity types, relation types,
- * ontologies with their inclusions, and each lens's agents and saved
+ * lenses with their inclusions, and each lens's agents and saved
  * queries — no timestamps, no internal ids, no instance data. This is both
  * the REST export payload and what the modeling MCP `get_schema` and
  * `export_schema` tools return.
@@ -1244,15 +1244,15 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
     properties: ((rt.properties as Row[] | undefined) ?? []).map(exportProperty),
   }));
 
-  const ontologies: Row[] = [];
-  for (const ont of schema.ontologies as Row[]) {
-    const entityInclusions = (ont.entityInclusions as Row[] | undefined) ?? [];
-    const relationInclusions = (ont.relationInclusions as Row[] | undefined) ?? [];
+  const lenses: Row[] = [];
+  for (const lens of schema.lenses as Row[]) {
+    const entityInclusions = (lens.entityInclusions as Row[] | undefined) ?? [];
+    const relationInclusions = (lens.relationInclusions as Row[] | undefined) ?? [];
 
     const exported: Row = {
-      key: ont.key,
-      name: ont.name,
-      description: optString(ont.description),
+      key: lens.key,
+      name: lens.name,
+      description: optString(lens.description),
     };
     if (entityInclusions.length > 0 || relationInclusions.length > 0) {
       const exportInclusion = (inc: Row): Row => ({
@@ -1265,7 +1265,7 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
       };
     }
 
-    const agentRows = await store.listAiAgentsForExport(ont.ontologyId as string);
+    const agentRows = await store.listAiAgentsForExport(lens.lensId as string);
     exported.aiAgents = agentRows.map((ag) => ({
       key: ag.key,
       name: ag.name,
@@ -1274,7 +1274,7 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
       tools: (ag.tools as string[] | null | undefined) ?? null,
     }));
 
-    const queryRows = await store.listSavedQueriesForExport(ont.ontologyId as string);
+    const queryRows = await store.listSavedQueriesForExport(lens.lensId as string);
     exported.savedQueries = queryRows.map((sq) => ({
       key: sq.key,
       name: sq.name,
@@ -1289,14 +1289,14 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
       })),
     }));
 
-    ontologies.push(exported);
+    lenses.push(exported);
   }
 
   return {
     formatVersion: TRANSFER_FORMAT_VERSION,
     entityTypes,
     relationTypes,
-    ontologies,
+    lenses,
   };
 }
 
@@ -1417,14 +1417,14 @@ export async function importSchema(
     }
   }
 
-  for (const ont of payload.ontologies) {
-    if (!KEY_PATTERN.test(ont.key)) {
-      errors.push(badKey("ontology", ont.key, typeKeyPattern));
+  for (const lens of payload.lenses) {
+    if (!KEY_PATTERN.test(lens.key)) {
+      errors.push(badKey("lens", lens.key, typeKeyPattern));
     }
-    if (ont.key.length > MAX_KEY_LENGTH) {
-      errors.push(longKey("ontology", ont.key));
+    if (lens.key.length > MAX_KEY_LENGTH) {
+      errors.push(longKey("lens", lens.key));
     }
-    for (const ag of ont.aiAgents) {
+    for (const ag of lens.aiAgents) {
       if (!AGENT_KEY_REGEX.test(ag.key)) {
         errors.push(badKey("agent", ag.key, AGENT_KEY_PATTERN));
       }
@@ -1443,7 +1443,7 @@ export async function importSchema(
         }
       }
     }
-    for (const sq of ont.savedQueries) {
+    for (const sq of lens.savedQueries) {
       if (!AGENT_KEY_REGEX.test(sq.key)) {
         errors.push(badKey("saved query", sq.key, AGENT_KEY_PATTERN));
       }
@@ -1526,12 +1526,12 @@ export async function importSchema(
     }
     seenRtKeys.add(rt.key);
   }
-  const seenOntKeys = new Set<string>();
-  for (const ont of payload.ontologies) {
-    if (seenOntKeys.has(ont.key) || (await store.getOntologyByKey(ont.key))) {
-      conflicts.push(`Ontology with key '${ont.key}' already exists`);
+  const seenLensKeys = new Set<string>();
+  for (const lens of payload.lenses) {
+    if (seenLensKeys.has(lens.key) || (await store.getLensByKey(lens.key))) {
+      conflicts.push(`Lens with key '${lens.key}' already exists`);
     }
-    seenOntKeys.add(ont.key);
+    seenLensKeys.add(lens.key);
   }
 
   if (conflicts.length > 0) {
@@ -1598,25 +1598,25 @@ export async function importSchema(
     }
   }
 
-  const createdOntologies: OntologyResponseBody[] = [];
-  for (const ont of payload.ontologies) {
-    const ontId = randomUUID();
-    const ontData = await store.createOntology(ontId, ont.key, ont.name, ont.description ?? null);
+  const createdLenses: LensResponseBody[] = [];
+  for (const lens of payload.lenses) {
+    const lensId = randomUUID();
+    const lensData = await store.createLens(lensId, lens.key, lens.name, lens.description ?? null);
 
     // Inclusions are written WITHOUT the four inclusion rules — lens
     // validation reports any damage (`docs/capabilities/transfer.md`).
-    if (ont.includes) {
-      for (const inc of ont.includes.entityTypes) {
-        await store.addIncludesType(ontId, "EntityType", inc.key, inc.properties ?? null);
+    if (lens.includes) {
+      for (const inc of lens.includes.entityTypes) {
+        await store.addIncludesType(lensId, "EntityType", inc.key, inc.properties ?? null);
       }
-      for (const inc of ont.includes.relationTypes) {
-        await store.addIncludesType(ontId, "RelationType", inc.key, inc.properties ?? null);
+      for (const inc of lens.includes.relationTypes) {
+        await store.addIncludesType(lensId, "RelationType", inc.key, inc.properties ?? null);
       }
     }
 
-    for (const ag of ont.aiAgents) {
+    for (const ag of lens.aiAgents) {
       await store.upsertAiAgent(
-        ontId,
+        lensId,
         randomUUID(),
         ag.key,
         ag.name,
@@ -1626,7 +1626,7 @@ export async function importSchema(
       );
     }
 
-    for (const sq of ont.savedQueries) {
+    for (const sq of lens.savedQueries) {
       const stepsJson = JSON.stringify(
         sq.steps.map((s) => ({
           name: s.name,
@@ -1653,19 +1653,19 @@ export async function importSchema(
         embedding = await provider.embed(sq.description);
       }
       await store.upsertSavedQuery(
-        ontId,
+        lensId,
         randomUUID(),
         sq.key,
         sq.name,
         sq.description,
         stepsJson,
         paramsJson,
-        ont.key,
+        lens.key,
         embedding,
       );
     }
 
-    createdOntologies.push(toOntologyResponse(ontData));
+    createdLenses.push(toLensResponse(lensData));
   }
 
   // The shared saved-query index is ensured once at the end.
@@ -1674,7 +1674,7 @@ export async function importSchema(
   }
 
   invalidateLoadedSchemaCache();
-  return { ontologies: createdOntologies };
+  return { lenses: createdLenses };
 }
 
 // --- AI Agent Config ---
@@ -1686,12 +1686,12 @@ function pyList(items: string[]): string {
   return `[${items.map((item) => `'${item}'`).join(", ")}]`;
 }
 
-async function resolveOntologyByKey(store: ModelingStore, ontologyKey: string): Promise<Row> {
-  const ont = await store.getOntologyByKey(ontologyKey);
-  if (!ont) {
-    throw new NotFoundError(`Ontology '${ontologyKey}' not found`);
+async function resolveLensByKey(store: ModelingStore, lensKey: string): Promise<Row> {
+  const lens = await store.getLensByKey(lensKey);
+  if (!lens) {
+    throw new NotFoundError(`Lens '${lensKey}' not found`);
   }
-  return ont;
+  return lens;
 }
 
 function toAiAgentResponse(data: Row): AiAgentConfigResponseBody {
@@ -1707,17 +1707,17 @@ function toAiAgentResponse(data: Row): AiAgentConfigResponseBody {
 }
 
 export async function listAiAgents(
-  ontologyKey: string,
+  lensKey: string,
   store: ModelingStore,
 ): Promise<AiAgentConfigResponseBody[]> {
-  const ont = await resolveOntologyByKey(store, ontologyKey);
-  const rows = await store.listAiAgents(ont.ontologyId as string);
+  const lens = await resolveLensByKey(store, lensKey);
+  const rows = await store.listAiAgents(lens.lensId as string);
   return rows.map(toAiAgentResponse);
 }
 
 /** Upsert by key. Returns `[response, created]`. */
 export async function upsertAiAgent(
-  ontologyKey: string,
+  lensKey: string,
   agentKey: string,
   body: AiAgentConfigUpsertInput,
   store: ModelingStore,
@@ -1749,10 +1749,10 @@ export async function upsertAiAgent(
     }
   }
 
-  const ont = await resolveOntologyByKey(store, ontologyKey);
+  const lens = await resolveLensByKey(store, lensKey);
   const agentConfigId = randomUUID();
   const [data, created] = await store.upsertAiAgent(
-    ont.ontologyId as string,
+    lens.lensId as string,
     agentConfigId,
     agentKey,
     body.name,
@@ -1765,12 +1765,12 @@ export async function upsertAiAgent(
 }
 
 export async function deleteAiAgent(
-  ontologyKey: string,
+  lensKey: string,
   agentKey: string,
   store: ModelingStore,
 ): Promise<void> {
-  const ont = await resolveOntologyByKey(store, ontologyKey);
-  const deleted = await store.deleteAiAgent(ont.ontologyId as string, agentKey);
+  const lens = await resolveLensByKey(store, lensKey);
+  const deleted = await store.deleteAiAgent(lens.lensId as string, agentKey);
   if (!deleted) {
     throw new NotFoundError(`AI agent '${agentKey}' not found`);
   }
@@ -1924,17 +1924,17 @@ function validatePipeline(steps: StepInput[], paramNames: string[], queryKey: st
 }
 
 export async function listSavedQueries(
-  ontologyKey: string,
+  lensKey: string,
   store: ModelingStore,
 ): Promise<SavedQueryResponseBody[]> {
-  const ont = await resolveOntologyByKey(store, ontologyKey);
-  const rows = await store.listSavedQueries(ont.ontologyId as string);
+  const lens = await resolveLensByKey(store, lensKey);
+  const rows = await store.listSavedQueries(lens.lensId as string);
   return rows.map(toSavedQueryResponse);
 }
 
 /** Upsert by key. Returns `[response, created]`. */
 export async function upsertSavedQuery(
-  ontologyKey: string,
+  lensKey: string,
   queryKey: string,
   body: SavedQueryUpsertInput,
   store: ModelingStore,
@@ -1968,12 +1968,12 @@ export async function upsertSavedQuery(
     queryKey,
   );
 
-  const ont = await resolveOntologyByKey(store, ontologyKey);
+  const lens = await resolveLensByKey(store, lensKey);
 
   // Validate each oql step against the lens's schema — skipped ONLY when
   // that schema cannot be loaded (the run-time check still applies then).
   try {
-    const loaded = await loadSchema(ontologyKey, runtimeStore);
+    const loaded = await loadSchema(lensKey, runtimeStore);
     for (const step of body.steps) {
       if (step.type === "oql" && step.oql) {
         parseAndValidate(step.oql, loaded.scoped);
@@ -1981,7 +1981,7 @@ export async function upsertSavedQuery(
     }
   } catch (exc) {
     if (exc instanceof NotFoundError) {
-      // Ontology has no runtime schema loaded yet.
+      // Lens has no runtime schema loaded yet.
     } else if (exc instanceof ValidationError || exc instanceof StoreError) {
       // A storage failure loading the schema is not a problem with the
       // submitted query; a validation failure IS one — both pass through.
@@ -2022,14 +2022,14 @@ export async function upsertSavedQuery(
 
   const savedQueryId = randomUUID();
   const [data, created] = await store.upsertSavedQuery(
-    ont.ontologyId as string,
+    lens.lensId as string,
     savedQueryId,
     queryKey,
     body.name,
     body.description,
     stepsJson,
     paramsJson,
-    ontologyKey,
+    lensKey,
     embedding,
   );
   invalidateLoadedSchemaCache();
@@ -2037,12 +2037,12 @@ export async function upsertSavedQuery(
 }
 
 export async function deleteSavedQuery(
-  ontologyKey: string,
+  lensKey: string,
   queryKey: string,
   store: ModelingStore,
 ): Promise<void> {
-  const ont = await resolveOntologyByKey(store, ontologyKey);
-  const deleted = await store.deleteSavedQuery(ont.ontologyId as string, queryKey);
+  const lens = await resolveLensByKey(store, lensKey);
+  const deleted = await store.deleteSavedQuery(lens.lensId as string, queryKey);
   if (!deleted) {
     throw new NotFoundError(`Saved query '${queryKey}' not found`);
   }

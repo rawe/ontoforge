@@ -78,7 +78,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  delete process.env.DEFAULT_MCP_ONTOLOGY_KEY;
+  delete process.env.DEFAULT_MCP_LENS_KEY;
 });
 
 describe("lens resolution", () => {
@@ -86,42 +86,42 @@ describe("lens resolution", () => {
     const client = await connectClient(`${baseUrl}/mcp/runtime/hr_view`);
     try {
       const schema = json(await call(client, "get_schema"));
-      expect((schema.ontology as Record<string, unknown>).key).toBe("hr_view");
+      expect((schema.lens as Record<string, unknown>).key).toBe("hr_view");
     } finally {
       await client.close();
     }
   });
 
-  it("2 — the X-Ontology-Key header binds the lens when the path names none", async () => {
+  it("2 — the X-Lens-Key header binds the lens when the path names none", async () => {
     const client = await connectClient(`${baseUrl}/mcp/runtime`, {
-      "X-Ontology-Key": "test_ontology",
+      "X-Lens-Key": "test_lens",
     });
     try {
       const schema = json(await call(client, "get_schema"));
-      expect((schema.ontology as Record<string, unknown>).key).toBe("test_ontology");
+      expect((schema.lens as Record<string, unknown>).key).toBe("test_lens");
     } finally {
       await client.close();
     }
   });
 
-  it("3 — the DEFAULT_MCP_ONTOLOGY_KEY environment variable is the fallback", async () => {
-    process.env.DEFAULT_MCP_ONTOLOGY_KEY = "hr_view";
+  it("3 — the DEFAULT_MCP_LENS_KEY environment variable is the fallback", async () => {
+    process.env.DEFAULT_MCP_LENS_KEY = "hr_view";
     const client = await connectClient(`${baseUrl}/mcp/runtime`);
     try {
       const schema = json(await call(client, "get_schema"));
-      expect((schema.ontology as Record<string, unknown>).key).toBe("hr_view");
+      expect((schema.lens as Record<string, unknown>).key).toBe("hr_view");
     } finally {
       await client.close();
     }
   });
 
   it("the path takes priority over the header", async () => {
-    const client = await connectClient(`${baseUrl}/mcp/runtime/test_ontology`, {
-      "X-Ontology-Key": "hr_view",
+    const client = await connectClient(`${baseUrl}/mcp/runtime/test_lens`, {
+      "X-Lens-Key": "hr_view",
     });
     try {
       const schema = json(await call(client, "get_schema"));
-      expect((schema.ontology as Record<string, unknown>).key).toBe("test_ontology");
+      expect((schema.lens as Record<string, unknown>).key).toBe("test_lens");
     } finally {
       await client.close();
     }
@@ -143,13 +143,13 @@ describe("lens resolution", () => {
       }),
     });
     expect(res.status).toBe(400);
-    expect(await res.text()).toBe("Ontology key required");
+    expect(await res.text()).toBe("Lens key required");
   });
 });
 
 describe("tool surface", () => {
   it("lists exactly the twenty runtime tools", async () => {
-    const client = await connectClient(`${baseUrl}/mcp/runtime/test_ontology`);
+    const client = await connectClient(`${baseUrl}/mcp/runtime/test_lens`);
     try {
       const tools = await client.listTools();
       expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
@@ -197,7 +197,7 @@ describe("document tools", () => {
 
   it("get_document reads whole documents and clamped slices", async () => {
     await addBioProperty();
-    const client = await connectClient(`${baseUrl}/mcp/runtime/test_ontology`);
+    const client = await connectClient(`${baseUrl}/mcp/runtime/test_lens`);
     try {
       const created = json(
         await call(client, "create_entity", {
@@ -254,7 +254,7 @@ describe("document tools", () => {
 
   it("edit_document replaces exactly and reports ambiguity as a tool error", async () => {
     await addBioProperty();
-    const client = await connectClient(`${baseUrl}/mcp/runtime/test_ontology`);
+    const client = await connectClient(`${baseUrl}/mcp/runtime/test_lens`);
     try {
       const created = json(
         await call(client, "create_entity", {
@@ -303,7 +303,7 @@ describe("document tools", () => {
 
   it("write_document overwrites ranges and surfaces the expect conflict", async () => {
     await addBioProperty();
-    const client = await connectClient(`${baseUrl}/mcp/runtime/test_ontology`);
+    const client = await connectClient(`${baseUrl}/mcp/runtime/test_lens`);
     try {
       const created = json(
         await call(client, "create_entity", {
@@ -367,7 +367,7 @@ describe("document tools", () => {
 
 describe("entity tools", () => {
   it("round-trips create, list, get, update, delete through one lens", async () => {
-    const client = await connectClient(`${baseUrl}/mcp/runtime/test_ontology`);
+    const client = await connectClient(`${baseUrl}/mcp/runtime/test_lens`);
     try {
       const created = json(
         await call(client, "create_entity", {
@@ -424,7 +424,7 @@ describe("entity tools", () => {
   });
 
   it("clamps limit and offset into range where REST rejects", async () => {
-    const client = await connectClient(`${baseUrl}/mcp/runtime/test_ontology`);
+    const client = await connectClient(`${baseUrl}/mcp/runtime/test_lens`);
     try {
       await call(client, "create_entity", {
         entity_type_key: "person",
@@ -447,7 +447,7 @@ describe("entity tools", () => {
   });
 
   it("refuses a sort direction outside asc/desc at the tool boundary", async () => {
-    const client = await connectClient(`${baseUrl}/mcp/runtime/test_ontology`);
+    const client = await connectClient(`${baseUrl}/mcp/runtime/test_lens`);
     try {
       // A crafted tail must die at argument validation, never reach a query.
       const entities = await call(client, "list_entities", {
@@ -472,7 +472,7 @@ describe("entity tools", () => {
   });
 
   it("sorts descending when order is 'desc'", async () => {
-    const client = await connectClient(`${baseUrl}/mcp/runtime/test_ontology`);
+    const client = await connectClient(`${baseUrl}/mcp/runtime/test_lens`);
     try {
       for (const name of ["Alice", "Bob"]) {
         await call(client, "create_entity", {
@@ -495,7 +495,7 @@ describe("entity tools", () => {
   });
 
   it("a validation failure flattens every offending field into the tool error", async () => {
-    const client = await connectClient(`${baseUrl}/mcp/runtime/test_ontology`);
+    const client = await connectClient(`${baseUrl}/mcp/runtime/test_lens`);
     try {
       const result = await call(client, "create_entity", {
         entity_type_key: "person",
@@ -512,7 +512,7 @@ describe("entity tools", () => {
   });
 
   it("relation tools round-trip create, list, get, update, delete", async () => {
-    const client = await connectClient(`${baseUrl}/mcp/runtime/test_ontology`);
+    const client = await connectClient(`${baseUrl}/mcp/runtime/test_lens`);
     try {
       const alice = json(
         await call(client, "create_entity", {
@@ -591,7 +591,7 @@ describe("entity tools", () => {
   });
 
   it("create_relation reports endpoint and property errors together as a tool error", async () => {
-    const client = await connectClient(`${baseUrl}/mcp/runtime/test_ontology`);
+    const client = await connectClient(`${baseUrl}/mcp/runtime/test_lens`);
     try {
       const result = await call(client, "create_relation", {
         relation_type_key: "works_for",
@@ -610,7 +610,7 @@ describe("entity tools", () => {
   });
 
   it("get_neighbors round-trips with projections and clamps its limit", async () => {
-    const client = await connectClient(`${baseUrl}/mcp/runtime/test_ontology`);
+    const client = await connectClient(`${baseUrl}/mcp/runtime/test_lens`);
     try {
       const alice = json(
         await call(client, "create_entity", {

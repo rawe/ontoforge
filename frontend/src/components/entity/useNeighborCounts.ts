@@ -11,19 +11,19 @@ import { qk } from '@/api/queryKeys'
 import type { EntityInstance, SchemaRelationType } from '@/api/types'
 
 export const neighborCountsKey = (
-  ontologyKey: string,
+  lensKey: string,
   entityTypeKey: string,
   id: string,
-) => ['neighborCounts', ontologyKey, entityTypeKey, id] as const
+) => ['neighborCounts', lensKey, entityTypeKey, id] as const
 
 export function useNeighborCounts(
-  ontologyKey: string,
+  lensKey: string,
   entity: EntityInstance | undefined,
   relationTypes: readonly SchemaRelationType[],
 ) {
   return useQuery({
     queryKey: neighborCountsKey(
-      ontologyKey,
+      lensKey,
       entity?._entityTypeKey ?? '',
       entity?._id ?? '',
     ),
@@ -34,14 +34,14 @@ export function useNeighborCounts(
         relationTypes.map(async (rt) => {
           let total = 0
           if (rt.fromEntityTypeKey === entity!._entityTypeKey) {
-            const res = await runtime.listRelations(ontologyKey, rt.key, {
+            const res = await runtime.listRelations(lensKey, rt.key, {
               fromEntityId: entity!._id,
               limit: 1,
             })
             total += res.total
           }
           if (rt.toEntityTypeKey === entity!._entityTypeKey) {
-            const res = await runtime.listRelations(ontologyKey, rt.key, {
+            const res = await runtime.listRelations(lensKey, rt.key, {
               toEntityId: entity!._id,
               limit: 1,
             })
@@ -58,14 +58,14 @@ export function useNeighborCounts(
 /** Invalidate everything that renders this entity's neighborhood. */
 export function invalidateNeighborhood(
   queryClient: QueryClient,
-  ontologyKey: string,
+  lensKey: string,
   entityTypeKey: string,
   id: string,
 ): void {
   void queryClient.invalidateQueries({
-    queryKey: qk.neighbors(ontologyKey, entityTypeKey, id),
+    queryKey: qk.neighbors(lensKey, entityTypeKey, id),
   })
   void queryClient.invalidateQueries({
-    queryKey: neighborCountsKey(ontologyKey, entityTypeKey, id),
+    queryKey: neighborCountsKey(lensKey, entityTypeKey, id),
   })
 }

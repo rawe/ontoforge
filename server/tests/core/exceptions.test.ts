@@ -29,9 +29,9 @@ describe("exception taxonomy", () => {
     expect(new ValidationError("bad", details).details).toBe(details);
   });
 
-  it("CascadeRequiredError carries the affected ontologies", () => {
+  it("CascadeRequiredError carries the affected lenses", () => {
     const error = new CascadeRequiredError("cascade", ["lens_a", "lens_b"]);
-    expect(error.affectedOntologies).toEqual(["lens_a", "lens_b"]);
+    expect(error.affectedLenses).toEqual(["lens_a", "lens_b"]);
   });
 
   it("StoreError generates an 8-hex errorId and a neutral default message", () => {

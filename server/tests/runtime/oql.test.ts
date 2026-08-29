@@ -37,10 +37,10 @@ function prop(key: string, dataType: string, required = false): Row {
 /** Minimal scoped schema for testing. */
 function schema(): SchemaCacheValue {
   return {
-    ontologyId: "ont-1",
-    ontologyKey: "test",
-    ontologyName: "Test",
-    ontologyDescription: null,
+    lensId: "lens-1",
+    lensKey: "test",
+    lensName: "Test",
+    lensDescription: null,
     entityTypes: {
       person: {
         key: "person",
@@ -839,10 +839,10 @@ describe("rewriting", () => {
 
   it("multi-word entity pascal case", () => {
     const s: SchemaCacheValue = {
-      ontologyId: "t",
-      ontologyKey: "t",
-      ontologyName: "T",
-      ontologyDescription: null,
+      lensId: "t",
+      lensKey: "t",
+      lensName: "T",
+      lensDescription: null,
       entityTypes: {
         research_paper: {
           key: "research_paper",
@@ -984,8 +984,8 @@ describe("chunk blocklist", () => {
 /** Full-schema payload whose person type carries a document property. */
 function docSchemaPayload(): Row {
   return {
-    ontology: {
-      ontologyId: "ont-1",
+    lens: {
+      lensId: "lens-1",
       key: "docs_view",
       name: "Docs View",
       description: null,
@@ -1041,7 +1041,7 @@ describe("query endpoint", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/full_ontology/query",
+      url: "/api/runtime/full_lens/query",
       payload: { query: "MATCH (p:person) RETURN p" },
     });
 
@@ -1055,7 +1055,7 @@ describe("query endpoint", () => {
   it("rejects the legacy 'cypher' body field", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/full_ontology/query",
+      url: "/api/runtime/full_lens/query",
       payload: { cypher: "MATCH (p:person) RETURN p" },
     });
 
@@ -1065,7 +1065,7 @@ describe("query endpoint", () => {
   it("rejects write operations", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/full_ontology/query",
+      url: "/api/runtime/full_lens/query",
       payload: { query: "CREATE (n:person {name: 'Bob'})" },
     });
 
@@ -1078,14 +1078,14 @@ describe("query endpoint", () => {
   it("rejects unknown entity types", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/full_ontology/query",
+      url: "/api/runtime/full_lens/query",
       payload: { query: "MATCH (n:animal) RETURN n" },
     });
 
     expect(res.statusCode).toBe(422);
   });
 
-  it("scoped ontology strips out-of-scope properties from results", async () => {
+  it("scoped lens strips out-of-scope properties from results", async () => {
     const { makeScopedSchema } = await import("./helpers.js");
     holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
     holder.store.executeOql.mockResolvedValue([

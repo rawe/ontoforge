@@ -28,7 +28,7 @@ import { KeyField } from '@/components/studio/shared'
 import { detectParams } from './resultUtils'
 
 interface SaveQueryDialogProps {
-  ontologyKey: string
+  lensKey: string
   /** The console's current query — becomes the single `main` step. */
   query: string
   open: boolean
@@ -42,7 +42,7 @@ interface SaveQueryDialogProps {
  * API as a single-step OQL pipeline.
  */
 export function SaveQueryDialog({
-  ontologyKey,
+  lensKey,
   query,
   open,
   onOpenChange,
@@ -75,7 +75,7 @@ export function SaveQueryDialog({
     // `description` is a required string on the query AND each parameter
     // (both are embedded for semantic discovery) — send '' when empty.
     mutationFn: () =>
-      model.upsertSavedQuery(ontologyKey, key, {
+      model.upsertSavedQuery(lensKey, key, {
         name: name.trim(),
         description: description.trim(),
         steps: [{ name: 'main', type: 'oql', oql: query }],
@@ -86,12 +86,12 @@ export function SaveQueryDialog({
         })),
       }),
     onSuccess: (saved) => {
-      void queryClient.invalidateQueries({ queryKey: qk.savedQueries(ontologyKey) })
+      void queryClient.invalidateQueries({ queryKey: qk.savedQueries(lensKey) })
       void queryClient.invalidateQueries({
-        queryKey: qk.model('ontologies', ontologyKey, 'saved-queries'),
+        queryKey: qk.model('lenses', lensKey, 'saved-queries'),
       })
       void queryClient.invalidateQueries({
-        queryKey: ['palette', 'savedQuerySearch', ontologyKey],
+        queryKey: ['palette', 'savedQuerySearch', lensKey],
       })
       toast.success(`Saved query "${saved.key}"`)
       onOpenChange(false)
@@ -113,7 +113,7 @@ export function SaveQueryDialog({
         <DialogHeader>
           <DialogTitle>Save as query</DialogTitle>
           <DialogDescription>
-            Stores the current query as a reusable saved query on this ontology —
+            Stores the current query as a reusable saved query on this lens —
             runnable from the Library, REST and MCP.
           </DialogDescription>
         </DialogHeader>

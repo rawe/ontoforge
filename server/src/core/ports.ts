@@ -2,7 +2,7 @@
  * Persistence port: store interfaces, store accessors, adapter lifecycle.
  *
  * Services, routers, and MCP handlers obtain their store through this
- * module and speak ontology vocabulary only (type keys, property keys,
+ * module and speak lens vocabulary only (type keys, property keys,
  * instance ids, structured filters). Everything database-specific —
  * connections, transactions, query text, physical naming, index DDL,
  * driver types — is owned by the adapter selected via
@@ -91,31 +91,31 @@ export interface ModelingStore {
   findReservedTypeKeysInUse(): Promise<ReservedTypeKeyInUse[]>;
 
   // ------------------------------------------------------------------
-  // Ontologies
+  // Lenses
   // ------------------------------------------------------------------
 
-  createOntology(
-    ontologyId: string,
+  createLens(
+    lensId: string,
     key: string,
     name: string,
     description: string | null,
   ): Promise<Row>;
 
-  listOntologies(): Promise<Row[]>;
+  listLenses(): Promise<Row[]>;
 
-  getOntology(ontologyId: string): Promise<Row | null>;
+  getLens(lensId: string): Promise<Row | null>;
 
-  getOntologyByName(name: string): Promise<Row | null>;
+  getLensByName(name: string): Promise<Row | null>;
 
-  getOntologyByKey(key: string): Promise<Row | null>;
+  getLensByKey(key: string): Promise<Row | null>;
 
-  updateOntology(
-    ontologyId: string,
+  updateLens(
+    lensId: string,
     name: string | null,
     description: string | null,
   ): Promise<Row | null>;
 
-  deleteOntology(ontologyId: string): Promise<boolean>;
+  deleteLens(lensId: string): Promise<boolean>;
 
   // ------------------------------------------------------------------
   // Entity types
@@ -211,22 +211,22 @@ export interface ModelingStore {
   // ------------------------------------------------------------------
 
   addIncludesType(
-    ontologyId: string,
+    lensId: string,
     typeKind: TypeKind,
     typeKey: string,
     properties: string[] | null,
   ): Promise<Row | null>;
 
-  listIncludesTypes(ontologyId: string, typeKind: TypeKind): Promise<Row[]>;
+  listIncludesTypes(lensId: string, typeKind: TypeKind): Promise<Row[]>;
 
   updateIncludesType(
-    ontologyId: string,
+    lensId: string,
     typeKind: TypeKind,
     typeId: string,
     properties: string[] | null,
   ): Promise<Row | null>;
 
-  removeIncludesType(ontologyId: string, typeKind: TypeKind, typeId: string): Promise<boolean>;
+  removeIncludesType(lensId: string, typeKind: TypeKind, typeId: string): Promise<boolean>;
 
   // ------------------------------------------------------------------
   // Scope inclusions (cascade-protocol support)
@@ -234,9 +234,9 @@ export interface ModelingStore {
 
   removeAllIncludesForType(typeKind: TypeKind, typeId: string): Promise<number>;
 
-  findOntologiesIncludingType(typeKind: TypeKind, typeId: string): Promise<string[]>;
+  findLensesIncludingType(typeKind: TypeKind, typeId: string): Promise<string[]>;
 
-  findOntologiesWithExplicitProperty(
+  findLensesWithExplicitProperty(
     typeKind: TypeKind,
     typeId: string,
     propertyKey: string,
@@ -272,10 +272,10 @@ export interface ModelingStore {
   // AI agent configs
   // ------------------------------------------------------------------
 
-  listAiAgents(ontologyId: string): Promise<Row[]>;
+  listAiAgents(lensId: string): Promise<Row[]>;
 
   upsertAiAgent(
-    ontologyId: string,
+    lensId: string,
     agentConfigId: string,
     key: string,
     name: string,
@@ -284,31 +284,31 @@ export interface ModelingStore {
     tools: string[] | null,
   ): Promise<[Row, boolean]>;
 
-  listAiAgentsForExport(ontologyId: string): Promise<Row[]>;
+  listAiAgentsForExport(lensId: string): Promise<Row[]>;
 
-  deleteAiAgent(ontologyId: string, agentKey: string): Promise<boolean>;
+  deleteAiAgent(lensId: string, agentKey: string): Promise<boolean>;
 
   // ------------------------------------------------------------------
   // Saved query configs
   // ------------------------------------------------------------------
 
-  listSavedQueries(ontologyId: string): Promise<Row[]>;
+  listSavedQueries(lensId: string): Promise<Row[]>;
 
-  listSavedQueriesForExport(ontologyId: string): Promise<Row[]>;
+  listSavedQueriesForExport(lensId: string): Promise<Row[]>;
 
   upsertSavedQuery(
-    ontologyId: string,
+    lensId: string,
     savedQueryId: string,
     key: string,
     name: string,
     description: string,
     stepsJson: string,
     parametersJson: string,
-    ontologyKey?: string | null,
+    lensKey?: string | null,
     embedding?: number[] | null,
   ): Promise<[Row, boolean]>;
 
-  deleteSavedQuery(ontologyId: string, queryKey: string): Promise<boolean>;
+  deleteSavedQuery(lensId: string, queryKey: string): Promise<boolean>;
 
   // ------------------------------------------------------------------
   // Embedding maintenance (rebuild support)
@@ -370,11 +370,11 @@ export interface RuntimeStore {
   // Schema reading (for the runtime schema cache)
   // ------------------------------------------------------------------
 
-  getFullSchema(ontologyKey: string): Promise<Row | null>;
+  getFullSchema(lensKey: string): Promise<Row | null>;
 
-  getAiAgentConfigs(ontologyKey: string): Promise<Row[]>;
+  getAiAgentConfigs(lensKey: string): Promise<Row[]>;
 
-  getSavedQueries(ontologyKey: string): Promise<Row[]>;
+  getSavedQueries(lensKey: string): Promise<Row[]>;
 
   // ------------------------------------------------------------------
   // Vector-index metadata validation
@@ -486,7 +486,7 @@ export interface RuntimeStore {
   /** Rank SavedQuery descriptions for one lens by vector similarity. */
   searchSavedQueries(
     queryEmbedding: number[],
-    ontologyKey: string,
+    lensKey: string,
     limit: number,
     minScore: number | null,
   ): Promise<Row[]>;

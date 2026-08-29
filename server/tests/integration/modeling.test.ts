@@ -400,7 +400,7 @@ describe("full-schema snapshot", () => {
     const schema = (await getModelingStore().getFullSchema()) as {
       entityTypes: Record<string, unknown>[];
       relationTypes: Record<string, unknown>[];
-      ontologies: unknown[];
+      lenses: unknown[];
     };
 
     expect(schema.entityTypes.map((et) => et.key)).toEqual(["company", "person"]);
@@ -418,6 +418,6 @@ describe("full-schema snapshot", () => {
     expect(worksFor?.targetKey).toBe("company");
     expect((worksFor?.properties as unknown[])).toHaveLength(1);
 
-    expect(schema.ontologies).toHaveLength(0);
+    expect(schema.lenses).toHaveLength(0);
   });
 });

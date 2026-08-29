@@ -23,8 +23,8 @@ import { indexDimensions } from "./support.js";
 
 type Row = Record<string, unknown>;
 
-const LEGACY_EXPORT = JSON.parse(
-  readFileSync(new URL("../../../fixtures/legacy-export.json", import.meta.url), "utf8"),
+const EXPORT_FIXTURE = JSON.parse(
+  readFileSync(new URL("../../../fixtures/export.json", import.meta.url), "utf8"),
 ) as Row;
 
 const ollamaUp = await checkOllamaModel();
@@ -41,7 +41,7 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("schema import (Ne
     const res = await app.inject({
       method: "POST",
       url: "/api/model/import",
-      payload: LEGACY_EXPORT,
+      payload: EXPORT_FIXTURE,
     });
     expect(res.statusCode, res.body).toBe(201);
   });

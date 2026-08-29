@@ -89,10 +89,10 @@ beforeAll(async () => {
   await app.ready();
 
   // Schema: person/company/works_for, seeded, in an unscoped lens.
-  await post("/api/model/ontologies", {
+  await post("/api/model/lenses", {
     key: "ai_test",
     name: "AI Test",
-    description: "Integration test ontology for AI endpoints",
+    description: "Integration test lens for AI endpoints",
   });
 
   const person = await post("/api/model/entity-types", {
@@ -128,7 +128,7 @@ beforeAll(async () => {
   // A restricted agent for the trace scenario.
   const res = await app.inject({
     method: "PUT",
-    url: "/api/model/ontologies/ai_test/ai-agents/analyst",
+    url: "/api/model/lenses/ai_test/ai-agents/analyst",
     payload: {
       name: "Analyst",
       description: "Answers only via OQL queries",

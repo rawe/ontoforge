@@ -115,7 +115,7 @@ export function EntityTypeCreateDialog({ open, onOpenChange }: CreateDialogProps
         <DialogHeader>
           <DialogTitle>New entity type</DialogTitle>
           <DialogDescription>
-            Entity types are global — every ontology can include them in its scope.
+            Entity types are global — every lens can include them in its scope.
           </DialogDescription>
         </DialogHeader>
         <form

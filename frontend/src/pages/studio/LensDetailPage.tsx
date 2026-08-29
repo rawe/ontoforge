@@ -3,7 +3,7 @@ import { Bot, ChevronLeft, ExternalLink, Layers, Plug, SquareTerminal, Trash2 } 
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import * as model from '@/api/model'
-import { useOntologies } from '@/api/hooks'
+import { useLenses } from '@/api/hooks'
 import { EmptyState } from '@/components/EmptyState'
 import { AgentsTab } from '@/components/studio/AgentsTab'
 import { ConnectTab } from '@/components/studio/ConnectTab'
@@ -11,7 +11,7 @@ import { ScopeTab } from '@/components/studio/ScopeTab'
 import { SavedQueriesTab } from '@/components/studio/SavedQueriesTab'
 import { invalidateModeling, toastError } from '@/components/studio/lib'
 import { InlineText } from '@/components/studio/shared'
-import { ScopeBadge } from '@/pages/studio/OntologiesPage'
+import { ScopeBadge } from '@/pages/studio/LensesPage'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,8 +31,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 const TABS = ['scope', 'agents', 'queries', 'connect'] as const
 type Tab = (typeof TABS)[number]
 
-/** `/studio/ontologies/:id` — scope editor, agents, saved queries, connect. */
-export function OntologyDetailPage() {
+/** `/studio/lenses/:id` — scope editor, agents, saved queries, connect. */
+export function LensDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -40,12 +40,12 @@ export function OntologyDetailPage() {
   const tabParam = searchParams.get('tab')
   const tab: Tab = TABS.includes(tabParam as Tab) ? (tabParam as Tab) : 'scope'
 
-  const { data: ontologies, isPending } = useOntologies()
-  const ontology = ontologies?.find((o) => o.ontologyId === id)
+  const { data: lenses, isPending } = useLenses()
+  const lens = lenses?.find((o) => o.lensId === id)
 
   const update = useMutation({
     mutationFn: (patch: { name: string; description: string | null }) =>
-      model.updateOntology(id ?? '', patch),
+      model.updateLens(id ?? '', patch),
     onSuccess: () => {
       invalidateModeling(queryClient)
       toast.success('Saved')
@@ -54,11 +54,11 @@ export function OntologyDetailPage() {
   })
 
   const remove = useMutation({
-    mutationFn: () => model.deleteOntology(id ?? ''),
+    mutationFn: () => model.deleteLens(id ?? ''),
     onSuccess: () => {
       invalidateModeling(queryClient)
-      toast.success('Ontology deleted')
-      void navigate('/studio/ontologies')
+      toast.success('Lens deleted')
+      void navigate('/studio/lenses')
     },
     onError: toastError,
   })
@@ -72,15 +72,15 @@ export function OntologyDetailPage() {
     )
   }
 
-  if (ontology === undefined) {
+  if (lens === undefined) {
     return (
       <EmptyState
         icon={Layers}
-        title="Ontology not found"
+        title="Lens not found"
         description="It may have been deleted."
         action={
           <Button variant="outline" asChild>
-            <Link to="/studio/ontologies">Back to ontologies</Link>
+            <Link to="/studio/lenses">Back to lenses</Link>
           </Button>
         }
       />
@@ -91,28 +91,28 @@ export function OntologyDetailPage() {
     <div>
       <header className="border-b px-6 py-4">
         <Link
-          to="/studio/ontologies"
+          to="/studio/lenses"
           className="mb-2 inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
         >
-          <ChevronLeft className="size-3.5" /> Ontologies
+          <ChevronLeft className="size-3.5" /> Lenses
         </Link>
         <div className="flex flex-wrap items-center gap-3">
           <InlineText
-            aria-label="Ontology name"
-            value={ontology.name}
+            aria-label="Lens name"
+            value={lens.name}
             onSave={(v) => {
-              if (v !== '') update.mutate({ name: v, description: ontology.description })
+              if (v !== '') update.mutate({ name: v, description: lens.description })
             }}
             className="text-[15px] font-semibold tracking-tight"
             inputClassName="h-8 w-64 text-[15px] font-semibold"
           />
           <Badge variant="outline" className="font-mono text-[11px]" title="Immutable key">
-            {ontology.key}
+            {lens.key}
           </Badge>
-          <ScopeBadge ontologyId={ontology.ontologyId} />
+          <ScopeBadge lensId={lens.lensId} />
           <div className="ml-auto flex items-center gap-2">
             <Button variant="outline" size="sm" asChild>
-              <Link to={`/w/${ontology.key}`}>
+              <Link to={`/w/${lens.key}`}>
                 <ExternalLink className="size-3.5" /> Open in Workbench
               </Link>
             </Button>
@@ -124,9 +124,9 @@ export function OntologyDetailPage() {
               </AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>
-                  <AlertDialogTitle>Delete "{ontology.name}"?</AlertDialogTitle>
+                  <AlertDialogTitle>Delete "{lens.name}"?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    This deletes the ontology lens, its scope, agents and saved queries.
+                    This deletes the lens, its scope, agents and saved queries.
                     The global schema and instance data are not affected. This cannot be
                     undone.
                   </AlertDialogDescription>
@@ -134,7 +134,7 @@ export function OntologyDetailPage() {
                 <AlertDialogFooter>
                   <AlertDialogCancel>Cancel</AlertDialogCancel>
                   <AlertDialogAction variant="destructive" onClick={() => remove.mutate()}>
-                    Delete ontology
+                    Delete lens
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
@@ -144,11 +144,11 @@ export function OntologyDetailPage() {
         <div className="mt-1 max-w-2xl">
           <InlineText
             aria-label="Description"
-            value={ontology.description ?? ''}
+            value={lens.description ?? ''}
             placeholder="Add a description…"
             multiline
             onSave={(v) =>
-              update.mutate({ name: ontology.name, description: v === '' ? null : v })
+              update.mutate({ name: lens.name, description: v === '' ? null : v })
             }
             className="block w-full text-[13px] text-muted-foreground"
           />
@@ -177,16 +177,16 @@ export function OntologyDetailPage() {
             </TabsTrigger>
           </TabsList>
           <TabsContent value="scope">
-            <ScopeTab ontology={ontology} />
+            <ScopeTab lens={lens} />
           </TabsContent>
           <TabsContent value="agents">
-            <AgentsTab ontology={ontology} />
+            <AgentsTab lens={lens} />
           </TabsContent>
           <TabsContent value="queries">
-            <SavedQueriesTab ontology={ontology} />
+            <SavedQueriesTab lens={lens} />
           </TabsContent>
           <TabsContent value="connect">
-            <ConnectTab ontology={ontology} />
+            <ConnectTab lens={lens} />
           </TabsContent>
         </Tabs>
       </div>

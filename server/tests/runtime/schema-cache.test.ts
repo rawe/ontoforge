@@ -34,12 +34,12 @@ describe("lazy assembly and reuse", () => {
     const mock = storeWith(makeScopedSchema());
     const first = await loadSchema("hr_view", asRuntimeStore(mock));
     const second = await loadSchema("hr_view", asRuntimeStore(mock));
-    expect(first.scoped.ontologyKey).toBe("hr_view");
+    expect(first.scoped.lensKey).toBe("hr_view");
     expect(second).toBe(first); // the lens is a value, held per process
     expect(mock.getFullSchema).toHaveBeenCalledTimes(1);
   });
 
-  it("an unknown ontology key answers not found", async () => {
+  it("an unknown lens key answers not found", async () => {
     const mock = storeWith(null);
     await expect(loadSchema("nonexistent", asRuntimeStore(mock))).rejects.toThrow(
       NotFoundError,
@@ -68,7 +68,7 @@ describe("lazy assembly and reuse", () => {
 
 describe("the scoping matrix", () => {
   it("row 1 — no inclusions: all entity types, all relation types", async () => {
-    const mock = storeWith(makeFullSchema({ ontologyKey: "full" }));
+    const mock = storeWith(makeFullSchema({ lensKey: "full" }));
     const loaded = await loadSchema("full", asRuntimeStore(mock));
     expect(Object.keys(loaded.scoped.entityTypes).sort()).toEqual([
       "company",
@@ -84,7 +84,7 @@ describe("the scoping matrix", () => {
   it("row 2 — entity inclusions only: inferred relations need BOTH endpoints in scope", async () => {
     const mock = storeWith(
       makeFullSchema({
-        ontologyKey: "lens",
+        lensKey: "lens",
         entityInclusions: [
           { key: "person", properties: null },
           { key: "company", properties: null },
@@ -101,7 +101,7 @@ describe("the scoping matrix", () => {
   it("row 2 — all endpoints in scope infers every relation type", async () => {
     const mock = storeWith(
       makeFullSchema({
-        ontologyKey: "lens",
+        lensKey: "lens",
         entityInclusions: [
           { key: "person", properties: null },
           { key: "company", properties: null },
@@ -119,7 +119,7 @@ describe("the scoping matrix", () => {
   it("row 3 — relation inclusions only: ALL entity types, only included relations", async () => {
     const mock = storeWith(
       makeFullSchema({
-        ontologyKey: "lens",
+        lensKey: "lens",
         relationInclusions: [{ key: "works_for", properties: null }],
       }),
     );
@@ -148,7 +148,7 @@ describe("the scoping matrix", () => {
       asRuntimeStore(
         storeWith(
           makeFullSchema({
-            ontologyKey: "before",
+            lensKey: "before",
             entityInclusions: [
               { key: "person", properties: null },
               { key: "company", properties: null },
@@ -170,7 +170,7 @@ describe("the scoping matrix", () => {
       asRuntimeStore(
         storeWith(
           makeFullSchema({
-            ontologyKey: "after",
+            lensKey: "after",
             entityInclusions: [
               { key: "person", properties: null },
               { key: "company", properties: null },
@@ -199,7 +199,7 @@ describe("the scoping matrix", () => {
   it("an allowlist key that no longer resolves simply matches nothing", async () => {
     const mock = storeWith(
       makeFullSchema({
-        ontologyKey: "lens",
+        lensKey: "lens",
         entityInclusions: [{ key: "person", properties: ["name", "ghost_prop"] }],
       }),
     );
@@ -210,7 +210,7 @@ describe("the scoping matrix", () => {
   it("dead inclusion keys are skipped silently on both dimensions", async () => {
     const mock = storeWith(
       makeFullSchema({
-        ontologyKey: "lens",
+        lensKey: "lens",
         entityInclusions: [
           { key: "person", properties: null },
           { key: "company", properties: null },
@@ -240,10 +240,10 @@ describe("the scoping matrix", () => {
 describe("wholesale invalidation via the modeling seam", () => {
   it("a modeling mutation clears the WHOLE cache", async () => {
     const hrMock = storeWith(makeScopedSchema());
-    const fullMock = storeWith(makeFullSchema({ ontologyKey: "full_ontology" }));
+    const fullMock = storeWith(makeFullSchema({ lensKey: "full_lens" }));
 
     await loadSchema("hr_view", asRuntimeStore(hrMock));
-    await loadSchema("full_ontology", asRuntimeStore(fullMock));
+    await loadSchema("full_lens", asRuntimeStore(fullMock));
     expect(hrMock.getFullSchema).toHaveBeenCalledTimes(1);
     expect(fullMock.getFullSchema).toHaveBeenCalledTimes(1);
 
@@ -251,7 +251,7 @@ describe("wholesale invalidation via the modeling seam", () => {
     invalidateLoadedSchemaCache();
 
     await loadSchema("hr_view", asRuntimeStore(hrMock));
-    await loadSchema("full_ontology", asRuntimeStore(fullMock));
+    await loadSchema("full_lens", asRuntimeStore(fullMock));
     expect(hrMock.getFullSchema).toHaveBeenCalledTimes(2);
     expect(fullMock.getFullSchema).toHaveBeenCalledTimes(2);
   });
@@ -267,15 +267,15 @@ describe("wholesale invalidation via the modeling seam", () => {
     );
     const modelingService = await import("../../src/modeling/service.js");
     const modelingMock = createMockModelingStore();
-    modelingMock.createOntology.mockResolvedValue({
-      ontologyId: "ont-2",
+    modelingMock.createLens.mockResolvedValue({
+      lensId: "lens-2",
       key: "new_view",
       name: "New View",
       description: null,
       createdAt: NOW,
       updatedAt: NOW,
     });
-    await modelingService.createOntology(
+    await modelingService.createLens(
       { key: "new_view", name: "New View", description: null },
       asModelingStore(modelingMock),
     );

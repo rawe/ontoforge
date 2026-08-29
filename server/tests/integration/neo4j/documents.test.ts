@@ -71,12 +71,12 @@ describe.skipIf(settings.DB_BACKEND !== "neo4j")("Neo4j physical chunk rows", ()
       payload: { key: "body", displayName: "Body", dataType: "document" },
     });
     expect(bodyProp.statusCode).toBe(201);
-    const ont = await app.inject({
+    const lens = await app.inject({
       method: "POST",
-      url: "/api/model/ontologies",
+      url: "/api/model/lenses",
       payload: { key: "docs_view", name: "Docs View" },
     });
-    expect(ont.statusCode).toBe(201);
+    expect(lens.statusCode).toBe(201);
   });
 
   afterAll(async () => {

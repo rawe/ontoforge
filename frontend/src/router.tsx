@@ -29,12 +29,12 @@ const EntityTypePage = lazy(() =>
 const RelationTypePage = lazy(() =>
   import('@/pages/studio/RelationTypePage').then((m) => ({ default: m.RelationTypePage })),
 )
-const OntologiesPage = lazy(() =>
-  import('@/pages/studio/OntologiesPage').then((m) => ({ default: m.OntologiesPage })),
+const LensesPage = lazy(() =>
+  import('@/pages/studio/LensesPage').then((m) => ({ default: m.LensesPage })),
 )
-const OntologyDetailPage = lazy(() =>
-  import('@/pages/studio/OntologyDetailPage').then((m) => ({
-    default: m.OntologyDetailPage,
+const LensDetailPage = lazy(() =>
+  import('@/pages/studio/LensDetailPage').then((m) => ({
+    default: m.LensDetailPage,
   })),
 )
 const TransferPage = lazy(() =>
@@ -49,7 +49,7 @@ export const router = createBrowserRouter([
   { path: '/', element: <RootRedirect /> },
   { path: '/welcome', element: <WelcomePage /> },
   {
-    path: '/w/:ontologyKey',
+    path: '/w/:lensKey',
     element: <WorkbenchLayout />,
     children: [
       { index: true, element: <HomePage /> },
@@ -67,8 +67,8 @@ export const router = createBrowserRouter([
       { index: true, element: suspended(<StudioHomePage />) },
       { path: 'entity-types/:id', element: suspended(<EntityTypePage />) },
       { path: 'relation-types/:id', element: suspended(<RelationTypePage />) },
-      { path: 'ontologies', element: suspended(<OntologiesPage />) },
-      { path: 'ontologies/:id', element: suspended(<OntologyDetailPage />) },
+      { path: 'lenses', element: suspended(<LensesPage />) },
+      { path: 'lenses/:id', element: suspended(<LensDetailPage />) },
       { path: 'transfer', element: suspended(<TransferPage />) },
     ],
   },

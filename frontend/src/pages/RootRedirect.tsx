@@ -1,14 +1,14 @@
 import { Navigate } from 'react-router-dom'
-import { useOntologies } from '@/api/hooks'
+import { useLenses } from '@/api/hooks'
 import { Logo } from '@/components/Logo'
 import { readString, remove, storageKeys } from '@/lib/storage'
 
 /**
- * `/` — routes to the last-used ontology's workbench if it still exists,
+ * `/` — routes to the last-used lens's workbench if it still exists,
  * otherwise to the welcome picker.
  */
 export function RootRedirect() {
-  const { data: ontologies, isPending, isError } = useOntologies()
+  const { data: lenses, isPending, isError } = useLenses()
 
   if (isPending) {
     return (
@@ -18,10 +18,10 @@ export function RootRedirect() {
     )
   }
 
-  const last = readString(storageKeys.lastOntology)
-  if (!isError && last !== null && ontologies.some((o) => o.key === last)) {
+  const last = readString(storageKeys.lastLens)
+  if (!isError && last !== null && lenses.some((o) => o.key === last)) {
     return <Navigate to={`/w/${last}`} replace />
   }
-  if (last !== null) remove(storageKeys.lastOntology)
+  if (last !== null) remove(storageKeys.lastLens)
   return <Navigate to="/welcome" replace />
 }

@@ -24,12 +24,12 @@ import { cn } from '@/lib/utils'
 /* ------------------------------- property row ------------------------------- */
 
 interface PropertyRowProps {
-  ontologyKey: string
+  lensKey: string
   entity: EntityInstance
   property: SchemaProperty
 }
 
-function PropertyRow({ ontologyKey, entity, property }: PropertyRowProps) {
+function PropertyRow({ lensKey, entity, property }: PropertyRowProps) {
   const queryClient = useQueryClient()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
@@ -37,16 +37,16 @@ function PropertyRow({ ontologyKey, entity, property }: PropertyRowProps) {
 
   const mutation = useMutation({
     mutationFn: (value: JsonPrimitive | null) =>
-      runtime.updateEntity(ontologyKey, entity._entityTypeKey, entity._id, {
+      runtime.updateEntity(lensKey, entity._entityTypeKey, entity._id, {
         [property.key]: value,
       }),
     onSuccess: (updated) => {
       queryClient.setQueryData(
-        qk.entity(ontologyKey, entity._entityTypeKey, entity._id),
+        qk.entity(lensKey, entity._entityTypeKey, entity._id),
         updated,
       )
       void queryClient.invalidateQueries({
-        queryKey: qk.entities(ontologyKey, entity._entityTypeKey),
+        queryKey: qk.entities(lensKey, entity._entityTypeKey),
       })
       setEditing(false)
       setError(null)
@@ -178,7 +178,7 @@ function PropertyRow({ ontologyKey, entity, property }: PropertyRowProps) {
 /* ------------------------------ properties card ------------------------------ */
 
 interface PropertiesCardProps {
-  ontologyKey: string
+  lensKey: string
   entityType: SchemaEntityType
   entity: EntityInstance
 }
@@ -190,7 +190,7 @@ interface PropertiesCardProps {
  * Document properties render last as collapsed rows (stub badge; expanding
  * fetches and renders the Markdown, editing opens a Write/Preview dialog).
  */
-export function PropertiesCard({ ontologyKey, entityType, entity }: PropertiesCardProps) {
+export function PropertiesCard({ lensKey, entityType, entity }: PropertiesCardProps) {
   const scalarProperties = entityType.properties.filter((p) => p.dataType !== 'document')
   const documentProperties = entityType.properties.filter(
     (p) => p.dataType === 'document',
@@ -209,7 +209,7 @@ export function PropertiesCard({ ontologyKey, entityType, entity }: PropertiesCa
           {scalarProperties.map((property) => (
             <PropertyRow
               key={property.key}
-              ontologyKey={ontologyKey}
+              lensKey={lensKey}
               entity={entity}
               property={property}
             />
@@ -217,7 +217,7 @@ export function PropertiesCard({ ontologyKey, entityType, entity }: PropertiesCa
           {documentProperties.map((property) => (
             <DocumentPropertyRow
               key={property.key}
-              ontologyKey={ontologyKey}
+              lensKey={lensKey}
               entity={entity}
               property={property}
             />

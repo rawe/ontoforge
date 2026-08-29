@@ -67,7 +67,7 @@ describe.skipIf(!ollamaUp)("document semantic search (Ollama)", () => {
   }
 
   async function buildDocFixture(): Promise<void> {
-    await post("/api/model/ontologies", { key: "doc_search", name: "Doc Search" });
+    await post("/api/model/lenses", { key: "doc_search", name: "Doc Search" });
     const et = await post("/api/model/entity-types", { key: "article", displayName: "Article" });
     const etId = et.entityTypeId as string;
     await post(`/api/model/entity-types/${etId}/properties`, {

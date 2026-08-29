@@ -30,9 +30,9 @@ vi.mock("../../src/core/ports.js", () => ({
   getRuntimeStore: () => holder.runtimeStore,
 }));
 
-const MOCK_ONTOLOGY = {
-  ontologyId: "ont-1",
-  key: "test_onto",
+const MOCK_LENS = {
+  lensId: "lens-1",
+  key: "test_lens",
   name: "Test",
   description: null,
   createdAt: NOW,
@@ -75,29 +75,29 @@ beforeEach(() => {
 async function put(key: string, payload: Row) {
   return app.inject({
     method: "PUT",
-    url: `/api/model/ontologies/test_onto/saved-queries/${key}`,
+    url: `/api/model/lenses/test_lens/saved-queries/${key}`,
     payload,
   });
 }
 
 describe("list", () => {
   it("answers an empty list", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     holder.store.listSavedQueries.mockResolvedValue([]);
     const res = await app.inject({
       method: "GET",
-      url: "/api/model/ontologies/test_onto/saved-queries",
+      url: "/api/model/lenses/test_lens/saved-queries",
     });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual([]);
   });
 
   it("deserializes the stored steps and parameters JSON", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     holder.store.listSavedQueries.mockResolvedValue([MOCK_QUERY]);
     const res = await app.inject({
       method: "GET",
-      url: "/api/model/ontologies/test_onto/saved-queries",
+      url: "/api/model/lenses/test_lens/saved-queries",
     });
     expect(res.statusCode).toBe(200);
     const body = res.json() as Row[];
@@ -120,10 +120,10 @@ describe("list", () => {
     expect(query).toHaveProperty("updatedAt");
   });
 
-  it("an unknown ontology key answers 404", async () => {
+  it("an unknown lens key answers 404", async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/api/model/ontologies/nonexistent/saved-queries",
+      url: "/api/model/lenses/nonexistent/saved-queries",
     });
     expect(res.statusCode).toBe(404);
   });
@@ -144,7 +144,7 @@ describe("upsert", () => {
   };
 
   it("create answers 201", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     holder.store.upsertSavedQuery.mockResolvedValue([MOCK_QUERY, true]);
     const res = await put("find-people", VALID_BODY);
     expect(res.statusCode).toBe(201);
@@ -154,7 +154,7 @@ describe("upsert", () => {
   });
 
   it("replace answers 200", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     holder.store.upsertSavedQuery.mockResolvedValue([MOCK_QUERY, false]);
     const res = await put("find-people", VALID_BODY);
     expect(res.statusCode).toBe(200);
@@ -172,21 +172,21 @@ describe("upsert", () => {
   });
 
   it("embeds the description on write when a provider is configured", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     holder.store.upsertSavedQuery.mockResolvedValue([MOCK_QUERY, true]);
     const embed = vi.fn(async () => [0.1, 0.2, 0.3]);
     setEmbeddingProvider({ dimensions: 3, embed });
     const res = await put("find-people", VALID_BODY);
     expect(res.statusCode).toBe(201);
     expect(embed).toHaveBeenCalledWith("Find people by name");
-    // embedding + denormalized ontology key reach the store.
+    // embedding + denormalized lens key reach the store.
     const args = holder.store.upsertSavedQuery.mock.calls[0]!;
-    expect(args[7]).toBe("test_onto");
+    expect(args[7]).toBe("test_lens");
     expect(args[8]).toEqual([0.1, 0.2, 0.3]);
   });
 
   it("passes a null embedding when no provider is configured", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     holder.store.upsertSavedQuery.mockResolvedValue([MOCK_QUERY, true]);
     const res = await put("find-people", VALID_BODY);
     expect(res.statusCode).toBe(201);
@@ -196,21 +196,21 @@ describe("upsert", () => {
 
 describe("delete", () => {
   it("answers 204", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     holder.store.deleteSavedQuery.mockResolvedValue(true);
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/ontologies/test_onto/saved-queries/find-people",
+      url: "/api/model/lenses/test_lens/saved-queries/find-people",
     });
     expect(res.statusCode).toBe(204);
   });
 
   it("an unknown query key answers 404", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     holder.store.deleteSavedQuery.mockResolvedValue(false);
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/ontologies/test_onto/saved-queries/nonexistent",
+      url: "/api/model/lenses/test_lens/saved-queries/nonexistent",
     });
     expect(res.statusCode).toBe(404);
   });
@@ -218,7 +218,7 @@ describe("delete", () => {
 
 describe("key validation", () => {
   it("a key violating ^[a-z][a-z0-9_-]*$ is rejected 422", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     const res = await put("INVALID", {
       name: "Test",
       description: "test",
@@ -230,7 +230,7 @@ describe("key validation", () => {
 
   // The cap is 64 characters, uniformly on every key kind.
   it("a key longer than 64 characters is rejected 422 naming the cap", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     const res = await put("k".repeat(65), {
       name: "Test",
       description: "test",
@@ -245,7 +245,7 @@ describe("key validation", () => {
 
 describe("parameter cross-checks (both directions)", () => {
   it("a $param referenced in a step but not declared is rejected", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     const res = await put("test-query", {
       name: "Test",
       description: "test",
@@ -260,7 +260,7 @@ describe("parameter cross-checks (both directions)", () => {
   });
 
   it("a declared parameter referenced by no step is rejected", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     const res = await put("test-query", {
       name: "Test",
       description: "test",
@@ -275,7 +275,7 @@ describe("parameter cross-checks (both directions)", () => {
   });
 
   it("a binding-supplied name must NOT also be declared — it would be unreferenced", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     const res = await put("test-query", {
       name: "Test",
       description: "test",
@@ -298,7 +298,7 @@ describe("parameter cross-checks (both directions)", () => {
   });
 
   it("a $param in a search text must be declared even when a binding shares its name", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     // Bindings on a semantic_search step are ignored at run time, so the
     // $q in the search text is caller-supplied and must be declared.
     const res = await put("test-query", {
@@ -326,7 +326,7 @@ describe("parameter cross-checks (both directions)", () => {
 
 describe("pipeline validation", () => {
   it("an empty steps array is a request-shape failure", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     const res = await put("test-query", {
       name: "Test",
       description: "test",
@@ -337,7 +337,7 @@ describe("pipeline validation", () => {
   });
 
   it("an invalid step type is rejected", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     const res = await put("test-query", {
       name: "Test",
       description: "test",
@@ -348,7 +348,7 @@ describe("pipeline validation", () => {
   });
 
   it("duplicate step names are rejected", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     const res = await put("test-query", {
       name: "Test",
       description: "test",
@@ -364,7 +364,7 @@ describe("pipeline validation", () => {
   });
 
   it("a binding referencing a nonexistent step is rejected", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     const res = await put("test-query", {
       name: "Test",
       description: "test",
@@ -382,7 +382,7 @@ describe("pipeline validation", () => {
   });
 
   it("a forward reference is rejected — the step must be strictly earlier", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     const res = await put("test-query", {
       name: "Test",
       description: "test",
@@ -401,7 +401,7 @@ describe("pipeline validation", () => {
   });
 
   it("a self reference is rejected", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     const res = await put("test-query", {
       name: "Test",
       description: "test",
@@ -421,7 +421,7 @@ describe("pipeline validation", () => {
   });
 
   it("a malformed binding expression is rejected", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     const res = await put("test-query", {
       name: "Test",
       description: "test",
@@ -441,7 +441,7 @@ describe("pipeline validation", () => {
   });
 
   it("an oql step without a query is rejected", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     const res = await put("test-query", {
       name: "Test",
       description: "test",
@@ -452,7 +452,7 @@ describe("pipeline validation", () => {
   });
 
   it("a semantic_search step missing its fields collects BOTH failures", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     const res = await put("test-query", {
       name: "Test",
       description: "test",
@@ -468,7 +468,7 @@ describe("pipeline validation", () => {
   });
 
   it("ALL structural and cross-check failures are collected in one response", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     const res = await put("test-query", {
       name: "Test",
       description: "test",
@@ -489,7 +489,7 @@ describe("pipeline validation", () => {
   });
 
   it("a multi-step pipeline with valid bindings succeeds", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     holder.store.upsertSavedQuery.mockResolvedValue([MOCK_QUERY, true]);
     const res = await put("find-skilled-persons", {
       name: "Find Skilled Persons",
@@ -519,13 +519,13 @@ describe("pipeline validation", () => {
 
 describe("definition-time OQL lens check", () => {
   it("an oql step naming a type the lens does not expose is rejected", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     holder.runtimeStore.getFullSchema.mockResolvedValue(
       makeUnscopedSchema(),
     );
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/ontologies/full_ontology/saved-queries/bad-query",
+      url: "/api/model/lenses/full_lens/saved-queries/bad-query",
       payload: {
         name: "Bad",
         description: "references an unknown label",
@@ -538,7 +538,7 @@ describe("definition-time OQL lens check", () => {
   });
 
   it("the check is skipped when the lens's schema cannot be loaded", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     holder.store.upsertSavedQuery.mockResolvedValue([MOCK_QUERY, true]);
     // Default runtime store: getFullSchema -> null -> NotFoundError.
     const res = await put("stored-anyway", {
@@ -553,8 +553,8 @@ describe("definition-time OQL lens check", () => {
 
 describe("cascading delete", () => {
   it("deleting the lens deletes its saved queries (handled by the store)", async () => {
-    holder.store.deleteOntology.mockResolvedValue(true);
-    const res = await app.inject({ method: "DELETE", url: "/api/model/ontologies/ont-1" });
+    holder.store.deleteLens.mockResolvedValue(true);
+    const res = await app.inject({ method: "DELETE", url: "/api/model/lenses/lens-1" });
     expect(res.statusCode).toBe(204);
   });
 });

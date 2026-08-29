@@ -22,7 +22,7 @@ try {
   const ontologyKey = flags.ontologyKey || pickOntologyKey(schema);
   if (!ontologyKey) die('No ontologies found. Import a schema first.');
   if (!flags.ontologyKey) {
-    const isUnscoped = (schema.ontologies || []).some(
+    const isUnscoped = (schema.lenses || []).some(
       (o) => o.key === ontologyKey && !o.includes,
     );
     console.error(

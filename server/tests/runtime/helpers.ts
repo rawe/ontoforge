@@ -21,16 +21,16 @@ interface InclusionRow {
  * `getFullSchema`. With no inclusions the lens is fully unscoped.
  */
 export function makeFullSchema(options?: {
-  ontologyKey?: string;
-  ontologyName?: string;
+  lensKey?: string;
+  lensName?: string;
   entityInclusions?: InclusionRow[];
   relationInclusions?: InclusionRow[];
 }): Row {
   return {
-    ontology: {
-      ontologyId: "ont-1",
-      key: options?.ontologyKey ?? "hr_view",
-      name: options?.ontologyName ?? "HR View",
+    lens: {
+      lensId: "lens-1",
+      key: options?.lensKey ?? "hr_view",
+      name: options?.lensName ?? "HR View",
       description: null,
       createdAt: NOW,
       updatedAt: NOW,
@@ -103,8 +103,8 @@ export function makeFullSchema(options?: {
  */
 export function makeScopedSchema(): Row {
   return makeFullSchema({
-    ontologyKey: "hr_view",
-    ontologyName: "HR View",
+    lensKey: "hr_view",
+    lensName: "HR View",
     entityInclusions: [
       { key: "person", properties: ["name", "email"] },
       { key: "company", properties: null },
@@ -113,11 +113,11 @@ export function makeScopedSchema(): Row {
   });
 }
 
-/** The unscoped fixture (`full_ontology`): everything visible. */
+/** The unscoped fixture (`full_lens`): everything visible. */
 export function makeUnscopedSchema(): Row {
   return makeFullSchema({
-    ontologyKey: "full_ontology",
-    ontologyName: "Full Ontology",
+    lensKey: "full_lens",
+    lensName: "Full Lens",
     entityInclusions: [],
     relationInclusions: [],
   });

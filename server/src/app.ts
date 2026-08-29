@@ -121,7 +121,7 @@ export async function createApp(): Promise<FastifyInstance> {
     }
     if (error instanceof CascadeRequiredError) {
       return sendError(reply, 409, "CASCADE_REQUIRED", error.message, {
-        affectedOntologies: error.affectedOntologies,
+        affectedLenses: error.affectedLenses,
       });
     }
     if (error instanceof StoreError) {

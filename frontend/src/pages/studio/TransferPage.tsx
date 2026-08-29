@@ -180,7 +180,7 @@ export function TransferPage() {
         <TransferCard
           icon={Download}
           title="Export schema"
-          description="Download the full global schema — entity types, relation types, properties, ontologies, agents and saved queries — as a portable JSON file."
+          description="Download the full global schema — entity types, relation types, properties, lenses, agents and saved queries — as a portable JSON file."
         >
           <Button
             onClick={() => exportMutation.mutate()}

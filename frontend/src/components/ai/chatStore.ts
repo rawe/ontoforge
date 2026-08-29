@@ -1,5 +1,5 @@
 /**
- * Persisted chat history: `of.chat.{ontologyKey}` holds a map of agent key →
+ * Persisted chat history: `of.chat.{lensKey}` holds a map of agent key →
  * messages (capped at 50 per agent) so each agent keeps its own thread.
  */
 
@@ -17,24 +17,24 @@ const CAP = 50
 
 type ChatStore = Record<string, StoredChatMessage[]>
 
-export function readChatHistory(ontologyKey: string, agentKey: string): StoredChatMessage[] {
-  const store = readJson<ChatStore>(storageKeys.chat(ontologyKey))
+export function readChatHistory(lensKey: string, agentKey: string): StoredChatMessage[] {
+  const store = readJson<ChatStore>(storageKeys.chat(lensKey))
   const messages = store?.[agentKey]
   return Array.isArray(messages) ? messages : []
 }
 
 export function writeChatHistory(
-  ontologyKey: string,
+  lensKey: string,
   agentKey: string,
   messages: StoredChatMessage[],
 ): void {
-  const store = readJson<ChatStore>(storageKeys.chat(ontologyKey)) ?? {}
+  const store = readJson<ChatStore>(storageKeys.chat(lensKey)) ?? {}
   store[agentKey] = messages.slice(-CAP)
-  writeJson(storageKeys.chat(ontologyKey), store)
+  writeJson(storageKeys.chat(lensKey), store)
 }
 
-export function clearChatHistory(ontologyKey: string, agentKey: string): void {
-  const store = readJson<ChatStore>(storageKeys.chat(ontologyKey)) ?? {}
+export function clearChatHistory(lensKey: string, agentKey: string): void {
+  const store = readJson<ChatStore>(storageKeys.chat(lensKey)) ?? {}
   delete store[agentKey]
-  writeJson(storageKeys.chat(ontologyKey), store)
+  writeJson(storageKeys.chat(lensKey), store)
 }

@@ -53,13 +53,13 @@ describe.skipIf(!ollamaUp)("semantic search (Ollama)", () => {
     return res.json() as Row;
   }
 
-  /** Ontology `search_test`, entity type `person` with
+  /** Lens `search_test`, entity type `person` with
    * name/role/bio (strings) and age (integer). */
   async function buildSearchFixture(): Promise<{ etId: string }> {
-    await post("/api/model/ontologies", {
+    await post("/api/model/lenses", {
       key: "search_test",
       name: "Search Test",
-      description: "Integration test ontology for semantic search",
+      description: "Integration test lens for semantic search",
     });
     const et = await post("/api/model/entity-types", { key: "person", displayName: "Person" });
     const etId = et.entityTypeId as string;

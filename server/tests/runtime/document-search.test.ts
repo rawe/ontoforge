@@ -72,7 +72,7 @@ function rawSchema(options?: {
     });
   }
   return {
-    ontology: { ontologyId: "ont-1", key: "test", name: "Test", description: null },
+    lens: { lensId: "lens-1", key: "test", name: "Test", description: null },
     entityTypes,
     relationTypes: [],
     entityInclusions: options?.scopedPersonProps

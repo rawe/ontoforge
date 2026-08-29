@@ -35,10 +35,10 @@ const DDL_STATEMENTS: string[] = [
 
   // --- Schema side -------------------------------------------------------
 
-  `CREATE TABLE IF NOT EXISTS ontology (
-  ontology_id  uuid        CONSTRAINT ontology_pk PRIMARY KEY,   -- caller-supplied, no default
-  key          text        NOT NULL CONSTRAINT ontology_key_unique  UNIQUE,
-  name         text        NOT NULL CONSTRAINT ontology_name_unique UNIQUE,
+  `CREATE TABLE IF NOT EXISTS lens (
+  lens_id      uuid        CONSTRAINT lens_pk PRIMARY KEY,   -- caller-supplied, no default
+  key          text        NOT NULL CONSTRAINT lens_key_unique  UNIQUE,
+  name         text        NOT NULL CONSTRAINT lens_name_unique UNIQUE,
   description  text,
   created_at   timestamptz NOT NULL DEFAULT now(),
   updated_at   timestamptz NOT NULL DEFAULT now()
@@ -85,23 +85,23 @@ const DDL_STATEMENTS: string[] = [
   CONSTRAINT property_def_relation_key_unique UNIQUE (relation_type_id, key)
 )`,
 
-  `CREATE TABLE IF NOT EXISTS ontology_includes (
-  ontology_id      uuid   NOT NULL CONSTRAINT ontology_includes_ontology_fk
-                          REFERENCES ontology (ontology_id) ON DELETE CASCADE,
-  entity_type_id   uuid   CONSTRAINT ontology_includes_entity_type_fk
+  `CREATE TABLE IF NOT EXISTS lens_includes (
+  lens_id          uuid   NOT NULL CONSTRAINT lens_includes_lens_fk
+                          REFERENCES lens (lens_id) ON DELETE CASCADE,
+  entity_type_id   uuid   CONSTRAINT lens_includes_entity_type_fk
                           REFERENCES entity_type (entity_type_id) ON DELETE CASCADE,
-  relation_type_id uuid   CONSTRAINT ontology_includes_relation_type_fk
+  relation_type_id uuid   CONSTRAINT lens_includes_relation_type_fk
                           REFERENCES relation_type (relation_type_id) ON DELETE CASCADE,
   properties       text[],  -- NULL = all properties; '{}' = none. The distinction is contract.
-  CONSTRAINT ontology_includes_one_type CHECK (num_nonnulls(entity_type_id, relation_type_id) = 1),
-  CONSTRAINT ontology_includes_entity_unique   UNIQUE (ontology_id, entity_type_id),
-  CONSTRAINT ontology_includes_relation_unique UNIQUE (ontology_id, relation_type_id)
+  CONSTRAINT lens_includes_one_type CHECK (num_nonnulls(entity_type_id, relation_type_id) = 1),
+  CONSTRAINT lens_includes_entity_unique   UNIQUE (lens_id, entity_type_id),
+  CONSTRAINT lens_includes_relation_unique UNIQUE (lens_id, relation_type_id)
 )`, // no timestamps, no PK
 
   `CREATE TABLE IF NOT EXISTS ai_agent_config (
   agent_config_id uuid        CONSTRAINT ai_agent_config_pk PRIMARY KEY,
-  ontology_id     uuid        NOT NULL CONSTRAINT ai_agent_config_ontology_fk
-                              REFERENCES ontology (ontology_id) ON DELETE CASCADE,
+  lens_id         uuid        NOT NULL CONSTRAINT ai_agent_config_lens_fk
+                              REFERENCES lens (lens_id) ON DELETE CASCADE,
   key             text        NOT NULL,
   name            text        NOT NULL,
   description     text,
@@ -109,14 +109,14 @@ const DDL_STATEMENTS: string[] = [
   tools           text[],     -- NULL = all tools
   created_at      timestamptz NOT NULL DEFAULT now(),
   updated_at      timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT ai_agent_config_key_unique UNIQUE (ontology_id, key)   -- upsert arbiter
+  CONSTRAINT ai_agent_config_key_unique UNIQUE (lens_id, key)   -- upsert arbiter
 )`,
 
   `CREATE TABLE IF NOT EXISTS saved_query (
   saved_query_id uuid        CONSTRAINT saved_query_pk PRIMARY KEY,
-  ontology_id    uuid        NOT NULL CONSTRAINT saved_query_ontology_fk
-                             REFERENCES ontology (ontology_id) ON DELETE CASCADE,
-  ontology_key   text,       -- denormalized (normative, Part 1); nullable
+  lens_id        uuid        NOT NULL CONSTRAINT saved_query_lens_fk
+                             REFERENCES lens (lens_id) ON DELETE CASCADE,
+  lens_key       text,       -- denormalized (normative, Part 1); nullable
   key            text        NOT NULL,
   name           text        NOT NULL,
   description    text        NOT NULL,
@@ -125,7 +125,7 @@ const DDL_STATEMENTS: string[] = [
   embedding      vector,                -- description embedding; width policed by the index
   created_at     timestamptz NOT NULL DEFAULT now(),
   updated_at     timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT saved_query_key_unique UNIQUE (ontology_id, key)        -- upsert arbiter
+  CONSTRAINT saved_query_key_unique UNIQUE (lens_id, key)        -- upsert arbiter
 )`,
 
   // --- Instance side -----------------------------------------------------
@@ -302,7 +302,7 @@ const CROSS_TYPE_SPEC: IndexSpec = {
   predicate: null,
 };
 
-/** Saved-query descriptions. Ontology scoping is a plain query-time
+/** Saved-query descriptions. Lens scoping is a plain query-time
  * predicate, so the index needs no scoping of its own. */
 const SAVED_QUERY_SPEC: IndexSpec = {
   name: SAVED_QUERY_INDEX,

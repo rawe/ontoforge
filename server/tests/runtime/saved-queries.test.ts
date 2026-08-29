@@ -126,14 +126,14 @@ describe("executeSavedQuery parameter validation", () => {
   it("an unknown query key is not found", async () => {
     stubSavedQueries([]);
     await expect(
-      executeSavedQuery("full_ontology", "nonexistent", {}, asRuntimeStore(store)),
+      executeSavedQuery("full_lens", "nonexistent", {}, asRuntimeStore(store)),
     ).rejects.toThrow(/Saved query 'nonexistent' not found/);
   });
 
   it("a missing parameter is rejected", async () => {
     stubSavedQueries([FIND_PEOPLE_QUERY]);
     await expect(
-      executeSavedQuery("full_ontology", "find-people", {}, asRuntimeStore(store)),
+      executeSavedQuery("full_lens", "find-people", {}, asRuntimeStore(store)),
     ).rejects.toThrow(/Missing required parameters/);
   });
 
@@ -141,7 +141,7 @@ describe("executeSavedQuery parameter validation", () => {
     stubSavedQueries([FIND_PEOPLE_QUERY]);
     await expect(
       executeSavedQuery(
-        "full_ontology",
+        "full_lens",
         "find-people",
         { name: "Alice", extra: "bad" },
         asRuntimeStore(store),
@@ -154,7 +154,7 @@ describe("executeSavedQuery parameter validation", () => {
     let caught: ValidationError | null = null;
     try {
       await executeSavedQuery(
-        "full_ontology",
+        "full_lens",
         "find-people",
         { wrong: "x" },
         asRuntimeStore(store),
@@ -190,7 +190,7 @@ describe("executeSavedQuery parameter validation", () => {
     let caught: ValidationError | null = null;
     try {
       await executeSavedQuery(
-        "full_ontology",
+        "full_lens",
         "typed",
         { min_age: "not-a-number", active: "not-a-bool" },
         asRuntimeStore(store),
@@ -215,7 +215,7 @@ describe("executeSavedQuery pipelines", () => {
     store.executeOql.mockResolvedValue([["p"], [{ p: { _id: "e1", name: "Alice" } }]]);
 
     const result = await executeSavedQuery(
-      "full_ontology",
+      "full_lens",
       "find-people",
       { name: "Alice" },
       asRuntimeStore(store),
@@ -250,7 +250,7 @@ describe("executeSavedQuery pipelines", () => {
       .mockResolvedValueOnce([["p"], [{ p: { _id: "e1", name: "Alice" } }]]);
 
     const result = await executeSavedQuery(
-      "full_ontology",
+      "full_lens",
       "two-step",
       {},
       asRuntimeStore(store),
@@ -291,7 +291,7 @@ describe("executeSavedQuery pipelines", () => {
       .mockResolvedValueOnce([["p"], []]);
 
     await executeSavedQuery(
-      "full_ontology",
+      "full_lens",
       "collision",
       { names: "Ali" },
       asRuntimeStore(store),
@@ -324,7 +324,7 @@ describe("executeSavedQuery pipelines", () => {
       .mockResolvedValueOnce([["p"], []]);
 
     const result = await executeSavedQuery(
-      "full_ontology",
+      "full_lens",
       "empty-flow",
       {},
       asRuntimeStore(store),
@@ -368,7 +368,7 @@ describe("executeSavedQuery pipelines", () => {
     store.executeOql.mockResolvedValue([["p"], [{ p: { _id: "person-1", name: "Alice" } }]]);
 
     const result = await executeSavedQuery(
-      "full_ontology",
+      "full_lens",
       "skilled-persons",
       { skill_query: "machine learning" },
       asRuntimeStore(store),
@@ -414,7 +414,7 @@ describe("executeSavedQuery pipelines", () => {
     store.semanticSearch.mockResolvedValue([]);
 
     await executeSavedQuery(
-      "full_ontology",
+      "full_lens",
       "ignored-binding",
       { q: "engineers" },
       asRuntimeStore(store),
@@ -444,7 +444,7 @@ describe("executeSavedQuery pipelines", () => {
     ]);
     let caught: ValidationError | null = null;
     try {
-      await executeSavedQuery("full_ontology", "needs-provider", {}, asRuntimeStore(store));
+      await executeSavedQuery("full_lens", "needs-provider", {}, asRuntimeStore(store));
     } catch (exc) {
       caught = exc as ValidationError;
     }
@@ -465,7 +465,7 @@ describe("executeSavedQuery pipelines", () => {
       },
     ]);
     await expect(
-      executeSavedQuery("full_ontology", "stale", {}, asRuntimeStore(store)),
+      executeSavedQuery("full_lens", "stale", {}, asRuntimeStore(store)),
     ).rejects.toThrow(ValidationError);
   });
 });
@@ -492,7 +492,7 @@ describe("listSavedQueries", () => {
       },
     ]);
 
-    const queries = await listSavedQueries("full_ontology", asRuntimeStore(store));
+    const queries = await listSavedQueries("full_lens", asRuntimeStore(store));
     expect(queries).toHaveLength(1);
     const q = queries[0]! as Row;
     expect(q.key).toBe("find-people");
@@ -510,17 +510,17 @@ describe("listSavedQueries", () => {
 
   it("is served from the cache until a modeling mutation invalidates it", async () => {
     stubSavedQueries([FIND_PEOPLE_QUERY]);
-    const first = await listSavedQueries("full_ontology", asRuntimeStore(store));
+    const first = await listSavedQueries("full_lens", asRuntimeStore(store));
     expect(first).toHaveLength(1);
 
     // The store changes; the cached lens does not.
     store.getSavedQueries.mockResolvedValue([]);
-    const cached = await listSavedQueries("full_ontology", asRuntimeStore(store));
+    const cached = await listSavedQueries("full_lens", asRuntimeStore(store));
     expect(cached).toHaveLength(1);
 
     // Invalidation (every modeling mutation) makes the change visible.
     invalidateLoadedSchemaCache();
-    const fresh = await listSavedQueries("full_ontology", asRuntimeStore(store));
+    const fresh = await listSavedQueries("full_lens", asRuntimeStore(store));
     expect(fresh).toHaveLength(0);
   });
 });
@@ -533,7 +533,7 @@ describe("searchSavedQueries", () => {
   it("is rejected as FEATURE_DISABLED without a provider", async () => {
     let caught: ValidationError | null = null;
     try {
-      await searchSavedQueries("full_ontology", "find people", 3, 0.7, asRuntimeStore(store));
+      await searchSavedQueries("full_lens", "find people", 3, 0.7, asRuntimeStore(store));
     } catch (exc) {
       caught = exc as ValidationError;
     }
@@ -554,7 +554,7 @@ describe("searchSavedQueries", () => {
     ]);
 
     const results = await searchSavedQueries(
-      "full_ontology",
+      "full_lens",
       "who works here",
       3,
       0.7,

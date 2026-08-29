@@ -85,9 +85,9 @@ beforeEach(async () => {
   });
   ids.notesPropId = notesProp.propertyId as string;
 
-  await post("/api/model/ontologies", { key: "docs_view", name: "Docs View" });
-  const titleOnly = await post("/api/model/ontologies", { key: "title_only", name: "Title Only" });
-  await post(`/api/model/ontologies/${titleOnly.ontologyId}/includes/entity-types`, {
+  await post("/api/model/lenses", { key: "docs_view", name: "Docs View" });
+  const titleOnly = await post("/api/model/lenses", { key: "title_only", name: "Title Only" });
+  await post(`/api/model/lenses/${titleOnly.lensId}/includes/entity-types`, {
     key: "article",
     properties: ["title"],
   });

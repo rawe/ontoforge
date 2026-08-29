@@ -14,15 +14,15 @@ import { invalidateLoadedSchemaCache, type SchemaCacheValue } from "../../src/ru
 import { asRuntimeStore, createMockRuntimeStore, makeFullSchema } from "./helpers.js";
 
 function makeSchemaCache(options?: {
-  ontologyKey?: string;
-  ontologyName?: string;
-  ontologyDescription?: string | null;
+  lensKey?: string;
+  lensName?: string;
+  lensDescription?: string | null;
 }): SchemaCacheValue {
   return {
-    ontologyId: "ont-1",
-    ontologyKey: options?.ontologyKey ?? "test_onto",
-    ontologyName: options?.ontologyName ?? "Test Ontology",
-    ontologyDescription: options?.ontologyDescription ?? null,
+    lensId: "lens-1",
+    lensKey: options?.lensKey ?? "test_lens",
+    lensName: options?.lensName ?? "Test Lens",
+    lensDescription: options?.lensDescription ?? null,
     entityTypes: {
       person: {
         key: "person",
@@ -74,7 +74,7 @@ beforeEach(() => {
 describe("listRuntimeAgents", () => {
   it("returns the default agent plus any configured agents", async () => {
     const store = createMockRuntimeStore();
-    store.getFullSchema.mockResolvedValue(makeFullSchema({ ontologyKey: "test_onto" }));
+    store.getFullSchema.mockResolvedValue(makeFullSchema({ lensKey: "test_lens" }));
     store.getAiAgentConfigs.mockResolvedValue([
       {
         key: "my-agent",
@@ -85,7 +85,7 @@ describe("listRuntimeAgents", () => {
       },
     ]);
 
-    const agents = await listRuntimeAgents("test_onto", asRuntimeStore(store));
+    const agents = await listRuntimeAgents("test_lens", asRuntimeStore(store));
 
     expect(agents).toHaveLength(2);
     // First should be the default agent.
@@ -99,9 +99,9 @@ describe("listRuntimeAgents", () => {
 
   it("with no configured agents, returns only the default", async () => {
     const store = createMockRuntimeStore();
-    store.getFullSchema.mockResolvedValue(makeFullSchema({ ontologyKey: "test_onto" }));
+    store.getFullSchema.mockResolvedValue(makeFullSchema({ lensKey: "test_lens" }));
 
-    const agents = await listRuntimeAgents("test_onto", asRuntimeStore(store));
+    const agents = await listRuntimeAgents("test_lens", asRuntimeStore(store));
 
     expect(agents).toHaveLength(1);
     expect(agents[0]!.key).toBe("_default");
@@ -115,7 +115,7 @@ describe("buildAgentCard", () => {
     expect(card.name).toBe("My Agent");
     expect(card.description).toBe("A custom agent");
     expect(card.url).toBe(
-      "http://localhost:8000/api/runtime/test_onto/ai/agents/my-agent/a2a",
+      "http://localhost:8000/api/runtime/test_lens/ai/agents/my-agent/a2a",
     );
     expect(card.version).toBe("0.1.0");
     expect((card.capabilities as Record<string, unknown>).streaming).toBe(false);
@@ -128,7 +128,7 @@ describe("buildAgentCard", () => {
     const card = buildAgentCard(DEFAULT_AGENT_CONFIG, makeSchemaCache(), "http://localhost:8000");
 
     expect(card.name).toBe(DEFAULT_AGENT_CONFIG.name);
-    expect(card.url).toBe("http://localhost:8000/api/runtime/test_onto/ai/a2a");
+    expect(card.url).toBe("http://localhost:8000/api/runtime/test_lens/ai/a2a");
   });
 
   it("auto-generates a description from schema types when none is set", () => {
@@ -141,7 +141,7 @@ describe("buildAgentCard", () => {
     };
     const card = buildAgentCard(
       agentNoDesc,
-      makeSchemaCache({ ontologyName: "HR Ontology" }),
+      makeSchemaCache({ lensName: "HR Lens" }),
       "http://localhost:8000",
     );
 
@@ -149,6 +149,6 @@ describe("buildAgentCard", () => {
     expect(description).toContain("person");
     expect(description).toContain("company");
     expect(description).toContain("works_for");
-    expect(description).toContain("HR Ontology");
+    expect(description).toContain("HR Lens");
   });
 });

@@ -108,7 +108,7 @@ describe("document property deletion", () => {
 describe("entity type deletion", () => {
   it("cascades chunk cleanup for each document property only", async () => {
     holder.store.isEntityTypeReferenced.mockResolvedValue(false);
-    holder.store.findOntologiesIncludingType.mockResolvedValue([]);
+    holder.store.findLensesIncludingType.mockResolvedValue([]);
     holder.store.getEntityType.mockResolvedValue(ET_DATA);
     holder.store.listProperties.mockResolvedValue([
       { ...DOC_PROP_DATA },

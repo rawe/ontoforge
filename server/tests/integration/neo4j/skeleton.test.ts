@@ -19,9 +19,9 @@ import { wipeDatabase } from "../reset.js";
 import { shutdownServer, startServer, warnAboutReservedTypeKeysInUse } from "../../../src/main.js";
 
 const EXPECTED_CONSTRAINTS = [
-  "ontology_id_unique",
-  "ontology_key_unique",
-  "ontology_name_unique",
+  "lens_id_unique",
+  "lens_key_unique",
+  "lens_name_unique",
   "entity_type_id_unique",
   "entity_type_key_unique",
   "relation_type_id_unique",

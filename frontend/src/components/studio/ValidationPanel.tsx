@@ -9,7 +9,7 @@ interface ValidationPanelProps {
   className?: string
 }
 
-/** Inline results panel for schema / ontology validation. */
+/** Inline results panel for schema / lens validation. */
 export function ValidationPanel({ result, onDismiss, className }: ValidationPanelProps) {
   return (
     <div

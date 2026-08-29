@@ -243,10 +243,10 @@ function translateConstraint(exc: pg.DatabaseError): OntoForgeError | null {
       return null;
     case "23505":
       switch (constraint) {
-        case "ontology_key_unique":
-          return new ConflictError(`Ontology with key '${value}' already exists`);
-        case "ontology_name_unique":
-          return new ConflictError(`Ontology with name '${value}' already exists`);
+        case "lens_key_unique":
+          return new ConflictError(`Lens with key '${value}' already exists`);
+        case "lens_name_unique":
+          return new ConflictError(`Lens with name '${value}' already exists`);
         case "entity_type_key_unique":
           return new ConflictError(`Entity type with key '${value}' already exists`);
         case "relation_type_key_unique":
@@ -254,10 +254,10 @@ function translateConstraint(exc: pg.DatabaseError): OntoForgeError | null {
         case "property_def_entity_key_unique":
         case "property_def_relation_key_unique":
           return new ConflictError(`Property with key '${value}' already exists on this type`);
-        case "ontology_includes_entity_unique":
-          return new ConflictError("Entity type is already included in this ontology");
-        case "ontology_includes_relation_unique":
-          return new ConflictError("Relation type is already included in this ontology");
+        case "lens_includes_entity_unique":
+          return new ConflictError("Entity type is already included in this lens");
+        case "lens_includes_relation_unique":
+          return new ConflictError("Relation type is already included in this lens");
         default:
           return null;
       }

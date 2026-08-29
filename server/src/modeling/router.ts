@@ -25,9 +25,9 @@ import {
   IncludeTypeRequest,
   IncludeTypeResponse,
   IncludeTypeUpdate,
-  OntologyCreate,
-  OntologyResponse,
-  OntologyUpdate,
+  LensCreate,
+  LensResponse,
+  LensUpdate,
   PropertyDefinitionCreate,
   PropertyDefinitionResponse,
   PropertyDefinitionUpdate,
@@ -40,8 +40,8 @@ import {
 } from "./schemas.js";
 import * as service from "./service.js";
 
-const OntologyIdParams = z.object({ ontologyId: z.string() });
-const OntologyTypeParams = z.object({ ontologyId: z.string(), typeId: z.string() });
+const LensIdParams = z.object({ lensId: z.string() });
+const LensTypeParams = z.object({ lensId: z.string(), typeId: z.string() });
 const EntityTypeIdParams = z.object({ entityTypeId: z.string() });
 const RelationTypeIdParams = z.object({ relationTypeId: z.string() });
 const EntityTypePropertyParams = z.object({
@@ -55,9 +55,9 @@ const RelationTypePropertyParams = z.object({
 
 // Agent configs and saved queries are the modeling exceptions addressed by
 // KEY, not internal identifier (`docs/interfaces.md`).
-const OntologyKeyParams = z.object({ ontologyKey: z.string() });
-const AgentKeyParams = z.object({ ontologyKey: z.string(), agentKey: z.string() });
-const QueryKeyParams = z.object({ ontologyKey: z.string(), queryKey: z.string() });
+const LensKeyParams = z.object({ lensKey: z.string() });
+const AgentKeyParams = z.object({ lensKey: z.string(), agentKey: z.string() });
+const QueryKeyParams = z.object({ lensKey: z.string(), queryKey: z.string() });
 
 // `cascade` arrives as a query-string token; accept the usual boolean
 // spellings clients send.
@@ -70,70 +70,70 @@ const CascadeQuery = z.object({
 
 /** Routes mounted at `/api/model`. */
 export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
-  // --- Ontologies ---
+  // --- Lenses ---
 
   app.post(
-    "/ontologies",
+    "/lenses",
     {
       schema: {
         tags: ["modeling"],
-        body: OntologyCreate,
-        response: { 201: OntologyResponse },
+        body: LensCreate,
+        response: { 201: LensResponse },
       },
     },
     async (request, reply) => {
-      const result = await service.createOntology(request.body, getModelingStore());
+      const result = await service.createLens(request.body, getModelingStore());
       return reply.status(201).send(result);
     },
   );
 
   app.get(
-    "/ontologies",
+    "/lenses",
     {
       schema: {
         tags: ["modeling"],
-        response: { 200: z.array(OntologyResponse) },
+        response: { 200: z.array(LensResponse) },
       },
     },
-    async () => service.listOntologies(getModelingStore()),
+    async () => service.listLenses(getModelingStore()),
   );
 
   app.get(
-    "/ontologies/:ontologyId",
+    "/lenses/:lensId",
     {
       schema: {
         tags: ["modeling"],
-        params: OntologyIdParams,
-        response: { 200: OntologyResponse },
+        params: LensIdParams,
+        response: { 200: LensResponse },
       },
     },
-    async (request) => service.getOntology(request.params.ontologyId, getModelingStore()),
+    async (request) => service.getLens(request.params.lensId, getModelingStore()),
   );
 
   app.put(
-    "/ontologies/:ontologyId",
+    "/lenses/:lensId",
     {
       schema: {
         tags: ["modeling"],
-        params: OntologyIdParams,
-        body: OntologyUpdate,
-        response: { 200: OntologyResponse },
+        params: LensIdParams,
+        body: LensUpdate,
+        response: { 200: LensResponse },
       },
     },
     async (request) =>
-      service.updateOntology(request.params.ontologyId, request.body, getModelingStore()),
+      service.updateLens(request.params.lensId, request.body, getModelingStore()),
   );
 
   app.delete(
-    "/ontologies/:ontologyId",
+    "/lenses/:lensId",
     {
       schema: {
         tags: ["modeling"],
-        params: OntologyIdParams,
+        params: LensIdParams,
       },
     },
     async (request, reply) => {
-      await service.deleteOntology(request.params.ontologyId, getModelingStore());
+      await service.deleteLens(request.params.lensId, getModelingStore());
       return reply.status(204).send();
     },
   );
@@ -143,18 +143,18 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
   // removing one names it by INTERNAL IDENTIFIER in the path.
 
   app.post(
-    "/ontologies/:ontologyId/includes/entity-types",
+    "/lenses/:lensId/includes/entity-types",
     {
       schema: {
         tags: ["modeling"],
-        params: OntologyIdParams,
+        params: LensIdParams,
         body: IncludeTypeRequest,
         response: { 201: IncludeTypeResponse },
       },
     },
     async (request, reply) => {
       const result = await service.addIncludesEntityType(
-        request.params.ontologyId,
+        request.params.lensId,
         request.body,
         getModelingStore(),
       );
@@ -163,31 +163,31 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
   );
 
   app.get(
-    "/ontologies/:ontologyId/includes/entity-types",
+    "/lenses/:lensId/includes/entity-types",
     {
       schema: {
         tags: ["modeling"],
-        params: OntologyIdParams,
+        params: LensIdParams,
         response: { 200: z.array(IncludeTypeResponse) },
       },
     },
     async (request) =>
-      service.listIncludesEntityTypes(request.params.ontologyId, getModelingStore()),
+      service.listIncludesEntityTypes(request.params.lensId, getModelingStore()),
   );
 
   app.put(
-    "/ontologies/:ontologyId/includes/entity-types/:typeId",
+    "/lenses/:lensId/includes/entity-types/:typeId",
     {
       schema: {
         tags: ["modeling"],
-        params: OntologyTypeParams,
+        params: LensTypeParams,
         body: IncludeTypeUpdate,
         response: { 200: IncludeTypeResponse },
       },
     },
     async (request) =>
       service.updateIncludesEntityType(
-        request.params.ontologyId,
+        request.params.lensId,
         request.params.typeId,
         request.body,
         getModelingStore(),
@@ -195,16 +195,16 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
   );
 
   app.delete(
-    "/ontologies/:ontologyId/includes/entity-types/:typeId",
+    "/lenses/:lensId/includes/entity-types/:typeId",
     {
       schema: {
         tags: ["modeling"],
-        params: OntologyTypeParams,
+        params: LensTypeParams,
       },
     },
     async (request, reply) => {
       await service.removeIncludesEntityType(
-        request.params.ontologyId,
+        request.params.lensId,
         request.params.typeId,
         getModelingStore(),
       );
@@ -213,18 +213,18 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
   );
 
   app.post(
-    "/ontologies/:ontologyId/includes/relation-types",
+    "/lenses/:lensId/includes/relation-types",
     {
       schema: {
         tags: ["modeling"],
-        params: OntologyIdParams,
+        params: LensIdParams,
         body: IncludeTypeRequest,
         response: { 201: IncludeTypeResponse },
       },
     },
     async (request, reply) => {
       const result = await service.addIncludesRelationType(
-        request.params.ontologyId,
+        request.params.lensId,
         request.body,
         getModelingStore(),
       );
@@ -233,31 +233,31 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
   );
 
   app.get(
-    "/ontologies/:ontologyId/includes/relation-types",
+    "/lenses/:lensId/includes/relation-types",
     {
       schema: {
         tags: ["modeling"],
-        params: OntologyIdParams,
+        params: LensIdParams,
         response: { 200: z.array(IncludeTypeResponse) },
       },
     },
     async (request) =>
-      service.listIncludesRelationTypes(request.params.ontologyId, getModelingStore()),
+      service.listIncludesRelationTypes(request.params.lensId, getModelingStore()),
   );
 
   app.put(
-    "/ontologies/:ontologyId/includes/relation-types/:typeId",
+    "/lenses/:lensId/includes/relation-types/:typeId",
     {
       schema: {
         tags: ["modeling"],
-        params: OntologyTypeParams,
+        params: LensTypeParams,
         body: IncludeTypeUpdate,
         response: { 200: IncludeTypeResponse },
       },
     },
     async (request) =>
       service.updateIncludesRelationType(
-        request.params.ontologyId,
+        request.params.lensId,
         request.params.typeId,
         request.body,
         getModelingStore(),
@@ -265,16 +265,16 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
   );
 
   app.delete(
-    "/ontologies/:ontologyId/includes/relation-types/:typeId",
+    "/lenses/:lensId/includes/relation-types/:typeId",
     {
       schema: {
         tags: ["modeling"],
-        params: OntologyTypeParams,
+        params: LensTypeParams,
       },
     },
     async (request, reply) => {
       await service.removeIncludesRelationType(
-        request.params.ontologyId,
+        request.params.lensId,
         request.params.typeId,
         getModelingStore(),
       );
@@ -287,15 +287,15 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
   // report, they never raise.
 
   app.post(
-    "/ontologies/:ontologyId/validate",
+    "/lenses/:lensId/validate",
     {
       schema: {
         tags: ["modeling"],
-        params: OntologyIdParams,
+        params: LensIdParams,
         response: { 200: ValidationResult },
       },
     },
-    async (request) => service.validateOntology(request.params.ontologyId, getModelingStore()),
+    async (request) => service.validateLens(request.params.lensId, getModelingStore()),
   );
 
   app.post(
@@ -644,22 +644,22 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
     },
   );
 
-  // --- AI Agent Configs (addressed by ontology key + agent key) ---
+  // --- AI Agent Configs (addressed by lens key + agent key) ---
 
   app.get(
-    "/ontologies/:ontologyKey/ai-agents",
+    "/lenses/:lensKey/ai-agents",
     {
       schema: {
         tags: ["modeling"],
-        params: OntologyKeyParams,
+        params: LensKeyParams,
         response: { 200: z.array(AiAgentConfigResponse) },
       },
     },
-    async (request) => service.listAiAgents(request.params.ontologyKey, getModelingStore()),
+    async (request) => service.listAiAgents(request.params.lensKey, getModelingStore()),
   );
 
   app.put(
-    "/ontologies/:ontologyKey/ai-agents/:agentKey",
+    "/lenses/:lensKey/ai-agents/:agentKey",
     {
       schema: {
         tags: ["modeling"],
@@ -670,7 +670,7 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
     },
     async (request, reply) => {
       const [result, created] = await service.upsertAiAgent(
-        request.params.ontologyKey,
+        request.params.lensKey,
         request.params.agentKey,
         request.body,
         getModelingStore(),
@@ -680,13 +680,13 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
   );
 
   app.delete(
-    "/ontologies/:ontologyKey/ai-agents/:agentKey",
+    "/lenses/:lensKey/ai-agents/:agentKey",
     {
       schema: { tags: ["modeling"], params: AgentKeyParams },
     },
     async (request, reply) => {
       await service.deleteAiAgent(
-        request.params.ontologyKey,
+        request.params.lensKey,
         request.params.agentKey,
         getModelingStore(),
       );
@@ -694,22 +694,22 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
     },
   );
 
-  // --- Saved Queries (addressed by ontology key + query key) ---
+  // --- Saved Queries (addressed by lens key + query key) ---
 
   app.get(
-    "/ontologies/:ontologyKey/saved-queries",
+    "/lenses/:lensKey/saved-queries",
     {
       schema: {
         tags: ["modeling"],
-        params: OntologyKeyParams,
+        params: LensKeyParams,
         response: { 200: z.array(SavedQueryResponse) },
       },
     },
-    async (request) => service.listSavedQueries(request.params.ontologyKey, getModelingStore()),
+    async (request) => service.listSavedQueries(request.params.lensKey, getModelingStore()),
   );
 
   app.put(
-    "/ontologies/:ontologyKey/saved-queries/:queryKey",
+    "/lenses/:lensKey/saved-queries/:queryKey",
     {
       schema: {
         tags: ["modeling"],
@@ -720,7 +720,7 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
     },
     async (request, reply) => {
       const [result, created] = await service.upsertSavedQuery(
-        request.params.ontologyKey,
+        request.params.lensKey,
         request.params.queryKey,
         request.body,
         getModelingStore(),
@@ -731,13 +731,13 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
   );
 
   app.delete(
-    "/ontologies/:ontologyKey/saved-queries/:queryKey",
+    "/lenses/:lensKey/saved-queries/:queryKey",
     {
       schema: { tags: ["modeling"], params: QueryKeyParams },
     },
     async (request, reply) => {
       await service.deleteSavedQuery(
-        request.params.ontologyKey,
+        request.params.lensKey,
         request.params.queryKey,
         getModelingStore(),
       );

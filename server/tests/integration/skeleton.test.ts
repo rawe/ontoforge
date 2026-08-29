@@ -37,7 +37,7 @@ describe("adapter lifecycle", () => {
     await closeStores();
     await closeStores(); // the port contract's "Close. Idempotent."
     await initStores(); // boot again against the same store
-    expect(await getModelingStore().listOntologies()).toEqual([]);
+    expect(await getModelingStore().listLenses()).toEqual([]);
   });
 });
 

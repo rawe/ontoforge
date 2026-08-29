@@ -97,7 +97,7 @@ const ENTITY_VALUE_RE = /^(?:entity|recent):([^:]+):(.+)$/
 /* --------------------------------- palette ---------------------------------- */
 
 interface SearchPaletteProps {
-  ontologyKey: string
+  lensKey: string
   open: boolean
   onOpenChange: (open: boolean) => void
 }
@@ -110,7 +110,7 @@ interface SearchPaletteProps {
  * The stateful content only mounts while the dialog is open, so every open
  * starts with a fresh input, scope and recents snapshot.
  */
-export function SearchPalette({ ontologyKey, open, onOpenChange }: SearchPaletteProps) {
+export function SearchPalette({ lensKey, open, onOpenChange }: SearchPaletteProps) {
   return (
     <CommandDialog
       open={open}
@@ -119,26 +119,26 @@ export function SearchPalette({ ontologyKey, open, onOpenChange }: SearchPalette
       description="Search entities, saved queries and actions"
       className="top-[18%] sm:max-w-xl"
     >
-      {open && <PaletteContent ontologyKey={ontologyKey} onOpenChange={onOpenChange} />}
+      {open && <PaletteContent lensKey={lensKey} onOpenChange={onOpenChange} />}
     </CommandDialog>
   )
 }
 
 function PaletteContent({
-  ontologyKey,
+  lensKey,
   onOpenChange,
 }: Omit<SearchPaletteProps, 'open'>) {
   const navigate = useNavigate()
   const { resolvedTheme, setTheme } = useTheme()
   const { data: features } = useFeatures()
-  const schema = useRuntimeSchema(ontologyKey)
+  const schema = useRuntimeSchema(lensKey)
 
   const [input, setInput] = useState('')
   const [scopedType, setScopedType] = useState<string | null>(null)
   const [selected, setSelected] = useState('')
-  const [recents] = useState<RecentEntity[]>(() => readRecents(ontologyKey))
+  const [recents] = useState<RecentEntity[]>(() => readRecents(lensKey))
 
-  const base = `/w/${ontologyKey}`
+  const base = `/w/${lensKey}`
   const semantic = features?.semanticSearch === true
   const entityTypes = useMemo(() => schema.data?.entityTypes ?? [], [schema.data])
   const typeName = (key: string) =>
@@ -169,7 +169,7 @@ function PaletteContent({
     (scopedType !== null || (q.length >= 2 && debouncedQ.length >= 2))
 
   const entitySearch = useEntitySearch({
-    ontologyKey,
+    lensKey,
     q: mode === 'entities' ? debouncedQ : '',
     typeKey: scopedType ?? undefined,
     semantic,
@@ -178,7 +178,7 @@ function PaletteContent({
   })
 
   const savedQuerySearch = useSavedQuerySearch(
-    ontologyKey,
+    lensKey,
     mode === 'queries' ? debouncedQ : '',
     semantic,
     mode === 'queries',
@@ -408,7 +408,7 @@ function PaletteContent({
     ) : queries.length === 0 ? (
       <StatusRow>
         {debouncedQ === ''
-          ? 'No saved queries in this ontology.'
+          ? 'No saved queries in this lens.'
           : `No saved query matches “${debouncedQ}”.`}
       </StatusRow>
     ) : (

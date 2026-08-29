@@ -1,7 +1,7 @@
 /**
  * Modeling MCP server: the global schema surface over MCP.
  *
- * Global by design — no ontology key anywhere; the schema belongs to no
+ * Global by design — no lens key anywhere; the schema belongs to no
  * lens. Tools take KEYS (never internal identifiers) plus a `type_kind`
  * discriminator for properties, and resolve keys to internal ids per call
  * (never cached). Tool parameters are snake_case on the wire
@@ -26,13 +26,14 @@ import {
   EntityTypeUpdate,
   ExportPayload,
   IncludeTypeRequest,
-  OntologyCreate,
-  OntologyUpdate,
+  LensCreate,
+  LensUpdate,
   PropertyDefinitionCreate,
   PropertyDefinitionUpdate,
   RelationTypeCreate,
   RelationTypeUpdate,
   SavedQueryUpsert,
+  TRANSFER_FORMAT_VERSION,
 } from "../modeling/schemas.js";
 import * as service from "../modeling/service.js";
 import { VALID_AGENT_TOOLS_CSV } from "../runtime/toolNames.js";
@@ -151,13 +152,13 @@ async function resolveProperty(
   return data;
 }
 
-async function resolveOntologyByKey(
+async function resolveLensByKey(
   store: ModelingStore,
-  ontologyKey: string,
+  lensKey: string,
 ): Promise<Record<string, unknown>> {
-  const data = await store.getOntologyByKey(ontologyKey);
+  const data = await store.getLensByKey(lensKey);
   if (!data) {
-    throw new NotFoundError(`Ontology '${ontologyKey}' not found`);
+    throw new NotFoundError(`Lens '${lensKey}' not found`);
   }
   return data;
 }
@@ -268,7 +269,7 @@ export function createModelingMcpServer(): McpServer {
     {
       description:
         "Remove an entity type and its properties. Use cascade=True to auto-remove " +
-        "from any scoped ontologies. Fails if any relation type references it.",
+        "from any scoped lenses. Fails if any relation type references it.",
       inputSchema: {
         entity_type_key: z.string(),
         cascade: z.boolean().optional(),
@@ -351,7 +352,7 @@ export function createModelingMcpServer(): McpServer {
     {
       description:
         "Remove a relation type and its properties. Use cascade=True to auto-remove " +
-        "from any scoped ontologies.",
+        "from any scoped lenses.",
       inputSchema: {
         relation_type_key: z.string(),
         cascade: z.boolean().optional(),
@@ -384,7 +385,7 @@ export function createModelingMcpServer(): McpServer {
         "embeddings are enabled and is returned as a stub (never inline) by " +
         "runtime reads. Document properties are only allowed on entity types " +
         "— on relation types they are rejected. " +
-        "Use cascade=True to auto-add required properties to scoped ontology property lists.",
+        "Use cascade=True to auto-add required properties to scoped lens property lists.",
       inputSchema: {
         type_kind: z.string(),
         type_key: z.string(),
@@ -482,7 +483,7 @@ export function createModelingMcpServer(): McpServer {
       description:
         "Remove a property definition from an entity type or relation type. " +
         "type_kind must be 'entity_type' or 'relation_type'. " +
-        "Use cascade=True to auto-remove from scoped ontology property lists.",
+        "Use cascade=True to auto-remove from scoped lens property lists.",
       inputSchema: {
         type_kind: z.string(),
         type_key: z.string(),
@@ -528,8 +529,8 @@ export function createModelingMcpServer(): McpServer {
     "import_schema",
     {
       description:
-        "Import a v2.0 schema payload. Creates entity types, relation types, " +
-        "and ontologies with scope configuration.",
+        `Import a v${TRANSFER_FORMAT_VERSION} schema payload. Creates entity types, relation types, ` +
+        "and lenses with scope configuration.",
       inputSchema: {
         payload: z.record(z.string(), z.unknown()),
       },
@@ -544,7 +545,7 @@ export function createModelingMcpServer(): McpServer {
   server.registerTool(
     "validate_schema",
     {
-      description: "Check the global schema + all scoped ontologies for consistency.",
+      description: "Check the global schema + all scoped lenses for consistency.",
       inputSchema: {},
     },
     wrap("validate_schema", async () => {
@@ -553,72 +554,72 @@ export function createModelingMcpServer(): McpServer {
     }),
   );
 
-  // --- Ontology Management ---
+  // --- Lens Management ---
 
   server.registerTool(
-    "create_ontology",
+    "create_lens",
     {
-      description: "Create a new ontology (named lens over the schema).",
+      description: "Create a new lens (named view over the schema).",
       inputSchema: {
         key: z.string(),
         name: z.string(),
         description: z.string().optional(),
       },
     },
-    wrap("create_ontology", async (args: {
+    wrap("create_lens", async (args: {
       key: string;
       name: string;
       description?: string | undefined;
     }) => {
-      const body = OntologyCreate.parse({
+      const body = LensCreate.parse({
         key: args.key,
         name: args.name,
         description: args.description ?? null,
       });
-      const result = await service.createOntology(body, getModelingStore());
+      const result = await service.createLens(body, getModelingStore());
       return jsonResult(result);
     }),
   );
 
   server.registerTool(
-    "update_ontology",
+    "update_lens",
     {
-      description: "Update an ontology's display name or description.",
+      description: "Update a lens's display name or description.",
       inputSchema: {
-        ontology_key: z.string(),
+        lens_key: z.string(),
         name: z.string().optional(),
         description: z.string().optional(),
       },
     },
-    wrap("update_ontology", async (args: {
-      ontology_key: string;
+    wrap("update_lens", async (args: {
+      lens_key: string;
       name?: string | undefined;
       description?: string | undefined;
     }) => {
       const store = getModelingStore();
-      const ontology = await resolveOntologyByKey(store, args.ontology_key);
-      const body = OntologyUpdate.parse({
+      const lens = await resolveLensByKey(store, args.lens_key);
+      const body = LensUpdate.parse({
         name: args.name ?? null,
         description: args.description ?? null,
       });
-      const result = await service.updateOntology(ontology.ontologyId as string, body, store);
+      const result = await service.updateLens(lens.lensId as string, body, store);
       return jsonResult(result);
     }),
   );
 
   server.registerTool(
-    "delete_ontology",
+    "delete_lens",
     {
-      description: "Delete an ontology. Does not affect the schema or other ontologies.",
+      description: "Delete a lens. Does not affect the schema or other lenses.",
       inputSchema: {
-        ontology_key: z.string(),
+        lens_key: z.string(),
       },
     },
-    wrap("delete_ontology", async (args: { ontology_key: string }) => {
+    wrap("delete_lens", async (args: { lens_key: string }) => {
       const store = getModelingStore();
-      const ontology = await resolveOntologyByKey(store, args.ontology_key);
-      await service.deleteOntology(ontology.ontologyId as string, store);
-      return textResult(`Ontology '${args.ontology_key}' deleted successfully.`);
+      const lens = await resolveLensByKey(store, args.lens_key);
+      await service.deleteLens(lens.lensId as string, store);
+      return textResult(`Lens '${args.lens_key}' deleted successfully.`);
     }),
   );
 
@@ -627,30 +628,30 @@ export function createModelingMcpServer(): McpServer {
   // MCP, which works because adding is an upsert.
 
   server.registerTool(
-    "add_entity_type_to_ontology",
+    "add_entity_type_to_lens",
     {
       description:
-        "Add an entity type to an ontology's scope. Properties=null means all " +
+        "Add an entity type to a lens's scope. Properties=null means all " +
         "properties. Properties=[...] means only listed properties are exposed.",
       inputSchema: {
-        ontology_key: z.string(),
+        lens_key: z.string(),
         entity_type_key: z.string(),
         properties: z.array(z.string()).optional(),
       },
     },
-    wrap("add_entity_type_to_ontology", async (args: {
-      ontology_key: string;
+    wrap("add_entity_type_to_lens", async (args: {
+      lens_key: string;
       entity_type_key: string;
       properties?: string[] | undefined;
     }) => {
       const store = getModelingStore();
-      const ontology = await resolveOntologyByKey(store, args.ontology_key);
+      const lens = await resolveLensByKey(store, args.lens_key);
       const body = IncludeTypeRequest.parse({
         key: args.entity_type_key,
         properties: args.properties ?? null,
       });
       const result = await service.addIncludesEntityType(
-        ontology.ontologyId as string,
+        lens.lensId as string,
         body,
         store,
       );
@@ -659,57 +660,57 @@ export function createModelingMcpServer(): McpServer {
   );
 
   server.registerTool(
-    "remove_entity_type_from_ontology",
+    "remove_entity_type_from_lens",
     {
-      description: "Remove an entity type from an ontology's scope.",
+      description: "Remove an entity type from a lens's scope.",
       inputSchema: {
-        ontology_key: z.string(),
+        lens_key: z.string(),
         entity_type_key: z.string(),
       },
     },
-    wrap("remove_entity_type_from_ontology", async (args: {
-      ontology_key: string;
+    wrap("remove_entity_type_from_lens", async (args: {
+      lens_key: string;
       entity_type_key: string;
     }) => {
       const store = getModelingStore();
-      const ontology = await resolveOntologyByKey(store, args.ontology_key);
+      const lens = await resolveLensByKey(store, args.lens_key);
       const et = await resolveEntityType(store, args.entity_type_key);
       await service.removeIncludesEntityType(
-        ontology.ontologyId as string,
+        lens.lensId as string,
         et.entityTypeId as string,
         store,
       );
       return textResult(
-        `Entity type '${args.entity_type_key}' removed from ontology '${args.ontology_key}'.`,
+        `Entity type '${args.entity_type_key}' removed from lens '${args.lens_key}'.`,
       );
     }),
   );
 
   server.registerTool(
-    "add_relation_type_to_ontology",
+    "add_relation_type_to_lens",
     {
       description:
-        "Add a relation type to an ontology's scope. Properties=null means all " +
+        "Add a relation type to a lens's scope. Properties=null means all " +
         "properties. Properties=[...] means only listed properties are exposed.",
       inputSchema: {
-        ontology_key: z.string(),
+        lens_key: z.string(),
         relation_type_key: z.string(),
         properties: z.array(z.string()).optional(),
       },
     },
-    wrap("add_relation_type_to_ontology", async (args: {
-      ontology_key: string;
+    wrap("add_relation_type_to_lens", async (args: {
+      lens_key: string;
       relation_type_key: string;
       properties?: string[] | undefined;
     }) => {
       const store = getModelingStore();
-      const ontology = await resolveOntologyByKey(store, args.ontology_key);
+      const lens = await resolveLensByKey(store, args.lens_key);
       const body = IncludeTypeRequest.parse({
         key: args.relation_type_key,
         properties: args.properties ?? null,
       });
       const result = await service.addIncludesRelationType(
-        ontology.ontologyId as string,
+        lens.lensId as string,
         body,
         store,
       );
@@ -718,45 +719,45 @@ export function createModelingMcpServer(): McpServer {
   );
 
   server.registerTool(
-    "remove_relation_type_from_ontology",
+    "remove_relation_type_from_lens",
     {
-      description: "Remove a relation type from an ontology's scope.",
+      description: "Remove a relation type from a lens's scope.",
       inputSchema: {
-        ontology_key: z.string(),
+        lens_key: z.string(),
         relation_type_key: z.string(),
       },
     },
-    wrap("remove_relation_type_from_ontology", async (args: {
-      ontology_key: string;
+    wrap("remove_relation_type_from_lens", async (args: {
+      lens_key: string;
       relation_type_key: string;
     }) => {
       const store = getModelingStore();
-      const ontology = await resolveOntologyByKey(store, args.ontology_key);
+      const lens = await resolveLensByKey(store, args.lens_key);
       const rt = await resolveRelationType(store, args.relation_type_key);
       await service.removeIncludesRelationType(
-        ontology.ontologyId as string,
+        lens.lensId as string,
         rt.relationTypeId as string,
         store,
       );
       return textResult(
-        `Relation type '${args.relation_type_key}' removed from ontology '${args.ontology_key}'.`,
+        `Relation type '${args.relation_type_key}' removed from lens '${args.lens_key}'.`,
       );
     }),
   );
 
   server.registerTool(
-    "validate_ontology",
+    "validate_lens",
     {
       description:
-        "Validate a single ontology's INCLUDES_TYPE configuration against the schema.",
+        "Validate a single lens's INCLUDES_TYPE configuration against the schema.",
       inputSchema: {
-        ontology_key: z.string(),
+        lens_key: z.string(),
       },
     },
-    wrap("validate_ontology", async (args: { ontology_key: string }) => {
+    wrap("validate_lens", async (args: { lens_key: string }) => {
       const store = getModelingStore();
-      const ontology = await resolveOntologyByKey(store, args.ontology_key);
-      const result = await service.validateOntology(ontology.ontologyId as string, store);
+      const lens = await resolveLensByKey(store, args.lens_key);
+      const result = await service.validateLens(lens.lensId as string, store);
       return jsonResult(result);
     }),
   );
@@ -766,13 +767,13 @@ export function createModelingMcpServer(): McpServer {
   server.registerTool(
     "list_ai_agents",
     {
-      description: "List all AI agent configurations for an ontology.",
+      description: "List all AI agent configurations for a lens.",
       inputSchema: {
-        ontology_key: z.string(),
+        lens_key: z.string(),
       },
     },
-    wrap("list_ai_agents", async (args: { ontology_key: string }) => {
-      const results = await service.listAiAgents(args.ontology_key, getModelingStore());
+    wrap("list_ai_agents", async (args: { lens_key: string }) => {
+      const results = await service.listAiAgents(args.lens_key, getModelingStore());
       return jsonResult(results);
     }),
   );
@@ -781,12 +782,12 @@ export function createModelingMcpServer(): McpServer {
     "set_ai_agent",
     {
       description:
-        "Create or update an AI agent configuration for an ontology. " +
+        "Create or update an AI agent configuration for a lens. " +
         "Key must match pattern ^[a-z][a-z0-9_-]*$, be at most 64 characters, and cannot be '_default'. " +
         `Tools must be valid tool names (${VALID_AGENT_TOOLS_CSV}). ` +
         "Set tools=null to allow all tools.",
       inputSchema: {
-        ontology_key: z.string(),
+        lens_key: z.string(),
         key: z.string(),
         name: z.string(),
         description: z.string().optional(),
@@ -795,7 +796,7 @@ export function createModelingMcpServer(): McpServer {
       },
     },
     wrap("set_ai_agent", async (args: {
-      ontology_key: string;
+      lens_key: string;
       key: string;
       name: string;
       description?: string | undefined;
@@ -809,7 +810,7 @@ export function createModelingMcpServer(): McpServer {
         tools: args.tools ?? null,
       });
       const [result, created] = await service.upsertAiAgent(
-        args.ontology_key,
+        args.lens_key,
         args.key,
         body,
         getModelingStore(),
@@ -821,16 +822,16 @@ export function createModelingMcpServer(): McpServer {
   server.registerTool(
     "delete_ai_agent",
     {
-      description: "Delete an AI agent configuration from an ontology.",
+      description: "Delete an AI agent configuration from a lens.",
       inputSchema: {
-        ontology_key: z.string(),
+        lens_key: z.string(),
         agent_key: z.string(),
       },
     },
-    wrap("delete_ai_agent", async (args: { ontology_key: string; agent_key: string }) => {
-      await service.deleteAiAgent(args.ontology_key, args.agent_key, getModelingStore());
+    wrap("delete_ai_agent", async (args: { lens_key: string; agent_key: string }) => {
+      await service.deleteAiAgent(args.lens_key, args.agent_key, getModelingStore());
       return textResult(
-        `AI agent '${args.agent_key}' deleted from ontology '${args.ontology_key}'.`,
+        `AI agent '${args.agent_key}' deleted from lens '${args.lens_key}'.`,
       );
     }),
   );
@@ -840,13 +841,13 @@ export function createModelingMcpServer(): McpServer {
   server.registerTool(
     "list_saved_queries",
     {
-      description: "List all saved queries for an ontology.",
+      description: "List all saved queries for a lens.",
       inputSchema: {
-        ontology_key: z.string(),
+        lens_key: z.string(),
       },
     },
-    wrap("list_saved_queries", async (args: { ontology_key: string }) => {
-      const results = await service.listSavedQueries(args.ontology_key, getModelingStore());
+    wrap("list_saved_queries", async (args: { lens_key: string }) => {
+      const results = await service.listSavedQueries(args.lens_key, getModelingStore());
       return jsonResult(results);
     }),
   );
@@ -855,7 +856,7 @@ export function createModelingMcpServer(): McpServer {
     "set_saved_query",
     {
       description:
-        "Create or update a saved query pipeline for an ontology. " +
+        "Create or update a saved query pipeline for a lens. " +
         "Key must match pattern ^[a-z][a-z0-9_-]*$ and be at most 64 characters. " +
         "Steps is an ordered array of pipeline steps. Each step requires a unique 'name' and a 'type'. " +
         "Step types: " +
@@ -871,7 +872,7 @@ export function createModelingMcpServer(): McpServer {
         "{name:'results', type:'oql', oql:'MATCH (p:person)-[:has_skill]->(s:skill) " +
         "WHERE s._id IN $ids RETURN p', bindings:{ids:'{{skills._id}}'}}], parameters=[{name:'q', ...}]",
       inputSchema: {
-        ontology_key: z.string(),
+        lens_key: z.string(),
         key: z.string(),
         name: z.string(),
         description: z.string(),
@@ -880,7 +881,7 @@ export function createModelingMcpServer(): McpServer {
       },
     },
     wrap("set_saved_query", async (args: {
-      ontology_key: string;
+      lens_key: string;
       key: string;
       name: string;
       description: string;
@@ -894,7 +895,7 @@ export function createModelingMcpServer(): McpServer {
         parameters: args.parameters ?? [],
       });
       const [result, created] = await service.upsertSavedQuery(
-        args.ontology_key,
+        args.lens_key,
         args.key,
         body,
         getModelingStore(),
@@ -907,16 +908,16 @@ export function createModelingMcpServer(): McpServer {
   server.registerTool(
     "delete_saved_query",
     {
-      description: "Delete a saved query from an ontology.",
+      description: "Delete a saved query from a lens.",
       inputSchema: {
-        ontology_key: z.string(),
+        lens_key: z.string(),
         query_key: z.string(),
       },
     },
-    wrap("delete_saved_query", async (args: { ontology_key: string; query_key: string }) => {
-      await service.deleteSavedQuery(args.ontology_key, args.query_key, getModelingStore());
+    wrap("delete_saved_query", async (args: { lens_key: string; query_key: string }) => {
+      await service.deleteSavedQuery(args.lens_key, args.query_key, getModelingStore());
       return textResult(
-        `Saved query '${args.query_key}' deleted from ontology '${args.ontology_key}'.`,
+        `Saved query '${args.query_key}' deleted from lens '${args.lens_key}'.`,
       );
     }),
   );

@@ -98,9 +98,9 @@ export function reservedRelationTypeKeys(): ReadonlySet<string> {
  * Constraints and indexes created unconditionally at startup.
  */
 export const CONSTRAINTS: readonly string[] = [
-  "CREATE CONSTRAINT ontology_id_unique IF NOT EXISTS FOR (o:Ontology) REQUIRE o.ontologyId IS UNIQUE",
-  "CREATE CONSTRAINT ontology_key_unique IF NOT EXISTS FOR (o:Ontology) REQUIRE o.key IS UNIQUE",
-  "CREATE CONSTRAINT ontology_name_unique IF NOT EXISTS FOR (o:Ontology) REQUIRE o.name IS UNIQUE",
+  "CREATE CONSTRAINT lens_id_unique IF NOT EXISTS FOR (o:Ontology) REQUIRE o.lensId IS UNIQUE",
+  "CREATE CONSTRAINT lens_key_unique IF NOT EXISTS FOR (o:Ontology) REQUIRE o.key IS UNIQUE",
+  "CREATE CONSTRAINT lens_name_unique IF NOT EXISTS FOR (o:Ontology) REQUIRE o.name IS UNIQUE",
   "CREATE CONSTRAINT entity_type_id_unique IF NOT EXISTS FOR (et:EntityType) REQUIRE et.entityTypeId IS UNIQUE",
   "CREATE CONSTRAINT entity_type_key_unique IF NOT EXISTS FOR (et:EntityType) REQUIRE et.key IS UNIQUE",
   "CREATE CONSTRAINT relation_type_id_unique IF NOT EXISTS FOR (rt:RelationType) REQUIRE rt.relationTypeId IS UNIQUE",
@@ -365,8 +365,8 @@ export async function ensureEntityVectorIndex(
 
 /**
  * Create the vector index for SavedQuery descriptions (IF NOT EXISTS).
- * `_ontologyKey` is an in-index filter property so a description search
- * can be scoped to one ontology in a single query.
+ * `_lensKey` is an in-index filter property so a description search
+ * can be scoped to one lens in a single query.
  */
 export async function ensureSavedQueryVectorIndex(
   driver: Driver,
@@ -383,7 +383,7 @@ export async function ensureSavedQueryVectorIndex(
   const query =
     "CREATE VECTOR INDEX saved_query_embedding IF NOT EXISTS " +
     "FOR (sq:SavedQuery) ON (sq._embedding) " +
-    "WITH [sq._ontologyKey] " +
+    "WITH [sq._lensKey] " +
     `OPTIONS {indexConfig: {\`vector.dimensions\`: ${dimensions}, ` +
     "`vector.similarity_function`: 'cosine'}}";
   await runSession(driver, async (session) => {

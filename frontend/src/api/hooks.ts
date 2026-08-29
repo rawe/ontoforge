@@ -12,26 +12,26 @@ export function useFeatures() {
   })
 }
 
-/** Modeling ontology list (has `ontologyId` for Studio cross-links). */
-export function useOntologies() {
+/** Modeling lens list (has `lensId` for Studio cross-links). */
+export function useLenses() {
   return useQuery({
-    queryKey: qk.ontologies,
-    queryFn: model.listOntologies,
+    queryKey: qk.lenses,
+    queryFn: model.listLenses,
   })
 }
 
 /**
- * Scope includes of an ontology (modeling API). `scoped` is true when any
- * include exists. NOTE: the runtime schema's `ontology.includes` field is not
+ * Scope includes of a lens (modeling API). `scoped` is true when any
+ * include exists. NOTE: the runtime schema's `lens.includes` field is not
  * populated by the backend — use this hook for scoped/unscoped decisions.
  */
-export function useOntologyScope(ontologyId: string | undefined) {
+export function useLensScope(lensId: string | undefined) {
   return useQuery({
-    queryKey: qk.model('ontologies', ontologyId ?? '', 'includes'),
+    queryKey: qk.model('lenses', lensId ?? '', 'includes'),
     queryFn: async () => {
       const [entityTypes, relationTypes] = await Promise.all([
-        model.listScopeEntityTypes(ontologyId!),
-        model.listScopeRelationTypes(ontologyId!),
+        model.listScopeEntityTypes(lensId!),
+        model.listScopeRelationTypes(lensId!),
       ])
       return {
         entityTypes,
@@ -39,15 +39,15 @@ export function useOntologyScope(ontologyId: string | undefined) {
         scoped: entityTypes.length + relationTypes.length > 0,
       }
     },
-    enabled: ontologyId !== undefined && ontologyId !== '',
+    enabled: lensId !== undefined && lensId !== '',
   })
 }
 
-/** Runtime schema for one ontology — the lens the workbench renders through. */
-export function useRuntimeSchema(ontologyKey: string | undefined) {
+/** Runtime schema for one lens — the lens the workbench renders through. */
+export function useRuntimeSchema(lensKey: string | undefined) {
   return useQuery({
-    queryKey: qk.schema(ontologyKey ?? ''),
-    queryFn: () => runtime.getSchema(ontologyKey!),
-    enabled: ontologyKey !== undefined && ontologyKey !== '',
+    queryKey: qk.schema(lensKey ?? ''),
+    queryFn: () => runtime.getSchema(lensKey!),
+    enabled: lensKey !== undefined && lensKey !== '',
   })
 }

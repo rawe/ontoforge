@@ -43,13 +43,13 @@ describe.skipIf(!ollamaUp)("MCP semantic_search (Ollama)", () => {
     }
     baseUrl = `http://127.0.0.1:${address.port}`;
 
-    // Fixture: ontology + person type + two entities.
+    // Fixture: lens + person type + two entities.
     const post = async (url: string, payload: Row): Promise<Row> => {
       const res = await app.inject({ method: "POST", url, payload });
       expect(res.statusCode, `POST ${url}: ${res.body}`).toBe(201);
       return res.json() as Row;
     };
-    await post("/api/model/ontologies", { key: "mcp_search", name: "MCP Search" });
+    await post("/api/model/lenses", { key: "mcp_search", name: "MCP Search" });
     const et = await post("/api/model/entity-types", { key: "person", displayName: "Person" });
     for (const prop of [
       { key: "name", displayName: "Name", dataType: "string", required: true },

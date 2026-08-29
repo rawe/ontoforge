@@ -1,5 +1,5 @@
 /**
- * Recently opened entities, persisted per ontology under `of.recents.{key}`.
+ * Recently opened entities, persisted per lens under `of.recents.{key}`.
  * The entity detail page records visits; the search palette shows them when
  * its input is empty. Capped at 10, most recent first, deduped by entity id.
  */
@@ -16,8 +16,8 @@ export interface RecentEntity {
 
 const MAX_RECENTS = 10
 
-export function readRecents(ontologyKey: string): RecentEntity[] {
-  const raw = readJson<unknown>(storageKeys.recents(ontologyKey))
+export function readRecents(lensKey: string): RecentEntity[] {
+  const raw = readJson<unknown>(storageKeys.recents(lensKey))
   if (!Array.isArray(raw)) return []
   return raw.filter(
     (r): r is RecentEntity =>
@@ -30,12 +30,12 @@ export function readRecents(ontologyKey: string): RecentEntity[] {
 }
 
 export function recordRecent(
-  ontologyKey: string,
+  lensKey: string,
   entry: Omit<RecentEntity, 'at'>,
 ): void {
   const next: RecentEntity[] = [
     { ...entry, at: Date.now() },
-    ...readRecents(ontologyKey).filter((r) => r.id !== entry.id),
+    ...readRecents(lensKey).filter((r) => r.id !== entry.id),
   ].slice(0, MAX_RECENTS)
-  writeJson(storageKeys.recents(ontologyKey), next)
+  writeJson(storageKeys.recents(lensKey), next)
 }

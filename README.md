@@ -91,7 +91,7 @@ claude --mcp-config mcp-example.json
 
 #### Header-based
 
-The ontology key is passed via the `X-Ontology-Key` HTTP header. Useful for orchestration frameworks that manage config via headers. Example config at `mcp-example-header.json`:
+The lens key is passed via the `X-Lens-Key` HTTP header. Useful for orchestration frameworks that manage config via headers. Example config at `mcp-example-header.json`:
 
 ```bash
 claude --mcp-config mcp-example-header.json
@@ -108,7 +108,7 @@ claude --mcp-config mcp-example-header.json
       "type": "http",
       "url": "http://localhost:8000/mcp/runtime",
       "headers": {
-        "X-Ontology-Key": "my_ontology"
+        "X-Lens-Key": "my_lens"
       }
     }
   }
@@ -117,9 +117,9 @@ claude --mcp-config mcp-example-header.json
 
 #### Environment variable
 
-For single-ontology deployments, set `DEFAULT_MCP_ONTOLOGY_KEY` on the server. Runtime MCP connections without a URL key or header will use this default.
+For single-lens deployments, set `DEFAULT_MCP_LENS_KEY` on the server. Runtime MCP connections without a URL key or header will use this default.
 
-**Runtime resolution order:** URL path (highest priority) → `X-Ontology-Key` header → `DEFAULT_MCP_ONTOLOGY_KEY` env var → 400 error.
+**Runtime resolution order:** URL path (highest priority) → `X-Lens-Key` header → `DEFAULT_MCP_LENS_KEY` env var → 400 error.
 
 ### Example: Runtime Server Quick Start
 
@@ -269,7 +269,7 @@ The backend reads settings from environment variables (or a `.env` file in `serv
 | `DB_USER` | `postgres` | Database username |
 | `DB_PASSWORD` | `ontoforge_dev` | Database password |
 | `PORT` | `8000` | HTTP listen port |
-| `DEFAULT_MCP_ONTOLOGY_KEY` | *(unset)* | MCP default ontology key — used when no key is in the URL or header |
+| `DEFAULT_MCP_LENS_KEY` | *(unset)* | MCP default lens key — used when no key is in the URL or header |
 
 In Docker, `DB_URI` is set to `postgresql://postgres:5432/ontoforge` automatically via `docker-compose.yml`.
 

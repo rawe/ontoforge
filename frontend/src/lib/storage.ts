@@ -1,23 +1,23 @@
 /**
  * Tiny localStorage helpers. All persisted UI state lives under `of.*` keys:
  *
- *   of.lastOntology          — key of the last-used ontology
+ *   of.lastLens          — key of the last-used lens
  *   of.theme                 — managed by next-themes (light|dark|system)
  *   of.sidebar               — "expanded" | "collapsed"
- *   of.explore.{ontologyKey} — Explorer canvas working set (later slice)
- *   of.chat.{ontologyKey}    — AI chat history (later slice)
- *   of.recents.{ontologyKey} — last 10 opened entities (see `lib/recents.ts`)
- *   of.queryHistory.{ontologyKey} — last 10 run OQL queries (Query console)
+ *   of.explore.{lensKey} — Explorer canvas working set (later slice)
+ *   of.chat.{lensKey}    — AI chat history (later slice)
+ *   of.recents.{lensKey} — last 10 opened entities (see `lib/recents.ts`)
+ *   of.queryHistory.{lensKey} — last 10 run OQL queries (Query console)
  */
 
 export const storageKeys = {
-  lastOntology: 'of.lastOntology',
+  lastLens: 'of.lastLens',
   theme: 'of.theme',
   sidebar: 'of.sidebar',
-  explore: (ontologyKey: string) => `of.explore.${ontologyKey}`,
-  chat: (ontologyKey: string) => `of.chat.${ontologyKey}`,
-  recents: (ontologyKey: string) => `of.recents.${ontologyKey}`,
-  queryHistory: (ontologyKey: string) => `of.queryHistory.${ontologyKey}`,
+  explore: (lensKey: string) => `of.explore.${lensKey}`,
+  chat: (lensKey: string) => `of.chat.${lensKey}`,
+  recents: (lensKey: string) => `of.recents.${lensKey}`,
+  queryHistory: (lensKey: string) => `of.queryHistory.${lensKey}`,
 } as const
 
 export function readString(key: string): string | null {

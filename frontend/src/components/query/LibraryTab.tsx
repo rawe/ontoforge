@@ -10,7 +10,7 @@ import {
   Terminal,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { useFeatures, useOntologies } from '@/api/hooks'
+import { useFeatures, useLenses } from '@/api/hooks'
 import * as runtime from '@/api/runtime'
 import type { JsonValue, QueryResult, SchemaRelationType } from '@/api/types'
 import { EmptyState } from '@/components/EmptyState'
@@ -33,12 +33,12 @@ import { formatQueryError } from './resultUtils'
 /* --------------------------------- run panel --------------------------------- */
 
 function RunPanel({
-  ontologyKey,
+  lensKey,
   query,
   relationTypes,
   autoRun,
 }: {
-  ontologyKey: string
+  lensKey: string
   /** Full query or step-less search hit — running only needs key + parameters. */
   query: SavedQueryHit
   relationTypes: readonly SchemaRelationType[]
@@ -61,7 +61,7 @@ function RunPanel({
   const execute = useMutation({
     mutationFn: async () => {
       const started = performance.now()
-      const result = await runtime.runSavedQuery(ontologyKey, query.key, buildParams())
+      const result = await runtime.runSavedQuery(lensKey, query.key, buildParams())
       return { result, ms: Math.round(performance.now() - started) }
     },
     onSuccess: (data) => {
@@ -83,7 +83,7 @@ function RunPanel({
   const allParamsFilled = query.parameters.every((p) => (raw[p.name] ?? '').trim() !== '')
 
   const copyCurl = () => {
-    const url = `${window.location.origin}/api/runtime/${ontologyKey}/saved-queries/${query.key}/run`
+    const url = `${window.location.origin}/api/runtime/${lensKey}/saved-queries/${query.key}/run`
     const body = JSON.stringify({ params: buildParams() })
     const command = `curl -X POST '${url}' -H 'Content-Type: application/json' -d '${body.replaceAll("'", "'\\''")}'`
     navigator.clipboard
@@ -139,11 +139,11 @@ function RunPanel({
 
       {run !== null && (
         <ResultsPanel
-          ontologyKey={ontologyKey}
+          lensKey={lensKey}
           result={run.result}
           elapsedMs={run.ms}
           relationTypes={relationTypes}
-          csvName={`${ontologyKey}-${query.key}`}
+          csvName={`${lensKey}-${query.key}`}
         />
       )}
     </div>
@@ -165,7 +165,7 @@ function stepBadges(query: SavedQueryHit) {
 }
 
 interface LibraryTabProps {
-  ontologyKey: string
+  lensKey: string
   relationTypes: readonly SchemaRelationType[]
   /** `?run=` — open (and, when parameterless, immediately run) this query. */
   runKey: string | null
@@ -179,21 +179,21 @@ interface LibraryTabProps {
  * "Edit in Studio" link — management lives in the Studio.
  */
 export function LibraryTab({
-  ontologyKey,
+  lensKey,
   relationTypes,
   runKey,
   onOpenConsole,
 }: LibraryTabProps) {
   const { data: features } = useFeatures()
-  const { data: ontologies } = useOntologies()
-  const ontologyId = ontologies?.find((o) => o.key === ontologyKey)?.ontologyId
+  const { data: lenses } = useLenses()
+  const lensId = lenses?.find((o) => o.key === lensKey)?.lensId
   const studioHref =
-    ontologyId !== undefined ? `/studio/ontologies/${ontologyId}?tab=queries` : '/studio/ontologies'
+    lensId !== undefined ? `/studio/lenses/${lensId}?tab=queries` : '/studio/lenses'
 
   const [search, setSearch] = useState('')
   const debounced = useDebouncedValue(search.trim(), 250)
   const semantic = features?.semanticSearch === true
-  const queriesQuery = useSavedQuerySearch(ontologyKey, debounced, semantic, true)
+  const queriesQuery = useSavedQuerySearch(lensKey, debounced, semantic, true)
   const queries = queriesQuery.data
 
   const [expandedKey, setExpandedKey] = useState<string | null>(runKey)
@@ -316,7 +316,7 @@ export function LibraryTab({
               </div>
               {expanded && (
                 <RunPanel
-                  ontologyKey={ontologyKey}
+                  lensKey={lensKey}
                   query={q}
                   relationTypes={relationTypes}
                   autoRun={runKey === q.key && q.parameters.length === 0}

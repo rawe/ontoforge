@@ -32,7 +32,7 @@ try {
 
   const etCount = (payload.entityTypes || []).length;
   const rtCount = (payload.relationTypes || []).length;
-  const ontologies = result.ontologies || [];
+  const ontologies = result.lenses || [];
   console.error(
     `Imported ${etCount} entity types, ${rtCount} relation types, ${ontologies.length} ontologies`,
   );

@@ -39,12 +39,12 @@ const DEFAULT_AGENT = '_default'
 /**
  * Chat tab: agent picker in the header, markdown message list with per-message
  * tool-call inspection, Enter-to-send input, elapsed-seconds pending state and
- * per-ontology+agent persisted history.
+ * per-lens+agent persisted history.
  */
-export function ChatTab({ ontologyKey }: { ontologyKey: string }) {
+export function ChatTab({ lensKey }: { lensKey: string }) {
   const agents = useQuery({
-    queryKey: qk.agents(ontologyKey),
-    queryFn: () => listAiAgents(ontologyKey),
+    queryKey: qk.agents(lensKey),
+    queryFn: () => listAiAgents(lensKey),
   })
   const agentOptions = useMemo(() => {
     const list = agents.data ?? []
@@ -55,7 +55,7 @@ export function ChatTab({ ontologyKey }: { ontologyKey: string }) {
 
   const [agentKey, setAgentKey] = useState(DEFAULT_AGENT)
   const [messages, setMessages] = useState<StoredChatMessage[]>(() =>
-    readChatHistory(ontologyKey, DEFAULT_AGENT),
+    readChatHistory(lensKey, DEFAULT_AGENT),
   )
   const [input, setInput] = useState('')
   /** Message optimistically shown while the request is in flight / failed. */
@@ -72,8 +72,8 @@ export function ChatTab({ ontologyKey }: { ontologyKey: string }) {
       }))
       const body = { message: text, history, includeToolCalls: true }
       return agentKey === DEFAULT_AGENT
-        ? aiChat(ontologyKey, body)
-        : aiAgentChat(ontologyKey, agentKey, body)
+        ? aiChat(lensKey, body)
+        : aiAgentChat(lensKey, agentKey, body)
     },
     onSuccess: (response, text) => {
       const userMessage: StoredChatMessage = { role: 'user', content: text }
@@ -86,7 +86,7 @@ export function ChatTab({ ontologyKey }: { ontologyKey: string }) {
       }
       const next = [...messages, userMessage, assistantMessage].slice(-50)
       setMessages(next)
-      writeChatHistory(ontologyKey, agentKey, next)
+      writeChatHistory(lensKey, agentKey, next)
       setPendingText(null)
     },
   })
@@ -128,7 +128,7 @@ export function ChatTab({ ontologyKey }: { ontologyKey: string }) {
           onValueChange={(key) => {
             // Each agent keeps its own persisted thread.
             setAgentKey(key)
-            setMessages(readChatHistory(ontologyKey, key))
+            setMessages(readChatHistory(lensKey, key))
             setPendingText(null)
             send.reset()
           }}
@@ -169,7 +169,7 @@ export function ChatTab({ ontologyKey }: { ontologyKey: string }) {
           <EmptyState
             icon={Bot}
             title="Chat with your knowledge graph"
-            description="The agent can look up entities, traverse relations and run queries against this ontology. Answers may take a while with local models."
+            description="The agent can look up entities, traverse relations and run queries against this lens. Answers may take a while with local models."
             className="py-12"
           />
         ) : (
@@ -271,7 +271,7 @@ export function ChatTab({ ontologyKey }: { ontologyKey: string }) {
           <AlertDialogHeader>
             <AlertDialogTitle>Clear this chat?</AlertDialogTitle>
             <AlertDialogDescription>
-              Removes the stored history for this agent in this ontology. This cannot be
+              Removes the stored history for this agent in this lens. This cannot be
               undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -279,7 +279,7 @@ export function ChatTab({ ontologyKey }: { ontologyKey: string }) {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
-                clearChatHistory(ontologyKey, agentKey)
+                clearChatHistory(lensKey, agentKey)
                 setMessages([])
                 setPendingText(null)
                 send.reset()

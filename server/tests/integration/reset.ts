@@ -25,11 +25,11 @@ import { settings } from "../../src/config.js";
 
 /** All ten tables — kept in step with the adapter's init DDL. */
 const ALL_TABLES = [
-  "ontology",
+  "lens",
   "entity_type",
   "relation_type",
   "property_def",
-  "ontology_includes",
+  "lens_includes",
   "ai_agent_config",
   "saved_query",
   "entity",
@@ -115,10 +115,31 @@ async function hardResetPostgres(): Promise<void> {
   }
 }
 
+/** Drop every constraint and every non-lookup index so the boot DDL
+ * rebuilds the physical skeleton from nothing. Wholesale, so leftovers
+ * from an older physical layout can never shadow the current one (a
+ * renamed constraint over an equivalent schema would be skipped by
+ * `IF NOT EXISTS` otherwise). */
+async function dropNeo4jSchemaObjects(): Promise<void> {
+  await runSession(getDriver(), async (session) => {
+    const constraints = await session.run("SHOW CONSTRAINTS YIELD name RETURN name");
+    for (const record of constraints.records) {
+      await session.run(`DROP CONSTRAINT \`${record.get("name") as string}\` IF EXISTS`);
+    }
+    const indexes = await session.run(
+      "SHOW INDEXES YIELD name, type WHERE type <> 'LOOKUP' RETURN name",
+    );
+    for (const record of indexes.records) {
+      await session.run(`DROP INDEX \`${record.get("name") as string}\` IF EXISTS`);
+    }
+  });
+}
+
 /** The full wipe, on a driver of its own (no stores exist yet). */
 async function hardResetNeo4j(): Promise<void> {
   await initDriver();
   try {
+    await dropNeo4jSchemaObjects();
     await wipeNeo4j();
   } finally {
     await closeDriver();

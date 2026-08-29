@@ -83,7 +83,7 @@ export async function paginate(baseUrl, path, pageSize = 200) {
  * Prefers unscoped ontologies (includes === null).
  */
 export function pickOntologyKey(schemaPayload) {
-  const ontologies = schemaPayload.ontologies || [];
+  const ontologies = schemaPayload.lenses || [];
   if (!ontologies.length) return null;
   const unscoped = ontologies.find((o) => !o.includes);
   return unscoped ? unscoped.key : ontologies[0].key;

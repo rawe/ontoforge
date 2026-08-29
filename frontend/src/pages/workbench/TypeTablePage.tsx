@@ -95,9 +95,9 @@ function csvEscape(value: unknown): string {
   return /[",\n\r]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s
 }
 
-/** `/w/:ontologyKey/t/:typeKey` — server-driven table over one entity type. */
+/** `/w/:lensKey/t/:typeKey` — server-driven table over one entity type. */
 export function TypeTablePage() {
-  const { ontologyKey, typeKey } = useParams<{ ontologyKey: string; typeKey: string }>()
+  const { lensKey, typeKey } = useParams<{ lensKey: string; typeKey: string }>()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -111,7 +111,7 @@ export function TypeTablePage() {
     setSearchParams(next, { replace: true })
   }, [wantsNew, typeKey, searchParams, setSearchParams])
   const queryClient = useQueryClient()
-  const schema = useRuntimeSchema(ontologyKey)
+  const schema = useRuntimeSchema(lensKey)
   const type = schema.data?.entityTypes.find((t) => t.key === typeKey)
 
   // Required properties first — this is also the column order.
@@ -188,9 +188,9 @@ export function TypeTablePage() {
   }, [sorting, properties, columnVisibility, page, debouncedQ, filters])
 
   const entities = useQuery({
-    queryKey: qk.entities(ontologyKey ?? '', typeKey ?? '', params),
-    queryFn: () => listEntities(ontologyKey!, typeKey!, params),
-    enabled: ontologyKey !== undefined && typeKey !== undefined && type !== undefined,
+    queryKey: qk.entities(lensKey ?? '', typeKey ?? '', params),
+    queryFn: () => listEntities(lensKey!, typeKey!, params),
+    enabled: lensKey !== undefined && typeKey !== undefined && type !== undefined,
     placeholderData: keepPreviousData,
   })
 
@@ -306,7 +306,7 @@ export function TypeTablePage() {
                 onClick={(e) => {
                   e.stopPropagation()
                   navigate(
-                    `/w/${ontologyKey}/explore?focus=${typeKey}:${row.original._id}`,
+                    `/w/${lensKey}/explore?focus=${typeKey}:${row.original._id}`,
                   )
                 }}
                 aria-label="Open in Explorer"
@@ -320,7 +320,7 @@ export function TypeTablePage() {
       },
     ]
     return defs
-  }, [properties, navigate, ontologyKey, typeKey])
+  }, [properties, navigate, lensKey, typeKey])
 
   const table = useReactTable({
     data: entities.data?.items ?? [],
@@ -346,7 +346,7 @@ export function TypeTablePage() {
       let failed = 0
       for (const [index, id] of ids.entries()) {
         try {
-          await deleteEntity(ontologyKey!, typeKey!, id)
+          await deleteEntity(lensKey!, typeKey!, id)
         } catch {
           failed++
         }
@@ -366,7 +366,7 @@ export function TypeTablePage() {
     onSettled: () => {
       setRowSelection({})
       void queryClient.invalidateQueries({
-        queryKey: qk.entities(ontologyKey ?? '', typeKey ?? ''),
+        queryKey: qk.entities(lensKey ?? '', typeKey ?? ''),
       })
     },
   })
@@ -402,7 +402,7 @@ export function TypeTablePage() {
     toast.success(`Exported ${items.length} rows`)
   }
 
-  if (ontologyKey === undefined || typeKey === undefined) return null
+  if (lensKey === undefined || typeKey === undefined) return null
 
   if (schema.isPending) {
     return (
@@ -419,10 +419,10 @@ export function TypeTablePage() {
       <EmptyState
         icon={SearchX}
         title="Unknown entity type"
-        description={`This ontology has no entity type "${typeKey}" in scope.`}
+        description={`This lens has no entity type "${typeKey}" in scope.`}
         action={
           <Button asChild size="sm" variant="outline">
-            <Link to={`/w/${ontologyKey}`}>Back to overview</Link>
+            <Link to={`/w/${lensKey}`}>Back to overview</Link>
           </Button>
         }
       />
@@ -444,7 +444,7 @@ export function TypeTablePage() {
 
   const openRow = (row: EntityInstance) => {
     if (window.getSelection()?.toString() !== '') return
-    navigate(`/w/${ontologyKey}/e/${typeKey}/${row._id}`)
+    navigate(`/w/${lensKey}/e/${typeKey}/${row._id}`)
   }
 
   return (
@@ -471,7 +471,7 @@ export function TypeTablePage() {
           description={`No ${type.displayName.toLowerCase()} entities exist yet. Create one to get started — or press ⌘K to search and add from anywhere.`}
           action={
             <Button asChild size="sm">
-              <Link to={`/w/${ontologyKey}/t/${typeKey}?new=1`}>
+              <Link to={`/w/${lensKey}/t/${typeKey}?new=1`}>
                 <Plus className="size-3.5" />
                 New {type.displayName}
               </Link>
@@ -686,7 +686,7 @@ export function TypeTablePage() {
           />
 
           <DocumentViewerDialog
-            ontologyKey={ontologyKey}
+            lensKey={lensKey}
             target={docTarget}
             onClose={() => setDocTarget(null)}
           />

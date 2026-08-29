@@ -83,7 +83,7 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
       sourceEntityTypeKey: "person",
       targetEntityTypeKey: "skill",
     });
-    await post("/api/model/ontologies", { key: "sq_test", name: "Saved Query Test" });
+    await post("/api/model/lenses", { key: "sq_test", name: "Saved Query Test" });
 
     const alice = await post("/api/runtime/sq_test/entities/person", { name: "Alice" });
     const python = await post("/api/runtime/sq_test/entities/skill", {
@@ -109,7 +109,7 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
         "List baking recipes and cooking instructions for the kitchen",
       ],
     ] as const) {
-      const res = await inject("PUT", `/api/model/ontologies/sq_test/saved-queries/${key}`, {
+      const res = await inject("PUT", `/api/model/lenses/sq_test/saved-queries/${key}`, {
         name,
         description,
         steps: [{ name: "main", type: "oql", oql: "MATCH (p:person) RETURN p.name AS name" }],
@@ -144,7 +144,7 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
     // Repurpose kitchen-recipes: its description now matches the probe.
     const res = await inject(
       "PUT",
-      "/api/model/ontologies/sq_test/saved-queries/kitchen-recipes",
+      "/api/model/lenses/sq_test/saved-queries/kitchen-recipes",
       {
         name: "Kitchen recipes",
         description:
@@ -169,7 +169,7 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
   it("runs a search -> oql pipeline: hits flow through the binding", async () => {
     const defined = await inject(
       "PUT",
-      "/api/model/ontologies/sq_test/saved-queries/experts-for",
+      "/api/model/lenses/sq_test/saved-queries/experts-for",
       {
         name: "Experts for a topic",
         description: "Search skills semantically, then list people holding them",
@@ -205,7 +205,7 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
   });
 
   it("runs an oql -> oql pipeline with a provider active too", async () => {
-    await inject("PUT", "/api/model/ontologies/sq_test/saved-queries/skill-holders", {
+    await inject("PUT", "/api/model/lenses/sq_test/saved-queries/skill-holders", {
       name: "Skill holders",
       description: "People holding any skill at all",
       steps: [

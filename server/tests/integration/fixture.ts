@@ -1,7 +1,7 @@
 /**
  * Integration fixture, built through the modeling API:
  * person/company/works_for, an unscoped
- * lens `test_ontology`, and a scoped lens `hr_view` (person narrowed to
+ * lens `test_lens`, and a scoped lens `hr_view` (person narrowed to
  * name+email, company whole, works_for included).
  */
 
@@ -20,7 +20,7 @@ export interface FixtureIds {
   personId: string;
   companyId: string;
   worksForId: string;
-  testOntologyId: string;
+  testLensId: string;
   hrViewId: string;
 }
 
@@ -70,26 +70,26 @@ export async function buildFixture(app: FastifyInstance): Promise<FixtureIds> {
     await post(app, `/api/model/relation-types/${worksForId}/properties`, prop);
   }
 
-  const testOntology = await post(app, "/api/model/ontologies", {
-    key: "test_ontology",
-    name: "Test Ontology",
-    description: "Person/Company ontology for testing",
+  const testLens = await post(app, "/api/model/lenses", {
+    key: "test_lens",
+    name: "Test Lens",
+    description: "Person/Company lens for testing",
   });
 
-  const hrView = await post(app, "/api/model/ontologies", {
+  const hrView = await post(app, "/api/model/lenses", {
     key: "hr_view",
     name: "HR View",
     description: "HR-scoped view for testing",
   });
-  const hrViewId = hrView.ontologyId as string;
-  await post(app, `/api/model/ontologies/${hrViewId}/includes/entity-types`, {
+  const hrViewId = hrView.lensId as string;
+  await post(app, `/api/model/lenses/${hrViewId}/includes/entity-types`, {
     key: "person",
     properties: ["name", "email"],
   });
-  await post(app, `/api/model/ontologies/${hrViewId}/includes/entity-types`, {
+  await post(app, `/api/model/lenses/${hrViewId}/includes/entity-types`, {
     key: "company",
   });
-  await post(app, `/api/model/ontologies/${hrViewId}/includes/relation-types`, {
+  await post(app, `/api/model/lenses/${hrViewId}/includes/relation-types`, {
     key: "works_for",
   });
 
@@ -97,7 +97,7 @@ export async function buildFixture(app: FastifyInstance): Promise<FixtureIds> {
     personId,
     companyId,
     worksForId,
-    testOntologyId: testOntology.ontologyId as string,
+    testLensId: testLens.lensId as string,
     hrViewId,
   };
 }

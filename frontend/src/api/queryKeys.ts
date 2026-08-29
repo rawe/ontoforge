@@ -2,15 +2,15 @@
  * TanStack Query key scheme (see master spec):
  *
  *   ['features']                                     staleTime Infinity
- *   ['ontologies']                                   modeling ontology list
- *   ['schema', ontologyKey]                          runtime schema
- *   ['entities', ontologyKey, typeKey, params]
- *   ['entity', ontologyKey, typeKey, id]
- *   ['document', ontologyKey, typeKey, id, propertyKey]
- *   ['neighbors', ontologyKey, typeKey, id, params]
- *   ['relations', ontologyKey, typeKey, params]
- *   ['savedQueries', ontologyKey]
- *   ['agents', ontologyKey]
+ *   ['lenses']                                   modeling lens list
+ *   ['schema', lensKey]                          runtime schema
+ *   ['entities', lensKey, typeKey, params]
+ *   ['entity', lensKey, typeKey, id]
+ *   ['document', lensKey, typeKey, id, propertyKey]
+ *   ['neighbors', lensKey, typeKey, id, params]
+ *   ['relations', lensKey, typeKey, params]
+ *   ['savedQueries', lensKey]
+ *   ['agents', lensKey]
  *   ['model', ...]                                   modeling sub-keys
  *
  * Mutations invalidate precisely; scope/schema mutations invalidate
@@ -19,30 +19,30 @@
 
 export const qk = {
   features: ['features'] as const,
-  ontologies: ['ontologies'] as const,
+  lenses: ['lenses'] as const,
 
   schemaAll: ['schema'] as const,
-  schema: (ontologyKey: string) => ['schema', ontologyKey] as const,
+  schema: (lensKey: string) => ['schema', lensKey] as const,
 
-  entities: (ontologyKey: string, typeKey: string, params?: unknown) =>
+  entities: (lensKey: string, typeKey: string, params?: unknown) =>
     params === undefined
-      ? (['entities', ontologyKey, typeKey] as const)
-      : (['entities', ontologyKey, typeKey, params] as const),
-  entity: (ontologyKey: string, typeKey: string, id: string) =>
-    ['entity', ontologyKey, typeKey, id] as const,
-  document: (ontologyKey: string, typeKey: string, id: string, propertyKey: string) =>
-    ['document', ontologyKey, typeKey, id, propertyKey] as const,
-  neighbors: (ontologyKey: string, typeKey: string, id: string, params?: unknown) =>
+      ? (['entities', lensKey, typeKey] as const)
+      : (['entities', lensKey, typeKey, params] as const),
+  entity: (lensKey: string, typeKey: string, id: string) =>
+    ['entity', lensKey, typeKey, id] as const,
+  document: (lensKey: string, typeKey: string, id: string, propertyKey: string) =>
+    ['document', lensKey, typeKey, id, propertyKey] as const,
+  neighbors: (lensKey: string, typeKey: string, id: string, params?: unknown) =>
     params === undefined
-      ? (['neighbors', ontologyKey, typeKey, id] as const)
-      : (['neighbors', ontologyKey, typeKey, id, params] as const),
-  relations: (ontologyKey: string, typeKey: string, params?: unknown) =>
+      ? (['neighbors', lensKey, typeKey, id] as const)
+      : (['neighbors', lensKey, typeKey, id, params] as const),
+  relations: (lensKey: string, typeKey: string, params?: unknown) =>
     params === undefined
-      ? (['relations', ontologyKey, typeKey] as const)
-      : (['relations', ontologyKey, typeKey, params] as const),
+      ? (['relations', lensKey, typeKey] as const)
+      : (['relations', lensKey, typeKey, params] as const),
 
-  savedQueries: (ontologyKey: string) => ['savedQueries', ontologyKey] as const,
-  agents: (ontologyKey: string) => ['agents', ontologyKey] as const,
+  savedQueries: (lensKey: string) => ['savedQueries', lensKey] as const,
+  agents: (lensKey: string) => ['agents', lensKey] as const,
 
   model: (...parts: readonly unknown[]) => ['model', ...parts] as const,
 } as const

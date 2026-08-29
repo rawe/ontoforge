@@ -1,6 +1,6 @@
 /**
  * The cascade protocol, complete: the three triggers, the four mechanical
- * repairs, the sorted lens keys in `details.affectedOntologies`, and the
+ * repairs, the sorted lens keys in `details.affectedLenses`, and the
  * two deliberate asymmetries — property deletion never triggers it, and
  * changing an existing property is never checked.
  */
@@ -67,16 +67,16 @@ beforeEach(() => {
 
 describe("trigger 1: delete an entity type included by a lens", () => {
   it("without cascade: 409 CASCADE_REQUIRED with the sorted lens keys", async () => {
-    holder.store.findOntologiesIncludingType.mockResolvedValue(["alpha", "beta", "zulu"]);
+    holder.store.findLensesIncludingType.mockResolvedValue(["alpha", "beta", "zulu"]);
     const res = await app.inject({ method: "DELETE", url: "/api/model/entity-types/et-1" });
     expect(res.statusCode).toBe(409);
     expect(res.json().error.code).toBe("CASCADE_REQUIRED");
-    expect(res.json().error.details.affectedOntologies).toEqual(["alpha", "beta", "zulu"]);
+    expect(res.json().error.details.affectedLenses).toEqual(["alpha", "beta", "zulu"]);
     expect(holder.store.deleteEntityType).not.toHaveBeenCalled();
   });
 
   it("with cascade: removes the inclusions from every lens, then deletes", async () => {
-    holder.store.findOntologiesIncludingType.mockResolvedValue(["alpha"]);
+    holder.store.findLensesIncludingType.mockResolvedValue(["alpha"]);
     holder.store.getEntityType.mockResolvedValue(ET_DATA);
     holder.store.deleteEntityType.mockResolvedValue(true);
     const res = await app.inject({
@@ -99,15 +99,15 @@ describe("trigger 1: delete an entity type included by a lens", () => {
 
 describe("trigger 2: delete a relation type included by a lens", () => {
   it("without cascade: 409 CASCADE_REQUIRED with the sorted lens keys", async () => {
-    holder.store.findOntologiesIncludingType.mockResolvedValue(["hr_lens", "sales_lens"]);
+    holder.store.findLensesIncludingType.mockResolvedValue(["hr_lens", "sales_lens"]);
     const res = await app.inject({ method: "DELETE", url: "/api/model/relation-types/rt-1" });
     expect(res.statusCode).toBe(409);
     expect(res.json().error.code).toBe("CASCADE_REQUIRED");
-    expect(res.json().error.details.affectedOntologies).toEqual(["hr_lens", "sales_lens"]);
+    expect(res.json().error.details.affectedLenses).toEqual(["hr_lens", "sales_lens"]);
   });
 
   it("with cascade: removes the inclusions, then deletes", async () => {
-    holder.store.findOntologiesIncludingType.mockResolvedValue(["hr_lens"]);
+    holder.store.findLensesIncludingType.mockResolvedValue(["hr_lens"]);
     holder.store.deleteRelationType.mockResolvedValue(true);
     const res = await app.inject({
       method: "DELETE",
@@ -121,7 +121,7 @@ describe("trigger 2: delete a relation type included by a lens", () => {
 describe("trigger 3: create a required property with no default", () => {
   it("refused when a lens's explicit allowlist for the owning type omits the key", async () => {
     holder.store.getEntityType.mockResolvedValue(ET_DATA);
-    holder.store.findOntologiesWithExplicitProperty.mockResolvedValue(["alpha", "beta"]);
+    holder.store.findLensesWithExplicitProperty.mockResolvedValue(["alpha", "beta"]);
     const res = await app.inject({
       method: "POST",
       url: "/api/model/entity-types/et-1/properties",
@@ -129,13 +129,13 @@ describe("trigger 3: create a required property with no default", () => {
     });
     expect(res.statusCode).toBe(409);
     expect(res.json().error.code).toBe("CASCADE_REQUIRED");
-    expect(res.json().error.details.affectedOntologies).toEqual(["alpha", "beta"]);
+    expect(res.json().error.details.affectedLenses).toEqual(["alpha", "beta"]);
     expect(holder.store.createProperty).not.toHaveBeenCalled();
   });
 
   it("applies to relation types alike", async () => {
     holder.store.getRelationType.mockResolvedValue(RT_DATA);
-    holder.store.findOntologiesWithExplicitProperty.mockResolvedValue(["hr_lens"]);
+    holder.store.findLensesWithExplicitProperty.mockResolvedValue(["hr_lens"]);
     const res = await app.inject({
       method: "POST",
       url: "/api/model/relation-types/rt-1/properties",
@@ -147,7 +147,7 @@ describe("trigger 3: create a required property with no default", () => {
 
   it("with cascade: appends the new key to every affected allowlist, then creates", async () => {
     holder.store.getEntityType.mockResolvedValue(ET_DATA);
-    holder.store.findOntologiesWithExplicitProperty.mockResolvedValue(["alpha"]);
+    holder.store.findLensesWithExplicitProperty.mockResolvedValue(["alpha"]);
     holder.store.createProperty.mockResolvedValue(PROP_DATA);
     const res = await app.inject({
       method: "POST",
@@ -177,7 +177,7 @@ describe("trigger 3: create a required property with no default", () => {
       },
     });
     expect(res.statusCode).toBe(201);
-    expect(holder.store.findOntologiesWithExplicitProperty).not.toHaveBeenCalled();
+    expect(holder.store.findLensesWithExplicitProperty).not.toHaveBeenCalled();
   });
 
   it("an optional property never triggers", async () => {
@@ -189,14 +189,14 @@ describe("trigger 3: create a required property with no default", () => {
       payload: { key: "salary", displayName: "Salary", dataType: "float" },
     });
     expect(res.statusCode).toBe(201);
-    expect(holder.store.findOntologiesWithExplicitProperty).not.toHaveBeenCalled();
+    expect(holder.store.findLensesWithExplicitProperty).not.toHaveBeenCalled();
   });
 
   it("only lenses with an EXPLICIT allowlist are affected — none means no refusal", async () => {
     holder.store.getEntityType.mockResolvedValue(ET_DATA);
     // Lenses including the type WITHOUT an allowlist track it automatically;
     // the store query reports none affected.
-    holder.store.findOntologiesWithExplicitProperty.mockResolvedValue([]);
+    holder.store.findLensesWithExplicitProperty.mockResolvedValue([]);
     holder.store.createProperty.mockResolvedValue(PROP_DATA);
     const res = await app.inject({
       method: "POST",
@@ -212,7 +212,7 @@ describe("the non-trigger: property deletion (cleanup, not consent)", () => {
   it("without cascade: deletes anyway, allowlists left holding the stale key", async () => {
     holder.store.getEntityType.mockResolvedValue(ET_DATA);
     holder.store.getProperty.mockResolvedValue(PROP_DATA);
-    holder.store.findOntologiesIncludingType.mockResolvedValue(["alpha", "beta"]);
+    holder.store.findLensesIncludingType.mockResolvedValue(["alpha", "beta"]);
     holder.store.deleteProperty.mockResolvedValue(true);
     const res = await app.inject({
       method: "DELETE",
@@ -252,6 +252,6 @@ describe("the unchecked gap: changing an existing property", () => {
     });
     // Exactly the state trigger 3 exists to prevent — and nothing stops it.
     expect(res.statusCode).toBe(200);
-    expect(holder.store.findOntologiesWithExplicitProperty).not.toHaveBeenCalled();
+    expect(holder.store.findLensesWithExplicitProperty).not.toHaveBeenCalled();
   });
 });

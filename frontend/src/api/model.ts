@@ -1,6 +1,6 @@
 /**
  * Modeling API client — `/api/model/...`, addressed by UUID
- * (`ontologyId`, `entityTypeId`, `relationTypeId`, `propertyId`).
+ * (`lensId`, `entityTypeId`, `relationTypeId`, `propertyId`).
  */
 
 import { buildQuery, request } from './http'
@@ -10,8 +10,8 @@ import type {
   EntityType,
   EntityTypeInput,
   JsonValue,
-  Ontology,
-  OntologyInput,
+  Lens,
+  LensInput,
   PropertyDefinition,
   PropertyInput,
   RelationType,
@@ -24,21 +24,21 @@ import type {
 
 const BASE = '/api/model'
 
-/* --------------------------------- ontologies -------------------------------- */
+/* --------------------------------- lenses -------------------------------- */
 
-export const listOntologies = () => request<Ontology[]>(`${BASE}/ontologies`)
+export const listLenses = () => request<Lens[]>(`${BASE}/lenses`)
 
-export const createOntology = (body: OntologyInput) =>
-  request<Ontology>(`${BASE}/ontologies`, { method: 'POST', body })
+export const createLens = (body: LensInput) =>
+  request<Lens>(`${BASE}/lenses`, { method: 'POST', body })
 
-export const getOntology = (ontologyId: string) =>
-  request<Ontology>(`${BASE}/ontologies/${ontologyId}`)
+export const getLens = (lensId: string) =>
+  request<Lens>(`${BASE}/lenses/${lensId}`)
 
-export const updateOntology = (ontologyId: string, body: OntologyInput) =>
-  request<Ontology>(`${BASE}/ontologies/${ontologyId}`, { method: 'PUT', body })
+export const updateLens = (lensId: string, body: LensInput) =>
+  request<Lens>(`${BASE}/lenses/${lensId}`, { method: 'PUT', body })
 
-export const deleteOntology = (ontologyId: string) =>
-  request<undefined>(`${BASE}/ontologies/${ontologyId}`, { method: 'DELETE' })
+export const deleteLens = (lensId: string) =>
+  request<undefined>(`${BASE}/lenses/${lensId}`, { method: 'DELETE' })
 
 /* -------------------------------- entity types ------------------------------- */
 
@@ -125,60 +125,60 @@ export const deleteProperty = (
 
 /* ------------------------------ scope (includes) ----------------------------- */
 
-export const listScopeEntityTypes = (ontologyId: string) =>
-  request<ScopeInclude[]>(`${BASE}/ontologies/${ontologyId}/includes/entity-types`)
+export const listScopeEntityTypes = (lensId: string) =>
+  request<ScopeInclude[]>(`${BASE}/lenses/${lensId}/includes/entity-types`)
 
-export const addScopeEntityType = (ontologyId: string, body: ScopeInclude) =>
-  request<ScopeInclude>(`${BASE}/ontologies/${ontologyId}/includes/entity-types`, {
+export const addScopeEntityType = (lensId: string, body: ScopeInclude) =>
+  request<ScopeInclude>(`${BASE}/lenses/${lensId}/includes/entity-types`, {
     method: 'POST',
     body,
   })
 
 export const updateScopeEntityType = (
-  ontologyId: string,
+  lensId: string,
   entityTypeId: string,
   body: ScopeInclude,
 ) =>
   request<ScopeInclude>(
-    `${BASE}/ontologies/${ontologyId}/includes/entity-types/${entityTypeId}`,
+    `${BASE}/lenses/${lensId}/includes/entity-types/${entityTypeId}`,
     { method: 'PUT', body },
   )
 
-export const removeScopeEntityType = (ontologyId: string, entityTypeId: string) =>
+export const removeScopeEntityType = (lensId: string, entityTypeId: string) =>
   request<undefined>(
-    `${BASE}/ontologies/${ontologyId}/includes/entity-types/${entityTypeId}`,
+    `${BASE}/lenses/${lensId}/includes/entity-types/${entityTypeId}`,
     { method: 'DELETE' },
   )
 
-export const listScopeRelationTypes = (ontologyId: string) =>
-  request<ScopeInclude[]>(`${BASE}/ontologies/${ontologyId}/includes/relation-types`)
+export const listScopeRelationTypes = (lensId: string) =>
+  request<ScopeInclude[]>(`${BASE}/lenses/${lensId}/includes/relation-types`)
 
-export const addScopeRelationType = (ontologyId: string, body: ScopeInclude) =>
-  request<ScopeInclude>(`${BASE}/ontologies/${ontologyId}/includes/relation-types`, {
+export const addScopeRelationType = (lensId: string, body: ScopeInclude) =>
+  request<ScopeInclude>(`${BASE}/lenses/${lensId}/includes/relation-types`, {
     method: 'POST',
     body,
   })
 
 export const updateScopeRelationType = (
-  ontologyId: string,
+  lensId: string,
   relationTypeId: string,
   body: ScopeInclude,
 ) =>
   request<ScopeInclude>(
-    `${BASE}/ontologies/${ontologyId}/includes/relation-types/${relationTypeId}`,
+    `${BASE}/lenses/${lensId}/includes/relation-types/${relationTypeId}`,
     { method: 'PUT', body },
   )
 
-export const removeScopeRelationType = (ontologyId: string, relationTypeId: string) =>
+export const removeScopeRelationType = (lensId: string, relationTypeId: string) =>
   request<undefined>(
-    `${BASE}/ontologies/${ontologyId}/includes/relation-types/${relationTypeId}`,
+    `${BASE}/lenses/${lensId}/includes/relation-types/${relationTypeId}`,
     { method: 'DELETE' },
   )
 
 /* --------------------------------- validation -------------------------------- */
 
-export const validateOntology = (ontologyId: string) =>
-  request<ValidationResult>(`${BASE}/ontologies/${ontologyId}/validate`, {
+export const validateLens = (lensId: string) =>
+  request<ValidationResult>(`${BASE}/lenses/${lensId}/validate`, {
     method: 'POST',
   })
 
@@ -197,45 +197,45 @@ export const rebuildEmbeddings = () =>
   request<Record<string, JsonValue>>(`${BASE}/rebuild-embeddings`, { method: 'POST' })
 
 /* ---------------------------------- AI agents -------------------------------- */
-/* Unlike the routes above, ai-agent and saved-query routes address the ontology
+/* Unlike the routes above, ai-agent and saved-query routes address the lens
    by its KEY, not its UUID. */
 
-export const listAiAgents = (ontologyKey: string) =>
-  request<AiAgent[]>(`${BASE}/ontologies/${ontologyKey}/ai-agents`)
+export const listAiAgents = (lensKey: string) =>
+  request<AiAgent[]>(`${BASE}/lenses/${lensKey}/ai-agents`)
 
 /** Upsert — 201 created / 200 updated. */
 export const upsertAiAgent = (
-  ontologyKey: string,
+  lensKey: string,
   agentKey: string,
   body: AiAgentInput,
 ) =>
-  request<AiAgent>(`${BASE}/ontologies/${ontologyKey}/ai-agents/${agentKey}`, {
+  request<AiAgent>(`${BASE}/lenses/${lensKey}/ai-agents/${agentKey}`, {
     method: 'PUT',
     body,
   })
 
-export const deleteAiAgent = (ontologyKey: string, agentKey: string) =>
-  request<undefined>(`${BASE}/ontologies/${ontologyKey}/ai-agents/${agentKey}`, {
+export const deleteAiAgent = (lensKey: string, agentKey: string) =>
+  request<undefined>(`${BASE}/lenses/${lensKey}/ai-agents/${agentKey}`, {
     method: 'DELETE',
   })
 
 /* -------------------------------- saved queries ------------------------------ */
 
-export const listSavedQueries = (ontologyKey: string) =>
-  request<SavedQuery[]>(`${BASE}/ontologies/${ontologyKey}/saved-queries`)
+export const listSavedQueries = (lensKey: string) =>
+  request<SavedQuery[]>(`${BASE}/lenses/${lensKey}/saved-queries`)
 
 /** Upsert — 201 created / 200 updated. */
 export const upsertSavedQuery = (
-  ontologyKey: string,
+  lensKey: string,
   queryKey: string,
   body: SavedQueryInput,
 ) =>
-  request<SavedQuery>(`${BASE}/ontologies/${ontologyKey}/saved-queries/${queryKey}`, {
+  request<SavedQuery>(`${BASE}/lenses/${lensKey}/saved-queries/${queryKey}`, {
     method: 'PUT',
     body,
   })
 
-export const deleteSavedQuery = (ontologyKey: string, queryKey: string) =>
-  request<undefined>(`${BASE}/ontologies/${ontologyKey}/saved-queries/${queryKey}`, {
+export const deleteSavedQuery = (lensKey: string, queryKey: string) =>
+  request<undefined>(`${BASE}/lenses/${lensKey}/saved-queries/${queryKey}`, {
     method: 'DELETE',
   })

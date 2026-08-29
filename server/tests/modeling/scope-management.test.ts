@@ -16,10 +16,10 @@ vi.mock("../../src/core/ports.js", () => ({
   getRuntimeStore: () => ({}),
 }));
 
-const ONTOLOGY_DATA = {
-  ontologyId: "ont-1",
-  key: "my_ontology",
-  name: "My Ontology",
+const LENS_DATA = {
+  lensId: "lens-1",
+  key: "my_lens",
+  name: "My Lens",
   description: null,
   createdAt: NOW,
   updatedAt: NOW,
@@ -63,7 +63,7 @@ beforeEach(() => {
 
 describe("add entity type inclusion", () => {
   it("include with properties omitted means all properties (allowlist absent)", async () => {
-    holder.store.getOntology.mockResolvedValue(ONTOLOGY_DATA);
+    holder.store.getLens.mockResolvedValue(LENS_DATA);
     holder.store.getEntityTypeByKey.mockResolvedValue(ET_DATA);
     holder.store.addIncludesType.mockResolvedValue({
       key: "person",
@@ -72,7 +72,7 @@ describe("add entity type inclusion", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/ontologies/ont-1/includes/entity-types",
+      url: "/api/model/lenses/lens-1/includes/entity-types",
       payload: { key: "person" },
     });
     expect(res.statusCode).toBe(201);
@@ -81,7 +81,7 @@ describe("add entity type inclusion", () => {
     expect(body.properties).toBeNull();
     // The store receives null — allowlist absent, not empty.
     expect(holder.store.addIncludesType).toHaveBeenCalledWith(
-      "ont-1",
+      "lens-1",
       "EntityType",
       "person",
       null,
@@ -89,7 +89,7 @@ describe("add entity type inclusion", () => {
   });
 
   it("include with an explicit property subset", async () => {
-    holder.store.getOntology.mockResolvedValue(ONTOLOGY_DATA);
+    holder.store.getLens.mockResolvedValue(LENS_DATA);
     holder.store.getEntityTypeByKey.mockResolvedValue(ET_DATA);
     holder.store.listProperties.mockResolvedValue([
       { propertyId: "p-1", key: "full_name", dataType: "string", required: false, defaultValue: null },
@@ -102,7 +102,7 @@ describe("add entity type inclusion", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/ontologies/ont-1/includes/entity-types",
+      url: "/api/model/lenses/lens-1/includes/entity-types",
       payload: { key: "person", properties: ["full_name"] },
     });
     expect(res.statusCode).toBe(201);
@@ -110,7 +110,7 @@ describe("add entity type inclusion", () => {
   });
 
   it("an empty allowlist is passed through as [] — not collapsed to absent", async () => {
-    holder.store.getOntology.mockResolvedValue(ONTOLOGY_DATA);
+    holder.store.getLens.mockResolvedValue(LENS_DATA);
     holder.store.getEntityTypeByKey.mockResolvedValue(ET_DATA);
     holder.store.listProperties.mockResolvedValue([
       { propertyId: "p-1", key: "nickname", dataType: "string", required: false, defaultValue: null },
@@ -122,16 +122,16 @@ describe("add entity type inclusion", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/ontologies/ont-1/includes/entity-types",
+      url: "/api/model/lenses/lens-1/includes/entity-types",
       payload: { key: "person", properties: [] },
     });
     expect(res.statusCode).toBe(201);
     expect(res.json().properties).toEqual([]);
-    expect(holder.store.addIncludesType).toHaveBeenCalledWith("ont-1", "EntityType", "person", []);
+    expect(holder.store.addIncludesType).toHaveBeenCalledWith("lens-1", "EntityType", "person", []);
   });
 
   it("adding an already-included type again is an upsert, not a conflict", async () => {
-    holder.store.getOntology.mockResolvedValue(ONTOLOGY_DATA);
+    holder.store.getLens.mockResolvedValue(LENS_DATA);
     holder.store.getEntityTypeByKey.mockResolvedValue(ET_DATA);
     holder.store.listIncludesTypes.mockResolvedValue([
       { key: "person", typeId: "et-1", properties: ["full_name"] },
@@ -143,7 +143,7 @@ describe("add entity type inclusion", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/ontologies/ont-1/includes/entity-types",
+      url: "/api/model/lenses/lens-1/includes/entity-types",
       payload: { key: "person" },
     });
     // No pre-check, no 409 — the store's MERGE replaces the declaration.
@@ -152,14 +152,14 @@ describe("add entity type inclusion", () => {
   });
 
   it("rejects an allowlist naming a property the type does not have", async () => {
-    holder.store.getOntology.mockResolvedValue(ONTOLOGY_DATA);
+    holder.store.getLens.mockResolvedValue(LENS_DATA);
     holder.store.getEntityTypeByKey.mockResolvedValue(ET_DATA);
     holder.store.listProperties.mockResolvedValue([
       { propertyId: "p-1", key: "full_name", dataType: "string", required: false, defaultValue: null },
     ]);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/ontologies/ont-1/includes/entity-types",
+      url: "/api/model/lenses/lens-1/includes/entity-types",
       payload: { key: "person", properties: ["nonexistent"] },
     });
     expect(res.statusCode).toBe(422);
@@ -167,14 +167,14 @@ describe("add entity type inclusion", () => {
   });
 
   it("rejects an allowlist omitting a required property without default", async () => {
-    holder.store.getOntology.mockResolvedValue(ONTOLOGY_DATA);
+    holder.store.getLens.mockResolvedValue(LENS_DATA);
     holder.store.getEntityTypeByKey.mockResolvedValue(ET_DATA);
     holder.store.listProperties.mockResolvedValue([
       { propertyId: "p-1", key: "full_name", dataType: "string", required: true, defaultValue: null },
     ]);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/ontologies/ont-1/includes/entity-types",
+      url: "/api/model/lenses/lens-1/includes/entity-types",
       payload: { key: "person", properties: [] },
     });
     expect(res.statusCode).toBe(422);
@@ -182,7 +182,7 @@ describe("add entity type inclusion", () => {
   });
 
   it("a required property WITH a default may be omitted from the allowlist", async () => {
-    holder.store.getOntology.mockResolvedValue(ONTOLOGY_DATA);
+    holder.store.getLens.mockResolvedValue(LENS_DATA);
     holder.store.getEntityTypeByKey.mockResolvedValue(ET_DATA);
     holder.store.listProperties.mockResolvedValue([
       { propertyId: "p-1", key: "status", dataType: "string", required: true, defaultValue: "new" },
@@ -195,26 +195,26 @@ describe("add entity type inclusion", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/ontologies/ont-1/includes/entity-types",
+      url: "/api/model/lenses/lens-1/includes/entity-types",
       payload: { key: "person", properties: ["full_name"] },
     });
     expect(res.statusCode).toBe(201);
   });
 
   it("an unknown entity type key answers 404", async () => {
-    holder.store.getOntology.mockResolvedValue(ONTOLOGY_DATA);
+    holder.store.getLens.mockResolvedValue(LENS_DATA);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/ontologies/ont-1/includes/entity-types",
+      url: "/api/model/lenses/lens-1/includes/entity-types",
       payload: { key: "nonexistent" },
     });
     expect(res.statusCode).toBe(404);
   });
 
-  it("an unknown ontology id answers 404", async () => {
+  it("an unknown lens id answers 404", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/ontologies/nonexistent/includes/entity-types",
+      url: "/api/model/lenses/nonexistent/includes/entity-types",
       payload: { key: "person" },
     });
     expect(res.statusCode).toBe(404);
@@ -223,14 +223,14 @@ describe("add entity type inclusion", () => {
 
 describe("list entity type inclusions", () => {
   it("returns each inclusion with its allowlist, absent preserved as null", async () => {
-    holder.store.getOntology.mockResolvedValue(ONTOLOGY_DATA);
+    holder.store.getLens.mockResolvedValue(LENS_DATA);
     holder.store.listIncludesTypes.mockResolvedValue([
       { key: "person", typeId: "et-1", properties: null },
       { key: "company", typeId: "et-2", properties: ["name"] },
     ]);
     const res = await app.inject({
       method: "GET",
-      url: "/api/model/ontologies/ont-1/includes/entity-types",
+      url: "/api/model/lenses/lens-1/includes/entity-types",
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -243,7 +243,7 @@ describe("list entity type inclusions", () => {
 
 describe("update entity type inclusion (by internal id in the path)", () => {
   it("replaces the allowlist", async () => {
-    holder.store.getOntology.mockResolvedValue(ONTOLOGY_DATA);
+    holder.store.getLens.mockResolvedValue(LENS_DATA);
     holder.store.getEntityType.mockResolvedValue(ET_DATA);
     holder.store.listProperties.mockResolvedValue([
       { propertyId: "p-1", key: "full_name", dataType: "string", required: false, defaultValue: null },
@@ -256,7 +256,7 @@ describe("update entity type inclusion (by internal id in the path)", () => {
     });
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/ontologies/ont-1/includes/entity-types/et-1",
+      url: "/api/model/lenses/lens-1/includes/entity-types/et-1",
       payload: { properties: ["full_name", "age"] },
     });
     expect(res.statusCode).toBe(200);
@@ -264,14 +264,14 @@ describe("update entity type inclusion (by internal id in the path)", () => {
   });
 
   it("update enforces the required-no-default rule too", async () => {
-    holder.store.getOntology.mockResolvedValue(ONTOLOGY_DATA);
+    holder.store.getLens.mockResolvedValue(LENS_DATA);
     holder.store.getEntityType.mockResolvedValue(ET_DATA);
     holder.store.listProperties.mockResolvedValue([
       { propertyId: "p-1", key: "full_name", dataType: "string", required: true, defaultValue: null },
     ]);
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/ontologies/ont-1/includes/entity-types/et-1",
+      url: "/api/model/lenses/lens-1/includes/entity-types/et-1",
       payload: { properties: [] },
     });
     expect(res.statusCode).toBe(422);
@@ -279,11 +279,11 @@ describe("update entity type inclusion (by internal id in the path)", () => {
   });
 
   it("updating a type that is not included answers 404", async () => {
-    holder.store.getOntology.mockResolvedValue(ONTOLOGY_DATA);
+    holder.store.getLens.mockResolvedValue(LENS_DATA);
     holder.store.getEntityType.mockResolvedValue(ET_DATA);
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/ontologies/ont-1/includes/entity-types/et-1",
+      url: "/api/model/lenses/lens-1/includes/entity-types/et-1",
       payload: { properties: null },
     });
     expect(res.statusCode).toBe(404);
@@ -292,21 +292,21 @@ describe("update entity type inclusion (by internal id in the path)", () => {
 
 describe("remove entity type inclusion", () => {
   it("answers 204", async () => {
-    holder.store.getOntology.mockResolvedValue(ONTOLOGY_DATA);
+    holder.store.getLens.mockResolvedValue(LENS_DATA);
     holder.store.removeIncludesType.mockResolvedValue(true);
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/ontologies/ont-1/includes/entity-types/et-1",
+      url: "/api/model/lenses/lens-1/includes/entity-types/et-1",
     });
     expect(res.statusCode).toBe(204);
   });
 
   it("removing a type that is not included answers 404", async () => {
-    holder.store.getOntology.mockResolvedValue(ONTOLOGY_DATA);
+    holder.store.getLens.mockResolvedValue(LENS_DATA);
     holder.store.removeIncludesType.mockResolvedValue(false);
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/ontologies/ont-1/includes/entity-types/et-1",
+      url: "/api/model/lenses/lens-1/includes/entity-types/et-1",
     });
     expect(res.statusCode).toBe(404);
   });
@@ -314,7 +314,7 @@ describe("remove entity type inclusion", () => {
 
 describe("relation type inclusion", () => {
   it("accepted when both endpoints are already included", async () => {
-    holder.store.getOntology.mockResolvedValue(ONTOLOGY_DATA);
+    holder.store.getLens.mockResolvedValue(LENS_DATA);
     holder.store.getRelationTypeByKey.mockResolvedValue(RT_DATA);
     holder.store.listIncludesTypes.mockResolvedValue([
       { key: "person", typeId: "et-1", properties: null },
@@ -327,7 +327,7 @@ describe("relation type inclusion", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/ontologies/ont-1/includes/relation-types",
+      url: "/api/model/lenses/lens-1/includes/relation-types",
       payload: { key: "works_for" },
     });
     expect(res.statusCode).toBe(201);
@@ -335,14 +335,14 @@ describe("relation type inclusion", () => {
   });
 
   it("rejected when the source endpoint is not included", async () => {
-    holder.store.getOntology.mockResolvedValue(ONTOLOGY_DATA);
+    holder.store.getLens.mockResolvedValue(LENS_DATA);
     holder.store.getRelationTypeByKey.mockResolvedValue(RT_DATA);
     holder.store.listIncludesTypes.mockResolvedValue([
       { key: "company", typeId: "et-2", properties: null },
     ]);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/ontologies/ont-1/includes/relation-types",
+      url: "/api/model/lenses/lens-1/includes/relation-types",
       payload: { key: "works_for" },
     });
     expect(res.statusCode).toBe(422);
@@ -350,7 +350,7 @@ describe("relation type inclusion", () => {
   });
 
   it("the ordering hazard: with NO entity inclusions yet, any relation inclusion is accepted unchecked", async () => {
-    holder.store.getOntology.mockResolvedValue(ONTOLOGY_DATA);
+    holder.store.getLens.mockResolvedValue(LENS_DATA);
     holder.store.getRelationTypeByKey.mockResolvedValue(RT_DATA);
     holder.store.listIncludesTypes.mockResolvedValue([]);
     holder.store.addIncludesType.mockResolvedValue({
@@ -360,20 +360,20 @@ describe("relation type inclusion", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/ontologies/ont-1/includes/relation-types",
+      url: "/api/model/lenses/lens-1/includes/relation-types",
       payload: { key: "works_for" },
     });
     expect(res.statusCode).toBe(201);
   });
 
   it("list returns the relation inclusions", async () => {
-    holder.store.getOntology.mockResolvedValue(ONTOLOGY_DATA);
+    holder.store.getLens.mockResolvedValue(LENS_DATA);
     holder.store.listIncludesTypes.mockResolvedValue([
       { key: "works_for", typeId: "rt-1", properties: null },
     ]);
     const res = await app.inject({
       method: "GET",
-      url: "/api/model/ontologies/ont-1/includes/relation-types",
+      url: "/api/model/lenses/lens-1/includes/relation-types",
     });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toHaveLength(1);
@@ -381,11 +381,11 @@ describe("relation type inclusion", () => {
   });
 
   it("remove answers 204", async () => {
-    holder.store.getOntology.mockResolvedValue(ONTOLOGY_DATA);
+    holder.store.getLens.mockResolvedValue(LENS_DATA);
     holder.store.removeIncludesType.mockResolvedValue(true);
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/ontologies/ont-1/includes/relation-types/rt-1",
+      url: "/api/model/lenses/lens-1/includes/relation-types/rt-1",
     });
     expect(res.statusCode).toBe(204);
   });

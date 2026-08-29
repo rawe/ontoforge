@@ -8,22 +8,22 @@ import { z } from "zod";
 
 import { DATA_TYPES, KEY_PATTERN, MAX_KEY_LENGTH } from "../core/schemas.js";
 
-// --- Ontology ---
+// --- Lens ---
 
-export const OntologyCreate = z.object({
+export const LensCreate = z.object({
   key: z.string().regex(KEY_PATTERN).max(MAX_KEY_LENGTH),
   name: z.string(),
   description: z.string().nullable().optional(),
 });
 
 /** Sparse update; the key is immutable and absent from this surface. */
-export const OntologyUpdate = z.object({
+export const LensUpdate = z.object({
   name: z.string().nullable().optional(),
   description: z.string().nullable().optional(),
 });
 
-export const OntologyResponse = z.object({
-  ontologyId: z.string(),
+export const LensResponse = z.object({
+  lensId: z.string(),
   key: z.string(),
   name: z.string(),
   description: z.string().nullable(),
@@ -234,7 +234,7 @@ export const SavedQueryResponse = z.object({
 // what catches those later.
 
 /** Current transfer format version — informational, never dispatched on. */
-export const TRANSFER_FORMAT_VERSION = "3.0";
+export const TRANSFER_FORMAT_VERSION = "4.0";
 
 export const ExportProperty = z.object({
   key: z.string(),
@@ -261,14 +261,14 @@ export const ExportRelationType = z.object({
   properties: z.array(ExportProperty).default([]),
 });
 
-export const ExportOntologyInclusion = z.object({
+export const ExportLensInclusion = z.object({
   key: z.string(),
   properties: z.array(z.string()).nullable().optional(),
 });
 
-export const ExportOntologyInclusions = z.object({
-  entityTypes: z.array(ExportOntologyInclusion).default([]),
-  relationTypes: z.array(ExportOntologyInclusion).default([]),
+export const ExportLensInclusions = z.object({
+  entityTypes: z.array(ExportLensInclusion).default([]),
+  relationTypes: z.array(ExportLensInclusion).default([]),
 });
 
 export const ExportAiAgent = z.object({
@@ -307,11 +307,11 @@ export const ExportSavedQuery = z.object({
   parameters: z.array(ExportSavedQueryParameter).default([]),
 });
 
-export const ExportOntology = z.object({
+export const ExportLens = z.object({
   key: z.string(),
   name: z.string(),
   description: z.string().nullable().optional(),
-  includes: ExportOntologyInclusions.nullable().optional(),
+  includes: ExportLensInclusions.nullable().optional(),
   aiAgents: z.array(ExportAiAgent).default([]),
   savedQueries: z.array(ExportSavedQuery).default([]),
 });
@@ -320,12 +320,14 @@ export const ExportPayload = z.object({
   formatVersion: z.string().optional().default(TRANSFER_FORMAT_VERSION),
   entityTypes: z.array(ExportEntityType).default([]),
   relationTypes: z.array(ExportRelationType).default([]),
-  ontologies: z.array(ExportOntology).default([]),
+  // Required, no default: a pre-4.0 document (`ontologies[]`) must fail
+  // plain shape validation — the intended, final rejection of old payloads.
+  lenses: z.array(ExportLens),
 });
 
-export type OntologyCreateInput = z.infer<typeof OntologyCreate>;
-export type OntologyUpdateInput = z.infer<typeof OntologyUpdate>;
-export type OntologyResponseBody = z.infer<typeof OntologyResponse>;
+export type LensCreateInput = z.infer<typeof LensCreate>;
+export type LensUpdateInput = z.infer<typeof LensUpdate>;
+export type LensResponseBody = z.infer<typeof LensResponse>;
 export type IncludeTypeRequestInput = z.infer<typeof IncludeTypeRequest>;
 export type IncludeTypeUpdateInput = z.infer<typeof IncludeTypeUpdate>;
 export type IncludeTypeResponseBody = z.infer<typeof IncludeTypeResponse>;
@@ -349,6 +351,6 @@ export type SavedQueryResponseBody = z.infer<typeof SavedQueryResponse>;
 export type ExportPayloadInput = z.infer<typeof ExportPayload>;
 export type ExportEntityTypeInput = z.infer<typeof ExportEntityType>;
 export type ExportRelationTypeInput = z.infer<typeof ExportRelationType>;
-export type ExportOntologyInput = z.infer<typeof ExportOntology>;
+export type ExportLensInput = z.infer<typeof ExportLens>;
 export type ExportSavedQueryInput = z.infer<typeof ExportSavedQuery>;
 export type ExportSavedQueryStepInput = z.infer<typeof ExportSavedQueryStep>;

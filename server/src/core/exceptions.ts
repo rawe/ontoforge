@@ -29,14 +29,14 @@ export class ValidationError extends OntoForgeError {
   }
 }
 
-/** A schema change would break scoped ontologies and cascade was not
+/** A schema change would break scoped lenses and cascade was not
  * requested. -> 409 CASCADE_REQUIRED */
 export class CascadeRequiredError extends OntoForgeError {
-  affectedOntologies: string[];
+  affectedLenses: string[];
 
-  constructor(message: string, affectedOntologies: string[]) {
+  constructor(message: string, affectedLenses: string[]) {
     super(message);
-    this.affectedOntologies = affectedOntologies;
+    this.affectedLenses = affectedLenses;
   }
 }
 

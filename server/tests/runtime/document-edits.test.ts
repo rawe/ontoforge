@@ -28,8 +28,8 @@ type Row = Record<string, unknown>;
 /** Schema with a person type that has a document property. */
 function makeDocSchema(entityInclusions?: Row[]): Row {
   return {
-    ontology: {
-      ontologyId: "ont-1",
+    lens: {
+      lensId: "lens-1",
       key: "docs_view",
       name: "Docs View",
       description: null,

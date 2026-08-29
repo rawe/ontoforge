@@ -1,18 +1,16 @@
 /**
- * Schema transfer against the real Neo4j: the export→wipe→import→export
+ * Schema transfer against the real database: the export→wipe→import→export
  * fixed point, validate-then-write leaving the database untouched on
- * conflict, the modeling MCP pair (`get_schema` ≡ export), and backward
- * compatibility with payloads written by the previous implementation.
+ * conflict, and the modeling MCP pair (`get_schema` ≡ export).
  *
- * `tests/fixtures/legacy-export.json` is a real `GET /api/model/export`
- * payload from that implementation, over the same design this suite
- * imports. It is kept because such files exist in users' hands: importing
- * one must keep working. Two normalizations make the comparison meaningful:
+ * `tests/fixtures/export.json` is a stored `GET /api/model/export`
+ * payload (format 4.0) over the same design this suite imports. Two
+ * normalizations make the comparison meaningful:
  *
  * - Property and inclusion arrays are sorted by key: the full-schema query
  *   collects them WITHOUT an ORDER BY, so their order is storage order —
  *   real, but not deterministic.
- * - The legacy payload spells an unscoped lens as `"includes": null`; this
+ * - The fixture spells an unscoped lens as `"includes": null`; this
  *   export omits the key entirely, per the docs' "absent entirely".
  */
 
@@ -29,11 +27,11 @@ import { wipeDatabase } from "./reset.js";
 
 type Row = Record<string, unknown>;
 
-const LEGACY_EXPORT = JSON.parse(
-  readFileSync(new URL("../fixtures/legacy-export.json", import.meta.url), "utf8"),
+const EXPORT_FIXTURE = JSON.parse(
+  readFileSync(new URL("../fixtures/export.json", import.meta.url), "utf8"),
 ) as Row;
 
-/** Order-normalize a payload and drop `includes: null` (the legacy
+/** Order-normalize a payload and drop `includes: null` (the fixture's
  * spelling of "absent" — this export omits the key). */
 function normalize(payload: Row): Row {
   const clone = JSON.parse(JSON.stringify(payload)) as Row;
@@ -44,11 +42,11 @@ function normalize(payload: Row): Row {
   for (const rt of (clone.relationTypes as Row[]) ?? []) {
     (rt.properties as Row[]).sort(byKey);
   }
-  for (const ont of (clone.ontologies as Row[]) ?? []) {
-    if (ont.includes === null) {
-      delete ont.includes;
-    } else if (ont.includes) {
-      const includes = ont.includes as Row;
+  for (const lens of (clone.lenses as Row[]) ?? []) {
+    if (lens.includes === null) {
+      delete lens.includes;
+    } else if (lens.includes) {
+      const includes = lens.includes as Row;
       ((includes.entityTypes as Row[]) ?? []).sort(byKey);
       ((includes.relationTypes as Row[]) ?? []).sort(byKey);
     }
@@ -91,26 +89,26 @@ beforeEach(async () => {
   await wipeDatabase();
 });
 
-describe("round-trip against a legacy export", () => {
-  it("imports the legacy payload and re-exports it identically", async () => {
-    const res = await importPayload(LEGACY_EXPORT);
+describe("round-trip against a stored export document", () => {
+  it("imports the fixture payload and re-exports it identically", async () => {
+    const res = await importPayload(EXPORT_FIXTURE);
     expect(res.statusCode, res.body).toBe(201);
-    const created = (res.json() as { ontologies: Row[] }).ontologies;
-    expect(created.map((o) => o.key)).toEqual(["hr_view", "test_ontology"]);
-    // Created lenses answer in the ontology response shape, ids regenerated.
-    expect(created[0]!.ontologyId).toMatch(/^[0-9a-f-]{36}$/);
+    const created = (res.json() as { lenses: Row[] }).lenses;
+    expect(created.map((o) => o.key)).toEqual(["hr_view", "test_lens"]);
+    // Created lenses answer in the lens response shape, ids regenerated.
+    expect(created[0]!.lensId).toMatch(/^[0-9a-f-]{36}$/);
     expect(created[0]!.createdAt).toBeTruthy();
 
     const reExported = await exportPayload();
-    expect(normalize(reExported)).toEqual(normalize(LEGACY_EXPORT));
+    expect(normalize(reExported)).toEqual(normalize(EXPORT_FIXTURE));
   });
 
   it("recreates the agents and saved queries inside their lens", async () => {
-    await importPayload(LEGACY_EXPORT);
+    await importPayload(EXPORT_FIXTURE);
 
     const agents = await app.inject({
       method: "GET",
-      url: "/api/model/ontologies/hr_view/ai-agents",
+      url: "/api/model/lenses/hr_view/ai-agents",
     });
     expect(agents.statusCode).toBe(200);
     const agentRows = agents.json() as Row[];
@@ -119,7 +117,7 @@ describe("round-trip against a legacy export", () => {
 
     const queries = await app.inject({
       method: "GET",
-      url: "/api/model/ontologies/hr_view/saved-queries",
+      url: "/api/model/lenses/hr_view/saved-queries",
     });
     expect(queries.statusCode).toBe(200);
     const queryRows = queries.json() as Row[];
@@ -129,7 +127,7 @@ describe("round-trip against a legacy export", () => {
 
 describe("fixed point", () => {
   it("export → wipe → import → export yields the identical payload", async () => {
-    await importPayload(LEGACY_EXPORT);
+    await importPayload(EXPORT_FIXTURE);
     const first = await exportPayload();
 
     await wipeDatabase();
@@ -139,21 +137,21 @@ describe("fixed point", () => {
     const second = await exportPayload();
     expect(normalize(second)).toEqual(normalize(first));
     // The unscoped lens carries no includes key at all in the TS export.
-    const unscoped = (second.ontologies as Row[]).find((o) => o.key === "test_ontology")!;
+    const unscoped = (second.lenses as Row[]).find((o) => o.key === "test_lens")!;
     expect("includes" in unscoped).toBe(false);
   });
 });
 
 describe("validate-then-write", () => {
   it("a conflicting re-import answers 409 naming every key and changes nothing", async () => {
-    await importPayload(LEGACY_EXPORT);
+    await importPayload(EXPORT_FIXTURE);
     const before = await exportPayload();
 
-    const res = await importPayload(LEGACY_EXPORT);
+    const res = await importPayload(EXPORT_FIXTURE);
     expect(res.statusCode).toBe(409);
     const body = res.json() as { error: { code: string; message: string } };
     expect(body.error.code).toBe("RESOURCE_CONFLICT");
-    for (const key of ["person", "company", "works_for", "hr_view", "test_ontology"]) {
+    for (const key of ["person", "company", "works_for", "hr_view", "test_lens"]) {
       expect(body.error.message).toContain(`'${key}'`);
     }
 
@@ -162,7 +160,7 @@ describe("validate-then-write", () => {
   });
 
   it("a payload with rule violations writes nothing", async () => {
-    const bad = JSON.parse(JSON.stringify(LEGACY_EXPORT)) as Row;
+    const bad = JSON.parse(JSON.stringify(EXPORT_FIXTURE)) as Row;
     ((bad.entityTypes as Row[])[0]!.properties as Row[]).push({
       key: "_id",
       displayName: "Smuggled",
@@ -175,7 +173,7 @@ describe("validate-then-write", () => {
 
     const after = await exportPayload();
     expect(after.entityTypes).toEqual([]);
-    expect(after.ontologies).toEqual([]);
+    expect(after.lenses).toEqual([]);
   });
 });
 
@@ -196,7 +194,7 @@ describe("modeling MCP transfer pair", () => {
   }
 
   it("get_schema and export_schema both return exactly the REST export payload", async () => {
-    await importPayload(LEGACY_EXPORT);
+    await importPayload(EXPORT_FIXTURE);
     const rest = await exportPayload();
 
     const client = await connect();
@@ -213,15 +211,15 @@ describe("modeling MCP transfer pair", () => {
   it("import_schema imports a payload and reports conflicts as tool errors", async () => {
     const client = await connect();
     try {
-      const result = await callJson(client, "import_schema", { payload: LEGACY_EXPORT });
-      expect((result.ontologies as Row[]).map((o) => o.key)).toEqual([
+      const result = await callJson(client, "import_schema", { payload: EXPORT_FIXTURE });
+      expect((result.lenses as Row[]).map((o) => o.key)).toEqual([
         "hr_view",
-        "test_ontology",
+        "test_lens",
       ]);
 
       const again = (await client.callTool({
         name: "import_schema",
-        arguments: { payload: LEGACY_EXPORT },
+        arguments: { payload: EXPORT_FIXTURE },
       })) as { content: { text: string }[]; isError?: boolean };
       expect(again.isError).toBe(true);
       expect(again.content[0]!.text).toContain("already exists");

@@ -9,7 +9,7 @@
  * by `placeNodes`, and only the explicit `setPositions` action (re-layout)
  * moves things.
  *
- * Persistence (`of.explore.{ontologyKey}`) stores the slim shape only:
+ * Persistence (`of.explore.{lensKey}`) stores the slim shape only:
  * id / typeKey / position / pinned per node. Entities and edges are refetched
  * on restore.
  */
@@ -235,8 +235,8 @@ export interface PersistedNode {
   pinned: boolean
 }
 
-export function readPersistedNodes(ontologyKey: string): PersistedNode[] {
-  const raw = readJson<unknown>(storageKeys.explore(ontologyKey))
+export function readPersistedNodes(lensKey: string): PersistedNode[] {
+  const raw = readJson<unknown>(storageKeys.explore(lensKey))
   if (raw === null || typeof raw !== 'object') return []
   const nodes = (raw as { nodes?: unknown }).nodes
   if (!Array.isArray(nodes)) return []
@@ -256,10 +256,10 @@ export function readPersistedNodes(ontologyKey: string): PersistedNode[] {
 }
 
 export function persistWorkingSet(
-  ontologyKey: string,
+  lensKey: string,
   nodes: readonly EntityFlowNode[],
 ): void {
-  writeJson(storageKeys.explore(ontologyKey), {
+  writeJson(storageKeys.explore(lensKey), {
     nodes: nodes.map(
       (n): PersistedNode => ({
         id: n.id,

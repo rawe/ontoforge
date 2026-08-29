@@ -10,19 +10,19 @@ import { QuickAddDialog } from '@/components/quickadd/QuickAddDialog'
 import { Button } from '@/components/ui/button'
 import { remove, storageKeys, writeString } from '@/lib/storage'
 
-/** Shell for all `/w/:ontologyKey/...` routes: sidebar + scrolling content. */
+/** Shell for all `/w/:lensKey/...` routes: sidebar + scrolling content. */
 export function WorkbenchLayout() {
-  const { ontologyKey } = useParams<{ ontologyKey: string }>()
-  const schema = useRuntimeSchema(ontologyKey)
+  const { lensKey } = useParams<{ lensKey: string }>()
+  const schema = useRuntimeSchema(lensKey)
   const [paletteOpen, setPaletteOpen] = useState(false)
 
   const notFound = schema.error instanceof ApiError && schema.error.status === 404
 
   useEffect(() => {
-    if (ontologyKey !== undefined && !notFound) {
-      writeString(storageKeys.lastOntology, ontologyKey)
+    if (lensKey !== undefined && !notFound) {
+      writeString(storageKeys.lastLens, lensKey)
     }
-  }, [ontologyKey, notFound])
+  }, [lensKey, notFound])
 
   // Global Cmd/Ctrl+K toggles the search palette from anywhere.
   useEffect(() => {
@@ -43,18 +43,18 @@ export function WorkbenchLayout() {
     return () => window.removeEventListener('of:open-palette', onOpen)
   }, [])
 
-  if (ontologyKey === undefined) return null
+  if (lensKey === undefined) return null
 
   if (notFound) {
     return (
       <div className="flex h-dvh items-center justify-center">
         <EmptyState
           icon={SearchX}
-          title="Ontology not found"
-          description={`No ontology with key "${ontologyKey}" exists on this server.`}
+          title="Lens not found"
+          description={`No lens with key "${lensKey}" exists on this server.`}
           action={
-            <Button asChild size="sm" onClick={() => remove(storageKeys.lastOntology)}>
-              <Link to="/welcome">Pick an ontology</Link>
+            <Button asChild size="sm" onClick={() => remove(storageKeys.lastLens)}>
+              <Link to="/welcome">Pick a lens</Link>
             </Button>
           }
         />
@@ -64,16 +64,16 @@ export function WorkbenchLayout() {
 
   return (
     <div className="flex h-dvh overflow-hidden bg-background">
-      <Sidebar ontologyKey={ontologyKey} onSearch={() => setPaletteOpen(true)} />
+      <Sidebar lensKey={lensKey} onSearch={() => setPaletteOpen(true)} />
       <main className="min-w-0 flex-1 overflow-y-auto">
         <Outlet />
       </main>
       <SearchPalette
-        ontologyKey={ontologyKey}
+        lensKey={lensKey}
         open={paletteOpen}
         onOpenChange={setPaletteOpen}
       />
-      <QuickAddDialog ontologyKey={ontologyKey} />
+      <QuickAddDialog lensKey={lensKey} />
     </div>
   )
 }

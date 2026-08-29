@@ -1,5 +1,5 @@
 {
-    "formatVersion": "3.0",
+    "formatVersion": "4.0",
     "entityTypes": [
         {
             "key": "company",
@@ -107,7 +107,7 @@
             ]
         }
     ],
-    "ontologies": [
+    "lenses": [
         {
             "key": "hr_view",
             "name": "HR View",
@@ -217,9 +217,9 @@
             ]
         },
         {
-            "key": "test_ontology",
-            "name": "Test Ontology",
-            "description": "Person/Company ontology for testing",
+            "key": "test_lens",
+            "name": "Test Lens",
+            "description": "Person/Company lens for testing",
             "includes": null,
             "aiAgents": [],
             "savedQueries": []

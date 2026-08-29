@@ -52,7 +52,7 @@ function directionOf(
 }
 
 interface NodePanelProps {
-  ontologyKey: string
+  lensKey: string
   node: EntityFlowNode
   entityTypes: readonly SchemaEntityType[]
   relationTypes: readonly SchemaRelationType[]
@@ -75,7 +75,7 @@ interface NodePanelProps {
  * open-detail / pin / remove-from-canvas / add-connected-entity actions.
  */
 export function NodePanel({
-  ontologyKey,
+  lensKey,
   node,
   entityTypes,
   relationTypes,
@@ -97,7 +97,7 @@ export function NodePanel({
       ),
     [relationTypes, typeKey],
   )
-  const counts = useNeighborCounts(ontologyKey, entity, applicable)
+  const counts = useNeighborCounts(lensKey, entity, applicable)
 
   const [fetched, setFetched] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState<string | null>(null)
@@ -109,7 +109,7 @@ export function NodePanel({
     const limit = Math.min((fetched[rt.key] ?? 0) + EXPAND_PAGE, 200)
     setLoading(rt.key)
     try {
-      const res = await runtime.getNeighbors(ontologyKey, typeKey, entity._id, {
+      const res = await runtime.getNeighbors(lensKey, typeKey, entity._id, {
         relationTypeKey: rt.key,
         direction: directionOf(rt, typeKey),
         limit,
@@ -165,7 +165,7 @@ export function NodePanel({
         </div>
         <div className="mt-2.5 flex items-center gap-1">
           <Button variant="outline" size="xs" asChild>
-            <Link to={`/w/${ontologyKey}/e/${typeKey}/${entity._id}`}>
+            <Link to={`/w/${lensKey}/e/${typeKey}/${entity._id}`}>
               <ExternalLink className="size-3" /> Detail
             </Link>
           </Button>
@@ -350,13 +350,13 @@ export function NodePanel({
       </div>
 
       <DocumentViewerDialog
-        ontologyKey={ontologyKey}
+        lensKey={lensKey}
         target={docTarget}
         onClose={() => setDocTarget(null)}
       />
 
       <AddRelationDialog
-        ontologyKey={ontologyKey}
+        lensKey={lensKey}
         entity={entity}
         entityLabel={label}
         relationTypes={applicable}

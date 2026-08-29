@@ -5,16 +5,16 @@
  * runtime lens view — read the same type, property and inclusion tables,
  * so the type SELECTs, the props-bucketing, and the inclusion
  * classification live here once. Callers pass the `Querier` of their own
- * open REPEATABLE READ transaction and keep their ontology and inclusion
- * SELECTs, which differ (all ontologies vs. one by key).
+ * open REPEATABLE READ transaction and keep their lens and inclusion
+ * SELECTs, which differ (all lenses vs. one by key).
  */
 
 import type { Row } from "../../core/ports.js";
 import type { Querier } from "./errors.js";
 import { camelizeRow } from "./rows.js";
 
-/** Ontology read columns — the port-visible shape of an ontology row. */
-export const ONTOLOGY_COLS = "ontology_id, key, name, description, created_at, updated_at";
+/** Lens read columns — the port-visible shape of a lens row. */
+export const LENS_COLS = "lens_id, key, name, description, created_at, updated_at";
 
 const PROPERTY_COLS =
   "property_id, key, display_name, description, data_type, required, default_value";

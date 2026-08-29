@@ -9,14 +9,14 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 type Tab = 'console' | 'library'
 
 /**
- * `/w/:ontologyKey/query` — Query workbench. Two tabs: Console and
+ * `/w/:lensKey/query` — Query workbench. Two tabs: Console and
  * saved-query Library. URL params: `?tab=library`, `?run={queryKey}` (open a
  * saved query's run panel) and `?query=...` (prefill the console).
  */
 export function QueryPage() {
-  const { ontologyKey } = useParams<{ ontologyKey: string }>()
+  const { lensKey } = useParams<{ lensKey: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
-  const schema = useRuntimeSchema(ontologyKey)
+  const schema = useRuntimeSchema(lensKey)
 
   const runParam = searchParams.get('run')
   const queryParam = searchParams.get('query')
@@ -35,13 +35,13 @@ export function QueryPage() {
     setSearchParams(next === 'console' ? {} : { tab: 'library' }, { replace: true })
   }
 
-  if (ontologyKey === undefined) return null
+  if (lensKey === undefined) return null
 
   return (
     <div>
       <PageHeader
         title="Query"
-        description="Run read-only OQL queries against this ontology and use the saved-query library."
+        description="Run read-only OQL queries against this lens and use the saved-query library."
         actions={
           <Tabs value={tab} onValueChange={(v) => switchTab(v as Tab)}>
             <TabsList>
@@ -66,16 +66,16 @@ export function QueryPage() {
             {/* Both tabs stay mounted so console results survive a Library visit. */}
             <div className={tab === 'console' ? '' : 'hidden'}>
               <ConsoleTab
-                key={ontologyKey}
-                ontologyKey={ontologyKey}
+                key={lensKey}
+                lensKey={lensKey}
                 schema={schema.data}
                 initialQuery={queryParam ?? undefined}
               />
             </div>
             <div className={tab === 'library' ? '' : 'hidden'}>
               <LibraryTab
-                key={ontologyKey}
-                ontologyKey={ontologyKey}
+                key={lensKey}
+                lensKey={lensKey}
                 relationTypes={schema.data.relationTypes}
                 runKey={runParam}
                 onOpenConsole={() => switchTab('console')}

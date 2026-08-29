@@ -142,7 +142,7 @@ describe("scope filtering", () => {
   it("filters relation properties to a property-narrowed inclusion", async () => {
     holder.store.getFullSchema.mockResolvedValue(
       makeFullSchema({
-        ontologyKey: "restricted_view",
+        lensKey: "restricted_view",
         entityInclusions: [
           { key: "person", properties: null },
           { key: "company", properties: null },
@@ -179,7 +179,7 @@ describe("scope filtering", () => {
     // department: the department neighbour comes back with ALL properties.
     holder.store.getFullSchema.mockResolvedValue(
       makeFullSchema({
-        ontologyKey: "leaky_view",
+        lensKey: "leaky_view",
         entityInclusions: [
           { key: "person", properties: ["name"] },
           { key: "company", properties: null },
@@ -235,7 +235,7 @@ describe("scope filtering", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_ontology/entities/person/ent-1/neighbors",
+      url: "/api/runtime/full_lens/entities/person/ent-1/neighbors",
     });
 
     expect(res.statusCode).toBe(200);
@@ -345,7 +345,7 @@ describe("field projection", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_ontology/entities/person/ent-1/neighbors?fields=name",
+      url: "/api/runtime/full_lens/entities/person/ent-1/neighbors?fields=name",
     });
 
     expect(res.statusCode).toBe(200);
@@ -367,7 +367,7 @@ describe("field projection", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_ontology/entities/person/ent-1/neighbors?relationFields=role",
+      url: "/api/runtime/full_lens/entities/person/ent-1/neighbors?relationFields=role",
     });
 
     expect(res.statusCode).toBe(200);

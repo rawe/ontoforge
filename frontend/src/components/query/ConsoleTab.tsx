@@ -29,7 +29,7 @@ import { insertAtCursor } from './snippets'
 import { useQueryHistory } from './useQueryHistory'
 
 interface ConsoleTabProps {
-  ontologyKey: string
+  lensKey: string
   schema: RuntimeSchema
   /** Prefill from `?query=` (palette / AI hand-off). */
   initialQuery?: string
@@ -37,17 +37,17 @@ interface ConsoleTabProps {
 
 /**
  * Query console: CodeMirror editor with schema sidebar (click-to-insert
- * snippets), Cmd+Enter / Run, per-ontology history, verbatim backend error
+ * snippets), Cmd+Enter / Run, per-lens history, verbatim backend error
  * hints and the shared results panel with graph toggle.
  */
-export function ConsoleTab({ ontologyKey, schema, initialQuery }: ConsoleTabProps) {
+export function ConsoleTab({ lensKey, schema, initialQuery }: ConsoleTabProps) {
   const [query, setQuery] = useState(initialQuery ?? '')
   const [run, setRun] = useState<{ result: QueryResult; ms: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saveOpen, setSaveOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const editorRef = useRef<ReactCodeMirrorRef | null>(null)
-  const { history, push } = useQueryHistory(ontologyKey)
+  const { history, push } = useQueryHistory(lensKey)
 
   // Adopt a new `?query=` prefill arriving while mounted (AI → console).
   const [lastInitial, setLastInitial] = useState(initialQuery)
@@ -59,7 +59,7 @@ export function ConsoleTab({ ontologyKey, schema, initialQuery }: ConsoleTabProp
   const execute = useMutation({
     mutationFn: async (text: string) => {
       const started = performance.now()
-      const result = await runtime.runQuery(ontologyKey, text)
+      const result = await runtime.runQuery(lensKey, text)
       return { result, ms: Math.round(performance.now() - started) }
     },
     onSuccess: (data, text) => {
@@ -153,11 +153,11 @@ export function ConsoleTab({ ontologyKey, schema, initialQuery }: ConsoleTabProp
 
         {run !== null && (
           <ResultsPanel
-            ontologyKey={ontologyKey}
+            lensKey={lensKey}
             result={run.result}
             elapsedMs={run.ms}
             relationTypes={schema.relationTypes}
-            csvName={`${ontologyKey}-query`}
+            csvName={`${lensKey}-query`}
           />
         )}
 
@@ -180,7 +180,7 @@ export function ConsoleTab({ ontologyKey, schema, initialQuery }: ConsoleTabProp
       )}
 
       <SaveQueryDialog
-        ontologyKey={ontologyKey}
+        lensKey={lensKey}
         query={query.trim()}
         open={saveOpen}
         onOpenChange={setSaveOpen}

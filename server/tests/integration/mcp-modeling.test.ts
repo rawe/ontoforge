@@ -76,15 +76,15 @@ describe("tool surface", () => {
   it("lists exactly the twenty-seven tools of sessions 02–10 — and NO update-inclusion tool", async () => {
     const tools = await client.listTools();
     expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
-      "add_entity_type_to_ontology",
+      "add_entity_type_to_lens",
       "add_property",
-      "add_relation_type_to_ontology",
+      "add_relation_type_to_lens",
       "create_entity_type",
-      "create_ontology",
+      "create_lens",
       "create_relation_type",
       "delete_ai_agent",
       "delete_entity_type",
-      "delete_ontology",
+      "delete_lens",
       "delete_property",
       "delete_relation_type",
       "delete_saved_query",
@@ -93,15 +93,15 @@ describe("tool surface", () => {
       "import_schema",
       "list_ai_agents",
       "list_saved_queries",
-      "remove_entity_type_from_ontology",
-      "remove_relation_type_from_ontology",
+      "remove_entity_type_from_lens",
+      "remove_relation_type_from_lens",
       "set_ai_agent",
       "set_saved_query",
       "update_entity_type",
-      "update_ontology",
+      "update_lens",
       "update_property",
       "update_relation_type",
-      "validate_ontology",
+      "validate_lens",
       "validate_schema",
     ]);
   });
@@ -180,8 +180,8 @@ describe("schema lifecycle over MCP (keys, never ids)", () => {
 
     // get_schema reflects it all in the transfer shape.
     const schema = json(await call(client, "get_schema"));
-    expect(schema.formatVersion).toBe("3.0");
-    expect(schema.ontologies).toEqual([]);
+    expect(schema.formatVersion).toBe("4.0");
+    expect(schema.lenses).toEqual([]);
     const entityTypes = schema.entityTypes as Record<string, unknown>[];
     expect(entityTypes.map((et) => et.key)).toEqual(["company", "person"]);
     const personExport = entityTypes.find((et) => et.key === "person");
@@ -293,7 +293,7 @@ describe("tool errors", () => {
   // `tests/integration/neo4j/mcp-modeling.test.ts`.
 });
 
-describe("ontology lenses over MCP", () => {
+describe("lenses over MCP", () => {
   it("full lens lifecycle by key: create, update, include, validate, delete", async () => {
     await call(client, "create_entity_type", { key: "person", display_name: "Person" });
     await call(client, "add_property", {
@@ -304,7 +304,7 @@ describe("ontology lenses over MCP", () => {
       data_type: "string",
     });
 
-    const created = await call(client, "create_ontology", {
+    const created = await call(client, "create_lens", {
       key: "hr",
       name: "Human Resources",
       description: "People",
@@ -313,35 +313,35 @@ describe("ontology lenses over MCP", () => {
     expect(json(created).key).toBe("hr");
     expect(json(created).name).toBe("Human Resources");
 
-    const renamed = await call(client, "update_ontology", {
-      ontology_key: "hr",
+    const renamed = await call(client, "update_lens", {
+      lens_key: "hr",
       name: "People",
     });
     expect(json(renamed).name).toBe("People");
     expect(json(renamed).key).toBe("hr"); // immutable
 
-    const included = await call(client, "add_entity_type_to_ontology", {
-      ontology_key: "hr",
+    const included = await call(client, "add_entity_type_to_lens", {
+      lens_key: "hr",
       entity_type_key: "person",
       properties: ["full_name"],
     });
     expect(json(included)).toEqual({ key: "person", properties: ["full_name"] });
 
-    const validation = json(await call(client, "validate_ontology", { ontology_key: "hr" }));
+    const validation = json(await call(client, "validate_lens", { lens_key: "hr" }));
     expect(validation.valid).toBe(true);
 
-    const removed = await call(client, "remove_entity_type_from_ontology", {
-      ontology_key: "hr",
+    const removed = await call(client, "remove_entity_type_from_lens", {
+      lens_key: "hr",
       entity_type_key: "person",
     });
-    expect(text(removed)).toBe("Entity type 'person' removed from ontology 'hr'.");
+    expect(text(removed)).toBe("Entity type 'person' removed from lens 'hr'.");
 
-    const deleted = await call(client, "delete_ontology", { ontology_key: "hr" });
-    expect(text(deleted)).toBe("Ontology 'hr' deleted successfully.");
+    const deleted = await call(client, "delete_lens", { lens_key: "hr" });
+    expect(text(deleted)).toBe("Lens 'hr' deleted successfully.");
 
-    const gone = await call(client, "validate_ontology", { ontology_key: "hr" });
+    const gone = await call(client, "validate_lens", { lens_key: "hr" });
     expect(gone.isError).toBe(true);
-    expect(text(gone)).toContain("Ontology 'hr' not found");
+    expect(text(gone)).toContain("Lens 'hr' not found");
   });
 
   it("adding again is the MCP way to change an allowlist (there is no update tool)", async () => {
@@ -360,18 +360,18 @@ describe("ontology lenses over MCP", () => {
       display_name: "Age",
       data_type: "integer",
     });
-    await call(client, "create_ontology", { key: "hr", name: "HR" });
+    await call(client, "create_lens", { key: "hr", name: "HR" });
 
-    const first = await call(client, "add_entity_type_to_ontology", {
-      ontology_key: "hr",
+    const first = await call(client, "add_entity_type_to_lens", {
+      lens_key: "hr",
       entity_type_key: "person",
       properties: ["full_name"],
     });
     expect(json(first).properties).toEqual(["full_name"]);
 
     // Re-add with a different allowlist — an upsert, not a conflict.
-    const second = await call(client, "add_entity_type_to_ontology", {
-      ontology_key: "hr",
+    const second = await call(client, "add_entity_type_to_lens", {
+      lens_key: "hr",
       entity_type_key: "person",
       properties: ["full_name", "age"],
     });
@@ -379,8 +379,8 @@ describe("ontology lenses over MCP", () => {
     expect(json(second).properties).toEqual(["full_name", "age"]);
 
     // Re-add with no properties widens back to all.
-    const third = await call(client, "add_entity_type_to_ontology", {
-      ontology_key: "hr",
+    const third = await call(client, "add_entity_type_to_lens", {
+      lens_key: "hr",
       entity_type_key: "person",
     });
     expect(json(third).properties).toBeNull();
@@ -395,35 +395,35 @@ describe("ontology lenses over MCP", () => {
       source_entity_type_key: "person",
       target_entity_type_key: "company",
     });
-    await call(client, "create_ontology", { key: "hr", name: "HR" });
-    await call(client, "add_entity_type_to_ontology", {
-      ontology_key: "hr",
+    await call(client, "create_lens", { key: "hr", name: "HR" });
+    await call(client, "add_entity_type_to_lens", {
+      lens_key: "hr",
       entity_type_key: "person",
     });
 
-    const refused = await call(client, "add_relation_type_to_ontology", {
-      ontology_key: "hr",
+    const refused = await call(client, "add_relation_type_to_lens", {
+      lens_key: "hr",
       relation_type_key: "works_for",
     });
     expect(refused.isError).toBe(true);
     expect(text(refused)).toContain("company");
 
-    await call(client, "add_entity_type_to_ontology", {
-      ontology_key: "hr",
+    await call(client, "add_entity_type_to_lens", {
+      lens_key: "hr",
       entity_type_key: "company",
     });
-    const accepted = await call(client, "add_relation_type_to_ontology", {
-      ontology_key: "hr",
+    const accepted = await call(client, "add_relation_type_to_lens", {
+      lens_key: "hr",
       relation_type_key: "works_for",
     });
     expect(accepted.isError).toBeUndefined();
     expect(json(accepted).key).toBe("works_for");
 
-    const removed = await call(client, "remove_relation_type_from_ontology", {
-      ontology_key: "hr",
+    const removed = await call(client, "remove_relation_type_from_lens", {
+      lens_key: "hr",
       relation_type_key: "works_for",
     });
-    expect(text(removed)).toBe("Relation type 'works_for' removed from ontology 'hr'.");
+    expect(text(removed)).toBe("Relation type 'works_for' removed from lens 'hr'.");
   });
 
   it("validate_schema combines the global half with every lens", async () => {
@@ -438,9 +438,9 @@ describe("ontology lenses over MCP", () => {
       display_name: "Full Name",
       data_type: "string",
     });
-    await call(client, "create_ontology", { key: "hr", name: "HR" });
-    await call(client, "add_entity_type_to_ontology", {
-      ontology_key: "hr",
+    await call(client, "create_lens", { key: "hr", name: "HR" });
+    await call(client, "add_entity_type_to_lens", {
+      lens_key: "hr",
       entity_type_key: "person",
       properties: ["full_name"],
     });
@@ -455,25 +455,25 @@ describe("ontology lenses over MCP", () => {
     expect(result.valid).toBe(false);
     const errors = result.errors as { path: string; message: string }[];
     expect(errors).toContainEqual({
-      path: "ontologies.hr.includes.entityTypes.person.properties",
+      path: "lenses.hr.includes.entityTypes.person.properties",
       message: "Property 'full_name' does not exist on entity type 'person'",
     });
   });
 
   it("a cascade refusal over MCP carries only the message — no structured lens list", async () => {
     await call(client, "create_entity_type", { key: "person", display_name: "Person" });
-    await call(client, "create_ontology", { key: "hr", name: "HR" });
-    await call(client, "add_entity_type_to_ontology", {
-      ontology_key: "hr",
+    await call(client, "create_lens", { key: "hr", name: "HR" });
+    await call(client, "add_entity_type_to_lens", {
+      lens_key: "hr",
       entity_type_key: "person",
     });
 
     const refused = await call(client, "delete_entity_type", { entity_type_key: "person" });
     expect(refused.isError).toBe(true);
-    expect(text(refused)).toContain("included by 1 ontology(ies)");
-    // Only the flat message: the structured affectedOntologies list is REST-only.
+    expect(text(refused)).toContain("included by 1 lens(es)");
+    // Only the flat message: the structured affectedLenses list is REST-only.
     expect(refused.content).toHaveLength(1);
-    expect(text(refused)).not.toContain("affectedOntologies");
+    expect(text(refused)).not.toContain("affectedLenses");
 
     // The cascade flag works end-to-end.
     const consented = await call(client, "delete_entity_type", {
@@ -481,7 +481,7 @@ describe("ontology lenses over MCP", () => {
       cascade: true,
     });
     expect(consented.isError).toBeUndefined();
-    const inclusions = await call(client, "validate_ontology", { ontology_key: "hr" });
+    const inclusions = await call(client, "validate_lens", { lens_key: "hr" });
     expect(json(inclusions).valid).toBe(true); // lens now unscoped again
   });
 });
@@ -540,7 +540,7 @@ describe("stateless transport", () => {
   });
 
   it("a trailing path segment is not a lens — it is an unknown route", async () => {
-    const res = await app.inject({ method: "POST", url: "/mcp/model/some_ontology" });
+    const res = await app.inject({ method: "POST", url: "/mcp/model/some_lens" });
     expect(res.statusCode).toBe(404);
     expect(res.json().error.code).toBe("RESOURCE_NOT_FOUND");
   });

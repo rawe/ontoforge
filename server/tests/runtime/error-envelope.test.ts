@@ -37,7 +37,7 @@ beforeAll(async () => {
     throw new ValidationError("Invalid input");
   });
   app.get("/boom/cascade", () => {
-    throw new CascadeRequiredError("Change breaks ontologies", ["lens_a", "lens_b"]);
+    throw new CascadeRequiredError("Change breaks lenses", ["lens_a", "lens_b"]);
   });
   app.get("/boom/store", () => {
     throw new StoreError();
@@ -96,14 +96,14 @@ describe("domain exceptions map to their exact status and envelope", () => {
     });
   });
 
-  it("CascadeRequiredError -> 409 CASCADE_REQUIRED with affectedOntologies", async () => {
+  it("CascadeRequiredError -> 409 CASCADE_REQUIRED with affectedLenses", async () => {
     const res = await app.inject({ method: "GET", url: "/boom/cascade" });
     expect(res.statusCode).toBe(409);
     expect(res.json()).toEqual({
       error: {
         code: "CASCADE_REQUIRED",
-        message: "Change breaks ontologies",
-        details: { affectedOntologies: ["lens_a", "lens_b"] },
+        message: "Change breaks lenses",
+        details: { affectedLenses: ["lens_a", "lens_b"] },
       },
     });
   });

@@ -164,7 +164,7 @@ describe("read relation", () => {
   it("a property-filtered inclusion hides the excluded relation property", async () => {
     holder.store.getFullSchema.mockResolvedValue(
       makeFullSchema({
-        ontologyKey: "restricted_view",
+        lensKey: "restricted_view",
         entityInclusions: [
           { key: "person", properties: null },
           { key: "company", properties: null },

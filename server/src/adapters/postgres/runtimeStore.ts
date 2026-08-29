@@ -57,7 +57,7 @@ import {
 } from "./filters.js";
 import { fromJson, toJson } from "./json.js";
 import { camelizeRow, isUuid } from "./rows.js";
-import { ONTOLOGY_COLS, readTypesWithProperties, splitInclusions } from "./schemaRead.js";
+import { LENS_COLS, readTypesWithProperties, splitInclusions } from "./schemaRead.js";
 import {
   distance,
   minScoreFloor,
@@ -133,60 +133,60 @@ export class PostgresRuntimeStore implements RuntimeStore {
   // Schema reading (for the runtime schema cache)
   // ------------------------------------------------------------------
 
-  /** The lens view: the ontology, ALL types with their properties, and
-   * this ontology's inclusions — one coherent REPEATABLE READ snapshot.
-   * Answers null when no ontology has the key. */
-  async getFullSchema(ontologyKey: string): Promise<Row | null> {
+  /** The lens view: the lens, ALL types with their properties, and
+   * this lens's inclusions — one coherent REPEATABLE READ snapshot.
+   * Answers null when no lens has the key. */
+  async getFullSchema(lensKey: string): Promise<Row | null> {
     return withTransaction(async (querier) => {
-      const ont = await querier.query(
-        `SELECT ${ONTOLOGY_COLS} FROM ontology WHERE key = $1`,
-        [ontologyKey],
+      const lensResult = await querier.query(
+        `SELECT ${LENS_COLS} FROM lens WHERE key = $1`,
+        [lensKey],
       );
-      const ontRow = ont.rows[0];
-      if (ontRow === undefined) {
+      const lensRow = lensResult.rows[0];
+      if (lensRow === undefined) {
         return null;
       }
-      const ontology = camelizeRow(ontRow);
-      const ontologyId = ontology.ontologyId as string;
+      const lens = camelizeRow(lensRow);
+      const lensId = lens.lensId as string;
 
       const { entityTypes, relationTypes } = await readTypesWithProperties(querier, false);
 
       const incs = await querier.query(
         `SELECT oi.properties, et.key AS entity_type_key, rt.key AS relation_type_key
-         FROM ontology_includes oi
+         FROM lens_includes oi
          LEFT JOIN entity_type et ON et.entity_type_id = oi.entity_type_id
          LEFT JOIN relation_type rt ON rt.relation_type_id = oi.relation_type_id
-         WHERE oi.ontology_id = $1`,
-        [ontologyId],
+         WHERE oi.lens_id = $1`,
+        [lensId],
       );
       const { entityInclusions, relationInclusions } = splitInclusions(incs.rows);
 
-      return { ontology, entityTypes, relationTypes, entityInclusions, relationInclusions };
+      return { lens, entityTypes, relationTypes, entityInclusions, relationInclusions };
     }, "REPEATABLE READ");
   }
 
-  /** AiAgentConfig rows for one ontology, by key. */
-  async getAiAgentConfigs(ontologyKey: string): Promise<Row[]> {
+  /** AiAgentConfig rows for one lens, by key. */
+  async getAiAgentConfigs(lensKey: string): Promise<Row[]> {
     const result = await runQuery(
       `SELECT ac.key, ac.name, ac.description, ac.system_prompt, ac.tools
        FROM ai_agent_config ac
-       JOIN ontology o ON o.ontology_id = ac.ontology_id
+       JOIN lens o ON o.lens_id = ac.lens_id
        WHERE o.key = $1
        ORDER BY ac.name`,
-      [ontologyKey],
+      [lensKey],
     );
     return result.rows.map(camelizeRow);
   }
 
-  /** SavedQuery rows for one ontology, by key. */
-  async getSavedQueries(ontologyKey: string): Promise<Row[]> {
+  /** SavedQuery rows for one lens, by key. */
+  async getSavedQueries(lensKey: string): Promise<Row[]> {
     const result = await runQuery(
       `SELECT sq.key, sq.name, sq.description, sq.steps, sq.parameters
        FROM saved_query sq
-       JOIN ontology o ON o.ontology_id = sq.ontology_id
+       JOIN lens o ON o.lens_id = sq.lens_id
        WHERE o.key = $1
        ORDER BY sq.name`,
-      [ontologyKey],
+      [lensKey],
     );
     return result.rows.map(camelizeRow);
   }
@@ -522,19 +522,19 @@ export class PostgresRuntimeStore implements RuntimeStore {
    * query-time predicate: the index carries no scoping of its own. */
   async searchSavedQueries(
     queryEmbedding: number[],
-    ontologyKey: string,
+    lensKey: string,
     limit: number,
     minScore: number | null,
   ): Promise<Row[]> {
     const params = vectorParams(queryEmbedding);
-    params.push(ontologyKey, limit);
+    params.push(lensKey, limit);
     const rows = await vectorSearch(
       () => Promise.resolve(SAVED_QUERY_INDEX),
       queryEmbedding,
       params,
       (width) =>
         `SELECT key, name, description, parameters, ${similarity(width)} FROM saved_query
-         WHERE ontology_key = $2 AND ${EMBEDDED}
+         WHERE lens_key = $2 AND ${EMBEDDED}
          ORDER BY ${distance(width)} LIMIT $3`,
     );
     return minScoreFloor(rows, minScore);

@@ -40,8 +40,8 @@ function StudioNavItem({
 
 /** Shell for all `/studio/...` routes — the modeling surface. */
 export function StudioLayout() {
-  const lastOntology = readString(storageKeys.lastOntology)
-  const backTo = lastOntology === null ? '/welcome' : `/w/${lastOntology}`
+  const lastLens = readString(storageKeys.lastLens)
+  const backTo = lastLens === null ? '/welcome' : `/w/${lastLens}`
 
   return (
     <div className="flex h-dvh overflow-hidden bg-background">
@@ -57,7 +57,7 @@ export function StudioLayout() {
         </div>
         <nav className="flex flex-col gap-0.5 px-2 pt-1" aria-label="Studio">
           <StudioNavItem to="/studio" end label="Schema" icon={Shapes} />
-          <StudioNavItem to="/studio/ontologies" label="Ontologies" icon={Layers} />
+          <StudioNavItem to="/studio/lenses" label="Lenses" icon={Layers} />
           <StudioNavItem to="/studio/transfer" label="Transfer" icon={ArrowLeftRight} />
         </nav>
         <div className="flex-1" />

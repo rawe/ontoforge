@@ -49,7 +49,7 @@ describe("GET /schema", () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
 
-    expect(body.ontology.key).toBe("hr_view");
+    expect(body.lens.key).toBe("hr_view");
 
     const etKeys = body.entityTypes.map((et: { key: string }) => et.key).sort();
     expect(etKeys).toEqual(["company", "person"]);
@@ -68,7 +68,7 @@ describe("GET /schema", () => {
   it("unscoped: the full schema", async () => {
     holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
 
-    const res = await app.inject({ method: "GET", url: "/api/runtime/full_ontology/schema" });
+    const res = await app.inject({ method: "GET", url: "/api/runtime/full_lens/schema" });
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -100,7 +100,7 @@ describe("GET /schema", () => {
     expect(worksFor.toEntityTypeKey).toBe("company");
   });
 
-  it("an unknown ontology answers 404", async () => {
+  it("an unknown lens answers 404", async () => {
     holder.store.getFullSchema.mockResolvedValue(null);
 
     const res = await app.inject({ method: "GET", url: "/api/runtime/nonexistent/schema" });
@@ -130,7 +130,7 @@ describe("GET /schema/entity-types", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_ontology/schema/entity-types",
+      url: "/api/runtime/full_lens/schema/entity-types",
     });
 
     expect(res.json().map((et: { key: string }) => et.key).sort()).toEqual([
@@ -195,7 +195,7 @@ describe("GET /schema/relation-types", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_ontology/schema/relation-types",
+      url: "/api/runtime/full_lens/schema/relation-types",
     });
 
     expect(res.json().map((rt: { key: string }) => rt.key).sort()).toEqual([

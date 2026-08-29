@@ -51,7 +51,7 @@ function relationPropsSummary(neighbor: Neighbor): string {
 }
 
 interface RelationSectionProps {
-  ontologyKey: string
+  lensKey: string
   entity: EntityInstance
   relationType: SchemaRelationType
   entityTypes: readonly SchemaEntityType[]
@@ -66,7 +66,7 @@ interface RelationSectionProps {
  * pagination via a limit bump on /neighbors.
  */
 export function RelationSection({
-  ontologyKey,
+  lensKey,
   entity,
   relationType,
   entityTypes,
@@ -85,18 +85,18 @@ export function RelationSection({
 
   const params = { relationTypeKey: relationType.key, direction, limit }
   const neighbors = useQuery({
-    queryKey: qk.neighbors(ontologyKey, myTypeKey, entity._id, params),
-    queryFn: () => runtime.getNeighbors(ontologyKey, myTypeKey, entity._id, params),
+    queryKey: qk.neighbors(lensKey, myTypeKey, entity._id, params),
+    queryFn: () => runtime.getNeighbors(lensKey, myTypeKey, entity._id, params),
   })
 
   const unlinkMutation = useMutation({
     mutationFn: (neighbor: Neighbor) =>
-      runtime.deleteRelation(ontologyKey, relationType.key, neighbor.relation._id),
+      runtime.deleteRelation(lensKey, relationType.key, neighbor.relation._id),
     onSuccess: (_res, neighbor) => {
-      invalidateNeighborhood(queryClient, ontologyKey, myTypeKey, entity._id)
+      invalidateNeighborhood(queryClient, lensKey, myTypeKey, entity._id)
       invalidateNeighborhood(
         queryClient,
-        ontologyKey,
+        lensKey,
         neighbor.entity._entityTypeKey,
         neighbor.entity._id,
       )
@@ -204,7 +204,7 @@ export function RelationSection({
                   size="sm"
                 />
                 <Link
-                  to={`/w/${ontologyKey}/e/${neighbor.entity._entityTypeKey}/${neighbor.entity._id}`}
+                  to={`/w/${lensKey}/e/${neighbor.entity._entityTypeKey}/${neighbor.entity._id}`}
                   className="min-w-0 truncate text-[13px] font-medium hover:underline focus-visible:outline-2 focus-visible:outline-ring/60"
                 >
                   {displayLabel(neighbor.entity)}

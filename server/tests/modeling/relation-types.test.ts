@@ -170,14 +170,14 @@ describe("relation type CRUD", () => {
   });
 
   it("a type included by a lens without cascade answers 409 CASCADE_REQUIRED", async () => {
-    holder.store.findOntologiesIncludingType.mockResolvedValue(["my_ontology"]);
+    holder.store.findLensesIncludingType.mockResolvedValue(["my_lens"]);
     const res = await app.inject({ method: "DELETE", url: "/api/model/relation-types/rt-1" });
     expect(res.statusCode).toBe(409);
     expect(res.json().error.code).toBe("CASCADE_REQUIRED");
   });
 
   it("a type included by a lens deletes with cascade", async () => {
-    holder.store.findOntologiesIncludingType.mockResolvedValue(["my_ontology"]);
+    holder.store.findLensesIncludingType.mockResolvedValue(["my_lens"]);
     holder.store.removeAllIncludesForType.mockResolvedValue(1);
     holder.store.deleteRelationType.mockResolvedValue(true);
     const res = await app.inject({

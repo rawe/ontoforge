@@ -30,7 +30,7 @@ if (!data.formatVersion) {
 // Resolve ontology key
 let ontologyKey = flags.ontologyKey;
 if (!ontologyKey) {
-  const ontologies = await api(baseUrl, '/api/model/ontologies').catch(() => []);
+  const ontologies = await api(baseUrl, '/api/model/lenses').catch(() => []);
   if (!ontologies.length) die('No ontologies found. Import a schema first.');
   ontologyKey = ontologies[0].key;
   console.error(`Using ontology: ${ontologyKey}`);

@@ -8,12 +8,12 @@ import { Skeleton } from '@/components/ui/skeleton'
  * count linking to its table, plus a compact chip row of relation types.
  */
 export function TypesGrid({
-  ontologyKey,
+  lensKey,
   entityTypes,
   relationTypes,
   counts,
 }: {
-  ontologyKey: string
+  lensKey: string
   entityTypes: readonly SchemaEntityType[]
   relationTypes: readonly SchemaRelationType[]
   counts: Record<string, number | undefined>
@@ -29,7 +29,7 @@ export function TypesGrid({
           return (
             <Link
               key={t.key}
-              to={`/w/${ontologyKey}/t/${t.key}`}
+              to={`/w/${lensKey}/t/${t.key}`}
               className="group rounded-xl border bg-card p-4 transition-all duration-150 hover:border-ring/40 focus-visible:outline-2 focus-visible:outline-ring/60"
             >
               <div className="flex items-center gap-2">

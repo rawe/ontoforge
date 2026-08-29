@@ -17,9 +17,9 @@ equivalents are named per step for the case where they are not.
 List the ontologies and pick the key this bundle syncs with.
 
 - MCP: `get_schema`
-- REST: `GET /api/model/ontologies`
+- REST: `GET /api/model/lenses`
 
-Create one with `create_ontology` (REST: `POST /api/model/ontologies`) when none
+Create one with `create_lens` (REST: `POST /api/model/lenses`) when none
 fits. An unscoped ontology sees the whole schema and is the simplest choice.
 
 ## 2. List the entity types that already exist
@@ -72,8 +72,8 @@ body, so a bundle needs none.
 that shape — `staleAfter`, `okf-version` — can never be modeled, and stays
 unknown on every push.
 
-Finally, add each type to the ontology with `add_entity_type_to_ontology` (REST:
-`POST /api/model/ontologies/{ontologyId}/includes/entity-types`). A scoped
+Finally, add each type to the ontology with `add_entity_type_to_lens` (REST:
+`POST /api/model/lenses/{lensId}/includes/entity-types`). A scoped
 ontology must expose the concept-ID property and the document property, because
 a property the ontology hides cannot be written through it.
 

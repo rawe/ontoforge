@@ -63,10 +63,10 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
     return res.json() as Row;
   }
 
-  /** Ontology `index_drift_test` with one person type and one entity;
+  /** Lens `index_drift_test` with one person type and one entity;
    * indexes exist at the provider width (768). */
   async function buildDriftFixture(): Promise<void> {
-    await post("/api/model/ontologies", { key: "index_drift_test", name: "Index Drift Test" });
+    await post("/api/model/lenses", { key: "index_drift_test", name: "Index Drift Test" });
     const et = await post("/api/model/entity-types", { key: "person", displayName: "Person" });
     await post(`/api/model/entity-types/${et.entityTypeId as string}/properties`, {
       key: "name",
@@ -194,7 +194,7 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
     await post("/api/runtime/index_drift_test/entities/person", { name: "Bob Smith" });
     const defined = await app.inject({
       method: "PUT",
-      url: "/api/model/ontologies/index_drift_test/saved-queries/everyone",
+      url: "/api/model/lenses/index_drift_test/saved-queries/everyone",
       payload: {
         name: "Everyone",
         description: "List every person by name",
@@ -252,7 +252,7 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
     try {
       const res = await app.inject({
         method: "PUT",
-        url: "/api/model/ontologies/index_drift_test/saved-queries/find-people",
+        url: "/api/model/lenses/index_drift_test/saved-queries/find-people",
         payload: {
           name: "Find People",
           description: "Find people and employees working at the company by their name",

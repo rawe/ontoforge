@@ -27,22 +27,22 @@ function toEntityRow(raw: unknown): Row {
 // --- Schema reading (for the runtime schema cache) ---
 
 /**
- * Read the full schema for one ontology by key: ALL entity and relation
- * types globally, plus this ontology's INCLUDES_TYPE edges for scope
- * filtering. Returns null when no matching ontology exists.
+ * Read the full schema for one lens by key: ALL entity and relation
+ * types globally, plus this lens's INCLUDES_TYPE edges for scope
+ * filtering. Returns null when no matching lens exists.
  */
-export async function getFullSchema(session: Session, ontologyKey: string): Promise<Row | null> {
-  const ontResult = await session.run(
-    "MATCH (o:Ontology {key: $key}) RETURN o {.*} AS ontology",
-    { key: ontologyKey },
+export async function getFullSchema(session: Session, lensKey: string): Promise<Row | null> {
+  const lensResult = await session.run(
+    "MATCH (o:Ontology {key: $key}) RETURN o {.*} AS lens",
+    { key: lensKey },
   );
-  const ontRecord = ontResult.records[0];
-  if (ontRecord === undefined) {
+  const lensRecord = lensResult.records[0];
+  if (lensRecord === undefined) {
     return null;
   }
 
-  const ontology = convertNeo4jProperties(ontRecord.get("ontology") as Row);
-  const ontologyId = ontology.ontologyId as string;
+  const lens = convertNeo4jProperties(lensRecord.get("lens") as Row);
+  const lensId = lens.lensId as string;
 
   const etResult = await session.run(
     `
@@ -87,10 +87,10 @@ export async function getFullSchema(session: Session, ontologyKey: string): Prom
 
   const incResult = await session.run(
     `
-    MATCH (o:Ontology {ontologyId: $ontologyId})-[r:INCLUDES_TYPE]->(t)
+    MATCH (o:Ontology {lensId: $lensId})-[r:INCLUDES_TYPE]->(t)
     RETURN t.key AS key, labels(t)[0] AS label, r.properties AS properties
     `,
-    { ontologyId },
+    { lensId },
   );
   const entityInclusions: Row[] = [];
   const relationInclusions: Row[] = [];
@@ -107,33 +107,33 @@ export async function getFullSchema(session: Session, ontologyKey: string): Prom
     }
   }
 
-  return { ontology, entityTypes, relationTypes, entityInclusions, relationInclusions };
+  return { lens, entityTypes, relationTypes, entityInclusions, relationInclusions };
 }
 
-/** AiAgentConfig rows for one ontology, by key. */
-export async function getAiAgentConfigs(session: Session, ontologyKey: string): Promise<Row[]> {
+/** AiAgentConfig rows for one lens, by key. */
+export async function getAiAgentConfigs(session: Session, lensKey: string): Promise<Row[]> {
   const result = await session.run(
     `
-    MATCH (o:Ontology {key: $ontologyKey})-[:HAS_AI_AGENT]->(ac:AiAgentConfig)
+    MATCH (o:Ontology {key: $lensKey})-[:HAS_AI_AGENT]->(ac:AiAgentConfig)
     RETURN ac.key AS key, ac.name AS name, ac.description AS description,
            ac.systemPrompt AS systemPrompt, ac.tools AS tools
     ORDER BY ac.name
     `,
-    { ontologyKey },
+    { lensKey },
   );
   return result.records.map((record) => convertNeo4jProperties(record.toObject() as Row));
 }
 
-/** SavedQuery rows for one ontology, by key. */
-export async function getSavedQueries(session: Session, ontologyKey: string): Promise<Row[]> {
+/** SavedQuery rows for one lens, by key. */
+export async function getSavedQueries(session: Session, lensKey: string): Promise<Row[]> {
   const result = await session.run(
     `
-    MATCH (o:Ontology {key: $ontologyKey})-[:HAS_SAVED_QUERY]->(sq:SavedQuery)
+    MATCH (o:Ontology {key: $lensKey})-[:HAS_SAVED_QUERY]->(sq:SavedQuery)
     RETURN sq.key AS key, sq.name AS name, sq.description AS description,
            sq.steps AS steps, sq.parameters AS parameters
     ORDER BY sq.name
     `,
-    { ontologyKey },
+    { lensKey },
   );
   return result.records.map((record) => convertNeo4jProperties(record.toObject() as Row));
 }
@@ -666,13 +666,13 @@ export async function semanticSearch(
 
 /**
  * Semantic search over SavedQuery descriptions via the shared
- * `saved_query_embedding` vector index, scoped to one ontology through
- * in-index filtering on the denormalized `_ontologyKey`.
+ * `saved_query_embedding` vector index, scoped to one lens through
+ * in-index filtering on the denormalized `_lensKey`.
  */
 export async function searchSavedQueries(
   session: Session,
   queryEmbedding: number[],
-  ontologyKey: string,
+  lensKey: string,
   limit: number,
   minScore: number | null,
 ): Promise<Row[]> {
@@ -681,7 +681,7 @@ export async function searchSavedQueries(
     "SEARCH sq IN (" +
     "VECTOR INDEX saved_query_embedding " +
     "FOR $query_embedding " +
-    "WHERE sq._ontologyKey = $ontology_key " +
+    "WHERE sq._lensKey = $lens_key " +
     "LIMIT $limit" +
     ") SCORE AS score " +
     "RETURN sq.key AS key, sq.name AS name, sq.description AS description, " +
@@ -689,7 +689,7 @@ export async function searchSavedQueries(
 
   const result = await session.run(query, {
     query_embedding: queryEmbedding,
-    ontology_key: ontologyKey,
+    lens_key: lensKey,
     limit: neo4j.int(limit),
   });
 

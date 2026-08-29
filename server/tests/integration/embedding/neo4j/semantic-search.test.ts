@@ -48,12 +48,12 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")(
       return res.json() as Row;
     }
 
-    /** Ontology `search_test`, entity type `person` with name/bio. */
+    /** Lens `search_test`, entity type `person` with name/bio. */
     async function buildSearchFixture(): Promise<{ etId: string }> {
-      await post("/api/model/ontologies", {
+      await post("/api/model/lenses", {
         key: "search_test",
         name: "Search Test",
-        description: "Integration test ontology for the write constraint",
+        description: "Integration test lens for the write constraint",
       });
       const et = await post("/api/model/entity-types", { key: "person", displayName: "Person" });
       const etId = et.entityTypeId as string;

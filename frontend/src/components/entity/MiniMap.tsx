@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { TypeDot } from '@/components/TypeChip'
 
 interface MiniMapProps {
-  ontologyKey: string
+  lensKey: string
   entity: EntityInstance
   relationTypes: readonly SchemaRelationType[]
   counts: Record<string, number> | undefined
@@ -15,7 +15,7 @@ interface MiniMapProps {
  * Compact neighborhood summary: neighbor count per relation type with a CTA
  * to open the entity focused in the Explorer canvas.
  */
-export function MiniMap({ ontologyKey, entity, relationTypes, counts }: MiniMapProps) {
+export function MiniMap({ lensKey, entity, relationTypes, counts }: MiniMapProps) {
   const myTypeKey = entity._entityTypeKey
   const total =
     counts === undefined
@@ -57,7 +57,7 @@ export function MiniMap({ ontologyKey, entity, relationTypes, counts }: MiniMapP
       </div>
       <div className="border-t px-4 py-2">
         <Button variant="outline" size="sm" className="w-full" asChild>
-          <Link to={`/w/${ontologyKey}/explore?focus=${myTypeKey}:${entity._id}`}>
+          <Link to={`/w/${lensKey}/explore?focus=${myTypeKey}:${entity._id}`}>
             <Waypoints className="size-3.5" />
             Open in Explorer
           </Link>

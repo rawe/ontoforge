@@ -28,10 +28,10 @@ import { prop } from "../../propertyDefs.js";
 // ---------------------------------------------------------------------------
 
 const SCHEMA: SchemaCacheValue = {
-  ontologyId: "ont-1",
-  ontologyKey: "test",
-  ontologyName: "Test",
-  ontologyDescription: null,
+  lensId: "lens-1",
+  lensKey: "test",
+  lensName: "Test",
+  lensDescription: null,
   entityTypes: {
     person: {
       key: "person",

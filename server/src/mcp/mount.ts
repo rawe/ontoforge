@@ -2,7 +2,7 @@
  * MCP mounts on the Fastify app.
  *
  * The modeling server is mounted at exactly `/mcp/model` — global by
- * design, no ontology key, and a trailing path segment is NOT a lens (it
+ * design, no lens key, and a trailing path segment is NOT a lens (it
  * falls through to the app's standard 404). Transport is Streamable HTTP,
  * STATELESS, with plain JSON responses (no SSE), per
  * `docs/decisions.md#interfaces`: a fresh server + transport pair serves
@@ -13,8 +13,8 @@
  * to exactly one lens, resolved in priority order:
  *
  *   1. the first path segment after the mount (`/mcp/runtime/{key}`);
- *   2. the `X-Ontology-Key` request header;
- *   3. the `DEFAULT_MCP_ONTOLOGY_KEY` environment variable.
+ *   2. the `X-Lens-Key` request header;
+ *   3. the `DEFAULT_MCP_LENS_KEY` environment variable.
  *
  * With none of the three the request is refused with 400 — a model never
  * chooses a lens and can never reach across two. The environment variable
@@ -28,7 +28,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { createModelingMcpServer } from "./modeling.js";
 import { createRuntimeMcpServer } from "./runtime.js";
 
-const ONTOLOGY_KEY_HEADER = "x-ontology-key";
+const LENS_KEY_HEADER = "x-lens-key";
 
 /** Serve one stateless MCP request with a fresh server + transport pair. */
 async function handleMcpRequest(
@@ -81,18 +81,18 @@ export function mountMcp(app: FastifyInstance): void {
     url: "/mcp/runtime",
     schema: { hide: true },
     handler: async (request, reply) => {
-      const headerKey = request.headers[ONTOLOGY_KEY_HEADER];
-      const envKey = process.env.DEFAULT_MCP_ONTOLOGY_KEY;
-      const ontologyKey =
+      const headerKey = request.headers[LENS_KEY_HEADER];
+      const envKey = process.env.DEFAULT_MCP_LENS_KEY;
+      const lensKey =
         (Array.isArray(headerKey) ? headerKey[0] : headerKey) ||
         (envKey !== undefined && envKey !== "" ? envKey : undefined);
-      if (ontologyKey === undefined) {
+      if (lensKey === undefined) {
         return reply
           .status(400)
           .header("content-type", "text/plain; charset=utf-8")
-          .send("Ontology key required");
+          .send("Lens key required");
       }
-      await handleMcpRequest(createRuntimeMcpServer(ontologyKey), request, reply);
+      await handleMcpRequest(createRuntimeMcpServer(lensKey), request, reply);
     },
   });
 
@@ -100,11 +100,11 @@ export function mountMcp(app: FastifyInstance): void {
   // priority over header and environment.
   app.route({
     method: ["GET", "POST", "DELETE"],
-    url: "/mcp/runtime/:ontologyKey",
+    url: "/mcp/runtime/:lensKey",
     schema: { hide: true },
     handler: async (request, reply) => {
-      const { ontologyKey } = request.params as { ontologyKey: string };
-      await handleMcpRequest(createRuntimeMcpServer(ontologyKey), request, reply);
+      const { lensKey } = request.params as { lensKey: string };
+      await handleMcpRequest(createRuntimeMcpServer(lensKey), request, reply);
     },
   });
 }

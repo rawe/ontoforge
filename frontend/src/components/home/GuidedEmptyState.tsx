@@ -44,11 +44,13 @@ function Step({
  * three numbered ways to get data in.
  */
 export function GuidedEmptyState({
+  ontologyKey,
   lensKey,
   lensName,
   entityTypes,
   aiEnabled,
 }: {
+  ontologyKey: string
   lensKey: string
   lensName: string
   entityTypes: readonly SchemaEntityType[]
@@ -75,7 +77,7 @@ export function GuidedEmptyState({
             description={`Start small: create a ${first.displayName.toLowerCase()} by hand, or press ⌘K to add from anywhere.`}
             action={
               <Button asChild size="sm">
-                <Link to={`/w/${lensKey}/t/${first.key}`}>
+                <Link to={`/o/${ontologyKey}/w/${lensKey}/t/${first.key}`}>
                   Open {first.displayName} table
                   <ArrowRight className="size-3.5" />
                 </Link>
@@ -96,7 +98,7 @@ export function GuidedEmptyState({
           action={
             aiEnabled ? (
               <Button asChild size="sm" variant="outline">
-                <Link to={`/w/${lensKey}/ai`}>
+                <Link to={`/o/${ontologyKey}/w/${lensKey}/ai`}>
                   Open AI extract
                   <ArrowRight className="size-3.5" />
                 </Link>
@@ -115,6 +117,7 @@ export function GuidedEmptyState({
           description="Let Claude or any MCP-capable agent read and write this lens directly via the built-in MCP servers."
           action={
             <McpConnectDialog
+              ontologyKey={ontologyKey}
               lensKey={lensKey}
               trigger={
                 <Button size="sm" variant="outline">

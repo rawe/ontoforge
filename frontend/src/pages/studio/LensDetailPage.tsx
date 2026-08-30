@@ -31,21 +31,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 const TABS = ['scope', 'agents', 'queries', 'connect'] as const
 type Tab = (typeof TABS)[number]
 
-/** `/studio/lenses/:id` — scope editor, agents, saved queries, connect. */
+/** `/o/:ontologyKey/studio/lenses/:id` — scope editor, agents, saved queries, connect. */
 export function LensDetailPage() {
-  const { id } = useParams<{ id: string }>()
+  const { ontologyKey, id } = useParams<{ ontologyKey: string; id: string }>()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
   const tabParam = searchParams.get('tab')
   const tab: Tab = TABS.includes(tabParam as Tab) ? (tabParam as Tab) : 'scope'
 
-  const { data: lenses, isPending } = useLenses()
+  const { data: lenses, isPending } = useLenses(ontologyKey)
   const lens = lenses?.find((o) => o.lensId === id)
 
   const update = useMutation({
     mutationFn: (patch: { name: string; description: string | null }) =>
-      model.updateLens(id ?? '', patch),
+      model.updateLens(ontologyKey ?? '', id ?? '', patch),
     onSuccess: () => {
       invalidateModeling(queryClient)
       toast.success('Saved')
@@ -54,14 +54,16 @@ export function LensDetailPage() {
   })
 
   const remove = useMutation({
-    mutationFn: () => model.deleteLens(id ?? ''),
+    mutationFn: () => model.deleteLens(ontologyKey ?? '', id ?? ''),
     onSuccess: () => {
       invalidateModeling(queryClient)
       toast.success('Lens deleted')
-      void navigate('/studio/lenses')
+      void navigate(`/o/${ontologyKey}/studio/lenses`)
     },
     onError: toastError,
   })
+
+  if (ontologyKey === undefined) return null
 
   if (isPending) {
     return (
@@ -80,7 +82,7 @@ export function LensDetailPage() {
         description="It may have been deleted."
         action={
           <Button variant="outline" asChild>
-            <Link to="/studio/lenses">Back to lenses</Link>
+            <Link to={`/o/${ontologyKey}/studio/lenses`}>Back to lenses</Link>
           </Button>
         }
       />
@@ -91,7 +93,7 @@ export function LensDetailPage() {
     <div>
       <header className="border-b px-6 py-4">
         <Link
-          to="/studio/lenses"
+          to={`/o/${ontologyKey}/studio/lenses`}
           className="mb-2 inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
         >
           <ChevronLeft className="size-3.5" /> Lenses
@@ -109,10 +111,10 @@ export function LensDetailPage() {
           <Badge variant="outline" className="font-mono text-[11px]" title="Immutable key">
             {lens.key}
           </Badge>
-          <ScopeBadge lensId={lens.lensId} />
+          <ScopeBadge ontologyKey={ontologyKey} lensId={lens.lensId} />
           <div className="ml-auto flex items-center gap-2">
             <Button variant="outline" size="sm" asChild>
-              <Link to={`/w/${lens.key}`}>
+              <Link to={`/o/${ontologyKey}/w/${lens.key}`}>
                 <ExternalLink className="size-3.5" /> Open in Workbench
               </Link>
             </Button>
@@ -127,8 +129,8 @@ export function LensDetailPage() {
                   <AlertDialogTitle>Delete "{lens.name}"?</AlertDialogTitle>
                   <AlertDialogDescription>
                     This deletes the lens, its scope, agents and saved queries.
-                    The global schema and instance data are not affected. This cannot be
-                    undone.
+                    The ontology's schema and instance data are not affected. This
+                    cannot be undone.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
@@ -177,16 +179,16 @@ export function LensDetailPage() {
             </TabsTrigger>
           </TabsList>
           <TabsContent value="scope">
-            <ScopeTab lens={lens} />
+            <ScopeTab ontologyKey={ontologyKey} lens={lens} />
           </TabsContent>
           <TabsContent value="agents">
-            <AgentsTab lens={lens} />
+            <AgentsTab ontologyKey={ontologyKey} lens={lens} />
           </TabsContent>
           <TabsContent value="queries">
-            <SavedQueriesTab lens={lens} />
+            <SavedQueriesTab ontologyKey={ontologyKey} lens={lens} />
           </TabsContent>
           <TabsContent value="connect">
-            <ConnectTab lens={lens} />
+            <ConnectTab ontologyKey={ontologyKey} lens={lens} />
           </TabsContent>
         </Tabs>
       </div>

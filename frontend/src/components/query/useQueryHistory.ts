@@ -5,12 +5,12 @@ const MAX_HISTORY = 10
 
 /**
  * Last 10 run query strings for one lens, persisted under
- * `of.queryHistory.{lensKey}`. Mount the consuming component keyed by
- * lens so the initial read matches the active lens.
+ * `of.queryHistory.{ontologyKey}.{lensKey}`. Mount the consuming component
+ * keyed by ontology + lens so the initial read matches the active lens.
  */
-export function useQueryHistory(lensKey: string) {
+export function useQueryHistory(ontologyKey: string, lensKey: string) {
   const [history, setHistory] = useState<string[]>(
-    () => readJson<string[]>(storageKeys.queryHistory(lensKey)) ?? [],
+    () => readJson<string[]>(storageKeys.queryHistory(ontologyKey, lensKey)) ?? [],
   )
 
   const push = useCallback(
@@ -19,11 +19,11 @@ export function useQueryHistory(lensKey: string) {
       if (trimmed === '') return
       setHistory((prev) => {
         const next = [trimmed, ...prev.filter((c) => c !== trimmed)].slice(0, MAX_HISTORY)
-        writeJson(storageKeys.queryHistory(lensKey), next)
+        writeJson(storageKeys.queryHistory(ontologyKey, lensKey), next)
         return next
       })
     },
-    [lensKey],
+    [ontologyKey, lensKey],
   )
 
   return { history, push }

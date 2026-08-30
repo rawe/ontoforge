@@ -313,6 +313,7 @@ function RelationRow({
 /* --------------------------------- review ----------------------------------- */
 
 interface ExtractReviewProps {
+  ontologyKey: string
   lensKey: string
   schema: RuntimeSchema
   response: ExtractResponse
@@ -329,6 +330,7 @@ interface ExtractReviewProps {
  * the created/existing id mapping. Failed items stay editable for retry.
  */
 export function ExtractReview({
+  ontologyKey,
   lensKey,
   schema,
   response,
@@ -345,7 +347,7 @@ export function ExtractReview({
     null,
   )
 
-  const similar = useSimilarEntities(lensKey, initial.entities, semanticEnabled)
+  const similar = useSimilarEntities(ontologyKey, lensKey, initial.entities, semanticEnabled)
 
   const entitiesById = useMemo(
     () => new Map(entities.map((e) => [e.id, e])),
@@ -418,7 +420,7 @@ export function ExtractReview({
       item.status = 'creating'
       flushEntities()
       try {
-        const created = await createEntity(lensKey, item.entityTypeKey, coerced.values)
+        const created = await createEntity(ontologyKey, lensKey, item.entityTypeKey, coerced.values)
         item.status = 'created'
         item.createdId = created._id
         item.error = undefined
@@ -465,7 +467,7 @@ export function ExtractReview({
       item.status = 'creating'
       flushRelations()
       try {
-        await createRelation(lensKey, item.relationTypeKey, {
+        await createRelation(ontologyKey, lensKey, item.relationTypeKey, {
           fromEntityId: fromId,
           toEntityId: toId,
           ...coerced.values,
@@ -483,7 +485,7 @@ export function ExtractReview({
 
     setFirstCreated(firstId)
     setAccepting(false)
-    void queryClient.invalidateQueries({ queryKey: ['entities', lensKey] })
+    void queryClient.invalidateQueries({ queryKey: ['entities', ontologyKey, lensKey] })
 
     if (failed === 0 && createdE + createdR > 0) {
       toast.success(
@@ -616,7 +618,7 @@ export function ExtractReview({
           {createdCount > 0 && (
             <Button asChild variant="outline" size="sm" className="h-8 gap-1.5 text-[13px]">
               <Link
-                to={`/w/${lensKey}/explore${
+                to={`/o/${ontologyKey}/w/${lensKey}/explore${
                   firstCreated !== null
                     ? `?focus=${firstCreated.typeKey}:${firstCreated.id}`
                     : ''

@@ -39,6 +39,7 @@ import {
 import { KeyField } from './shared'
 
 interface PropertyDialogProps {
+  ontologyKey: string
   kind: 'entity-types' | 'relation-types'
   typeId: string
   /** null → create mode. */
@@ -52,6 +53,7 @@ interface PropertyDialogProps {
  * a required property may 409 with CASCADE_REQUIRED — handled inline.
  */
 export function PropertyDialog({
+  ontologyKey,
   kind,
   typeId,
   property,
@@ -103,8 +105,8 @@ export function PropertyDialog({
   const save = useMutation({
     mutationFn: (cascadeFlag: boolean) =>
       isEdit
-        ? model.updateProperty(kind, typeId, property.propertyId, body())
-        : model.createProperty(kind, typeId, body(), cascadeFlag),
+        ? model.updateProperty(ontologyKey, kind, typeId, property.propertyId, body())
+        : model.createProperty(ontologyKey, kind, typeId, body(), cascadeFlag),
     onSuccess: (saved) => {
       invalidateModeling(queryClient)
       toast.success(isEdit ? `Property "${saved.key}" updated` : `Property "${saved.key}" added`)

@@ -1,7 +1,8 @@
 /**
  * Wire types for the OntoForge server.
  * Field names are the exact camelCase wire names — see the API contract.
- * Runtime addresses by lens/type KEY, modeling by UUID.
+ * Everything is scoped to one ontology (addressed by KEY); within it,
+ * runtime addresses by lens/type KEY, modeling by UUID.
  */
 
 /* ----------------------------------- misc ---------------------------------- */
@@ -265,6 +266,17 @@ export interface ToolCall {
 export interface ChatResponse {
   reply: string
   toolCalls: ToolCall[] | null
+}
+
+/* --------------------------------- registry --------------------------------- */
+
+export interface Ontology {
+  ontologyId: string
+  key: string
+  /** Mutable server-wide-unique display name; `null` when never named. */
+  displayName: string | null
+  createdAt: string
+  updatedAt: string
 }
 
 /* --------------------------------- modeling --------------------------------- */

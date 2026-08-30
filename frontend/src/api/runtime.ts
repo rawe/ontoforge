@@ -1,5 +1,6 @@
 /**
- * Runtime API client — `/api/runtime/...`, addressed by lens/type KEY.
+ * Runtime API client — `/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/...`,
+ * addressed by ontology, lens and type KEY.
  */
 
 import { buildQuery, request, type FilterMap } from './http'
@@ -11,7 +12,6 @@ import type {
   DocumentContentResponse,
   EntityInstance,
   ExtractResponse,
-  Features,
   JsonValue,
   ListResponse,
   NeighborDirection,
@@ -26,28 +26,25 @@ import type {
   SemanticSearchResponse,
 } from './types'
 
-const base = (lensKey: string) => `/api/runtime/${lensKey}`
-
-/* --------------------------------- features --------------------------------- */
-
-export const getFeatures = () => request<Features>('/api/runtime/features')
+const base = (ontologyKey: string, lensKey: string) =>
+  `/api/ontologies/${ontologyKey}/runtime/lenses/${lensKey}`
 
 /* ---------------------------------- schema ---------------------------------- */
 
-export const getSchema = (lensKey: string) =>
-  request<RuntimeSchema>(`${base(lensKey)}/schema`)
+export const getSchema = (ontologyKey: string, lensKey: string) =>
+  request<RuntimeSchema>(`${base(ontologyKey, lensKey)}/schema`)
 
-export const getSchemaEntityTypes = (lensKey: string) =>
-  request<SchemaEntityType[]>(`${base(lensKey)}/schema/entity-types`)
+export const getSchemaEntityTypes = (ontologyKey: string, lensKey: string) =>
+  request<SchemaEntityType[]>(`${base(ontologyKey, lensKey)}/schema/entity-types`)
 
-export const getSchemaEntityType = (lensKey: string, typeKey: string) =>
-  request<SchemaEntityType>(`${base(lensKey)}/schema/entity-types/${typeKey}`)
+export const getSchemaEntityType = (ontologyKey: string, lensKey: string, typeKey: string) =>
+  request<SchemaEntityType>(`${base(ontologyKey, lensKey)}/schema/entity-types/${typeKey}`)
 
-export const getSchemaRelationTypes = (lensKey: string) =>
-  request<SchemaRelationType[]>(`${base(lensKey)}/schema/relation-types`)
+export const getSchemaRelationTypes = (ontologyKey: string, lensKey: string) =>
+  request<SchemaRelationType[]>(`${base(ontologyKey, lensKey)}/schema/relation-types`)
 
-export const getSchemaRelationType = (lensKey: string, typeKey: string) =>
-  request<SchemaRelationType>(`${base(lensKey)}/schema/relation-types/${typeKey}`)
+export const getSchemaRelationType = (ontologyKey: string, lensKey: string, typeKey: string) =>
+  request<SchemaRelationType>(`${base(ontologyKey, lensKey)}/schema/relation-types/${typeKey}`)
 
 /* --------------------------------- entities --------------------------------- */
 
@@ -62,41 +59,44 @@ export interface ListEntitiesParams {
 }
 
 export const listEntities = (
+  ontologyKey: string,
   lensKey: string,
   entityTypeKey: string,
   params?: ListEntitiesParams,
 ) =>
   request<ListResponse<EntityInstance>>(
-    `${base(lensKey)}/entities/${entityTypeKey}${buildQuery(params)}`,
+    `${base(ontologyKey, lensKey)}/entities/${entityTypeKey}${buildQuery(params)}`,
   )
 
 export const createEntity = (
+  ontologyKey: string,
   lensKey: string,
   entityTypeKey: string,
   properties: Record<string, JsonValue>,
 ) =>
-  request<EntityInstance>(`${base(lensKey)}/entities/${entityTypeKey}`, {
+  request<EntityInstance>(`${base(ontologyKey, lensKey)}/entities/${entityTypeKey}`, {
     method: 'POST',
     body: properties,
   })
 
-export const getEntity = (lensKey: string, entityTypeKey: string, id: string) =>
-  request<EntityInstance>(`${base(lensKey)}/entities/${entityTypeKey}/${id}`)
+export const getEntity = (ontologyKey: string, lensKey: string, entityTypeKey: string, id: string) =>
+  request<EntityInstance>(`${base(ontologyKey, lensKey)}/entities/${entityTypeKey}/${id}`)
 
 /** Partial update; an explicit `null` removes a property. */
 export const updateEntity = (
+  ontologyKey: string,
   lensKey: string,
   entityTypeKey: string,
   id: string,
   properties: Record<string, JsonValue | null>,
 ) =>
-  request<EntityInstance>(`${base(lensKey)}/entities/${entityTypeKey}/${id}`, {
+  request<EntityInstance>(`${base(ontologyKey, lensKey)}/entities/${entityTypeKey}/${id}`, {
     method: 'PATCH',
     body: properties,
   })
 
-export const deleteEntity = (lensKey: string, entityTypeKey: string, id: string) =>
-  request<undefined>(`${base(lensKey)}/entities/${entityTypeKey}/${id}`, {
+export const deleteEntity = (ontologyKey: string, lensKey: string, entityTypeKey: string, id: string) =>
+  request<undefined>(`${base(ontologyKey, lensKey)}/entities/${entityTypeKey}/${id}`, {
     method: 'DELETE',
   })
 
@@ -111,6 +111,7 @@ export interface GetDocumentParams {
 
 /** Full or sliced content of a document property (stubbed in entity reads). */
 export const getDocument = (
+  ontologyKey: string,
   lensKey: string,
   entityTypeKey: string,
   id: string,
@@ -118,7 +119,7 @@ export const getDocument = (
   params?: GetDocumentParams,
 ) =>
   request<DocumentContentResponse>(
-    `${base(lensKey)}/entities/${entityTypeKey}/${id}/documents/${propertyKey}${buildQuery(params)}`,
+    `${base(ontologyKey, lensKey)}/entities/${entityTypeKey}/${id}/documents/${propertyKey}${buildQuery(params)}`,
   )
 
 /* --------------------------------- neighbors -------------------------------- */
@@ -132,13 +133,14 @@ export interface NeighborsParams {
 }
 
 export const getNeighbors = (
+  ontologyKey: string,
   lensKey: string,
   entityTypeKey: string,
   id: string,
   params?: NeighborsParams,
 ) =>
   request<NeighborsResponse>(
-    `${base(lensKey)}/entities/${entityTypeKey}/${id}/neighbors${buildQuery(params)}`,
+    `${base(ontologyKey, lensKey)}/entities/${entityTypeKey}/${id}/neighbors${buildQuery(params)}`,
   )
 
 /* --------------------------------- relations -------------------------------- */
@@ -154,45 +156,49 @@ export interface ListRelationsParams {
 }
 
 export const listRelations = (
+  ontologyKey: string,
   lensKey: string,
   relationTypeKey: string,
   params?: ListRelationsParams,
 ) =>
   request<ListResponse<RelationInstance>>(
-    `${base(lensKey)}/relations/${relationTypeKey}${buildQuery(params)}`,
+    `${base(ontologyKey, lensKey)}/relations/${relationTypeKey}${buildQuery(params)}`,
   )
 
 export const createRelation = (
+  ontologyKey: string,
   lensKey: string,
   relationTypeKey: string,
   body: { fromEntityId: string; toEntityId: string } & Record<string, JsonValue>,
 ) =>
-  request<RelationInstance>(`${base(lensKey)}/relations/${relationTypeKey}`, {
+  request<RelationInstance>(`${base(ontologyKey, lensKey)}/relations/${relationTypeKey}`, {
     method: 'POST',
     body,
   })
 
-export const getRelation = (lensKey: string, relationTypeKey: string, id: string) =>
-  request<RelationInstance>(`${base(lensKey)}/relations/${relationTypeKey}/${id}`)
+export const getRelation = (ontologyKey: string, lensKey: string, relationTypeKey: string, id: string) =>
+  request<RelationInstance>(`${base(ontologyKey, lensKey)}/relations/${relationTypeKey}/${id}`)
 
 /** Props only — endpoints are immutable. */
 export const updateRelation = (
+  ontologyKey: string,
   lensKey: string,
   relationTypeKey: string,
   id: string,
   properties: Record<string, JsonValue | null>,
 ) =>
-  request<RelationInstance>(`${base(lensKey)}/relations/${relationTypeKey}/${id}`, {
+  request<RelationInstance>(`${base(ontologyKey, lensKey)}/relations/${relationTypeKey}/${id}`, {
     method: 'PATCH',
     body: properties,
   })
 
 export const deleteRelation = (
+  ontologyKey: string,
   lensKey: string,
   relationTypeKey: string,
   id: string,
 ) =>
-  request<undefined>(`${base(lensKey)}/relations/${relationTypeKey}/${id}`, {
+  request<undefined>(`${base(ontologyKey, lensKey)}/relations/${relationTypeKey}/${id}`, {
     method: 'DELETE',
   })
 
@@ -215,33 +221,35 @@ export interface SemanticSearchParams {
 }
 
 export const semanticSearch = (
+  ontologyKey: string,
   lensKey: string,
   { minScore, ...params }: SemanticSearchParams,
 ) =>
   request<SemanticSearchResponse>(
-    `${base(lensKey)}/search/semantic${buildQuery({ ...params, min_score: minScore })}`,
+    `${base(ontologyKey, lensKey)}/search/semantic${buildQuery({ ...params, min_score: minScore })}`,
   )
 
 /* ----------------------------------- query ----------------------------------- */
 
 /** Run a read-only OQL query against the lens. */
-export const runQuery = (lensKey: string, query: string) =>
-  request<QueryResult>(`${base(lensKey)}/query`, {
+export const runQuery = (ontologyKey: string, lensKey: string, query: string) =>
+  request<QueryResult>(`${base(ontologyKey, lensKey)}/query`, {
     method: 'POST',
     body: { query },
   })
 
 /* -------------------------------- saved queries ------------------------------ */
 
-export const listSavedQueries = (lensKey: string) =>
-  request<SavedQuery[]>(`${base(lensKey)}/saved-queries`)
+export const listSavedQueries = (ontologyKey: string, lensKey: string) =>
+  request<SavedQuery[]>(`${base(ontologyKey, lensKey)}/saved-queries`)
 
 export const searchSavedQueries = (
+  ontologyKey: string,
   lensKey: string,
   params: { q: string; limit?: number; minScore?: number },
 ) =>
   request<SavedQuerySearchHit[]>(
-    `${base(lensKey)}/saved-queries/search${buildQuery({
+    `${base(ontologyKey, lensKey)}/saved-queries/search${buildQuery({
       q: params.q,
       limit: params.limit,
       min_score: params.minScore,
@@ -249,50 +257,54 @@ export const searchSavedQueries = (
   )
 
 export const runSavedQuery = (
+  ontologyKey: string,
   lensKey: string,
   queryKey: string,
   params: Record<string, JsonValue>,
 ) =>
-  request<QueryResult>(`${base(lensKey)}/saved-queries/${queryKey}/run`, {
+  request<QueryResult>(`${base(ontologyKey, lensKey)}/saved-queries/${queryKey}/run`, {
     method: 'POST',
     body: { params },
   })
 
 /* ------------------------------------- AI ------------------------------------ */
 
-export const aiQuery = (lensKey: string, question: string) =>
-  request<AiQueryResponse>(`${base(lensKey)}/ai/query`, {
+export const aiQuery = (ontologyKey: string, lensKey: string, question: string) =>
+  request<AiQueryResponse>(`${base(ontologyKey, lensKey)}/ai/query`, {
     method: 'POST',
     body: { question },
   })
 
 export const aiExtract = (
+  ontologyKey: string,
   lensKey: string,
   body: { text: string; entityTypes?: string[]; create?: boolean },
 ) =>
-  request<ExtractResponse>(`${base(lensKey)}/ai/extract`, {
+  request<ExtractResponse>(`${base(ontologyKey, lensKey)}/ai/extract`, {
     method: 'POST',
     body,
   })
 
 export const aiChat = (
+  ontologyKey: string,
   lensKey: string,
   body: { message: string; history?: ChatMessage[]; includeToolCalls?: boolean },
 ) =>
-  request<ChatResponse>(`${base(lensKey)}/ai/chat`, {
+  request<ChatResponse>(`${base(ontologyKey, lensKey)}/ai/chat`, {
     method: 'POST',
     body,
   })
 
-export const listAiAgents = (lensKey: string) =>
-  request<AiAgent[]>(`${base(lensKey)}/ai/agents`)
+export const listAiAgents = (ontologyKey: string, lensKey: string) =>
+  request<AiAgent[]>(`${base(ontologyKey, lensKey)}/ai/agents`)
 
 export const aiAgentChat = (
+  ontologyKey: string,
   lensKey: string,
   agentKey: string,
   body: { message: string; history?: ChatMessage[]; includeToolCalls?: boolean },
 ) =>
-  request<ChatResponse>(`${base(lensKey)}/ai/agents/${agentKey}/chat`, {
+  request<ChatResponse>(`${base(ontologyKey, lensKey)}/ai/agents/${agentKey}/chat`, {
     method: 'POST',
     body,
   })

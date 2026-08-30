@@ -16,8 +16,8 @@ export interface RecentEntity {
 
 const MAX_RECENTS = 10
 
-export function readRecents(lensKey: string): RecentEntity[] {
-  const raw = readJson<unknown>(storageKeys.recents(lensKey))
+export function readRecents(ontologyKey: string, lensKey: string): RecentEntity[] {
+  const raw = readJson<unknown>(storageKeys.recents(ontologyKey, lensKey))
   if (!Array.isArray(raw)) return []
   return raw.filter(
     (r): r is RecentEntity =>
@@ -30,12 +30,13 @@ export function readRecents(lensKey: string): RecentEntity[] {
 }
 
 export function recordRecent(
+  ontologyKey: string,
   lensKey: string,
   entry: Omit<RecentEntity, 'at'>,
 ): void {
   const next: RecentEntity[] = [
     { ...entry, at: Date.now() },
-    ...readRecents(lensKey).filter((r) => r.id !== entry.id),
+    ...readRecents(ontologyKey, lensKey).filter((r) => r.id !== entry.id),
   ].slice(0, MAX_RECENTS)
-  writeJson(storageKeys.recents(lensKey), next)
+  writeJson(storageKeys.recents(ontologyKey, lensKey), next)
 }

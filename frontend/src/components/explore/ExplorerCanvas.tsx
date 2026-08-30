@@ -75,11 +75,12 @@ const openPalette = () =>
   window.dispatchEvent(new CustomEvent('of:open-palette'))
 
 interface ExplorerCanvasProps {
+  ontologyKey: string
   lensKey: string
   schema: RuntimeSchema
 }
 
-/** Explorer canvas — remounted per lens (`key={lensKey}` upstream). */
+/** Explorer canvas — remounted per ontology + lens (composite `key` upstream). */
 export function ExplorerCanvas(props: ExplorerCanvasProps) {
   return (
     <ReactFlowProvider>
@@ -88,7 +89,7 @@ export function ExplorerCanvas(props: ExplorerCanvasProps) {
   )
 }
 
-function ExplorerCanvasInner({ lensKey, schema }: ExplorerCanvasProps) {
+function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasProps) {
   const navigate = useNavigate()
   const { resolvedTheme } = useTheme()
   const reactFlow = useReactFlow()
@@ -112,7 +113,7 @@ function ExplorerCanvasInner({ lensKey, schema }: ExplorerCanvasProps) {
   const [connectPair, setConnectPair] = useState<ConnectPair | null>(null)
   const [edgePopover, setEdgePopover] = useState<{ id: string; x: number; y: number } | null>(null)
   const [relayouting, setRelayouting] = useState(false)
-  const [recents] = useState<RecentEntity[]>(() => readRecents(lensKey))
+  const [recents] = useState<RecentEntity[]>(() => readRecents(ontologyKey, lensKey))
 
   const typeNameOf = useCallback(
     (key: string) => schema.entityTypes.find((t) => t.key === key)?.displayName ?? key,
@@ -144,7 +145,7 @@ function ExplorerCanvasInner({ lensKey, schema }: ExplorerCanvasProps) {
     void (async () => {
       const s = schemaRef.current
       const inScope = new Set(s.entityTypes.map((t) => t.key))
-      const persisted = readPersistedNodes(lensKey)
+      const persisted = readPersistedNodes(ontologyKey, lensKey)
         .filter((p) => inScope.has(p.typeKey))
         .slice(0, MAX_NODES)
       if (persisted.length === 0) {
@@ -153,7 +154,7 @@ function ExplorerCanvasInner({ lensKey, schema }: ExplorerCanvasProps) {
       }
       // Refetch entities; 404s (deleted since last visit) drop silently.
       const results = await Promise.allSettled(
-        persisted.map((p) => runtime.getEntity(lensKey, p.typeKey, p.id)),
+        persisted.map((p) => runtime.getEntity(ontologyKey, lensKey, p.typeKey, p.id)),
       )
       const nodes: EntityFlowNode[] = []
       results.forEach((res, i) => {
@@ -179,7 +180,7 @@ function ExplorerCanvasInner({ lensKey, schema }: ExplorerCanvasProps) {
           if (n.data.entity._entityTypeKey !== rt.fromEntityTypeKey) continue
           fetches.push(
             runtime
-              .listRelations(lensKey, rt.key, { fromEntityId: n.id, limit: 200 })
+              .listRelations(ontologyKey, lensKey, rt.key, { fromEntityId: n.id, limit: 200 })
               .then(
                 (res) => res.items.filter((rel) => ids.has(rel.toEntityId)),
                 () => [],
@@ -198,15 +199,15 @@ function ExplorerCanvasInner({ lensKey, schema }: ExplorerCanvasProps) {
     return () => {
       cancelled = true
     }
-  }, [lensKey, reactFlow, fitOptions])
+  }, [ontologyKey, lensKey, reactFlow, fitOptions])
 
   /* -------------------------------- persist ---------------------------------- */
 
   useEffect(() => {
     if (!hydrated) return
-    const timer = setTimeout(() => persistWorkingSet(lensKey, ws.nodes), 400)
+    const timer = setTimeout(() => persistWorkingSet(ontologyKey, lensKey, ws.nodes), 400)
     return () => clearTimeout(timer)
-  }, [ws.nodes, hydrated, lensKey])
+  }, [ws.nodes, hydrated, ontologyKey, lensKey])
 
   /* -------------------------------- helpers ---------------------------------- */
 
@@ -315,13 +316,13 @@ function ExplorerCanvasInner({ lensKey, schema }: ExplorerCanvasProps) {
     const id = focus.slice(sep + 1)
     void (async () => {
       try {
-        const entity = await runtime.getEntity(lensKey, typeKey, id)
+        const entity = await runtime.getEntity(ontologyKey, lensKey, typeKey, id)
         focusEntity(entity)
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Entity not found')
       }
     })()
-  }, [hydrated, searchParams, setSearchParams, lensKey, focusEntity])
+  }, [hydrated, searchParams, setSearchParams, ontologyKey, lensKey, focusEntity])
 
   /* ------------------------------ interactions ------------------------------- */
 
@@ -466,7 +467,7 @@ function ExplorerCanvasInner({ lensKey, schema }: ExplorerCanvasProps) {
 
   const addRecent = async (recent: RecentEntity) => {
     try {
-      const entity = await runtime.getEntity(lensKey, recent.typeKey, recent.id)
+      const entity = await runtime.getEntity(ontologyKey, lensKey, recent.typeKey, recent.id)
       focusEntity(entity)
     } catch {
       toast.error(`"${recent.label}" no longer exists.`)
@@ -499,7 +500,7 @@ function ExplorerCanvasInner({ lensKey, schema }: ExplorerCanvasProps) {
           }
           onNodeDoubleClick={(_event, node) => {
             void navigate(
-              `/w/${lensKey}/e/${node.data.entity._entityTypeKey}/${node.id}`,
+              `/o/${ontologyKey}/w/${lensKey}/e/${node.data.entity._entityTypeKey}/${node.id}`,
             )
           }}
           onPaneClick={() => setEdgePopover(null)}
@@ -580,6 +581,7 @@ function ExplorerCanvasInner({ lensKey, schema }: ExplorerCanvasProps) {
       {panelNode !== null && (
         <NodePanel
           key={panelNode.id}
+          ontologyKey={ontologyKey}
           lensKey={lensKey}
           node={panelNode}
           entityTypes={schema.entityTypes}
@@ -614,6 +616,7 @@ function ExplorerCanvasInner({ lensKey, schema }: ExplorerCanvasProps) {
 
       {edgePopover !== null && popoverEdge !== undefined && (
         <EdgePopover
+          ontologyKey={ontologyKey}
           lensKey={lensKey}
           edge={popoverEdge}
           at={{ x: edgePopover.x, y: edgePopover.y }}
@@ -635,6 +638,7 @@ function ExplorerCanvasInner({ lensKey, schema }: ExplorerCanvasProps) {
       )}
 
       <ConnectDialog
+        ontologyKey={ontologyKey}
         lensKey={lensKey}
         pair={connectPair}
         entityTypes={schema.entityTypes}

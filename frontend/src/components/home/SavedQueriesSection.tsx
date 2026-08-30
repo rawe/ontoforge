@@ -9,10 +9,10 @@ import { Skeleton } from '@/components/ui/skeleton'
  * Saved queries as quick-run cards; clicking navigates to the Query page
  * with `?run={queryKey}` (the Query slice wires the parameter up).
  */
-export function SavedQueriesSection({ lensKey }: { lensKey: string }) {
+export function SavedQueriesSection({ ontologyKey, lensKey }: { ontologyKey: string; lensKey: string }) {
   const queries = useQuery({
-    queryKey: qk.savedQueries(lensKey),
-    queryFn: () => listSavedQueries(lensKey),
+    queryKey: qk.savedQueries(ontologyKey, lensKey),
+    queryFn: () => listSavedQueries(ontologyKey, lensKey),
   })
 
   return (
@@ -35,7 +35,7 @@ export function SavedQueriesSection({ lensKey }: { lensKey: string }) {
             {queries.data.map((q) => (
               <li key={q.key}>
                 <Link
-                  to={`/w/${lensKey}/query?run=${encodeURIComponent(q.key)}`}
+                  to={`/o/${ontologyKey}/w/${lensKey}/query?run=${encodeURIComponent(q.key)}`}
                   className="group flex items-start gap-2.5 rounded-xl border bg-card px-3.5 py-2.5 transition-all duration-150 hover:border-ring/40"
                 >
                   <SquareTerminal className="mt-0.5 size-4 shrink-0 text-muted-foreground" />

@@ -21,6 +21,7 @@ export function QueryErrorBlock({ message }: { message: string }) {
 }
 
 interface ResultsPanelProps {
+  ontologyKey: string
   lensKey: string
   result: QueryResult
   /** Wall-clock duration of the run, shown next to the row count. */
@@ -36,6 +37,7 @@ interface ResultsPanelProps {
  * the results contain at least one entity object).
  */
 export function ResultsPanel({
+  ontologyKey,
   lensKey,
   result,
   elapsedMs,
@@ -101,12 +103,13 @@ export function ResultsPanel({
 
       {view === 'graph' && graph !== null ? (
         <ResultsGraph
+          ontologyKey={ontologyKey}
           lensKey={lensKey}
           entities={graph.entities}
           edges={graph.edges}
         />
       ) : (
-        <ResultsTable lensKey={lensKey} result={result} />
+        <ResultsTable ontologyKey={ontologyKey} lensKey={lensKey} result={result} />
       )}
     </div>
   )

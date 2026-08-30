@@ -11,31 +11,17 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 
-function snippetUrlBased(origin: string, lensKey: string): string {
-  return JSON.stringify(
-    {
-      mcpServers: {
-        'ontoforge-modeling': { type: 'http', url: `${origin}/mcp/model` },
-        'ontoforge-runtime': { type: 'http', url: `${origin}/mcp/runtime/${lensKey}` },
-      },
-    },
-    null,
-    2,
-  )
-}
-
-function snippetHeaderBased(origin: string, lensKey: string): string {
+function snippet(origin: string, ontologyKey: string, lensKey: string): string {
   return JSON.stringify(
     {
       mcpServers: {
         'ontoforge-modeling': {
           type: 'http',
-          url: `${origin}/mcp/model`,
+          url: `${origin}/mcp/ontologies/${ontologyKey}/model`,
         },
         'ontoforge-runtime': {
           type: 'http',
-          url: `${origin}/mcp/runtime`,
-          headers: { 'X-Lens-Key': lensKey },
+          url: `${origin}/mcp/ontologies/${ontologyKey}/runtime/lenses/${lensKey}`,
         },
       },
     },
@@ -78,13 +64,16 @@ function CodeBlock({ label, code }: { label: string; code: string }) {
 }
 
 /**
- * "Connect AI clients" dialog: MCP config snippets (URL-based and
- * header-based) with the lens key inlined, plus copy buttons.
+ * "Connect AI clients" dialog: the MCP config snippet with both servers
+ * bound by URL — modeling to this ontology, runtime to this ontology and
+ * lens.
  */
 export function McpConnectDialog({
+  ontologyKey,
   lensKey,
   trigger,
 }: {
+  ontologyKey: string
   lensKey: string
   trigger: ReactNode
 }) {
@@ -96,21 +85,15 @@ export function McpConnectDialog({
         <DialogHeader>
           <DialogTitle>Connect AI clients</DialogTitle>
           <DialogDescription>
-            Point any MCP-capable client (Claude, IDEs, agents) at this lens. Both
-            snippets expose the modeling and runtime servers for{' '}
-            <span className="font-mono text-foreground">{lensKey}</span>.
+            Point any MCP-capable client (Claude, IDEs, agents) at this ontology. The
+            modeling server works on the schema of{' '}
+            <span className="font-mono text-foreground">{ontologyKey}</span>; the
+            runtime server reads and writes data through the lens{' '}
+            <span className="font-mono text-foreground">{lensKey}</span>. Both are
+            bound by their URL.
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4">
-          <CodeBlock
-            label="Lens key in the URL"
-            code={snippetUrlBased(origin, lensKey)}
-          />
-          <CodeBlock
-            label="Lens key as a header"
-            code={snippetHeaderBased(origin, lensKey)}
-          />
-        </div>
+        <CodeBlock label="MCP config" code={snippet(origin, ontologyKey, lensKey)} />
       </DialogContent>
     </Dialog>
   )

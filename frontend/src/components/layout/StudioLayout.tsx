@@ -1,7 +1,7 @@
 import { ArrowLeftRight, ArrowLeft, Layers, Shapes } from 'lucide-react'
 import type { ComponentType } from 'react'
-import { NavLink, Outlet } from 'react-router-dom'
-import { Logo } from '@/components/Logo'
+import { NavLink, Outlet, useParams } from 'react-router-dom'
+import { OntologySwitcher } from '@/components/layout/OntologySwitcher'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { Button } from '@/components/ui/button'
 import { readString, storageKeys } from '@/lib/storage'
@@ -38,27 +38,31 @@ function StudioNavItem({
   )
 }
 
-/** Shell for all `/studio/...` routes — the modeling surface. */
+/** Shell for all `/o/:ontologyKey/studio/...` routes — the modeling surface. */
 export function StudioLayout() {
-  const lastLens = readString(storageKeys.lastLens)
-  const backTo = lastLens === null ? '/welcome' : `/w/${lastLens}`
+  const { ontologyKey } = useParams<{ ontologyKey: string }>()
+  if (ontologyKey === undefined) return null
+
+  const base = `/o/${ontologyKey}/studio`
+  // Back to this ontology's workbench: its remembered last-used lens, or
+  // the start page when none is remembered (a lens-less ontology has no
+  // workbench to return to).
+  const lastLens = readString(storageKeys.lastLens(ontologyKey))
+  const backTo = lastLens === null ? '/' : `/o/${ontologyKey}/w/${lastLens}`
 
   return (
     <div className="flex h-dvh overflow-hidden bg-background">
       <aside className="flex h-full w-60 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground">
-        <div className="flex h-13 items-center gap-2 px-3.5">
-          <Logo className="size-6 rounded-md" />
-          <div className="min-w-0">
-            <div className="truncate text-[13px] font-semibold leading-tight">OntoForge</div>
-            <div className="text-[10.5px] font-medium uppercase tracking-wider text-primary">
-              Studio
-            </div>
-          </div>
+        <div className="p-2">
+          <OntologySwitcher ontologyKey={ontologyKey} surface="studio" />
+        </div>
+        <div className="px-3.5 pb-1 text-[10.5px] font-medium uppercase tracking-wider text-primary">
+          Studio
         </div>
         <nav className="flex flex-col gap-0.5 px-2 pt-1" aria-label="Studio">
-          <StudioNavItem to="/studio" end label="Schema" icon={Shapes} />
-          <StudioNavItem to="/studio/lenses" label="Lenses" icon={Layers} />
-          <StudioNavItem to="/studio/transfer" label="Transfer" icon={ArrowLeftRight} />
+          <StudioNavItem to={base} end label="Schema" icon={Shapes} />
+          <StudioNavItem to={`${base}/lenses`} label="Lenses" icon={Layers} />
+          <StudioNavItem to={`${base}/transfer`} label="Transfer" icon={ArrowLeftRight} />
         </nav>
         <div className="flex-1" />
         <div className="flex items-center gap-1 border-t p-2">

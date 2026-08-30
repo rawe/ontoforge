@@ -41,10 +41,10 @@ const DEFAULT_AGENT = '_default'
  * tool-call inspection, Enter-to-send input, elapsed-seconds pending state and
  * per-lens+agent persisted history.
  */
-export function ChatTab({ lensKey }: { lensKey: string }) {
+export function ChatTab({ ontologyKey, lensKey }: { ontologyKey: string; lensKey: string }) {
   const agents = useQuery({
-    queryKey: qk.agents(lensKey),
-    queryFn: () => listAiAgents(lensKey),
+    queryKey: qk.agents(ontologyKey, lensKey),
+    queryFn: () => listAiAgents(ontologyKey, lensKey),
   })
   const agentOptions = useMemo(() => {
     const list = agents.data ?? []
@@ -55,7 +55,7 @@ export function ChatTab({ lensKey }: { lensKey: string }) {
 
   const [agentKey, setAgentKey] = useState(DEFAULT_AGENT)
   const [messages, setMessages] = useState<StoredChatMessage[]>(() =>
-    readChatHistory(lensKey, DEFAULT_AGENT),
+    readChatHistory(ontologyKey, lensKey, DEFAULT_AGENT),
   )
   const [input, setInput] = useState('')
   /** Message optimistically shown while the request is in flight / failed. */
@@ -72,8 +72,8 @@ export function ChatTab({ lensKey }: { lensKey: string }) {
       }))
       const body = { message: text, history, includeToolCalls: true }
       return agentKey === DEFAULT_AGENT
-        ? aiChat(lensKey, body)
-        : aiAgentChat(lensKey, agentKey, body)
+        ? aiChat(ontologyKey, lensKey, body)
+        : aiAgentChat(ontologyKey, lensKey, agentKey, body)
     },
     onSuccess: (response, text) => {
       const userMessage: StoredChatMessage = { role: 'user', content: text }
@@ -86,7 +86,7 @@ export function ChatTab({ lensKey }: { lensKey: string }) {
       }
       const next = [...messages, userMessage, assistantMessage].slice(-50)
       setMessages(next)
-      writeChatHistory(lensKey, agentKey, next)
+      writeChatHistory(ontologyKey, lensKey, agentKey, next)
       setPendingText(null)
     },
   })
@@ -128,7 +128,7 @@ export function ChatTab({ lensKey }: { lensKey: string }) {
           onValueChange={(key) => {
             // Each agent keeps its own persisted thread.
             setAgentKey(key)
-            setMessages(readChatHistory(lensKey, key))
+            setMessages(readChatHistory(ontologyKey, lensKey, key))
             setPendingText(null)
             send.reset()
           }}
@@ -279,7 +279,7 @@ export function ChatTab({ lensKey }: { lensKey: string }) {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
-                clearChatHistory(lensKey, agentKey)
+                clearChatHistory(ontologyKey, lensKey, agentKey)
                 setMessages([])
                 setPendingText(null)
                 send.reset()

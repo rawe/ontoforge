@@ -6,15 +6,15 @@ import { ExplorerCanvas } from '@/components/explore/ExplorerCanvas'
 import { Skeleton } from '@/components/ui/skeleton'
 
 /**
- * `/w/:lensKey/explore` — the Explorer canvas (slice S5). Full-bleed
+ * `/o/:ontologyKey/w/:lensKey/explore` — the Explorer canvas (slice S5). Full-bleed
  * React Flow surface; all page state lives in `ExplorerCanvas`, remounted
  * per lens so working sets never bleed across lenses.
  */
 export function ExplorePage() {
-  const { lensKey } = useParams<{ lensKey: string }>()
-  const schema = useRuntimeSchema(lensKey)
+  const { ontologyKey, lensKey } = useParams<{ ontologyKey: string; lensKey: string }>()
+  const schema = useRuntimeSchema(ontologyKey, lensKey)
 
-  if (lensKey === undefined) return null
+  if (ontologyKey === undefined || lensKey === undefined) return null
 
   if (schema.isPending) {
     return (
@@ -36,6 +36,11 @@ export function ExplorePage() {
   }
 
   return (
-    <ExplorerCanvas key={lensKey} lensKey={lensKey} schema={schema.data} />
+    <ExplorerCanvas
+      key={`${ontologyKey}/${lensKey}`}
+      ontologyKey={ontologyKey}
+      lensKey={lensKey}
+      schema={schema.data}
+    />
   )
 }

@@ -31,6 +31,7 @@ export interface EntitySearchResult {
 }
 
 export interface EntitySearchOptions {
+  ontologyKey: string
   lensKey: string
   /** Debounced, prefix-stripped query. */
   q: string
@@ -51,6 +52,7 @@ export interface EntitySearchOptions {
  * that type; an empty unscoped query returns nothing.
  */
 export function useEntitySearch({
+  ontologyKey,
   lensKey,
   q,
   typeKey,
@@ -63,6 +65,7 @@ export function useEntitySearch({
     queryKey: [
       'palette',
       'entitySearch',
+      ontologyKey,
       lensKey,
       typeKey ?? '*',
       q,
@@ -74,11 +77,11 @@ export function useEntitySearch({
     queryFn: async (): Promise<EntitySearchResult[]> => {
       if (q === '') {
         if (typeKey === undefined) return []
-        const res = await runtime.listEntities(lensKey, typeKey, { limit: 10 })
+        const res = await runtime.listEntities(ontologyKey, lensKey, typeKey, { limit: 10 })
         return res.items.map((entity) => ({ entity }))
       }
       if (semantic && q.length >= 2) {
-        const res = await runtime.semanticSearch(lensKey, {
+        const res = await runtime.semanticSearch(ontologyKey, lensKey, {
           q,
           ...(typeKey !== undefined ? { type: typeKey } : {}),
           limit,
@@ -90,11 +93,11 @@ export function useEntitySearch({
         }))
       }
       if (typeKey !== undefined) {
-        const res = await runtime.listEntities(lensKey, typeKey, { q, limit })
+        const res = await runtime.listEntities(ontologyKey, lensKey, typeKey, { q, limit })
         return res.items.map((entity) => ({ entity }))
       }
       const settled = await Promise.allSettled(
-        allTypeKeys.map((t) => runtime.listEntities(lensKey, t, { q, limit: 5 })),
+        allTypeKeys.map((t) => runtime.listEntities(ontologyKey, lensKey, t, { q, limit: 5 })),
       )
       return settled.flatMap((s) =>
         s.status === 'fulfilled' ? s.value.items.map((entity) => ({ entity })) : [],
@@ -116,21 +119,22 @@ export type SavedQueryHit = SavedQuery | SavedQuerySearchHit
  * Semantic hits carry no steps (the search endpoint never returns them).
  */
 export function useSavedQuerySearch(
+  ontologyKey: string,
   lensKey: string,
   q: string,
   semantic: boolean,
   enabled: boolean,
 ) {
   return useQuery({
-    queryKey: ['palette', 'savedQuerySearch', lensKey, q, semantic],
+    queryKey: ['palette', 'savedQuerySearch', ontologyKey, lensKey, q, semantic],
     enabled,
     placeholderData: keepPreviousData,
     queryFn: async (): Promise<SavedQueryHit[]> => {
-      if (q === '') return runtime.listSavedQueries(lensKey)
+      if (q === '') return runtime.listSavedQueries(ontologyKey, lensKey)
       if (semantic && q.length >= 2) {
-        return runtime.searchSavedQueries(lensKey, { q, limit: 10, minScore: 0.3 })
+        return runtime.searchSavedQueries(ontologyKey, lensKey, { q, limit: 10, minScore: 0.3 })
       }
-      const all = await runtime.listSavedQueries(lensKey)
+      const all = await runtime.listSavedQueries(ontologyKey, lensKey)
       const needle = q.toLowerCase()
       return all.filter(
         (sq) =>

@@ -33,11 +33,13 @@ import { formatQueryError } from './resultUtils'
 /* --------------------------------- run panel --------------------------------- */
 
 function RunPanel({
+  ontologyKey,
   lensKey,
   query,
   relationTypes,
   autoRun,
 }: {
+  ontologyKey: string
   lensKey: string
   /** Full query or step-less search hit — running only needs key + parameters. */
   query: SavedQueryHit
@@ -61,7 +63,7 @@ function RunPanel({
   const execute = useMutation({
     mutationFn: async () => {
       const started = performance.now()
-      const result = await runtime.runSavedQuery(lensKey, query.key, buildParams())
+      const result = await runtime.runSavedQuery(ontologyKey, lensKey, query.key, buildParams())
       return { result, ms: Math.round(performance.now() - started) }
     },
     onSuccess: (data) => {
@@ -83,7 +85,7 @@ function RunPanel({
   const allParamsFilled = query.parameters.every((p) => (raw[p.name] ?? '').trim() !== '')
 
   const copyCurl = () => {
-    const url = `${window.location.origin}/api/runtime/${lensKey}/saved-queries/${query.key}/run`
+    const url = `${window.location.origin}/api/ontologies/${ontologyKey}/runtime/lenses/${lensKey}/saved-queries/${query.key}/run`
     const body = JSON.stringify({ params: buildParams() })
     const command = `curl -X POST '${url}' -H 'Content-Type: application/json' -d '${body.replaceAll("'", "'\\''")}'`
     navigator.clipboard
@@ -139,6 +141,7 @@ function RunPanel({
 
       {run !== null && (
         <ResultsPanel
+          ontologyKey={ontologyKey}
           lensKey={lensKey}
           result={run.result}
           elapsedMs={run.ms}
@@ -165,6 +168,7 @@ function stepBadges(query: SavedQueryHit) {
 }
 
 interface LibraryTabProps {
+  ontologyKey: string
   lensKey: string
   relationTypes: readonly SchemaRelationType[]
   /** `?run=` — open (and, when parameterless, immediately run) this query. */
@@ -179,21 +183,24 @@ interface LibraryTabProps {
  * "Edit in Studio" link — management lives in the Studio.
  */
 export function LibraryTab({
+  ontologyKey,
   lensKey,
   relationTypes,
   runKey,
   onOpenConsole,
 }: LibraryTabProps) {
   const { data: features } = useFeatures()
-  const { data: lenses } = useLenses()
+  const { data: lenses } = useLenses(ontologyKey)
   const lensId = lenses?.find((o) => o.key === lensKey)?.lensId
   const studioHref =
-    lensId !== undefined ? `/studio/lenses/${lensId}?tab=queries` : '/studio/lenses'
+    lensId !== undefined
+      ? `/o/${ontologyKey}/studio/lenses/${lensId}?tab=queries`
+      : `/o/${ontologyKey}/studio/lenses`
 
   const [search, setSearch] = useState('')
   const debounced = useDebouncedValue(search.trim(), 250)
   const semantic = features?.semanticSearch === true
-  const queriesQuery = useSavedQuerySearch(lensKey, debounced, semantic, true)
+  const queriesQuery = useSavedQuerySearch(ontologyKey, lensKey, debounced, semantic, true)
   const queries = queriesQuery.data
 
   const [expandedKey, setExpandedKey] = useState<string | null>(runKey)
@@ -316,6 +323,7 @@ export function LibraryTab({
               </div>
               {expanded && (
                 <RunPanel
+                  ontologyKey={ontologyKey}
                   lensKey={lensKey}
                   query={q}
                   relationTypes={relationTypes}

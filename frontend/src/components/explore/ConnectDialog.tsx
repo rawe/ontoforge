@@ -32,6 +32,7 @@ export interface ConnectPair {
 }
 
 interface ConnectDialogProps {
+  ontologyKey: string
   lensKey: string
   pair: ConnectPair | null
   entityTypes: readonly SchemaEntityType[]
@@ -54,6 +55,7 @@ export function ConnectDialog({ pair, onClose, ...rest }: ConnectDialogProps) {
 }
 
 function ConnectFlow({
+  ontologyKey,
   lensKey,
   pair,
   entityTypes,
@@ -83,7 +85,7 @@ function ConnectFlow({
         setErrors(result.errors)
         return Promise.reject(new Error('__validation__'))
       }
-      return runtime.createRelation(lensKey, vars.option.relationType.key, {
+      return runtime.createRelation(ontologyKey, lensKey, vars.option.relationType.key, {
         fromEntityId: vars.option.from._id,
         toEntityId: vars.option.to._id,
         ...result.values,
@@ -92,12 +94,14 @@ function ConnectFlow({
     onSuccess: (created, vars) => {
       invalidateNeighborhood(
         queryClient,
+        ontologyKey,
         lensKey,
         vars.option.from._entityTypeKey,
         vars.option.from._id,
       )
       invalidateNeighborhood(
         queryClient,
+        ontologyKey,
         lensKey,
         vars.option.to._entityTypeKey,
         vars.option.to._id,

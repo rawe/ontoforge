@@ -12,21 +12,21 @@ const TABS = ['chat', 'ask', 'extract'] as const
 type TabKey = (typeof TABS)[number]
 
 /**
- * `/w/:lensKey/ai` — AI assistant with tabs Chat | Ask | Extract.
+ * `/o/:ontologyKey/w/:lensKey/ai` — AI assistant with tabs Chat | Ask | Extract.
  * The active tab lives in `?tab=` so extract/ask can be deep-linked; all
  * three panels stay mounted so a long-running extraction survives tab
  * switches.
  */
 export function AiPage() {
-  const { lensKey } = useParams<{ lensKey: string }>()
+  const { ontologyKey, lensKey } = useParams<{ ontologyKey: string; lensKey: string }>()
   const { data: features } = useFeatures()
-  const schema = useRuntimeSchema(lensKey)
+  const schema = useRuntimeSchema(ontologyKey, lensKey)
   const [searchParams, setSearchParams] = useSearchParams()
 
   const rawTab = searchParams.get('tab')
   const tab: TabKey = TABS.includes(rawTab as TabKey) ? (rawTab as TabKey) : 'chat'
 
-  if (lensKey === undefined) return null
+  if (ontologyKey === undefined || lensKey === undefined) return null
 
   if (features?.ai === false) {
     return (
@@ -87,14 +87,22 @@ export function AiPage() {
             forceMount
             className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
           >
-            <ChatTab key={lensKey} lensKey={lensKey} />
+            <ChatTab
+              key={`${ontologyKey}/${lensKey}`}
+              ontologyKey={ontologyKey}
+              lensKey={lensKey}
+            />
           </TabsContent>
           <TabsContent
             value="ask"
             forceMount
             className="min-h-0 flex-1 overflow-y-auto data-[state=inactive]:hidden"
           >
-            <AskTab key={lensKey} lensKey={lensKey} />
+            <AskTab
+              key={`${ontologyKey}/${lensKey}`}
+              ontologyKey={ontologyKey}
+              lensKey={lensKey}
+            />
           </TabsContent>
           <TabsContent
             value="extract"
@@ -102,7 +110,8 @@ export function AiPage() {
             className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
           >
             <ExtractTab
-              key={lensKey}
+              key={`${ontologyKey}/${lensKey}`}
+              ontologyKey={ontologyKey}
               lensKey={lensKey}
               schema={schema.data}
               semanticEnabled={features?.semanticSearch === true}

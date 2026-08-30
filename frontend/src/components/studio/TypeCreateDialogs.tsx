@@ -83,19 +83,24 @@ function applyApiError(
 }
 
 interface CreateDialogProps {
+  ontologyKey: string
   open: boolean
   onOpenChange: (open: boolean) => void
 }
 
 /** "New entity type" dialog — key, display name, description. */
-export function EntityTypeCreateDialog({ open, onOpenChange }: CreateDialogProps) {
+export function EntityTypeCreateDialog({
+  ontologyKey,
+  open,
+  onOpenChange,
+}: CreateDialogProps) {
   const form = useTypeForm(open)
   const queryClient = useQueryClient()
   const navigate = useNavigate()
 
   const create = useMutation({
     mutationFn: () =>
-      model.createEntityType({
+      model.createEntityType(ontologyKey, {
         key: form.key,
         displayName: form.displayName.trim(),
         description: form.description.trim() === '' ? null : form.description.trim(),
@@ -104,7 +109,7 @@ export function EntityTypeCreateDialog({ open, onOpenChange }: CreateDialogProps
       invalidateModeling(queryClient)
       toast.success(`Entity type "${created.displayName}" created`)
       onOpenChange(false)
-      void navigate(`/studio/entity-types/${created.entityTypeId}`)
+      void navigate(`/o/${ontologyKey}/studio/entity-types/${created.entityTypeId}`)
     },
     onError: (error) => applyApiError(error, form.setFieldErrors),
   })
@@ -174,6 +179,7 @@ interface RelationTypeCreateDialogProps extends CreateDialogProps {
 
 /** "New relation type" dialog — adds source/target selects (immutable after). */
 export function RelationTypeCreateDialog({
+  ontologyKey,
   open,
   onOpenChange,
   entityTypes,
@@ -195,7 +201,7 @@ export function RelationTypeCreateDialog({
 
   const create = useMutation({
     mutationFn: () =>
-      model.createRelationType({
+      model.createRelationType(ontologyKey, {
         key: form.key,
         displayName: form.displayName.trim(),
         description: form.description.trim() === '' ? null : form.description.trim(),
@@ -206,7 +212,7 @@ export function RelationTypeCreateDialog({
       invalidateModeling(queryClient)
       toast.success(`Relation type "${created.displayName}" created`)
       onOpenChange(false)
-      void navigate(`/studio/relation-types/${created.relationTypeId}`)
+      void navigate(`/o/${ontologyKey}/studio/relation-types/${created.relationTypeId}`)
     },
     onError: (error) => applyApiError(error, form.setFieldErrors),
   })

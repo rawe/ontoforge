@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Layers, Plus } from 'lucide-react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import * as model from '@/api/model'
 import { ApiError } from '@/api/http'
@@ -27,8 +27,14 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 
 /** Scoped/unscoped badge with include counts — needs its own scope query. */
-export function ScopeBadge({ lensId }: { lensId: string }) {
-  const { data: scope } = useLensScope(lensId)
+export function ScopeBadge({
+  ontologyKey,
+  lensId,
+}: {
+  ontologyKey: string
+  lensId: string
+}) {
+  const { data: scope } = useLensScope(ontologyKey, lensId)
   if (scope === undefined) return null
   if (!scope.scoped) {
     return (
@@ -44,17 +50,17 @@ export function ScopeBadge({ lensId }: { lensId: string }) {
   )
 }
 
-function LensCard({ lens }: { lens: Lens }) {
+function LensCard({ ontologyKey, lens }: { ontologyKey: string; lens: Lens }) {
   return (
     <Link
-      to={`/studio/lenses/${lens.lensId}`}
+      to={`/o/${ontologyKey}/studio/lenses/${lens.lensId}`}
       className="rounded-xl border bg-card p-4 transition-colors duration-150 hover:border-ring/40 focus-visible:outline-2 focus-visible:outline-ring/60"
     >
       <div className="flex items-center gap-2">
         <span className="truncate text-sm font-medium">{lens.name}</span>
         <span className="font-mono text-[11px] text-muted-foreground">{lens.key}</span>
         <span className="ml-auto shrink-0">
-          <ScopeBadge lensId={lens.lensId} />
+          <ScopeBadge ontologyKey={ontologyKey} lensId={lens.lensId} />
         </span>
       </div>
       <p className="mt-1 line-clamp-2 text-[13px] text-muted-foreground">
@@ -65,12 +71,17 @@ function LensCard({ lens }: { lens: Lens }) {
 }
 
 interface CreateLensDialogProps {
+  ontologyKey: string
   open: boolean
   onOpenChange: (open: boolean) => void
 }
 
 /** "New lens" dialog with live key validation; the key is immutable. */
-export function CreateLensDialog({ open, onOpenChange }: CreateLensDialogProps) {
+export function CreateLensDialog({
+  ontologyKey,
+  open,
+  onOpenChange,
+}: CreateLensDialogProps) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const [name, setName] = useState('')
@@ -93,7 +104,7 @@ export function CreateLensDialog({ open, onOpenChange }: CreateLensDialogProps) 
 
   const create = useMutation({
     mutationFn: () =>
-      model.createLens({
+      model.createLens(ontologyKey, {
         key,
         name: name.trim(),
         description: description.trim() === '' ? null : description.trim(),
@@ -102,7 +113,7 @@ export function CreateLensDialog({ open, onOpenChange }: CreateLensDialogProps) 
       invalidateModeling(queryClient)
       toast.success(`Lens "${created.name}" created`)
       onOpenChange(false)
-      void navigate(`/studio/lenses/${created.lensId}`)
+      void navigate(`/o/${ontologyKey}/studio/lenses/${created.lensId}`)
     },
     onError: (error) => {
       if (error instanceof ApiError && error.fieldErrors !== undefined) {
@@ -120,8 +131,8 @@ export function CreateLensDialog({ open, onOpenChange }: CreateLensDialogProps) 
         <DialogHeader>
           <DialogTitle>New lens</DialogTitle>
           <DialogDescription>
-            A named lens over the global schema. New lenses start unscoped — they
-            expose the full schema until you scope them.
+            A named lens over this ontology's schema. New lenses start unscoped —
+            they expose the full schema until you scope them.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -180,16 +191,19 @@ export function CreateLensDialog({ open, onOpenChange }: CreateLensDialogProps) 
   )
 }
 
-/** `/studio/lenses` — lens list + creation. */
+/** `/o/:ontologyKey/studio/lenses` — lens list + creation. */
 export function LensesPage() {
-  const { data: lenses, isPending } = useLenses()
+  const { ontologyKey } = useParams<{ ontologyKey: string }>()
+  const { data: lenses, isPending } = useLenses(ontologyKey)
   const [createOpen, setCreateOpen] = useState(false)
+
+  if (ontologyKey === undefined) return null
 
   return (
     <div>
       <PageHeader
         title="Lenses"
-        description="Named lenses over the global schema — unscoped or filtered to a subset of types."
+        description="Named views over this ontology's schema — unscoped or filtered to a subset of types."
         actions={
           <Button size="sm" onClick={() => setCreateOpen(true)}>
             <Plus className="size-3.5" /> New lens
@@ -218,12 +232,16 @@ export function LensesPage() {
         {lenses !== undefined && lenses.length > 0 && (
           <div className="grid gap-3 sm:grid-cols-2">
             {lenses.map((o) => (
-              <LensCard key={o.lensId} lens={o} />
+              <LensCard key={o.lensId} ontologyKey={ontologyKey} lens={o} />
             ))}
           </div>
         )}
       </div>
-      <CreateLensDialog open={createOpen} onOpenChange={setCreateOpen} />
+      <CreateLensDialog
+        ontologyKey={ontologyKey}
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+      />
     </div>
   )
 }

@@ -1,23 +1,29 @@
 /**
- * Tiny localStorage helpers. All persisted UI state lives under `of.*` keys:
+ * Tiny localStorage helpers. All persisted UI state lives under `of.*` keys.
+ * Lens keys are unique only within their ontology, so every per-lens key is
+ * qualified by ontology + lens:
  *
- *   of.lastLens          — key of the last-used lens
- *   of.theme                 — managed by next-themes (light|dark|system)
- *   of.sidebar               — "expanded" | "collapsed"
- *   of.explore.{lensKey} — Explorer canvas working set (later slice)
- *   of.chat.{lensKey}    — AI chat history (later slice)
- *   of.recents.{lensKey} — last 10 opened entities (see `lib/recents.ts`)
- *   of.queryHistory.{lensKey} — last 10 run OQL queries (Query console)
+ *   of.lastLens.{ontologyKey} — key of that ontology's last-used lens; feeds
+ *                               the ontology switcher's workbench landing
+ *   of.theme                  — managed by next-themes (light|dark|system)
+ *   of.sidebar                — "expanded" | "collapsed"
+ *   of.explore.{ontologyKey}.{lensKey} — Explorer canvas working set
+ *   of.chat.{ontologyKey}.{lensKey}    — AI chat history
+ *   of.recents.{ontologyKey}.{lensKey} — last 10 opened entities (`lib/recents.ts`)
+ *   of.queryHistory.{ontologyKey}.{lensKey} — last 10 run OQL queries
  */
 
 export const storageKeys = {
-  lastLens: 'of.lastLens',
+  lastLens: (ontologyKey: string) => `of.lastLens.${ontologyKey}`,
   theme: 'of.theme',
   sidebar: 'of.sidebar',
-  explore: (lensKey: string) => `of.explore.${lensKey}`,
-  chat: (lensKey: string) => `of.chat.${lensKey}`,
-  recents: (lensKey: string) => `of.recents.${lensKey}`,
-  queryHistory: (lensKey: string) => `of.queryHistory.${lensKey}`,
+  explore: (ontologyKey: string, lensKey: string) =>
+    `of.explore.${ontologyKey}.${lensKey}`,
+  chat: (ontologyKey: string, lensKey: string) => `of.chat.${ontologyKey}.${lensKey}`,
+  recents: (ontologyKey: string, lensKey: string) =>
+    `of.recents.${ontologyKey}.${lensKey}`,
+  queryHistory: (ontologyKey: string, lensKey: string) =>
+    `of.queryHistory.${ontologyKey}.${lensKey}`,
 } as const
 
 export function readString(key: string): string | null {

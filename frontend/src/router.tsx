@@ -3,8 +3,7 @@ import { createBrowserRouter, Navigate } from 'react-router-dom'
 import { StudioLayout } from '@/components/layout/StudioLayout'
 import { WorkbenchLayout } from '@/components/layout/WorkbenchLayout'
 import { RouteFallback } from '@/components/RouteFallback'
-import { RootRedirect } from '@/pages/RootRedirect'
-import { WelcomePage } from '@/pages/WelcomePage'
+import { StartPage } from '@/pages/StartPage'
 import { EntityDetailPage } from '@/pages/workbench/EntityDetailPage'
 import { HomePage } from '@/pages/workbench/HomePage'
 import { TypeTablePage } from '@/pages/workbench/TypeTablePage'
@@ -45,11 +44,13 @@ const suspended = (node: ReactNode) => (
   <Suspense fallback={<RouteFallback />}>{node}</Suspense>
 )
 
+// URLs are ontology-first, mirroring REST: `/o/:ontologyKey/studio/...`
+// for modeling, `/o/:ontologyKey/w/:lensKey/...` for the workbench. The
+// URL is the only source of truth for both keys.
 export const router = createBrowserRouter([
-  { path: '/', element: <RootRedirect /> },
-  { path: '/welcome', element: <WelcomePage /> },
+  { path: '/', element: <StartPage /> },
   {
-    path: '/w/:lensKey',
+    path: '/o/:ontologyKey/w/:lensKey',
     element: <WorkbenchLayout />,
     children: [
       { index: true, element: <HomePage /> },
@@ -61,7 +62,7 @@ export const router = createBrowserRouter([
     ],
   },
   {
-    path: '/studio',
+    path: '/o/:ontologyKey/studio',
     element: <StudioLayout />,
     children: [
       { index: true, element: suspended(<StudioHomePage />) },

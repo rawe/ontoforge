@@ -45,12 +45,14 @@ interface RowType {
 
 /** Per-property scope editor shown when an included type row is expanded. */
 function PropertyScopeEditor({
+  ontologyKey,
   kind,
   lensId,
   type,
   include,
   onInvalidate,
 }: {
+  ontologyKey: string
   kind: Kind
   lensId: string
   type: RowType
@@ -58,14 +60,14 @@ function PropertyScopeEditor({
   onInvalidate: () => void
 }) {
   const propertiesQuery = useQuery({
-    queryKey: qk.model(kind, type.typeId, 'properties'),
-    queryFn: () => model.listProperties(kind, type.typeId),
+    queryKey: qk.model(ontologyKey, kind, type.typeId, 'properties'),
+    queryFn: () => model.listProperties(ontologyKey, kind, type.typeId),
   })
   const properties = propertiesQuery.data
 
   const update = useMutation({
     mutationFn: (properties: string[] | null) =>
-      scopeApi[kind].update(lensId, type.typeId, { key: type.key, properties }),
+      scopeApi[kind].update(ontologyKey, lensId, type.typeId, { key: type.key, properties }),
     onSuccess: onInvalidate,
     onError: toastError,
   })
@@ -142,12 +144,14 @@ function PropertyScopeEditor({
 
 /** One type row in the scope checklist. */
 function ScopeRow({
+  ontologyKey,
   kind,
   lensId,
   type,
   include,
   onInvalidate,
 }: {
+  ontologyKey: string
   kind: Kind
   lensId: string
   type: RowType
@@ -160,8 +164,8 @@ function ScopeRow({
   const toggle = useMutation({
     mutationFn: (checked: boolean) =>
       checked
-        ? scopeApi[kind].add(lensId, { key: type.key, properties: null })
-        : scopeApi[kind].remove(lensId, type.typeId),
+        ? scopeApi[kind].add(ontologyKey, lensId, { key: type.key, properties: null })
+        : scopeApi[kind].remove(ontologyKey, lensId, type.typeId),
     onSuccess: onInvalidate,
     onError: toastError,
   })
@@ -210,6 +214,7 @@ function ScopeRow({
       </div>
       {included && expanded && (
         <PropertyScopeEditor
+          ontologyKey={ontologyKey}
           kind={kind}
           lensId={lensId}
           type={type}
@@ -222,8 +227,8 @@ function ScopeRow({
 }
 
 /** Live preview of what the lens exposes — rendered from the runtime schema. */
-function LensPreview({ lensKey }: { lensKey: string }) {
-  const { data: schema, isPending, isFetching } = useRuntimeSchema(lensKey)
+function LensPreview({ ontologyKey, lensKey }: { ontologyKey: string; lensKey: string }) {
+  const { data: schema, isPending, isFetching } = useRuntimeSchema(ontologyKey, lensKey)
 
   return (
     <div className="rounded-xl border bg-card p-4">
@@ -304,31 +309,31 @@ function LensPreview({ lensKey }: { lensKey: string }) {
   )
 }
 
-/** Scope editor tab: checklists of all global types + live lens preview. */
-export function ScopeTab({ lens }: { lens: Lens }) {
+/** Scope editor tab: checklists of the ontology's types + live lens preview. */
+export function ScopeTab({ ontologyKey, lens }: { ontologyKey: string; lens: Lens }) {
   const queryClient = useQueryClient()
   const [validation, setValidation] = useState<ValidationResult | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
   const entityTypesQuery = useQuery({
-    queryKey: qk.model('entity-types'),
-    queryFn: model.listEntityTypes,
+    queryKey: qk.model(ontologyKey, 'entity-types'),
+    queryFn: () => model.listEntityTypes(ontologyKey),
   })
   const relationTypesQuery = useQuery({
-    queryKey: qk.model('relation-types'),
-    queryFn: model.listRelationTypes,
+    queryKey: qk.model(ontologyKey, 'relation-types'),
+    queryFn: () => model.listRelationTypes(ontologyKey),
   })
-  const scope = useLensScope(lens.lensId)
+  const scope = useLensScope(ontologyKey, lens.lensId)
 
   const invalidate = () => {
     void queryClient.invalidateQueries({
-      queryKey: qk.model('lenses', lens.lensId, 'includes'),
+      queryKey: qk.model(ontologyKey, 'lenses', lens.lensId, 'includes'),
     })
     void queryClient.invalidateQueries({ queryKey: ['schema'] })
   }
 
   const validate = useMutation({
-    mutationFn: () => model.validateLens(lens.lensId),
+    mutationFn: () => model.validateLens(ontologyKey, lens.lensId),
     onSuccess: setValidation,
     onError: toastError,
   })
@@ -415,6 +420,7 @@ export function ScopeTab({ lens }: { lens: Lens }) {
             {entityRows.map((t) => (
               <ScopeRow
                 key={t.typeId}
+                ontologyKey={ontologyKey}
                 kind="entity-types"
                 lensId={lens.lensId}
                 type={t}
@@ -423,7 +429,7 @@ export function ScopeTab({ lens }: { lens: Lens }) {
               />
             ))}
             {entityRows.length === 0 && (
-              <p className="text-[12px] text-muted-foreground">No global entity types.</p>
+              <p className="text-[12px] text-muted-foreground">No entity types in this ontology.</p>
             )}
           </section>
           <section>
@@ -433,6 +439,7 @@ export function ScopeTab({ lens }: { lens: Lens }) {
             {relationRows.map((t) => (
               <ScopeRow
                 key={t.typeId}
+                ontologyKey={ontologyKey}
                 kind="relation-types"
                 lensId={lens.lensId}
                 type={t}
@@ -441,7 +448,7 @@ export function ScopeTab({ lens }: { lens: Lens }) {
               />
             ))}
             {relationRows.length === 0 && (
-              <p className="text-[12px] text-muted-foreground">No global relation types.</p>
+              <p className="text-[12px] text-muted-foreground">No relation types in this ontology.</p>
             )}
           </section>
           <p className="text-[11px] text-muted-foreground">
@@ -449,7 +456,7 @@ export function ScopeTab({ lens }: { lens: Lens }) {
             types are also in scope — run Validate to check.
           </p>
         </div>
-        <LensPreview lensKey={lens.key} />
+        <LensPreview ontologyKey={ontologyKey} lensKey={lens.key} />
       </div>
     </div>
   )

@@ -57,10 +57,10 @@ function isEditableTarget(e: KeyboardEvent): boolean {
  * or palette action. Step 1 picks an entity type (skipped when pre-scoped),
  * step 2 is the schema-driven EntityForm.
  */
-export function QuickAddDialog({ lensKey }: { lensKey: string }) {
+export function QuickAddDialog({ ontologyKey, lensKey }: { ontologyKey: string; lensKey: string }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const schema = useRuntimeSchema(lensKey)
+  const schema = useRuntimeSchema(ontologyKey, lensKey)
 
   const [open, setOpen] = useState(false)
   const [typeKey, setTypeKey] = useState<string | undefined>(undefined)
@@ -79,16 +79,16 @@ export function QuickAddDialog({ lensKey }: { lensKey: string }) {
     }: {
       forType: string
       values: Record<string, JsonValue>
-    }) => createEntity(lensKey, forType, values),
+    }) => createEntity(ontologyKey, lensKey, forType, values),
     onSuccess: (entity, { forType }) => {
       // Entity lists AND the per-type count queries share this key prefix.
       void queryClient.invalidateQueries({
-        queryKey: qk.entities(lensKey, forType),
+        queryKey: qk.entities(ontologyKey, lensKey, forType),
       })
       toast.success(`Created ${displayLabel(entity)}`, {
         action: {
           label: 'View',
-          onClick: () => navigate(`/w/${lensKey}/e/${forType}/${entity._id}`),
+          onClick: () => navigate(`/o/${ontologyKey}/w/${lensKey}/e/${forType}/${entity._id}`),
         },
       })
       setDirty(false)

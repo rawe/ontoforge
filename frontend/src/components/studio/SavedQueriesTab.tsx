@@ -317,6 +317,7 @@ function StepEditor({
 /* ------------------------------- editor dialog ------------------------------- */
 
 interface SavedQueryDialogProps {
+  ontologyKey: string
   /** Modeling saved-query routes are addressed by lens KEY (not UUID). */
   lensKey: string
   /** null → create mode. */
@@ -325,13 +326,19 @@ interface SavedQueryDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
-function SavedQueryDialog({ lensKey, query, open, onOpenChange }: SavedQueryDialogProps) {
+function SavedQueryDialog({
+  ontologyKey,
+  lensKey,
+  query,
+  open,
+  onOpenChange,
+}: SavedQueryDialogProps) {
   const isEdit = query !== null
   const queryClient = useQueryClient()
 
   const entityTypesQuery = useQuery({
-    queryKey: qk.model('entity-types'),
-    queryFn: model.listEntityTypes,
+    queryKey: qk.model(ontologyKey, 'entity-types'),
+    queryFn: () => model.listEntityTypes(ontologyKey),
   })
   const entityTypeKeys = (entityTypesQuery.data ?? []).map((t) => t.key)
 
@@ -388,7 +395,7 @@ function SavedQueryDialog({ lensKey, query, open, onOpenChange }: SavedQueryDial
     // NOTE: the backend requires `description` as a plain string on saved
     // queries and their parameters (it is embedded for semantic discovery).
     mutationFn: () =>
-      model.upsertSavedQuery(lensKey, key, {
+      model.upsertSavedQuery(ontologyKey, lensKey, key, {
         name: name.trim(),
         description: description.trim(),
         steps: cleanSteps(),
@@ -633,9 +640,11 @@ function formatCell(value: JsonValue | undefined): string {
 
 /** Inline test runner for a saved query: param inputs → run → results. */
 function SavedQueryRunner({
+  ontologyKey,
   lensKey,
   query,
 }: {
+  ontologyKey: string
   lensKey: string
   query: SavedQuery
 }) {
@@ -651,7 +660,7 @@ function SavedQueryRunner({
         const value = coerceTypedValue(p.dataType, raw[p.name] ?? '')
         if (value !== null) params[p.name] = value
       }
-      return runtime.runSavedQuery(lensKey, query.key, params)
+      return runtime.runSavedQuery(ontologyKey, lensKey, query.key, params)
     },
     onSuccess: (res) => {
       setResult(res)
@@ -752,7 +761,13 @@ function SavedQueryRunner({
 /* ----------------------------------- tab ------------------------------------ */
 
 /** Saved queries tab: list + editor dialog + inline test runner. */
-export function SavedQueriesTab({ lens }: { lens: Lens }) {
+export function SavedQueriesTab({
+  ontologyKey,
+  lens,
+}: {
+  ontologyKey: string
+  lens: Lens
+}) {
   const queryClient = useQueryClient()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<SavedQuery | null>(null)
@@ -760,15 +775,15 @@ export function SavedQueriesTab({ lens }: { lens: Lens }) {
   const [runnerKey, setRunnerKey] = useState<string | null>(null)
 
   // NOTE: modeling saved-query routes are key-addressed, unlike the other
-  // /api/model/lenses/{id}/... routes.
+  // /api/ontologies/{key}/model/lenses/{id}/... routes.
   const queriesQuery = useQuery({
-    queryKey: qk.model('lenses', lens.key, 'saved-queries'),
-    queryFn: () => model.listSavedQueries(lens.key),
+    queryKey: qk.model(ontologyKey, 'lenses', lens.key, 'saved-queries'),
+    queryFn: () => model.listSavedQueries(ontologyKey, lens.key),
   })
   const queries = queriesQuery.data
 
   const remove = useMutation({
-    mutationFn: (queryKey: string) => model.deleteSavedQuery(lens.key, queryKey),
+    mutationFn: (queryKey: string) => model.deleteSavedQuery(ontologyKey, lens.key, queryKey),
     onSuccess: () => {
       invalidateModeling(queryClient)
       toast.success('Saved query deleted')
@@ -864,7 +879,7 @@ export function SavedQueriesTab({ lens }: { lens: Lens }) {
                 </Button>
               </div>
               {runnerKey === q.key && (
-                <SavedQueryRunner lensKey={lens.key} query={q} />
+                <SavedQueryRunner ontologyKey={ontologyKey} lensKey={lens.key} query={q} />
               )}
             </div>
           ))}
@@ -872,6 +887,7 @@ export function SavedQueriesTab({ lens }: { lens: Lens }) {
       )}
 
       <SavedQueryDialog
+        ontologyKey={ontologyKey}
         lensKey={lens.key}
         query={editing}
         open={dialogOpen}

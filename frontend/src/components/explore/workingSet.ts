@@ -235,8 +235,8 @@ export interface PersistedNode {
   pinned: boolean
 }
 
-export function readPersistedNodes(lensKey: string): PersistedNode[] {
-  const raw = readJson<unknown>(storageKeys.explore(lensKey))
+export function readPersistedNodes(ontologyKey: string, lensKey: string): PersistedNode[] {
+  const raw = readJson<unknown>(storageKeys.explore(ontologyKey, lensKey))
   if (raw === null || typeof raw !== 'object') return []
   const nodes = (raw as { nodes?: unknown }).nodes
   if (!Array.isArray(nodes)) return []
@@ -256,10 +256,11 @@ export function readPersistedNodes(lensKey: string): PersistedNode[] {
 }
 
 export function persistWorkingSet(
+  ontologyKey: string,
   lensKey: string,
   nodes: readonly EntityFlowNode[],
 ): void {
-  writeJson(storageKeys.explore(lensKey), {
+  writeJson(storageKeys.explore(ontologyKey, lensKey), {
     nodes: nodes.map(
       (n): PersistedNode => ({
         id: n.id,

@@ -96,7 +96,7 @@ function mockEdit(entity: Row, updated?: Row): void {
   holder.store.updateEntity.mockResolvedValue(updated ?? entity);
 }
 
-const URL = "/api/runtime/docs_view/entities/person/ent-1/documents/bio";
+const URL = "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person/ent-1/documents/bio";
 
 async function patchDoc(payload: Row, url = URL) {
   return app.inject({ method: "PATCH", url, payload });
@@ -303,7 +303,7 @@ describe("request shape", () => {
     holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
     const res = await patchDoc(
       { op: "str_replace", oldString: "a", newString: "b" },
-      "/api/runtime/docs_view/entities/person/ent-1/documents/name",
+      "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person/ent-1/documents/name",
     );
     expect(res.statusCode).toBe(404);
   });

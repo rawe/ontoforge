@@ -60,7 +60,7 @@ describe("features route on a fully booted server", () => {
   it("answers both capabilities false with the exact field names", async () => {
     const app = await startServer();
     try {
-      const res = await app.inject({ method: "GET", url: "/api/runtime/features" });
+      const res = await app.inject({ method: "GET", url: "/api/server/features" });
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({ semanticSearch: false, ai: false });
     } finally {

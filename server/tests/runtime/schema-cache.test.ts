@@ -237,6 +237,41 @@ describe("the scoping matrix", () => {
   });
 });
 
+describe("the cache key carries the ontology dimension", () => {
+  it("the same lens key in two ontologies yields two independent entries", async () => {
+    // Both ontologies hold a lens `default`, with different schemas.
+    const crm = createMockRuntimeStore("crm");
+    crm.getFullSchema.mockResolvedValue(makeFullSchema({ lensKey: "default" }));
+    const hr = createMockRuntimeStore("hr");
+    hr.getFullSchema.mockResolvedValue(
+      makeFullSchema({
+        lensKey: "default",
+        entityInclusions: [{ key: "person", properties: ["name", "email"] }],
+      }),
+    );
+
+    const fromCrm = await loadSchema("default", asRuntimeStore(crm));
+    const fromHr = await loadSchema("default", asRuntimeStore(hr));
+
+    // Each entry was built from its own store — the second load must not
+    // be served from the first ontology's entry.
+    expect(crm.getFullSchema).toHaveBeenCalledTimes(1);
+    expect(hr.getFullSchema).toHaveBeenCalledTimes(1);
+    expect(Object.keys(fromCrm.scoped.entityTypes).sort()).toEqual([
+      "company",
+      "department",
+      "person",
+    ]);
+    expect(Object.keys(fromHr.scoped.entityTypes)).toEqual(["person"]);
+
+    // Repeat loads hit each ontology's own entry.
+    expect(await loadSchema("default", asRuntimeStore(crm))).toBe(fromCrm);
+    expect(await loadSchema("default", asRuntimeStore(hr))).toBe(fromHr);
+    expect(crm.getFullSchema).toHaveBeenCalledTimes(1);
+    expect(hr.getFullSchema).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("wholesale invalidation via the modeling seam", () => {
   it("a modeling mutation clears the WHOLE cache", async () => {
     const hrMock = storeWith(makeScopedSchema());

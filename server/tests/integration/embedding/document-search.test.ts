@@ -91,14 +91,14 @@ describe.skipIf(!ollamaUp)("document semantic search (Ollama)", () => {
   });
 
   it("finds a passage inside a document and resolves it to the parent entity", async () => {
-    const article = await post("/api/runtime/doc_search/entities/article", {
+    const article = await post("/api/ontologies/test_ont/runtime/lenses/doc_search/entities/article", {
       title: "Engines",
       body: BODY,
     });
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/doc_search/search/semantic?q=polynomial%20computation&type=article&searchIn=documents",
+      url: "/api/ontologies/test_ont/runtime/lenses/doc_search/search/semantic?q=polynomial%20computation&type=article&searchIn=documents",
     });
     expect(res.statusCode).toBe(200);
     const data = res.json() as { total: number; results: Row[] };
@@ -121,7 +121,7 @@ describe.skipIf(!ollamaUp)("document semantic search (Ollama)", () => {
     const slice = await app.inject({
       method: "GET",
       url:
-        `/api/runtime/doc_search/entities/article/${article._id as string}` +
+        `/api/ontologies/test_ont/runtime/lenses/doc_search/entities/article/${article._id as string}` +
         `/documents/body?offset=${mv.charOffset as number}&limit=${mv.charLength as number}`,
     });
     expect(slice.statusCode).toBe(200);
@@ -130,7 +130,7 @@ describe.skipIf(!ollamaUp)("document semantic search (Ollama)", () => {
   });
 
   it("search hits return the chunk payload unchanged (ordinal, offsets)", async () => {
-    const article = await post("/api/runtime/doc_search/entities/article", {
+    const article = await post("/api/ontologies/test_ont/runtime/lenses/doc_search/entities/article", {
       title: "Engines",
       body: BODY,
     });
@@ -158,11 +158,11 @@ describe.skipIf(!ollamaUp)("document semantic search (Ollama)", () => {
   });
 
   it("suppressing snippets keeps the coordinates", async () => {
-    await post("/api/runtime/doc_search/entities/article", { title: "Engines", body: BODY });
+    await post("/api/ontologies/test_ont/runtime/lenses/doc_search/entities/article", { title: "Engines", body: BODY });
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/doc_search/search/semantic?q=punched%20cards&type=article&searchIn=documents&snippets=false",
+      url: "/api/ontologies/test_ont/runtime/lenses/doc_search/search/semantic?q=punched%20cards&type=article&searchIn=documents&snippets=false",
     });
     expect(res.statusCode).toBe(200);
     const mv = ((res.json() as { results: Row[] }).results[0]!.matchedVia) as Row;
@@ -172,19 +172,19 @@ describe.skipIf(!ollamaUp)("document semantic search (Ollama)", () => {
 
   it("fused search ranks an entity found in both scopes first", async () => {
     // Matches in both scopes: title (entity vector) and body (passages).
-    await post("/api/runtime/doc_search/entities/article", {
+    await post("/api/ontologies/test_ont/runtime/lenses/doc_search/entities/article", {
       title: "Analytical engine computation",
       body: BODY,
     });
     // Matches at most weakly in either.
-    await post("/api/runtime/doc_search/entities/article", {
+    await post("/api/ontologies/test_ont/runtime/lenses/doc_search/entities/article", {
       title: "Gardening for beginners",
       body: "Water your plants regularly and prune them in spring.",
     });
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/doc_search/search/semantic?q=analytical%20engine&type=article&searchIn=all",
+      url: "/api/ontologies/test_ont/runtime/lenses/doc_search/search/semantic?q=analytical%20engine&type=article&searchIn=all",
     });
     expect(res.statusCode).toBe(200);
     const data = res.json() as { results: Row[] };
@@ -197,7 +197,7 @@ describe.skipIf(!ollamaUp)("document semantic search (Ollama)", () => {
   });
 
   it("reuses chunk vectors for unchanged text on a partial edit", async () => {
-    const article = await post("/api/runtime/doc_search/entities/article", {
+    const article = await post("/api/ontologies/test_ont/runtime/lenses/doc_search/entities/article", {
       title: "Engines",
       body: BODY,
     });
@@ -208,7 +208,7 @@ describe.skipIf(!ollamaUp)("document semantic search (Ollama)", () => {
     const counter = countEmbedCalls();
     const res = await app.inject({
       method: "PATCH",
-      url: `/api/runtime/doc_search/entities/article/${article._id as string}/documents/body`,
+      url: `/api/ontologies/test_ont/runtime/lenses/doc_search/entities/article/${article._id as string}/documents/body`,
       payload: {
         op: "str_replace",
         oldString: "Paragraph 9:",
@@ -224,7 +224,7 @@ describe.skipIf(!ollamaUp)("document semantic search (Ollama)", () => {
   });
 
   it("a full rewrite re-embeds every chunk (the reuse map finds nothing)", async () => {
-    const article = await post("/api/runtime/doc_search/entities/article", {
+    const article = await post("/api/ontologies/test_ont/runtime/lenses/doc_search/entities/article", {
       title: "Engines",
       body: BODY,
     });
@@ -233,7 +233,7 @@ describe.skipIf(!ollamaUp)("document semantic search (Ollama)", () => {
     const rewritten = BODY.replaceAll("Paragraph", "Chapter");
     const res = await app.inject({
       method: "PATCH",
-      url: `/api/runtime/doc_search/entities/article/${article._id as string}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/doc_search/entities/article/${article._id as string}`,
       payload: { body: rewritten },
     });
     expect(res.statusCode, res.body).toBe(200);
@@ -241,7 +241,7 @@ describe.skipIf(!ollamaUp)("document semantic search (Ollama)", () => {
   });
 
   it("min_score floors the raw similarity, not the fused score", async () => {
-    await post("/api/runtime/doc_search/entities/article", {
+    await post("/api/ontologies/test_ont/runtime/lenses/doc_search/entities/article", {
       title: "Analytical engine computation",
       body: BODY,
     });
@@ -250,7 +250,7 @@ describe.skipIf(!ollamaUp)("document semantic search (Ollama)", () => {
     // fused scores (~1/61) would always pass a similarity threshold of 0.
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/doc_search/search/semantic?q=analytical%20engine&type=article&min_score=0.99",
+      url: "/api/ontologies/test_ont/runtime/lenses/doc_search/search/semantic?q=analytical%20engine&type=article&min_score=0.99",
     });
     expect(res.statusCode).toBe(200);
     expect((res.json() as { total: number }).total).toBe(0);

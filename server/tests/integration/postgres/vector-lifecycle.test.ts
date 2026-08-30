@@ -43,9 +43,9 @@ interface IndexFacts {
   definition: string;
 }
 
-/** Every index in the schema, by name, with the width of its first
+/** Every index in one namespace, by name, with the width of its first
  * column and its full definition. */
-async function catalog(): Promise<Map<string, IndexFacts>> {
+async function catalog(namespace: string = NAMESPACE): Promise<Map<string, IndexFacts>> {
   const result = await runQuery(
     `SELECT idx.relname AS name,
             format_type(att.atttypid, att.atttypmod) AS coltype,
@@ -54,7 +54,7 @@ async function catalog(): Promise<Map<string, IndexFacts>> {
      JOIN pg_namespace nsp ON nsp.oid = idx.relnamespace
      LEFT JOIN pg_attribute att ON att.attrelid = idx.oid AND att.attnum = 1
      WHERE nsp.nspname = $1 AND idx.relkind = 'i'`,
-    [NAMESPACE],
+    [namespace],
   );
   const facts = new Map<string, IndexFacts>();
   for (const row of result.rows) {
@@ -374,6 +374,51 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
       const indexes = await catalog();
       expect(indexes.has("entity_embedding_all_idx")).toBe(true);
       expect(indexes.has("saved_query_embedding_idx")).toBe(true);
+    });
+  });
+
+  describe("startup maintenance across the registry", () => {
+    it("one startup ensure covers every registered ontology's namespace", async () => {
+      // A second ontology with its own typed schema beside the fixture one.
+      await getOntologyRegistry().createOntology(randomUUID(), "vec_other", null, null);
+      const other = await getModelingStore("vec_other");
+      const otherTypeId = randomUUID();
+      await other.createEntityType(otherTypeId, "ticket", "Ticket", null);
+
+      // An orphan staged in the second namespace: the sweep must reach it.
+      const orphan = `vec_entity_${nameId(randomUUID())}`;
+      await runQuery(
+        `CREATE INDEX ${orphan} ON entity USING hnsw ((embedding::vector(${MODEL_WIDTH})) vector_cosine_ops)`,
+        undefined,
+        "ont_vec_other",
+      );
+
+      await ensureSemanticIndexes(MODEL_WIDTH);
+
+      // The fixture ontology got its full inventory ...
+      for (const name of [entityIndex, chunkIndex, "entity_embedding_all_idx"]) {
+        expect((await catalog()).get(name)?.width, `${name} missing in ${NAMESPACE}`).toBe(
+          MODEL_WIDTH,
+        );
+      }
+      // ... and so did the second, per ITS schema, in ITS namespace.
+      const otherIndexes = await catalog("ont_vec_other");
+      expect(otherIndexes.get(`vec_entity_${nameId(otherTypeId)}`)?.width).toBe(MODEL_WIDTH);
+      expect(otherIndexes.get("entity_embedding_all_idx")?.width).toBe(MODEL_WIDTH);
+      expect(otherIndexes.get("saved_query_embedding_idx")?.width).toBe(MODEL_WIDTH);
+      // The orphan in the second namespace was swept by the same call.
+      expect(otherIndexes.has(orphan)).toBe(false);
+      // The fixture namespace never grew the other ontology's index.
+      expect((await catalog()).has(`vec_entity_${nameId(otherTypeId)}`)).toBe(false);
+    });
+
+    it("with zero ontologies the startup ensure does nothing and succeeds", async () => {
+      await wipeDatabase();
+      await expect(ensureSemanticIndexes(MODEL_WIDTH)).resolves.toBeUndefined();
+      const namespaces = await runQuery(
+        `SELECT nspname FROM pg_namespace WHERE nspname LIKE 'ont\\_%'`,
+      );
+      expect(namespaces.rows).toHaveLength(0);
     });
   });
 });

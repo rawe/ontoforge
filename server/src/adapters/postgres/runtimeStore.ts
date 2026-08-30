@@ -136,9 +136,12 @@ function propsJson(properties: Row, propertyDefs: PropertyDefs): string {
 }
 
 export class PostgresRuntimeStore implements RuntimeStore {
-  /** Bound to one ontology's namespace; unbound (tests only) runs against
-   * the connection's default namespace. */
-  constructor(private readonly namespace?: string) {}
+  /** Bound to one ontology and its namespace; unbound (tests only) runs
+   * against the connection's default namespace. */
+  constructor(
+    public readonly ontologyKey: string = "",
+    private readonly namespace?: string,
+  ) {}
 
   /** Door one, carrying this store's binding. */
   private query(text: string, params?: unknown[]): Promise<DbResult> {

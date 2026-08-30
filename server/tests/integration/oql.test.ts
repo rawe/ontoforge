@@ -57,7 +57,7 @@ beforeEach(async () => {
 async function createEntity(lens: string, typeKey: string, payload: Row): Promise<Row> {
   const res = await app.inject({
     method: "POST",
-    url: `/api/runtime/${lens}/entities/${typeKey}`,
+    url: `/api/ontologies/test_ont/runtime/lenses/${lens}/entities/${typeKey}`,
     payload,
   });
   expect(res.statusCode, res.body).toBe(201);
@@ -67,7 +67,7 @@ async function createEntity(lens: string, typeKey: string, payload: Row): Promis
 async function createRelation(lens: string, typeKey: string, payload: Row): Promise<Row> {
   const res = await app.inject({
     method: "POST",
-    url: `/api/runtime/${lens}/relations/${typeKey}`,
+    url: `/api/ontologies/test_ont/runtime/lenses/${lens}/relations/${typeKey}`,
     payload,
   });
   expect(res.statusCode, res.body).toBe(201);
@@ -77,7 +77,7 @@ async function createRelation(lens: string, typeKey: string, payload: Row): Prom
 async function query(lens: string, oql: string, expectedStatus = 200): Promise<Row> {
   const res = await app.inject({
     method: "POST",
-    url: `/api/runtime/${lens}/query`,
+    url: `/api/ontologies/test_ont/runtime/lenses/${lens}/query`,
     payload: { query: oql },
   });
   expect(res.statusCode, res.body).toBe(expectedStatus);
@@ -495,7 +495,7 @@ describe("the clause and expression matrix", () => {
 
       const filtered = await app.inject({
         method: "GET",
-        url: "/api/runtime/test_lens/entities/person?filter.name__contains=ali",
+        url: "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person?filter.name__contains=ali",
       });
       expect(filtered.json().total).toBe(1);
     });

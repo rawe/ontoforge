@@ -37,7 +37,7 @@ export function createModelingStore(ontologyKey: string): PostgresModelingStore 
 
 /** A runtime store bound to one ontology's namespace. */
 export function createRuntimeStore(ontologyKey: string): PostgresRuntimeStore {
-  return new PostgresRuntimeStore(ontologyNamespace(ontologyKey));
+  return new PostgresRuntimeStore(ontologyKey, ontologyNamespace(ontologyKey));
 }
 
 /** The ontology registry over the pool `initAdapter` opened. */

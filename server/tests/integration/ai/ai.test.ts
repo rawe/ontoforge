@@ -139,14 +139,14 @@ beforeAll(async () => {
   expect(res.statusCode, res.body).toBe(201);
 
   // Seed instance data.
-  await post("/api/runtime/ai_test/entities/company", { name: "Acme Corp" });
-  await post("/api/runtime/ai_test/entities/company", { name: "TechStart GmbH" });
-  await post("/api/runtime/ai_test/entities/person", {
+  await post("/api/ontologies/test_ont/runtime/lenses/ai_test/entities/company", { name: "Acme Corp" });
+  await post("/api/ontologies/test_ont/runtime/lenses/ai_test/entities/company", { name: "TechStart GmbH" });
+  await post("/api/ontologies/test_ont/runtime/lenses/ai_test/entities/person", {
     name: "Alice",
     age: 30,
     location: "Berlin",
   });
-  await post("/api/runtime/ai_test/entities/person", {
+  await post("/api/ontologies/test_ont/runtime/lenses/ai_test/entities/person", {
     name: "Bob",
     age: 25,
     location: "Munich",
@@ -178,7 +178,7 @@ const ifAvailable = (name: string, fn: () => Promise<void>) =>
 
 describe("features", () => {
   ifAvailable("reports ai enabled", async () => {
-    const { statusCode, body } = await inject("GET", "/api/runtime/features");
+    const { statusCode, body } = await inject("GET", "/api/server/features");
     expect(statusCode).toBe(200);
     expect(body.ai).toBe(true);
   });
@@ -190,7 +190,7 @@ describe("features", () => {
 
 describe("POST /ai/query", () => {
   ifAvailable("answers a question over seeded data with OQL and rows", async () => {
-    const { statusCode, body } = await inject("POST", "/api/runtime/ai_test/ai/query", {
+    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/query", {
       question: "How many persons are there? Use the execute_query tool.",
     });
     expect(statusCode).toBe(200);
@@ -207,7 +207,7 @@ describe("POST /ai/query", () => {
   });
 
   ifAvailable("rejects an empty question", async () => {
-    const { statusCode } = await inject("POST", "/api/runtime/ai_test/ai/query", {
+    const { statusCode } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/query", {
       question: "",
     });
     expect(statusCode).toBe(422);
@@ -220,7 +220,7 @@ describe("POST /ai/query", () => {
 
 describe("POST /ai/extract", () => {
   ifAvailable("returns proposals shaped to the schema without writing", async () => {
-    const { statusCode, body } = await inject("POST", "/api/runtime/ai_test/ai/extract", {
+    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/extract", {
       text: "Charlie is 28 years old and lives in Hamburg. He works at DataFlow Inc.",
     });
     expect(statusCode).toBe(200);
@@ -235,7 +235,7 @@ describe("POST /ai/extract", () => {
   });
 
   ifAvailable("honours the entity-type hint list", async () => {
-    const { statusCode, body } = await inject("POST", "/api/runtime/ai_test/ai/extract", {
+    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/extract", {
       text: "Eve works at GlobalTech.",
       entityTypes: ["person"],
     });
@@ -244,7 +244,7 @@ describe("POST /ai/extract", () => {
   });
 
   ifAvailable("persists on request and reports it", async () => {
-    const { statusCode, body } = await inject("POST", "/api/runtime/ai_test/ai/extract", {
+    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/extract", {
       text: "Dave is 35 years old.",
       entityTypes: ["person"],
       create: true,
@@ -252,14 +252,14 @@ describe("POST /ai/extract", () => {
     expect(statusCode).toBe(200);
     expect(body.created).toBe(true);
 
-    const list = await inject("GET", "/api/runtime/ai_test/entities/person?q=Dave");
+    const list = await inject("GET", "/api/ontologies/test_ont/runtime/lenses/ai_test/entities/person?q=Dave");
     expect(list.statusCode).toBe(200);
     const items = list.body.items as Row[];
     expect(items.some((item) => String(item.name ?? "").includes("Dave"))).toBe(true);
   });
 
   ifAvailable("rejects empty text", async () => {
-    const { statusCode } = await inject("POST", "/api/runtime/ai_test/ai/extract", {
+    const { statusCode } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/extract", {
       text: "",
     });
     expect(statusCode).toBe(422);
@@ -272,7 +272,7 @@ describe("POST /ai/extract", () => {
 
 describe("POST /ai/chat", () => {
   ifAvailable("returns a reply; toolCalls stays null without the trace flag", async () => {
-    const { statusCode, body } = await inject("POST", "/api/runtime/ai_test/ai/chat", {
+    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/chat", {
       message: "How many companies are in the database?",
     });
     expect(statusCode).toBe(200);
@@ -282,7 +282,7 @@ describe("POST /ai/chat", () => {
   });
 
   ifAvailable("returns the tool-call trace on request", async () => {
-    const { statusCode, body } = await inject("POST", "/api/runtime/ai_test/ai/chat", {
+    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/chat", {
       message: "List all persons",
       includeToolCalls: true,
     });
@@ -296,7 +296,7 @@ describe("POST /ai/chat", () => {
   });
 
   ifAvailable("accepts caller-supplied history", async () => {
-    const { statusCode, body } = await inject("POST", "/api/runtime/ai_test/ai/chat", {
+    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/chat", {
       message: "And how old is she?",
       history: [
         { role: "user", content: "How many persons are there?" },
@@ -308,7 +308,7 @@ describe("POST /ai/chat", () => {
   });
 
   ifAvailable("rejects an empty message", async () => {
-    const { statusCode } = await inject("POST", "/api/runtime/ai_test/ai/chat", {
+    const { statusCode } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/chat", {
       message: "",
     });
     expect(statusCode).toBe(422);
@@ -321,7 +321,7 @@ describe("POST /ai/chat", () => {
 
 describe("agents", () => {
   ifAvailable("lists the default agent alongside the configured one", async () => {
-    const { statusCode, body } = await inject("GET", "/api/runtime/ai_test/ai/agents");
+    const { statusCode, body } = await inject("GET", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/agents");
     expect(statusCode).toBe(200);
     const agents = body as unknown as Row[];
     const keys = agents.map((a) => a.key);
@@ -332,7 +332,7 @@ describe("agents", () => {
   ifAvailable("a restricted agent's trace shows only allowlisted tools", async () => {
     const { statusCode, body } = await inject(
       "POST",
-      "/api/runtime/ai_test/ai/agents/analyst/chat",
+      "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/agents/analyst/chat",
       {
         message: "How many persons are stored? Answer using your tools.",
         includeToolCalls: true,
@@ -348,7 +348,7 @@ describe("agents", () => {
   });
 
   ifAvailable("chat with an unknown agent answers 404", async () => {
-    const { statusCode } = await inject("POST", "/api/runtime/ai_test/ai/agents/ghost/chat", {
+    const { statusCode } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/agents/ghost/chat", {
       message: "Hi",
     });
     expect(statusCode).toBe(404);
@@ -361,24 +361,24 @@ describe("agents", () => {
 
 describe("A2A", () => {
   ifAvailable("serves the default card and a named card", async () => {
-    const def = await inject("GET", "/api/runtime/ai_test/ai/.well-known/agent.json");
+    const def = await inject("GET", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/.well-known/agent.json");
     expect(def.statusCode).toBe(200);
     expect(def.body.name).toBe("Knowledge Assistant");
-    expect(def.body.url as string).toContain("/api/runtime/ai_test/ai/a2a");
+    expect(def.body.url as string).toContain("/api/ontologies/test_ont/runtime/lenses/ai_test/ai/a2a");
     expect((def.body.capabilities as Row).streaming).toBe(false);
     expect(def.body.skills as Row[]).toHaveLength(1);
 
     const named = await inject(
       "GET",
-      "/api/runtime/ai_test/ai/agents/analyst/.well-known/agent.json",
+      "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/agents/analyst/.well-known/agent.json",
     );
     expect(named.statusCode).toBe(200);
     expect(named.body.name).toBe("Analyst");
-    expect(named.body.url as string).toContain("/api/runtime/ai_test/ai/agents/analyst/a2a");
+    expect(named.body.url as string).toContain("/api/ontologies/test_ont/runtime/lenses/ai_test/ai/agents/analyst/a2a");
   });
 
   ifAvailable("task round-trip against the default agent", async () => {
-    const { statusCode, body } = await inject("POST", "/api/runtime/ai_test/ai/a2a", {
+    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/a2a", {
       jsonrpc: "2.0",
       id: 1,
       method: "tasks/send",
@@ -404,7 +404,7 @@ describe("A2A", () => {
   ifAvailable("task round-trip against a named agent", async () => {
     const { statusCode, body } = await inject(
       "POST",
-      "/api/runtime/ai_test/ai/agents/analyst/a2a",
+      "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/agents/analyst/a2a",
       {
         jsonrpc: "2.0",
         id: 2,
@@ -421,7 +421,7 @@ describe("A2A", () => {
   });
 
   ifAvailable("an unsupported method answers JSON-RPC method-not-found", async () => {
-    const { statusCode, body } = await inject("POST", "/api/runtime/ai_test/ai/a2a", {
+    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/a2a", {
       jsonrpc: "2.0",
       id: 3,
       method: "tasks/stream",

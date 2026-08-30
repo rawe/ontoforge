@@ -63,12 +63,12 @@ afterEach(() => {
 
 describe("FEATURE_DISABLED without a provider", () => {
   const cases: [string, string, Record<string, unknown>][] = [
-    ["query", "/api/runtime/test_lens/ai/query", { question: "How many?" }],
-    ["extract", "/api/runtime/test_lens/ai/extract", { text: "Some text" }],
-    ["chat", "/api/runtime/test_lens/ai/chat", { message: "Hi" }],
+    ["query", "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/query", { question: "How many?" }],
+    ["extract", "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/extract", { text: "Some text" }],
+    ["chat", "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/chat", { message: "Hi" }],
     [
       "agent chat",
-      "/api/runtime/test_lens/ai/agents/my-agent/chat",
+      "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/agents/my-agent/chat",
       { message: "Hi" },
     ],
   ];
@@ -90,7 +90,7 @@ describe("FEATURE_DISABLED without a provider", () => {
   it("a valid A2A task without a provider is rejected the same way", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/test_lens/ai/a2a",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/a2a",
       payload: {
         jsonrpc: "2.0",
         id: 1,
@@ -103,7 +103,7 @@ describe("FEATURE_DISABLED without a provider", () => {
   });
 
   it("listing agents still works", async () => {
-    const res = await app.inject({ method: "GET", url: "/api/runtime/test_lens/ai/agents" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/agents" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual([
       { key: "_default", name: "Knowledge Assistant", description: null },
@@ -114,7 +114,7 @@ describe("FEATURE_DISABLED without a provider", () => {
   it("serving cards still works", async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/test_lens/ai/.well-known/agent.json",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/.well-known/agent.json",
     });
     expect(res.statusCode).toBe(200);
     expect(res.json().name).toBe("Knowledge Assistant");
@@ -126,35 +126,35 @@ describe("card URL derivation", () => {
     settings.PUBLIC_URL = "https://onto.example.com/";
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/test_lens/ai/.well-known/agent.json",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/.well-known/agent.json",
     });
-    expect(res.json().url).toBe("https://onto.example.com/api/runtime/test_lens/ai/a2a");
+    expect(res.json().url).toBe("https://onto.example.com/api/ontologies/test_ont/runtime/lenses/test_lens/ai/a2a");
   });
 
   it("falls back to forwarded proto + host headers", async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/test_lens/ai/agents/my-agent/.well-known/agent.json",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/agents/my-agent/.well-known/agent.json",
       headers: { "x-forwarded-proto": "https", host: "proxy.example.com" },
     });
     expect(res.json().url).toBe(
-      "https://proxy.example.com/api/runtime/test_lens/ai/agents/my-agent/a2a",
+      "https://proxy.example.com/api/ontologies/test_ont/runtime/lenses/test_lens/ai/agents/my-agent/a2a",
     );
   });
 
   it("without forwarding headers, uses the request scheme and host", async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/test_lens/ai/.well-known/agent.json",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/.well-known/agent.json",
       headers: { host: "localhost:8000" },
     });
-    expect(res.json().url).toBe("http://localhost:8000/api/runtime/test_lens/ai/a2a");
+    expect(res.json().url).toBe("http://localhost:8000/api/ontologies/test_ont/runtime/lenses/test_lens/ai/a2a");
   });
 
   it("an unknown agent's card answers 404", async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/test_lens/ai/agents/ghost/.well-known/agent.json",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/agents/ghost/.well-known/agent.json",
     });
     expect(res.statusCode).toBe(404);
     expect(res.json().error.code).toBe("RESOURCE_NOT_FOUND");
@@ -165,7 +165,7 @@ describe("A2A JSON-RPC error cases", () => {
   it("an unsupported method answers JSON-RPC method-not-found, not an HTTP error", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/test_lens/ai/a2a",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/a2a",
       payload: { jsonrpc: "2.0", id: 7, method: "tasks/stream", params: {} },
     });
     expect(res.statusCode).toBe(200);
@@ -179,7 +179,7 @@ describe("A2A JSON-RPC error cases", () => {
   it("a message with no text parts answers invalid-params", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/test_lens/ai/a2a",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/a2a",
       payload: {
         jsonrpc: "2.0",
         id: "abc",
@@ -198,7 +198,7 @@ describe("A2A JSON-RPC error cases", () => {
   it("a task against an unknown agent answers 404", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/test_lens/ai/agents/ghost/a2a",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/agents/ghost/a2a",
       payload: { jsonrpc: "2.0", id: 1, method: "tasks/send", params: {} },
     });
     expect(res.statusCode).toBe(404);
@@ -208,7 +208,7 @@ describe("A2A JSON-RPC error cases", () => {
     setAiModel(new FakeToolCallingModel([new AIMessage("The answer.")]));
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/test_lens/ai/a2a",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/a2a",
       payload: {
         jsonrpc: "2.0",
         id: 42,
@@ -235,7 +235,7 @@ describe("A2A JSON-RPC error cases", () => {
     setAiModel(new FakeToolCallingModel([new AIMessage("Done.")]));
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/test_lens/ai/a2a",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/a2a",
       payload: {
         jsonrpc: "2.0",
         id: 1,
@@ -254,7 +254,7 @@ describe("chat wire shape", () => {
     setAiModel(new FakeToolCallingModel([new AIMessage("Hello!")]));
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/test_lens/ai/chat",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/chat",
       payload: { message: "Hi" },
     });
     expect(res.statusCode).toBe(200);
@@ -264,7 +264,7 @@ describe("chat wire shape", () => {
   it("an empty message is rejected with 422", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/test_lens/ai/chat",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/chat",
       payload: { message: "" },
     });
     expect(res.statusCode).toBe(422);
@@ -273,7 +273,7 @@ describe("chat wire shape", () => {
   it("a history role outside user/assistant is rejected with 422", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/test_lens/ai/chat",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/chat",
       payload: { message: "Hi", history: [{ role: "system", content: "x" }] },
     });
     expect(res.statusCode).toBe(422);

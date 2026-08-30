@@ -110,7 +110,7 @@ describe("read-model stubs", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/docs_view/entities/person/ent-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person/ent-1",
     });
 
     expect(res.statusCode).toBe(200);
@@ -128,7 +128,7 @@ describe("read-model stubs", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/docs_view/entities/person/ent-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person/ent-1",
     });
 
     expect(res.json().bio).toEqual({ document: true, length: BIO.length });
@@ -141,7 +141,7 @@ describe("read-model stubs", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/docs_view/entities/person/ent-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person/ent-1",
     });
 
     expect(res.json().bio).toEqual({ document: true, length: Array.from(emojiBio).length });
@@ -157,7 +157,7 @@ describe("read-model stubs", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/docs_view/entities/person",
+      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person",
     });
 
     const item = res.json().items[0];
@@ -173,7 +173,7 @@ describe("read-model stubs", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/docs_view/entities/person/ent-1?fields=bio",
+      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person/ent-1?fields=bio",
     });
 
     const body = res.json();
@@ -189,7 +189,7 @@ describe("document read endpoint", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/docs_view/entities/person/ent-1/documents/bio",
+      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person/ent-1/documents/bio",
     });
 
     expect(res.statusCode).toBe(200);
@@ -208,7 +208,7 @@ describe("document read endpoint", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/docs_view/entities/person/ent-1/documents/bio?offset=100&limit=50",
+      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person/ent-1/documents/bio?offset=100&limit=50",
     });
 
     const body = res.json();
@@ -226,7 +226,7 @@ describe("document read endpoint", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/docs_view/entities/person/ent-1/documents/bio?offset=6&limit=10",
+      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person/ent-1/documents/bio?offset=6&limit=10",
     });
 
     const body = res.json();
@@ -243,7 +243,7 @@ describe("document read endpoint", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/docs_view/entities/person/ent-1/documents/bio?offset=100",
+      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person/ent-1/documents/bio?offset=100",
     });
 
     const body = res.json();
@@ -258,7 +258,7 @@ describe("document read endpoint", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/docs_view/entities/person/ent-1/documents/bio",
+      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person/ent-1/documents/bio",
     });
 
     expect(res.statusCode).toBe(200);
@@ -270,7 +270,7 @@ describe("document read endpoint", () => {
     holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/docs_view/entities/person/ent-1/documents/name",
+      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person/ent-1/documents/name",
     });
     expect(res.statusCode).toBe(404);
   });
@@ -279,7 +279,7 @@ describe("document read endpoint", () => {
     holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/docs_view/entities/person/ent-1/documents/nonexistent",
+      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person/ent-1/documents/nonexistent",
     });
     expect(res.statusCode).toBe(404);
   });
@@ -291,7 +291,7 @@ describe("document read endpoint", () => {
     );
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/docs_view/entities/person/ent-1/documents/bio",
+      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person/ent-1/documents/bio",
     });
     expect(res.statusCode).toBe(404);
   });
@@ -301,7 +301,7 @@ describe("document read endpoint", () => {
     holder.store.getEntity.mockResolvedValue(null);
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/docs_view/entities/person/ent-1/documents/bio",
+      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person/ent-1/documents/bio",
     });
     expect(res.statusCode).toBe(404);
   });
@@ -310,7 +310,7 @@ describe("document read endpoint", () => {
     holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/docs_view/entities/nonexistent/ent-1/documents/bio",
+      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/nonexistent/ent-1/documents/bio",
     });
     expect(res.statusCode).toBe(404);
   });
@@ -326,7 +326,7 @@ describe("chunk sync on create / update", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/docs_view/entities/person",
+      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person",
       payload: { name: "Ada", bio: BIO },
     });
 
@@ -371,7 +371,7 @@ describe("chunk sync on create / update", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/docs_view/entities/person",
+      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person",
       payload: { name: "Ada", bio: BIO },
     });
 
@@ -394,7 +394,7 @@ describe("chunk sync on create / update", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/docs_view/entities/person",
+      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person",
       payload: { name: "Ada", bio: emojiBio },
     });
 
@@ -413,7 +413,7 @@ describe("chunk sync on create / update", () => {
 
     const res = await app.inject({
       method: "PATCH",
-      url: "/api/runtime/docs_view/entities/person/ent-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person/ent-1",
       payload: { bio: "new text" },
     });
 
@@ -432,7 +432,7 @@ describe("chunk sync on create / update", () => {
 
     const res = await app.inject({
       method: "PATCH",
-      url: "/api/runtime/docs_view/entities/person/ent-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person/ent-1",
       payload: { bio: null },
     });
 
@@ -453,7 +453,7 @@ describe("chunk sync on create / update", () => {
 
     const res = await app.inject({
       method: "PATCH",
-      url: "/api/runtime/docs_view/entities/person/ent-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person/ent-1",
       payload: { name: "Grace" },
     });
 

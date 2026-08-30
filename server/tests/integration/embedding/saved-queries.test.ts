@@ -86,12 +86,12 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
     });
     await post("/api/ontologies/test_ont/model/lenses", { key: "sq_test", name: "Saved Query Test" });
 
-    const alice = await post("/api/runtime/sq_test/entities/person", { name: "Alice" });
-    const python = await post("/api/runtime/sq_test/entities/skill", {
+    const alice = await post("/api/ontologies/test_ont/runtime/lenses/sq_test/entities/person", { name: "Alice" });
+    const python = await post("/api/ontologies/test_ont/runtime/lenses/sq_test/entities/skill", {
       name: "Python programming",
     });
-    await post("/api/runtime/sq_test/entities/skill", { name: "Sourdough baking" });
-    await post("/api/runtime/sq_test/relations/has_skill", {
+    await post("/api/ontologies/test_ont/runtime/lenses/sq_test/entities/skill", { name: "Sourdough baking" });
+    await post("/api/ontologies/test_ont/runtime/lenses/sq_test/relations/has_skill", {
       fromEntityId: alice._id as string,
       toEntityId: python._id as string,
     });
@@ -121,7 +121,7 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
 
     const search = await inject(
       "GET",
-      "/api/runtime/sq_test/saved-queries/search?q=" +
+      "/api/ontologies/test_ont/runtime/lenses/sq_test/saved-queries/search?q=" +
         encodeURIComponent("which coworkers know a programming language") +
         "&min_score=0.1",
     );
@@ -158,7 +158,7 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
 
     const search = await inject(
       "GET",
-      "/api/runtime/sq_test/saved-queries/search?q=" +
+      "/api/ontologies/test_ont/runtime/lenses/sq_test/saved-queries/search?q=" +
         encodeURIComponent("which coworkers know a programming language") +
         "&min_score=0.1&limit=5",
     );
@@ -196,7 +196,7 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
     );
     expect(defined.statusCode).toBe(201);
 
-    const run = await inject("POST", "/api/runtime/sq_test/saved-queries/experts-for/run", {
+    const run = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/sq_test/saved-queries/experts-for/run", {
       params: { topic: "software development languages" },
     });
     expect(run.statusCode).toBe(200);
@@ -223,7 +223,7 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
       parameters: [],
     });
 
-    const run = await inject("POST", "/api/runtime/sq_test/saved-queries/skill-holders/run", {
+    const run = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/sq_test/saved-queries/skill-holders/run", {
       params: {},
     });
     expect(run.statusCode).toBe(200);

@@ -82,7 +82,7 @@ describe("create entity", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/full_lens/entities/person",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/entities/person",
       payload: { name: "Alice", age: 30, email: "a@b.com" },
     });
 
@@ -103,7 +103,7 @@ describe("create entity", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/hr_view/entities/person",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person",
       payload: { name: "Alice", email: "a@b.com" },
     });
 
@@ -126,7 +126,7 @@ describe("create entity", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/hr_view/entities/person",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person",
       payload: { name: "Alice", age: 30 }, // age is hidden by the lens
     });
 
@@ -140,7 +140,7 @@ describe("create entity", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/full_lens/entities/person",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/entities/person",
       payload: { name: "Alice", _id: "forged-id" },
     });
 
@@ -153,7 +153,7 @@ describe("create entity", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/hr_view/entities/department",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/department",
       payload: { name: "Engineering" },
     });
 
@@ -165,7 +165,7 @@ describe("create entity", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/nonexistent/entities/person",
+      url: "/api/ontologies/test_ont/runtime/lenses/nonexistent/entities/person",
       payload: { name: "Alice" },
     });
 
@@ -177,7 +177,7 @@ describe("create entity", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/full_lens/entities/person",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/entities/person",
       payload: { age: "not-a-number", active: "not-a-bool", nickname: "Al" },
     });
 
@@ -195,7 +195,7 @@ describe("create entity", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/full_lens/entities/person",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/entities/person",
       payload: { name: null },
     });
 
@@ -231,7 +231,7 @@ describe("bad-default failure modes", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/lens/entities/thing",
+      url: "/api/ontologies/test_ont/runtime/lenses/lens/entities/thing",
       payload: { name: "A" },
     });
 
@@ -245,7 +245,7 @@ describe("bad-default failure modes", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/lens/entities/thing",
+      url: "/api/ontologies/test_ont/runtime/lenses/lens/entities/thing",
       payload: { name: "A", count: null },
     });
 
@@ -259,7 +259,7 @@ describe("bad-default failure modes", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/lens/entities/thing",
+      url: "/api/ontologies/test_ont/runtime/lenses/lens/entities/thing",
       payload: { name: "A" }, // count omitted: default applied after validation
     });
 
@@ -276,7 +276,7 @@ describe("get entity", () => {
       makeEntity({ name: "Alice", age: 30, email: "a@b.com", active: true }),
     );
 
-    const res = await app.inject({ method: "GET", url: "/api/runtime/hr_view/entities/person/ent-1" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person/ent-1" });
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -294,7 +294,7 @@ describe("get entity", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_lens/entities/person/ent-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/entities/person/ent-1",
     });
 
     expect(res.statusCode).toBe(200);
@@ -309,7 +309,7 @@ describe("get entity", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/entities/person/no-such-id",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person/no-such-id",
     });
 
     expect(res.statusCode).toBe(404);
@@ -323,7 +323,7 @@ describe("get entity", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_lens/entities/person/ent-1?fields=name",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/entities/person/ent-1?fields=name",
     });
 
     expect(res.statusCode).toBe(200);
@@ -336,7 +336,7 @@ describe("get entity", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_lens/entities/person/ent-1?fields=ghost",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/entities/person/ent-1?fields=ghost",
     });
 
     expect(res.statusCode).toBe(200);
@@ -353,7 +353,7 @@ describe("update entity (partial)", () => {
 
     const res = await app.inject({
       method: "PATCH",
-      url: "/api/runtime/hr_view/entities/person/ent-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person/ent-1",
       payload: { email: "new@b.com" },
     });
 
@@ -370,7 +370,7 @@ describe("update entity (partial)", () => {
 
     const res = await app.inject({
       method: "PATCH",
-      url: "/api/runtime/hr_view/entities/person/ent-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person/ent-1",
       payload: { age: 31 },
     });
 
@@ -384,7 +384,7 @@ describe("update entity (partial)", () => {
 
     const res = await app.inject({
       method: "PATCH",
-      url: "/api/runtime/full_lens/entities/person/ent-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/entities/person/ent-1",
       payload: { email: null },
     });
 
@@ -399,7 +399,7 @@ describe("update entity (partial)", () => {
 
     const res = await app.inject({
       method: "PATCH",
-      url: "/api/runtime/full_lens/entities/person/ent-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/entities/person/ent-1",
       payload: { name: null },
     });
 
@@ -414,7 +414,7 @@ describe("update entity (partial)", () => {
 
     await app.inject({
       method: "PATCH",
-      url: "/api/runtime/full_lens/entities/person/ent-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/entities/person/ent-1",
       payload: { name: "Bob" },
     });
 
@@ -428,7 +428,7 @@ describe("update entity (partial)", () => {
 
     const res = await app.inject({
       method: "PATCH",
-      url: "/api/runtime/full_lens/entities/person/ent-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/entities/person/ent-1",
       payload: {},
     });
 
@@ -444,7 +444,7 @@ describe("update entity (partial)", () => {
 
     const res = await app.inject({
       method: "PATCH",
-      url: "/api/runtime/full_lens/entities/person/no-such-id",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/entities/person/no-such-id",
       payload: { name: "Bob" },
     });
 
@@ -459,7 +459,7 @@ describe("delete entity", () => {
 
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/runtime/hr_view/entities/person/ent-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person/ent-1",
     });
 
     expect(res.statusCode).toBe(204);
@@ -470,7 +470,7 @@ describe("delete entity", () => {
 
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/runtime/hr_view/entities/department/ent-99",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/department/ent-99",
     });
 
     expect(res.statusCode).toBe(404);
@@ -483,7 +483,7 @@ describe("delete entity", () => {
 
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/runtime/hr_view/entities/person/no-such-id",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person/no-such-id",
     });
 
     expect(res.statusCode).toBe(404);
@@ -502,7 +502,7 @@ describe("document stubs and projection interplay", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/doc_lens/entities/article/ent-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/doc_lens/entities/article/ent-1",
     });
 
     expect(res.statusCode).toBe(200);
@@ -520,7 +520,7 @@ describe("document stubs and projection interplay", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/doc_lens/entities/article/ent-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/doc_lens/entities/article/ent-1",
     });
 
     expect(res.json().body).toEqual({ document: true, length: 5 });
@@ -532,7 +532,7 @@ describe("document stubs and projection interplay", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/doc_lens/entities/article/ent-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/doc_lens/entities/article/ent-1",
     });
 
     expect(res.json()).not.toHaveProperty("body");
@@ -549,7 +549,7 @@ describe("document stubs and projection interplay", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/doc_lens/entities/article/ent-1?fields=body",
+      url: "/api/ontologies/test_ont/runtime/lenses/doc_lens/entities/article/ent-1?fields=body",
     });
 
     expect(res.statusCode).toBe(200);
@@ -564,7 +564,7 @@ describe("document stubs and projection interplay", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/doc_lens/entities/article",
+      url: "/api/ontologies/test_ont/runtime/lenses/doc_lens/entities/article",
       payload: { title: "T", body: "hello" },
     });
 
@@ -581,7 +581,7 @@ describe("document stubs and projection interplay", () => {
 
     await app.inject({
       method: "PATCH",
-      url: "/api/runtime/doc_lens/entities/article/ent-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/doc_lens/entities/article/ent-1",
       payload: { body: "longer text!" },
     });
     let [, , setProps, removeProps] = holder.store.updateEntity.mock.calls[0]!;
@@ -590,7 +590,7 @@ describe("document stubs and projection interplay", () => {
 
     await app.inject({
       method: "PATCH",
-      url: "/api/runtime/doc_lens/entities/article/ent-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/doc_lens/entities/article/ent-1",
       payload: { body: null },
     });
     [, , setProps, removeProps] = holder.store.updateEntity.mock.calls[1]!;

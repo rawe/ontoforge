@@ -59,12 +59,12 @@ describe.skipIf(!ollamaUp)("MCP semantic_search (Ollama)", () => {
     ]) {
       await post(`/api/ontologies/test_ont/model/entity-types/${et.entityTypeId as string}/properties`, prop);
     }
-    await post("/api/runtime/mcp_search/entities/person", {
+    await post("/api/ontologies/test_ont/runtime/lenses/mcp_search/entities/person", {
       name: "Alice Chen",
       bio: "Expert in distributed systems and microservices",
       age: 34,
     });
-    await post("/api/runtime/mcp_search/entities/person", {
+    await post("/api/ontologies/test_ont/runtime/lenses/mcp_search/entities/person", {
       name: "Bob Smith",
       bio: "Leads brand strategy and market research",
       age: 51,

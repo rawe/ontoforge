@@ -101,7 +101,7 @@ describe("scope filtering", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/entities/person/ent-1/neighbors",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person/ent-1/neighbors",
     });
 
     expect(res.statusCode).toBe(200);
@@ -128,7 +128,7 @@ describe("scope filtering", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/entities/person/ent-1/neighbors",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person/ent-1/neighbors",
     });
 
     expect(res.statusCode).toBe(200);
@@ -166,7 +166,7 @@ describe("scope filtering", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/restricted_view/entities/person/ent-1/neighbors",
+      url: "/api/ontologies/test_ont/runtime/lenses/restricted_view/entities/person/ent-1/neighbors",
     });
 
     expect(res.statusCode).toBe(200);
@@ -202,7 +202,7 @@ describe("scope filtering", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/leaky_view/entities/company/ent-2/neighbors",
+      url: "/api/ontologies/test_ont/runtime/lenses/leaky_view/entities/company/ent-2/neighbors",
     });
 
     expect(res.statusCode).toBe(200);
@@ -237,7 +237,7 @@ describe("scope filtering", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_lens/entities/person/ent-1/neighbors",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/entities/person/ent-1/neighbors",
     });
 
     expect(res.statusCode).toBe(200);
@@ -255,7 +255,7 @@ describe("addressing", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/entities/department/ent-1/neighbors",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/department/ent-1/neighbors",
     });
 
     expect(res.statusCode).toBe(404);
@@ -267,7 +267,7 @@ describe("addressing", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/entities/person/no-such-id/neighbors",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person/no-such-id/neighbors",
     });
 
     expect(res.statusCode).toBe(404);
@@ -281,7 +281,7 @@ describe("addressing", () => {
     const res = await app.inject({
       method: "GET",
       url:
-        "/api/runtime/hr_view/entities/person/ent-1/neighbors" +
+        "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person/ent-1/neighbors" +
         "?direction=outgoing&relationTypeKey=works_for&limit=5",
     });
 
@@ -302,7 +302,7 @@ describe("addressing", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/entities/person/ent-1/neighbors?relationTypeKey=no_such_type",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person/ent-1/neighbors?relationTypeKey=no_such_type",
     });
 
     expect(res.statusCode).toBe(200);
@@ -312,13 +312,13 @@ describe("addressing", () => {
   it("rejects an invalid direction and an out-of-range limit on REST", async () => {
     const badDirection = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/entities/person/ent-1/neighbors?direction=sideways",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person/ent-1/neighbors?direction=sideways",
     });
     expect(badDirection.statusCode).toBe(422);
 
     const badLimit = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/entities/person/ent-1/neighbors?limit=201",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person/ent-1/neighbors?limit=201",
     });
     expect(badLimit.statusCode).toBe(422);
   });
@@ -347,7 +347,7 @@ describe("field projection", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_lens/entities/person/ent-1/neighbors?fields=name",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/entities/person/ent-1/neighbors?fields=name",
     });
 
     expect(res.statusCode).toBe(200);
@@ -369,7 +369,7 @@ describe("field projection", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_lens/entities/person/ent-1/neighbors?relationFields=role",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/entities/person/ent-1/neighbors?relationFields=role",
     });
 
     expect(res.statusCode).toBe(200);

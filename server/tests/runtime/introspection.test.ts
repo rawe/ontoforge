@@ -46,7 +46,7 @@ describe("GET /schema", () => {
   it("scoped: only included types, each with only its scoped properties", async () => {
     holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
 
-    const res = await app.inject({ method: "GET", url: "/api/runtime/hr_view/schema" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/hr_view/schema" });
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -70,7 +70,7 @@ describe("GET /schema", () => {
   it("unscoped: the full schema", async () => {
     holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
 
-    const res = await app.inject({ method: "GET", url: "/api/runtime/full_lens/schema" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/full_lens/schema" });
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -95,7 +95,7 @@ describe("GET /schema", () => {
   it("relation types carry their endpoint keys in the wire shape", async () => {
     holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
 
-    const res = await app.inject({ method: "GET", url: "/api/runtime/hr_view/schema" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/hr_view/schema" });
 
     const worksFor = res.json().relationTypes[0];
     expect(worksFor.fromEntityTypeKey).toBe("person");
@@ -105,7 +105,7 @@ describe("GET /schema", () => {
   it("an unknown lens answers 404", async () => {
     holder.store.getFullSchema.mockResolvedValue(null);
 
-    const res = await app.inject({ method: "GET", url: "/api/runtime/nonexistent/schema" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/nonexistent/schema" });
 
     expect(res.statusCode).toBe(404);
   });
@@ -117,7 +117,7 @@ describe("GET /schema/entity-types", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/schema/entity-types",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/schema/entity-types",
     });
 
     expect(res.statusCode).toBe(200);
@@ -132,7 +132,7 @@ describe("GET /schema/entity-types", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_lens/schema/entity-types",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/schema/entity-types",
     });
 
     expect(res.json().map((et: { key: string }) => et.key).sort()).toEqual([
@@ -149,7 +149,7 @@ describe("GET /schema/entity-types/{key}", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/schema/entity-types/person",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/schema/entity-types/person",
     });
 
     expect(res.statusCode).toBe(200);
@@ -166,11 +166,11 @@ describe("GET /schema/entity-types/{key}", () => {
 
     const outOfScope = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/schema/entity-types/department",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/schema/entity-types/department",
     });
     const nonexistent = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/schema/entity-types/ghost",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/schema/entity-types/ghost",
     });
 
     expect(outOfScope.statusCode).toBe(404);
@@ -186,7 +186,7 @@ describe("GET /schema/relation-types", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/schema/relation-types",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/schema/relation-types",
     });
 
     expect(res.json().map((rt: { key: string }) => rt.key)).toEqual(["works_for"]);
@@ -197,7 +197,7 @@ describe("GET /schema/relation-types", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_lens/schema/relation-types",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/schema/relation-types",
     });
 
     expect(res.json().map((rt: { key: string }) => rt.key).sort()).toEqual([
@@ -213,7 +213,7 @@ describe("GET /schema/relation-types/{key}", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/schema/relation-types/works_for",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/schema/relation-types/works_for",
     });
 
     expect(res.statusCode).toBe(200);
@@ -230,7 +230,7 @@ describe("GET /schema/relation-types/{key}", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/schema/relation-types/belongs_to",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/schema/relation-types/belongs_to",
     });
 
     expect(res.statusCode).toBe(404);

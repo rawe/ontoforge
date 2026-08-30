@@ -45,7 +45,7 @@ type Row = Record<string, unknown>;
 async function createEntity(lens: string, typeKey: string, payload: Row): Promise<Row> {
   const res = await app.inject({
     method: "POST",
-    url: `/api/runtime/${lens}/entities/${typeKey}`,
+    url: `/api/ontologies/test_ont/runtime/lenses/${lens}/entities/${typeKey}`,
     payload,
   });
   expect(res.statusCode, res.body).toBe(201);
@@ -60,7 +60,7 @@ async function createRelation(
 ): Promise<Row> {
   const res = await app.inject({
     method: "POST",
-    url: `/api/runtime/${lens}/relations/${typeKey}`,
+    url: `/api/ontologies/test_ont/runtime/lenses/${lens}/relations/${typeKey}`,
     payload,
   });
   expect(res.statusCode, res.body).toBe(expectedStatus);
@@ -106,7 +106,7 @@ describe("relation CRUD round trip", () => {
 
     const listed = await app.inject({
       method: "GET",
-      url: "/api/runtime/test_lens/relations/works_for",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/relations/works_for",
     });
     expect(listed.statusCode).toBe(200);
     expect(listed.json().total).toBe(1);
@@ -114,7 +114,7 @@ describe("relation CRUD round trip", () => {
 
     const read = await app.inject({
       method: "GET",
-      url: `/api/runtime/test_lens/relations/works_for/${relId}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/relations/works_for/${relId}`,
     });
     expect(read.statusCode).toBe(200);
     expect(read.json().role).toBe("Engineer");
@@ -122,7 +122,7 @@ describe("relation CRUD round trip", () => {
 
     const patched = await app.inject({
       method: "PATCH",
-      url: `/api/runtime/test_lens/relations/works_for/${relId}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/relations/works_for/${relId}`,
       payload: { role: "Senior Engineer", since: null },
     });
     expect(patched.statusCode).toBe(200);
@@ -131,20 +131,20 @@ describe("relation CRUD round trip", () => {
 
     const deleted = await app.inject({
       method: "DELETE",
-      url: `/api/runtime/test_lens/relations/works_for/${relId}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/relations/works_for/${relId}`,
     });
     expect(deleted.statusCode).toBe(204);
 
     const gone = await app.inject({
       method: "GET",
-      url: `/api/runtime/test_lens/relations/works_for/${relId}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/relations/works_for/${relId}`,
     });
     expect(gone.statusCode).toBe(404);
 
     // Neither endpoint was touched by the relation delete.
     const aliceStill = await app.inject({
       method: "GET",
-      url: `/api/runtime/test_lens/entities/person/${alice._id}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person/${alice._id}`,
     });
     expect(aliceStill.statusCode).toBe(200);
   });
@@ -156,7 +156,7 @@ describe("relation CRUD round trip", () => {
     // not exist, and the property is unknown — one response, three fields.
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/hr_view/relations/works_for",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/relations/works_for",
       payload: {
         fromEntityId: acme._id,
         toEntityId: "no-such-entity",
@@ -185,7 +185,7 @@ describe("relation CRUD round trip", () => {
 
     const res = await app.inject({
       method: "PATCH",
-      url: `/api/runtime/test_lens/relations/works_for/${rel._id}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/relations/works_for/${rel._id}`,
       payload: { fromEntityId: bob._id, role: "Manager" },
     });
     expect(res.statusCode).toBe(200);
@@ -218,20 +218,20 @@ describe("relation CRUD round trip", () => {
 
     const fromAlice = await app.inject({
       method: "GET",
-      url: `/api/runtime/test_lens/relations/works_for?fromEntityId=${alice._id}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/relations/works_for?fromEntityId=${alice._id}`,
     });
     expect(fromAlice.json().total).toBe(2);
 
     const toAcme = await app.inject({
       method: "GET",
-      url: `/api/runtime/test_lens/relations/works_for?toEntityId=${acme._id}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/relations/works_for?toEntityId=${acme._id}`,
     });
     expect(toAcme.json().total).toBe(2);
 
     const both = await app.inject({
       method: "GET",
       url:
-        `/api/runtime/test_lens/relations/works_for` +
+        `/api/ontologies/test_ont/runtime/lenses/test_lens/relations/works_for` +
         `?fromEntityId=${alice._id}&toEntityId=${acme._id}`,
     });
     expect(both.json().total).toBe(1);
@@ -241,7 +241,7 @@ describe("relation CRUD round trip", () => {
     const filtered = await app.inject({
       method: "GET",
       url:
-        `/api/runtime/test_lens/relations/works_for` +
+        `/api/ontologies/test_ont/runtime/lenses/test_lens/relations/works_for` +
         `?fromEntityId=${alice._id}&filter.role=Advisor`,
     });
     expect(filtered.json().total).toBe(1);
@@ -252,20 +252,20 @@ describe("relation CRUD round trip", () => {
     for (const id of ["not-a-uuid", "4F2D8A31-0000-4000-8000-000000000000"]) {
       const read = await app.inject({
         method: "GET",
-        url: `/api/runtime/test_lens/relations/works_for/${id}`,
+        url: `/api/ontologies/test_ont/runtime/lenses/test_lens/relations/works_for/${id}`,
       });
       expect(read.statusCode).toBe(404);
 
       const patched = await app.inject({
         method: "PATCH",
-        url: `/api/runtime/test_lens/relations/works_for/${id}`,
+        url: `/api/ontologies/test_ont/runtime/lenses/test_lens/relations/works_for/${id}`,
         payload: { role: "Ghost" },
       });
       expect(patched.statusCode).toBe(404);
 
       const deleted = await app.inject({
         method: "DELETE",
-        url: `/api/runtime/test_lens/relations/works_for/${id}`,
+        url: `/api/ontologies/test_ont/runtime/lenses/test_lens/relations/works_for/${id}`,
       });
       expect(deleted.statusCode).toBe(404);
     }
@@ -286,7 +286,7 @@ describe("relation CRUD round trip", () => {
     ]) {
       const res = await app.inject({
         method: "GET",
-        url: `/api/runtime/test_lens/relations/works_for?${query}`,
+        url: `/api/ontologies/test_ont/runtime/lenses/test_lens/relations/works_for?${query}`,
       });
       expect(res.statusCode).toBe(200);
       expect(res.json().total).toBe(0);
@@ -310,7 +310,7 @@ describe("relation CRUD round trip", () => {
     for (const query of ["fromEntityId=", "toEntityId=", "fromEntityId=&toEntityId="]) {
       const res = await app.inject({
         method: "GET",
-        url: `/api/runtime/test_lens/relations/works_for?${query}`,
+        url: `/api/ontologies/test_ont/runtime/lenses/test_lens/relations/works_for?${query}`,
       });
       expect(res.statusCode).toBe(200);
       expect(res.json().total).toBe(2);
@@ -339,7 +339,7 @@ describe("relation CRUD round trip", () => {
 
     const scoped = await app.inject({
       method: "GET",
-      url: `/api/runtime/hr_view/relations/works_for/${rel._id}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/hr_view/relations/works_for/${rel._id}`,
     });
     expect(scoped.statusCode).toBe(200);
     expect(scoped.json().role).toBe("Engineer");
@@ -371,7 +371,7 @@ describe("neighbours", () => {
 
     const all = await app.inject({
       method: "GET",
-      url: `/api/runtime/test_lens/entities/person/${alice._id}/neighbors`,
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person/${alice._id}/neighbors`,
     });
     expect(all.statusCode).toBe(200);
     const directions = (all.json().neighbors as Row[]).map(
@@ -384,7 +384,7 @@ describe("neighbours", () => {
     // neighbour vanishes entirely.
     const budget = await app.inject({
       method: "GET",
-      url: `/api/runtime/test_lens/entities/person/${alice._id}/neighbors?limit=2`,
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person/${alice._id}/neighbors?limit=2`,
     });
     const budgetDirections = (budget.json().neighbors as Row[]).map(
       (n) => (n.relation as Row).direction,
@@ -394,7 +394,7 @@ describe("neighbours", () => {
     // Asking for each direction separately is the way to see both.
     const incoming = await app.inject({
       method: "GET",
-      url: `/api/runtime/test_lens/entities/person/${alice._id}/neighbors?direction=incoming&limit=2`,
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person/${alice._id}/neighbors?direction=incoming&limit=2`,
     });
     expect(incoming.json().neighbors).toHaveLength(1);
     expect((incoming.json().neighbors[0].relation as Row)._relationTypeKey).toBe("founded_by");
@@ -403,7 +403,7 @@ describe("neighbours", () => {
   it("a garbage root entity id answers not-found", async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/test_lens/entities/person/not-a-uuid/neighbors",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person/not-a-uuid/neighbors",
     });
     expect(res.statusCode).toBe(404);
   });
@@ -423,14 +423,14 @@ describe("neighbours", () => {
 
     const filtered = await app.inject({
       method: "GET",
-      url: `/api/runtime/test_lens/entities/person/${alice._id}/neighbors?relationTypeKey=works_for`,
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person/${alice._id}/neighbors?relationTypeKey=works_for`,
     });
     expect(filtered.json().neighbors).toHaveLength(1);
     expect((filtered.json().neighbors[0].relation as Row)._relationTypeKey).toBe("works_for");
 
     const unknown = await app.inject({
       method: "GET",
-      url: `/api/runtime/test_lens/entities/person/${alice._id}/neighbors?relationTypeKey=no_such_type`,
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person/${alice._id}/neighbors?relationTypeKey=no_such_type`,
     });
     expect(unknown.statusCode).toBe(200);
     expect(unknown.json().neighbors).toEqual([]);
@@ -452,7 +452,7 @@ describe("neighbours", () => {
     // hr_view does not include founded_by: only the works_for neighbour remains.
     const scoped = await app.inject({
       method: "GET",
-      url: `/api/runtime/hr_view/entities/person/${alice._id}/neighbors`,
+      url: `/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person/${alice._id}/neighbors`,
     });
     expect(scoped.statusCode).toBe(200);
     const neighbors = scoped.json().neighbors as Row[];
@@ -462,7 +462,7 @@ describe("neighbours", () => {
     // The unscoped lens still sees both.
     const unscoped = await app.inject({
       method: "GET",
-      url: `/api/runtime/test_lens/entities/person/${alice._id}/neighbors`,
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person/${alice._id}/neighbors`,
     });
     expect(unscoped.json().neighbors).toHaveLength(2);
   });
@@ -483,7 +483,7 @@ describe("neighbours", () => {
     const res = await app.inject({
       method: "GET",
       url:
-        `/api/runtime/test_lens/entities/person/${alice._id}/neighbors` +
+        `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person/${alice._id}/neighbors` +
         `?fields=name&relationFields=role`,
     });
     expect(res.statusCode).toBe(200);
@@ -525,28 +525,28 @@ describe("entity delete cascade", () => {
     // Delete Alice THROUGH THE NARROW LENS, which cannot see founded_by.
     const del = await app.inject({
       method: "DELETE",
-      url: `/api/runtime/hr_view/entities/person/${alice._id}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person/${alice._id}`,
     });
     expect(del.statusCode).toBe(204);
 
     // Both of Alice's relations are gone — verified through the wide lens.
     const worksFor = await app.inject({
       method: "GET",
-      url: "/api/runtime/test_lens/relations/works_for",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/relations/works_for",
     });
     expect(worksFor.json().total).toBe(1); // only Bob's survives
     expect(worksFor.json().items[0]._id).toBe(bobRel._id);
 
     const foundedBy = await app.inject({
       method: "GET",
-      url: "/api/runtime/test_lens/relations/founded_by",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/relations/founded_by",
     });
     expect(foundedBy.json().total).toBe(0);
 
     // The far endpoints are untouched.
     const acmeStill = await app.inject({
       method: "GET",
-      url: `/api/runtime/test_lens/entities/company/${acme._id}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/company/${acme._id}`,
     });
     expect(acmeStill.statusCode).toBe(200);
   });

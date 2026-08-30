@@ -374,6 +374,10 @@ export interface ModelingStore {
  * carry none.
  */
 export interface RuntimeStore {
+  /** The ontology this store is bound to. The runtime schema cache keys
+   * its entries by this binding plus the lens key. */
+  readonly ontologyKey: string;
+
   // ------------------------------------------------------------------
   // Schema reading (for the runtime schema cache)
   // ------------------------------------------------------------------
@@ -714,11 +718,11 @@ export function getOntologyRegistry(): OntologyRegistry {
 // ---------------------------------------------------------------------------
 
 /**
- * The legacy `/api/runtime` and `/mcp/*` surfaces (tickets 16/17) do not
- * yet name an ontology in their URLs. Until they move, they bind to the
- * server's sole ontology; with zero or several ontologies they answer
- * not-found, because no binding can be inferred. Delete these two
- * helpers when the last legacy surface moves.
+ * The legacy `/mcp/*` mounts (ticket 17) do not yet name an ontology in
+ * their URLs. Until they move, they bind to the server's sole ontology;
+ * with zero or several ontologies they answer not-found, because no
+ * binding can be inferred. Delete these two helpers when the MCP mounts
+ * move.
  */
 async function soleOntologyKey(): Promise<string> {
   const ontologies = await getOntologyRegistry().listOntologies();
@@ -736,8 +740,7 @@ export async function getLegacyModelingStore(): Promise<ModelingStore> {
   return getModelingStore(await soleOntologyKey());
 }
 
-/** @deprecated transitional — removed when `/api/runtime` and `/mcp/*`
- * move (tickets 16/17). */
+/** @deprecated transitional — removed when `/mcp/*` moves (ticket 17). */
 export async function getLegacyRuntimeStore(): Promise<RuntimeStore> {
   return getRuntimeStore(await soleOntologyKey());
 }

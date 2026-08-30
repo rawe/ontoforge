@@ -29,8 +29,8 @@ export function createModelingStore(_ontologyKey: string): Neo4jModelingStore {
   return new Neo4jModelingStore(getDriver());
 }
 
-export function createRuntimeStore(_ontologyKey: string): Neo4jRuntimeStore {
-  return new Neo4jRuntimeStore(getDriver());
+export function createRuntimeStore(ontologyKey: string): Neo4jRuntimeStore {
+  return new Neo4jRuntimeStore(getDriver(), ontologyKey);
 }
 
 /**

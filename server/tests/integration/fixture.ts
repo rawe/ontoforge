@@ -4,9 +4,9 @@
  * lens `test_lens`, and a scoped lens `hr_view` (person narrowed to
  * name+email, company whole, works_for included).
  *
- * The legacy runtime and MCP surfaces (until tickets 16/17) bind to the
- * server's sole ontology, so a file that hits them must create exactly
- * one — which is what `buildFixture` does.
+ * The legacy MCP mounts (until ticket 17) bind to the server's sole
+ * ontology, so a file that hits them must create exactly one — which is
+ * what `buildFixture` does.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -26,6 +26,11 @@ export const FIXTURE_ONTOLOGY_KEY = "test_ont";
 /** The modeling tree of one ontology. */
 export function modelPrefix(ontologyKey: string): string {
   return `/api/ontologies/${ontologyKey}/model`;
+}
+
+/** The runtime tree of one lens in one ontology. */
+export function runtimePrefix(ontologyKey: string, lensKey: string): string {
+  return `/api/ontologies/${ontologyKey}/runtime/lenses/${lensKey}`;
 }
 
 /** Create one bare ontology over the registry API. */

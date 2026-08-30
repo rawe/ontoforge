@@ -208,7 +208,7 @@ describe("semantic search route", () => {
   it("answers 422 VALIDATION_ERROR with details.code FEATURE_DISABLED without a provider", async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_lens/search/semantic?q=anything",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/search/semantic?q=anything",
     });
 
     expect(res.statusCode).toBe(422);
@@ -224,7 +224,7 @@ describe("semantic search route", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_lens/search/semantic?q=alice&type=person&min_score=0.75",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/search/semantic?q=alice&type=person&min_score=0.75",
     });
 
     expect(res.statusCode).toBe(200);
@@ -236,7 +236,7 @@ describe("semantic search route", () => {
     setEmbeddingProvider(mockProvider());
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_lens/search/semantic",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/search/semantic",
     });
     expect(res.statusCode).toBe(422);
   });
@@ -245,7 +245,7 @@ describe("semantic search route", () => {
     setEmbeddingProvider(mockProvider());
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_lens/search/semantic?q=x&limit=101",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/search/semantic?q=x&limit=101",
     });
     expect(res.statusCode).toBe(422);
   });

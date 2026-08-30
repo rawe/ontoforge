@@ -39,7 +39,7 @@ type Row = Record<string, unknown>;
 async function createPerson(lens: string, payload: Row): Promise<Row> {
   const res = await app.inject({
     method: "POST",
-    url: `/api/runtime/${lens}/entities/person`,
+    url: `/api/ontologies/test_ont/runtime/lenses/${lens}/entities/person`,
     payload,
   });
   expect(res.statusCode, res.body).toBe(201);
@@ -48,7 +48,7 @@ async function createPerson(lens: string, payload: Row): Promise<Row> {
 
 describe("schema introspection through both lenses", () => {
   it("the unscoped lens exposes the whole schema", async () => {
-    const res = await app.inject({ method: "GET", url: "/api/runtime/test_lens/schema" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/test_lens/schema" });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.lens.key).toBe("test_lens");
@@ -65,33 +65,33 @@ describe("schema introspection through both lenses", () => {
   });
 
   it("the scoped lens narrows types and properties; out-of-scope reads answer 404", async () => {
-    const schema = await app.inject({ method: "GET", url: "/api/runtime/hr_view/schema" });
+    const schema = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/hr_view/schema" });
     const person = schema.json().entityTypes.find((et: Row) => et.key === "person");
     expect(person.properties.map((p: Row) => p.key).sort()).toEqual(["email", "name"]);
 
     const single = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/schema/entity-types/person",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/schema/entity-types/person",
     });
     expect(single.statusCode).toBe(200);
     expect(single.json().properties.map((p: Row) => p.key).sort()).toEqual(["email", "name"]);
 
     const relations = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/schema/relation-types/works_for",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/schema/relation-types/works_for",
     });
     expect(relations.statusCode).toBe(200);
     expect(relations.json().fromEntityTypeKey).toBe("person");
 
     const ghost = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/schema/entity-types/ghost",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/schema/entity-types/ghost",
     });
     expect(ghost.statusCode).toBe(404);
   });
 
   it("an unknown lens key answers 404 everywhere", async () => {
-    const res = await app.inject({ method: "GET", url: "/api/runtime/no_such_lens/schema" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/no_such_lens/schema" });
     expect(res.statusCode).toBe(404);
   });
 });
@@ -115,14 +115,14 @@ describe("entity CRUD through the unscoped lens", () => {
 
     const read = await app.inject({
       method: "GET",
-      url: `/api/runtime/test_lens/entities/person/${created._id}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person/${created._id}`,
     });
     expect(read.statusCode).toBe(200);
     expect(read.json()).toEqual(created);
 
     const updated = await app.inject({
       method: "PATCH",
-      url: `/api/runtime/test_lens/entities/person/${created._id}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person/${created._id}`,
       payload: { email: "new@b.com" },
     });
     expect(updated.statusCode).toBe(200);
@@ -131,13 +131,13 @@ describe("entity CRUD through the unscoped lens", () => {
 
     const deleted = await app.inject({
       method: "DELETE",
-      url: `/api/runtime/test_lens/entities/person/${created._id}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person/${created._id}`,
     });
     expect(deleted.statusCode).toBe(204);
 
     const gone = await app.inject({
       method: "GET",
-      url: `/api/runtime/test_lens/entities/person/${created._id}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person/${created._id}`,
     });
     expect(gone.statusCode).toBe(404);
   });
@@ -145,7 +145,7 @@ describe("entity CRUD through the unscoped lens", () => {
   it("a date property round-trips as an ISO calendar date", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/test_lens/entities/company",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/company",
       payload: { name: "Acme", founded: "2020-01-15", employee_count: 12 },
     });
     expect(res.statusCode).toBe(201);
@@ -158,7 +158,7 @@ describe("entity CRUD through the unscoped lens", () => {
 
     const noChange = await app.inject({
       method: "PATCH",
-      url: `/api/runtime/test_lens/entities/person/${created._id}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person/${created._id}`,
       payload: {},
     });
     expect(noChange.statusCode).toBe(200);
@@ -166,7 +166,7 @@ describe("entity CRUD through the unscoped lens", () => {
 
     const removed = await app.inject({
       method: "PATCH",
-      url: `/api/runtime/test_lens/entities/person/${created._id}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person/${created._id}`,
       payload: { age: null },
     });
     expect(removed.statusCode).toBe(200);
@@ -175,7 +175,7 @@ describe("entity CRUD through the unscoped lens", () => {
 
     const read = await app.inject({
       method: "GET",
-      url: `/api/runtime/test_lens/entities/person/${created._id}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person/${created._id}`,
     });
     expect(read.json()).not.toHaveProperty("age");
   });
@@ -183,7 +183,7 @@ describe("entity CRUD through the unscoped lens", () => {
   it("validation collects every offending field in one response", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/test_lens/entities/person",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person",
       payload: { age: "abc", active: 7, nickname: "x" },
     });
     expect(res.statusCode).toBe(422);
@@ -197,20 +197,20 @@ describe("entity CRUD through the unscoped lens", () => {
     for (const id of ["not-a-uuid", "4F2D8A31-0000-4000-8000-000000000000"]) {
       const read = await app.inject({
         method: "GET",
-        url: `/api/runtime/test_lens/entities/person/${id}`,
+        url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person/${id}`,
       });
       expect(read.statusCode).toBe(404);
 
       const patched = await app.inject({
         method: "PATCH",
-        url: `/api/runtime/test_lens/entities/person/${id}`,
+        url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person/${id}`,
         payload: { name: "Ghost" },
       });
       expect(patched.statusCode).toBe(404);
 
       const deleted = await app.inject({
         method: "DELETE",
-        url: `/api/runtime/test_lens/entities/person/${id}`,
+        url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person/${id}`,
       });
       expect(deleted.statusCode).toBe(404);
     }
@@ -243,7 +243,7 @@ describe("entity CRUD through the unscoped lens", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/test_lens/entities/measurement",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/measurement",
       payload: {
         label: "probe-1",
         count: 9007199254740991, // the enforced global integer maximum
@@ -258,7 +258,7 @@ describe("entity CRUD through the unscoped lens", () => {
 
     const read = await app.inject({
       method: "GET",
-      url: `/api/runtime/test_lens/entities/measurement/${created._id}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/measurement/${created._id}`,
     });
     expect(read.statusCode).toBe(200);
     for (const body of [created, read.json()]) {
@@ -284,14 +284,14 @@ describe("entity CRUD through the scoped lens", () => {
     // The wide lens sees the hidden default that was still applied.
     const wide = await app.inject({
       method: "GET",
-      url: `/api/runtime/test_lens/entities/person/${created._id}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person/${created._id}`,
     });
     expect(wide.json().active).toBe(true);
 
     // A hidden property is an unknown property through the narrow lens.
     const rejected = await app.inject({
       method: "PATCH",
-      url: `/api/runtime/hr_view/entities/person/${created._id}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person/${created._id}`,
       payload: { age: 31 },
     });
     expect(rejected.statusCode).toBe(422);
@@ -300,7 +300,7 @@ describe("entity CRUD through the scoped lens", () => {
     // Instance data is shared: the same record through every lens.
     const narrow = await app.inject({
       method: "GET",
-      url: `/api/runtime/hr_view/entities/person/${created._id}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person/${created._id}`,
     });
     expect(narrow.json()._id).toBe(created._id);
     expect(narrow.json()).not.toHaveProperty("active");
@@ -310,7 +310,7 @@ describe("entity CRUD through the scoped lens", () => {
     const created = await createPerson("test_lens", { name: "Dan", age: 44 });
     const narrow = await app.inject({
       method: "GET",
-      url: `/api/runtime/hr_view/entities/person/${created._id}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person/${created._id}`,
     });
     expect(narrow.statusCode).toBe(200);
     expect(narrow.json()).not.toHaveProperty("age");
@@ -329,7 +329,7 @@ describe("listing with q + filters + sort + paging", () => {
     const res = await app.inject({
       method: "GET",
       url:
-        "/api/runtime/test_lens/entities/person" +
+        "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person" +
         "?q=a&filter.age__gte=29&sort=age&order=desc&limit=1&offset=0",
     });
     expect(res.statusCode).toBe(200);
@@ -344,7 +344,7 @@ describe("listing with q + filters + sort + paging", () => {
     const secondPage = await app.inject({
       method: "GET",
       url:
-        "/api/runtime/test_lens/entities/person" +
+        "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person" +
         "?q=a&filter.age__gte=29&sort=age&order=desc&limit=1&offset=1",
     });
     expect(secondPage.json().items[0].name).toBe("Alice");
@@ -353,7 +353,7 @@ describe("listing with q + filters + sort + paging", () => {
   it("rejects a NUL character in a contains filter and in q, identically on every backend", async () => {
     const filtered = await app.inject({
       method: "GET",
-      url: "/api/runtime/test_lens/entities/person?filter.name__contains=%00",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person?filter.name__contains=%00",
     });
     expect(filtered.statusCode).toBe(422);
     expect(filtered.json().error.details.fields.name).toBe(
@@ -362,7 +362,7 @@ describe("listing with q + filters + sort + paging", () => {
 
     const searched = await app.inject({
       method: "GET",
-      url: "/api/runtime/test_lens/entities/person?q=%00",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person?q=%00",
     });
     expect(searched.statusCode).toBe(422);
     expect(searched.json().error.message).toBe(
@@ -373,33 +373,33 @@ describe("listing with q + filters + sort + paging", () => {
   it("filters coerce per declared type and reject uncoercible values", async () => {
     const exact = await app.inject({
       method: "GET",
-      url: "/api/runtime/test_lens/entities/person?filter.age=30",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person?filter.age=30",
     });
     expect(exact.json().total).toBe(1);
     expect(exact.json().items[0].name).toBe("Alice");
 
     const contains = await app.inject({
       method: "GET",
-      url: "/api/runtime/test_lens/entities/person?filter.name__contains=AL",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person?filter.name__contains=AL",
     });
     expect(contains.json().total).toBe(2); // Alice, Albert — case-insensitive
 
     const bad = await app.inject({
       method: "GET",
-      url: "/api/runtime/test_lens/entities/person?filter.age=abc",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person?filter.age=abc",
     });
     expect(bad.statusCode).toBe(422);
     expect(bad.json().error.details.fields.age).toContain("Expected integer");
 
     const unknown = await app.inject({
       method: "GET",
-      url: "/api/runtime/test_lens/entities/person?filter.ghost=1",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person?filter.ghost=1",
     });
     expect(unknown.statusCode).toBe(422);
 
     const badOp = await app.inject({
       method: "GET",
-      url: "/api/runtime/test_lens/entities/person?filter.age__between=1",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person?filter.age__between=1",
     });
     expect(badOp.statusCode).toBe(422);
   });
@@ -407,7 +407,7 @@ describe("listing with q + filters + sort + paging", () => {
   it("out-of-range paging is rejected", async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/test_lens/entities/person?limit=201",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person?limit=201",
     });
     expect(res.statusCode).toBe(422);
     expect(res.json().error.code).toBe("VALIDATION_ERROR");
@@ -417,11 +417,11 @@ describe("listing with q + filters + sort + paging", () => {
     // Single-case data only: both backends order it identically.
     await app.inject({
       method: "GET",
-      url: "/api/runtime/test_lens/entities/person", // warm the lens
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person", // warm the lens
     });
     const listed = await app.inject({
       method: "GET",
-      url: "/api/runtime/test_lens/entities/person?sort=name&order=asc&limit=10",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person?sort=name&order=asc&limit=10",
     });
     const byName = new Map(
       (listed.json().items as Row[]).map((p) => [p.name as string, p._id as string]),
@@ -432,7 +432,7 @@ describe("listing with q + filters + sort + paging", () => {
     ]) {
       const res = await app.inject({
         method: "PATCH",
-        url: `/api/runtime/test_lens/entities/person/${byName.get(name!)}`,
+        url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person/${byName.get(name!)}`,
         payload: { email },
       });
       expect(res.statusCode).toBe(200);
@@ -440,14 +440,14 @@ describe("listing with q + filters + sort + paging", () => {
 
     const asc = await app.inject({
       method: "GET",
-      url: "/api/runtime/test_lens/entities/person?sort=email&order=asc&limit=10",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person?sort=email&order=asc&limit=10",
     });
     const ascEmails = (asc.json().items as Row[]).map((p) => p.email ?? null);
     expect(ascEmails).toEqual(["alice@x.com", "bob@x.com", null, null]);
 
     const desc = await app.inject({
       method: "GET",
-      url: "/api/runtime/test_lens/entities/person?sort=email&order=desc&limit=10",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person?sort=email&order=desc&limit=10",
     });
     const descEmails = (desc.json().items as Row[]).map((p) => p.email ?? null);
     expect(descEmails).toEqual([null, null, "bob@x.com", "alice@x.com"]);
@@ -456,13 +456,13 @@ describe("listing with q + filters + sort + paging", () => {
   it("contains matches every row on the empty string; a missing property never matches", async () => {
     const withEmail = await app.inject({
       method: "GET",
-      url: "/api/runtime/test_lens/entities/person?limit=10",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person?limit=10",
     });
     const anna = (withEmail.json().items as Row[]).find((p) => p.name === "Anna")!;
     const alice = (withEmail.json().items as Row[]).find((p) => p.name === "Alice")!;
     const patched = await app.inject({
       method: "PATCH",
-      url: `/api/runtime/test_lens/entities/person/${alice._id}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person/${alice._id}`,
       payload: { email: "alice@x.com" },
     });
     expect(patched.statusCode).toBe(200);
@@ -471,7 +471,7 @@ describe("listing with q + filters + sort + paging", () => {
     // rows without it are excluded — Anna and the rest carry no email.
     const empty = await app.inject({
       method: "GET",
-      url: "/api/runtime/test_lens/entities/person?filter.email__contains=",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person?filter.email__contains=",
     });
     expect(empty.json().total).toBe(1);
     expect(empty.json().items[0]._id).toBe(alice._id);
@@ -483,7 +483,7 @@ describe("listing with q + filters + sort + paging", () => {
     // still works on name.
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/entities/person?q=anna",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person?q=anna",
     });
     expect(res.json().total).toBe(1);
   });
@@ -492,7 +492,7 @@ describe("listing with q + filters + sort + paging", () => {
 describe("cache invalidation across a modeling change", () => {
   it("a type created after the lens was cached is visible without restart", async () => {
     // Prime the cache.
-    const before = await app.inject({ method: "GET", url: "/api/runtime/test_lens/schema" });
+    const before = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/test_lens/schema" });
     expect(before.json().entityTypes.map((et: Row) => et.key)).not.toContain("project");
 
     // Modeling mutation: create a new entity type.
@@ -504,16 +504,16 @@ describe("cache invalidation across a modeling change", () => {
     expect(created.statusCode).toBe(201);
 
     // The unscoped lens tracks the schema automatically — no restart.
-    const after = await app.inject({ method: "GET", url: "/api/runtime/test_lens/schema" });
+    const after = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/test_lens/schema" });
     expect(after.json().entityTypes.map((et: Row) => et.key)).toContain("project");
 
     // The scoped lens keeps hiding it.
-    const scoped = await app.inject({ method: "GET", url: "/api/runtime/hr_view/schema" });
+    const scoped = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/hr_view/schema" });
     expect(scoped.json().entityTypes.map((et: Row) => et.key)).not.toContain("project");
   });
 
   it("a property allowlist change is visible immediately", async () => {
-    await app.inject({ method: "GET", url: "/api/runtime/hr_view/schema" }); // prime
+    await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/hr_view/schema" }); // prime
 
     // Re-adding an inclusion is an upsert; widen person to include age.
     const lenses = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/model/lenses" });
@@ -527,7 +527,7 @@ describe("cache invalidation across a modeling change", () => {
     });
     expect(res.statusCode).toBe(201);
 
-    const schema = await app.inject({ method: "GET", url: "/api/runtime/hr_view/schema" });
+    const schema = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/hr_view/schema" });
     const person = schema.json().entityTypes.find((et: Row) => et.key === "person");
     expect(person.properties.map((p: Row) => p.key).sort()).toEqual(["age", "email", "name"]);
   });

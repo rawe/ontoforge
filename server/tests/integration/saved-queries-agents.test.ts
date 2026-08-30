@@ -79,20 +79,20 @@ beforeAll(async () => {
 
   await buildFixture(app);
 
-  const alice = await inject("POST", "/api/runtime/test_lens/entities/person", {
+  const alice = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person", {
     name: "Alice",
     age: 30,
   });
   aliceId = (alice.body as Row)._id as string;
-  await inject("POST", "/api/runtime/test_lens/entities/person", {
+  await inject("POST", "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person", {
     name: "Bob",
     age: 40,
   });
-  const acme = await inject("POST", "/api/runtime/test_lens/entities/company", {
+  const acme = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/company", {
     name: "Acme",
   });
   acmeId = (acme.body as Row)._id as string;
-  await inject("POST", "/api/runtime/test_lens/relations/works_for", {
+  await inject("POST", "/api/ontologies/test_ont/runtime/lenses/test_lens/relations/works_for", {
     fromEntityId: aliceId,
     toEntityId: acmeId,
   });
@@ -262,7 +262,7 @@ describe("saved queries (modeling REST, no provider)", () => {
 
 describe("runtime listing reflects the schema cache", () => {
   it("every modeling upsert invalidates the cache the listing is served from", async () => {
-    const before = await inject("GET", "/api/runtime/test_lens/saved-queries");
+    const before = await inject("GET", "/api/ontologies/test_ont/runtime/lenses/test_lens/saved-queries");
     expect(before.statusCode).toBe(200);
     expect((before.body as Row[]).map((q) => q.key)).not.toContain("cache-probe");
 
@@ -273,7 +273,7 @@ describe("runtime listing reflects the schema cache", () => {
       parameters: [],
     });
 
-    const after = await inject("GET", "/api/runtime/test_lens/saved-queries");
+    const after = await inject("GET", "/api/ontologies/test_ont/runtime/lenses/test_lens/saved-queries");
     const probe = (after.body as Row[]).find((q) => q.key === "cache-probe")!;
     expect(probe).toBeDefined();
     expect(probe.name).toBe("Cache Probe");
@@ -290,13 +290,13 @@ describe("runtime listing reflects the schema cache", () => {
       steps: [{ name: "main", type: "oql", oql: "MATCH (p:person) RETURN p.name AS name" }],
       parameters: [],
     });
-    const updated = await inject("GET", "/api/runtime/test_lens/saved-queries");
+    const updated = await inject("GET", "/api/ontologies/test_ont/runtime/lenses/test_lens/saved-queries");
     expect((updated.body as Row[]).find((q) => q.key === "cache-probe")!.name).toBe(
       "Cache Probe v2",
     );
 
     await inject("DELETE", "/api/ontologies/test_ont/model/lenses/test_lens/saved-queries/cache-probe");
-    const gone = await inject("GET", "/api/runtime/test_lens/saved-queries");
+    const gone = await inject("GET", "/api/ontologies/test_ont/runtime/lenses/test_lens/saved-queries");
     expect((gone.body as Row[]).map((q) => q.key)).not.toContain("cache-probe");
   });
 });
@@ -316,7 +316,7 @@ describe("runtime run (no provider)", () => {
       parameters: [{ name: "min_age", description: "Age threshold", dataType: "integer" }],
     });
 
-    const run = await inject("POST", "/api/runtime/test_lens/saved-queries/adults/run", {
+    const run = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/test_lens/saved-queries/adults/run", {
       params: { min_age: "35" },
     });
     expect(run.statusCode).toBe(200);
@@ -346,7 +346,7 @@ describe("runtime run (no provider)", () => {
 
     const first = await inject(
       "POST",
-      "/api/runtime/test_lens/saved-queries/people-page/run",
+      "/api/ontologies/test_ont/runtime/lenses/test_lens/saved-queries/people-page/run",
       { params: { offset: 0, page_size: 1 } },
     );
     expect(first.statusCode, JSON.stringify(first.body)).toBe(200);
@@ -354,7 +354,7 @@ describe("runtime run (no provider)", () => {
 
     const second = await inject(
       "POST",
-      "/api/runtime/test_lens/saved-queries/people-page/run",
+      "/api/ontologies/test_ont/runtime/lenses/test_lens/saved-queries/people-page/run",
       { params: { offset: 1, page_size: 1 } },
     );
     expect(second.statusCode, JSON.stringify(second.body)).toBe(200);
@@ -381,7 +381,7 @@ describe("runtime run (no provider)", () => {
 
     const run = await inject(
       "POST",
-      "/api/runtime/test_lens/saved-queries/company-staff/run",
+      "/api/ontologies/test_ont/runtime/lenses/test_lens/saved-queries/company-staff/run",
       { params: {} },
     );
     expect(run.statusCode).toBe(200);
@@ -391,7 +391,7 @@ describe("runtime run (no provider)", () => {
   });
 
   it("collects missing and unknown parameters together", async () => {
-    const run = await inject("POST", "/api/runtime/test_lens/saved-queries/adults/run", {
+    const run = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/test_lens/saved-queries/adults/run", {
       params: { wrong: 1 },
     });
     expect(run.statusCode).toBe(422);
@@ -406,7 +406,7 @@ describe("runtime run (no provider)", () => {
   it("an unknown query key answers 404", async () => {
     const run = await inject(
       "POST",
-      "/api/runtime/test_lens/saved-queries/nonexistent/run",
+      "/api/ontologies/test_ont/runtime/lenses/test_lens/saved-queries/nonexistent/run",
       { params: {} },
     );
     expect(run.statusCode).toBe(404);
@@ -430,7 +430,7 @@ describe("runtime run (no provider)", () => {
 
     const run = await inject(
       "POST",
-      "/api/runtime/test_lens/saved-queries/needs-embeddings/run",
+      "/api/ontologies/test_ont/runtime/lenses/test_lens/saved-queries/needs-embeddings/run",
       { params: { who: "engineers" } },
     );
     expect(run.statusCode).toBe(422);
@@ -441,7 +441,7 @@ describe("runtime run (no provider)", () => {
   it("saved-query search answers FEATURE_DISABLED without a provider", async () => {
     const res = await inject(
       "GET",
-      "/api/runtime/test_lens/saved-queries/search?q=find+people",
+      "/api/ontologies/test_ont/runtime/lenses/test_lens/saved-queries/search?q=find+people",
     );
     expect(res.statusCode).toBe(422);
     const error = (res.body as Row).error as Row;

@@ -1043,7 +1043,7 @@ describe("query endpoint", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/full_lens/query",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/query",
       payload: { query: "MATCH (p:person) RETURN p" },
     });
 
@@ -1057,7 +1057,7 @@ describe("query endpoint", () => {
   it("rejects the legacy 'cypher' body field", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/full_lens/query",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/query",
       payload: { cypher: "MATCH (p:person) RETURN p" },
     });
 
@@ -1067,7 +1067,7 @@ describe("query endpoint", () => {
   it("rejects write operations", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/full_lens/query",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/query",
       payload: { query: "CREATE (n:person {name: 'Bob'})" },
     });
 
@@ -1080,7 +1080,7 @@ describe("query endpoint", () => {
   it("rejects unknown entity types", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/full_lens/query",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/query",
       payload: { query: "MATCH (n:animal) RETURN n" },
     });
 
@@ -1097,7 +1097,7 @@ describe("query endpoint", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/hr_view/query",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/query",
       payload: { query: "MATCH (p:person) RETURN p" },
     });
 
@@ -1117,7 +1117,7 @@ describe("query endpoint", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/docs_view/query",
+      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/query",
       payload: { query: "MATCH (p:person) RETURN p" },
     });
 
@@ -1137,7 +1137,7 @@ describe("query endpoint", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/docs_view/query",
+      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/query",
       payload: { query: "MATCH (p:person) RETURN p.bio, p.name" },
     });
 
@@ -1156,7 +1156,7 @@ describe("query endpoint", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/docs_view/query",
+      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/query",
       payload: { query: "MATCH (p:person) RETURN p.bio AS biography" },
     });
 

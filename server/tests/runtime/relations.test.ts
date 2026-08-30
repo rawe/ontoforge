@@ -57,7 +57,7 @@ describe("create relation", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/hr_view/relations/works_for",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/relations/works_for",
       payload: { fromEntityId: "ent-1", toEntityId: "ent-2", role: "Engineer" },
     });
 
@@ -75,7 +75,7 @@ describe("create relation", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/hr_view/relations/belongs_to",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/relations/belongs_to",
       payload: { fromEntityId: "ent-1", toEntityId: "ent-2" },
     });
 
@@ -92,7 +92,7 @@ describe("create relation", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/hr_view/relations/works_for",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/relations/works_for",
       payload: { fromEntityId: "ent-9", toEntityId: "ent-2" },
     });
 
@@ -113,7 +113,7 @@ describe("create relation", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/hr_view/relations/works_for",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/relations/works_for",
       payload: {
         fromEntityId: "no-such-entity",
         toEntityId: "ent-1",
@@ -134,7 +134,7 @@ describe("create relation", () => {
   it("missing endpoints in the payload answer 422 in the standard envelope", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/hr_view/relations/works_for",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/relations/works_for",
       payload: { role: "Engineer" },
     });
 
@@ -152,7 +152,7 @@ describe("read relation", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/relations/works_for/rel-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/relations/works_for/rel-1",
     });
 
     expect(res.statusCode).toBe(200);
@@ -180,7 +180,7 @@ describe("read relation", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/restricted_view/relations/works_for/rel-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/restricted_view/relations/works_for/rel-1",
     });
 
     expect(res.statusCode).toBe(200);
@@ -195,7 +195,7 @@ describe("read relation", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/relations/works_for/no-such-id",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/relations/works_for/no-such-id",
     });
 
     expect(res.statusCode).toBe(404);
@@ -215,7 +215,7 @@ describe("list relations", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/relations/works_for",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/relations/works_for",
     });
 
     expect(res.statusCode).toBe(200);
@@ -231,7 +231,7 @@ describe("list relations", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/relations/belongs_to",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/relations/belongs_to",
     });
 
     expect(res.statusCode).toBe(404);
@@ -243,7 +243,7 @@ describe("list relations", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/relations/works_for?fromEntityId=ent-1&toEntityId=ent-2",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/relations/works_for?fromEntityId=ent-1&toEntityId=ent-2",
     });
 
     expect(res.statusCode).toBe(200);
@@ -258,7 +258,7 @@ describe("list relations", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/relations/works_for?fromEntityId=ent-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/relations/works_for?fromEntityId=ent-1",
     });
 
     expect(res.statusCode).toBe(200);
@@ -273,7 +273,7 @@ describe("list relations", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/relations/works_for?q=alice",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/relations/works_for?q=alice",
     });
 
     expect(res.statusCode).toBe(200);
@@ -284,7 +284,7 @@ describe("list relations", () => {
   it("out-of-range limit answers 422 on REST", async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/relations/works_for?limit=500",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/relations/works_for?limit=500",
     });
 
     expect(res.statusCode).toBe(422);
@@ -300,7 +300,7 @@ describe("update relation", () => {
 
     const res = await app.inject({
       method: "PATCH",
-      url: "/api/runtime/hr_view/relations/works_for/rel-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/relations/works_for/rel-1",
       payload: { role: "Senior Engineer" },
     });
 
@@ -314,7 +314,7 @@ describe("update relation", () => {
 
     const res = await app.inject({
       method: "PATCH",
-      url: "/api/runtime/hr_view/relations/works_for/rel-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/relations/works_for/rel-1",
       payload: {
         fromEntityId: "ent-999",
         toEntityId: "ent-888",
@@ -340,7 +340,7 @@ describe("update relation", () => {
 
     const res = await app.inject({
       method: "PATCH",
-      url: "/api/runtime/hr_view/relations/works_for/rel-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/relations/works_for/rel-1",
       payload: { fromEntityId: "ent-999", toEntityId: "ent-888" },
     });
 
@@ -354,7 +354,7 @@ describe("update relation", () => {
 
     const res = await app.inject({
       method: "PATCH",
-      url: "/api/runtime/hr_view/relations/belongs_to/rel-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/relations/belongs_to/rel-1",
       payload: { name: "X" },
     });
 
@@ -369,7 +369,7 @@ describe("delete relation", () => {
 
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/runtime/hr_view/relations/works_for/rel-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/relations/works_for/rel-1",
     });
 
     expect(res.statusCode).toBe(204);
@@ -380,7 +380,7 @@ describe("delete relation", () => {
 
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/runtime/hr_view/relations/belongs_to/rel-1",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/relations/belongs_to/rel-1",
     });
 
     expect(res.statusCode).toBe(404);
@@ -392,7 +392,7 @@ describe("delete relation", () => {
 
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/runtime/hr_view/relations/works_for/no-such-id",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/relations/works_for/no-such-id",
     });
 
     expect(res.statusCode).toBe(404);

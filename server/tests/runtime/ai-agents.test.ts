@@ -110,12 +110,17 @@ describe("listRuntimeAgents", () => {
 
 describe("buildAgentCard", () => {
   it("builds an A2A agent card with all fields", () => {
-    const card = buildAgentCard(TEST_AGENT_CONFIG, makeSchemaCache(), "http://localhost:8000");
+    const card = buildAgentCard(
+      TEST_AGENT_CONFIG,
+      "test_ont",
+      makeSchemaCache(),
+      "http://localhost:8000",
+    );
 
     expect(card.name).toBe("My Agent");
     expect(card.description).toBe("A custom agent");
     expect(card.url).toBe(
-      "http://localhost:8000/api/runtime/test_lens/ai/agents/my-agent/a2a",
+      "http://localhost:8000/api/ontologies/test_ont/runtime/lenses/test_lens/ai/agents/my-agent/a2a",
     );
     expect(card.version).toBe("0.1.0");
     expect((card.capabilities as Record<string, unknown>).streaming).toBe(false);
@@ -125,10 +130,15 @@ describe("buildAgentCard", () => {
   });
 
   it("default agent card uses the default A2A URL path", () => {
-    const card = buildAgentCard(DEFAULT_AGENT_CONFIG, makeSchemaCache(), "http://localhost:8000");
+    const card = buildAgentCard(
+      DEFAULT_AGENT_CONFIG,
+      "test_ont",
+      makeSchemaCache(),
+      "http://localhost:8000",
+    );
 
     expect(card.name).toBe(DEFAULT_AGENT_CONFIG.name);
-    expect(card.url).toBe("http://localhost:8000/api/runtime/test_lens/ai/a2a");
+    expect(card.url).toBe("http://localhost:8000/api/ontologies/test_ont/runtime/lenses/test_lens/ai/a2a");
   });
 
   it("auto-generates a description from schema types when none is set", () => {
@@ -141,6 +151,7 @@ describe("buildAgentCard", () => {
     };
     const card = buildAgentCard(
       agentNoDesc,
+      "test_ont",
       makeSchemaCache({ lensName: "HR Lens" }),
       "http://localhost:8000",
     );

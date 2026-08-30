@@ -59,7 +59,7 @@ describe.skipIf(!ollamaUp)("schema import (Ollama)", () => {
   it("embeds saved-query descriptions on import — searchable immediately", async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/saved-queries/search?q=find%20persons%20by%20their%20names",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/saved-queries/search?q=find%20persons%20by%20their%20names",
     });
     expect(res.statusCode).toBe(200);
     const results = res.json() as Row[];

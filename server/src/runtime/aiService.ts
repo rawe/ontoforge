@@ -967,9 +967,11 @@ export async function listRuntimeAgents(
   return agents;
 }
 
-/** Generate an A2A agent card JSON. */
+/** Generate an A2A agent card JSON. The advertised task URL names the
+ * ontology and lens, mirroring the runtime tree the card is served from. */
 export function buildAgentCard(
   agentConfig: AgentConfig,
+  ontologyKey: string,
   schemaCache: SchemaCacheValue,
   baseUrl: string,
 ): Row {
@@ -983,10 +985,11 @@ export function buildAgentCard(
       `Relation types: ${relationTypes.join(", ")}.`;
   }
 
+  const lensUrl = `${baseUrl}/api/ontologies/${ontologyKey}/runtime/lenses/${schemaCache.lensKey}`;
   const url =
     agentConfig.key === "_default"
-      ? `${baseUrl}/api/runtime/${schemaCache.lensKey}/ai/a2a`
-      : `${baseUrl}/api/runtime/${schemaCache.lensKey}/ai/agents/${agentConfig.key}/a2a`;
+      ? `${lensUrl}/ai/a2a`
+      : `${lensUrl}/ai/agents/${agentConfig.key}/a2a`;
 
   return {
     name: agentConfig.name,

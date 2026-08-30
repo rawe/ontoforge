@@ -159,12 +159,16 @@ export function makeRelation(
   };
 }
 
-/** Every port method as a mock — completeness is compiler-enforced. */
-export type MockRuntimeStore = { [K in keyof RuntimeStore]: Mock };
+/** Every port method as a mock — completeness is compiler-enforced. The
+ * one non-method member, the store's ontology binding, stays a value. */
+export type MockRuntimeStore = {
+  [K in Exclude<keyof RuntimeStore, "ontologyKey">]: Mock;
+} & { ontologyKey: string };
 
 /** A mock store whose reads default to "nothing stored". */
-export function createMockRuntimeStore(): MockRuntimeStore {
+export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeStore {
   return {
+    ontologyKey,
     getFullSchema: vi.fn(async () => null),
     getAiAgentConfigs: vi.fn(async () => []),
     getSavedQueries: vi.fn(async () => []),

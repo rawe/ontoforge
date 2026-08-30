@@ -1,8 +1,10 @@
 /**
- * AI runtime routes, mounted at `/api/runtime` alongside the runtime
- * router: ask, extract, chat (default and per-agent), agent discovery,
- * and the A2A card and task endpoints. Routers parse and shape only;
- * every rule lives in `aiService.ts`.
+ * AI runtime routes, mounted at
+ * `/api/ontologies/:ontologyKey/runtime/lenses/:lensKey` alongside the
+ * runtime router: ask, extract, chat (default and per-agent), agent
+ * discovery, and the A2A card and task endpoints. Every request binds a
+ * runtime store to the ontology its path names. Routers parse and shape
+ * only; every rule lives in `aiService.ts`.
  *
  * There are deliberately NO MCP tools for ask/extract/chat — an MCP
  * client is itself a language model and gets the underlying tools
@@ -16,12 +18,12 @@ import { z } from "zod";
 import { settings } from "../config.js";
 import { DEFAULT_AGENT_CONFIG } from "../core/ai.js";
 import { NotFoundError } from "../core/exceptions.js";
-import { getLegacyRuntimeStore } from "../core/ports.js";
+import { getRuntimeStore } from "../core/ports.js";
 import * as aiService from "./aiService.js";
 import { loadSchema } from "./schemaCache.js";
 
-const LensParams = z.object({ lensKey: z.string() });
-const AgentParams = z.object({ lensKey: z.string(), agentKey: z.string() });
+const LensParams = z.object({ ontologyKey: z.string(), lensKey: z.string() });
+const AgentParams = LensParams.extend({ agentKey: z.string() });
 
 const AiQueryPayload = z.looseObject({
   question: z.string().min(1),
@@ -67,36 +69,40 @@ export function getBaseUrl(request: FastifyRequest): string {
   return `${scheme}://${host}`;
 }
 
-/** AI routes mounted at `/api/runtime`, addressing one lens by key. */
+/** AI routes mounted at `/api/ontologies/:ontologyKey/runtime/lenses/:lensKey`. */
 export const aiRouter: FastifyPluginAsyncZod = async (app) => {
   app.post(
-    "/:lensKey/ai/query",
+    "/ai/query",
     { schema: { tags: ["ai"], params: LensParams, body: AiQueryPayload } },
     async (request) =>
-      aiService.aiQuery(request.params.lensKey, request.body.question, await getLegacyRuntimeStore()),
+      aiService.aiQuery(
+        request.params.lensKey,
+        request.body.question,
+        await getRuntimeStore(request.params.ontologyKey),
+      ),
   );
 
   app.post(
-    "/:lensKey/ai/extract",
+    "/ai/extract",
     { schema: { tags: ["ai"], params: LensParams, body: AiExtractPayload } },
     async (request) =>
       aiService.aiExtract(
         request.params.lensKey,
         request.body.text,
-        await getLegacyRuntimeStore(),
+        await getRuntimeStore(request.params.ontologyKey),
         request.body.entityTypes ?? request.body.entity_types ?? null,
         request.body.create,
       ),
   );
 
   app.post(
-    "/:lensKey/ai/chat",
+    "/ai/chat",
     { schema: { tags: ["ai"], params: LensParams, body: AiChatPayload } },
     async (request) =>
       aiService.aiChat(
         request.params.lensKey,
         request.body.message,
-        await getLegacyRuntimeStore(),
+        await getRuntimeStore(request.params.ontologyKey),
         request.body.history ?? null,
         request.body.includeToolCalls ?? request.body.include_tool_calls ?? false,
       ),
@@ -105,21 +111,24 @@ export const aiRouter: FastifyPluginAsyncZod = async (app) => {
   // --- Agent discovery and per-agent chat ---
 
   app.get(
-    "/:lensKey/ai/agents",
+    "/ai/agents",
     { schema: { tags: ["ai"], params: LensParams } },
     async (request) =>
-      aiService.listRuntimeAgents(request.params.lensKey, await getLegacyRuntimeStore()),
+      aiService.listRuntimeAgents(
+        request.params.lensKey,
+        await getRuntimeStore(request.params.ontologyKey),
+      ),
   );
 
   app.post(
-    "/:lensKey/ai/agents/:agentKey/chat",
+    "/ai/agents/:agentKey/chat",
     { schema: { tags: ["ai"], params: AgentParams, body: AiChatPayload } },
     async (request) =>
       aiService.aiAgentChat(
         request.params.lensKey,
         request.params.agentKey,
         request.body.message,
-        await getLegacyRuntimeStore(),
+        await getRuntimeStore(request.params.ontologyKey),
         request.body.history ?? null,
         request.body.includeToolCalls ?? request.body.include_tool_calls ?? false,
       ),
@@ -128,54 +137,66 @@ export const aiRouter: FastifyPluginAsyncZod = async (app) => {
   // --- A2A / Agent Card Endpoints ---
 
   app.get(
-    "/:lensKey/ai/.well-known/agent.json",
+    "/ai/.well-known/agent.json",
     { schema: { tags: ["ai"], params: LensParams } },
     async (request) => {
-      const loaded = await loadSchema(request.params.lensKey, await getLegacyRuntimeStore());
-      return aiService.buildAgentCard(DEFAULT_AGENT_CONFIG, loaded.scoped, getBaseUrl(request));
+      const loaded = await loadSchema(
+        request.params.lensKey,
+        await getRuntimeStore(request.params.ontologyKey),
+      );
+      return aiService.buildAgentCard(
+        DEFAULT_AGENT_CONFIG,
+        request.params.ontologyKey,
+        loaded.scoped,
+        getBaseUrl(request),
+      );
     },
   );
 
   app.post(
-    "/:lensKey/ai/a2a",
+    "/ai/a2a",
     { schema: { tags: ["ai"], params: LensParams, body: A2aPayload } },
     async (request) =>
       aiService.handleA2aTask(
         DEFAULT_AGENT_CONFIG,
         request.params.lensKey,
         request.body,
-        await getLegacyRuntimeStore(),
+        await getRuntimeStore(request.params.ontologyKey),
       ),
   );
 
   app.get(
-    "/:lensKey/ai/agents/:agentKey/.well-known/agent.json",
+    "/ai/agents/:agentKey/.well-known/agent.json",
     { schema: { tags: ["ai"], params: AgentParams } },
     async (request) => {
-      const loaded = await loadSchema(request.params.lensKey, await getLegacyRuntimeStore());
+      const loaded = await loadSchema(
+        request.params.lensKey,
+        await getRuntimeStore(request.params.ontologyKey),
+      );
       const config = loaded.agentConfigs[request.params.agentKey];
       if (!config) {
         throw new NotFoundError(`AI agent '${request.params.agentKey}' not found`);
       }
-      return aiService.buildAgentCard(config, loaded.scoped, getBaseUrl(request));
+      return aiService.buildAgentCard(
+        config,
+        request.params.ontologyKey,
+        loaded.scoped,
+        getBaseUrl(request),
+      );
     },
   );
 
   app.post(
-    "/:lensKey/ai/agents/:agentKey/a2a",
+    "/ai/agents/:agentKey/a2a",
     { schema: { tags: ["ai"], params: AgentParams, body: A2aPayload } },
     async (request) => {
-      const loaded = await loadSchema(request.params.lensKey, await getLegacyRuntimeStore());
+      const store = await getRuntimeStore(request.params.ontologyKey);
+      const loaded = await loadSchema(request.params.lensKey, store);
       const config = loaded.agentConfigs[request.params.agentKey];
       if (!config) {
         throw new NotFoundError(`AI agent '${request.params.agentKey}' not found`);
       }
-      return aiService.handleA2aTask(
-        config,
-        request.params.lensKey,
-        request.body,
-        await getLegacyRuntimeStore(),
-      );
+      return aiService.handleA2aTask(config, request.params.lensKey, request.body, store);
     },
   );
 };

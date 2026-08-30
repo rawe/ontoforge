@@ -58,7 +58,11 @@ function toWriteProperties(
 }
 
 export class Neo4jRuntimeStore implements RuntimeStore {
-  constructor(private readonly driver: Driver) {}
+  /** Bound to one ontology; unbound (tests only) carries the empty key. */
+  constructor(
+    private readonly driver: Driver,
+    public readonly ontologyKey: string = "",
+  ) {}
 
   // ------------------------------------------------------------------
   // Schema reading (for the runtime schema cache)

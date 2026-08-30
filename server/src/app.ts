@@ -30,7 +30,8 @@ import { mountMcp } from "./mcp/mount.js";
 import { modelingRouter } from "./modeling/router.js";
 import { registryRouter } from "./registry/router.js";
 import { aiRouter } from "./runtime/aiRouter.js";
-import { runtimeGlobalRouter, runtimeRouter } from "./runtime/router.js";
+import { runtimeRouter } from "./runtime/router.js";
+import { serverRouter } from "./server/router.js";
 
 function sendError(
   reply: FastifyReply,
@@ -158,12 +159,15 @@ export async function createApp(): Promise<FastifyInstance> {
   });
 
   await app.register(registryRouter, { prefix: "/api" });
-  // The modeling surface is ontology-scoped: every request names its
-  // ontology in the path and runs against a store bound to it.
+  // The phase-neutral server surface: capability reads only.
+  await app.register(serverRouter, { prefix: "/api/server" });
+  // The modeling and runtime surfaces are ontology-scoped: every request
+  // names its ontology in the path and runs against a store bound to it;
+  // runtime requests additionally name the lens they read through.
   await app.register(modelingRouter, { prefix: "/api/ontologies/:ontologyKey/model" });
-  await app.register(runtimeGlobalRouter, { prefix: "/api/runtime" });
-  await app.register(runtimeRouter, { prefix: "/api/runtime" });
-  await app.register(aiRouter, { prefix: "/api/runtime" });
+  const runtimePrefix = "/api/ontologies/:ontologyKey/runtime/lenses/:lensKey";
+  await app.register(runtimeRouter, { prefix: runtimePrefix });
+  await app.register(aiRouter, { prefix: runtimePrefix });
 
   // Startup step 6: both MCP servers share the process and call the same
   // services as REST.

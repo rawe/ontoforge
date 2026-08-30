@@ -184,7 +184,7 @@ describe("framework-level failures answer in the envelope", () => {
 
 describe("features route", () => {
   it("reports both capabilities false with the exact field names", async () => {
-    const res = await app.inject({ method: "GET", url: "/api/runtime/features" });
+    const res = await app.inject({ method: "GET", url: "/api/server/features" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ semanticSearch: false, ai: false });
   });
@@ -196,7 +196,7 @@ describe("OpenAPI surface", () => {
     expect(res.statusCode).toBe(200);
     const spec = res.json();
     expect(spec.info.title).toBe("OntoForge");
-    expect(spec.paths["/api/runtime/features"]).toBeDefined();
+    expect(spec.paths["/api/server/features"]).toBeDefined();
   });
 
   it("serves the swagger UI at /docs", async () => {

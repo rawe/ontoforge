@@ -2,14 +2,22 @@
 
 A plugin for AI coding assistants (Claude Code and OpenAI Codex) that provides OntoForge skills for ontology schema management and project setup.
 
+## Ontologies and lenses
+
+One OntoForge server holds many **ontologies** — isolated units, each with its own schema, lenses, saved queries, agents and instance data. Nothing spans two. A **lens** is a named view over one ontology's schema; instance data is read and written through one.
+
+Every skill here works against one ontology at a time, and every skill that touches instance data also names a lens. Neither has a default, so both are explicit inputs — a flag or an environment variable for `ontoforge-sync`, `okf.config.json` for `ontoforge-okf`, and the mount URL for the MCP servers `ontoforge-setup` configures.
+
 ## Skills
 
 ### ontoforge-sync
 
-Export and import OntoForge schema and instance data via the REST API.
+Export and import one ontology's design and instance data via the REST API.
 
-- **Schema export/import**: save and restore the complete global schema (entity types, relation types, ontologies) as JSON
-- **Data export/import**: save and restore all instance data (entities, relations) with automatic ID remapping
+- **Design export/import**: save and restore one ontology's schema, lenses, agents and saved queries as JSON, in the server's own transfer format
+- **Data export/import**: save and restore instance data (entities, relations) with automatic ID remapping — this is the only instance-data export there is, since the transfer format carries the design alone
+- **Embedding rebuild**: regenerate one ontology's semantic-search vectors, with streamed progress
+- Resolves the ontology key from `--ontology` or `ONTOFORGE_ONTOLOGY`, and stops with a clear message when neither is set
 - Uses Node.js 18+ with built-in `fetch` — no external dependencies
 
 ### ontoforge-okf
@@ -19,7 +27,7 @@ Sync Markdown documents with YAML frontmatter (Google's [Open Knowledge Format](
 - **Push**: `okf-push.mjs <file.md>` turns a concept document into an entity — frontmatter keys become scalar properties, the Markdown body becomes the `document` property, the file path becomes the concept ID (natural key). Idempotent: re-pushing updates instead of duplicating.
 - **Pull**: `okf-pull.mjs <conceptId>` writes an entity back to `<conceptId>.md` with deterministic frontmatter ordering for clean git diffs.
 - Document content moves filesystem ↔ API directly, never through an LLM context — use it alongside the MCP tools, not instead of them.
-- Optional `okf.config.json` per bundle for ontology key, type mapping, and list-property handling.
+- `okf.config.json` at the bundle root carries the per-bundle state: the ontology key, the lens key, the type mapping and the list-property handling. Only the server URL stays per-developer, in `ONTOFORGE_BASE_URL`.
 
 See [SKILL.md](skills/ontoforge-okf/SKILL.md) for the full usage reference, schema requirements, and the supported YAML subset.
 
@@ -37,7 +45,7 @@ The skill uses bundled templates as starting points and adapts them based on use
 
 ### ontoforge-runtime-api
 
-Help an agent build `curl` calls, clients, and integrations against the OntoForge runtime REST API. The skill stays runtime-only and points to the existing endpoint contract and usage guide instead of duplicating the API docs.
+Help an agent build `curl` calls, clients, and integrations against the OntoForge runtime REST API under `/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}`. The skill stays runtime-only — it covers neither the modeling surface nor the ontology registry — and bundles a reference covering the endpoint contract, the filter and projection syntax, the error envelope, and what the surface deliberately does not offer.
 
 ## Installation
 

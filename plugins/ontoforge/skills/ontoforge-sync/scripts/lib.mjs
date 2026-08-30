@@ -35,6 +35,35 @@ export function getBaseUrl(flags) {
 }
 
 /**
+ * Resolve the ontology key every request is scoped to. There is no default
+ * ontology on the server, so an absent key is a hard stop rather than a guess.
+ * Priority: --ontology flag > ONTOFORGE_ONTOLOGY env.
+ */
+export function getOntologyKey(flags) {
+  const key = flags.ontology || process.env.ONTOFORGE_ONTOLOGY;
+  if (!key) {
+    die(
+      'no ontology key — pass --ontology <key> or set ONTOFORGE_ONTOLOGY. ' +
+        'List the server\'s ontologies with GET /api/ontologies.',
+    );
+  }
+  return key;
+}
+
+/** Route prefix for one ontology's modeling surface. */
+export function modelPath(ontologyKey) {
+  return `/api/ontologies/${encodeURIComponent(ontologyKey)}/model`;
+}
+
+/** Route prefix for one ontology's instance data seen through one lens. */
+export function runtimePath(ontologyKey, lensKey) {
+  return (
+    `/api/ontologies/${encodeURIComponent(ontologyKey)}` +
+    `/runtime/lenses/${encodeURIComponent(lensKey)}`
+  );
+}
+
+/**
  * Make an API request. Throws on non-2xx responses.
  */
 export async function api(baseUrl, path, options = {}) {
@@ -79,14 +108,14 @@ export async function paginate(baseUrl, path, pageSize = 200) {
 }
 
 /**
- * Pick an ontology key for full data access from a schema export payload.
- * Prefers unscoped ontologies (includes === null).
+ * Pick the lens that grants the widest data access from an export payload.
+ * Prefers an unscoped lens (includes === null), which sees the whole schema.
  */
-export function pickOntologyKey(schemaPayload) {
-  const ontologies = schemaPayload.lenses || [];
-  if (!ontologies.length) return null;
-  const unscoped = ontologies.find((o) => !o.includes);
-  return unscoped ? unscoped.key : ontologies[0].key;
+export function pickLensKey(exportPayload) {
+  const lenses = exportPayload.lenses || [];
+  if (!lenses.length) return null;
+  const unscoped = lenses.find((lens) => !lens.includes);
+  return unscoped ? unscoped.key : lenses[0].key;
 }
 
 export function die(message) {

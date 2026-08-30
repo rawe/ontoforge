@@ -10,7 +10,8 @@
 const CONFIG_LABEL = 'okf.config.json';
 
 export const DEFAULT_CONFIG = {
-  ontology: null, // required
+  ontology: null, // required: the ontology key the bundle syncs with
+  lens: null, // required: the lens its instance data is read and written through
   conceptIdProperty: 'concept_id',
   documentProperty: null, // null = auto-detect the single document property
   typeMap: {}, // required: frontmatter type value -> entity type key, one-to-one
@@ -35,6 +36,11 @@ function validateConfig(config) {
   const errors = [];
   if (!config.ontology) {
     errors.push('"ontology" is missing — name the ontology key this bundle syncs with');
+  }
+  if (!config.lens) {
+    errors.push(
+      '"lens" is missing — name the lens the bundle\'s entities are read and written through',
+    );
   }
   const entries = Object.entries(config.typeMap);
   if (!entries.length) {

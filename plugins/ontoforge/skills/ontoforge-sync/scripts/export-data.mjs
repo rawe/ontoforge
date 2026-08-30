@@ -1,42 +1,60 @@
 #!/usr/bin/env node
-// Export all OntoForge instance data (entities and relations) to a JSON file.
+// Export one ontology's instance data (entities and relations) to a JSON
+// file. The data is read through one lens, so the lens decides how much of
+// the ontology the export can see.
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { api, die, getBaseUrl, paginate, parseCliArgs, pickOntologyKey } from './lib.mjs';
+import {
+  api,
+  die,
+  getBaseUrl,
+  getOntologyKey,
+  modelPath,
+  paginate,
+  parseCliArgs,
+  pickLensKey,
+  runtimePath,
+} from './lib.mjs';
 
 const { flags } = parseCliArgs({
   output: ['-o', '--output'],
   baseUrl: ['--base-url'],
-  ontologyKey: ['--ontology-key'],
+  ontology: ['--ontology'],
+  lens: ['--lens'],
 });
 
 const baseUrl = getBaseUrl(flags);
+const ontologyKey = getOntologyKey(flags);
 const output = flags.output || './ontoforge/data.json';
 
 try {
-  // Get the global schema to discover all type keys
-  const schema = await api(baseUrl, '/api/model/export');
+  // Read the ontology's design to discover every type key.
+  const design = await api(baseUrl, `${modelPath(ontologyKey)}/export`);
 
-  // Resolve ontology key for runtime API access (prefers unscoped)
-  const ontologyKey = flags.ontologyKey || pickOntologyKey(schema);
-  if (!ontologyKey) die('No ontologies found. Import a schema first.');
-  if (!flags.ontologyKey) {
-    const isUnscoped = (schema.lenses || []).some(
-      (o) => o.key === ontologyKey && !o.includes,
+  // Resolve the lens the runtime API reads through (prefers unscoped).
+  const lensKey = flags.lens || pickLensKey(design);
+  if (!lensKey) {
+    die(`ontology "${ontologyKey}" has no lens. Create one before exporting data.`);
+  }
+  if (!flags.lens) {
+    const isUnscoped = (design.lenses || []).some(
+      (lens) => lens.key === lensKey && !lens.includes,
     );
     console.error(
-      `Using ontology: ${ontologyKey}${isUnscoped ? '' : ' (scoped — export may be partial)'}`,
+      `Using lens: ${lensKey}${isUnscoped ? '' : ' (scoped — export may be partial)'}`,
     );
   }
 
+  const prefix = runtimePath(ontologyKey, lensKey);
+
   // Export all entities by type
   const entities = {};
-  for (const et of schema.entityTypes || []) {
+  for (const et of design.entityTypes || []) {
     // Document properties are returned as stubs by default; request raw
     // values via the fields projection. Since `fields` limits the response,
     // list every property plus the system fields the export format needs.
-    let path = `/api/runtime/${encodeURIComponent(ontologyKey)}/entities/${encodeURIComponent(et.key)}`;
+    let path = `${prefix}/entities/${encodeURIComponent(et.key)}`;
     const props = et.properties || [];
     if (props.some((p) => p.dataType === 'document')) {
       const fields = ['_entityTypeKey', '_createdAt', '_updatedAt', ...props.map((p) => p.key)];
@@ -49,25 +67,25 @@ try {
         console.error(`  ${et.key}: ${items.length} entities`);
       }
     } catch (err) {
-      if (err.message.includes('404')) continue; // type not in scope
+      if (err.message.includes('404')) continue; // type not visible through the lens
       throw err;
     }
   }
 
   // Export all relations by type
   const relations = {};
-  for (const rt of schema.relationTypes || []) {
+  for (const rt of design.relationTypes || []) {
     try {
       const items = await paginate(
         baseUrl,
-        `/api/runtime/${encodeURIComponent(ontologyKey)}/relations/${encodeURIComponent(rt.key)}`,
+        `${prefix}/relations/${encodeURIComponent(rt.key)}`,
       );
       if (items.length > 0) {
         relations[rt.key] = items;
         console.error(`  ${rt.key}: ${items.length} relations`);
       }
     } catch (err) {
-      if (err.message.includes('404')) continue; // type not in scope
+      if (err.message.includes('404')) continue; // type not visible through the lens
       throw err;
     }
   }

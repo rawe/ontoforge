@@ -25,10 +25,23 @@ The concept ID alone identifies a document. Push and pull resolve it the same wa
 
 - **Node.js 18+** — built-in `fetch`, no dependencies
 - **`ONTOFORGE_BASE_URL`** naming a running OntoForge server. It is per-developer, so it stays out of the bundle
-- **`okf.config.json` at the bundle root**, naming the ontology and mapping every `type` value to an entity type
-- **Entity types** carrying a concept-ID property and a document property
+- **`okf.config.json` at the bundle root**, naming the ontology and the lens, and mapping every `type` value to an entity type
+- **Entity types** carrying a concept-ID property and a document property, visible through that lens
 
-**Missing `okf.config.json`, or an ontology with no entity types for this bundle? → [references/setup.md](references/setup.md)**
+**Missing `okf.config.json`, or a lens with no entity types for this bundle? → [references/setup.md](references/setup.md)**
+
+## Where a bundle syncs to
+
+A bundle is bound to exactly one **ontology** — the isolated unit holding a schema and
+all its instance data — and reads and writes its entities through exactly one **lens** of
+that ontology, a named view over the ontology's schema. Both keys live in
+`okf.config.json`, because they are per-bundle state rather than per-developer: everyone
+working on the same bundle syncs to the same place. Only the server URL is per-developer,
+and it stays in `ONTOFORGE_BASE_URL`.
+
+The lens decides what the scripts can see. An unscoped lens exposes the whole schema; a
+scoped lens must expose every mapped entity type, the concept-ID property and the
+document property, because a property the lens hides cannot be written through it.
 
 ## Commands
 
@@ -49,7 +62,7 @@ Parses each file, resolves the entity type from frontmatter `type`, looks the co
 - A concept ID already stored under a different entity type is a conflict. An entity cannot change type — delete the stored entity, then push again.
 - Several files go in one invocation (shell globs work). Failures are reported per file and the exit code is non-zero if any failed.
 
-**API used**: `GET /schema/entity-types`, `GET /entities/{type}?filter.<concept-ID property>=…`, `POST /entities/{type}`, `PATCH /entities/{type}/{id}` (all under `/api/runtime/{ontology}`)
+**API used**: `GET /schema/entity-types`, `GET /entities/{type}?filter.<concept-ID property>=…`, `POST /entities/{type}`, `PATCH /entities/{type}/{id}` — all under `/api/ontologies/{ontology}/runtime/lenses/{lens}`
 
 ### Pull (entity → file)
 
@@ -61,7 +74,7 @@ Derives the concept ID from the path, finds the entity across every mapped entit
 
 A concept ID that exists more than once aborts the pull and lists the entities, because the concept ID is meant to be unique.
 
-**API used**: `GET /schema/entity-types`, `GET /entities/{type}?filter.…&fields=_id`, `GET /entities/{type}/{id}?fields=…`
+**API used**: `GET /schema/entity-types`, `GET /entities/{type}?filter.…&fields=_id`, `GET /entities/{type}/{id}?fields=…` — all under `/api/ontologies/{ontology}/runtime/lenses/{lens}`
 
 ## Frontmatter Support
 
@@ -75,6 +88,7 @@ Nested mappings — `generated: { by: …, at: … }`, `sources:` with indented 
 - Markdown links between concepts stay inside the body. They become no OntoForge relations.
 - Renaming or moving a file changes its concept ID, so the next push creates a second entity and leaves the first in place.
 - Whole-bundle import and export, `index.md` generation and schema bootstrap are not part of this skill.
+- One bundle, one ontology and one lens. Nothing spans two ontologies, so a bundle cannot be split across them.
 
 ## Testing
 
@@ -86,6 +100,6 @@ Covers config validation, frontmatter parsing, payload mapping, serialization or
 
 ## Related Skills
 
-- **ontoforge-sync** — whole-database schema and instance-data export/import as JSON.
+- **ontoforge-sync** — export and import one ontology's design and instance data as JSON.
 - **ontoforge-setup** — bootstrap a project with Docker Compose and MCP configuration.
 - **ontoforge-runtime-api** — build against the OntoForge runtime REST API.

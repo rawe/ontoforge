@@ -21,7 +21,9 @@ the capability flags are false, which only holds with no provider configured.
 **Integration tests** (`tests/integration/`) hit real services and run serially — they
 wipe the database between files. The integration suite *is* the conformance suite: the
 same tests run against whichever adapter `DB_BACKEND` selects, and nothing is renamed
-per backend. The embedding suite (`tests/integration/embedding/`) and the AI suite
+per backend. It carries two tiers (`tests/integration/tiers.ts`): the contract tier
+every adapter runs, and a multi-ontology tier — cases that need several ontologies at
+once — that skips on adapters capped at one ontology (Neo4j). The embedding suite (`tests/integration/embedding/`) and the AI suite
 (`tests/integration/ai/`) are separate because they configure live providers, while the
 plain integration suite's feature-disabled assertions depend on running with *no*
 provider configured.

@@ -12,7 +12,7 @@ instance data they govern.
 ## Decision
 
 One database instance holds all schema and instance data. The server always serves both
-modeling (`/api/model`) and runtime (`/api/runtime/{ontologyKey}`) routes from a single
+the modeling and the runtime routes from a single
 process. No mode switching, and no separate deployments for different concerns.
 
 ## Consequences

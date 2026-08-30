@@ -16,7 +16,7 @@ Startup reads each existing index's width, compares it against the configured pr
 and warns per mismatch — naming the entity type, document property, or search scope, both
 widths, and the remedy. It does not repair.
 
-`POST /api/model/rebuild-embeddings` does repair, because there the drop is immediately
+The rebuild-embeddings operation does repair, because there the drop is immediately
 followed by regeneration at the new width — the operator asked for exactly that, and the
 endpoint's documentation already named a changed embedding model as a reason to run it.
 

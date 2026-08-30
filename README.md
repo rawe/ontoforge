@@ -6,17 +6,20 @@ A graph-native ontology studio for designing graph schemas and using them throug
 
 When building applications that depend on structured domain knowledge — whether it's a research tool, a recommendation system, or an internal knowledge base — the schema behind the data matters as much as the data itself. Without a way to define and enforce that schema, knowledge graphs tend to drift into inconsistency.
 
-OntoForge exists to solve this. It lets you **model a global schema** (entity types, relation types, property definitions) through a dedicated UI and API, and then **interact with instance data** through a generic, schema-driven runtime API that validates every write against your schema. You define the rules once; the system enforces them on every operation.
+OntoForge exists to solve this. It lets you **model a schema** (entity types, relation types, property definitions) through a dedicated UI and API, and then **interact with instance data** through a generic, schema-driven runtime API that validates every write against your schema. You define the rules once; the system enforces them on every operation.
 
-**Ontologies are lenses.** The schema is global and independent. Ontologies are named views over this schema — either unscoped (full access to all types and properties) or scoped to a filtered subset. This lets different teams or applications work with the same data through focused, domain-specific views without fragmenting the data model.
+**One server, many ontologies.** An ontology is a totally isolated unit: one domain's schema together with its lenses, saved queries, agents, and all of its instance data. Nothing spans two ontologies — every request addresses exactly one, named in the URL.
+
+**Lenses are views.** Within an ontology, lenses are named views over its schema — either unscoped (full access to all types and properties) or scoped to a filtered subset. This lets different teams or applications work with the same data through focused, domain-specific views without fragmenting the data model.
 
 The intended workflow:
 
-1. **Design** your schema using the modeling UI or API — define what entity types, relation types, and properties exist in your domain.
-2. **Create ontologies** — define named lenses over the schema, optionally scoping each to specific types and properties.
-3. **Test** your schema by creating instance data through the runtime API and iterating until it fits.
-4. **Integrate** the runtime API into your application's backend — OntoForge becomes the schema-enforced persistence layer for your domain knowledge.
-5. **Connect AI tools** via MCP servers — one for modeling the schema, one for structured read/write access to instance data, giving coding assistants controlled access to your knowledge graph.
+1. **Create an ontology** — a named, isolated home for one domain.
+2. **Design** its schema using the modeling UI or API — define what entity types, relation types, and properties exist in that domain.
+3. **Create lenses** — named views over the schema, optionally scoping each to specific types and properties.
+4. **Test** your schema by creating instance data through the runtime API and iterating until it fits.
+5. **Integrate** the runtime API into your application's backend — OntoForge becomes the schema-enforced persistence layer for your domain knowledge.
+6. **Connect AI tools** via MCP servers — one for modeling the schema, one for structured read/write access to instance data through one lens, giving coding assistants controlled access to your knowledge graph.
 
 The key idea: **no unstructured writes**. Every entity and relation that goes into the graph must conform to the schema. Read access can be more flexible (e.g., OQL queries for analytics), but writes are always schema-enforced through the runtime API.
 
@@ -90,7 +93,7 @@ Once connected to the runtime server, an AI assistant can work with your knowled
 3. **Search by meaning** — `semantic_search(query="distributed systems engineers")` finds entities by semantic similarity, not just keyword matching. Requires `EMBEDDING_PROVIDER` to be configured.
 4. **Explore the graph** — `get_neighbors(entity_type_key="person", entity_id="...", direction="outgoing")` discovers what an entity is connected to.
 
-Every write is validated against the ontology — the assistant cannot invent entity types, add undefined properties, or write structurally invalid data.
+Every write is validated against the ontology's schema — the assistant cannot invent entity types, add undefined properties, or write structurally invalid data.
 
 See [docs/interfaces.md](docs/interfaces.md) for the full tool catalog.
 
@@ -130,10 +133,12 @@ npm install
 npm run dev
 ```
 
-The API is available at `http://localhost:8000`. On startup it initializes the database schema. The runtime schema cache is loaded lazily on first request per ontology.
+The API is available at `http://localhost:8000`. On startup it initializes the server-wide database objects; each ontology's storage is provisioned when the ontology is created. The runtime schema cache is loaded lazily on first request per ontology and lens.
 
-- Modeling endpoints: `/api/model/...`
-- Runtime endpoints: `/api/runtime/{ontologyKey}/...`
+- Registry endpoints: `/api/ontologies`
+- Modeling endpoints: `/api/ontologies/{ontologyKey}/model/...`
+- Runtime endpoints: `/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/...`
+- Server capability report: `/api/server/features`
 
 ### 3. Start the Frontend
 
@@ -158,14 +163,16 @@ Integration tests are opt-in and do require a running database and Ollama; see
 
 ## Architecture
 
-OntoForge is a modular monolith backed by a single database holding both schema and
-instance data. All database access goes through a persistence port; PostgreSQL is the
-default adapter, Neo4j the alternative.
+OntoForge is a modular monolith backed by a single database holding every ontology's
+schema and instance data. All database access goes through a persistence port with
+per-ontology bound stores; PostgreSQL is the default adapter (one PostgreSQL schema per
+ontology), Neo4j the alternative (capped at one ontology).
 
-- **Modeling** — the global schema, ontology scopes, validation, export/import (`/api/model`)
-- **Runtime** — schema-driven instance data through an ontology lens (`/api/runtime/{ontologyKey}`)
-- **MCP** — two servers, modeling and runtime, for AI clients
-- **Frontend** — two surfaces: Workbench for data, Studio for schema design
+- **Registry** — ontologies as manageable units (`/api/ontologies`)
+- **Modeling** — one ontology's schema, lenses, validation, export/import (`/api/ontologies/{ontologyKey}/model`)
+- **Runtime** — schema-driven instance data through one lens (`/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}`)
+- **MCP** — two servers, modeling and runtime, for AI clients, bound by their mount URLs
+- **Frontend** — a start page managing the ontologies, then two surfaces per ontology: Workbench for data, Studio for schema design
 
 Full documentation starts at **[docs/README.md](docs/README.md)**:
 
@@ -196,8 +203,10 @@ ontoforge/
 │   │   ├── config.ts               # Environment-based settings
 │   │   ├── core/                   # Shared: persistence port, exceptions, OQL, AI
 │   │   ├── adapters/               # Database adapters (PostgreSQL, Neo4j)
+│   │   ├── registry/               # Ontology registry CRUD
 │   │   ├── modeling/               # Schema CRUD, validation, export/import
 │   │   ├── runtime/                # Instance CRUD, search, graph traversal
+│   │   ├── server/                 # Server capability report
 │   │   └── mcp/                    # MCP servers (modeling + runtime tools)
 │   └── tests/
 ├── dev.sh                          # Start PostgreSQL + backend + frontend for local development
@@ -253,7 +262,7 @@ Find entities by meaning rather than exact keywords — within a single entity t
 | `EMBEDDING_API_KEY` | *(unset)* | API key (required for `openai` provider) |
 | `EMBEDDING_DIMENSIONS` | *(auto)* | Vector dimensions (defaults: ollama=768, openai=1536) |
 
-Semantic indexes are built for the vector width of the model that created them, so changing `EMBEDDING_MODEL` or `EMBEDDING_DIMENSIONS` on an existing database — including a reused Docker volume — leaves indexes the new model cannot be searched against. Startup names each one in a warning; `POST /api/model/rebuild-embeddings` rebuilds them at the new width and regenerates the vectors.
+Semantic indexes are built for the vector width of the model that created them, so changing `EMBEDDING_MODEL` or `EMBEDDING_DIMENSIONS` on an existing database — including a reused Docker volume — leaves indexes the new model cannot be searched against. Startup names each one in a warning; `POST /api/ontologies/{ontologyKey}/model/rebuild-embeddings` rebuilds one ontology's indexes at the new width and regenerates its vectors — run it once per ontology after a provider switch.
 
 ### AI-Powered Runtime
 

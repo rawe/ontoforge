@@ -10,8 +10,8 @@ separation.
 
 ## Decision
 
-Two separate MCP mount points within the same process: one for modeling
-(`/mcp/model/{key}`) and one for runtime (`/mcp/runtime/{key}`).
+Two separate MCP mount points within the same process: one for modeling and one for
+runtime.
 
 ## Consequences
 

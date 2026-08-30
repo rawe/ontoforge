@@ -1,8 +1,9 @@
 # Storage adapters
 
 Everything OntoForge persists crosses one boundary: the persistence port. Above it,
-services speak ontology vocabulary only — keys, property definitions, structured filters,
-instance identifiers. Below it, exactly one adapter knows a database.
+services speak schema vocabulary only — keys, property definitions, structured filters,
+instance identifiers — through stores bound to one ontology and a small registry port.
+Below it, exactly one adapter knows a database.
 
 This document is the contract an adapter must satisfy. Concepts and vocabulary:
 [README.md](README.md). Where the port sits in the system:
@@ -19,6 +20,56 @@ and the adapter parts.
 ---
 
 # Part 1 — The contract (normative)
+
+## Bound stores and the registry
+
+The port has three surfaces: a modeling store and a runtime store, each obtained **bound
+to one ontology**, and an **ontology registry** that manages ontologies as whole units.
+
+**Stores are bound.** A store is requested for an ontology key and every operation on it
+resolves within that binding. The binding check happens above the adapter — the port
+accessors verify the key against the registry and fail with not found before the adapter
+is asked for a store — so an adapter may hand out bound stores without checking. All
+store operations below are written as if the ontology were the whole world, because
+through a bound store it is.
+
+**Isolation is total.** An operation on a store bound to one ontology must never
+observe, return, or affect another ontology's data — schema, instances, chunks, vectors,
+or search indexes. "One request, one ontology" is structural above the adapter and
+physical inside it: *how* the data of two ontologies is kept apart is each adapter's
+private business, described only in its own non-normative part, and nothing above the
+port may depend on the mechanism.
+
+**The registry manages ontologies as whole units.** Its rows carry the internal id, the
+key, the optional display name and timestamps. Six operations:
+
+| Operation | Obligation |
+|---|---|
+| Create | Given an internal id, a key, an optional display name and an optional embedding width, create the registry entry **and provision the ontology's physical home atomically** — a failed create leaves no entry and no home. When a width is given, the home carries the fixed semantic indexes at that width; when none is (no embedding provider), it carries none. |
+| List | Every ontology, as registry rows. |
+| Read by key | One row, or an absent result. |
+| Read by display name | One row, or an absent result — display names are unique server-wide, and the pre-write conflict check needs the lookup. |
+| Rename | Set the display name; the key never changes. Absent result when not found. |
+| Delete | Hard cascade: the ontology's physical home and its registry entry go together — schema, lenses, agents, saved queries, instances, chunks, and every search index. False when not found. |
+
+The registry — not the database's own catalog — is the authoritative list of ontologies.
+The store must enforce server-wide uniqueness of the ontology key and the display name;
+a concurrent pair of creates must produce a conflict, not a duplicate.
+
+**A capped registry is a valid implementation.** An adapter whose physical mapping
+cannot hold more than one ontology may enforce a cap by rejecting further creates as a
+domain conflict — see the conformance tiers below and the rule in
+[decisions.md](decisions.md#storage).
+
+### Conformance tiers
+
+The conformance suite splits in two. The **contract tier** covers everything in this
+part at a scale of one ontology — bound stores, the registry operations, isolation
+semantics — and every adapter must pass it. The **multi-ontology tier** exercises
+several ontologies at once — independent same-key schemas, disjoint instance data,
+cross-ontology search silence — and only adapters whose registry accepts more than one
+ontology run it. PostgreSQL runs both tiers; Neo4j, capped at one ontology, runs the
+contract tier only.
 
 ## What crosses the port
 
@@ -52,7 +103,7 @@ or an absent value, and a failed delete is a false return. See the error table i
 [architecture.md](architecture.md).
 
 **An adapter declares the type keys it reserves, as plain keys.** Two sets, one for entity
-type keys and one for relation type keys. They are returned as ontology-level keys, never
+type keys and one for relation type keys. They are returned as schema-level keys, never
 as physical names, so the modeling service can reject a colliding key without knowing what
 it would collide with. An adapter with no collisions returns two empty sets.
 
@@ -66,15 +117,16 @@ physical objects that way; a new adapter accepts them and maps them to whatever 
 
 | Operation | Obligation |
 |---|---|
-| Initialize | Open connections, verify the database is reachable, create every constraint and index the adapter needs, and return the two store surfaces. Failure prevents the server from serving. |
+| Initialize | Open connections, verify the database is reachable, create every **server-wide** constraint and index the adapter needs, and hand out the registry and the two bound-store factories. Per-ontology storage is provisioned by registry create, never at initialization. Failure prevents the server from serving. |
 | Close | Release connections. Idempotent. |
-| Ensure semantic indexes | Given a vector width, create every vector index the current schema implies. Called at startup only when an embedding provider is configured. |
+| Ensure semantic indexes | Given a vector width, create every vector index the current schemas imply, for **every ontology the registry lists** — doing nothing when there are none. Called at startup only when an embedding provider is configured. |
 
 ## The two store surfaces
 
-Two stores, matching the modeling/runtime split. Neither knows about the other. Operations
-are grouped by capability below; each group states the shape of the data and the rules the
-adapter must honour, not per-operation signatures.
+Two stores, matching the modeling/runtime split, each bound to one ontology. Neither
+knows about the other. Operations are grouped by capability below; each group states the
+shape of the data and the rules the adapter must honour, not per-operation signatures.
+"Unique" in this section always means unique within the bound ontology.
 
 Internal identifiers appear in this section because they are the store's own currency.
 They never reach a caller — see the keys-not-identifiers rule in
@@ -82,7 +134,7 @@ They never reach a caller — see the keys-not-identifiers rule in
 
 ### Schema side
 
-**Ontology management.** Create with a caller-supplied internal id, key, name and optional
+**Lens management.** Create with a caller-supplied internal id, key, name and optional
 description. List all. Read by internal id, by key, and by name — the last two exist
 separately because both are unique and both are used to detect a conflict before a write.
 Update name and description. Delete.
@@ -102,34 +154,34 @@ display name, description, required and default are each *optional* — absent m
 unchanged — and clearing a default is a separate explicit flag, because an absent default
 and a default of nothing are different intentions.
 
-**Scope inclusion management.** An inclusion joins one ontology to one type and optionally
+**Scope inclusion management.** An inclusion joins one lens to one type and optionally
 carries a property allowlist; an absent allowlist means all properties, and is not the
-same as an empty one. Add an inclusion, list the inclusions of one kind for an ontology,
+same as an empty one. Add an inclusion, list the inclusions of one kind for a lens,
 update its allowlist, remove one. Beyond the plain lifecycle, four operations
 exist purely to serve the cascade protocol and must be provided:
 
-- Remove every inclusion referring to a given type, across all ontologies.
-- List the ontology keys that include a given type.
-- List the ontology keys whose inclusion for a given type carries an explicit allowlist
-  that does **not** name a given property — ontologies with no allowlist auto-track the
+- Remove every inclusion referring to a given type, across all lenses.
+- List the lens keys that include a given type.
+- List the lens keys whose inclusion for a given type carries an explicit allowlist
+  that does **not** name a given property — lenses with no allowlist auto-track the
   type's properties and must not be reported.
 - Add, or remove, a property key across every explicit allowlist that names a given type,
   returning how many were changed.
 
-**Full-schema retrieval.** One operation returns the entire global schema in a single
+**Full-schema retrieval.** One operation returns the ontology's entire schema in a single
 call: every entity type with its properties, every relation type with its properties and
-its endpoint keys, and every ontology with its inclusions. It backs validation, export and
+its endpoint keys, and every lens with its inclusions. It backs validation, export and
 cross-cutting checks, and must be a coherent snapshot rather than a walk the caller
 stitches together.
 
-**Agent and saved-query storage.** Both belong to an ontology and are addressed by key
-within it. For each: list for an ontology, upsert, delete, and a list-for-export variant
+**Agent and saved-query storage.** Both belong to a lens and are addressed by key
+within it. For each: list for a lens, upsert, delete, and a list-for-export variant
 that returns the full stored form rather than the summary. Upsert
 reports whether it created or updated, because the interface layer distinguishes the two.
 An agent carries name, description, system prompt and a tool allowlist. A saved query
 carries name, description, and its steps and parameters as serialized text — the store
 does not interpret them. A saved query also accepts an embedding of its description, and
-the key of its owning ontology alongside it, so that a search over descriptions can be
+the key of its owning lens alongside it, so that a search over descriptions can be
 narrowed to one lens without a join.
 
 **Embedding maintenance.** Backing the rebuild operation: list every entity type with its
@@ -147,10 +199,12 @@ document property. Invoked when the property, or its owning type, is removed.
 ### Data side
 
 **Schema reading.** The runtime side reads the schema for itself rather than calling the
-modeling side. Three operations, all keyed by ontology key: the full schema as that lens
-sees it — all types globally, plus that ontology's inclusions, so the caller can compute
-the scope — its agent configurations, and its saved queries. The first returns nothing at
-all when no ontology has that key, which is how an unknown lens is detected.
+modeling side. Three operations, all keyed by lens key within the binding: the full
+schema as that lens sees it — all of the ontology's types, plus that lens's inclusions,
+so the caller can compute the scope — its agent configurations, and its saved queries.
+The first returns nothing at all when no lens has that key, which is how an unknown lens
+is detected. The runtime store also exposes the ontology key it is bound to, because the
+schema cache keys its entries by ontology plus lens.
 
 **Entity lifecycle.** Create with the type key, a caller-supplied instance id, the
 validated property map and an optional embedding vector. Read by type key and id; read by
@@ -211,14 +265,16 @@ the port.
 
 | Kind | Input | Returns |
 |---|---|---|
-| Entities | A query vector, and either one entity type key with its scoped property definitions and optional filter conditions, or nothing — meaning all types at once | Entities with scores |
+| Entities | A query vector, and either one entity type key with its scoped property definitions and optional filter conditions, or nothing — meaning all of the ontology's types at once | Entities with scores |
 | Document chunks | A query vector, an entity type key and a document property key | Chunks with scores |
-| Saved queries | A query vector and an ontology key | Saved-query summaries with scores |
+| Saved queries | A query vector and a lens key | Saved-query summaries with scores |
 
 The per-type entity search accepts the same parsed filter conditions that listing does and
 must apply them as part of the search, not after it, so that the limit counts filtered hits.
-Cross-type entity search takes no filter; narrowing to a lens happens above the port.
-Saved-query search is always narrowed to a single ontology.
+Cross-type entity search takes no filter; narrowing to a lens happens above the port —
+but never crosses the binding: through a bound store, "all types" means all of that
+ontology's types, and another ontology's better-matching entity must never appear.
+Saved-query search is always narrowed to a single lens.
 
 Literal text matching is not a separate operation — it is the search string on the listing
 operations, matched case-insensitively as a substring against the named string properties,
@@ -241,7 +297,7 @@ adapter.
 
 **Physical naming, and the reserved keys it implies.** The adapter alone decides how a
 type key becomes a physical object. Whatever that transformation is, it must then declare
-every ontology-level key whose transformed form would collide with the adapter's own
+every schema-level key whose transformed form would collide with the adapter's own
 storage objects. The declaration is what makes the collision rejectable at the service
 layer, in a message naming neither vendor nor physical name. Names the adapter reserves
 for internal use are safe without declaration only if they cannot be produced by the
@@ -249,12 +305,13 @@ transformation at all — a leading underscore is such a case, since no valid ke
 one.
 
 **Uniqueness.** The store is the last line, not the first. Services pre-check for
-conflicts, but the store must itself enforce uniqueness of: each ontology's internal id,
-key and name; each entity type's internal id and key; each relation type's internal id and
-key; each property definition's internal id; each agent configuration's internal id; each
-saved query's internal id; and each entity instance's id. A concurrent pair of writes must
-produce a conflict, not a duplicate. Lookup of instances by type key must be indexed —
-every listing depends on it.
+conflicts, but the store must itself enforce, within each ontology, uniqueness of: each
+lens's internal id, key and name; each entity type's internal id and key; each relation
+type's internal id and key; each property definition's internal id; each agent
+configuration's internal id; each saved query's internal id; and each entity instance's
+id — and, server-wide, each ontology's key and display name. A concurrent pair of writes
+must produce a conflict, not a duplicate. Lookup of instances by type key must be
+indexed — every listing depends on it.
 
 **Vector index lifecycle.** The adapter owns index creation and removal, and the port
 exposes exactly the hooks the schema lifecycle needs: create the index for an entity type
@@ -263,7 +320,9 @@ rebuild it against the type's current properties; create and drop the index for 
 property's chunks; ensure the saved-query index; and ensure all of them at once. All are
 called at the points where the schema changes shape — adding a type, deleting a type,
 adding or removing a property, adding or removing a document property — and are no-ops
-when no embedding provider is configured.
+when no embedding provider is configured. Indexes are per ontology like everything else:
+created through a bound store, they serve that ontology alone, and registry delete
+removes them with the rest.
 
 **Vector index width reconciliation.** An index fixes its vector width when it is created,
 and a create-if-absent is a no-op against an index that already exists — the failure mode
@@ -271,8 +330,9 @@ this produces, and why startup reports it instead of repairing it, are in
 [decisions.md](decisions.md#behaviour) and
 [capabilities/search.md](capabilities/search.md#vector-index-width-drift). The adapter's
 obligation is threefold: before every create, read the existing index's configured width
-and compare it; on the startup path report a mismatch and change nothing; on the rebuild
-path, which passes an explicit recreate flag, drop and recreate at the new width. The
+and compare it; on the startup path — which walks every registered ontology — report a
+mismatch and change nothing; on the rebuild path, which passes an explicit recreate flag,
+drop and recreate at the new width. The
 report must describe the index the way the API does — by entity type, by document property,
 or by search scope — and never by its physical name.
 
@@ -337,7 +397,7 @@ The adapter **must not** assume:
 
 Correspondingly, whatever the compilation style, the compiled statement must ask the
 database exactly what the validated query asks — only the names are translated.
-Results come back in ontology vocabulary, so no reverse translation of names is required —
+Results come back in schema vocabulary, so no reverse translation of names is required —
 the compiled query returns whatever the caller asked for, converted per the value rules
 above.
 
@@ -349,7 +409,9 @@ Parsing and validation happen above the port, so the Neo4j and PostgreSQL adapte
 exactly the same queries and reject invalid ones identically. Beyond acceptance, the known
 divergences between them are enumerated here. Two deviations stand with the rules they
 attach to in Part 1 rather than here: the datetime text form on the two point reads
-(PostgreSQL), and the indexed-value size ceiling (Neo4j).
+(PostgreSQL), and the indexed-value size ceiling (Neo4j). One is structural and stands
+with the registry contract: Neo4j caps the registry at one ontology, so the
+multi-ontology conformance tier runs on PostgreSQL only.
 
 - **Decoding through a shared type key.** An entity type and a relation type may share a
   key; if both declare the same property key at different data types, the traversal read
@@ -405,19 +467,43 @@ inexpressible on both adapters alike. `1.5` is unaffected.
 > satisfies Part 1. It is illustration, not contract. No name, convention or structure in
 > this part is part of the port, and a different adapter is free to share none of it.
 
+## How ontologies are isolated
+
+One PostgreSQL namespace (schema, in the engine's own vocabulary) per ontology, named
+`ont_` plus the ontology key — the reason ontology keys are capped at 59 characters: the
+engine truncates identifiers at 63, and the key is immutable, so a namespace never
+renames. Isolation is structural: an ontology's tables and vector indexes live in its
+own namespace, all DDL and queries run unqualified against the transaction's search
+path, and no statement can name another ontology's namespace.
+
+`public` is the server-wide home. It holds the registry table `ontology` — one row per
+ontology, carrying the id, key, display name, timestamps and the namespace name — and
+nothing ontology-scoped; `ont_*` namespaces hold only ontology-scoped data. The registry
+table, not the engine's catalog, is the authoritative ontology list; the catalog is
+consulted only to sweep orphaned namespaces.
+
+Boot DDL creates only the `public` objects. **Registry create** is one transaction:
+the registry row first — so a concurrent same-key create dies on the named constraint as
+a conflict — then the fresh namespace, the ten tables below and, when an embedding width
+is given, the fixed vector indexes inside it. **Registry delete** is one transaction:
+the registry row out, the namespace dropped in one cascade. A bound store applies its
+ontology's namespace to the search path per statement, inside the shared transaction
+machinery.
+
 ## Logical to physical mapping
 
-Schema objects are plain relational tables, one per object kind, joined by foreign keys:
+Schema objects are plain relational tables, one per object kind, joined by foreign keys —
+per namespace:
 
 | Logical | Table | Joined by |
 |---|---|---|
-| Ontology | `ontology` | referenced by its inclusions, agents and saved queries |
+| Lens | `lens` | referenced by its inclusions, agents and saved queries |
 | Entity type | `entity_type` | referenced by its property definitions and inclusions |
 | Relation type | `relation_type` | endpoint entity type keys as deletion-restricted references to `entity_type`; referenced by its property definitions and inclusions |
 | Property definition | `property_def` | exactly one of two owner columns — entity type or relation type — enforced by a check constraint |
-| Scope inclusion | `ontology_includes` | its ontology plus exactly one of two type columns; the optional property allowlist is an array column, and an absent allowlist is stored as null, never as an empty array |
-| Agent configuration | `ai_agent_config` | its ontology |
-| Saved query | `saved_query` | its ontology, with the denormalized ontology key alongside |
+| Scope inclusion | `lens_includes` | its lens plus exactly one of two type columns; the optional property allowlist is an array column, and an absent allowlist is stored as null, never as an empty array |
+| Agent configuration | `ai_agent_config` | its lens |
+| Saved query | `saved_query` | its lens, with the denormalized lens key alongside |
 
 Every schema row carries a `uuid` primary key. That is load-bearing beyond identity: the
 name of a dynamically created vector index embeds the uuid of the schema row that causes
@@ -427,7 +513,8 @@ Deleting a schema object cascades through the foreign keys — property definiti
 inclusions, agents and saved queries die with their owner. The DDL carries structure
 only, per the rule in [decisions.md](decisions.md#storage): identity, referential
 integrity, exactly-one-owner and uniqueness, with no backstop for the business rules the
-service validates.
+service validates. The uniqueness constraints on type keys act per namespace, which is
+exactly the per-ontology key scoping the contract requires.
 
 ## Naming transformations
 
@@ -447,14 +534,14 @@ construction — the two fixed vector indexes live outside it.
 
 ## How instance data is stored
 
-Two generic tables hold all instance data, however many types the schema declares:
-`entity` and `relation`. Each row carries its `uuid` id, its type key, its user
-properties as one `jsonb` document, and its timestamps; an entity row additionally
-carries its embedding vector in a dedicated dimensionless column, never inside the
-properties document. A schema change — a new type, a new property — is therefore pure
-data: no DDL ever runs against a live database. The deliberation behind this mapping is
-[adr/0015](adr/0015-generic-jsonb-instance-tables.md); the binding rule is in
-[decisions.md](decisions.md#storage).
+Two generic tables per namespace hold all of an ontology's instance data, however many
+types its schema declares: `entity` and `relation`. Each row carries its `uuid` id, its
+type key, its user properties as one `jsonb` document, and its timestamps; an entity row
+additionally carries its embedding vector in a dedicated dimensionless column, never
+inside the properties document. A schema change — a new type, a new property — is
+therefore pure data: no DDL ever runs against a live database. The deliberation behind
+this mapping is [adr/0015](adr/0015-generic-jsonb-instance-tables.md); the binding rule
+is in [decisions.md](decisions.md#storage).
 
 Chunks live in a third table, `document_chunk` — one row per passage with its owning
 entity, type and property keys, ordinal, offsets, text and optional vector.
@@ -475,19 +562,24 @@ text.
 ## Index inventory
 
 Created only when an embedding provider is configured — all HNSW over the embedding
-column cast to the provider's width, all cosine:
+column cast to the provider's width, all cosine, all per namespace:
 
 | Vector index | Form | Scope |
 |---|---|---|
 | One per entity type | partial index on `entity`, predicated on the type key | that type's rows |
 | One per document property | partial index on `document_chunk`, predicated on the entity type key and property key | that property's passages |
-| One across all entity types | full-table on `entity`, fixed name | cross-type entity search |
-| One for saved queries | full-table on `saved_query`, fixed name | description search |
+| One across all entity types | full-table on `entity`, fixed name | cross-type entity search within the ontology |
+| One for saved queries | full-table on `saved_query`, fixed name | description search within the ontology |
+
+The two fixed-name indexes exist once per namespace — cross-type search and saved-query
+search are ontology-scoped by construction, because a bound store's search can only see
+its own namespace's index.
 
 An index's width is read back from its own indexed column type in the catalog — the
-`vector(D)` of the cast expression — and that is what width reconciliation compares.
-Builds are plain, transactional index creation; a failed or interrupted build leaves
-nothing behind, so no failed-index defence exists or is needed. The filterable-property
+`vector(D)` of the cast expression — and that is what width reconciliation compares,
+namespace by namespace across the registry. Builds are plain, transactional index
+creation; a failed or interrupted build leaves nothing behind, so no failed-index defence
+exists or is needed. The filterable-property
 list a caller may pass on index creation is accepted and ignored: property values are
 never index metadata here, so every property filters semantic search, always, with no
 declaration and no rebuild.
@@ -521,18 +613,38 @@ which is the behaviour the shared documentation states.
 > illustration, not contract. No name, convention or structure in this part is part of
 > the port, and a different adapter is free to share none of it.
 
+## Capped at one ontology
+
+The Neo4j adapter implements the full port but its registry holds **at most one
+ontology**: the first create succeeds, a second is rejected as a domain conflict, and
+deleting the one ontology returns the adapter to zero — after which a create works
+again. With a single ontology, the label derivation and Cypher below are exactly what a
+single-database deployment implies, and no per-ontology qualification exists anywhere.
+The adapter passes the contract conformance tier; the multi-ontology tier does not run
+against it.
+
+The registry entry lives on a single internal node labelled `_OntologyRegistry` —
+underscore-internal, like every physical name no key can produce. Registry create
+pre-checks the cap, creates the fixed vector indexes when an embedding width is given
+(index DDL cannot share a transaction with data writes in this engine; a mid-way failure
+leaves nothing observable through the port), then writes the registry node with a
+single-statement conditional create as the in-transaction backstop. Registry delete
+wipes the whole graph — schema nodes, instance nodes, chunks, and the registry node —
+and drops every vector index, so no width or filter-property imprint of the deleted
+schema survives; the boot-time constraints stay.
+
 ## Logical to physical mapping
 
 Schema objects are nodes, joined by relationships:
 
 | Logical | Node label | Joined by |
 |---|---|---|
-| Ontology | `Ontology` | `INCLUDES_TYPE` to a type node, carrying the optional property allowlist |
+| Lens | `Ontology` — a physical name exempt from the vocabulary lock ([decisions.md](decisions.md#ontologies)) | `INCLUDES_TYPE` to a type node, carrying the optional property allowlist |
 | Entity type | `EntityType` | `HAS_PROPERTY` to its property nodes |
 | Relation type | `RelationType` | `HAS_PROPERTY`, plus `RELATES_FROM` and `RELATES_TO` to its endpoint entity types |
 | Property definition | `PropertyDefinition` | — |
-| Agent configuration | `AiAgentConfig` | `HAS_AI_AGENT` from its ontology |
-| Saved query | `SavedQuery` | `HAS_SAVED_QUERY` from its ontology |
+| Agent configuration | `AiAgentConfig` | `HAS_AI_AGENT` from its lens |
+| Saved query | `SavedQuery` | `HAS_SAVED_QUERY` from its lens |
 
 Instance data lives in the same database, distinguished by underscore-prefixed internal
 names:
@@ -553,10 +665,12 @@ entity type `person` with document property `bio` yields `PersonDocumentBio`.
 These transformations are what generate the adapter's reserved key sets. An entity type
 key is reserved when its PascalCase form is one of the six schema node labels, giving
 `ontology`, `entity_type`, `relation_type`, `property_definition`, `ai_agent_config` and
-`saved_query`. A relation type key is reserved when its upper-snake form is one of the six
-schema relationship types, giving `includes_type`, `has_property`, `relates_from`,
-`relates_to`, `has_ai_agent` and `has_saved_query`. The internal names `_Entity`, `_Chunk`
-and `_HAS_CHUNK` need no reservation, since no valid key can produce a leading underscore.
+`saved_query` — the first of those derives from the kept `Ontology` lens label. A
+relation type key is reserved when its upper-snake form is one of the six schema
+relationship types, giving `includes_type`, `has_property`, `relates_from`,
+`relates_to`, `has_ai_agent` and `has_saved_query`. The internal names `_Entity`,
+`_Chunk`, `_HAS_CHUNK` and `_OntologyRegistry` need no reservation, since no valid key
+can produce a leading underscore.
 
 ## How instance data is stored
 
@@ -580,23 +694,27 @@ Created at startup, unconditionally:
 
 | Kind | On | Purpose |
 |---|---|---|
-| Uniqueness constraint | `Ontology` internal id, key, name | Ontology identity |
-| Uniqueness constraint | `EntityType` internal id, key | Global entity type key uniqueness |
-| Uniqueness constraint | `RelationType` internal id, key | Global relation type key uniqueness |
+| Uniqueness constraint | `Ontology` internal id, key, name | Lens identity |
+| Uniqueness constraint | `EntityType` internal id, key | Entity type key uniqueness |
+| Uniqueness constraint | `RelationType` internal id, key | Relation type key uniqueness |
 | Uniqueness constraint | `PropertyDefinition` internal id | Property identity |
 | Uniqueness constraint | `AiAgentConfig` internal id | Agent identity |
 | Uniqueness constraint | `SavedQuery` internal id | Saved-query identity |
 | Uniqueness constraint | `_Entity` instance id | Instance identity |
 | Index | `_Entity` type key | Every listing filters on it |
 
-Created only when an embedding provider is configured:
+With the registry capped at one ontology, per-database uniqueness and per-ontology
+uniqueness are the same thing.
+
+Created only when an embedding provider is configured — the fixed pair at registry
+create, the dynamic ones as the schema changes shape:
 
 | Vector index | On | Filterable in-index |
 |---|---|---|
 | One per entity type | The type's own label | All of the type's non-document property keys |
 | One across all entity types | The `_Entity` marker label | — |
 | One per document property | That property's virtual chunk label | — |
-| One for saved queries | `SavedQuery` | The owning ontology key |
+| One for saved queries | `SavedQuery` | The owning lens key |
 
 All use cosine similarity. The per-entity-type indexes are rebuilt whenever the type's
 property set changes, so their in-index filter list stays in step with the schema. A
@@ -610,7 +728,7 @@ type's property values as filter metadata, indexed string values are subject to 
 engine's indexed-property size limit of 32766 bytes. Writes exceeding it are rejected with
 a validation error before persistence, phrased without naming the engine. Document
 property values are exempt — they are never part of an entity's embedding or its filter
-metadata. The same mechanism is why a saved query carries its owning ontology key as a
+metadata. The same mechanism is why a saved query carries its owning lens key as a
 node property: the vector index can filter on node properties but not across
 relationships, so the key is denormalized onto the node.
 
@@ -628,21 +746,26 @@ would otherwise skip over it forever.
 
 Provide, in this order:
 
-1. **Connection lifecycle and physical naming.** Decide how a type key becomes a physical
-   object before writing a single query — every later decision depends on it. Derive and
-   declare the two reserved key sets from that transformation immediately.
+1. **Connection lifecycle, physical isolation and physical naming.** Decide how an
+   ontology's data is kept apart from its neighbours', and how a type key becomes a
+   physical object, before writing a single query — every later decision depends on
+   both. Derive and declare the two reserved key sets from the naming transformation
+   immediately. If the isolation mapping cannot hold more than one ontology, cap the
+   registry as a domain conflict rather than pretending.
 2. **Error translation.** Build the single choke point through which all database access
    passes, before any operation exists to bypass it.
-3. **Constraints and indexes.** Everything under the uniqueness obligation, created at
-   initialization.
-4. **The schema side.** Ontologies, types, properties, inclusions, full-schema retrieval,
+3. **The registry.** Create with atomic provisioning, list, read, rename, delete as one
+   cascade. Nothing else works until an ontology can exist.
+4. **Constraints and indexes.** Everything under the uniqueness obligation — the
+   server-wide part at initialization, the per-ontology part at registry create.
+5. **The schema side.** Lenses, types, properties, inclusions, full-schema retrieval,
    agents and saved queries. Nothing on the data side is useful until the schema can be
    read back.
-5. **The data side.** Entities, relations, traversal, chunks.
-6. **Filters, sorts and text search.** The predicate builder, shared by listing and by
+6. **The data side.** Entities, relations, traversal, chunks.
+7. **Filters, sorts and text search.** The predicate builder, shared by listing and by
    filtered vector search.
-7. **Vector indexes and search**, including width reconciliation.
-8. **Query compilation.** Last, because it needs the naming transformation from step 1 and
+8. **Vector indexes and search**, including width reconciliation.
+9. **Query compilation.** Last, because it needs the naming transformation from step 1 and
    nothing else.
 
 Three traps, each of which produces a system that passes casual testing and fails later:

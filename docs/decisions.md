@@ -12,17 +12,39 @@ one be approved before it is adopted — are in the repository `CLAUDE.md`.
 ## System shape
 
 **One server, always serving everything.**
-Modeling routes, runtime routes and both MCP servers are served by every instance. There
-is no mode switch and no runtime-only deployment. A schema change and the data it governs
-must never be able to disagree about which server they reached.
+Registry, modeling and runtime routes and both MCP servers are served by every instance.
+There is no mode switch and no runtime-only deployment. A schema change and the data it
+governs must never be able to disagree about which server they reached.
 
 **One database holds schema and instance data.**
 Keeping them apart is the adapter's business, not the API's. Two stores would make every
 schema change a distributed transaction to buy an isolation nothing needs.
 
-**Three modules: modeling, runtime, core — and runtime never depends on modeling.**
-Runtime obtains the schema through the persistence port, not by calling modeling. This is
-what lets a lens be cached as a value rather than fetched as a service.
+**Modules registry, modeling, runtime, server and core — and runtime never depends on
+modeling.**
+Registry manages ontologies as whole units, server carries the deployment's capability
+report, and core owns what the others share. Runtime obtains the schema through the
+persistence port, not by calling modeling. This is what lets a lens be cached as a value
+rather than fetched as a service.
+
+## Ontologies
+
+**Vocabulary** — *Ontology* is the isolated unit of one schema, its lenses, and its
+instance data; *Schema* is one ontology's type-set; *Lens* is a named view over one
+ontology's schema. No interface name may use "ontology" in the old sense (lens); old
+spellings do not survive. Physical database names are exempt.
+
+**Ontology identity** — an ontology is addressed by an immutable `lower_snake_case`
+key, unique server-wide, with a mutable display name, also unique server-wide.
+Interfaces speak the key.
+
+**Key scoping** — every key is unique within its owner: property keys per type,
+saved-query and agent keys per lens, type and lens keys per ontology, ontology keys
+per server.
+
+**Ontology lifecycle** — created bare (no types, no lenses, no data); rename changes
+the display name only; delete is a hard full cascade over everything the ontology
+contains. Zero ontologies is a valid server state.
 
 ## Naming
 
@@ -32,21 +54,22 @@ synonyms. This governs code and API surface. The web client is free to use its o
 product names for its surfaces, and does.
 
 **Keys, never identifiers, on the runtime and MCP surfaces.**
-Everything an agent or a data client touches is addressed by human-readable key: types,
-properties, ontologies, saved queries and agents. Internal identifiers are resolved behind
-the interface. A language model should never have to carry an opaque identifier to name a
-type.
+Everything an agent or a data client touches is addressed by human-readable key:
+ontologies, lenses, types, properties, saved queries and agents. Internal identifiers are
+resolved behind the interface. A language model should never have to carry an opaque
+identifier to name a type.
 
-The modeling REST surface is the exception: it addresses ontologies, types and properties
+The modeling REST surface is the exception: it addresses lenses, types and properties
 by internal identifier, and only agent configurations and saved queries by key. It is a
 schema-design surface used by a client that has just listed the resource it is about to
 address, so the identifier is always at hand.
 
-**Key length cap.** Every key — entity type, relation type, ontology, property,
+**Key length cap.** Every key — entity type, relation type, lens, property,
 agent, saved query — is at most 64 characters (`MAX_KEY_LENGTH`), enforced at
 validation alongside the key pattern. Keys are human-typed identifiers; the cap
 keeps adapter-derived physical names legible and rejects absurd input at the
-boundary rather than deep inside an adapter.
+boundary rather than deep inside an adapter. Ontology keys carry a tighter cap of
+their own — see the PostgreSQL layout rule under Storage.
 
 **No vendor or implementation-language vocabulary anywhere a caller can see.**
 Not in route names, field names, tool names or error messages. The query endpoint takes a
@@ -61,7 +84,24 @@ either would be a leak, not a convenience. Deliberation on the type-vocabulary h
 **All storage access crosses the persistence port.**
 Everything specific to a database — driver, connections, query text, physical naming,
 index definitions, driver-native temporal types — lives inside one adapter. Services,
-routers and MCP handlers speak ontology vocabulary only.
+routers and MCP handlers speak schema vocabulary only.
+
+**Persistence isolation** — every persistence operation runs through a store bound to
+exactly one ontology; registry operations live on a separate registry port. The
+physical isolation mechanism is each adapter's private business, behind the
+technology-neutral contract.
+
+**PostgreSQL layout** — one PG namespace per ontology, named `ont_<key>`; ontology
+keys are capped at 59 characters. `public` holds everything server-wide, starting
+with the ontology registry (table `ontology`). Ontology-scoped DDL runs at ontology
+creation; ontology delete drops the namespace in one cascade. Physical lens names
+follow the locked vocabulary (`lens`, `lens_includes`, `lens_id`, `lens_key`).
+Deliberation: [adr/0017](adr/0017-postgres-namespace-per-ontology.md).
+
+**Neo4j ontology cap** — the Neo4j adapter supports at most one ontology; a second
+create is rejected as a domain condition. Multi-ontology conformance is a separate
+suite tier that only multi-capable adapters run. Deliberation:
+[adr/0017](adr/0017-postgres-namespace-per-ontology.md).
 
 **Filters, sorts and searches cross the port as structured values.**
 Never as query text or fragments. A fragment crossing the port would put query syntax in
@@ -111,17 +151,32 @@ storage-adapters.md, never as hedges in the shared documents.
 
 ## Interfaces
 
+**REST addressing** — every ontology-scoped request names the ontology in the path:
+`/api/ontologies/:key/model/...` for schema, and
+`/api/ontologies/:key/runtime/lenses/:lensKey/...` for instance data through a lens
+— never both in one request. An ontology is always addressed as `ontologies/<key>`,
+a lens always as `lenses/<key>`. Registry CRUD lives at `/api/ontologies`;
+ontology delete is a plain request, guarded only by UI confirmation.
+
+**Server surface** — server-wide, phase-neutral capability reads live under
+`/api/server`. Ontology-scoped operations never live there; server-wide data
+operations do not exist (rebuild-embeddings is per-ontology).
+
+**MCP addressing** — every MCP mount is bound by URL, mirroring REST spelling:
+modeling at `/mcp/ontologies/:key/model`, runtime at
+`/mcp/ontologies/:key/runtime/lenses/:lensKey`. The URL is the only binding
+channel — no header or env fallback — and tools never take an ontology parameter.
+No MCP surface exposes the ontology registry — ontology management is REST/UI
+only — with one exception: the modeling mount's argument-less `ensure_ontology`
+creates the ontology its own URL names. Deliberation:
+[adr/0016](adr/0016-mcp-url-only-binding.md).
+
 **MCP runs inside the server process and calls services directly.**
 Not a separate process, and not a wrapper over the REST API. A wrapper would add a
 network hop and a second contract to keep in agreement with the first.
 
 **Two MCP servers, one for modeling and one for runtime.**
 Mirroring the REST split, so that no client can reach both through one connection.
-
-**Runtime MCP binds to exactly one ontology, resolved when the connection opens.**
-From the URL path, else a request header, else a configured fallback; with none of these,
-the connection is refused. A language model should never have to choose a lens, or be
-able to reach across two.
 
 **Transport is stateless HTTP with plain JSON responses.**
 No event stream. Statelessness is what allows the same mount to serve many clients
@@ -179,11 +234,27 @@ there the caller has asked for exactly that.
 
 ## Scope
 
-**Schema transfer carries schema only.**
-Export and import move types, properties, lenses, agents and saved queries. Instance data
-is not part of the format.
+**Hard cut** — the multi-ontology system replaces the single-schema system with no
+migration and no compatibility: it begins on a fresh database (no data migration
+from single-ontology deployments), old REST/MCP paths are removed without aliases,
+no default ontology exists, and it ships as a major version bump. Deliberation:
+[adr/0018](adr/0018-multi-ontology-hard-cut.md).
+
+**Transfer scope** — export and import carry one ontology's design: schema, lenses,
+and their agents and saved queries. Never instance data, never the ontology's
+identity. A transfer document is portable into any ontology.
+
+**Transfer target** — import writes into an existing ontology named by the request;
+creating the ontology is a registry operation. Key conflicts are checked all-or-fail
+against the target ontology's keys.
+
+**Transfer format version** — the format version is the format's own line,
+independent of the project version; informational only, never dispatched on, bumped
+only when the payload shape changes incompatibly. Old-format payloads are rejected
+by ordinary validation; no conversion or compatibility machinery exists.
 
 **No authentication, authorization or multi-tenancy.**
 OntoForge assumes it is deployed behind something that provides them, or on a trusted
-network. Building a permission model before a deployment requires one would be guessing
-at its shape.
+network. Ontologies are isolation units, not tenants: no ontology has an owner, an ACL
+or a quota. Building a permission model before a deployment requires one would be
+guessing at its shape.

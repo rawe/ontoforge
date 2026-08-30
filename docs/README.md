@@ -3,8 +3,10 @@
 OntoForge is a graph-native ontology studio. You design a graph schema, then use it
 through generic, schema-driven APIs — no per-schema code is written or generated.
 
-The system has two halves. **Modeling** designs the schema. **Runtime** reads and writes
-instance data through that schema. Both run in one server, over one database, and are
+One server holds many **ontologies** — totally isolated units, each with its own schema,
+lenses, saved queries, agents and instance data. Within an ontology the system has two
+halves. **Modeling** designs that ontology's schema. **Runtime** reads and writes its
+instance data through one lens. Both run in one server, over one database, and are
 reachable over REST, over MCP, and through a web UI.
 
 ## Documentation map
@@ -31,7 +33,7 @@ what rules bind it, and how it is reached from every interface.
 | Capability | Covers |
 |---|---|
 | [schema-modeling](capabilities/schema-modeling.md) | Entity types, relation types, properties, cascade protocol |
-| [ontology-lenses](capabilities/ontology-lenses.md) | Scoping a lens to part of the schema |
+| [ontology-lenses](capabilities/ontology-lenses.md) | Scoping a lens to part of an ontology's schema |
 | [instance-data](capabilities/instance-data.md) | Creating, reading and traversing entities and relations |
 | [documents](capabilities/documents.md) | Long-text properties, stubs and partial edits |
 | [search](capabilities/search.md) | Text matching and semantic retrieval |
@@ -50,48 +52,63 @@ without a deployment.
 
 Two consequences follow, and they explain most of the design:
 
-**The schema is global and singular.** There is exactly one set of entity types and
-relation types in a system. They are not owned by anything.
+**Ontologies are isolated units.** An ontology holds one domain's schema — its entity
+types, relation types and property definitions — together with its lenses, saved
+queries, agents and all of its instance data. A server holds many ontologies, and
+nothing spans two: no relation, no query, no lens, no agent. One request addresses one
+ontology, always named in the path. Cross-ontology overviews are a client-side concern.
 
-**Ontologies are lenses, not containers.** An ontology does not hold types or data. It is
-a named view that selects part of the global schema. Two ontologies over the same graph
-see the same entities through different apertures.
+**Lenses are views, not containers.** A lens does not hold types or data. It is a named
+view that selects part of its ontology's schema. Two lenses over the same ontology see
+the same entities through different apertures.
 
-This is the point most easily misread. An entity is not "in" an ontology. It exists once,
-and every lens that includes its type can see it.
+This is the point most easily misread. An entity is not "in" a lens. Within its
+ontology it exists once, and every lens that includes its type can see it.
 
 ## How the pieces relate
 
 ```
-              global schema                        instance data
-   ┌────────────────────────────────┐     ┌───────────────────────────┐
-   │  entity types                  │     │  entities                 │
-   │  relation types                │ ◀── │  relations                │
-   │  property definitions          │typed│  document chunks          │
-   └────────────────────────────────┘     └───────────────────────────┘
-                  ▲                                     ▲
-                  │ selects from                        │ seen through
-         ┌────────┴────────┐                            │
-         │   ontologies    │────────────────────────────┘
-         │    (lenses)     │
-         └─────────────────┘
-                  ▲
-     ┌────────────┴────────────┐
-     │                         │
-  modeling                  runtime
-  designs the schema        uses it through one lens
+   ┌── ontology ────────────────────────────────────────────────────────┐
+   │                                                                    │
+   │             schema                            instance data        │
+   │   ┌─────────────────────────┐        ┌───────────────────────────┐ │
+   │   │  entity types           │        │  entities                 │ │
+   │   │  relation types         │  ◀──   │  relations                │ │
+   │   │  property definitions   │ typed  │  document chunks          │ │
+   │   └─────────────────────────┘        └───────────────────────────┘ │
+   │              ▲                                     ▲               │
+   │              │ select from                         │ seen through  │
+   │         ┌────┴────┐                                │               │
+   │         │ lenses  │────────────────────────────────┘               │
+   │         └─────────┘                                                │
+   │              ▲                                                     │
+   │   ┌──────────┴──────────┐                                          │
+   │   │                     │                                          │
+   │  modeling            runtime                                       │
+   │  designs the schema  uses it through one lens                      │
+   └────────────────────────────────────────────────────────────────────┘
+
+   ┌── registry ──────────────────────────────────────┐
+   │  the server's flat list of ontologies, by key    │
+   │  create · list · rename · delete                 │
+   └──────────────────────────────────────────────────┘
 ```
+
+A server holds any number of such ontologies — including zero: nothing is auto-created,
+and the last one is deletable. The
+**registry** manages them as whole units. An ontology is created bare — empty schema, no
+lenses, no data — and deleted as one hard cascade over everything it contains.
 
 ## Modeling and runtime
 
 The split is about *what you are addressing*, not about deployment. Both are always
-served by the same process.
+served by the same process, and both address one ontology named in the path.
 
 |  | Modeling | Runtime |
 |---|---|---|
-| Subject | The global schema | Instance data |
-| Addressed by | Type identifiers | An ontology key in the path |
-| Scope | Everything | Only what the lens exposes |
+| Subject | One ontology's schema | One ontology's instance data |
+| Addressed by | Ontology key, then type identifiers | Ontology key, then a lens key |
+| Scope | The whole ontology | Only what the lens exposes |
 | Changes | Rare, deliberate | Continuous |
 
 Runtime never edits the schema, and modeling never touches instance data. A request that
@@ -106,11 +123,14 @@ the schema changes, runtime behaviour changes with it, with no separate configur
 The same capabilities are exposed three ways, over one service layer. No interface is
 built on another — in particular, MCP does not call REST.
 
-- **REST** — the complete surface. Schema design under one route prefix, instance data
-  under a per-ontology prefix.
-- **MCP** — two servers, one for modeling and one for runtime, for AI clients. The
-  runtime server binds to a single ontology so a model never sees more than one lens.
-- **Web UI** — two surfaces mirroring the split: a schema studio and a data workbench.
+- **REST** — the complete surface. Registry CRUD at the top, then schema design and
+  instance data under per-ontology route prefixes. The only interface that manages
+  ontologies.
+- **MCP** — two servers, one for modeling and one for runtime, for AI clients. Each
+  mount is bound by its URL — the modeling server to one ontology, the runtime server
+  to one ontology and one lens — so a model never sees more than it was given.
+- **Web UI** — a start page managing the ontologies, then two surfaces per ontology
+  mirroring the split: a schema studio and a data workbench.
 
 See [interfaces.md](interfaces.md).
 
@@ -134,12 +154,19 @@ Terms are used in exactly this sense throughout the documentation and the API.
 
 ### Schema and design
 
-**Schema** — the global set of entity types, relation types and property definitions.
-There is one per system. It is the ground truth, independent of any ontology.
+**Ontology** — the independent, isolated unit: one domain's schema, its lenses, saved
+queries, agents, and all instance data. A server holds many; nothing spans two.
+Addressed by an immutable key, unique server-wide, with a mutable display name.
+
+**Registry** — the server's flat, listable set of ontologies, addressed by key. The
+only place ontologies are created, renamed and deleted.
+
+**Schema** — the set of entity types, relation types and property definitions of one
+ontology.
 
 **Entity type** — a kind of thing that can exist (`person`, `invoice`). Identified by a
-globally unique **key** in `lower_snake_case`. The key is chosen at creation and never
-changes.
+**key** in `lower_snake_case`, unique within its ontology. The key is chosen at creation
+and never changes.
 
 **Relation type** — a kind of directed, typed connection between two entity types. Its
 source and target entity types are fixed at creation.
@@ -154,19 +181,20 @@ Carries a data type, whether it is required, and an optional default.
 only. Reads return a size stub rather than the content, so that listing entities stays
 cheap. See [capabilities/documents.md](capabilities/documents.md).
 
-**Key** — the stable, human-readable identifier of a type, property, ontology, saved
-query or agent. Keys are what every interface speaks. They are never database
-identifiers, and they are never exposed as UUIDs.
+**Key** — the stable, human-readable identifier of an ontology, type, property, lens,
+saved query or agent. Keys are what every interface speaks. They are never database
+identifiers, and they are never exposed as UUIDs. Every key is unique within its owner;
+only ontology keys are unique server-wide.
 
 ### Lenses
 
-**Ontology** — a named lens over the global schema, addressed by its own key. Holds no
-types and no data of its own.
+**Lens** — a named view over one ontology's schema, addressed by its own key within
+that ontology. Belongs to exactly one ontology; holds no types and no data of its own.
 
-**Unscoped ontology** — a lens that declares no selection and therefore exposes the whole
-schema. Adding a type to the schema widens it automatically.
+**Unscoped lens** — a lens that declares no selection and therefore exposes its
+ontology's whole schema. Adding a type to the schema widens it automatically.
 
-**Scoped ontology** — a lens that names the types, and optionally the individual
+**Scoped lens** — a lens that names the types, and optionally the individual
 properties, it exposes. Everything else is invisible through it: absent from schema
 reads, rejected on write, and stripped from query results.
 
@@ -201,7 +229,7 @@ over document passages, or over both fused into one ranking.
 Discoverable by listing or by searching descriptions, so a client can find a suitable
 query without composing one.
 
-**Agent** — a named language-model configuration bound to one ontology: a system prompt
+**Agent** — a named language-model configuration bound to one lens: a system prompt
 plus the set of read-only tools it may use.
 
 **A2A** — the agent-to-agent protocol. Each agent publishes a machine-readable card and
@@ -210,12 +238,15 @@ accepts tasks, so external systems can call it without knowing OntoForge's own A
 ### Internals
 
 **Persistence port** — the boundary every storage operation crosses. Above it, only
-ontology vocabulary; below it, one adapter that knows a specific database. See
+schema vocabulary, through stores bound to one ontology and a separate registry port;
+below it, one adapter that knows a specific database. See
 [storage-adapters.md](storage-adapters.md).
 
 **Adapter** — an implementation of the port for one database. Owns physical naming, query
-compilation, index management and error translation. Exactly one is active.
+compilation, index management, error translation, and the physical isolation between
+ontologies. Exactly one is active.
 
-**Transfer format** — the versioned JSON representation of a schema, used for export and
-import. Carries schema only; instance data is not included. See
+**Transfer format** — the versioned JSON representation of one ontology's design, used
+for export and import. Carries schema, lenses, agents and saved queries only — no
+instance data and no ontology identity. See
 [capabilities/transfer.md](capabilities/transfer.md).

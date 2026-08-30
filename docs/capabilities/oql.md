@@ -87,7 +87,7 @@ database. Four checks, all keyed on the scoped schema:
   type **within the lens**;
 - system properties are always permitted, on any variable, regardless of lens.
 
-A type or property that exists in the global schema but not in this lens is rejected
+A type or property that exists in the ontology's schema but not in this lens is rejected
 identically to one that does not exist anywhere — same check, same wording, same
 suggestions. The lens is a complete horizon, not a permission filter that leaks the
 existence of what it hides.

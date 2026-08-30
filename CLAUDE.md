@@ -1,6 +1,6 @@
 # OntoForge
 
-OntoForge is a graph-native ontology studio for designing graph schemas and using them through generic, schema-driven APIs. Storage sits behind an exchangeable database adapter. The schema (entity types, relation types, properties) is global and independent. Ontologies are named lenses over this schema — either unscoped (full schema access) or scoped to a filtered subset of types and properties. The system provides dedicated REST and MCP interfaces for modeling and runtime, stores schema and data together in one database behind a persistence port, and supports JSON-based export and import.
+OntoForge is a graph-native ontology studio for designing graph schemas and using them through generic, schema-driven APIs. Storage sits behind an exchangeable database adapter. One server holds many ontologies — totally isolated units, each with its own schema (entity types, relation types, properties), its lenses, saved queries, agents, and instance data; nothing spans two. Lenses are named views over one ontology's schema — either unscoped (full schema access) or scoped to a filtered subset of types and properties. The system provides a registry for managing ontologies plus dedicated, ontology-scoped REST and MCP interfaces for modeling and runtime, stores schema and data together in one database behind a persistence port, and supports JSON-based export and import of one ontology's design.
 
 ## Project Structure
 

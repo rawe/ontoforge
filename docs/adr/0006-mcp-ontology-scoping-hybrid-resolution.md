@@ -1,6 +1,10 @@
 # 0006. MCP ontology scoping: hybrid resolution
 
-- **Status:** Accepted
+- **Status:** Superseded by [0016](0016-mcp-url-only-binding.md)
+
+> This record predates the multi-ontology system and uses "ontology" in the old sense
+> (today's lens). The hybrid resolution it describes — URL, then header, then
+> environment fallback — was replaced by URL-only binding.
 
 ## Context
 

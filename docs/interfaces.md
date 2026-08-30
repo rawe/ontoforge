@@ -1,9 +1,10 @@
 # Interfaces
 
-The complete index of every way into the system: two REST surfaces and two MCP servers.
-Concepts and vocabulary: [README.md](README.md). Structure and error model:
-[architecture.md](architecture.md). What each operation *means* is in
-[capabilities/](capabilities/) — this document is the map, not the semantics.
+The complete index of every way into the system: the ontology registry, two per-ontology
+REST surfaces, one server-wide route, and two MCP servers. Concepts and vocabulary:
+[README.md](README.md). Structure and error model: [architecture.md](architecture.md).
+What each operation *means* is in [capabilities/](capabilities/) — this document is the
+map, not the semantics.
 
 Exact request and response shapes are served by the running system as an OpenAPI
 description at `/openapi.json`, with a browsable rendering at `/docs`. No request or
@@ -15,20 +16,30 @@ response bodies are reproduced here.
 
 | Prefix | Surface |
 |---|---|
-| `/api/model` | Modeling REST — the global schema and per-lens configuration |
-| `/api/runtime` | Runtime REST — instance data through one lens |
-| `/mcp/model` | Modeling MCP server |
-| `/mcp/runtime` | Runtime MCP server |
+| `/api/ontologies` | Registry — ontologies as whole units |
+| `/api/server` | Server — deployment capability reads |
+| `/api/ontologies/{ontologyKey}/model` | Modeling REST — one ontology's schema and per-lens configuration |
+| `/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}` | Runtime REST — one ontology's instance data through one lens |
+| `/mcp/ontologies/{ontologyKey}/model` | Modeling MCP server, bound to one ontology |
+| `/mcp/ontologies/{ontologyKey}/runtime/lenses/{lensKey}` | Runtime MCP server, bound to one ontology and one lens |
 
-### How a lens is addressed
+Every ontology-scoped request names its ontology in the path, and an ontology is always
+spelled `ontologies/<key>`, a lens always `lenses/<key>` — uniformly across REST, MCP
+and the web client's own addresses. There is no header-based addressing and no default
+ontology. A request naming an unknown ontology key answers not found before anything
+else about it is considered.
 
-Runtime REST carries the ontology key as the first path segment after the prefix:
-`/api/runtime/{ontologyKey}/...`. One route is the exception — `/api/runtime/features`
-describes the server, not a lens.
+### How an ontology and a lens are addressed
 
-Modeling REST does **not** nest types under an ontology. Entity types, relation types and
-their properties are global resources at the top level. Only three things are addressed
-per-lens: scope inclusions, agent configurations and saved queries.
+The registry addresses ontologies by key. Below one ontology, the modeling surface
+addresses the schema; the runtime surface addresses instance data and carries the lens
+key as a second path parameter. One request addresses either the schema or instance
+data through one lens — never both.
+
+Modeling REST does **not** nest types under a lens. Entity types, relation types and
+their properties are resources of the ontology, at the top level of its modeling
+surface. Only three things are addressed per-lens: scope inclusions, agent
+configurations and saved queries.
 
 ### What a path segment identifies
 
@@ -36,15 +47,16 @@ This is the single most common source of mistakes against the modeling surface.
 
 | Surface | Addressed by |
 |---|---|
-| Runtime REST, everywhere | Keys — ontology key, type key, property key; instance ids for entities and relations |
-| Modeling REST — ontologies, entity types, relation types, properties, inclusions | **Internal identifiers**, not keys |
-| Modeling REST — agent configs, saved queries | Ontology key, agent key, query key |
+| Registry | Ontology key |
+| Runtime REST, everywhere | Keys — ontology key, lens key, type key, property key; instance ids for entities and relations |
+| Modeling REST — lenses, entity types, relation types, properties, inclusions | **Internal identifiers**, not keys |
+| Modeling REST — agent configs, saved queries | Lens key, agent key, query key |
 | Both MCP servers | Keys only |
 
-So `PUT /api/model/ontologies/{ontologyId}` takes an identifier while
-`PUT /api/model/ontologies/{ontologyKey}/ai-agents/{agentKey}` takes a key, even though
-the two routes share a prefix. Identifiers are obtained from the response of the create
-call or from a list call. A key is never accepted where an identifier is expected.
+So `PUT .../model/lenses/{lensId}` takes an identifier while
+`PUT .../model/lenses/{lensKey}/ai-agents/{agentKey}` takes a key, even though the two
+routes share a prefix. Identifiers are obtained from the response of the create call or
+from a list call. A key is never accepted where an identifier is expected.
 
 The same asymmetry appears inside the inclusion routes: adding an inclusion names the type
 by **key in the request body**, while updating or removing one names it by **identifier in
@@ -55,9 +67,9 @@ MCP has no such split — every tool takes keys and resolves them internally.
 ### JSON shape
 
 Field names are `camelCase` in every REST body and in every MCP result. The values that
-name schema elements — type keys, property keys, ontology keys — are `lower_snake_case`,
-because keys are a separate namespace from field names. MCP *tool parameters* are
-`snake_case`.
+name schema elements — ontology keys, lens keys, type keys, property keys — are
+`lower_snake_case`, because keys are a separate namespace from field names. MCP *tool
+parameters* are `snake_case`.
 
 Server-managed fields carry a leading underscore and are readable everywhere and writable
 nowhere. Their names, and the one field that breaks the underscore convention, are in
@@ -131,8 +143,8 @@ parameters on the same routes (`searchIn`, `relationTypeKey`, `relationFields`,
 
 ### Errors
 
-Both REST surfaces answer with the single error envelope and the six-code taxonomy defined
-in [architecture.md](architecture.md#error-model). Nothing is added per route.
+Every REST surface answers with the single error envelope and the six-code taxonomy
+defined in [architecture.md](architecture.md#error-model). Nothing is added per route.
 
 MCP reports the same failures as tool errors. Because a tool error is a single string, the
 per-field detail that REST returns under `details.fields` is flattened into the message
@@ -141,32 +153,65 @@ text, so a model still sees every offending field in one response.
 Requesting a capability whose provider is not configured is a `VALIDATION_ERROR`. Only the
 two routes that need an embedding provider — semantic search and saved-query search — mark
 it with `details.code` of `FEATURE_DISABLED`; the AI routes do not, so a client cannot tell
-a switched-off capability from a bad request there. Call `GET /api/runtime/features` first
+a switched-off capability from a bad request there. Call `GET /api/server/features` first
 rather than relying on the refusal.
+
+## Registry
+
+Prefix `/api/ontologies`. Ontologies as whole units — the only surface that manages
+them. An ontology is created bare: empty schema, no lenses, no data, and no lens is
+auto-created.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/ontologies` | Create an ontology — a key plus an optional display name |
+| GET | `/api/ontologies` | List every ontology |
+| GET | `/api/ontologies/{ontologyKey}` | Read one ontology |
+| PATCH | `/api/ontologies/{ontologyKey}` | Rename — the display name only; the key is immutable |
+| DELETE | `/api/ontologies/{ontologyKey}` | Hard cascade delete of the ontology and everything it contains |
+
+Keys match `^[a-z][a-z0-9_]*$` at up to 59 characters and are unique server-wide, as are
+display names. Delete is a plain request with no API-level guard — the web client adds
+its own confirmation, callers of the API get none.
+
+## Server
+
+Prefix `/api/server`. Read-only capability reads describing the deployment.
+Ontology-scoped operations never live here, and server-wide data operations do not
+exist.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/server/features` | Report whether semantic search and AI are available |
+
+The one route that concerns neither the ontologies nor their content — it describes the
+deployment. Clients call it before
+offering semantic search or AI, since both depend on external providers.
 
 ## Modeling REST
 
-Prefix `/api/model`. This surface is global; see the addressing note above before using it.
-Semantics: [capabilities/schema-modeling.md](capabilities/schema-modeling.md) and
+Prefix `/api/ontologies/{ontologyKey}/model`. This surface covers one ontology's whole
+schema; see the addressing note above before using it. Semantics:
+[capabilities/schema-modeling.md](capabilities/schema-modeling.md) and
 [capabilities/ontology-lenses.md](capabilities/ontology-lenses.md).
 
-### Ontologies
+### Lenses
 
 | Method | Path | Purpose | Parameters |
 |---|---|---|---|
-| POST | `/ontologies` | Create a lens | — |
-| GET | `/ontologies` | List all lenses | — |
-| GET | `/ontologies/{ontologyId}` | Read one lens | — |
-| PUT | `/ontologies/{ontologyId}` | Update name or description; the key is immutable | — |
-| DELETE | `/ontologies/{ontologyId}` | Delete a lens; the schema and its data are untouched | — |
-| POST | `/ontologies/{ontologyId}/validate` | Check this lens's inclusions against the schema | — |
+| POST | `/lenses` | Create a lens | — |
+| GET | `/lenses` | List the ontology's lenses | — |
+| GET | `/lenses/{lensId}` | Read one lens | — |
+| PUT | `/lenses/{lensId}` | Update name or description; the key is immutable | — |
+| DELETE | `/lenses/{lensId}` | Delete a lens; the schema and its data are untouched | — |
+| POST | `/lenses/{lensId}/validate` | Check this lens's inclusions against the schema | — |
 
 ### Entity types
 
 | Method | Path | Purpose | Parameters |
 |---|---|---|---|
 | POST | `/entity-types` | Create an entity type | — |
-| GET | `/entity-types` | List all entity types | — |
+| GET | `/entity-types` | List the ontology's entity types | — |
 | GET | `/entity-types/{entityTypeId}` | Read one entity type | — |
 | PUT | `/entity-types/{entityTypeId}` | Update display name or description | — |
 | DELETE | `/entity-types/{entityTypeId}` | Delete an entity type and its properties | `cascade` |
@@ -176,7 +221,7 @@ Semantics: [capabilities/schema-modeling.md](capabilities/schema-modeling.md) an
 | Method | Path | Purpose | Parameters |
 |---|---|---|---|
 | POST | `/relation-types` | Create a relation type; endpoints are named by entity type key and are fixed | — |
-| GET | `/relation-types` | List all relation types | — |
+| GET | `/relation-types` | List the ontology's relation types | — |
 | GET | `/relation-types/{relationTypeId}` | Read one relation type | — |
 | PUT | `/relation-types/{relationTypeId}` | Update display name or description | — |
 | DELETE | `/relation-types/{relationTypeId}` | Delete a relation type and its properties | `cascade` |
@@ -206,67 +251,65 @@ The routes that make a lens scoped. A lens with no inclusions exposes the whole 
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/ontologies/{ontologyId}/includes/entity-types` | Include an entity type, optionally narrowed to a property list |
-| GET | `/ontologies/{ontologyId}/includes/entity-types` | List the lens's entity type inclusions |
-| PUT | `/ontologies/{ontologyId}/includes/entity-types/{entityTypeId}` | Replace an inclusion's property list |
-| DELETE | `/ontologies/{ontologyId}/includes/entity-types/{entityTypeId}` | Drop an entity type from the lens |
-| POST | `/ontologies/{ontologyId}/includes/relation-types` | Include a relation type, optionally narrowed to a property list |
-| GET | `/ontologies/{ontologyId}/includes/relation-types` | List the lens's relation type inclusions |
-| PUT | `/ontologies/{ontologyId}/includes/relation-types/{relationTypeId}` | Replace an inclusion's property list |
-| DELETE | `/ontologies/{ontologyId}/includes/relation-types/{relationTypeId}` | Drop a relation type from the lens |
+| POST | `/lenses/{lensId}/includes/entity-types` | Include an entity type, optionally narrowed to a property list |
+| GET | `/lenses/{lensId}/includes/entity-types` | List the lens's entity type inclusions |
+| PUT | `/lenses/{lensId}/includes/entity-types/{entityTypeId}` | Replace an inclusion's property list |
+| DELETE | `/lenses/{lensId}/includes/entity-types/{entityTypeId}` | Drop an entity type from the lens |
+| POST | `/lenses/{lensId}/includes/relation-types` | Include a relation type, optionally narrowed to a property list |
+| GET | `/lenses/{lensId}/includes/relation-types` | List the lens's relation type inclusions |
+| PUT | `/lenses/{lensId}/includes/relation-types/{relationTypeId}` | Replace an inclusion's property list |
+| DELETE | `/lenses/{lensId}/includes/relation-types/{relationTypeId}` | Drop a relation type from the lens |
 
 An omitted property list means *all properties*; an explicit list must contain every
 required property that has no default.
 
 ### Agent configurations
 
-Per-lens, addressed by ontology key. Semantics:
+Per-lens, addressed by lens key. Semantics:
 [capabilities/ai-agents.md](capabilities/ai-agents.md).
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/ontologies/{ontologyKey}/ai-agents` | List the lens's agent configurations |
-| PUT | `/ontologies/{ontologyKey}/ai-agents/{agentKey}` | Create or replace one; answers 201 on create, 200 on replace |
-| DELETE | `/ontologies/{ontologyKey}/ai-agents/{agentKey}` | Delete an agent configuration |
+| GET | `/lenses/{lensKey}/ai-agents` | List the lens's agent configurations |
+| PUT | `/lenses/{lensKey}/ai-agents/{agentKey}` | Create or replace one; answers 201 on create, 200 on replace |
+| DELETE | `/lenses/{lensKey}/ai-agents/{agentKey}` | Delete an agent configuration |
 
 ### Saved queries
 
-Per-lens, addressed by ontology key. Semantics:
+Per-lens, addressed by lens key. Semantics:
 [capabilities/saved-queries.md](capabilities/saved-queries.md).
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/ontologies/{ontologyKey}/saved-queries` | List the lens's saved queries |
-| PUT | `/ontologies/{ontologyKey}/saved-queries/{queryKey}` | Create or replace one; answers 201 on create, 200 on replace |
-| DELETE | `/ontologies/{ontologyKey}/saved-queries/{queryKey}` | Delete a saved query |
+| GET | `/lenses/{lensKey}/saved-queries` | List the lens's saved queries |
+| PUT | `/lenses/{lensKey}/saved-queries/{queryKey}` | Create or replace one; answers 201 on create, 200 on replace |
+| DELETE | `/lenses/{lensKey}/saved-queries/{queryKey}` | Delete a saved query |
 
 ### Schema-wide operations
 
+Schema-wide means ontology-wide: each of these covers the addressed ontology and nothing
+beyond it.
+
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/schema/validate` | Check the global schema and every lens for consistency |
-| GET | `/export` | Export the whole schema in the transfer format |
-| POST | `/import` | Import a transfer payload |
-| POST | `/rebuild-embeddings` | Regenerate every embedding and repair vector index widths |
+| POST | `/schema/validate` | Check the ontology's schema and every lens for consistency |
+| GET | `/export` | Export the ontology's design in the transfer format |
+| POST | `/import` | Import a transfer payload into this ontology |
+| POST | `/rebuild-embeddings` | Regenerate the ontology's embeddings and repair its vector index widths |
 
 Rebuild answers with a stream of newline-delimited JSON progress records rather than one
-body, because it runs over the whole dataset. It is refused when no embedding provider is
-configured. Transfer carries schema only — see
+body, because it runs over the ontology's whole dataset. It is refused when no embedding
+provider is configured; after an embedding-provider switch it is run once per ontology.
+Transfer carries the design only — schema, lenses, agents, saved queries; no instance
+data and no ontology identity — see
 [capabilities/transfer.md](capabilities/transfer.md) and
 [capabilities/search.md](capabilities/search.md).
 
 ## Runtime REST
 
-One global route, then everything else under `/api/runtime/{ontologyKey}`.
-
-### Server capabilities
-
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/api/runtime/features` | Report whether semantic search and AI are available |
-
-The only route on either surface that names no lens. Clients call it before offering
-semantic search or AI, since both depend on external providers.
+Everything under `/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}`. An unknown
+ontology key answers not found before the lens is considered; an unknown lens key
+answers not found within the ontology.
 
 ### Schema introspection
 
@@ -400,32 +443,35 @@ connection carries state.
 
 | | Modeling | Runtime |
 |---|---|---|
-| Mount | `/mcp/model` | `/mcp/runtime`, or `/mcp/runtime/{ontologyKey}` |
-| Lens binding | None — the server is global | Exactly one, resolved when the request arrives |
-| Tools | 27 | 20 |
+| Mount | `/mcp/ontologies/{ontologyKey}/model` | `/mcp/ontologies/{ontologyKey}/runtime/lenses/{lensKey}` |
+| Bound to | One ontology | One ontology and one lens |
+| Tools | 28 | 20 |
 
-### How each resolves a lens
+### How a mount is bound
 
-**The modeling server takes no ontology key in its URL.** It is mounted at `/mcp/model`
-with nothing after it, and it is global by design, matching the modeling REST surface: the
-schema belongs to no lens. The tools that *do* concern a lens — ontology management, scope
-inclusions, agent configurations, saved queries — take an `ontology_key` argument instead.
-A trailing path segment on this mount is not interpreted as a lens.
+**The URL is the only binding channel.** Each mount names its scope in its own address —
+there is no request header and no configured fallback, and no tool takes an ontology or
+lens argument. A URL that names no ontology (or, for runtime, no lens) is an unknown
+route and answers the standard not-found error. One MCP client configuration entry per
+ontology is the intended shape.
 
-The runtime server resolves exactly one lens per request, in this order:
+A bound client can never reach, list, or infer another ontology's existence: the binding
+is fixed in the URL, and no mount exposes the registry. Ontology management — listing,
+creating under an arbitrary key, renaming, deleting — is REST and web UI only, with one
+carve-out: the modeling mount's `ensure_ontology` tool, which acts only on the mount's
+own binding.
 
-1. the first path segment after `/mcp/runtime`;
-2. the `X-Ontology-Key` request header;
-3. a configured fallback key.
-
-With none of the three, the request is refused with 400. A tool can therefore never name a
-lens or reach across two.
+The modeling mount serves requests even when its ontology does not exist yet — that is
+what lets `ensure_ontology` provision it; until then every other tool answers a
+not-found tool error. The runtime mount requires both its ontology and its lens to
+exist; its tools answer not-found tool errors otherwise.
 
 ### Modeling tools
 
 | Tool | Purpose |
 |---|---|
-| `get_schema` | The whole global schema — types, relation types, properties, and every lens with its inclusions, agents and saved queries. Identical to `export_schema`, and the only way to enumerate lenses: there is no `list_ontologies` |
+| `ensure_ontology` | Create the ontology this mount is bound to if it does not exist yet; no-op if it does. Argument-less — it acts only on the mount's own ontology — and reports the key and whether it created. A created ontology starts bare and without a display name; naming is a REST/UI operation |
+| `get_schema` | The ontology's whole design — types, relation types, properties, and every lens with its inclusions, agents and saved queries. Identical to `export_schema`, and the only way to enumerate lenses: there is no `list_lenses` |
 | `create_entity_type` | Add an entity type |
 | `update_entity_type` | Change display name or description; the key is immutable |
 | `delete_entity_type` | Remove an entity type and its properties |
@@ -435,17 +481,17 @@ lens or reach across two.
 | `add_property` | Define a property on an entity type or a relation type |
 | `update_property` | Change a property's metadata; key and data type are immutable |
 | `delete_property` | Remove a property definition |
-| `validate_schema` | Check the global schema and every lens |
+| `validate_schema` | Check the ontology's schema and every lens |
 | `export_schema` | Produce a transfer payload |
 | `import_schema` | Apply a transfer payload |
-| `create_ontology` | Create a lens |
-| `update_ontology` | Change a lens's name or description |
-| `delete_ontology` | Delete a lens |
-| `add_entity_type_to_ontology` | Include an entity type in a lens, optionally narrowed to a property list |
-| `remove_entity_type_from_ontology` | Drop an entity type from a lens |
-| `add_relation_type_to_ontology` | Include a relation type in a lens, optionally narrowed to a property list |
-| `remove_relation_type_from_ontology` | Drop a relation type from a lens |
-| `validate_ontology` | Check one lens's inclusions against the schema |
+| `create_lens` | Create a lens |
+| `update_lens` | Change a lens's name or description |
+| `delete_lens` | Delete a lens |
+| `add_entity_type_to_lens` | Include an entity type in a lens, optionally narrowed to a property list |
+| `remove_entity_type_from_lens` | Drop an entity type from a lens |
+| `add_relation_type_to_lens` | Include a relation type in a lens, optionally narrowed to a property list |
+| `remove_relation_type_from_lens` | Drop a relation type from a lens |
+| `validate_lens` | Check one lens's inclusions against the schema |
 | `list_ai_agents` | List a lens's agent configurations |
 | `set_ai_agent` | Create or replace an agent configuration |
 | `delete_ai_agent` | Delete an agent configuration |
@@ -453,9 +499,10 @@ lens or reach across two.
 | `set_saved_query` | Create or replace a saved query pipeline |
 | `delete_saved_query` | Delete a saved query |
 
-`add_property`, `delete_property`, `delete_entity_type` and `delete_relation_type` take a
-`cascade` flag with the same meaning as the REST parameter. There is no modeling tool for
-rebuilding embeddings.
+The per-lens tools take a `lens_key` naming a lens of the bound ontology.
+`add_property`, `delete_property`, `delete_entity_type` and
+`delete_relation_type` take a `cascade` flag with the same meaning as the REST
+parameter. There is no modeling tool for rebuilding embeddings.
 
 ### Runtime tools
 
@@ -501,11 +548,13 @@ Reasonable things to look for that are absent everywhere — REST, MCP and the w
 | Absent | Consequence |
 |---|---|
 | Health or readiness endpoint | Nothing for an orchestrator to probe; liveness must be inferred from a real request |
-| Data-wipe endpoint | Instance data is removed one entity or relation at a time |
-| Bulk or batch write | Every create and update is a single object; import covers schema, not data |
-| Instance-data export | Transfer moves the schema only; data leaves through queries or listing |
+| Data-wipe endpoint | Instance data is removed one entity or relation at a time; deleting the whole ontology is the only bulk removal |
+| Bulk or batch write | Every create and update is a single object; import covers the design, not data |
+| Instance-data export | Transfer moves the design only; data leaves through queries or listing |
 | Single-property read on modeling | List the owning type's properties |
 | Cross-lens read | No route or tool sees two lenses at once |
+| Cross-ontology anything | No route or tool sees two ontologies at once; overviews are a client-side concern |
+| Registry over MCP | Ontology management is REST/UI only; `ensure_ontology` is the sole, self-scoped exception |
 
 Authentication, authorization and multi-tenancy are absent by design and are discussed in
 [architecture.md](architecture.md#what-the-architecture-does-not-provide).

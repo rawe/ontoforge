@@ -279,6 +279,18 @@ export interface Ontology {
   updatedAt: string
 }
 
+export interface OntologyCreateInput {
+  /** Immutable, server-wide unique; snake_case, max 59 chars. */
+  key: string
+  /** Optional — an ontology starts nameless unless one is chosen here. */
+  displayName?: string
+}
+
+/** Rename touches the display name only; the key is immutable. */
+export interface OntologyRenameInput {
+  displayName: string
+}
+
 /* --------------------------------- modeling --------------------------------- */
 
 export interface Lens {

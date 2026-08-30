@@ -38,9 +38,15 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("schema import (Ne
     enableOllamaProvider();
     app = await createApp();
     await app.ready();
+    const ontology = await app.inject({
+      method: "POST",
+      url: "/api/ontologies",
+      payload: { key: "test_ont" },
+    });
+    expect(ontology.statusCode, ontology.body).toBe(201);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/import",
+      url: "/api/ontologies/test_ont/model/import",
       payload: EXPORT_FIXTURE,
     });
     expect(res.statusCode, res.body).toBe(201);

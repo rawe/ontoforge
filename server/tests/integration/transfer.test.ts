@@ -28,6 +28,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../../src/app.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
+import { supportsMultipleOntologies } from "./tiers.js";
 
 type Row = Record<string, unknown>;
 
@@ -154,7 +155,7 @@ describe("round-trip against a stored export document", () => {
 });
 
 describe("transfer between ontologies", () => {
-  it("one ontology's export imports into another, bare or populated", async () => {
+  it.skipIf(!supportsMultipleOntologies)("one ontology's export imports into another, bare or populated", async () => {
     await createOntology("target_ont");
     await importInto("test_ont", EXPORT_FIXTURE);
 
@@ -194,7 +195,7 @@ describe("transfer between ontologies", () => {
     expect((sourceTypes.json() as Row[]).map((et) => et.key)).toEqual(["company", "person"]);
   });
 
-  it("conflicts fail all-or-nothing against the target ontology's keys", async () => {
+  it.skipIf(!supportsMultipleOntologies)("conflicts fail all-or-nothing against the target ontology's keys", async () => {
     await createOntology("target_ont");
     await importInto("test_ont", EXPORT_FIXTURE);
     const exported = await exportFrom("test_ont");

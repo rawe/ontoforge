@@ -7,6 +7,10 @@
  * `/api/ontologies/:key/runtime/lenses/:lensKey`, an unknown ontology
  * answers 404 before any lens logic, the old `/api/runtime` tree is
  * gone, and the feature report lives at `/api/server/features`.
+ *
+ * The twin-ontology isolation describe is multi-ontology tier
+ * (`tiers.ts`); the runtime-surface pins run over a single ontology and
+ * stay contract tier.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -17,6 +21,7 @@ import { closeStores, initStores } from "../../src/core/ports.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { createOntology, modelPrefix, runtimePrefix } from "./fixture.js";
 import { wipeDatabase } from "./reset.js";
+import { supportsMultipleOntologies } from "./tiers.js";
 
 let app: FastifyInstance;
 
@@ -99,10 +104,13 @@ const hr = runtimePrefix("hr", "default");
 beforeEach(async () => {
   await wipeDatabase();
   invalidateLoadedSchemaCache();
-  await buildTwinOntologies();
 });
 
-describe("the same names in two ontologies stay disjoint", () => {
+describe.skipIf(!supportsMultipleOntologies)("the same names in two ontologies stay disjoint", () => {
+  beforeEach(async () => {
+    await buildTwinOntologies();
+  });
+
   it("schema reads through the same lens key serve each ontology's own schema", async () => {
     const crmSchema = await getJson(`${crm}/schema`);
     const hrSchema = await getJson(`${hr}/schema`);
@@ -263,7 +271,13 @@ describe("the same names in two ontologies stay disjoint", () => {
   });
 });
 
+// Contract tier: everything below runs over a single ontology.
 describe("the runtime surface itself", () => {
+  beforeEach(async () => {
+    await createOntology(app, "crm");
+    await post(`${modelPrefix("crm")}/lenses`, { key: "default", name: "Default (crm)" });
+  });
+
   it("AI routes answer under the new prefix (FEATURE_DISABLED without a provider)", async () => {
     const res = await app.inject({
       method: "POST",

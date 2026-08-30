@@ -18,6 +18,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../../src/app.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
+import { supportsMultipleOntologies } from "./tiers.js";
 
 interface ToolCallResult {
   content: { type: string; text: string }[];
@@ -133,7 +134,15 @@ describe("tool surface", () => {
 });
 
 describe("ensure_ontology", () => {
-  it("creates the mount's own ontology, no-ops on the second call, and the result is fully usable", async () => {
+  it("no-ops on a mount whose ontology already exists", async () => {
+    const result = await call(client, "ensure_ontology");
+    expect(result.isError, text(result)).toBeUndefined();
+    expect(json(result)).toEqual({ key: "test_ont", created: false });
+  });
+
+  // Multi-ontology tier: `fresh_ont` is a second ontology beside the
+  // fixture's `test_ont`.
+  it.skipIf(!supportsMultipleOntologies)("creates the mount's own ontology, no-ops on the second call, and the result is fully usable", async () => {
     // No REST create for fresh_ont — the mount names an ontology that
     // does not exist yet.
     const fresh = await connectClient("ensure-tests", "fresh_ont");
@@ -555,7 +564,7 @@ describe("lenses over MCP", () => {
   });
 });
 
-describe("ontology isolation", () => {
+describe.skipIf(!supportsMultipleOntologies)("ontology isolation", () => {
   it("two clients on two mounts cannot observe each other", async () => {
     const created = await app.inject({
       method: "POST",

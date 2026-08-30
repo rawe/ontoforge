@@ -7,11 +7,11 @@
  * imported from anywhere else in the server.
  */
 
-import { StoreError } from "../../core/exceptions.js";
-import type { OntologyRegistry, Row } from "../../core/ports.js";
+import type { OntologyRegistry } from "../../core/ports.js";
 import { ensureVectorIndexes } from "./ddl.js";
 import { closeDriver, getDriver, initDriver } from "./driver.js";
 import { Neo4jModelingStore } from "./modelingStore.js";
+import { Neo4jOntologyRegistry, registryHoldsOntology } from "./registry.js";
 import { Neo4jRuntimeStore } from "./runtimeStore.js";
 
 /** Initialize the Neo4j adapter: connect and verify the driver. */
@@ -20,10 +20,11 @@ export async function initAdapter(): Promise<void> {
 }
 
 /**
- * The single-graph stores. This adapter holds at most one ontology
- * (spec §6.6; the capped registry is ticket 18's), so the binding key
- * selects nothing physical yet — today's label derivation and Cypher
- * stay valid unchanged.
+ * The single-graph stores. This adapter holds at most one ontology (its
+ * registry enforces the cap, see `registry.ts`), so the binding key
+ * selects nothing physical — today's label derivation and Cypher stay
+ * valid unchanged. The port accessors have already verified the key
+ * against the registry.
  */
 export function createModelingStore(_ontologyKey: string): Neo4jModelingStore {
   return new Neo4jModelingStore(getDriver());
@@ -33,31 +34,9 @@ export function createRuntimeStore(ontologyKey: string): Neo4jRuntimeStore {
   return new Neo4jRuntimeStore(getDriver(), ontologyKey);
 }
 
-/**
- * The one-ontology-capped Neo4j registry is not built yet; until it is,
- * every registry operation rejects as a `StoreError` (port contract rule
- * 4: nothing else crosses the port, and the client sees no backend
- * detail — the cause is logged against the error id). The adapter itself
- * still initializes and serves — only the registry surface is
- * unavailable on this backend.
- */
+/** The one-ontology-capped registry (`registry.ts`). */
 export function createRegistry(): OntologyRegistry {
-  const unavailable = (): Promise<never> => {
-    const error = new StoreError();
-    console.error(
-      `Storage failure ${error.errorId}: the ontology registry is not ` +
-        "implemented on this backend yet",
-    );
-    return Promise.reject(error);
-  };
-  return {
-    createOntology: (): Promise<Row> => unavailable(),
-    listOntologies: (): Promise<Row[]> => unavailable(),
-    getOntology: (): Promise<Row | null> => unavailable(),
-    getOntologyByDisplayName: (): Promise<Row | null> => unavailable(),
-    renameOntology: (): Promise<Row | null> => unavailable(),
-    deleteOntology: (): Promise<boolean> => unavailable(),
-  };
+  return new Neo4jOntologyRegistry(getDriver());
 }
 
 export async function closeStores(): Promise<void> {
@@ -65,7 +44,9 @@ export async function closeStores(): Promise<void> {
 }
 
 /**
- * Ensure all vector indexes exist for the configured dimensions.
+ * Ensure all vector indexes exist for the configured dimensions, covering
+ * every ontology the registry lists: zero ontologies means nothing to
+ * ensure, one means the whole graph.
  *
  * The startup path (architecture step 5): width mismatches are REPORTED and
  * nothing is repaired — only the rebuild operation recreates a drifted
@@ -73,5 +54,9 @@ export async function closeStores(): Promise<void> {
  * (`docs/decisions.md#behaviour`).
  */
 export async function ensureSemanticIndexes(dimensions: number): Promise<void> {
-  await ensureVectorIndexes(getDriver(), dimensions, false);
+  const driver = getDriver();
+  if (!(await registryHoldsOntology(driver))) {
+    return;
+  }
+  await ensureVectorIndexes(driver, dimensions, false);
 }

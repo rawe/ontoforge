@@ -42,7 +42,8 @@ export const SCHEMA_RELATIONSHIP_TYPES: ReadonlySet<string> = new Set([
   "HAS_SAVED_QUERY",
 ]);
 
-// The internal names `_Entity`, `_Chunk` and `_HAS_CHUNK` need no reserved
+// The internal names `_Entity`, `_Chunk`, `_HAS_CHUNK` and
+// `_OntologyRegistry` (the registry node, `registry.ts`) need no reserved
 // key: the type key pattern forbids a leading underscore, so no key can
 // convert to them.
 

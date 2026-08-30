@@ -5,10 +5,8 @@
  * untouched (unembedded rows are invisible to semantic search, which is
  * what makes the difference observable through the port).
  *
- * Two ontologies at once, so gated to PostgreSQL like the registry
- * conformance suite — the capped Neo4j registry (ticket 18) widens the
- * multi-ontology tier when it lands. SKIPPED when Ollama or the model is
- * unavailable.
+ * Two ontologies at once — multi-ontology tier (`tiers.ts`). SKIPPED
+ * when Ollama or the model is unavailable.
  */
 
 import { randomUUID } from "node:crypto";
@@ -17,7 +15,6 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createApp } from "../../../src/app.js";
-import { settings } from "../../../src/config.js";
 import { getEmbeddingProvider } from "../../../src/core/embedding.js";
 import {
   closeStores,
@@ -26,6 +23,7 @@ import {
 } from "../../../src/core/ports.js";
 import type { PropertyDef } from "../../../src/core/schemas.js";
 import { wipeDatabase } from "../reset.js";
+import { supportsMultipleOntologies } from "../tiers.js";
 import { checkOllamaModel, disableProvider, enableOllamaProvider } from "./support.js";
 
 type Row = Record<string, unknown>;
@@ -77,7 +75,7 @@ async function personHits(ontologyKey: string, query: string): Promise<Row[]> {
   return store.semanticSearch("person", DEFS, embedding!, 10, null);
 }
 
-describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "postgres")(
+describe.skipIf(!ollamaUp || !supportsMultipleOntologies)(
   "per-ontology rebuild-embeddings (Ollama)",
   () => {
     beforeAll(async () => {

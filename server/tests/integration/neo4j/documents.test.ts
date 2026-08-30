@@ -58,22 +58,28 @@ describe.skipIf(settings.DB_BACKEND !== "neo4j")("Neo4j physical chunk rows", ()
     app = await createApp();
     await app.ready();
 
+    const ontology = await app.inject({
+      method: "POST",
+      url: "/api/ontologies",
+      payload: { key: "test_ont" },
+    });
+    expect(ontology.statusCode).toBe(201);
     const article = await app.inject({
       method: "POST",
-      url: "/api/model/entity-types",
+      url: "/api/ontologies/test_ont/model/entity-types",
       payload: { key: "article", displayName: "Article" },
     });
     expect(article.statusCode).toBe(201);
     const articleId = (article.json() as Row).entityTypeId as string;
     const bodyProp = await app.inject({
       method: "POST",
-      url: `/api/model/entity-types/${articleId}/properties`,
+      url: `/api/ontologies/test_ont/model/entity-types/${articleId}/properties`,
       payload: { key: "body", displayName: "Body", dataType: "document" },
     });
     expect(bodyProp.statusCode).toBe(201);
     const lens = await app.inject({
       method: "POST",
-      url: "/api/model/lenses",
+      url: "/api/ontologies/test_ont/model/lenses",
       payload: { key: "docs_view", name: "Docs View" },
     });
     expect(lens.statusCode).toBe(201);
@@ -92,7 +98,7 @@ describe.skipIf(settings.DB_BACKEND !== "neo4j")("Neo4j physical chunk rows", ()
 
     const created = await app.inject({
       method: "POST",
-      url: "/api/runtime/docs_view/entities/article",
+      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/article",
       payload: { body: BODY },
     });
     expect(created.statusCode, created.body).toBe(201);

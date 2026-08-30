@@ -17,6 +17,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../../src/app.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
+import { supportsMultipleOntologies } from "./tiers.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { buildFixture } from "./fixture.js";
 
@@ -135,7 +136,7 @@ describe("URL binding", () => {
   });
 });
 
-describe("ontology isolation", () => {
+describe.skipIf(!supportsMultipleOntologies)("ontology isolation", () => {
   it("two clients on two mounts cannot observe each other", async () => {
     // A second ontology with the SAME type key and the SAME lens key —
     // legal since keys are per-ontology — holding disjoint data.

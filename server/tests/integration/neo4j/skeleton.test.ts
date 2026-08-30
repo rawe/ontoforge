@@ -8,13 +8,15 @@
  * `tests/integration/skeleton.test.ts`.
  */
 
+import { randomUUID } from "node:crypto";
+
 import type { FastifyInstance } from "fastify";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { getDriver } from "../../../src/adapters/neo4j/driver.js";
 import { runSession } from "../../../src/adapters/neo4j/errors.js";
 import { settings } from "../../../src/config.js";
-import { closeStores, initStores } from "../../../src/core/ports.js";
+import { closeStores, getOntologyRegistry, initStores } from "../../../src/core/ports.js";
 import { wipeDatabase } from "../reset.js";
 import { shutdownServer, startServer, warnAboutReservedTypeKeysInUse } from "../../../src/main.js";
 
@@ -78,6 +80,9 @@ describe.skipIf(settings.DB_BACKEND !== "neo4j")("Neo4j physical skeleton", () =
 
   describe("startup reserved-key report", () => {
     it("a stored type with a now-reserved key triggers the startup warning", async () => {
+      // The report walks the registry, so the graph must belong to a
+      // registered ontology.
+      await getOntologyRegistry().createOntology(randomUUID(), "legacy_ont", null, null);
       // Seed directly via the driver: types that predate the reserved-key check.
       await runSession(getDriver(), async (session) => {
         await session.run(
@@ -104,6 +109,10 @@ describe.skipIf(settings.DB_BACKEND !== "neo4j")("Neo4j physical skeleton", () =
         expect(
           reservedWarnings.some((w) => w.includes("RelationType 'has_property'")),
         ).toBe(true);
+        // The walk names the ontology the collision lives in.
+        expect(reservedWarnings.every((w) => w.includes("in ontology 'legacy_ont'"))).toBe(
+          true,
+        );
       } finally {
         warnSpy.mockRestore();
         await wipeDatabase();
@@ -115,6 +124,8 @@ describe.skipIf(settings.DB_BACKEND !== "neo4j")("Neo4j physical skeleton", () =
 
     it("reports nothing when no stored key is reserved", async () => {
       await initStores();
+      // A registered ontology, so the walk actually inspects the graph.
+      await getOntologyRegistry().createOntology(randomUUID(), "clean_ont", null, null);
       const warnings: string[] = [];
       const warnSpy = vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
         warnings.push(args.map(String).join(" "));

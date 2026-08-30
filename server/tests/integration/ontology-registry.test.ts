@@ -6,25 +6,24 @@
  * dimensions, the 59-char key cap at its physical edge, and zero
  * ontologies as a valid served state.
  *
- * Gated to PostgreSQL: the Neo4j adapter does not implement the registry
- * port yet — when its one-ontology-capped registry lands, this file's
- * contract tier runs on both backends and only the multi-ontology cases
- * stay PostgreSQL-gated.
+ * Contract tier — runs on every adapter. Only the cases that hold
+ * several ontologies at once are multi-ontology tier (`tiers.ts`); the
+ * Neo4j-specific cap behaviour lives in `neo4j/registry-cap.test.ts`.
  */
 
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../../src/app.js";
-import { settings } from "../../src/config.js";
 import { closeStores, getOntologyRegistry, initStores } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
+import { supportsMultipleOntologies } from "./tiers.js";
 
 type Row = Record<string, unknown>;
 
 let app: FastifyInstance;
 
-describe.skipIf(settings.DB_BACKEND !== "postgres")("ontology registry", () => {
+describe("ontology registry", () => {
   beforeAll(async () => {
     await initStores();
     await wipeDatabase();
@@ -79,7 +78,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("ontology registry", () => {
       expect(list.json()).toEqual([created]);
     });
 
-    it("several ontologies may all lack a display name", async () => {
+    it.skipIf(!supportsMultipleOntologies)("several ontologies may all lack a display name", async () => {
       const first = await createOntology({ key: "first" });
       const second = await createOntology({ key: "second" });
       expect(first.displayName).toBeNull();
@@ -156,7 +155,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("ontology registry", () => {
       expect(res.json().displayName).toBe("Customer Relations");
     });
 
-    it("a display name held by another ontology answers 409", async () => {
+    it.skipIf(!supportsMultipleOntologies)("a display name held by another ontology answers 409", async () => {
       await createOntology({ key: "crm", displayName: "Customer Relations" });
       await createOntology({ key: "hr", displayName: "Human Resources" });
       const res = await app.inject({
@@ -226,7 +225,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("ontology registry", () => {
       expect(await registry.getOntologyByDisplayName("Nope")).toBeNull();
     });
 
-    it("listOntologies orders by key", async () => {
+    it.skipIf(!supportsMultipleOntologies)("listOntologies orders by key", async () => {
       const registry = getOntologyRegistry();
       await registry.createOntology(ID_B, "zeta", null, null);
       await registry.createOntology(ID_A, "alpha", null, null);

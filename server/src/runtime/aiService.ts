@@ -747,12 +747,22 @@ export async function aiExtract(
   }
 
   const model = requireModel();
-  // `jsonSchema` constrains the response server-side — Ollama and OpenAI
-  // both support it, so the model cannot return a shape we then have to
-  // repair.
+  // The schema travels as the parameters of a single forced tool call
+  // rather than in `response_format`: a `json_schema` response format is
+  // validated against OpenAI's strict subset, which rejects the open
+  // `additionalProperties: true` maps this schema needs — property names
+  // come from the ontology, so the key set is not knowable statically.
+  // Tool parameters carry no such restriction, and the guarantee is
+  // unchanged: LangChain emits a `tool_choice` naming that one function,
+  // so the model cannot answer in prose.
+  //
+  // This is a stopgap. It rests on tool-parameter schemas not being
+  // strictly validated, which holds today but is not promised. The durable
+  // fix is to generate a strict-compliant schema from the lens's scoped
+  // ontology per request; that work is tracked separately.
   const structured = model.withStructuredOutput(
     EXTRACTION_JSON_SCHEMA as unknown as Record<string, unknown>,
-    { method: "jsonSchema" },
+    { method: "functionCalling" },
   );
   const raw = await structured.invoke([
     new SystemMessage(EXTRACT_SYSTEM_PROMPT.replace("{schema}", schemaDesc) + promptExtra),

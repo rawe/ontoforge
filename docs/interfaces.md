@@ -150,11 +150,16 @@ MCP reports the same failures as tool errors. Because a tool error is a single s
 per-field detail that REST returns under `details.fields` is flattened into the message
 text, so a model still sees every offending field in one response.
 
-Requesting a capability whose provider is not configured is a `VALIDATION_ERROR`. Only the
-two routes that need an embedding provider — semantic search and saved-query search — mark
-it with `details.code` of `FEATURE_DISABLED`; the AI routes do not, so a client cannot tell
-a switched-off capability from a bad request there. Call `GET /api/server/features` first
-rather than relying on the refusal.
+Requesting a capability whose provider is not configured answers `VALIDATION_ERROR` with
+`details.code` of `FEATURE_DISABLED` — on the two routes that need an embedding provider,
+semantic search and saved-query search, and on the AI routes alike. A client can therefore
+tell a switched-off capability from a rejected request. Two AI routes are exempt because
+they never run a model: listing agents and fetching an agent card answer normally on a
+server with no provider, and only a task sent to an agent fails
+([capabilities/ai-agents.md](capabilities/ai-agents.md)).
+
+Call `GET /api/server/features` first all the same. Probing lets a client hide what is
+unavailable, rather than offering it and explaining the refusal afterwards.
 
 ## Registry
 

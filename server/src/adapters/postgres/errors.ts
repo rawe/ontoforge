@@ -243,6 +243,10 @@ function translateConstraint(exc: pg.DatabaseError): OntoForgeError | null {
       return null;
     case "23505":
       switch (constraint) {
+        case "ontology_key_unique":
+          return new ConflictError(`Ontology with key '${value}' already exists`);
+        case "ontology_display_name_unique":
+          return new ConflictError(`Ontology with display name '${value}' already exists`);
         case "lens_key_unique":
           return new ConflictError(`Lens with key '${value}' already exists`);
         case "lens_name_unique":

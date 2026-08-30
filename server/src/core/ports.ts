@@ -554,6 +554,48 @@ export interface RuntimeStore {
 }
 
 /**
+ * The ontology registry: the small third port beside the two phase
+ * stores. It manages ontologies as whole units — create, list, get,
+ * rename, delete — while the phase stores work inside one ontology.
+ *
+ * Rows carry `ontologyId`, `key`, `displayName` (nullable), `createdAt`,
+ * `updatedAt`. The physical isolation mechanism behind an ontology —
+ * what `createOntology` provisions and `deleteOntology` cascades over —
+ * is each adapter's private business; nothing above this port knows what
+ * it is.
+ */
+export interface OntologyRegistry {
+  /**
+   * Create one ontology and provision its physical home atomically: a
+   * failed create leaves nothing behind. `embeddingDimensions` is the
+   * process's embedding width for the fixed semantic indexes the home
+   * carries; null when no embedding provider is configured, and the
+   * home then carries no semantic indexes — the same width policy the
+   * boot sequence applies (an index needs a width, and only a provider
+   * has one).
+   */
+  createOntology(
+    ontologyId: string,
+    key: string,
+    displayName: string | null,
+    embeddingDimensions: number | null,
+  ): Promise<Row>;
+
+  listOntologies(): Promise<Row[]>;
+
+  getOntology(key: string): Promise<Row | null>;
+
+  getOntologyByDisplayName(displayName: string): Promise<Row | null>;
+
+  /** Set the display name; the key never changes. Null = not found. */
+  renameOntology(key: string, displayName: string): Promise<Row | null>;
+
+  /** Hard cascade: the ontology's physical home and its registry entry
+   * go together. False = not found. */
+  deleteOntology(key: string): Promise<boolean>;
+}
+
+/**
  * The lifecycle surface every adapter package exports. The module IS the
  * namespace import — no wrapper object, no default export, no factory
  * class; TypeScript checks each `import()` result structurally at the
@@ -561,6 +603,7 @@ export interface RuntimeStore {
  */
 export interface AdapterModule {
   createStores(): Promise<[ModelingStore, RuntimeStore]>;
+  createRegistry(): OntologyRegistry;
   closeStores(): Promise<void>;
   ensureSemanticIndexes(dimensions: number): Promise<void>;
 }
@@ -577,6 +620,7 @@ const ADAPTERS: Record<string, () => Promise<AdapterModule>> = {
 
 let modelingStore: ModelingStore | null = null;
 let runtimeStore: RuntimeStore | null = null;
+let ontologyRegistry: OntologyRegistry | null = null;
 let activeAdapter: AdapterModule | null = null;
 
 function unknownBackend(): never {
@@ -591,6 +635,7 @@ export async function initStores(): Promise<void> {
   const loadAdapter = ADAPTERS[settings.DB_BACKEND] ?? unknownBackend();
   const adapter = await loadAdapter();
   [modelingStore, runtimeStore] = await adapter.createStores();
+  ontologyRegistry = adapter.createRegistry();
   activeAdapter = adapter;
 }
 
@@ -602,6 +647,7 @@ export async function closeStores(): Promise<void> {
   }
   modelingStore = null;
   runtimeStore = null;
+  ontologyRegistry = null;
 }
 
 /** Ensure the adapter's semantic-search indexes exist (startup hook). */
@@ -624,4 +670,11 @@ export function getRuntimeStore(): RuntimeStore {
     throw new Error("Stores not initialized");
   }
   return runtimeStore;
+}
+
+export function getOntologyRegistry(): OntologyRegistry {
+  if (ontologyRegistry === null) {
+    throw new Error("Stores not initialized");
+  }
+  return ontologyRegistry;
 }

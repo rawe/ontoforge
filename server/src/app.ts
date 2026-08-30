@@ -28,6 +28,7 @@ import {
 } from "./core/exceptions.js";
 import { mountMcp } from "./mcp/mount.js";
 import { modelingRouter } from "./modeling/router.js";
+import { registryRouter } from "./registry/router.js";
 import { aiRouter } from "./runtime/aiRouter.js";
 import { runtimeGlobalRouter, runtimeRouter } from "./runtime/router.js";
 
@@ -156,6 +157,7 @@ export async function createApp(): Promise<FastifyInstance> {
     return reply.status(500).header("content-type", "text/plain").send("Internal Server Error");
   });
 
+  await app.register(registryRouter, { prefix: "/api" });
   await app.register(modelingRouter, { prefix: "/api/model" });
   await app.register(runtimeGlobalRouter, { prefix: "/api/runtime" });
   await app.register(runtimeRouter, { prefix: "/api/runtime" });

@@ -45,6 +45,9 @@ const ALL_TABLES = [
  * The five fixed B-tree indexes and the two fixed vector indexes survive
  * — clearing the width imprint the latter carry is the suite-level hard
  * reset's job, not this one's.
+ *
+ * The ontology registry resets with everything else: every `ont_*`
+ * namespace drops in one cascade each and `public.ontology` truncates.
  */
 async function wipePostgres(): Promise<void> {
   await withTransaction(async (querier) => {
@@ -56,6 +59,15 @@ async function wipePostgres(): Promise<void> {
     for (const row of indexes.rows) {
       await querier.query(`DROP INDEX IF EXISTS ${quoteIdent(row["indexname"] as string)}`);
     }
+    const namespaces = await querier.query(
+      `SELECT nspname FROM pg_namespace WHERE nspname LIKE 'ont\\_%'`,
+    );
+    for (const row of namespaces.rows) {
+      await querier.query(
+        `DROP SCHEMA IF EXISTS ${quoteIdent(row["nspname"] as string)} CASCADE`,
+      );
+    }
+    await querier.query(`TRUNCATE public.ontology`);
   });
 }
 

@@ -1,8 +1,9 @@
 /**
  * Init DDL and the vector-index lifecycle.
  *
- * `initSchema` runs the whole ten-table set — schema side and instance
- * side together — as one all-or-nothing transaction at adapter init.
+ * `initSchema` runs the server-wide DDL (the `public.ontology` registry
+ * table) and the whole ten-table set — schema side and instance side
+ * together — as one all-or-nothing transaction at adapter init.
  * Idempotence rides `CREATE TABLE IF NOT EXISTS` with all constraints
  * inline and explicitly named (PG has no `ADD CONSTRAINT IF NOT EXISTS`);
  * no fixed constraint or index name uses the `vec_` prefix, which is
@@ -29,10 +30,33 @@ import type { Querier } from "./errors.js";
 import { withTransaction } from "./errors.js";
 import { quoteIdent } from "./oql/bindings.js";
 
-/** Executed in order at adapter init, idempotent. */
-const DDL_STATEMENTS: string[] = [
+/**
+ * Server-wide DDL, executed at adapter init only: the pgvector extension
+ * and the `public` home — the ontology registry. Always
+ * schema-qualified, because `public` is the fixed server-wide home
+ * regardless of any search path.
+ */
+const SERVER_DDL_STATEMENTS: string[] = [
   `CREATE EXTENSION IF NOT EXISTS vector`,
 
+  `CREATE TABLE IF NOT EXISTS public.ontology (
+  ontology_id  uuid        CONSTRAINT ontology_pk PRIMARY KEY,   -- caller-supplied, no default
+  key          text        NOT NULL CONSTRAINT ontology_key_unique UNIQUE,
+  display_name text        CONSTRAINT ontology_display_name_unique UNIQUE,  -- nullable: absent names never collide
+  namespace    text        NOT NULL,   -- the ontology's physical home, ont_<key>
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  updated_at   timestamptz NOT NULL DEFAULT now()
+)`,
+];
+
+/**
+ * The ten-table set one ontology lives in. Deliberately unqualified —
+ * namespace-relocatable: at adapter init it runs against the default
+ * namespace (the single-schema home), and at ontology creation the
+ * registry runs it inside a fresh `ont_<key>` namespace via the
+ * transaction's search path.
+ */
+export const ONTOLOGY_DDL_STATEMENTS: string[] = [
   // --- Schema side -------------------------------------------------------
 
   `CREATE TABLE IF NOT EXISTS lens (
@@ -172,7 +196,7 @@ const DDL_STATEMENTS: string[] = [
 /** Create every table and index if absent, in one transaction. */
 export async function initSchema(): Promise<void> {
   await withTransaction(async (querier) => {
-    for (const statement of DDL_STATEMENTS) {
+    for (const statement of [...SERVER_DDL_STATEMENTS, ...ONTOLOGY_DDL_STATEMENTS]) {
       await querier.query(statement);
     }
   });
@@ -317,6 +341,15 @@ function createHnsw(spec: IndexSpec, dimensions: number): string {
     `CREATE INDEX IF NOT EXISTS ${spec.name} ON ${spec.table} ` +
     `USING hnsw ((${castExpression(dimensions)}) vector_cosine_ops)${where}`
   );
+}
+
+/**
+ * The two fixed vector indexes as CREATE statements, unqualified like the
+ * ten-table DDL: ontology provisioning runs them inside the fresh
+ * namespace's search path (`registry.ts`).
+ */
+export function fixedVectorIndexStatements(dimensions: number): string[] {
+  return [createHnsw(CROSS_TYPE_SPEC, dimensions), createHnsw(SAVED_QUERY_SPEC, dimensions)];
 }
 
 /** Drop one index. Callers pass a plain name — derived from a schema row

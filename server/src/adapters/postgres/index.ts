@@ -15,6 +15,7 @@
 import { ensureVectorIndexes, initSchema } from "./ddl.js";
 import { closePool, initPool } from "./errors.js";
 import { PostgresModelingStore } from "./modelingStore.js";
+import { PostgresOntologyRegistry } from "./registry.js";
 import { PostgresRuntimeStore } from "./runtimeStore.js";
 
 /** Initialize the PostgreSQL adapter and return `[modelingStore, runtimeStore]`. */
@@ -22,6 +23,11 @@ export async function createStores(): Promise<[PostgresModelingStore, PostgresRu
   await initPool();
   await initSchema();
   return [new PostgresModelingStore(), new PostgresRuntimeStore()];
+}
+
+/** The ontology registry over the pool `createStores` opened. */
+export function createRegistry(): PostgresOntologyRegistry {
+  return new PostgresOntologyRegistry();
 }
 
 export async function closeStores(): Promise<void> {

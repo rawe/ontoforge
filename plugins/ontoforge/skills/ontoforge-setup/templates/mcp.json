@@ -2,14 +2,11 @@
   "mcpServers": {
     "ontoforge-modeling": {
       "type": "http",
-      "url": "http://localhost:8000/mcp/model"
+      "url": "http://localhost:8000/mcp/ontologies/my_ontology/model"
     },
     "ontoforge-runtime": {
       "type": "http",
-      "url": "http://localhost:8000/mcp/runtime",
-      "headers": {
-        "X-Lens-Key": "my_lens"
-      }
+      "url": "http://localhost:8000/mcp/ontologies/my_ontology/runtime/lenses/my_lens"
     }
   }
 }

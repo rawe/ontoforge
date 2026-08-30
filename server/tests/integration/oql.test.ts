@@ -780,7 +780,7 @@ describe("MCP execute_query", () => {
 
   it("round-trips a query through the runtime MCP server", async () => {
     await seedGraph();
-    const client = await connectClient(`${baseUrl}/mcp/runtime/test_lens`);
+    const client = await connectClient(`${baseUrl}/mcp/ontologies/test_ont/runtime/lenses/test_lens`);
     try {
       const result = (await client.callTool({
         name: "execute_query",
@@ -800,7 +800,7 @@ describe("MCP execute_query", () => {
   });
 
   it("reports a validation failure carrying the self-correction hints", async () => {
-    const client = await connectClient(`${baseUrl}/mcp/runtime/test_lens`);
+    const client = await connectClient(`${baseUrl}/mcp/ontologies/test_ont/runtime/lenses/test_lens`);
     try {
       const result = (await client.callTool({
         name: "execute_query",

@@ -14,9 +14,7 @@ const holder: { store: MockModelingStore } = { store: createMockModelingStore() 
 
 vi.mock("../../src/core/ports.js", () => ({
   getModelingStore: async () => holder.store,
-  getLegacyModelingStore: async () => holder.store,
   getRuntimeStore: async () => ({}),
-  getLegacyRuntimeStore: async () => ({}),
 }));
 
 const MOCK_LENS = {

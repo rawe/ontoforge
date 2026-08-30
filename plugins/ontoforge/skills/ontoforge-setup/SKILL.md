@@ -34,7 +34,7 @@ Read these templates as the starting point. Adapt them to the user's needs and w
 
 Ask the user:
 
-1. **Lens key** — the name/key for their lens (e.g. `my_lens`). Used in the MCP runtime `X-Lens-Key` header and optionally as `DEFAULT_MCP_LENS_KEY`.
+1. **Ontology key and lens key** — the ontology the project binds to (e.g. `my_ontology`) and the lens for runtime data operations (e.g. `my_lens`). Both are path segments of the MCP mount URLs — the URL is the only binding channel.
 2. **Embedding provider** — whether they want semantic search enabled, and if so which provider:
    - `ollama` — local Ollama instance (default model: `nomic-embed-text`)
    - `openai` — OpenAI-compatible API (requires API key)
@@ -60,7 +60,6 @@ Read the template from `templates/docker-compose.yml` and adapt it based on the 
 - If the user chose `openai` for AI, set `AI_PROVIDER: openai` and note that `AI_API_KEY` must be provided (do not write a real key into the file).
 - Adjust port mappings if the user reported conflicts.
 - If the backend service is renamed, update `BACKEND_URL` on the `ontoforge-ui` service to match (e.g. `http://<new-service-name>:8000`).
-- `DEFAULT_MCP_LENS_KEY` is a server-side fallback: if an MCP request arrives without an `X-Lens-Key` header or a URL path key, the server uses this value. Uncomment it in the Docker Compose if the user wants a fallback; the primary mechanism is the `X-Lens-Key` header set in `.mcp.json`.
 
 Write the result as `docker-compose.yml` (or `docker-compose.ontoforge.yml` if the user already has a compose file) in the project root.
 
@@ -68,7 +67,7 @@ Write the result as `docker-compose.yml` (or `docker-compose.ontoforge.yml` if t
 
 Read the template from `templates/mcp.json` and adapt it:
 
-- Replace `my_lens` in the `X-Lens-Key` header with the user's lens key.
+- Replace `my_ontology` and `my_lens` in the mount URLs with the user's ontology key and lens key.
 - Adjust the host/port if the user changed defaults.
 
 Write the result as `.mcp.json` in the project root. If a `.mcp.json` already exists, merge the `mcpServers` entries into it — do not overwrite existing servers.
@@ -96,9 +95,6 @@ DB_PASSWORD=changeme
 # AI_BASE_URL=http://localhost:11434
 # AI_API_KEY=
 # AI_REASONING_EFFORT=
-
-# MCP default lens key (optional)
-# DEFAULT_MCP_LENS_KEY=my_lens
 ```
 
 Add `.env` to `.gitignore` if not already there.
@@ -134,7 +130,6 @@ These are the **only** environment variables recognized by the `ontoforge-server
 | `AI_BASE_URL` | no | `http://localhost:11434` | AI provider API base URL |
 | `AI_API_KEY` | no | *(none)* | API key — **required** when `AI_PROVIDER=openai` |
 | `AI_REASONING_EFFORT` | no | *(model default)* | `none`, `low`, `medium` or `high` — how hard the model thinks |
-| `DEFAULT_MCP_LENS_KEY` | no | *(none)* | Fallback lens key for MCP when not in URL/header |
 
 ## Container Images
 
@@ -147,10 +142,12 @@ These are the **only** environment variables recognized by the `ontoforge-server
 
 ## MCP Endpoints
 
-OntoForge exposes two MCP servers:
+OntoForge exposes two MCP servers, each bound to one ontology by its mount URL:
 
-- **Modeling**: `http://<host>:8000/mcp/model` — schema design (entity types, relation types, properties, ontologies)
-- **Runtime**: `http://<host>:8000/mcp/runtime` — data operations through a lens. The lens key is provided via the `X-Lens-Key` HTTP header.
+- **Modeling**: `http://<host>:8000/mcp/ontologies/<ontologyKey>/model` — schema design (entity types, relation types, properties, lenses)
+- **Runtime**: `http://<host>:8000/mcp/ontologies/<ontologyKey>/runtime/lenses/<lensKey>` — data operations through one lens
+
+If the configured ontology does not exist yet, the modeling server's argument-less `ensure_ontology` tool creates it (and no-ops when it already exists); creating ontologies under other keys, renaming, and deleting are REST/UI operations.
 
 ## Post-Setup Checklist
 

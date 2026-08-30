@@ -243,7 +243,7 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
     const client = new Client({ name: "saved-queries-embedding-tests", version: "0.0.1" });
     await client.connect(
       new StreamableHTTPClientTransport(
-        new URL(`http://127.0.0.1:${address.port}/mcp/runtime/sq_test`),
+        new URL(`http://127.0.0.1:${address.port}/mcp/ontologies/test_ont/runtime/lenses/sq_test`),
       ),
     );
     try {

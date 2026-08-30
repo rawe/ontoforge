@@ -712,35 +712,3 @@ export function getOntologyRegistry(): OntologyRegistry {
   }
   return ontologyRegistry;
 }
-
-// ---------------------------------------------------------------------------
-// TRANSITIONAL: sole-ontology binding for the legacy surfaces
-// ---------------------------------------------------------------------------
-
-/**
- * The legacy `/mcp/*` mounts (ticket 17) do not yet name an ontology in
- * their URLs. Until they move, they bind to the server's sole ontology;
- * with zero or several ontologies they answer not-found, because no
- * binding can be inferred. Delete these two helpers when the MCP mounts
- * move.
- */
-async function soleOntologyKey(): Promise<string> {
-  const ontologies = await getOntologyRegistry().listOntologies();
-  if (ontologies.length !== 1) {
-    throw new NotFoundError(
-      "This surface binds to the server's sole ontology, and the server " +
-        `has ${ontologies.length} — address the ontology explicitly`,
-    );
-  }
-  return ontologies[0]!["key"] as string;
-}
-
-/** @deprecated transitional — removed when `/mcp/*` moves (ticket 17). */
-export async function getLegacyModelingStore(): Promise<ModelingStore> {
-  return getModelingStore(await soleOntologyKey());
-}
-
-/** @deprecated transitional — removed when `/mcp/*` moves (ticket 17). */
-export async function getLegacyRuntimeStore(): Promise<RuntimeStore> {
-  return getRuntimeStore(await soleOntologyKey());
-}

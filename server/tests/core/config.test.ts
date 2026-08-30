@@ -28,7 +28,6 @@ describe("config defaults", () => {
     expect(settings.AI_REASONING_EFFORT).toBeNull();
 
     expect(settings.PUBLIC_URL).toBeNull();
-    expect(settings.DEFAULT_MCP_LENS_KEY).toBeNull();
   });
 });
 
@@ -53,7 +52,6 @@ describe("config env overrides", () => {
       AI_API_KEY: "akey",
       AI_REASONING_EFFORT: "high",
       PUBLIC_URL: "https://onto.example.com",
-      DEFAULT_MCP_LENS_KEY: "my_lens",
     });
 
     expect(settings.DB_BACKEND).toBe("other");
@@ -74,7 +72,6 @@ describe("config env overrides", () => {
     expect(settings.AI_API_KEY).toBe("akey");
     expect(settings.AI_REASONING_EFFORT).toBe("high");
     expect(settings.PUBLIC_URL).toBe("https://onto.example.com");
-    expect(settings.DEFAULT_MCP_LENS_KEY).toBe("my_lens");
   });
 
   it("rejects a non-integer value for an integer variable", () => {

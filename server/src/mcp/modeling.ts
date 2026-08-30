@@ -1,13 +1,17 @@
 /**
  * Modeling MCP server: one ontology's schema surface over MCP.
  *
- * No lens key anywhere — the schema belongs to no lens. Until ticket 17
- * moves the mount under `/mcp/ontologies/:key/model`, every tool binds
- * to the server's sole ontology (`getLegacyModelingStore`). Tools take
- * KEYS (never internal identifiers) plus a `type_kind` discriminator for
- * properties, and resolve keys to internal ids per call (never cached).
- * Tool parameters are snake_case on the wire (`docs/interfaces.md`,
- * "JSON shape").
+ * The server is bound to the ontology its mount URL names
+ * (`/mcp/ontologies/:ontologyKey/model`) — the URL is the only binding
+ * channel, and no tool takes an ontology parameter, so a bound client
+ * can never reach, list, or infer another ontology's existence. The one
+ * registry-touching tool is the argument-less `ensure_ontology`, which
+ * creates the mount's own ontology if missing; every other tool fails
+ * with not-found until the ontology exists. No lens key anywhere — the
+ * schema belongs to no lens. Tools take KEYS (never internal
+ * identifiers) plus a `type_kind` discriminator for properties, and
+ * resolve keys to internal ids per call (never cached). Tool parameters
+ * are snake_case on the wire (`docs/interfaces.md`, "JSON shape").
  *
  * Tools call the modeling services directly — never HTTP to the REST
  * routes; a second path would be a second contract. Failures are reported
@@ -19,9 +23,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z, ZodError } from "zod";
 
 import { NotFoundError, ValidationError } from "../core/exceptions.js";
-import { getLegacyModelingStore, getLegacyRuntimeStore } from "../core/ports.js";
+import { getModelingStore, getOntologyRegistry, getRuntimeStore } from "../core/ports.js";
 import type { ModelingStore } from "../core/ports.js";
 import type { TypeKind } from "../core/schemas.js";
+import { OntologyCreate } from "../registry/schemas.js";
+import * as registryService from "../registry/service.js";
 import {
   AiAgentConfigUpsert,
   EntityTypeCreate,
@@ -197,8 +203,34 @@ async function resolveOwner(
 // Server factory (stateless transport: one server per request)
 // ---------------------------------------------------------------------------
 
-export function createModelingMcpServer(): McpServer {
+/** Build the modeling MCP server bound to one ontology key. */
+export function createModelingMcpServer(ontologyKey: string): McpServer {
   const server = new McpServer({ name: "OntoForge Modeling", version: "0.1.0" });
+
+  // The ONE registry-touching tool over MCP (`docs/decisions.md`): with
+  // no arguments it can only ever act on the binding the client already
+  // holds — it cannot list, reach, rename, or delete anything.
+  server.registerTool(
+    "ensure_ontology",
+    {
+      description:
+        "Create the ontology this mount is bound to if it does not exist yet; " +
+        "no-op if it does. Takes no arguments — it acts only on the mount's own " +
+        "ontology — and reports the ontology key and whether it created. A " +
+        "created ontology starts bare (no types, no lenses, no data) and " +
+        "without a display name; naming happens over REST/UI.",
+      inputSchema: {},
+    },
+    wrap("ensure_ontology", async () => {
+      const registry = getOntologyRegistry();
+      if ((await registry.getOntology(ontologyKey)) !== null) {
+        return jsonResult({ key: ontologyKey, created: false });
+      }
+      const body = OntologyCreate.parse({ key: ontologyKey });
+      await registryService.createOntology(body, registry);
+      return jsonResult({ key: ontologyKey, created: true });
+    }),
+  );
 
   server.registerTool(
     "get_schema",
@@ -209,7 +241,7 @@ export function createModelingMcpServer(): McpServer {
       inputSchema: {},
     },
     wrap("get_schema", async () => {
-      const result = await service.getSchemaExport(await getLegacyModelingStore());
+      const result = await service.getSchemaExport(await getModelingStore(ontologyKey));
       return jsonResult(result);
     }),
   );
@@ -235,7 +267,7 @@ export function createModelingMcpServer(): McpServer {
         displayName: args.display_name,
         description: args.description ?? null,
       });
-      const result = await service.createEntityType(body, await getLegacyModelingStore());
+      const result = await service.createEntityType(body, await getModelingStore(ontologyKey));
       return jsonResult(result);
     }),
   );
@@ -255,7 +287,7 @@ export function createModelingMcpServer(): McpServer {
       display_name?: string | undefined;
       description?: string | undefined;
     }) => {
-      const store = await getLegacyModelingStore();
+      const store = await getModelingStore(ontologyKey);
       const et = await resolveEntityType(store, args.entity_type_key);
       const body = EntityTypeUpdate.parse({
         displayName: args.display_name ?? null,
@@ -281,7 +313,7 @@ export function createModelingMcpServer(): McpServer {
       entity_type_key: string;
       cascade?: boolean | undefined;
     }) => {
-      const store = await getLegacyModelingStore();
+      const store = await getModelingStore(ontologyKey);
       const et = await resolveEntityType(store, args.entity_type_key);
       await service.deleteEntityType(et.entityTypeId as string, args.cascade ?? false, store);
       return textResult(`Entity type '${args.entity_type_key}' deleted successfully.`);
@@ -316,7 +348,7 @@ export function createModelingMcpServer(): McpServer {
         sourceEntityTypeKey: args.source_entity_type_key,
         targetEntityTypeKey: args.target_entity_type_key,
       });
-      const result = await service.createRelationType(body, await getLegacyModelingStore());
+      const result = await service.createRelationType(body, await getModelingStore(ontologyKey));
       return jsonResult(result);
     }),
   );
@@ -338,7 +370,7 @@ export function createModelingMcpServer(): McpServer {
       display_name?: string | undefined;
       description?: string | undefined;
     }) => {
-      const store = await getLegacyModelingStore();
+      const store = await getModelingStore(ontologyKey);
       const rt = await resolveRelationType(store, args.relation_type_key);
       const body = RelationTypeUpdate.parse({
         displayName: args.display_name ?? null,
@@ -364,7 +396,7 @@ export function createModelingMcpServer(): McpServer {
       relation_type_key: string;
       cascade?: boolean | undefined;
     }) => {
-      const store = await getLegacyModelingStore();
+      const store = await getModelingStore(ontologyKey);
       const rt = await resolveRelationType(store, args.relation_type_key);
       await service.deleteRelationType(
         rt.relationTypeId as string,
@@ -411,7 +443,7 @@ export function createModelingMcpServer(): McpServer {
       description?: string | undefined;
       cascade?: boolean | undefined;
     }) => {
-      const store = await getLegacyModelingStore();
+      const store = await getModelingStore(ontologyKey);
       const [ownerId, typeKind] = await resolveOwner(store, args.type_kind, args.type_key);
       const body = PropertyDefinitionCreate.parse({
         key: args.key,
@@ -457,7 +489,7 @@ export function createModelingMcpServer(): McpServer {
       default_value?: string | undefined;
       description?: string | undefined;
     }) => {
-      const store = await getLegacyModelingStore();
+      const store = await getModelingStore(ontologyKey);
       const [ownerId, typeKind] = await resolveOwner(store, args.type_kind, args.type_key);
       const prop = await resolveProperty(store, ownerId, typeKind, args.property_key);
       // Known wart: the tool argument shape cannot distinguish an omitted
@@ -499,7 +531,7 @@ export function createModelingMcpServer(): McpServer {
       property_key: string;
       cascade?: boolean | undefined;
     }) => {
-      const store = await getLegacyModelingStore();
+      const store = await getModelingStore(ontologyKey);
       const [ownerId, typeKind] = await resolveOwner(store, args.type_kind, args.type_key);
       const prop = await resolveProperty(store, ownerId, typeKind, args.property_key);
       await service.deleteProperty(
@@ -522,7 +554,7 @@ export function createModelingMcpServer(): McpServer {
       inputSchema: {},
     },
     wrap("export_schema", async () => {
-      const result = await service.getSchemaExport(await getLegacyModelingStore());
+      const result = await service.getSchemaExport(await getModelingStore(ontologyKey));
       return jsonResult(result);
     }),
   );
@@ -539,7 +571,7 @@ export function createModelingMcpServer(): McpServer {
     },
     wrap("import_schema", async (args: { payload: Record<string, unknown> }) => {
       const parsed = ExportPayload.parse(args.payload);
-      const result = await service.importSchema(parsed, await getLegacyModelingStore());
+      const result = await service.importSchema(parsed, await getModelingStore(ontologyKey));
       return jsonResult(result);
     }),
   );
@@ -551,7 +583,7 @@ export function createModelingMcpServer(): McpServer {
       inputSchema: {},
     },
     wrap("validate_schema", async () => {
-      const result = await service.validateAll(await getLegacyModelingStore());
+      const result = await service.validateAll(await getModelingStore(ontologyKey));
       return jsonResult(result);
     }),
   );
@@ -578,7 +610,7 @@ export function createModelingMcpServer(): McpServer {
         name: args.name,
         description: args.description ?? null,
       });
-      const result = await service.createLens(body, await getLegacyModelingStore());
+      const result = await service.createLens(body, await getModelingStore(ontologyKey));
       return jsonResult(result);
     }),
   );
@@ -598,7 +630,7 @@ export function createModelingMcpServer(): McpServer {
       name?: string | undefined;
       description?: string | undefined;
     }) => {
-      const store = await getLegacyModelingStore();
+      const store = await getModelingStore(ontologyKey);
       const lens = await resolveLensByKey(store, args.lens_key);
       const body = LensUpdate.parse({
         name: args.name ?? null,
@@ -618,7 +650,7 @@ export function createModelingMcpServer(): McpServer {
       },
     },
     wrap("delete_lens", async (args: { lens_key: string }) => {
-      const store = await getLegacyModelingStore();
+      const store = await getModelingStore(ontologyKey);
       const lens = await resolveLensByKey(store, args.lens_key);
       await service.deleteLens(lens.lensId as string, store);
       return textResult(`Lens '${args.lens_key}' deleted successfully.`);
@@ -646,7 +678,7 @@ export function createModelingMcpServer(): McpServer {
       entity_type_key: string;
       properties?: string[] | undefined;
     }) => {
-      const store = await getLegacyModelingStore();
+      const store = await getModelingStore(ontologyKey);
       const lens = await resolveLensByKey(store, args.lens_key);
       const body = IncludeTypeRequest.parse({
         key: args.entity_type_key,
@@ -674,7 +706,7 @@ export function createModelingMcpServer(): McpServer {
       lens_key: string;
       entity_type_key: string;
     }) => {
-      const store = await getLegacyModelingStore();
+      const store = await getModelingStore(ontologyKey);
       const lens = await resolveLensByKey(store, args.lens_key);
       const et = await resolveEntityType(store, args.entity_type_key);
       await service.removeIncludesEntityType(
@@ -705,7 +737,7 @@ export function createModelingMcpServer(): McpServer {
       relation_type_key: string;
       properties?: string[] | undefined;
     }) => {
-      const store = await getLegacyModelingStore();
+      const store = await getModelingStore(ontologyKey);
       const lens = await resolveLensByKey(store, args.lens_key);
       const body = IncludeTypeRequest.parse({
         key: args.relation_type_key,
@@ -733,7 +765,7 @@ export function createModelingMcpServer(): McpServer {
       lens_key: string;
       relation_type_key: string;
     }) => {
-      const store = await getLegacyModelingStore();
+      const store = await getModelingStore(ontologyKey);
       const lens = await resolveLensByKey(store, args.lens_key);
       const rt = await resolveRelationType(store, args.relation_type_key);
       await service.removeIncludesRelationType(
@@ -757,7 +789,7 @@ export function createModelingMcpServer(): McpServer {
       },
     },
     wrap("validate_lens", async (args: { lens_key: string }) => {
-      const store = await getLegacyModelingStore();
+      const store = await getModelingStore(ontologyKey);
       const lens = await resolveLensByKey(store, args.lens_key);
       const result = await service.validateLens(lens.lensId as string, store);
       return jsonResult(result);
@@ -775,7 +807,7 @@ export function createModelingMcpServer(): McpServer {
       },
     },
     wrap("list_ai_agents", async (args: { lens_key: string }) => {
-      const results = await service.listAiAgents(args.lens_key, await getLegacyModelingStore());
+      const results = await service.listAiAgents(args.lens_key, await getModelingStore(ontologyKey));
       return jsonResult(results);
     }),
   );
@@ -815,7 +847,7 @@ export function createModelingMcpServer(): McpServer {
         args.lens_key,
         args.key,
         body,
-        await getLegacyModelingStore(),
+        await getModelingStore(ontologyKey),
       );
       return jsonResult({ ...result, created });
     }),
@@ -831,7 +863,7 @@ export function createModelingMcpServer(): McpServer {
       },
     },
     wrap("delete_ai_agent", async (args: { lens_key: string; agent_key: string }) => {
-      await service.deleteAiAgent(args.lens_key, args.agent_key, await getLegacyModelingStore());
+      await service.deleteAiAgent(args.lens_key, args.agent_key, await getModelingStore(ontologyKey));
       return textResult(
         `AI agent '${args.agent_key}' deleted from lens '${args.lens_key}'.`,
       );
@@ -849,7 +881,7 @@ export function createModelingMcpServer(): McpServer {
       },
     },
     wrap("list_saved_queries", async (args: { lens_key: string }) => {
-      const results = await service.listSavedQueries(args.lens_key, await getLegacyModelingStore());
+      const results = await service.listSavedQueries(args.lens_key, await getModelingStore(ontologyKey));
       return jsonResult(results);
     }),
   );
@@ -900,8 +932,8 @@ export function createModelingMcpServer(): McpServer {
         args.lens_key,
         args.key,
         body,
-        await getLegacyModelingStore(),
-        await getLegacyRuntimeStore(),
+        await getModelingStore(ontologyKey),
+        await getRuntimeStore(ontologyKey),
       );
       return jsonResult({ ...result, created });
     }),
@@ -917,7 +949,7 @@ export function createModelingMcpServer(): McpServer {
       },
     },
     wrap("delete_saved_query", async (args: { lens_key: string; query_key: string }) => {
-      await service.deleteSavedQuery(args.lens_key, args.query_key, await getLegacyModelingStore());
+      await service.deleteSavedQuery(args.lens_key, args.query_key, await getModelingStore(ontologyKey));
       return textResult(
         `Saved query '${args.query_key}' deleted from lens '${args.lens_key}'.`,
       );

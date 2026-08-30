@@ -452,7 +452,7 @@ describe("runtime run (no provider)", () => {
 
 describe("modeling MCP tools", () => {
   it("set/list/delete an agent config, reporting created vs updated", async () => {
-    const client = await connectClient(`${baseUrl}/mcp/model`);
+    const client = await connectClient(`${baseUrl}/mcp/ontologies/test_ont/model`);
     try {
       const created = await call(client, "set_ai_agent", {
         lens_key: "test_lens",
@@ -498,7 +498,7 @@ describe("modeling MCP tools", () => {
   });
 
   it("set/list/delete a saved query; a validation failure flattens every error", async () => {
-    const client = await connectClient(`${baseUrl}/mcp/model`);
+    const client = await connectClient(`${baseUrl}/mcp/ontologies/test_ont/model`);
     try {
       const created = await call(client, "set_saved_query", {
         lens_key: "test_lens",
@@ -573,7 +573,7 @@ describe("runtime MCP tools", () => {
       parameters: [{ name: "who", description: "Exact name", dataType: "string" }],
     });
 
-    const client = await connectClient(`${baseUrl}/mcp/runtime/test_lens`);
+    const client = await connectClient(`${baseUrl}/mcp/ontologies/test_ont/runtime/lenses/test_lens`);
     try {
       const list = await call(client, "list_saved_queries");
       const queries = JSON.parse(text(list)) as Row[];

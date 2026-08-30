@@ -74,8 +74,6 @@ services:
       # AI_API_KEY: sk-...
       # Model thinking effort: none, low, medium or high (unset = model default)
       # AI_REASONING_EFFORT: medium
-      # MCP default lens key (optional — used when no key in URL path or header)
-      # DEFAULT_MCP_LENS_KEY: my_lens
     depends_on:
       postgres:
         condition: service_healthy

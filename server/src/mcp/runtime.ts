@@ -1,10 +1,12 @@
 /**
- * Runtime MCP server: instance data through exactly one lens.
+ * Runtime MCP server: instance data of one ontology through exactly one
+ * lens.
  *
- * The lens is resolved per request by the mount (`mount.ts`) — path
- * segment, then `X-Lens-Key` header, then the configured fallback —
- * and bound into the server factory, so a tool can never name a lens or
- * reach across two (`docs/decisions.md#interfaces`).
+ * Both bindings come from the mount URL alone
+ * (`/mcp/ontologies/:ontologyKey/runtime/lenses/:lensKey`, `mount.ts`)
+ * and are fixed into the server factory, so a tool can never name an
+ * ontology or a lens, and can never reach across two
+ * (`docs/decisions.md#interfaces`).
  *
  * Tools call the runtime services directly, take snake_case parameters,
  * and CLAMP `limit`/`offset` into range where REST rejects out-of-range
@@ -17,7 +19,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import { valueToText } from "../core/dataTypes.js";
-import { getLegacyRuntimeStore } from "../core/ports.js";
+import { getRuntimeStore } from "../core/ports.js";
 import * as service from "../runtime/service.js";
 import { formatToolError } from "./modeling.js";
 
@@ -53,8 +55,8 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(value, max));
 }
 
-/** Build the runtime MCP server bound to one resolved lens key. */
-export function createRuntimeMcpServer(lensKey: string): McpServer {
+/** Build the runtime MCP server bound to one ontology and one lens. */
+export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): McpServer {
   const server = new McpServer({ name: "OntoForge Runtime", version: "0.1.0" });
 
   server.registerTool(
@@ -67,7 +69,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
       inputSchema: {},
     },
     wrap("get_schema", async () => {
-      const result = await service.getFullSchema(lensKey, await getLegacyRuntimeStore());
+      const result = await service.getFullSchema(lensKey, await getRuntimeStore(ontologyKey));
       return jsonResult(result);
     }),
   );
@@ -92,7 +94,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         lensKey,
         args.entity_type_key,
         args.properties,
-        await getLegacyRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
       );
       return jsonResult(result);
     }),
@@ -148,7 +150,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         args.order ?? "asc",
         args.search ?? null,
         strFilters,
-        await getLegacyRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
         args.fields ?? null,
       );
       return jsonResult(result);
@@ -179,7 +181,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         lensKey,
         args.entity_type_key,
         args.entity_id,
-        await getLegacyRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
         args.fields ?? null,
       );
       return jsonResult(result);
@@ -220,7 +222,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         args.property_key,
         offset,
         limit,
-        await getLegacyRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
       );
       return jsonResult(result);
     }),
@@ -250,7 +252,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         args.entity_type_key,
         args.entity_id,
         args.properties,
-        await getLegacyRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
       );
       return jsonResult(result);
     }),
@@ -294,7 +296,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
           newString: args.new_string,
           replaceAll: args.replace_all ?? false,
         },
-        await getLegacyRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
       );
       return jsonResult(result);
     }),
@@ -342,7 +344,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
           content: args.content,
           expect: args.expect ?? null,
         },
-        await getLegacyRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
       );
       return jsonResult(result);
     }),
@@ -362,7 +364,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         lensKey,
         args.entity_type_key,
         args.entity_id,
-        await getLegacyRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
       );
       // This tool returns a message OBJECT, unlike the modeling delete
       // tools, which return bare strings. Wire contract — do not unify.
@@ -395,7 +397,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         args.from_entity_id,
         args.to_entity_id,
         args.properties ?? {},
-        await getLegacyRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
       );
       return jsonResult(result);
     }),
@@ -446,7 +448,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         args.from_entity_id ?? null,
         args.to_entity_id ?? null,
         strFilters,
-        await getLegacyRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
       );
       return jsonResult(result);
     }),
@@ -466,7 +468,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         lensKey,
         args.relation_type_key,
         args.relation_id,
-        await getLegacyRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
       );
       return jsonResult(result);
     }),
@@ -494,7 +496,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         args.relation_type_key,
         args.relation_id,
         args.properties,
-        await getLegacyRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
       );
       return jsonResult(result);
     }),
@@ -514,7 +516,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         lensKey,
         args.relation_type_key,
         args.relation_id,
-        await getLegacyRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
       );
       return jsonResult({ message: `Relation '${args.relation_id}' deleted successfully.` });
     }),
@@ -556,7 +558,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         args.direction ?? "both",
         args.relation_type_key ?? null,
         limit,
-        await getLegacyRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
         args.fields ?? null,
         args.relation_fields ?? null,
       );
@@ -583,7 +585,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
       },
     },
     wrap("execute_query", async (args: { query: string }) => {
-      const result = await service.executeQuery(lensKey, args.query, await getLegacyRuntimeStore());
+      const result = await service.executeQuery(lensKey, args.query, await getRuntimeStore(ontologyKey));
       return jsonResult(result);
     }),
   );
@@ -644,7 +646,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         args.entity_type_key ?? null,
         limit,
         null,
-        await getLegacyRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
         {
           filters: strFilters,
           fields: args.fields ?? null,
@@ -666,7 +668,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
       inputSchema: {},
     },
     wrap("list_saved_queries", async () => {
-      const result = await service.listSavedQueries(lensKey, await getLegacyRuntimeStore());
+      const result = await service.listSavedQueries(lensKey, await getRuntimeStore(ontologyKey));
       return jsonResult(result);
     }),
   );
@@ -691,7 +693,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         lensKey,
         args.query_key,
         args.params ?? {},
-        await getLegacyRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
       );
       return jsonResult(result);
     }),
@@ -715,7 +717,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         args.query,
         3,
         0.7,
-        await getLegacyRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
       );
       return jsonResult(result);
     }),

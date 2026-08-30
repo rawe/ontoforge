@@ -4,9 +4,8 @@
  * lens `test_lens`, and a scoped lens `hr_view` (person narrowed to
  * name+email, company whole, works_for included).
  *
- * The legacy MCP mounts (until ticket 17) bind to the server's sole
- * ontology, so a file that hits them must create exactly one — which is
- * what `buildFixture` does.
+ * The MCP mounts, like REST, name their ontology in the URL — files
+ * that hit them bind to `test_ont`.
  */
 
 import type { FastifyInstance } from "fastify";

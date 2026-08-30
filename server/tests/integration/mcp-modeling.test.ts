@@ -1,11 +1,13 @@
 /**
  * Modeling MCP server integration — official SDK client against
- * `/mcp/model` on a real listening server, backed by the docker-compose
- * Neo4j.
+ * `/mcp/ontologies/:ontologyKey/model` on a real listening server,
+ * backed by the docker-compose test database.
  *
- * Covers: every tool shipped this session, stateless JSON transport with
- * two interleaved clients, key (not id) addressing, and validation
- * failures surfacing every offending field in one message string.
+ * Covers: the URL-bound mount (the only binding channel), every modeling
+ * tool including `ensure_ontology`, stateless JSON transport with two
+ * interleaved clients, key (not id) addressing, ontology isolation
+ * between two bound clients, and validation failures surfacing every
+ * offending field in one message string.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -26,9 +28,11 @@ let app: FastifyInstance;
 let baseUrl: string;
 let client: Client;
 
-async function connectClient(name: string): Promise<Client> {
+async function connectClient(name: string, ontologyKey = "test_ont"): Promise<Client> {
   const c = new Client({ name, version: "0.0.1" });
-  await c.connect(new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp/model`)));
+  await c.connect(
+    new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp/ontologies/${ontologyKey}/model`)),
+  );
   return c;
 }
 
@@ -70,8 +74,8 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await wipeDatabase();
-  // The legacy /mcp/model mount binds to the server's sole ontology
-  // until ticket 17 moves it to /mcp/ontologies/:key/model.
+  // The mount binds the ontology its URL names; the shared client above
+  // is bound to `test_ont`, which every test starts from.
   const created = await app.inject({
     method: "POST",
     url: "/api/ontologies",
@@ -81,8 +85,9 @@ beforeEach(async () => {
 });
 
 describe("tool surface", () => {
-  it("lists exactly the twenty-seven tools of sessions 02–10 — and NO update-inclusion tool", async () => {
+  it("lists exactly the twenty-eight modeling tools — and NO update-inclusion tool", async () => {
     const tools = await client.listTools();
+    expect(tools.tools).toHaveLength(28);
     expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
       "add_entity_type_to_lens",
       "add_property",
@@ -96,6 +101,7 @@ describe("tool surface", () => {
       "delete_property",
       "delete_relation_type",
       "delete_saved_query",
+      "ensure_ontology",
       "export_schema",
       "get_schema",
       "import_schema",
@@ -112,6 +118,61 @@ describe("tool surface", () => {
       "validate_lens",
       "validate_schema",
     ]);
+  });
+
+  it("no tool takes an ontology parameter — the mount URL is the only binding", async () => {
+    const tools = await client.listTools();
+    for (const tool of tools.tools) {
+      const properties = (tool.inputSchema.properties ?? {}) as Record<string, unknown>;
+      expect(Object.keys(properties), tool.name).not.toContain("ontology_key");
+      expect(Object.keys(properties), tool.name).not.toContain("ontology_id");
+    }
+    const ensure = tools.tools.find((tool) => tool.name === "ensure_ontology")!;
+    expect(Object.keys((ensure.inputSchema.properties ?? {}) as Record<string, unknown>)).toEqual([]);
+  });
+});
+
+describe("ensure_ontology", () => {
+  it("creates the mount's own ontology, no-ops on the second call, and the result is fully usable", async () => {
+    // No REST create for fresh_ont — the mount names an ontology that
+    // does not exist yet.
+    const fresh = await connectClient("ensure-tests", "fresh_ont");
+    try {
+      // Every other tool fails with not-found until the ontology exists.
+      const before = await call(fresh, "get_schema");
+      expect(before.isError).toBe(true);
+      expect(text(before)).toContain("Ontology 'fresh_ont' not found");
+
+      const first = await call(fresh, "ensure_ontology");
+      expect(first.isError, text(first)).toBeUndefined();
+      expect(json(first)).toEqual({ key: "fresh_ont", created: true });
+
+      const second = await call(fresh, "ensure_ontology");
+      expect(json(second)).toEqual({ key: "fresh_ont", created: false });
+
+      // Fully usable: modeling works on the mount, and the registry has it.
+      const created = await call(fresh, "create_entity_type", {
+        key: "person",
+        display_name: "Person",
+      });
+      expect(created.isError, text(created)).toBeUndefined();
+      const listed = await app.inject({ method: "GET", url: "/api/ontologies/fresh_ont" });
+      expect(listed.statusCode).toBe(200);
+      expect(listed.json().displayName).toBeNull();
+    } finally {
+      await fresh.close();
+    }
+  });
+
+  it("rejects a mount key that is no valid ontology key", async () => {
+    const bad = await connectClient("ensure-bad-key", "Bad-Key");
+    try {
+      const result = await call(bad, "ensure_ontology");
+      expect(result.isError).toBe(true);
+      expect(text(result)).toContain("key");
+    } finally {
+      await bad.close();
+    }
   });
 });
 
@@ -494,6 +555,64 @@ describe("lenses over MCP", () => {
   });
 });
 
+describe("ontology isolation", () => {
+  it("two clients on two mounts cannot observe each other", async () => {
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/ontologies",
+      payload: { key: "other_ont" },
+    });
+    expect(created.statusCode, created.body).toBe(201);
+
+    const clientA = await connectClient("isolation-a", "test_ont");
+    const clientB = await connectClient("isolation-b", "other_ont");
+    try {
+      // The same type key exists in both ontologies without conflict.
+      const personA = await call(clientA, "create_entity_type", {
+        key: "person",
+        display_name: "Person in A",
+      });
+      expect(personA.isError, text(personA)).toBeUndefined();
+      const personB = await call(clientB, "create_entity_type", {
+        key: "person",
+        display_name: "Person in B",
+      });
+      expect(personB.isError, text(personB)).toBeUndefined();
+
+      await call(clientA, "create_entity_type", { key: "only_in_a", display_name: "A" });
+
+      // Each client sees only its own ontology's schema — and nothing in
+      // any response names the other ontology.
+      const schemaA = json(await call(clientA, "get_schema"));
+      const schemaB = json(await call(clientB, "get_schema"));
+      expect((schemaA.entityTypes as Record<string, unknown>[]).map((et) => et.key)).toEqual([
+        "only_in_a",
+        "person",
+      ]);
+      expect((schemaB.entityTypes as Record<string, unknown>[]).map((et) => et.key)).toEqual([
+        "person",
+      ]);
+      const personBExport = (schemaB.entityTypes as Record<string, unknown>[])[0]!;
+      expect(personBExport.displayName).toBe("Person in B");
+      expect(JSON.stringify(schemaB)).not.toContain("test_ont");
+      expect(JSON.stringify(schemaB)).not.toContain("only_in_a");
+      expect(JSON.stringify(schemaA)).not.toContain("other_ont");
+
+      // A tool cannot be steered at the other ontology: keys resolve
+      // within the binding only.
+      const missing = await call(clientB, "update_entity_type", {
+        entity_type_key: "only_in_a",
+        display_name: "Stolen",
+      });
+      expect(missing.isError).toBe(true);
+      expect(text(missing)).toContain("Entity type 'only_in_a' not found");
+    } finally {
+      await clientA.close();
+      await clientB.close();
+    }
+  });
+});
+
 describe("stateless transport", () => {
   it("two interleaved clients work over one mount", async () => {
     const clientA = await connectClient("interleaved-a");
@@ -511,7 +630,7 @@ describe("stateless transport", () => {
       expect(b1.isError).toBeUndefined();
       const a2 = json(await call(clientA, "get_schema"));
       const b2 = json(await call(clientB, "get_schema"));
-      // Both clients see the one global schema — no per-connection state.
+      // Both clients see the same bound ontology — no per-connection state.
       expect((a2.entityTypes as Record<string, unknown>[]).map((et) => et.key)).toEqual([
         "alpha",
         "beta",
@@ -524,7 +643,7 @@ describe("stateless transport", () => {
   });
 
   it("answers plain JSON, not SSE", async () => {
-    const res = await fetch(`${baseUrl}/mcp/model`, {
+    const res = await fetch(`${baseUrl}/mcp/ontologies/test_ont/model`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -547,9 +666,29 @@ describe("stateless transport", () => {
     expect(body.result.serverInfo.name).toBe("OntoForge Modeling");
   });
 
-  it("a trailing path segment is not a lens — it is an unknown route", async () => {
-    const res = await app.inject({ method: "POST", url: "/mcp/model/some_lens" });
+  it("a trailing path segment below the mount is an unknown route", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/mcp/ontologies/test_ont/model/extra",
+    });
     expect(res.statusCode).toBe(404);
     expect(res.json().error.code).toBe("RESOURCE_NOT_FOUND");
+  });
+});
+
+describe("mount addressing", () => {
+  it("the old mount paths are gone", async () => {
+    for (const url of ["/mcp/model", "/mcp/model/some_lens", "/mcp/runtime", "/mcp/runtime/test_lens"]) {
+      const res = await app.inject({ method: "POST", url });
+      expect(res.statusCode, url).toBe(404);
+      expect(res.json().error.code).toBe("RESOURCE_NOT_FOUND");
+    }
+  });
+
+  it("a mount URL naming no ontology is an error", async () => {
+    for (const url of ["/mcp/ontologies//model", "/mcp/ontologies/model", "/mcp/ontologies"]) {
+      const res = await app.inject({ method: "POST", url });
+      expect(res.statusCode, url).toBe(404);
+    }
   });
 });

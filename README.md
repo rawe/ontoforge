@@ -44,31 +44,23 @@ docker compose stop
 
 ## MCP Servers
 
-OntoForge exposes two MCP servers for AI-assisted workflows — one for schema design, one for data access. Both run inside the same backend process.
+OntoForge exposes two MCP servers for AI-assisted workflows — one for schema design, one for data access. Both run inside the same backend process, and both are bound to one ontology by their mount URL. The URL is the only binding channel: no tool takes an ontology parameter, and a bound client can never reach another ontology.
 
 ### Modeling Server
 
-Design and iterate on the global schema. Tools for managing entity types, relation types, properties, ontology scopes, validation, and export/import.
+Design and iterate on one ontology's schema. Tools for managing entity types, relation types, properties, lenses, validation, and export/import — plus the argument-less `ensure_ontology`, which creates the mount's own ontology if it does not exist yet.
 
-**Endpoint:** `http://localhost:8000/mcp/model`
-
-The modeling server operates on the global schema — no ontology key required.
+**Endpoint:** `http://localhost:8000/mcp/ontologies/{ontologyKey}/model`
 
 ### Runtime Server
 
-Read and write instance data validated against the schema through an ontology lens. Tools for entity/relation CRUD, semantic search, filtering, and graph exploration.
+Read and write one ontology's instance data through one lens. Tools for entity/relation CRUD, semantic search, filtering, and graph exploration.
 
-**Endpoint:** `http://localhost:8000/mcp/runtime/{ontologyKey}`
-
-The runtime server requires an ontology key to determine which lens to apply.
+**Endpoint:** `http://localhost:8000/mcp/ontologies/{ontologyKey}/runtime/lenses/{lensKey}`
 
 ### Client Configuration
 
-To connect an MCP client (e.g., Claude Code, Cursor), add one or both servers to your MCP configuration. Replace `my_ontology` with your ontology's key.
-
-#### URL-based (default)
-
-The ontology key is part of the runtime URL path. Example config at `mcp-example.json`:
+To connect an MCP client (e.g., Claude Code, Cursor), add one or both servers to your MCP configuration — one config entry per ontology. Replace `my_ontology` and `my_lens` with your keys. Example config at `mcp-example.json`:
 
 ```bash
 claude --mcp-config mcp-example.json
@@ -79,47 +71,15 @@ claude --mcp-config mcp-example.json
   "mcpServers": {
     "ontoforge-modeling": {
       "type": "http",
-      "url": "http://localhost:8000/mcp/model"
+      "url": "http://localhost:8000/mcp/ontologies/my_ontology/model"
     },
     "ontoforge-runtime": {
       "type": "http",
-      "url": "http://localhost:8000/mcp/runtime/my_ontology"
+      "url": "http://localhost:8000/mcp/ontologies/my_ontology/runtime/lenses/my_lens"
     }
   }
 }
 ```
-
-#### Header-based
-
-The lens key is passed via the `X-Lens-Key` HTTP header. Useful for orchestration frameworks that manage config via headers. Example config at `mcp-example-header.json`:
-
-```bash
-claude --mcp-config mcp-example-header.json
-```
-
-```json
-{
-  "mcpServers": {
-    "ontoforge-modeling": {
-      "type": "http",
-      "url": "http://localhost:8000/mcp/model"
-    },
-    "ontoforge-runtime": {
-      "type": "http",
-      "url": "http://localhost:8000/mcp/runtime",
-      "headers": {
-        "X-Lens-Key": "my_lens"
-      }
-    }
-  }
-}
-```
-
-#### Environment variable
-
-For single-lens deployments, set `DEFAULT_MCP_LENS_KEY` on the server. Runtime MCP connections without a URL key or header will use this default.
-
-**Runtime resolution order:** URL path (highest priority) → `X-Lens-Key` header → `DEFAULT_MCP_LENS_KEY` env var → 400 error.
 
 ### Example: Runtime Server Quick Start
 
@@ -269,7 +229,6 @@ The backend reads settings from environment variables (or a `.env` file in `serv
 | `DB_USER` | `postgres` | Database username |
 | `DB_PASSWORD` | `ontoforge_dev` | Database password |
 | `PORT` | `8000` | HTTP listen port |
-| `DEFAULT_MCP_LENS_KEY` | *(unset)* | MCP default lens key — used when no key is in the URL or header |
 
 In Docker, `DB_URI` is set to `postgresql://postgres:5432/ontoforge` automatically via `docker-compose.yml`.
 

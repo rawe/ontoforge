@@ -275,11 +275,10 @@ describe("validate-then-write", () => {
 });
 
 describe("modeling MCP transfer pair", () => {
-  // The legacy /mcp/model mount binds to the server's sole ontology
-  // (test_ont here) until ticket 17 moves it under /mcp/ontologies.
+  // The mount is bound to the ontology its URL names (test_ont here).
   async function connect(): Promise<Client> {
     const client = new Client({ name: "session-10-tests", version: "0.0.1" });
-    await client.connect(new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp/model`)));
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp/ontologies/test_ont/model`)));
     return client;
   }
 

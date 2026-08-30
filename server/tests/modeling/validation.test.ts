@@ -12,8 +12,10 @@ import { createMockModelingStore, NOW, type MockModelingStore } from "./helpers.
 const holder: { store: MockModelingStore } = { store: createMockModelingStore() };
 
 vi.mock("../../src/core/ports.js", () => ({
-  getModelingStore: () => holder.store,
-  getRuntimeStore: () => ({}),
+  getModelingStore: async () => holder.store,
+  getLegacyModelingStore: async () => holder.store,
+  getRuntimeStore: async () => ({}),
+  getLegacyRuntimeStore: async () => ({}),
 }));
 
 const LENS_DATA = {
@@ -68,7 +70,7 @@ describe("validate one lens", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/lenses/lens-1/validate",
+      url: "/api/ontologies/onto/model/lenses/lens-1/validate",
     });
     expect(res.statusCode).toBe(200);
     expect(res.json().valid).toBe(true);
@@ -101,7 +103,7 @@ describe("validate one lens", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/lenses/lens-1/validate",
+      url: "/api/ontologies/onto/model/lenses/lens-1/validate",
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -128,7 +130,7 @@ describe("validate one lens", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/lenses/lens-1/validate",
+      url: "/api/ontologies/onto/model/lenses/lens-1/validate",
     });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ valid: true, errors: [] });
@@ -137,7 +139,7 @@ describe("validate one lens", () => {
   it("an unknown lens id answers 404", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/lenses/nonexistent/validate",
+      url: "/api/ontologies/onto/model/lenses/nonexistent/validate",
     });
     expect(res.statusCode).toBe(404);
   });
@@ -175,7 +177,7 @@ describe("validate one lens", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/lenses/lens-1/validate",
+      url: "/api/ontologies/onto/model/lenses/lens-1/validate",
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -205,7 +207,7 @@ describe("validate one lens", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/lenses/lens-1/validate",
+      url: "/api/ontologies/onto/model/lenses/lens-1/validate",
     });
     const body = res.json();
     expect(body.valid).toBe(false);
@@ -236,7 +238,7 @@ describe("validate one lens", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/lenses/lens-1/validate",
+      url: "/api/ontologies/onto/model/lenses/lens-1/validate",
     });
     const body = res.json();
     expect(body.valid).toBe(false);
@@ -305,7 +307,7 @@ describe("validate the whole schema", () => {
     holder.store.getFullSchema.mockResolvedValue(FULL_SCHEMA);
     holder.store.listLenses.mockResolvedValue(FULL_SCHEMA.lenses);
     holder.store.getLens.mockResolvedValue(FULL_SCHEMA.lenses[0]);
-    const res = await app.inject({ method: "POST", url: "/api/model/schema/validate" });
+    const res = await app.inject({ method: "POST", url: "/api/ontologies/onto/model/schema/validate" });
     expect(res.statusCode).toBe(200);
     expect(res.json().valid).toBe(true);
     expect(res.json().errors).toEqual([]);
@@ -335,7 +337,7 @@ describe("validate the whole schema", () => {
     };
     holder.store.getFullSchema.mockResolvedValue(badSchema);
     holder.store.listLenses.mockResolvedValue([]);
-    const res = await app.inject({ method: "POST", url: "/api/model/schema/validate" });
+    const res = await app.inject({ method: "POST", url: "/api/ontologies/onto/model/schema/validate" });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.valid).toBe(false);
@@ -364,7 +366,7 @@ describe("validate the whole schema", () => {
     };
     holder.store.getFullSchema.mockResolvedValue(badSchema);
     holder.store.listLenses.mockResolvedValue([]);
-    const res = await app.inject({ method: "POST", url: "/api/model/schema/validate" });
+    const res = await app.inject({ method: "POST", url: "/api/ontologies/onto/model/schema/validate" });
     const messages = res.json().errors.map((e: { message: string }) => e.message);
     expect(messages).toContain("Duplicate entity type key 'person'");
     expect(messages).toContain("Duplicate property key 'name'");
@@ -394,7 +396,7 @@ describe("validate the whole schema", () => {
     holder.store.getFullSchema.mockResolvedValue(schema);
     holder.store.listLenses.mockResolvedValue(schema.lenses);
     holder.store.getLens.mockResolvedValue(schema.lenses[0]);
-    const res = await app.inject({ method: "POST", url: "/api/model/schema/validate" });
+    const res = await app.inject({ method: "POST", url: "/api/ontologies/onto/model/schema/validate" });
     const body = res.json();
     expect(body.valid).toBe(false);
     expect(body.errors).toEqual([

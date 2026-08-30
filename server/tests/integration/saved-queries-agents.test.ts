@@ -108,7 +108,7 @@ describe("agent configurations (modeling REST)", () => {
   it("upserts by key: 201 on create, 200 on replace, full wire shape", async () => {
     const created = await inject(
       "PUT",
-      "/api/model/lenses/test_lens/ai-agents/hr-assistant",
+      "/api/ontologies/test_ont/model/lenses/test_lens/ai-agents/hr-assistant",
       {
         name: "HR Assistant",
         description: "Answers HR questions",
@@ -125,32 +125,32 @@ describe("agent configurations (modeling REST)", () => {
 
     const replaced = await inject(
       "PUT",
-      "/api/model/lenses/test_lens/ai-agents/hr-assistant",
+      "/api/ontologies/test_ont/model/lenses/test_lens/ai-agents/hr-assistant",
       { name: "HR Assistant v2", tools: null },
     );
     expect(replaced.statusCode).toBe(200);
     expect((replaced.body as Row).name).toBe("HR Assistant v2");
     expect((replaced.body as Row).tools).toBeNull();
 
-    const list = await inject("GET", "/api/model/lenses/test_lens/ai-agents");
+    const list = await inject("GET", "/api/ontologies/test_ont/model/lenses/test_lens/ai-agents");
     expect(list.statusCode).toBe(200);
     const keys = (list.body as Row[]).map((a) => a.key);
     expect(keys).toContain("hr-assistant");
 
     const deleted = await inject(
       "DELETE",
-      "/api/model/lenses/test_lens/ai-agents/hr-assistant",
+      "/api/ontologies/test_ont/model/lenses/test_lens/ai-agents/hr-assistant",
     );
     expect(deleted.statusCode).toBe(204);
     const again = await inject(
       "DELETE",
-      "/api/model/lenses/test_lens/ai-agents/hr-assistant",
+      "/api/ontologies/test_ont/model/lenses/test_lens/ai-agents/hr-assistant",
     );
     expect(again.statusCode).toBe(404);
   });
 
   it("an unknown tool name is rejected 422 naming the valid set", async () => {
-    const res = await inject("PUT", "/api/model/lenses/test_lens/ai-agents/bad-tools", {
+    const res = await inject("PUT", "/api/ontologies/test_ont/model/lenses/test_lens/ai-agents/bad-tools", {
       name: "Bad",
       tools: ["write_document"],
     });
@@ -161,13 +161,13 @@ describe("agent configurations (modeling REST)", () => {
   });
 
   it("rejects a bad key and the reserved '_default'", async () => {
-    const bad = await inject("PUT", "/api/model/lenses/test_lens/ai-agents/BadKey", {
+    const bad = await inject("PUT", "/api/ontologies/test_ont/model/lenses/test_lens/ai-agents/BadKey", {
       name: "X",
     });
     expect(bad.statusCode).toBe(422);
     const reserved = await inject(
       "PUT",
-      "/api/model/lenses/test_lens/ai-agents/_default",
+      "/api/ontologies/test_ont/model/lenses/test_lens/ai-agents/_default",
       { name: "X" },
     );
     expect(reserved.statusCode).toBe(422);
@@ -178,7 +178,7 @@ describe("saved queries (modeling REST, no provider)", () => {
   it("defines, replaces, lists and deletes an oql-only pipeline", async () => {
     const created = await inject(
       "PUT",
-      "/api/model/lenses/test_lens/saved-queries/people-by-name",
+      "/api/ontologies/test_ont/model/lenses/test_lens/saved-queries/people-by-name",
       {
         name: "People by name",
         description: "Find people whose name contains a fragment",
@@ -197,7 +197,7 @@ describe("saved queries (modeling REST, no provider)", () => {
 
     const replaced = await inject(
       "PUT",
-      "/api/model/lenses/test_lens/saved-queries/people-by-name",
+      "/api/ontologies/test_ont/model/lenses/test_lens/saved-queries/people-by-name",
       {
         name: "People by name (v2)",
         description: "Find people whose name contains a fragment",
@@ -214,7 +214,7 @@ describe("saved queries (modeling REST, no provider)", () => {
     expect(replaced.statusCode).toBe(200);
     expect((replaced.body as Row).name).toBe("People by name (v2)");
 
-    const list = await inject("GET", "/api/model/lenses/test_lens/saved-queries");
+    const list = await inject("GET", "/api/ontologies/test_ont/model/lenses/test_lens/saved-queries");
     expect(list.statusCode).toBe(200);
     const found = (list.body as Row[]).find((q) => q.key === "people-by-name")!;
     expect(found).toBeDefined();
@@ -223,12 +223,12 @@ describe("saved queries (modeling REST, no provider)", () => {
 
     const deleted = await inject(
       "DELETE",
-      "/api/model/lenses/test_lens/saved-queries/people-by-name",
+      "/api/ontologies/test_ont/model/lenses/test_lens/saved-queries/people-by-name",
     );
     expect(deleted.statusCode).toBe(204);
     const again = await inject(
       "DELETE",
-      "/api/model/lenses/test_lens/saved-queries/people-by-name",
+      "/api/ontologies/test_ont/model/lenses/test_lens/saved-queries/people-by-name",
     );
     expect(again.statusCode).toBe(404);
   });
@@ -236,7 +236,7 @@ describe("saved queries (modeling REST, no provider)", () => {
   it("the definition-time OQL check rejects a type the lens cannot see", async () => {
     const res = await inject(
       "PUT",
-      "/api/model/lenses/hr_view/saved-queries/out-of-scope",
+      "/api/ontologies/test_ont/model/lenses/hr_view/saved-queries/out-of-scope",
       {
         name: "Out of scope",
         description: "names a type outside the lens",
@@ -248,7 +248,7 @@ describe("saved queries (modeling REST, no provider)", () => {
   });
 
   it("the definition-time OQL check rejects a property the lens hides", async () => {
-    const res = await inject("PUT", "/api/model/lenses/hr_view/saved-queries/hidden-prop", {
+    const res = await inject("PUT", "/api/ontologies/test_ont/model/lenses/hr_view/saved-queries/hidden-prop", {
       name: "Hidden property",
       description: "hr_view narrows person to name+email",
       steps: [
@@ -266,7 +266,7 @@ describe("runtime listing reflects the schema cache", () => {
     expect(before.statusCode).toBe(200);
     expect((before.body as Row[]).map((q) => q.key)).not.toContain("cache-probe");
 
-    await inject("PUT", "/api/model/lenses/test_lens/saved-queries/cache-probe", {
+    await inject("PUT", "/api/ontologies/test_ont/model/lenses/test_lens/saved-queries/cache-probe", {
       name: "Cache Probe",
       description: "probe",
       steps: [{ name: "main", type: "oql", oql: "MATCH (p:person) RETURN p.name AS name" }],
@@ -284,7 +284,7 @@ describe("runtime listing reflects the schema cache", () => {
       oql: "MATCH (p:person) RETURN p.name AS name",
     });
 
-    await inject("PUT", "/api/model/lenses/test_lens/saved-queries/cache-probe", {
+    await inject("PUT", "/api/ontologies/test_ont/model/lenses/test_lens/saved-queries/cache-probe", {
       name: "Cache Probe v2",
       description: "probe",
       steps: [{ name: "main", type: "oql", oql: "MATCH (p:person) RETURN p.name AS name" }],
@@ -295,7 +295,7 @@ describe("runtime listing reflects the schema cache", () => {
       "Cache Probe v2",
     );
 
-    await inject("DELETE", "/api/model/lenses/test_lens/saved-queries/cache-probe");
+    await inject("DELETE", "/api/ontologies/test_ont/model/lenses/test_lens/saved-queries/cache-probe");
     const gone = await inject("GET", "/api/runtime/test_lens/saved-queries");
     expect((gone.body as Row[]).map((q) => q.key)).not.toContain("cache-probe");
   });
@@ -303,7 +303,7 @@ describe("runtime listing reflects the schema cache", () => {
 
 describe("runtime run (no provider)", () => {
   it("runs a one-step oql pipeline with typed parameters", async () => {
-    await inject("PUT", "/api/model/lenses/test_lens/saved-queries/adults", {
+    await inject("PUT", "/api/ontologies/test_ont/model/lenses/test_lens/saved-queries/adults", {
       name: "Adults",
       description: "People above an age threshold",
       steps: [
@@ -326,7 +326,7 @@ describe("runtime run (no provider)", () => {
   });
 
   it("pages with $parameter SKIP and LIMIT operands", async () => {
-    await inject("PUT", "/api/model/lenses/test_lens/saved-queries/people-page", {
+    await inject("PUT", "/api/ontologies/test_ont/model/lenses/test_lens/saved-queries/people-page", {
       name: "People page",
       description: "People ordered by age, one page at a time",
       steps: [
@@ -362,7 +362,7 @@ describe("runtime run (no provider)", () => {
   });
 
   it("runs a two-step oql -> oql pipeline through a binding", async () => {
-    await inject("PUT", "/api/model/lenses/test_lens/saved-queries/company-staff", {
+    await inject("PUT", "/api/ontologies/test_ont/model/lenses/test_lens/saved-queries/company-staff", {
       name: "Company staff",
       description: "People working for any company",
       steps: [
@@ -413,7 +413,7 @@ describe("runtime run (no provider)", () => {
   });
 
   it("a pipeline containing a semantic_search step fails without a provider", async () => {
-    await inject("PUT", "/api/model/lenses/test_lens/saved-queries/needs-embeddings", {
+    await inject("PUT", "/api/ontologies/test_ont/model/lenses/test_lens/saved-queries/needs-embeddings", {
       name: "Needs embeddings",
       description: "search feeding a query",
       steps: [
@@ -560,7 +560,7 @@ describe("modeling MCP tools", () => {
 
 describe("runtime MCP tools", () => {
   it("list and run work without a provider; search reports FEATURE_DISABLED", async () => {
-    await inject("PUT", "/api/model/lenses/test_lens/saved-queries/mcp-run-probe", {
+    await inject("PUT", "/api/ontologies/test_ont/model/lenses/test_lens/saved-queries/mcp-run-probe", {
       name: "MCP Run Probe",
       description: "runtime MCP probe",
       steps: [
@@ -604,35 +604,35 @@ describe("runtime MCP tools", () => {
 
 describe("lens cascade", () => {
   it("deleting the lens deletes its agents and saved queries", async () => {
-    const created = await inject("POST", "/api/model/lenses", {
+    const created = await inject("POST", "/api/ontologies/test_ont/model/lenses", {
       key: "cascade_probe",
       name: "Cascade Probe",
     });
     expect(created.statusCode).toBe(201);
     const lensId = (created.body as Row).lensId as string;
 
-    await inject("PUT", "/api/model/lenses/cascade_probe/ai-agents/doomed-agent", {
+    await inject("PUT", "/api/ontologies/test_ont/model/lenses/cascade_probe/ai-agents/doomed-agent", {
       name: "Doomed",
     });
-    await inject("PUT", "/api/model/lenses/cascade_probe/saved-queries/doomed-query", {
+    await inject("PUT", "/api/ontologies/test_ont/model/lenses/cascade_probe/saved-queries/doomed-query", {
       name: "Doomed",
       description: "doomed",
       steps: [{ name: "main", type: "oql", oql: "MATCH (p:person) RETURN p.name AS name" }],
       parameters: [],
     });
 
-    const deleted = await inject("DELETE", `/api/model/lenses/${lensId}`);
+    const deleted = await inject("DELETE", `/api/ontologies/test_ont/model/lenses/${lensId}`);
     expect(deleted.statusCode).toBe(204);
 
     // Recreate the same key: a fresh lens holds neither configuration.
-    const recreated = await inject("POST", "/api/model/lenses", {
+    const recreated = await inject("POST", "/api/ontologies/test_ont/model/lenses", {
       key: "cascade_probe",
       name: "Cascade Probe II",
     });
     expect(recreated.statusCode).toBe(201);
-    const agents = await inject("GET", "/api/model/lenses/cascade_probe/ai-agents");
+    const agents = await inject("GET", "/api/ontologies/test_ont/model/lenses/cascade_probe/ai-agents");
     expect(agents.body).toEqual([]);
-    const queries = await inject("GET", "/api/model/lenses/cascade_probe/saved-queries");
+    const queries = await inject("GET", "/api/ontologies/test_ont/model/lenses/cascade_probe/saved-queries");
     expect(queries.body).toEqual([]);
   });
 });

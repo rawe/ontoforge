@@ -1,8 +1,12 @@
 /**
- * Integration fixture, built through the modeling API:
- * person/company/works_for, an unscoped
+ * Integration fixture, built through the registry and modeling APIs: one
+ * ontology (`test_ont`) holding person/company/works_for, an unscoped
  * lens `test_lens`, and a scoped lens `hr_view` (person narrowed to
  * name+email, company whole, works_for included).
+ *
+ * The legacy runtime and MCP surfaces (until tickets 16/17) bind to the
+ * server's sole ontology, so a file that hits them must create exactly
+ * one — which is what `buildFixture` does.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -16,7 +20,21 @@ async function post(app: FastifyInstance, url: string, payload: Row): Promise<Ro
   return res.json() as Row;
 }
 
+/** The fixture ontology every integration file models in. */
+export const FIXTURE_ONTOLOGY_KEY = "test_ont";
+
+/** The modeling tree of one ontology. */
+export function modelPrefix(ontologyKey: string): string {
+  return `/api/ontologies/${ontologyKey}/model`;
+}
+
+/** Create one bare ontology over the registry API. */
+export async function createOntology(app: FastifyInstance, key: string): Promise<void> {
+  await post(app, "/api/ontologies", { key });
+}
+
 export interface FixtureIds {
+  ontologyKey: string;
   personId: string;
   companyId: string;
   worksForId: string;
@@ -25,7 +43,10 @@ export interface FixtureIds {
 }
 
 export async function buildFixture(app: FastifyInstance): Promise<FixtureIds> {
-  const person = await post(app, "/api/model/entity-types", {
+  await createOntology(app, FIXTURE_ONTOLOGY_KEY);
+  const model = modelPrefix(FIXTURE_ONTOLOGY_KEY);
+
+  const person = await post(app, `${model}/entity-types`, {
     key: "person",
     displayName: "Person",
     description: "A human being",
@@ -38,10 +59,10 @@ export async function buildFixture(app: FastifyInstance): Promise<FixtureIds> {
     { key: "active", displayName: "Active", dataType: "boolean", required: false, defaultValue: "true" },
     { key: "hired_at", displayName: "Hired At", dataType: "datetime", required: false },
   ]) {
-    await post(app, `/api/model/entity-types/${personId}/properties`, prop);
+    await post(app, `${model}/entity-types/${personId}/properties`, prop);
   }
 
-  const company = await post(app, "/api/model/entity-types", {
+  const company = await post(app, `${model}/entity-types`, {
     key: "company",
     displayName: "Company",
     description: "A business organization",
@@ -52,10 +73,10 @@ export async function buildFixture(app: FastifyInstance): Promise<FixtureIds> {
     { key: "founded", displayName: "Founded", dataType: "date", required: false },
     { key: "employee_count", displayName: "Employee Count", dataType: "integer", required: false },
   ]) {
-    await post(app, `/api/model/entity-types/${companyId}/properties`, prop);
+    await post(app, `${model}/entity-types/${companyId}/properties`, prop);
   }
 
-  const worksFor = await post(app, "/api/model/relation-types", {
+  const worksFor = await post(app, `${model}/relation-types`, {
     key: "works_for",
     displayName: "Works For",
     description: "Employment relationship",
@@ -67,33 +88,34 @@ export async function buildFixture(app: FastifyInstance): Promise<FixtureIds> {
     { key: "since", displayName: "Since", dataType: "date", required: false },
     { key: "role", displayName: "Role", dataType: "string", required: false },
   ]) {
-    await post(app, `/api/model/relation-types/${worksForId}/properties`, prop);
+    await post(app, `${model}/relation-types/${worksForId}/properties`, prop);
   }
 
-  const testLens = await post(app, "/api/model/lenses", {
+  const testLens = await post(app, `${model}/lenses`, {
     key: "test_lens",
     name: "Test Lens",
     description: "Person/Company lens for testing",
   });
 
-  const hrView = await post(app, "/api/model/lenses", {
+  const hrView = await post(app, `${model}/lenses`, {
     key: "hr_view",
     name: "HR View",
     description: "HR-scoped view for testing",
   });
   const hrViewId = hrView.lensId as string;
-  await post(app, `/api/model/lenses/${hrViewId}/includes/entity-types`, {
+  await post(app, `${model}/lenses/${hrViewId}/includes/entity-types`, {
     key: "person",
     properties: ["name", "email"],
   });
-  await post(app, `/api/model/lenses/${hrViewId}/includes/entity-types`, {
+  await post(app, `${model}/lenses/${hrViewId}/includes/entity-types`, {
     key: "company",
   });
-  await post(app, `/api/model/lenses/${hrViewId}/includes/relation-types`, {
+  await post(app, `${model}/lenses/${hrViewId}/includes/relation-types`, {
     key: "works_for",
   });
 
   return {
+    ontologyKey: FIXTURE_ONTOLOGY_KEY,
     personId,
     companyId,
     worksForId,

@@ -56,12 +56,13 @@ describe.skipIf(!ollamaUp)("semantic search (Ollama)", () => {
   /** Lens `search_test`, entity type `person` with
    * name/role/bio (strings) and age (integer). */
   async function buildSearchFixture(): Promise<{ etId: string }> {
-    await post("/api/model/lenses", {
+    await post("/api/ontologies", { key: "test_ont" });
+    await post("/api/ontologies/test_ont/model/lenses", {
       key: "search_test",
       name: "Search Test",
       description: "Integration test lens for semantic search",
     });
-    const et = await post("/api/model/entity-types", { key: "person", displayName: "Person" });
+    const et = await post("/api/ontologies/test_ont/model/entity-types", { key: "person", displayName: "Person" });
     const etId = et.entityTypeId as string;
     for (const prop of [
       { key: "name", displayName: "Name", dataType: "string", required: true },
@@ -69,7 +70,7 @@ describe.skipIf(!ollamaUp)("semantic search (Ollama)", () => {
       { key: "bio", displayName: "Bio", dataType: "string", required: false },
       { key: "age", displayName: "Age", dataType: "integer", required: false },
     ]) {
-      await post(`/api/model/entity-types/${etId}/properties`, prop);
+      await post(`/api/ontologies/test_ont/model/entity-types/${etId}/properties`, prop);
     }
     return { etId };
   }
@@ -151,11 +152,11 @@ describe.skipIf(!ollamaUp)("semantic search (Ollama)", () => {
     // boots without the startup sequence, so ensure it explicitly.
     await ensureSemanticIndexes(getEmbeddingProvider()!.dimensions);
 
-    const company = await post("/api/model/entity-types", {
+    const company = await post("/api/ontologies/test_ont/model/entity-types", {
       key: "company",
       displayName: "Company",
     });
-    await post(`/api/model/entity-types/${company.entityTypeId as string}/properties`, {
+    await post(`/api/ontologies/test_ont/model/entity-types/${company.entityTypeId as string}/properties`, {
       key: "name",
       displayName: "Name",
       dataType: "string",

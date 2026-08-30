@@ -73,7 +73,7 @@ async function createRelation(
 async function addFoundedBy(): Promise<void> {
   const res = await app.inject({
     method: "POST",
-    url: "/api/model/relation-types",
+    url: "/api/ontologies/test_ont/model/relation-types",
     payload: {
       key: "founded_by",
       displayName: "Founded By",
@@ -322,7 +322,7 @@ describe("relation CRUD round trip", () => {
     // Narrow works_for in hr_view to role only.
     const narrowed = await app.inject({
       method: "PUT",
-      url: `/api/model/lenses/${fixture.hrViewId}/includes/relation-types/${fixture.worksForId}`,
+      url: `/api/ontologies/test_ont/model/lenses/${fixture.hrViewId}/includes/relation-types/${fixture.worksForId}`,
       payload: { properties: ["role"] },
     });
     expect(narrowed.statusCode, narrowed.body).toBe(200);

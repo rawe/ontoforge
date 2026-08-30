@@ -23,42 +23,14 @@ import { closePool, initPool, withTransaction } from "../../src/adapters/postgre
 import { quoteIdent } from "../../src/adapters/postgres/oql/bindings.js";
 import { settings } from "../../src/config.js";
 
-/** All ten tables — kept in step with the adapter's init DDL. */
-const ALL_TABLES = [
-  "lens",
-  "entity_type",
-  "relation_type",
-  "property_def",
-  "lens_includes",
-  "ai_agent_config",
-  "saved_query",
-  "entity",
-  "relation",
-  "document_chunk",
-];
-
 /**
- * One `TRUNCATE` across all ten tables plus a drop of every
- * `vec_`-prefixed index, in one transaction. The index drop is
- * load-bearing: a re-created type key gets a fresh uuid-named index while
- * an orphan's `WHERE type_key = …` predicate would still match new rows.
- * The five fixed B-tree indexes and the two fixed vector indexes survive
- * — clearing the width imprint the latter carry is the suite-level hard
- * reset's job, not this one's.
- *
- * The ontology registry resets with everything else: every `ont_*`
- * namespace drops in one cascade each and `public.ontology` truncates.
+ * All ontology-scoped state lives inside `ont_*` namespaces, so the wipe
+ * is: every `ont_*` namespace drops in one cascade each — tables, data,
+ * every vector index and its width imprint with it — and the registry
+ * (`public.ontology`, the only stateful server-wide table) truncates.
  */
 async function wipePostgres(): Promise<void> {
   await withTransaction(async (querier) => {
-    await querier.query(`TRUNCATE ${ALL_TABLES.join(", ")}`);
-    const indexes = await querier.query(
-      `SELECT indexname FROM pg_indexes
-       WHERE schemaname = current_schema() AND indexname LIKE 'vec\\_%'`,
-    );
-    for (const row of indexes.rows) {
-      await querier.query(`DROP INDEX IF EXISTS ${quoteIdent(row["indexname"] as string)}`);
-    }
     const namespaces = await querier.query(
       `SELECT nspname FROM pg_namespace WHERE nspname LIKE 'ont\\_%'`,
     );

@@ -1,9 +1,11 @@
 /**
  * MCP mounts on the Fastify app.
  *
- * The modeling server is mounted at exactly `/mcp/model` — global by
- * design, no lens key, and a trailing path segment is NOT a lens (it
- * falls through to the app's standard 404). Transport is Streamable HTTP,
+ * The modeling server is mounted at exactly `/mcp/model` — no lens key,
+ * and a trailing path segment is NOT a lens (it falls through to the
+ * app's standard 404). Until ticket 17 moves both mounts under
+ * `/mcp/ontologies/:key/...`, each tool call binds to the server's sole
+ * ontology. Transport is Streamable HTTP,
  * STATELESS, with plain JSON responses (no SSE), per
  * `docs/decisions.md#interfaces`: a fresh server + transport pair serves
  * each request, so one mount serves many clients and no connection

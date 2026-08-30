@@ -18,8 +18,10 @@ import {
 const holder: { store: MockModelingStore } = { store: createMockModelingStore() };
 
 vi.mock("../../src/core/ports.js", () => ({
-  getModelingStore: () => holder.store,
-  getRuntimeStore: () => ({}),
+  getModelingStore: async () => holder.store,
+  getLegacyModelingStore: async () => holder.store,
+  getRuntimeStore: async () => ({}),
+  getLegacyRuntimeStore: async () => ({}),
 }));
 
 let app: FastifyInstance;
@@ -44,7 +46,7 @@ describe("entity types", () => {
     async (key) => {
       const res = await app.inject({
         method: "POST",
-        url: "/api/model/entity-types",
+        url: "/api/ontologies/onto/model/entity-types",
         payload: { key, displayName: "Injected" },
       });
       expect(res.statusCode).toBe(422);
@@ -59,7 +61,7 @@ describe("entity types", () => {
   it("the message lists the whole reserved set", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/entity-types",
+      url: "/api/ontologies/onto/model/entity-types",
       payload: { key: "ontology", displayName: "Injected" },
     });
     const message = res.json().error.message;
@@ -71,7 +73,7 @@ describe("entity types", () => {
   it("the message names no vendor and no physical name", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/entity-types",
+      url: "/api/ontologies/onto/model/entity-types",
       payload: { key: "ontology", displayName: "Injected" },
     });
     const message = res.json().error.message as string;
@@ -91,7 +93,7 @@ describe("entity types", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/entity-types",
+      url: "/api/ontologies/onto/model/entity-types",
       payload: { key: "ontology_note", displayName: "Ontology Note" },
     });
     expect(res.statusCode).toBe(201);
@@ -105,7 +107,7 @@ describe("relation types", () => {
       holder.store.getEntityTypeByKey.mockResolvedValue({ key: "person" });
       const res = await app.inject({
         method: "POST",
-        url: "/api/model/relation-types",
+        url: "/api/ontologies/onto/model/relation-types",
         payload: {
           key,
           displayName: "Injected",
@@ -126,7 +128,7 @@ describe("relation types", () => {
     holder.store.getEntityTypeByKey.mockResolvedValue({ key: "person" });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/relation-types",
+      url: "/api/ontologies/onto/model/relation-types",
       payload: {
         key: "has_property",
         displayName: "Injected",

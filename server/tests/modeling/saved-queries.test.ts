@@ -26,8 +26,10 @@ const holder: { store: MockModelingStore; runtimeStore: MockRuntimeStore } = {
 };
 
 vi.mock("../../src/core/ports.js", () => ({
-  getModelingStore: () => holder.store,
-  getRuntimeStore: () => holder.runtimeStore,
+  getModelingStore: async () => holder.store,
+  getLegacyModelingStore: async () => holder.store,
+  getRuntimeStore: async () => holder.runtimeStore,
+  getLegacyRuntimeStore: async () => holder.runtimeStore,
 }));
 
 const MOCK_LENS = {
@@ -75,7 +77,7 @@ beforeEach(() => {
 async function put(key: string, payload: Row) {
   return app.inject({
     method: "PUT",
-    url: `/api/model/lenses/test_lens/saved-queries/${key}`,
+    url: `/api/ontologies/onto/model/lenses/test_lens/saved-queries/${key}`,
     payload,
   });
 }
@@ -86,7 +88,7 @@ describe("list", () => {
     holder.store.listSavedQueries.mockResolvedValue([]);
     const res = await app.inject({
       method: "GET",
-      url: "/api/model/lenses/test_lens/saved-queries",
+      url: "/api/ontologies/onto/model/lenses/test_lens/saved-queries",
     });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual([]);
@@ -97,7 +99,7 @@ describe("list", () => {
     holder.store.listSavedQueries.mockResolvedValue([MOCK_QUERY]);
     const res = await app.inject({
       method: "GET",
-      url: "/api/model/lenses/test_lens/saved-queries",
+      url: "/api/ontologies/onto/model/lenses/test_lens/saved-queries",
     });
     expect(res.statusCode).toBe(200);
     const body = res.json() as Row[];
@@ -123,7 +125,7 @@ describe("list", () => {
   it("an unknown lens key answers 404", async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/api/model/lenses/nonexistent/saved-queries",
+      url: "/api/ontologies/onto/model/lenses/nonexistent/saved-queries",
     });
     expect(res.statusCode).toBe(404);
   });
@@ -200,7 +202,7 @@ describe("delete", () => {
     holder.store.deleteSavedQuery.mockResolvedValue(true);
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/lenses/test_lens/saved-queries/find-people",
+      url: "/api/ontologies/onto/model/lenses/test_lens/saved-queries/find-people",
     });
     expect(res.statusCode).toBe(204);
   });
@@ -210,7 +212,7 @@ describe("delete", () => {
     holder.store.deleteSavedQuery.mockResolvedValue(false);
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/lenses/test_lens/saved-queries/nonexistent",
+      url: "/api/ontologies/onto/model/lenses/test_lens/saved-queries/nonexistent",
     });
     expect(res.statusCode).toBe(404);
   });
@@ -525,7 +527,7 @@ describe("definition-time OQL lens check", () => {
     );
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/lenses/full_lens/saved-queries/bad-query",
+      url: "/api/ontologies/onto/model/lenses/full_lens/saved-queries/bad-query",
       payload: {
         name: "Bad",
         description: "references an unknown label",
@@ -554,7 +556,7 @@ describe("definition-time OQL lens check", () => {
 describe("cascading delete", () => {
   it("deleting the lens deletes its saved queries (handled by the store)", async () => {
     holder.store.deleteLens.mockResolvedValue(true);
-    const res = await app.inject({ method: "DELETE", url: "/api/model/lenses/lens-1" });
+    const res = await app.inject({ method: "DELETE", url: "/api/ontologies/onto/model/lenses/lens-1" });
     expect(res.statusCode).toBe(204);
   });
 });

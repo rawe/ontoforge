@@ -22,8 +22,10 @@ import {
 const holder: { store: MockRuntimeStore } = { store: createMockRuntimeStore() };
 
 vi.mock("../../src/core/ports.js", () => ({
-  getModelingStore: () => ({}),
-  getRuntimeStore: () => holder.store,
+  getModelingStore: async () => ({}),
+  getLegacyModelingStore: async () => ({}),
+  getRuntimeStore: async () => holder.store,
+  getLegacyRuntimeStore: async () => holder.store,
 }));
 
 let app: FastifyInstance;

@@ -1,5 +1,5 @@
 /**
- * Modeling service: every domain rule for the global schema — entity
+ * Modeling service: every domain rule for one ontology's schema — entity
  * types, relation types, property definitions. REST and MCP are two
  * entrances to these same functions, so no rule may live in a router.
  *
@@ -30,7 +30,7 @@ import {
   type TypeKind,
 } from "../core/schemas.js";
 import { buildTextRepr } from "../runtime/embedding.js";
-import { invalidateLoadedSchemaCache, loadSchema } from "../runtime/schemaCache.js";
+import { invalidateLoadedSchemaCache, loadSchemaUncached } from "../runtime/schemaCache.js";
 import { syncDocumentChunks } from "../runtime/service.js";
 import { VALID_AGENT_TOOLS } from "../runtime/toolNames.js";
 import {
@@ -800,7 +800,7 @@ interface SchemaValidationErrorItem {
 }
 
 /**
- * Validate the global schema half: the same four conditions the create
+ * Validate the schema half: the same four conditions the create
  * paths already prevent — duplicate type keys, duplicate property keys
  * within one type, an unknown data type, and a relation endpoint that does
  * not exist. The pass earns its place because import does not check them.
@@ -1013,7 +1013,7 @@ export async function validateLens(
   return { valid: errors.length === 0, errors };
 }
 
-/** Validate the global schema and then every lens: one combined list. */
+/** Validate the schema and then every lens: one combined list. */
 export async function validateAll(store: ModelingStore): Promise<ValidationResultBody> {
   const schemaResult = await validateSchema(store);
   const errors = [...schemaResult.errors];
@@ -1206,7 +1206,7 @@ function parseStoredJsonList(raw: unknown): Row[] {
 }
 
 /**
- * The whole global schema in the transfer format
+ * The ontology's whole schema in the transfer format
  * (`docs/capabilities/transfer.md`): entity types, relation types,
  * lenses with their inclusions, and each lens's agents and saved
  * queries — no timestamps, no internal ids, no instance data. This is both
@@ -1303,7 +1303,7 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
 // --- Import (transfer format) ---
 
 /**
- * Import a transfer payload: create the types globally, then the lenses
+ * Import a transfer payload: create the types, then the lenses
  * with their inclusions, agents and saved queries.
  *
  * Validate-then-write: the ENTIRE payload is
@@ -1972,8 +1972,10 @@ export async function upsertSavedQuery(
 
   // Validate each oql step against the lens's schema — skipped ONLY when
   // that schema cannot be loaded (the run-time check still applies then).
+  // Cache-free on purpose: the runtime cache is keyed by bare lens key,
+  // and this path runs against any ontology's bound store.
   try {
-    const loaded = await loadSchema(lensKey, runtimeStore);
+    const loaded = await loadSchemaUncached(lensKey, runtimeStore);
     for (const step of body.steps) {
       if (step.type === "oql" && step.oql) {
         parseAndValidate(step.oql, loaded.scoped);

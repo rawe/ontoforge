@@ -12,7 +12,9 @@ import { getOntologyRegistry } from "../core/ports.js";
 import { OntologyCreate, OntologyRename, OntologyResponse } from "./schemas.js";
 import * as service from "./service.js";
 
-const OntologyKeyParams = z.object({ key: z.string() });
+// Param name matches the modeling subtree (`/api/ontologies/:ontologyKey/model`)
+// mounted at the same segment — the router requires one spelling per position.
+const OntologyKeyParams = z.object({ ontologyKey: z.string() });
 
 /** Routes mounted at `/api`. */
 export const registryRouter: FastifyPluginAsyncZod = async (app) => {
@@ -43,7 +45,7 @@ export const registryRouter: FastifyPluginAsyncZod = async (app) => {
   );
 
   app.get(
-    "/ontologies/:key",
+    "/ontologies/:ontologyKey",
     {
       schema: {
         tags: ["registry"],
@@ -51,11 +53,11 @@ export const registryRouter: FastifyPluginAsyncZod = async (app) => {
         response: { 200: OntologyResponse },
       },
     },
-    async (request) => service.getOntology(request.params.key, getOntologyRegistry()),
+    async (request) => service.getOntology(request.params.ontologyKey, getOntologyRegistry()),
   );
 
   app.patch(
-    "/ontologies/:key",
+    "/ontologies/:ontologyKey",
     {
       schema: {
         tags: ["registry"],
@@ -65,11 +67,11 @@ export const registryRouter: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request) =>
-      service.renameOntology(request.params.key, request.body, getOntologyRegistry()),
+      service.renameOntology(request.params.ontologyKey, request.body, getOntologyRegistry()),
   );
 
   app.delete(
-    "/ontologies/:key",
+    "/ontologies/:ontologyKey",
     {
       schema: {
         tags: ["registry"],
@@ -77,7 +79,7 @@ export const registryRouter: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request, reply) => {
-      await service.deleteOntology(request.params.key, getOntologyRegistry());
+      await service.deleteOntology(request.params.ontologyKey, getOntologyRegistry());
       return reply.status(204).send();
     },
   );

@@ -12,8 +12,10 @@ import { createMockModelingStore, NOW, type MockModelingStore } from "./helpers.
 const holder: { store: MockModelingStore } = { store: createMockModelingStore() };
 
 vi.mock("../../src/core/ports.js", () => ({
-  getModelingStore: () => holder.store,
-  getRuntimeStore: () => ({}),
+  getModelingStore: async () => holder.store,
+  getLegacyModelingStore: async () => holder.store,
+  getRuntimeStore: async () => ({}),
+  getLegacyRuntimeStore: async () => ({}),
 }));
 
 const ET_DATA = {
@@ -61,7 +63,7 @@ describe("document property creation", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/entity-types/et-1/properties",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties",
       payload: { key: "bio", displayName: "Bio", dataType: "document" },
     });
 
@@ -78,7 +80,7 @@ describe("document property deletion", () => {
 
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/entity-types/et-1/properties/prop-1",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties/prop-1",
     });
 
     expect(res.statusCode).toBe(204);
@@ -97,7 +99,7 @@ describe("document property deletion", () => {
 
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/entity-types/et-1/properties/prop-1",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties/prop-1",
     });
 
     expect(res.statusCode).toBe(204);
@@ -116,7 +118,7 @@ describe("entity type deletion", () => {
     ]);
     holder.store.deleteEntityType.mockResolvedValue(true);
 
-    const res = await app.inject({ method: "DELETE", url: "/api/model/entity-types/et-1" });
+    const res = await app.inject({ method: "DELETE", url: "/api/ontologies/onto/model/entity-types/et-1" });
 
     expect(res.statusCode).toBe(204);
     // Only the document property cascades chunk cleanup.

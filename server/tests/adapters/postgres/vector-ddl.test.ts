@@ -259,7 +259,7 @@ describe("width drift", () => {
     expect(reported).toContain("entity type 'person'");
     expect(reported).toContain("1024");
     expect(reported).toContain("768");
-    expect(reported).toContain("/api/model/rebuild-embeddings");
+    expect(reported).toContain("/model/rebuild-embeddings");
     expect(statements().filter((sql) => sql.includes("DROP INDEX"))).toEqual([]);
   });
 
@@ -300,7 +300,7 @@ describe("width drift", () => {
     expect(statements().filter((sql) => sql.includes("CREATE INDEX")).join("\n")).toContain(
       "embedding::vector(768)",
     );
-    expect(captured.lines.join("\n")).not.toContain("/api/model/rebuild-embeddings");
+    expect(captured.lines.join("\n")).not.toContain("/model/rebuild-embeddings");
   });
 
   it("stays silent when the widths already agree", async () => {

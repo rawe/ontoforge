@@ -158,7 +158,9 @@ export async function createApp(): Promise<FastifyInstance> {
   });
 
   await app.register(registryRouter, { prefix: "/api" });
-  await app.register(modelingRouter, { prefix: "/api/model" });
+  // The modeling surface is ontology-scoped: every request names its
+  // ontology in the path and runs against a store bound to it.
+  await app.register(modelingRouter, { prefix: "/api/ontologies/:ontologyKey/model" });
   await app.register(runtimeGlobalRouter, { prefix: "/api/runtime" });
   await app.register(runtimeRouter, { prefix: "/api/runtime" });
   await app.register(aiRouter, { prefix: "/api/runtime" });

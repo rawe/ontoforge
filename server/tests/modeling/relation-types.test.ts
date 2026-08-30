@@ -11,8 +11,10 @@ import { createMockModelingStore, NOW, type MockModelingStore } from "./helpers.
 const holder: { store: MockModelingStore } = { store: createMockModelingStore() };
 
 vi.mock("../../src/core/ports.js", () => ({
-  getModelingStore: () => holder.store,
-  getRuntimeStore: () => ({}),
+  getModelingStore: async () => holder.store,
+  getLegacyModelingStore: async () => holder.store,
+  getRuntimeStore: async () => ({}),
+  getLegacyRuntimeStore: async () => ({}),
 }));
 
 const SOURCE_ET = {
@@ -73,7 +75,7 @@ describe("relation type CRUD", () => {
     holder.store.createRelationType.mockResolvedValue(RT_DATA);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/relation-types",
+      url: "/api/ontologies/onto/model/relation-types",
       payload: CREATE_PAYLOAD,
     });
     expect(res.statusCode).toBe(201);
@@ -87,7 +89,7 @@ describe("relation type CRUD", () => {
     holder.store.getRelationTypeByKey.mockResolvedValue(RT_DATA);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/relation-types",
+      url: "/api/ontologies/onto/model/relation-types",
       payload: CREATE_PAYLOAD,
     });
     expect(res.statusCode).toBe(409);
@@ -96,7 +98,7 @@ describe("relation type CRUD", () => {
   it("a missing source endpoint answers 422 naming it", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/relation-types",
+      url: "/api/ontologies/onto/model/relation-types",
       payload: { ...CREATE_PAYLOAD, sourceEntityTypeKey: "nonexistent" },
     });
     expect(res.statusCode).toBe(422);
@@ -110,7 +112,7 @@ describe("relation type CRUD", () => {
       .mockResolvedValueOnce(null);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/relation-types",
+      url: "/api/ontologies/onto/model/relation-types",
       payload: { ...CREATE_PAYLOAD, targetEntityTypeKey: "nonexistent" },
     });
     expect(res.statusCode).toBe(422);
@@ -119,7 +121,7 @@ describe("relation type CRUD", () => {
 
   it("list returns every stored type", async () => {
     holder.store.listRelationTypes.mockResolvedValue([RT_DATA]);
-    const res = await app.inject({ method: "GET", url: "/api/model/relation-types" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/relation-types" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toHaveLength(1);
     expect(res.json()[0].key).toBe("works_for");
@@ -127,7 +129,7 @@ describe("relation type CRUD", () => {
 
   it("read by id answers the stored type", async () => {
     holder.store.getRelationType.mockResolvedValue(RT_DATA);
-    const res = await app.inject({ method: "GET", url: "/api/model/relation-types/rt-1" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/relation-types/rt-1" });
     expect(res.statusCode).toBe(200);
     expect(res.json().key).toBe("works_for");
   });
@@ -135,7 +137,7 @@ describe("relation type CRUD", () => {
   it("read of a missing id answers 404", async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/api/model/relation-types/nonexistent",
+      url: "/api/ontologies/onto/model/relation-types/nonexistent",
     });
     expect(res.statusCode).toBe(404);
   });
@@ -147,7 +149,7 @@ describe("relation type CRUD", () => {
     });
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/relation-types/rt-1",
+      url: "/api/ontologies/onto/model/relation-types/rt-1",
       payload: { displayName: "Employed By" },
     });
     expect(res.statusCode).toBe(200);
@@ -157,7 +159,7 @@ describe("relation type CRUD", () => {
   it("update of a missing id answers 404", async () => {
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/relation-types/nonexistent",
+      url: "/api/ontologies/onto/model/relation-types/nonexistent",
       payload: { displayName: "Whatever" },
     });
     expect(res.statusCode).toBe(404);
@@ -165,13 +167,13 @@ describe("relation type CRUD", () => {
 
   it("delete answers 204", async () => {
     holder.store.deleteRelationType.mockResolvedValue(true);
-    const res = await app.inject({ method: "DELETE", url: "/api/model/relation-types/rt-1" });
+    const res = await app.inject({ method: "DELETE", url: "/api/ontologies/onto/model/relation-types/rt-1" });
     expect(res.statusCode).toBe(204);
   });
 
   it("a type included by a lens without cascade answers 409 CASCADE_REQUIRED", async () => {
     holder.store.findLensesIncludingType.mockResolvedValue(["my_lens"]);
-    const res = await app.inject({ method: "DELETE", url: "/api/model/relation-types/rt-1" });
+    const res = await app.inject({ method: "DELETE", url: "/api/ontologies/onto/model/relation-types/rt-1" });
     expect(res.statusCode).toBe(409);
     expect(res.json().error.code).toBe("CASCADE_REQUIRED");
   });
@@ -182,7 +184,7 @@ describe("relation type CRUD", () => {
     holder.store.deleteRelationType.mockResolvedValue(true);
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/relation-types/rt-1?cascade=true",
+      url: "/api/ontologies/onto/model/relation-types/rt-1?cascade=true",
     });
     expect(res.statusCode).toBe(204);
   });
@@ -190,7 +192,7 @@ describe("relation type CRUD", () => {
   it("delete of a missing id answers 404", async () => {
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/relation-types/nonexistent",
+      url: "/api/ontologies/onto/model/relation-types/nonexistent",
     });
     expect(res.statusCode).toBe(404);
   });
@@ -202,7 +204,7 @@ describe("key pattern", () => {
     async (key) => {
       const res = await app.inject({
         method: "POST",
-        url: "/api/model/relation-types",
+        url: "/api/ontologies/onto/model/relation-types",
         payload: { ...CREATE_PAYLOAD, key },
       });
       expect(res.statusCode).toBe(422);
@@ -219,7 +221,7 @@ describe("key pattern", () => {
       .mockResolvedValueOnce(TARGET_ET);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/relation-types",
+      url: "/api/ontologies/onto/model/relation-types",
       payload: { ...CREATE_PAYLOAD, key: "k".repeat(65) },
     });
     expect(res.statusCode).toBe(422);

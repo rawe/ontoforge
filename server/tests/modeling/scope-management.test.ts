@@ -12,8 +12,10 @@ import { createMockModelingStore, NOW, type MockModelingStore } from "./helpers.
 const holder: { store: MockModelingStore } = { store: createMockModelingStore() };
 
 vi.mock("../../src/core/ports.js", () => ({
-  getModelingStore: () => holder.store,
-  getRuntimeStore: () => ({}),
+  getModelingStore: async () => holder.store,
+  getLegacyModelingStore: async () => holder.store,
+  getRuntimeStore: async () => ({}),
+  getLegacyRuntimeStore: async () => ({}),
 }));
 
 const LENS_DATA = {
@@ -72,7 +74,7 @@ describe("add entity type inclusion", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/lenses/lens-1/includes/entity-types",
+      url: "/api/ontologies/onto/model/lenses/lens-1/includes/entity-types",
       payload: { key: "person" },
     });
     expect(res.statusCode).toBe(201);
@@ -102,7 +104,7 @@ describe("add entity type inclusion", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/lenses/lens-1/includes/entity-types",
+      url: "/api/ontologies/onto/model/lenses/lens-1/includes/entity-types",
       payload: { key: "person", properties: ["full_name"] },
     });
     expect(res.statusCode).toBe(201);
@@ -122,7 +124,7 @@ describe("add entity type inclusion", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/lenses/lens-1/includes/entity-types",
+      url: "/api/ontologies/onto/model/lenses/lens-1/includes/entity-types",
       payload: { key: "person", properties: [] },
     });
     expect(res.statusCode).toBe(201);
@@ -143,7 +145,7 @@ describe("add entity type inclusion", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/lenses/lens-1/includes/entity-types",
+      url: "/api/ontologies/onto/model/lenses/lens-1/includes/entity-types",
       payload: { key: "person" },
     });
     // No pre-check, no 409 — the store's MERGE replaces the declaration.
@@ -159,7 +161,7 @@ describe("add entity type inclusion", () => {
     ]);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/lenses/lens-1/includes/entity-types",
+      url: "/api/ontologies/onto/model/lenses/lens-1/includes/entity-types",
       payload: { key: "person", properties: ["nonexistent"] },
     });
     expect(res.statusCode).toBe(422);
@@ -174,7 +176,7 @@ describe("add entity type inclusion", () => {
     ]);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/lenses/lens-1/includes/entity-types",
+      url: "/api/ontologies/onto/model/lenses/lens-1/includes/entity-types",
       payload: { key: "person", properties: [] },
     });
     expect(res.statusCode).toBe(422);
@@ -195,7 +197,7 @@ describe("add entity type inclusion", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/lenses/lens-1/includes/entity-types",
+      url: "/api/ontologies/onto/model/lenses/lens-1/includes/entity-types",
       payload: { key: "person", properties: ["full_name"] },
     });
     expect(res.statusCode).toBe(201);
@@ -205,7 +207,7 @@ describe("add entity type inclusion", () => {
     holder.store.getLens.mockResolvedValue(LENS_DATA);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/lenses/lens-1/includes/entity-types",
+      url: "/api/ontologies/onto/model/lenses/lens-1/includes/entity-types",
       payload: { key: "nonexistent" },
     });
     expect(res.statusCode).toBe(404);
@@ -214,7 +216,7 @@ describe("add entity type inclusion", () => {
   it("an unknown lens id answers 404", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/lenses/nonexistent/includes/entity-types",
+      url: "/api/ontologies/onto/model/lenses/nonexistent/includes/entity-types",
       payload: { key: "person" },
     });
     expect(res.statusCode).toBe(404);
@@ -230,7 +232,7 @@ describe("list entity type inclusions", () => {
     ]);
     const res = await app.inject({
       method: "GET",
-      url: "/api/model/lenses/lens-1/includes/entity-types",
+      url: "/api/ontologies/onto/model/lenses/lens-1/includes/entity-types",
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -256,7 +258,7 @@ describe("update entity type inclusion (by internal id in the path)", () => {
     });
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/lenses/lens-1/includes/entity-types/et-1",
+      url: "/api/ontologies/onto/model/lenses/lens-1/includes/entity-types/et-1",
       payload: { properties: ["full_name", "age"] },
     });
     expect(res.statusCode).toBe(200);
@@ -271,7 +273,7 @@ describe("update entity type inclusion (by internal id in the path)", () => {
     ]);
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/lenses/lens-1/includes/entity-types/et-1",
+      url: "/api/ontologies/onto/model/lenses/lens-1/includes/entity-types/et-1",
       payload: { properties: [] },
     });
     expect(res.statusCode).toBe(422);
@@ -283,7 +285,7 @@ describe("update entity type inclusion (by internal id in the path)", () => {
     holder.store.getEntityType.mockResolvedValue(ET_DATA);
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/lenses/lens-1/includes/entity-types/et-1",
+      url: "/api/ontologies/onto/model/lenses/lens-1/includes/entity-types/et-1",
       payload: { properties: null },
     });
     expect(res.statusCode).toBe(404);
@@ -296,7 +298,7 @@ describe("remove entity type inclusion", () => {
     holder.store.removeIncludesType.mockResolvedValue(true);
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/lenses/lens-1/includes/entity-types/et-1",
+      url: "/api/ontologies/onto/model/lenses/lens-1/includes/entity-types/et-1",
     });
     expect(res.statusCode).toBe(204);
   });
@@ -306,7 +308,7 @@ describe("remove entity type inclusion", () => {
     holder.store.removeIncludesType.mockResolvedValue(false);
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/lenses/lens-1/includes/entity-types/et-1",
+      url: "/api/ontologies/onto/model/lenses/lens-1/includes/entity-types/et-1",
     });
     expect(res.statusCode).toBe(404);
   });
@@ -327,7 +329,7 @@ describe("relation type inclusion", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/lenses/lens-1/includes/relation-types",
+      url: "/api/ontologies/onto/model/lenses/lens-1/includes/relation-types",
       payload: { key: "works_for" },
     });
     expect(res.statusCode).toBe(201);
@@ -342,7 +344,7 @@ describe("relation type inclusion", () => {
     ]);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/lenses/lens-1/includes/relation-types",
+      url: "/api/ontologies/onto/model/lenses/lens-1/includes/relation-types",
       payload: { key: "works_for" },
     });
     expect(res.statusCode).toBe(422);
@@ -360,7 +362,7 @@ describe("relation type inclusion", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/lenses/lens-1/includes/relation-types",
+      url: "/api/ontologies/onto/model/lenses/lens-1/includes/relation-types",
       payload: { key: "works_for" },
     });
     expect(res.statusCode).toBe(201);
@@ -373,7 +375,7 @@ describe("relation type inclusion", () => {
     ]);
     const res = await app.inject({
       method: "GET",
-      url: "/api/model/lenses/lens-1/includes/relation-types",
+      url: "/api/ontologies/onto/model/lenses/lens-1/includes/relation-types",
     });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toHaveLength(1);
@@ -385,7 +387,7 @@ describe("relation type inclusion", () => {
     holder.store.removeIncludesType.mockResolvedValue(true);
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/lenses/lens-1/includes/relation-types/rt-1",
+      url: "/api/ontologies/onto/model/lenses/lens-1/includes/relation-types/rt-1",
     });
     expect(res.statusCode).toBe(204);
   });

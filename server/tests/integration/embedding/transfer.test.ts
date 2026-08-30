@@ -35,9 +35,15 @@ describe.skipIf(!ollamaUp)("schema import (Ollama)", () => {
     enableOllamaProvider();
     app = await createApp();
     await app.ready();
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/ontologies",
+      payload: { key: "test_ont" },
+    });
+    expect(created.statusCode, created.body).toBe(201);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/import",
+      url: "/api/ontologies/test_ont/model/import",
       payload: EXPORT_FIXTURE,
     });
     expect(res.statusCode, res.body).toBe(201);

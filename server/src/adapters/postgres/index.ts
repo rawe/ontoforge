@@ -6,26 +6,41 @@
  * text, physical naming, index DDL — lives inside this package and must
  * not be imported from anywhere else in the server.
  *
- * Build state: complete — lifecycle, init DDL, the error/transaction
- * doors, the modeling store, runtime CRUD, the vector-index lifecycle,
- * semantic search, the document chunks, and the OQL→SQL compiler behind
- * `executeOql`.
+ * One ontology lives in one PG namespace (`ont_<key>`); a bound store is
+ * an ordinary store instance carrying that namespace, applied per
+ * statement through the doors' `SET LOCAL search_path`. The registry
+ * (`public.ontology`) provisions and drops namespaces; `public` holds
+ * only the server-wide objects.
  */
 
 import { ensureVectorIndexes, initSchema } from "./ddl.js";
 import { closePool, initPool } from "./errors.js";
 import { PostgresModelingStore } from "./modelingStore.js";
-import { PostgresOntologyRegistry } from "./registry.js";
+import {
+  listOntologyNamespaces,
+  ontologyNamespace,
+  PostgresOntologyRegistry,
+} from "./registry.js";
 import { PostgresRuntimeStore } from "./runtimeStore.js";
 
-/** Initialize the PostgreSQL adapter and return `[modelingStore, runtimeStore]`. */
-export async function createStores(): Promise<[PostgresModelingStore, PostgresRuntimeStore]> {
+/** Initialize the PostgreSQL adapter: the pool and the server-wide DDL. */
+export async function initAdapter(): Promise<void> {
   await initPool();
   await initSchema();
-  return [new PostgresModelingStore(), new PostgresRuntimeStore()];
 }
 
-/** The ontology registry over the pool `createStores` opened. */
+/** A modeling store bound to one ontology's namespace. The caller (the
+ * port accessor) has already verified the ontology exists. */
+export function createModelingStore(ontologyKey: string): PostgresModelingStore {
+  return new PostgresModelingStore(ontologyNamespace(ontologyKey));
+}
+
+/** A runtime store bound to one ontology's namespace. */
+export function createRuntimeStore(ontologyKey: string): PostgresRuntimeStore {
+  return new PostgresRuntimeStore(ontologyNamespace(ontologyKey));
+}
+
+/** The ontology registry over the pool `initAdapter` opened. */
 export function createRegistry(): PostgresOntologyRegistry {
   return new PostgresOntologyRegistry();
 }
@@ -35,7 +50,9 @@ export async function closeStores(): Promise<void> {
 }
 
 /**
- * Ensure all vector indexes exist for the configured dimensions.
+ * Ensure every ontology's vector indexes exist for the configured
+ * dimensions, walking the registry — the authoritative ontology list —
+ * one namespace at a time. Zero ontologies: nothing to do.
  *
  * The startup path: width mismatches are REPORTED and nothing is
  * repaired — only the rebuild operation recreates a drifted index,
@@ -43,5 +60,7 @@ export async function closeStores(): Promise<void> {
  * (`docs/decisions.md#behaviour`).
  */
 export async function ensureSemanticIndexes(dimensions: number): Promise<void> {
-  await ensureVectorIndexes(dimensions, false);
+  for (const namespace of await listOntologyNamespaces()) {
+    await ensureVectorIndexes(dimensions, false, namespace);
+  }
 }

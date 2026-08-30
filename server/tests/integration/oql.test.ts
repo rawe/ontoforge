@@ -505,7 +505,7 @@ describe("the clause and expression matrix", () => {
     async function addKnows(): Promise<void> {
       const res = await app.inject({
         method: "POST",
-        url: "/api/model/relation-types",
+        url: "/api/ontologies/test_ont/model/relation-types",
         payload: {
           key: "knows",
           displayName: "Knows",
@@ -690,7 +690,7 @@ describe("scoped lens", () => {
     // `project` exists in the global schema but not in hr_view.
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/entity-types",
+      url: "/api/ontologies/test_ont/model/entity-types",
       payload: { key: "project", displayName: "Project" },
     });
     expect(res.statusCode, res.body).toBe(201);
@@ -712,11 +712,11 @@ describe("document properties in results", () => {
   const BIO = "# Biography\n\nAda Lovelace wrote the first program. ".repeat(12);
 
   async function addBioProperty(): Promise<void> {
-    const list = await app.inject({ method: "GET", url: "/api/model/entity-types" });
+    const list = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/model/entity-types" });
     const person = (list.json() as Row[]).find((et) => et.key === "person")!;
     const res = await app.inject({
       method: "POST",
-      url: `/api/model/entity-types/${person.entityTypeId}/properties`,
+      url: `/api/ontologies/test_ont/model/entity-types/${person.entityTypeId}/properties`,
       payload: { key: "bio", displayName: "Bio", dataType: "document", required: false },
     });
     expect(res.statusCode, res.body).toBe(201);

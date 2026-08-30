@@ -17,7 +17,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import { valueToText } from "../core/dataTypes.js";
-import { getRuntimeStore } from "../core/ports.js";
+import { getLegacyRuntimeStore } from "../core/ports.js";
 import * as service from "../runtime/service.js";
 import { formatToolError } from "./modeling.js";
 
@@ -67,7 +67,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
       inputSchema: {},
     },
     wrap("get_schema", async () => {
-      const result = await service.getFullSchema(lensKey, getRuntimeStore());
+      const result = await service.getFullSchema(lensKey, await getLegacyRuntimeStore());
       return jsonResult(result);
     }),
   );
@@ -92,7 +92,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         lensKey,
         args.entity_type_key,
         args.properties,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
       );
       return jsonResult(result);
     }),
@@ -148,7 +148,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         args.order ?? "asc",
         args.search ?? null,
         strFilters,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
         args.fields ?? null,
       );
       return jsonResult(result);
@@ -179,7 +179,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         lensKey,
         args.entity_type_key,
         args.entity_id,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
         args.fields ?? null,
       );
       return jsonResult(result);
@@ -220,7 +220,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         args.property_key,
         offset,
         limit,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
       );
       return jsonResult(result);
     }),
@@ -250,7 +250,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         args.entity_type_key,
         args.entity_id,
         args.properties,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
       );
       return jsonResult(result);
     }),
@@ -294,7 +294,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
           newString: args.new_string,
           replaceAll: args.replace_all ?? false,
         },
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
       );
       return jsonResult(result);
     }),
@@ -342,7 +342,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
           content: args.content,
           expect: args.expect ?? null,
         },
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
       );
       return jsonResult(result);
     }),
@@ -362,7 +362,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         lensKey,
         args.entity_type_key,
         args.entity_id,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
       );
       // This tool returns a message OBJECT, unlike the modeling delete
       // tools, which return bare strings. Wire contract — do not unify.
@@ -395,7 +395,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         args.from_entity_id,
         args.to_entity_id,
         args.properties ?? {},
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
       );
       return jsonResult(result);
     }),
@@ -446,7 +446,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         args.from_entity_id ?? null,
         args.to_entity_id ?? null,
         strFilters,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
       );
       return jsonResult(result);
     }),
@@ -466,7 +466,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         lensKey,
         args.relation_type_key,
         args.relation_id,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
       );
       return jsonResult(result);
     }),
@@ -494,7 +494,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         args.relation_type_key,
         args.relation_id,
         args.properties,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
       );
       return jsonResult(result);
     }),
@@ -514,7 +514,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         lensKey,
         args.relation_type_key,
         args.relation_id,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
       );
       return jsonResult({ message: `Relation '${args.relation_id}' deleted successfully.` });
     }),
@@ -556,7 +556,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         args.direction ?? "both",
         args.relation_type_key ?? null,
         limit,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
         args.fields ?? null,
         args.relation_fields ?? null,
       );
@@ -583,7 +583,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
       },
     },
     wrap("execute_query", async (args: { query: string }) => {
-      const result = await service.executeQuery(lensKey, args.query, getRuntimeStore());
+      const result = await service.executeQuery(lensKey, args.query, await getLegacyRuntimeStore());
       return jsonResult(result);
     }),
   );
@@ -644,7 +644,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         args.entity_type_key ?? null,
         limit,
         null,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
         {
           filters: strFilters,
           fields: args.fields ?? null,
@@ -666,7 +666,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
       inputSchema: {},
     },
     wrap("list_saved_queries", async () => {
-      const result = await service.listSavedQueries(lensKey, getRuntimeStore());
+      const result = await service.listSavedQueries(lensKey, await getLegacyRuntimeStore());
       return jsonResult(result);
     }),
   );
@@ -691,7 +691,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         lensKey,
         args.query_key,
         args.params ?? {},
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
       );
       return jsonResult(result);
     }),
@@ -715,7 +715,7 @@ export function createRuntimeMcpServer(lensKey: string): McpServer {
         args.query,
         3,
         0.7,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
       );
       return jsonResult(result);
     }),

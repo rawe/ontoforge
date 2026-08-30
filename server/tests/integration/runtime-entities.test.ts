@@ -219,7 +219,7 @@ describe("entity CRUD through the unscoped lens", () => {
   it("every declared data type round-trips exactly through create and read", async () => {
     const measurement = await app.inject({
       method: "POST",
-      url: "/api/model/entity-types",
+      url: "/api/ontologies/test_ont/model/entity-types",
       payload: { key: "measurement", displayName: "Measurement" },
     });
     expect(measurement.statusCode).toBe(201);
@@ -234,7 +234,7 @@ describe("entity CRUD through the unscoped lens", () => {
     ]) {
       const created = await app.inject({
         method: "POST",
-        url: `/api/model/entity-types/${typeId}/properties`,
+        url: `/api/ontologies/test_ont/model/entity-types/${typeId}/properties`,
         payload: prop,
       });
       expect(created.statusCode, created.body).toBe(201);
@@ -498,7 +498,7 @@ describe("cache invalidation across a modeling change", () => {
     // Modeling mutation: create a new entity type.
     const created = await app.inject({
       method: "POST",
-      url: "/api/model/entity-types",
+      url: "/api/ontologies/test_ont/model/entity-types",
       payload: { key: "project", displayName: "Project" },
     });
     expect(created.statusCode).toBe(201);
@@ -516,13 +516,13 @@ describe("cache invalidation across a modeling change", () => {
     await app.inject({ method: "GET", url: "/api/runtime/hr_view/schema" }); // prime
 
     // Re-adding an inclusion is an upsert; widen person to include age.
-    const lenses = await app.inject({ method: "GET", url: "/api/model/lenses" });
+    const lenses = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/model/lenses" });
     const hrView = lenses
       .json()
       .find((o: Row) => o.key === "hr_view") as Row;
     const res = await app.inject({
       method: "POST",
-      url: `/api/model/lenses/${hrView.lensId}/includes/entity-types`,
+      url: `/api/ontologies/test_ont/model/lenses/${hrView.lensId}/includes/entity-types`,
       payload: { key: "person", properties: ["name", "email", "age"] },
     });
     expect(res.statusCode).toBe(201);

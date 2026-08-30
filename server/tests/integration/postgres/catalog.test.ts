@@ -1,8 +1,10 @@
 /**
  * PostgreSQL-physical catalog tests — everything here reaches past the
- * persistence port on purpose: the init DDL's tables, named constraints,
- * fixed indexes, and the wipe's `vec_%` index sweep, asserted against
- * the system catalogs. Requires the docker-compose PostgreSQL.
+ * persistence port on purpose: the physical skeleton one ontology's
+ * provisioning leaves in its `ont_<key>` namespace (tables, named
+ * constraints, fixed indexes), the server-wide `public` home, and the
+ * wipe's whole-namespace drop, asserted against the system catalogs.
+ * Requires the docker-compose PostgreSQL.
  *
  * The database-blind skeleton contract lives in
  * `tests/integration/skeleton.test.ts`.
@@ -10,10 +12,16 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { randomUUID } from "node:crypto";
+
 import { runQuery } from "../../../src/adapters/postgres/errors.js";
 import { settings } from "../../../src/config.js";
-import { closeStores, initStores } from "../../../src/core/ports.js";
+import { closeStores, getOntologyRegistry, initStores } from "../../../src/core/ports.js";
 import { wipeDatabase } from "../reset.js";
+
+/** The provisioned ontology every assertion reads, and its namespace. */
+const ONTOLOGY_KEY = "catalog_ont";
+const NAMESPACE = "ont_catalog_ont";
 
 const ALL_TABLES = [
   "lens",
@@ -77,7 +85,8 @@ const FIXED_BTREE_INDEXES = [
 
 async function tableNames(): Promise<string[]> {
   const result = await runQuery(
-    `SELECT tablename FROM pg_tables WHERE schemaname = current_schema()`,
+    `SELECT tablename FROM pg_tables WHERE schemaname = $1`,
+    [NAMESPACE],
   );
   return result.rows.map((row) => row.tablename as string);
 }
@@ -88,7 +97,8 @@ async function constraintTypes(): Promise<Record<string, string>> {
      FROM pg_constraint con
      JOIN pg_class rel ON rel.oid = con.conrelid
      JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
-     WHERE nsp.nspname = current_schema()`,
+     WHERE nsp.nspname = $1`,
+    [NAMESPACE],
   );
   const map: Record<string, string> = {};
   for (const row of result.rows) {
@@ -99,9 +109,14 @@ async function constraintTypes(): Promise<Record<string, string>> {
 
 async function indexNames(): Promise<string[]> {
   const result = await runQuery(
-    `SELECT indexname FROM pg_indexes WHERE schemaname = current_schema()`,
+    `SELECT indexname FROM pg_indexes WHERE schemaname = $1`,
+    [NAMESPACE],
   );
   return result.rows.map((row) => row.indexname as string);
+}
+
+async function provisionOntology(): Promise<void> {
+  await getOntologyRegistry().createOntology(randomUUID(), ONTOLOGY_KEY, null, null);
 }
 
 async function assertCatalogComplete(): Promise<void> {
@@ -123,6 +138,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL physical catalog
   beforeAll(async () => {
     await initStores();
     await wipeDatabase();
+    await provisionOntology();
   });
 
   afterAll(async () => {
@@ -130,13 +146,20 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL physical catalog
     await closeStores();
   });
 
-  it("init created the ten tables, the named constraints, and the fixed indexes", async () => {
+  it("provisioning created the ten tables, the named constraints, and the fixed indexes", async () => {
     await assertCatalogComplete();
   });
 
-  it("init is idempotent across a close→boot cycle", async () => {
+  it("boot only creates the server-wide home: public holds the registry, no ontology tables", async () => {
+    const result = await runQuery(
+      `SELECT tablename FROM pg_tables WHERE schemaname = 'public'`,
+    );
+    expect(result.rows.map((row) => row.tablename)).toEqual(["ontology"]);
+  });
+
+  it("boot is idempotent across a close→boot cycle and leaves provisioned namespaces alone", async () => {
     await closeStores();
-    await initStores(); // second boot runs the same DDL against existing objects
+    await initStores(); // second boot runs the same server DDL against existing objects
     await assertCatalogComplete();
   });
 
@@ -152,8 +175,9 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL physical catalog
        FROM pg_attribute att
        JOIN pg_class rel ON rel.oid = att.attrelid
        JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
-       WHERE nsp.nspname = current_schema() AND rel.relkind = 'r'
+       WHERE nsp.nspname = $1 AND rel.relkind = 'r'
          AND att.attname = 'embedding' AND NOT att.attisdropped`,
+      [NAMESPACE],
     );
     expect(cols.rows.map((row) => row.table).sort()).toEqual([
       "document_chunk",
@@ -171,7 +195,8 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL physical catalog
        FROM pg_constraint con
        JOIN pg_class rel ON rel.oid = con.conrelid
        JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
-       WHERE nsp.nspname = current_schema() AND con.contype = 'f'`,
+       WHERE nsp.nspname = $1 AND con.contype = 'f'`,
+      [NAMESPACE],
     );
     const rules = new Map(result.rows.map((row) => [row.name as string, row.del as string]));
     expect(rules.get("relation_type_source_fk")).toBe("r"); // RESTRICT
@@ -192,19 +217,18 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL physical catalog
     expect(fixed.filter((name) => name.startsWith("vec_"))).toEqual([]);
   });
 
-  it("wipe drops vec_-prefixed indexes and keeps the fixed set", async () => {
-    // Stage what only M4's lifecycle (or an orphaned import) would create:
-    // a dynamically named index under the reserved prefix.
-    const staged = `vec_entity_${"0".repeat(32)}`;
-    await runQuery(`CREATE INDEX ${staged} ON entity (type_key)`);
-    expect(await indexNames()).toContain(staged);
-
+  it("wipe drops every ont_ namespace whole and empties the registry", async () => {
     await wipeDatabase();
 
-    const after = await indexNames();
-    expect(after).not.toContain(staged);
-    for (const index of FIXED_BTREE_INDEXES) {
-      expect(after).toContain(index);
-    }
+    const namespaces = await runQuery(
+      `SELECT nspname FROM pg_namespace WHERE nspname LIKE 'ont\\_%'`,
+    );
+    expect(namespaces.rows).toEqual([]);
+    const registry = await runQuery(`SELECT count(*)::int AS total FROM public.ontology`);
+    expect(registry.rows[0]!.total).toBe(0);
+
+    // Re-provisioning after the wipe rebuilds the full skeleton.
+    await provisionOntology();
+    await assertCatalogComplete();
   });
 });

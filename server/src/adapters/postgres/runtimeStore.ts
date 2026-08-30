@@ -47,7 +47,14 @@ import {
   ENTITY_ALL_INDEX,
   SAVED_QUERY_INDEX,
 } from "./ddl.js";
-import { runArrayQuery, runQuery, withTransaction, type Querier } from "./errors.js";
+import {
+  runArrayQuery,
+  runQuery,
+  withTransaction,
+  type DbResult,
+  type IsolationLevel,
+  type Querier,
+} from "./errors.js";
 import { bindValues, compileOql, convertRows } from "./oql/index.js";
 import {
   buildEndpointClauses,
@@ -129,6 +136,23 @@ function propsJson(properties: Row, propertyDefs: PropertyDefs): string {
 }
 
 export class PostgresRuntimeStore implements RuntimeStore {
+  /** Bound to one ontology's namespace; unbound (tests only) runs against
+   * the connection's default namespace. */
+  constructor(private readonly namespace?: string) {}
+
+  /** Door one, carrying this store's binding. */
+  private query(text: string, params?: unknown[]): Promise<DbResult> {
+    return runQuery(text, params, this.namespace);
+  }
+
+  /** Door two, carrying this store's binding. */
+  private tx<T>(
+    work: (querier: Querier) => Promise<T>,
+    isolation: IsolationLevel = "READ COMMITTED",
+  ): Promise<T> {
+    return withTransaction(work, isolation, this.namespace);
+  }
+
   // ------------------------------------------------------------------
   // Schema reading (for the runtime schema cache)
   // ------------------------------------------------------------------
@@ -137,7 +161,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
    * this lens's inclusions — one coherent REPEATABLE READ snapshot.
    * Answers null when no lens has the key. */
   async getFullSchema(lensKey: string): Promise<Row | null> {
-    return withTransaction(async (querier) => {
+    return this.tx(async (querier) => {
       const lensResult = await querier.query(
         `SELECT ${LENS_COLS} FROM lens WHERE key = $1`,
         [lensKey],
@@ -167,7 +191,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
 
   /** AiAgentConfig rows for one lens, by key. */
   async getAiAgentConfigs(lensKey: string): Promise<Row[]> {
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT ac.key, ac.name, ac.description, ac.system_prompt, ac.tools
        FROM ai_agent_config ac
        JOIN lens o ON o.lens_id = ac.lens_id
@@ -180,7 +204,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
 
   /** SavedQuery rows for one lens, by key. */
   async getSavedQueries(lensKey: string): Promise<Row[]> {
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT sq.key, sq.name, sq.description, sq.steps, sq.parameters
        FROM saved_query sq
        JOIN lens o ON o.lens_id = sq.lens_id
@@ -212,7 +236,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
     propertyDefs: PropertyDefs,
     embedding: number[] | null = null,
   ): Promise<Row> {
-    const result = await runQuery(
+    const result = await this.query(
       `INSERT INTO entity (id, type_key, props, embedding)
        VALUES ($1, $2, $3::jsonb, $4::vector)
        RETURNING ${ENTITY_COLS}`,
@@ -247,7 +271,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
     }
     const whereSql = where.join(" AND ");
 
-    return withTransaction(async (querier) => {
+    return this.tx(async (querier) => {
       const total = await countRows(querier, `entity WHERE ${whereSql}`, params);
       if (total === 0) {
         return [[], 0];
@@ -270,7 +294,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
     if (!isUuid(entityId)) {
       return null;
     }
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT ${ENTITY_COLS} FROM entity WHERE type_key = $1 AND id = $2`,
       [entityTypeKey, entityId],
     );
@@ -282,7 +306,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
     if (!isUuid(entityId)) {
       return null;
     }
-    const result = await runQuery(`SELECT ${ENTITY_COLS} FROM entity WHERE id = $1`, [
+    const result = await this.query(`SELECT ${ENTITY_COLS} FROM entity WHERE id = $1`, [
       entityId,
     ]);
     const row = result.rows[0];
@@ -314,7 +338,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
       params.push(embedding === null ? null : toSql(embedding));
       embeddingSet = `, embedding = $${params.length}::vector`;
     }
-    const result = await runQuery(
+    const result = await this.query(
       `UPDATE entity
        SET props = (props || $3::jsonb) - $4::text[], updated_at = now()${embeddingSet}
        WHERE type_key = $1 AND id = $2
@@ -331,7 +355,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
     if (!isUuid(entityId)) {
       return false;
     }
-    const result = await runQuery(`DELETE FROM entity WHERE type_key = $1 AND id = $2`, [
+    const result = await this.query(`DELETE FROM entity WHERE type_key = $1 AND id = $2`, [
       entityTypeKey,
       entityId,
     ]);
@@ -352,7 +376,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
     if (!isUuid(entityId)) {
       return {};
     }
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT text, embedding::text AS embedding FROM document_chunk
        WHERE entity_id = $1 AND property_key = $2 AND ${EMBEDDED}`,
       [entityId, propertyKey],
@@ -370,7 +394,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
     if (!isUuid(entityId)) {
       return;
     }
-    await runQuery(`DELETE FROM document_chunk WHERE entity_id = $1 AND property_key = $2`, [
+    await this.query(`DELETE FROM document_chunk WHERE entity_id = $1 AND property_key = $2`, [
       entityId,
       propertyKey,
     ]);
@@ -406,7 +430,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
         embedding: vector === undefined ? null : toSql(vector),
       };
     });
-    await runQuery(
+    await this.query(
       `INSERT INTO document_chunk (id, entity_id, entity_type_key, property_key,
                                    chunk_index, start_char, char_length, text, embedding)
        SELECT c.id, $1, $2, $3, c.chunk_index, c.start_char, c.char_length, c.text,
@@ -435,6 +459,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
         `SELECT ${CHUNK_COLS}, ${similarity(width)} FROM document_chunk
          WHERE entity_type_key = $2 AND property_key = $3 AND ${EMBEDDED}
          ORDER BY ${distance(width)} LIMIT $4`,
+      this.namespace,
     );
     return rows.map((row) => ({ chunk: chunkRow(row), score: row.score }));
   }
@@ -449,7 +474,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
     if (validIds.length === 0) {
       return {};
     }
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT ${ENTITY_COLS} FROM entity WHERE id = ANY($1::uuid[])`,
       [validIds],
     );
@@ -493,6 +518,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
         `SELECT ${ENTITY_COLS}, ${similarity(width)} FROM entity
          WHERE ${where.join(" AND ")}
          ORDER BY ${distance(width)} LIMIT $${limitP}`,
+      this.namespace,
     );
     return entityHits(rows, propertyDefs, minScore);
   }
@@ -514,6 +540,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
       (width) =>
         `SELECT ${ENTITY_COLS}, ${similarity(width)} FROM entity
          WHERE ${EMBEDDED} ORDER BY ${distance(width)} LIMIT $2`,
+      this.namespace,
     );
     return entityHits(rows, NO_DEFS, minScore);
   }
@@ -536,6 +563,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
         `SELECT key, name, description, parameters, ${similarity(width)} FROM saved_query
          WHERE lens_key = $2 AND ${EMBEDDED}
          ORDER BY ${distance(width)} LIMIT $3`,
+      this.namespace,
     );
     return minScoreFloor(rows, minScore);
   }
@@ -555,7 +583,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
     properties: Row,
     propertyDefs: PropertyDefs,
   ): Promise<Row> {
-    const result = await runQuery(
+    const result = await this.query(
       `INSERT INTO relation (id, type_key, from_id, to_id, props)
        VALUES ($1, $2, $3, $4, $5::jsonb)
        RETURNING ${RELATION_COLS}`,
@@ -590,7 +618,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
     ];
     const whereSql = where.join(" AND ");
 
-    return withTransaction(async (querier) => {
+    return this.tx(async (querier) => {
       const total = await countRows(querier, `relation WHERE ${whereSql}`, params);
       if (total === 0) {
         return [[], 0];
@@ -611,7 +639,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
     if (!isUuid(relationId)) {
       return null;
     }
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT ${RELATION_COLS} FROM relation WHERE type_key = $1 AND id = $2`,
       [relationTypeKey, relationId],
     );
@@ -629,7 +657,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
     if (!isUuid(relationId)) {
       return null;
     }
-    const result = await runQuery(
+    const result = await this.query(
       `UPDATE relation
        SET props = (props || $3::jsonb) - $4::text[], updated_at = now()
        WHERE type_key = $1 AND id = $2
@@ -645,7 +673,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
     if (!isUuid(relationId)) {
       return false;
     }
-    const result = await runQuery(`DELETE FROM relation WHERE type_key = $1 AND id = $2`, [
+    const result = await this.query(`DELETE FROM relation WHERE type_key = $1 AND id = $2`, [
       relationTypeKey,
       relationId,
     ]);
@@ -669,7 +697,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
    */
   async executeOql(validated: ValidatedQuery, params: Row = {}): Promise<[string[], Row[]]> {
     const compiled = compileOql(validated);
-    const rows = await runArrayQuery(compiled.sql, bindValues(compiled, params));
+    const rows = await runArrayQuery(compiled.sql, bindValues(compiled, params), this.namespace);
     return [compiled.columns, convertRows(compiled, rows)];
   }
 
@@ -697,7 +725,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
     }
 
     if (direction === "both") {
-      return withTransaction(async (querier) => {
+      return this.tx(async (querier) => {
         const outgoing = await neighborPage(
           querier,
           "outgoing",
@@ -723,7 +751,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
     }
 
     return neighborPage(
-      { query: runQuery },
+      { query: (text, params) => this.query(text, params) },
       direction === "outgoing" ? "outgoing" : "incoming",
       entityId,
       relationTypeKey,

@@ -1,7 +1,7 @@
 /**
  * Shared full-schema assembly for the PostgreSQL adapter.
  *
- * Both stores' `getFullSchema` — modeling's global schema and the
+ * Both stores' `getFullSchema` — modeling's whole schema and the
  * runtime lens view — read the same type, property and inclusion tables,
  * so the type SELECTs, the props-bucketing, and the inclusion
  * classification live here once. Callers pass the `Querier` of their own
@@ -21,7 +21,7 @@ const PROPERTY_COLS =
 
 /**
  * Every entity type and relation type with its property rows attached,
- * all ordered by key. Modeling's global schema keeps timestamps on
+ * all ordered by key. Modeling's whole schema keeps timestamps on
  * property rows; the runtime lens view carries them without — the flag
  * preserves each caller's shape.
  */

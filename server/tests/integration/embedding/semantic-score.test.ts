@@ -34,6 +34,7 @@ import { getEmbeddingProvider } from "../../../src/core/embedding.js";
 import {
   closeStores,
   getModelingStore,
+  getOntologyRegistry,
   getRuntimeStore,
   initStores,
 } from "../../../src/core/ports.js";
@@ -84,7 +85,8 @@ const DEFS: Record<string, PropertyDef> = {
 };
 
 async function search(limit: number, minScore: number | null): Promise<Row[]> {
-  return getRuntimeStore().semanticSearch(TYPE_KEY, DEFS, query(), limit, minScore);
+  const runtime = await getRuntimeStore("score_probe");
+  return runtime.semanticSearch(TYPE_KEY, DEFS, query(), limit, minScore);
 }
 
 describe.skipIf(!ollamaUp)("semantic-search score", () => {
@@ -94,7 +96,8 @@ describe.skipIf(!ollamaUp)("semantic-search score", () => {
     enableOllamaProvider();
     width = getEmbeddingProvider()!.dimensions;
 
-    const modeling = getModelingStore();
+    await getOntologyRegistry().createOntology(randomUUID(), "score_probe", null, width);
+    const modeling = await getModelingStore("score_probe");
     const entityTypeId = randomUUID();
     await modeling.createEntityType(entityTypeId, TYPE_KEY, "Vector Probe", null);
     await modeling.createProperty(
@@ -110,7 +113,7 @@ describe.skipIf(!ollamaUp)("semantic-search score", () => {
     );
     await modeling.rebuildVectorIndex(TYPE_KEY, width);
 
-    const runtime = getRuntimeStore();
+    const runtime = await getRuntimeStore("score_probe");
     for (const testCase of CASES) {
       await runtime.createEntity(
         TYPE_KEY,

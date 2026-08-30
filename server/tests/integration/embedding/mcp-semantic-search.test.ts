@@ -49,14 +49,15 @@ describe.skipIf(!ollamaUp)("MCP semantic_search (Ollama)", () => {
       expect(res.statusCode, `POST ${url}: ${res.body}`).toBe(201);
       return res.json() as Row;
     };
-    await post("/api/model/lenses", { key: "mcp_search", name: "MCP Search" });
-    const et = await post("/api/model/entity-types", { key: "person", displayName: "Person" });
+    await post("/api/ontologies", { key: "test_ont" });
+    await post("/api/ontologies/test_ont/model/lenses", { key: "mcp_search", name: "MCP Search" });
+    const et = await post("/api/ontologies/test_ont/model/entity-types", { key: "person", displayName: "Person" });
     for (const prop of [
       { key: "name", displayName: "Name", dataType: "string", required: true },
       { key: "bio", displayName: "Bio", dataType: "string", required: false },
       { key: "age", displayName: "Age", dataType: "integer", required: false },
     ]) {
-      await post(`/api/model/entity-types/${et.entityTypeId as string}/properties`, prop);
+      await post(`/api/ontologies/test_ont/model/entity-types/${et.entityTypeId as string}/properties`, prop);
     }
     await post("/api/runtime/mcp_search/entities/person", {
       name: "Alice Chen",

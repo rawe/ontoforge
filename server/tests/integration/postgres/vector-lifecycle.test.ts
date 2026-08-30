@@ -19,10 +19,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { runQuery } from "../../../src/adapters/postgres/errors.js";
 import { settings } from "../../../src/config.js";
+import type { ModelingStore } from "../../../src/core/ports.js";
 import {
   closeStores,
   ensureSemanticIndexes,
   getModelingStore,
+  getOntologyRegistry,
   initStores,
 } from "../../../src/core/ports.js";
 import { wipeDatabase } from "../reset.js";
@@ -31,6 +33,10 @@ import { DRIFT_SCOPES, logsOf, POSTGRES_LEAKS } from "../../vectorDrift.js";
 /** The configured model's width, and a width no model in play produces. */
 const MODEL_WIDTH = 768;
 const DRIFTED_WIDTH = 1024;
+
+/** The ontology every case runs in, and its physical namespace. */
+const ONTOLOGY_KEY = "vec_ont";
+const NAMESPACE = "ont_vec_ont";
 
 interface IndexFacts {
   width: number | null;
@@ -47,7 +53,8 @@ async function catalog(): Promise<Map<string, IndexFacts>> {
      FROM pg_class idx
      JOIN pg_namespace nsp ON nsp.oid = idx.relnamespace
      LEFT JOIN pg_attribute att ON att.attrelid = idx.oid AND att.attnum = 1
-     WHERE nsp.nspname = current_schema() AND idx.relkind = 'i'`,
+     WHERE nsp.nspname = $1 AND idx.relkind = 'i'`,
+    [NAMESPACE],
   );
   const facts = new Map<string, IndexFacts>();
   for (const row of result.rows) {
@@ -70,6 +77,7 @@ function nameId(rowId: string): string {
 }
 
 describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lifecycle", () => {
+  let store: ModelingStore;
   let entityTypeId: string;
   let documentPropertyId: string;
   let entityIndex: string;
@@ -88,7 +96,10 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
    * yet — every test decides how they come into existence. */
   beforeEach(async () => {
     await wipeDatabase();
-    const store = getModelingStore();
+    // A bare provisioning (no embedding width): no fixed vector indexes
+    // yet — every test decides how indexes come into existence.
+    await getOntologyRegistry().createOntology(randomUUID(), ONTOLOGY_KEY, null, null);
+    store = await getModelingStore(ONTOLOGY_KEY);
     entityTypeId = randomUUID();
     await store.createEntityType(entityTypeId, "person", "Person", null);
     await store.createProperty(
@@ -118,12 +129,12 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
     chunkIndex = `vec_document_chunk_${nameId(documentPropertyId)}`;
     // The two fixed indexes survive a wipe by design; drop them so each
     // test starts from a known width.
-    await runQuery(`DROP INDEX IF EXISTS entity_embedding_all_idx`);
-    await runQuery(`DROP INDEX IF EXISTS saved_query_embedding_idx`);
+    await runQuery(`DROP INDEX IF EXISTS entity_embedding_all_idx`, undefined, NAMESPACE);
+    await runQuery(`DROP INDEX IF EXISTS saved_query_embedding_idx`, undefined, NAMESPACE);
   });
 
   it("ensures the whole inventory: two partial indexes and the two fixed ones", async () => {
-    await getModelingStore().ensureVectorIndexes(MODEL_WIDTH);
+    await store.ensureVectorIndexes(MODEL_WIDTH);
 
     const indexes = await catalog();
     for (const name of [
@@ -164,7 +175,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
   });
 
   it("names every dynamic index reversibly from the row that causes it", async () => {
-    await getModelingStore().ensureVectorIndexes(MODEL_WIDTH);
+    await store.ensureVectorIndexes(MODEL_WIDTH);
     const dynamic = [...(await catalog()).keys()].filter((name) => name.startsWith("vec_")).sort();
 
     expect(dynamic).toEqual([chunkIndex, entityIndex].sort());
@@ -172,13 +183,13 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
     const rows = await runQuery(
       `SELECT entity_type_id FROM entity_type WHERE replace(entity_type_id::text, '-', '') = $1`,
       [entityIndex.slice("vec_entity_".length)],
+      NAMESPACE,
     );
     expect(rows.rows[0]!.entity_type_id).toBe(entityTypeId);
   });
 
   it("creates and drops one type's index through the port", async () => {
-    const store = getModelingStore();
-    await store.createVectorIndex("person", MODEL_WIDTH, ["name"]);
+        await store.createVectorIndex("person", MODEL_WIDTH, ["name"]);
     expect(await widthOf(entityIndex)).toBe(MODEL_WIDTH);
 
     await store.dropVectorIndex("person");
@@ -186,8 +197,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
   });
 
   it("creates and drops one document property's chunk index through the port", async () => {
-    const store = getModelingStore();
-    await store.createDocumentVectorIndex("person", "bio", MODEL_WIDTH);
+        await store.createDocumentVectorIndex("person", "bio", MODEL_WIDTH);
     expect(await widthOf(chunkIndex)).toBe(MODEL_WIDTH);
 
     await store.dropDocumentVectorIndex("person", "bio");
@@ -195,14 +205,13 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
   });
 
   it("rebuilds an existing index to the model's width", async () => {
-    const store = getModelingStore();
-    await store.createVectorIndex("person", DRIFTED_WIDTH);
+        await store.createVectorIndex("person", DRIFTED_WIDTH);
     await store.rebuildVectorIndex("person", MODEL_WIDTH);
     expect(await widthOf(entityIndex)).toBe(MODEL_WIDTH);
   });
 
   it("ensures the saved-query index on its own", async () => {
-    await getModelingStore().ensureSavedQueryVectorIndex(MODEL_WIDTH);
+    await store.ensureSavedQueryVectorIndex(MODEL_WIDTH);
     expect(await widthOf("saved_query_embedding_idx")).toBe(MODEL_WIDTH);
     expect(await widthOf("entity_embedding_all_idx")).toBeNull();
   });
@@ -210,7 +219,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
   describe("width drift", () => {
     /** The whole inventory built at the wrong width. */
     async function stageDrift(): Promise<void> {
-      await getModelingStore().ensureVectorIndexes(DRIFTED_WIDTH);
+      await store.ensureVectorIndexes(DRIFTED_WIDTH);
       for (const name of [
         entityIndex,
         chunkIndex,
@@ -232,7 +241,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
       }
       expect(reported).toContain(String(DRIFTED_WIDTH));
       expect(reported).toContain(String(MODEL_WIDTH));
-      expect(reported).toContain("/api/model/rebuild-embeddings");
+      expect(reported).toContain("/model/rebuild-embeddings");
       // API vocabulary only: no vendor, no physical name.
       for (const leak of POSTGRES_LEAKS) {
         expect(reported, `'${leak}' leaked into the report`).not.toContain(leak);
@@ -252,11 +261,11 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
       await stageDrift();
 
       const reported = await logsOf(() =>
-        getModelingStore().ensureVectorIndexes(MODEL_WIDTH, true),
+        store.ensureVectorIndexes(MODEL_WIDTH, true),
       );
 
       expect(reported).toContain("Recreating the semantic index for entity type 'person'");
-      expect(reported).not.toContain("/api/model/rebuild-embeddings");
+      expect(reported).not.toContain("/model/rebuild-embeddings");
       for (const name of [
         entityIndex,
         chunkIndex,
@@ -268,8 +277,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
     });
 
     it("the per-type create path reports without touching", async () => {
-      const store = getModelingStore();
-      await store.createVectorIndex("person", DRIFTED_WIDTH);
+            await store.createVectorIndex("person", DRIFTED_WIDTH);
       await store.createDocumentVectorIndex("person", "bio", DRIFTED_WIDTH);
       await store.ensureSavedQueryVectorIndex(DRIFTED_WIDTH);
 
@@ -288,8 +296,8 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
     });
 
     it("says nothing when the widths agree", async () => {
-      await getModelingStore().ensureVectorIndexes(MODEL_WIDTH);
-      const reported = await logsOf(() => getModelingStore().ensureVectorIndexes(MODEL_WIDTH));
+      await store.ensureVectorIndexes(MODEL_WIDTH);
+      const reported = await logsOf(() => store.ensureVectorIndexes(MODEL_WIDTH));
       expect(reported).toBe("");
     });
   });
@@ -303,12 +311,16 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
       const chunkOrphan = `vec_document_chunk_${nameId(randomUUID())}`;
       await runQuery(
         `CREATE INDEX ${orphan} ON entity USING hnsw ((embedding::vector(${MODEL_WIDTH})) vector_cosine_ops) WHERE type_key = 'person'`,
+        undefined,
+        NAMESPACE,
       );
       await runQuery(
         `CREATE INDEX ${chunkOrphan} ON document_chunk USING hnsw ((embedding::vector(${MODEL_WIDTH})) vector_cosine_ops)`,
+        undefined,
+        NAMESPACE,
       );
 
-      await getModelingStore().ensureVectorIndexes(MODEL_WIDTH);
+      await store.ensureVectorIndexes(MODEL_WIDTH);
 
       const indexes = await catalog();
       expect(indexes.has(orphan)).toBe(false);
@@ -318,8 +330,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
     });
 
     it("collects the index a deleted entity type left behind", async () => {
-      const store = getModelingStore();
-      await store.ensureVectorIndexes(MODEL_WIDTH);
+            await store.ensureVectorIndexes(MODEL_WIDTH);
       expect(await widthOf(entityIndex)).toBe(MODEL_WIDTH);
 
       // The delete hooks run after the schema row is gone, so the drop
@@ -338,16 +349,17 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
     });
 
     it("collects the chunk index of a property that is no longer a document", async () => {
-      const store = getModelingStore();
-      await store.ensureVectorIndexes(MODEL_WIDTH);
+            await store.ensureVectorIndexes(MODEL_WIDTH);
       expect(await widthOf(chunkIndex)).toBe(MODEL_WIDTH);
 
       // Staged directly: no port method converts a property's data type
       // in place. The index is what makes the state interesting — the
       // row survives, only its membership of the inventory does not.
-      await runQuery(`UPDATE property_def SET data_type = 'string' WHERE property_id = $1`, [
-        documentPropertyId,
-      ]);
+      await runQuery(
+        `UPDATE property_def SET data_type = 'string' WHERE property_id = $1`,
+        [documentPropertyId],
+        NAMESPACE,
+      );
 
       await store.ensureVectorIndexes(MODEL_WIDTH);
 
@@ -357,8 +369,8 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
     });
 
     it("leaves the fixed indexes alone", async () => {
-      await getModelingStore().ensureVectorIndexes(MODEL_WIDTH);
-      await getModelingStore().ensureVectorIndexes(MODEL_WIDTH);
+      await store.ensureVectorIndexes(MODEL_WIDTH);
+      await store.ensureVectorIndexes(MODEL_WIDTH);
       const indexes = await catalog();
       expect(indexes.has("entity_embedding_all_idx")).toBe(true);
       expect(indexes.has("saved_query_embedding_idx")).toBe(true);

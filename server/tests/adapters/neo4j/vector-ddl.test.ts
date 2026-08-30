@@ -128,7 +128,7 @@ describe("reconcileIndexDimensions", () => {
     expect(text).toContain(ENTITY_TYPE_SCOPE);
     expect(text).toContain("1024");
     expect(text).toContain("768");
-    expect(text).toContain("/api/model/rebuild-embeddings");
+    expect(text).toContain("/model/rebuild-embeddings");
   });
 
   it("names no vendor or physical index in the warning", async () => {

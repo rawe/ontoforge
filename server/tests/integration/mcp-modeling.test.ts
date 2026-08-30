@@ -70,6 +70,14 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await wipeDatabase();
+  // The legacy /mcp/model mount binds to the server's sole ontology
+  // until ticket 17 moves it to /mcp/ontologies/:key/model.
+  const created = await app.inject({
+    method: "POST",
+    url: "/api/ontologies",
+    payload: { key: "test_ont" },
+  });
+  expect(created.statusCode, created.body).toBe(201);
 });
 
 describe("tool surface", () => {

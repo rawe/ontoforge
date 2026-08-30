@@ -49,8 +49,9 @@ export function reportWidthMismatch(
     `The semantic index for ${describes} holds ${existingWidth}-dimensional ` +
       `vectors, but the configured embedding model produces ${configuredWidth}. ` +
       "Semantic search over it fails until the widths agree. Run " +
-      "POST /api/model/rebuild-embeddings to recreate it at the model's " +
-      "width and regenerate its vectors.",
+      "POST /api/ontologies/{ontologyKey}/model/rebuild-embeddings on the " +
+      "ontology holding it to recreate it at the model's width and " +
+      "regenerate its vectors.",
   );
 }
 

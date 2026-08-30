@@ -76,6 +76,12 @@ export function invalidateLoadedSchemaCache(): void {
 /**
  * Load the lens for a lens key: from the cache, or built from the
  * runtime store's schema reads on a miss. Unknown key -> not found.
+ *
+ * The cache key is the bare lens key, which identifies a lens only
+ * within one ontology — safe while the runtime surface serves a single
+ * ontology (ticket 16 adds the ontology dimension to the key). Callers
+ * that hold a store bound to an arbitrary ontology use
+ * `loadSchemaUncached` instead of this cache.
  */
 export async function loadSchema(
   lensKey: string,
@@ -85,7 +91,19 @@ export async function loadSchema(
   if (cached !== undefined) {
     return cached;
   }
+  const loaded = await loadSchemaUncached(lensKey, store);
+  loadedSchemaCache.set(lensKey, loaded);
+  return loaded;
+}
 
+/**
+ * The cache-free build: the lens assembled fresh from the bound store's
+ * schema reads. Unknown key -> not found.
+ */
+export async function loadSchemaUncached(
+  lensKey: string,
+  store: RuntimeStore,
+): Promise<LoadedSchema> {
   const schema = await store.getFullSchema(lensKey);
   if (schema === null) {
     throw new NotFoundError(`Lens '${lensKey}' not found or has no schema loaded`);
@@ -120,9 +138,7 @@ export async function loadSchema(
     savedQueries[row.key as string] = toSavedQueryConfig(row);
   }
 
-  const loaded: LoadedSchema = { scoped, full, agentConfigs, savedQueries };
-  loadedSchemaCache.set(lensKey, loaded);
-  return loaded;
+  return { scoped, full, agentConfigs, savedQueries };
 }
 
 /** Deserialize one stored saved-query row: `steps` and `parameters` are

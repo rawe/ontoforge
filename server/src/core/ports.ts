@@ -2,11 +2,18 @@
  * Persistence port: store interfaces, store accessors, adapter lifecycle.
  *
  * Services, routers, and MCP handlers obtain their store through this
- * module and speak lens vocabulary only (type keys, property keys,
+ * module and speak schema vocabulary only (type keys, property keys,
  * instance ids, structured filters). Everything database-specific —
  * connections, transactions, query text, physical naming, index DDL,
  * driver types — is owned by the adapter selected via
  * `settings.DB_BACKEND`.
+ *
+ * Stores are BOUND: `getModelingStore(ontologyKey)` /
+ * `getRuntimeStore(ontologyKey)` return stores bound to exactly one
+ * ontology; every method resolves keys within that binding, and binding
+ * an unknown key fails with not-found. Registry operations live on the
+ * separate `OntologyRegistry` port. "One request, one ontology" is
+ * structural above the adapter and physical inside it.
  *
  * Port contract (every adapter must satisfy it):
  *
@@ -41,6 +48,7 @@
  */
 
 import { settings } from "../config.js";
+import { NotFoundError } from "./exceptions.js";
 import type { ValidatedQuery } from "./oql/index.js";
 import type { PropertyDef, TypeKind } from "./schemas.js";
 
@@ -600,9 +608,19 @@ export interface OntologyRegistry {
  * namespace import — no wrapper object, no default export, no factory
  * class; TypeScript checks each `import()` result structurally at the
  * registry literal below.
+ *
+ * `createModelingStore`/`createRuntimeStore` return stores bound to one
+ * ontology — every method resolves within that binding; the physical
+ * mechanism is the adapter's private business. The port accessors below
+ * verify the ontology exists (against the registry, the authoritative
+ * list) before asking the adapter for a bound store, so adapters may
+ * bind without checking. `ensureSemanticIndexes` covers every ontology
+ * the registry lists and does nothing when there are none.
  */
 export interface AdapterModule {
-  createStores(): Promise<[ModelingStore, RuntimeStore]>;
+  initAdapter(): Promise<void>;
+  createModelingStore(ontologyKey: string): ModelingStore;
+  createRuntimeStore(ontologyKey: string): RuntimeStore;
   createRegistry(): OntologyRegistry;
   closeStores(): Promise<void>;
   ensureSemanticIndexes(dimensions: number): Promise<void>;
@@ -618,8 +636,6 @@ const ADAPTERS: Record<string, () => Promise<AdapterModule>> = {
   postgres: () => import("../adapters/postgres/index.js"),
 };
 
-let modelingStore: ModelingStore | null = null;
-let runtimeStore: RuntimeStore | null = null;
 let ontologyRegistry: OntologyRegistry | null = null;
 let activeAdapter: AdapterModule | null = null;
 
@@ -630,11 +646,11 @@ function unknownBackend(): never {
   );
 }
 
-/** Initialize the configured persistence adapter and its stores. */
+/** Initialize the configured persistence adapter and its registry. */
 export async function initStores(): Promise<void> {
   const loadAdapter = ADAPTERS[settings.DB_BACKEND] ?? unknownBackend();
   const adapter = await loadAdapter();
-  [modelingStore, runtimeStore] = await adapter.createStores();
+  await adapter.initAdapter();
   ontologyRegistry = adapter.createRegistry();
   activeAdapter = adapter;
 }
@@ -645,12 +661,11 @@ export async function closeStores(): Promise<void> {
     await activeAdapter.closeStores();
     activeAdapter = null;
   }
-  modelingStore = null;
-  runtimeStore = null;
   ontologyRegistry = null;
 }
 
-/** Ensure the adapter's semantic-search indexes exist (startup hook). */
+/** Ensure the semantic-search indexes of every registered ontology exist
+ * (startup hook). Zero ontologies: nothing happens. */
 export async function ensureSemanticIndexes(dimensions: number): Promise<void> {
   if (activeAdapter === null) {
     throw new Error("Stores not initialized");
@@ -658,18 +673,33 @@ export async function ensureSemanticIndexes(dimensions: number): Promise<void> {
   await activeAdapter.ensureSemanticIndexes(dimensions);
 }
 
-export function getModelingStore(): ModelingStore {
-  if (modelingStore === null) {
+function requireAdapter(): AdapterModule {
+  if (activeAdapter === null) {
     throw new Error("Stores not initialized");
   }
-  return modelingStore;
+  return activeAdapter;
 }
 
-export function getRuntimeStore(): RuntimeStore {
-  if (runtimeStore === null) {
-    throw new Error("Stores not initialized");
+/** The binding check: an unknown ontology key fails with not-found. */
+async function requireOntology(ontologyKey: string): Promise<void> {
+  const existing = await getOntologyRegistry().getOntology(ontologyKey);
+  if (existing === null) {
+    throw new NotFoundError(`Ontology '${ontologyKey}' not found`);
   }
-  return runtimeStore;
+}
+
+/** A modeling store bound to one ontology. Unknown key -> not found. */
+export async function getModelingStore(ontologyKey: string): Promise<ModelingStore> {
+  const adapter = requireAdapter();
+  await requireOntology(ontologyKey);
+  return adapter.createModelingStore(ontologyKey);
+}
+
+/** A runtime store bound to one ontology. Unknown key -> not found. */
+export async function getRuntimeStore(ontologyKey: string): Promise<RuntimeStore> {
+  const adapter = requireAdapter();
+  await requireOntology(ontologyKey);
+  return adapter.createRuntimeStore(ontologyKey);
 }
 
 export function getOntologyRegistry(): OntologyRegistry {
@@ -677,4 +707,37 @@ export function getOntologyRegistry(): OntologyRegistry {
     throw new Error("Stores not initialized");
   }
   return ontologyRegistry;
+}
+
+// ---------------------------------------------------------------------------
+// TRANSITIONAL: sole-ontology binding for the legacy surfaces
+// ---------------------------------------------------------------------------
+
+/**
+ * The legacy `/api/runtime` and `/mcp/*` surfaces (tickets 16/17) do not
+ * yet name an ontology in their URLs. Until they move, they bind to the
+ * server's sole ontology; with zero or several ontologies they answer
+ * not-found, because no binding can be inferred. Delete these two
+ * helpers when the last legacy surface moves.
+ */
+async function soleOntologyKey(): Promise<string> {
+  const ontologies = await getOntologyRegistry().listOntologies();
+  if (ontologies.length !== 1) {
+    throw new NotFoundError(
+      "This surface binds to the server's sole ontology, and the server " +
+        `has ${ontologies.length} — address the ontology explicitly`,
+    );
+  }
+  return ontologies[0]!["key"] as string;
+}
+
+/** @deprecated transitional — removed when `/mcp/*` moves (ticket 17). */
+export async function getLegacyModelingStore(): Promise<ModelingStore> {
+  return getModelingStore(await soleOntologyKey());
+}
+
+/** @deprecated transitional — removed when `/api/runtime` and `/mcp/*`
+ * move (tickets 16/17). */
+export async function getLegacyRuntimeStore(): Promise<RuntimeStore> {
+  return getRuntimeStore(await soleOntologyKey());
 }

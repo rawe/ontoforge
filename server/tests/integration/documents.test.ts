@@ -61,33 +61,34 @@ beforeEach(async () => {
   await wipeDatabase();
   invalidateLoadedSchemaCache();
 
-  const article = await post("/api/model/entity-types", {
+  await post("/api/ontologies", { key: "test_ont" });
+  const article = await post("/api/ontologies/test_ont/model/entity-types", {
     key: "article",
     displayName: "Article",
   });
   ids.articleId = article.entityTypeId as string;
-  await post(`/api/model/entity-types/${ids.articleId}/properties`, {
+  await post(`/api/ontologies/test_ont/model/entity-types/${ids.articleId}/properties`, {
     key: "title",
     displayName: "Title",
     dataType: "string",
     required: true,
   });
-  const bodyProp = await post(`/api/model/entity-types/${ids.articleId}/properties`, {
+  const bodyProp = await post(`/api/ontologies/test_ont/model/entity-types/${ids.articleId}/properties`, {
     key: "body",
     displayName: "Body",
     dataType: "document",
   });
   ids.bodyPropId = bodyProp.propertyId as string;
-  const notesProp = await post(`/api/model/entity-types/${ids.articleId}/properties`, {
+  const notesProp = await post(`/api/ontologies/test_ont/model/entity-types/${ids.articleId}/properties`, {
     key: "notes",
     displayName: "Notes",
     dataType: "document",
   });
   ids.notesPropId = notesProp.propertyId as string;
 
-  await post("/api/model/lenses", { key: "docs_view", name: "Docs View" });
-  const titleOnly = await post("/api/model/lenses", { key: "title_only", name: "Title Only" });
-  await post(`/api/model/lenses/${titleOnly.lensId}/includes/entity-types`, {
+  await post("/api/ontologies/test_ont/model/lenses", { key: "docs_view", name: "Docs View" });
+  const titleOnly = await post("/api/ontologies/test_ont/model/lenses", { key: "title_only", name: "Title Only" });
+  await post(`/api/ontologies/test_ont/model/lenses/${titleOnly.lensId}/includes/entity-types`, {
     key: "article",
     properties: ["title"],
   });
@@ -114,7 +115,8 @@ async function readDocument(entityId: string, propertyKey: string, query = ""): 
  * provider stores a vector on every chunk, so the text→vector map lists
  * exactly the stored chunks (fixtures keep chunk texts distinct). */
 async function chunkTexts(entityId: string, propertyKey: string): Promise<string[]> {
-  const map = await getRuntimeStore().getChunkEmbeddingsForEntityProperty(entityId, propertyKey);
+  const store = await getRuntimeStore("test_ont");
+  const map = await store.getChunkEmbeddingsForEntityProperty(entityId, propertyKey);
   return Object.keys(map);
 }
 
@@ -424,7 +426,7 @@ describe("chunk lifecycle (fake provider, fixed vector)", () => {
 
     const res = await app.inject({
       method: "DELETE",
-      url: `/api/model/entity-types/${ids.articleId}/properties/${ids.notesPropId}`,
+      url: `/api/ontologies/test_ont/model/entity-types/${ids.articleId}/properties/${ids.notesPropId}`,
     });
     expect(res.statusCode).toBe(204);
 
@@ -439,7 +441,7 @@ describe("chunk lifecycle (fake provider, fixed vector)", () => {
     // The `title_only` lens includes the type: consent to the cascade.
     const res = await app.inject({
       method: "DELETE",
-      url: `/api/model/entity-types/${ids.articleId}?cascade=true`,
+      url: `/api/ontologies/test_ont/model/entity-types/${ids.articleId}?cascade=true`,
     });
     expect(res.statusCode, res.body).toBe(204);
 
@@ -453,7 +455,8 @@ describe("chunk lifecycle (fake provider, fixed vector)", () => {
     const entity = await createArticle({ title: "T", body: BODY });
     const entityId = entity._id as string;
 
-    const map = await getRuntimeStore().getChunkEmbeddingsForEntityProperty(entityId, "body");
+    const store = await getRuntimeStore("test_ont");
+    const map = await store.getChunkEmbeddingsForEntityProperty(entityId, "body");
     expect(Object.keys(map).length).toBeGreaterThan(1);
     for (const vector of Object.values(map)) {
       expect(vector).toEqual(VECTOR);

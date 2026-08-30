@@ -1,11 +1,15 @@
 /**
- * Schema transfer against the real database: the export→wipe→import→export
- * fixed point, validate-then-write leaving the database untouched on
- * conflict, and the modeling MCP pair (`get_schema` ≡ export).
+ * Schema transfer against the real database, per ontology: the
+ * export→wipe→import→export fixed point, one ontology's export imported
+ * into another (bare and populated) with conflicts checked all-or-fail
+ * against the target alone, validate-then-write leaving the target
+ * untouched on conflict, and the modeling MCP pair (`get_schema` ≡
+ * export).
  *
- * `tests/fixtures/export.json` is a stored `GET /api/model/export`
- * payload (format 4.0) over the same design this suite imports. Two
- * normalizations make the comparison meaningful:
+ * `tests/fixtures/export.json` is a stored export payload (format 4.0)
+ * over the same design this suite imports; the document is
+ * identity-free — no ontology key or name — so it is portable into any
+ * ontology. Two normalizations make the comparison meaningful:
  *
  * - Property and inclusion arrays are sorted by key: the full-schema query
  *   collects them WITHOUT an ORDER BY, so their order is storage order —
@@ -57,12 +61,24 @@ function normalize(payload: Row): Row {
 let app: FastifyInstance;
 let baseUrl: string;
 
-async function importPayload(payload: Row) {
-  return app.inject({ method: "POST", url: "/api/model/import", payload });
+async function createOntology(key: string): Promise<void> {
+  const res = await app.inject({ method: "POST", url: "/api/ontologies", payload: { key } });
+  expect(res.statusCode, res.body).toBe(201);
 }
 
-async function exportPayload(): Promise<Row> {
-  const res = await app.inject({ method: "GET", url: "/api/model/export" });
+async function importInto(ontologyKey: string, payload: Row) {
+  return app.inject({
+    method: "POST",
+    url: `/api/ontologies/${ontologyKey}/model/import`,
+    payload,
+  });
+}
+
+async function exportFrom(ontologyKey: string): Promise<Row> {
+  const res = await app.inject({
+    method: "GET",
+    url: `/api/ontologies/${ontologyKey}/model/export`,
+  });
   expect(res.statusCode).toBe(200);
   return res.json() as Row;
 }
@@ -87,11 +103,12 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await wipeDatabase();
+  await createOntology("test_ont");
 });
 
 describe("round-trip against a stored export document", () => {
   it("imports the fixture payload and re-exports it identically", async () => {
-    const res = await importPayload(EXPORT_FIXTURE);
+    const res = await importInto("test_ont", EXPORT_FIXTURE);
     expect(res.statusCode, res.body).toBe(201);
     const created = (res.json() as { lenses: Row[] }).lenses;
     expect(created.map((o) => o.key)).toEqual(["hr_view", "test_lens"]);
@@ -99,16 +116,16 @@ describe("round-trip against a stored export document", () => {
     expect(created[0]!.lensId).toMatch(/^[0-9a-f-]{36}$/);
     expect(created[0]!.createdAt).toBeTruthy();
 
-    const reExported = await exportPayload();
+    const reExported = await exportFrom("test_ont");
     expect(normalize(reExported)).toEqual(normalize(EXPORT_FIXTURE));
   });
 
   it("recreates the agents and saved queries inside their lens", async () => {
-    await importPayload(EXPORT_FIXTURE);
+    await importInto("test_ont", EXPORT_FIXTURE);
 
     const agents = await app.inject({
       method: "GET",
-      url: "/api/model/lenses/hr_view/ai-agents",
+      url: "/api/ontologies/test_ont/model/lenses/hr_view/ai-agents",
     });
     expect(agents.statusCode).toBe(200);
     const agentRows = agents.json() as Row[];
@@ -117,24 +134,104 @@ describe("round-trip against a stored export document", () => {
 
     const queries = await app.inject({
       method: "GET",
-      url: "/api/model/lenses/hr_view/saved-queries",
+      url: "/api/ontologies/test_ont/model/lenses/hr_view/saved-queries",
     });
     expect(queries.statusCode).toBe(200);
     const queryRows = queries.json() as Row[];
     expect(queryRows.map((q) => q.key)).toEqual(["people-by-name", "similar-then-fetch"]);
   });
+
+  it("the export document carries no ontology identity", async () => {
+    await importInto("test_ont", EXPORT_FIXTURE);
+    const exported = await exportFrom("test_ont");
+    expect(Object.keys(exported).sort()).toEqual([
+      "entityTypes",
+      "formatVersion",
+      "lenses",
+      "relationTypes",
+    ]);
+  });
+});
+
+describe("transfer between ontologies", () => {
+  it("one ontology's export imports into another, bare or populated", async () => {
+    await createOntology("target_ont");
+    await importInto("test_ont", EXPORT_FIXTURE);
+
+    // Into the bare target: the source ontology holding the same keys is
+    // irrelevant — conflicts are checked against the target alone.
+    const exported = await exportFrom("test_ont");
+    const intoBare = await importInto("target_ont", exported);
+    expect(intoBare.statusCode, intoBare.body).toBe(201);
+    expect(normalize(await exportFrom("target_ont"))).toEqual(normalize(exported));
+
+    // Into the now-populated target: a disjoint payload still lands.
+    const disjoint: Row = {
+      formatVersion: "4.0",
+      entityTypes: [
+        { key: "project", displayName: "Project", description: null, properties: [] },
+      ],
+      relationTypes: [],
+      lenses: [],
+    };
+    const intoPopulated = await importInto("target_ont", disjoint);
+    expect(intoPopulated.statusCode, intoPopulated.body).toBe(201);
+
+    const targetTypes = await app.inject({
+      method: "GET",
+      url: "/api/ontologies/target_ont/model/entity-types",
+    });
+    expect((targetTypes.json() as Row[]).map((et) => et.key)).toEqual([
+      "company",
+      "person",
+      "project",
+    ]);
+    // The source ontology never saw the disjoint payload.
+    const sourceTypes = await app.inject({
+      method: "GET",
+      url: "/api/ontologies/test_ont/model/entity-types",
+    });
+    expect((sourceTypes.json() as Row[]).map((et) => et.key)).toEqual(["company", "person"]);
+  });
+
+  it("conflicts fail all-or-nothing against the target ontology's keys", async () => {
+    await createOntology("target_ont");
+    await importInto("test_ont", EXPORT_FIXTURE);
+    const exported = await exportFrom("test_ont");
+    await importInto("target_ont", exported);
+    const before = await exportFrom("target_ont");
+
+    const res = await importInto("target_ont", exported);
+    expect(res.statusCode).toBe(409);
+    const body = res.json() as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("RESOURCE_CONFLICT");
+    for (const key of ["person", "company", "works_for", "hr_view", "test_lens"]) {
+      expect(body.error.message).toContain(`'${key}'`);
+    }
+
+    expect(await exportFrom("target_ont")).toEqual(before);
+  });
+
+  it("import into an unknown ontology answers 404 — import never creates its target", async () => {
+    const res = await importInto("no_such_ont", EXPORT_FIXTURE);
+    expect(res.statusCode).toBe(404);
+    expect((res.json() as { error: { message: string } }).error.message).toContain(
+      "'no_such_ont'",
+    );
+  });
 });
 
 describe("fixed point", () => {
   it("export → wipe → import → export yields the identical payload", async () => {
-    await importPayload(EXPORT_FIXTURE);
-    const first = await exportPayload();
+    await importInto("test_ont", EXPORT_FIXTURE);
+    const first = await exportFrom("test_ont");
 
     await wipeDatabase();
-    const res = await importPayload(first);
+    await createOntology("test_ont");
+    const res = await importInto("test_ont", first);
     expect(res.statusCode, res.body).toBe(201);
 
-    const second = await exportPayload();
+    const second = await exportFrom("test_ont");
     expect(normalize(second)).toEqual(normalize(first));
     // The unscoped lens carries no includes key at all in the TS export.
     const unscoped = (second.lenses as Row[]).find((o) => o.key === "test_lens")!;
@@ -144,10 +241,10 @@ describe("fixed point", () => {
 
 describe("validate-then-write", () => {
   it("a conflicting re-import answers 409 naming every key and changes nothing", async () => {
-    await importPayload(EXPORT_FIXTURE);
-    const before = await exportPayload();
+    await importInto("test_ont", EXPORT_FIXTURE);
+    const before = await exportFrom("test_ont");
 
-    const res = await importPayload(EXPORT_FIXTURE);
+    const res = await importInto("test_ont", EXPORT_FIXTURE);
     expect(res.statusCode).toBe(409);
     const body = res.json() as { error: { code: string; message: string } };
     expect(body.error.code).toBe("RESOURCE_CONFLICT");
@@ -155,7 +252,7 @@ describe("validate-then-write", () => {
       expect(body.error.message).toContain(`'${key}'`);
     }
 
-    const after = await exportPayload();
+    const after = await exportFrom("test_ont");
     expect(after).toEqual(before);
   });
 
@@ -167,17 +264,19 @@ describe("validate-then-write", () => {
       dataType: "string",
       required: false,
     });
-    const res = await importPayload(bad);
+    const res = await importInto("test_ont", bad);
     expect(res.statusCode).toBe(422);
     expect((res.json() as Row & { error: Row }).error.message).toContain("'_id'");
 
-    const after = await exportPayload();
+    const after = await exportFrom("test_ont");
     expect(after.entityTypes).toEqual([]);
     expect(after.lenses).toEqual([]);
   });
 });
 
 describe("modeling MCP transfer pair", () => {
+  // The legacy /mcp/model mount binds to the server's sole ontology
+  // (test_ont here) until ticket 17 moves it under /mcp/ontologies.
   async function connect(): Promise<Client> {
     const client = new Client({ name: "session-10-tests", version: "0.0.1" });
     await client.connect(new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp/model`)));
@@ -194,8 +293,8 @@ describe("modeling MCP transfer pair", () => {
   }
 
   it("get_schema and export_schema both return exactly the REST export payload", async () => {
-    await importPayload(EXPORT_FIXTURE);
-    const rest = await exportPayload();
+    await importInto("test_ont", EXPORT_FIXTURE);
+    const rest = await exportFrom("test_ont");
 
     const client = await connect();
     try {

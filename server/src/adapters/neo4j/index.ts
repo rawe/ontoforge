@@ -14,10 +14,23 @@ import { closeDriver, getDriver, initDriver } from "./driver.js";
 import { Neo4jModelingStore } from "./modelingStore.js";
 import { Neo4jRuntimeStore } from "./runtimeStore.js";
 
-/** Initialize the Neo4j adapter and return `[modelingStore, runtimeStore]`. */
-export async function createStores(): Promise<[Neo4jModelingStore, Neo4jRuntimeStore]> {
-  const driver = await initDriver();
-  return [new Neo4jModelingStore(driver), new Neo4jRuntimeStore(driver)];
+/** Initialize the Neo4j adapter: connect and verify the driver. */
+export async function initAdapter(): Promise<void> {
+  await initDriver();
+}
+
+/**
+ * The single-graph stores. This adapter holds at most one ontology
+ * (spec §6.6; the capped registry is ticket 18's), so the binding key
+ * selects nothing physical yet — today's label derivation and Cypher
+ * stay valid unchanged.
+ */
+export function createModelingStore(_ontologyKey: string): Neo4jModelingStore {
+  return new Neo4jModelingStore(getDriver());
+}
+
+export function createRuntimeStore(_ontologyKey: string): Neo4jRuntimeStore {
+  return new Neo4jRuntimeStore(getDriver());
 }
 
 /**

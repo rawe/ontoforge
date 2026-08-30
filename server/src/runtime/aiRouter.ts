@@ -16,7 +16,7 @@ import { z } from "zod";
 import { settings } from "../config.js";
 import { DEFAULT_AGENT_CONFIG } from "../core/ai.js";
 import { NotFoundError } from "../core/exceptions.js";
-import { getRuntimeStore } from "../core/ports.js";
+import { getLegacyRuntimeStore } from "../core/ports.js";
 import * as aiService from "./aiService.js";
 import { loadSchema } from "./schemaCache.js";
 
@@ -73,7 +73,7 @@ export const aiRouter: FastifyPluginAsyncZod = async (app) => {
     "/:lensKey/ai/query",
     { schema: { tags: ["ai"], params: LensParams, body: AiQueryPayload } },
     async (request) =>
-      aiService.aiQuery(request.params.lensKey, request.body.question, getRuntimeStore()),
+      aiService.aiQuery(request.params.lensKey, request.body.question, await getLegacyRuntimeStore()),
   );
 
   app.post(
@@ -83,7 +83,7 @@ export const aiRouter: FastifyPluginAsyncZod = async (app) => {
       aiService.aiExtract(
         request.params.lensKey,
         request.body.text,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
         request.body.entityTypes ?? request.body.entity_types ?? null,
         request.body.create,
       ),
@@ -96,7 +96,7 @@ export const aiRouter: FastifyPluginAsyncZod = async (app) => {
       aiService.aiChat(
         request.params.lensKey,
         request.body.message,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
         request.body.history ?? null,
         request.body.includeToolCalls ?? request.body.include_tool_calls ?? false,
       ),
@@ -108,7 +108,7 @@ export const aiRouter: FastifyPluginAsyncZod = async (app) => {
     "/:lensKey/ai/agents",
     { schema: { tags: ["ai"], params: LensParams } },
     async (request) =>
-      aiService.listRuntimeAgents(request.params.lensKey, getRuntimeStore()),
+      aiService.listRuntimeAgents(request.params.lensKey, await getLegacyRuntimeStore()),
   );
 
   app.post(
@@ -119,7 +119,7 @@ export const aiRouter: FastifyPluginAsyncZod = async (app) => {
         request.params.lensKey,
         request.params.agentKey,
         request.body.message,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
         request.body.history ?? null,
         request.body.includeToolCalls ?? request.body.include_tool_calls ?? false,
       ),
@@ -131,7 +131,7 @@ export const aiRouter: FastifyPluginAsyncZod = async (app) => {
     "/:lensKey/ai/.well-known/agent.json",
     { schema: { tags: ["ai"], params: LensParams } },
     async (request) => {
-      const loaded = await loadSchema(request.params.lensKey, getRuntimeStore());
+      const loaded = await loadSchema(request.params.lensKey, await getLegacyRuntimeStore());
       return aiService.buildAgentCard(DEFAULT_AGENT_CONFIG, loaded.scoped, getBaseUrl(request));
     },
   );
@@ -144,7 +144,7 @@ export const aiRouter: FastifyPluginAsyncZod = async (app) => {
         DEFAULT_AGENT_CONFIG,
         request.params.lensKey,
         request.body,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
       ),
   );
 
@@ -152,7 +152,7 @@ export const aiRouter: FastifyPluginAsyncZod = async (app) => {
     "/:lensKey/ai/agents/:agentKey/.well-known/agent.json",
     { schema: { tags: ["ai"], params: AgentParams } },
     async (request) => {
-      const loaded = await loadSchema(request.params.lensKey, getRuntimeStore());
+      const loaded = await loadSchema(request.params.lensKey, await getLegacyRuntimeStore());
       const config = loaded.agentConfigs[request.params.agentKey];
       if (!config) {
         throw new NotFoundError(`AI agent '${request.params.agentKey}' not found`);
@@ -165,7 +165,7 @@ export const aiRouter: FastifyPluginAsyncZod = async (app) => {
     "/:lensKey/ai/agents/:agentKey/a2a",
     { schema: { tags: ["ai"], params: AgentParams, body: A2aPayload } },
     async (request) => {
-      const loaded = await loadSchema(request.params.lensKey, getRuntimeStore());
+      const loaded = await loadSchema(request.params.lensKey, await getLegacyRuntimeStore());
       const config = loaded.agentConfigs[request.params.agentKey];
       if (!config) {
         throw new NotFoundError(`AI agent '${request.params.agentKey}' not found`);
@@ -174,7 +174,7 @@ export const aiRouter: FastifyPluginAsyncZod = async (app) => {
         config,
         request.params.lensKey,
         request.body,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
       );
     },
   );

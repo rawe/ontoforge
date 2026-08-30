@@ -10,9 +10,12 @@
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { randomUUID } from "node:crypto";
+
 import {
   closeStores,
   getModelingStore,
+  getOntologyRegistry,
   initStores,
 } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
@@ -37,7 +40,9 @@ describe("adapter lifecycle", () => {
     await closeStores();
     await closeStores(); // the port contract's "Close. Idempotent."
     await initStores(); // boot again against the same store
-    expect(await getModelingStore().listLenses()).toEqual([]);
+    await getOntologyRegistry().createOntology(randomUUID(), "lifecycle_probe", null, null);
+    const store = await getModelingStore("lifecycle_probe");
+    expect(await store.listLenses()).toEqual([]);
   });
 });
 

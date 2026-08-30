@@ -31,9 +31,18 @@ import { camelizeRow, camelizeRows } from "./rows.js";
 // the adapter.
 const ONTOLOGY_COLS = "ontology_id, key, display_name, created_at, updated_at";
 
-/** The namespace an ontology key names. */
-function ontologyNamespace(key: string): string {
+/** The namespace an ontology key names — the binding the bound stores
+ * carry (`index.ts`). */
+export function ontologyNamespace(key: string): string {
   return `ont_${key}`;
+}
+
+/** Every registered ontology's namespace, in key order — what the
+ * adapter's per-namespace maintenance walks (`index.ts`). The registry,
+ * not the PG catalog, is the authoritative list. */
+export async function listOntologyNamespaces(): Promise<string[]> {
+  const result = await runQuery(`SELECT namespace FROM public.ontology ORDER BY key`);
+  return result.rows.map((row) => row["namespace"] as string);
 }
 
 export class PostgresOntologyRegistry implements OntologyRegistry {

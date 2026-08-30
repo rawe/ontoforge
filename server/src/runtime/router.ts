@@ -16,7 +16,7 @@ import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 
 import { settings } from "../config.js";
-import { getRuntimeStore } from "../core/ports.js";
+import { getLegacyRuntimeStore } from "../core/ports.js";
 import { parseFilters } from "./service.js";
 import * as service from "./service.js";
 
@@ -184,34 +184,34 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/:lensKey/schema",
     { schema: { tags: ["runtime"], params: LensParams } },
-    async (request) => service.getFullSchema(request.params.lensKey, getRuntimeStore()),
+    async (request) => service.getFullSchema(request.params.lensKey, await getLegacyRuntimeStore()),
   );
 
   app.get(
     "/:lensKey/schema/entity-types",
     { schema: { tags: ["runtime"], params: LensParams } },
-    async (request) => service.listEntityTypes(request.params.lensKey, getRuntimeStore()),
+    async (request) => service.listEntityTypes(request.params.lensKey, await getLegacyRuntimeStore()),
   );
 
   app.get(
     "/:lensKey/schema/entity-types/:key",
     { schema: { tags: ["runtime"], params: TypeKeyParams } },
     async (request) =>
-      service.getEntityType(request.params.lensKey, request.params.key, getRuntimeStore()),
+      service.getEntityType(request.params.lensKey, request.params.key, await getLegacyRuntimeStore()),
   );
 
   app.get(
     "/:lensKey/schema/relation-types",
     { schema: { tags: ["runtime"], params: LensParams } },
     async (request) =>
-      service.listRelationTypes(request.params.lensKey, getRuntimeStore()),
+      service.listRelationTypes(request.params.lensKey, await getLegacyRuntimeStore()),
   );
 
   app.get(
     "/:lensKey/schema/relation-types/:key",
     { schema: { tags: ["runtime"], params: TypeKeyParams } },
     async (request) =>
-      service.getRelationType(request.params.lensKey, request.params.key, getRuntimeStore()),
+      service.getRelationType(request.params.lensKey, request.params.key, await getLegacyRuntimeStore()),
   );
 
   // --- Semantic search ---
@@ -228,7 +228,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         type ?? null,
         limit,
         min_score ?? null,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
         { filters, fields: fields ?? null, searchIn, snippets },
       );
     },
@@ -244,7 +244,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         request.params.lensKey,
         request.params.entityTypeKey,
         request.body,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
       );
       return reply.status(201).send(result);
     },
@@ -265,7 +265,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         order,
         q ?? null,
         filters,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
         fields ?? null,
       );
     },
@@ -279,7 +279,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         request.params.lensKey,
         request.params.entityTypeKey,
         request.params.entityId,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
         request.query.fields ?? null,
       ),
   );
@@ -293,7 +293,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         request.params.entityTypeKey,
         request.params.entityId,
         request.body,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
       ),
   );
 
@@ -305,7 +305,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         request.params.lensKey,
         request.params.entityTypeKey,
         request.params.entityId,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
       );
       return reply.status(204).send();
     },
@@ -324,7 +324,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         request.params.propertyKey,
         request.query.offset,
         request.query.limit ?? null,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
       ),
   );
 
@@ -338,7 +338,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         request.params.entityId,
         request.params.propertyKey,
         request.body,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
       ),
   );
 
@@ -356,7 +356,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         direction,
         relationTypeKey ?? null,
         limit,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
         fields ?? null,
         relationFields ?? null,
       );
@@ -369,7 +369,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
     "/:lensKey/query",
     { schema: { tags: ["runtime"], params: LensParams, body: QueryPayload } },
     async (request) =>
-      service.executeQuery(request.params.lensKey, request.body.query, getRuntimeStore()),
+      service.executeQuery(request.params.lensKey, request.body.query, await getLegacyRuntimeStore()),
   );
 
   // --- Saved queries (runtime: list from the cache, search, run) ---
@@ -378,7 +378,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
     "/:lensKey/saved-queries",
     { schema: { tags: ["runtime"], params: LensParams } },
     async (request) =>
-      service.listSavedQueries(request.params.lensKey, getRuntimeStore()),
+      service.listSavedQueries(request.params.lensKey, await getLegacyRuntimeStore()),
   );
 
   app.get(
@@ -390,7 +390,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         request.query.q,
         request.query.limit,
         request.query.min_score,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
       ),
   );
 
@@ -402,7 +402,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         request.params.lensKey,
         request.params.queryKey,
         request.body.params,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
       ),
   );
 
@@ -421,7 +421,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         fromEntityId,
         toEntityId,
         userProps,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
       );
       return reply.status(201).send(result);
     },
@@ -443,7 +443,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         fromEntityId ?? null,
         toEntityId ?? null,
         filters,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
       );
     },
   );
@@ -456,7 +456,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         request.params.lensKey,
         request.params.relationTypeKey,
         request.params.relationId,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
       ),
   );
 
@@ -469,7 +469,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         request.params.relationTypeKey,
         request.params.relationId,
         request.body,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
       ),
   );
 
@@ -481,7 +481,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         request.params.lensKey,
         request.params.relationTypeKey,
         request.params.relationId,
-        getRuntimeStore(),
+        await getLegacyRuntimeStore(),
       );
       return reply.status(204).send();
     },

@@ -1,13 +1,19 @@
 /**
  * Init DDL and the vector-index lifecycle.
  *
- * `initSchema` runs the server-wide DDL (the `public.ontology` registry
- * table) and the whole ten-table set — schema side and instance side
- * together — as one all-or-nothing transaction at adapter init.
- * Idempotence rides `CREATE TABLE IF NOT EXISTS` with all constraints
- * inline and explicitly named (PG has no `ADD CONSTRAINT IF NOT EXISTS`);
- * no fixed constraint or index name uses the `vec_` prefix, which is
- * reserved for the dynamically created vector indexes.
+ * `initSchema` runs the server-wide DDL — the pgvector extension and the
+ * `public.ontology` registry table — as one all-or-nothing transaction at
+ * adapter init. The ten-table set is ontology-scoped and runs only at
+ * ontology creation, inside the fresh `ont_<key>` namespace
+ * (`registry.ts`). Idempotence rides `CREATE TABLE IF NOT EXISTS` with
+ * all constraints inline and explicitly named (PG has no
+ * `ADD CONSTRAINT IF NOT EXISTS`); no fixed constraint or index name uses
+ * the `vec_` prefix, which is reserved for the dynamically created vector
+ * indexes.
+ *
+ * The vector-lifecycle functions take the caller's bound `namespace` and
+ * run their transactions inside it, so index DDL and catalog reads
+ * (`current_schema()`) resolve within that ontology alone.
  *
  * The DDL carries structure only — identity, referential integrity,
  * exactly-one-owner, uniqueness. Business rules validate in the service,
@@ -51,10 +57,9 @@ const SERVER_DDL_STATEMENTS: string[] = [
 
 /**
  * The ten-table set one ontology lives in. Deliberately unqualified —
- * namespace-relocatable: at adapter init it runs against the default
- * namespace (the single-schema home), and at ontology creation the
- * registry runs it inside a fresh `ont_<key>` namespace via the
- * transaction's search path.
+ * namespace-relocatable: ontology creation runs it inside a fresh
+ * `ont_<key>` namespace via the transaction's search path
+ * (`registry.ts`).
  */
 export const ONTOLOGY_DDL_STATEMENTS: string[] = [
   // --- Schema side -------------------------------------------------------
@@ -193,10 +198,12 @@ export const ONTOLOGY_DDL_STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS document_chunk_entity_property_idx ON document_chunk (entity_id, property_key)`,
 ];
 
-/** Create every table and index if absent, in one transaction. */
+/** Create the server-wide objects if absent, in one transaction. Boot
+ * DDL creates nothing ontology-scoped — ontologies are provisioned by
+ * the registry, each in its own namespace. */
 export async function initSchema(): Promise<void> {
   await withTransaction(async (querier) => {
-    for (const statement of [...SERVER_DDL_STATEMENTS, ...ONTOLOGY_DDL_STATEMENTS]) {
+    for (const statement of SERVER_DDL_STATEMENTS) {
       await querier.query(statement);
     }
   });
@@ -563,14 +570,19 @@ export async function createVectorIndex(
   entityTypeKey: string,
   dimensions: number,
   _filterProperties?: string[] | null,
+  namespace?: string,
 ): Promise<void> {
-  await withTransaction(async (querier) => {
-    const entityTypeId = await entityTypeIdOf(querier, entityTypeKey);
-    if (entityTypeId === null) {
-      return;
-    }
-    await ensureIndex(querier, entityIndexSpec(entityTypeId, entityTypeKey), dimensions, false);
-  });
+  await withTransaction(
+    async (querier) => {
+      const entityTypeId = await entityTypeIdOf(querier, entityTypeKey);
+      if (entityTypeId === null) {
+        return;
+      }
+      await ensureIndex(querier, entityIndexSpec(entityTypeId, entityTypeKey), dimensions, false);
+    },
+    "READ COMMITTED",
+    namespace,
+  );
 }
 
 /**
@@ -580,14 +592,18 @@ export async function createVectorIndex(
  * deleted the row leave the index behind as an orphan — `ensureVectorIndexes`
  * sweeps it on the next startup or rebuild.
  */
-export async function dropVectorIndex(entityTypeKey: string): Promise<void> {
-  await withTransaction(async (querier) => {
-    const entityTypeId = await entityTypeIdOf(querier, entityTypeKey);
-    if (entityTypeId === null) {
-      return;
-    }
-    await dropIndex(querier, entityIndexName(entityTypeId));
-  });
+export async function dropVectorIndex(entityTypeKey: string, namespace?: string): Promise<void> {
+  await withTransaction(
+    async (querier) => {
+      const entityTypeId = await entityTypeIdOf(querier, entityTypeKey);
+      if (entityTypeId === null) {
+        return;
+      }
+      await dropIndex(querier, entityIndexName(entityTypeId));
+    },
+    "READ COMMITTED",
+    namespace,
+  );
 }
 
 /**
@@ -601,18 +617,23 @@ export async function dropVectorIndex(entityTypeKey: string): Promise<void> {
 export async function rebuildVectorIndex(
   entityTypeKey: string,
   dimensions: number,
+  namespace?: string,
 ): Promise<void> {
-  await withTransaction(async (querier) => {
-    const entityTypeId = await entityTypeIdOf(querier, entityTypeKey);
-    if (entityTypeId === null) {
-      return;
-    }
-    const spec = entityIndexSpec(entityTypeId, entityTypeKey);
-    await dropIndex(querier, spec.name);
-    // Not `ensureIndex`: the index is gone, so there is nothing left to
-    // reconcile — only a catalog read that could answer nothing.
-    await querier.query(createHnsw(spec, dimensions));
-  });
+  await withTransaction(
+    async (querier) => {
+      const entityTypeId = await entityTypeIdOf(querier, entityTypeKey);
+      if (entityTypeId === null) {
+        return;
+      }
+      const spec = entityIndexSpec(entityTypeId, entityTypeKey);
+      await dropIndex(querier, spec.name);
+      // Not `ensureIndex`: the index is gone, so there is nothing left to
+      // reconcile — only a catalog read that could answer nothing.
+      await querier.query(createHnsw(spec, dimensions));
+    },
+    "READ COMMITTED",
+    namespace,
+  );
 }
 
 /** Create the chunk vector index of one document property. */
@@ -620,19 +641,24 @@ export async function createDocumentVectorIndex(
   entityTypeKey: string,
   propertyKey: string,
   dimensions: number,
+  namespace?: string,
 ): Promise<void> {
-  await withTransaction(async (querier) => {
-    const propertyId = await documentPropertyIdOf(querier, entityTypeKey, propertyKey);
-    if (propertyId === null) {
-      return;
-    }
-    await ensureIndex(
-      querier,
-      chunkIndexSpec(propertyId, entityTypeKey, propertyKey),
-      dimensions,
-      false,
-    );
-  });
+  await withTransaction(
+    async (querier) => {
+      const propertyId = await documentPropertyIdOf(querier, entityTypeKey, propertyKey);
+      if (propertyId === null) {
+        return;
+      }
+      await ensureIndex(
+        querier,
+        chunkIndexSpec(propertyId, entityTypeKey, propertyKey),
+        dimensions,
+        false,
+      );
+    },
+    "READ COMMITTED",
+    namespace,
+  );
 }
 
 /** Drop the chunk vector index of one document property. As with
@@ -641,21 +667,33 @@ export async function createDocumentVectorIndex(
 export async function dropDocumentVectorIndex(
   entityTypeKey: string,
   propertyKey: string,
+  namespace?: string,
 ): Promise<void> {
-  await withTransaction(async (querier) => {
-    const propertyId = await documentPropertyIdOf(querier, entityTypeKey, propertyKey);
-    if (propertyId === null) {
-      return;
-    }
-    await dropIndex(querier, chunkIndexName(propertyId));
-  });
+  await withTransaction(
+    async (querier) => {
+      const propertyId = await documentPropertyIdOf(querier, entityTypeKey, propertyKey);
+      if (propertyId === null) {
+        return;
+      }
+      await dropIndex(querier, chunkIndexName(propertyId));
+    },
+    "READ COMMITTED",
+    namespace,
+  );
 }
 
 /** Ensure the saved-query description index exists. */
-export async function ensureSavedQueryVectorIndex(dimensions: number): Promise<void> {
-  await withTransaction(async (querier) => {
-    await ensureIndex(querier, SAVED_QUERY_SPEC, dimensions, false);
-  });
+export async function ensureSavedQueryVectorIndex(
+  dimensions: number,
+  namespace?: string,
+): Promise<void> {
+  await withTransaction(
+    async (querier) => {
+      await ensureIndex(querier, SAVED_QUERY_SPEC, dimensions, false);
+    },
+    "READ COMMITTED",
+    namespace,
+  );
 }
 
 /**
@@ -670,41 +708,46 @@ export async function ensureSavedQueryVectorIndex(dimensions: number): Promise<v
 export async function ensureVectorIndexes(
   dimensions: number,
   recreateOnMismatch = false,
+  namespace?: string,
 ): Promise<void> {
-  await withTransaction(async (querier) => {
-    await sweepOrphanIndexes(querier);
+  await withTransaction(
+    async (querier) => {
+      await sweepOrphanIndexes(querier);
 
-    const entityTypes = await querier.query(
-      `SELECT entity_type_id, key FROM entity_type ORDER BY key`,
-    );
-    for (const row of entityTypes.rows) {
-      await ensureIndex(
-        querier,
-        entityIndexSpec(row["entity_type_id"] as string, row["key"] as string),
-        dimensions,
-        recreateOnMismatch,
+      const entityTypes = await querier.query(
+        `SELECT entity_type_id, key FROM entity_type ORDER BY key`,
       );
-    }
+      for (const row of entityTypes.rows) {
+        await ensureIndex(
+          querier,
+          entityIndexSpec(row["entity_type_id"] as string, row["key"] as string),
+          dimensions,
+          recreateOnMismatch,
+        );
+      }
 
-    const documentProperties = await querier.query(
-      `SELECT p.property_id, p.key AS property_key, et.key AS entity_type_key
+      const documentProperties = await querier.query(
+        `SELECT p.property_id, p.key AS property_key, et.key AS entity_type_key
      ${DOCUMENT_PROPERTY_ROWS}
      ORDER BY et.key, p.key`,
-    );
-    for (const row of documentProperties.rows) {
-      await ensureIndex(
-        querier,
-        chunkIndexSpec(
-          row["property_id"] as string,
-          row["entity_type_key"] as string,
-          row["property_key"] as string,
-        ),
-        dimensions,
-        recreateOnMismatch,
       );
-    }
+      for (const row of documentProperties.rows) {
+        await ensureIndex(
+          querier,
+          chunkIndexSpec(
+            row["property_id"] as string,
+            row["entity_type_key"] as string,
+            row["property_key"] as string,
+          ),
+          dimensions,
+          recreateOnMismatch,
+        );
+      }
 
-    await ensureIndex(querier, CROSS_TYPE_SPEC, dimensions, recreateOnMismatch);
-    await ensureIndex(querier, SAVED_QUERY_SPEC, dimensions, recreateOnMismatch);
-  });
+      await ensureIndex(querier, CROSS_TYPE_SPEC, dimensions, recreateOnMismatch);
+      await ensureIndex(querier, SAVED_QUERY_SPEC, dimensions, recreateOnMismatch);
+    },
+    "READ COMMITTED",
+    namespace,
+  );
 }

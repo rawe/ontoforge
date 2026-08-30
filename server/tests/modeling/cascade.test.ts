@@ -13,8 +13,10 @@ import { createMockModelingStore, NOW, type MockModelingStore } from "./helpers.
 const holder: { store: MockModelingStore } = { store: createMockModelingStore() };
 
 vi.mock("../../src/core/ports.js", () => ({
-  getModelingStore: () => holder.store,
-  getRuntimeStore: () => ({}),
+  getModelingStore: async () => holder.store,
+  getLegacyModelingStore: async () => holder.store,
+  getRuntimeStore: async () => ({}),
+  getLegacyRuntimeStore: async () => ({}),
 }));
 
 const ET_DATA = {
@@ -68,7 +70,7 @@ beforeEach(() => {
 describe("trigger 1: delete an entity type included by a lens", () => {
   it("without cascade: 409 CASCADE_REQUIRED with the sorted lens keys", async () => {
     holder.store.findLensesIncludingType.mockResolvedValue(["alpha", "beta", "zulu"]);
-    const res = await app.inject({ method: "DELETE", url: "/api/model/entity-types/et-1" });
+    const res = await app.inject({ method: "DELETE", url: "/api/ontologies/onto/model/entity-types/et-1" });
     expect(res.statusCode).toBe(409);
     expect(res.json().error.code).toBe("CASCADE_REQUIRED");
     expect(res.json().error.details.affectedLenses).toEqual(["alpha", "beta", "zulu"]);
@@ -81,7 +83,7 @@ describe("trigger 1: delete an entity type included by a lens", () => {
     holder.store.deleteEntityType.mockResolvedValue(true);
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/entity-types/et-1?cascade=true",
+      url: "/api/ontologies/onto/model/entity-types/et-1?cascade=true",
     });
     expect(res.statusCode).toBe(204);
     expect(holder.store.removeAllIncludesForType).toHaveBeenCalledWith("EntityType", "et-1");
@@ -91,7 +93,7 @@ describe("trigger 1: delete an entity type included by a lens", () => {
   it("a lens-free type deletes without any of it", async () => {
     holder.store.getEntityType.mockResolvedValue(ET_DATA);
     holder.store.deleteEntityType.mockResolvedValue(true);
-    const res = await app.inject({ method: "DELETE", url: "/api/model/entity-types/et-1" });
+    const res = await app.inject({ method: "DELETE", url: "/api/ontologies/onto/model/entity-types/et-1" });
     expect(res.statusCode).toBe(204);
     expect(holder.store.removeAllIncludesForType).not.toHaveBeenCalled();
   });
@@ -100,7 +102,7 @@ describe("trigger 1: delete an entity type included by a lens", () => {
 describe("trigger 2: delete a relation type included by a lens", () => {
   it("without cascade: 409 CASCADE_REQUIRED with the sorted lens keys", async () => {
     holder.store.findLensesIncludingType.mockResolvedValue(["hr_lens", "sales_lens"]);
-    const res = await app.inject({ method: "DELETE", url: "/api/model/relation-types/rt-1" });
+    const res = await app.inject({ method: "DELETE", url: "/api/ontologies/onto/model/relation-types/rt-1" });
     expect(res.statusCode).toBe(409);
     expect(res.json().error.code).toBe("CASCADE_REQUIRED");
     expect(res.json().error.details.affectedLenses).toEqual(["hr_lens", "sales_lens"]);
@@ -111,7 +113,7 @@ describe("trigger 2: delete a relation type included by a lens", () => {
     holder.store.deleteRelationType.mockResolvedValue(true);
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/relation-types/rt-1?cascade=true",
+      url: "/api/ontologies/onto/model/relation-types/rt-1?cascade=true",
     });
     expect(res.statusCode).toBe(204);
     expect(holder.store.removeAllIncludesForType).toHaveBeenCalledWith("RelationType", "rt-1");
@@ -124,7 +126,7 @@ describe("trigger 3: create a required property with no default", () => {
     holder.store.findLensesWithExplicitProperty.mockResolvedValue(["alpha", "beta"]);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/entity-types/et-1/properties",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties",
       payload: { key: "salary", displayName: "Salary", dataType: "float", required: true },
     });
     expect(res.statusCode).toBe(409);
@@ -138,7 +140,7 @@ describe("trigger 3: create a required property with no default", () => {
     holder.store.findLensesWithExplicitProperty.mockResolvedValue(["hr_lens"]);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/relation-types/rt-1/properties",
+      url: "/api/ontologies/onto/model/relation-types/rt-1/properties",
       payload: { key: "since", displayName: "Since", dataType: "date", required: true },
     });
     expect(res.statusCode).toBe(409);
@@ -151,7 +153,7 @@ describe("trigger 3: create a required property with no default", () => {
     holder.store.createProperty.mockResolvedValue(PROP_DATA);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/entity-types/et-1/properties?cascade=true",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties?cascade=true",
       payload: { key: "salary", displayName: "Salary", dataType: "float", required: true },
     });
     expect(res.statusCode).toBe(201);
@@ -167,7 +169,7 @@ describe("trigger 3: create a required property with no default", () => {
     holder.store.createProperty.mockResolvedValue({ ...PROP_DATA, defaultValue: "0" });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/entity-types/et-1/properties",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties",
       payload: {
         key: "salary",
         displayName: "Salary",
@@ -185,7 +187,7 @@ describe("trigger 3: create a required property with no default", () => {
     holder.store.createProperty.mockResolvedValue({ ...PROP_DATA, required: false });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/entity-types/et-1/properties",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties",
       payload: { key: "salary", displayName: "Salary", dataType: "float" },
     });
     expect(res.statusCode).toBe(201);
@@ -200,7 +202,7 @@ describe("trigger 3: create a required property with no default", () => {
     holder.store.createProperty.mockResolvedValue(PROP_DATA);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/entity-types/et-1/properties",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties",
       payload: { key: "salary", displayName: "Salary", dataType: "float", required: true },
     });
     expect(res.statusCode).toBe(201);
@@ -216,7 +218,7 @@ describe("the non-trigger: property deletion (cleanup, not consent)", () => {
     holder.store.deleteProperty.mockResolvedValue(true);
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/entity-types/et-1/properties/prop-1",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties/prop-1",
     });
     // Never a refusal — CASCADE_REQUIRED is unreachable on this path.
     expect(res.statusCode).toBe(204);
@@ -230,7 +232,7 @@ describe("the non-trigger: property deletion (cleanup, not consent)", () => {
     holder.store.deleteProperty.mockResolvedValue(true);
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/entity-types/et-1/properties/prop-1?cascade=true",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties/prop-1?cascade=true",
     });
     expect(res.statusCode).toBe(204);
     expect(holder.store.removePropertyFromIncludesLists).toHaveBeenCalledWith(
@@ -247,7 +249,7 @@ describe("the unchecked gap: changing an existing property", () => {
     holder.store.updateProperty.mockResolvedValue({ ...PROP_DATA, required: true });
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/entity-types/et-1/properties/prop-1",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties/prop-1",
       payload: { required: true, defaultValue: null },
     });
     // Exactly the state trigger 3 exists to prevent — and nothing stops it.

@@ -67,15 +67,20 @@ export async function vectorSearch(
   queryEmbedding: number[],
   params: unknown[],
   sqlFor: (width: number) => string,
+  namespace?: string,
 ): Promise<Row[]> {
-  return withTransaction(async (querier) => {
-    await querier.query("SET LOCAL hnsw.iterative_scan = strict_order");
-    const indexName = await indexOf(querier);
-    const width =
-      (indexName === null ? null : await indexWidth(querier, indexName)) ?? queryEmbedding.length;
-    const result = await querier.query(sqlFor(width), params);
-    return result.rows;
-  });
+  return withTransaction(
+    async (querier) => {
+      await querier.query("SET LOCAL hnsw.iterative_scan = strict_order");
+      const indexName = await indexOf(querier);
+      const width =
+        (indexName === null ? null : await indexWidth(querier, indexName)) ?? queryEmbedding.length;
+      const result = await querier.query(sqlFor(width), params);
+      return result.rows;
+    },
+    "READ COMMITTED",
+    namespace,
+  );
 }
 
 /** The post-hoc similarity floor. A page that loses rows to it stays

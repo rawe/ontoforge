@@ -14,6 +14,14 @@
  *   statements uses it, reads included; there is deliberately no bare
  *   `withClient`.
  *
+ * Every door takes an optional `namespace` — the ontology binding. A
+ * bound call runs inside a transaction whose first statement is
+ * `SET LOCAL search_path TO <namespace>, public`, so every unqualified
+ * name in the statement resolves inside that ontology's namespace and
+ * the setting can never leak to another pooled connection (`SET LOCAL`
+ * dies with the transaction). An unbound call runs against the
+ * connection's default namespace, exactly as before.
+ *
  * `pg` has no single error hierarchy (server errors are `DatabaseError`;
  * connection failures are plain `Error`s), so the catch is placed instead
  * of filtered: translation happens only at the driver boundaries —
@@ -36,6 +44,7 @@ import type { PoolClient } from "pg";
 import { settings } from "../../config.js";
 import { ConflictError, NotFoundError, OntoForgeError, StoreError } from "../../core/exceptions.js";
 import type { Row } from "../../core/ports.js";
+import { quoteIdent } from "./oql/bindings.js";
 
 /** A statement result with every driver type stripped. */
 export interface DbResult {
@@ -99,8 +108,74 @@ function getPool(): pg.Pool {
   return pool;
 }
 
-/** Door one: a single statement on the shared pool. */
-export async function runQuery(text: string, params?: unknown[]): Promise<DbResult> {
+/** The `SET LOCAL` that binds a transaction to one ontology's namespace.
+ * `public` stays on the path for the pgvector type; the namespace comes
+ * first, so every unqualified name resolves there. */
+function searchPathStatement(namespace: string): string {
+  return `SET LOCAL search_path TO ${quoteIdent(namespace)}, public`;
+}
+
+/**
+ * The one transaction skeleton every multi-statement or bound path
+ * shares: connect, BEGIN (with isolation), the optional namespace
+ * `SET LOCAL`, the work, COMMIT — with ROLLBACK + `release()` on
+ * failure. The bracket statements are translated here; `work` receives
+ * the raw client and translates at its own statement boundaries, so
+ * code between statements sits outside every catch and domain
+ * exceptions propagate as themselves.
+ */
+async function inTransaction<T>(
+  isolation: IsolationLevel,
+  namespace: string | undefined,
+  work: (client: PoolClient) => Promise<T>,
+): Promise<T> {
+  const active = getPool();
+  let client: PoolClient;
+  try {
+    client = await active.connect();
+  } catch (exc) {
+    throw translate(exc);
+  }
+  let committed = false;
+  try {
+    try {
+      await client.query(
+        isolation === "REPEATABLE READ" ? "BEGIN ISOLATION LEVEL REPEATABLE READ" : "BEGIN",
+      );
+      if (namespace !== undefined) {
+        await client.query(searchPathStatement(namespace));
+      }
+    } catch (exc) {
+      throw translate(exc);
+    }
+    const result = await work(client);
+    try {
+      await client.query("COMMIT");
+    } catch (exc) {
+      throw translate(exc);
+    }
+    committed = true;
+    return result;
+  } finally {
+    if (!committed) {
+      // The failure that got us here is what matters; a rollback error
+      // on a broken connection must not mask it.
+      await client.query("ROLLBACK").catch(() => undefined);
+    }
+    client.release();
+  }
+}
+
+/** Door one: a single statement on the shared pool. Bound calls run the
+ * statement inside a transaction carrying the namespace's search path. */
+export async function runQuery(
+  text: string,
+  params?: unknown[],
+  namespace?: string,
+): Promise<DbResult> {
+  if (namespace !== undefined) {
+    return withTransaction((querier) => querier.query(text, params), "READ COMMITTED", namespace);
+  }
   const active = getPool();
   try {
     const result = await active.query(text, params);
@@ -116,7 +191,21 @@ export async function runQuery(text: string, params?: unknown[]): Promise<DbResu
  * repeat, and only the compiled plan knows which is which — so the
  * result rows must arrive in projection order, unkeyed.
  */
-export async function runArrayQuery(text: string, params?: unknown[]): Promise<unknown[][]> {
+export async function runArrayQuery(
+  text: string,
+  params?: unknown[],
+  namespace?: string,
+): Promise<unknown[][]> {
+  if (namespace !== undefined) {
+    return inTransaction("READ COMMITTED", namespace, async (client) => {
+      try {
+        const result = await client.query({ text, values: params, rowMode: "array" });
+        return result.rows as unknown[][];
+      } catch (exc) {
+        throw translate(exc);
+      }
+    });
+  }
   const active = getPool();
   try {
     const result = await active.query({ text, values: params, rowMode: "array" });
@@ -130,41 +219,21 @@ export async function runArrayQuery(text: string, params?: unknown[]): Promise<u
 export async function withTransaction<T>(
   work: (querier: Querier) => Promise<T>,
   isolation: IsolationLevel = "READ COMMITTED",
+  namespace?: string,
 ): Promise<T> {
-  const active = getPool();
-  let client: PoolClient;
-  try {
-    client = await active.connect();
-  } catch (exc) {
-    throw translate(exc);
-  }
-  const querier: Querier = {
-    async query(text: string, params?: unknown[]): Promise<DbResult> {
-      try {
-        const result = await client.query(text, params);
-        return { rows: result.rows as Row[], rowCount: result.rowCount ?? 0 };
-      } catch (exc) {
-        throw translate(exc);
-      }
-    },
-  };
-  let committed = false;
-  try {
-    await querier.query(
-      isolation === "REPEATABLE READ" ? "BEGIN ISOLATION LEVEL REPEATABLE READ" : "BEGIN",
-    );
-    const result = await work(querier);
-    await querier.query("COMMIT");
-    committed = true;
-    return result;
-  } finally {
-    if (!committed) {
-      // The failure that got us here is what matters; a rollback error
-      // on a broken connection must not mask it.
-      await client.query("ROLLBACK").catch(() => undefined);
-    }
-    client.release();
-  }
+  return inTransaction(isolation, namespace, (client) => {
+    const querier: Querier = {
+      async query(text: string, params?: unknown[]): Promise<DbResult> {
+        try {
+          const result = await client.query(text, params);
+          return { rows: result.rows as Row[], rowCount: result.rowCount ?? 0 };
+        } catch (exc) {
+          throw translate(exc);
+        }
+      },
+    };
+    return work(querier);
+  });
 }
 
 /** Log a driver failure and return the `StoreError` that replaces it

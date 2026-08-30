@@ -14,8 +14,10 @@ import { createMockModelingStore, NOW, type MockModelingStore } from "./helpers.
 const holder: { store: MockModelingStore } = { store: createMockModelingStore() };
 
 vi.mock("../../src/core/ports.js", () => ({
-  getModelingStore: () => holder.store,
-  getRuntimeStore: () => ({}),
+  getModelingStore: async () => holder.store,
+  getLegacyModelingStore: async () => holder.store,
+  getRuntimeStore: async () => ({}),
+  getLegacyRuntimeStore: async () => ({}),
 }));
 
 const FULL_SCHEMA = {
@@ -99,7 +101,7 @@ afterEach(() => {
 describe("export", () => {
   it("exports the whole design in the transfer format", async () => {
     holder.store.getFullSchema.mockResolvedValue(FULL_SCHEMA);
-    const res = await app.inject({ method: "GET", url: "/api/model/export" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.formatVersion).toBe("4.0");
@@ -130,7 +132,7 @@ describe("export", () => {
       relationTypes: [],
       lenses: [],
     });
-    const res = await app.inject({ method: "GET", url: "/api/model/export" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({
       formatVersion: "4.0",
@@ -155,7 +157,7 @@ describe("export", () => {
         },
       ],
     });
-    const res = await app.inject({ method: "GET", url: "/api/model/export" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
     expect(res.statusCode).toBe(200);
     const lens = res.json().lenses[0];
     expect("includes" in lens).toBe(false);
@@ -200,7 +202,7 @@ describe("export", () => {
         ]),
       },
     ]);
-    const res = await app.inject({ method: "GET", url: "/api/model/export" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
     expect(res.statusCode).toBe(200);
     const lens = res.json().lenses[0];
     expect(lens.aiAgents).toEqual([
@@ -286,7 +288,7 @@ function importPayload(overrides: Record<string, unknown> = {}): Record<string, 
 }
 
 async function postImport(payload: Record<string, unknown>) {
-  return app.inject({ method: "POST", url: "/api/model/import", payload });
+  return app.inject({ method: "POST", url: "/api/ontologies/onto/model/import", payload });
 }
 
 describe("import", () => {

@@ -115,16 +115,17 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL registry provisi
     expect(await registryRowCount("crm")).toBe(0);
   });
 
-  it("provisioned namespaces are independent of the default single-schema home", async () => {
+  it("the server-wide home holds only the registry — no ontology tables", async () => {
     await getOntologyRegistry().createOntology(ID_A, "crm", null, null);
-    // The default namespace keeps its own ten tables plus the registry.
+    // `public` is the server-wide home: the registry and nothing
+    // ontology-scoped; the ten tables live only inside `ont_*`.
     const result = await runQuery(
       `SELECT table_name FROM information_schema.tables
        WHERE table_schema = current_schema()`,
     );
     const names = result.rows.map((row) => row["table_name"] as string);
     for (const table of ALL_TABLES) {
-      expect(names).toContain(table);
+      expect(names).not.toContain(table);
     }
     expect(names).toContain("ontology");
   });

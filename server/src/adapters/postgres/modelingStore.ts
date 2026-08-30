@@ -37,7 +37,7 @@ import { toSql } from "pgvector";
 import type { ModelingStore, ReservedTypeKeyInUse, Row } from "../../core/ports.js";
 import type { TypeKind } from "../../core/schemas.js";
 import * as vectorDdl from "./ddl.js";
-import { runQuery, withTransaction } from "./errors.js";
+import { runQuery, withTransaction, type DbResult, type IsolationLevel, type Querier } from "./errors.js";
 import { camelizeRow, camelizeRows, isUuid } from "./rows.js";
 import { LENS_COLS, readTypesWithProperties, splitInclusions } from "./schemaRead.js";
 
@@ -102,6 +102,23 @@ function toIncludeRow(row: Row): Row {
 }
 
 export class PostgresModelingStore implements ModelingStore {
+  /** Bound to one ontology's namespace; unbound (tests only) runs against
+   * the connection's default namespace. */
+  constructor(private readonly namespace?: string) {}
+
+  /** Door one, carrying this store's binding. */
+  private query(text: string, params?: unknown[]): Promise<DbResult> {
+    return runQuery(text, params, this.namespace);
+  }
+
+  /** Door two, carrying this store's binding. */
+  private tx<T>(
+    work: (querier: Querier) => Promise<T>,
+    isolation: IsolationLevel = "READ COMMITTED",
+  ): Promise<T> {
+    return withTransaction(work, isolation, this.namespace);
+  }
+
   // ------------------------------------------------------------------
   // Reserved keys
   // ------------------------------------------------------------------
@@ -128,7 +145,7 @@ export class PostgresModelingStore implements ModelingStore {
     name: string,
     description: string | null,
   ): Promise<Row> {
-    const result = await runQuery(
+    const result = await this.query(
       `INSERT INTO lens (lens_id, key, name, description)
        VALUES ($1, $2, $3, $4)
        RETURNING ${LENS_COLS}`,
@@ -138,7 +155,7 @@ export class PostgresModelingStore implements ModelingStore {
   }
 
   async listLenses(): Promise<Row[]> {
-    const result = await runQuery(`SELECT ${LENS_COLS} FROM lens ORDER BY name`);
+    const result = await this.query(`SELECT ${LENS_COLS} FROM lens ORDER BY name`);
     return camelizeRows(result.rows);
   }
 
@@ -146,7 +163,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(lensId)) {
       return null;
     }
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT ${LENS_COLS} FROM lens WHERE lens_id = $1`,
       [lensId],
     );
@@ -154,14 +171,14 @@ export class PostgresModelingStore implements ModelingStore {
   }
 
   async getLensByName(name: string): Promise<Row | null> {
-    const result = await runQuery(`SELECT ${LENS_COLS} FROM lens WHERE name = $1`, [
+    const result = await this.query(`SELECT ${LENS_COLS} FROM lens WHERE name = $1`, [
       name,
     ]);
     return firstRowOrNull(result.rows);
   }
 
   async getLensByKey(key: string): Promise<Row | null> {
-    const result = await runQuery(`SELECT ${LENS_COLS} FROM lens WHERE key = $1`, [key]);
+    const result = await this.query(`SELECT ${LENS_COLS} FROM lens WHERE key = $1`, [key]);
     return firstRowOrNull(result.rows);
   }
 
@@ -178,7 +195,7 @@ export class PostgresModelingStore implements ModelingStore {
       ["name", name],
       ["description", description],
     ]);
-    const result = await runQuery(
+    const result = await this.query(
       `UPDATE lens SET ${sets.join(", ")} WHERE lens_id = $1 RETURNING ${LENS_COLS}`,
       params,
     );
@@ -190,7 +207,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(lensId)) {
       return false;
     }
-    const result = await runQuery(`DELETE FROM lens WHERE lens_id = $1`, [lensId]);
+    const result = await this.query(`DELETE FROM lens WHERE lens_id = $1`, [lensId]);
     return result.rowCount > 0;
   }
 
@@ -204,7 +221,7 @@ export class PostgresModelingStore implements ModelingStore {
     displayName: string,
     description: string | null,
   ): Promise<Row> {
-    const result = await runQuery(
+    const result = await this.query(
       `INSERT INTO entity_type (entity_type_id, key, display_name, description)
        VALUES ($1, $2, $3, $4)
        RETURNING ${ENTITY_TYPE_COLS}`,
@@ -214,7 +231,7 @@ export class PostgresModelingStore implements ModelingStore {
   }
 
   async listEntityTypes(): Promise<Row[]> {
-    const result = await runQuery(`SELECT ${ENTITY_TYPE_COLS} FROM entity_type ORDER BY key`);
+    const result = await this.query(`SELECT ${ENTITY_TYPE_COLS} FROM entity_type ORDER BY key`);
     return camelizeRows(result.rows);
   }
 
@@ -222,7 +239,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(entityTypeId)) {
       return null;
     }
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT ${ENTITY_TYPE_COLS} FROM entity_type WHERE entity_type_id = $1`,
       [entityTypeId],
     );
@@ -230,7 +247,7 @@ export class PostgresModelingStore implements ModelingStore {
   }
 
   async getEntityTypeByKey(key: string): Promise<Row | null> {
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT ${ENTITY_TYPE_COLS} FROM entity_type WHERE key = $1`,
       [key],
     );
@@ -250,7 +267,7 @@ export class PostgresModelingStore implements ModelingStore {
       ["display_name", displayName],
       ["description", description],
     ]);
-    const result = await runQuery(
+    const result = await this.query(
       `UPDATE entity_type SET ${sets.join(", ")}
        WHERE entity_type_id = $1 RETURNING ${ENTITY_TYPE_COLS}`,
       params,
@@ -264,7 +281,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(entityTypeId)) {
       return false;
     }
-    const result = await runQuery(`DELETE FROM entity_type WHERE entity_type_id = $1`, [
+    const result = await this.query(`DELETE FROM entity_type WHERE entity_type_id = $1`, [
       entityTypeId,
     ]);
     return result.rowCount > 0;
@@ -274,7 +291,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(entityTypeId)) {
       return false;
     }
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT EXISTS (
          SELECT 1
          FROM relation_type rt
@@ -299,7 +316,7 @@ export class PostgresModelingStore implements ModelingStore {
     sourceEntityTypeKey: string,
     targetEntityTypeKey: string,
   ): Promise<Row> {
-    const result = await runQuery(
+    const result = await this.query(
       `INSERT INTO relation_type
          (relation_type_id, key, display_name, description,
           source_entity_type_key, target_entity_type_key)
@@ -311,7 +328,7 @@ export class PostgresModelingStore implements ModelingStore {
   }
 
   async listRelationTypes(): Promise<Row[]> {
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT ${RELATION_TYPE_COLS} FROM relation_type ORDER BY key`,
     );
     return camelizeRows(result.rows);
@@ -321,7 +338,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(relationTypeId)) {
       return null;
     }
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT ${RELATION_TYPE_COLS} FROM relation_type WHERE relation_type_id = $1`,
       [relationTypeId],
     );
@@ -329,7 +346,7 @@ export class PostgresModelingStore implements ModelingStore {
   }
 
   async getRelationTypeByKey(key: string): Promise<Row | null> {
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT ${RELATION_TYPE_COLS} FROM relation_type WHERE key = $1`,
       [key],
     );
@@ -349,7 +366,7 @@ export class PostgresModelingStore implements ModelingStore {
       ["display_name", displayName],
       ["description", description],
     ]);
-    const result = await runQuery(
+    const result = await this.query(
       `UPDATE relation_type SET ${sets.join(", ")}
        WHERE relation_type_id = $1 RETURNING ${RELATION_TYPE_COLS}`,
       params,
@@ -362,7 +379,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(relationTypeId)) {
       return false;
     }
-    const result = await runQuery(`DELETE FROM relation_type WHERE relation_type_id = $1`, [
+    const result = await this.query(`DELETE FROM relation_type WHERE relation_type_id = $1`, [
       relationTypeId,
     ]);
     return result.rowCount > 0;
@@ -383,7 +400,7 @@ export class PostgresModelingStore implements ModelingStore {
     required: boolean,
     defaultValue: string | null,
   ): Promise<Row> {
-    const result = await runQuery(
+    const result = await this.query(
       `INSERT INTO property_def
          (property_id, entity_type_id, relation_type_id, key, display_name,
           description, data_type, required, default_value)
@@ -408,7 +425,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(ownerId)) {
       return [];
     }
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT ${PROPERTY_COLS} FROM property_def
        WHERE ${ownerColumn(typeKind)} = $1 ORDER BY key`,
       [ownerId],
@@ -424,7 +441,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(ownerId) || !isUuid(propertyId)) {
       return null;
     }
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT ${PROPERTY_COLS} FROM property_def
        WHERE ${ownerColumn(typeKind)} = $1 AND property_id = $2`,
       [ownerId, propertyId],
@@ -436,7 +453,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(ownerId)) {
       return null;
     }
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT ${PROPERTY_COLS} FROM property_def
        WHERE ${ownerColumn(typeKind)} = $1 AND key = $2`,
       [ownerId, key],
@@ -467,7 +484,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (clearDefault) {
       sets.push("default_value = NULL");
     }
-    const result = await runQuery(
+    const result = await this.query(
       `UPDATE property_def SET ${sets.join(", ")}
        WHERE ${ownerColumn(typeKind)} = $1 AND property_id = $2
        RETURNING ${PROPERTY_COLS}`,
@@ -480,7 +497,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(ownerId) || !isUuid(propertyId)) {
       return false;
     }
-    const result = await runQuery(
+    const result = await this.query(
       `DELETE FROM property_def WHERE property_id = $2 AND ${ownerColumn(typeKind)} = $1`,
       [ownerId, propertyId],
     );
@@ -504,7 +521,7 @@ export class PostgresModelingStore implements ModelingStore {
       return null;
     }
     const owner = ownerColumn(typeKind);
-    const result = await runQuery(
+    const result = await this.query(
       `INSERT INTO lens_includes (lens_id, ${owner}, properties)
        SELECT o.lens_id, t.${owner}, $3::text[]
        FROM lens o
@@ -523,7 +540,7 @@ export class PostgresModelingStore implements ModelingStore {
       return [];
     }
     const owner = ownerColumn(typeKind);
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT t.key AS key, t.${owner} AS type_id, oi.properties AS properties
        FROM lens_includes oi
        JOIN ${typeTable(typeKind)} t ON t.${owner} = oi.${owner}
@@ -545,7 +562,7 @@ export class PostgresModelingStore implements ModelingStore {
       return null;
     }
     const owner = ownerColumn(typeKind);
-    const result = await runQuery(
+    const result = await this.query(
       `UPDATE lens_includes oi
        SET properties = $3::text[]
        FROM ${typeTable(typeKind)} t
@@ -565,7 +582,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(lensId) || !isUuid(typeId)) {
       return false;
     }
-    const result = await runQuery(
+    const result = await this.query(
       `DELETE FROM lens_includes
        WHERE lens_id = $1 AND ${ownerColumn(typeKind)} = $2`,
       [lensId, typeId],
@@ -581,7 +598,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(typeId)) {
       return 0;
     }
-    const result = await runQuery(
+    const result = await this.query(
       `DELETE FROM lens_includes WHERE ${ownerColumn(typeKind)} = $1`,
       [typeId],
     );
@@ -592,7 +609,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(typeId)) {
       return [];
     }
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT o.key FROM lens_includes oi
        JOIN lens o ON o.lens_id = oi.lens_id
        WHERE oi.${ownerColumn(typeKind)} = $1
@@ -613,7 +630,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(typeId)) {
       return [];
     }
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT o.key FROM lens_includes oi
        JOIN lens o ON o.lens_id = oi.lens_id
        WHERE oi.${ownerColumn(typeKind)} = $1
@@ -633,7 +650,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(typeId)) {
       return 0;
     }
-    const result = await runQuery(
+    const result = await this.query(
       `UPDATE lens_includes SET properties = properties || $2::text
        WHERE ${ownerColumn(typeKind)} = $1
          AND properties IS NOT NULL
@@ -651,7 +668,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(typeId)) {
       return 0;
     }
-    const result = await runQuery(
+    const result = await this.query(
       `UPDATE lens_includes SET properties = array_remove(properties, $2::text)
        WHERE ${ownerColumn(typeKind)} = $1
          AND properties IS NOT NULL
@@ -669,7 +686,7 @@ export class PostgresModelingStore implements ModelingStore {
    * `deleteProperty`; type keys carry no FK by design, so this is the
    * one statement that removes a dropped document property's chunks. */
   async deleteChunksForTypeProperty(entityTypeKey: string, propertyKey: string): Promise<void> {
-    await runQuery(
+    await this.query(
       `DELETE FROM document_chunk WHERE entity_type_key = $1 AND property_key = $2`,
       [entityTypeKey, propertyKey],
     );
@@ -679,10 +696,10 @@ export class PostgresModelingStore implements ModelingStore {
   // Full schema
   // ------------------------------------------------------------------
 
-  /** The entire global schema plus every lens with its inclusions, read
+  /** The ontology's entire schema plus every lens with its inclusions, read
    * as one coherent snapshot: a single REPEATABLE READ transaction. */
   async getFullSchema(): Promise<Row> {
-    return withTransaction(async (querier) => {
+    return this.tx(async (querier) => {
       const { entityTypes, relationTypes } = await readTypesWithProperties(querier, true);
 
       const lensResult = await querier.query(`SELECT ${LENS_COLS} FROM lens ORDER BY name`);
@@ -725,7 +742,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(lensId)) {
       return [];
     }
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT ${AGENT_COLS} FROM ai_agent_config WHERE lens_id = $1 ORDER BY name`,
       [lensId],
     );
@@ -743,7 +760,7 @@ export class PostgresModelingStore implements ModelingStore {
     systemPrompt: string | null,
     tools: string[] | null,
   ): Promise<[Row, boolean]> {
-    const result = await runQuery(
+    const result = await this.query(
       `INSERT INTO ai_agent_config
          (agent_config_id, lens_id, key, name, description, system_prompt, tools)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -765,7 +782,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(lensId)) {
       return [];
     }
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT key, name, description, system_prompt, tools
        FROM ai_agent_config WHERE lens_id = $1 ORDER BY name`,
       [lensId],
@@ -777,7 +794,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(lensId)) {
       return false;
     }
-    const result = await runQuery(
+    const result = await this.query(
       `DELETE FROM ai_agent_config WHERE lens_id = $1 AND key = $2`,
       [lensId, agentKey],
     );
@@ -792,7 +809,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(lensId)) {
       return [];
     }
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT ${SAVED_QUERY_COLS} FROM saved_query WHERE lens_id = $1 ORDER BY name`,
       [lensId],
     );
@@ -805,7 +822,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(lensId)) {
       return [];
     }
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT key, name, description, steps, parameters
        FROM saved_query WHERE lens_id = $1 ORDER BY name`,
       [lensId],
@@ -828,7 +845,7 @@ export class PostgresModelingStore implements ModelingStore {
     lensKey: string | null = null,
     embedding: number[] | null = null,
   ): Promise<[Row, boolean]> {
-    const result = await runQuery(
+    const result = await this.query(
       `INSERT INTO saved_query
          (saved_query_id, lens_id, lens_key, key, name, description,
           steps, parameters, embedding)
@@ -862,7 +879,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(lensId)) {
       return false;
     }
-    const result = await runQuery(
+    const result = await this.query(
       `DELETE FROM saved_query WHERE lens_id = $1 AND key = $2`,
       [lensId, queryKey],
     );
@@ -876,7 +893,7 @@ export class PostgresModelingStore implements ModelingStore {
   /** Every entity type key with its property definitions, aggregated in
    * one statement (jsonb) so the read stays on door one. */
   async getEntityTypesWithProperties(): Promise<Row[]> {
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT et.key,
               coalesce(
                 jsonb_agg(
@@ -906,14 +923,14 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(entityId)) {
       return;
     }
-    await runQuery(`UPDATE entity SET embedding = $2::vector WHERE id = $1`, [
+    await this.query(`UPDATE entity SET embedding = $2::vector WHERE id = $1`, [
       entityId,
       toSql(embedding),
     ]);
   }
 
   async listSavedQueryRefs(): Promise<Row[]> {
-    const result = await runQuery(`SELECT saved_query_id, description FROM saved_query`);
+    const result = await this.query(`SELECT saved_query_id, description FROM saved_query`);
     return camelizeRows(result.rows);
   }
 
@@ -922,7 +939,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(savedQueryId)) {
       return;
     }
-    await runQuery(`UPDATE saved_query SET embedding = $2::vector WHERE saved_query_id = $1`, [
+    await this.query(`UPDATE saved_query SET embedding = $2::vector WHERE saved_query_id = $1`, [
       savedQueryId,
       toSql(embedding),
     ]);
@@ -937,15 +954,15 @@ export class PostgresModelingStore implements ModelingStore {
     dimensions: number,
     filterProperties?: string[] | null,
   ): Promise<void> {
-    return vectorDdl.createVectorIndex(entityTypeKey, dimensions, filterProperties);
+    return vectorDdl.createVectorIndex(entityTypeKey, dimensions, filterProperties, this.namespace);
   }
 
   dropVectorIndex(entityTypeKey: string): Promise<void> {
-    return vectorDdl.dropVectorIndex(entityTypeKey);
+    return vectorDdl.dropVectorIndex(entityTypeKey, this.namespace);
   }
 
   rebuildVectorIndex(entityTypeKey: string, dimensions: number): Promise<void> {
-    return vectorDdl.rebuildVectorIndex(entityTypeKey, dimensions);
+    return vectorDdl.rebuildVectorIndex(entityTypeKey, dimensions, this.namespace);
   }
 
   createDocumentVectorIndex(
@@ -953,18 +970,18 @@ export class PostgresModelingStore implements ModelingStore {
     propertyKey: string,
     dimensions: number,
   ): Promise<void> {
-    return vectorDdl.createDocumentVectorIndex(entityTypeKey, propertyKey, dimensions);
+    return vectorDdl.createDocumentVectorIndex(entityTypeKey, propertyKey, dimensions, this.namespace);
   }
 
   dropDocumentVectorIndex(entityTypeKey: string, propertyKey: string): Promise<void> {
-    return vectorDdl.dropDocumentVectorIndex(entityTypeKey, propertyKey);
+    return vectorDdl.dropDocumentVectorIndex(entityTypeKey, propertyKey, this.namespace);
   }
 
   ensureSavedQueryVectorIndex(dimensions: number): Promise<void> {
-    return vectorDdl.ensureSavedQueryVectorIndex(dimensions);
+    return vectorDdl.ensureSavedQueryVectorIndex(dimensions, this.namespace);
   }
 
   ensureVectorIndexes(dimensions: number, recreateOnMismatch?: boolean): Promise<void> {
-    return vectorDdl.ensureVectorIndexes(dimensions, recreateOnMismatch);
+    return vectorDdl.ensureVectorIndexes(dimensions, recreateOnMismatch, this.namespace);
   }
 }

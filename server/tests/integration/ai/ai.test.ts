@@ -89,13 +89,14 @@ beforeAll(async () => {
   await app.ready();
 
   // Schema: person/company/works_for, seeded, in an unscoped lens.
-  await post("/api/model/lenses", {
+  await post("/api/ontologies", { key: "test_ont" });
+  await post("/api/ontologies/test_ont/model/lenses", {
     key: "ai_test",
     name: "AI Test",
     description: "Integration test lens for AI endpoints",
   });
 
-  const person = await post("/api/model/entity-types", {
+  const person = await post("/api/ontologies/test_ont/model/entity-types", {
     key: "person",
     displayName: "Person",
   });
@@ -104,21 +105,21 @@ beforeAll(async () => {
     { key: "age", displayName: "Age", dataType: "integer", required: false },
     { key: "location", displayName: "Location", dataType: "string", required: false },
   ]) {
-    await post(`/api/model/entity-types/${person.entityTypeId as string}/properties`, prop);
+    await post(`/api/ontologies/test_ont/model/entity-types/${person.entityTypeId as string}/properties`, prop);
   }
 
-  const company = await post("/api/model/entity-types", {
+  const company = await post("/api/ontologies/test_ont/model/entity-types", {
     key: "company",
     displayName: "Company",
   });
-  await post(`/api/model/entity-types/${company.entityTypeId as string}/properties`, {
+  await post(`/api/ontologies/test_ont/model/entity-types/${company.entityTypeId as string}/properties`, {
     key: "name",
     displayName: "Name",
     dataType: "string",
     required: true,
   });
 
-  await post("/api/model/relation-types", {
+  await post("/api/ontologies/test_ont/model/relation-types", {
     key: "works_for",
     displayName: "Works For",
     sourceEntityTypeKey: "person",
@@ -128,7 +129,7 @@ beforeAll(async () => {
   // A restricted agent for the trace scenario.
   const res = await app.inject({
     method: "PUT",
-    url: "/api/model/lenses/ai_test/ai-agents/analyst",
+    url: "/api/ontologies/test_ont/model/lenses/ai_test/ai-agents/analyst",
     payload: {
       name: "Analyst",
       description: "Answers only via OQL queries",

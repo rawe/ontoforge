@@ -11,8 +11,10 @@ import { createMockModelingStore, NOW, type MockModelingStore } from "./helpers.
 const holder: { store: MockModelingStore } = { store: createMockModelingStore() };
 
 vi.mock("../../src/core/ports.js", () => ({
-  getModelingStore: () => holder.store,
-  getRuntimeStore: () => ({}),
+  getModelingStore: async () => holder.store,
+  getLegacyModelingStore: async () => holder.store,
+  getRuntimeStore: async () => ({}),
+  getLegacyRuntimeStore: async () => ({}),
 }));
 
 const LENS_DATA = {
@@ -45,7 +47,7 @@ describe("lens CRUD", () => {
     holder.store.createLens.mockResolvedValue(LENS_DATA);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/lenses",
+      url: "/api/ontologies/onto/model/lenses",
       payload: { key: "test_lens", name: "Test Lens", description: "A test lens" },
     });
     expect(res.statusCode).toBe(201);
@@ -59,7 +61,7 @@ describe("lens CRUD", () => {
     holder.store.getLensByKey.mockResolvedValue(LENS_DATA);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/lenses",
+      url: "/api/ontologies/onto/model/lenses",
       payload: { key: "test_lens", name: "Other Name" },
     });
     expect(res.statusCode).toBe(409);
@@ -71,7 +73,7 @@ describe("lens CRUD", () => {
     holder.store.getLensByName.mockResolvedValue(LENS_DATA);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/lenses",
+      url: "/api/ontologies/onto/model/lenses",
       payload: { key: "other_key", name: "Test Lens" },
     });
     expect(res.statusCode).toBe(409);
@@ -83,7 +85,7 @@ describe("lens CRUD", () => {
     for (const key of ["BadKey", "1starts_with_digit", "has-dash", "_underscore_first"]) {
       const res = await app.inject({
         method: "POST",
-        url: "/api/model/lenses",
+        url: "/api/ontologies/onto/model/lenses",
         payload: { key, name: "Whatever" },
       });
       expect(res.statusCode).toBe(422);
@@ -95,7 +97,7 @@ describe("lens CRUD", () => {
   it("a key longer than 64 characters is rejected 422", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/lenses",
+      url: "/api/ontologies/onto/model/lenses",
       payload: { key: "k".repeat(65), name: "Whatever" },
     });
     expect(res.statusCode).toBe(422);
@@ -105,7 +107,7 @@ describe("lens CRUD", () => {
 
   it("list returns every stored lens", async () => {
     holder.store.listLenses.mockResolvedValue([LENS_DATA]);
-    const res = await app.inject({ method: "GET", url: "/api/model/lenses" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/lenses" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toHaveLength(1);
     expect(res.json()[0].key).toBe("test_lens");
@@ -113,7 +115,7 @@ describe("lens CRUD", () => {
 
   it("read by id answers the stored lens", async () => {
     holder.store.getLens.mockResolvedValue(LENS_DATA);
-    const res = await app.inject({ method: "GET", url: "/api/model/lenses/lens-1" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/lenses/lens-1" });
     expect(res.statusCode).toBe(200);
     expect(res.json().lensId).toBe("lens-1");
   });
@@ -121,7 +123,7 @@ describe("lens CRUD", () => {
   it("read of a missing id answers 404", async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/api/model/lenses/nonexistent",
+      url: "/api/ontologies/onto/model/lenses/nonexistent",
     });
     expect(res.statusCode).toBe(404);
     expect(res.json().error.code).toBe("RESOURCE_NOT_FOUND");
@@ -131,7 +133,7 @@ describe("lens CRUD", () => {
     holder.store.updateLens.mockResolvedValue({ ...LENS_DATA, name: "Updated Name" });
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/lenses/lens-1",
+      url: "/api/ontologies/onto/model/lenses/lens-1",
       payload: { name: "Updated Name" },
     });
     expect(res.statusCode).toBe(200);
@@ -142,7 +144,7 @@ describe("lens CRUD", () => {
     holder.store.getLensByName.mockResolvedValue({ ...LENS_DATA, lensId: "lens-2" });
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/lenses/lens-1",
+      url: "/api/ontologies/onto/model/lenses/lens-1",
       payload: { name: "Test Lens" },
     });
     expect(res.statusCode).toBe(409);
@@ -153,7 +155,7 @@ describe("lens CRUD", () => {
     holder.store.updateLens.mockResolvedValue(LENS_DATA);
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/lenses/lens-1",
+      url: "/api/ontologies/onto/model/lenses/lens-1",
       payload: { name: "Test Lens" },
     });
     expect(res.statusCode).toBe(200);
@@ -162,7 +164,7 @@ describe("lens CRUD", () => {
   it("update of a missing id answers 404", async () => {
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/lenses/nonexistent",
+      url: "/api/ontologies/onto/model/lenses/nonexistent",
       payload: { name: "Whatever" },
     });
     expect(res.statusCode).toBe(404);
@@ -172,7 +174,7 @@ describe("lens CRUD", () => {
     holder.store.updateLens.mockResolvedValue(LENS_DATA);
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/lenses/lens-1",
+      url: "/api/ontologies/onto/model/lenses/lens-1",
       payload: { key: "new_key", name: "Test Lens" },
     });
     expect(res.statusCode).toBe(200);
@@ -183,14 +185,14 @@ describe("lens CRUD", () => {
 
   it("delete answers 204 — always permitted, no consent step", async () => {
     holder.store.deleteLens.mockResolvedValue(true);
-    const res = await app.inject({ method: "DELETE", url: "/api/model/lenses/lens-1" });
+    const res = await app.inject({ method: "DELETE", url: "/api/ontologies/onto/model/lenses/lens-1" });
     expect(res.statusCode).toBe(204);
   });
 
   it("delete of a missing id answers 404", async () => {
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/lenses/nonexistent",
+      url: "/api/ontologies/onto/model/lenses/nonexistent",
     });
     expect(res.statusCode).toBe(404);
   });

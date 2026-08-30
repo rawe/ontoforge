@@ -13,8 +13,10 @@ import { createMockModelingStore, NOW, type MockModelingStore } from "./helpers.
 const holder: { store: MockModelingStore } = { store: createMockModelingStore() };
 
 vi.mock("../../src/core/ports.js", () => ({
-  getModelingStore: () => holder.store,
-  getRuntimeStore: () => ({}),
+  getModelingStore: async () => holder.store,
+  getLegacyModelingStore: async () => holder.store,
+  getRuntimeStore: async () => ({}),
+  getLegacyRuntimeStore: async () => ({}),
 }));
 
 const MOCK_LENS = {
@@ -57,7 +59,7 @@ describe("list", () => {
   it("answers an empty list", async () => {
     holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     holder.store.listAiAgents.mockResolvedValue([]);
-    const res = await app.inject({ method: "GET", url: "/api/model/lenses/test_lens/ai-agents" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/lenses/test_lens/ai-agents" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual([]);
   });
@@ -65,7 +67,7 @@ describe("list", () => {
   it("returns the full agent wire shape", async () => {
     holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     holder.store.listAiAgents.mockResolvedValue([MOCK_AGENT]);
-    const res = await app.inject({ method: "GET", url: "/api/model/lenses/test_lens/ai-agents" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/lenses/test_lens/ai-agents" });
     expect(res.statusCode).toBe(200);
     const body = res.json() as Record<string, unknown>[];
     expect(body).toHaveLength(1);
@@ -82,7 +84,7 @@ describe("list", () => {
   it("an unknown lens key answers 404", async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/api/model/lenses/nonexistent/ai-agents",
+      url: "/api/ontologies/onto/model/lenses/nonexistent/ai-agents",
     });
     expect(res.statusCode).toBe(404);
   });
@@ -94,7 +96,7 @@ describe("upsert", () => {
     holder.store.upsertAiAgent.mockResolvedValue([MOCK_AGENT, true]);
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/lenses/test_lens/ai-agents/my-agent",
+      url: "/api/ontologies/onto/model/lenses/test_lens/ai-agents/my-agent",
       payload: {
         name: "My Agent",
         description: "test desc",
@@ -113,7 +115,7 @@ describe("upsert", () => {
     holder.store.upsertAiAgent.mockResolvedValue([MOCK_AGENT, false]);
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/lenses/test_lens/ai-agents/my-agent",
+      url: "/api/ontologies/onto/model/lenses/test_lens/ai-agents/my-agent",
       payload: { name: "My Agent" },
     });
     expect(res.statusCode).toBe(200);
@@ -123,7 +125,7 @@ describe("upsert", () => {
   it("an unknown lens key answers 404", async () => {
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/lenses/nonexistent/ai-agents/my-agent",
+      url: "/api/ontologies/onto/model/lenses/nonexistent/ai-agents/my-agent",
       payload: { name: "Test" },
     });
     expect(res.statusCode).toBe(404);
@@ -136,7 +138,7 @@ describe("delete", () => {
     holder.store.deleteAiAgent.mockResolvedValue(true);
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/lenses/test_lens/ai-agents/my-agent",
+      url: "/api/ontologies/onto/model/lenses/test_lens/ai-agents/my-agent",
     });
     expect(res.statusCode).toBe(204);
   });
@@ -146,7 +148,7 @@ describe("delete", () => {
     holder.store.deleteAiAgent.mockResolvedValue(false);
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/lenses/test_lens/ai-agents/nonexistent",
+      url: "/api/ontologies/onto/model/lenses/test_lens/ai-agents/nonexistent",
     });
     expect(res.statusCode).toBe(404);
   });
@@ -157,7 +159,7 @@ describe("key validation", () => {
     holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/lenses/test_lens/ai-agents/INVALID",
+      url: "/api/ontologies/onto/model/lenses/test_lens/ai-agents/INVALID",
       payload: { name: "Test" },
     });
     expect(res.statusCode).toBe(422);
@@ -169,7 +171,7 @@ describe("key validation", () => {
     holder.store.upsertAiAgent.mockResolvedValue([MOCK_AGENT, true]);
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/lenses/test_lens/ai-agents/my-agent",
+      url: "/api/ontologies/onto/model/lenses/test_lens/ai-agents/my-agent",
       payload: { name: "Test" },
     });
     expect(res.statusCode).toBe(201);
@@ -180,7 +182,7 @@ describe("key validation", () => {
     holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     const res = await app.inject({
       method: "PUT",
-      url: `/api/model/lenses/test_lens/ai-agents/${"k".repeat(65)}`,
+      url: `/api/ontologies/onto/model/lenses/test_lens/ai-agents/${"k".repeat(65)}`,
       payload: { name: "Test" },
     });
     expect(res.statusCode).toBe(422);
@@ -196,7 +198,7 @@ describe("key validation", () => {
     ]);
     const res = await app.inject({
       method: "PUT",
-      url: `/api/model/lenses/test_lens/ai-agents/${"k".repeat(64)}`,
+      url: `/api/ontologies/onto/model/lenses/test_lens/ai-agents/${"k".repeat(64)}`,
       payload: { name: "Test" },
     });
     expect(res.statusCode).toBe(201);
@@ -206,7 +208,7 @@ describe("key validation", () => {
     holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/lenses/test_lens/ai-agents/_default",
+      url: "/api/ontologies/onto/model/lenses/test_lens/ai-agents/_default",
       payload: { name: "Test" },
     });
     expect(res.statusCode).toBe(422);
@@ -218,7 +220,7 @@ describe("tool allowlist validation", () => {
     holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/lenses/test_lens/ai-agents/my-agent",
+      url: "/api/ontologies/onto/model/lenses/test_lens/ai-agents/my-agent",
       payload: { name: "Test", tools: ["nonexistent_tool"] },
     });
     expect(res.statusCode).toBe(422);
@@ -254,7 +256,7 @@ describe("tool allowlist validation", () => {
     holder.store.upsertAiAgent.mockResolvedValue([MOCK_AGENT, true]);
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/lenses/test_lens/ai-agents/my-agent",
+      url: "/api/ontologies/onto/model/lenses/test_lens/ai-agents/my-agent",
       payload: { name: "Test", tools: ["get_schema"] },
     });
     expect(res.statusCode).toBe(201);
@@ -265,7 +267,7 @@ describe("tool allowlist validation", () => {
     holder.store.upsertAiAgent.mockResolvedValue([{ ...MOCK_AGENT, tools: null }, true]);
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/lenses/test_lens/ai-agents/my-agent",
+      url: "/api/ontologies/onto/model/lenses/test_lens/ai-agents/my-agent",
       payload: { name: "Test", tools: null },
     });
     expect(res.statusCode).toBe(201);
@@ -276,7 +278,7 @@ describe("tool allowlist validation", () => {
 describe("cascading delete", () => {
   it("deleting the lens deletes its agents (handled by the store)", async () => {
     holder.store.deleteLens.mockResolvedValue(true);
-    const res = await app.inject({ method: "DELETE", url: "/api/model/lenses/lens-1" });
+    const res = await app.inject({ method: "DELETE", url: "/api/ontologies/onto/model/lenses/lens-1" });
     expect(res.statusCode).toBe(204);
   });
 });

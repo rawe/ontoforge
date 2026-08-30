@@ -183,13 +183,13 @@ describe("tool surface", () => {
 describe("document tools", () => {
   /** The fixture has no document property; declare one on person. */
   async function addBioProperty(): Promise<void> {
-    const list = await app.inject({ method: "GET", url: "/api/model/entity-types" });
+    const list = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/model/entity-types" });
     const person = (list.json() as { entityTypeId: string; key: string }[]).find(
       (et) => et.key === "person",
     )!;
     const res = await app.inject({
       method: "POST",
-      url: `/api/model/entity-types/${person.entityTypeId}/properties`,
+      url: `/api/ontologies/test_ont/model/entity-types/${person.entityTypeId}/properties`,
       payload: { key: "bio", displayName: "Bio", dataType: "document" },
     });
     expect(res.statusCode).toBe(201);

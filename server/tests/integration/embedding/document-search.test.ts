@@ -67,16 +67,17 @@ describe.skipIf(!ollamaUp)("document semantic search (Ollama)", () => {
   }
 
   async function buildDocFixture(): Promise<void> {
-    await post("/api/model/lenses", { key: "doc_search", name: "Doc Search" });
-    const et = await post("/api/model/entity-types", { key: "article", displayName: "Article" });
+    await post("/api/ontologies", { key: "test_ont" });
+    await post("/api/ontologies/test_ont/model/lenses", { key: "doc_search", name: "Doc Search" });
+    const et = await post("/api/ontologies/test_ont/model/entity-types", { key: "article", displayName: "Article" });
     const etId = et.entityTypeId as string;
-    await post(`/api/model/entity-types/${etId}/properties`, {
+    await post(`/api/ontologies/test_ont/model/entity-types/${etId}/properties`, {
       key: "title",
       displayName: "Title",
       dataType: "string",
       required: true,
     });
-    await post(`/api/model/entity-types/${etId}/properties`, {
+    await post(`/api/ontologies/test_ont/model/entity-types/${etId}/properties`, {
       key: "body",
       displayName: "Body",
       dataType: "document",
@@ -134,13 +135,14 @@ describe.skipIf(!ollamaUp)("document semantic search (Ollama)", () => {
       body: BODY,
     });
 
+    const store = await getRuntimeStore("test_ont");
     const chunkCount = Object.keys(
-      await getRuntimeStore().getChunkEmbeddingsForEntityProperty(article._id as string, "body"),
+      await store.getChunkEmbeddingsForEntityProperty(article._id as string, "body"),
     ).length;
     expect(chunkCount).toBeGreaterThan(1);
 
     const embedding = await getEmbeddingProvider()!.embed("polynomial computation");
-    const hits = await getRuntimeStore().searchDocumentChunks("article", "body", embedding!, 5);
+    const hits = await store.searchDocumentChunks("article", "body", embedding!, 5);
     expect(hits.length).toBeGreaterThan(0);
     for (const hit of hits) {
       const chunk = hit.chunk as Row;

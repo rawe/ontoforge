@@ -31,6 +31,15 @@ Sync Markdown documents with YAML frontmatter (Google's [Open Knowledge Format](
 
 See [SKILL.md](skills/ontoforge-okf/SKILL.md) for the full usage reference, schema requirements, and the supported YAML subset.
 
+### ontoforge-document
+
+Upload a file's contents verbatim into a `document` property of an existing entity, and download it back byte for byte — one file, one property, one entity.
+
+- **Upload**: `ontoforge-doc.mjs upload <file> --type <key> (--id <uuid> | --where <field>=<value>)` replaces the property's content with the file's, as a plain `PATCH` on that one field.
+- **Download**: the same call with `download` writes the property back to a file, reading through `GET .../documents/<field>` because ordinary entity reads return a document stub, not the text.
+- Reads the schema rather than guessing: an unknown type or property yields the list of valid keys, and the `document` property is auto-selected when the type has exactly one.
+- It never creates entities and touches no property but the named one: the target entity must already exist. Nothing is parsed out of the file — no frontmatter, no schema mapping, no config file.
+
 ### ontoforge-setup
 
 Bootstrap a project with OntoForge: Docker Compose, environment variables, and MCP configuration.

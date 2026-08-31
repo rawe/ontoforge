@@ -239,32 +239,41 @@ export async function existingVectorIndexDimensions(
  * check above does not see it, and the symptom only appears later, as a
  * storage failure on the first semantic search.
  *
- * On startup this only warns: dropping an index destroys the vectors it
- * holds, and that is the operator's call. The rebuild path passes
- * `recreateOnMismatch`, because there the drop is followed immediately by
- * regeneration at the new width — the operator asked for exactly that.
+ * Every path that creates only warns: repairing means dropping, and
+ * dropping is the operator's call, made through the rebuild
+ * (`dropMismatchedVectorIndexes`).
  *
  * Only the detection is here. What the operator is told — the wording
  * and the API-scope vocabulary every backend shares — is
  * `core/vectorDrift.ts`.
  */
-export async function reconcileIndexDimensions(
+export async function reportIfDimensionsDrifted(
   driver: Driver,
   indexName: string,
   describes: string,
   dimensions: number,
-  recreateOnMismatch: boolean,
 ): Promise<void> {
   const existing = await existingVectorIndexDimensions(driver, indexName);
   if (existing === null || existing === dimensions) {
     return;
   }
+  reportWidthMismatch(describes, existing, dimensions);
+}
 
-  if (!recreateOnMismatch) {
-    reportWidthMismatch(describes, existing, dimensions);
+/**
+ * Drop one index if its width has drifted, reporting what it covered.
+ * The rebuild's first phase reaches this and nothing else does.
+ */
+async function dropIfDimensionsDrifted(
+  driver: Driver,
+  indexName: string,
+  describes: string,
+  dimensions: number,
+): Promise<void> {
+  const existing = await existingVectorIndexDimensions(driver, indexName);
+  if (existing === null || existing === dimensions) {
     return;
   }
-
   await runSession(driver, async (session) => {
     await session.run(`DROP INDEX ${indexName} IF EXISTS`);
   });
@@ -277,13 +286,11 @@ export async function reconcileIndexDimensions(
  * New indexes include a WITH clause listing all current non-document
  * properties for in-index filtering. Existing indexes are left untouched
  * unless their width no longer matches `dimensions`, in which case they
- * are reported — or, with `recreateOnMismatch`, dropped and recreated.
- * See `reconcileIndexDimensions`.
+ * are reported and left alone. See `reportIfDimensionsDrifted`.
  */
 export async function ensureVectorIndexes(
   driver: Driver,
   dimensions: number,
-  recreateOnMismatch = false,
 ): Promise<void> {
   const entityTypes = await runSession(driver, async (session) => {
     const result = await session.run(
@@ -301,7 +308,7 @@ export async function ensureVectorIndexes(
   });
 
   for (const et of entityTypes) {
-    await createVectorIndex(driver, et.key, dimensions, et.propertyKeys, recreateOnMismatch);
+    await createVectorIndex(driver, et.key, dimensions, et.propertyKeys);
   }
 
   // Chunk vector indexes for document properties (one per virtual type).
@@ -319,20 +326,78 @@ export async function ensureVectorIndexes(
   });
 
   for (const { entityTypeKey, propertyKey } of documentProperties) {
-    await createDocumentVectorIndex(
-      driver,
-      entityTypeKey,
-      propertyKey,
-      dimensions,
-      recreateOnMismatch,
-    );
+    await createDocumentVectorIndex(driver, entityTypeKey, propertyKey, dimensions);
   }
 
   // Cross-type entity vector index (semantic search across all types).
-  await ensureEntityVectorIndex(driver, dimensions, recreateOnMismatch);
+  await ensureEntityVectorIndex(driver, dimensions);
 
   // Saved-query vector index (semantic search over descriptions).
-  await ensureSavedQueryVectorIndex(driver, dimensions, recreateOnMismatch);
+  await ensureSavedQueryVectorIndex(driver, dimensions);
+}
+
+/**
+ * Drop every vector index whose width no longer matches the model — the
+ * rebuild's first phase.
+ *
+ * A vector index fixes its width at creation and rejects every vector of
+ * any other, so a drifted one has to be gone before the rebuild can
+ * store what the new model produces. `ensureVectorIndexes` builds them
+ * again once the vectors are in place. An index that is already the
+ * right width is left alone, so a rebuild without drift never loses one.
+ */
+export async function dropMismatchedVectorIndexes(
+  driver: Driver,
+  dimensions: number,
+): Promise<void> {
+  const entityTypeKeys = await runSession(driver, async (session) => {
+    const result = await session.run("MATCH (et:EntityType) RETURN et.key AS key");
+    return result.records.map((record) => record.get("key") as string);
+  });
+
+  for (const key of entityTypeKeys) {
+    await dropIfDimensionsDrifted(
+      driver,
+      `${key}_embedding`,
+      entityTypeScope(key),
+      dimensions,
+    );
+  }
+
+  const documentProperties = await runSession(driver, async (session) => {
+    const result = await session.run(
+      `
+      MATCH (et:EntityType)-[:HAS_PROPERTY]->(p:PropertyDefinition {dataType: 'document'})
+      RETURN et.key AS entity_type_key, p.key AS property_key
+      `,
+    );
+    return result.records.map((record) => ({
+      entityTypeKey: record.get("entity_type_key") as string,
+      propertyKey: record.get("property_key") as string,
+    }));
+  });
+
+  for (const { entityTypeKey, propertyKey } of documentProperties) {
+    await dropIfDimensionsDrifted(
+      driver,
+      documentIndexName(entityTypeKey, propertyKey),
+      documentPropertyScope(entityTypeKey, propertyKey),
+      dimensions,
+    );
+  }
+
+  await dropIfDimensionsDrifted(
+    driver,
+    ENTITY_VECTOR_INDEX_NAME,
+    ALL_ENTITY_TYPES_SCOPE,
+    dimensions,
+  );
+  await dropIfDimensionsDrifted(
+    driver,
+    "saved_query_embedding",
+    SAVED_QUERY_SCOPE,
+    dimensions,
+  );
 }
 
 /**
@@ -343,15 +408,13 @@ export async function ensureVectorIndexes(
 export async function ensureEntityVectorIndex(
   driver: Driver,
   dimensions: number,
-  recreateOnMismatch = false,
 ): Promise<void> {
   await dropFailedIndexIfExists(driver, ENTITY_VECTOR_INDEX_NAME);
-  await reconcileIndexDimensions(
+  await reportIfDimensionsDrifted(
     driver,
     ENTITY_VECTOR_INDEX_NAME,
     ALL_ENTITY_TYPES_SCOPE,
     dimensions,
-    recreateOnMismatch,
   );
   const query =
     `CREATE VECTOR INDEX ${ENTITY_VECTOR_INDEX_NAME} IF NOT EXISTS ` +
@@ -372,14 +435,12 @@ export async function ensureEntityVectorIndex(
 export async function ensureSavedQueryVectorIndex(
   driver: Driver,
   dimensions: number,
-  recreateOnMismatch = false,
 ): Promise<void> {
-  await reconcileIndexDimensions(
+  await reportIfDimensionsDrifted(
     driver,
     "saved_query_embedding",
     SAVED_QUERY_SCOPE,
     dimensions,
-    recreateOnMismatch,
   );
   const query =
     "CREATE VECTOR INDEX saved_query_embedding IF NOT EXISTS " +
@@ -403,7 +464,6 @@ export async function createVectorIndex(
   entityTypeKey: string,
   dimensions: number,
   filterProperties: string[] | null = null,
-  recreateOnMismatch = false,
 ): Promise<void> {
   const pascalLabel = toPascalCase(entityTypeKey);
   const indexName = `${entityTypeKey}_embedding`;
@@ -415,12 +475,11 @@ export async function createVectorIndex(
     selectedProperties,
   );
   await dropFailedIndexIfExists(driver, indexName);
-  await reconcileIndexDimensions(
+  await reportIfDimensionsDrifted(
     driver,
     indexName,
     entityTypeScope(entityTypeKey),
     dimensions,
-    recreateOnMismatch,
   );
   let withClause = "";
   if (selectedProperties.length > 0) {
@@ -445,17 +504,15 @@ export async function createDocumentVectorIndex(
   entityTypeKey: string,
   propertyKey: string,
   dimensions: number,
-  recreateOnMismatch = false,
 ): Promise<void> {
   const indexName = documentIndexName(entityTypeKey, propertyKey);
   const virtualLabel = documentVirtualLabel(entityTypeKey, propertyKey);
   await dropFailedIndexIfExists(driver, indexName);
-  await reconcileIndexDimensions(
+  await reportIfDimensionsDrifted(
     driver,
     indexName,
     documentPropertyScope(entityTypeKey, propertyKey),
     dimensions,
-    recreateOnMismatch,
   );
   const query =
     `CREATE VECTOR INDEX ${indexName} IF NOT EXISTS ` +

@@ -54,6 +54,18 @@ export async function registryHoldsOntology(driver: Driver): Promise<boolean> {
   });
 }
 
+/** The key of the one registered ontology, or null when there is none.
+ * The adapter's maintenance names the ontology by this key when it has
+ * something to report (`index.ts`). */
+export async function registeredOntologyKey(driver: Driver): Promise<string | null> {
+  return runSession(driver, async (session) => {
+    const result = await session.run(
+      `MATCH (r:${REGISTRY_LABEL}) RETURN r.key AS key LIMIT 1`,
+    );
+    return (result.records[0]?.get("key") as string | undefined) ?? null;
+  });
+}
+
 export class Neo4jOntologyRegistry implements OntologyRegistry {
   constructor(private readonly driver: Driver) {}
 

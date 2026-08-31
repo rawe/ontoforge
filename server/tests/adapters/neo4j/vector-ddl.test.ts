@@ -9,8 +9,9 @@ import type { Driver } from "neo4j-driver";
 import { describe, expect, it } from "vitest";
 
 import {
+  dropMismatchedVectorIndexes,
   MAX_VECTOR_FILTER_VALUE_BYTES,
-  reconcileIndexDimensions,
+  reportIfDimensionsDrifted,
   validateVectorIndexedProperties,
 } from "../../../src/adapters/neo4j/ddl.js";
 import { ValidationError } from "../../../src/core/exceptions.js";
@@ -64,11 +65,20 @@ interface FakeSession {
 }
 
 /** A driver whose sessions answer SHOW VECTOR INDEXES with `existing` (or
- * nothing when null) and record every other statement. */
+ * nothing when null), report a single entity type `person` when asked for
+ * the index inventory, and record every other statement. */
 function fakeDriver(existingDimensions: number | null): { driver: Driver; session: FakeSession } {
   const session: FakeSession = {
     statements: [],
     run: async (query: string) => {
+      if (query.includes("PropertyDefinition {dataType: 'document'}")) {
+        session.statements.push(query);
+        return { records: [] };
+      }
+      if (query.includes("MATCH (et:EntityType)")) {
+        session.statements.push(query);
+        return { records: [{ get: (key: string) => (key === "key" ? "person" : null) }] };
+      }
       if (query.includes("SHOW VECTOR INDEXES")) {
         if (existingDimensions === null) {
           return { records: [] };
@@ -94,35 +104,34 @@ function fakeDriver(existingDimensions: number | null): { driver: Driver; sessio
 
 async function reconcile(
   existingDimensions: number | null,
-  recreate: boolean,
 ): Promise<{ statements: string[]; warnings: string[]; infos: string[] }> {
   const captured = captureLogs();
   const { driver, session } = fakeDriver(existingDimensions);
   try {
-    await reconcileIndexDimensions(driver, "person_embedding", ENTITY_TYPE_SCOPE, 768, recreate);
+    await reportIfDimensionsDrifted(driver, "person_embedding", ENTITY_TYPE_SCOPE, 768);
   } finally {
     captured.restore();
   }
   return { statements: session.statements, warnings: captured.warnings, infos: captured.infos };
 }
 
-describe("reconcileIndexDimensions", () => {
+describe("reportIfDimensionsDrifted", () => {
   it("leaves matching dimensions alone", async () => {
-    const { statements, warnings, infos } = await reconcile(768, false);
+    const { statements, warnings, infos } = await reconcile(768);
     expect(statements).toEqual([]);
     expect(warnings).toEqual([]);
     expect(infos).toEqual([]);
   });
 
   it("leaves an absent index to the create statement", async () => {
-    const { statements, warnings, infos } = await reconcile(null, false);
+    const { statements, warnings, infos } = await reconcile(null);
     expect(statements).toEqual([]);
     expect(warnings).toEqual([]);
     expect(infos).toEqual([]);
   });
 
   it("warns on mismatch without dropping the index", async () => {
-    const { statements, warnings } = await reconcile(1024, false);
+    const { statements, warnings } = await reconcile(1024);
     expect(statements).toEqual([]);
     const text = warnings.join("\n");
     expect(text).toContain(ENTITY_TYPE_SCOPE);
@@ -132,17 +141,39 @@ describe("reconcileIndexDimensions", () => {
   });
 
   it("names no vendor or physical index in the warning", async () => {
-    const { warnings } = await reconcile(1024, false);
+    const { warnings } = await reconcile(1024);
     const text = warnings.join("\n");
     for (const leak of ["eo4j", "Cypher", "person_embedding", "VECTOR INDEX", "label"]) {
       expect(text, `'${leak}' leaked into the warning`).not.toContain(leak);
     }
   });
 
-  it("drops the mismatched index when recreation is requested", async () => {
-    const { statements, warnings, infos } = await reconcile(1024, true);
-    expect(statements).toEqual(["DROP INDEX person_embedding IF EXISTS"]);
-    expect(warnings).toEqual([]);
-    expect(infos.join("\n")).toContain(ENTITY_TYPE_SCOPE);
+  it("never drops: the ensure paths only report", async () => {
+    const { statements } = await reconcile(1024);
+    expect(statements.filter((sql) => sql.includes("DROP INDEX"))).toEqual([]);
+  });
+});
+
+describe("dropMismatchedVectorIndexes", () => {
+  it("drops a drifted index and announces the repair", async () => {
+    const captured = captureLogs();
+    const { driver, session } = fakeDriver(1024);
+    try {
+      await dropMismatchedVectorIndexes(driver, 768);
+    } finally {
+      captured.restore();
+    }
+
+    expect(session.statements).toContain("DROP INDEX person_embedding IF EXISTS");
+    // Phase one builds nothing: the vectors it drops do not exist yet.
+    expect(session.statements.filter((sql) => sql.includes("CREATE VECTOR INDEX"))).toEqual([]);
+    expect(captured.warnings).toEqual([]);
+    expect(captured.infos.join("\n")).toContain(ENTITY_TYPE_SCOPE);
+  });
+
+  it("leaves an index alone when its width already agrees", async () => {
+    const { driver, session } = fakeDriver(768);
+    await dropMismatchedVectorIndexes(driver, 768);
+    expect(session.statements.filter((sql) => sql.includes("DROP INDEX"))).toEqual([]);
   });
 });

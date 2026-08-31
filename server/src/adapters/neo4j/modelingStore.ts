@@ -546,7 +546,11 @@ export class Neo4jModelingStore implements ModelingStore {
     await ddl.ensureSavedQueryVectorIndex(this.driver, dimensions);
   }
 
-  async ensureVectorIndexes(dimensions: number, recreateOnMismatch = false): Promise<void> {
-    await ddl.ensureVectorIndexes(this.driver, dimensions, recreateOnMismatch);
+  async dropMismatchedVectorIndexes(dimensions: number): Promise<void> {
+    await ddl.dropMismatchedVectorIndexes(this.driver, dimensions);
+  }
+
+  async ensureVectorIndexes(dimensions: number): Promise<void> {
+    await ddl.ensureVectorIndexes(this.driver, dimensions);
   }
 }

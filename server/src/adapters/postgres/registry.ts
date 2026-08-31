@@ -37,12 +37,23 @@ export function ontologyNamespace(key: string): string {
   return `ont_${key}`;
 }
 
-/** Every registered ontology's namespace, in key order — what the
- * adapter's per-namespace maintenance walks (`index.ts`). The registry,
- * not the PG catalog, is the authoritative list. */
-export async function listOntologyNamespaces(): Promise<string[]> {
-  const result = await runQuery(`SELECT namespace FROM public.ontology ORDER BY key`);
-  return result.rows.map((row) => row["namespace"] as string);
+/** One registered ontology as the adapter's maintenance sees it: the
+ * namespace it works in, and the key it names the ontology by when it
+ * has something to report. */
+export interface OntologyBinding {
+  key: string;
+  namespace: string;
+}
+
+/** Every registered ontology, in key order — what the adapter's
+ * per-namespace maintenance walks (`index.ts`). The registry, not the PG
+ * catalog, is the authoritative list. */
+export async function listOntologyBindings(): Promise<OntologyBinding[]> {
+  const result = await runQuery(`SELECT key, namespace FROM public.ontology ORDER BY key`);
+  return result.rows.map((row) => ({
+    key: row["key"] as string,
+    namespace: row["namespace"] as string,
+  }));
 }
 
 export class PostgresOntologyRegistry implements OntologyRegistry {

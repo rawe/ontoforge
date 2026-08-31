@@ -94,6 +94,7 @@ export function createMockModelingStore(): MockModelingStore {
     createDocumentVectorIndex: vi.fn(async () => undefined),
     dropDocumentVectorIndex: vi.fn(async () => undefined),
     ensureSavedQueryVectorIndex: vi.fn(async () => undefined),
+    dropMismatchedVectorIndexes: vi.fn(async () => undefined),
     ensureVectorIndexes: vi.fn(async () => undefined),
   };
 }

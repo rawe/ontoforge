@@ -785,6 +785,14 @@ export async function syncDocumentChunks(
     // edit the chunker re-synchronizes on the same boundaries, so most
     // chunks keep their exact text (at shifted offsets) and only the
     // chunks overlapping the edit need a fresh embedding.
+    //
+    // Only a vector the CURRENT model could have produced may be reused.
+    // After a switch of embedding model every stored vector has the old
+    // width, and reusing one would both answer with a vector from a
+    // different model and leave a row no index of the new width can be
+    // built over. The width check is what makes a rebuild after such a
+    // switch actually re-embed: the text is unchanged there, so every
+    // chunk would otherwise be reused and none regenerated.
     const reusable = await store.getChunkEmbeddingsForEntityProperty(entityId, propertyKey);
     await store.deleteChunksForEntityProperty(entityId, propertyKey);
     if (!value) {
@@ -809,7 +817,9 @@ export async function syncDocumentChunks(
         charLength: chunk.charLength,
         text: chunk.text,
       };
-      let chunkEmbedding = reusable[chunk.text] ?? null;
+      const stored = reusable[chunk.text] ?? null;
+      let chunkEmbedding =
+        stored !== null && stored.length === provider.dimensions ? stored : null;
       if (chunkEmbedding === null) {
         chunkEmbedding = await provider.embed(chunk.text);
       }

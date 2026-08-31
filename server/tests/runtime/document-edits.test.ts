@@ -372,6 +372,27 @@ describe("chunk re-sync + embedding reuse", () => {
     expect(holder.store.createDocumentChunks).not.toHaveBeenCalled();
   });
 
+  it("re-embeds unchanged chunks whose stored vector is of another model's width", async () => {
+    // The rebuild case: the text never changes, so reuse-by-text alone
+    // would keep every stale vector and regenerate nothing.
+    const chunks = chunkDocument(BIO, settings.DOCUMENT_CHUNK_SIZE, settings.DOCUMENT_CHUNK_OVERLAP);
+    const reuseMap: Record<string, number[]> = {};
+    for (const chunk of chunks) {
+      reuseMap[chunk.text] = Array.from({ length: 4 }, () => 0.5);
+    }
+    const provider = mockProvider();
+    setEmbeddingProvider(provider);
+    holder.store.getChunkEmbeddingsForEntityProperty.mockResolvedValue(reuseMap);
+
+    await syncDocumentChunks(asRuntimeStore(holder.store), "person", "ent-1", { bio: BIO });
+
+    expect(provider.embed).toHaveBeenCalledTimes(chunks.length);
+    const rows = holder.store.createDocumentChunks.mock.calls[0]![3] as Row[];
+    for (const row of rows) {
+      expect(row._embedding).toEqual(Array.from({ length: 8 }, () => 0.1));
+    }
+  });
+
   it("sync reuses embeddings for unchanged chunk texts", async () => {
     // Only chunks whose text changed are re-embedded; the rest reuse
     // stored vectors.

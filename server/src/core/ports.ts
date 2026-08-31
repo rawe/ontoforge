@@ -354,7 +354,24 @@ export interface ModelingStore {
 
   ensureSavedQueryVectorIndex(dimensions: number): Promise<void>;
 
-  ensureVectorIndexes(dimensions: number, recreateOnMismatch?: boolean): Promise<void>;
+  /**
+   * Drop every semantic index whose width no longer matches the model.
+   *
+   * The rebuild's first phase, and the only place drift is repaired
+   * rather than reported. It has to come first: an index fixes its width
+   * when it is created, so while a drifted one stands, storing a vector
+   * of the model's width fails — there is no order in which the vectors
+   * could be regenerated underneath it. What this leaves absent,
+   * `ensureVectorIndexes` builds again once the new vectors are in place.
+   */
+  dropMismatchedVectorIndexes(dimensions: number): Promise<void>;
+
+  /**
+   * Build every semantic index the schema calls for and does not have,
+   * at `dimensions`. An index whose width has drifted is REPORTED and
+   * left alone — repair belongs to the rebuild, through the method above.
+   */
+  ensureVectorIndexes(dimensions: number): Promise<void>;
 }
 
 /**

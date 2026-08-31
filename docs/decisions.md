@@ -228,9 +228,33 @@ a broken agent configuration rather than a model limitation.
 **Vector index width drift is reported at startup and repaired only on request.**
 An index fixes its width when created, so a changed embedding model leaves indexes that
 cannot accept vectors at the new width. Startup warns per mismatch and names the remedy.
-It does not repair, because repair means dropping and rebuilding at the new width — a
-destructive act no adapter may take unbidden. The rebuild operation does repair, because
+It does not repair, because repair means dropping the index and re-embedding everything it
+covered — downtime and one model call per stored item, which no adapter may spend unbidden.
+The stored vectors are never at stake: they live in the store's own column, not in the
+index. The rebuild operation does repair, because
 there the caller has asked for exactly that.
+
+**Repair is three phases, in this order: drop, regenerate, build.** A drifted index
+cannot be dropped and rebuilt in one step. While it stands it rejects vectors of the new
+width, so the vectors cannot be regenerated underneath it; and it cannot be built over
+vectors of the old width. Rebuild therefore drops every mismatched index first, then
+regenerates every vector, then builds the indexes it dropped. An index whose width
+already agrees is never dropped, so a rebuild without drift loses none. Between the first
+and third phase the ontology has no semantic index — a rebuild that dies in between
+leaves them absent and its vectors of mixed width, which the next completed rebuild
+repairs.
+
+**A stored embedding is reused only at the configured provider's width.** Reuse is keyed
+by content — an unchanged document passage keeps its vector — but a vector of any other
+width came from a different model and no index of the current width can be built over it,
+so it is always recomputed. Without this, a rebuild after a model switch would regenerate
+nothing for document passages: their text is unchanged, so every one of them would be
+reused.
+
+**A failed index ensure never stops the boot.** Startup reports the ontology it could not
+bring into line, in API vocabulary, and carries on with the rest. The state that makes an
+ensure fail is an unfinished rebuild, and refusing to start would take away the server
+the operator needs in order to finish it.
 
 ## Scope
 

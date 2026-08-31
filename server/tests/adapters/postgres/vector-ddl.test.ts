@@ -286,21 +286,43 @@ describe("width drift", () => {
     }
   });
 
-  it("repairs on the recreate flag: drop then recreate at the model's width", async () => {
+  it("reports drift without dropping — the ensure never repairs", async () => {
     existingWidth(1024, [{ entity_type_id: ENTITY_TYPE_ID, key: "person" }]);
     const captured = captureLogs();
     try {
-      await store.ensureVectorIndexes(768, true);
+      await store.ensureVectorIndexes(768);
     } finally {
       captured.restore();
     }
 
-    const dropped = statements().filter((sql) => sql.includes(`DROP INDEX IF EXISTS ${ENTITY_INDEX}`));
-    expect(dropped).toHaveLength(1);
-    expect(statements().filter((sql) => sql.includes("CREATE INDEX")).join("\n")).toContain(
-      "embedding::vector(768)",
+    expect(statements().filter((sql) => sql.includes("DROP INDEX"))).toEqual([]);
+    expect(captured.lines.join("\n")).toContain("/model/rebuild-embeddings");
+  });
+
+  it("drops a drifted index and only a drifted one, creating nothing", async () => {
+    existingWidth(1024, [{ entity_type_id: ENTITY_TYPE_ID, key: "person" }]);
+    const captured = captureLogs();
+    try {
+      await store.dropMismatchedVectorIndexes(768);
+    } finally {
+      captured.restore();
+    }
+
+    const dropped = statements().filter((sql) =>
+      sql.includes(`DROP INDEX IF EXISTS ${ENTITY_INDEX}`),
     );
+    expect(dropped).toHaveLength(1);
+    // Phase one builds nothing: the vectors it drops do not exist yet.
+    expect(statements().filter((sql) => sql.includes("CREATE INDEX"))).toEqual([]);
+    // A repair announcement, not the operator advice the ensure gives.
+    expect(captured.lines.join("\n")).toContain("Recreating the semantic index");
     expect(captured.lines.join("\n")).not.toContain("/model/rebuild-embeddings");
+  });
+
+  it("leaves an index alone when its width already agrees", async () => {
+    existingWidth(768, [{ entity_type_id: ENTITY_TYPE_ID, key: "person" }]);
+    await store.dropMismatchedVectorIndexes(768);
+    expect(statements().filter((sql) => sql.includes("DROP INDEX"))).toEqual([]);
   });
 
   it("stays silent when the widths already agree", async () => {

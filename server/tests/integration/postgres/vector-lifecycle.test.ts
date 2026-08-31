@@ -19,12 +19,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { runQuery } from "../../../src/adapters/postgres/errors.js";
 import { settings } from "../../../src/config.js";
-import type { ModelingStore } from "../../../src/core/ports.js";
+import type { ModelingStore, PropertyDef, RuntimeStore } from "../../../src/core/ports.js";
 import {
   closeStores,
   ensureSemanticIndexes,
   getModelingStore,
   getOntologyRegistry,
+  getRuntimeStore,
   initStores,
 } from "../../../src/core/ports.js";
 import { wipeDatabase } from "../reset.js";
@@ -76,8 +77,15 @@ function nameId(rowId: string): string {
   return rowId.replaceAll("-", "");
 }
 
+/** A vector of the given width — the values are irrelevant, only the
+ * width is. */
+function vectorOf(width: number): number[] {
+  return Array.from({ length: width }, () => 0.1);
+}
+
 describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lifecycle", () => {
   let store: ModelingStore;
+  let runtime: RuntimeStore;
   let entityTypeId: string;
   let documentPropertyId: string;
   let entityIndex: string;
@@ -100,6 +108,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
     // yet — every test decides how indexes come into existence.
     await getOntologyRegistry().createOntology(randomUUID(), ONTOLOGY_KEY, null, null);
     store = await getModelingStore(ONTOLOGY_KEY);
+    runtime = await getRuntimeStore(ONTOLOGY_KEY);
     entityTypeId = randomUUID();
     await store.createEntityType(entityTypeId, "person", "Person", null);
     await store.createProperty(
@@ -257,12 +266,10 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
       }
     });
 
-    it("the recreate flag repairs every scope", async () => {
+    it("the drop phase clears every mismatched scope and builds nothing", async () => {
       await stageDrift();
 
-      const reported = await logsOf(() =>
-        store.ensureVectorIndexes(MODEL_WIDTH, true),
-      );
+      const reported = await logsOf(() => store.dropMismatchedVectorIndexes(MODEL_WIDTH));
 
       expect(reported).toContain("Recreating the semantic index for entity type 'person'");
       expect(reported).not.toContain("/model/rebuild-embeddings");
@@ -272,7 +279,75 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
         "entity_embedding_all_idx",
         "saved_query_embedding_idx",
       ]) {
-        expect(await widthOf(name), `${name} was not repaired`).toBe(MODEL_WIDTH);
+        expect(await widthOf(name), `${name} was not dropped`).toBeNull();
+      }
+    });
+
+    it("the drop phase leaves indexes of the right width alone", async () => {
+      await store.ensureVectorIndexes(MODEL_WIDTH);
+
+      await store.dropMismatchedVectorIndexes(MODEL_WIDTH);
+
+      for (const name of [
+        entityIndex,
+        chunkIndex,
+        "entity_embedding_all_idx",
+        "saved_query_embedding_idx",
+      ]) {
+        expect(await widthOf(name), `${name} was dropped`).toBe(MODEL_WIDTH);
+      }
+    });
+
+    /**
+     * The reason the drop is a phase of its own rather than a flag on the
+     * ensure. An index is built over `embedding::vector(D)` and the cast
+     * runs per row, so it can only be built once every stored vector is
+     * already D wide — which, after a model switch, is true only after
+     * the rebuild has regenerated them. Drop and create in one step
+     * cannot work while the old vectors are still there.
+     */
+    it("drop, regenerate, ensure — the order a model switch has to follow", async () => {
+      const propertyDefs: Record<string, PropertyDef> = {
+        name: {
+          key: "name",
+          displayName: "Name",
+          description: null,
+          dataType: "string",
+          required: true,
+          defaultValue: null,
+        },
+      };
+      await store.ensureVectorIndexes(DRIFTED_WIDTH);
+      const entityId = randomUUID();
+      await runtime.createEntity(
+        "person",
+        entityId,
+        { name: "Ada" },
+        propertyDefs,
+        vectorOf(DRIFTED_WIDTH),
+      );
+
+      // While the drifted index still stands the ensure is a no-op —
+      // `CREATE INDEX IF NOT EXISTS` skips it — so it only reports.
+      await store.ensureVectorIndexes(MODEL_WIDTH);
+      expect(await widthOf(entityIndex)).toBe(DRIFTED_WIDTH);
+
+      // Phase one: the drop.
+      await store.dropMismatchedVectorIndexes(MODEL_WIDTH);
+      expect(await widthOf(entityIndex)).toBeNull();
+
+      // The heart of it: with the index gone and the old vector still
+      // stored, building at the model's width is impossible. This is the
+      // step the old one-transaction repair performed straight after its
+      // drop, and it is why the two cannot share a phase.
+      await expect(store.ensureVectorIndexes(MODEL_WIDTH)).rejects.toThrow();
+
+      // Phase two regenerates, and only then can phase three build.
+      await store.setEntityEmbedding(entityId, vectorOf(MODEL_WIDTH));
+      await store.ensureVectorIndexes(MODEL_WIDTH);
+
+      for (const name of [entityIndex, "entity_embedding_all_idx"]) {
+        expect(await widthOf(name), `${name} was not rebuilt`).toBe(MODEL_WIDTH);
       }
     });
 

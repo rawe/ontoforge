@@ -13,11 +13,12 @@
  * only the server-wide objects.
  */
 
+import { reportEnsureFailed } from "../../core/vectorDrift.js";
 import { ensureVectorIndexes, initSchema } from "./ddl.js";
 import { closePool, initPool } from "./errors.js";
 import { PostgresModelingStore } from "./modelingStore.js";
 import {
-  listOntologyNamespaces,
+  listOntologyBindings,
   ontologyNamespace,
   PostgresOntologyRegistry,
 } from "./registry.js";
@@ -55,12 +56,21 @@ export async function closeStores(): Promise<void> {
  * one namespace at a time. Zero ontologies: nothing to do.
  *
  * The startup path: width mismatches are REPORTED and nothing is
- * repaired — only the rebuild operation recreates a drifted index,
- * immediately before regenerating the vectors that fill it
+ * repaired — only the rebuild operation drops a drifted index, and it
+ * regenerates the vectors before building it again
  * (`docs/decisions.md#behaviour`).
+ *
+ * One ontology cannot stop the others, and none of them can stop the
+ * boot. An unfinished rebuild leaves vectors of mixed width behind, over
+ * which no index can be built; failing to start would take away the
+ * server the operator needs to finish that rebuild.
  */
 export async function ensureSemanticIndexes(dimensions: number): Promise<void> {
-  for (const namespace of await listOntologyNamespaces()) {
-    await ensureVectorIndexes(dimensions, false, namespace);
+  for (const binding of await listOntologyBindings()) {
+    try {
+      await ensureVectorIndexes(dimensions, binding.namespace);
+    } catch {
+      reportEnsureFailed(binding.key);
+    }
   }
 }

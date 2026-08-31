@@ -398,49 +398,39 @@ export async function indexWidth(querier: Querier, indexName: string): Promise<n
 }
 
 /**
- * Handle an existing index whose width no longer matches the model.
+ * Report an existing index whose width no longer matches the model.
  *
  * An index fixes its width when it is created and a create-if-absent is a
  * no-op against one that exists, so changing the embedding model leaves
- * an index that rejects every vector the new model produces. On the
- * startup and per-type create paths this only reports: dropping an index
- * destroys the vectors it holds, and that is the operator's call. The
- * rebuild path passes `recreateOnMismatch`, because there the drop is
- * followed immediately by regeneration at the new width.
+ * an index that rejects every vector the new model produces. Every path
+ * that creates only reports it: repairing means dropping, and dropping
+ * is the operator's call, made through the rebuild
+ * (`dropMismatchedVectorIndexes`).
  *
  * Only the detection is here. What the operator is told — the wording
  * and the API-scope vocabulary every backend shares — is
  * `core/vectorDrift.ts`.
  */
-async function reconcileIndexWidth(
+async function reportIfWidthDrifted(
   querier: Querier,
   indexName: string,
   describes: string,
   dimensions: number,
-  recreateOnMismatch: boolean,
 ): Promise<void> {
   const existing = await indexWidth(querier, indexName);
   if (existing === null || existing === dimensions) {
     return;
   }
-
-  if (!recreateOnMismatch) {
-    reportWidthMismatch(describes, existing, dimensions);
-    return;
-  }
-
-  await dropIndex(querier, indexName);
-  reportWidthRecreate(describes, existing, dimensions);
+  reportWidthMismatch(describes, existing, dimensions);
 }
 
-/** Reconcile the width of an index, then create it if absent. */
+/** Report a drifted width, then create the index if it is absent. */
 async function ensureIndex(
   querier: Querier,
   spec: IndexSpec,
   dimensions: number,
-  recreateOnMismatch: boolean,
 ): Promise<void> {
-  await reconcileIndexWidth(querier, spec.name, spec.describes, dimensions, recreateOnMismatch);
+  await reportIfWidthDrifted(querier, spec.name, spec.describes, dimensions);
   await querier.query(createHnsw(spec, dimensions));
 }
 
@@ -578,7 +568,7 @@ export async function createVectorIndex(
       if (entityTypeId === null) {
         return;
       }
-      await ensureIndex(querier, entityIndexSpec(entityTypeId, entityTypeKey), dimensions, false);
+      await ensureIndex(querier, entityIndexSpec(entityTypeId, entityTypeKey), dimensions);
     },
     "READ COMMITTED",
     namespace,
@@ -649,12 +639,7 @@ export async function createDocumentVectorIndex(
       if (propertyId === null) {
         return;
       }
-      await ensureIndex(
-        querier,
-        chunkIndexSpec(propertyId, entityTypeKey, propertyKey),
-        dimensions,
-        false,
-      );
+      await ensureIndex(querier, chunkIndexSpec(propertyId, entityTypeKey, propertyKey), dimensions);
     },
     "READ COMMITTED",
     namespace,
@@ -689,7 +674,7 @@ export async function ensureSavedQueryVectorIndex(
 ): Promise<void> {
   await withTransaction(
     async (querier) => {
-      await ensureIndex(querier, SAVED_QUERY_SPEC, dimensions, false);
+      await ensureIndex(querier, SAVED_QUERY_SPEC, dimensions);
     },
     "READ COMMITTED",
     namespace,
@@ -697,55 +682,97 @@ export async function ensureSavedQueryVectorIndex(
 }
 
 /**
- * Ensure the whole vector-index inventory, in one all-or-nothing
- * transaction: sweep the orphans, then reconcile and create the per-type
- * indexes, the chunk indexes of every document property, the cross-type
- * index, and the saved-query index.
+ * Every semantic index the schema calls for, handed to a visitor one at
+ * a time: the per-type indexes, the chunk index of every document
+ * property, the cross-type index, and the saved-query index.
  *
- * `recreateOnMismatch` is the rebuild path's flag — the one path allowed
- * to repair a width mismatch, because it regenerates the vectors it drops.
+ * A rebuild walks this twice — once to drop what has drifted, once to
+ * build what is missing — and the two passes have to agree on the
+ * inventory exactly, or an index dropped by the first would never come
+ * back. So it is derived once, here.
+ */
+async function forEachIndexSpec(
+  querier: Querier,
+  visit: (spec: IndexSpec) => Promise<void>,
+): Promise<void> {
+  const entityTypes = await querier.query(
+    `SELECT entity_type_id, key FROM entity_type ORDER BY key`,
+  );
+  for (const row of entityTypes.rows) {
+    await visit(entityIndexSpec(row["entity_type_id"] as string, row["key"] as string));
+  }
+
+  const documentProperties = await querier.query(
+    `SELECT p.property_id, p.key AS property_key, et.key AS entity_type_key
+     ${DOCUMENT_PROPERTY_ROWS}
+     ORDER BY et.key, p.key`,
+  );
+  for (const row of documentProperties.rows) {
+    await visit(
+      chunkIndexSpec(
+        row["property_id"] as string,
+        row["entity_type_key"] as string,
+        row["property_key"] as string,
+      ),
+    );
+  }
+
+  await visit(CROSS_TYPE_SPEC);
+  await visit(SAVED_QUERY_SPEC);
+}
+
+/**
+ * Ensure the whole vector-index inventory, in one all-or-nothing
+ * transaction: sweep the orphans, then create every index the schema
+ * calls for and does not have. A drifted width is reported, never
+ * repaired.
+ *
+ * An index is built over `embedding::vector(D)`, and the cast is
+ * evaluated per row — so this succeeds only while every stored vector is
+ * already `dimensions` wide. After a switch of embedding model that is
+ * true only once the rebuild has regenerated them.
  */
 export async function ensureVectorIndexes(
   dimensions: number,
-  recreateOnMismatch = false,
   namespace?: string,
 ): Promise<void> {
   await withTransaction(
     async (querier) => {
       await sweepOrphanIndexes(querier);
+      await forEachIndexSpec(querier, (spec) => ensureIndex(querier, spec, dimensions));
+    },
+    "READ COMMITTED",
+    namespace,
+  );
+}
 
-      const entityTypes = await querier.query(
-        `SELECT entity_type_id, key FROM entity_type ORDER BY key`,
-      );
-      for (const row of entityTypes.rows) {
-        await ensureIndex(
-          querier,
-          entityIndexSpec(row["entity_type_id"] as string, row["key"] as string),
-          dimensions,
-          recreateOnMismatch,
-        );
-      }
-
-      const documentProperties = await querier.query(
-        `SELECT p.property_id, p.key AS property_key, et.key AS entity_type_key
-     ${DOCUMENT_PROPERTY_ROWS}
-     ORDER BY et.key, p.key`,
-      );
-      for (const row of documentProperties.rows) {
-        await ensureIndex(
-          querier,
-          chunkIndexSpec(
-            row["property_id"] as string,
-            row["entity_type_key"] as string,
-            row["property_key"] as string,
-          ),
-          dimensions,
-          recreateOnMismatch,
-        );
-      }
-
-      await ensureIndex(querier, CROSS_TYPE_SPEC, dimensions, recreateOnMismatch);
-      await ensureIndex(querier, SAVED_QUERY_SPEC, dimensions, recreateOnMismatch);
+/**
+ * Drop every index whose width no longer matches the model — the
+ * rebuild's first phase.
+ *
+ * It has to be a phase of its own. The index casts each row to its own
+ * width, so while a drifted index stands, writing a vector of the
+ * model's width fails: the vectors cannot be regenerated underneath it,
+ * and it cannot be rebuilt over the old ones. Drop first, regenerate,
+ * then `ensureVectorIndexes`.
+ *
+ * An index that is already the right width is left alone, so a rebuild
+ * without drift never loses one.
+ */
+export async function dropMismatchedVectorIndexes(
+  dimensions: number,
+  namespace?: string,
+): Promise<void> {
+  await withTransaction(
+    async (querier) => {
+      await forEachIndexSpec(querier, async (spec) => {
+        const existing = await indexWidth(querier, spec.name);
+        if (existing === null || existing === dimensions) {
+          return;
+        }
+        await dropIndex(querier, spec.name);
+        reportWidthRecreate(spec.describes, existing, dimensions);
+      });
     },
     "READ COMMITTED",
     namespace,

@@ -37,7 +37,7 @@ const adapter = await import("../../../src/adapters/neo4j/index.js");
 describe("ensureSemanticIndexes", () => {
   it("does nothing when the registry holds no ontology", async () => {
     queries.length = 0;
-    respond = () => [{ registered: 0 }];
+    respond = () => [];
 
     await adapter.ensureSemanticIndexes(768);
 
@@ -47,7 +47,7 @@ describe("ensureSemanticIndexes", () => {
 
   it("ensures the graph's indexes when the one ontology exists", async () => {
     queries.length = 0;
-    respond = (query) => (query.includes("_OntologyRegistry") ? [{ registered: 1 }] : []);
+    respond = (query) => (query.includes("_OntologyRegistry") ? [{ key: "workspace" }] : []);
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
 
     try {

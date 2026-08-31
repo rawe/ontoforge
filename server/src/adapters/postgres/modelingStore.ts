@@ -981,7 +981,11 @@ export class PostgresModelingStore implements ModelingStore {
     return vectorDdl.ensureSavedQueryVectorIndex(dimensions, this.namespace);
   }
 
-  ensureVectorIndexes(dimensions: number, recreateOnMismatch?: boolean): Promise<void> {
-    return vectorDdl.ensureVectorIndexes(dimensions, recreateOnMismatch, this.namespace);
+  dropMismatchedVectorIndexes(dimensions: number): Promise<void> {
+    return vectorDdl.dropMismatchedVectorIndexes(dimensions, this.namespace);
+  }
+
+  ensureVectorIndexes(dimensions: number): Promise<void> {
+    return vectorDdl.ensureVectorIndexes(dimensions, this.namespace);
   }
 }

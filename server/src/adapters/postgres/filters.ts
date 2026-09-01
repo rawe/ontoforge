@@ -21,7 +21,11 @@
  * assume server-format ids.
  */
 
-import type { FilterCondition, PropertyFilterCondition } from "../../core/ports.js";
+import type {
+  FilterCondition,
+  PathFilterCondition,
+  PropertyFilterCondition,
+} from "../../core/ports.js";
 import type { PropertyDef } from "../../core/schemas.js";
 
 const OPERATORS: Record<Exclude<FilterCondition["op"], "contains">, string> = {
@@ -55,10 +59,9 @@ export function jsonAccessor(dataType: string, container: string, key: string): 
   }
 }
 
-/** The accessor over this module's own `props` column, key bound at the
- * given placeholder. */
-function accessor(dataType: string, keyPlaceholder: number): string {
-  return jsonAccessor(dataType, "props", `$${keyPlaceholder}`);
+/** The accessor over a `props` column, key bound at the given placeholder. */
+function accessor(dataType: string, container: string, keyPlaceholder: number): string {
+  return jsonAccessor(dataType, container, `$${keyPlaceholder}`);
 }
 
 /** Append one value to the params array, returning its placeholder number. */
@@ -77,23 +80,56 @@ export function buildFilterClauses(
   for (const condition of conditions) {
     switch (condition.kind) {
       case "property":
-        clauses.push(buildPropertyClause(condition, params));
+        clauses.push(buildPropertyClause(condition, "props", params));
         break;
+      case "path":
+        clauses.push(buildPathClause(condition, params));
+        break;
+      default: {
+        const unhandled: never = condition;
+        throw new Error(`Unhandled filter condition kind: ${String(unhandled)}`);
+      }
     }
   }
   return clauses;
 }
 
-/** The predicate for one property condition over this row's `props`. */
-function buildPropertyClause(condition: PropertyFilterCondition, params: unknown[]): string {
+/** The predicate for one property comparison over the given `props`
+ * column — the listed row's own, or the related row's inside a path
+ * subquery. */
+function buildPropertyClause(
+  condition: Pick<PropertyFilterCondition, "propertyKey" | "dataType" | "op" | "value">,
+  container: string,
+  params: unknown[],
+): string {
   if (condition.op === "contains") {
     const valueP = bind(params, condition.value);
     const keyP = bind(params, condition.propertyKey);
-    return `position(lower($${valueP}) in lower(props->>$${keyP})) > 0`;
+    return `position(lower($${valueP}) in lower(${container}->>$${keyP})) > 0`;
   }
   const keyP = bind(params, condition.propertyKey);
   const valueP = bind(params, condition.value);
-  return `${accessor(condition.dataType, keyP)} ${OPERATORS[condition.op]} $${valueP}`;
+  return `${accessor(condition.dataType, container, keyP)} ${OPERATORS[condition.op]} $${valueP}`;
+}
+
+/**
+ * The existential predicate for one path condition: a relation row of the
+ * type, anchored on the listed row (`entity` — the outer query's table,
+ * unaliased) at the near endpoint, joined to the related row at the far
+ * endpoint, with the property comparison on that row. Self-contained per
+ * condition, so two paths through one relation type may be satisfied by
+ * two different related rows. The relation type key is bound like every
+ * property key.
+ */
+function buildPathClause(condition: PathFilterCondition, params: unknown[]): string {
+  const [near, far] =
+    condition.direction === "outgoing" ? ["from_id", "to_id"] : ["to_id", "from_id"];
+  const typeP = bind(params, condition.relationTypeKey);
+  const predicate = buildPropertyClause(condition, "re.props", params);
+  return (
+    `EXISTS (SELECT 1 FROM relation r JOIN entity re ON re.id = r.${far} ` +
+    `WHERE r.${near} = entity.id AND r.type_key = $${typeP} AND ${predicate})`
+  );
 }
 
 /** The free-text search fragment: the contains idiom ORed over the
@@ -126,7 +162,11 @@ export function buildOrderBy(
   } else if (sortField === "_updatedAt") {
     sortExpr = "updated_at";
   } else {
-    sortExpr = accessor(propertyDefs[sortField]?.dataType ?? "string", bind(params, sortField));
+    sortExpr = accessor(
+      propertyDefs[sortField]?.dataType ?? "string",
+      "props",
+      bind(params, sortField),
+    );
   }
   return `ORDER BY ${sortExpr} ${direction}, id`;
 }

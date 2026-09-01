@@ -16,7 +16,7 @@ import {
   buildOrderBy,
   buildSearchClause,
 } from "../../../src/adapters/postgres/filters.js";
-import { cond, DEFS } from "../../propertyDefs.js";
+import { cond, DEFS, pathCond } from "../../propertyDefs.js";
 
 describe("operator x type mapping — key and value both bound", () => {
   it("string equality reads the text accessor", () => {
@@ -196,5 +196,64 @@ describe("relation endpoint filters — plain indexed columns", () => {
     const params: unknown[] = [];
     expect(buildEndpointClauses(null, null, params)).toEqual([]);
     expect(params).toEqual([]);
+  });
+});
+
+describe("path conditions — an existential subquery through the relation table", () => {
+  it("outgoing: the listed row is the relation's source, the related row its target", () => {
+    const params: unknown[] = ["person"];
+    const clauses = buildFilterClauses(
+      [pathCond("works_for", "outgoing", "name", "string", "eq", "Acme")],
+      params,
+    );
+    expect(clauses).toEqual([
+      "EXISTS (SELECT 1 FROM relation r JOIN entity re ON re.id = r.to_id " +
+        "WHERE r.from_id = entity.id AND r.type_key = $2 AND re.props->>$3 = $4)",
+    ]);
+    expect(params).toEqual(["person", "works_for", "name", "Acme"]);
+  });
+
+  it("incoming: the listed row is the relation's target, the related row its source, typed by the final property", () => {
+    const params: unknown[] = [];
+    const clauses = buildFilterClauses(
+      [pathCond("works_for", "incoming", "age", "integer", "gt", 30)],
+      params,
+    );
+    expect(clauses).toEqual([
+      "EXISTS (SELECT 1 FROM relation r JOIN entity re ON re.id = r.from_id " +
+        "WHERE r.to_id = entity.id AND r.type_key = $1 AND (re.props->$2)::numeric > $3)",
+    ]);
+    expect(params).toEqual(["works_for", "age", 30]);
+  });
+
+  it("contains keeps the position() idiom over the related row's text form", () => {
+    const params: unknown[] = [];
+    const clauses = buildFilterClauses(
+      [pathCond("works_for", "outgoing", "name", "string", "contains", "ac")],
+      params,
+    );
+    expect(clauses).toEqual([
+      "EXISTS (SELECT 1 FROM relation r JOIN entity re ON re.id = r.to_id " +
+        "WHERE r.from_id = entity.id AND r.type_key = $1 AND " +
+        "position(lower($2) in lower(re.props->>$3)) > 0)",
+    ]);
+    expect(params).toEqual(["works_for", "ac", "name"]);
+  });
+
+  it("path and property conditions compose in order over the shared params", () => {
+    const params: unknown[] = [];
+    const clauses = buildFilterClauses(
+      [
+        cond("age", "integer", "gte", 18),
+        pathCond("works_for", "outgoing", "name", "string", "eq", "Acme"),
+      ],
+      params,
+    );
+    expect(clauses).toEqual([
+      "(props->$1)::numeric >= $2",
+      "EXISTS (SELECT 1 FROM relation r JOIN entity re ON re.id = r.to_id " +
+        "WHERE r.from_id = entity.id AND r.type_key = $3 AND re.props->>$4 = $5)",
+    ]);
+    expect(params).toEqual(["age", 18, "works_for", "name", "Acme"]);
   });
 });

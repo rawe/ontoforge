@@ -9,14 +9,19 @@
  * Validation happens above the port: the service parses, checks, and
  * coerces every filter, so what arrives here is valid by construction
  * and the builder is pure fragment assembly. VALUES are always bound
- * parameters; the only interpolated identifiers are property keys taken
- * from the STORED schema via the parsed conditions, never from raw
- * request input.
+ * parameters; the only interpolated identifiers are property keys and
+ * relation type keys taken from the STORED schema via the parsed
+ * conditions, never from raw request input.
  */
 
 import neo4j from "neo4j-driver";
 
-import type { FilterCondition, PropertyFilterCondition } from "../../core/ports.js";
+import type {
+  FilterCondition,
+  PathFilterCondition,
+  PropertyFilterCondition,
+} from "../../core/ports.js";
+import { toUpperSnakeCase } from "./ddl.js";
 import { toNeo4jDate, toNeo4jDateTime } from "./temporal.js";
 
 const OPERATORS: Record<string, string> = {
@@ -62,10 +67,42 @@ export function buildFilterClauses(
         params[paramName] = value;
         break;
       }
+      case "path": {
+        const [clause, value] = buildPathClause(condition, nodeAlias, paramName);
+        whereClauses.push(clause);
+        params[paramName] = value;
+        break;
+      }
+      default: {
+        const unhandled: never = condition;
+        throw new Error(`Unhandled filter condition kind: ${String(unhandled)}`);
+      }
     }
   }
 
   return [whereClauses, params];
+}
+
+/**
+ * The existential pattern predicate for one path condition: from the
+ * listed node, one relationship of the type in the resolved direction to
+ * the related node `re`, with the property comparison on that node.
+ * Self-contained per condition, so two paths through one relation type
+ * may be satisfied by two different related nodes. The relationship type
+ * is the stored relation type key's physical form.
+ */
+function buildPathClause(
+  condition: PathFilterCondition,
+  alias: string,
+  paramName: string,
+): [string, unknown] {
+  const [predicate, value] = buildPropertyClause(condition, "re", paramName);
+  const relationship = `[:${toUpperSnakeCase(condition.relationTypeKey)}]`;
+  const pattern =
+    condition.direction === "outgoing"
+      ? `(${alias})-${relationship}->(re)`
+      : `(${alias})<-${relationship}-(re)`;
+  return [`EXISTS { MATCH ${pattern} WHERE ${predicate} }`, value];
 }
 
 /** The fragment for one property condition on the aliased node or
@@ -74,7 +111,7 @@ export function buildFilterClauses(
  * and crosses untouched; every other value is converted to its
  * driver-native form. */
 function buildPropertyClause(
-  condition: PropertyFilterCondition,
+  condition: Pick<PropertyFilterCondition, "propertyKey" | "dataType" | "op" | "value">,
   alias: string,
   paramName: string,
 ): [string, unknown] {

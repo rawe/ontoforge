@@ -89,9 +89,13 @@ there one deviation exists — PostgreSQL-specific: datetime values return as th
 ISO text, whose wire serialization is byte-identical.
 
 **Filters, sorts and searches cross as structured values, never as query text.** A filter
-is a list of parsed conditions, each tagged with its kind; the only kind is the property
-condition — property key, declared data type, operator, and the value already coerced to
-that type. A sort is a property key plus a direction; a text search is
+is a list of parsed conditions, each tagged with its kind. The property condition carries
+a property key, its declared data type, an operator, and the value already coerced to
+that type. The path condition carries a relation type key, an explicit direction —
+outgoing or incoming — the source of the final property (the related entity), the final
+property key, its data type, an operator and the coerced value; the service resolves the
+path above the port, so an adapter receives only valid, fully resolved conditions and
+never a key to interpret. A sort is a property key plus a direction; a text search is
 a string plus the list of property keys to match it against. No fragment of any query
 language enters or leaves the port. The one exception is the validated query object,
 described below, which is opaque rather than textual.
@@ -342,18 +346,23 @@ the adapter, dispatching on each condition's kind, must turn every condition int
 predicate the database can evaluate. The
 operator vocabulary is fixed by the caller-facing surface, not by the adapter, and is
 enumerated once in [interfaces.md](interfaces.md#listing-sorting-filtering); an adapter
-supports all of it and invents none of it. Validation happens above the port: the three
-filter faults — an unknown property, an unknown operator, a value that will not coerce —
-are collected there into one domain validation error, identically on every backend, so the
-adapter receives only valid conditions and raises no filter validation error of its own. Each
-condition's value is already coerced to the property's declared data type; the substring
-operator is the exception, comparing case-insensitively on the string form of both sides
-and carrying that string form as its value. One fault remains the adapter's to raise, as a
+supports all of it and invents none of it. Validation happens above the port: every filter
+fault — an unknown property, an unknown operator, a value that will not coerce, a query
+path that does not resolve — is collected there into one domain validation error,
+identically on every backend, so the adapter receives only valid conditions and raises no
+filter validation error of its own. Each condition's value is already coerced to the
+property's declared data type; the substring operator is the exception, comparing
+case-insensitively on the string form of both sides and carrying that string form as its
+value. A path condition's predicate is existential and self-contained: it holds when at
+least one relation of the type — leaving the listed instance for the outgoing direction,
+arriving at it for the incoming one — reaches a related entity whose property satisfies
+the comparison, evaluated per condition. One fault remains the adapter's to raise, as a
 domain validation error and not a storage error — Neo4j-specific, raised on the write path
 through the write-value constraint above: an indexed value exceeding the 32766-byte
 ceiling, in an error naming the property. Every value must reach the database as a bound
-parameter. Type keys and property keys may be interpolated into generated query text —
-they originate from the stored schema, never from request input — but values never may.
+parameter. Type keys, relation type keys and property keys may be interpolated into
+generated query text — they originate from the stored schema, never from request input —
+but values never may.
 
 **Compiling a validated query.** The adapter turns the validated query into its native
 dialect and runs it read-only. How it compiles is its own business — rewriting tokens in
@@ -559,7 +568,10 @@ Five B-tree indexes back the hot paths: entity rows by type key; relation rows b
 key, by source entity and by target entity; chunk rows by owning entity and property
 key. Filters, sorts and text search evaluate jsonb expressions that cast a property to
 its declared data type; property keys and values are both bound parameters, never SQL
-text.
+text. A path condition is an existential subquery over the relation table — anchored on
+the listed row's id at the near endpoint column, joined to the related row at the far
+one, the relation type key bound like a property key — with the comparison evaluated on
+the related row's properties; the endpoint indexes serve it.
 
 ## Index inventory
 
@@ -684,7 +696,9 @@ counterparts, and a document property to a string.
 Relations are native relationships rather than intermediate nodes. That choice buys
 natural traversal patterns, the engine's optimised relationship storage, and compatibility
 with its graph algorithms and visualization tooling — at the cost noted under engine
-constraints below.
+constraints below. A path condition is an existential pattern predicate: one relationship
+of the type from the listed node, in the resolved direction, to the related node, with the
+comparison on that node's properties.
 
 Chunks are separate nodes rather than a nested structure, because each needs its own
 vector and its own place in a vector index. Deleting an entity removes its chunk nodes in

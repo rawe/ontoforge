@@ -107,6 +107,13 @@ suite tier that only multi-capable adapters run. Deliberation:
 Never as query text or fragments. A fragment crossing the port would put query syntax in
 the service layer and make the port unimplementable by a different kind of database.
 
+**Query paths are resolved above the port and cross it as structured path conditions.**
+The service parses the key, checks it against the lens-scoped schema and derives the
+direction; the adapter receives a condition carrying relation type key, explicit direction,
+property source, final property key, data type, operator and value — never a key to
+interpret. Resolving in one place is what keeps the faults identical on every backend and
+the lens a complete horizon.
+
 **Driver exceptions never cross the port.**
 Any storage failure surfaces as a single storage error carrying a generated id. The
 original is logged against that id, because a driver message names the vendor and its
@@ -195,6 +202,20 @@ above the persistence port: any construct or function the grammar parses but the
 enumeration does not name is rejected with a self-correction hint. Every backend
 accepts exactly the same queries. Widening the surface is a deliberate, non-breaking
 addition; narrowing it is a breaking change.
+
+**A structured filter key may cross exactly one relation.**
+A query path names one relation type and a property of the related entity; it is resolved
+against the lens-scoped schema at query time, and nothing is declared or stored for it.
+One hop covers the case that would otherwise flatten a relation into a property; anything
+beyond it is OQL's job. Widening — more hops, quantifiers, path values in responses — is a
+deliberate future addition, never implied by the syntax. Deliberation:
+[adr/0019](adr/0019-inline-query-paths-over-declared-query-fields.md).
+
+**A path condition holds when at least one reachable value satisfies it.**
+Conditions are independent: two paths through one relation type may be satisfied by two
+different related entities, and they combine with each other and with plain filters by
+AND. Existential is the only quantifier, so an entity with no relation of the type simply
+does not match — as an entity lacking a property does not.
 
 **Validation collects every error before answering.**
 A rejected write names all offending fields at once, so a caller can correct in one round

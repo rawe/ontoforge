@@ -62,10 +62,12 @@ export type FilterOperator = "eq" | "gt" | "gte" | "lt" | "lte" | "contains";
  * One parsed, coerced filter condition, tagged by `kind`. Built by the
  * runtime service — which validates the key, coerces the value, and
  * checks the operator above the port — so adapters receive only valid
- * input, dispatch on the kind, and do pure predicate assembly. The only
- * kind is the plain property condition: one property of the listed type,
- * named explicitly. The value is already coerced to the declared data
- * type (`contains` compares textually and carries the string form).
+ * input, dispatch on the kind, and do pure predicate assembly. Two kinds:
+ * the plain property condition names one property of the listed type;
+ * the path condition crosses one relation type to a property of the
+ * related entity. The value is already coerced to the final property's
+ * declared data type (`contains` compares textually and carries the
+ * string form).
  */
 export interface PropertyFilterCondition {
   kind: "property";
@@ -75,7 +77,25 @@ export interface PropertyFilterCondition {
   value: unknown;
 }
 
-export type FilterCondition = PropertyFilterCondition;
+/**
+ * A query path, fully resolved above the port: the relation type crossed,
+ * the direction to cross it in — always explicit here, derived by the
+ * service from the relation type's endpoints — where the final property
+ * lives, and the property itself. An entity matches when at least one
+ * related entity reachable through the path satisfies the comparison.
+ */
+export interface PathFilterCondition {
+  kind: "path";
+  relationTypeKey: string;
+  direction: "outgoing" | "incoming";
+  propertySource: "relatedEntity";
+  propertyKey: string;
+  dataType: string;
+  op: FilterOperator;
+  value: unknown;
+}
+
+export type FilterCondition = PropertyFilterCondition | PathFilterCondition;
 
 /** One stored type whose key the active adapter now reserves. */
 export interface ReservedTypeKeyInUse {

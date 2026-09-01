@@ -26,6 +26,7 @@ import type { PropertyDef } from "../core/schemas.js";
 import { chunkDocument } from "./chunking.js";
 import { cpIndexOf, cpLength, cpSlice, countOccurrences } from "./codePoints.js";
 import { buildTextRepr } from "./embedding.js";
+import { isQueryPath, resolveQueryPath, type ResolvedQueryPath } from "./queryPaths.js";
 import {
   loadSchema,
   type EntityTypeDef,
@@ -275,6 +276,10 @@ interface FilterParseOptions {
    * `__contains` with its own wording — one more collected fault, checked
    * before the key's other faults so a lone rejection reads unchanged. */
   rejectContains?: Omit<FilterFault, "field">;
+  /** The lens-scoped schema query paths are resolved against, `typeKey`
+   * being the listed entity type. Absent on the surfaces that take no
+   * paths, where a path key is one more collected fault. */
+  pathSchema?: SchemaCacheValue;
 }
 
 /** The single rejection for a set of filter faults: every fault under its
@@ -326,7 +331,29 @@ export function parseFilterConditions(
       continue;
     }
 
-    const propDef = propertyDefs[propKey];
+    let propDef: PropertyDef | undefined;
+    let path: ResolvedQueryPath | null = null;
+    if (isQueryPath(propKey)) {
+      if (options.pathSchema === undefined) {
+        faults.push({
+          field: filterExpr,
+          message: `Query paths apply to entity lists only: '${propKey}'`,
+          detail:
+            `'${propKey}' is a query path; only a property key of '${typeKey}' ` +
+            "can be filtered here",
+        });
+        continue;
+      }
+      const resolved = resolveQueryPath(propKey, typeKey, options.pathSchema);
+      if (!("propertyDef" in resolved)) {
+        faults.push({ field: filterExpr, ...resolved });
+        continue;
+      }
+      path = resolved;
+      propDef = resolved.propertyDef;
+    } else {
+      propDef = propertyDefs[propKey];
+    }
     if (propDef === undefined) {
       faults.push({
         field: filterExpr,
@@ -369,13 +396,26 @@ export function parseFilterConditions(
       continue;
     }
 
-    conditions.push({
-      kind: "property",
-      propertyKey: propKey,
-      dataType: propDef.dataType,
-      op,
-      value,
-    });
+    if (path !== null) {
+      conditions.push({
+        kind: "path",
+        relationTypeKey: path.relationTypeKey,
+        direction: path.direction,
+        propertySource: path.propertySource,
+        propertyKey: path.propertyKey,
+        dataType: propDef.dataType,
+        op,
+        value,
+      });
+    } else {
+      conditions.push({
+        kind: "property",
+        propertyKey: propKey,
+        dataType: propDef.dataType,
+        op,
+        value,
+      });
+    }
   }
 
   if (faults.length > 0) {
@@ -403,6 +443,11 @@ export function validateSortField(
   }
   if (sort in propertyDefs) {
     return sort;
+  }
+  if (isQueryPath(sort)) {
+    throw new ValidationError("Sorting by query paths is not supported", {
+      fields: { sort: `'${sort}' is a query path; sorting by query paths is not supported` },
+    });
   }
   throw new ValidationError(`Invalid sort field: '${sort}'`, {
     fields: { sort: `'${sort}' is not a valid sort field` },
@@ -633,7 +678,9 @@ export async function listEntities(
     .map((p) => p.key);
 
   const sortField = validateSortField(sort, scopedEt.properties);
-  const conditions = parseFilterConditions(filters, scopedEt.properties, entityTypeKey);
+  const conditions = parseFilterConditions(filters, scopedEt.properties, entityTypeKey, {
+    pathSchema: loaded.scoped,
+  });
 
   const [rawItems, total] = await store.listEntities(
     entityTypeKey,

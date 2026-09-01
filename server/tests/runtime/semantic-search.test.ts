@@ -183,6 +183,15 @@ describe("filters (in-index WHERE, no over-fetch)", () => {
     ).rejects.toThrow(/Unknown filter property/);
   });
 
+  it("a query path is rejected on semantic search — entity lists only", async () => {
+    setEmbeddingProvider(provider());
+    await expect(
+      semanticSearch("test", "query", "person", 10, null, store, {
+        filters: { "works_for.name": "Acme" },
+      }),
+    ).rejects.toThrow("Query paths apply to entity lists only: 'works_for.name'");
+  });
+
   it("__contains is rejected on semantic search", async () => {
     setEmbeddingProvider(provider());
     await expect(

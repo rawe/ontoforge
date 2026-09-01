@@ -161,6 +161,39 @@ Relation lists additionally filter by source id, target id, or both, which is ho
 relations of one entity are enumerated with a real total — the traversal operation below
 does not provide one.
 
+### Query paths
+
+A filter key on an **entity** list may cross exactly one relation type and name a
+property of the related entity: `filter.<relationTypeKey>.<propertyKey>[__<op>]`.
+Listing persons with `filter.works_for.name=Acme` returns the persons employed by Acme;
+listing companies with `filter.works_for.age__gt=30` returns the companies with at least
+one employee over thirty. No schema key may contain a dot, so a path is never mistaken
+for a property key.
+
+- **Direction is derived.** When the listed type is only the relation type's source, the
+  path is followed outgoing, to the target; when it is only the target, incoming, to the
+  source. A relation type whose source and target are both the listed type is rejected
+  as ambiguous.
+- **Matching is existential.** An entity matches when at least one related entity
+  satisfies the condition. Conditions are independent: two paths through the same
+  relation type may be satisfied by two different related entities, and paths combine
+  with each other and with plain filters by AND. An entity with no relation of the type
+  never matches — no null semantics, as with an absent property.
+- **The value is coerced by the final property**, exactly as a plain filter is coerced by
+  its own; the substring operator stays textual. A path cannot end in a `document`
+  property.
+- **Resolution uses the lens-scoped schema**, at query time. Nothing is declared or
+  stored: every exposed relation type is queryable the moment it exists.
+
+Path faults are collected under their filter keys like every other: an unknown first
+segment (the detail lists the listed type's property keys and the relation types
+touching it), a relation type that does not touch the listed type, an unknown property
+on the related entity type (the detail lists that type's property keys), more than one
+relation segment, a document-typed final property, and a self-relation. Paths are a
+filter feature only: `sort` rejects them, `fields` treats them as any unknown name, no
+response ever carries a path value, and the relation list and semantic search reject
+them with a message saying so.
+
 ## Field projection
 
 Any read that returns entities accepts `fields`: a list of property keys to keep. It is a

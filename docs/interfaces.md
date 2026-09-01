@@ -87,6 +87,7 @@ Entity and relation list routes share one parameter vocabulary.
 | `order` | `asc` or `desc`, default `asc` |
 | `q` | Case-insensitive substring match across every `string` property in scope; entity lists only, and `document` properties are not searched |
 | `filter.<propertyKey>[__<op>]` | Property filter, repeatable |
+| `filter.<relationTypeKey>.<propertyKey>[__<op>]` | Query path — filter by a property of the related entity; entity lists only, repeatable |
 
 A list response carries `items`, `total`, `limit` and `offset`. `total` is the count
 before paging. String sorting follows the database's default collation.
@@ -111,6 +112,15 @@ filters is rejected once, every fault under its own filter key in `details.field
 filter is evaluated, and the trap in the suffix rule, are in
 [capabilities/instance-data.md](capabilities/instance-data.md#listing). Relation lists
 additionally accept `fromEntityId` and `toEntityId`.
+
+A filter key on an entity list may be a query path — `filter.works_for.name=Acme` — with
+the same operator suffixes and the value coerced by the related entity's property. The
+direction follows the relation type's endpoints, an entity matches when at least one
+related entity satisfies the condition, and every path fault is collected like a property
+fault; the rules are in
+[capabilities/instance-data.md](capabilities/instance-data.md#query-paths). `sort` rejects
+paths, and relation lists take none. The MCP `filters` object takes path keys as ordinary
+keys.
 
 Semantic search accepts filters through the same `filter.` syntax, but not all of them, and
 not on every request shape — the restrictions and their reasons are in

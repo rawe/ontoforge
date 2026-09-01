@@ -736,3 +736,53 @@ describe("entity tools", () => {
     }
   });
 });
+
+describe("query paths", () => {
+  it("the filters object accepts a path key as an ordinary key", async () => {
+    const client = await connectClient(`${baseUrl}/mcp/ontologies/test_ont/runtime/lenses/test_lens`);
+    try {
+      const acme = json(
+        await call(client, "create_entity", {
+          entity_type_key: "company",
+          properties: { name: "Acme" },
+        }),
+      );
+      const alice = json(
+        await call(client, "create_entity", {
+          entity_type_key: "person",
+          properties: { name: "Alice" },
+        }),
+      );
+      json(
+        await call(client, "create_entity", {
+          entity_type_key: "person",
+          properties: { name: "Bob" },
+        }),
+      );
+      await call(client, "create_relation", {
+        relation_type_key: "works_for",
+        from_entity_id: alice._id,
+        to_entity_id: acme._id,
+      });
+
+      const listed = json(
+        await call(client, "list_entities", {
+          entity_type_key: "person",
+          filters: { "works_for.name": "Acme" },
+        }),
+      );
+      expect(listed.total).toBe(1);
+      expect((listed.items as Record<string, unknown>[])[0]!.name).toBe("Alice");
+
+      const faulty = await call(client, "list_entities", {
+        entity_type_key: "person",
+        filters: { "ghost.name": "x" },
+      });
+      expect(faulty.isError).toBe(true);
+      expect(text(faulty)).toContain("Unknown filter property or relation type: 'ghost'");
+      expect(text(faulty)).toContain("Relation types touching 'person': works_for");
+    } finally {
+      await client.close();
+    }
+  });
+});

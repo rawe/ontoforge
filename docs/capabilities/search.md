@@ -42,8 +42,8 @@ term.
 ### Without a provider
 
 The search operation is rejected as a validation error carrying the disabled-feature
-refinement described in [../architecture.md](../architecture.md#error-model). A global
-feature-discovery operation reports availability so clients can hide the surface instead
+refinement described in [../architecture.md](../architecture.md#error-model). The
+server's feature report states availability so clients can hide the surface instead
 of failing.
 
 The consequence that is easy to miss: with no provider, **no vectors are written either**.
@@ -123,7 +123,9 @@ thing identifying what a hit is, is the entity type key carried as a system prop
 the returned entity. Field projection consequently always retains that system property in
 cross-type mode, on top of the identifier it always retains.
 
-A scoped lens searching all types over-fetches from the shared cross-type index and
+Cross-type search is ontology-scoped like everything else: it ranks over the ontology's
+own cross-type index, and another ontology's entities can never appear, however well
+they match. A scoped lens searching all types over-fetches from that index and
 discards hits whose type is out of scope. The candidate pool is capped, so a narrow lens
 over a large graph can return fewer hits than requested even when more matching entities
 exist. This is a known limit of cross-type search, not an error condition.
@@ -178,8 +180,9 @@ Recomputed automatically, when a provider is configured:
   recomputed from the merged post-update state, not from the submitted fragment;
 - for document properties, per changed property: its passages are discarded, the value is
   re-chunked, and the new passages are embedded. Passages whose text is unchanged reuse
-  their existing vector, so editing part of a large document re-embeds only the passages
-  the edit touched ([documents.md](documents.md)).
+  their existing vector — unless it is of another width, which no current index could hold
+  — so editing part of a large document re-embeds only the passages the edit touched
+  ([documents.md](documents.md)).
 
 Not recomputed, and both are traps:
 
@@ -193,14 +196,27 @@ Both are repaired by the same operation.
 
 ### Rebuild
 
-One global modeling operation — it covers the whole schema and all data, not one lens. It
-is rejected if no embedding provider is configured. It:
+One modeling operation per ontology — it covers that ontology's whole schema and all its
+data, not one lens and nothing beyond the ontology. There is no server-wide rebuild:
+after an embedding-provider switch it is run once per ontology. It is rejected if no
+embedding provider is configured. It:
 
-1. ensures every semantic index exists, recreating any whose vector width no longer
-   matches the provider's;
+1. drops every one of the ontology's semantic indexes whose vector width no longer
+   matches the provider's, and only those;
 2. recomposes the text of every entity of every entity type and rewrites its vector;
-3. discards, re-chunks and re-embeds every document property value;
-4. re-embeds every saved-query description ([saved-queries.md](saved-queries.md)).
+3. discards and re-chunks every document property value, embedding every passage whose
+   stored vector is not already of the provider's width — after a model switch that is all
+   of them;
+4. re-embeds every saved-query description ([saved-queries.md](saved-queries.md));
+5. builds every semantic index the schema calls for and does not have — the ones it
+   dropped in step 1, at the provider's width, and any that never existed.
+
+The order is forced, not chosen: an index rejects every vector of a width other than its
+own, so while a drifted one stands the new vectors cannot be written, and it cannot be
+built over the old ones. Between step 1 and step 5 the ontology has no semantic index, and
+a rebuild that dies in between leaves them absent with vectors of mixed width — the next
+rebuild that runs to completion repairs that, since it regenerates every vector
+regardless.
 
 It streams progress while running, as newline-delimited JSON: a progress record per
 processed item carrying the entity type key it belongs to, the count so far and that
@@ -220,16 +236,18 @@ existing index refuses. Nothing about the index looks wrong to the database — 
 healthy and online — so the failure does not appear at startup. It appears as a storage
 error on the first operation that touches the index.
 
-Startup detects the condition rather than the symptom: with a provider configured, each
-semantic index's configured width is compared against the provider's, and every mismatch
-is reported as a warning identifying the index by what it covers — an entity type, a
-document property on an entity type, cross-type entity search, or saved-query descriptions
+Startup detects the condition rather than the symptom: with a provider configured, the
+check walks every registered ontology, compares each semantic index's configured width
+against the provider's, and reports every mismatch as a warning identifying the index by
+what it covers — an entity type, a document property on an entity type, cross-type entity
+search, or saved-query descriptions
 — never by a physical index name, and naming rebuild as the remedy.
 
 Startup warns and does not repair; the reasoning is in
-[../decisions.md](../decisions.md#behaviour). Rebuild does repair, dropping and recreating
-each mismatched index at the provider's width immediately before regenerating the vectors
-that fill it.
+[../decisions.md](../decisions.md#behaviour). Rebuild does repair, in the three-phase
+order above — drop, regenerate, build. A startup ensure that cannot succeed, which is what
+an unfinished rebuild leaves behind, is reported against the ontology it belongs to and
+does not stop the server from starting.
 
 ## Through the interfaces
 
@@ -239,8 +257,8 @@ Complete operation and tool index: [../interfaces.md](../interfaces.md).
 |---|---|---|---|
 | Literal matching | query parameters on the runtime list operations | the runtime list tools | list and table views |
 | Semantic retrieval | one runtime search operation | `semantic_search` on the runtime server | command palette, relation target picker, extraction dedupe |
-| Availability | a global feature-discovery operation | — | drives what the client shows |
-| Rebuild | one modeling operation, streaming | — | alongside schema transfer |
+| Availability | the server's feature report | — | drives what the client shows |
+| Rebuild | one per-ontology modeling operation, streaming | — | alongside schema transfer |
 
 One difference worth knowing: the MCP tool exposes scope, snippets, filters and field
 projection, but **no minimum score** — it always searches without a floor. A model that

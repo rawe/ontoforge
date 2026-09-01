@@ -20,8 +20,8 @@ import { checkOllamaModel, disableProvider, enableOllamaProvider } from "./suppo
 
 type Row = Record<string, unknown>;
 
-const LEGACY_EXPORT = JSON.parse(
-  readFileSync(new URL("../../fixtures/legacy-export.json", import.meta.url), "utf8"),
+const EXPORT_FIXTURE = JSON.parse(
+  readFileSync(new URL("../../fixtures/export.json", import.meta.url), "utf8"),
 ) as Row;
 
 const ollamaUp = await checkOllamaModel();
@@ -35,10 +35,16 @@ describe.skipIf(!ollamaUp)("schema import (Ollama)", () => {
     enableOllamaProvider();
     app = await createApp();
     await app.ready();
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/ontologies",
+      payload: { key: "test_ont" },
+    });
+    expect(created.statusCode, created.body).toBe(201);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/import",
-      payload: LEGACY_EXPORT,
+      url: "/api/ontologies/test_ont/model/import",
+      payload: EXPORT_FIXTURE,
     });
     expect(res.statusCode, res.body).toBe(201);
   });
@@ -53,7 +59,7 @@ describe.skipIf(!ollamaUp)("schema import (Ollama)", () => {
   it("embeds saved-query descriptions on import — searchable immediately", async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/saved-queries/search?q=find%20persons%20by%20their%20names",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/saved-queries/search?q=find%20persons%20by%20their%20names",
     });
     expect(res.statusCode).toBe(200);
     const results = res.json() as Row[];

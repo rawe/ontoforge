@@ -8,28 +8,30 @@ import { Button } from '@/components/ui/button'
  */
 export function QuickActions({
   ontologyKey,
+  lensKey,
   aiEnabled,
 }: {
   ontologyKey: string
+  lensKey: string
   aiEnabled: boolean
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Button asChild variant="outline" size="sm" className="h-8 gap-1.5 text-[13px]">
-        <Link to={`/w/${ontologyKey}/explore`}>
+        <Link to={`/o/${ontologyKey}/w/${lensKey}/explore`}>
           <Waypoints className="size-3.5" />
           Open Explorer
         </Link>
       </Button>
       <Button asChild variant="outline" size="sm" className="h-8 gap-1.5 text-[13px]">
-        <Link to={`/w/${ontologyKey}/query`}>
+        <Link to={`/o/${ontologyKey}/w/${lensKey}/query`}>
           <SquareTerminal className="size-3.5" />
           Query console
         </Link>
       </Button>
       {aiEnabled && (
         <Button asChild variant="outline" size="sm" className="h-8 gap-1.5 text-[13px]">
-          <Link to={`/w/${ontologyKey}/ai`}>
+          <Link to={`/o/${ontologyKey}/w/${lensKey}/ai`}>
             <Sparkles className="size-3.5" />
             Ask AI
           </Link>

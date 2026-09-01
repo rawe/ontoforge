@@ -4,8 +4,8 @@ import { isCascadeError } from './lib'
 export interface CascadeState {
   /** Backend message for the conflict. */
   message: string
-  /** Ontologies whose scope will be updated by the cascade. */
-  affectedOntologies: string[]
+  /** Lenses whose scope will be updated by the cascade. */
+  affectedLenses: string[]
   /** Re-runs the operation with `cascade=true`. */
   retry: () => void
 }
@@ -21,7 +21,7 @@ export function useCascade() {
     if (isCascadeError(error)) {
       setCascade({
         message: error.message,
-        affectedOntologies: error.affectedOntologies ?? [],
+        affectedLenses: error.affectedLenses ?? [],
         retry,
       })
       return true

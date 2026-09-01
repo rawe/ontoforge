@@ -5,6 +5,9 @@ node_modules/
 .env
 .env.*
 !.env.example
+# Local overrides of the committed env/ presets — for credentials, which
+# must never enter a committed preset.
+env/*.local.env
 
 # IDE
 .idea/
@@ -40,3 +43,7 @@ neo4j/logs/
 # Temporary working files (not committed)
 .tmp/
 .scratch/
+
+# Default output of the ontoforge-sync export scripts. Anchored to the repo
+# root on purpose: an unanchored pattern would also swallow plugins/ontoforge/.
+/ontoforge/

@@ -22,6 +22,7 @@ import { isDocumentStub } from '@/lib/documents'
 
 interface DocumentPropertyRowProps {
   ontologyKey: string
+  lensKey: string
   entity: EntityInstance
   property: SchemaProperty
 }
@@ -35,6 +36,7 @@ interface DocumentPropertyRowProps {
  */
 export function DocumentPropertyRow({
   ontologyKey,
+  lensKey,
   entity,
   property,
 }: DocumentPropertyRowProps) {
@@ -49,9 +51,9 @@ export function DocumentPropertyRow({
   const [error, setError] = useState<string | null>(null)
 
   const docQuery = useQuery({
-    queryKey: qk.document(ontologyKey, entity._entityTypeKey, entity._id, property.key),
+    queryKey: qk.document(ontologyKey, lensKey, entity._entityTypeKey, entity._id, property.key),
     queryFn: () =>
-      runtime.getDocument(ontologyKey, entity._entityTypeKey, entity._id, property.key),
+      runtime.getDocument(ontologyKey, lensKey, entity._entityTypeKey, entity._id, property.key),
     enabled: hasValue && (expanded || editOpen),
   })
 
@@ -70,19 +72,19 @@ export function DocumentPropertyRow({
 
   const mutation = useMutation({
     mutationFn: (value: string | null) =>
-      runtime.updateEntity(ontologyKey, entity._entityTypeKey, entity._id, {
+      runtime.updateEntity(ontologyKey, lensKey, entity._entityTypeKey, entity._id, {
         [property.key]: value,
       }),
     onSuccess: (updated) => {
       queryClient.setQueryData(
-        qk.entity(ontologyKey, entity._entityTypeKey, entity._id),
+        qk.entity(ontologyKey, lensKey, entity._entityTypeKey, entity._id),
         updated,
       )
       void queryClient.invalidateQueries({
-        queryKey: qk.entities(ontologyKey, entity._entityTypeKey),
+        queryKey: qk.entities(ontologyKey, lensKey, entity._entityTypeKey),
       })
       void queryClient.invalidateQueries({
-        queryKey: qk.document(ontologyKey, entity._entityTypeKey, entity._id, property.key),
+        queryKey: qk.document(ontologyKey, lensKey, entity._entityTypeKey, entity._id, property.key),
       })
       setEditOpen(false)
       toast.success(`${property.displayName} saved`)

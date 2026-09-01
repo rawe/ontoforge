@@ -25,8 +25,9 @@ npm run dev
 
 The server listens on http://localhost:8000 — interactive API docs at
 [/docs](http://localhost:8000/docs), the OpenAPI description at
-[/openapi.json](http://localhost:8000/openapi.json), MCP mounts at `/mcp/model`
-and `/mcp/runtime/{ontologyKey}`.
+[/openapi.json](http://localhost:8000/openapi.json), MCP mounts at
+`/mcp/ontologies/{ontologyKey}/model` and
+`/mcp/ontologies/{ontologyKey}/runtime/lenses/{lensKey}`.
 
 For production-style runs: `npm run build && npm start`.
 

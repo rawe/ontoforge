@@ -1,7 +1,7 @@
 /**
  * OQL — OntoForge Query Language: parsing and validation.
  *
- * OQL is OntoForge's read-only graph query language over ontology type
+ * OQL is OntoForge's read-only graph query language over lens type
  * keys. Its syntax is openCypher-shaped; its normative reference is the
  * ISO GQL standard (ISO/IEC 39075:2024) and the GPML pattern sublanguage
  * shared with SQL/PGQ — see `docs/decisions.md#behaviour`.
@@ -9,7 +9,7 @@
  * This module is database-independent: it parses user-submitted OQL with
  * the ANTLR parser generated from the vendored Cypher grammar
  * (`grammar/*.g4`, `npm run generate:oql`), validates entity/relation
- * type keys and properties against the scoped ontology schema, and
+ * type keys and properties against the scoped lens schema, and
  * enforces the closed OQL surface fail-closed: write operations, CALL,
  * and every construct or function the grammar parses but the enumeration
  * in `docs/capabilities/oql.md` ("Supported surface") does not name are

@@ -1,16 +1,20 @@
 ---
 name: ontoforge-sync
-description: "Export and import OntoForge schema and instance data. Use when the user wants to export or import their global schema (entity types, relation types, ontologies) and/or instance data (entities, relations) via JSON files."
+description: "Export and import one OntoForge ontology's design and instance data. Use when the user wants to snapshot or restore an ontology — its schema, lenses, agents and saved queries, and/or its entities and relations — as JSON files."
 ---
 
 # Goal
 
-Export and import the complete OntoForge schema and instance data via the REST API. Schema and data are separate concerns handled by dedicated scripts, and must be imported in the correct order.
+Export and import one ontology via the REST API. Every script addresses exactly one
+ontology, named by its key. Design and instance data are separate concerns handled by
+dedicated scripts, and must be imported in that order.
 
 ## Prerequisites
 
 - **Node.js 18+** (uses built-in `fetch`, no external dependencies)
 - **OntoForge server running** at the configured base URL
+- **An ontology to work against.** Nothing is auto-created and there is no default
+  ontology — the key is a required input for every script.
 
 ## Environment
 
@@ -20,106 +24,165 @@ All scripts resolve the server URL in this order:
 2. `ONTOFORGE_BASE_URL` environment variable
 3. Default: `http://localhost:8000`
 
+and the ontology key in this order:
+
+1. `--ontology <key>` flag
+2. `ONTOFORGE_ONTOLOGY` environment variable
+
+There is no default ontology. A script with no key resolved stops before calling the
+server and names both inputs. List the server's ontologies with
+`GET /api/ontologies`; create one with `POST /api/ontologies`.
+
+## Ontologies and lenses
+
+An **ontology** is the isolated unit: one schema, its lenses, its agents, its saved
+queries and all of its instance data. Nothing spans two ontologies.
+
+A **lens** is a named view over one ontology's schema. Instance data is only reachable
+through a lens, so the two data scripts take a lens key as well. An **unscoped** lens
+sees the whole schema and is the one to use for a complete export; a **scoped** lens
+exposes only the types and properties it names, and exports only that subset.
+
+Design operations — schema export and import, embedding rebuild — cover the whole
+ontology and need no lens.
+
 ## Commands
 
 All paths below are relative to this skill directory (`scripts/`).
 
 ### Export Schema
 
-Export the complete global schema (entity types, relation types, ontologies with scopes, AI agents, saved queries) to a single JSON file.
+Export one ontology's design — entity types, relation types, properties, lenses with
+their inclusions, AI agents and saved queries — to a single JSON file.
 
 ```bash
-node scripts/export-schema.mjs [-o <output>] [--base-url <url>]
+node scripts/export-schema.mjs [-o <output>] [--ontology <key>] [--base-url <url>]
 ```
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `-o, --output` | `./ontoforge/schema.json` | Output file path |
+| `--ontology` | see Environment | Ontology key |
 | `--base-url` | see Environment | OntoForge server URL |
 
-**API used**: `GET /api/model/export`
+**API used**: `GET /api/ontologies/{ontologyKey}/model/export`
 
-The output file is the standard OntoForge transfer format (v2.2) and can be committed to version control.
+The output file is the OntoForge transfer format (v4.0) and can be committed to version
+control. It carries the design only — no entities, no relations, no document content,
+and not the ontology's own key or display name. It is not a backup.
 
 ### Import Schema
 
-Import a schema JSON file into the database. **Requires a fresh database** — the API rejects any type or ontology key that already exists.
+Import a design JSON file into **one existing ontology**.
 
 ```bash
-node scripts/import-schema.mjs <file> [--base-url <url>]
+node scripts/import-schema.mjs <file> [--ontology <key>] [--base-url <url>]
 ```
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `<file>` | yes | Path to schema JSON file |
+| `<file>` | yes | Path to a transfer-format JSON file |
+| `--ontology` | see Environment | Ontology key |
 | `--base-url` | no | OntoForge server URL |
 
-**API used**: `POST /api/model/import`
+**API used**: `POST /api/ontologies/{ontologyKey}/model/import`
 
-Prints the created ontology keys on success.
+Import never creates its target. When the named ontology does not exist the script stops
+and prints the registry call that creates it. Prints the imported lens keys on success.
+
+The target may be bare or populated, but any entity type, relation type or lens key that
+already exists there blocks the whole import with a conflict naming every clash. There is
+no merge and no overwrite: resolve the clashes, or import into a bare ontology.
+
+Because the payload carries no ontology identity, the same file imports into any
+ontology under any key — which is how an ontology is cloned: export A, create B, import
+into B.
 
 ### Export Data
 
-Export all instance data (entities and relations) to a JSON file.
+Export one ontology's instance data (entities and relations) to a JSON file.
 
 ```bash
-node scripts/export-data.mjs [-o <output>] [--base-url <url>] [--ontology-key <key>]
+node scripts/export-data.mjs [-o <output>] [--ontology <key>] [--lens <key>] [--base-url <url>]
 ```
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `-o, --output` | `./ontoforge/data.json` | Output file path |
+| `--ontology` | see Environment | Ontology key |
+| `--lens` | auto-detected | Lens key the data is read through |
 | `--base-url` | see Environment | OntoForge server URL |
-| `--ontology-key` | auto-detected | Ontology key for runtime API access |
 
-If `--ontology-key` is omitted, the script picks an unscoped ontology automatically. An **unscoped ontology** (one without INCLUDES_TYPE edges) grants access to all entity types and relation types — use one for a complete export. A scoped ontology will only export the subset it can see.
+If `--lens` is omitted, the script picks an unscoped lens of that ontology when there is
+one, and reports which lens it used. A scoped lens exports only the subset it exposes.
 
-**API used**: `GET /api/model/export` (for type discovery), `GET /api/runtime/{key}/entities/{type}` and `/relations/{type}` (paginated, max 200 per page)
+**API used**: `GET /api/ontologies/{ontologyKey}/model/export` (for type discovery),
+then `GET /api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/entities/{type}` and
+`/relations/{type}` (paginated, max 200 per page)
+
+This is the only instance-data export there is — the server's own export/import covers
+the design and nothing else.
 
 ### Import Data
 
 Import instance data from a JSON file, automatically remapping entity IDs.
 
 ```bash
-node scripts/import-data.mjs <file> [--base-url <url>] [--ontology-key <key>]
+node scripts/import-data.mjs <file> [--ontology <key>] [--lens <key>] [--base-url <url>]
 ```
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `<file>` | yes | Path to data JSON file |
+| `--ontology` | see Environment | Ontology key |
+| `--lens` | no (auto-detected) | Lens key the data is written through |
 | `--base-url` | no | OntoForge server URL |
-| `--ontology-key` | no (auto-detected) | Ontology key for runtime API access |
 
-The import creates all entities first (building a map from old IDs to new IDs), then creates all relations using the remapped IDs. Relations referencing unknown entities are skipped with a warning.
+The import creates all entities first (building a map from old IDs to new IDs), then
+creates all relations using the remapped IDs. Relations referencing unknown entities are
+skipped with a warning. The lens must expose every type and property the file carries —
+a scoped lens rejects what it hides.
 
-**API used**: `POST /api/runtime/{key}/entities/{type}`, `POST /api/runtime/{key}/relations/{type}`
+**API used**: `POST /api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/entities/{type}`,
+`POST /api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/relations/{type}`
 
 ### Rebuild Embeddings
 
-Regenerate all embedding vectors for semantic search. Run this after data import, after changing the embedding model, or to repair missing indexes.
+Regenerate one ontology's embedding vectors for semantic search, and repair its vector
+index widths. Run this after data import, after changing the embedding model, or to
+repair missing indexes. It covers the whole ontology, so no lens is involved; after an
+embedding-provider switch, run it once per ontology.
 
 ```bash
-node scripts/rebuild-embeddings.mjs [--base-url <url>]
+node scripts/rebuild-embeddings.mjs [--ontology <key>] [--base-url <url>]
 ```
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
+| `--ontology` | see Environment | Ontology key |
 | `--base-url` | no | OntoForge server URL |
 
-**API used**: `POST /api/model/rebuild-embeddings`
+**API used**: `POST /api/ontologies/{ontologyKey}/model/rebuild-embeddings`
 
-Streams progress to stderr. On completion, prints a per-type summary. Returns a `422` error if the embedding provider is not configured on the server.
+Streams progress to stderr. On completion, prints a per-type summary. Fails when no
+embedding provider is configured on the server.
 
 ## Ordering Rules
 
-1. **Schema before data.** The schema defines entity types and relation types. Data cannot be imported until the schema exists.
-2. **Entities before relations.** The data import script handles this automatically.
-3. **Rebuild embeddings after data import.** Semantic search requires embedding vectors. Run `rebuild-embeddings.mjs` after importing data.
-4. **Fresh database for schema import.** The schema import API does not support overwrite. If the database already has types or ontologies with the same keys, the import will fail with a 409 Conflict. To re-import, reset the database first (e.g. `docker compose down -v && docker compose up -d`).
+1. **The ontology before anything.** Create it in the registry first — no script creates
+   one, and import refuses a target that does not exist.
+2. **Schema before data.** The schema defines entity types and relation types. Data
+   cannot be imported until the schema exists.
+3. **Entities before relations.** The data import script handles this automatically.
+4. **Rebuild embeddings after data import.** Semantic search requires embedding vectors.
+5. **A clear key space for a schema import.** The import API does not overwrite or merge.
+   If the target ontology already holds a type or lens with the same key, the import
+   fails with a 409 Conflict naming every clash. Import into a bare ontology, or delete
+   the clashing objects first.
 
 ## Typical Workflows
 
-### Bootstrap a new project from an existing schema
+### Bootstrap a new project from an existing design
 
 ```bash
 # 1. Start OntoForge
@@ -127,35 +190,53 @@ docker compose up -d
 
 # 2. Wait for PostgreSQL to be ready (health check)
 
-# 3. Import schema
-node scripts/import-schema.mjs ./ontoforge/schema.json
+# 3. Create the ontology — nothing is auto-created
+curl -X POST http://localhost:8000/api/ontologies \
+  -H 'Content-Type: application/json' \
+  -d '{"key":"my_ontology","displayName":"My Ontology"}'
 
-# 4. Optionally import seed data
-node scripts/import-data.mjs ./ontoforge/data.json
+# 4. Import the design
+node scripts/import-schema.mjs ./ontoforge/schema.json --ontology my_ontology
 
-# 5. Rebuild embeddings for semantic search
-node scripts/rebuild-embeddings.mjs
+# 5. Optionally import seed data
+node scripts/import-data.mjs ./ontoforge/data.json --ontology my_ontology
+
+# 6. Rebuild embeddings for semantic search
+node scripts/rebuild-embeddings.mjs --ontology my_ontology
 ```
 
-### Snapshot the current state for version control
+Set `ONTOFORGE_ONTOLOGY=my_ontology` once instead of repeating `--ontology`.
+
+### Snapshot one ontology for version control
 
 ```bash
-# Export schema (always do this)
+export ONTOFORGE_ONTOLOGY=my_ontology
+
+# Export the design (always do this)
 node scripts/export-schema.mjs -o ./ontoforge/schema.json
 
-# Export data (if instance data should be versioned too)
+# Export the data (if instance data should be versioned too)
 node scripts/export-data.mjs -o ./ontoforge/data.json
+```
+
+### Clone an ontology
+
+```bash
+node scripts/export-schema.mjs --ontology source -o /tmp/design.json
+curl -X POST http://localhost:8000/api/ontologies \
+  -H 'Content-Type: application/json' -d '{"key":"clone"}'
+node scripts/import-schema.mjs /tmp/design.json --ontology clone
 ```
 
 ## File Formats
 
-### Schema file (v2.2)
+### Schema file (transfer format v4.0)
 
-Standard OntoForge transfer format produced by `GET /api/model/export`:
+Produced by `GET /api/ontologies/{ontologyKey}/model/export`:
 
 ```json
 {
-  "formatVersion": "2.2",
+  "formatVersion": "4.0",
   "entityTypes": [
     {
       "key": "person",
@@ -174,10 +255,10 @@ Standard OntoForge transfer format produced by `GET /api/model/export`:
       "properties": []
     }
   ],
-  "ontologies": [
+  "lenses": [
     {
-      "key": "my_ontology",
-      "name": "My Ontology",
+      "key": "my_lens",
+      "name": "My Lens",
       "includes": null,
       "aiAgents": [],
       "savedQueries": []
@@ -186,11 +267,17 @@ Standard OntoForge transfer format produced by `GET /api/model/export`:
 }
 ```
 
-An ontology with `"includes": null` is **unscoped** and sees all types. An ontology with includes lists specific type keys and optionally restricts visible properties.
+A lens with `"includes": null` is **unscoped** and sees the whole schema. A scoped lens
+lists the type keys it exposes and optionally restricts the visible properties.
+
+The format version is informational — import never dispatches on it. A pre-4.0 document
+carries its lenses under `ontologies` and is rejected on its shape; no converter exists,
+so re-export the design from a current server.
 
 ### Data file (v1.0)
 
-Instance data grouped by type key:
+Instance data grouped by type key. This format is the scripts' own — the server has no
+instance-data transfer format.
 
 ```json
 {
@@ -209,9 +296,12 @@ Instance data grouped by type key:
 }
 ```
 
-On import, `_id`, `_entityTypeKey`, `_relationTypeKey`, `_createdAt`, and `_updatedAt` are stripped. Entity IDs in relations are remapped to the newly created IDs.
+On import, `_id`, `_entityTypeKey`, `_relationTypeKey`, `_createdAt`, and `_updatedAt`
+are stripped. Entity IDs in relations are remapped to the newly created IDs. Document
+properties are exported with their full content, not as size stubs.
 
 ## Related Skills
 
 - **ontoforge-setup** — Bootstrap a project with Docker Compose, environment variables, and MCP configuration.
 - **ontoforge-runtime-api** — Build against the OntoForge runtime REST API.
+- **ontoforge-okf** — Sync individual Markdown documents with entities, one file per entity.

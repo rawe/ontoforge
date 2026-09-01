@@ -1,24 +1,22 @@
 /**
  * MCP mounts on the Fastify app.
  *
- * The modeling server is mounted at exactly `/mcp/model` — global by
- * design, no ontology key, and a trailing path segment is NOT a lens (it
- * falls through to the app's standard 404). Transport is Streamable HTTP,
- * STATELESS, with plain JSON responses (no SSE), per
- * `docs/decisions.md#interfaces`: a fresh server + transport pair serves
- * each request, so one mount serves many clients and no connection
- * carries state.
+ * Both servers are bound by URL, mirroring the REST tree — the URL is
+ * the ONLY binding channel (`docs/decisions.md#interfaces`): no header,
+ * no environment fallback, no tool parameter. A URL that names no
+ * ontology (or, for runtime, no lens) answers the app's standard 404 —
+ * as an unmatched route, or through the empty-segment guards below.
  *
- * The runtime server is mounted at `/mcp/runtime` and binds each request
- * to exactly one lens, resolved in priority order:
+ *   - Modeling: `/mcp/ontologies/:ontologyKey/model`. The mount accepts
+ *     requests even when its ontology does not exist yet — that is what
+ *     lets `ensure_ontology` provision the mount's own ontology; every
+ *     other tool then fails with not-found until it exists.
+ *   - Runtime: `/mcp/ontologies/:ontologyKey/runtime/lenses/:lensKey`.
  *
- *   1. the first path segment after the mount (`/mcp/runtime/{key}`);
- *   2. the `X-Ontology-Key` request header;
- *   3. the `DEFAULT_MCP_ONTOLOGY_KEY` environment variable.
- *
- * With none of the three the request is refused with 400 — a model never
- * chooses a lens and can never reach across two. The environment variable
- * is read per request.
+ * Transport is Streamable HTTP, STATELESS, with plain JSON responses
+ * (no SSE), per `docs/decisions.md#interfaces`: a fresh server +
+ * transport pair serves each request, so one mount serves many clients
+ * and no connection carries state.
  */
 
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -27,8 +25,6 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { createModelingMcpServer } from "./modeling.js";
 import { createRuntimeMcpServer } from "./runtime.js";
-
-const ONTOLOGY_KEY_HEADER = "x-ontology-key";
 
 /** Serve one stateless MCP request with a fresh server + transport pair. */
 async function handleMcpRequest(
@@ -67,44 +63,32 @@ async function handleMcpRequest(
 export function mountMcp(app: FastifyInstance): void {
   app.route({
     method: ["GET", "POST", "DELETE"],
-    url: "/mcp/model",
-    schema: { hide: true },
-    handler: async (request, reply) => {
-      await handleMcpRequest(createModelingMcpServer(), request, reply);
-    },
-  });
-
-  // Runtime mount: without a path key the header, then the environment
-  // fallback, may still supply one; otherwise the request is refused.
-  app.route({
-    method: ["GET", "POST", "DELETE"],
-    url: "/mcp/runtime",
-    schema: { hide: true },
-    handler: async (request, reply) => {
-      const headerKey = request.headers[ONTOLOGY_KEY_HEADER];
-      const envKey = process.env.DEFAULT_MCP_ONTOLOGY_KEY;
-      const ontologyKey =
-        (Array.isArray(headerKey) ? headerKey[0] : headerKey) ||
-        (envKey !== undefined && envKey !== "" ? envKey : undefined);
-      if (ontologyKey === undefined) {
-        return reply
-          .status(400)
-          .header("content-type", "text/plain; charset=utf-8")
-          .send("Ontology key required");
-      }
-      await handleMcpRequest(createRuntimeMcpServer(ontologyKey), request, reply);
-    },
-  });
-
-  // Path form: the first segment after the mount is the lens key and takes
-  // priority over header and environment.
-  app.route({
-    method: ["GET", "POST", "DELETE"],
-    url: "/mcp/runtime/:ontologyKey",
+    url: "/mcp/ontologies/:ontologyKey/model",
     schema: { hide: true },
     handler: async (request, reply) => {
       const { ontologyKey } = request.params as { ontologyKey: string };
-      await handleMcpRequest(createRuntimeMcpServer(ontologyKey), request, reply);
+      // An empty segment matches the route but names no ontology.
+      if (ontologyKey === "") {
+        return reply.callNotFound();
+      }
+      await handleMcpRequest(createModelingMcpServer(ontologyKey), request, reply);
+    },
+  });
+
+  app.route({
+    method: ["GET", "POST", "DELETE"],
+    url: "/mcp/ontologies/:ontologyKey/runtime/lenses/:lensKey",
+    schema: { hide: true },
+    handler: async (request, reply) => {
+      const { ontologyKey, lensKey } = request.params as {
+        ontologyKey: string;
+        lensKey: string;
+      };
+      // An empty segment matches the route but names no ontology/lens.
+      if (ontologyKey === "" || lensKey === "") {
+        return reply.callNotFound();
+      }
+      await handleMcpRequest(createRuntimeMcpServer(ontologyKey, lensKey), request, reply);
     },
   });
 }

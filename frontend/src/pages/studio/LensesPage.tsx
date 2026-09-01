@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Layers, Plus } from 'lucide-react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import * as model from '@/api/model'
 import { ApiError } from '@/api/http'
-import { useOntologies, useOntologyScope } from '@/api/hooks'
-import type { Ontology } from '@/api/types'
+import { useLenses, useLensScope } from '@/api/hooks'
+import type { Lens } from '@/api/types'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
 import { deriveKey, invalidateModeling, isValidKey, toastError } from '@/components/studio/lib'
@@ -27,8 +27,14 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 
 /** Scoped/unscoped badge with include counts — needs its own scope query. */
-export function ScopeBadge({ ontologyId }: { ontologyId: string }) {
-  const { data: scope } = useOntologyScope(ontologyId)
+export function ScopeBadge({
+  ontologyKey,
+  lensId,
+}: {
+  ontologyKey: string
+  lensId: string
+}) {
+  const { data: scope } = useLensScope(ontologyKey, lensId)
   if (scope === undefined) return null
   if (!scope.scoped) {
     return (
@@ -44,33 +50,38 @@ export function ScopeBadge({ ontologyId }: { ontologyId: string }) {
   )
 }
 
-function OntologyCard({ ontology }: { ontology: Ontology }) {
+function LensCard({ ontologyKey, lens }: { ontologyKey: string; lens: Lens }) {
   return (
     <Link
-      to={`/studio/ontologies/${ontology.ontologyId}`}
+      to={`/o/${ontologyKey}/studio/lenses/${lens.lensId}`}
       className="rounded-xl border bg-card p-4 transition-colors duration-150 hover:border-ring/40 focus-visible:outline-2 focus-visible:outline-ring/60"
     >
       <div className="flex items-center gap-2">
-        <span className="truncate text-sm font-medium">{ontology.name}</span>
-        <span className="font-mono text-[11px] text-muted-foreground">{ontology.key}</span>
+        <span className="truncate text-sm font-medium">{lens.name}</span>
+        <span className="font-mono text-[11px] text-muted-foreground">{lens.key}</span>
         <span className="ml-auto shrink-0">
-          <ScopeBadge ontologyId={ontology.ontologyId} />
+          <ScopeBadge ontologyKey={ontologyKey} lensId={lens.lensId} />
         </span>
       </div>
       <p className="mt-1 line-clamp-2 text-[13px] text-muted-foreground">
-        {ontology.description ?? 'No description.'}
+        {lens.description ?? 'No description.'}
       </p>
     </Link>
   )
 }
 
-interface CreateOntologyDialogProps {
+interface CreateLensDialogProps {
+  ontologyKey: string
   open: boolean
   onOpenChange: (open: boolean) => void
 }
 
-/** "New ontology" dialog with live key validation; the key is immutable. */
-export function CreateOntologyDialog({ open, onOpenChange }: CreateOntologyDialogProps) {
+/** "New lens" dialog with live key validation; the key is immutable. */
+export function CreateLensDialog({
+  ontologyKey,
+  open,
+  onOpenChange,
+}: CreateLensDialogProps) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const [name, setName] = useState('')
@@ -93,16 +104,16 @@ export function CreateOntologyDialog({ open, onOpenChange }: CreateOntologyDialo
 
   const create = useMutation({
     mutationFn: () =>
-      model.createOntology({
+      model.createLens(ontologyKey, {
         key,
         name: name.trim(),
         description: description.trim() === '' ? null : description.trim(),
       }),
     onSuccess: (created) => {
       invalidateModeling(queryClient)
-      toast.success(`Ontology "${created.name}" created`)
+      toast.success(`Lens "${created.name}" created`)
       onOpenChange(false)
-      void navigate(`/studio/ontologies/${created.ontologyId}`)
+      void navigate(`/o/${ontologyKey}/studio/lenses/${created.lensId}`)
     },
     onError: (error) => {
       if (error instanceof ApiError && error.fieldErrors !== undefined) {
@@ -118,10 +129,10 @@ export function CreateOntologyDialog({ open, onOpenChange }: CreateOntologyDialo
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>New ontology</DialogTitle>
+          <DialogTitle>New lens</DialogTitle>
           <DialogDescription>
-            A named lens over the global schema. New ontologies start unscoped — they
-            expose the full schema until you scope them.
+            A named lens over this ontology's schema. New lenses start unscoped —
+            they expose the full schema until you scope them.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -132,23 +143,23 @@ export function CreateOntologyDialog({ open, onOpenChange }: CreateOntologyDialo
           }}
         >
           <div className="grid gap-1.5">
-            <Label htmlFor="ont-name">Name</Label>
+            <Label htmlFor="lens-name">Name</Label>
             <Input
-              id="ont-name"
+              id="lens-name"
               value={name}
               autoFocus
               onChange={(e) => {
                 setName(e.target.value)
                 if (!keyTouched) setKey(deriveKey(e.target.value))
               }}
-              placeholder="My Ontology"
+              placeholder="My Lens"
             />
             {fieldErrors.name !== undefined && (
               <p className="text-xs text-destructive">{fieldErrors.name}</p>
             )}
           </div>
           <KeyField
-            id="ont-key"
+            id="lens-key"
             value={key}
             onChange={(v) => {
               setKeyTouched(true)
@@ -157,9 +168,9 @@ export function CreateOntologyDialog({ open, onOpenChange }: CreateOntologyDialo
             error={fieldErrors.key}
           />
           <div className="grid gap-1.5">
-            <Label htmlFor="ont-desc">Description</Label>
+            <Label htmlFor="lens-desc">Description</Label>
             <Textarea
-              id="ont-desc"
+              id="lens-desc"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={2}
@@ -171,7 +182,7 @@ export function CreateOntologyDialog({ open, onOpenChange }: CreateOntologyDialo
               Cancel
             </Button>
             <Button type="submit" disabled={!valid || create.isPending}>
-              Create ontology
+              Create lens
             </Button>
           </DialogFooter>
         </form>
@@ -180,19 +191,22 @@ export function CreateOntologyDialog({ open, onOpenChange }: CreateOntologyDialo
   )
 }
 
-/** `/studio/ontologies` — ontology list + creation. */
-export function OntologiesPage() {
-  const { data: ontologies, isPending } = useOntologies()
+/** `/o/:ontologyKey/studio/lenses` — lens list + creation. */
+export function LensesPage() {
+  const { ontologyKey } = useParams<{ ontologyKey: string }>()
+  const { data: lenses, isPending } = useLenses(ontologyKey)
   const [createOpen, setCreateOpen] = useState(false)
+
+  if (ontologyKey === undefined) return null
 
   return (
     <div>
       <PageHeader
-        title="Ontologies"
-        description="Named lenses over the global schema — unscoped or filtered to a subset of types."
+        title="Lenses"
+        description="Named views over this ontology's schema — unscoped or filtered to a subset of types."
         actions={
           <Button size="sm" onClick={() => setCreateOpen(true)}>
-            <Plus className="size-3.5" /> New ontology
+            <Plus className="size-3.5" /> New lens
           </Button>
         }
       />
@@ -203,27 +217,31 @@ export function OntologiesPage() {
             <Skeleton className="h-24 rounded-xl" />
           </div>
         )}
-        {ontologies !== undefined && ontologies.length === 0 && (
+        {lenses !== undefined && lenses.length === 0 && (
           <EmptyState
             icon={Layers}
-            title="No ontologies"
-            description="Create an ontology to expose the schema to the workbench, REST and MCP."
+            title="No lenses"
+            description="Create a lens to expose the schema to the workbench, REST and MCP."
             action={
               <Button onClick={() => setCreateOpen(true)}>
-                <Plus className="size-4" /> New ontology
+                <Plus className="size-4" /> New lens
               </Button>
             }
           />
         )}
-        {ontologies !== undefined && ontologies.length > 0 && (
+        {lenses !== undefined && lenses.length > 0 && (
           <div className="grid gap-3 sm:grid-cols-2">
-            {ontologies.map((o) => (
-              <OntologyCard key={o.ontologyId} ontology={o} />
+            {lenses.map((o) => (
+              <LensCard key={o.lensId} ontologyKey={ontologyKey} lens={o} />
             ))}
           </div>
         )}
       </div>
-      <CreateOntologyDialog open={createOpen} onOpenChange={setCreateOpen} />
+      <CreateLensDialog
+        ontologyKey={ontologyKey}
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+      />
     </div>
   )
 }

@@ -391,14 +391,14 @@ function relationTypeDefToExport(rtDef: RelationTypeDef): Row {
 }
 
 /** The whole scoped schema in one response. */
-export async function getFullSchema(ontologyKey: string, store: RuntimeStore): Promise<Row> {
-  const loaded = await loadSchema(ontologyKey, store);
+export async function getFullSchema(lensKey: string, store: RuntimeStore): Promise<Row> {
+  const loaded = await loadSchema(lensKey, store);
   const cache = loaded.scoped;
   return {
-    ontology: {
-      key: cache.ontologyKey,
-      name: cache.ontologyName,
-      description: cache.ontologyDescription,
+    lens: {
+      key: cache.lensKey,
+      name: cache.lensName,
+      description: cache.lensDescription,
       includes: null,
       aiAgents: [],
       savedQueries: [],
@@ -408,18 +408,18 @@ export async function getFullSchema(ontologyKey: string, store: RuntimeStore): P
   };
 }
 
-export async function listEntityTypes(ontologyKey: string, store: RuntimeStore): Promise<Row[]> {
-  const loaded = await loadSchema(ontologyKey, store);
+export async function listEntityTypes(lensKey: string, store: RuntimeStore): Promise<Row[]> {
+  const loaded = await loadSchema(lensKey, store);
   return Object.values(loaded.scoped.entityTypes).map(entityTypeDefToExport);
 }
 
 /** Out-of-scope reads answer not-found, indistinguishably from nonexistent. */
 export async function getEntityType(
-  ontologyKey: string,
+  lensKey: string,
   key: string,
   store: RuntimeStore,
 ): Promise<Row> {
-  const loaded = await loadSchema(ontologyKey, store);
+  const loaded = await loadSchema(lensKey, store);
   const etDef = loaded.scoped.entityTypes[key];
   if (etDef === undefined) {
     throw new NotFoundError(`Entity type '${key}' not found`);
@@ -428,19 +428,19 @@ export async function getEntityType(
 }
 
 export async function listRelationTypes(
-  ontologyKey: string,
+  lensKey: string,
   store: RuntimeStore,
 ): Promise<Row[]> {
-  const loaded = await loadSchema(ontologyKey, store);
+  const loaded = await loadSchema(lensKey, store);
   return Object.values(loaded.scoped.relationTypes).map(relationTypeDefToExport);
 }
 
 export async function getRelationType(
-  ontologyKey: string,
+  lensKey: string,
   key: string,
   store: RuntimeStore,
 ): Promise<Row> {
-  const loaded = await loadSchema(ontologyKey, store);
+  const loaded = await loadSchema(lensKey, store);
   const rtDef = loaded.scoped.relationTypes[key];
   if (rtDef === undefined) {
     throw new NotFoundError(`Relation type '${key}' not found`);
@@ -466,12 +466,12 @@ export interface PaginatedResult {
  * document length bookkeeping, filter the response to the lens.
  */
 export async function createEntity(
-  ontologyKey: string,
+  lensKey: string,
   entityTypeKey: string,
   body: Row,
   store: RuntimeStore,
 ): Promise<Row> {
-  const loaded = await loadSchema(ontologyKey, store);
+  const loaded = await loadSchema(lensKey, store);
   const scopedEt = loaded.scoped.entityTypes[entityTypeKey];
   if (scopedEt === undefined) {
     throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
@@ -544,7 +544,7 @@ export async function createEntity(
 }
 
 export async function listEntities(
-  ontologyKey: string,
+  lensKey: string,
   entityTypeKey: string,
   limit: number,
   offset: number,
@@ -555,7 +555,7 @@ export async function listEntities(
   store: RuntimeStore,
   fields?: string[] | null,
 ): Promise<PaginatedResult> {
-  const loaded = await loadSchema(ontologyKey, store);
+  const loaded = await loadSchema(lensKey, store);
   const scopedEt = loaded.scoped.entityTypes[entityTypeKey];
   if (scopedEt === undefined) {
     throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
@@ -602,13 +602,13 @@ export async function listEntities(
 }
 
 export async function getEntity(
-  ontologyKey: string,
+  lensKey: string,
   entityTypeKey: string,
   entityId: string,
   store: RuntimeStore,
   fields?: string[] | null,
 ): Promise<Row> {
-  const loaded = await loadSchema(ontologyKey, store);
+  const loaded = await loadSchema(lensKey, store);
   const scopedEt = loaded.scoped.entityTypes[entityTypeKey];
   if (scopedEt === undefined) {
     throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
@@ -630,13 +630,13 @@ export async function getEntity(
  * without advancing `_updatedAt`.
  */
 export async function updateEntity(
-  ontologyKey: string,
+  lensKey: string,
   entityTypeKey: string,
   entityId: string,
   body: Row,
   store: RuntimeStore,
 ): Promise<Row> {
-  const loaded = await loadSchema(ontologyKey, store);
+  const loaded = await loadSchema(lensKey, store);
   const scopedEt = loaded.scoped.entityTypes[entityTypeKey];
   if (scopedEt === undefined) {
     throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
@@ -658,7 +658,7 @@ export async function updateEntity(
   }
 
   if (Object.keys(setProps).length === 0 && removeProps.length === 0) {
-    return getEntity(ontologyKey, entityTypeKey, entityId, store);
+    return getEntity(lensKey, entityTypeKey, entityId, store);
   }
 
   const fullEt = loaded.full.entityTypes[entityTypeKey];
@@ -739,12 +739,12 @@ export async function updateEntity(
  * chunks. The runtime cascade is silent: nothing warns, nothing refuses.
  */
 export async function deleteEntity(
-  ontologyKey: string,
+  lensKey: string,
   entityTypeKey: string,
   entityId: string,
   store: RuntimeStore,
 ): Promise<void> {
-  const loaded = await loadSchema(ontologyKey, store);
+  const loaded = await loadSchema(lensKey, store);
   if (!(entityTypeKey in loaded.scoped.entityTypes)) {
     throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
   }
@@ -785,6 +785,14 @@ export async function syncDocumentChunks(
     // edit the chunker re-synchronizes on the same boundaries, so most
     // chunks keep their exact text (at shifted offsets) and only the
     // chunks overlapping the edit need a fresh embedding.
+    //
+    // Only a vector the CURRENT model could have produced may be reused.
+    // After a switch of embedding model every stored vector has the old
+    // width, and reusing one would both answer with a vector from a
+    // different model and leave a row no index of the new width can be
+    // built over. The width check is what makes a rebuild after such a
+    // switch actually re-embed: the text is unchanged there, so every
+    // chunk would otherwise be reused and none regenerated.
     const reusable = await store.getChunkEmbeddingsForEntityProperty(entityId, propertyKey);
     await store.deleteChunksForEntityProperty(entityId, propertyKey);
     if (!value) {
@@ -809,7 +817,9 @@ export async function syncDocumentChunks(
         charLength: chunk.charLength,
         text: chunk.text,
       };
-      let chunkEmbedding = reusable[chunk.text] ?? null;
+      const stored = reusable[chunk.text] ?? null;
+      let chunkEmbedding =
+        stored !== null && stored.length === provider.dimensions ? stored : null;
       if (chunkEmbedding === null) {
         chunkEmbedding = await provider.embed(chunk.text);
       }
@@ -830,13 +840,13 @@ export async function syncDocumentChunks(
  * reads as "".
  */
 async function loadDocumentValue(
-  ontologyKey: string,
+  lensKey: string,
   entityTypeKey: string,
   entityId: string,
   propertyKey: string,
   store: RuntimeStore,
 ): Promise<{ value: string; loaded: Awaited<ReturnType<typeof loadSchema>> }> {
-  const loaded = await loadSchema(ontologyKey, store);
+  const loaded = await loadSchema(lensKey, store);
   const scopedEt = loaded.scoped.entityTypes[entityTypeKey];
   if (scopedEt === undefined) {
     throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
@@ -865,7 +875,7 @@ async function loadDocumentValue(
  * over-long limits are truncated.
  */
 export async function getDocument(
-  ontologyKey: string,
+  lensKey: string,
   entityTypeKey: string,
   entityId: string,
   propertyKey: string,
@@ -874,7 +884,7 @@ export async function getDocument(
   store: RuntimeStore,
 ): Promise<Row> {
   const { value } = await loadDocumentValue(
-    ontologyKey,
+    lensKey,
     entityTypeKey,
     entityId,
     propertyKey,
@@ -997,7 +1007,7 @@ function applyReplaceRange(
  * embeddings, so only chunks overlapping the edit are re-embedded.
  */
 export async function editDocument(
-  ontologyKey: string,
+  lensKey: string,
   entityTypeKey: string,
   entityId: string,
   propertyKey: string,
@@ -1005,7 +1015,7 @@ export async function editDocument(
   store: RuntimeStore,
 ): Promise<Row> {
   const { value, loaded } = await loadDocumentValue(
-    ontologyKey,
+    lensKey,
     entityTypeKey,
     entityId,
     propertyKey,
@@ -1058,14 +1068,14 @@ export async function editDocument(
  * collected alongside property errors in ONE response.
  */
 export async function createRelation(
-  ontologyKey: string,
+  lensKey: string,
   relationTypeKey: string,
   fromEntityId: string,
   toEntityId: string,
   userProps: Row,
   store: RuntimeStore,
 ): Promise<Row> {
-  const loaded = await loadSchema(ontologyKey, store);
+  const loaded = await loadSchema(lensKey, store);
   const scopedRt = loaded.scoped.relationTypes[relationTypeKey];
   if (scopedRt === undefined) {
     throw new NotFoundError(`Relation type '${relationTypeKey}' not found`);
@@ -1135,7 +1145,7 @@ export async function createRelation(
 }
 
 export async function listRelations(
-  ontologyKey: string,
+  lensKey: string,
   relationTypeKey: string,
   limit: number,
   offset: number,
@@ -1146,7 +1156,7 @@ export async function listRelations(
   filters: Record<string, string>,
   store: RuntimeStore,
 ): Promise<PaginatedResult> {
-  const loaded = await loadSchema(ontologyKey, store);
+  const loaded = await loadSchema(lensKey, store);
   const scopedRt = loaded.scoped.relationTypes[relationTypeKey];
   if (scopedRt === undefined) {
     throw new NotFoundError(`Relation type '${relationTypeKey}' not found`);
@@ -1173,12 +1183,12 @@ export async function listRelations(
 }
 
 export async function getRelation(
-  ontologyKey: string,
+  lensKey: string,
   relationTypeKey: string,
   relationId: string,
   store: RuntimeStore,
 ): Promise<Row> {
-  const loaded = await loadSchema(ontologyKey, store);
+  const loaded = await loadSchema(lensKey, store);
   const scopedRt = loaded.scoped.relationTypes[relationTypeKey];
   if (scopedRt === undefined) {
     throw new NotFoundError(`Relation type '${relationTypeKey}' not found`);
@@ -1197,13 +1207,13 @@ export async function getRelation(
  * properties in the same payload still apply.
  */
 export async function updateRelation(
-  ontologyKey: string,
+  lensKey: string,
   relationTypeKey: string,
   relationId: string,
   body: Row,
   store: RuntimeStore,
 ): Promise<Row> {
-  const loaded = await loadSchema(ontologyKey, store);
+  const loaded = await loadSchema(lensKey, store);
   const scopedRt = loaded.scoped.relationTypes[relationTypeKey];
   if (scopedRt === undefined) {
     throw new NotFoundError(`Relation type '${relationTypeKey}' not found`);
@@ -1234,7 +1244,7 @@ export async function updateRelation(
   }
 
   if (Object.keys(setProps).length === 0 && removeProps.length === 0) {
-    return getRelation(ontologyKey, relationTypeKey, relationId, store);
+    return getRelation(lensKey, relationTypeKey, relationId, store);
   }
 
   const fullRt = loaded.full.relationTypes[relationTypeKey];
@@ -1254,12 +1264,12 @@ export async function updateRelation(
 
 /** Delete a relation; neither endpoint is touched. */
 export async function deleteRelation(
-  ontologyKey: string,
+  lensKey: string,
   relationTypeKey: string,
   relationId: string,
   store: RuntimeStore,
 ): Promise<void> {
-  const loaded = await loadSchema(ontologyKey, store);
+  const loaded = await loadSchema(lensKey, store);
   if (!(relationTypeKey in loaded.scoped.relationTypes)) {
     throw new NotFoundError(`Relation type '${relationTypeKey}' not found`);
   }
@@ -1287,7 +1297,7 @@ export interface NeighborhoodResult {
  * documented leak), though its document values are still stubbed.
  */
 export async function getNeighbors(
-  ontologyKey: string,
+  lensKey: string,
   entityTypeKey: string,
   entityId: string,
   direction: string,
@@ -1297,7 +1307,7 @@ export async function getNeighbors(
   fields?: string[] | null,
   relationFields?: string[] | null,
 ): Promise<NeighborhoodResult> {
-  const loaded = await loadSchema(ontologyKey, store);
+  const loaded = await loadSchema(lensKey, store);
   const scopedEt = loaded.scoped.entityTypes[entityTypeKey];
   if (scopedEt === undefined) {
     throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
@@ -1401,7 +1411,7 @@ export interface SemanticSearchOptions {
  * when no embedding provider is configured.
  */
 export async function semanticSearch(
-  ontologyKey: string,
+  lensKey: string,
   query: string,
   entityTypeKey: string | null,
   limit: number,
@@ -1409,7 +1419,7 @@ export async function semanticSearch(
   store: RuntimeStore,
   options: SemanticSearchOptions = {},
 ): Promise<Row> {
-  const loaded = await loadSchema(ontologyKey, store);
+  const loaded = await loadSchema(lensKey, store);
 
   const provider = getEmbeddingProvider();
   if (!provider) {
@@ -1560,7 +1570,7 @@ async function semanticSearchSingleType(
 /**
  * Search the shared cross-type entity vector index across all scoped
  * entity types. The in-index WHERE cannot express membership in a set of
- * type keys, so scoped ontologies over-fetch and filter to scoped types
+ * type keys, so scoped lenses over-fetch and filter to scoped types
  * here. The candidate pool is capped, so a heavily restricted scope may
  * return fewer than `limit` results even when more matches exist.
  */
@@ -1864,17 +1874,17 @@ function rrfFuse(entityRanking: Row[], documentRanking: Row[], limit: number): R
  * Validate, compile, and execute a read-only OQL query.
  *
  * Returns `{columns, results}` with properties filtered to the scoped
- * ontology schema. Parsing and validation happen here, above the port;
+ * lens schema. Parsing and validation happen here, above the port;
  * the adapter compiles the validated query to its native dialect at
  * execution time. Ad-hoc queries run with NO parameter values —
  * placeholders parse, but binding is a saved-query concern.
  */
 export async function executeQuery(
-  ontologyKey: string,
+  lensKey: string,
   query: string,
   store: RuntimeStore,
 ): Promise<{ columns: string[]; results: Row[] }> {
-  const loaded = await loadSchema(ontologyKey, store);
+  const loaded = await loadSchema(lensKey, store);
   const scoped = loaded.scoped;
 
   // Map variables → schema keys (uses original type keys).
@@ -2021,12 +2031,12 @@ export function substituteParams(template: string, params: Row): string {
  * change surfaces here, at the next run.
  */
 export async function executeSavedQuery(
-  ontologyKey: string,
+  lensKey: string,
   queryKey: string,
   params: Row,
   store: RuntimeStore,
 ): Promise<Row> {
-  const loaded = await loadSchema(ontologyKey, store);
+  const loaded = await loadSchema(lensKey, store);
   const config = loaded.savedQueries[queryKey];
   if (config === undefined) {
     throw new NotFoundError(`Saved query '${queryKey}' not found`);
@@ -2108,7 +2118,7 @@ export async function executeSavedQuery(
       const minScore = step.minScore ?? null;
 
       const result = await semanticSearch(
-        ontologyKey,
+        lensKey,
         queryText,
         step.entityTypeKey!,
         limit,
@@ -2179,8 +2189,8 @@ function savedQueryToWire(sq: {
 
 /** The lens's saved queries, served FROM THE SCHEMA CACHE — the runtime
  * listing reflects the state of the process that answers it. */
-export async function listSavedQueries(ontologyKey: string, store: RuntimeStore): Promise<Row[]> {
-  const loaded = await loadSchema(ontologyKey, store);
+export async function listSavedQueries(lensKey: string, store: RuntimeStore): Promise<Row[]> {
+  const loaded = await loadSchema(lensKey, store);
   return Object.values(loaded.savedQueries).map(savedQueryToWire);
 }
 
@@ -2190,7 +2200,7 @@ export async function listSavedQueries(ontologyKey: string, store: RuntimeStore)
  * Requires an embedding provider (`details.code: FEATURE_DISABLED`).
  */
 export async function searchSavedQueries(
-  ontologyKey: string,
+  lensKey: string,
   query: string,
   limit: number,
   minScore: number | null,
@@ -2209,7 +2219,7 @@ export async function searchSavedQueries(
     throw new ValidationError("Failed to generate embedding for search query");
   }
 
-  const results = await store.searchSavedQueries(queryEmbedding, ontologyKey, limit, minScore);
+  const results = await store.searchSavedQueries(queryEmbedding, lensKey, limit, minScore);
 
   // Deserialize the stored parameters JSON for each hit.
   for (const r of results) {

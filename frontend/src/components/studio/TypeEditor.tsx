@@ -38,6 +38,7 @@ import { InlineText } from './shared'
 type Kind = 'entity-types' | 'relation-types'
 
 interface TypeEditorProps {
+  ontologyKey: string
   kind: Kind
   typeId: string
 }
@@ -46,7 +47,7 @@ interface TypeEditorProps {
  * Shared editor for entity and relation types: editable display name and
  * description, immutable key, delete with cascade flow, properties table.
  */
-export function TypeEditor({ kind, typeId }: TypeEditorProps) {
+export function TypeEditor({ ontologyKey, kind, typeId }: TypeEditorProps) {
   const isEntity = kind === 'entity-types'
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -58,11 +59,11 @@ export function TypeEditor({ kind, typeId }: TypeEditorProps) {
   const [propertyToDelete, setPropertyToDelete] = useState<PropertyDefinition | null>(null)
 
   const typesQuery = useQuery<(EntityType | RelationType)[]>({
-    queryKey: qk.model(kind),
+    queryKey: qk.model(ontologyKey, kind),
     queryFn: () =>
       isEntity
-        ? (model.listEntityTypes() as Promise<(EntityType | RelationType)[]>)
-        : (model.listRelationTypes() as Promise<(EntityType | RelationType)[]>),
+        ? (model.listEntityTypes(ontologyKey) as Promise<(EntityType | RelationType)[]>)
+        : (model.listRelationTypes(ontologyKey) as Promise<(EntityType | RelationType)[]>),
   })
   const type = typesQuery.data?.find((t) =>
     isEntity
@@ -71,16 +72,16 @@ export function TypeEditor({ kind, typeId }: TypeEditorProps) {
   )
 
   const propertiesQuery = useQuery({
-    queryKey: qk.model(kind, typeId, 'properties'),
-    queryFn: () => model.listProperties(kind, typeId),
+    queryKey: qk.model(ontologyKey, kind, typeId, 'properties'),
+    queryFn: () => model.listProperties(ontologyKey, kind, typeId),
   })
   const properties = propertiesQuery.data
 
   const update = useMutation({
     mutationFn: (patch: { displayName: string; description: string | null }): Promise<unknown> =>
       isEntity
-        ? model.updateEntityType(typeId, patch)
-        : model.updateRelationType(typeId, patch),
+        ? model.updateEntityType(ontologyKey, typeId, patch)
+        : model.updateRelationType(ontologyKey, typeId, patch),
     onSuccess: () => {
       invalidateModeling(queryClient)
       toast.success('Saved')
@@ -91,12 +92,12 @@ export function TypeEditor({ kind, typeId }: TypeEditorProps) {
   const deleteType = useMutation({
     mutationFn: (cascadeFlag: boolean) =>
       isEntity
-        ? model.deleteEntityType(typeId, cascadeFlag)
-        : model.deleteRelationType(typeId, cascadeFlag),
+        ? model.deleteEntityType(ontologyKey, typeId, cascadeFlag)
+        : model.deleteRelationType(ontologyKey, typeId, cascadeFlag),
     onSuccess: () => {
       invalidateModeling(queryClient)
       toast.success(`${isEntity ? 'Entity' : 'Relation'} type deleted`)
-      void navigate('/studio')
+      void navigate(`/o/${ontologyKey}/studio`)
     },
     onError: (error) => {
       if (guard(error, () => deleteType.mutate(true))) return
@@ -106,7 +107,7 @@ export function TypeEditor({ kind, typeId }: TypeEditorProps) {
 
   const deleteProperty = useMutation({
     mutationFn: ({ propertyId, cascadeFlag }: { propertyId: string; cascadeFlag: boolean }) =>
-      model.deleteProperty(kind, typeId, propertyId, cascadeFlag),
+      model.deleteProperty(ontologyKey, kind, typeId, propertyId, cascadeFlag),
     onSuccess: () => {
       invalidateModeling(queryClient)
       toast.success('Property deleted')
@@ -140,7 +141,7 @@ export function TypeEditor({ kind, typeId }: TypeEditorProps) {
         description="It may have been deleted."
         action={
           <Button variant="outline" asChild>
-            <Link to="/studio">Back to schema</Link>
+            <Link to={`/o/${ontologyKey}/studio`}>Back to schema</Link>
           </Button>
         }
       />
@@ -153,7 +154,7 @@ export function TypeEditor({ kind, typeId }: TypeEditorProps) {
     <div>
       <header className="border-b px-6 py-4">
         <Link
-          to="/studio"
+          to={`/o/${ontologyKey}/studio`}
           className="mb-2 inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
         >
           <ChevronLeft className="size-3.5" /> Schema
@@ -302,6 +303,7 @@ export function TypeEditor({ kind, typeId }: TypeEditorProps) {
       </div>
 
       <PropertyDialog
+        ontologyKey={ontologyKey}
         kind={kind}
         typeId={typeId}
         property={editingProperty}
@@ -315,7 +317,7 @@ export function TypeEditor({ kind, typeId }: TypeEditorProps) {
             <AlertDialogTitle>Delete "{type.displayName}"?</AlertDialogTitle>
             <AlertDialogDescription>
               This removes the {isEntity ? 'entity' : 'relation'} type and its properties
-              from the global schema. This cannot be undone.
+              from this ontology's schema. This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

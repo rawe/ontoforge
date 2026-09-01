@@ -75,11 +75,11 @@ export function coerceTypedValue(dataType: DataType, raw: string): JsonPrimitive
 
 /**
  * Invalidate everything the modeling surface can affect: modeling caches,
- * ontology list and all runtime schemas (the lenses re-render downstream).
+ * lens list and all runtime schemas (the lenses re-render downstream).
  */
 export function invalidateModeling(queryClient: QueryClient) {
   void queryClient.invalidateQueries({ queryKey: ['model'] })
-  void queryClient.invalidateQueries({ queryKey: ['ontologies'] })
+  void queryClient.invalidateQueries({ queryKey: ['lenses'] })
   void queryClient.invalidateQueries({ queryKey: ['schema'] })
   void queryClient.invalidateQueries({ queryKey: ['agents'] })
   void queryClient.invalidateQueries({ queryKey: ['savedQueries'] })

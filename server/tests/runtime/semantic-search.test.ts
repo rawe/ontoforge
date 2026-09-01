@@ -56,7 +56,7 @@ function rawSchema(entityTypeKeys: string[] = ["person"], scopedKeys?: string[])
           ],
   }));
   return {
-    ontology: { ontologyId: "ont-1", key: "test", name: "Test", description: null },
+    lens: { lensId: "lens-1", key: "test", name: "Test", description: null },
     entityTypes,
     relationTypes: [],
     entityInclusions: (scopedKeys ?? []).map((key) => ({ key, properties: null })),
@@ -263,7 +263,7 @@ describe("cross-type search (no entity type)", () => {
     expect((results[1]!.entity as Row)._entityTypeKey).toBe("company");
   });
 
-  it("a scoped ontology over-fetches and drops out-of-scope types", async () => {
+  it("a scoped lens over-fetches and drops out-of-scope types", async () => {
     setEmbeddingProvider(provider());
     mockedGetFullSchema.mockResolvedValue(rawSchema(["person", "company"], ["person"]));
     mockedSemanticSearch.mockResolvedValue([

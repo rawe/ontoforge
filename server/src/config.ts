@@ -26,11 +26,6 @@ export interface Settings {
   AI_REASONING_EFFORT: string | null;
 
   PUBLIC_URL: string | null;
-
-  /** Fallback ontology key for runtime-MCP connections. Read per request in
-   * `mcp/mount.ts`; surfaced here so every consumer shares one settings
-   * object. */
-  DEFAULT_MCP_ONTOLOGY_KEY: string | null;
 }
 
 function str(env: NodeJS.ProcessEnv, name: string, fallback: string): string {
@@ -107,8 +102,6 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
     AI_REASONING_EFFORT: optOneOf(env, "AI_REASONING_EFFORT", AI_REASONING_EFFORTS),
 
     PUBLIC_URL: optStr(env, "PUBLIC_URL"),
-
-    DEFAULT_MCP_ONTOLOGY_KEY: optStr(env, "DEFAULT_MCP_ONTOLOGY_KEY"),
   };
 }
 

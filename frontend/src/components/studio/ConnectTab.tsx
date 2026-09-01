@@ -1,6 +1,6 @@
 import { Check, Copy } from 'lucide-react'
 import { useState } from 'react'
-import type { Ontology } from '@/api/types'
+import type { Lens } from '@/api/types'
 import { Button } from '@/components/ui/button'
 
 function CodeBlock({ code, label }: { code: string; label: string }) {
@@ -28,33 +28,21 @@ function CodeBlock({ code, label }: { code: string; label: string }) {
   )
 }
 
-/** Connect tab: MCP configuration snippets for this ontology. */
-export function ConnectTab({ ontology }: { ontology: Ontology }) {
+/** Connect tab: MCP configuration snippet for this ontology and lens. */
+export function ConnectTab({ ontologyKey, lens }: { ontologyKey: string; lens: Lens }) {
   const origin = window.location.origin
-  const key = ontology.key
+  const key = lens.key
 
-  const urlSnippet = JSON.stringify(
-    {
-      mcpServers: {
-        'ontoforge-modeling': { type: 'http', url: `${origin}/mcp/model` },
-        'ontoforge-runtime': { type: 'http', url: `${origin}/mcp/runtime/${key}` },
-      },
-    },
-    null,
-    2,
-  )
-
-  const headerSnippet = JSON.stringify(
+  const mcpSnippet = JSON.stringify(
     {
       mcpServers: {
         'ontoforge-modeling': {
           type: 'http',
-          url: `${origin}/mcp/model`,
+          url: `${origin}/mcp/ontologies/${ontologyKey}/model`,
         },
         'ontoforge-runtime': {
           type: 'http',
-          url: `${origin}/mcp/runtime`,
-          headers: { 'X-Ontology-Key': key },
+          url: `${origin}/mcp/ontologies/${ontologyKey}/runtime/lenses/${key}`,
         },
       },
     },
@@ -65,27 +53,18 @@ export function ConnectTab({ ontology }: { ontology: Ontology }) {
   return (
     <div className="max-w-2xl space-y-6">
       <div className="rounded-xl border bg-card p-4">
-        <h3 className="text-[13px] font-semibold">MCP — URL-based</h3>
+        <h3 className="text-[13px] font-semibold">MCP</h3>
         <p className="mb-3 mt-0.5 text-[12px] text-muted-foreground">
-          Point AI clients (Claude Code, Claude Desktop, …) at this ontology. The runtime
-          server is bound to <span className="font-mono">{key}</span> by its URL. The
-          modeling server is global — it works on the whole schema and takes the ontology
-          as a tool argument, so no key appears in its address.
+          Point AI clients (Claude Code, Claude Desktop, …) at this ontology. Both
+          servers are bound by their URL: the modeling server to the ontology{' '}
+          <span className="font-mono">{ontologyKey}</span>, the runtime server to the
+          lens <span className="font-mono">{key}</span> within it.
         </p>
-        <CodeBlock code={urlSnippet} label="URL-based MCP config" />
-      </div>
-      <div className="rounded-xl border bg-card p-4">
-        <h3 className="text-[13px] font-semibold">MCP — header-based</h3>
-        <p className="mb-3 mt-0.5 text-[12px] text-muted-foreground">
-          Same servers, with the runtime ontology selected via the{' '}
-          <span className="font-mono">X-Ontology-Key</span> header instead of the URL. The
-          modeling server stays global either way.
-        </p>
-        <CodeBlock code={headerSnippet} label="Header-based MCP config" />
+        <CodeBlock code={mcpSnippet} label="MCP config" />
       </div>
       <p className="text-[12px] text-muted-foreground">
-        The modeling server edits the global schema through this ontology's lens; the
-        runtime server reads and writes knowledge data. Snippets use this app's origin —
+        The modeling server edits this ontology's schema; the runtime server reads and
+        writes knowledge data through this lens. The snippet uses this app's origin —
         replace it with your backend host if clients connect directly.
       </p>
     </div>

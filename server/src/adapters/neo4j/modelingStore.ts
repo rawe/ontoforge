@@ -45,48 +45,48 @@ export class Neo4jModelingStore implements ModelingStore {
   }
 
   // ------------------------------------------------------------------
-  // Ontologies
+  // Lenses
   // ------------------------------------------------------------------
 
-  async createOntology(
-    ontologyId: string,
+  async createLens(
+    lensId: string,
     key: string,
     name: string,
     description: string | null,
   ): Promise<Row> {
     return runSession(this.driver, (session) =>
-      queries.createOntology(session, ontologyId, key, name, description),
+      queries.createLens(session, lensId, key, name, description),
     );
   }
 
-  async listOntologies(): Promise<Row[]> {
-    return runSession(this.driver, (session) => queries.listOntologies(session));
+  async listLenses(): Promise<Row[]> {
+    return runSession(this.driver, (session) => queries.listLenses(session));
   }
 
-  async getOntology(ontologyId: string): Promise<Row | null> {
-    return runSession(this.driver, (session) => queries.getOntology(session, ontologyId));
+  async getLens(lensId: string): Promise<Row | null> {
+    return runSession(this.driver, (session) => queries.getLens(session, lensId));
   }
 
-  async getOntologyByName(name: string): Promise<Row | null> {
-    return runSession(this.driver, (session) => queries.getOntologyByName(session, name));
+  async getLensByName(name: string): Promise<Row | null> {
+    return runSession(this.driver, (session) => queries.getLensByName(session, name));
   }
 
-  async getOntologyByKey(key: string): Promise<Row | null> {
-    return runSession(this.driver, (session) => queries.getOntologyByKey(session, key));
+  async getLensByKey(key: string): Promise<Row | null> {
+    return runSession(this.driver, (session) => queries.getLensByKey(session, key));
   }
 
-  async updateOntology(
-    ontologyId: string,
+  async updateLens(
+    lensId: string,
     name: string | null,
     description: string | null,
   ): Promise<Row | null> {
     return runSession(this.driver, (session) =>
-      queries.updateOntology(session, ontologyId, name, description),
+      queries.updateLens(session, lensId, name, description),
     );
   }
 
-  async deleteOntology(ontologyId: string): Promise<boolean> {
-    return runSession(this.driver, (session) => queries.deleteOntology(session, ontologyId));
+  async deleteLens(lensId: string): Promise<boolean> {
+    return runSession(this.driver, (session) => queries.deleteLens(session, lensId));
   }
 
   // ------------------------------------------------------------------
@@ -290,40 +290,40 @@ export class Neo4jModelingStore implements ModelingStore {
   // ------------------------------------------------------------------
 
   async addIncludesType(
-    ontologyId: string,
+    lensId: string,
     typeKind: TypeKind,
     typeKey: string,
     properties: string[] | null,
   ): Promise<Row | null> {
     return runSession(this.driver, (session) =>
-      queries.addIncludesType(session, ontologyId, typeKind, typeKey, properties),
+      queries.addIncludesType(session, lensId, typeKind, typeKey, properties),
     );
   }
 
-  async listIncludesTypes(ontologyId: string, typeKind: TypeKind): Promise<Row[]> {
+  async listIncludesTypes(lensId: string, typeKind: TypeKind): Promise<Row[]> {
     return runSession(this.driver, (session) =>
-      queries.listIncludesTypes(session, ontologyId, typeKind),
+      queries.listIncludesTypes(session, lensId, typeKind),
     );
   }
 
   async updateIncludesType(
-    ontologyId: string,
+    lensId: string,
     typeKind: TypeKind,
     typeId: string,
     properties: string[] | null,
   ): Promise<Row | null> {
     return runSession(this.driver, (session) =>
-      queries.updateIncludesType(session, ontologyId, typeKind, typeId, properties),
+      queries.updateIncludesType(session, lensId, typeKind, typeId, properties),
     );
   }
 
   async removeIncludesType(
-    ontologyId: string,
+    lensId: string,
     typeKind: TypeKind,
     typeId: string,
   ): Promise<boolean> {
     return runSession(this.driver, (session) =>
-      queries.removeIncludesType(session, ontologyId, typeKind, typeId),
+      queries.removeIncludesType(session, lensId, typeKind, typeId),
     );
   }
 
@@ -337,22 +337,22 @@ export class Neo4jModelingStore implements ModelingStore {
     );
   }
 
-  async findOntologiesIncludingType(
+  async findLensesIncludingType(
     typeKind: TypeKind,
     typeId: string,
   ): Promise<string[]> {
     return runSession(this.driver, (session) =>
-      queries.findOntologiesIncludingType(session, typeKind, typeId),
+      queries.findLensesIncludingType(session, typeKind, typeId),
     );
   }
 
-  async findOntologiesWithExplicitProperty(
+  async findLensesWithExplicitProperty(
     typeKind: TypeKind,
     typeId: string,
     propertyKey: string,
   ): Promise<string[]> {
     return runSession(this.driver, (session) =>
-      queries.findOntologiesWithExplicitProperty(session, typeKind, typeId, propertyKey),
+      queries.findLensesWithExplicitProperty(session, typeKind, typeId, propertyKey),
     );
   }
 
@@ -400,12 +400,12 @@ export class Neo4jModelingStore implements ModelingStore {
   // AI agent configs
   // ------------------------------------------------------------------
 
-  async listAiAgents(ontologyId: string): Promise<Row[]> {
-    return runSession(this.driver, (session) => queries.listAiAgents(session, ontologyId));
+  async listAiAgents(lensId: string): Promise<Row[]> {
+    return runSession(this.driver, (session) => queries.listAiAgents(session, lensId));
   }
 
   async upsertAiAgent(
-    ontologyId: string,
+    lensId: string,
     agentConfigId: string,
     key: string,
     name: string,
@@ -416,7 +416,7 @@ export class Neo4jModelingStore implements ModelingStore {
     return runSession(this.driver, (session) =>
       queries.upsertAiAgent(
         session,
-        ontologyId,
+        lensId,
         agentConfigId,
         key,
         name,
@@ -427,15 +427,15 @@ export class Neo4jModelingStore implements ModelingStore {
     );
   }
 
-  async listAiAgentsForExport(ontologyId: string): Promise<Row[]> {
+  async listAiAgentsForExport(lensId: string): Promise<Row[]> {
     return runSession(this.driver, (session) =>
-      queries.listAiAgentsForExport(session, ontologyId),
+      queries.listAiAgentsForExport(session, lensId),
     );
   }
 
-  async deleteAiAgent(ontologyId: string, agentKey: string): Promise<boolean> {
+  async deleteAiAgent(lensId: string, agentKey: string): Promise<boolean> {
     return runSession(this.driver, (session) =>
-      queries.deleteAiAgent(session, ontologyId, agentKey),
+      queries.deleteAiAgent(session, lensId, agentKey),
     );
   }
 
@@ -443,46 +443,46 @@ export class Neo4jModelingStore implements ModelingStore {
   // Saved query configs
   // ------------------------------------------------------------------
 
-  async listSavedQueries(ontologyId: string): Promise<Row[]> {
-    return runSession(this.driver, (session) => queries.listSavedQueries(session, ontologyId));
+  async listSavedQueries(lensId: string): Promise<Row[]> {
+    return runSession(this.driver, (session) => queries.listSavedQueries(session, lensId));
   }
 
-  async listSavedQueriesForExport(ontologyId: string): Promise<Row[]> {
+  async listSavedQueriesForExport(lensId: string): Promise<Row[]> {
     return runSession(this.driver, (session) =>
-      queries.listSavedQueriesForExport(session, ontologyId),
+      queries.listSavedQueriesForExport(session, lensId),
     );
   }
 
   async upsertSavedQuery(
-    ontologyId: string,
+    lensId: string,
     savedQueryId: string,
     key: string,
     name: string,
     description: string,
     stepsJson: string,
     parametersJson: string,
-    ontologyKey: string | null = null,
+    lensKey: string | null = null,
     embedding: number[] | null = null,
   ): Promise<[Row, boolean]> {
     return runSession(this.driver, (session) =>
       queries.upsertSavedQuery(
         session,
-        ontologyId,
+        lensId,
         savedQueryId,
         key,
         name,
         description,
         stepsJson,
         parametersJson,
-        ontologyKey,
+        lensKey,
         embedding,
       ),
     );
   }
 
-  async deleteSavedQuery(ontologyId: string, queryKey: string): Promise<boolean> {
+  async deleteSavedQuery(lensId: string, queryKey: string): Promise<boolean> {
     return runSession(this.driver, (session) =>
-      queries.deleteSavedQuery(session, ontologyId, queryKey),
+      queries.deleteSavedQuery(session, lensId, queryKey),
     );
   }
 
@@ -546,7 +546,11 @@ export class Neo4jModelingStore implements ModelingStore {
     await ddl.ensureSavedQueryVectorIndex(this.driver, dimensions);
   }
 
-  async ensureVectorIndexes(dimensions: number, recreateOnMismatch = false): Promise<void> {
-    await ddl.ensureVectorIndexes(this.driver, dimensions, recreateOnMismatch);
+  async dropMismatchedVectorIndexes(dimensions: number): Promise<void> {
+    await ddl.dropMismatchedVectorIndexes(this.driver, dimensions);
+  }
+
+  async ensureVectorIndexes(dimensions: number): Promise<void> {
+    await ddl.ensureVectorIndexes(this.driver, dimensions);
   }
 }

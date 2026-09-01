@@ -1,25 +1,27 @@
 #!/usr/bin/env node
-// Rebuild all embedding vectors for semantic search via the OntoForge API.
+// Rebuild one ontology's embedding vectors for semantic search.
 
-import { die, getBaseUrl, parseCliArgs } from './lib.mjs';
+import { die, getBaseUrl, getOntologyKey, modelPath, parseCliArgs } from './lib.mjs';
 
 const { flags } = parseCliArgs({
   baseUrl: ['--base-url'],
+  ontology: ['--ontology'],
 });
 
 const baseUrl = getBaseUrl(flags);
-const url = `${baseUrl}/api/model/rebuild-embeddings`;
+const ontologyKey = getOntologyKey(flags);
+const path = `${modelPath(ontologyKey)}/rebuild-embeddings`;
 
 let res;
 try {
-  res = await fetch(url, { method: 'POST' });
+  res = await fetch(`${baseUrl}${path}`, { method: 'POST' });
 } catch {
   die(`Cannot connect to ${baseUrl}. Is the OntoForge server running?`);
 }
 
 if (!res.ok) {
   const text = await res.text();
-  die(`POST /api/model/rebuild-embeddings -> ${res.status}: ${text}`);
+  die(`POST ${path} -> ${res.status}: ${text}`);
 }
 
 // Stream NDJSON response line by line

@@ -1,7 +1,8 @@
 /**
- * Session-03 integration suite — ontology lenses, inclusions, the cascade
- * protocol and validation against the docker-compose Neo4j at
- * bolt://localhost:7687.
+ * Integration suite — lenses, inclusions, the cascade protocol and
+ * validation, on the ontology-scoped modeling tree
+ * (`/api/ontologies/:ontologyKey/model`) against the docker-compose
+ * database.
  *
  * Covers: lens CRUD with both uniqueness dimensions, the inclusion
  * lifecycle with the absent-vs-empty allowlist distinction preserved by
@@ -34,12 +35,19 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await wipeDatabase();
+  await createOntology("test_ont");
 });
+
+/** Create one bare ontology over the registry API. */
+async function createOntology(key: string): Promise<void> {
+  const res = await app.inject({ method: "POST", url: "/api/ontologies", payload: { key } });
+  expect(res.statusCode, res.body).toBe(201);
+}
 
 async function createEntityType(key: string, displayName: string): Promise<string> {
   const res = await app.inject({
     method: "POST",
-    url: "/api/model/entity-types",
+    url: "/api/ontologies/test_ont/model/entity-types",
     payload: { key, displayName },
   });
   expect(res.statusCode).toBe(201);
@@ -53,7 +61,7 @@ async function createRelationType(
 ): Promise<string> {
   const res = await app.inject({
     method: "POST",
-    url: "/api/model/relation-types",
+    url: "/api/ontologies/test_ont/model/relation-types",
     payload: {
       key,
       displayName: key,
@@ -65,14 +73,14 @@ async function createRelationType(
   return res.json().relationTypeId as string;
 }
 
-async function createOntology(key: string, name: string): Promise<string> {
+async function createLens(key: string, name: string): Promise<string> {
   const res = await app.inject({
     method: "POST",
-    url: "/api/model/ontologies",
+    url: "/api/ontologies/test_ont/model/lenses",
     payload: { key, name },
   });
   expect(res.statusCode).toBe(201);
-  return res.json().ontologyId as string;
+  return res.json().lensId as string;
 }
 
 async function addProperty(
@@ -82,39 +90,39 @@ async function addProperty(
 ): Promise<string> {
   const res = await app.inject({
     method: "POST",
-    url: `/api/model/entity-types/${entityTypeId}/properties`,
+    url: `/api/ontologies/test_ont/model/entity-types/${entityTypeId}/properties`,
     payload: { key, displayName: key, dataType: "string", ...extra },
   });
   expect(res.statusCode).toBe(201);
   return res.json().propertyId as string;
 }
 
-describe("ontology round trip", () => {
+describe("lens round trip", () => {
   it("create, read, list, update, delete", async () => {
     const created = await app.inject({
       method: "POST",
-      url: "/api/model/ontologies",
+      url: "/api/ontologies/test_ont/model/lenses",
       payload: { key: "hr", name: "Human Resources", description: "People stuff" },
     });
     expect(created.statusCode).toBe(201);
     const body = created.json();
     expect(body.key).toBe("hr");
     expect(body.name).toBe("Human Resources");
-    expect(body.ontologyId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(body.lensId).toMatch(/^[0-9a-f-]{36}$/);
 
     const read = await app.inject({
       method: "GET",
-      url: `/api/model/ontologies/${body.ontologyId}`,
+      url: `/api/ontologies/test_ont/model/lenses/${body.lensId}`,
     });
     expect(read.statusCode).toBe(200);
     expect(read.json()).toEqual(body);
 
-    const list = await app.inject({ method: "GET", url: "/api/model/ontologies" });
+    const list = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/model/lenses" });
     expect(list.json()).toHaveLength(1);
 
     const updated = await app.inject({
       method: "PUT",
-      url: `/api/model/ontologies/${body.ontologyId}`,
+      url: `/api/ontologies/test_ont/model/lenses/${body.lensId}`,
       payload: { name: "People" },
     });
     expect(updated.statusCode).toBe(200);
@@ -124,22 +132,22 @@ describe("ontology round trip", () => {
 
     const deleted = await app.inject({
       method: "DELETE",
-      url: `/api/model/ontologies/${body.ontologyId}`,
+      url: `/api/ontologies/test_ont/model/lenses/${body.lensId}`,
     });
     expect(deleted.statusCode).toBe(204);
     const gone = await app.inject({
       method: "GET",
-      url: `/api/model/ontologies/${body.ontologyId}`,
+      url: `/api/ontologies/test_ont/model/lenses/${body.lensId}`,
     });
     expect(gone.statusCode).toBe(404);
   });
 
-  it("key and name are each globally unique", async () => {
-    await createOntology("hr", "Human Resources");
+  it("key and name are each unique within the ontology", async () => {
+    await createLens("hr", "Human Resources");
 
     const dupKey = await app.inject({
       method: "POST",
-      url: "/api/model/ontologies",
+      url: "/api/ontologies/test_ont/model/lenses",
       payload: { key: "hr", name: "Different Name" },
     });
     expect(dupKey.statusCode).toBe(409);
@@ -147,7 +155,7 @@ describe("ontology round trip", () => {
 
     const dupName = await app.inject({
       method: "POST",
-      url: "/api/model/ontologies",
+      url: "/api/ontologies/test_ont/model/lenses",
       payload: { key: "different_key", name: "Human Resources" },
     });
     expect(dupName.statusCode).toBe(409);
@@ -156,27 +164,27 @@ describe("ontology round trip", () => {
 
   it("lens deletion leaves schema and other lenses untouched", async () => {
     const etId = await createEntityType("person", "Person");
-    const ontA = await createOntology("lens_a", "Lens A");
-    const ontB = await createOntology("lens_b", "Lens B");
+    const lensA = await createLens("lens_a", "Lens A");
+    const lensB = await createLens("lens_b", "Lens B");
     await app.inject({
       method: "POST",
-      url: `/api/model/ontologies/${ontA}/includes/entity-types`,
+      url: `/api/ontologies/test_ont/model/lenses/${lensA}/includes/entity-types`,
       payload: { key: "person" },
     });
     await app.inject({
       method: "POST",
-      url: `/api/model/ontologies/${ontB}/includes/entity-types`,
+      url: `/api/ontologies/test_ont/model/lenses/${lensB}/includes/entity-types`,
       payload: { key: "person" },
     });
 
-    const deleted = await app.inject({ method: "DELETE", url: `/api/model/ontologies/${ontA}` });
+    const deleted = await app.inject({ method: "DELETE", url: `/api/ontologies/test_ont/model/lenses/${lensA}` });
     expect(deleted.statusCode).toBe(204);
 
-    const et = await app.inject({ method: "GET", url: `/api/model/entity-types/${etId}` });
+    const et = await app.inject({ method: "GET", url: `/api/ontologies/test_ont/model/entity-types/${etId}` });
     expect(et.statusCode).toBe(200);
     const bInclusions = await app.inject({
       method: "GET",
-      url: `/api/model/ontologies/${ontB}/includes/entity-types`,
+      url: `/api/ontologies/test_ont/model/lenses/${lensB}/includes/entity-types`,
     });
     expect(bInclusions.json()).toHaveLength(1);
   });
@@ -186,11 +194,11 @@ describe("inclusion lifecycle against real storage", () => {
   it("absent and empty allowlists survive the round trip as distinct states", async () => {
     await createEntityType("person", "Person");
     await createEntityType("company", "Company");
-    const ontId = await createOntology("hr", "Human Resources");
+    const lensId = await createLens("hr", "Human Resources");
 
     const absent = await app.inject({
       method: "POST",
-      url: `/api/model/ontologies/${ontId}/includes/entity-types`,
+      url: `/api/ontologies/test_ont/model/lenses/${lensId}/includes/entity-types`,
       payload: { key: "person" },
     });
     expect(absent.statusCode).toBe(201);
@@ -198,7 +206,7 @@ describe("inclusion lifecycle against real storage", () => {
 
     const empty = await app.inject({
       method: "POST",
-      url: `/api/model/ontologies/${ontId}/includes/entity-types`,
+      url: `/api/ontologies/test_ont/model/lenses/${lensId}/includes/entity-types`,
       payload: { key: "company", properties: [] },
     });
     expect(empty.statusCode).toBe(201);
@@ -206,7 +214,7 @@ describe("inclusion lifecycle against real storage", () => {
 
     const list = await app.inject({
       method: "GET",
-      url: `/api/model/ontologies/${ontId}/includes/entity-types`,
+      url: `/api/ontologies/test_ont/model/lenses/${lensId}/includes/entity-types`,
     });
     const rows = list.json() as { key: string; properties: string[] | null }[];
     expect(rows.find((r) => r.key === "person")?.properties).toBeNull();
@@ -216,16 +224,16 @@ describe("inclusion lifecycle against real storage", () => {
   it("re-adding the same type is an upsert that replaces the allowlist", async () => {
     const etId = await createEntityType("person", "Person");
     await addProperty(etId, "full_name");
-    const ontId = await createOntology("hr", "Human Resources");
+    const lensId = await createLens("hr", "Human Resources");
 
     await app.inject({
       method: "POST",
-      url: `/api/model/ontologies/${ontId}/includes/entity-types`,
+      url: `/api/ontologies/test_ont/model/lenses/${lensId}/includes/entity-types`,
       payload: { key: "person", properties: ["full_name"] },
     });
     const again = await app.inject({
       method: "POST",
-      url: `/api/model/ontologies/${ontId}/includes/entity-types`,
+      url: `/api/ontologies/test_ont/model/lenses/${lensId}/includes/entity-types`,
       payload: { key: "person" },
     });
     expect(again.statusCode).toBe(201); // not a conflict
@@ -233,7 +241,7 @@ describe("inclusion lifecycle against real storage", () => {
 
     const list = await app.inject({
       method: "GET",
-      url: `/api/model/ontologies/${ontId}/includes/entity-types`,
+      url: `/api/ontologies/test_ont/model/lenses/${lensId}/includes/entity-types`,
     });
     expect(list.json()).toHaveLength(1); // still one inclusion per (lens, type)
     expect(list.json()[0].properties).toBeNull();
@@ -243,16 +251,16 @@ describe("inclusion lifecycle against real storage", () => {
     const etId = await createEntityType("person", "Person");
     await addProperty(etId, "full_name");
     await addProperty(etId, "age");
-    const ontId = await createOntology("hr", "Human Resources");
+    const lensId = await createLens("hr", "Human Resources");
     await app.inject({
       method: "POST",
-      url: `/api/model/ontologies/${ontId}/includes/entity-types`,
+      url: `/api/ontologies/test_ont/model/lenses/${lensId}/includes/entity-types`,
       payload: { key: "person" },
     });
 
     const updated = await app.inject({
       method: "PUT",
-      url: `/api/model/ontologies/${ontId}/includes/entity-types/${etId}`,
+      url: `/api/ontologies/test_ont/model/lenses/${lensId}/includes/entity-types/${etId}`,
       payload: { properties: ["full_name"] },
     });
     expect(updated.statusCode).toBe(200);
@@ -260,12 +268,12 @@ describe("inclusion lifecycle against real storage", () => {
 
     const removed = await app.inject({
       method: "DELETE",
-      url: `/api/model/ontologies/${ontId}/includes/entity-types/${etId}`,
+      url: `/api/ontologies/test_ont/model/lenses/${lensId}/includes/entity-types/${etId}`,
     });
     expect(removed.statusCode).toBe(204);
     const list = await app.inject({
       method: "GET",
-      url: `/api/model/ontologies/${ontId}/includes/entity-types`,
+      url: `/api/ontologies/test_ont/model/lenses/${lensId}/includes/entity-types`,
     });
     expect(list.json()).toHaveLength(0);
   });
@@ -274,12 +282,12 @@ describe("inclusion lifecycle against real storage", () => {
     await createEntityType("person", "Person");
     await createEntityType("company", "Company");
     await createRelationType("works_for", "person", "company");
-    const ontId = await createOntology("hr", "Human Resources");
+    const lensId = await createLens("hr", "Human Resources");
 
     // Relation inclusion first — no entity inclusions yet, accepted unchecked.
     const rel = await app.inject({
       method: "POST",
-      url: `/api/model/ontologies/${ontId}/includes/relation-types`,
+      url: `/api/ontologies/test_ont/model/lenses/${lensId}/includes/relation-types`,
       payload: { key: "works_for" },
     });
     expect(rel.statusCode).toBe(201);
@@ -287,20 +295,20 @@ describe("inclusion lifecycle against real storage", () => {
     // Now scope entities to person only — works_for's target is not exposed.
     await app.inject({
       method: "POST",
-      url: `/api/model/ontologies/${ontId}/includes/entity-types`,
+      url: `/api/ontologies/test_ont/model/lenses/${lensId}/includes/entity-types`,
       payload: { key: "person" },
     });
 
     const validation = await app.inject({
       method: "POST",
-      url: `/api/model/ontologies/${ontId}/validate`,
+      url: `/api/ontologies/test_ont/model/lenses/${lensId}/validate`,
     });
     expect(validation.statusCode).toBe(200);
     const body = validation.json();
     expect(body.valid).toBe(false);
     expect(body.errors).toEqual([
       {
-        path: "ontologies.hr.includes.relationTypes.works_for",
+        path: "lenses.hr.includes.relationTypes.works_for",
         message: "Target entity type 'company' is not included",
       },
     ]);
@@ -308,7 +316,7 @@ describe("inclusion lifecycle against real storage", () => {
     // The same relation inclusion attempted NOW is checked and refused.
     const late = await app.inject({
       method: "POST",
-      url: `/api/model/ontologies/${ontId}/includes/relation-types`,
+      url: `/api/ontologies/test_ont/model/lenses/${lensId}/includes/relation-types`,
       payload: { key: "works_for" },
     });
     expect(late.statusCode).toBe(422);
@@ -319,33 +327,33 @@ describe("inclusion lifecycle against real storage", () => {
 describe("cascade protocol end-to-end", () => {
   it("deleting an included entity type without cascade is refused with sorted keys; with cascade repairs", async () => {
     const etId = await createEntityType("person", "Person");
-    const zebra = await createOntology("zebra_lens", "Zebra");
-    const alpha = await createOntology("alpha_lens", "Alpha");
-    for (const ontId of [zebra, alpha]) {
+    const zebra = await createLens("zebra_lens", "Zebra");
+    const alpha = await createLens("alpha_lens", "Alpha");
+    for (const lensId of [zebra, alpha]) {
       await app.inject({
         method: "POST",
-        url: `/api/model/ontologies/${ontId}/includes/entity-types`,
+        url: `/api/ontologies/test_ont/model/lenses/${lensId}/includes/entity-types`,
         payload: { key: "person" },
       });
     }
 
-    const refused = await app.inject({ method: "DELETE", url: `/api/model/entity-types/${etId}` });
+    const refused = await app.inject({ method: "DELETE", url: `/api/ontologies/test_ont/model/entity-types/${etId}` });
     expect(refused.statusCode).toBe(409);
     expect(refused.json().error.code).toBe("CASCADE_REQUIRED");
-    expect(refused.json().error.details.affectedOntologies).toEqual([
+    expect(refused.json().error.details.affectedLenses).toEqual([
       "alpha_lens",
       "zebra_lens",
     ]);
 
     const consented = await app.inject({
       method: "DELETE",
-      url: `/api/model/entity-types/${etId}?cascade=true`,
+      url: `/api/ontologies/test_ont/model/entity-types/${etId}?cascade=true`,
     });
     expect(consented.statusCode).toBe(204);
-    for (const ontId of [zebra, alpha]) {
+    for (const lensId of [zebra, alpha]) {
       const list = await app.inject({
         method: "GET",
-        url: `/api/model/ontologies/${ontId}/includes/entity-types`,
+        url: `/api/ontologies/test_ont/model/lenses/${lensId}/includes/entity-types`,
       });
       expect(list.json()).toHaveLength(0);
     }
@@ -354,52 +362,52 @@ describe("cascade protocol end-to-end", () => {
   it("trigger 3 end-to-end: required-no-default property vs explicit allowlist", async () => {
     const etId = await createEntityType("person", "Person");
     await addProperty(etId, "full_name");
-    const scoped = await createOntology("scoped_lens", "Scoped");
-    const tracking = await createOntology("tracking_lens", "Tracking");
+    const scoped = await createLens("scoped_lens", "Scoped");
+    const tracking = await createLens("tracking_lens", "Tracking");
     await app.inject({
       method: "POST",
-      url: `/api/model/ontologies/${scoped}/includes/entity-types`,
+      url: `/api/ontologies/test_ont/model/lenses/${scoped}/includes/entity-types`,
       payload: { key: "person", properties: ["full_name"] },
     });
     // Tracking lens has no allowlist — never affected.
     await app.inject({
       method: "POST",
-      url: `/api/model/ontologies/${tracking}/includes/entity-types`,
+      url: `/api/ontologies/test_ont/model/lenses/${tracking}/includes/entity-types`,
       payload: { key: "person" },
     });
 
     const refused = await app.inject({
       method: "POST",
-      url: `/api/model/entity-types/${etId}/properties`,
+      url: `/api/ontologies/test_ont/model/entity-types/${etId}/properties`,
       payload: { key: "ssn", displayName: "SSN", dataType: "string", required: true },
     });
     expect(refused.statusCode).toBe(409);
     expect(refused.json().error.code).toBe("CASCADE_REQUIRED");
-    expect(refused.json().error.details.affectedOntologies).toEqual(["scoped_lens"]);
+    expect(refused.json().error.details.affectedLenses).toEqual(["scoped_lens"]);
 
     const consented = await app.inject({
       method: "POST",
-      url: `/api/model/entity-types/${etId}/properties?cascade=true`,
+      url: `/api/ontologies/test_ont/model/entity-types/${etId}/properties?cascade=true`,
       payload: { key: "ssn", displayName: "SSN", dataType: "string", required: true },
     });
     expect(consented.statusCode).toBe(201);
 
     const scopedList = await app.inject({
       method: "GET",
-      url: `/api/model/ontologies/${scoped}/includes/entity-types`,
+      url: `/api/ontologies/test_ont/model/lenses/${scoped}/includes/entity-types`,
     });
     expect(scopedList.json()[0].properties).toEqual(["full_name", "ssn"]);
     const trackingList = await app.inject({
       method: "GET",
-      url: `/api/model/ontologies/${tracking}/includes/entity-types`,
+      url: `/api/ontologies/test_ont/model/lenses/${tracking}/includes/entity-types`,
     });
     expect(trackingList.json()[0].properties).toBeNull(); // untouched
 
     // Both lenses remain valid afterwards.
-    for (const ontId of [scoped, tracking]) {
+    for (const lensId of [scoped, tracking]) {
       const validation = await app.inject({
         method: "POST",
-        url: `/api/model/ontologies/${ontId}/validate`,
+        url: `/api/ontologies/test_ont/model/lenses/${lensId}/validate`,
       });
       expect(validation.json().valid).toBe(true);
     }
@@ -409,10 +417,10 @@ describe("cascade protocol end-to-end", () => {
     const etId = await createEntityType("person", "Person");
     await addProperty(etId, "full_name");
     const nickId = await addProperty(etId, "nickname");
-    const ontId = await createOntology("hr", "Human Resources");
+    const lensId = await createLens("hr", "Human Resources");
     await app.inject({
       method: "POST",
-      url: `/api/model/ontologies/${ontId}/includes/entity-types`,
+      url: `/api/ontologies/test_ont/model/lenses/${lensId}/includes/entity-types`,
       payload: { key: "person", properties: ["full_name", "nickname"] },
     });
 
@@ -420,17 +428,17 @@ describe("cascade protocol end-to-end", () => {
     // lens validation reports it.
     const deleted = await app.inject({
       method: "DELETE",
-      url: `/api/model/entity-types/${etId}/properties/${nickId}`,
+      url: `/api/ontologies/test_ont/model/entity-types/${etId}/properties/${nickId}`,
     });
     expect(deleted.statusCode).toBe(204);
     const list = await app.inject({
       method: "GET",
-      url: `/api/model/ontologies/${ontId}/includes/entity-types`,
+      url: `/api/ontologies/test_ont/model/lenses/${lensId}/includes/entity-types`,
     });
     expect(list.json()[0].properties).toEqual(["full_name", "nickname"]);
     const invalid = await app.inject({
       method: "POST",
-      url: `/api/model/ontologies/${ontId}/validate`,
+      url: `/api/ontologies/test_ont/model/lenses/${lensId}/validate`,
     });
     expect(invalid.json().valid).toBe(false);
     expect(invalid.json().errors[0].message).toBe(
@@ -441,23 +449,23 @@ describe("cascade protocol end-to-end", () => {
     const nick2 = await addProperty(etId, "nickname");
     const updated = await app.inject({
       method: "PUT",
-      url: `/api/model/ontologies/${ontId}/includes/entity-types/${etId}`,
+      url: `/api/ontologies/test_ont/model/lenses/${lensId}/includes/entity-types/${etId}`,
       payload: { properties: ["full_name", "nickname"] },
     });
     expect(updated.statusCode).toBe(200);
     const cleaned = await app.inject({
       method: "DELETE",
-      url: `/api/model/entity-types/${etId}/properties/${nick2}?cascade=true`,
+      url: `/api/ontologies/test_ont/model/entity-types/${etId}/properties/${nick2}?cascade=true`,
     });
     expect(cleaned.statusCode).toBe(204);
     const afterCleanup = await app.inject({
       method: "GET",
-      url: `/api/model/ontologies/${ontId}/includes/entity-types`,
+      url: `/api/ontologies/test_ont/model/lenses/${lensId}/includes/entity-types`,
     });
     expect(afterCleanup.json()[0].properties).toEqual(["full_name"]);
     const valid = await app.inject({
       method: "POST",
-      url: `/api/model/ontologies/${ontId}/validate`,
+      url: `/api/ontologies/test_ont/model/lenses/${lensId}/validate`,
     });
     expect(valid.json().valid).toBe(true);
   });
@@ -466,29 +474,29 @@ describe("cascade protocol end-to-end", () => {
     await createEntityType("person", "Person");
     await createEntityType("company", "Company");
     const rtId = await createRelationType("works_for", "person", "company");
-    const ontId = await createOntology("hr", "Human Resources");
+    const lensId = await createLens("hr", "Human Resources");
     await app.inject({
       method: "POST",
-      url: `/api/model/ontologies/${ontId}/includes/relation-types`,
+      url: `/api/ontologies/test_ont/model/lenses/${lensId}/includes/relation-types`,
       payload: { key: "works_for" },
     });
 
     const refused = await app.inject({
       method: "DELETE",
-      url: `/api/model/relation-types/${rtId}`,
+      url: `/api/ontologies/test_ont/model/relation-types/${rtId}`,
     });
     expect(refused.statusCode).toBe(409);
     expect(refused.json().error.code).toBe("CASCADE_REQUIRED");
-    expect(refused.json().error.details.affectedOntologies).toEqual(["hr"]);
+    expect(refused.json().error.details.affectedLenses).toEqual(["hr"]);
 
     const consented = await app.inject({
       method: "DELETE",
-      url: `/api/model/relation-types/${rtId}?cascade=true`,
+      url: `/api/ontologies/test_ont/model/relation-types/${rtId}?cascade=true`,
     });
     expect(consented.statusCode).toBe(204);
     const list = await app.inject({
       method: "GET",
-      url: `/api/model/ontologies/${ontId}/includes/relation-types`,
+      url: `/api/ontologies/test_ont/model/lenses/${lensId}/includes/relation-types`,
     });
     expect(list.json()).toHaveLength(0);
   });
@@ -498,14 +506,14 @@ describe("schema validation", () => {
   it("a clean schema with a valid scoped lens answers valid", async () => {
     const etId = await createEntityType("person", "Person");
     await addProperty(etId, "full_name", { required: true });
-    const ontId = await createOntology("hr", "Human Resources");
+    const lensId = await createLens("hr", "Human Resources");
     await app.inject({
       method: "POST",
-      url: `/api/model/ontologies/${ontId}/includes/entity-types`,
+      url: `/api/ontologies/test_ont/model/lenses/${lensId}/includes/entity-types`,
       payload: { key: "person", properties: ["full_name"] },
     });
 
-    const res = await app.inject({ method: "POST", url: "/api/model/schema/validate" });
+    const res = await app.inject({ method: "POST", url: "/api/ontologies/test_ont/model/schema/validate" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ valid: true, errors: [] });
   });

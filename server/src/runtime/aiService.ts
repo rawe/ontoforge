@@ -76,9 +76,9 @@ const EMBEDDING_TOOLS: ReadonlySet<string> = new Set([
 
 /** Build a concise text description of the scoped schema for the LLM. */
 export function describeSchema(schema: SchemaCacheValue): string {
-  const lines = [`Ontology: ${schema.ontologyName} (key: ${schema.ontologyKey})`];
-  if (schema.ontologyDescription) {
-    lines.push(`Description: ${schema.ontologyDescription}`);
+  const lines = [`Lens: ${schema.lensName} (key: ${schema.lensKey})`];
+  if (schema.lensDescription) {
+    lines.push(`Description: ${schema.lensDescription}`);
   }
 
   lines.push("\nSystem properties (available on all entities and relations):");
@@ -134,7 +134,7 @@ interface AgentToolDef {
   name: string;
   description: string;
   schema: z.ZodType;
-  run: (ontologyKey: string, store: RuntimeStore, args: Row) => Promise<unknown>;
+  run: (lensKey: string, store: RuntimeStore, args: Row) => Promise<unknown>;
 }
 
 const clampLimit = (limit: unknown, fallback: number, max: number): number =>
@@ -144,12 +144,12 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
   {
     name: TOOL_GET_SCHEMA,
     description:
-      "Get the full ontology schema including entity types, relation types, " +
+      "Get the full lens schema including entity types, relation types, " +
       "and their property definitions with data types and required flags. " +
       "Call this if you need to verify available types or properties.",
     schema: z.object({}),
-    run: async (ontologyKey, store) => {
-      const loaded = await loadSchema(ontologyKey, store);
+    run: async (lensKey, store) => {
+      const loaded = await loadSchema(lensKey, store);
       return describeSchema(loaded.scoped);
     },
   },
@@ -168,9 +168,9 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       filters: z.record(z.string(), z.string()).nullish(),
       limit: z.number().int().nullish(),
     }),
-    run: async (ontologyKey, store, args) =>
+    run: async (lensKey, store, args) =>
       service.listEntities(
-        ontologyKey,
+        lensKey,
         args.entity_type_key as string,
         clampLimit(args.limit, 20, 50),
         0,
@@ -188,9 +188,9 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       entity_type_key: z.string(),
       entity_id: z.string(),
     }),
-    run: async (ontologyKey, store, args) =>
+    run: async (lensKey, store, args) =>
       service.getEntity(
-        ontologyKey,
+        lensKey,
         args.entity_type_key as string,
         args.entity_id as string,
         store,
@@ -205,9 +205,9 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       relation_type_key: z.string(),
       limit: z.number().int().nullish(),
     }),
-    run: async (ontologyKey, store, args) =>
+    run: async (lensKey, store, args) =>
       service.listRelations(
-        ontologyKey,
+        lensKey,
         args.relation_type_key as string,
         clampLimit(args.limit, 20, 50),
         0,
@@ -231,9 +231,9 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       direction: z.string().nullish(),
       limit: z.number().int().nullish(),
     }),
-    run: async (ontologyKey, store, args) =>
+    run: async (lensKey, store, args) =>
       service.getNeighbors(
-        ontologyKey,
+        lensKey,
         args.entity_type_key as string,
         args.entity_id as string,
         (args.direction as string | null | undefined) ?? "both",
@@ -253,9 +253,9 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       entity_type_key: z.string(),
       limit: z.number().int().nullish(),
     }),
-    run: async (ontologyKey, store, args) =>
+    run: async (lensKey, store, args) =>
       service.semanticSearch(
-        ontologyKey,
+        lensKey,
         args.query as string,
         args.entity_type_key as string,
         clampLimit(args.limit, 10, 20),
@@ -280,8 +280,8 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
     schema: z.object({
       query: z.string(),
     }),
-    run: async (ontologyKey, store, args) =>
-      service.executeQuery(ontologyKey, args.query as string, store),
+    run: async (lensKey, store, args) =>
+      service.executeQuery(lensKey, args.query as string, store),
   },
   {
     name: TOOL_LIST_SAVED_QUERIES,
@@ -289,8 +289,8 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       "List available saved queries with their parameters. " +
       "Each query has a key, name, description, and parameter definitions.",
     schema: z.object({}),
-    run: async (ontologyKey, store) => {
-      const loaded = await loadSchema(ontologyKey, store);
+    run: async (lensKey, store) => {
+      const loaded = await loadSchema(lensKey, store);
       return Object.values(loaded.savedQueries).map((sq) => ({
         key: sq.key,
         name: sq.name,
@@ -313,9 +313,9 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       query_key: z.string(),
       params: z.record(z.string(), z.unknown()).nullish(),
     }),
-    run: async (ontologyKey, store, args) =>
+    run: async (lensKey, store, args) =>
       service.executeSavedQuery(
-        ontologyKey,
+        lensKey,
         args.query_key as string,
         (args.params as Row | null | undefined) ?? {},
         store,
@@ -331,8 +331,8 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
     schema: z.object({
       query: z.string(),
     }),
-    run: async (ontologyKey, store, args) =>
-      service.searchSavedQueries(ontologyKey, args.query as string, 3, 0.7, store),
+    run: async (lensKey, store, args) =>
+      service.searchSavedQueries(lensKey, args.query as string, 3, 0.7, store),
   },
 ];
 
@@ -351,7 +351,7 @@ export const ALL_TOOL_NAMES: ReadonlySet<string> = new Set(AGENT_TOOL_DEFS_BY_NA
  * Anything else is rethrown and aborts the run.
  */
 export function buildTools(
-  ontologyKey: string,
+  lensKey: string,
   store: RuntimeStore,
   toolNames: string[],
   recorder: ToolCallRecord[],
@@ -368,7 +368,7 @@ export function buildTools(
         recorder.push(record);
         let result: unknown;
         try {
-          result = await def.run(ontologyKey, store, (args ?? {}) as Row);
+          result = await def.run(lensKey, store, (args ?? {}) as Row);
         } catch (error) {
           if (error instanceof NotFoundError || error instanceof ValidationError) {
             result = { error: error.message };
@@ -521,16 +521,16 @@ function isPlainObject(value: unknown): value is Row {
 
 /** Translate a natural language question to OQL, execute it, and summarize. */
 export async function aiQuery(
-  ontologyKey: string,
+  lensKey: string,
   question: string,
   store: RuntimeStore,
 ): Promise<Row> {
-  const loaded = await loadSchema(ontologyKey, store);
+  const loaded = await loadSchema(lensKey, store);
   const schemaDesc = describeSchema(loaded.scoped);
   const model = requireModel();
 
   const recorder: ToolCallRecord[] = [];
-  const tools = buildTools(ontologyKey, store, QUERY_TOOLS, recorder);
+  const tools = buildTools(lensKey, store, QUERY_TOOLS, recorder);
   const answer = await runReactAgent(
     model,
     QUERY_SYSTEM_PROMPT.replace("{schema}", schemaDesc),
@@ -624,7 +624,7 @@ const EXTRACTION_JSON_SCHEMA = {
 } as const;
 
 const EXTRACT_SYSTEM_PROMPT = `You are an entity extraction assistant for a knowledge graph.
-Given unstructured text, extract entities and relations that match the ontology schema.
+Given unstructured text, extract entities and relations that match the lens schema.
 
 RULES:
 - Only extract entities whose types exist in the schema below
@@ -730,15 +730,15 @@ function resolveEndpoint(
   return { reason: `matched ${matches.length} entities created in this call` };
 }
 
-/** Extract entities and relations from text using the ontology schema. */
+/** Extract entities and relations from text using the lens schema. */
 export async function aiExtract(
-  ontologyKey: string,
+  lensKey: string,
   text: string,
   store: RuntimeStore,
   entityTypes: string[] | null = null,
   create = false,
 ): Promise<Row> {
-  const loaded = await loadSchema(ontologyKey, store);
+  const loaded = await loadSchema(lensKey, store);
   const schemaDesc = describeSchema(loaded.scoped);
 
   let promptExtra = "";
@@ -747,12 +747,22 @@ export async function aiExtract(
   }
 
   const model = requireModel();
-  // `jsonSchema` constrains the response server-side — Ollama and OpenAI
-  // both support it, so the model cannot return a shape we then have to
-  // repair.
+  // The schema travels as the parameters of a single forced tool call
+  // rather than in `response_format`: a `json_schema` response format is
+  // validated against OpenAI's strict subset, which rejects the open
+  // `additionalProperties: true` maps this schema needs — property names
+  // come from the ontology, so the key set is not knowable statically.
+  // Tool parameters carry no such restriction, and the guarantee is
+  // unchanged: LangChain emits a `tool_choice` naming that one function,
+  // so the model cannot answer in prose.
+  //
+  // This is a stopgap. It rests on tool-parameter schemas not being
+  // strictly validated, which holds today but is not promised. The durable
+  // fix is to generate a strict-compliant schema from the lens's scoped
+  // ontology per request; that work is tracked separately.
   const structured = model.withStructuredOutput(
     EXTRACTION_JSON_SCHEMA as unknown as Record<string, unknown>,
-    { method: "jsonSchema" },
+    { method: "functionCalling" },
   );
   const raw = await structured.invoke([
     new SystemMessage(EXTRACT_SYSTEM_PROMPT.replace("{schema}", schemaDesc) + promptExtra),
@@ -781,7 +791,7 @@ export async function aiExtract(
     const createdEntities: CreatedEntity[] = [];
     for (const entity of extraction.entities) {
       const created = await service.createEntity(
-        ontologyKey,
+        lensKey,
         entity.entityTypeKey,
         entity.properties,
         store,
@@ -813,7 +823,7 @@ export async function aiExtract(
       }
 
       await service.createRelation(
-        ontologyKey,
+        lensKey,
         relation.relationTypeKey,
         source.entity._id as string,
         target.entity._id as string,
@@ -871,13 +881,13 @@ export function resolveChatToolNames(agentConfig: AgentConfig): string[] {
 /** Unified engine function for agent-powered chat. */
 export async function runAgentChat(
   agentConfig: AgentConfig,
-  ontologyKey: string,
+  lensKey: string,
   message: string,
   store: RuntimeStore,
   history: ChatHistoryEntry[] | null = null,
   includeToolCalls = false,
 ): Promise<Row> {
-  const loaded = await loadSchema(ontologyKey, store);
+  const loaded = await loadSchema(lensKey, store);
   const schemaDesc = describeSchema(loaded.scoped);
 
   // Resolve system prompt: a custom prompt gets the schema appended; no
@@ -890,7 +900,7 @@ export async function runAgentChat(
   const toolNames = resolveChatToolNames(agentConfig);
   const model = requireModel();
   const recorder: ToolCallRecord[] = [];
-  const tools = buildTools(ontologyKey, store, toolNames, recorder);
+  const tools = buildTools(lensKey, store, toolNames, recorder);
 
   // Stateless history: caller-supplied user/assistant turns, text only.
   const messages: BaseMessage[] = [];
@@ -914,42 +924,42 @@ export async function runAgentChat(
 
 /** Chat with the knowledge graph using AI and tools (default agent). */
 export async function aiChat(
-  ontologyKey: string,
+  lensKey: string,
   message: string,
   store: RuntimeStore,
   history: ChatHistoryEntry[] | null = null,
   includeToolCalls = false,
 ): Promise<Row> {
-  return runAgentChat(DEFAULT_AGENT_CONFIG, ontologyKey, message, store, history, includeToolCalls);
+  return runAgentChat(DEFAULT_AGENT_CONFIG, lensKey, message, store, history, includeToolCalls);
 }
 
 /** Chat using a configured agent. */
 export async function aiAgentChat(
-  ontologyKey: string,
+  lensKey: string,
   agentKey: string,
   message: string,
   store: RuntimeStore,
   history: ChatHistoryEntry[] | null = null,
   includeToolCalls = false,
 ): Promise<Row> {
-  const loaded = await loadSchema(ontologyKey, store);
+  const loaded = await loadSchema(lensKey, store);
   const config = loaded.agentConfigs[agentKey];
   if (!config) {
     throw new NotFoundError(`AI agent '${agentKey}' not found`);
   }
-  return runAgentChat(config, ontologyKey, message, store, history, includeToolCalls);
+  return runAgentChat(config, lensKey, message, store, history, includeToolCalls);
 }
 
 // ---------------------------------------------------------------------------
 // Agent discovery and A2A
 // ---------------------------------------------------------------------------
 
-/** List all agents (default + configured) for an ontology. */
+/** List all agents (default + configured) for a lens. */
 export async function listRuntimeAgents(
-  ontologyKey: string,
+  lensKey: string,
   store: RuntimeStore,
 ): Promise<Row[]> {
-  const loaded = await loadSchema(ontologyKey, store);
+  const loaded = await loadSchema(lensKey, store);
   const agents: Row[] = [
     {
       key: DEFAULT_AGENT_CONFIG.key,
@@ -967,9 +977,11 @@ export async function listRuntimeAgents(
   return agents;
 }
 
-/** Generate an A2A agent card JSON. */
+/** Generate an A2A agent card JSON. The advertised task URL names the
+ * ontology and lens, mirroring the runtime tree the card is served from. */
 export function buildAgentCard(
   agentConfig: AgentConfig,
+  ontologyKey: string,
   schemaCache: SchemaCacheValue,
   baseUrl: string,
 ): Row {
@@ -978,15 +990,16 @@ export function buildAgentCard(
     const entityTypes = Object.keys(schemaCache.entityTypes);
     const relationTypes = Object.keys(schemaCache.relationTypes);
     description =
-      `Knowledge assistant for ${schemaCache.ontologyName}. ` +
+      `Knowledge assistant for ${schemaCache.lensName}. ` +
       `Entity types: ${entityTypes.join(", ")}. ` +
       `Relation types: ${relationTypes.join(", ")}.`;
   }
 
+  const lensUrl = `${baseUrl}/api/ontologies/${ontologyKey}/runtime/lenses/${schemaCache.lensKey}`;
   const url =
     agentConfig.key === "_default"
-      ? `${baseUrl}/api/runtime/${schemaCache.ontologyKey}/ai/a2a`
-      : `${baseUrl}/api/runtime/${schemaCache.ontologyKey}/ai/agents/${agentConfig.key}/a2a`;
+      ? `${lensUrl}/ai/a2a`
+      : `${lensUrl}/ai/agents/${agentConfig.key}/a2a`;
 
   return {
     name: agentConfig.name,
@@ -1001,7 +1014,7 @@ export function buildAgentCard(
       {
         id: "chat",
         name: "Knowledge Graph Chat",
-        description: `Chat with the ${schemaCache.ontologyName} knowledge graph`,
+        description: `Chat with the ${schemaCache.lensName} knowledge graph`,
       },
     ],
   };
@@ -1010,7 +1023,7 @@ export function buildAgentCard(
 /** Handle an A2A JSON-RPC `tasks/send` request. */
 export async function handleA2aTask(
   agentConfig: AgentConfig,
-  ontologyKey: string,
+  lensKey: string,
   requestBody: Row,
   store: RuntimeStore,
 ): Promise<Row> {
@@ -1045,7 +1058,7 @@ export async function handleA2aTask(
     };
   }
 
-  const result = await runAgentChat(agentConfig, ontologyKey, messageText, store);
+  const result = await runAgentChat(agentConfig, lensKey, messageText, store);
 
   return {
     jsonrpc: "2.0",

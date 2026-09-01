@@ -1,10 +1,13 @@
 /**
- * Runtime routes, mounted at `/api/runtime`.
+ * Runtime routes, mounted at
+ * `/api/ontologies/:ontologyKey/runtime/lenses/:lensKey`.
  *
- * One lens-free route (`/features`), then everything else under
- * `/{ontologyKey}/...` — the runtime surface is addressed by KEYS
- * everywhere (`docs/interfaces.md`). Routers parse and shape only; every
- * domain rule lives in `service.ts`, shared with the runtime MCP server.
+ * Every request names its ontology and lens in the path and runs against
+ * a runtime store bound to that ontology — an unknown ontology key
+ * answers 404 before any route logic runs. Below the lens the surface is
+ * addressed by KEYS everywhere (`docs/interfaces.md`). Routers parse and
+ * shape only; every domain rule lives in `service.ts`, shared with the
+ * runtime MCP server.
  *
  * Paging bounds are enforced here (limit 1–200, offset >= 0) so an
  * out-of-range value answers `422 VALIDATION_ERROR` — where the MCP tools
@@ -15,41 +18,16 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 
-import { settings } from "../config.js";
 import { getRuntimeStore } from "../core/ports.js";
 import { parseFilters } from "./service.js";
 import * as service from "./service.js";
 
-const FeaturesResponse = z.object({
-  semanticSearch: z.boolean(),
-  ai: z.boolean(),
-});
-
-/** Routes mounted at `/api/runtime` that take no ontology key. */
-export const runtimeGlobalRouter: FastifyPluginAsyncZod = async (app) => {
-  app.get(
-    "/features",
-    {
-      schema: {
-        tags: ["runtime"],
-        response: { 200: FeaturesResponse },
-      },
-    },
-    async () => ({
-      semanticSearch: Boolean(settings.EMBEDDING_PROVIDER),
-      ai: Boolean(settings.AI_PROVIDER),
-    }),
-  );
-};
-
-const OntologyParams = z.object({ ontologyKey: z.string() });
-const TypeKeyParams = z.object({ ontologyKey: z.string(), key: z.string() });
-const EntityTypeParams = z.object({ ontologyKey: z.string(), entityTypeKey: z.string() });
-const EntityParams = z.object({
-  ontologyKey: z.string(),
-  entityTypeKey: z.string(),
-  entityId: z.string(),
-});
+// Every params schema carries the mount prefix's own parameters —
+// `ontologyKey` binds the store, `lensKey` names the lens.
+const LensParams = z.object({ ontologyKey: z.string(), lensKey: z.string() });
+const TypeKeyParams = LensParams.extend({ key: z.string() });
+const EntityTypeParams = LensParams.extend({ entityTypeKey: z.string() });
+const EntityParams = EntityTypeParams.extend({ entityId: z.string() });
 
 /** `fields` is repeated rather than comma-separated; one occurrence arrives
  * as a bare string and is normalized to a single-element list. */
@@ -98,12 +76,7 @@ const SemanticSearchQuery = z.looseObject({
  * so the only static rule is "a JSON object". */
 const PropertyPayload = z.record(z.string(), z.unknown());
 
-const DocumentParams = z.object({
-  ontologyKey: z.string(),
-  entityTypeKey: z.string(),
-  entityId: z.string(),
-  propertyKey: z.string(),
-});
+const DocumentParams = EntityParams.extend({ propertyKey: z.string() });
 
 const DocumentReadQuery = z.looseObject({
   offset: z.coerce.number().int().min(0).default(0),
@@ -128,7 +101,7 @@ const DocumentEditPayload = z.looseObject({
 /** OQL query request: the query text, nothing else (`docs/interfaces.md`). */
 const QueryPayload = z.looseObject({ query: z.string().min(1) });
 
-const SavedQueryRunParams = z.object({ ontologyKey: z.string(), queryKey: z.string() });
+const SavedQueryRunParams = LensParams.extend({ queryKey: z.string() });
 
 /** Saved-query run request: parameter values keyed by name. */
 const SavedQueryRunPayload = z.looseObject({
@@ -143,12 +116,8 @@ const SavedQuerySearchQuery = z.looseObject({
   min_score: z.coerce.number().min(0).max(1).default(0.7),
 });
 
-const RelationTypeParams = z.object({ ontologyKey: z.string(), relationTypeKey: z.string() });
-const RelationParams = z.object({
-  ontologyKey: z.string(),
-  relationTypeKey: z.string(),
-  relationId: z.string(),
-});
+const RelationTypeParams = LensParams.extend({ relationTypeKey: z.string() });
+const RelationParams = RelationTypeParams.extend({ relationId: z.string() });
 
 /** Relation creation names its two endpoints; everything else in the body
  * is a property value. */
@@ -177,58 +146,77 @@ const NeighborsQuery = z.looseObject({
   relationFields: FieldsParam,
 });
 
-/** Routes mounted at `/api/runtime` that address one lens by key. */
+/** Routes mounted at `/api/ontologies/:ontologyKey/runtime/lenses/:lensKey`. */
 export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
   // --- Schema introspection (read-only, already filtered to the lens) ---
 
   app.get(
-    "/:ontologyKey/schema",
-    { schema: { tags: ["runtime"], params: OntologyParams } },
-    async (request) => service.getFullSchema(request.params.ontologyKey, getRuntimeStore()),
+    "/schema",
+    { schema: { tags: ["runtime"], params: LensParams } },
+    async (request) =>
+      service.getFullSchema(
+        request.params.lensKey,
+        await getRuntimeStore(request.params.ontologyKey),
+      ),
   );
 
   app.get(
-    "/:ontologyKey/schema/entity-types",
-    { schema: { tags: ["runtime"], params: OntologyParams } },
-    async (request) => service.listEntityTypes(request.params.ontologyKey, getRuntimeStore()),
+    "/schema/entity-types",
+    { schema: { tags: ["runtime"], params: LensParams } },
+    async (request) =>
+      service.listEntityTypes(
+        request.params.lensKey,
+        await getRuntimeStore(request.params.ontologyKey),
+      ),
   );
 
   app.get(
-    "/:ontologyKey/schema/entity-types/:key",
+    "/schema/entity-types/:key",
     { schema: { tags: ["runtime"], params: TypeKeyParams } },
     async (request) =>
-      service.getEntityType(request.params.ontologyKey, request.params.key, getRuntimeStore()),
+      service.getEntityType(
+        request.params.lensKey,
+        request.params.key,
+        await getRuntimeStore(request.params.ontologyKey),
+      ),
   );
 
   app.get(
-    "/:ontologyKey/schema/relation-types",
-    { schema: { tags: ["runtime"], params: OntologyParams } },
+    "/schema/relation-types",
+    { schema: { tags: ["runtime"], params: LensParams } },
     async (request) =>
-      service.listRelationTypes(request.params.ontologyKey, getRuntimeStore()),
+      service.listRelationTypes(
+        request.params.lensKey,
+        await getRuntimeStore(request.params.ontologyKey),
+      ),
   );
 
   app.get(
-    "/:ontologyKey/schema/relation-types/:key",
+    "/schema/relation-types/:key",
     { schema: { tags: ["runtime"], params: TypeKeyParams } },
     async (request) =>
-      service.getRelationType(request.params.ontologyKey, request.params.key, getRuntimeStore()),
+      service.getRelationType(
+        request.params.lensKey,
+        request.params.key,
+        await getRuntimeStore(request.params.ontologyKey),
+      ),
   );
 
   // --- Semantic search ---
 
   app.get(
-    "/:ontologyKey/search/semantic",
-    { schema: { tags: ["runtime"], params: OntologyParams, querystring: SemanticSearchQuery } },
+    "/search/semantic",
+    { schema: { tags: ["runtime"], params: LensParams, querystring: SemanticSearchQuery } },
     async (request) => {
       const { q, type, limit, min_score, fields, searchIn, snippets } = request.query;
       const filters = parseFilters(request.query as Record<string, unknown>);
       return service.semanticSearch(
-        request.params.ontologyKey,
+        request.params.lensKey,
         q,
         type ?? null,
         limit,
         min_score ?? null,
-        getRuntimeStore(),
+        await getRuntimeStore(request.params.ontologyKey),
         { filters, fields: fields ?? null, searchIn, snippets },
       );
     },
@@ -237,27 +225,27 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
   // --- Entity instance CRUD ---
 
   app.post(
-    "/:ontologyKey/entities/:entityTypeKey",
+    "/entities/:entityTypeKey",
     { schema: { tags: ["runtime"], params: EntityTypeParams, body: PropertyPayload } },
     async (request, reply) => {
       const result = await service.createEntity(
-        request.params.ontologyKey,
+        request.params.lensKey,
         request.params.entityTypeKey,
         request.body,
-        getRuntimeStore(),
+        await getRuntimeStore(request.params.ontologyKey),
       );
       return reply.status(201).send(result);
     },
   );
 
   app.get(
-    "/:ontologyKey/entities/:entityTypeKey",
+    "/entities/:entityTypeKey",
     { schema: { tags: ["runtime"], params: EntityTypeParams, querystring: ListQuery } },
     async (request) => {
       const { limit, offset, sort, order, q, fields } = request.query;
       const filters = parseFilters(request.query as Record<string, unknown>);
       return service.listEntities(
-        request.params.ontologyKey,
+        request.params.lensKey,
         request.params.entityTypeKey,
         limit,
         offset,
@@ -265,47 +253,47 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         order,
         q ?? null,
         filters,
-        getRuntimeStore(),
+        await getRuntimeStore(request.params.ontologyKey),
         fields ?? null,
       );
     },
   );
 
   app.get(
-    "/:ontologyKey/entities/:entityTypeKey/:entityId",
+    "/entities/:entityTypeKey/:entityId",
     { schema: { tags: ["runtime"], params: EntityParams, querystring: ReadQuery } },
     async (request) =>
       service.getEntity(
-        request.params.ontologyKey,
+        request.params.lensKey,
         request.params.entityTypeKey,
         request.params.entityId,
-        getRuntimeStore(),
+        await getRuntimeStore(request.params.ontologyKey),
         request.query.fields ?? null,
       ),
   );
 
   app.patch(
-    "/:ontologyKey/entities/:entityTypeKey/:entityId",
+    "/entities/:entityTypeKey/:entityId",
     { schema: { tags: ["runtime"], params: EntityParams, body: PropertyPayload } },
     async (request) =>
       service.updateEntity(
-        request.params.ontologyKey,
+        request.params.lensKey,
         request.params.entityTypeKey,
         request.params.entityId,
         request.body,
-        getRuntimeStore(),
+        await getRuntimeStore(request.params.ontologyKey),
       ),
   );
 
   app.delete(
-    "/:ontologyKey/entities/:entityTypeKey/:entityId",
+    "/entities/:entityTypeKey/:entityId",
     { schema: { tags: ["runtime"], params: EntityParams } },
     async (request, reply) => {
       await service.deleteEntity(
-        request.params.ontologyKey,
+        request.params.lensKey,
         request.params.entityTypeKey,
         request.params.entityId,
-        getRuntimeStore(),
+        await getRuntimeStore(request.params.ontologyKey),
       );
       return reply.status(204).send();
     },
@@ -314,49 +302,49 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
   // --- Document properties ---
 
   app.get(
-    "/:ontologyKey/entities/:entityTypeKey/:entityId/documents/:propertyKey",
+    "/entities/:entityTypeKey/:entityId/documents/:propertyKey",
     { schema: { tags: ["runtime"], params: DocumentParams, querystring: DocumentReadQuery } },
     async (request) =>
       service.getDocument(
-        request.params.ontologyKey,
+        request.params.lensKey,
         request.params.entityTypeKey,
         request.params.entityId,
         request.params.propertyKey,
         request.query.offset,
         request.query.limit ?? null,
-        getRuntimeStore(),
+        await getRuntimeStore(request.params.ontologyKey),
       ),
   );
 
   app.patch(
-    "/:ontologyKey/entities/:entityTypeKey/:entityId/documents/:propertyKey",
+    "/entities/:entityTypeKey/:entityId/documents/:propertyKey",
     { schema: { tags: ["runtime"], params: DocumentParams, body: DocumentEditPayload } },
     async (request) =>
       service.editDocument(
-        request.params.ontologyKey,
+        request.params.lensKey,
         request.params.entityTypeKey,
         request.params.entityId,
         request.params.propertyKey,
         request.body,
-        getRuntimeStore(),
+        await getRuntimeStore(request.params.ontologyKey),
       ),
   );
 
   // --- Graph traversal ---
 
   app.get(
-    "/:ontologyKey/entities/:entityTypeKey/:entityId/neighbors",
+    "/entities/:entityTypeKey/:entityId/neighbors",
     { schema: { tags: ["runtime"], params: EntityParams, querystring: NeighborsQuery } },
     async (request) => {
       const { relationTypeKey, direction, limit, fields, relationFields } = request.query;
       return service.getNeighbors(
-        request.params.ontologyKey,
+        request.params.lensKey,
         request.params.entityTypeKey,
         request.params.entityId,
         direction,
         relationTypeKey ?? null,
         limit,
-        getRuntimeStore(),
+        await getRuntimeStore(request.params.ontologyKey),
         fields ?? null,
         relationFields ?? null,
       );
@@ -366,75 +354,82 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
   // --- OQL query ---
 
   app.post(
-    "/:ontologyKey/query",
-    { schema: { tags: ["runtime"], params: OntologyParams, body: QueryPayload } },
+    "/query",
+    { schema: { tags: ["runtime"], params: LensParams, body: QueryPayload } },
     async (request) =>
-      service.executeQuery(request.params.ontologyKey, request.body.query, getRuntimeStore()),
+      service.executeQuery(
+        request.params.lensKey,
+        request.body.query,
+        await getRuntimeStore(request.params.ontologyKey),
+      ),
   );
 
   // --- Saved queries (runtime: list from the cache, search, run) ---
 
   app.get(
-    "/:ontologyKey/saved-queries",
-    { schema: { tags: ["runtime"], params: OntologyParams } },
+    "/saved-queries",
+    { schema: { tags: ["runtime"], params: LensParams } },
     async (request) =>
-      service.listSavedQueries(request.params.ontologyKey, getRuntimeStore()),
+      service.listSavedQueries(
+        request.params.lensKey,
+        await getRuntimeStore(request.params.ontologyKey),
+      ),
   );
 
   app.get(
-    "/:ontologyKey/saved-queries/search",
-    { schema: { tags: ["runtime"], params: OntologyParams, querystring: SavedQuerySearchQuery } },
+    "/saved-queries/search",
+    { schema: { tags: ["runtime"], params: LensParams, querystring: SavedQuerySearchQuery } },
     async (request) =>
       service.searchSavedQueries(
-        request.params.ontologyKey,
+        request.params.lensKey,
         request.query.q,
         request.query.limit,
         request.query.min_score,
-        getRuntimeStore(),
+        await getRuntimeStore(request.params.ontologyKey),
       ),
   );
 
   app.post(
-    "/:ontologyKey/saved-queries/:queryKey/run",
+    "/saved-queries/:queryKey/run",
     { schema: { tags: ["runtime"], params: SavedQueryRunParams, body: SavedQueryRunPayload } },
     async (request) =>
       service.executeSavedQuery(
-        request.params.ontologyKey,
+        request.params.lensKey,
         request.params.queryKey,
         request.body.params,
-        getRuntimeStore(),
+        await getRuntimeStore(request.params.ontologyKey),
       ),
   );
 
   // --- Relation instance CRUD ---
 
   app.post(
-    "/:ontologyKey/relations/:relationTypeKey",
+    "/relations/:relationTypeKey",
     {
       schema: { tags: ["runtime"], params: RelationTypeParams, body: RelationCreatePayload },
     },
     async (request, reply) => {
       const { fromEntityId, toEntityId, ...userProps } = request.body;
       const result = await service.createRelation(
-        request.params.ontologyKey,
+        request.params.lensKey,
         request.params.relationTypeKey,
         fromEntityId,
         toEntityId,
         userProps,
-        getRuntimeStore(),
+        await getRuntimeStore(request.params.ontologyKey),
       );
       return reply.status(201).send(result);
     },
   );
 
   app.get(
-    "/:ontologyKey/relations/:relationTypeKey",
+    "/relations/:relationTypeKey",
     { schema: { tags: ["runtime"], params: RelationTypeParams, querystring: RelationListQuery } },
     async (request) => {
       const { limit, offset, sort, order, fromEntityId, toEntityId } = request.query;
       const filters = parseFilters(request.query as Record<string, unknown>);
       return service.listRelations(
-        request.params.ontologyKey,
+        request.params.lensKey,
         request.params.relationTypeKey,
         limit,
         offset,
@@ -443,45 +438,45 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         fromEntityId ?? null,
         toEntityId ?? null,
         filters,
-        getRuntimeStore(),
+        await getRuntimeStore(request.params.ontologyKey),
       );
     },
   );
 
   app.get(
-    "/:ontologyKey/relations/:relationTypeKey/:relationId",
+    "/relations/:relationTypeKey/:relationId",
     { schema: { tags: ["runtime"], params: RelationParams } },
     async (request) =>
       service.getRelation(
-        request.params.ontologyKey,
+        request.params.lensKey,
         request.params.relationTypeKey,
         request.params.relationId,
-        getRuntimeStore(),
+        await getRuntimeStore(request.params.ontologyKey),
       ),
   );
 
   app.patch(
-    "/:ontologyKey/relations/:relationTypeKey/:relationId",
+    "/relations/:relationTypeKey/:relationId",
     { schema: { tags: ["runtime"], params: RelationParams, body: PropertyPayload } },
     async (request) =>
       service.updateRelation(
-        request.params.ontologyKey,
+        request.params.lensKey,
         request.params.relationTypeKey,
         request.params.relationId,
         request.body,
-        getRuntimeStore(),
+        await getRuntimeStore(request.params.ontologyKey),
       ),
   );
 
   app.delete(
-    "/:ontologyKey/relations/:relationTypeKey/:relationId",
+    "/relations/:relationTypeKey/:relationId",
     { schema: { tags: ["runtime"], params: RelationParams } },
     async (request, reply) => {
       await service.deleteRelation(
-        request.params.ontologyKey,
+        request.params.lensKey,
         request.params.relationTypeKey,
         request.params.relationId,
-        getRuntimeStore(),
+        await getRuntimeStore(request.params.ontologyKey),
       );
       return reply.status(204).send();
     },

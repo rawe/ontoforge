@@ -68,7 +68,7 @@ describe("toolset computation", () => {
   it("default agent without embedding provider drops the embedding tools", async () => {
     const fake = installFake([new AIMessage("hi")]);
 
-    await aiChat("full_ontology", "hello", asRuntimeStore(store));
+    await aiChat("full_lens", "hello", asRuntimeStore(store));
 
     expect(boundToolNames(fake)).toEqual(
       CHAT_TOOLS.filter((t) => t !== "semantic_search" && t !== "search_saved_queries"),
@@ -79,7 +79,7 @@ describe("toolset computation", () => {
     setEmbeddingProvider(fakeEmbedding);
     const fake = installFake([new AIMessage("hi")]);
 
-    await aiChat("full_ontology", "hello", asRuntimeStore(store));
+    await aiChat("full_lens", "hello", asRuntimeStore(store));
 
     expect(boundToolNames(fake)).toEqual(CHAT_TOOLS);
   });
@@ -94,7 +94,7 @@ describe("toolset computation", () => {
       tools: ["semantic_search", "execute_query", "get_schema", "not_a_tool"],
     };
 
-    await runAgentChat(config, "full_ontology", "hello", asRuntimeStore(store));
+    await runAgentChat(config, "full_lens", "hello", asRuntimeStore(store));
 
     // semantic_search dropped (no provider), unknown name dropped silently.
     expect(boundToolNames(fake)).toEqual(["execute_query", "get_schema"]);
@@ -111,7 +111,7 @@ describe("toolset computation", () => {
       tools: ["semantic_search"],
     };
 
-    await runAgentChat(config, "full_ontology", "hello", asRuntimeStore(store));
+    await runAgentChat(config, "full_lens", "hello", asRuntimeStore(store));
 
     expect(boundToolNames(fake)).toEqual(["semantic_search"]);
   });
@@ -126,7 +126,7 @@ describe("toolset computation", () => {
       tools: ["semantic_search"], // dropped without a provider -> empty
     };
 
-    const result = await runAgentChat(config, "full_ontology", "hello", asRuntimeStore(store));
+    const result = await runAgentChat(config, "full_lens", "hello", asRuntimeStore(store));
 
     expect(result.reply).toBe("plain answer");
     expect(fake.boundTools).toHaveLength(0);
@@ -142,9 +142,9 @@ describe("prompt assembly", () => {
   it("no custom prompt: the built-in chat prompt containing the schema", async () => {
     const fake = installFake([new AIMessage("hi")]);
 
-    await aiChat("full_ontology", "hello", asRuntimeStore(store));
+    await aiChat("full_lens", "hello", asRuntimeStore(store));
 
-    const loaded = await loadSchema("full_ontology", asRuntimeStore(store));
+    const loaded = await loadSchema("full_lens", asRuntimeStore(store));
     const system = fake.calls[0]![0]!;
     expect(system).toBeInstanceOf(SystemMessage);
     const content = String(system.content);
@@ -163,18 +163,18 @@ describe("prompt assembly", () => {
       tools: null,
     };
 
-    await runAgentChat(config, "full_ontology", "hello", asRuntimeStore(store));
+    await runAgentChat(config, "full_lens", "hello", asRuntimeStore(store));
 
-    const loaded = await loadSchema("full_ontology", asRuntimeStore(store));
+    const loaded = await loadSchema("full_lens", asRuntimeStore(store));
     const content = String(fake.calls[0]![0]!.content);
     expect(content).toBe("You are a test agent\n\nSCHEMA:\n" + describeSchema(loaded.scoped));
   });
 
   it("the schema description names the lens, types, properties and flags", async () => {
-    const loaded = await loadSchema("full_ontology", asRuntimeStore(store));
+    const loaded = await loadSchema("full_lens", asRuntimeStore(store));
     const desc = describeSchema(loaded.scoped);
 
-    expect(desc).toContain("Ontology: Full Ontology (key: full_ontology)");
+    expect(desc).toContain("Lens: Full Lens (key: full_lens)");
     expect(desc).toContain("  - _id: string (unique identifier)");
     expect(desc).toContain("  - person");
     expect(desc).toContain("    - name: string (required)");
@@ -194,7 +194,7 @@ describe("tool failures", () => {
       new AIMessage("recovered"),
     ]);
 
-    const result = await aiChat("full_ontology", "list them", asRuntimeStore(store), null, true);
+    const result = await aiChat("full_lens", "list them", asRuntimeStore(store), null, true);
 
     expect(result.reply).toBe("recovered");
     // The second model call sees the error as the tool's result.
@@ -213,7 +213,7 @@ describe("tool failures", () => {
       new AIMessage("fixed"),
     ]);
 
-    const result = await aiChat("full_ontology", "query", asRuntimeStore(store));
+    const result = await aiChat("full_lens", "query", asRuntimeStore(store));
 
     expect(result.reply).toBe("fixed");
   });
@@ -229,7 +229,7 @@ describe("tool failures", () => {
       new AIMessage("recovered"),
     ]);
 
-    const result = await aiChat("full_ontology", "find Alice", asRuntimeStore(store), null, true);
+    const result = await aiChat("full_lens", "find Alice", asRuntimeStore(store), null, true);
 
     expect(result.reply).toBe("recovered");
     // The second model call sees the parse failure as the tool's result.
@@ -252,7 +252,7 @@ describe("tool failures", () => {
     ]);
     store.listEntities.mockRejectedValue(new Error("boom"));
 
-    await expect(aiChat("full_ontology", "list", asRuntimeStore(store))).rejects.toThrow("boom");
+    await expect(aiChat("full_lens", "list", asRuntimeStore(store))).rejects.toThrow("boom");
   });
 });
 
@@ -268,7 +268,7 @@ describe("aiQuery", () => {
     ]);
     store.executeOql.mockResolvedValue([["p.name"], [{ "p.name": "Alice" }, { "p.name": "Bob" }]]);
 
-    const result = await aiQuery("full_ontology", "How many people?", asRuntimeStore(store));
+    const result = await aiQuery("full_lens", "How many people?", asRuntimeStore(store));
 
     expect(result.answer).toBe("There are two people.");
     expect(result.query).toBe("MATCH (p:person) RETURN p.name");
@@ -283,7 +283,7 @@ describe("aiQuery", () => {
   it("query and results are absent when the tool was never called", async () => {
     installFake([new AIMessage("I answered from thin air.")]);
 
-    const result = await aiQuery("full_ontology", "Anything?", asRuntimeStore(store));
+    const result = await aiQuery("full_lens", "Anything?", asRuntimeStore(store));
 
     expect(result.answer).toBe("I answered from thin air.");
     expect(result.query).toBeNull();
@@ -296,7 +296,7 @@ describe("aiQuery", () => {
       new AIMessage("That failed."),
     ]);
 
-    const result = await aiQuery("full_ontology", "Bad question", asRuntimeStore(store));
+    const result = await aiQuery("full_lens", "Bad question", asRuntimeStore(store));
 
     expect(result.query).toBe("MATCH (x:unknown_type) RETURN x");
     expect(result.results).toHaveProperty("error");
@@ -356,7 +356,7 @@ describe("aiExtract", () => {
   it("propose-only by default: nothing written, proposals echoed", async () => {
     installExtractFake(EXTRACTION);
 
-    const result = await aiExtract("full_ontology", "Charlie ...", asRuntimeStore(store));
+    const result = await aiExtract("full_lens", "Charlie ...", asRuntimeStore(store));
 
     expect(result.created).toBe(false);
     expect(result.entities).toEqual(EXTRACTION.entities);
@@ -370,7 +370,7 @@ describe("aiExtract", () => {
     const created = wireCreation();
 
     const result = await aiExtract(
-      "full_ontology",
+      "full_lens",
       "Charlie ...",
       asRuntimeStore(store),
       null,
@@ -407,7 +407,7 @@ describe("aiExtract", () => {
     wireCreation();
 
     const result = await aiExtract(
-      "full_ontology",
+      "full_lens",
       "Charlie ...",
       asRuntimeStore(store),
       null,
@@ -442,7 +442,7 @@ describe("aiExtract", () => {
     });
     wireCreation();
 
-    const result = await aiExtract("full_ontology", "two Charlies", asRuntimeStore(store), null, true);
+    const result = await aiExtract("full_lens", "two Charlies", asRuntimeStore(store), null, true);
 
     expect(store.createEntity).toHaveBeenCalledTimes(3);
     expect(store.createRelation).not.toHaveBeenCalled();
@@ -464,7 +464,7 @@ describe("aiExtract", () => {
     });
     wireCreation();
 
-    const result = await aiExtract("full_ontology", "vague", asRuntimeStore(store), null, true);
+    const result = await aiExtract("full_lens", "vague", asRuntimeStore(store), null, true);
 
     expect(store.createRelation).not.toHaveBeenCalled();
     expect((result.droppedRelations as Row[])[0]!.reason).toBe(
@@ -476,7 +476,7 @@ describe("aiExtract", () => {
     installExtractFake(EXTRACTION);
     wireCreation();
 
-    const result = await aiExtract("full_ontology", "Charlie ...", asRuntimeStore(store), null, true);
+    const result = await aiExtract("full_lens", "Charlie ...", asRuntimeStore(store), null, true);
 
     expect(store.createRelation).toHaveBeenCalledTimes(1);
     expect(result.droppedRelations).toEqual([]);
@@ -492,7 +492,7 @@ describe("aiExtract", () => {
     });
     wireCreation();
 
-    await aiExtract("full_ontology", "Charlie twice", asRuntimeStore(store), null, true);
+    await aiExtract("full_lens", "Charlie twice", asRuntimeStore(store), null, true);
 
     expect(store.createEntity).toHaveBeenCalledTimes(2);
   });
@@ -500,7 +500,7 @@ describe("aiExtract", () => {
   it("entity-type hints are appended to the prompt, not enforced", async () => {
     const fake = installExtractFake({ entities: [], relations: [] });
 
-    await aiExtract("full_ontology", "text", asRuntimeStore(store), ["person", "company"]);
+    await aiExtract("full_lens", "text", asRuntimeStore(store), ["person", "company"]);
 
     const system = fake.calls[0]![0]!;
     expect(String(system.content)).toContain("Focus on these entity types: person, company");
@@ -532,7 +532,7 @@ describe("chat trace and history", () => {
   it("trace off by default: toolCalls is null", async () => {
     installFake([new AIMessage("hi")]);
 
-    const result = await aiChat("full_ontology", "hello", asRuntimeStore(store));
+    const result = await aiChat("full_lens", "hello", asRuntimeStore(store));
 
     expect(result.toolCalls).toBeNull();
   });
@@ -546,7 +546,7 @@ describe("chat trace and history", () => {
       new AIMessage("done"),
     ]);
 
-    const result = await aiChat("full_ontology", "explore", asRuntimeStore(store), null, true);
+    const result = await aiChat("full_lens", "explore", asRuntimeStore(store), null, true);
 
     expect(result.toolCalls).toEqual([
       { tool: "list_entities", args: { entity_type_key: "person" } },
@@ -557,7 +557,7 @@ describe("chat trace and history", () => {
   it("history turns are replayed as user/assistant messages before the new one", async () => {
     const fake = installFake([new AIMessage("She is 30.")]);
 
-    await aiChat("full_ontology", "And how old is she?", asRuntimeStore(store), [
+    await aiChat("full_lens", "And how old is she?", asRuntimeStore(store), [
       { role: "user", content: "How many persons are there?" },
       { role: "assistant", content: "There are 2 persons: Alice and Bob." },
     ]);
@@ -591,15 +591,15 @@ describe("without a language-model provider", () => {
   };
 
   it("query is rejected with FEATURE_DISABLED", async () => {
-    await expectDisabled(() => aiQuery("full_ontology", "q", asRuntimeStore(store)));
+    await expectDisabled(() => aiQuery("full_lens", "q", asRuntimeStore(store)));
   });
 
   it("extract is rejected with FEATURE_DISABLED", async () => {
-    await expectDisabled(() => aiExtract("full_ontology", "text", asRuntimeStore(store)));
+    await expectDisabled(() => aiExtract("full_lens", "text", asRuntimeStore(store)));
   });
 
   it("chat is rejected with FEATURE_DISABLED", async () => {
-    await expectDisabled(() => aiChat("full_ontology", "hi", asRuntimeStore(store)));
+    await expectDisabled(() => aiChat("full_lens", "hi", asRuntimeStore(store)));
   });
 
   it("an unknown lens still answers not-found before the provider check", async () => {

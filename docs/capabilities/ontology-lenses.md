@@ -1,6 +1,6 @@
-# Ontology lenses
+# Lenses
 
-An ontology is a named aperture onto the one global schema. It decides what a
+A lens is a named aperture onto one ontology's schema. It decides what a
 runtime caller can see, name and write — and nothing else.
 
 Vocabulary: [../README.md](../README.md). The schema it looks at:
@@ -8,12 +8,16 @@ Vocabulary: [../README.md](../README.md). The schema it looks at:
 
 ## What a lens is
 
-A lens has a key, a unique name and an optional description. The key matches
-`^[a-z][a-z0-9_]*$` at up to 64 characters, is chosen at creation, is never updatable, and is what every
-interface uses to address the lens. The name is unique too, but purely for
-display.
+A lens belongs to exactly one ontology. It has a key, a name and an optional
+description. The key matches `^[a-z][a-z0-9_]*$` at up to 64 characters, is chosen
+at creation, is never updatable, and is what every interface uses to address the
+lens — always together with its ontology, because lens keys are unique only within
+their ontology: every ontology can have its own `default`. The name is unique
+within the ontology too, but purely for display.
 
-Any number of lenses may exist, including any number that expose everything.
+Any number of lenses may exist in an ontology, including any number that expose
+everything — and none at all: an ontology starts with no lens, and runtime access
+to it begins when its first lens is created.
 
 **A lens is not a container.** It holds no types, no properties and no instance
 data. It cannot define a type, override a property, or rename anything. Its entire
@@ -27,7 +31,9 @@ written in terms of what that lens exposes.
 Deleting a lens deletes those two and nothing else. Types, property definitions
 and every entity and relation survive untouched, and other lenses are unaffected.
 There is no consent step and no protection: lens deletion is always permitted,
-because nothing outside the lens depends on it.
+because nothing outside the lens depends on it. (Deleting the whole *ontology* is
+a different operation with a different blast radius — the registry cascade takes
+the schema and all instance data with it.)
 
 ## Unscoped and scoped
 
@@ -35,9 +41,10 @@ A lens is scoped **if and only if it has at least one inclusion.** There is no
 flag, no mode and no third state — declaring nothing is what makes a lens
 unscoped.
 
-An unscoped lens exposes the entire schema, and keeps doing so as the schema
-changes: a type created tomorrow is visible through it immediately, with no edit.
-It can never be broken by a schema change and never appears in a cascade refusal.
+An unscoped lens exposes its ontology's entire schema, and keeps doing so as the
+schema changes: a type created tomorrow is visible through it immediately, with no
+edit. It can never be broken by a schema change and never appears in a cascade
+refusal.
 
 A scoped lens exposes what it declares, and everything else is invisible through
 it — absent from schema reads, rejected on write, stripped from results.
@@ -155,10 +162,10 @@ above.
 
 ## The lens/full-schema asymmetry
 
-A lens governs what a caller may name. It does not govern what the system knows.
-Three operations deliberately consult the full schema instead of the lens, and
-getting any of them wrong produces data that is valid under one lens and broken
-under another:
+A lens governs what a caller may name. It does not govern what the ontology
+knows. Three operations deliberately consult the full schema instead of the lens,
+and getting any of them wrong produces data that is valid under one lens and
+broken under another:
 
 - **Defaults on create come from the full schema.** A property the lens hides
   cannot be written through it, yet if that property has a default the created
@@ -173,17 +180,22 @@ under another:
   sharing one stored record between lenses, and is documented rather than
   prevented.
 
+"Full schema" always means the owning ontology's schema, never anything wider —
+no operation anywhere consults another ontology.
+
 Defaults apply on creation only. A lens that hides a property never causes that
 property to be re-defaulted on update, so widening or narrowing a lens does not
 rewrite anything already stored.
 
 ## Instance data is shared
 
-An entity is not *in* an ontology. It exists once, and every lens exposing its
-type sees it — the same identifier, the same record.
+Within an ontology, an entity is not *in* a lens. It exists once, and every lens
+of that ontology exposing its type sees it — the same identifier, the same
+record.
 
 - An entity created through one lens is readable and writable through every other
-  lens that exposes its type. There is no copy and no synchronization.
+  lens of the same ontology that exposes its type. There is no copy and no
+  synchronization.
 - Two lenses over the same entity see different property subsets of one stored
   record. Hiding a property does not remove it, and does not stop another lens
   from writing it.
@@ -191,11 +203,15 @@ type sees it — the same identifier, the same record.
   wins. Nothing partitions the data by lens, so nothing detects the collision.
 - There is no lens-scoped data deletion, and deliberately so: wiping "the lens's
   data" would destroy instances other lenses depend on. Data is removed one
-  entity or relation at a time ([instance-data.md](instance-data.md)).
+  entity or relation at a time ([instance-data.md](instance-data.md)) — or all at
+  once, with everything else, by deleting the ontology.
 
-A lens is assembled once per process and discarded after any modeling change; the
-caching rules and their one operational limit are in
-[../architecture.md](../architecture.md).
+Sharing stops at the ontology boundary: lenses of two ontologies share nothing,
+whatever their keys.
+
+A lens is assembled once per process, cached under its ontology and lens keys, and
+discarded after any modeling change; the caching rules and their one operational
+limit are in [../architecture.md](../architecture.md).
 
 ## Through the interfaces
 
@@ -210,7 +226,7 @@ lens without handing it the schema.
 | Lens create, read, update, delete | modeling routes | modeling server, by key | schema studio |
 | Inclusions | separate operations per dimension: add, list, update, remove | add and remove per dimension | schema studio |
 | Lens validation | per-lens operation | per-lens tool | schema studio |
-| Using a lens | the lens key is a path segment on every runtime route | bound once, at connection time | data workbench |
+| Using a lens | ontology key and lens key are path segments on every runtime route | bound once, by the mount URL | data workbench |
 
 Two interface facts are load-bearing:
 
@@ -218,9 +234,9 @@ Two interface facts are load-bearing:
 allowlist is how an allowlist is changed there, which works because adding is an
 upsert. REST offers the explicit update as well.
 
-**The runtime MCP server binds to exactly one lens for the life of the
-connection**, resolved when it opens ([../decisions.md](../decisions.md)). A model
-never chooses a lens and can never reach across two.
+**The runtime MCP server is bound to exactly one ontology and one lens by its
+mount URL** ([../decisions.md](../decisions.md#interfaces)). A model never chooses
+a lens and can never reach across two — nor across two ontologies.
 
 What the web UI does with all of this is described in
 [../product-surface.md](../product-surface.md).

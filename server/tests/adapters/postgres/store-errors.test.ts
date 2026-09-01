@@ -102,7 +102,7 @@ describe("the truth table: 23503 insert side (vanished parent)", () => {
   it("an unclaimed FK constraint falls through to StoreError", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const error = await translated(
-      dbError("23503", "saved_query_ontology_fk", "Key (ontology_id)=(x) is not present…"),
+      dbError("23503", "saved_query_lens_fk", "Key (lens_id)=(x) is not present…"),
     );
     expect(error).toBeInstanceOf(StoreError);
   });
@@ -144,11 +144,11 @@ describe("the truth table: 23001 delete side (RESTRICT fired)", () => {
 
 describe("the truth table: 23505 named uniques", () => {
   const cases: [string, string, string][] = [
-    ["ontology_key_unique", "Key (key)=(hr) already exists.", "Ontology with key 'hr' already exists"],
+    ["lens_key_unique", "Key (key)=(hr) already exists.", "Lens with key 'hr' already exists"],
     [
-      "ontology_name_unique",
+      "lens_name_unique",
       "Key (name)=(Human Resources) already exists.",
-      "Ontology with name 'Human Resources' already exists",
+      "Lens with name 'Human Resources' already exists",
     ],
     [
       "entity_type_key_unique",
@@ -171,14 +171,14 @@ describe("the truth table: 23505 named uniques", () => {
       "Property with key 'since' already exists on this type",
     ],
     [
-      "ontology_includes_entity_unique",
-      "Key (ontology_id, entity_type_id)=(a, b) already exists.",
-      "Entity type is already included in this ontology",
+      "lens_includes_entity_unique",
+      "Key (lens_id, entity_type_id)=(a, b) already exists.",
+      "Entity type is already included in this lens",
     ],
     [
-      "ontology_includes_relation_unique",
-      "Key (ontology_id, relation_type_id)=(a, b) already exists.",
-      "Relation type is already included in this ontology",
+      "lens_includes_relation_unique",
+      "Key (lens_id, relation_type_id)=(a, b) already exists.",
+      "Relation type is already included in this lens",
     ],
   ];
 
@@ -192,7 +192,7 @@ describe("the truth table: 23505 named uniques", () => {
     "the upsert arbiter %s is unclaimed — StoreError if it ever surfaces",
     async (constraint) => {
       vi.spyOn(console, "error").mockImplementation(() => {});
-      const error = await translated(dbError("23505", constraint, "Key (ontology_id, key)=(a, b)…"));
+      const error = await translated(dbError("23505", constraint, "Key (lens_id, key)=(a, b)…"));
       expect(error).toBeInstanceOf(StoreError);
     },
   );

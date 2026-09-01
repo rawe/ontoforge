@@ -11,8 +11,8 @@ import { createMockModelingStore, NOW, type MockModelingStore } from "./helpers.
 const holder: { store: MockModelingStore } = { store: createMockModelingStore() };
 
 vi.mock("../../src/core/ports.js", () => ({
-  getModelingStore: () => holder.store,
-  getRuntimeStore: () => ({}),
+  getModelingStore: async () => holder.store,
+  getRuntimeStore: async () => ({}),
 }));
 
 const ET_DATA = {
@@ -45,7 +45,7 @@ describe("entity type CRUD", () => {
     holder.store.createEntityType.mockResolvedValue(ET_DATA);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/entity-types",
+      url: "/api/ontologies/onto/model/entity-types",
       payload: { key: "person", displayName: "Person", description: "A person entity" },
     });
     expect(res.statusCode).toBe(201);
@@ -59,7 +59,7 @@ describe("entity type CRUD", () => {
     holder.store.getEntityTypeByKey.mockResolvedValue(ET_DATA);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/entity-types",
+      url: "/api/ontologies/onto/model/entity-types",
       payload: { key: "person", displayName: "Person" },
     });
     expect(res.statusCode).toBe(409);
@@ -68,7 +68,7 @@ describe("entity type CRUD", () => {
 
   it("list returns every stored type", async () => {
     holder.store.listEntityTypes.mockResolvedValue([ET_DATA]);
-    const res = await app.inject({ method: "GET", url: "/api/model/entity-types" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/entity-types" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toHaveLength(1);
     expect(res.json()[0].key).toBe("person");
@@ -76,7 +76,7 @@ describe("entity type CRUD", () => {
 
   it("read by id answers the stored type", async () => {
     holder.store.getEntityType.mockResolvedValue(ET_DATA);
-    const res = await app.inject({ method: "GET", url: "/api/model/entity-types/et-1" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/entity-types/et-1" });
     expect(res.statusCode).toBe(200);
     expect(res.json().entityTypeId).toBe("et-1");
   });
@@ -84,7 +84,7 @@ describe("entity type CRUD", () => {
   it("read of a missing id answers 404", async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/api/model/entity-types/nonexistent",
+      url: "/api/ontologies/onto/model/entity-types/nonexistent",
     });
     expect(res.statusCode).toBe(404);
   });
@@ -93,7 +93,7 @@ describe("entity type CRUD", () => {
     holder.store.updateEntityType.mockResolvedValue({ ...ET_DATA, displayName: "Updated Person" });
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/entity-types/et-1",
+      url: "/api/ontologies/onto/model/entity-types/et-1",
       payload: { displayName: "Updated Person" },
     });
     expect(res.statusCode).toBe(200);
@@ -103,7 +103,7 @@ describe("entity type CRUD", () => {
   it("update of a missing id answers 404", async () => {
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/entity-types/nonexistent",
+      url: "/api/ontologies/onto/model/entity-types/nonexistent",
       payload: { displayName: "Whatever" },
     });
     expect(res.statusCode).toBe(404);
@@ -112,14 +112,14 @@ describe("entity type CRUD", () => {
   it("delete answers 204", async () => {
     holder.store.getEntityType.mockResolvedValue(ET_DATA);
     holder.store.deleteEntityType.mockResolvedValue(true);
-    const res = await app.inject({ method: "DELETE", url: "/api/model/entity-types/et-1" });
+    const res = await app.inject({ method: "DELETE", url: "/api/ontologies/onto/model/entity-types/et-1" });
     expect(res.statusCode).toBe(204);
   });
 
   it("delete of a missing id answers 404", async () => {
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/entity-types/nonexistent",
+      url: "/api/ontologies/onto/model/entity-types/nonexistent",
     });
     expect(res.statusCode).toBe(404);
   });
@@ -128,7 +128,7 @@ describe("entity type CRUD", () => {
 describe("deletion protections", () => {
   it("a type referenced by a relation type answers an unconditional 409 RESOURCE_CONFLICT", async () => {
     holder.store.isEntityTypeReferenced.mockResolvedValue(true);
-    const res = await app.inject({ method: "DELETE", url: "/api/model/entity-types/et-1" });
+    const res = await app.inject({ method: "DELETE", url: "/api/ontologies/onto/model/entity-types/et-1" });
     expect(res.statusCode).toBe(409);
     expect(res.json().error.code).toBe("RESOURCE_CONFLICT");
   });
@@ -137,7 +137,7 @@ describe("deletion protections", () => {
     holder.store.isEntityTypeReferenced.mockResolvedValue(true);
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/entity-types/et-1?cascade=true",
+      url: "/api/ontologies/onto/model/entity-types/et-1?cascade=true",
     });
     expect(res.statusCode).toBe(409);
     expect(res.json().error.code).toBe("RESOURCE_CONFLICT");
@@ -145,21 +145,21 @@ describe("deletion protections", () => {
   });
 
   it("a type included by a lens without cascade answers 409 CASCADE_REQUIRED", async () => {
-    holder.store.findOntologiesIncludingType.mockResolvedValue(["my_ontology"]);
-    const res = await app.inject({ method: "DELETE", url: "/api/model/entity-types/et-1" });
+    holder.store.findLensesIncludingType.mockResolvedValue(["my_lens"]);
+    const res = await app.inject({ method: "DELETE", url: "/api/ontologies/onto/model/entity-types/et-1" });
     expect(res.statusCode).toBe(409);
     expect(res.json().error.code).toBe("CASCADE_REQUIRED");
-    expect(res.json().error.details.affectedOntologies).toContain("my_ontology");
+    expect(res.json().error.details.affectedLenses).toContain("my_lens");
   });
 
   it("a type included by a lens deletes with cascade", async () => {
-    holder.store.findOntologiesIncludingType.mockResolvedValue(["my_ontology"]);
+    holder.store.findLensesIncludingType.mockResolvedValue(["my_lens"]);
     holder.store.removeAllIncludesForType.mockResolvedValue(1);
     holder.store.getEntityType.mockResolvedValue(ET_DATA);
     holder.store.deleteEntityType.mockResolvedValue(true);
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/entity-types/et-1?cascade=true",
+      url: "/api/ontologies/onto/model/entity-types/et-1?cascade=true",
     });
     expect(res.statusCode).toBe(204);
     expect(holder.store.removeAllIncludesForType).toHaveBeenCalledWith("EntityType", "et-1");
@@ -172,7 +172,7 @@ describe("key pattern", () => {
     async (key) => {
       const res = await app.inject({
         method: "POST",
-        url: "/api/model/entity-types",
+        url: "/api/ontologies/onto/model/entity-types",
         payload: { key, displayName: "Person" },
       });
       expect(res.statusCode).toBe(422);
@@ -185,7 +185,7 @@ describe("key pattern", () => {
   it("rejects a 65-character key with 422", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/entity-types",
+      url: "/api/ontologies/onto/model/entity-types",
       payload: { key: "k".repeat(65), displayName: "Person" },
     });
     expect(res.statusCode).toBe(422);
@@ -200,7 +200,7 @@ describe("key pattern", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/entity-types",
+      url: "/api/ontologies/onto/model/entity-types",
       payload: { key: "k".repeat(64), displayName: "Person" },
     });
     expect(res.statusCode).toBe(201);

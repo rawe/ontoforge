@@ -151,10 +151,14 @@ text, and why documents stay out of it, are in
 [search.md](search.md#what-gets-embedded). The consequence here: adding, changing or
 removing a document value never re-embeds the entity, only its chunks.
 
-**Chunks are reused by content.** On every re-write the property's existing chunks are read
-into a text-to-vector map, deleted, and the new value re-chunked; a new chunk whose text is
-byte-identical to one of the old ones keeps that vector, and only the rest are embedded
-afresh. Because chunk boundaries are found by scanning local text, the chunker
+**Chunks are reused by content, and only at the configured model's width.** On every
+re-write the property's existing chunks are read into a text-to-vector map, deleted, and the
+new value re-chunked; a new chunk whose text is byte-identical to one of the old ones keeps
+that vector, and only the rest are embedded afresh. A stored vector of any other width is
+never reused — it came from a different embedding model, and no index of the current width
+could be built over it. That check is also what makes a rebuild after a model switch
+re-embed at all: the text is unchanged there, so reuse by content alone would keep every
+stale vector and regenerate none. Because chunk boundaries are found by scanning local text, the chunker
 re-synchronizes on the same paragraph and sentence breaks after an edit, so most chunks come
 back unchanged at shifted offsets and a small edit costs a handful of embedding calls. The
 worst case degrades to a full re-embed and no further.

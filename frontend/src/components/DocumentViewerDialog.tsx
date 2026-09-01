@@ -26,6 +26,7 @@ export interface DocumentViewerTarget {
 
 interface DocumentViewerDialogProps {
   ontologyKey: string
+  lensKey: string
   /** `null` keeps the dialog closed. */
   target: DocumentViewerTarget | null
   onClose: () => void
@@ -39,12 +40,14 @@ interface DocumentViewerDialogProps {
  */
 export function DocumentViewerDialog({
   ontologyKey,
+  lensKey,
   target,
   onClose,
 }: DocumentViewerDialogProps) {
   const docQuery = useQuery({
     queryKey: qk.document(
       ontologyKey,
+      lensKey,
       target?.entityTypeKey ?? '',
       target?.entityId ?? '',
       target?.property.key ?? '',
@@ -52,6 +55,7 @@ export function DocumentViewerDialog({
     queryFn: () =>
       runtime.getDocument(
         ontologyKey,
+        lensKey,
         target!.entityTypeKey,
         target!.entityId,
         target!.property.key,

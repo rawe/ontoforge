@@ -61,33 +61,34 @@ beforeEach(async () => {
   await wipeDatabase();
   invalidateLoadedSchemaCache();
 
-  const article = await post("/api/model/entity-types", {
+  await post("/api/ontologies", { key: "test_ont" });
+  const article = await post("/api/ontologies/test_ont/model/entity-types", {
     key: "article",
     displayName: "Article",
   });
   ids.articleId = article.entityTypeId as string;
-  await post(`/api/model/entity-types/${ids.articleId}/properties`, {
+  await post(`/api/ontologies/test_ont/model/entity-types/${ids.articleId}/properties`, {
     key: "title",
     displayName: "Title",
     dataType: "string",
     required: true,
   });
-  const bodyProp = await post(`/api/model/entity-types/${ids.articleId}/properties`, {
+  const bodyProp = await post(`/api/ontologies/test_ont/model/entity-types/${ids.articleId}/properties`, {
     key: "body",
     displayName: "Body",
     dataType: "document",
   });
   ids.bodyPropId = bodyProp.propertyId as string;
-  const notesProp = await post(`/api/model/entity-types/${ids.articleId}/properties`, {
+  const notesProp = await post(`/api/ontologies/test_ont/model/entity-types/${ids.articleId}/properties`, {
     key: "notes",
     displayName: "Notes",
     dataType: "document",
   });
   ids.notesPropId = notesProp.propertyId as string;
 
-  await post("/api/model/ontologies", { key: "docs_view", name: "Docs View" });
-  const titleOnly = await post("/api/model/ontologies", { key: "title_only", name: "Title Only" });
-  await post(`/api/model/ontologies/${titleOnly.ontologyId}/includes/entity-types`, {
+  await post("/api/ontologies/test_ont/model/lenses", { key: "docs_view", name: "Docs View" });
+  const titleOnly = await post("/api/ontologies/test_ont/model/lenses", { key: "title_only", name: "Title Only" });
+  await post(`/api/ontologies/test_ont/model/lenses/${titleOnly.lensId}/includes/entity-types`, {
     key: "article",
     properties: ["title"],
   });
@@ -98,13 +99,13 @@ afterEach(() => {
 });
 
 async function createArticle(props: Row): Promise<Row> {
-  return post("/api/runtime/docs_view/entities/article", props);
+  return post("/api/ontologies/test_ont/runtime/lenses/docs_view/entities/article", props);
 }
 
 async function readDocument(entityId: string, propertyKey: string, query = ""): Promise<Row> {
   const res = await app.inject({
     method: "GET",
-    url: `/api/runtime/docs_view/entities/article/${entityId}/documents/${propertyKey}${query}`,
+    url: `/api/ontologies/test_ont/runtime/lenses/docs_view/entities/article/${entityId}/documents/${propertyKey}${query}`,
   });
   expect(res.statusCode, res.body).toBe(200);
   return res.json() as Row;
@@ -114,7 +115,8 @@ async function readDocument(entityId: string, propertyKey: string, query = ""): 
  * provider stores a vector on every chunk, so the text→vector map lists
  * exactly the stored chunks (fixtures keep chunk texts distinct). */
 async function chunkTexts(entityId: string, propertyKey: string): Promise<string[]> {
-  const map = await getRuntimeStore().getChunkEmbeddingsForEntityProperty(entityId, propertyKey);
+  const store = await getRuntimeStore("test_ont");
+  const map = await store.getChunkEmbeddingsForEntityProperty(entityId, propertyKey);
   return Object.keys(map);
 }
 
@@ -164,13 +166,13 @@ describe("slice reads", () => {
     const entityId = entity._id as string;
     const read = await app.inject({
       method: "GET",
-      url: `/api/runtime/docs_view/entities/article/${entityId}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/docs_view/entities/article/${entityId}`,
     });
     expect(read.json().body).toEqual({ document: true, length: BODY.length });
 
     const projected = await app.inject({
       method: "GET",
-      url: `/api/runtime/docs_view/entities/article/${entityId}?fields=body`,
+      url: `/api/ontologies/test_ont/runtime/lenses/docs_view/entities/article/${entityId}?fields=body`,
     });
     expect(projected.json().body).toBe(BODY);
   });
@@ -181,25 +183,25 @@ describe("slice reads", () => {
 
     const hidden = await app.inject({
       method: "GET",
-      url: `/api/runtime/title_only/entities/article/${entityId}/documents/body`,
+      url: `/api/ontologies/test_ont/runtime/lenses/title_only/entities/article/${entityId}/documents/body`,
     });
     expect(hidden.statusCode).toBe(404);
 
     const nonDoc = await app.inject({
       method: "GET",
-      url: `/api/runtime/docs_view/entities/article/${entityId}/documents/title`,
+      url: `/api/ontologies/test_ont/runtime/lenses/docs_view/entities/article/${entityId}/documents/title`,
     });
     expect(nonDoc.statusCode).toBe(404);
 
     const missingEntity = await app.inject({
       method: "GET",
-      url: "/api/runtime/docs_view/entities/article/nope/documents/body",
+      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/article/nope/documents/body",
     });
     expect(missingEntity.statusCode).toBe(404);
 
     const missingType = await app.inject({
       method: "GET",
-      url: `/api/runtime/docs_view/entities/nope/${entityId}/documents/body`,
+      url: `/api/ontologies/test_ont/runtime/lenses/docs_view/entities/nope/${entityId}/documents/body`,
     });
     expect(missingType.statusCode).toBe(404);
   });
@@ -212,7 +214,7 @@ describe("partial writes", () => {
 
     const res = await app.inject({
       method: "PATCH",
-      url: `/api/runtime/docs_view/entities/article/${entityId}/documents/body`,
+      url: `/api/ontologies/test_ont/runtime/lenses/docs_view/entities/article/${entityId}/documents/body`,
       payload: { op: "str_replace", oldString: "brave", newString: "beautiful" },
     });
     expect(res.statusCode).toBe(200);
@@ -231,7 +233,7 @@ describe("partial writes", () => {
     // Length bookkeeping followed the edit.
     const entityRead = await app.inject({
       method: "GET",
-      url: `/api/runtime/docs_view/entities/article/${entityId}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/docs_view/entities/article/${entityId}`,
     });
     expect(entityRead.json().body).toEqual({
       document: true,
@@ -242,7 +244,7 @@ describe("partial writes", () => {
   it("replace_range inserts, appends, and honours the expect guard", async () => {
     const entity = await createArticle({ title: "T", body: "Hello world" });
     const entityId = entity._id as string;
-    const url = `/api/runtime/docs_view/entities/article/${entityId}/documents/body`;
+    const url = `/api/ontologies/test_ont/runtime/lenses/docs_view/entities/article/${entityId}/documents/body`;
 
     const insert = await app.inject({
       method: "PATCH",
@@ -285,7 +287,7 @@ describe("partial writes", () => {
 
     const res = await app.inject({
       method: "PATCH",
-      url: `/api/runtime/docs_view/entities/article/${entityId}/documents/body`,
+      url: `/api/ontologies/test_ont/runtime/lenses/docs_view/entities/article/${entityId}/documents/body`,
       payload: { op: "str_replace", oldString: "two", newString: "three", replaceAll: true },
     });
     expect(res.statusCode).toBe(200);
@@ -312,7 +314,7 @@ describe("partial writes", () => {
     // Range overwrite addressed in code points, with the guard.
     const res = await app.inject({
       method: "PATCH",
-      url: `/api/runtime/docs_view/entities/article/${entityId}/documents/body`,
+      url: `/api/ontologies/test_ont/runtime/lenses/docs_view/entities/article/${entityId}/documents/body`,
       payload: { op: "replace_range", offset: 9, length: 6, content: "landing", expect: "launch" },
     });
     expect(res.statusCode).toBe(200);
@@ -326,7 +328,7 @@ describe("partial writes", () => {
 
     const updated = await app.inject({
       method: "PATCH",
-      url: `/api/runtime/docs_view/entities/article/${entityId}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/docs_view/entities/article/${entityId}`,
       payload: { body: "replaced whole" },
     });
     expect(updated.statusCode).toBe(200);
@@ -336,7 +338,7 @@ describe("partial writes", () => {
     // Nulling removes the value entirely — the stub disappears.
     const nulled = await app.inject({
       method: "PATCH",
-      url: `/api/runtime/docs_view/entities/article/${entityId}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/docs_view/entities/article/${entityId}`,
       payload: { body: null },
     });
     expect(nulled.statusCode).toBe(200);
@@ -373,7 +375,7 @@ describe("chunk lifecycle (fake provider, fixed vector)", () => {
 
     const res = await app.inject({
       method: "PATCH",
-      url: `/api/runtime/docs_view/entities/article/${entityId}/documents/body`,
+      url: `/api/ontologies/test_ont/runtime/lenses/docs_view/entities/article/${entityId}/documents/body`,
       payload: { op: "str_replace", oldString: "Paragraph 3:", newString: "Chapter 3 —" },
     });
     expect(res.statusCode).toBe(200);
@@ -394,7 +396,7 @@ describe("chunk lifecycle (fake provider, fixed vector)", () => {
 
     const res = await app.inject({
       method: "PATCH",
-      url: `/api/runtime/docs_view/entities/article/${entityId}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/docs_view/entities/article/${entityId}`,
       payload: { body: null },
     });
     expect(res.statusCode).toBe(200);
@@ -410,7 +412,7 @@ describe("chunk lifecycle (fake provider, fixed vector)", () => {
 
     const res = await app.inject({
       method: "DELETE",
-      url: `/api/runtime/docs_view/entities/article/${entityId}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/docs_view/entities/article/${entityId}`,
     });
     expect(res.statusCode).toBe(204);
 
@@ -424,7 +426,7 @@ describe("chunk lifecycle (fake provider, fixed vector)", () => {
 
     const res = await app.inject({
       method: "DELETE",
-      url: `/api/model/entity-types/${ids.articleId}/properties/${ids.notesPropId}`,
+      url: `/api/ontologies/test_ont/model/entity-types/${ids.articleId}/properties/${ids.notesPropId}`,
     });
     expect(res.statusCode).toBe(204);
 
@@ -439,7 +441,7 @@ describe("chunk lifecycle (fake provider, fixed vector)", () => {
     // The `title_only` lens includes the type: consent to the cascade.
     const res = await app.inject({
       method: "DELETE",
-      url: `/api/model/entity-types/${ids.articleId}?cascade=true`,
+      url: `/api/ontologies/test_ont/model/entity-types/${ids.articleId}?cascade=true`,
     });
     expect(res.statusCode, res.body).toBe(204);
 
@@ -453,7 +455,8 @@ describe("chunk lifecycle (fake provider, fixed vector)", () => {
     const entity = await createArticle({ title: "T", body: BODY });
     const entityId = entity._id as string;
 
-    const map = await getRuntimeStore().getChunkEmbeddingsForEntityProperty(entityId, "body");
+    const store = await getRuntimeStore("test_ont");
+    const map = await store.getChunkEmbeddingsForEntityProperty(entityId, "body");
     expect(Object.keys(map).length).toBeGreaterThan(1);
     for (const vector of Object.values(map)) {
       expect(vector).toEqual(VECTOR);
@@ -462,7 +465,7 @@ describe("chunk lifecycle (fake provider, fixed vector)", () => {
     // never expose it — spot-check the fields projection.
     const projected = await app.inject({
       method: "GET",
-      url: `/api/runtime/docs_view/entities/article/${entityId}?fields=body`,
+      url: `/api/ontologies/test_ont/runtime/lenses/docs_view/entities/article/${entityId}?fields=body`,
     });
     expect(projected.json().body).toBe(BODY);
   });

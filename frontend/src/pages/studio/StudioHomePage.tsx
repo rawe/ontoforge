@@ -9,7 +9,7 @@ import {
   Waypoints,
   Workflow,
 } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import * as model from '@/api/model'
 import { qk } from '@/api/queryKeys'
 import type { EntityType, RelationType, ValidationResult } from '@/api/types'
@@ -27,11 +27,16 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
-function usePropertyCounts(kind: 'entity-types' | 'relation-types', ids: string[]) {
+function usePropertyCounts(
+  ontologyKey: string | undefined,
+  kind: 'entity-types' | 'relation-types',
+  ids: string[],
+) {
   return useQueries({
     queries: ids.map((id) => ({
-      queryKey: qk.model(kind, id, 'properties'),
-      queryFn: () => model.listProperties(kind, id),
+      queryKey: qk.model(ontologyKey ?? '', kind, id, 'properties'),
+      queryFn: () => model.listProperties(ontologyKey!, kind, id),
+      enabled: ontologyKey !== undefined,
     })),
     combine: (results) => {
       const counts: Record<string, number> = {}
@@ -53,10 +58,18 @@ function propCountLabel(count: number | undefined) {
   )
 }
 
-function EntityTypeCard({ type, propCount }: { type: EntityType; propCount?: number }) {
+function EntityTypeCard({
+  ontologyKey,
+  type,
+  propCount,
+}: {
+  ontologyKey: string
+  type: EntityType
+  propCount?: number
+}) {
   return (
     <Link
-      to={`/studio/entity-types/${type.entityTypeId}`}
+      to={`/o/${ontologyKey}/studio/entity-types/${type.entityTypeId}`}
       className="block rounded-xl border bg-card p-3.5 transition-colors duration-150 hover:border-ring/40 focus-visible:outline-2 focus-visible:outline-ring/60"
     >
       <div className="flex items-center gap-2">
@@ -73,10 +86,18 @@ function EntityTypeCard({ type, propCount }: { type: EntityType; propCount?: num
   )
 }
 
-function RelationTypeCard({ type, propCount }: { type: RelationType; propCount?: number }) {
+function RelationTypeCard({
+  ontologyKey,
+  type,
+  propCount,
+}: {
+  ontologyKey: string
+  type: RelationType
+  propCount?: number
+}) {
   return (
     <Link
-      to={`/studio/relation-types/${type.relationTypeId}`}
+      to={`/o/${ontologyKey}/studio/relation-types/${type.relationTypeId}`}
       className="block rounded-xl border bg-card p-3.5 transition-colors duration-150 hover:border-ring/40 focus-visible:outline-2 focus-visible:outline-ring/60"
     >
       <div className="flex items-center gap-2">
@@ -102,20 +123,23 @@ function RelationTypeCard({ type, propCount }: { type: RelationType; propCount?:
   )
 }
 
-/** `/studio` — schema overview: type lists, diagram toggle, validation. */
+/** `/o/:ontologyKey/studio` — schema overview: type lists, diagram toggle, validation. */
 export function StudioHomePage() {
+  const { ontologyKey } = useParams<{ ontologyKey: string }>()
   const [view, setView] = useState<'list' | 'diagram'>('list')
   const [validation, setValidation] = useState<ValidationResult | null>(null)
   const [createEntityOpen, setCreateEntityOpen] = useState(false)
   const [createRelationOpen, setCreateRelationOpen] = useState(false)
 
   const entityTypesQuery = useQuery({
-    queryKey: qk.model('entity-types'),
-    queryFn: model.listEntityTypes,
+    queryKey: qk.model(ontologyKey ?? '', 'entity-types'),
+    queryFn: () => model.listEntityTypes(ontologyKey!),
+    enabled: ontologyKey !== undefined,
   })
   const relationTypesQuery = useQuery({
-    queryKey: qk.model('relation-types'),
-    queryFn: model.listRelationTypes,
+    queryKey: qk.model(ontologyKey ?? '', 'relation-types'),
+    queryFn: () => model.listRelationTypes(ontologyKey!),
+    enabled: ontologyKey !== undefined,
   })
   const entityTypes = entityTypesQuery.data
   const relationTypes = relationTypesQuery.data
@@ -128,14 +152,16 @@ export function StudioHomePage() {
     () => (relationTypes ?? []).map((t) => t.relationTypeId),
     [relationTypes],
   )
-  const entityPropCounts = usePropertyCounts('entity-types', entityIds)
-  const relationPropCounts = usePropertyCounts('relation-types', relationIds)
+  const entityPropCounts = usePropertyCounts(ontologyKey, 'entity-types', entityIds)
+  const relationPropCounts = usePropertyCounts(ontologyKey, 'relation-types', relationIds)
 
   const validate = useMutation({
-    mutationFn: model.validateSchema,
+    mutationFn: () => model.validateSchema(ontologyKey!),
     onSuccess: setValidation,
     onError: toastError,
   })
+
+  if (ontologyKey === undefined) return null
 
   const loading = entityTypesQuery.isPending || relationTypesQuery.isPending
   const empty =
@@ -148,7 +174,7 @@ export function StudioHomePage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Schema"
-        description="The global ground truth: entity types, relation types and their properties."
+        description="This ontology's entity types, relation types and their properties."
         actions={
           <>
             <Tabs value={view} onValueChange={(v) => setView(v as 'list' | 'diagram')}>
@@ -216,6 +242,7 @@ export function StudioHomePage() {
         {!loading && !empty && view === 'diagram' && (
           <div className="min-h-0 flex-1">
             <SchemaDiagram
+              ontologyKey={ontologyKey}
               entityTypes={entityTypes ?? []}
               relationTypes={relationTypes ?? []}
             />
@@ -235,6 +262,7 @@ export function StudioHomePage() {
               {(entityTypes ?? []).map((t) => (
                 <EntityTypeCard
                   key={t.entityTypeId}
+                  ontologyKey={ontologyKey}
                   type={t}
                   propCount={entityPropCounts[t.entityTypeId]}
                 />
@@ -256,6 +284,7 @@ export function StudioHomePage() {
               {(relationTypes ?? []).map((t) => (
                 <RelationTypeCard
                   key={t.relationTypeId}
+                  ontologyKey={ontologyKey}
                   type={t}
                   propCount={relationPropCounts[t.relationTypeId]}
                 />
@@ -270,8 +299,13 @@ export function StudioHomePage() {
         )}
       </div>
 
-      <EntityTypeCreateDialog open={createEntityOpen} onOpenChange={setCreateEntityOpen} />
+      <EntityTypeCreateDialog
+        ontologyKey={ontologyKey}
+        open={createEntityOpen}
+        onOpenChange={setCreateEntityOpen}
+      />
       <RelationTypeCreateDialog
+        ontologyKey={ontologyKey}
         open={createRelationOpen}
         onOpenChange={setCreateRelationOpen}
         entityTypes={entityTypes ?? []}

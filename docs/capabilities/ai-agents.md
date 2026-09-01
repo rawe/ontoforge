@@ -11,12 +11,12 @@ asymmetry to know when reimplementing: listing agents and fetching an agent card
 run a model, so they keep answering normally on a server with no provider. Only a task
 sent to that agent fails.
 
-Everything here is runtime, and everything is scoped to one lens
-([ontology-lenses.md](ontology-lenses.md)). A model is given the lens's schema — its
-ontology name and description, the system properties, each entity type with its
+Everything here is runtime, and everything is scoped to one lens of one ontology
+([ontology-lenses.md](ontology-lenses.md)). A model is given the lens's schema — the
+lens's name and key, the system properties, each entity type with its
 properties, their data types and required flags, and each relation type with its
 endpoints. Out-of-scope types are not merely filtered out of results; they are never
-described to the model in the first place.
+described to the model in the first place — and nothing of any other ontology ever is.
 
 ## What it does
 

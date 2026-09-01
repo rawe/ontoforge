@@ -8,35 +8,71 @@ section links to the capability document that owns them.
 This document is the capability inventory. It is complete on *what the product does* and
 deliberately silent on how it is built.
 
-## The two surfaces
+## The three levels
+
+The product mirrors the system's shape: a server holds ontologies, an ontology holds a
+schema and lenses, a lens shows instance data.
+
+| Level | Screen | Subject |
+|---|---|---|
+| Server | Start page at `/` | The ontologies themselves — create, rename, delete, enter |
+| Ontology | Studio | One ontology's schema and its lenses |
+| Lens | Workbench | Instance data seen through one lens |
+
+Every address below the start page is ontology-first, mirroring the API: the Studio
+lives under the ontology's key, the Workbench under the ontology's key plus a lens key.
+The address is the only source of truth for both — nothing else decides what is shown.
+
+### The start page
+
+`/` is the "Ontologies" page — the server-level entry point and the only management
+screen; there is no separate settings area.
+
+- A card per ontology: display name and key, its lenses as direct links into the
+  Workbench, an "Open Studio" action, and a ⋯ menu with Rename and Delete. Rename
+  changes the display name only. Delete asks for confirmation stating the hard cascade —
+  schema, lenses and all data go — because the API itself has no guard.
+- "+ New ontology" creates one: a key (proposed from the display name until the key
+  field is touched, validated live against the key pattern, and permanent) plus an
+  optional display name. Creation lands in the new ontology's Studio, which is where a
+  bare ontology is useful first.
+- An empty server shows "No ontologies yet" with the create action. Fresh server to
+  working graph is one unbroken path: create an ontology, model its schema, create a
+  lens, enter data — all in the UI.
+- `/` never redirects on its own. There is no remembered auto-resume into a workbench;
+  returning users pick their card.
+
+### The two working surfaces
 
 | | Workbench | Studio |
 |---|---|---|
-| Subject | Instance data seen through one lens | The global schema and the lenses themselves |
-| Addressed by | An ontology key, then type keys | Type and ontology identifiers |
+| Subject | Instance data seen through one lens | One ontology's schema and its lenses |
+| Addressed by | Ontology key and lens key, then type keys | Ontology key, then type and lens identifiers |
 | Answers | "What is in the graph?" | "What can be in the graph?" |
 
 The two never mix. Nothing in the Workbench edits the schema; nothing in the Studio
 touches instance data. Each surface has its own shell, and each links to the other: the
-Workbench sidebar has a Studio entry, the Studio sidebar returns to the last-used lens.
+Workbench sidebar has a Studio entry, the Studio sidebar returns to the ontology's
+last-used lens (or the start page when none is remembered).
 
-### Choosing and remembering a lens
+### The two switchers
 
-The Workbench is always bound to exactly one lens, named in the address. The client
-remembers the last lens used and restores it on the next visit.
+Two stacked dropdowns in the sidebar, one per containment level — never a combined menu.
 
-- Opening the application resolves to the remembered lens if it still exists on this
-  server, otherwise to the lens picker. A remembered key that no longer resolves is
-  forgotten rather than retried.
-- The picker lists every ontology as a card: name, key, description, the number of entity
-  and relation types the lens exposes, and whether it is scoped. Choosing one records it
-  as the remembered lens. A tile alongside leads to lens creation in the Studio.
-- The sidebar switcher changes lens from anywhere and records the new one.
-- Navigating to an unknown lens key shows a dedicated not-found state which forgets the
-  remembered lens and offers the picker; it never silently redirects.
-- Per-lens client state (see [Local state](#local-state)) is keyed by the lens, so
-  switching lenses never leaks a working set, a chat or a query history across the
-  boundary.
+- The **ontology switcher** sits atop the sidebar of both surfaces. Switching keeps the
+  surface: from a Studio it goes to the other ontology's Studio; from a Workbench it
+  goes to the target ontology's remembered last-used lens — validated against that
+  ontology's actual lenses, a stale remembered key being forgotten rather than retried —
+  and to its Studio when no remembered lens survives that check.
+- The **lens switcher** sits below it in the Workbench only, listing only the current
+  ontology's lenses. Choosing one records it as that ontology's last-used lens.
+- Both dropdowns end in a "Manage…" entry leading to the start page.
+
+Navigating to an unknown ontology or lens shows a dedicated not-found state which
+forgets the remembered lens and offers the start page; it never silently redirects.
+Per-lens client state (see [Local state](#local-state)) is keyed by ontology plus lens,
+so switching either never leaks a working set, a chat or a query history across a
+boundary — not even between same-keyed lenses of two ontologies.
 
 ---
 
@@ -44,7 +80,8 @@ remembers the last lens used and restores it on the next visit.
 
 ### Shell
 
-A collapsible sidebar (collapse state persists) carrying: the lens switcher, a search
+A collapsible sidebar (collapse state persists) carrying: the ontology switcher, the
+lens switcher beneath it, a search
 trigger, a create-entity trigger, fixed entries for Home, Explore, Query and — when
 available — AI, then a data section listing every entity type the lens exposes, each with
 its type colour. Below: a theme control cycling system → light → dark, and the Studio
@@ -174,9 +211,13 @@ configured.
 
 ## Studio screens
 
+The Studio is scoped wholesale to one ontology: its sidebar carries the ontology
+switcher, its navigation covers Schema, Lenses and Transfer, and everything it reads and
+writes belongs to the current ontology.
+
 ### Schema
 
-The global schema, in two interchangeable views: a two-column list of entity types and
+The ontology's schema, in two interchangeable views: a two-column list of entity types and
 relation types, and a [diagram](#schema-diagram). Each card shows the type's key, display
 name, property count and description; a relation type card also shows its endpoints.
 From here: create an entity type, create a relation type, and validate the whole schema.
@@ -204,18 +245,19 @@ as a data type on entity types only. Creating a required property may trigger th
 flow. Deleting a property warns that existing stored values remain in the database but
 leave the schema. See [capabilities/schema-modeling.md](capabilities/schema-modeling.md).
 
-### Ontologies
+### Lenses
 
-A list of every lens with its key and a scope marker — either "unscoped", or "scoped" with
+A list of the ontology's lenses with their keys and a scope marker — either "unscoped",
+or "scoped" with
 the number of included types. Creation asks for a name, a derived-but-editable key and a
 description, and states plainly that a new lens starts unscoped and therefore exposes
 everything.
 
-### Ontology detail
+### Lens detail
 
 Inline-editable name and description, an immutable key, a scope marker, an entry into the
 Workbench for this lens, and deletion behind a confirmation stating that the lens, its
-scope, its agents and its saved queries go — while the global schema and all instance data
+scope, its agents and its saved queries go — while the schema and all instance data
 stay. Four tabs:
 
 **Scope** — the [scope editor](#scope-editor).
@@ -235,25 +277,25 @@ a description and a scalar data type (document is not offered). An inline runner
 the query with typed parameter inputs and shows the result as a table or as raw JSON. See
 [capabilities/saved-queries.md](capabilities/saved-queries.md).
 
-**Connect** — two ready-to-paste AI-client configurations for this lens, one carrying the
-lens key in the address and one carrying it in a header, each covering both the modeling
-and the runtime MCP server. Only the runtime entry is actually bound by the key: the
-modeling server is global and reads no lens from its address
-([interfaces.md](interfaces.md#how-each-resolves-a-lens)). Both configurations are copyable
-and both are built from the address the client itself was served from, with a note to
-substitute the backend host when clients connect directly.
+**Connect** — one ready-to-paste AI-client configuration covering both MCP servers,
+bound entirely by their URLs: the modeling server to this ontology, the runtime server to
+this lens within it ([interfaces.md](interfaces.md#how-a-mount-is-bound)). The
+snippet is copyable and built from the address the client itself was served from, with a
+note to substitute the backend host when clients connect directly.
 
 ### Transfer
 
 Three operations, each with its own explanation. See
 [capabilities/transfer.md](capabilities/transfer.md).
 
-- **Export** — downloads the whole schema as a JSON file.
-- **Import** — takes a JSON file, reports malformed JSON before sending anything, and on a
+- **Export** — downloads the ontology's whole design as a JSON file.
+- **Import** — takes a JSON file and writes it into the current ontology. It reports
+  malformed JSON before sending anything, and on a
   key conflict explains that pre-existing objects with the same keys block the import and
-  that the clashes must be resolved (or an empty instance used). A successful import
+  that the clashes must be resolved (or a bare ontology used). A successful import
   refreshes every cached view.
-- **Rebuild embeddings** — behind a confirmation warning about duration and provider cost,
+- **Rebuild embeddings** — for this ontology, behind a confirmation warning about
+  duration and provider cost,
   then live progress per entity type while it runs and a summary when it finishes. The
   action is disabled with an explanation when no embedding provider is configured.
 
@@ -447,7 +489,7 @@ place where nothing is written without an explicit second step.
 
 ### Schema diagram
 
-A read-only picture of the global schema: one node per entity type in its colour, one
+A read-only picture of the ontology's schema: one node per entity type in its colour, one
 labelled edge per relation type, laid out left to right. Pan, zoom and drag are available;
 nothing can be created, connected or deleted here. Double-clicking a node opens that type's
 editor. The layout is recomputed when the schema itself changes, not when a node is
@@ -457,12 +499,13 @@ dragged. Relation types with a missing endpoint are omitted rather than drawn da
 
 Two panes side by side: what is *declared*, and what that *produces*.
 
-The left pane is a checklist of every entity type and relation type in the global schema —
+The left pane is a checklist of every entity type and relation type in the ontology's
+schema —
 not just the ones already included. Checking a type includes it with all its properties.
 An included row expands into a per-property editor offering either "all properties" or an
 explicit selection; in explicit mode, properties that are required and have no default are
 checked, locked and labelled, because a lens that hid them could not create valid data.
-The pane also offers ontology validation, and states the rule that a relation type is only
+The pane also offers lens validation, and states the rule that a relation type is only
 usable when both of its endpoint types are also in scope.
 
 An unscoped lens is called out prominently: it exposes the whole schema, and checking any
@@ -612,13 +655,18 @@ the address.
 
 | What | Scope | Cap |
 |---|---|---|
-| Last-used lens | Global | — |
+| Last-used lens | Per ontology | — |
 | Theme preference | Global | — |
 | Sidebar collapsed | Global | — |
-| Explorer working set | Per lens | Bounded by the hard node cap |
-| Recently opened entities | Per lens | 10 |
-| Recent query texts | Per lens | 10 |
-| Chat history | Per lens, then per agent | 50 messages per agent |
+| Explorer working set | Per ontology + lens | Bounded by the hard node cap |
+| Recently opened entities | Per ontology + lens | 10 |
+| Recent query texts | Per ontology + lens | 10 |
+| Chat history | Per ontology + lens, then per agent | 50 messages per agent |
+
+Per-lens state is keyed by ontology **and** lens because lens keys are unique only
+within their ontology — two ontologies' `default` lenses must never share a canvas or a
+chat. The remembered last-used lens exists per ontology, and only to feed the ontology
+switcher's Workbench landing; nothing at the root consumes it.
 
 The working set stores only identifiers, type keys, positions and pin flags — entities and
 relations are re-fetched on restore, so a stale canvas can never display stale property
@@ -632,28 +680,30 @@ same, minus the memory.
 
 Every one of these is stable and safe to construct externally.
 
+Workbench addresses live under `/o/{ontologyKey}/w/{lensKey}`, Studio addresses under
+`/o/{ontologyKey}/studio` — the same ontology-first spelling as the API.
+
 | Address | Effect |
 |---|---|
-| `/` | The remembered lens, else the lens picker |
-| `/welcome` | The lens picker |
-| `/w/{ontologyKey}` | That lens's Home |
-| `/w/{ontologyKey}/t/{typeKey}` | That type's table |
-| `/w/{ontologyKey}/t/{typeKey}?new=1` | The table, with quick add open and pre-scoped to the type |
-| `/w/{ontologyKey}/e/{typeKey}/{id}` | One entity's detail page |
-| `/w/{ontologyKey}/explore` | The canvas, restored from the saved working set |
-| `/w/{ontologyKey}/explore?focus={typeKey}:{id}` | The canvas with that entity added, selected and centred |
-| `/w/{ontologyKey}/query` | The query console |
-| `/w/{ontologyKey}/query?query={text}` | The console with the query prefilled |
-| `/w/{ontologyKey}/query?tab=library` | The saved-query library |
-| `/w/{ontologyKey}/query?run={queryKey}` | The library with that query expanded, run at once when it has no parameters |
-| `/w/{ontologyKey}/ai` | The AI panel, Chat |
-| `/w/{ontologyKey}/ai?tab=ask` · `?tab=extract` | The other two AI modes |
-| `/studio` | The schema overview |
-| `/studio/entity-types/{id}` · `/studio/relation-types/{id}` | A type editor |
-| `/studio/ontologies` | The lens list |
-| `/studio/ontologies/{id}` | A lens, Scope tab |
-| `/studio/ontologies/{id}?tab=agents` · `?tab=queries` · `?tab=connect` | The other lens tabs |
-| `/studio/transfer` | Export, import, rebuild |
+| `/` | The "Ontologies" start page — never a redirect |
+| `/o/{ontologyKey}/w/{lensKey}` | That lens's Home |
+| `/o/{ontologyKey}/w/{lensKey}/t/{typeKey}` | That type's table |
+| `/o/{ontologyKey}/w/{lensKey}/t/{typeKey}?new=1` | The table, with quick add open and pre-scoped to the type |
+| `/o/{ontologyKey}/w/{lensKey}/e/{typeKey}/{id}` | One entity's detail page |
+| `/o/{ontologyKey}/w/{lensKey}/explore` | The canvas, restored from the saved working set |
+| `/o/{ontologyKey}/w/{lensKey}/explore?focus={typeKey}:{id}` | The canvas with that entity added, selected and centred |
+| `/o/{ontologyKey}/w/{lensKey}/query` | The query console |
+| `/o/{ontologyKey}/w/{lensKey}/query?query={text}` | The console with the query prefilled |
+| `/o/{ontologyKey}/w/{lensKey}/query?tab=library` | The saved-query library |
+| `/o/{ontologyKey}/w/{lensKey}/query?run={queryKey}` | The library with that query expanded, run at once when it has no parameters |
+| `/o/{ontologyKey}/w/{lensKey}/ai` | The AI panel, Chat |
+| `/o/{ontologyKey}/w/{lensKey}/ai?tab=ask` · `?tab=extract` | The other two AI modes |
+| `/o/{ontologyKey}/studio` | The ontology's schema overview |
+| `/o/{ontologyKey}/studio/entity-types/{id}` · `.../relation-types/{id}` | A type editor |
+| `/o/{ontologyKey}/studio/lenses` | The lens list |
+| `/o/{ontologyKey}/studio/lenses/{id}` | A lens, Scope tab |
+| `/o/{ontologyKey}/studio/lenses/{id}?tab=agents` · `?tab=queries` · `?tab=connect` | The other lens tabs |
+| `/o/{ontologyKey}/studio/transfer` | Export, import, rebuild |
 
 Two consumed parameters are stripped from the address as soon as they are acted on, so that
 a reload does not repeat the action: the quick-add trigger and the Explorer focus target.

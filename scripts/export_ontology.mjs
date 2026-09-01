@@ -116,7 +116,7 @@ async function exportOntology(baseUrl, ontologyKey, outputDir) {
   console.log(`Fetching schema from ${apiBase}/schema ...`);
   const schema = await getJson(`${apiBase}/schema`);
 
-  const ontologyName = schema.ontology.name ?? ontologyKey;
+  const ontologyName = schema.lens.name ?? ontologyKey;
   const entityTypes = schema.entityTypes;
   const relationTypes = schema.relationTypes;
 

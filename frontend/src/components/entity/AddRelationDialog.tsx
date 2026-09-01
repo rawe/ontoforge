@@ -50,6 +50,7 @@ export interface RelationInitial {
 
 interface AddRelationDialogProps {
   ontologyKey: string
+  lensKey: string
   entity: EntityInstance
   entityLabel: string
   /** Relation types applicable to this entity's type (either endpoint). */
@@ -81,6 +82,7 @@ export function AddRelationDialog({ open, onOpenChange, ...rest }: AddRelationDi
 
 function AddRelationFlow({
   ontologyKey,
+  lensKey,
   entity,
   entityLabel,
   relationTypes,
@@ -137,6 +139,7 @@ function AddRelationFlow({
   const debouncedQuery = useDebouncedValue(targetQuery.trim(), 250)
   const targetSearch = useEntitySearch({
     ontologyKey,
+    lensKey,
     q: debouncedQuery,
     typeKey: targetTypeKey,
     semantic: features?.semanticSearch === true,
@@ -150,7 +153,7 @@ function AddRelationFlow({
     mutationFn: (vars: { target: EntityInstance; props: Record<string, JsonValue> }) => {
       const fromEntityId = choice!.direction === 'outgoing' ? entity._id : vars.target._id
       const toEntityId = choice!.direction === 'outgoing' ? vars.target._id : entity._id
-      return runtime.createRelation(ontologyKey, choice!.relationType.key, {
+      return runtime.createRelation(ontologyKey, lensKey, choice!.relationType.key, {
         fromEntityId,
         toEntityId,
         ...vars.props,
@@ -158,10 +161,11 @@ function AddRelationFlow({
     },
     onSuccess: (created, vars) => {
       onCreated?.(created, vars.target)
-      invalidateNeighborhood(queryClient, ontologyKey, myTypeKey, entity._id)
+      invalidateNeighborhood(queryClient, ontologyKey, lensKey, myTypeKey, entity._id)
       invalidateNeighborhood(
         queryClient,
         ontologyKey,
+        lensKey,
         vars.target._entityTypeKey,
         vars.target._id,
       )
@@ -189,10 +193,10 @@ function AddRelationFlow({
 
   const createEntityMutation = useMutation({
     mutationFn: (props: Record<string, JsonValue>) =>
-      runtime.createEntity(ontologyKey, targetTypeKey!, props),
+      runtime.createEntity(ontologyKey, lensKey, targetTypeKey!, props),
     onSuccess: (created) => {
       void queryClient.invalidateQueries({
-        queryKey: qk.entities(ontologyKey, created._entityTypeKey),
+        queryKey: qk.entities(ontologyKey, lensKey, created._entityTypeKey),
       })
       toast.success(`${targetType?.displayName ?? 'Entity'} created`)
       setCreatingNew(false)

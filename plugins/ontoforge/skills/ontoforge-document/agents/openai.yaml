@@ -1,0 +1,7 @@
+interface:
+  display_name: "OntoForge Document"
+  short_description: "Upload and download one document property of an entity"
+  icon_small: "./assets/ontoforge-icon.svg"
+  icon_large: "./assets/ontoforge-icon.svg"
+  brand_color: "#0A7CFF"
+  default_prompt: "Use $ontoforge-document to upload a file into a document property of an OntoForge entity, or download it back."

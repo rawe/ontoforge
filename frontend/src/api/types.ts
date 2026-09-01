@@ -1,7 +1,8 @@
 /**
  * Wire types for the OntoForge server.
  * Field names are the exact camelCase wire names — see the API contract.
- * Runtime addresses by ontology/type KEY, modeling by UUID.
+ * Everything is scoped to one ontology (addressed by KEY); within it,
+ * runtime addresses by lens/type KEY, modeling by UUID.
  */
 
 /* ----------------------------------- misc ---------------------------------- */
@@ -118,7 +119,7 @@ export interface AiAgent {
   tools?: string[] | null
 }
 
-export interface SchemaOntology {
+export interface SchemaLens {
   key: string
   name: string
   description: string | null
@@ -129,7 +130,7 @@ export interface SchemaOntology {
 }
 
 export interface RuntimeSchema {
-  ontology: SchemaOntology
+  lens: SchemaLens
   entityTypes: SchemaEntityType[]
   relationTypes: SchemaRelationType[]
 }
@@ -267,10 +268,33 @@ export interface ChatResponse {
   toolCalls: ToolCall[] | null
 }
 
-/* --------------------------------- modeling --------------------------------- */
+/* --------------------------------- registry --------------------------------- */
 
 export interface Ontology {
   ontologyId: string
+  key: string
+  /** Mutable server-wide-unique display name; `null` when never named. */
+  displayName: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface OntologyCreateInput {
+  /** Immutable, server-wide unique; snake_case, max 59 chars. */
+  key: string
+  /** Optional — an ontology starts nameless unless one is chosen here. */
+  displayName?: string
+}
+
+/** Rename touches the display name only; the key is immutable. */
+export interface OntologyRenameInput {
+  displayName: string
+}
+
+/* --------------------------------- modeling --------------------------------- */
+
+export interface Lens {
+  lensId: string
   key: string
   name: string
   description: string | null
@@ -326,7 +350,7 @@ export interface ValidationResult {
 
 /* ------------------------------ modeling inputs ------------------------------ */
 
-export interface OntologyInput {
+export interface LensInput {
   key?: string
   name: string
   description?: string | null

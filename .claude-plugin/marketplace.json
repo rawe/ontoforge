@@ -7,8 +7,8 @@
     {
       "name": "ontoforge",
       "source": "./plugins/ontoforge",
-      "description": "OntoForge plugin: export and import ontology schemas and instance data, sync OKF Markdown documents with entities, and bootstrap new projects with Docker Compose, environment variables, and MCP configuration.",
-      "version": "0.7.0"
+      "description": "OntoForge plugin: export and import ontology schemas and instance data, sync OKF Markdown documents with entities, move single documents in and out of entity properties, and bootstrap new projects with Docker Compose, environment variables, and MCP configuration.",
+      "version": "0.8.0"
     }
   ]
 }

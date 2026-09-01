@@ -14,8 +14,8 @@ import { createMockModelingStore, NOW, type MockModelingStore } from "./helpers.
 const holder: { store: MockModelingStore } = { store: createMockModelingStore() };
 
 vi.mock("../../src/core/ports.js", () => ({
-  getModelingStore: () => holder.store,
-  getRuntimeStore: () => ({}),
+  getModelingStore: async () => holder.store,
+  getRuntimeStore: async () => ({}),
 }));
 
 const FULL_SCHEMA = {
@@ -55,11 +55,11 @@ const FULL_SCHEMA = {
       properties: [],
     },
   ],
-  ontologies: [
+  lenses: [
     {
-      ontologyId: "ont-1",
-      key: "test_ontology",
-      name: "Test Ontology",
+      lensId: "lens-1",
+      key: "test_lens",
+      name: "Test Lens",
       description: null,
       createdAt: NOW,
       updatedAt: NOW,
@@ -99,13 +99,13 @@ afterEach(() => {
 describe("export", () => {
   it("exports the whole design in the transfer format", async () => {
     holder.store.getFullSchema.mockResolvedValue(FULL_SCHEMA);
-    const res = await app.inject({ method: "GET", url: "/api/model/export" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.formatVersion).toBe("3.0");
+    expect(body.formatVersion).toBe("4.0");
     expect(body.entityTypes).toHaveLength(2);
     expect(body.relationTypes).toHaveLength(1);
-    expect(body.ontologies).toHaveLength(1);
+    expect(body.lenses).toHaveLength(1);
     const person = body.entityTypes[0];
     expect(person.key).toBe("person");
     expect(person.properties).toHaveLength(1);
@@ -113,13 +113,13 @@ describe("export", () => {
     const rt = body.relationTypes[0];
     expect(rt.fromEntityTypeKey).toBe("person");
     expect(rt.toEntityTypeKey).toBe("company");
-    const ont = body.ontologies[0];
-    expect(ont.key).toBe("test_ontology");
-    expect(ont.includes.entityTypes[0].key).toBe("person");
-    expect(ont.includes.relationTypes[0].key).toBe("works_for");
+    const lens = body.lenses[0];
+    expect(lens.key).toBe("test_lens");
+    expect(lens.includes.entityTypes[0].key).toBe("person");
+    expect(lens.includes.relationTypes[0].key).toBe("works_for");
     // No timestamps, no internal ids anywhere.
-    expect(ont.ontologyId).toBeUndefined();
-    expect(ont.createdAt).toBeUndefined();
+    expect(lens.lensId).toBeUndefined();
+    expect(lens.createdAt).toBeUndefined();
     expect(person.entityTypeId).toBeUndefined();
     expect(person.properties[0].propertyId).toBeUndefined();
   });
@@ -128,15 +128,15 @@ describe("export", () => {
     holder.store.getFullSchema.mockResolvedValue({
       entityTypes: [],
       relationTypes: [],
-      ontologies: [],
+      lenses: [],
     });
-    const res = await app.inject({ method: "GET", url: "/api/model/export" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({
-      formatVersion: "3.0",
+      formatVersion: "4.0",
       entityTypes: [],
       relationTypes: [],
-      ontologies: [],
+      lenses: [],
     });
   });
 
@@ -144,9 +144,9 @@ describe("export", () => {
     holder.store.getFullSchema.mockResolvedValue({
       entityTypes: [],
       relationTypes: [],
-      ontologies: [
+      lenses: [
         {
-          ontologyId: "ont-1",
+          lensId: "lens-1",
           key: "everything",
           name: "Everything",
           description: null,
@@ -155,21 +155,21 @@ describe("export", () => {
         },
       ],
     });
-    const res = await app.inject({ method: "GET", url: "/api/model/export" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
     expect(res.statusCode).toBe(200);
-    const ont = res.json().ontologies[0];
-    expect("includes" in ont).toBe(false);
-    expect(ont.aiAgents).toEqual([]);
-    expect(ont.savedQueries).toEqual([]);
+    const lens = res.json().lenses[0];
+    expect("includes" in lens).toBe(false);
+    expect(lens.aiAgents).toEqual([]);
+    expect(lens.savedQueries).toEqual([]);
   });
 
   it("nests agents and saved queries in their lens, steps with explicit nulls", async () => {
     holder.store.getFullSchema.mockResolvedValue({
       entityTypes: [],
       relationTypes: [],
-      ontologies: [
+      lenses: [
         {
-          ontologyId: "ont-1",
+          lensId: "lens-1",
           key: "hr_view",
           name: "HR View",
           description: "HR lens",
@@ -200,10 +200,10 @@ describe("export", () => {
         ]),
       },
     ]);
-    const res = await app.inject({ method: "GET", url: "/api/model/export" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
     expect(res.statusCode).toBe(200);
-    const ont = res.json().ontologies[0];
-    expect(ont.aiAgents).toEqual([
+    const lens = res.json().lenses[0];
+    expect(lens.aiAgents).toEqual([
       {
         key: "assistant",
         name: "Assistant",
@@ -212,7 +212,7 @@ describe("export", () => {
         tools: ["query", "get_entity"],
       },
     ]);
-    expect(ont.savedQueries).toEqual([
+    expect(lens.savedQueries).toEqual([
       {
         key: "find-people",
         name: "Find People",
@@ -232,8 +232,8 @@ describe("export", () => {
         parameters: [{ name: "q", description: "Query", dataType: "string" }],
       },
     ]);
-    expect(holder.store.listAiAgentsForExport).toHaveBeenCalledWith("ont-1");
-    expect(holder.store.listSavedQueriesForExport).toHaveBeenCalledWith("ont-1");
+    expect(holder.store.listAiAgentsForExport).toHaveBeenCalledWith("lens-1");
+    expect(holder.store.listSavedQueriesForExport).toHaveBeenCalledWith("lens-1");
   });
 });
 
@@ -241,8 +241,8 @@ describe("export", () => {
 // Import — happy path
 // ---------------------------------------------------------------------------
 
-const ONT_DATA = {
-  ontologyId: "ont-new",
+const LENS_DATA = {
+  lensId: "lens-new",
   key: "imported",
   name: "Imported",
   description: null,
@@ -271,7 +271,7 @@ function importPayload(overrides: Record<string, unknown> = {}): Record<string, 
         properties: [],
       },
     ],
-    ontologies: [
+    lenses: [
       {
         key: "imported",
         name: "Imported",
@@ -286,22 +286,22 @@ function importPayload(overrides: Record<string, unknown> = {}): Record<string, 
 }
 
 async function postImport(payload: Record<string, unknown>) {
-  return app.inject({ method: "POST", url: "/api/model/import", payload });
+  return app.inject({ method: "POST", url: "/api/ontologies/onto/model/import", payload });
 }
 
 describe("import", () => {
   it("imports types, lenses and inclusions; answers 201 with the created lenses", async () => {
-    holder.store.createOntology.mockResolvedValue(ONT_DATA);
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
     holder.store.addIncludesType.mockResolvedValue({ key: "person", properties: null });
     const res = await postImport(importPayload());
     expect(res.statusCode).toBe(201);
     const body = res.json();
-    expect(body.ontologies).toHaveLength(1);
-    expect(body.ontologies[0].key).toBe("imported");
+    expect(body.lenses).toHaveLength(1);
+    expect(body.lenses[0].key).toBe("imported");
     expect(holder.store.createEntityType).toHaveBeenCalledTimes(1);
     expect(holder.store.createProperty).toHaveBeenCalledTimes(1);
     expect(holder.store.createRelationType).toHaveBeenCalledTimes(1);
-    expect(holder.store.createOntology).toHaveBeenCalledTimes(1);
+    expect(holder.store.createLens).toHaveBeenCalledTimes(1);
     expect(holder.store.addIncludesType).toHaveBeenCalledTimes(2);
     // No provider: no vector-index DDL at all.
     expect(holder.store.createVectorIndex).not.toHaveBeenCalled();
@@ -310,7 +310,7 @@ describe("import", () => {
   });
 
   it("regenerates internal identifiers — the payload never carries one", async () => {
-    holder.store.createOntology.mockResolvedValue(ONT_DATA);
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
     holder.store.addIncludesType.mockResolvedValue({ key: "person", properties: null });
     await postImport(importPayload());
     const etId = holder.store.createEntityType.mock.calls[0]![0] as string;
@@ -320,7 +320,7 @@ describe("import", () => {
   it("processes old, unknown and missing format versions identically", async () => {
     for (const version of ["2.0", "unknown-version", undefined]) {
       holder.store = createMockModelingStore();
-      holder.store.createOntology.mockResolvedValue(ONT_DATA);
+      holder.store.createLens.mockResolvedValue(LENS_DATA);
       holder.store.addIncludesType.mockResolvedValue({ key: "person", properties: null });
       const payload = importPayload();
       if (version === undefined) {
@@ -333,8 +333,19 @@ describe("import", () => {
     }
   });
 
+  it("rejects a 3.0 document by shape — ontologies[] where lenses[] is required", async () => {
+    const payload = importPayload({ formatVersion: "3.0" });
+    payload.ontologies = payload.lenses;
+    delete payload.lenses;
+    const res = await postImport(payload);
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe("VALIDATION_ERROR");
+    expect(holder.store.createEntityType).not.toHaveBeenCalled();
+    expect(holder.store.createLens).not.toHaveBeenCalled();
+  });
+
   it("does NOT check property data types against the enum (preserved gap)", async () => {
-    holder.store.createOntology.mockResolvedValue(ONT_DATA);
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
     const res = await postImport({
       entityTypes: [
         {
@@ -346,7 +357,7 @@ describe("import", () => {
         },
       ],
       relationTypes: [],
-      ontologies: [],
+      lenses: [],
     });
     expect(res.statusCode).toBe(201);
     expect(holder.store.createProperty).toHaveBeenCalledTimes(1);
@@ -367,7 +378,7 @@ describe("import conflicts", () => {
     expect(res.json().error.message).toContain("person");
     expect(holder.store.createEntityType).not.toHaveBeenCalled();
     expect(holder.store.createRelationType).not.toHaveBeenCalled();
-    expect(holder.store.createOntology).not.toHaveBeenCalled();
+    expect(holder.store.createLens).not.toHaveBeenCalled();
   });
 
   it("an existing relation type key answers 409 and writes nothing", async () => {
@@ -378,13 +389,13 @@ describe("import conflicts", () => {
     expect(holder.store.createEntityType).not.toHaveBeenCalled();
   });
 
-  it("an existing ontology key answers 409 and writes nothing", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue({ ontologyId: "ont-x", key: "imported" });
+  it("an existing lens key answers 409 and writes nothing", async () => {
+    holder.store.getLensByKey.mockResolvedValue({ lensId: "lens-x", key: "imported" });
     const res = await postImport(importPayload());
     expect(res.statusCode).toBe(409);
-    expect(res.json().error.message).toContain("Ontology with key 'imported' already exists");
+    expect(res.json().error.message).toContain("Lens with key 'imported' already exists");
     expect(holder.store.createEntityType).not.toHaveBeenCalled();
-    expect(holder.store.createOntology).not.toHaveBeenCalled();
+    expect(holder.store.createLens).not.toHaveBeenCalled();
   });
 
   it("a mid-payload conflict writes nothing — validate-then-write", async () => {
@@ -398,7 +409,7 @@ describe("import conflicts", () => {
         { key: "company", displayName: "Company", properties: [] },
       ],
       relationTypes: [],
-      ontologies: [],
+      lenses: [],
     });
     expect(res.statusCode).toBe(409);
     expect(res.json().error.message).toContain("company");
@@ -409,13 +420,13 @@ describe("import conflicts", () => {
   it("names EVERY conflicting key in one response", async () => {
     holder.store.getEntityTypeByKey.mockResolvedValue({ entityTypeId: "et-x" });
     holder.store.getRelationTypeByKey.mockResolvedValue({ relationTypeId: "rt-x" });
-    holder.store.getOntologyByKey.mockResolvedValue({ ontologyId: "ont-x" });
+    holder.store.getLensByKey.mockResolvedValue({ lensId: "lens-x" });
     const res = await postImport(importPayload());
     expect(res.statusCode).toBe(409);
     const message = res.json().error.message as string;
     expect(message).toContain("Entity type with key 'person' already exists");
     expect(message).toContain("Relation type with key 'works_for' already exists");
-    expect(message).toContain("Ontology with key 'imported' already exists");
+    expect(message).toContain("Lens with key 'imported' already exists");
   });
 
   it("an intra-payload duplicate key conflicts like the sequential write would have", async () => {
@@ -425,7 +436,7 @@ describe("import conflicts", () => {
         { key: "person", displayName: "Person Again", properties: [] },
       ],
       relationTypes: [],
-      ontologies: [],
+      lenses: [],
     });
     expect(res.statusCode).toBe(409);
     expect(res.json().error.message).toContain("Entity type with key 'person' already exists");
@@ -442,7 +453,7 @@ describe("import validations", () => {
     const res = await postImport({
       entityTypes: [{ key: "ontology", displayName: "Bad", properties: [] }],
       relationTypes: [],
-      ontologies: [],
+      lenses: [],
     });
     expect(res.statusCode).toBe(422);
     expect(res.json().error.message).toContain("reserved");
@@ -460,7 +471,7 @@ describe("import validations", () => {
           toEntityTypeKey: "person",
         },
       ],
-      ontologies: [],
+      lenses: [],
     });
     expect(res.statusCode).toBe(422);
     expect(res.json().error.message).toContain("nonexistent");
@@ -481,7 +492,7 @@ describe("import validations", () => {
           ],
         },
       ],
-      ontologies: [],
+      lenses: [],
     });
     expect(res.statusCode).toBe(422);
     expect(res.json().error.message).toContain(
@@ -493,7 +504,7 @@ describe("import validations", () => {
     const res = await postImport({
       entityTypes: [],
       relationTypes: [],
-      ontologies: [
+      lenses: [
         {
           key: "lens",
           name: "Lens",
@@ -507,7 +518,7 @@ describe("import validations", () => {
     const message = res.json().error.message as string;
     expect(message).toContain("not_a_tool");
     expect(message).toContain("Available tools:");
-    expect(holder.store.createOntology).not.toHaveBeenCalled();
+    expect(holder.store.createLens).not.toHaveBeenCalled();
     expect(holder.store.upsertAiAgent).not.toHaveBeenCalled();
   });
 
@@ -516,7 +527,7 @@ describe("import validations", () => {
       formatVersion: "2.2",
       entityTypes: [],
       relationTypes: [],
-      ontologies: [
+      lenses: [
         {
           key: "imported",
           name: "Imported",
@@ -541,7 +552,7 @@ describe("import validations", () => {
     const res = await postImport({
       entityTypes: [],
       relationTypes: [],
-      ontologies: [
+      lenses: [
         {
           key: "lens",
           name: "Lens",
@@ -564,7 +575,7 @@ describe("import validations", () => {
     const res = await postImport({
       entityTypes: [],
       relationTypes: [],
-      ontologies: [
+      lenses: [
         {
           key: "lens",
           name: "Lens",
@@ -592,11 +603,11 @@ describe("import validations", () => {
 
   it("imports a structurally sound pipeline whose OQL names types no lens exposes", async () => {
     // No lens check on import: this pipeline fails at first RUN, not here.
-    holder.store.createOntology.mockResolvedValue(ONT_DATA);
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
     const res = await postImport({
       entityTypes: [],
       relationTypes: [],
-      ontologies: [
+      lenses: [
         {
           key: "imported",
           name: "Imported",
@@ -631,7 +642,7 @@ describe("import key patterns", () => {
         },
       ],
       relationTypes: [],
-      ontologies: [],
+      lenses: [],
     });
     expect(res.statusCode).toBe(422);
     expect(res.json().error.code).toBe("VALIDATION_ERROR");
@@ -640,15 +651,15 @@ describe("import key patterns", () => {
     expect(holder.store.createProperty).not.toHaveBeenCalled();
   });
 
-  it("rejects an underscore-leading ontology key", async () => {
+  it("rejects an underscore-leading lens key", async () => {
     const res = await postImport({
       entityTypes: [],
       relationTypes: [],
-      ontologies: [{ key: "_hidden", name: "Hidden" }],
+      lenses: [{ key: "_hidden", name: "Hidden" }],
     });
     expect(res.statusCode).toBe(422);
     expect(res.json().error.message).toContain("'_hidden'");
-    expect(holder.store.createOntology).not.toHaveBeenCalled();
+    expect(holder.store.createLens).not.toHaveBeenCalled();
   });
 
   it("collects every offending key across kinds in one response", async () => {
@@ -663,7 +674,7 @@ describe("import key patterns", () => {
           properties: [],
         },
       ],
-      ontologies: [
+      lenses: [
         {
           key: "lens",
           name: "Lens",
@@ -688,7 +699,7 @@ describe("import key patterns", () => {
     expect(message).toContain("'9bad'");
     expect(body.error.details.errors).toHaveLength(4);
     expect(holder.store.createEntityType).not.toHaveBeenCalled();
-    expect(holder.store.createOntology).not.toHaveBeenCalled();
+    expect(holder.store.createLens).not.toHaveBeenCalled();
   });
 
   // The cap is 64 characters, uniformly on every key kind; import collects
@@ -717,9 +728,9 @@ describe("import key patterns", () => {
           ],
         },
       ],
-      ontologies: [
+      lenses: [
         {
-          key: long("ont"),
+          key: long("lens"),
           name: "Long Lens",
           aiAgents: [{ key: long("agent"), name: "Long Agent" }],
           savedQueries: [
@@ -737,23 +748,23 @@ describe("import key patterns", () => {
     const body = res.json();
     const errors = body.error.details.errors as string[];
     expect(errors).toHaveLength(7);
-    for (const kind of ["et", "etp", "rt", "rtp", "ont", "agent", "sq"]) {
+    for (const kind of ["et", "etp", "rt", "rtp", "lens", "agent", "sq"]) {
       expect(errors.some((e) => e.includes(`'${long(kind)}'`))).toBe(true);
     }
     for (const e of errors) {
       expect(e).toContain("64");
     }
     expect(holder.store.createEntityType).not.toHaveBeenCalled();
-    expect(holder.store.createOntology).not.toHaveBeenCalled();
+    expect(holder.store.createLens).not.toHaveBeenCalled();
   });
 
   it("a 64-character key of every kind passes the length check", async () => {
     const exact = (prefix: string): string => prefix + "k".repeat(64 - prefix.length);
-    holder.store.createOntology.mockResolvedValue(ONT_DATA);
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
     const res = await postImport({
       entityTypes: [{ key: exact("et"), displayName: "ET", properties: [] }],
       relationTypes: [],
-      ontologies: [{ key: exact("ont"), name: "Lens" }],
+      lenses: [{ key: exact("lens"), name: "Lens" }],
     });
     expect(res.statusCode).toBe(201);
   });
@@ -772,7 +783,7 @@ describe("import key patterns", () => {
           ],
         },
       ],
-      ontologies: [
+      lenses: [
         {
           key: "lens",
           name: "Lens",
@@ -804,7 +815,7 @@ describe("import side effects with a provider", () => {
         return [0.1, 0.2];
       },
     });
-    holder.store.createOntology.mockResolvedValue(ONT_DATA);
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
     const res = await postImport({
       entityTypes: [
         {
@@ -817,7 +828,7 @@ describe("import side effects with a provider", () => {
         },
       ],
       relationTypes: [],
-      ontologies: [
+      lenses: [
         {
           key: "imported",
           name: "Imported",

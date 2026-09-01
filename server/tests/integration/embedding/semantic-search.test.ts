@@ -53,15 +53,16 @@ describe.skipIf(!ollamaUp)("semantic search (Ollama)", () => {
     return res.json() as Row;
   }
 
-  /** Ontology `search_test`, entity type `person` with
+  /** Lens `search_test`, entity type `person` with
    * name/role/bio (strings) and age (integer). */
   async function buildSearchFixture(): Promise<{ etId: string }> {
-    await post("/api/model/ontologies", {
+    await post("/api/ontologies", { key: "test_ont" });
+    await post("/api/ontologies/test_ont/model/lenses", {
       key: "search_test",
       name: "Search Test",
-      description: "Integration test ontology for semantic search",
+      description: "Integration test lens for semantic search",
     });
-    const et = await post("/api/model/entity-types", { key: "person", displayName: "Person" });
+    const et = await post("/api/ontologies/test_ont/model/entity-types", { key: "person", displayName: "Person" });
     const etId = et.entityTypeId as string;
     for (const prop of [
       { key: "name", displayName: "Name", dataType: "string", required: true },
@@ -69,7 +70,7 @@ describe.skipIf(!ollamaUp)("semantic search (Ollama)", () => {
       { key: "bio", displayName: "Bio", dataType: "string", required: false },
       { key: "age", displayName: "Age", dataType: "integer", required: false },
     ]) {
-      await post(`/api/model/entity-types/${etId}/properties`, prop);
+      await post(`/api/ontologies/test_ont/model/entity-types/${etId}/properties`, prop);
     }
     return { etId };
   }
@@ -80,7 +81,7 @@ describe.skipIf(!ollamaUp)("semantic search (Ollama)", () => {
   });
 
   it("reports semanticSearch: true on /features", async () => {
-    const res = await app.inject({ method: "GET", url: "/api/runtime/features" });
+    const res = await app.inject({ method: "GET", url: "/api/server/features" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ semanticSearch: true, ai: false });
   });
@@ -89,7 +90,7 @@ describe.skipIf(!ollamaUp)("semantic search (Ollama)", () => {
     await buildSearchFixture();
     const res = await app.inject({
       method: "POST",
-      url: "/api/runtime/search_test/entities/person",
+      url: "/api/ontologies/test_ont/runtime/lenses/search_test/entities/person",
       payload: {
         name: "Alice Chen",
         role: "Senior Engineer",
@@ -104,12 +105,12 @@ describe.skipIf(!ollamaUp)("semantic search (Ollama)", () => {
 
   it("finds entities by meaning", async () => {
     await buildSearchFixture();
-    await post("/api/runtime/search_test/entities/person", {
+    await post("/api/ontologies/test_ont/runtime/lenses/search_test/entities/person", {
       name: "Alice Chen",
       role: "Backend Engineer",
       bio: "Expert in distributed systems and microservices",
     });
-    await post("/api/runtime/search_test/entities/person", {
+    await post("/api/ontologies/test_ont/runtime/lenses/search_test/entities/person", {
       name: "Bob Smith",
       role: "Marketing Manager",
       bio: "Leads brand strategy and market research",
@@ -117,7 +118,7 @@ describe.skipIf(!ollamaUp)("semantic search (Ollama)", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/search_test/search/semantic?q=distributed%20systems%20engineer&type=person",
+      url: "/api/ontologies/test_ont/runtime/lenses/search_test/search/semantic?q=distributed%20systems%20engineer&type=person",
     });
     expect(res.statusCode).toBe(200);
     const data = res.json() as { total: number; results: Row[] };
@@ -128,14 +129,14 @@ describe.skipIf(!ollamaUp)("semantic search (Ollama)", () => {
 
   it("type-scoped search only returns entities of that type", async () => {
     await buildSearchFixture();
-    await post("/api/runtime/search_test/entities/person", {
+    await post("/api/ontologies/test_ont/runtime/lenses/search_test/entities/person", {
       name: "Charlie",
       role: "Developer",
     });
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/search_test/search/semantic?q=developer&type=person",
+      url: "/api/ontologies/test_ont/runtime/lenses/search_test/search/semantic?q=developer&type=person",
     });
     expect(res.statusCode).toBe(200);
     const data = res.json() as { total: number; results: Row[] };
@@ -151,29 +152,29 @@ describe.skipIf(!ollamaUp)("semantic search (Ollama)", () => {
     // boots without the startup sequence, so ensure it explicitly.
     await ensureSemanticIndexes(getEmbeddingProvider()!.dimensions);
 
-    const company = await post("/api/model/entity-types", {
+    const company = await post("/api/ontologies/test_ont/model/entity-types", {
       key: "company",
       displayName: "Company",
     });
-    await post(`/api/model/entity-types/${company.entityTypeId as string}/properties`, {
+    await post(`/api/ontologies/test_ont/model/entity-types/${company.entityTypeId as string}/properties`, {
       key: "name",
       displayName: "Name",
       dataType: "string",
       required: true,
     });
 
-    await post("/api/runtime/search_test/entities/person", {
+    await post("/api/ontologies/test_ont/runtime/lenses/search_test/entities/person", {
       name: "Alice Chen",
       role: "Backend Engineer",
       bio: "Expert in distributed systems and microservices",
     });
-    await post("/api/runtime/search_test/entities/company", {
+    await post("/api/ontologies/test_ont/runtime/lenses/search_test/entities/company", {
       name: "Distributed Systems Consulting",
     });
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/search_test/search/semantic?q=distributed%20systems&limit=10",
+      url: "/api/ontologies/test_ont/runtime/lenses/search_test/search/semantic?q=distributed%20systems&limit=10",
     });
     expect(res.statusCode).toBe(200);
     const data = res.json() as { total: number; results: Row[] };
@@ -187,7 +188,7 @@ describe.skipIf(!ollamaUp)("semantic search (Ollama)", () => {
     await buildSearchFixture();
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/search_test/search/semantic?q=anything&filter.name=Alice",
+      url: "/api/ontologies/test_ont/runtime/lenses/search_test/search/semantic?q=anything&filter.name=Alice",
     });
     expect(res.statusCode).toBe(422);
     expect((res.json() as { error: { message: string } }).error.message).toContain(
@@ -202,7 +203,7 @@ describe.skipIf(!ollamaUp)("semantic search (Ollama)", () => {
     try {
       const res = await app.inject({
         method: "GET",
-        url: "/api/runtime/search_test/search/semantic?q=test%20query&type=person",
+        url: "/api/ontologies/test_ont/runtime/lenses/search_test/search/semantic?q=test%20query&type=person",
       });
       expect(res.statusCode).toBe(422);
       const body = res.json() as { error: { message: string; details: Row } };

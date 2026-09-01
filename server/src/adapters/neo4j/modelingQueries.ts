@@ -51,11 +51,11 @@ export async function findReservedTypeKeysInUse(
   }));
 }
 
-// --- Ontology ---
+// --- Lens ---
 
-export async function createOntology(
+export async function createLens(
   session: Session,
-  ontologyId: string,
+  lensId: string,
   key: string,
   name: string,
   description: string | null,
@@ -63,62 +63,62 @@ export async function createOntology(
   const result = await session.run(
     `
     CREATE (o:Ontology {
-        ontologyId: $ontologyId,
+        lensId: $lensId,
         key: $key,
         name: $name,
         description: $description,
         createdAt: datetime(),
         updatedAt: datetime()
     })
-    RETURN o {.*} AS ontology
+    RETURN o {.*} AS lens
     `,
-    { ontologyId, key, name, description },
+    { lensId, key, name, description },
   );
-  return convertNeo4jProperties(result.records[0]?.get("ontology") as Row);
+  return convertNeo4jProperties(result.records[0]?.get("lens") as Row);
 }
 
-export async function listOntologies(session: Session): Promise<Row[]> {
+export async function listLenses(session: Session): Promise<Row[]> {
   const result = await session.run(
-    "MATCH (o:Ontology) RETURN o {.*} AS ontology ORDER BY o.name",
+    "MATCH (o:Ontology) RETURN o {.*} AS lens ORDER BY o.name",
   );
-  return result.records.map((record) => convertNeo4jProperties(record.get("ontology") as Row));
+  return result.records.map((record) => convertNeo4jProperties(record.get("lens") as Row));
 }
 
-export async function getOntology(session: Session, ontologyId: string): Promise<Row | null> {
+export async function getLens(session: Session, lensId: string): Promise<Row | null> {
   const result = await session.run(
-    "MATCH (o:Ontology {ontologyId: $ontologyId}) RETURN o {.*} AS ontology",
-    { ontologyId },
+    "MATCH (o:Ontology {lensId: $lensId}) RETURN o {.*} AS lens",
+    { lensId },
   );
   const record = result.records[0];
-  return record ? convertNeo4jProperties(record.get("ontology") as Row) : null;
+  return record ? convertNeo4jProperties(record.get("lens") as Row) : null;
 }
 
-export async function getOntologyByName(session: Session, name: string): Promise<Row | null> {
+export async function getLensByName(session: Session, name: string): Promise<Row | null> {
   const result = await session.run(
-    "MATCH (o:Ontology {name: $name}) RETURN o {.*} AS ontology",
+    "MATCH (o:Ontology {name: $name}) RETURN o {.*} AS lens",
     { name },
   );
   const record = result.records[0];
-  return record ? convertNeo4jProperties(record.get("ontology") as Row) : null;
+  return record ? convertNeo4jProperties(record.get("lens") as Row) : null;
 }
 
-export async function getOntologyByKey(session: Session, key: string): Promise<Row | null> {
+export async function getLensByKey(session: Session, key: string): Promise<Row | null> {
   const result = await session.run(
-    "MATCH (o:Ontology {key: $key}) RETURN o {.*} AS ontology",
+    "MATCH (o:Ontology {key: $key}) RETURN o {.*} AS lens",
     { key },
   );
   const record = result.records[0];
-  return record ? convertNeo4jProperties(record.get("ontology") as Row) : null;
+  return record ? convertNeo4jProperties(record.get("lens") as Row) : null;
 }
 
-export async function updateOntology(
+export async function updateLens(
   session: Session,
-  ontologyId: string,
+  lensId: string,
   name: string | null,
   description: string | null,
 ): Promise<Row | null> {
   const setClauses = ["o.updatedAt = datetime()"];
-  const params: Row = { ontologyId };
+  const params: Row = { lensId };
   if (name !== null) {
     setClauses.push("o.name = $name");
     params.name = name;
@@ -130,27 +130,27 @@ export async function updateOntology(
 
   const result = await session.run(
     `
-    MATCH (o:Ontology {ontologyId: $ontologyId})
+    MATCH (o:Ontology {lensId: $lensId})
     SET ${setClauses.join(", ")}
-    RETURN o {.*} AS ontology
+    RETURN o {.*} AS lens
     `,
     params,
   );
   const record = result.records[0];
-  return record ? convertNeo4jProperties(record.get("ontology") as Row) : null;
+  return record ? convertNeo4jProperties(record.get("lens") as Row) : null;
 }
 
-/** Delete ontology and cascade to agent configs and saved queries. */
-export async function deleteOntology(session: Session, ontologyId: string): Promise<boolean> {
+/** Delete lens and cascade to agent configs and saved queries. */
+export async function deleteLens(session: Session, lensId: string): Promise<boolean> {
   const result = await session.run(
     `
-    MATCH (o:Ontology {ontologyId: $ontologyId})
+    MATCH (o:Ontology {lensId: $lensId})
     OPTIONAL MATCH (o)-[:HAS_AI_AGENT]->(ac:AiAgentConfig)
     OPTIONAL MATCH (o)-[:HAS_SAVED_QUERY]->(sq:SavedQuery)
     DETACH DELETE o, ac, sq
     RETURN count(o) AS deleted
     `,
-    { ontologyId },
+    { lensId },
   );
   return (result.records[0]?.get("deleted") as number) > 0;
 }
@@ -580,45 +580,45 @@ function toIncludeRow(record: {
 }
 
 /**
- * MERGE an INCLUDES_TYPE edge from ontology to a type node — adding the
+ * MERGE an INCLUDES_TYPE edge from lens to a type node — adding the
  * same type again is an upsert that replaces the allowlist. Setting
  * `properties` to null removes the edge property (allowlist absent);
  * an empty array is stored as an empty list (allowlist empty).
  */
 export async function addIncludesType(
   session: Session,
-  ontologyId: string,
+  lensId: string,
   typeKind: TypeKind,
   typeKey: string,
   properties: string[] | null,
 ): Promise<IncludeRow | null> {
   const result = await session.run(
     `
-    MATCH (o:Ontology {ontologyId: $ontologyId})
+    MATCH (o:Ontology {lensId: $lensId})
     MATCH (t:${typeKind} {key: $typeKey})
     MERGE (o)-[r:INCLUDES_TYPE]->(t)
     SET r.properties = $properties
     RETURN t.key AS key, t.${idField(typeKind)} AS typeId, r.properties AS properties
     `,
-    { ontologyId, typeKey, properties },
+    { lensId, typeKey, properties },
   );
   const record = result.records[0];
   return record ? toIncludeRow(record) : null;
 }
 
-/** List all INCLUDES_TYPE edges from ontology to a given type label. */
+/** List all INCLUDES_TYPE edges from lens to a given type label. */
 export async function listIncludesTypes(
   session: Session,
-  ontologyId: string,
+  lensId: string,
   typeKind: TypeKind,
 ): Promise<IncludeRow[]> {
   const result = await session.run(
     `
-    MATCH (o:Ontology {ontologyId: $ontologyId})-[r:INCLUDES_TYPE]->(t:${typeKind})
+    MATCH (o:Ontology {lensId: $lensId})-[r:INCLUDES_TYPE]->(t:${typeKind})
     RETURN t.key AS key, t.${idField(typeKind)} AS typeId, r.properties AS properties
     ORDER BY t.key
     `,
-    { ontologyId },
+    { lensId },
   );
   return result.records.map(toIncludeRow);
 }
@@ -626,18 +626,18 @@ export async function listIncludesTypes(
 /** Replace the properties allowlist on an INCLUDES_TYPE edge. */
 export async function updateIncludesType(
   session: Session,
-  ontologyId: string,
+  lensId: string,
   typeKind: TypeKind,
   typeId: string,
   properties: string[] | null,
 ): Promise<IncludeRow | null> {
   const result = await session.run(
     `
-    MATCH (o:Ontology {ontologyId: $ontologyId})-[r:INCLUDES_TYPE]->(t:${typeKind} {${idField(typeKind)}: $typeId})
+    MATCH (o:Ontology {lensId: $lensId})-[r:INCLUDES_TYPE]->(t:${typeKind} {${idField(typeKind)}: $typeId})
     SET r.properties = $properties
     RETURN t.key AS key, t.${idField(typeKind)} AS typeId, r.properties AS properties
     `,
-    { ontologyId, typeId, properties },
+    { lensId, typeId, properties },
   );
   const record = result.records[0];
   return record ? toIncludeRow(record) : null;
@@ -646,17 +646,17 @@ export async function updateIncludesType(
 /** Remove an INCLUDES_TYPE edge. */
 export async function removeIncludesType(
   session: Session,
-  ontologyId: string,
+  lensId: string,
   typeKind: TypeKind,
   typeId: string,
 ): Promise<boolean> {
   const result = await session.run(
     `
-    MATCH (o:Ontology {ontologyId: $ontologyId})-[r:INCLUDES_TYPE]->(t:${typeKind} {${idField(typeKind)}: $typeId})
+    MATCH (o:Ontology {lensId: $lensId})-[r:INCLUDES_TYPE]->(t:${typeKind} {${idField(typeKind)}: $typeId})
     DELETE r
     RETURN count(r) AS deleted
     `,
-    { ontologyId, typeId },
+    { lensId, typeId },
   );
   return (result.records[0]?.get("deleted") as number) > 0;
 }
@@ -680,8 +680,8 @@ export async function removeAllIncludesForType(
   return result.records[0]?.get("deleted") as number;
 }
 
-/** Ontology keys with INCLUDES_TYPE edges to a specific type. */
-export async function findOntologiesIncludingType(
+/** Lens keys with INCLUDES_TYPE edges to a specific type. */
+export async function findLensesIncludingType(
   session: Session,
   typeKind: TypeKind,
   typeId: string,
@@ -698,11 +698,11 @@ export async function findOntologiesIncludingType(
 }
 
 /**
- * Ontology keys whose explicit property allowlist for a type does NOT
- * contain the given property key. Ontologies without an allowlist track
+ * Lens keys whose explicit property allowlist for a type does NOT
+ * contain the given property key. Lenses without an allowlist track
  * the type's properties automatically and are never affected.
  */
-export async function findOntologiesWithExplicitProperty(
+export async function findLensesWithExplicitProperty(
   session: Session,
   typeKind: TypeKind,
   typeId: string,
@@ -781,7 +781,7 @@ export async function deleteChunksForTypeProperty(
 
 // --- Full Schema (one coherent snapshot) ---
 
-/** Load the entire global schema plus every ontology with its inclusions. */
+/** Load the entire global schema plus every lens with its inclusions. */
 export async function getFullSchema(session: Session): Promise<Row> {
   const etResult = await session.run(
     `
@@ -824,7 +824,7 @@ export async function getFullSchema(session: Session): Promise<Row> {
     return rt;
   });
 
-  const ontResult = await session.run(
+  const lensResult = await session.run(
     `
     MATCH (o:Ontology)
     OPTIONAL MATCH (o)-[r:INCLUDES_TYPE]->(t)
@@ -833,12 +833,12 @@ export async function getFullSchema(session: Session): Promise<Row> {
         label: labels(t)[0],
         properties: r.properties
     }) AS inclusions
-    RETURN o {.*} AS ontology, inclusions
+    RETURN o {.*} AS lens, inclusions
     ORDER BY o.name
     `,
   );
-  const ontologies = ontResult.records.map((record) => {
-    const ont = convertNeo4jProperties(record.get("ontology") as Row);
+  const lenses = lensResult.records.map((record) => {
+    const lens = convertNeo4jProperties(record.get("lens") as Row);
     const rawInclusions = record.get("inclusions") as Row[];
     const entityInclusions: Row[] = [];
     const relationInclusions: Row[] = [];
@@ -853,12 +853,12 @@ export async function getFullSchema(session: Session): Promise<Row> {
         relationInclusions.push(entry);
       }
     }
-    ont.entityInclusions = entityInclusions;
-    ont.relationInclusions = relationInclusions;
-    return ont;
+    lens.entityInclusions = entityInclusions;
+    lens.relationInclusions = relationInclusions;
+    return lens;
   });
 
-  return { entityTypes, relationTypes, ontologies };
+  return { entityTypes, relationTypes, lenses };
 }
 
 // --- Embedding maintenance (rebuild support) ---
@@ -895,7 +895,7 @@ export async function setEntityEmbedding(
   });
 }
 
-/** List all saved queries (id + description) across all ontologies. */
+/** List all saved queries (id + description) across all lenses. */
 export async function listSavedQueryRefs(session: Session): Promise<Row[]> {
   const result = await session.run(
     "MATCH (sq:SavedQuery) " +
@@ -921,14 +921,14 @@ export async function setSavedQueryEmbedding(
 
 // --- AI Agent Config ---
 
-export async function listAiAgents(session: Session, ontologyId: string): Promise<Row[]> {
+export async function listAiAgents(session: Session, lensId: string): Promise<Row[]> {
   const result = await session.run(
     `
-    MATCH (o:Ontology {ontologyId: $ontologyId})-[:HAS_AI_AGENT]->(ac:AiAgentConfig)
+    MATCH (o:Ontology {lensId: $lensId})-[:HAS_AI_AGENT]->(ac:AiAgentConfig)
     RETURN ac {.*} AS agent
     ORDER BY ac.name
     `,
-    { ontologyId },
+    { lensId },
   );
   return result.records.map((record) => convertNeo4jProperties(record.get("agent") as Row));
 }
@@ -937,7 +937,7 @@ export async function listAiAgents(session: Session, ontologyId: string): Promis
  * whether ON CREATE stamped this call's fresh id onto the node. */
 export async function upsertAiAgent(
   session: Session,
-  ontologyId: string,
+  lensId: string,
   agentConfigId: string,
   key: string,
   name: string,
@@ -947,7 +947,7 @@ export async function upsertAiAgent(
 ): Promise<[Row, boolean]> {
   const result = await session.run(
     `
-    MATCH (o:Ontology {ontologyId: $ontologyId})
+    MATCH (o:Ontology {lensId: $lensId})
     MERGE (o)-[:HAS_AI_AGENT]->(ac:AiAgentConfig {key: $key})
     ON CREATE SET
         ac.agentConfigId = $agentConfigId,
@@ -965,7 +965,7 @@ export async function upsertAiAgent(
         ac.updatedAt = datetime()
     RETURN ac {.*} AS agent, ac.agentConfigId = $agentConfigId AS created
     `,
-    { ontologyId, agentConfigId, key, name, description, systemPrompt, tools },
+    { lensId, agentConfigId, key, name, description, systemPrompt, tools },
   );
   const record = result.records[0]!;
   return [convertNeo4jProperties(record.get("agent") as Row), record.get("created") as boolean];
@@ -975,16 +975,16 @@ export async function upsertAiAgent(
  * tools) — no ids, no timestamps. */
 export async function listAiAgentsForExport(
   session: Session,
-  ontologyId: string,
+  lensId: string,
 ): Promise<Row[]> {
   const result = await session.run(
     `
-    MATCH (o:Ontology {ontologyId: $ontologyId})-[:HAS_AI_AGENT]->(ac:AiAgentConfig)
+    MATCH (o:Ontology {lensId: $lensId})-[:HAS_AI_AGENT]->(ac:AiAgentConfig)
     RETURN ac.key AS key, ac.name AS name, ac.description AS description,
            ac.systemPrompt AS systemPrompt, ac.tools AS tools
     ORDER BY ac.name
     `,
-    { ontologyId },
+    { lensId },
   );
   return result.records.map((record) => ({
     key: record.get("key"),
@@ -997,30 +997,30 @@ export async function listAiAgentsForExport(
 
 export async function deleteAiAgent(
   session: Session,
-  ontologyId: string,
+  lensId: string,
   agentKey: string,
 ): Promise<boolean> {
   const result = await session.run(
     `
-    MATCH (o:Ontology {ontologyId: $ontologyId})-[:HAS_AI_AGENT]->(ac:AiAgentConfig {key: $agentKey})
+    MATCH (o:Ontology {lensId: $lensId})-[:HAS_AI_AGENT]->(ac:AiAgentConfig {key: $agentKey})
     DETACH DELETE ac
     RETURN count(ac) AS deleted
     `,
-    { ontologyId, agentKey },
+    { lensId, agentKey },
   );
   return ((result.records[0]?.get("deleted") as number) ?? 0) > 0;
 }
 
 // --- Saved Query Config ---
 
-export async function listSavedQueries(session: Session, ontologyId: string): Promise<Row[]> {
+export async function listSavedQueries(session: Session, lensId: string): Promise<Row[]> {
   const result = await session.run(
     `
-    MATCH (o:Ontology {ontologyId: $ontologyId})-[:HAS_SAVED_QUERY]->(sq:SavedQuery)
+    MATCH (o:Ontology {lensId: $lensId})-[:HAS_SAVED_QUERY]->(sq:SavedQuery)
     RETURN sq {.*} AS query
     ORDER BY sq.name
     `,
-    { ontologyId },
+    { lensId },
   );
   return result.records.map((record) => convertNeo4jProperties(record.get("query") as Row));
 }
@@ -1029,16 +1029,16 @@ export async function listSavedQueries(session: Session, ontologyId: string): Pr
  * the stored steps/parameters JSON text) — no ids, no timestamps. */
 export async function listSavedQueriesForExport(
   session: Session,
-  ontologyId: string,
+  lensId: string,
 ): Promise<Row[]> {
   const result = await session.run(
     `
-    MATCH (o:Ontology {ontologyId: $ontologyId})-[:HAS_SAVED_QUERY]->(sq:SavedQuery)
+    MATCH (o:Ontology {lensId: $lensId})-[:HAS_SAVED_QUERY]->(sq:SavedQuery)
     RETURN sq.key AS key, sq.name AS name, sq.description AS description,
            sq.steps AS steps, sq.parameters AS parameters
     ORDER BY sq.name
     `,
-    { ontologyId },
+    { lensId },
   );
   return result.records.map((record) => ({
     key: record.get("key"),
@@ -1050,25 +1050,25 @@ export async function listSavedQueriesForExport(
 }
 
 /** MERGE-based upsert. Steps and parameters arrive as serialized text this
- * store does not interpret; the denormalized `_ontologyKey` and the
+ * store does not interpret; the denormalized `_lensKey` and the
  * description embedding support in-index scoping of saved-query search. */
 export async function upsertSavedQuery(
   session: Session,
-  ontologyId: string,
+  lensId: string,
   savedQueryId: string,
   key: string,
   name: string,
   description: string,
   stepsJson: string,
   parametersJson: string,
-  ontologyKey: string | null = null,
+  lensKey: string | null = null,
   embedding: number[] | null = null,
 ): Promise<[Row, boolean]> {
   const embeddingClause = embedding !== null ? ", sq._embedding = $embedding" : "";
-  const ontologyKeyClause = ontologyKey !== null ? ", sq._ontologyKey = $ontologyKey" : "";
+  const lensKeyClause = lensKey !== null ? ", sq._lensKey = $lensKey" : "";
   const result = await session.run(
     `
-    MATCH (o:Ontology {ontologyId: $ontologyId})
+    MATCH (o:Ontology {lensId: $lensId})
     MERGE (o)-[:HAS_SAVED_QUERY]->(sq:SavedQuery {key: $key})
     ON CREATE SET
         sq.savedQueryId = $savedQueryId,
@@ -1077,24 +1077,24 @@ export async function upsertSavedQuery(
         sq.steps = $stepsJson,
         sq.parameters = $parametersJson,
         sq.createdAt = datetime(),
-        sq.updatedAt = datetime()${ontologyKeyClause}${embeddingClause}
+        sq.updatedAt = datetime()${lensKeyClause}${embeddingClause}
     ON MATCH SET
         sq.name = $name,
         sq.description = $description,
         sq.steps = $stepsJson,
         sq.parameters = $parametersJson,
-        sq.updatedAt = datetime()${ontologyKeyClause}${embeddingClause}
+        sq.updatedAt = datetime()${lensKeyClause}${embeddingClause}
     RETURN sq {.*} AS query, sq.savedQueryId = $savedQueryId AS created
     `,
     {
-      ontologyId,
+      lensId,
       savedQueryId,
       key,
       name,
       description,
       stepsJson,
       parametersJson,
-      ontologyKey,
+      lensKey,
       embedding,
     },
   );
@@ -1104,16 +1104,16 @@ export async function upsertSavedQuery(
 
 export async function deleteSavedQuery(
   session: Session,
-  ontologyId: string,
+  lensId: string,
   queryKey: string,
 ): Promise<boolean> {
   const result = await session.run(
     `
-    MATCH (o:Ontology {ontologyId: $ontologyId})-[:HAS_SAVED_QUERY]->(sq:SavedQuery {key: $queryKey})
+    MATCH (o:Ontology {lensId: $lensId})-[:HAS_SAVED_QUERY]->(sq:SavedQuery {key: $queryKey})
     DETACH DELETE sq
     RETURN count(sq) AS deleted
     `,
-    { ontologyId, queryKey },
+    { lensId, queryKey },
   );
   return ((result.records[0]?.get("deleted") as number) ?? 0) > 0;
 }

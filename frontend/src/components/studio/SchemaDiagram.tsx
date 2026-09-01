@@ -102,6 +102,7 @@ function layout(entityTypes: EntityType[], relationTypes: RelationType[]) {
 }
 
 interface SchemaDiagramProps {
+  ontologyKey: string
   entityTypes: EntityType[]
   relationTypes: RelationType[]
 }
@@ -111,7 +112,7 @@ interface SchemaDiagramProps {
  * labeled edges, dagre left-to-right layout. Pan/zoom/drag only; double-click
  * a node to open its editor.
  */
-export function SchemaDiagram({ entityTypes, relationTypes }: SchemaDiagramProps) {
+export function SchemaDiagram({ ontologyKey, entityTypes, relationTypes }: SchemaDiagramProps) {
   const { resolvedTheme } = useTheme()
   const navigate = useNavigate()
   const { nodes, edges } = useMemo(
@@ -146,7 +147,9 @@ export function SchemaDiagram({ entityTypes, relationTypes }: SchemaDiagramProps
         elementsSelectable={false}
         deleteKeyCode={null}
         onNodeDoubleClick={(_, node) => {
-          void navigate(`/studio/entity-types/${(node.data as TypeNodeData).entityTypeId}`)
+          void navigate(
+            `/o/${ontologyKey}/studio/entity-types/${(node.data as TypeNodeData).entityTypeId}`,
+          )
         }}
         style={{ background: 'transparent' }}
       >

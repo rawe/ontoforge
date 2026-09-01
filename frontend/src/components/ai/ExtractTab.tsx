@@ -13,6 +13,7 @@ import { Textarea } from '@/components/ui/textarea'
 
 interface ExtractTabProps {
   ontologyKey: string
+  lensKey: string
   schema: RuntimeSchema
   semanticEnabled: boolean
 }
@@ -22,14 +23,14 @@ interface ExtractTabProps {
  * `/ai/extract` (create:false — nothing is persisted), then review and accept
  * the proposals. The review stage owns all creation.
  */
-export function ExtractTab({ ontologyKey, schema, semanticEnabled }: ExtractTabProps) {
+export function ExtractTab({ ontologyKey, lensKey, schema, semanticEnabled }: ExtractTabProps) {
   const [text, setText] = useState('')
   const [restrictTypes, setRestrictTypes] = useState<string[]>([])
   const [response, setResponse] = useState<ExtractResponse | null>(null)
 
   const extract = useMutation({
     mutationFn: () =>
-      aiExtract(ontologyKey, {
+      aiExtract(ontologyKey, lensKey, {
         text: text.trim(),
         ...(restrictTypes.length > 0 ? { entityTypes: restrictTypes } : {}),
         create: false,
@@ -48,6 +49,7 @@ export function ExtractTab({ ontologyKey, schema, semanticEnabled }: ExtractTabP
         // Remount the review when a new extraction arrives.
         key={`${response.entities.length}-${response.relations.length}-${text.length}`}
         ontologyKey={ontologyKey}
+        lensKey={lensKey}
         schema={schema}
         response={response}
         semanticEnabled={semanticEnabled}

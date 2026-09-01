@@ -10,9 +10,12 @@
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { randomUUID } from "node:crypto";
+
 import {
   closeStores,
   getModelingStore,
+  getOntologyRegistry,
   initStores,
 } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
@@ -37,7 +40,9 @@ describe("adapter lifecycle", () => {
     await closeStores();
     await closeStores(); // the port contract's "Close. Idempotent."
     await initStores(); // boot again against the same store
-    expect(await getModelingStore().listOntologies()).toEqual([]);
+    await getOntologyRegistry().createOntology(randomUUID(), "lifecycle_probe", null, null);
+    const store = await getModelingStore("lifecycle_probe");
+    expect(await store.listLenses()).toEqual([]);
   });
 });
 
@@ -55,7 +60,7 @@ describe("features route on a fully booted server", () => {
   it("answers both capabilities false with the exact field names", async () => {
     const app = await startServer();
     try {
-      const res = await app.inject({ method: "GET", url: "/api/runtime/features" });
+      const res = await app.inject({ method: "GET", url: "/api/server/features" });
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({ semanticSearch: false, ai: false });
     } finally {

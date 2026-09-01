@@ -15,10 +15,18 @@ import {
   getEmbeddingProvider,
   initEmbeddingProvider,
 } from "./core/embedding.js";
-import { closeStores, ensureSemanticIndexes, getModelingStore, initStores } from "./core/ports.js";
+import {
+  closeStores,
+  ensureSemanticIndexes,
+  getModelingStore,
+  getOntologyRegistry,
+  initStores,
+} from "./core/ports.js";
 
 /**
- * Name any stored type whose key is now reserved.
+ * Name any stored type whose key is now reserved, walking the registry
+ * — the check runs per ontology, and a server with zero ontologies has
+ * nothing to check.
  *
  * Such types can only predate the reserved-key check. They are left in
  * place — renaming a type key is destructive and is the operator's call —
@@ -26,14 +34,19 @@ import { closeStores, ensureSemanticIndexes, getModelingStore, initStores } from
  * the modeling API once instance data exists under them.
  */
 export async function warnAboutReservedTypeKeysInUse(): Promise<void> {
-  const collisions = await getModelingStore().findReservedTypeKeysInUse();
-  for (const collision of collisions) {
-    console.warn(
-      `Stored ${collision.kind} '${collision.key}' uses a reserved key. It ` +
-        "predates the reserved-key check and can corrupt schema reads once " +
-        "instance data exists under it. Export its data, delete the type, " +
-        "and recreate it under a different key.",
-    );
+  for (const ontology of await getOntologyRegistry().listOntologies()) {
+    const ontologyKey = ontology["key"] as string;
+    const store = await getModelingStore(ontologyKey);
+    const collisions = await store.findReservedTypeKeysInUse();
+    for (const collision of collisions) {
+      console.warn(
+        `Stored ${collision.kind} '${collision.key}' in ontology ` +
+          `'${ontologyKey}' uses a reserved key. It predates the ` +
+          "reserved-key check and can corrupt schema reads once instance " +
+          "data exists under it. Export its data, delete the type, and " +
+          "recreate it under a different key.",
+      );
+    }
   }
 }
 

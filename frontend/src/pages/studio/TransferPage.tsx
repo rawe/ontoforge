@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { useParams } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Download, RefreshCw, Upload } from 'lucide-react'
 import { toast } from 'sonner'
@@ -38,9 +39,12 @@ interface RebuildSummary {
  * client can't consume that, so read the stream here and surface progress.
  */
 async function rebuildEmbeddingsStream(
+  ontologyKey: string,
   onProgress: (p: RebuildProgress) => void,
 ): Promise<RebuildSummary> {
-  const res = await fetch('/api/model/rebuild-embeddings', { method: 'POST' })
+  const res = await fetch(`/api/ontologies/${ontologyKey}/model/rebuild-embeddings`, {
+    method: 'POST',
+  })
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`
     try {
@@ -99,8 +103,9 @@ function TransferCard({
   )
 }
 
-/** `/studio/transfer` — export, import, rebuild embeddings. */
+/** `/o/:ontologyKey/studio/transfer` — export, import, rebuild embeddings. */
 export function TransferPage() {
+  const { ontologyKey } = useParams<{ ontologyKey: string }>()
   const queryClient = useQueryClient()
   const { data: features } = useFeatures()
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -109,13 +114,13 @@ export function TransferPage() {
   const [progress, setProgress] = useState<RebuildProgress | null>(null)
 
   const exportMutation = useMutation({
-    mutationFn: model.exportSchema,
+    mutationFn: () => model.exportSchema(ontologyKey!),
     onSuccess: (data) => {
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = 'schema.json'
+      a.download = `${ontologyKey ?? 'schema'}.json`
       a.click()
       URL.revokeObjectURL(url)
       toast.success('Schema exported')
@@ -132,7 +137,7 @@ export function TransferPage() {
       } catch {
         throw new Error('The selected file is not valid JSON.')
       }
-      return model.importSchema(data)
+      return model.importSchema(ontologyKey!, data)
     },
     onSuccess: () => {
       setImportError(null)
@@ -153,7 +158,7 @@ export function TransferPage() {
   })
 
   const rebuildMutation = useMutation({
-    mutationFn: () => rebuildEmbeddingsStream(setProgress),
+    mutationFn: () => rebuildEmbeddingsStream(ontologyKey!, setProgress),
     onSuccess: (summary) => {
       setProgress(null)
       toast.success(
@@ -170,6 +175,8 @@ export function TransferPage() {
 
   const semanticOff = features !== undefined && !features.semanticSearch
 
+  if (ontologyKey === undefined) return null
+
   return (
     <div>
       <PageHeader
@@ -180,7 +187,7 @@ export function TransferPage() {
         <TransferCard
           icon={Download}
           title="Export schema"
-          description="Download the full global schema — entity types, relation types, properties, ontologies, agents and saved queries — as a portable JSON file."
+          description="Download this ontology's schema — entity types, relation types, properties, lenses, agents and saved queries — as a portable JSON file."
         >
           <Button
             onClick={() => exportMutation.mutate()}
@@ -194,7 +201,7 @@ export function TransferPage() {
         <TransferCard
           icon={Upload}
           title="Import schema"
-          description="Import a previously exported schema JSON. Import fails if keys clash with existing objects."
+          description="Import a previously exported schema JSON into this ontology. Import fails if keys clash with the ontology's existing objects."
         >
           <div className="flex flex-wrap items-center gap-2">
             <Input
@@ -228,7 +235,7 @@ export function TransferPage() {
         <TransferCard
           icon={RefreshCw}
           title="Rebuild embeddings"
-          description="Re-embed all entities and saved queries with the configured embedding provider. Use after bulk imports or provider changes."
+          description="Re-embed this ontology's entities and saved queries with the configured embedding provider. Use after bulk imports or provider changes."
         >
           <div className="flex items-center gap-3">
             <AlertDialog>
@@ -247,7 +254,7 @@ export function TransferPage() {
                 <AlertDialogHeader>
                   <AlertDialogTitle>Rebuild all embeddings?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    Every entity and saved query is re-embedded. Depending on data volume
+                    Every entity and saved query of this ontology is re-embedded. Depending on data volume
                     this can take a while and calls the embedding provider for each item.
                   </AlertDialogDescription>
                 </AlertDialogHeader>

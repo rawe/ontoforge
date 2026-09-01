@@ -15,7 +15,7 @@ interface CascadeDialogProps {
   onClose: () => void
 }
 
-/** Confirm dialog for cascading schema changes across affected ontologies. */
+/** Confirm dialog for cascading schema changes across affected lenses. */
 export function CascadeDialog({ cascade, onClose }: CascadeDialogProps) {
   return (
     <AlertDialog open={cascade !== null} onOpenChange={(open) => !open && onClose()}>
@@ -24,12 +24,12 @@ export function CascadeDialog({ cascade, onClose }: CascadeDialogProps) {
           <AlertDialogTitle>Cascade required</AlertDialogTitle>
           <AlertDialogDescription>
             {cascade?.message ?? ''} This change also updates the scope of the affected
-            ontologies listed below.
+            lenses listed below.
           </AlertDialogDescription>
         </AlertDialogHeader>
-        {cascade !== null && cascade.affectedOntologies.length > 0 && (
+        {cascade !== null && cascade.affectedLenses.length > 0 && (
           <ul className="rounded-md border bg-muted/40 px-3 py-2 text-[13px]">
-            {cascade.affectedOntologies.map((name) => (
+            {cascade.affectedLenses.map((name) => (
               <li key={name} className="py-0.5 font-mono">
                 {name}
               </li>

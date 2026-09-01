@@ -32,7 +32,7 @@ interface AskEntry {
   at: number
 }
 
-/** Session-scoped Q&A history per ontology (survives tab switches, not reloads). */
+/** Session-scoped Q&A history per ontology + lens (survives tab switches, not reloads). */
 const sessionHistory = new Map<string, AskEntry[]>()
 
 function cellText(value: JsonValue | undefined): string {
@@ -75,7 +75,7 @@ function ResultsTable({ results }: { results: QueryResult }) {
 }
 
 /** Collapsible "Generated query" block: mono, copy, open-in-console. */
-function GeneratedQueryBlock({ ontologyKey, query }: { ontologyKey: string; query: string }) {
+function GeneratedQueryBlock({ ontologyKey, lensKey, query }: { ontologyKey: string; lensKey: string; query: string }) {
   const [open, setOpen] = useState(false)
   return (
     <div className="rounded-md border">
@@ -96,7 +96,7 @@ function GeneratedQueryBlock({ ontologyKey, query }: { ontologyKey: string; quer
           size="sm"
           className="h-6 gap-1 px-1.5 text-xs text-muted-foreground"
         >
-          <Link to={`/w/${ontologyKey}/query?query=${encodeURIComponent(query)}`}>
+          <Link to={`/o/${ontologyKey}/w/${lensKey}/query?query=${encodeURIComponent(query)}`}>
             <SquareTerminal className="size-3" />
             Open in console
           </Link>
@@ -111,14 +111,14 @@ function GeneratedQueryBlock({ ontologyKey, query }: { ontologyKey: string; quer
   )
 }
 
-function AnswerCard({ ontologyKey, entry }: { ontologyKey: string; entry: AskEntry }) {
+function AnswerCard({ ontologyKey, lensKey, entry }: { ontologyKey: string; lensKey: string; entry: AskEntry }) {
   return (
     <div className="rounded-lg border bg-card">
       <div className="border-b px-4 py-2.5 text-[13px] font-medium">{entry.question}</div>
       <div className="space-y-3 px-4 py-3">
         <Markdown>{entry.response.answer}</Markdown>
         {entry.response.query !== null && (
-          <GeneratedQueryBlock ontologyKey={ontologyKey} query={entry.response.query} />
+          <GeneratedQueryBlock ontologyKey={ontologyKey} lensKey={lensKey} query={entry.response.query} />
         )}
         {entry.response.results !== null && <ResultsTable results={entry.response.results} />}
       </div>
@@ -131,18 +131,18 @@ function AnswerCard({ ontologyKey, entry }: { ontologyKey: string; entry: AskEnt
  * generated-query block and a results table. Past Q&As of this session are
  * kept below (in memory only).
  */
-export function AskTab({ ontologyKey }: { ontologyKey: string }) {
+export function AskTab({ ontologyKey, lensKey }: { ontologyKey: string; lensKey: string }) {
   const [question, setQuestion] = useState('')
   const [history, setHistory] = useState<AskEntry[]>(
-    () => sessionHistory.get(ontologyKey) ?? [],
+    () => sessionHistory.get(`${ontologyKey}/${lensKey}`) ?? [],
   )
 
   const ask = useMutation({
-    mutationFn: (q: string) => aiQuery(ontologyKey, q),
+    mutationFn: (q: string) => aiQuery(ontologyKey, lensKey, q),
     onSuccess: (response, q) => {
       const next = [{ question: q, response, at: Date.now() }, ...history]
       setHistory(next)
-      sessionHistory.set(ontologyKey, next)
+      sessionHistory.set(`${ontologyKey}/${lensKey}`, next)
       setQuestion('')
     },
   })
@@ -207,7 +207,7 @@ export function AskTab({ ontologyKey }: { ontologyKey: string }) {
           </div>
         )}
 
-        {latest !== undefined && <AnswerCard ontologyKey={ontologyKey} entry={latest} />}
+        {latest !== undefined && <AnswerCard ontologyKey={ontologyKey} lensKey={lensKey} entry={latest} />}
 
         {history.length === 0 && !ask.isPending && !ask.isError && (
           <EmptyState
@@ -224,7 +224,7 @@ export function AskTab({ ontologyKey }: { ontologyKey: string }) {
               Earlier this session
             </p>
             {previous.map((entry) => (
-              <AnswerCard key={entry.at} ontologyKey={ontologyKey} entry={entry} />
+              <AnswerCard key={entry.at} ontologyKey={ontologyKey} lensKey={lensKey} entry={entry} />
             ))}
           </>
         )}

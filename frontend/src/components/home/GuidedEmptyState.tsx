@@ -40,17 +40,19 @@ function Step({
 }
 
 /**
- * Full-body guided empty state shown when the ontology has zero instances:
+ * Full-body guided empty state shown when the lens has zero instances:
  * three numbered ways to get data in.
  */
 export function GuidedEmptyState({
   ontologyKey,
-  ontologyName,
+  lensKey,
+  lensName,
   entityTypes,
   aiEnabled,
 }: {
   ontologyKey: string
-  ontologyName: string
+  lensKey: string
+  lensName: string
   entityTypes: readonly SchemaEntityType[]
   aiEnabled: boolean
 }) {
@@ -59,11 +61,11 @@ export function GuidedEmptyState({
     <div className="mx-auto max-w-2xl px-6 py-14">
       <div className="text-center">
         <h2 className="text-lg font-semibold tracking-tight">
-          {ontologyName} is ready — now add some knowledge
+          {lensName} is ready — now add some knowledge
         </h2>
         <p className="mx-auto mt-1.5 max-w-md text-[13px] text-muted-foreground">
           The schema is in place but no entities exist yet. Three ways to get data into
-          this ontology:
+          this lens:
         </p>
       </div>
       <ol className="mt-8 space-y-3">
@@ -75,7 +77,7 @@ export function GuidedEmptyState({
             description={`Start small: create a ${first.displayName.toLowerCase()} by hand, or press ⌘K to add from anywhere.`}
             action={
               <Button asChild size="sm">
-                <Link to={`/w/${ontologyKey}/t/${first.key}`}>
+                <Link to={`/o/${ontologyKey}/w/${lensKey}/t/${first.key}`}>
                   Open {first.displayName} table
                   <ArrowRight className="size-3.5" />
                 </Link>
@@ -96,7 +98,7 @@ export function GuidedEmptyState({
           action={
             aiEnabled ? (
               <Button asChild size="sm" variant="outline">
-                <Link to={`/w/${ontologyKey}/ai`}>
+                <Link to={`/o/${ontologyKey}/w/${lensKey}/ai`}>
                   Open AI extract
                   <ArrowRight className="size-3.5" />
                 </Link>
@@ -112,10 +114,11 @@ export function GuidedEmptyState({
           number={3}
           icon={<Cable className="size-4 text-muted-foreground" />}
           title="Connect your AI tools"
-          description="Let Claude or any MCP-capable agent read and write this ontology directly via the built-in MCP servers."
+          description="Let Claude or any MCP-capable agent read and write this lens directly via the built-in MCP servers."
           action={
             <McpConnectDialog
               ontologyKey={ontologyKey}
+              lensKey={lensKey}
               trigger={
                 <Button size="sm" variant="outline">
                   View MCP config

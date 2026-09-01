@@ -36,9 +36,17 @@ describe.skipIf(settings.DB_BACKEND !== "neo4j")("modeling MCP on Neo4j", () => 
     if (address === null || typeof address === "string") {
       throw new Error("Expected a bound TCP port");
     }
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/ontologies",
+      payload: { key: "test_ont" },
+    });
+    expect(created.statusCode, created.body).toBe(201);
     client = new Client({ name: "modeling-mcp-neo4j-tests", version: "0.0.1" });
     await client.connect(
-      new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/mcp/model`)),
+      new StreamableHTTPClientTransport(
+        new URL(`http://127.0.0.1:${address.port}/mcp/ontologies/test_ont/model`),
+      ),
     );
   });
 

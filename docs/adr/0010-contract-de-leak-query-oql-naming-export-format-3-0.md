@@ -32,6 +32,11 @@ the project consumed it.
 
 Alias removal was approved 2026-07-27.
 
+The format version has since moved to 4.0 — the multi-ontology hard cut
+([0018](0018-multi-ontology-hard-cut.md)) renamed the top-level `ontologies[]` field to
+`lenses[]`, an incompatible payload-shape change. The version policy is unchanged
+([../decisions.md](../decisions.md#scope)).
+
 ## Alternatives considered
 
 - **Renaming the saved-query step field `oql` to `query`** — rejected, because `query`

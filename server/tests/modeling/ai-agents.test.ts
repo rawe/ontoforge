@@ -13,13 +13,13 @@ import { createMockModelingStore, NOW, type MockModelingStore } from "./helpers.
 const holder: { store: MockModelingStore } = { store: createMockModelingStore() };
 
 vi.mock("../../src/core/ports.js", () => ({
-  getModelingStore: () => holder.store,
-  getRuntimeStore: () => ({}),
+  getModelingStore: async () => holder.store,
+  getRuntimeStore: async () => ({}),
 }));
 
-const MOCK_ONTOLOGY = {
-  ontologyId: "ont-1",
-  key: "test_onto",
+const MOCK_LENS = {
+  lensId: "lens-1",
+  key: "test_lens",
   name: "Test",
   description: null,
   createdAt: NOW,
@@ -55,17 +55,17 @@ beforeEach(() => {
 
 describe("list", () => {
   it("answers an empty list", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     holder.store.listAiAgents.mockResolvedValue([]);
-    const res = await app.inject({ method: "GET", url: "/api/model/ontologies/test_onto/ai-agents" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/lenses/test_lens/ai-agents" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual([]);
   });
 
   it("returns the full agent wire shape", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     holder.store.listAiAgents.mockResolvedValue([MOCK_AGENT]);
-    const res = await app.inject({ method: "GET", url: "/api/model/ontologies/test_onto/ai-agents" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/lenses/test_lens/ai-agents" });
     expect(res.statusCode).toBe(200);
     const body = res.json() as Record<string, unknown>[];
     expect(body).toHaveLength(1);
@@ -79,10 +79,10 @@ describe("list", () => {
     expect(agent).toHaveProperty("updatedAt");
   });
 
-  it("an unknown ontology key answers 404", async () => {
+  it("an unknown lens key answers 404", async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/api/model/ontologies/nonexistent/ai-agents",
+      url: "/api/ontologies/onto/model/lenses/nonexistent/ai-agents",
     });
     expect(res.statusCode).toBe(404);
   });
@@ -90,11 +90,11 @@ describe("list", () => {
 
 describe("upsert", () => {
   it("create answers 201", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     holder.store.upsertAiAgent.mockResolvedValue([MOCK_AGENT, true]);
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/ontologies/test_onto/ai-agents/my-agent",
+      url: "/api/ontologies/onto/model/lenses/test_lens/ai-agents/my-agent",
       payload: {
         name: "My Agent",
         description: "test desc",
@@ -109,21 +109,21 @@ describe("upsert", () => {
   });
 
   it("replace answers 200", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     holder.store.upsertAiAgent.mockResolvedValue([MOCK_AGENT, false]);
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/ontologies/test_onto/ai-agents/my-agent",
+      url: "/api/ontologies/onto/model/lenses/test_lens/ai-agents/my-agent",
       payload: { name: "My Agent" },
     });
     expect(res.statusCode).toBe(200);
     expect(res.json().key).toBe("my-agent");
   });
 
-  it("an unknown ontology key answers 404", async () => {
+  it("an unknown lens key answers 404", async () => {
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/ontologies/nonexistent/ai-agents/my-agent",
+      url: "/api/ontologies/onto/model/lenses/nonexistent/ai-agents/my-agent",
       payload: { name: "Test" },
     });
     expect(res.statusCode).toBe(404);
@@ -132,21 +132,21 @@ describe("upsert", () => {
 
 describe("delete", () => {
   it("answers 204", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     holder.store.deleteAiAgent.mockResolvedValue(true);
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/ontologies/test_onto/ai-agents/my-agent",
+      url: "/api/ontologies/onto/model/lenses/test_lens/ai-agents/my-agent",
     });
     expect(res.statusCode).toBe(204);
   });
 
   it("an unknown agent key answers 404", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     holder.store.deleteAiAgent.mockResolvedValue(false);
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/ontologies/test_onto/ai-agents/nonexistent",
+      url: "/api/ontologies/onto/model/lenses/test_lens/ai-agents/nonexistent",
     });
     expect(res.statusCode).toBe(404);
   });
@@ -154,10 +154,10 @@ describe("delete", () => {
 
 describe("key validation", () => {
   it("a key violating ^[a-z][a-z0-9_-]*$ is rejected 422", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/ontologies/test_onto/ai-agents/INVALID",
+      url: "/api/ontologies/onto/model/lenses/test_lens/ai-agents/INVALID",
       payload: { name: "Test" },
     });
     expect(res.statusCode).toBe(422);
@@ -165,11 +165,11 @@ describe("key validation", () => {
   });
 
   it("hyphens ARE allowed, unlike type keys", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     holder.store.upsertAiAgent.mockResolvedValue([MOCK_AGENT, true]);
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/ontologies/test_onto/ai-agents/my-agent",
+      url: "/api/ontologies/onto/model/lenses/test_lens/ai-agents/my-agent",
       payload: { name: "Test" },
     });
     expect(res.statusCode).toBe(201);
@@ -177,10 +177,10 @@ describe("key validation", () => {
 
   // The cap is 64 characters, uniformly on every key kind.
   it("a key longer than 64 characters is rejected 422 naming the cap", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     const res = await app.inject({
       method: "PUT",
-      url: `/api/model/ontologies/test_onto/ai-agents/${"k".repeat(65)}`,
+      url: `/api/ontologies/onto/model/lenses/test_lens/ai-agents/${"k".repeat(65)}`,
       payload: { name: "Test" },
     });
     expect(res.statusCode).toBe(422);
@@ -189,24 +189,24 @@ describe("key validation", () => {
   });
 
   it("a key of exactly 64 characters is accepted", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     holder.store.upsertAiAgent.mockResolvedValue([
       { ...MOCK_AGENT, key: "k".repeat(64) },
       true,
     ]);
     const res = await app.inject({
       method: "PUT",
-      url: `/api/model/ontologies/test_onto/ai-agents/${"k".repeat(64)}`,
+      url: `/api/ontologies/onto/model/lenses/test_lens/ai-agents/${"k".repeat(64)}`,
       payload: { name: "Test" },
     });
     expect(res.statusCode).toBe(201);
   });
 
   it("the reserved '_default' key is rejected 422", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/ontologies/test_onto/ai-agents/_default",
+      url: "/api/ontologies/onto/model/lenses/test_lens/ai-agents/_default",
       payload: { name: "Test" },
     });
     expect(res.statusCode).toBe(422);
@@ -215,10 +215,10 @@ describe("key validation", () => {
 
 describe("tool allowlist validation", () => {
   it("an unknown tool name is rejected and the error names the valid set", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/ontologies/test_onto/ai-agents/my-agent",
+      url: "/api/ontologies/onto/model/lenses/test_lens/ai-agents/my-agent",
       payload: { name: "Test", tools: ["nonexistent_tool"] },
     });
     expect(res.statusCode).toBe(422);
@@ -250,22 +250,22 @@ describe("tool allowlist validation", () => {
   });
 
   it("a valid tool name is accepted", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     holder.store.upsertAiAgent.mockResolvedValue([MOCK_AGENT, true]);
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/ontologies/test_onto/ai-agents/my-agent",
+      url: "/api/ontologies/onto/model/lenses/test_lens/ai-agents/my-agent",
       payload: { name: "Test", tools: ["get_schema"] },
     });
     expect(res.statusCode).toBe(201);
   });
 
   it("tools=null means 'all available tools' and is accepted", async () => {
-    holder.store.getOntologyByKey.mockResolvedValue(MOCK_ONTOLOGY);
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     holder.store.upsertAiAgent.mockResolvedValue([{ ...MOCK_AGENT, tools: null }, true]);
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/ontologies/test_onto/ai-agents/my-agent",
+      url: "/api/ontologies/onto/model/lenses/test_lens/ai-agents/my-agent",
       payload: { name: "Test", tools: null },
     });
     expect(res.statusCode).toBe(201);
@@ -275,8 +275,8 @@ describe("tool allowlist validation", () => {
 
 describe("cascading delete", () => {
   it("deleting the lens deletes its agents (handled by the store)", async () => {
-    holder.store.deleteOntology.mockResolvedValue(true);
-    const res = await app.inject({ method: "DELETE", url: "/api/model/ontologies/ont-1" });
+    holder.store.deleteLens.mockResolvedValue(true);
+    const res = await app.inject({ method: "DELETE", url: "/api/ontologies/onto/model/lenses/lens-1" });
     expect(res.statusCode).toBe(204);
   });
 });

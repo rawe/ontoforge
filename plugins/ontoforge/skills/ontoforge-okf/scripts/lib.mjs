@@ -43,6 +43,18 @@ export function getBaseUrl() {
 }
 
 /**
+ * Route prefix for the bundle's instance data: its ontology, seen through its
+ * lens. Both keys come from okf.config.json, and taking them from one place
+ * keeps the two from being swapped at a call site.
+ */
+export function runtimePath(config) {
+  return (
+    `/api/ontologies/${encodeURIComponent(config.ontology)}` +
+    `/runtime/lenses/${encodeURIComponent(config.lens)}`
+  );
+}
+
+/**
  * Make an API request. Throws on non-2xx responses.
  */
 export async function api(baseUrl, path, options = {}) {
@@ -108,16 +120,13 @@ export function resolveBundleContext(startDir) {
 }
 
 /**
- * Fetch the entity types the config maps to, keyed by entity type key.
- * A mapped type missing from the ontology is a config error, reported with
- * every offender at once.
+ * Fetch the entity types the config maps to, keyed by entity type key. The
+ * lens decides what is visible, so a mapped type the lens does not expose is
+ * a config error, reported with every offender at once.
  * @returns {Promise<Map<string, object>>}
  */
-export async function loadMappedTypes(baseUrl, ontologyKey, config, configPath) {
-  const all = await api(
-    baseUrl,
-    `/api/runtime/${encodeURIComponent(ontologyKey)}/schema/entity-types`,
-  );
+export async function loadMappedTypes(baseUrl, config, configPath) {
+  const all = await api(baseUrl, `${runtimePath(config)}/schema/entity-types`);
   const byKey = new Map(all.map((et) => [et.key, et]));
   const mapped = new Map();
   const missing = [];
@@ -128,9 +137,10 @@ export async function loadMappedTypes(baseUrl, ontologyKey, config, configPath) 
   }
   if (missing.length) {
     throw new Error(
-      `ontology "${ontologyKey}" has no entity type ${missing.map((k) => `"${k}"`).join(', ')} ` +
-        `— create ${missing.length > 1 ? 'them' : 'it'} or correct "typeMap" in ${configPath} ` +
-        '(see references/setup.md)',
+      `lens "${config.lens}" of ontology "${config.ontology}" exposes no entity type ` +
+        `${missing.map((k) => `"${k}"`).join(', ')} — create ${missing.length > 1 ? 'them' : 'it'}, ` +
+        `add ${missing.length > 1 ? 'them' : 'it'} to the lens, or correct "typeMap" in ` +
+        `${configPath} (see references/setup.md)`,
     );
   }
   return mapped;
@@ -142,11 +152,11 @@ export async function loadMappedTypes(baseUrl, ontologyKey, config, configPath) 
  * resolve it the same way.
  * @returns {Promise<Array<{ entityTypeKey: string, id: string }>>}
  */
-export async function findByConceptId(baseUrl, ontologyKey, config, mappedTypes, conceptId) {
+export async function findByConceptId(baseUrl, config, mappedTypes, conceptId) {
   const matches = [];
   for (const entityTypeKey of mappedTypes.keys()) {
     const path =
-      `/api/runtime/${encodeURIComponent(ontologyKey)}/entities/${encodeURIComponent(entityTypeKey)}` +
+      `${runtimePath(config)}/entities/${encodeURIComponent(entityTypeKey)}` +
       `?filter.${encodeURIComponent(config.conceptIdProperty)}=${encodeURIComponent(conceptId)}&limit=2&fields=_id`;
     const page = await api(baseUrl, path);
     for (const item of page.items) matches.push({ entityTypeKey, id: item._id });
@@ -158,11 +168,11 @@ export async function findByConceptId(baseUrl, ontologyKey, config, mappedTypes,
  * Fetch an entity with raw property values (document properties included,
  * not stubs) by projecting every declared property.
  */
-export async function fetchEntityRaw(baseUrl, ontologyKey, entityType, entityId) {
+export async function fetchEntityRaw(baseUrl, config, entityType, entityId) {
   const fields = (entityType.properties || []).map((p) => p.key);
   const query = fields.map((f) => `fields=${encodeURIComponent(f)}`).join('&');
   const path =
-    `/api/runtime/${encodeURIComponent(ontologyKey)}/entities/${encodeURIComponent(entityType.key)}` +
+    `${runtimePath(config)}/entities/${encodeURIComponent(entityType.key)}` +
     `/${encodeURIComponent(entityId)}?${query}`;
   return api(baseUrl, path);
 }

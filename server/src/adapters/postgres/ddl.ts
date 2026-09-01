@@ -1,12 +1,19 @@
 /**
  * Init DDL and the vector-index lifecycle.
  *
- * `initSchema` runs the whole ten-table set — schema side and instance
- * side together — as one all-or-nothing transaction at adapter init.
- * Idempotence rides `CREATE TABLE IF NOT EXISTS` with all constraints
- * inline and explicitly named (PG has no `ADD CONSTRAINT IF NOT EXISTS`);
- * no fixed constraint or index name uses the `vec_` prefix, which is
- * reserved for the dynamically created vector indexes.
+ * `initSchema` runs the server-wide DDL — the pgvector extension and the
+ * `public.ontology` registry table — as one all-or-nothing transaction at
+ * adapter init. The ten-table set is ontology-scoped and runs only at
+ * ontology creation, inside the fresh `ont_<key>` namespace
+ * (`registry.ts`). Idempotence rides `CREATE TABLE IF NOT EXISTS` with
+ * all constraints inline and explicitly named (PG has no
+ * `ADD CONSTRAINT IF NOT EXISTS`); no fixed constraint or index name uses
+ * the `vec_` prefix, which is reserved for the dynamically created vector
+ * indexes.
+ *
+ * The vector-lifecycle functions take the caller's bound `namespace` and
+ * run their transactions inside it, so index DDL and catalog reads
+ * (`current_schema()`) resolve within that ontology alone.
  *
  * The DDL carries structure only — identity, referential integrity,
  * exactly-one-owner, uniqueness. Business rules validate in the service,
@@ -29,16 +36,38 @@ import type { Querier } from "./errors.js";
 import { withTransaction } from "./errors.js";
 import { quoteIdent } from "./oql/bindings.js";
 
-/** Executed in order at adapter init, idempotent. */
-const DDL_STATEMENTS: string[] = [
+/**
+ * Server-wide DDL, executed at adapter init only: the pgvector extension
+ * and the `public` home — the ontology registry. Always
+ * schema-qualified, because `public` is the fixed server-wide home
+ * regardless of any search path.
+ */
+const SERVER_DDL_STATEMENTS: string[] = [
   `CREATE EXTENSION IF NOT EXISTS vector`,
 
+  `CREATE TABLE IF NOT EXISTS public.ontology (
+  ontology_id  uuid        CONSTRAINT ontology_pk PRIMARY KEY,   -- caller-supplied, no default
+  key          text        NOT NULL CONSTRAINT ontology_key_unique UNIQUE,
+  display_name text        CONSTRAINT ontology_display_name_unique UNIQUE,  -- nullable: absent names never collide
+  namespace    text        NOT NULL,   -- the ontology's physical home, ont_<key>
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  updated_at   timestamptz NOT NULL DEFAULT now()
+)`,
+];
+
+/**
+ * The ten-table set one ontology lives in. Deliberately unqualified —
+ * namespace-relocatable: ontology creation runs it inside a fresh
+ * `ont_<key>` namespace via the transaction's search path
+ * (`registry.ts`).
+ */
+export const ONTOLOGY_DDL_STATEMENTS: string[] = [
   // --- Schema side -------------------------------------------------------
 
-  `CREATE TABLE IF NOT EXISTS ontology (
-  ontology_id  uuid        CONSTRAINT ontology_pk PRIMARY KEY,   -- caller-supplied, no default
-  key          text        NOT NULL CONSTRAINT ontology_key_unique  UNIQUE,
-  name         text        NOT NULL CONSTRAINT ontology_name_unique UNIQUE,
+  `CREATE TABLE IF NOT EXISTS lens (
+  lens_id      uuid        CONSTRAINT lens_pk PRIMARY KEY,   -- caller-supplied, no default
+  key          text        NOT NULL CONSTRAINT lens_key_unique  UNIQUE,
+  name         text        NOT NULL CONSTRAINT lens_name_unique UNIQUE,
   description  text,
   created_at   timestamptz NOT NULL DEFAULT now(),
   updated_at   timestamptz NOT NULL DEFAULT now()
@@ -85,23 +114,23 @@ const DDL_STATEMENTS: string[] = [
   CONSTRAINT property_def_relation_key_unique UNIQUE (relation_type_id, key)
 )`,
 
-  `CREATE TABLE IF NOT EXISTS ontology_includes (
-  ontology_id      uuid   NOT NULL CONSTRAINT ontology_includes_ontology_fk
-                          REFERENCES ontology (ontology_id) ON DELETE CASCADE,
-  entity_type_id   uuid   CONSTRAINT ontology_includes_entity_type_fk
+  `CREATE TABLE IF NOT EXISTS lens_includes (
+  lens_id          uuid   NOT NULL CONSTRAINT lens_includes_lens_fk
+                          REFERENCES lens (lens_id) ON DELETE CASCADE,
+  entity_type_id   uuid   CONSTRAINT lens_includes_entity_type_fk
                           REFERENCES entity_type (entity_type_id) ON DELETE CASCADE,
-  relation_type_id uuid   CONSTRAINT ontology_includes_relation_type_fk
+  relation_type_id uuid   CONSTRAINT lens_includes_relation_type_fk
                           REFERENCES relation_type (relation_type_id) ON DELETE CASCADE,
   properties       text[],  -- NULL = all properties; '{}' = none. The distinction is contract.
-  CONSTRAINT ontology_includes_one_type CHECK (num_nonnulls(entity_type_id, relation_type_id) = 1),
-  CONSTRAINT ontology_includes_entity_unique   UNIQUE (ontology_id, entity_type_id),
-  CONSTRAINT ontology_includes_relation_unique UNIQUE (ontology_id, relation_type_id)
+  CONSTRAINT lens_includes_one_type CHECK (num_nonnulls(entity_type_id, relation_type_id) = 1),
+  CONSTRAINT lens_includes_entity_unique   UNIQUE (lens_id, entity_type_id),
+  CONSTRAINT lens_includes_relation_unique UNIQUE (lens_id, relation_type_id)
 )`, // no timestamps, no PK
 
   `CREATE TABLE IF NOT EXISTS ai_agent_config (
   agent_config_id uuid        CONSTRAINT ai_agent_config_pk PRIMARY KEY,
-  ontology_id     uuid        NOT NULL CONSTRAINT ai_agent_config_ontology_fk
-                              REFERENCES ontology (ontology_id) ON DELETE CASCADE,
+  lens_id         uuid        NOT NULL CONSTRAINT ai_agent_config_lens_fk
+                              REFERENCES lens (lens_id) ON DELETE CASCADE,
   key             text        NOT NULL,
   name            text        NOT NULL,
   description     text,
@@ -109,14 +138,14 @@ const DDL_STATEMENTS: string[] = [
   tools           text[],     -- NULL = all tools
   created_at      timestamptz NOT NULL DEFAULT now(),
   updated_at      timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT ai_agent_config_key_unique UNIQUE (ontology_id, key)   -- upsert arbiter
+  CONSTRAINT ai_agent_config_key_unique UNIQUE (lens_id, key)   -- upsert arbiter
 )`,
 
   `CREATE TABLE IF NOT EXISTS saved_query (
   saved_query_id uuid        CONSTRAINT saved_query_pk PRIMARY KEY,
-  ontology_id    uuid        NOT NULL CONSTRAINT saved_query_ontology_fk
-                             REFERENCES ontology (ontology_id) ON DELETE CASCADE,
-  ontology_key   text,       -- denormalized (normative, Part 1); nullable
+  lens_id        uuid        NOT NULL CONSTRAINT saved_query_lens_fk
+                             REFERENCES lens (lens_id) ON DELETE CASCADE,
+  lens_key       text,       -- denormalized (normative, Part 1); nullable
   key            text        NOT NULL,
   name           text        NOT NULL,
   description    text        NOT NULL,
@@ -125,7 +154,7 @@ const DDL_STATEMENTS: string[] = [
   embedding      vector,                -- description embedding; width policed by the index
   created_at     timestamptz NOT NULL DEFAULT now(),
   updated_at     timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT saved_query_key_unique UNIQUE (ontology_id, key)        -- upsert arbiter
+  CONSTRAINT saved_query_key_unique UNIQUE (lens_id, key)        -- upsert arbiter
 )`,
 
   // --- Instance side -----------------------------------------------------
@@ -169,10 +198,12 @@ const DDL_STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS document_chunk_entity_property_idx ON document_chunk (entity_id, property_key)`,
 ];
 
-/** Create every table and index if absent, in one transaction. */
+/** Create the server-wide objects if absent, in one transaction. Boot
+ * DDL creates nothing ontology-scoped — ontologies are provisioned by
+ * the registry, each in its own namespace. */
 export async function initSchema(): Promise<void> {
   await withTransaction(async (querier) => {
-    for (const statement of DDL_STATEMENTS) {
+    for (const statement of SERVER_DDL_STATEMENTS) {
       await querier.query(statement);
     }
   });
@@ -302,7 +333,7 @@ const CROSS_TYPE_SPEC: IndexSpec = {
   predicate: null,
 };
 
-/** Saved-query descriptions. Ontology scoping is a plain query-time
+/** Saved-query descriptions. Lens scoping is a plain query-time
  * predicate, so the index needs no scoping of its own. */
 const SAVED_QUERY_SPEC: IndexSpec = {
   name: SAVED_QUERY_INDEX,
@@ -317,6 +348,15 @@ function createHnsw(spec: IndexSpec, dimensions: number): string {
     `CREATE INDEX IF NOT EXISTS ${spec.name} ON ${spec.table} ` +
     `USING hnsw ((${castExpression(dimensions)}) vector_cosine_ops)${where}`
   );
+}
+
+/**
+ * The two fixed vector indexes as CREATE statements, unqualified like the
+ * ten-table DDL: ontology provisioning runs them inside the fresh
+ * namespace's search path (`registry.ts`).
+ */
+export function fixedVectorIndexStatements(dimensions: number): string[] {
+  return [createHnsw(CROSS_TYPE_SPEC, dimensions), createHnsw(SAVED_QUERY_SPEC, dimensions)];
 }
 
 /** Drop one index. Callers pass a plain name — derived from a schema row
@@ -358,49 +398,39 @@ export async function indexWidth(querier: Querier, indexName: string): Promise<n
 }
 
 /**
- * Handle an existing index whose width no longer matches the model.
+ * Report an existing index whose width no longer matches the model.
  *
  * An index fixes its width when it is created and a create-if-absent is a
  * no-op against one that exists, so changing the embedding model leaves
- * an index that rejects every vector the new model produces. On the
- * startup and per-type create paths this only reports: dropping an index
- * destroys the vectors it holds, and that is the operator's call. The
- * rebuild path passes `recreateOnMismatch`, because there the drop is
- * followed immediately by regeneration at the new width.
+ * an index that rejects every vector the new model produces. Every path
+ * that creates only reports it: repairing means dropping, and dropping
+ * is the operator's call, made through the rebuild
+ * (`dropMismatchedVectorIndexes`).
  *
  * Only the detection is here. What the operator is told — the wording
  * and the API-scope vocabulary every backend shares — is
  * `core/vectorDrift.ts`.
  */
-async function reconcileIndexWidth(
+async function reportIfWidthDrifted(
   querier: Querier,
   indexName: string,
   describes: string,
   dimensions: number,
-  recreateOnMismatch: boolean,
 ): Promise<void> {
   const existing = await indexWidth(querier, indexName);
   if (existing === null || existing === dimensions) {
     return;
   }
-
-  if (!recreateOnMismatch) {
-    reportWidthMismatch(describes, existing, dimensions);
-    return;
-  }
-
-  await dropIndex(querier, indexName);
-  reportWidthRecreate(describes, existing, dimensions);
+  reportWidthMismatch(describes, existing, dimensions);
 }
 
-/** Reconcile the width of an index, then create it if absent. */
+/** Report a drifted width, then create the index if it is absent. */
 async function ensureIndex(
   querier: Querier,
   spec: IndexSpec,
   dimensions: number,
-  recreateOnMismatch: boolean,
 ): Promise<void> {
-  await reconcileIndexWidth(querier, spec.name, spec.describes, dimensions, recreateOnMismatch);
+  await reportIfWidthDrifted(querier, spec.name, spec.describes, dimensions);
   await querier.query(createHnsw(spec, dimensions));
 }
 
@@ -530,14 +560,19 @@ export async function createVectorIndex(
   entityTypeKey: string,
   dimensions: number,
   _filterProperties?: string[] | null,
+  namespace?: string,
 ): Promise<void> {
-  await withTransaction(async (querier) => {
-    const entityTypeId = await entityTypeIdOf(querier, entityTypeKey);
-    if (entityTypeId === null) {
-      return;
-    }
-    await ensureIndex(querier, entityIndexSpec(entityTypeId, entityTypeKey), dimensions, false);
-  });
+  await withTransaction(
+    async (querier) => {
+      const entityTypeId = await entityTypeIdOf(querier, entityTypeKey);
+      if (entityTypeId === null) {
+        return;
+      }
+      await ensureIndex(querier, entityIndexSpec(entityTypeId, entityTypeKey), dimensions);
+    },
+    "READ COMMITTED",
+    namespace,
+  );
 }
 
 /**
@@ -547,14 +582,18 @@ export async function createVectorIndex(
  * deleted the row leave the index behind as an orphan — `ensureVectorIndexes`
  * sweeps it on the next startup or rebuild.
  */
-export async function dropVectorIndex(entityTypeKey: string): Promise<void> {
-  await withTransaction(async (querier) => {
-    const entityTypeId = await entityTypeIdOf(querier, entityTypeKey);
-    if (entityTypeId === null) {
-      return;
-    }
-    await dropIndex(querier, entityIndexName(entityTypeId));
-  });
+export async function dropVectorIndex(entityTypeKey: string, namespace?: string): Promise<void> {
+  await withTransaction(
+    async (querier) => {
+      const entityTypeId = await entityTypeIdOf(querier, entityTypeKey);
+      if (entityTypeId === null) {
+        return;
+      }
+      await dropIndex(querier, entityIndexName(entityTypeId));
+    },
+    "READ COMMITTED",
+    namespace,
+  );
 }
 
 /**
@@ -568,18 +607,23 @@ export async function dropVectorIndex(entityTypeKey: string): Promise<void> {
 export async function rebuildVectorIndex(
   entityTypeKey: string,
   dimensions: number,
+  namespace?: string,
 ): Promise<void> {
-  await withTransaction(async (querier) => {
-    const entityTypeId = await entityTypeIdOf(querier, entityTypeKey);
-    if (entityTypeId === null) {
-      return;
-    }
-    const spec = entityIndexSpec(entityTypeId, entityTypeKey);
-    await dropIndex(querier, spec.name);
-    // Not `ensureIndex`: the index is gone, so there is nothing left to
-    // reconcile — only a catalog read that could answer nothing.
-    await querier.query(createHnsw(spec, dimensions));
-  });
+  await withTransaction(
+    async (querier) => {
+      const entityTypeId = await entityTypeIdOf(querier, entityTypeKey);
+      if (entityTypeId === null) {
+        return;
+      }
+      const spec = entityIndexSpec(entityTypeId, entityTypeKey);
+      await dropIndex(querier, spec.name);
+      // Not `ensureIndex`: the index is gone, so there is nothing left to
+      // reconcile — only a catalog read that could answer nothing.
+      await querier.query(createHnsw(spec, dimensions));
+    },
+    "READ COMMITTED",
+    namespace,
+  );
 }
 
 /** Create the chunk vector index of one document property. */
@@ -587,19 +631,19 @@ export async function createDocumentVectorIndex(
   entityTypeKey: string,
   propertyKey: string,
   dimensions: number,
+  namespace?: string,
 ): Promise<void> {
-  await withTransaction(async (querier) => {
-    const propertyId = await documentPropertyIdOf(querier, entityTypeKey, propertyKey);
-    if (propertyId === null) {
-      return;
-    }
-    await ensureIndex(
-      querier,
-      chunkIndexSpec(propertyId, entityTypeKey, propertyKey),
-      dimensions,
-      false,
-    );
-  });
+  await withTransaction(
+    async (querier) => {
+      const propertyId = await documentPropertyIdOf(querier, entityTypeKey, propertyKey);
+      if (propertyId === null) {
+        return;
+      }
+      await ensureIndex(querier, chunkIndexSpec(propertyId, entityTypeKey, propertyKey), dimensions);
+    },
+    "READ COMMITTED",
+    namespace,
+  );
 }
 
 /** Drop the chunk vector index of one document property. As with
@@ -608,70 +652,129 @@ export async function createDocumentVectorIndex(
 export async function dropDocumentVectorIndex(
   entityTypeKey: string,
   propertyKey: string,
+  namespace?: string,
 ): Promise<void> {
-  await withTransaction(async (querier) => {
-    const propertyId = await documentPropertyIdOf(querier, entityTypeKey, propertyKey);
-    if (propertyId === null) {
-      return;
-    }
-    await dropIndex(querier, chunkIndexName(propertyId));
-  });
+  await withTransaction(
+    async (querier) => {
+      const propertyId = await documentPropertyIdOf(querier, entityTypeKey, propertyKey);
+      if (propertyId === null) {
+        return;
+      }
+      await dropIndex(querier, chunkIndexName(propertyId));
+    },
+    "READ COMMITTED",
+    namespace,
+  );
 }
 
 /** Ensure the saved-query description index exists. */
-export async function ensureSavedQueryVectorIndex(dimensions: number): Promise<void> {
-  await withTransaction(async (querier) => {
-    await ensureIndex(querier, SAVED_QUERY_SPEC, dimensions, false);
-  });
+export async function ensureSavedQueryVectorIndex(
+  dimensions: number,
+  namespace?: string,
+): Promise<void> {
+  await withTransaction(
+    async (querier) => {
+      await ensureIndex(querier, SAVED_QUERY_SPEC, dimensions);
+    },
+    "READ COMMITTED",
+    namespace,
+  );
+}
+
+/**
+ * Every semantic index the schema calls for, handed to a visitor one at
+ * a time: the per-type indexes, the chunk index of every document
+ * property, the cross-type index, and the saved-query index.
+ *
+ * A rebuild walks this twice — once to drop what has drifted, once to
+ * build what is missing — and the two passes have to agree on the
+ * inventory exactly, or an index dropped by the first would never come
+ * back. So it is derived once, here.
+ */
+async function forEachIndexSpec(
+  querier: Querier,
+  visit: (spec: IndexSpec) => Promise<void>,
+): Promise<void> {
+  const entityTypes = await querier.query(
+    `SELECT entity_type_id, key FROM entity_type ORDER BY key`,
+  );
+  for (const row of entityTypes.rows) {
+    await visit(entityIndexSpec(row["entity_type_id"] as string, row["key"] as string));
+  }
+
+  const documentProperties = await querier.query(
+    `SELECT p.property_id, p.key AS property_key, et.key AS entity_type_key
+     ${DOCUMENT_PROPERTY_ROWS}
+     ORDER BY et.key, p.key`,
+  );
+  for (const row of documentProperties.rows) {
+    await visit(
+      chunkIndexSpec(
+        row["property_id"] as string,
+        row["entity_type_key"] as string,
+        row["property_key"] as string,
+      ),
+    );
+  }
+
+  await visit(CROSS_TYPE_SPEC);
+  await visit(SAVED_QUERY_SPEC);
 }
 
 /**
  * Ensure the whole vector-index inventory, in one all-or-nothing
- * transaction: sweep the orphans, then reconcile and create the per-type
- * indexes, the chunk indexes of every document property, the cross-type
- * index, and the saved-query index.
+ * transaction: sweep the orphans, then create every index the schema
+ * calls for and does not have. A drifted width is reported, never
+ * repaired.
  *
- * `recreateOnMismatch` is the rebuild path's flag — the one path allowed
- * to repair a width mismatch, because it regenerates the vectors it drops.
+ * An index is built over `embedding::vector(D)`, and the cast is
+ * evaluated per row — so this succeeds only while every stored vector is
+ * already `dimensions` wide. After a switch of embedding model that is
+ * true only once the rebuild has regenerated them.
  */
 export async function ensureVectorIndexes(
   dimensions: number,
-  recreateOnMismatch = false,
+  namespace?: string,
 ): Promise<void> {
-  await withTransaction(async (querier) => {
-    await sweepOrphanIndexes(querier);
+  await withTransaction(
+    async (querier) => {
+      await sweepOrphanIndexes(querier);
+      await forEachIndexSpec(querier, (spec) => ensureIndex(querier, spec, dimensions));
+    },
+    "READ COMMITTED",
+    namespace,
+  );
+}
 
-    const entityTypes = await querier.query(
-      `SELECT entity_type_id, key FROM entity_type ORDER BY key`,
-    );
-    for (const row of entityTypes.rows) {
-      await ensureIndex(
-        querier,
-        entityIndexSpec(row["entity_type_id"] as string, row["key"] as string),
-        dimensions,
-        recreateOnMismatch,
-      );
-    }
-
-    const documentProperties = await querier.query(
-      `SELECT p.property_id, p.key AS property_key, et.key AS entity_type_key
-     ${DOCUMENT_PROPERTY_ROWS}
-     ORDER BY et.key, p.key`,
-    );
-    for (const row of documentProperties.rows) {
-      await ensureIndex(
-        querier,
-        chunkIndexSpec(
-          row["property_id"] as string,
-          row["entity_type_key"] as string,
-          row["property_key"] as string,
-        ),
-        dimensions,
-        recreateOnMismatch,
-      );
-    }
-
-    await ensureIndex(querier, CROSS_TYPE_SPEC, dimensions, recreateOnMismatch);
-    await ensureIndex(querier, SAVED_QUERY_SPEC, dimensions, recreateOnMismatch);
-  });
+/**
+ * Drop every index whose width no longer matches the model — the
+ * rebuild's first phase.
+ *
+ * It has to be a phase of its own. The index casts each row to its own
+ * width, so while a drifted index stands, writing a vector of the
+ * model's width fails: the vectors cannot be regenerated underneath it,
+ * and it cannot be rebuilt over the old ones. Drop first, regenerate,
+ * then `ensureVectorIndexes`.
+ *
+ * An index that is already the right width is left alone, so a rebuild
+ * without drift never loses one.
+ */
+export async function dropMismatchedVectorIndexes(
+  dimensions: number,
+  namespace?: string,
+): Promise<void> {
+  await withTransaction(
+    async (querier) => {
+      await forEachIndexSpec(querier, async (spec) => {
+        const existing = await indexWidth(querier, spec.name);
+        if (existing === null || existing === dimensions) {
+          return;
+        }
+        await dropIndex(querier, spec.name);
+        reportWidthRecreate(spec.describes, existing, dimensions);
+      });
+    },
+    "READ COMMITTED",
+    namespace,
+  );
 }

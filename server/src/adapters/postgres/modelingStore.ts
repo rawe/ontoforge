@@ -37,15 +37,15 @@ import { toSql } from "pgvector";
 import type { ModelingStore, ReservedTypeKeyInUse, Row } from "../../core/ports.js";
 import type { TypeKind } from "../../core/schemas.js";
 import * as vectorDdl from "./ddl.js";
-import { runQuery, withTransaction } from "./errors.js";
+import { runQuery, withTransaction, type DbResult, type IsolationLevel, type Querier } from "./errors.js";
 import { camelizeRow, camelizeRows, isUuid } from "./rows.js";
-import { ONTOLOGY_COLS, readTypesWithProperties, splitInclusions } from "./schemaRead.js";
+import { LENS_COLS, readTypesWithProperties, splitInclusions } from "./schemaRead.js";
 
 const NO_RESERVED_KEYS: ReadonlySet<string> = new Set();
 
 // Read column lists — the port-visible shape of each object; owner ids,
 // denormalized keys, and embeddings stay out of returned rows.
-// (`ONTOLOGY_COLS` comes from `schemaRead.ts`, shared with the runtime store.)
+// (`LENS_COLS` comes from `schemaRead.ts`, shared with the runtime store.)
 const ENTITY_TYPE_COLS = "entity_type_id, key, display_name, description, created_at, updated_at";
 const RELATION_TYPE_COLS =
   "relation_type_id, key, display_name, description, " +
@@ -102,6 +102,23 @@ function toIncludeRow(row: Row): Row {
 }
 
 export class PostgresModelingStore implements ModelingStore {
+  /** Bound to one ontology's namespace; unbound (tests only) runs against
+   * the connection's default namespace. */
+  constructor(private readonly namespace?: string) {}
+
+  /** Door one, carrying this store's binding. */
+  private query(text: string, params?: unknown[]): Promise<DbResult> {
+    return runQuery(text, params, this.namespace);
+  }
+
+  /** Door two, carrying this store's binding. */
+  private tx<T>(
+    work: (querier: Querier) => Promise<T>,
+    isolation: IsolationLevel = "READ COMMITTED",
+  ): Promise<T> {
+    return withTransaction(work, isolation, this.namespace);
+  }
+
   // ------------------------------------------------------------------
   // Reserved keys
   // ------------------------------------------------------------------
@@ -119,78 +136,78 @@ export class PostgresModelingStore implements ModelingStore {
   }
 
   // ------------------------------------------------------------------
-  // Ontologies
+  // Lenses
   // ------------------------------------------------------------------
 
-  async createOntology(
-    ontologyId: string,
+  async createLens(
+    lensId: string,
     key: string,
     name: string,
     description: string | null,
   ): Promise<Row> {
-    const result = await runQuery(
-      `INSERT INTO ontology (ontology_id, key, name, description)
+    const result = await this.query(
+      `INSERT INTO lens (lens_id, key, name, description)
        VALUES ($1, $2, $3, $4)
-       RETURNING ${ONTOLOGY_COLS}`,
-      [ontologyId, key, name, description],
+       RETURNING ${LENS_COLS}`,
+      [lensId, key, name, description],
     );
     return camelizeRow(result.rows[0]!);
   }
 
-  async listOntologies(): Promise<Row[]> {
-    const result = await runQuery(`SELECT ${ONTOLOGY_COLS} FROM ontology ORDER BY name`);
+  async listLenses(): Promise<Row[]> {
+    const result = await this.query(`SELECT ${LENS_COLS} FROM lens ORDER BY name`);
     return camelizeRows(result.rows);
   }
 
-  async getOntology(ontologyId: string): Promise<Row | null> {
-    if (!isUuid(ontologyId)) {
+  async getLens(lensId: string): Promise<Row | null> {
+    if (!isUuid(lensId)) {
       return null;
     }
-    const result = await runQuery(
-      `SELECT ${ONTOLOGY_COLS} FROM ontology WHERE ontology_id = $1`,
-      [ontologyId],
+    const result = await this.query(
+      `SELECT ${LENS_COLS} FROM lens WHERE lens_id = $1`,
+      [lensId],
     );
     return firstRowOrNull(result.rows);
   }
 
-  async getOntologyByName(name: string): Promise<Row | null> {
-    const result = await runQuery(`SELECT ${ONTOLOGY_COLS} FROM ontology WHERE name = $1`, [
+  async getLensByName(name: string): Promise<Row | null> {
+    const result = await this.query(`SELECT ${LENS_COLS} FROM lens WHERE name = $1`, [
       name,
     ]);
     return firstRowOrNull(result.rows);
   }
 
-  async getOntologyByKey(key: string): Promise<Row | null> {
-    const result = await runQuery(`SELECT ${ONTOLOGY_COLS} FROM ontology WHERE key = $1`, [key]);
+  async getLensByKey(key: string): Promise<Row | null> {
+    const result = await this.query(`SELECT ${LENS_COLS} FROM lens WHERE key = $1`, [key]);
     return firstRowOrNull(result.rows);
   }
 
-  async updateOntology(
-    ontologyId: string,
+  async updateLens(
+    lensId: string,
     name: string | null,
     description: string | null,
   ): Promise<Row | null> {
-    if (!isUuid(ontologyId)) {
+    if (!isUuid(lensId)) {
       return null;
     }
-    const params: unknown[] = [ontologyId];
+    const params: unknown[] = [lensId];
     const sets = buildUpdateSets(params, [
       ["name", name],
       ["description", description],
     ]);
-    const result = await runQuery(
-      `UPDATE ontology SET ${sets.join(", ")} WHERE ontology_id = $1 RETURNING ${ONTOLOGY_COLS}`,
+    const result = await this.query(
+      `UPDATE lens SET ${sets.join(", ")} WHERE lens_id = $1 RETURNING ${LENS_COLS}`,
       params,
     );
     return firstRowOrNull(result.rows);
   }
 
   /** One `DELETE`: agents, saved queries and inclusions go via CASCADE. */
-  async deleteOntology(ontologyId: string): Promise<boolean> {
-    if (!isUuid(ontologyId)) {
+  async deleteLens(lensId: string): Promise<boolean> {
+    if (!isUuid(lensId)) {
       return false;
     }
-    const result = await runQuery(`DELETE FROM ontology WHERE ontology_id = $1`, [ontologyId]);
+    const result = await this.query(`DELETE FROM lens WHERE lens_id = $1`, [lensId]);
     return result.rowCount > 0;
   }
 
@@ -204,7 +221,7 @@ export class PostgresModelingStore implements ModelingStore {
     displayName: string,
     description: string | null,
   ): Promise<Row> {
-    const result = await runQuery(
+    const result = await this.query(
       `INSERT INTO entity_type (entity_type_id, key, display_name, description)
        VALUES ($1, $2, $3, $4)
        RETURNING ${ENTITY_TYPE_COLS}`,
@@ -214,7 +231,7 @@ export class PostgresModelingStore implements ModelingStore {
   }
 
   async listEntityTypes(): Promise<Row[]> {
-    const result = await runQuery(`SELECT ${ENTITY_TYPE_COLS} FROM entity_type ORDER BY key`);
+    const result = await this.query(`SELECT ${ENTITY_TYPE_COLS} FROM entity_type ORDER BY key`);
     return camelizeRows(result.rows);
   }
 
@@ -222,7 +239,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(entityTypeId)) {
       return null;
     }
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT ${ENTITY_TYPE_COLS} FROM entity_type WHERE entity_type_id = $1`,
       [entityTypeId],
     );
@@ -230,7 +247,7 @@ export class PostgresModelingStore implements ModelingStore {
   }
 
   async getEntityTypeByKey(key: string): Promise<Row | null> {
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT ${ENTITY_TYPE_COLS} FROM entity_type WHERE key = $1`,
       [key],
     );
@@ -250,7 +267,7 @@ export class PostgresModelingStore implements ModelingStore {
       ["display_name", displayName],
       ["description", description],
     ]);
-    const result = await runQuery(
+    const result = await this.query(
       `UPDATE entity_type SET ${sets.join(", ")}
        WHERE entity_type_id = $1 RETURNING ${ENTITY_TYPE_COLS}`,
       params,
@@ -264,7 +281,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(entityTypeId)) {
       return false;
     }
-    const result = await runQuery(`DELETE FROM entity_type WHERE entity_type_id = $1`, [
+    const result = await this.query(`DELETE FROM entity_type WHERE entity_type_id = $1`, [
       entityTypeId,
     ]);
     return result.rowCount > 0;
@@ -274,7 +291,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(entityTypeId)) {
       return false;
     }
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT EXISTS (
          SELECT 1
          FROM relation_type rt
@@ -299,7 +316,7 @@ export class PostgresModelingStore implements ModelingStore {
     sourceEntityTypeKey: string,
     targetEntityTypeKey: string,
   ): Promise<Row> {
-    const result = await runQuery(
+    const result = await this.query(
       `INSERT INTO relation_type
          (relation_type_id, key, display_name, description,
           source_entity_type_key, target_entity_type_key)
@@ -311,7 +328,7 @@ export class PostgresModelingStore implements ModelingStore {
   }
 
   async listRelationTypes(): Promise<Row[]> {
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT ${RELATION_TYPE_COLS} FROM relation_type ORDER BY key`,
     );
     return camelizeRows(result.rows);
@@ -321,7 +338,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(relationTypeId)) {
       return null;
     }
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT ${RELATION_TYPE_COLS} FROM relation_type WHERE relation_type_id = $1`,
       [relationTypeId],
     );
@@ -329,7 +346,7 @@ export class PostgresModelingStore implements ModelingStore {
   }
 
   async getRelationTypeByKey(key: string): Promise<Row | null> {
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT ${RELATION_TYPE_COLS} FROM relation_type WHERE key = $1`,
       [key],
     );
@@ -349,7 +366,7 @@ export class PostgresModelingStore implements ModelingStore {
       ["display_name", displayName],
       ["description", description],
     ]);
-    const result = await runQuery(
+    const result = await this.query(
       `UPDATE relation_type SET ${sets.join(", ")}
        WHERE relation_type_id = $1 RETURNING ${RELATION_TYPE_COLS}`,
       params,
@@ -362,7 +379,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(relationTypeId)) {
       return false;
     }
-    const result = await runQuery(`DELETE FROM relation_type WHERE relation_type_id = $1`, [
+    const result = await this.query(`DELETE FROM relation_type WHERE relation_type_id = $1`, [
       relationTypeId,
     ]);
     return result.rowCount > 0;
@@ -383,7 +400,7 @@ export class PostgresModelingStore implements ModelingStore {
     required: boolean,
     defaultValue: string | null,
   ): Promise<Row> {
-    const result = await runQuery(
+    const result = await this.query(
       `INSERT INTO property_def
          (property_id, entity_type_id, relation_type_id, key, display_name,
           description, data_type, required, default_value)
@@ -408,7 +425,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(ownerId)) {
       return [];
     }
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT ${PROPERTY_COLS} FROM property_def
        WHERE ${ownerColumn(typeKind)} = $1 ORDER BY key`,
       [ownerId],
@@ -424,7 +441,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(ownerId) || !isUuid(propertyId)) {
       return null;
     }
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT ${PROPERTY_COLS} FROM property_def
        WHERE ${ownerColumn(typeKind)} = $1 AND property_id = $2`,
       [ownerId, propertyId],
@@ -436,7 +453,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(ownerId)) {
       return null;
     }
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT ${PROPERTY_COLS} FROM property_def
        WHERE ${ownerColumn(typeKind)} = $1 AND key = $2`,
       [ownerId, key],
@@ -467,7 +484,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (clearDefault) {
       sets.push("default_value = NULL");
     }
-    const result = await runQuery(
+    const result = await this.query(
       `UPDATE property_def SET ${sets.join(", ")}
        WHERE ${ownerColumn(typeKind)} = $1 AND property_id = $2
        RETURNING ${PROPERTY_COLS}`,
@@ -480,7 +497,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(ownerId) || !isUuid(propertyId)) {
       return false;
     }
-    const result = await runQuery(
+    const result = await this.query(
       `DELETE FROM property_def WHERE property_id = $2 AND ${ownerColumn(typeKind)} = $1`,
       [ownerId, propertyId],
     );
@@ -492,83 +509,83 @@ export class PostgresModelingStore implements ModelingStore {
   // ------------------------------------------------------------------
 
   /** Upsert on the composite unique — re-adding the same type replaces
-   * the allowlist. Answers null when the ontology or type is missing
+   * the allowlist. Answers null when the lens or type is missing
    * (the `INSERT … SELECT` finds no source row). */
   async addIncludesType(
-    ontologyId: string,
+    lensId: string,
     typeKind: TypeKind,
     typeKey: string,
     properties: string[] | null,
   ): Promise<Row | null> {
-    if (!isUuid(ontologyId)) {
+    if (!isUuid(lensId)) {
       return null;
     }
     const owner = ownerColumn(typeKind);
-    const result = await runQuery(
-      `INSERT INTO ontology_includes (ontology_id, ${owner}, properties)
-       SELECT o.ontology_id, t.${owner}, $3::text[]
-       FROM ontology o
+    const result = await this.query(
+      `INSERT INTO lens_includes (lens_id, ${owner}, properties)
+       SELECT o.lens_id, t.${owner}, $3::text[]
+       FROM lens o
        JOIN ${typeTable(typeKind)} t ON t.key = $2
-       WHERE o.ontology_id = $1
-       ON CONFLICT (ontology_id, ${owner}) DO UPDATE SET properties = EXCLUDED.properties
+       WHERE o.lens_id = $1
+       ON CONFLICT (lens_id, ${owner}) DO UPDATE SET properties = EXCLUDED.properties
        RETURNING ${owner} AS type_id, properties`,
-      [ontologyId, typeKey, properties],
+      [lensId, typeKey, properties],
     );
     const row = result.rows[0];
     return row ? toIncludeRow({ ...row, key: typeKey }) : null;
   }
 
-  async listIncludesTypes(ontologyId: string, typeKind: TypeKind): Promise<Row[]> {
-    if (!isUuid(ontologyId)) {
+  async listIncludesTypes(lensId: string, typeKind: TypeKind): Promise<Row[]> {
+    if (!isUuid(lensId)) {
       return [];
     }
     const owner = ownerColumn(typeKind);
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT t.key AS key, t.${owner} AS type_id, oi.properties AS properties
-       FROM ontology_includes oi
+       FROM lens_includes oi
        JOIN ${typeTable(typeKind)} t ON t.${owner} = oi.${owner}
-       WHERE oi.ontology_id = $1
+       WHERE oi.lens_id = $1
        ORDER BY t.key`,
-      [ontologyId],
+      [lensId],
     );
     return result.rows.map(toIncludeRow);
   }
 
   /** Replace the properties allowlist on one inclusion. */
   async updateIncludesType(
-    ontologyId: string,
+    lensId: string,
     typeKind: TypeKind,
     typeId: string,
     properties: string[] | null,
   ): Promise<Row | null> {
-    if (!isUuid(ontologyId) || !isUuid(typeId)) {
+    if (!isUuid(lensId) || !isUuid(typeId)) {
       return null;
     }
     const owner = ownerColumn(typeKind);
-    const result = await runQuery(
-      `UPDATE ontology_includes oi
+    const result = await this.query(
+      `UPDATE lens_includes oi
        SET properties = $3::text[]
        FROM ${typeTable(typeKind)} t
-       WHERE oi.ontology_id = $1 AND oi.${owner} = $2 AND t.${owner} = oi.${owner}
+       WHERE oi.lens_id = $1 AND oi.${owner} = $2 AND t.${owner} = oi.${owner}
        RETURNING t.key AS key, oi.${owner} AS type_id, oi.properties AS properties`,
-      [ontologyId, typeId, properties],
+      [lensId, typeId, properties],
     );
     const row = result.rows[0];
     return row ? toIncludeRow(row) : null;
   }
 
   async removeIncludesType(
-    ontologyId: string,
+    lensId: string,
     typeKind: TypeKind,
     typeId: string,
   ): Promise<boolean> {
-    if (!isUuid(ontologyId) || !isUuid(typeId)) {
+    if (!isUuid(lensId) || !isUuid(typeId)) {
       return false;
     }
-    const result = await runQuery(
-      `DELETE FROM ontology_includes
-       WHERE ontology_id = $1 AND ${ownerColumn(typeKind)} = $2`,
-      [ontologyId, typeId],
+    const result = await this.query(
+      `DELETE FROM lens_includes
+       WHERE lens_id = $1 AND ${ownerColumn(typeKind)} = $2`,
+      [lensId, typeId],
     );
     return result.rowCount > 0;
   }
@@ -581,20 +598,20 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(typeId)) {
       return 0;
     }
-    const result = await runQuery(
-      `DELETE FROM ontology_includes WHERE ${ownerColumn(typeKind)} = $1`,
+    const result = await this.query(
+      `DELETE FROM lens_includes WHERE ${ownerColumn(typeKind)} = $1`,
       [typeId],
     );
     return result.rowCount;
   }
 
-  async findOntologiesIncludingType(typeKind: TypeKind, typeId: string): Promise<string[]> {
+  async findLensesIncludingType(typeKind: TypeKind, typeId: string): Promise<string[]> {
     if (!isUuid(typeId)) {
       return [];
     }
-    const result = await runQuery(
-      `SELECT o.key FROM ontology_includes oi
-       JOIN ontology o ON o.ontology_id = oi.ontology_id
+    const result = await this.query(
+      `SELECT o.key FROM lens_includes oi
+       JOIN lens o ON o.lens_id = oi.lens_id
        WHERE oi.${ownerColumn(typeKind)} = $1
        ORDER BY o.key`,
       [typeId],
@@ -602,10 +619,10 @@ export class PostgresModelingStore implements ModelingStore {
     return result.rows.map((row) => row.key as string);
   }
 
-  /** Ontology keys whose explicit allowlist for the type does NOT carry
+  /** Lens keys whose explicit allowlist for the type does NOT carry
    * the property key; lenses without an allowlist track automatically
    * and are never affected. */
-  async findOntologiesWithExplicitProperty(
+  async findLensesWithExplicitProperty(
     typeKind: TypeKind,
     typeId: string,
     propertyKey: string,
@@ -613,9 +630,9 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(typeId)) {
       return [];
     }
-    const result = await runQuery(
-      `SELECT o.key FROM ontology_includes oi
-       JOIN ontology o ON o.ontology_id = oi.ontology_id
+    const result = await this.query(
+      `SELECT o.key FROM lens_includes oi
+       JOIN lens o ON o.lens_id = oi.lens_id
        WHERE oi.${ownerColumn(typeKind)} = $1
          AND oi.properties IS NOT NULL
          AND NOT (oi.properties @> ARRAY[$2::text])
@@ -633,8 +650,8 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(typeId)) {
       return 0;
     }
-    const result = await runQuery(
-      `UPDATE ontology_includes SET properties = properties || $2::text
+    const result = await this.query(
+      `UPDATE lens_includes SET properties = properties || $2::text
        WHERE ${ownerColumn(typeKind)} = $1
          AND properties IS NOT NULL
          AND NOT (properties @> ARRAY[$2::text])`,
@@ -651,8 +668,8 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(typeId)) {
       return 0;
     }
-    const result = await runQuery(
-      `UPDATE ontology_includes SET properties = array_remove(properties, $2::text)
+    const result = await this.query(
+      `UPDATE lens_includes SET properties = array_remove(properties, $2::text)
        WHERE ${ownerColumn(typeKind)} = $1
          AND properties IS NOT NULL
          AND properties @> ARRAY[$2::text]`,
@@ -669,7 +686,7 @@ export class PostgresModelingStore implements ModelingStore {
    * `deleteProperty`; type keys carry no FK by design, so this is the
    * one statement that removes a dropped document property's chunks. */
   async deleteChunksForTypeProperty(entityTypeKey: string, propertyKey: string): Promise<void> {
-    await runQuery(
+    await this.query(
       `DELETE FROM document_chunk WHERE entity_type_key = $1 AND property_key = $2`,
       [entityTypeKey, propertyKey],
     );
@@ -679,41 +696,41 @@ export class PostgresModelingStore implements ModelingStore {
   // Full schema
   // ------------------------------------------------------------------
 
-  /** The entire global schema plus every lens with its inclusions, read
+  /** The ontology's entire schema plus every lens with its inclusions, read
    * as one coherent snapshot: a single REPEATABLE READ transaction. */
   async getFullSchema(): Promise<Row> {
-    return withTransaction(async (querier) => {
+    return this.tx(async (querier) => {
       const { entityTypes, relationTypes } = await readTypesWithProperties(querier, true);
 
-      const onts = await querier.query(`SELECT ${ONTOLOGY_COLS} FROM ontology ORDER BY name`);
+      const lensResult = await querier.query(`SELECT ${LENS_COLS} FROM lens ORDER BY name`);
       const incs = await querier.query(
-        `SELECT oi.ontology_id, oi.properties,
+        `SELECT oi.lens_id, oi.properties,
                 et.key AS entity_type_key, rt.key AS relation_type_key
-         FROM ontology_includes oi
+         FROM lens_includes oi
          LEFT JOIN entity_type et ON et.entity_type_id = oi.entity_type_id
          LEFT JOIN relation_type rt ON rt.relation_type_id = oi.relation_type_id
          ORDER BY et.key, rt.key`,
       );
 
-      const incsByOntology = new Map<string, Row[]>();
+      const incsByLens = new Map<string, Row[]>();
       for (const raw of incs.rows) {
-        const ontologyId = raw.ontology_id as string;
-        const bucket = incsByOntology.get(ontologyId) ?? [];
+        const lensId = raw.lens_id as string;
+        const bucket = incsByLens.get(lensId) ?? [];
         bucket.push(raw);
-        incsByOntology.set(ontologyId, bucket);
+        incsByLens.set(lensId, bucket);
       }
 
-      const ontologies = onts.rows.map((raw) => {
-        const ont = camelizeRow(raw);
+      const lenses = lensResult.rows.map((raw) => {
+        const lens = camelizeRow(raw);
         const { entityInclusions, relationInclusions } = splitInclusions(
-          incsByOntology.get(ont.ontologyId as string) ?? [],
+          incsByLens.get(lens.lensId as string) ?? [],
         );
-        ont.entityInclusions = entityInclusions;
-        ont.relationInclusions = relationInclusions;
-        return ont;
+        lens.entityInclusions = entityInclusions;
+        lens.relationInclusions = relationInclusions;
+        return lens;
       });
 
-      return { entityTypes, relationTypes, ontologies };
+      return { entityTypes, relationTypes, lenses };
     }, "REPEATABLE READ");
   }
 
@@ -721,21 +738,21 @@ export class PostgresModelingStore implements ModelingStore {
   // AI agent configs
   // ------------------------------------------------------------------
 
-  async listAiAgents(ontologyId: string): Promise<Row[]> {
-    if (!isUuid(ontologyId)) {
+  async listAiAgents(lensId: string): Promise<Row[]> {
+    if (!isUuid(lensId)) {
       return [];
     }
-    const result = await runQuery(
-      `SELECT ${AGENT_COLS} FROM ai_agent_config WHERE ontology_id = $1 ORDER BY name`,
-      [ontologyId],
+    const result = await this.query(
+      `SELECT ${AGENT_COLS} FROM ai_agent_config WHERE lens_id = $1 ORDER BY name`,
+      [lensId],
     );
     return camelizeRows(result.rows);
   }
 
-  /** Upsert on the `(ontology_id, key)` arbiter. `created` is detected
+  /** Upsert on the `(lens_id, key)` arbiter. `created` is detected
    * by whether the insert stamped this call's fresh id onto the row. */
   async upsertAiAgent(
-    ontologyId: string,
+    lensId: string,
     agentConfigId: string,
     key: string,
     name: string,
@@ -743,43 +760,43 @@ export class PostgresModelingStore implements ModelingStore {
     systemPrompt: string | null,
     tools: string[] | null,
   ): Promise<[Row, boolean]> {
-    const result = await runQuery(
+    const result = await this.query(
       `INSERT INTO ai_agent_config
-         (agent_config_id, ontology_id, key, name, description, system_prompt, tools)
+         (agent_config_id, lens_id, key, name, description, system_prompt, tools)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
-       ON CONFLICT (ontology_id, key) DO UPDATE SET
+       ON CONFLICT (lens_id, key) DO UPDATE SET
          name = EXCLUDED.name,
          description = EXCLUDED.description,
          system_prompt = EXCLUDED.system_prompt,
          tools = EXCLUDED.tools,
          updated_at = now()
        RETURNING ${AGENT_COLS}, (agent_config_id = $1) AS created`,
-      [agentConfigId, ontologyId, key, name, description, systemPrompt, tools],
+      [agentConfigId, lensId, key, name, description, systemPrompt, tools],
     );
     const { created, ...row } = camelizeRow(result.rows[0]!);
     return [row, created as boolean];
   }
 
   /** Agents in the transfer shape — no ids, no timestamps. */
-  async listAiAgentsForExport(ontologyId: string): Promise<Row[]> {
-    if (!isUuid(ontologyId)) {
+  async listAiAgentsForExport(lensId: string): Promise<Row[]> {
+    if (!isUuid(lensId)) {
       return [];
     }
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT key, name, description, system_prompt, tools
-       FROM ai_agent_config WHERE ontology_id = $1 ORDER BY name`,
-      [ontologyId],
+       FROM ai_agent_config WHERE lens_id = $1 ORDER BY name`,
+      [lensId],
     );
     return camelizeRows(result.rows);
   }
 
-  async deleteAiAgent(ontologyId: string, agentKey: string): Promise<boolean> {
-    if (!isUuid(ontologyId)) {
+  async deleteAiAgent(lensId: string, agentKey: string): Promise<boolean> {
+    if (!isUuid(lensId)) {
       return false;
     }
-    const result = await runQuery(
-      `DELETE FROM ai_agent_config WHERE ontology_id = $1 AND key = $2`,
-      [ontologyId, agentKey],
+    const result = await this.query(
+      `DELETE FROM ai_agent_config WHERE lens_id = $1 AND key = $2`,
+      [lensId, agentKey],
     );
     return result.rowCount > 0;
   }
@@ -788,64 +805,64 @@ export class PostgresModelingStore implements ModelingStore {
   // Saved query configs
   // ------------------------------------------------------------------
 
-  async listSavedQueries(ontologyId: string): Promise<Row[]> {
-    if (!isUuid(ontologyId)) {
+  async listSavedQueries(lensId: string): Promise<Row[]> {
+    if (!isUuid(lensId)) {
       return [];
     }
-    const result = await runQuery(
-      `SELECT ${SAVED_QUERY_COLS} FROM saved_query WHERE ontology_id = $1 ORDER BY name`,
-      [ontologyId],
+    const result = await this.query(
+      `SELECT ${SAVED_QUERY_COLS} FROM saved_query WHERE lens_id = $1 ORDER BY name`,
+      [lensId],
     );
     return camelizeRows(result.rows);
   }
 
   /** Saved queries in the transfer shape (key, name, description, plus
    * the stored steps/parameters JSON text) — no ids, no timestamps. */
-  async listSavedQueriesForExport(ontologyId: string): Promise<Row[]> {
-    if (!isUuid(ontologyId)) {
+  async listSavedQueriesForExport(lensId: string): Promise<Row[]> {
+    if (!isUuid(lensId)) {
       return [];
     }
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT key, name, description, steps, parameters
-       FROM saved_query WHERE ontology_id = $1 ORDER BY name`,
-      [ontologyId],
+       FROM saved_query WHERE lens_id = $1 ORDER BY name`,
+      [lensId],
     );
     return camelizeRows(result.rows);
   }
 
-  /** Upsert on the `(ontology_id, key)` arbiter. Steps and parameters
+  /** Upsert on the `(lens_id, key)` arbiter. Steps and parameters
    * arrive as serialized text this store does not interpret. A null
-   * `ontologyKey` or `embedding` leaves the stored value untouched
+   * `lensKey` or `embedding` leaves the stored value untouched
    * (COALESCE), mirroring the reference adapter's conditional SET. */
   async upsertSavedQuery(
-    ontologyId: string,
+    lensId: string,
     savedQueryId: string,
     key: string,
     name: string,
     description: string,
     stepsJson: string,
     parametersJson: string,
-    ontologyKey: string | null = null,
+    lensKey: string | null = null,
     embedding: number[] | null = null,
   ): Promise<[Row, boolean]> {
-    const result = await runQuery(
+    const result = await this.query(
       `INSERT INTO saved_query
-         (saved_query_id, ontology_id, ontology_key, key, name, description,
+         (saved_query_id, lens_id, lens_key, key, name, description,
           steps, parameters, embedding)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::vector)
-       ON CONFLICT (ontology_id, key) DO UPDATE SET
+       ON CONFLICT (lens_id, key) DO UPDATE SET
          name = EXCLUDED.name,
          description = EXCLUDED.description,
          steps = EXCLUDED.steps,
          parameters = EXCLUDED.parameters,
-         ontology_key = COALESCE(EXCLUDED.ontology_key, saved_query.ontology_key),
+         lens_key = COALESCE(EXCLUDED.lens_key, saved_query.lens_key),
          embedding = COALESCE(EXCLUDED.embedding, saved_query.embedding),
          updated_at = now()
        RETURNING ${SAVED_QUERY_COLS}, (saved_query_id = $1) AS created`,
       [
         savedQueryId,
-        ontologyId,
-        ontologyKey,
+        lensId,
+        lensKey,
         key,
         name,
         description,
@@ -858,13 +875,13 @@ export class PostgresModelingStore implements ModelingStore {
     return [row, created as boolean];
   }
 
-  async deleteSavedQuery(ontologyId: string, queryKey: string): Promise<boolean> {
-    if (!isUuid(ontologyId)) {
+  async deleteSavedQuery(lensId: string, queryKey: string): Promise<boolean> {
+    if (!isUuid(lensId)) {
       return false;
     }
-    const result = await runQuery(
-      `DELETE FROM saved_query WHERE ontology_id = $1 AND key = $2`,
-      [ontologyId, queryKey],
+    const result = await this.query(
+      `DELETE FROM saved_query WHERE lens_id = $1 AND key = $2`,
+      [lensId, queryKey],
     );
     return result.rowCount > 0;
   }
@@ -876,7 +893,7 @@ export class PostgresModelingStore implements ModelingStore {
   /** Every entity type key with its property definitions, aggregated in
    * one statement (jsonb) so the read stays on door one. */
   async getEntityTypesWithProperties(): Promise<Row[]> {
-    const result = await runQuery(
+    const result = await this.query(
       `SELECT et.key,
               coalesce(
                 jsonb_agg(
@@ -906,14 +923,14 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(entityId)) {
       return;
     }
-    await runQuery(`UPDATE entity SET embedding = $2::vector WHERE id = $1`, [
+    await this.query(`UPDATE entity SET embedding = $2::vector WHERE id = $1`, [
       entityId,
       toSql(embedding),
     ]);
   }
 
   async listSavedQueryRefs(): Promise<Row[]> {
-    const result = await runQuery(`SELECT saved_query_id, description FROM saved_query`);
+    const result = await this.query(`SELECT saved_query_id, description FROM saved_query`);
     return camelizeRows(result.rows);
   }
 
@@ -922,7 +939,7 @@ export class PostgresModelingStore implements ModelingStore {
     if (!isUuid(savedQueryId)) {
       return;
     }
-    await runQuery(`UPDATE saved_query SET embedding = $2::vector WHERE saved_query_id = $1`, [
+    await this.query(`UPDATE saved_query SET embedding = $2::vector WHERE saved_query_id = $1`, [
       savedQueryId,
       toSql(embedding),
     ]);
@@ -937,15 +954,15 @@ export class PostgresModelingStore implements ModelingStore {
     dimensions: number,
     filterProperties?: string[] | null,
   ): Promise<void> {
-    return vectorDdl.createVectorIndex(entityTypeKey, dimensions, filterProperties);
+    return vectorDdl.createVectorIndex(entityTypeKey, dimensions, filterProperties, this.namespace);
   }
 
   dropVectorIndex(entityTypeKey: string): Promise<void> {
-    return vectorDdl.dropVectorIndex(entityTypeKey);
+    return vectorDdl.dropVectorIndex(entityTypeKey, this.namespace);
   }
 
   rebuildVectorIndex(entityTypeKey: string, dimensions: number): Promise<void> {
-    return vectorDdl.rebuildVectorIndex(entityTypeKey, dimensions);
+    return vectorDdl.rebuildVectorIndex(entityTypeKey, dimensions, this.namespace);
   }
 
   createDocumentVectorIndex(
@@ -953,18 +970,22 @@ export class PostgresModelingStore implements ModelingStore {
     propertyKey: string,
     dimensions: number,
   ): Promise<void> {
-    return vectorDdl.createDocumentVectorIndex(entityTypeKey, propertyKey, dimensions);
+    return vectorDdl.createDocumentVectorIndex(entityTypeKey, propertyKey, dimensions, this.namespace);
   }
 
   dropDocumentVectorIndex(entityTypeKey: string, propertyKey: string): Promise<void> {
-    return vectorDdl.dropDocumentVectorIndex(entityTypeKey, propertyKey);
+    return vectorDdl.dropDocumentVectorIndex(entityTypeKey, propertyKey, this.namespace);
   }
 
   ensureSavedQueryVectorIndex(dimensions: number): Promise<void> {
-    return vectorDdl.ensureSavedQueryVectorIndex(dimensions);
+    return vectorDdl.ensureSavedQueryVectorIndex(dimensions, this.namespace);
   }
 
-  ensureVectorIndexes(dimensions: number, recreateOnMismatch?: boolean): Promise<void> {
-    return vectorDdl.ensureVectorIndexes(dimensions, recreateOnMismatch);
+  dropMismatchedVectorIndexes(dimensions: number): Promise<void> {
+    return vectorDdl.dropMismatchedVectorIndexes(dimensions, this.namespace);
+  }
+
+  ensureVectorIndexes(dimensions: number): Promise<void> {
+    return vectorDdl.ensureVectorIndexes(dimensions, this.namespace);
   }
 }

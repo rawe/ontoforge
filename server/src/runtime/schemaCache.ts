@@ -40,10 +40,10 @@ export interface RelationTypeDef {
 }
 
 export interface SchemaCacheValue {
-  ontologyId: string;
-  ontologyKey: string;
-  ontologyName: string;
-  ontologyDescription: string | null;
+  lensId: string;
+  lensKey: string;
+  lensName: string;
+  lensDescription: string | null;
   entityTypes: Record<string, EntityTypeDef>;
   relationTypes: Record<string, RelationTypeDef>;
 }
@@ -74,25 +74,42 @@ export function invalidateLoadedSchemaCache(): void {
 }
 
 /**
- * Load the lens for an ontology key: from the cache, or built from the
+ * Load the lens for a lens key: from the cache, or built from the
  * runtime store's schema reads on a miss. Unknown key -> not found.
+ *
+ * The cache key is ontology + lens: a lens key identifies a lens only
+ * within one ontology, and the store carries its ontology binding — the
+ * same lens key in two ontologies yields two independent entries.
  */
 export async function loadSchema(
-  ontologyKey: string,
+  lensKey: string,
   store: RuntimeStore,
 ): Promise<LoadedSchema> {
-  const cached = loadedSchemaCache.get(ontologyKey);
+  const cacheKey = `${store.ontologyKey}/${lensKey}`;
+  const cached = loadedSchemaCache.get(cacheKey);
   if (cached !== undefined) {
     return cached;
   }
+  const loaded = await loadSchemaUncached(lensKey, store);
+  loadedSchemaCache.set(cacheKey, loaded);
+  return loaded;
+}
 
-  const schema = await store.getFullSchema(ontologyKey);
+/**
+ * The cache-free build: the lens assembled fresh from the bound store's
+ * schema reads. Unknown key -> not found.
+ */
+export async function loadSchemaUncached(
+  lensKey: string,
+  store: RuntimeStore,
+): Promise<LoadedSchema> {
+  const schema = await store.getFullSchema(lensKey);
   if (schema === null) {
-    throw new NotFoundError(`Ontology '${ontologyKey}' not found or has no schema loaded`);
+    throw new NotFoundError(`Lens '${lensKey}' not found or has no schema loaded`);
   }
 
   const full = buildSchemaCacheFromRaw(
-    schema.ontology as Row,
+    schema.lens as Row,
     schema.entityTypes as Row[],
     schema.relationTypes as Row[],
   );
@@ -102,7 +119,7 @@ export async function loadSchema(
     schema.relationInclusions as InclusionRow[],
   );
 
-  const agentRows = await store.getAiAgentConfigs(ontologyKey);
+  const agentRows = await store.getAiAgentConfigs(lensKey);
   const agentConfigs: Record<string, AgentConfig> = {};
   for (const row of agentRows) {
     agentConfigs[row.key as string] = {
@@ -114,15 +131,13 @@ export async function loadSchema(
     };
   }
 
-  const queryRows = await store.getSavedQueries(ontologyKey);
+  const queryRows = await store.getSavedQueries(lensKey);
   const savedQueries: Record<string, SavedQueryConfig> = {};
   for (const row of queryRows) {
     savedQueries[row.key as string] = toSavedQueryConfig(row);
   }
 
-  const loaded: LoadedSchema = { scoped, full, agentConfigs, savedQueries };
-  loadedSchemaCache.set(ontologyKey, loaded);
-  return loaded;
+  return { scoped, full, agentConfigs, savedQueries };
 }
 
 /** Deserialize one stored saved-query row: `steps` and `parameters` are
@@ -176,15 +191,15 @@ function toPropertyDefs(rows: Row[] | undefined): Record<string, PropertyDef> {
 }
 
 function buildSchemaCacheFromRaw(
-  ontology: Row,
+  lens: Row,
   entityTypesRaw: Row[],
   relationTypesRaw: Row[],
 ): SchemaCacheValue {
   const cache: SchemaCacheValue = {
-    ontologyId: ontology.ontologyId as string,
-    ontologyKey: ontology.key as string,
-    ontologyName: ontology.name as string,
-    ontologyDescription: (ontology.description as string | undefined) ?? null,
+    lensId: lens.lensId as string,
+    lensKey: lens.key as string,
+    lensName: lens.name as string,
+    lensDescription: (lens.description as string | undefined) ?? null,
     entityTypes: {},
     relationTypes: {},
   };
@@ -241,10 +256,10 @@ function applyScopeFiltering(
   const hasRelationScope = relationInclusions.length > 0;
 
   const scoped: SchemaCacheValue = {
-    ontologyId: full.ontologyId,
-    ontologyKey: full.ontologyKey,
-    ontologyName: full.ontologyName,
-    ontologyDescription: full.ontologyDescription,
+    lensId: full.lensId,
+    lensKey: full.lensKey,
+    lensName: full.lensName,
+    lensDescription: full.lensDescription,
     entityTypes: {},
     relationTypes: {},
   };

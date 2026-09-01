@@ -25,7 +25,7 @@ export type DataType = (typeof DATA_TYPES)[number];
 export const KEY_PATTERN = /^[a-z][a-z0-9_]*$/;
 
 /**
- * Maximum length for every key kind — entity type, relation type, ontology,
+ * Maximum length for every key kind — entity type, relation type, lens,
  * property, agent, saved query. Boundary hygiene, not a physical limit: an
  * absurd key dies as a clean 422 at validation instead of deep inside
  * adapter DDL, and derived physical names stay legible.
@@ -33,8 +33,16 @@ export const KEY_PATTERN = /^[a-z][a-z0-9_]*$/;
 export const MAX_KEY_LENGTH = 64;
 
 /**
+ * Ontology keys are capped tighter than the general key rule: an adapter
+ * derives a physical namespace name from the key, and the longest such
+ * derivation must stay a legal identifier everywhere (PostgreSQL truncates
+ * identifiers at 63, and `ont_` + 59 is exactly that).
+ */
+export const MAX_ONTOLOGY_KEY_LENGTH = 59;
+
+/**
  * The two kinds of schema type that can own a property definition or be
- * included in an ontology's scope. These exact values are the port's
+ * included in a lens's scope. These exact values are the port's
  * owner-kind vocabulary (normative); the MCP wire values
  * `entity_type`/`relation_type` are a separate, fixed spelling.
  */

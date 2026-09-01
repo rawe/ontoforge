@@ -6,7 +6,7 @@
  * `runSession`, so driver failures surface as `StoreError` (rule 4) — and
  * delegates to the query functions in `runtimeQueries.ts`. Physical naming
  * (PascalCase labels, UPPER_SNAKE_CASE relationship types) is derived here
- * from the ontology-level type keys the service passes in.
+ * from the lens-level type keys the service passes in.
  *
  * Write values cross the port in their port-safe forms (JS `Date` for
  * datetimes, ISO strings for dates, plain numbers for integers) and are
@@ -58,24 +58,28 @@ function toWriteProperties(
 }
 
 export class Neo4jRuntimeStore implements RuntimeStore {
-  constructor(private readonly driver: Driver) {}
+  /** Bound to one ontology; unbound (tests only) carries the empty key. */
+  constructor(
+    private readonly driver: Driver,
+    public readonly ontologyKey: string = "",
+  ) {}
 
   // ------------------------------------------------------------------
   // Schema reading (for the runtime schema cache)
   // ------------------------------------------------------------------
 
-  async getFullSchema(ontologyKey: string): Promise<Row | null> {
-    return runSession(this.driver, (session) => queries.getFullSchema(session, ontologyKey));
+  async getFullSchema(lensKey: string): Promise<Row | null> {
+    return runSession(this.driver, (session) => queries.getFullSchema(session, lensKey));
   }
 
-  async getAiAgentConfigs(ontologyKey: string): Promise<Row[]> {
+  async getAiAgentConfigs(lensKey: string): Promise<Row[]> {
     return runSession(this.driver, (session) =>
-      queries.getAiAgentConfigs(session, ontologyKey),
+      queries.getAiAgentConfigs(session, lensKey),
     );
   }
 
-  async getSavedQueries(ontologyKey: string): Promise<Row[]> {
-    return runSession(this.driver, (session) => queries.getSavedQueries(session, ontologyKey));
+  async getSavedQueries(lensKey: string): Promise<Row[]> {
+    return runSession(this.driver, (session) => queries.getSavedQueries(session, lensKey));
   }
 
   // ------------------------------------------------------------------
@@ -311,12 +315,12 @@ export class Neo4jRuntimeStore implements RuntimeStore {
   /** Rank SavedQuery descriptions for one lens by vector similarity. */
   async searchSavedQueries(
     queryEmbedding: number[],
-    ontologyKey: string,
+    lensKey: string,
     limit: number,
     minScore: number | null,
   ): Promise<Row[]> {
     return runSession(this.driver, (session) =>
-      queries.searchSavedQueries(session, queryEmbedding, ontologyKey, limit, minScore),
+      queries.searchSavedQueries(session, queryEmbedding, lensKey, limit, minScore),
     );
   }
 

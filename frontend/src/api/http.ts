@@ -33,9 +33,9 @@ export class ApiError extends Error {
     return undefined
   }
 
-  /** Ontologies affected by a `CASCADE_REQUIRED` conflict, if present. */
-  get affectedOntologies(): string[] | undefined {
-    const affected = this.details?.affectedOntologies
+  /** Lenses affected by a `CASCADE_REQUIRED` conflict, if present. */
+  get affectedLenses(): string[] | undefined {
+    const affected = this.details?.affectedLenses
     return Array.isArray(affected) ? (affected as string[]) : undefined
   }
 }

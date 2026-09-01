@@ -21,7 +21,7 @@ export type ItemStatus = 'idle' | 'creating' | 'created' | 'error'
 export interface ReviewEntityItem {
   id: string
   entityTypeKey: string
-  /** Undefined when the proposed type is not in this ontology's scope. */
+  /** Undefined when the proposed type is not in this lens's scope. */
   type: SchemaEntityType | undefined
   checked: boolean
   /** Drafts for schema properties (string-draft model). */
@@ -169,7 +169,7 @@ export function relationBlocker(
   entitiesById: ReadonlyMap<string, ReviewEntityItem>,
 ): string | null {
   if (relation.type === undefined) {
-    return `Relation type "${relation.relationTypeKey}" is not in this ontology's scope.`
+    return `Relation type "${relation.relationTypeKey}" is not in this lens's scope.`
   }
   const check = (id: string | undefined, label: string, side: string): string | null => {
     if (id === undefined) return `${side} "${label}" is not among the proposed entities.`

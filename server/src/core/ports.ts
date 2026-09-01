@@ -2,11 +2,18 @@
  * Persistence port: store interfaces, store accessors, adapter lifecycle.
  *
  * Services, routers, and MCP handlers obtain their store through this
- * module and speak ontology vocabulary only (type keys, property keys,
+ * module and speak schema vocabulary only (type keys, property keys,
  * instance ids, structured filters). Everything database-specific —
  * connections, transactions, query text, physical naming, index DDL,
  * driver types — is owned by the adapter selected via
  * `settings.DB_BACKEND`.
+ *
+ * Stores are BOUND: `getModelingStore(ontologyKey)` /
+ * `getRuntimeStore(ontologyKey)` return stores bound to exactly one
+ * ontology; every method resolves keys within that binding, and binding
+ * an unknown key fails with not-found. Registry operations live on the
+ * separate `OntologyRegistry` port. "One request, one ontology" is
+ * structural above the adapter and physical inside it.
  *
  * Port contract (every adapter must satisfy it):
  *
@@ -41,6 +48,7 @@
  */
 
 import { settings } from "../config.js";
+import { NotFoundError } from "./exceptions.js";
 import type { ValidatedQuery } from "./oql/index.js";
 import type { PropertyDef, TypeKind } from "./schemas.js";
 
@@ -91,31 +99,31 @@ export interface ModelingStore {
   findReservedTypeKeysInUse(): Promise<ReservedTypeKeyInUse[]>;
 
   // ------------------------------------------------------------------
-  // Ontologies
+  // Lenses
   // ------------------------------------------------------------------
 
-  createOntology(
-    ontologyId: string,
+  createLens(
+    lensId: string,
     key: string,
     name: string,
     description: string | null,
   ): Promise<Row>;
 
-  listOntologies(): Promise<Row[]>;
+  listLenses(): Promise<Row[]>;
 
-  getOntology(ontologyId: string): Promise<Row | null>;
+  getLens(lensId: string): Promise<Row | null>;
 
-  getOntologyByName(name: string): Promise<Row | null>;
+  getLensByName(name: string): Promise<Row | null>;
 
-  getOntologyByKey(key: string): Promise<Row | null>;
+  getLensByKey(key: string): Promise<Row | null>;
 
-  updateOntology(
-    ontologyId: string,
+  updateLens(
+    lensId: string,
     name: string | null,
     description: string | null,
   ): Promise<Row | null>;
 
-  deleteOntology(ontologyId: string): Promise<boolean>;
+  deleteLens(lensId: string): Promise<boolean>;
 
   // ------------------------------------------------------------------
   // Entity types
@@ -211,22 +219,22 @@ export interface ModelingStore {
   // ------------------------------------------------------------------
 
   addIncludesType(
-    ontologyId: string,
+    lensId: string,
     typeKind: TypeKind,
     typeKey: string,
     properties: string[] | null,
   ): Promise<Row | null>;
 
-  listIncludesTypes(ontologyId: string, typeKind: TypeKind): Promise<Row[]>;
+  listIncludesTypes(lensId: string, typeKind: TypeKind): Promise<Row[]>;
 
   updateIncludesType(
-    ontologyId: string,
+    lensId: string,
     typeKind: TypeKind,
     typeId: string,
     properties: string[] | null,
   ): Promise<Row | null>;
 
-  removeIncludesType(ontologyId: string, typeKind: TypeKind, typeId: string): Promise<boolean>;
+  removeIncludesType(lensId: string, typeKind: TypeKind, typeId: string): Promise<boolean>;
 
   // ------------------------------------------------------------------
   // Scope inclusions (cascade-protocol support)
@@ -234,9 +242,9 @@ export interface ModelingStore {
 
   removeAllIncludesForType(typeKind: TypeKind, typeId: string): Promise<number>;
 
-  findOntologiesIncludingType(typeKind: TypeKind, typeId: string): Promise<string[]>;
+  findLensesIncludingType(typeKind: TypeKind, typeId: string): Promise<string[]>;
 
-  findOntologiesWithExplicitProperty(
+  findLensesWithExplicitProperty(
     typeKind: TypeKind,
     typeId: string,
     propertyKey: string,
@@ -272,10 +280,10 @@ export interface ModelingStore {
   // AI agent configs
   // ------------------------------------------------------------------
 
-  listAiAgents(ontologyId: string): Promise<Row[]>;
+  listAiAgents(lensId: string): Promise<Row[]>;
 
   upsertAiAgent(
-    ontologyId: string,
+    lensId: string,
     agentConfigId: string,
     key: string,
     name: string,
@@ -284,31 +292,31 @@ export interface ModelingStore {
     tools: string[] | null,
   ): Promise<[Row, boolean]>;
 
-  listAiAgentsForExport(ontologyId: string): Promise<Row[]>;
+  listAiAgentsForExport(lensId: string): Promise<Row[]>;
 
-  deleteAiAgent(ontologyId: string, agentKey: string): Promise<boolean>;
+  deleteAiAgent(lensId: string, agentKey: string): Promise<boolean>;
 
   // ------------------------------------------------------------------
   // Saved query configs
   // ------------------------------------------------------------------
 
-  listSavedQueries(ontologyId: string): Promise<Row[]>;
+  listSavedQueries(lensId: string): Promise<Row[]>;
 
-  listSavedQueriesForExport(ontologyId: string): Promise<Row[]>;
+  listSavedQueriesForExport(lensId: string): Promise<Row[]>;
 
   upsertSavedQuery(
-    ontologyId: string,
+    lensId: string,
     savedQueryId: string,
     key: string,
     name: string,
     description: string,
     stepsJson: string,
     parametersJson: string,
-    ontologyKey?: string | null,
+    lensKey?: string | null,
     embedding?: number[] | null,
   ): Promise<[Row, boolean]>;
 
-  deleteSavedQuery(ontologyId: string, queryKey: string): Promise<boolean>;
+  deleteSavedQuery(lensId: string, queryKey: string): Promise<boolean>;
 
   // ------------------------------------------------------------------
   // Embedding maintenance (rebuild support)
@@ -346,7 +354,24 @@ export interface ModelingStore {
 
   ensureSavedQueryVectorIndex(dimensions: number): Promise<void>;
 
-  ensureVectorIndexes(dimensions: number, recreateOnMismatch?: boolean): Promise<void>;
+  /**
+   * Drop every semantic index whose width no longer matches the model.
+   *
+   * The rebuild's first phase, and the only place drift is repaired
+   * rather than reported. It has to come first: an index fixes its width
+   * when it is created, so while a drifted one stands, storing a vector
+   * of the model's width fails — there is no order in which the vectors
+   * could be regenerated underneath it. What this leaves absent,
+   * `ensureVectorIndexes` builds again once the new vectors are in place.
+   */
+  dropMismatchedVectorIndexes(dimensions: number): Promise<void>;
+
+  /**
+   * Build every semantic index the schema calls for and does not have,
+   * at `dimensions`. An index whose width has drifted is REPORTED and
+   * left alone — repair belongs to the rebuild, through the method above.
+   */
+  ensureVectorIndexes(dimensions: number): Promise<void>;
 }
 
 /**
@@ -366,15 +391,19 @@ export interface ModelingStore {
  * carry none.
  */
 export interface RuntimeStore {
+  /** The ontology this store is bound to. The runtime schema cache keys
+   * its entries by this binding plus the lens key. */
+  readonly ontologyKey: string;
+
   // ------------------------------------------------------------------
   // Schema reading (for the runtime schema cache)
   // ------------------------------------------------------------------
 
-  getFullSchema(ontologyKey: string): Promise<Row | null>;
+  getFullSchema(lensKey: string): Promise<Row | null>;
 
-  getAiAgentConfigs(ontologyKey: string): Promise<Row[]>;
+  getAiAgentConfigs(lensKey: string): Promise<Row[]>;
 
-  getSavedQueries(ontologyKey: string): Promise<Row[]>;
+  getSavedQueries(lensKey: string): Promise<Row[]>;
 
   // ------------------------------------------------------------------
   // Vector-index metadata validation
@@ -486,7 +515,7 @@ export interface RuntimeStore {
   /** Rank SavedQuery descriptions for one lens by vector similarity. */
   searchSavedQueries(
     queryEmbedding: number[],
-    ontologyKey: string,
+    lensKey: string,
     limit: number,
     minScore: number | null,
   ): Promise<Row[]>;
@@ -554,13 +583,66 @@ export interface RuntimeStore {
 }
 
 /**
+ * The ontology registry: the small third port beside the two phase
+ * stores. It manages ontologies as whole units — create, list, get,
+ * rename, delete — while the phase stores work inside one ontology.
+ *
+ * Rows carry `ontologyId`, `key`, `displayName` (nullable), `createdAt`,
+ * `updatedAt`. The physical isolation mechanism behind an ontology —
+ * what `createOntology` provisions and `deleteOntology` cascades over —
+ * is each adapter's private business; nothing above this port knows what
+ * it is.
+ */
+export interface OntologyRegistry {
+  /**
+   * Create one ontology and provision its physical home atomically: a
+   * failed create leaves nothing behind. `embeddingDimensions` is the
+   * process's embedding width for the fixed semantic indexes the home
+   * carries; null when no embedding provider is configured, and the
+   * home then carries no semantic indexes — the same width policy the
+   * boot sequence applies (an index needs a width, and only a provider
+   * has one).
+   */
+  createOntology(
+    ontologyId: string,
+    key: string,
+    displayName: string | null,
+    embeddingDimensions: number | null,
+  ): Promise<Row>;
+
+  listOntologies(): Promise<Row[]>;
+
+  getOntology(key: string): Promise<Row | null>;
+
+  getOntologyByDisplayName(displayName: string): Promise<Row | null>;
+
+  /** Set the display name; the key never changes. Null = not found. */
+  renameOntology(key: string, displayName: string): Promise<Row | null>;
+
+  /** Hard cascade: the ontology's physical home and its registry entry
+   * go together. False = not found. */
+  deleteOntology(key: string): Promise<boolean>;
+}
+
+/**
  * The lifecycle surface every adapter package exports. The module IS the
  * namespace import — no wrapper object, no default export, no factory
  * class; TypeScript checks each `import()` result structurally at the
  * registry literal below.
+ *
+ * `createModelingStore`/`createRuntimeStore` return stores bound to one
+ * ontology — every method resolves within that binding; the physical
+ * mechanism is the adapter's private business. The port accessors below
+ * verify the ontology exists (against the registry, the authoritative
+ * list) before asking the adapter for a bound store, so adapters may
+ * bind without checking. `ensureSemanticIndexes` covers every ontology
+ * the registry lists and does nothing when there are none.
  */
 export interface AdapterModule {
-  createStores(): Promise<[ModelingStore, RuntimeStore]>;
+  initAdapter(): Promise<void>;
+  createModelingStore(ontologyKey: string): ModelingStore;
+  createRuntimeStore(ontologyKey: string): RuntimeStore;
+  createRegistry(): OntologyRegistry;
   closeStores(): Promise<void>;
   ensureSemanticIndexes(dimensions: number): Promise<void>;
 }
@@ -575,8 +657,7 @@ const ADAPTERS: Record<string, () => Promise<AdapterModule>> = {
   postgres: () => import("../adapters/postgres/index.js"),
 };
 
-let modelingStore: ModelingStore | null = null;
-let runtimeStore: RuntimeStore | null = null;
+let ontologyRegistry: OntologyRegistry | null = null;
 let activeAdapter: AdapterModule | null = null;
 
 function unknownBackend(): never {
@@ -586,11 +667,12 @@ function unknownBackend(): never {
   );
 }
 
-/** Initialize the configured persistence adapter and its stores. */
+/** Initialize the configured persistence adapter and its registry. */
 export async function initStores(): Promise<void> {
   const loadAdapter = ADAPTERS[settings.DB_BACKEND] ?? unknownBackend();
   const adapter = await loadAdapter();
-  [modelingStore, runtimeStore] = await adapter.createStores();
+  await adapter.initAdapter();
+  ontologyRegistry = adapter.createRegistry();
   activeAdapter = adapter;
 }
 
@@ -600,11 +682,11 @@ export async function closeStores(): Promise<void> {
     await activeAdapter.closeStores();
     activeAdapter = null;
   }
-  modelingStore = null;
-  runtimeStore = null;
+  ontologyRegistry = null;
 }
 
-/** Ensure the adapter's semantic-search indexes exist (startup hook). */
+/** Ensure the semantic-search indexes of every registered ontology exist
+ * (startup hook). Zero ontologies: nothing happens. */
 export async function ensureSemanticIndexes(dimensions: number): Promise<void> {
   if (activeAdapter === null) {
     throw new Error("Stores not initialized");
@@ -612,16 +694,38 @@ export async function ensureSemanticIndexes(dimensions: number): Promise<void> {
   await activeAdapter.ensureSemanticIndexes(dimensions);
 }
 
-export function getModelingStore(): ModelingStore {
-  if (modelingStore === null) {
+function requireAdapter(): AdapterModule {
+  if (activeAdapter === null) {
     throw new Error("Stores not initialized");
   }
-  return modelingStore;
+  return activeAdapter;
 }
 
-export function getRuntimeStore(): RuntimeStore {
-  if (runtimeStore === null) {
+/** The binding check: an unknown ontology key fails with not-found. */
+async function requireOntology(ontologyKey: string): Promise<void> {
+  const existing = await getOntologyRegistry().getOntology(ontologyKey);
+  if (existing === null) {
+    throw new NotFoundError(`Ontology '${ontologyKey}' not found`);
+  }
+}
+
+/** A modeling store bound to one ontology. Unknown key -> not found. */
+export async function getModelingStore(ontologyKey: string): Promise<ModelingStore> {
+  const adapter = requireAdapter();
+  await requireOntology(ontologyKey);
+  return adapter.createModelingStore(ontologyKey);
+}
+
+/** A runtime store bound to one ontology. Unknown key -> not found. */
+export async function getRuntimeStore(ontologyKey: string): Promise<RuntimeStore> {
+  const adapter = requireAdapter();
+  await requireOntology(ontologyKey);
+  return adapter.createRuntimeStore(ontologyKey);
+}
+
+export function getOntologyRegistry(): OntologyRegistry {
+  if (ontologyRegistry === null) {
     throw new Error("Stores not initialized");
   }
-  return runtimeStore;
+  return ontologyRegistry;
 }

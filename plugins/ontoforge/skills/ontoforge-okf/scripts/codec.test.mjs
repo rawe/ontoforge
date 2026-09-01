@@ -13,7 +13,11 @@ import {
   typeValueFor,
 } from './codec.mjs';
 
-const CONFIG = mergeConfig({ ontology: 'main', typeMap: { note: 'note', Guide: 'guide' } });
+const CONFIG = mergeConfig({
+  ontology: 'main',
+  lens: 'full',
+  typeMap: { note: 'note', Guide: 'guide' },
+});
 
 const NOTE_TYPE = {
   key: 'note',
@@ -30,14 +34,15 @@ const NOTE_TYPE = {
   ],
 };
 
-test('mergeConfig requires an ontology and a type map', () => {
+test('mergeConfig requires an ontology, a lens and a type map', () => {
   assert.throws(() => mergeConfig({}), /"ontology" is missing/);
-  assert.throws(() => mergeConfig({ ontology: 'main' }), /"typeMap" is empty/);
+  assert.throws(() => mergeConfig({ ontology: 'main' }), /"lens" is missing/);
+  assert.throws(() => mergeConfig({ ontology: 'main', lens: 'full' }), /"typeMap" is empty/);
 });
 
 test('mergeConfig rejects a type map that is not one-to-one', () => {
   assert.throws(
-    () => mergeConfig({ ontology: 'main', typeMap: { Table: 'tbl', View: 'tbl' } }),
+    () => mergeConfig({ ontology: 'main', lens: 'full', typeMap: { Table: 'tbl', View: 'tbl' } }),
     /maps both "Table" and "View" to "tbl"/,
   );
 });
@@ -45,6 +50,7 @@ test('mergeConfig rejects a type map that is not one-to-one', () => {
 test('mergeConfig reports every fault at once', () => {
   assert.throws(() => mergeConfig({}), (err) => {
     assert.match(err.message, /"ontology" is missing/);
+    assert.match(err.message, /"lens" is missing/);
     assert.match(err.message, /"typeMap" is empty/);
     return true;
   });

@@ -88,7 +88,7 @@ default cannot be coerced are the property definition's own rules —
 [schema-modeling.md](schema-modeling.md#required-and-default) has the three states
 `required` and `default` combine into, and the two ways a bad default can fail. One
 consequence belongs to the write path itself: defaults come from the full schema while
-validation uses the lens ([architecture.md](../architecture.md#ontology-scoping)), so a
+validation uses the lens ([architecture.md](../architecture.md#lens-scoping)), so a
 property the lens hides still receives its default and an entity created through a narrow
 lens stays valid under a wide one.
 
@@ -207,7 +207,8 @@ values are stubbed even then.
 ## Through the interfaces
 
 The full index of routes and tools is [interfaces.md](../interfaces.md). All of the below
-is runtime, addressed through one ontology key.
+is runtime, addressed through one ontology and one lens — the same type key in another
+ontology names disjoint data that no operation here can reach.
 
 | Operation | REST | Runtime MCP |
 |---|---|---|

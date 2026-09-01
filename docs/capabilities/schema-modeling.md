@@ -1,6 +1,6 @@
 # Schema modeling
 
-Designing the one global schema: entity types, relation types and property
+Designing one ontology's schema: entity types, relation types and property
 definitions. Everything runtime permits is derived from it, so this is the only
 place where the shape of the graph is decided.
 
@@ -9,10 +9,13 @@ Vocabulary: [../README.md](../README.md). Layering and invariants:
 
 ## What it does
 
-A system has exactly one schema. Types are not owned by an ontology, a project or
-a namespace — a type key names the same type everywhere, for every caller. A lens
-can hide a type ([ontology-lenses.md](ontology-lenses.md)), but it cannot own,
-shadow or redefine one.
+An ontology has exactly one schema, and every modeling operation addresses one
+ontology. Types are not owned by a lens, a project or a namespace below the
+ontology — within its ontology, a type key names the same type everywhere, for
+every caller. A lens can hide a type ([ontology-lenses.md](ontology-lenses.md)),
+but it cannot own, shadow or redefine one. Beyond the ontology, nothing is shared:
+two ontologies can each define `person`, and the two types have nothing to do
+with each other.
 
 Creating a type is immediately effective. Its CRUD surface, query surface, search
 surface and MCP tools exist from the moment it is created, with no deployment step
@@ -20,8 +23,8 @@ and no generated code.
 
 | Object | Identity | Fixed at creation | Editable afterwards |
 |---|---|---|---|
-| Entity type | globally unique key | key | display name, description |
-| Relation type | globally unique key | key, source entity type, target entity type | display name, description |
+| Entity type | key, unique within the ontology | key | display name, description |
+| Relation type | key, unique within the ontology | key, source entity type, target entity type | display name, description |
 | Property definition | key, unique within its owning type | key, data type, owning type | display name, description, required flag, default |
 
 Every type carries a mandatory display name and an optional description. Both are
@@ -42,6 +45,8 @@ something a reader would otherwise assume:
 - No computed, derived or server-generated user properties.
 - No renaming. A key, a data type and a relation type's endpoints are permanent;
   changing any of them means creating a new object.
+- No cross-ontology references. A relation type's endpoints, like everything
+  else, name types of its own ontology.
 
 ## Rules
 
@@ -53,9 +58,9 @@ The leading-letter requirement is load-bearing: system properties
 are distinguished by a leading underscore, so no user key can ever collide with
 one.
 
-Entity type keys and relation type keys are globally unique — and share no
-namespace, so the same key may name one of each. Property keys are unique within
-their owning type only.
+Entity type keys and relation type keys are unique within their ontology — and
+share no namespace, so the same key may name one of each. Property keys are unique
+within their owning type only.
 
 Nothing that a stored value or a stored reference depends on can change: a key, a
 property's data type, the type a property belongs to, and a relation type's source
@@ -150,9 +155,10 @@ override it. Delete or redirect the referencing relation types first. The respon
 is a conflict, not a cascade prompt, because there is no consenting to it.
 
 **Deletion does not delete instance data.** Entities of a deleted entity type
-remain stored but become unreachable: no lens exposes the type, so every read,
-write and query naming it fails as not found. There is no operation that reports
-or removes them. This is the sharpest trap in the modeling surface.
+remain stored but become unreachable within their ontology: no lens exposes the
+type, so every read, write and query naming it fails as not found. There is no
+operation that reports or removes them — short of deleting the whole ontology.
+This is the sharpest trap in the modeling surface.
 
 Deleting an entity type also discards the search artefacts derived from it — its
 vector index, and the stored passages and index of each of its document properties
@@ -183,7 +189,7 @@ never affected — the same property added under the same circumstances breaks o
 lens and not the other, purely because of how they declared their inclusion.
 
 The refusal is the `CASCADE_REQUIRED` error described in
-[../architecture.md](../architecture.md). Its `details.affectedOntologies` is the
+[../architecture.md](../architecture.md). Its `details.affectedLenses` is the
 sorted list of the **keys** of every lens the change would break — enough to
 inspect each one and decide, without a second lookup.
 
@@ -220,8 +226,8 @@ dotted path locating the offending object and a message.
 unscoped lens is valid by definition. The rules are in
 [ontology-lenses.md](ontology-lenses.md).
 
-**Validating the schema** checks the global schema and then every lens, returning
-one combined error list. The global half reports:
+**Validating the schema** checks the ontology's schema and then every one of its
+lenses, returning one combined error list. The schema half reports:
 
 - a duplicate entity type key, or a duplicate relation type key
 - a duplicate property key within one type
@@ -238,7 +244,8 @@ invisible to both.
 
 ## Through the interfaces
 
-Full index: [../interfaces.md](../interfaces.md).
+Full index: [../interfaces.md](../interfaces.md). Every entrance below addresses
+one ontology — REST in the path, MCP through the mount's binding.
 
 The same service enforces every rule above regardless of entrance, including the
 cascade protocol. One detail does not survive the crossing: the structured list of

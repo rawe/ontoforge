@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import * as model from '@/api/model'
 import { ApiError } from '@/api/http'
 import { qk } from '@/api/queryKeys'
-import { AGENT_TOOL_NAMES, type AiAgent, type Ontology } from '@/api/types'
+import { AGENT_TOOL_NAMES, type AiAgent, type Lens } from '@/api/types'
 import { EmptyState } from '@/components/EmptyState'
 import {
   AlertDialog,
@@ -37,15 +37,22 @@ import { deriveKey, invalidateModeling, isValidKey, toastError } from './lib'
 import { KeyField } from './shared'
 
 interface AgentDialogProps {
-  /** Modeling agent routes are addressed by ontology KEY (not UUID). */
   ontologyKey: string
+  /** Modeling agent routes are addressed by lens KEY (not UUID). */
+  lensKey: string
   /** null → create mode. */
   agent: AiAgent | null
   open: boolean
   onOpenChange: (open: boolean) => void
 }
 
-function AgentDialog({ ontologyKey, agent, open, onOpenChange }: AgentDialogProps) {
+function AgentDialog({
+  ontologyKey,
+  lensKey,
+  agent,
+  open,
+  onOpenChange,
+}: AgentDialogProps) {
   const isEdit = agent !== null
   const queryClient = useQueryClient()
 
@@ -75,7 +82,7 @@ function AgentDialog({ ontologyKey, agent, open, onOpenChange }: AgentDialogProp
 
   const save = useMutation({
     mutationFn: () =>
-      model.upsertAiAgent(ontologyKey, key, {
+      model.upsertAiAgent(ontologyKey, lensKey, key, {
         name: name.trim(),
         description: description.trim() === '' ? null : description.trim(),
         systemPrompt: systemPrompt.trim() === '' ? null : systemPrompt,
@@ -103,7 +110,7 @@ function AgentDialog({ ontologyKey, agent, open, onOpenChange }: AgentDialogProp
         <DialogHeader>
           <DialogTitle>{isEdit ? `Edit agent "${agent.key}"` : 'New agent'}</DialogTitle>
           <DialogDescription>
-            Agents are AI personas for this ontology, with their own system prompt and
+            Agents are AI personas for this lens, with their own system prompt and
             tool access.
           </DialogDescription>
         </DialogHeader>
@@ -207,22 +214,22 @@ function AgentDialog({ ontologyKey, agent, open, onOpenChange }: AgentDialogProp
 }
 
 /** Agents tab: list of AI agent definitions + editor dialog. */
-export function AgentsTab({ ontology }: { ontology: Ontology }) {
+export function AgentsTab({ ontologyKey, lens }: { ontologyKey: string; lens: Lens }) {
   const queryClient = useQueryClient()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<AiAgent | null>(null)
   const [toDelete, setToDelete] = useState<AiAgent | null>(null)
 
   // NOTE: modeling agent routes are key-addressed, unlike the other
-  // /api/model/ontologies/{id}/... routes.
+  // /api/ontologies/{key}/model/lenses/{id}/... routes.
   const agentsQuery = useQuery({
-    queryKey: qk.model('ontologies', ontology.key, 'ai-agents'),
-    queryFn: () => model.listAiAgents(ontology.key),
+    queryKey: qk.model(ontologyKey, 'lenses', lens.key, 'ai-agents'),
+    queryFn: () => model.listAiAgents(ontologyKey, lens.key),
   })
   const agents = agentsQuery.data
 
   const remove = useMutation({
-    mutationFn: (agentKey: string) => model.deleteAiAgent(ontology.key, agentKey),
+    mutationFn: (agentKey: string) => model.deleteAiAgent(ontologyKey, lens.key, agentKey),
     onSuccess: () => {
       invalidateModeling(queryClient)
       toast.success('Agent deleted')
@@ -318,7 +325,8 @@ export function AgentsTab({ ontology }: { ontology: Ontology }) {
       )}
 
       <AgentDialog
-        ontologyKey={ontology.key}
+        ontologyKey={ontologyKey}
+        lensKey={lens.key}
         agent={editing}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
@@ -332,7 +340,7 @@ export function AgentsTab({ ontology }: { ontology: Ontology }) {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete agent "{toDelete?.key ?? ''}"?</AlertDialogTitle>
             <AlertDialogDescription>
-              The agent definition is removed from this ontology. This cannot be undone.
+              The agent definition is removed from this lens. This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -46,7 +46,7 @@ describe("off-format ids short-circuit to the not-found shape, database untouche
   ];
 
   it.each(OFF_FORMAT)("point reads answer null for '%s'", async (id) => {
-    expect(await store.getOntology(id)).toBeNull();
+    expect(await store.getLens(id)).toBeNull();
     expect(await store.getEntityType(id)).toBeNull();
     expect(await store.getRelationType(id)).toBeNull();
     expect(await store.getProperty(VALID, "EntityType", id)).toBeNull();
@@ -54,7 +54,7 @@ describe("off-format ids short-circuit to the not-found shape, database untouche
   });
 
   it("updates answer null", async () => {
-    expect(await store.updateOntology("nope", "n", null)).toBeNull();
+    expect(await store.updateLens("nope", "n", null)).toBeNull();
     expect(await store.updateEntityType("nope", "n", null)).toBeNull();
     expect(await store.updateRelationType("nope", "n", null)).toBeNull();
     expect(await store.updateProperty("nope", "EntityType", VALID, "n", null, null, null, false)).toBeNull();
@@ -63,7 +63,7 @@ describe("off-format ids short-circuit to the not-found shape, database untouche
   });
 
   it("deletes answer false", async () => {
-    expect(await store.deleteOntology("nope")).toBe(false);
+    expect(await store.deleteLens("nope")).toBe(false);
     expect(await store.deleteEntityType("nope")).toBe(false);
     expect(await store.deleteRelationType("nope")).toBe(false);
     expect(await store.deleteProperty("nope", "EntityType", VALID)).toBe(false);
@@ -91,8 +91,8 @@ describe("off-format ids short-circuit to the not-found shape, database untouche
     expect(await store.updateIncludesType(VALID, "EntityType", "nope", null)).toBeNull();
     expect(await store.removeIncludesType(VALID, "RelationType", "nope")).toBe(false);
     expect(await store.removeAllIncludesForType("EntityType", "nope")).toBe(0);
-    expect(await store.findOntologiesIncludingType("EntityType", "nope")).toEqual([]);
-    expect(await store.findOntologiesWithExplicitProperty("EntityType", "nope", "p")).toEqual([]);
+    expect(await store.findLensesIncludingType("EntityType", "nope")).toEqual([]);
+    expect(await store.findLensesWithExplicitProperty("EntityType", "nope", "p")).toEqual([]);
     expect(await store.addPropertyToIncludesLists("EntityType", "nope", "p")).toBe(0);
     expect(await store.removePropertyFromIncludesLists("EntityType", "nope", "p")).toBe(0);
     expect(fakeDb.queries).toEqual([]);
@@ -107,7 +107,7 @@ describe("off-format ids short-circuit to the not-found shape, database untouche
 
 describe("well-formed ids reach the database", () => {
   it("a lowercase hyphenated uuid issues the query", async () => {
-    expect(await store.getOntology(VALID)).toBeNull(); // empty fake result
+    expect(await store.getLens(VALID)).toBeNull(); // empty fake result
     expect(fakeDb.queries).toHaveLength(1);
     expect(fakeDb.queries[0]?.params).toEqual([VALID]);
   });

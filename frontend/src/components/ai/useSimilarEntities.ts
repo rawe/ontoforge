@@ -32,6 +32,7 @@ function dedupeQuery(item: ReviewEntityItem): string {
  */
 export function useSimilarEntities(
   ontologyKey: string,
+  lensKey: string,
   items: readonly ReviewEntityItem[],
   enabled: boolean,
 ): SimilarLookup {
@@ -39,9 +40,9 @@ export function useSimilarEntities(
     queries: items.map((item) => {
       const q = dedupeQuery(item)
       return {
-        queryKey: ['extract', 'dedupe', ontologyKey, item.entityTypeKey, q] as const,
+        queryKey: ['extract', 'dedupe', ontologyKey, lensKey, item.entityTypeKey, q] as const,
         queryFn: async () => {
-          const res = await semanticSearch(ontologyKey, {
+          const res = await semanticSearch(ontologyKey, lensKey, {
             q,
             type: item.entityTypeKey,
             limit: 3,

@@ -41,21 +41,26 @@ const formatTimestamp = (iso: string) => {
     : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 }
 
-/** `/w/:ontologyKey/e/:typeKey/:id` — entity detail (slice S4). */
+/** `/o/:ontologyKey/w/:lensKey/e/:typeKey/:id` — entity detail (slice S4). */
 export function EntityDetailPage() {
-  const { ontologyKey, typeKey, id } = useParams<{
+  const { ontologyKey, lensKey, typeKey, id } = useParams<{
     ontologyKey: string
+    lensKey: string
     typeKey: string
     id: string
   }>()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const schema = useRuntimeSchema(ontologyKey)
+  const schema = useRuntimeSchema(ontologyKey, lensKey)
 
   const entityQuery = useQuery({
-    queryKey: qk.entity(ontologyKey ?? '', typeKey ?? '', id ?? ''),
-    queryFn: () => runtime.getEntity(ontologyKey!, typeKey!, id!),
-    enabled: ontologyKey !== undefined && typeKey !== undefined && id !== undefined,
+    queryKey: qk.entity(ontologyKey ?? '', lensKey ?? '', typeKey ?? '', id ?? ''),
+    queryFn: () => runtime.getEntity(ontologyKey!, lensKey!, typeKey!, id!),
+    enabled:
+      ontologyKey !== undefined &&
+      lensKey !== undefined &&
+      typeKey !== undefined &&
+      id !== undefined,
   })
   const entity = entityQuery.data
 
@@ -68,18 +73,18 @@ export function EntityDetailPage() {
     [schema.data, typeKey],
   )
 
-  const counts = useNeighborCounts(ontologyKey ?? '', entity, relationTypes)
+  const counts = useNeighborCounts(ontologyKey ?? '', lensKey ?? '', entity, relationTypes)
 
   // Record the visit for the palette's recents list.
   useEffect(() => {
-    if (ontologyKey !== undefined && entity !== undefined) {
-      recordRecent(ontologyKey, {
+    if (ontologyKey !== undefined && lensKey !== undefined && entity !== undefined) {
+      recordRecent(ontologyKey, lensKey, {
         id: entity._id,
         typeKey: entity._entityTypeKey,
         label: displayLabel(entity),
       })
     }
-  }, [ontologyKey, entity])
+  }, [ontologyKey, lensKey, entity])
 
   const [addRelation, setAddRelation] = useState<{
     open: boolean
@@ -87,21 +92,22 @@ export function EntityDetailPage() {
   }>({ open: false })
 
   const deleteMutation = useMutation({
-    mutationFn: () => runtime.deleteEntity(ontologyKey!, typeKey!, id!),
+    mutationFn: () => runtime.deleteEntity(ontologyKey!, lensKey!, typeKey!, id!),
     onSuccess: () => {
       void queryClient.invalidateQueries({
-        queryKey: qk.entities(ontologyKey!, typeKey!),
+        queryKey: qk.entities(ontologyKey!, lensKey!, typeKey!),
       })
-      queryClient.removeQueries({ queryKey: qk.entity(ontologyKey!, typeKey!, id!) })
+      queryClient.removeQueries({ queryKey: qk.entity(ontologyKey!, lensKey!, typeKey!, id!) })
       toast.success('Entity deleted')
-      navigate(`/w/${ontologyKey}/t/${typeKey}`)
+      navigate(`/o/${ontologyKey}/w/${lensKey}/t/${typeKey}`)
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : 'Failed to delete entity')
     },
   })
 
-  if (ontologyKey === undefined || typeKey === undefined || id === undefined) return null
+  if (ontologyKey === undefined || lensKey === undefined || typeKey === undefined || id === undefined)
+    return null
 
   const notFound =
     (entityQuery.error instanceof ApiError && entityQuery.error.status === 404) ||
@@ -114,12 +120,12 @@ export function EntityDetailPage() {
         title="Entity not found"
         description={
           entityType === undefined && schema.data !== undefined
-            ? `Entity type "${typeKey}" is not part of this ontology's scope.`
-            : 'This entity does not exist (anymore) in this ontology.'
+            ? `Entity type "${typeKey}" is not part of this lens's scope.`
+            : 'This entity does not exist (anymore) in this lens.'
         }
         action={
           <Button variant="outline" size="sm" asChild>
-            <Link to={`/w/${ontologyKey}`}>Back to overview</Link>
+            <Link to={`/o/${ontologyKey}/w/${lensKey}`}>Back to overview</Link>
           </Button>
         }
         className="py-24"
@@ -160,7 +166,7 @@ export function EntityDetailPage() {
   }
 
   const label = displayLabel(entity)
-  const explorePath = `/w/${ontologyKey}/explore?focus=${typeKey}:${entity._id}`
+  const explorePath = `/o/${ontologyKey}/w/${lensKey}/explore?focus=${typeKey}:${entity._id}`
 
   return (
     <div>
@@ -225,7 +231,7 @@ export function EntityDetailPage() {
       />
 
       <div className="grid items-start gap-6 p-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-        <PropertiesCard ontologyKey={ontologyKey} entityType={entityType} entity={entity} />
+        <PropertiesCard ontologyKey={ontologyKey} lensKey={lensKey} entityType={entityType} entity={entity} />
 
         <div className="flex flex-col gap-4">
           {relationTypes.length === 0 ? (
@@ -237,6 +243,7 @@ export function EntityDetailPage() {
               <RelationSection
                 key={rt.key}
                 ontologyKey={ontologyKey}
+                lensKey={lensKey}
                 entity={entity}
                 relationType={rt}
                 entityTypes={schema.data!.entityTypes}
@@ -248,6 +255,7 @@ export function EntityDetailPage() {
 
           <MiniMap
             ontologyKey={ontologyKey}
+            lensKey={lensKey}
             entity={entity}
             relationTypes={relationTypes}
             counts={counts.data}
@@ -257,6 +265,7 @@ export function EntityDetailPage() {
 
       <AddRelationDialog
         ontologyKey={ontologyKey}
+        lensKey={lensKey}
         entity={entity}
         entityLabel={label}
         relationTypes={relationTypes}

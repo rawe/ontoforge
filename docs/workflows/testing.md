@@ -9,25 +9,28 @@ All commands are run from `server/`.
 | Command | Suite | External deps |
 |---|---|---|
 | `npm test` | Unit | None |
-| `npm run test:integration` | Integration | The selected database |
-| `npm run test:integration:embedding` | Semantic search | The selected database + Ollama (embedding model) |
-| `npm run test:integration:ai` | AI (slow, real model) | The selected database + Ollama (tool-calling model) |
+| `npm run test:integration` | Integration | The test database |
+| `npm run test:integration:embedding` | Semantic search | The test database + Ollama (embedding model) |
+| `npm run test:integration:ai` | AI (slow, real model) | The test database + Ollama (tool-calling model) |
 
 **Unit tests** (`tests/`, excluding `tests/integration/`) mock all external
 dependencies (database drivers, embedding providers, AI models). They run fast and
-require no infrastructure.
+require no infrastructure — but they still read `env/test.env`, because some assert that
+the capability flags are false, which only holds with no provider configured.
 
 **Integration tests** (`tests/integration/`) hit real services and run serially — they
 wipe the database between files. The integration suite *is* the conformance suite: the
 same tests run against whichever adapter `DB_BACKEND` selects, and nothing is renamed
-per backend. The embedding suite (`tests/integration/embedding/`) and the AI suite
+per backend. It carries two tiers (`tests/integration/tiers.ts`): the contract tier
+every adapter runs, and a multi-ontology tier — cases that need several ontologies at
+once — that skips on adapters capped at one ontology (Neo4j). The embedding suite (`tests/integration/embedding/`) and the AI suite
 (`tests/integration/ai/`) are separate because they configure live providers, while the
 plain integration suite's feature-disabled assertions depend on running with *no*
 provider configured.
 
-The embedding and AI suites auto-skip when their optional provider (Ollama) is
-unavailable. The integration suite does not: it requires a running database and fails
-loudly by design when the selected one is down.
+The embedding and AI suites auto-skip when their provider is unavailable, naming the
+cause. The integration suite does not: it requires a running database and fails loudly by
+design when the selected one is down.
 
 `npm run typecheck` runs the TypeScript compiler without emitting.
 
@@ -44,12 +47,21 @@ docker compose up -d
 A Neo4j run additionally needs the `neo4j` service block in `docker-compose.yml`
 uncommented; both databases run side by side with no port conflicts.
 
+### The test database
+
+Every integration suite reads its own env file — `env/test.env`,
+`env/test-embedding.env`, `env/test-ai.env` — named by the npm script. `server/.env` is
+never read by a test.
+
+All three point at `ontoforge_test` in the dev compose container, a database of its own.
+The suite-level hard reset drops and recreates it, so it is created on the first run and
+your development database is never touched.
+
 ### Selecting the adapter
 
-- **PostgreSQL (the default):** no `.env` needed — the built-in defaults
-  (`DB_BACKEND=postgres`, `postgresql://localhost:5432/ontoforge`) match the dev
-  compose service.
-- **Neo4j:** set the four values explicitly in `server/.env`:
+- **PostgreSQL (the default):** what the three test presets configure.
+- **Neo4j:** change the four `DB_*` values in the test preset you are running, or copy it
+  to an uncommitted `env/*.local.env` and name that file:
 
   ```
   DB_BACKEND=neo4j
@@ -68,16 +80,31 @@ Required by the embedding suite:
 ollama pull nomic-embed-text
 ```
 
-### Ollama (AI / Tool Calling)
+### Testing a paid AI provider
 
-Required by the AI suite:
+`env/test-ai.env` names a local Ollama model and carries no credential, so the default
+run is free. The AI suite drives a **real** language model, so against a paid endpoint
+every run costs money — which is why no committed preset can reach one.
+
+To test a paid provider, copy the preset to an uncommitted local file, put the provider
+and key there, and name it for that run:
 
 ```bash
-ollama pull qwen3:8b
+cp env/test-ai.env env/test-ai.local.env    # then edit in your provider and key
+ENV_FILE=../env/test-ai.local.env npm run test:integration:ai
 ```
 
-AI tests need a model that supports **tool calling** (function calling); not all Ollama
-models do. The suite uses the `AI_MODEL` default from `src/config.ts` (`qwen3:8b`).
+`env/*.local.env` is gitignored. **Never put a key in a file under `env/` itself** — that
+directory is committed. Each `test:integration*` script defaults its `ENV_FILE` with
+`${ENV_FILE:-…}`, so a value from your shell wins over the preset.
+
+The suite probes the OpenAI-compatible listing at `{AI_BASE_URL}/v1/models` — served by
+OpenRouter and by Ollama's compatibility layer — and skips with a message naming the
+cause when no provider is configured, the endpoint is unreachable, or it does not list
+`AI_MODEL`.
+
+The model must support **tool calling** (function calling); not all do. For the default
+Ollama run: `ollama pull qwen3:8b`.
 
 **Note on AI test flakiness:** AI integration tests interact with a real LLM, so results
 are non-deterministic. Tests are written to validate structure and basic correctness

@@ -23,12 +23,12 @@ import type { DerivedEdge } from './resultUtils'
 const NODE_WIDTH = 176
 const NODE_HEIGHT = 52
 
-type ResultNodeData = { entity: EntityInstance; ontologyKey: string }
+type ResultNodeData = { entity: EntityInstance; ontologyKey: string; lensKey: string }
 type ResultNode = Node<ResultNodeData, 'resultEntity'>
 
 function ResultEntityNode({ data }: NodeProps<ResultNode>) {
   const navigate = useNavigate()
-  const { entity, ontologyKey } = data
+  const { entity, ontologyKey, lensKey } = data
   const color = getTypeColor(entity._entityTypeKey)
   return (
     <div
@@ -54,7 +54,7 @@ function ResultEntityNode({ data }: NodeProps<ResultNode>) {
           onClick={(e) => {
             e.stopPropagation()
             void navigate(
-              `/w/${ontologyKey}/explore?focus=${entity._entityTypeKey}:${entity._id}`,
+              `/o/${ontologyKey}/w/${lensKey}/explore?focus=${entity._entityTypeKey}:${entity._id}`,
             )
           }}
         >
@@ -71,7 +71,12 @@ function ResultEntityNode({ data }: NodeProps<ResultNode>) {
 
 const nodeTypes = { resultEntity: ResultEntityNode }
 
-function layout(entities: EntityInstance[], derivedEdges: DerivedEdge[], ontologyKey: string) {
+function layout(
+  entities: EntityInstance[],
+  derivedEdges: DerivedEdge[],
+  ontologyKey: string,
+  lensKey: string,
+) {
   const g = new dagre.graphlib.Graph()
   g.setGraph({ rankdir: 'LR', nodesep: 30, ranksep: 80, marginx: 20, marginy: 20 })
   g.setDefaultEdgeLabel(() => ({}))
@@ -85,7 +90,7 @@ function layout(entities: EntityInstance[], derivedEdges: DerivedEdge[], ontolog
       id: entity._id,
       type: 'resultEntity',
       position: { x: pos.x - NODE_WIDTH / 2, y: pos.y - NODE_HEIGHT / 2 },
-      data: { entity, ontologyKey },
+      data: { entity, ontologyKey, lensKey },
     }
   })
 
@@ -110,6 +115,7 @@ function layout(entities: EntityInstance[], derivedEdges: DerivedEdge[], ontolog
 
 interface ResultsGraphProps {
   ontologyKey: string
+  lensKey: string
   entities: EntityInstance[]
   edges: DerivedEdge[]
 }
@@ -119,11 +125,11 @@ interface ResultsGraphProps {
  * type-colored nodes (dagre layout), derivable relations as labeled edges.
  * Each node offers "Open in Explorer".
  */
-export function ResultsGraph({ ontologyKey, entities, edges }: ResultsGraphProps) {
+export function ResultsGraph({ ontologyKey, lensKey, entities, edges }: ResultsGraphProps) {
   const { resolvedTheme } = useTheme()
   const graph = useMemo(
-    () => layout(entities, edges, ontologyKey),
-    [entities, edges, ontologyKey],
+    () => layout(entities, edges, ontologyKey, lensKey),
+    [entities, edges, ontologyKey, lensKey],
   )
   const dataKey = useMemo(
     () => entities.map((e) => e._id).concat(edges.map((e) => e.id)).join('|'),

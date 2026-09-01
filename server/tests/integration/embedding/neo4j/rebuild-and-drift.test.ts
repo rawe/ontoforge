@@ -63,19 +63,20 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
     return res.json() as Row;
   }
 
-  /** Ontology `index_drift_test` with one person type and one entity;
-   * indexes exist at the provider width (768). */
+  /** Ontology `test_ont` with lens `index_drift_test`, one person type
+   * and one entity; indexes exist at the provider width (768). */
   async function buildDriftFixture(): Promise<void> {
-    await post("/api/model/ontologies", { key: "index_drift_test", name: "Index Drift Test" });
-    const et = await post("/api/model/entity-types", { key: "person", displayName: "Person" });
-    await post(`/api/model/entity-types/${et.entityTypeId as string}/properties`, {
+    await post("/api/ontologies", { key: "test_ont" });
+    await post("/api/ontologies/test_ont/model/lenses", { key: "index_drift_test", name: "Index Drift Test" });
+    const et = await post("/api/ontologies/test_ont/model/entity-types", { key: "person", displayName: "Person" });
+    await post(`/api/ontologies/test_ont/model/entity-types/${et.entityTypeId as string}/properties`, {
       key: "name",
       displayName: "Name",
       dataType: "string",
       required: true,
     });
     await ensureSemanticIndexes(getEmbeddingProvider()!.dimensions);
-    await post("/api/runtime/index_drift_test/entities/person", { name: "Alice Chen" });
+    await post("/api/ontologies/test_ont/runtime/lenses/index_drift_test/entities/person", { name: "Alice Chen" });
   }
 
   /** Run `work` with both indexes drifted; restore even on failure. */
@@ -120,7 +121,7 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
       expect(reported).toContain("search across all entity types");
       expect(reported).toContain(String(MISMATCHED_DIMENSIONS));
       expect(reported).toContain(String(getEmbeddingProvider()!.dimensions));
-      expect(reported).toContain("/api/model/rebuild-embeddings");
+      expect(reported).toContain("/api/ontologies/{ontologyKey}/model/rebuild-embeddings");
 
       // Operator-facing text stays in API vocabulary: no vendor, no
       // physical index name.
@@ -139,7 +140,7 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
     await withDriftedIndexes(async () => {
       const res = await app.inject({
         method: "GET",
-        url: "/api/runtime/index_drift_test/search/semantic?q=Alice&searchIn=entities&type=person",
+        url: "/api/ontologies/test_ont/runtime/lenses/index_drift_test/search/semantic?q=Alice&searchIn=entities&type=person",
       });
 
       expect(res.statusCode, "expected the drift to break search").toBe(500);
@@ -167,11 +168,11 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
     await withDriftedIndexes(async () => {
       const before = await app.inject({
         method: "GET",
-        url: "/api/runtime/index_drift_test/search/semantic?q=Alice&searchIn=entities&type=person",
+        url: "/api/ontologies/test_ont/runtime/lenses/index_drift_test/search/semantic?q=Alice&searchIn=entities&type=person",
       });
       expect(before.statusCode, "expected the drift to break search first").toBe(500);
 
-      const rebuild = await app.inject({ method: "POST", url: "/api/model/rebuild-embeddings" });
+      const rebuild = await app.inject({ method: "POST", url: "/api/ontologies/test_ont/model/rebuild-embeddings" });
       expect(rebuild.statusCode, rebuild.body).toBe(200);
 
       const width = getEmbeddingProvider()!.dimensions;
@@ -182,7 +183,7 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
 
       const after = await app.inject({
         method: "GET",
-        url: "/api/runtime/index_drift_test/search/semantic?q=Alice&searchIn=entities&type=person",
+        url: "/api/ontologies/test_ont/runtime/lenses/index_drift_test/search/semantic?q=Alice&searchIn=entities&type=person",
       });
       expect(after.statusCode, after.body).toBe(200);
       expect((after.json() as { total: number }).total).toBeGreaterThan(0);
@@ -191,10 +192,10 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
 
   it("streams NDJSON progress records and a final summary, saved queries included", async () => {
     await buildDriftFixture();
-    await post("/api/runtime/index_drift_test/entities/person", { name: "Bob Smith" });
+    await post("/api/ontologies/test_ont/runtime/lenses/index_drift_test/entities/person", { name: "Bob Smith" });
     const defined = await app.inject({
       method: "PUT",
-      url: "/api/model/ontologies/index_drift_test/saved-queries/everyone",
+      url: "/api/ontologies/test_ont/model/lenses/index_drift_test/saved-queries/everyone",
       payload: {
         name: "Everyone",
         description: "List every person by name",
@@ -204,7 +205,7 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
     });
     expect(defined.statusCode, defined.body).toBe(201);
 
-    const res = await app.inject({ method: "POST", url: "/api/model/rebuild-embeddings" });
+    const res = await app.inject({ method: "POST", url: "/api/ontologies/test_ont/model/rebuild-embeddings" });
     expect(res.statusCode, res.body).toBe(200);
     expect(res.headers["content-type"]).toContain("application/x-ndjson");
 
@@ -252,7 +253,7 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
     try {
       const res = await app.inject({
         method: "PUT",
-        url: "/api/model/ontologies/index_drift_test/saved-queries/find-people",
+        url: "/api/ontologies/test_ont/model/lenses/index_drift_test/saved-queries/find-people",
         payload: {
           name: "Find People",
           description: "Find people and employees working at the company by their name",
@@ -268,20 +269,20 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
     const before = await app.inject({
       method: "GET",
       url:
-        "/api/runtime/index_drift_test/saved-queries/search?q=" +
+        "/api/ontologies/test_ont/runtime/lenses/index_drift_test/saved-queries/search?q=" +
         encodeURIComponent("which people work here") +
         "&min_score=0.1",
     });
     expect(before.statusCode).toBe(200);
     expect((before.json() as Row[]).map((h) => h.key)).not.toContain("find-people");
 
-    const rebuild = await app.inject({ method: "POST", url: "/api/model/rebuild-embeddings" });
+    const rebuild = await app.inject({ method: "POST", url: "/api/ontologies/test_ont/model/rebuild-embeddings" });
     expect(rebuild.statusCode, rebuild.body).toBe(200);
 
     const after = await app.inject({
       method: "GET",
       url:
-        "/api/runtime/index_drift_test/saved-queries/search?q=" +
+        "/api/ontologies/test_ont/runtime/lenses/index_drift_test/saved-queries/search?q=" +
         encodeURIComponent("which people work here") +
         "&min_score=0.1",
     });
@@ -296,17 +297,17 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
     // invisible to semantic search.
     disableProvider();
     try {
-      await post("/api/runtime/index_drift_test/entities/person", { name: "Grace Hopper" });
+      await post("/api/ontologies/test_ont/runtime/lenses/index_drift_test/entities/person", { name: "Grace Hopper" });
     } finally {
       enableOllamaProvider();
     }
 
-    const rebuild = await app.inject({ method: "POST", url: "/api/model/rebuild-embeddings" });
+    const rebuild = await app.inject({ method: "POST", url: "/api/ontologies/test_ont/model/rebuild-embeddings" });
     expect(rebuild.statusCode, rebuild.body).toBe(200);
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/index_drift_test/search/semantic?q=Grace%20Hopper&type=person&searchIn=entities",
+      url: "/api/ontologies/test_ont/runtime/lenses/index_drift_test/search/semantic?q=Grace%20Hopper&type=person&searchIn=entities",
     });
     expect(res.statusCode).toBe(200);
     const data = res.json() as { results: Row[] };
@@ -314,9 +315,12 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
   });
 
   it("rebuild is refused without a provider", async () => {
+    // The ontology must exist: rebuild answers 404 for an unknown
+    // ontology before the provider check.
+    await post("/api/ontologies", { key: "test_ont" });
     disableProvider();
     try {
-      const res = await app.inject({ method: "POST", url: "/api/model/rebuild-embeddings" });
+      const res = await app.inject({ method: "POST", url: "/api/ontologies/test_ont/model/rebuild-embeddings" });
       expect(res.statusCode).toBe(422);
       const body = res.json() as { error: { code: string; message: string } };
       expect(body.error.code).toBe("VALIDATION_ERROR");

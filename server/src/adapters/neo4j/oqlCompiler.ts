@@ -1,7 +1,7 @@
 /**
  * Compile validated OQL to Neo4j Cypher.
  *
- * OQL queries are written in ontology type keys. This adapter's dialect
+ * OQL queries are written in lens type keys. This adapter's dialect
  * uses PascalCase node labels and UPPER_SNAKE_CASE relationship types, so
  * the compiler rewrites the type-key tokens accordingly — through the
  * token positions the analysis provides, never by textual find-replace

@@ -41,8 +41,6 @@ services:
       # AI_BASE_URL: http://host.docker.internal:11434
       # AI_API_KEY:              # required for openai provider
       # AI_REASONING_EFFORT:     # none | low | medium | high (unset = model default)
-      # MCP default ontology key (optional)
-      # DEFAULT_MCP_ONTOLOGY_KEY: my_ontology
     depends_on:
       postgres:
         condition: service_healthy

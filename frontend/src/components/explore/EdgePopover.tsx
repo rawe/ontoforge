@@ -25,6 +25,7 @@ const POPOVER_WIDTH = 300
 
 interface EdgePopoverProps {
   ontologyKey: string
+  lensKey: string
   edge: RelationFlowEdge
   /** Screen coordinates of the click that opened the popover. */
   at: { x: number; y: number }
@@ -42,6 +43,7 @@ interface EdgePopoverProps {
  */
 export function EdgePopover({
   ontologyKey,
+  lensKey,
   edge,
   at,
   sourceEntity,
@@ -77,12 +79,13 @@ export function EdgePopover({
 
   const deleteMutation = useMutation({
     mutationFn: () =>
-      runtime.deleteRelation(ontologyKey, relation!._relationTypeKey, relation!._id),
+      runtime.deleteRelation(ontologyKey, lensKey, relation!._relationTypeKey, relation!._id),
     onSuccess: () => {
       if (sourceEntity !== undefined) {
         invalidateNeighborhood(
           queryClient,
           ontologyKey,
+          lensKey,
           sourceEntity._entityTypeKey,
           sourceEntity._id,
         )
@@ -91,6 +94,7 @@ export function EdgePopover({
         invalidateNeighborhood(
           queryClient,
           ontologyKey,
+          lensKey,
           targetEntity._entityTypeKey,
           targetEntity._id,
         )
@@ -121,7 +125,7 @@ export function EdgePopover({
       onClick={() => {
         if (entity === undefined) return
         onClose()
-        void navigate(`/w/${ontologyKey}/e/${entity._entityTypeKey}/${entity._id}`)
+        void navigate(`/o/${ontologyKey}/w/${lensKey}/e/${entity._entityTypeKey}/${entity._id}`)
       }}
     >
       <span className="truncate">

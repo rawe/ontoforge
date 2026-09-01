@@ -1,11 +1,13 @@
 import {
   Check,
   ChevronsUpDown,
+  Layers,
   LayoutDashboard,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
   Search,
+  Settings2,
   Shapes,
   Sparkles,
   SquareTerminal,
@@ -13,8 +15,8 @@ import {
 } from 'lucide-react'
 import { useState, type ComponentType, type ReactNode } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { useFeatures, useOntologies, useRuntimeSchema } from '@/api/hooks'
-import { Logo } from '@/components/Logo'
+import { useFeatures, useLenses, useRuntimeSchema } from '@/api/hooks'
+import { OntologySwitcher } from '@/components/layout/OntologySwitcher'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { TypeDot } from '@/components/TypeChip'
 import { Button } from '@/components/ui/button'
@@ -75,40 +77,39 @@ function NavItem({ to, label, collapsed, icon: Icon, leading, end }: NavItemProp
   )
 }
 
-/* ----------------------------- ontology switcher ----------------------------- */
+/* ----------------------------- lens switcher ----------------------------- */
 
-function OntologySwitcher({
+function LensSwitcher({
   ontologyKey,
+  lensKey,
   collapsed,
 }: {
   ontologyKey: string
+  lensKey: string
   collapsed: boolean
 }) {
   const navigate = useNavigate()
-  const { data: ontologies } = useOntologies()
-  const current = ontologies?.find((o) => o.key === ontologyKey)
+  const { data: lenses } = useLenses(ontologyKey)
+  const current = lenses?.find((o) => o.key === lensKey)
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
           className={cn(
-            'flex h-9 w-full items-center gap-2 rounded-lg px-1.5 text-left',
+            'flex h-8 w-full items-center gap-2 rounded-lg px-1.5 text-left',
             'transition-colors duration-100 hover:bg-sidebar-accent/60',
             'focus-visible:outline-2 focus-visible:outline-ring/60',
             collapsed && 'justify-center px-0',
           )}
-          aria-label="Switch ontology"
+          aria-label="Switch lens"
         >
-          <Logo className="size-6 shrink-0 rounded-md" />
+          <Layers className="size-4 shrink-0 text-muted-foreground" />
           {!collapsed && (
             <>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13px] font-semibold leading-tight">
-                  {current?.name ?? ontologyKey}
-                </span>
-                <span className="block truncate font-mono text-[10.5px] leading-tight text-muted-foreground">
-                  {ontologyKey}
+                <span className="block truncate text-[13px] font-medium leading-tight">
+                  {current?.name ?? lensKey}
                 </span>
               </span>
               <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
@@ -118,14 +119,14 @@ function OntologySwitcher({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-60">
         <DropdownMenuLabel className="text-[11px] uppercase tracking-wide text-muted-foreground">
-          Ontologies
+          Lens
         </DropdownMenuLabel>
-        {(ontologies ?? []).map((o) => (
+        {(lenses ?? []).map((o) => (
           <DropdownMenuItem
-            key={o.ontologyId}
+            key={o.lensId}
             onSelect={() => {
-              writeString(storageKeys.lastOntology, o.key)
-              navigate(`/w/${o.key}`)
+              writeString(storageKeys.lastLens(ontologyKey), o.key)
+              navigate(`/o/${ontologyKey}/w/${o.key}`)
             }}
             className="gap-2"
           >
@@ -135,13 +136,13 @@ function OntologySwitcher({
                 {o.key}
               </span>
             </span>
-            {o.key === ontologyKey && <Check className="size-4 shrink-0" />}
+            {o.key === lensKey && <Check className="size-4 shrink-0" />}
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => navigate('/studio/ontologies')} className="gap-2">
-          <Plus className="size-4" />
-          Manage ontologies
+        <DropdownMenuItem onSelect={() => navigate('/')} className="gap-2">
+          <Settings2 className="size-4" />
+          Manage…
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -152,9 +153,11 @@ function OntologySwitcher({
 
 export function Sidebar({
   ontologyKey,
+  lensKey,
   onSearch,
 }: {
   ontologyKey: string
+  lensKey: string
   /** Opens the Cmd+K search palette (provided by WorkbenchLayout). */
   onSearch?: () => void
 }) {
@@ -162,7 +165,7 @@ export function Sidebar({
     () => readString(storageKeys.sidebar) === 'collapsed',
   )
   const { data: features } = useFeatures()
-  const schema = useRuntimeSchema(ontologyKey)
+  const schema = useRuntimeSchema(ontologyKey, lensKey)
 
   const toggle = () => {
     setCollapsed((prev) => {
@@ -171,7 +174,7 @@ export function Sidebar({
     })
   }
 
-  const base = `/w/${ontologyKey}`
+  const base = `/o/${ontologyKey}/w/${lensKey}`
 
   return (
     <aside
@@ -181,8 +184,13 @@ export function Sidebar({
         collapsed ? 'w-13' : 'w-60',
       )}
     >
-      <div className={cn('p-2', collapsed && 'px-1.5')}>
-        <OntologySwitcher ontologyKey={ontologyKey} collapsed={collapsed} />
+      <div className={cn('flex flex-col gap-1 p-2', collapsed && 'px-1.5')}>
+        <OntologySwitcher
+          ontologyKey={ontologyKey}
+          surface="workbench"
+          collapsed={collapsed}
+        />
+        <LensSwitcher ontologyKey={ontologyKey} lensKey={lensKey} collapsed={collapsed} />
       </div>
 
       {onSearch !== undefined && (
@@ -334,7 +342,7 @@ export function Sidebar({
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size={collapsed ? 'icon-sm' : 'sm'} asChild>
-              <NavLink to="/studio" aria-label="Open Studio">
+              <NavLink to={`/o/${ontologyKey}/studio`} aria-label="Open Studio">
                 <Shapes className="size-4" />
                 {!collapsed && 'Studio'}
               </NavLink>

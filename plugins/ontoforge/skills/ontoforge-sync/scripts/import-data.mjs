@@ -1,20 +1,32 @@
 #!/usr/bin/env node
-// Import OntoForge instance data from a JSON file, remapping entity IDs.
+// Import instance data into one ontology from a JSON file, remapping entity
+// IDs. The data is written through one lens, so the lens must expose every
+// type and property the file carries.
 
 import { readFileSync } from 'node:fs';
-import { api, die, getBaseUrl, parseCliArgs } from './lib.mjs';
+import {
+  api,
+  die,
+  getBaseUrl,
+  getOntologyKey,
+  modelPath,
+  parseCliArgs,
+  runtimePath,
+} from './lib.mjs';
 
 const { flags, positional } = parseCliArgs({
   baseUrl: ['--base-url'],
-  ontologyKey: ['--ontology-key'],
+  ontology: ['--ontology'],
+  lens: ['--lens'],
 });
 
 const file = positional[0];
 if (!file) {
-  die('Usage: node import-data.mjs <file> [--base-url URL] [--ontology-key KEY]');
+  die('Usage: node import-data.mjs <file> [--base-url URL] [--ontology KEY] [--lens KEY]');
 }
 
 const baseUrl = getBaseUrl(flags);
+const ontologyKey = getOntologyKey(flags);
 
 let data;
 try {
@@ -27,13 +39,15 @@ if (!data.formatVersion) {
   die('Invalid data file: missing formatVersion field.');
 }
 
-// Resolve ontology key
-let ontologyKey = flags.ontologyKey;
-if (!ontologyKey) {
-  const ontologies = await api(baseUrl, '/api/model/ontologies').catch(() => []);
-  if (!ontologies.length) die('No ontologies found. Import a schema first.');
-  ontologyKey = ontologies[0].key;
-  console.error(`Using ontology: ${ontologyKey}`);
+// Resolve the lens the runtime API writes through
+let lensKey = flags.lens;
+if (!lensKey) {
+  const lenses = await api(baseUrl, `${modelPath(ontologyKey)}/lenses`).catch(() => []);
+  if (!lenses.length) {
+    die(`ontology "${ontologyKey}" has no lens. Import the schema first.`);
+  }
+  lensKey = lenses[0].key;
+  console.error(`Using lens: ${lensKey}`);
 }
 
 const ENTITY_SYSTEM = new Set([
@@ -43,7 +57,7 @@ const RELATION_SYSTEM = new Set([
   '_id', '_relationTypeKey', '_createdAt', '_updatedAt',
 ]);
 
-const prefix = `/api/runtime/${encodeURIComponent(ontologyKey)}`;
+const prefix = runtimePath(ontologyKey, lensKey);
 
 try {
   // Phase 1: Create entities and build old-ID -> new-ID map

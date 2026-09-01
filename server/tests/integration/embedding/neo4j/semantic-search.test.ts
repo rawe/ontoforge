@@ -48,20 +48,22 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")(
       return res.json() as Row;
     }
 
-    /** Ontology `search_test`, entity type `person` with name/bio. */
+    /** Ontology `test_ont` with lens `search_test`, entity type
+     * `person` with name/bio. */
     async function buildSearchFixture(): Promise<{ etId: string }> {
-      await post("/api/model/ontologies", {
+      await post("/api/ontologies", { key: "test_ont" });
+      await post("/api/ontologies/test_ont/model/lenses", {
         key: "search_test",
         name: "Search Test",
-        description: "Integration test ontology for the write constraint",
+        description: "Integration test lens for the write constraint",
       });
-      const et = await post("/api/model/entity-types", { key: "person", displayName: "Person" });
+      const et = await post("/api/ontologies/test_ont/model/entity-types", { key: "person", displayName: "Person" });
       const etId = et.entityTypeId as string;
       for (const prop of [
         { key: "name", displayName: "Name", dataType: "string", required: true },
         { key: "bio", displayName: "Bio", dataType: "string", required: false },
       ]) {
-        await post(`/api/model/entity-types/${etId}/properties`, prop);
+        await post(`/api/ontologies/test_ont/model/entity-types/${etId}/properties`, prop);
       }
       return { etId };
     }
@@ -77,7 +79,7 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")(
 
       const res = await app.inject({
         method: "POST",
-        url: "/api/runtime/search_test/entities/person",
+        url: "/api/ontologies/test_ont/runtime/lenses/search_test/entities/person",
         payload: { name: "Alice", bio: oversized },
       });
 
@@ -91,7 +93,7 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")(
 
     it("document values are exempt from the indexed-string size limit", async () => {
       const { etId } = await buildSearchFixture();
-      await post(`/api/model/entity-types/${etId}/properties`, {
+      await post(`/api/ontologies/test_ont/model/entity-types/${etId}/properties`, {
         key: "notes",
         displayName: "Notes",
         dataType: "document",
@@ -100,7 +102,7 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")(
       const oversized = "y".repeat(MAX_VECTOR_FILTER_VALUE_BYTES + 10);
       const res = await app.inject({
         method: "POST",
-        url: "/api/runtime/search_test/entities/person",
+        url: "/api/ontologies/test_ont/runtime/lenses/search_test/entities/person",
         payload: { name: "Alice", notes: oversized },
       });
 

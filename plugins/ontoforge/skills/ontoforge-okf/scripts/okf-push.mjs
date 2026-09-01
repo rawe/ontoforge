@@ -16,6 +16,7 @@ import {
   loadMappedTypes,
   parseCliArgs,
   resolveBundleContext,
+  runtimePath,
 } from './lib.mjs';
 import { conceptIdFromPath, entityTypeKeyFor, parseConceptDocument, toEntityPayload } from './codec.mjs';
 
@@ -28,10 +29,9 @@ try {
   const files = positional.map((file) => resolve(file));
   const { config, root, configPath } = resolveBundleContext(dirname(files[0]));
   const baseUrl = getBaseUrl();
-  const ontologyKey = config.ontology;
-  const mappedTypes = await loadMappedTypes(baseUrl, ontologyKey, config, configPath);
+  const mappedTypes = await loadMappedTypes(baseUrl, config, configPath);
   const basePathFor = (entityTypeKey) =>
-    `/api/runtime/${encodeURIComponent(ontologyKey)}/entities/${encodeURIComponent(entityTypeKey)}`;
+    `${runtimePath(config)}/entities/${encodeURIComponent(entityTypeKey)}`;
 
   let failures = 0;
   for (const abs of files) {
@@ -57,7 +57,7 @@ try {
 
       // The concept ID alone identifies the document, so a match under a
       // different entity type is a conflict, not a second concept.
-      const matches = await findByConceptId(baseUrl, ontologyKey, config, mappedTypes, conceptId);
+      const matches = await findByConceptId(baseUrl, config, mappedTypes, conceptId);
       if (matches.length > 1) {
         const list = matches.map((m) => `${m.entityTypeKey} (${m.id})`).join(', ');
         throw new Error(`concept ID "${conceptId}" already exists more than once: ${list} — resolve the duplicates first`);

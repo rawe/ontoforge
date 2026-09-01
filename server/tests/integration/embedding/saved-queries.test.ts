@@ -60,37 +60,38 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
       return res.body as Row;
     };
 
-    const person = await post("/api/model/entity-types", {
+    await post("/api/ontologies", { key: "test_ont" });
+    const person = await post("/api/ontologies/test_ont/model/entity-types", {
       key: "person",
       displayName: "Person",
     });
-    await post(`/api/model/entity-types/${person.entityTypeId as string}/properties`, {
+    await post(`/api/ontologies/test_ont/model/entity-types/${person.entityTypeId as string}/properties`, {
       key: "name",
       displayName: "Name",
       dataType: "string",
       required: true,
     });
-    const skill = await post("/api/model/entity-types", { key: "skill", displayName: "Skill" });
-    await post(`/api/model/entity-types/${skill.entityTypeId as string}/properties`, {
+    const skill = await post("/api/ontologies/test_ont/model/entity-types", { key: "skill", displayName: "Skill" });
+    await post(`/api/ontologies/test_ont/model/entity-types/${skill.entityTypeId as string}/properties`, {
       key: "name",
       displayName: "Name",
       dataType: "string",
       required: true,
     });
-    await post("/api/model/relation-types", {
+    await post("/api/ontologies/test_ont/model/relation-types", {
       key: "has_skill",
       displayName: "Has Skill",
       sourceEntityTypeKey: "person",
       targetEntityTypeKey: "skill",
     });
-    await post("/api/model/ontologies", { key: "sq_test", name: "Saved Query Test" });
+    await post("/api/ontologies/test_ont/model/lenses", { key: "sq_test", name: "Saved Query Test" });
 
-    const alice = await post("/api/runtime/sq_test/entities/person", { name: "Alice" });
-    const python = await post("/api/runtime/sq_test/entities/skill", {
+    const alice = await post("/api/ontologies/test_ont/runtime/lenses/sq_test/entities/person", { name: "Alice" });
+    const python = await post("/api/ontologies/test_ont/runtime/lenses/sq_test/entities/skill", {
       name: "Python programming",
     });
-    await post("/api/runtime/sq_test/entities/skill", { name: "Sourdough baking" });
-    await post("/api/runtime/sq_test/relations/has_skill", {
+    await post("/api/ontologies/test_ont/runtime/lenses/sq_test/entities/skill", { name: "Sourdough baking" });
+    await post("/api/ontologies/test_ont/runtime/lenses/sq_test/relations/has_skill", {
       fromEntityId: alice._id as string,
       toEntityId: python._id as string,
     });
@@ -109,7 +110,7 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
         "List baking recipes and cooking instructions for the kitchen",
       ],
     ] as const) {
-      const res = await inject("PUT", `/api/model/ontologies/sq_test/saved-queries/${key}`, {
+      const res = await inject("PUT", `/api/ontologies/test_ont/model/lenses/sq_test/saved-queries/${key}`, {
         name,
         description,
         steps: [{ name: "main", type: "oql", oql: "MATCH (p:person) RETURN p.name AS name" }],
@@ -120,7 +121,7 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
 
     const search = await inject(
       "GET",
-      "/api/runtime/sq_test/saved-queries/search?q=" +
+      "/api/ontologies/test_ont/runtime/lenses/sq_test/saved-queries/search?q=" +
         encodeURIComponent("which coworkers know a programming language") +
         "&min_score=0.1",
     );
@@ -144,7 +145,7 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
     // Repurpose kitchen-recipes: its description now matches the probe.
     const res = await inject(
       "PUT",
-      "/api/model/ontologies/sq_test/saved-queries/kitchen-recipes",
+      "/api/ontologies/test_ont/model/lenses/sq_test/saved-queries/kitchen-recipes",
       {
         name: "Kitchen recipes",
         description:
@@ -157,7 +158,7 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
 
     const search = await inject(
       "GET",
-      "/api/runtime/sq_test/saved-queries/search?q=" +
+      "/api/ontologies/test_ont/runtime/lenses/sq_test/saved-queries/search?q=" +
         encodeURIComponent("which coworkers know a programming language") +
         "&min_score=0.1&limit=5",
     );
@@ -169,7 +170,7 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
   it("runs a search -> oql pipeline: hits flow through the binding", async () => {
     const defined = await inject(
       "PUT",
-      "/api/model/ontologies/sq_test/saved-queries/experts-for",
+      "/api/ontologies/test_ont/model/lenses/sq_test/saved-queries/experts-for",
       {
         name: "Experts for a topic",
         description: "Search skills semantically, then list people holding them",
@@ -195,7 +196,7 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
     );
     expect(defined.statusCode).toBe(201);
 
-    const run = await inject("POST", "/api/runtime/sq_test/saved-queries/experts-for/run", {
+    const run = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/sq_test/saved-queries/experts-for/run", {
       params: { topic: "software development languages" },
     });
     expect(run.statusCode).toBe(200);
@@ -205,7 +206,7 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
   });
 
   it("runs an oql -> oql pipeline with a provider active too", async () => {
-    await inject("PUT", "/api/model/ontologies/sq_test/saved-queries/skill-holders", {
+    await inject("PUT", "/api/ontologies/test_ont/model/lenses/sq_test/saved-queries/skill-holders", {
       name: "Skill holders",
       description: "People holding any skill at all",
       steps: [
@@ -222,7 +223,7 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
       parameters: [],
     });
 
-    const run = await inject("POST", "/api/runtime/sq_test/saved-queries/skill-holders/run", {
+    const run = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/sq_test/saved-queries/skill-holders/run", {
       params: {},
     });
     expect(run.statusCode).toBe(200);
@@ -242,7 +243,7 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
     const client = new Client({ name: "saved-queries-embedding-tests", version: "0.0.1" });
     await client.connect(
       new StreamableHTTPClientTransport(
-        new URL(`http://127.0.0.1:${address.port}/mcp/runtime/sq_test`),
+        new URL(`http://127.0.0.1:${address.port}/mcp/ontologies/test_ont/runtime/lenses/sq_test`),
       ),
     );
     try {

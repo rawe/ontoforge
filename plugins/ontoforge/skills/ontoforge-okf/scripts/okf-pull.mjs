@@ -29,10 +29,9 @@ try {
   const conceptId = conceptIdFromPath(relative(root, abs));
 
   const baseUrl = getBaseUrl();
-  const ontologyKey = config.ontology;
-  const mappedTypes = await loadMappedTypes(baseUrl, ontologyKey, config, configPath);
+  const mappedTypes = await loadMappedTypes(baseUrl, config, configPath);
 
-  const matches = await findByConceptId(baseUrl, ontologyKey, config, mappedTypes, conceptId);
+  const matches = await findByConceptId(baseUrl, config, mappedTypes, conceptId);
   if (!matches.length) {
     die(`no entity found with ${config.conceptIdProperty}="${conceptId}"`);
   }
@@ -42,7 +41,7 @@ try {
   }
 
   const entityType = mappedTypes.get(matches[0].entityTypeKey);
-  const entity = await fetchEntityRaw(baseUrl, ontologyKey, entityType, matches[0].id);
+  const entity = await fetchEntityRaw(baseUrl, config, entityType, matches[0].id);
   const mdText = fromEntity(entity, entityType, config, typeValueFor(entityType.key, config));
 
   mkdirSync(dirname(abs), { recursive: true });

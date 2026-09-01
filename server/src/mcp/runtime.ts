@@ -1,10 +1,12 @@
 /**
- * Runtime MCP server: instance data through exactly one lens.
+ * Runtime MCP server: instance data of one ontology through exactly one
+ * lens.
  *
- * The lens is resolved per request by the mount (`mount.ts`) — path
- * segment, then `X-Ontology-Key` header, then the configured fallback —
- * and bound into the server factory, so a tool can never name a lens or
- * reach across two (`docs/decisions.md#interfaces`).
+ * Both bindings come from the mount URL alone
+ * (`/mcp/ontologies/:ontologyKey/runtime/lenses/:lensKey`, `mount.ts`)
+ * and are fixed into the server factory, so a tool can never name an
+ * ontology or a lens, and can never reach across two
+ * (`docs/decisions.md#interfaces`).
  *
  * Tools call the runtime services directly, take snake_case parameters,
  * and CLAMP `limit`/`offset` into range where REST rejects out-of-range
@@ -53,21 +55,21 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(value, max));
 }
 
-/** Build the runtime MCP server bound to one resolved ontology key. */
-export function createRuntimeMcpServer(ontologyKey: string): McpServer {
+/** Build the runtime MCP server bound to one ontology and one lens. */
+export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): McpServer {
   const server = new McpServer({ name: "OntoForge Runtime", version: "0.1.0" });
 
   server.registerTool(
     "get_schema",
     {
       description:
-        "Understand the ontology before creating data. Shows available entity types, " +
+        "Understand the lens before creating data. Shows available entity types, " +
         "relation types, and their property definitions including data types and " +
         "required flags. Call this first.",
       inputSchema: {},
     },
     wrap("get_schema", async () => {
-      const result = await service.getFullSchema(ontologyKey, getRuntimeStore());
+      const result = await service.getFullSchema(lensKey, await getRuntimeStore(ontologyKey));
       return jsonResult(result);
     }),
   );
@@ -89,10 +91,10 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
       properties: Record<string, unknown>;
     }) => {
       const result = await service.createEntity(
-        ontologyKey,
+        lensKey,
         args.entity_type_key,
         args.properties,
-        getRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
       );
       return jsonResult(result);
     }),
@@ -140,7 +142,7 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
       const limit = clamp(args.limit ?? 50, 1, 200);
       const offset = Math.max(0, args.offset ?? 0);
       const result = await service.listEntities(
-        ontologyKey,
+        lensKey,
         args.entity_type_key,
         limit,
         offset,
@@ -148,7 +150,7 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
         args.order ?? "asc",
         args.search ?? null,
         strFilters,
-        getRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
         args.fields ?? null,
       );
       return jsonResult(result);
@@ -176,10 +178,10 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
       fields?: string[] | undefined;
     }) => {
       const result = await service.getEntity(
-        ontologyKey,
+        lensKey,
         args.entity_type_key,
         args.entity_id,
-        getRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
         args.fields ?? null,
       );
       return jsonResult(result);
@@ -214,13 +216,13 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
       const offset = Math.max(0, args.offset ?? 0);
       const limit = args.limit === undefined || args.limit === null ? null : Math.max(1, args.limit);
       const result = await service.getDocument(
-        ontologyKey,
+        lensKey,
         args.entity_type_key,
         args.entity_id,
         args.property_key,
         offset,
         limit,
-        getRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
       );
       return jsonResult(result);
     }),
@@ -246,11 +248,11 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
       properties: Record<string, unknown>;
     }) => {
       const result = await service.updateEntity(
-        ontologyKey,
+        lensKey,
         args.entity_type_key,
         args.entity_id,
         args.properties,
-        getRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
       );
       return jsonResult(result);
     }),
@@ -284,7 +286,7 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
       replace_all?: boolean | undefined;
     }) => {
       const result = await service.editDocument(
-        ontologyKey,
+        lensKey,
         args.entity_type_key,
         args.entity_id,
         args.property_key,
@@ -294,7 +296,7 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
           newString: args.new_string,
           replaceAll: args.replace_all ?? false,
         },
-        getRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
       );
       return jsonResult(result);
     }),
@@ -331,7 +333,7 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
       expect?: string | undefined;
     }) => {
       const result = await service.editDocument(
-        ontologyKey,
+        lensKey,
         args.entity_type_key,
         args.entity_id,
         args.property_key,
@@ -342,7 +344,7 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
           content: args.content,
           expect: args.expect ?? null,
         },
-        getRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
       );
       return jsonResult(result);
     }),
@@ -359,10 +361,10 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
     },
     wrap("delete_entity", async (args: { entity_type_key: string; entity_id: string }) => {
       await service.deleteEntity(
-        ontologyKey,
+        lensKey,
         args.entity_type_key,
         args.entity_id,
-        getRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
       );
       // This tool returns a message OBJECT, unlike the modeling delete
       // tools, which return bare strings. Wire contract — do not unify.
@@ -390,12 +392,12 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
       properties?: Record<string, unknown> | undefined;
     }) => {
       const result = await service.createRelation(
-        ontologyKey,
+        lensKey,
         args.relation_type_key,
         args.from_entity_id,
         args.to_entity_id,
         args.properties ?? {},
-        getRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
       );
       return jsonResult(result);
     }),
@@ -437,7 +439,7 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
       const limit = clamp(args.limit ?? 50, 1, 200);
       const offset = Math.max(0, args.offset ?? 0);
       const result = await service.listRelations(
-        ontologyKey,
+        lensKey,
         args.relation_type_key,
         limit,
         offset,
@@ -446,7 +448,7 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
         args.from_entity_id ?? null,
         args.to_entity_id ?? null,
         strFilters,
-        getRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
       );
       return jsonResult(result);
     }),
@@ -463,10 +465,10 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
     },
     wrap("get_relation", async (args: { relation_type_key: string; relation_id: string }) => {
       const result = await service.getRelation(
-        ontologyKey,
+        lensKey,
         args.relation_type_key,
         args.relation_id,
-        getRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
       );
       return jsonResult(result);
     }),
@@ -490,11 +492,11 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
       properties: Record<string, unknown>;
     }) => {
       const result = await service.updateRelation(
-        ontologyKey,
+        lensKey,
         args.relation_type_key,
         args.relation_id,
         args.properties,
-        getRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
       );
       return jsonResult(result);
     }),
@@ -511,10 +513,10 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
     },
     wrap("delete_relation", async (args: { relation_type_key: string; relation_id: string }) => {
       await service.deleteRelation(
-        ontologyKey,
+        lensKey,
         args.relation_type_key,
         args.relation_id,
-        getRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
       );
       return jsonResult({ message: `Relation '${args.relation_id}' deleted successfully.` });
     }),
@@ -550,13 +552,13 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
     }) => {
       const limit = clamp(args.limit ?? 50, 1, 200);
       const result = await service.getNeighbors(
-        ontologyKey,
+        lensKey,
         args.entity_type_key,
         args.entity_id,
         args.direction ?? "both",
         args.relation_type_key ?? null,
         limit,
-        getRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
         args.fields ?? null,
         args.relation_fields ?? null,
       );
@@ -569,7 +571,7 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
     {
       description:
         "Execute a read-only OQL query (OQL-style graph pattern syntax) " +
-        "against the ontology's scoped schema. " +
+        "against the lens's scoped schema. " +
         "Use schema entity type keys (snake_case) as node labels and relation type " +
         "keys as relationship types. Only MATCH/RETURN queries are allowed — no " +
         "writes, no CALL. " +
@@ -583,7 +585,7 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
       },
     },
     wrap("execute_query", async (args: { query: string }) => {
-      const result = await service.executeQuery(ontologyKey, args.query, getRuntimeStore());
+      const result = await service.executeQuery(lensKey, args.query, await getRuntimeStore(ontologyKey));
       return jsonResult(result);
     }),
   );
@@ -639,12 +641,12 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
         strFilters[k] = valueToText(v);
       }
       const result = await service.semanticSearch(
-        ontologyKey,
+        lensKey,
         args.query,
         args.entity_type_key ?? null,
         limit,
         null,
-        getRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
         {
           filters: strFilters,
           fields: args.fields ?? null,
@@ -666,7 +668,7 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
       inputSchema: {},
     },
     wrap("list_saved_queries", async () => {
-      const result = await service.listSavedQueries(ontologyKey, getRuntimeStore());
+      const result = await service.listSavedQueries(lensKey, await getRuntimeStore(ontologyKey));
       return jsonResult(result);
     }),
   );
@@ -688,10 +690,10 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
       params?: Record<string, unknown> | undefined;
     }) => {
       const result = await service.executeSavedQuery(
-        ontologyKey,
+        lensKey,
         args.query_key,
         args.params ?? {},
-        getRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
       );
       return jsonResult(result);
     }),
@@ -711,11 +713,11 @@ export function createRuntimeMcpServer(ontologyKey: string): McpServer {
     },
     wrap("search_saved_queries", async (args: { query: string }) => {
       const result = await service.searchSavedQueries(
-        ontologyKey,
+        lensKey,
         args.query,
         3,
         0.7,
-        getRuntimeStore(),
+        await getRuntimeStore(ontologyKey),
       );
       return jsonResult(result);
     }),

@@ -28,8 +28,8 @@ type Row = Record<string, unknown>;
 /** Schema with a person type that has a document property. */
 function makeDocSchema(entityInclusions?: Row[]): Row {
   return {
-    ontology: {
-      ontologyId: "ont-1",
+    lens: {
+      lensId: "lens-1",
       key: "docs_view",
       name: "Docs View",
       description: null,
@@ -55,8 +55,8 @@ function makeDocSchema(entityInclusions?: Row[]): Row {
 const holder: { store: MockRuntimeStore } = { store: createMockRuntimeStore() };
 
 vi.mock("../../src/core/ports.js", () => ({
-  getModelingStore: () => ({}),
-  getRuntimeStore: () => holder.store,
+  getModelingStore: async () => ({}),
+  getRuntimeStore: async () => holder.store,
 }));
 
 let app: FastifyInstance;
@@ -94,7 +94,7 @@ function mockEdit(entity: Row, updated?: Row): void {
   holder.store.updateEntity.mockResolvedValue(updated ?? entity);
 }
 
-const URL = "/api/runtime/docs_view/entities/person/ent-1/documents/bio";
+const URL = "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person/ent-1/documents/bio";
 
 async function patchDoc(payload: Row, url = URL) {
   return app.inject({ method: "PATCH", url, payload });
@@ -301,7 +301,7 @@ describe("request shape", () => {
     holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
     const res = await patchDoc(
       { op: "str_replace", oldString: "a", newString: "b" },
-      "/api/runtime/docs_view/entities/person/ent-1/documents/name",
+      "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person/ent-1/documents/name",
     );
     expect(res.statusCode).toBe(404);
   });
@@ -370,6 +370,27 @@ describe("chunk re-sync + embedding reuse", () => {
     expect((holder.store.updateEntity.mock.calls[0]![2] as Row).bio).toBe("Hello docs");
     expect(holder.store.deleteChunksForEntityProperty).not.toHaveBeenCalled();
     expect(holder.store.createDocumentChunks).not.toHaveBeenCalled();
+  });
+
+  it("re-embeds unchanged chunks whose stored vector is of another model's width", async () => {
+    // The rebuild case: the text never changes, so reuse-by-text alone
+    // would keep every stale vector and regenerate nothing.
+    const chunks = chunkDocument(BIO, settings.DOCUMENT_CHUNK_SIZE, settings.DOCUMENT_CHUNK_OVERLAP);
+    const reuseMap: Record<string, number[]> = {};
+    for (const chunk of chunks) {
+      reuseMap[chunk.text] = Array.from({ length: 4 }, () => 0.5);
+    }
+    const provider = mockProvider();
+    setEmbeddingProvider(provider);
+    holder.store.getChunkEmbeddingsForEntityProperty.mockResolvedValue(reuseMap);
+
+    await syncDocumentChunks(asRuntimeStore(holder.store), "person", "ent-1", { bio: BIO });
+
+    expect(provider.embed).toHaveBeenCalledTimes(chunks.length);
+    const rows = holder.store.createDocumentChunks.mock.calls[0]![3] as Row[];
+    for (const row of rows) {
+      expect(row._embedding).toEqual(Array.from({ length: 8 }, () => 0.1));
+    }
   });
 
   it("sync reuses embeddings for unchanged chunk texts", async () => {

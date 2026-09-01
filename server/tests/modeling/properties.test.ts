@@ -12,8 +12,8 @@ import { createMockModelingStore, NOW, type MockModelingStore } from "./helpers.
 const holder: { store: MockModelingStore } = { store: createMockModelingStore() };
 
 vi.mock("../../src/core/ports.js", () => ({
-  getModelingStore: () => holder.store,
-  getRuntimeStore: () => ({}),
+  getModelingStore: async () => holder.store,
+  getRuntimeStore: async () => ({}),
 }));
 
 const ET_DATA = {
@@ -70,7 +70,7 @@ describe("entity type properties", () => {
     holder.store.createProperty.mockResolvedValue(PROP_DATA);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/entity-types/et-1/properties",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties",
       payload: { key: "full_name", displayName: "Full Name", dataType: "string" },
     });
     expect(res.statusCode).toBe(201);
@@ -85,7 +85,7 @@ describe("entity type properties", () => {
     holder.store.getPropertyByKey.mockResolvedValue(PROP_DATA);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/entity-types/et-1/properties",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties",
       payload: { key: "full_name", displayName: "Full Name", dataType: "string" },
     });
     expect(res.statusCode).toBe(409);
@@ -95,7 +95,7 @@ describe("entity type properties", () => {
   it("a missing owner answers 404", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/entity-types/nonexistent/properties",
+      url: "/api/ontologies/onto/model/entity-types/nonexistent/properties",
       payload: { key: "full_name", displayName: "Full Name", dataType: "string" },
     });
     expect(res.statusCode).toBe(404);
@@ -106,7 +106,7 @@ describe("entity type properties", () => {
     holder.store.getEntityType.mockResolvedValue(ET_DATA);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/entity-types/et-1/properties",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties",
       payload: { key: "k".repeat(65), displayName: "Too Long", dataType: "string" },
     });
     expect(res.statusCode).toBe(422);
@@ -119,7 +119,7 @@ describe("entity type properties", () => {
     holder.store.listProperties.mockResolvedValue([PROP_DATA]);
     const res = await app.inject({
       method: "GET",
-      url: "/api/model/entity-types/et-1/properties",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties",
     });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toHaveLength(1);
@@ -135,7 +135,7 @@ describe("entity type properties", () => {
     });
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/entity-types/et-1/properties/prop-1",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties/prop-1",
       payload: { displayName: "Name", required: true },
     });
     expect(res.statusCode).toBe(200);
@@ -146,7 +146,7 @@ describe("entity type properties", () => {
     holder.store.getEntityType.mockResolvedValue(ET_DATA);
     const res = await app.inject({
       method: "PUT",
-      url: "/api/model/entity-types/et-1/properties/nonexistent",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties/nonexistent",
       payload: { displayName: "Name" },
     });
     expect(res.statusCode).toBe(404);
@@ -158,7 +158,7 @@ describe("entity type properties", () => {
     holder.store.deleteProperty.mockResolvedValue(true);
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/entity-types/et-1/properties/prop-1",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties/prop-1",
     });
     expect(res.statusCode).toBe(204);
   });
@@ -167,7 +167,7 @@ describe("entity type properties", () => {
     holder.store.getEntityType.mockResolvedValue(ET_DATA);
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/entity-types/et-1/properties/nonexistent",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties/nonexistent",
     });
     expect(res.statusCode).toBe(404);
   });
@@ -179,7 +179,7 @@ describe("relation type properties", () => {
     holder.store.createProperty.mockResolvedValue(PROP_DATA);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/relation-types/rt-1/properties",
+      url: "/api/ontologies/onto/model/relation-types/rt-1/properties",
       payload: { key: "full_name", displayName: "Full Name", dataType: "string" },
     });
     expect(res.statusCode).toBe(201);
@@ -190,7 +190,7 @@ describe("relation type properties", () => {
     holder.store.getRelationType.mockResolvedValue(RT_DATA);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/relation-types/rt-1/properties",
+      url: "/api/ontologies/onto/model/relation-types/rt-1/properties",
       payload: { key: "notes", displayName: "Notes", dataType: "document" },
     });
     expect(res.statusCode).toBe(422);
@@ -205,10 +205,10 @@ describe("relation type properties", () => {
 describe("required-property cascade plumbing", () => {
   it("a required property without default breaking explicit allowlists answers 409 CASCADE_REQUIRED", async () => {
     holder.store.getEntityType.mockResolvedValue(ET_DATA);
-    holder.store.findOntologiesWithExplicitProperty.mockResolvedValue(["my_ontology"]);
+    holder.store.findLensesWithExplicitProperty.mockResolvedValue(["my_lens"]);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/entity-types/et-1/properties",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties",
       payload: { key: "email", displayName: "Email", dataType: "string", required: true },
     });
     expect(res.statusCode).toBe(409);
@@ -217,7 +217,7 @@ describe("required-property cascade plumbing", () => {
 
   it("the same create with cascade appends to the allowlists and answers 201", async () => {
     holder.store.getEntityType.mockResolvedValue(ET_DATA);
-    holder.store.findOntologiesWithExplicitProperty.mockResolvedValue(["my_ontology"]);
+    holder.store.findLensesWithExplicitProperty.mockResolvedValue(["my_lens"]);
     holder.store.addPropertyToIncludesLists.mockResolvedValue(1);
     holder.store.createProperty.mockResolvedValue({
       ...PROP_DATA,
@@ -226,7 +226,7 @@ describe("required-property cascade plumbing", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/entity-types/et-1/properties?cascade=true",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties?cascade=true",
       payload: { key: "email", displayName: "Email", dataType: "string", required: true },
     });
     expect(res.statusCode).toBe(201);
@@ -241,12 +241,12 @@ describe("required-property cascade plumbing", () => {
   it("delete with cascade removes the key from explicit allowlists", async () => {
     holder.store.getEntityType.mockResolvedValue(ET_DATA);
     holder.store.getProperty.mockResolvedValue(PROP_DATA);
-    holder.store.findOntologiesIncludingType.mockResolvedValue(["my_ontology"]);
+    holder.store.findLensesIncludingType.mockResolvedValue(["my_lens"]);
     holder.store.removePropertyFromIncludesLists.mockResolvedValue(1);
     holder.store.deleteProperty.mockResolvedValue(true);
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/entity-types/et-1/properties/prop-1?cascade=true",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties/prop-1?cascade=true",
     });
     expect(res.statusCode).toBe(204);
     expect(holder.store.removePropertyFromIncludesLists).toHaveBeenCalledWith(
@@ -259,11 +259,11 @@ describe("required-property cascade plumbing", () => {
   it("delete without cascade never touches allowlists (property deletion is not a cascade trigger)", async () => {
     holder.store.getEntityType.mockResolvedValue(ET_DATA);
     holder.store.getProperty.mockResolvedValue(PROP_DATA);
-    holder.store.findOntologiesIncludingType.mockResolvedValue(["my_ontology"]);
+    holder.store.findLensesIncludingType.mockResolvedValue(["my_lens"]);
     holder.store.deleteProperty.mockResolvedValue(true);
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/model/entity-types/et-1/properties/prop-1",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties/prop-1",
     });
     expect(res.statusCode).toBe(204);
     expect(holder.store.removePropertyFromIncludesLists).not.toHaveBeenCalled();
@@ -279,7 +279,7 @@ describe("sparse update semantics", () => {
   it("an omitted defaultValue leaves the default unchanged (no clear flag)", async () => {
     await app.inject({
       method: "PUT",
-      url: "/api/model/entity-types/et-1/properties/prop-1",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties/prop-1",
       payload: { displayName: "Name" },
     });
     expect(holder.store.updateProperty).toHaveBeenCalledWith(
@@ -297,7 +297,7 @@ describe("sparse update semantics", () => {
   it("an explicit null defaultValue sets the separate clear-default flag", async () => {
     await app.inject({
       method: "PUT",
-      url: "/api/model/entity-types/et-1/properties/prop-1",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties/prop-1",
       payload: { defaultValue: null },
     });
     expect(holder.store.updateProperty).toHaveBeenCalledWith(
@@ -315,7 +315,7 @@ describe("sparse update semantics", () => {
   it("a new defaultValue is passed through without the clear flag", async () => {
     await app.inject({
       method: "PUT",
-      url: "/api/model/entity-types/et-1/properties/prop-1",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties/prop-1",
       payload: { defaultValue: "42" },
     });
     expect(holder.store.updateProperty).toHaveBeenCalledWith(
@@ -333,7 +333,7 @@ describe("sparse update semantics", () => {
   it("an explicit null description is indistinguishable from omission — nothing is cleared", async () => {
     await app.inject({
       method: "PUT",
-      url: "/api/model/entity-types/et-1/properties/prop-1",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties/prop-1",
       payload: { description: null },
     });
     expect(holder.store.updateProperty).toHaveBeenCalledWith(
@@ -360,7 +360,7 @@ describe("definition-time traps", () => {
     });
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/entity-types/et-1/properties",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties",
       payload: {
         key: "age",
         displayName: "Age",
@@ -378,7 +378,7 @@ describe("definition-time traps", () => {
       holder.store.getEntityType.mockResolvedValue(ET_DATA);
       const res = await app.inject({
         method: "POST",
-        url: "/api/model/entity-types/et-1/properties",
+        url: "/api/ontologies/onto/model/entity-types/et-1/properties",
         payload: { key, displayName: "X", dataType: "string" },
       });
       expect(res.statusCode).toBe(422);
@@ -390,7 +390,7 @@ describe("definition-time traps", () => {
     holder.store.getEntityType.mockResolvedValue(ET_DATA);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/entity-types/et-1/properties",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties",
       payload: { key: "x", displayName: "X", dataType: "uuid" },
     });
     expect(res.statusCode).toBe(422);

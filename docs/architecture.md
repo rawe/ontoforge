@@ -10,15 +10,15 @@ should hold for a reimplementation in any language.
 
 Four parts, two processes.
 
-**Server** — one deployable unit. Serves the modeling API, the runtime API, both MCP
-servers and the OpenAPI description. There is no mode switch and no partial deployment:
-every instance serves everything.
+**Server** — one deployable unit. Serves the ontology registry, the modeling API, the
+runtime API, both MCP servers and the OpenAPI description. There is no mode switch and no
+partial deployment: every instance serves everything.
 
 **Web client** — a separate static application talking to the server over REST only. It
 holds no privileged path; anything it does can be done over the API.
 
-**Database** — one instance, holding schema and instance data together. Reached only
-through the persistence port.
+**Database** — one instance, holding every ontology's schema and instance data together.
+Reached only through the persistence port.
 
 **Storage adapter** — the single active implementation of that port. See
 [storage-adapters.md](storage-adapters.md).
@@ -34,7 +34,7 @@ through the persistence port.
         │   REST routers      MCP servers       │
         │        └──────┬──────────┘            │
         │          service layer                │
-        │        modeling │ runtime             │
+        │   registry │ modeling │ runtime       │
         │               ▼                       │
         │        persistence port               │
         └───────────────┬───────────────────────┘
@@ -62,44 +62,88 @@ REST — a second path would be a second contract.
 
 ## Bounded contexts
 
-Three modules, with a deliberately acyclic dependency graph:
+Five modules, with a deliberately acyclic dependency graph:
 
 ```
-   modeling ──▶ core ◀── runtime
+   registry ──▶
+   modeling ──▶  core  ◀── runtime
+   server   ──▶
 ```
 
-**Modeling** owns the global schema: types, properties, lens definitions, cascade rules,
-schema validation, transfer, embedding rebuild.
+**Registry** manages ontologies as whole units: create, list, read, rename, delete. It
+never looks inside one.
 
-**Runtime** owns instance data: entity and relation lifecycle, traversal, documents,
-search, query execution, saved-query pipelines, agents.
+**Modeling** owns one ontology's schema: types, properties, lens definitions, cascade
+rules, schema validation, transfer, embedding rebuild.
 
-**Core** owns what both need and neither should define twice: the persistence port, the
-exception taxonomy, the transfer format, the data-type enumeration, the embedding
-provider abstraction, and OQL parsing and validation.
+**Runtime** owns one ontology's instance data: entity and relation lifecycle, traversal,
+documents, search, query execution, saved-query pipelines, agents.
+
+**Server** carries the deployment's capability report — which optional providers this
+deployment has. It belongs to neither modeling nor runtime and is the only surface that
+is not ontology-scoped.
+
+**Core** owns what the others need and none should define twice: the persistence port,
+the exception taxonomy, the data-type enumeration, the embedding provider abstraction,
+and OQL parsing and validation.
 
 **Runtime never depends on modeling.** Everything runtime needs about the schema, it
 reads through the port. This keeps the schema a *value* to runtime rather than a service
 it calls, which is what makes the schema cache possible.
 
+## Ontology isolation
+
+One server holds many ontologies, and isolation is total: no relation, query, lens or
+agent ever spans two. The architecture makes that structural rather than checked:
+
+- **Every ontology-scoped request names its ontology in the path**, and either addresses
+  that ontology's schema (modeling) or its instance data through one lens (runtime) —
+  never both. There is no other addressing channel: no header, no default, no fallback.
+- **Every persistence operation runs through a store bound to exactly one ontology.**
+  The service layer obtains a modeling or runtime store *for* an ontology key; every
+  method of that store resolves within the binding, and binding an unknown key fails as
+  not found before any other rule runs. Registry operations live on a separate registry
+  port beside the two bound stores.
+- **The physical isolation mechanism is the adapter's private business.** Nothing above
+  the port knows how an ontology's data is kept apart from its neighbours'; the contract
+  and each adapter's mechanism are in [storage-adapters.md](storage-adapters.md).
+
+The registry — not any storage catalog — is the authoritative list of ontologies. Zero
+ontologies is a valid server state: a fresh server starts empty, nothing is auto-created
+at boot, and the last ontology is deletable. Deleting an ontology is one hard cascade
+over everything it contains — schema, lenses, saved queries, agents, instance data,
+chunks and search indexes.
+
 ## Logical data model
 
 Physical representation is the adapter's business; this is the logical shape.
 
-### Schema level
+### Server level
 
 | Kind | Identity | Notable fields |
 |---|---|---|
-| Ontology | id, unique `key`, unique name | name, description, timestamps |
-| Entity type | id, globally unique `key` | display name, description, timestamps |
-| Relation type | id, globally unique `key` | display name, source and target entity type keys |
-| Property definition | id, `key` unique within its owner | data type, required, default; owned by exactly one entity type or relation type |
-| Inclusion | ontology + type | optional property allowlist; absent means all properties |
-| Agent config | ontology + `key` | name, description, system prompt, tool allowlist |
-| Saved query | ontology + `key` | name, description, ordered steps, parameters, bindings |
+| Ontology | id, `key` unique server-wide | display name (optional, unique server-wide), timestamps |
 
-Ontologies, agent configs and saved queries are the three things that belong *to a lens*.
-Types and properties never do.
+The key is immutable; rename changes the display name only. Everything below belongs to
+exactly one ontology.
+
+### Schema level
+
+Per ontology. "Unique" here always means unique within the owning ontology.
+
+| Kind | Identity | Notable fields |
+|---|---|---|
+| Lens | id, unique `key`, unique name | name, description, timestamps |
+| Entity type | id, unique `key` | display name, description, timestamps |
+| Relation type | id, unique `key` | display name, source and target entity type keys |
+| Property definition | id, `key` unique within its owner | data type, required, default; owned by exactly one entity type or relation type |
+| Inclusion | lens + type | optional property allowlist; absent means all properties |
+| Agent config | lens + `key` | name, description, system prompt, tool allowlist |
+| Saved query | lens + `key` | name, description, ordered steps, parameters, bindings |
+
+Inclusions, agent configs and saved queries are the three things that belong *to a
+lens*. Types and properties never do. The same type key, and the same lens key, can
+exist independently in two ontologies.
 
 ### Instance level
 
@@ -130,10 +174,12 @@ Enforced in the service layer on every write path, whichever interface it arrive
 is the summary; each one is stated with its consequences in
 [capabilities/schema-modeling.md](capabilities/schema-modeling.md).
 
+- Ontology keys match `^[a-z][a-z0-9_]*$` and are at most 59 characters; ontology keys
+  and display names are unique server-wide.
 - Type and property keys match `^[a-z][a-z0-9_]*$` and are at most 64 characters, on
   every path that sets them — the modeling interfaces and import alike.
-- Entity type keys, relation type keys, ontology keys and ontology names are globally
-  unique. Property keys are unique within their owning type.
+- Entity type keys, relation type keys, lens keys and lens names are unique within
+  their ontology. Property keys are unique within their owning type.
 - A relation type may only be created if both endpoint entity types exist.
 - An entity type cannot be deleted while any relation type references it.
 - `document` properties are permitted on entity types only, on creation and on import.
@@ -142,12 +188,12 @@ is the summary; each one is stated with its consequences in
   are reported at startup, never silently rewritten.
 - Relation endpoints are fixed at creation. Properties may change; endpoints may not.
 
-## Ontology scoping
+## Lens scoping
 
-A lens with no inclusions exposes the whole schema. A lens with inclusions exposes
-exactly what it declares, with one inference: naming entity types alone also admits the
-relation types whose *both* endpoints are in scope, because a relation with an invisible
-endpoint would be unusable. The full rules are in
+A lens with no inclusions exposes its ontology's whole schema. A lens with inclusions
+exposes exactly what it declares, with one inference: naming entity types alone also
+admits the relation types whose *both* endpoints are in scope, because a relation with an
+invisible endpoint would be unusable. The full rules are in
 [capabilities/ontology-lenses.md](capabilities/ontology-lenses.md).
 
 Scoping cuts in three places: schema reads omit what is out of scope, writes reject it,
@@ -168,9 +214,11 @@ Runtime reads the schema on nearly every request, so each lens is assembled once
 in memory: its scoped schema, the full schema, its agent configurations and its saved
 queries.
 
-The cache is built lazily per lens and cleared wholesale by any modeling mutation.
-Wholesale rather than selective, because a single schema change can affect many lenses
-and the cost of rebuilding is small.
+The cache is keyed by ontology plus lens — lens keys are unique only within their
+ontology, so the lens key alone would be ambiguous. Entries are built lazily and cleared
+wholesale by any modeling mutation, in any ontology. Wholesale rather than selective,
+because a single schema change can affect many lenses and the cost of rebuilding is
+small.
 
 It is **per process**. Multiple server instances against one database will not see each
 other's schema changes until each rebuilds — a real constraint on horizontal scaling that
@@ -183,7 +231,8 @@ A runtime write, which is the longest path:
 ```
   request
     → parse and validate shape
-    → resolve ontology key to its lens
+    → bind a runtime store to the ontology key (unknown key → not found)
+    → resolve the lens key within that ontology
     → load lens from schema cache (build on miss)
     → reject unknown properties; check required; apply defaults
     → coerce each value to its declared data type
@@ -219,7 +268,7 @@ There are exactly six top-level codes:
 | Resource does not exist | 404 | `RESOURCE_NOT_FOUND` | — |
 | Uniqueness or referential conflict | 409 | `RESOURCE_CONFLICT` | — |
 | Input rejected | 422 | `VALIDATION_ERROR` | `fields` map or `errors` list |
-| Change requires explicit cascade | 409 | `CASCADE_REQUIRED` | `affectedOntologies` |
+| Change requires explicit cascade | 409 | `CASCADE_REQUIRED` | `affectedLenses` |
 | Unexpected storage failure | 500 | `STORAGE_ERROR` | `errorId` |
 | Malformed request body | 400 | `INVALID_JSON` | — |
 
@@ -239,21 +288,25 @@ its server-side record.
 
 Ordered, and failure at any step prevents serving:
 
-1. Connect storage, verify reachability, ensure constraints and indexes exist.
-2. Report any stored type key that the adapter now reserves.
+1. Connect storage, verify reachability, ensure the server-wide constraints and indexes
+   exist. Per-ontology storage is provisioned when an ontology is created, not at boot.
+2. Walk the registry and report any stored type key that the adapter now reserves.
 3. Initialize the embedding provider, if configured.
 4. Initialize the language-model provider, if configured.
-5. If embeddings are enabled, reconcile vector index widths against the provider and warn
-   on mismatch — see [capabilities/search.md](capabilities/search.md).
+5. If embeddings are enabled, reconcile vector index widths against the provider for
+   every registered ontology and warn on mismatch — see
+   [capabilities/search.md](capabilities/search.md).
 6. Start both MCP servers.
 
-Note step 5 warns and does not repair — deliberately, for the reason given in
-[decisions.md](decisions.md#behaviour). Rebuild is where repair happens.
+The registry walks in steps 2 and 5 do nothing when no ontology exists — a zero-ontology
+server boots clean. Note step 5 warns and does not repair — deliberately, for the reason
+given in [decisions.md](decisions.md#behaviour). Rebuild is where repair happens, one
+ontology at a time.
 
 ## Configuration
 
-Environment supplies all configuration. There is no configuration file and no per-tenant
-configuration.
+Environment supplies all configuration. There is no configuration file and no
+per-ontology configuration.
 
 | Group | Purpose | Absent means |
 |---|---|---|
@@ -261,7 +314,6 @@ configuration.
 | Embedding | Provider, model, endpoint, credential, vector width | Semantic search unavailable |
 | Documents | Chunk size and overlap | Defaults apply |
 | Language model | Provider, model, endpoint, credential | AI capabilities unavailable |
-| MCP | Fallback ontology key | Clients must supply a key themselves |
 | Public URL | Base address advertised in agent cards | Cards advertise a local address |
 
 Exact variable names are in the repository README; they are deployment surface, not
@@ -271,9 +323,11 @@ architecture.
 
 Stated plainly, because their absence is a design position and not an oversight:
 
-- **No authentication or authorization.** Every caller has full access. OntoForge is
-  deployed behind something that provides this, or on a trusted network.
-- **No multi-tenancy.** One schema, one dataset per deployment.
+- **No authentication or authorization.** Every caller has full access to every
+  ontology. OntoForge is deployed behind something that provides this, or on a trusted
+  network.
+- **No multi-tenancy.** An ontology isolates data but is not a tenant — the rule and
+  its reason are in [decisions.md](decisions.md#scope).
 - **No cross-process cache coherence**, as described above.
 
 Absences in the API surface itself — no health probe, no bulk write, no instance-data

@@ -26,8 +26,8 @@ type Row = Record<string, unknown>;
 const holder: { store: MockRuntimeStore } = { store: createMockRuntimeStore() };
 
 vi.mock("../../src/core/ports.js", () => ({
-  getModelingStore: () => ({}),
-  getRuntimeStore: () => holder.store,
+  getModelingStore: async () => ({}),
+  getRuntimeStore: async () => holder.store,
 }));
 
 let app: FastifyInstance;
@@ -65,7 +65,7 @@ describe("entity create", () => {
     holder.store.createEntity.mockResolvedValue(makeEntity({ name: "Alice" }));
 
     await service.createEntity(
-      "full_ontology",
+      "full_lens",
       "person",
       { name: "Alice", email: "a@b.c", age: 30 },
       asRuntimeStore(holder.store),
@@ -83,7 +83,7 @@ describe("entity create", () => {
     holder.store.createEntity.mockResolvedValue(makeEntity({ name: "Alice" }));
 
     const result = await service.createEntity(
-      "full_ontology",
+      "full_lens",
       "person",
       { name: "Alice" },
       asRuntimeStore(holder.store),
@@ -97,7 +97,7 @@ describe("entity create", () => {
     holder.store.createEntity.mockResolvedValue(makeEntity({ name: "Alice" }));
 
     await service.createEntity(
-      "full_ontology",
+      "full_lens",
       "person",
       { name: "Alice" },
       asRuntimeStore(holder.store),
@@ -115,7 +115,7 @@ describe("entity create", () => {
 
     await expect(
       service.createEntity(
-        "full_ontology",
+        "full_lens",
         "person",
         { name: "x" },
         asRuntimeStore(holder.store),
@@ -135,7 +135,7 @@ describe("entity update", () => {
     holder.store.updateEntity.mockResolvedValue(makeEntity({ name: "Alice", email: "new@b.c" }));
 
     await service.updateEntity(
-      "full_ontology",
+      "full_lens",
       "person",
       "ent-1",
       { email: "new@b.c" },
@@ -157,7 +157,7 @@ describe("entity update", () => {
     holder.store.updateEntity.mockResolvedValue(makeEntity({ name: "Alice" }));
 
     await service.updateEntity(
-      "full_ontology",
+      "full_lens",
       "person",
       "ent-1",
       { email: null },
@@ -173,7 +173,7 @@ describe("entity update", () => {
     holder.store.updateEntity.mockResolvedValue(makeEntity({ name: "Alice", age: 31 }));
 
     await service.updateEntity(
-      "full_ontology",
+      "full_lens",
       "person",
       "ent-1",
       { age: 31 },
@@ -190,7 +190,7 @@ describe("entity update", () => {
     holder.store.updateEntity.mockResolvedValue(makeEntity({ name: "Bob" }));
 
     await service.updateEntity(
-      "full_ontology",
+      "full_lens",
       "person",
       "ent-1",
       { name: "Bob" },
@@ -206,7 +206,7 @@ describe("semantic search route", () => {
   it("answers 422 VALIDATION_ERROR with details.code FEATURE_DISABLED without a provider", async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_ontology/search/semantic?q=anything",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/search/semantic?q=anything",
     });
 
     expect(res.statusCode).toBe(422);
@@ -222,7 +222,7 @@ describe("semantic search route", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_ontology/search/semantic?q=alice&type=person&min_score=0.75",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/search/semantic?q=alice&type=person&min_score=0.75",
     });
 
     expect(res.statusCode).toBe(200);
@@ -234,7 +234,7 @@ describe("semantic search route", () => {
     setEmbeddingProvider(mockProvider());
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_ontology/search/semantic",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/search/semantic",
     });
     expect(res.statusCode).toBe(422);
   });
@@ -243,7 +243,7 @@ describe("semantic search route", () => {
     setEmbeddingProvider(mockProvider());
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_ontology/search/semantic?q=x&limit=101",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/search/semantic?q=x&limit=101",
     });
     expect(res.statusCode).toBe(422);
   });

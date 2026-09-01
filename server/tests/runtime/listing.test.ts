@@ -19,8 +19,8 @@ import {
 const holder: { store: MockRuntimeStore } = { store: createMockRuntimeStore() };
 
 vi.mock("../../src/core/ports.js", () => ({
-  getModelingStore: () => ({}),
-  getRuntimeStore: () => holder.store,
+  getModelingStore: async () => ({}),
+  getRuntimeStore: async () => holder.store,
 }));
 
 let app: FastifyInstance;
@@ -50,7 +50,7 @@ describe("the list envelope", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_ontology/entities/person?limit=1&offset=3",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/entities/person?limit=1&offset=3",
     });
 
     expect(res.statusCode).toBe(200);
@@ -71,7 +71,7 @@ describe("the list envelope", () => {
       2,
     ]);
 
-    const res = await app.inject({ method: "GET", url: "/api/runtime/hr_view/entities/person" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person" });
 
     expect(res.statusCode).toBe(200);
     for (const item of res.json().items) {
@@ -91,7 +91,7 @@ describe("the list envelope", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_ontology/entities/person?fields=name&fields=email",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/entities/person?fields=name&fields=email",
     });
 
     expect(res.json().items[0]).toEqual({ _id: "ent-1", name: "Alice", email: "a@b.com" });
@@ -109,7 +109,7 @@ describe("paging bounds — REST rejects where MCP clamps", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: `/api/runtime/full_ontology/entities/person?${queryString}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/full_lens/entities/person?${queryString}`,
     });
 
     expect(res.statusCode).toBe(422);
@@ -123,7 +123,7 @@ describe("paging bounds — REST rejects where MCP clamps", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_ontology/entities/person",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/entities/person",
     });
 
     expect(res.statusCode).toBe(200);
@@ -149,7 +149,7 @@ describe("sorting", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: `/api/runtime/full_ontology/entities/person?sort=${sort}`,
+      url: `/api/ontologies/test_ont/runtime/lenses/full_lens/entities/person?sort=${sort}`,
     });
 
     expect(res.statusCode).toBe(200);
@@ -161,7 +161,7 @@ describe("sorting", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_ontology/entities/person?sort=ghost",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/entities/person?sort=ghost",
     });
 
     expect(res.statusCode).toBe(422);
@@ -173,7 +173,7 @@ describe("sorting", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/hr_view/entities/person?sort=age",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person?sort=age",
     });
 
     expect(res.statusCode).toBe(422);
@@ -184,7 +184,7 @@ describe("sorting", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_ontology/entities/person?order=sideways",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/entities/person?order=sideways",
     });
 
     expect(res.statusCode).toBe(422);
@@ -196,7 +196,7 @@ describe("free-text search and filters", () => {
     holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
     holder.store.listEntities.mockResolvedValue([[], 0]);
 
-    await app.inject({ method: "GET", url: "/api/runtime/hr_view/entities/person?q=ali" });
+    await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person?q=ali" });
 
     const call = holder.store.listEntities.mock.calls[0]!;
     expect(call[3]).toBe("ali");
@@ -208,7 +208,7 @@ describe("free-text search and filters", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_ontology/entities/person?q=%00",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/entities/person?q=%00",
     });
 
     expect(res.statusCode).toBe(422);
@@ -222,7 +222,7 @@ describe("free-text search and filters", () => {
     const { makeFullSchema } = await import("./helpers.js");
     holder.store.getFullSchema.mockResolvedValue(
       makeFullSchema({
-        ontologyKey: "narrow",
+        lensKey: "narrow",
         entityInclusions: [{ key: "person", properties: ["age", "active"] }],
       }),
     );
@@ -230,7 +230,7 @@ describe("free-text search and filters", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/narrow/entities/person?q=alice",
+      url: "/api/ontologies/test_ont/runtime/lenses/narrow/entities/person?q=alice",
     });
 
     // Not an error: the unfiltered list comes back rather than nothing.
@@ -247,7 +247,7 @@ describe("free-text search and filters", () => {
 
     await app.inject({
       method: "GET",
-      url: "/api/runtime/full_ontology/entities/person?filter.age__gte=30&filter.name=Alice",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/entities/person?filter.age__gte=30&filter.name=Alice",
     });
 
     const call = holder.store.listEntities.mock.calls[0]!;
@@ -263,7 +263,7 @@ describe("free-text search and filters", () => {
 
     await app.inject({
       method: "GET",
-      url: "/api/runtime/full_ontology/entities/person?filter.name=Alice&filter.name=Bob",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/entities/person?filter.name=Alice&filter.name=Bob",
     });
 
     expect(holder.store.listEntities.mock.calls[0]![2]).toEqual([
@@ -276,7 +276,7 @@ describe("free-text search and filters", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/runtime/full_ontology/entities/person?filter.age=abc",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/entities/person?filter.age=abc",
     });
 
     expect(res.statusCode).toBe(422);

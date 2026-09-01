@@ -23,8 +23,8 @@ import { indexDimensions } from "./support.js";
 
 type Row = Record<string, unknown>;
 
-const LEGACY_EXPORT = JSON.parse(
-  readFileSync(new URL("../../../fixtures/legacy-export.json", import.meta.url), "utf8"),
+const EXPORT_FIXTURE = JSON.parse(
+  readFileSync(new URL("../../../fixtures/export.json", import.meta.url), "utf8"),
 ) as Row;
 
 const ollamaUp = await checkOllamaModel();
@@ -38,10 +38,16 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("schema import (Ne
     enableOllamaProvider();
     app = await createApp();
     await app.ready();
+    const ontology = await app.inject({
+      method: "POST",
+      url: "/api/ontologies",
+      payload: { key: "test_ont" },
+    });
+    expect(ontology.statusCode, ontology.body).toBe(201);
     const res = await app.inject({
       method: "POST",
-      url: "/api/model/import",
-      payload: LEGACY_EXPORT,
+      url: "/api/ontologies/test_ont/model/import",
+      payload: EXPORT_FIXTURE,
     });
     expect(res.statusCode, res.body).toBe(201);
   });

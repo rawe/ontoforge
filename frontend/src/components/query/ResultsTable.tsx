@@ -48,9 +48,11 @@ function JsonCell({ value }: { value: JsonValue }) {
 
 function ResultCell({
   ontologyKey,
+  lensKey,
   value,
 }: {
   ontologyKey: string
+  lensKey: string
   value: JsonValue | undefined
 }) {
   if (value === undefined || value === null) {
@@ -65,7 +67,7 @@ function ResultCell({
   if (isEntityObject(value)) {
     return (
       <Link
-        to={`/w/${ontologyKey}/e/${value._entityTypeKey}/${value._id}`}
+        to={`/o/${ontologyKey}/w/${lensKey}/e/${value._entityTypeKey}/${value._id}`}
         className="inline-flex max-w-72 items-center gap-1.5 hover:underline"
       >
         <TypeChip typeKey={value._entityTypeKey} size="sm" />
@@ -109,6 +111,7 @@ function ResultCell({
 
 interface ResultsTableProps {
   ontologyKey: string
+  lensKey: string
   result: QueryResult
 }
 
@@ -117,7 +120,7 @@ interface ResultsTableProps {
  * type chips linking to their detail page, relation objects as mono chips,
  * plain scalars as-is, other objects as expandable JSON.
  */
-export function ResultsTable({ ontologyKey, result }: ResultsTableProps) {
+export function ResultsTable({ ontologyKey, lensKey, result }: ResultsTableProps) {
   if (result.results.length === 0) {
     return (
       <p className="rounded-xl border bg-card p-6 text-center text-[13px] text-muted-foreground">
@@ -142,7 +145,7 @@ export function ResultsTable({ ontologyKey, result }: ResultsTableProps) {
             <TableRow key={i}>
               {result.columns.map((c) => (
                 <TableCell key={c} className="align-top">
-                  <ResultCell ontologyKey={ontologyKey} value={row[c]} />
+                  <ResultCell ontologyKey={ontologyKey} lensKey={lensKey} value={row[c]} />
                 </TableCell>
               ))}
             </TableRow>

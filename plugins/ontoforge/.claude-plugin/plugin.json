@@ -1,5 +1,5 @@
 {
   "name": "ontoforge",
-  "description": "OntoForge plugin for Claude Code: export and import ontology schemas and instance data, sync OKF Markdown documents with entities, bootstrap new projects with Docker Compose, and build against the runtime API.",
-  "version": "0.7.0"
+  "description": "OntoForge plugin for Claude Code: export and import ontology schemas and instance data, sync OKF Markdown documents with entities, move single documents in and out of entity properties, bootstrap new projects with Docker Compose, and build against the runtime API.",
+  "version": "0.8.0"
 }

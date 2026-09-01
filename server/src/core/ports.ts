@@ -59,18 +59,23 @@ export type Row = Record<string, unknown>;
 export type FilterOperator = "eq" | "gt" | "gte" | "lt" | "lte" | "contains";
 
 /**
- * One parsed, coerced filter condition. Built by the runtime service —
- * which validates the property, coerces the value, and checks the
- * operator above the port — so adapters receive only valid input and do
- * pure predicate assembly. The value is already coerced to the declared
- * data type (`contains` compares textually and carries the string form).
+ * One parsed, coerced filter condition, tagged by `kind`. Built by the
+ * runtime service — which validates the key, coerces the value, and
+ * checks the operator above the port — so adapters receive only valid
+ * input, dispatch on the kind, and do pure predicate assembly. The only
+ * kind is the plain property condition: one property of the listed type,
+ * named explicitly. The value is already coerced to the declared data
+ * type (`contains` compares textually and carries the string form).
  */
-export interface FilterCondition {
-  key: string;
+export interface PropertyFilterCondition {
+  kind: "property";
+  propertyKey: string;
   dataType: string;
   op: FilterOperator;
   value: unknown;
 }
+
+export type FilterCondition = PropertyFilterCondition;
 
 /** One stored type whose key the active adapter now reserves. */
 export interface ReservedTypeKeyInUse {

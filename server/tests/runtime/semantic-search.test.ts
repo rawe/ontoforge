@@ -331,3 +331,48 @@ describe("cross-type search (no entity type)", () => {
     expect(mockedSearchChunks).not.toHaveBeenCalled();
   });
 });
+
+describe("filter faults are collected on semantic search", () => {
+  it("every faulty key, including __contains, is rejected once under its own key", async () => {
+    setEmbeddingProvider(provider());
+    const error = await semanticSearch("test", "query", "person", 10, null, store, {
+      filters: { nonexistent: "v", age: "abc", name__contains: "Ali", age__between: "1" },
+    }).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ValidationError);
+    expect((error as ValidationError).details).toEqual({
+      fields: {
+        nonexistent: "Not defined in type 'person'",
+        age: expect.stringContaining("Expected integer"),
+        name__contains: "Not supported on semantic search",
+        age__between: "Unsupported operator 'between'",
+      },
+    });
+    expect(mockedSemanticSearch).not.toHaveBeenCalled();
+  });
+
+  it("a lone __contains keeps its message and its field", async () => {
+    setEmbeddingProvider(provider());
+    const error = await semanticSearch("test", "query", "person", 10, null, store, {
+      filters: { name__contains: "Ali" },
+    }).catch((e: unknown) => e);
+
+    expect((error as ValidationError).message).toBe(
+      "The '__contains' filter is not supported on semantic search. " +
+        "Use exact match or range operators (=, __gt, __gte, __lt, __lte).",
+    );
+    expect((error as ValidationError).details).toEqual({
+      fields: { name__contains: "Not supported on semantic search" },
+    });
+  });
+
+  it("a passage-only search is rejected up front, not per hit", async () => {
+    setEmbeddingProvider(provider());
+    await expect(
+      semanticSearch("test", "query", "person", 10, null, store, {
+        searchIn: "documents",
+        filters: { nonexistent: "v" },
+      }),
+    ).rejects.toThrow(/Unknown filter property/);
+  });
+});

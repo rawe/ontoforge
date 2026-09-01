@@ -89,8 +89,9 @@ there one deviation exists — PostgreSQL-specific: datetime values return as th
 ISO text, whose wire serialization is byte-identical.
 
 **Filters, sorts and searches cross as structured values, never as query text.** A filter
-is a list of parsed conditions — property key, declared data type, operator, and the value
-already coerced to that type; a sort is a property key plus a direction; a text search is
+is a list of parsed conditions, each tagged with its kind; the only kind is the property
+condition — property key, declared data type, operator, and the value already coerced to
+that type. A sort is a property key plus a direction; a text search is
 a string plus the list of property keys to match it against. No fragment of any query
 language enters or leaves the port. The one exception is the validated query object,
 described below, which is opaque rather than textual.
@@ -337,13 +338,14 @@ report must describe the index the way the API does — by entity type, by docum
 or by search scope — and never by its physical name.
 
 **Building predicates from structured filters.** Filters arrive as parsed conditions, and
-the adapter must turn every condition into a predicate the database can evaluate. The
+the adapter, dispatching on each condition's kind, must turn every condition into a
+predicate the database can evaluate. The
 operator vocabulary is fixed by the caller-facing surface, not by the adapter, and is
 enumerated once in [interfaces.md](interfaces.md#listing-sorting-filtering); an adapter
 supports all of it and invents none of it. Validation happens above the port: the three
 filter faults — an unknown property, an unknown operator, a value that will not coerce —
-are raised there as domain validation errors, identically on every backend, so the adapter
-receives only valid conditions and raises no filter validation error of its own. Each
+are collected there into one domain validation error, identically on every backend, so the
+adapter receives only valid conditions and raises no filter validation error of its own. Each
 condition's value is already coerced to the property's declared data type; the substring
 operator is the exception, comparing case-insensitively on the string form of both sides
 and carrying that string form as its value. One fault remains the adapter's to raise, as a

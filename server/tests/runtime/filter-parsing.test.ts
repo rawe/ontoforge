@@ -1,8 +1,9 @@
 /**
  * The shared filter parser — request validation above the port. Every
  * backend receives only parsed, coerced conditions; the three faults
- * (unknown property, uncoercible value, unknown operator — checked in
- * that order) are raised here, identically for every adapter.
+ * (unknown property, uncoercible value, unknown operator — at most one
+ * per filter key, checked in that order) are collected across keys and
+ * raised here once, identically for every adapter.
  */
 
 import { describe, expect, it } from "vitest";
@@ -11,10 +12,12 @@ import { ValidationError } from "../../src/core/exceptions.js";
 import { parseFilterConditions } from "../../src/runtime/service.js";
 import { DEFS } from "../propertyDefs.js";
 
-describe("parsed conditions", () => {
+describe("parsed conditions — the tagged property condition", () => {
   it("a bare key parses as equality with the value coerced to the declared type", () => {
     const conditions = parseFilterConditions({ age: "30" }, DEFS, "person");
-    expect(conditions).toEqual([{ key: "age", dataType: "integer", op: "eq", value: 30 }]);
+    expect(conditions).toEqual([
+      { kind: "property", propertyKey: "age", dataType: "integer", op: "eq", value: 30 },
+    ]);
   });
 
   it("comparison suffixes map to their operators", () => {
@@ -31,7 +34,7 @@ describe("parsed conditions", () => {
     // An integer property under __contains accepts a non-numeric value.
     const conditions = parseFilterConditions({ age__contains: "3x" }, DEFS, "person");
     expect(conditions).toEqual([
-      { key: "age", dataType: "integer", op: "contains", value: "3x" },
+      { kind: "property", propertyKey: "age", dataType: "integer", op: "contains", value: "3x" },
     ]);
   });
 
@@ -43,7 +46,8 @@ describe("parsed conditions", () => {
       expect(error).toBeInstanceOf(ValidationError);
       expect((error as ValidationError).message).toBe("Invalid filter value for 'name'");
       expect(
-        ((error as ValidationError).details as { fields: Record<string, string> }).fields.name,
+        ((error as ValidationError).details as { fields: Record<string, string> }).fields
+          .name__contains,
       ).toBe("String value for 'name' must not contain the NUL character");
     }
   });
@@ -66,7 +70,7 @@ describe("parsed conditions", () => {
   });
 });
 
-describe("the three faults — property, then value, then operator", () => {
+describe("the three faults — property, then value, then operator, one per key", () => {
   it("an unknown property", () => {
     try {
       parseFilterConditions({ ghost: "x" }, DEFS, "person");
@@ -125,6 +129,60 @@ describe("the three faults — property, then value, then operator", () => {
     } catch (error) {
       expect(error).toBeInstanceOf(ValidationError);
       expect((error as ValidationError).message).toBe("Unknown filter property: 'notes'");
+    }
+  });
+});
+
+describe("faults are collected across filter keys", () => {
+  it("several faulty keys are rejected once, each under its own key with its own message", () => {
+    try {
+      parseFilterConditions(
+        { ghost: "x", age: "abc", score__between: "1", name: "Alice" },
+        DEFS,
+        "person",
+      );
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      expect((error as ValidationError).message).toBe(
+        "Unknown filter property: 'ghost'; " +
+          "Invalid filter value for 'age'; " +
+          "Unknown filter operator: 'between'",
+      );
+      expect((error as ValidationError).details).toEqual({
+        fields: {
+          ghost: "Not defined in type 'person'",
+          age: expect.stringContaining("Expected integer"),
+          score__between: "Unsupported operator 'between'",
+        },
+      });
+    }
+  });
+});
+
+describe("each faulty filter key is reported under the key the caller sent", () => {
+  it("two bounds on one property that both fail keep both faults", () => {
+    try {
+      parseFilterConditions({ age__gt: "abc", age__lt: "xyz" }, DEFS, "person");
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      expect((error as ValidationError).message).toBe("Invalid filter value for 'age'");
+      expect(
+        Object.keys(((error as ValidationError).details as { fields: Record<string, string> }).fields),
+      ).toEqual(["age__gt", "age__lt"]);
+    }
+  });
+
+  it("a bare key is its own filter key, so a single fault reads as before", () => {
+    try {
+      parseFilterConditions({ age: "abc" }, DEFS, "person");
+      expect.unreachable();
+    } catch (error) {
+      expect((error as ValidationError).message).toBe("Invalid filter value for 'age'");
+      expect(
+        Object.keys(((error as ValidationError).details as { fields: Record<string, string> }).fields),
+      ).toEqual(["age"]);
     }
   });
 });

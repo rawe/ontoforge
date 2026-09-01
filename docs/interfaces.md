@@ -106,8 +106,9 @@ Filter values arrive as text and are coerced to the property's declared data typ
 comparison; `__contains` is compared as text. Non-string values are matched against
 their text form — numbers as printed, booleans as `true`/`false`, datetimes as their
 ISO-8601 string. An unknown property key, an unknown operator
-suffix and an uncoercible value are each rejected. How a filter is evaluated, and the trap
-in the suffix rule, are in
+suffix and an uncoercible value are each rejected; a request carrying several faulty
+filters is rejected once, every fault under its own filter key in `details.fields`. How a
+filter is evaluated, and the trap in the suffix rule, are in
 [capabilities/instance-data.md](capabilities/instance-data.md#listing). Relation lists
 additionally accept `fromEntityId` and `toEntityId`.
 

@@ -21,7 +21,7 @@
  * assume server-format ids.
  */
 
-import type { FilterCondition } from "../../core/ports.js";
+import type { FilterCondition, PropertyFilterCondition } from "../../core/ports.js";
 import type { PropertyDef } from "../../core/schemas.js";
 
 const OPERATORS: Record<Exclude<FilterCondition["op"], "contains">, string> = {
@@ -67,24 +67,33 @@ function bind(params: unknown[], value: unknown): number {
   return params.length;
 }
 
-/** WHERE fragments for parsed filter conditions, ANDed by the caller. */
+/** WHERE fragments for parsed filter conditions, ANDed by the caller;
+ * one predicate per condition, dispatched on its kind. */
 export function buildFilterClauses(
   conditions: FilterCondition[],
   params: unknown[],
 ): string[] {
   const clauses: string[] = [];
   for (const condition of conditions) {
-    if (condition.op === "contains") {
-      const valueP = bind(params, condition.value);
-      const keyP = bind(params, condition.key);
-      clauses.push(`position(lower($${valueP}) in lower(props->>$${keyP})) > 0`);
-    } else {
-      const keyP = bind(params, condition.key);
-      const valueP = bind(params, condition.value);
-      clauses.push(`${accessor(condition.dataType, keyP)} ${OPERATORS[condition.op]} $${valueP}`);
+    switch (condition.kind) {
+      case "property":
+        clauses.push(buildPropertyClause(condition, params));
+        break;
     }
   }
   return clauses;
+}
+
+/** The predicate for one property condition over this row's `props`. */
+function buildPropertyClause(condition: PropertyFilterCondition, params: unknown[]): string {
+  if (condition.op === "contains") {
+    const valueP = bind(params, condition.value);
+    const keyP = bind(params, condition.propertyKey);
+    return `position(lower($${valueP}) in lower(props->>$${keyP})) > 0`;
+  }
+  const keyP = bind(params, condition.propertyKey);
+  const valueP = bind(params, condition.value);
+  return `${accessor(condition.dataType, keyP)} ${OPERATORS[condition.op]} $${valueP}`;
 }
 
 /** The free-text search fragment: the contains idiom ORed over the

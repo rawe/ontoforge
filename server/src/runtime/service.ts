@@ -262,21 +262,52 @@ const FILTER_OPERATORS: ReadonlySet<FilterOperator> = new Set([
   "contains",
 ]);
 
+/** One rejected filter key: the caller-facing message and the detail
+ * reported under `field` in `details.fields`. */
+interface FilterFault {
+  field: string;
+  message: string;
+  detail: string;
+}
+
+interface FilterParseOptions {
+  /** A surface that cannot evaluate substring containment rejects
+   * `__contains` with its own wording — one more collected fault, checked
+   * before the key's other faults so a lone rejection reads unchanged. */
+  rejectContains?: Omit<FilterFault, "field">;
+}
+
+/** The single rejection for a set of filter faults: every fault under its
+ * own field, the distinct messages joined — so a lone fault reads exactly
+ * as it always did. */
+function filterFaultsError(faults: FilterFault[]): ValidationError {
+  const fields: Record<string, string> = {};
+  for (const fault of faults) {
+    fields[fault.field] = fault.detail;
+  }
+  const messages = [...new Set(faults.map((fault) => fault.message))];
+  return new ValidationError(messages.join("; "), { fields });
+}
+
 /**
  * Parse a list-endpoint filter map into the conditions that cross the
  * port. The operator is the segment after the LAST double underscore —
  * so a property whose own key contains `__` cannot be filtered
- * (documented trap). The three faults — unknown property, uncoercible
- * value, unknown operator — raise `ValidationError`, checked in that
- * order; they are raised here, above the port, identically for every
- * backend. `contains` compares textually and skips type coercion.
+ * (documented trap). Each key yields at most one fault — unknown
+ * property, uncoercible value, unknown operator, checked in that order —
+ * reported under the filter key as sent; the faults of all keys are
+ * collected into one `ValidationError`, raised here, above the port,
+ * identically for every backend.
+ * `contains` compares textually and skips type coercion.
  */
 export function parseFilterConditions(
   filters: Record<string, string>,
   propertyDefs: Record<string, PropertyDef>,
   typeKey: string,
+  options: FilterParseOptions = {},
 ): FilterCondition[] {
   const conditions: FilterCondition[] = [];
+  const faults: FilterFault[] = [];
 
   for (const [filterExpr, rawValue] of Object.entries(filters)) {
     let propKey: string;
@@ -290,11 +321,19 @@ export function parseFilterConditions(
       opName = null;
     }
 
+    if (opName === "contains" && options.rejectContains !== undefined) {
+      faults.push({ field: filterExpr, ...options.rejectContains });
+      continue;
+    }
+
     const propDef = propertyDefs[propKey];
     if (propDef === undefined) {
-      throw new ValidationError(`Unknown filter property: '${propKey}'`, {
-        fields: { [propKey]: `Not defined in type '${typeKey}'` },
+      faults.push({
+        field: filterExpr,
+        message: `Unknown filter property: '${propKey}'`,
+        detail: `Not defined in type '${typeKey}'`,
       });
+      continue;
     }
 
     let value: unknown;
@@ -308,9 +347,12 @@ export function parseFilterConditions(
       }
     } catch (error) {
       if (!(error instanceof CoercionError)) throw error;
-      throw new ValidationError(`Invalid filter value for '${propKey}'`, {
-        fields: { [propKey]: error.message },
+      faults.push({
+        field: filterExpr,
+        message: `Invalid filter value for '${propKey}'`,
+        detail: error.message,
       });
+      continue;
     }
 
     let op: FilterOperator;
@@ -319,14 +361,26 @@ export function parseFilterConditions(
     } else if (FILTER_OPERATORS.has(opName as FilterOperator)) {
       op = opName as FilterOperator;
     } else {
-      throw new ValidationError(`Unknown filter operator: '${opName}'`, {
-        fields: { [filterExpr]: `Unsupported operator '${opName}'` },
+      faults.push({
+        field: filterExpr,
+        message: `Unknown filter operator: '${opName}'`,
+        detail: `Unsupported operator '${opName}'`,
       });
+      continue;
     }
 
-    conditions.push({ key: propKey, dataType: propDef.dataType, op, value });
+    conditions.push({
+      kind: "property",
+      propertyKey: propKey,
+      dataType: propDef.dataType,
+      op,
+      value,
+    });
   }
 
+  if (faults.length > 0) {
+    throw filterFaultsError(faults);
+  }
   return conditions;
 }
 
@@ -1392,6 +1446,14 @@ export async function getNeighbors(
 // ---------------------------------------------------------------------------
 
 const SEARCH_IN_VALUES = ["entities", "documents", "all"] as const;
+
+/** Substring containment cannot be evaluated inside a vector index. */
+const SEARCH_CONTAINS_REJECTION = {
+  message:
+    "The '__contains' filter is not supported on semantic search. " +
+    "Use exact match or range operators (=, __gt, __gte, __lt, __lte).",
+  detail: "Not supported on semantic search",
+};
 const RRF_K = 60;
 const SNIPPET_CHARS = 200;
 
@@ -1442,11 +1504,17 @@ export async function semanticSearch(
   const snippets = options.snippets ?? true;
 
   let scopedEt: EntityTypeDef | null = null;
+  let conditions: FilterCondition[] = [];
   if (entityTypeKey !== null) {
     scopedEt = loaded.scoped.entityTypes[entityTypeKey] ?? null;
     if (scopedEt === null) {
       throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
     }
+    // Parsed once, for every search scope, so a faulty filter is rejected
+    // before any index is consulted — every fault in one answer.
+    conditions = parseFilterConditions(filters, scopedEt.properties, entityTypeKey, {
+      rejectContains: SEARCH_CONTAINS_REJECTION,
+    });
   } else if (Object.keys(filters).length > 0) {
     const fieldErrors: Record<string, string> = {};
     for (const k of Object.keys(filters)) {
@@ -1456,18 +1524,6 @@ export async function semanticSearch(
       "Property filters require 'type' — filters are defined per entity type",
       { fields: fieldErrors },
     );
-  }
-
-  // Reject __contains — not supported by in-index WHERE (SEARCH clause).
-  // Use the entity list endpoint for substring filtering.
-  for (const filterKey of Object.keys(filters)) {
-    if (filterKey.endsWith("__contains")) {
-      throw new ValidationError(
-        "The '__contains' filter is not supported on semantic search. " +
-          "Use exact match or range operators (=, __gt, __gte, __lt, __lte).",
-        { fields: { [filterKey]: "Not supported on semantic search" } },
-      );
-    }
   }
 
   const queryEmbedding = await provider.embed(query);
@@ -1493,7 +1549,7 @@ export async function semanticSearch(
         queryEmbedding,
         limit,
         minScore,
-        filters,
+        conditions,
         store,
         fields,
       );
@@ -1545,12 +1601,10 @@ async function semanticSearchSingleType(
   queryEmbedding: number[],
   limit: number,
   minScore: number | null,
-  filters: Record<string, string>,
+  conditions: FilterCondition[],
   store: RuntimeStore,
   fields: string[] | null,
 ): Promise<Row[]> {
-  const conditions = parseFilterConditions(filters, scopedEt.properties, entityTypeKey);
-
   const results = await store.semanticSearch(
     entityTypeKey,
     scopedEt.properties,

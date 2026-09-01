@@ -16,7 +16,7 @@
 
 import neo4j from "neo4j-driver";
 
-import type { FilterCondition } from "../../core/ports.js";
+import type { FilterCondition, PropertyFilterCondition } from "../../core/ports.js";
 import { toNeo4jDate, toNeo4jDateTime } from "./temporal.js";
 
 const OPERATORS: Record<string, string> = {
@@ -44,7 +44,8 @@ export function toNeo4jParameter(value: unknown, dataType: string): unknown {
   }
 }
 
-/** Build WHERE fragments and parameters from parsed filter conditions. */
+/** Build WHERE fragments and parameters from parsed filter conditions —
+ * one fragment per condition, dispatched on its kind. */
 export function buildFilterClauses(
   conditions: FilterCondition[],
   nodeAlias = "n",
@@ -54,23 +55,39 @@ export function buildFilterClauses(
 
   for (const condition of conditions) {
     const paramName = `flt_${Object.keys(params).length}`;
-
-    if (condition.op === "contains") {
-      // Substring comparison is textual — the parsed value is already the
-      // string form and crosses untouched.
-      whereClauses.push(
-        `toLower(toString(${nodeAlias}.${condition.key})) CONTAINS toLower($${paramName})`,
-      );
-      params[paramName] = condition.value;
-    } else {
-      whereClauses.push(
-        `${nodeAlias}.${condition.key} ${OPERATORS[condition.op]} $${paramName}`,
-      );
-      params[paramName] = toNeo4jParameter(condition.value, condition.dataType);
+    switch (condition.kind) {
+      case "property": {
+        const [clause, value] = buildPropertyClause(condition, nodeAlias, paramName);
+        whereClauses.push(clause);
+        params[paramName] = value;
+        break;
+      }
     }
   }
 
   return [whereClauses, params];
+}
+
+/** The fragment for one property condition on the aliased node or
+ * relationship, plus the value to bind under `paramName`. Substring
+ * comparison is textual — the parsed value is already the string form
+ * and crosses untouched; every other value is converted to its
+ * driver-native form. */
+function buildPropertyClause(
+  condition: PropertyFilterCondition,
+  alias: string,
+  paramName: string,
+): [string, unknown] {
+  if (condition.op === "contains") {
+    return [
+      `toLower(toString(${alias}.${condition.propertyKey})) CONTAINS toLower($${paramName})`,
+      condition.value,
+    ];
+  }
+  return [
+    `${alias}.${condition.propertyKey} ${OPERATORS[condition.op]} $${paramName}`,
+    toNeo4jParameter(condition.value, condition.dataType),
+  ];
 }
 
 /** The case-insensitive substring search clause over string properties. */

@@ -356,7 +356,7 @@ describe("listing with q + filters + sort + paging", () => {
       url: "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person?filter.name__contains=%00",
     });
     expect(filtered.statusCode).toBe(422);
-    expect(filtered.json().error.details.fields.name).toBe(
+    expect(filtered.json().error.details.fields.name__contains).toBe(
       "String value for 'name' must not contain the NUL character",
     );
 
@@ -402,6 +402,27 @@ describe("listing with q + filters + sort + paging", () => {
       url: "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person?filter.age__between=1",
     });
     expect(badOp.statusCode).toBe(422);
+  });
+
+  it("several faulty filters are rejected once, every fault under its own filter key", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url:
+        "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person" +
+        "?filter.ghost=1&filter.age=abc&filter.age__between=1&filter.name=Alice",
+    });
+    expect(res.statusCode).toBe(422);
+    const error = res.json().error as { message: string; details: { fields: Record<string, string> } };
+    expect(error.message).toBe(
+      "Unknown filter property: 'ghost'; " +
+        "Invalid filter value for 'age'; " +
+        "Unknown filter operator: 'between'",
+    );
+    expect(error.details.fields).toEqual({
+      ghost: "Not defined in type 'person'",
+      age: expect.stringContaining("Expected integer"),
+      age__between: "Unsupported operator 'between'",
+    });
   });
 
   it("out-of-range paging is rejected", async () => {

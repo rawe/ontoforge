@@ -21,7 +21,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { initPool } from "../../../src/adapters/postgres/errors.js";
 import { PostgresRuntimeStore } from "../../../src/adapters/postgres/runtimeStore.js";
-import { DEFS } from "../../propertyDefs.js";
+import { cond, DEFS } from "../../propertyDefs.js";
 import { fakeDb } from "./support.js";
 
 vi.mock("pg", async (importOriginal) => {
@@ -143,7 +143,7 @@ describe.each(PATHS)("$name", ({ index, run }) => {
 describe("filtered semanticSearch", () => {
   it("keeps the scan setting and the pinned score beside the filter", async () => {
     await store.semanticSearch("person", DEFS, QUERY_VECTOR, 5, null, [
-      { key: "name", dataType: "string", op: "eq", value: "Ada" },
+      cond("name", "string", "eq", "Ada"),
     ]);
 
     const sql = statements();

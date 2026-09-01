@@ -149,9 +149,13 @@ in [interfaces.md](../interfaces.md#listing-sorting-filtering). What matters her
 filter is evaluated: values arrive as text and are coerced to the property's data type by
 the same rules as writes — except under the substring operator, which compares as text and
 therefore accepts anything. An unknown property, an unrecognized suffix or an uncoercible
-value is a validation error naming the filter. The operator is taken as the segment after
-the **last** double underscore, so a property whose own key contains a double underscore
-cannot be filtered.
+value is a validation error. **Faults are collected**, as they are on writes: one rejection
+names every faulty filter of the request at once, each under the filter key as sent
+(`age__gt`, not `age`) with its own detail, and a filter key carries at most one fault. The
+rejection's message lists the distinct faults, so a lone fault reads as it always did. The
+operator is
+taken as the segment after the **last** double underscore, so a property whose own key
+contains a double underscore cannot be filtered.
 
 Relation lists additionally filter by source id, target id, or both, which is how the
 relations of one entity are enumerated with a real total — the traversal operation below

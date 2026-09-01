@@ -1,12 +1,16 @@
 /**
  * Query paths on the entity list — conformance over REST, on whichever
  * adapter `DB_BACKEND` selects. A filter key crosses one relation type
- * to a property of the related entity; the direction is derived from the
- * relation type's endpoints; an entity matches when at least one related
- * entity satisfies the condition; faults are collected under their keys.
+ * to a property of the related entity (`.`) or to a property stored on
+ * the relation itself (`@`); the direction is derived from the relation
+ * type's endpoints; an entity matches when at least one relation of the
+ * type satisfies the condition; faults are collected under their keys.
  *
  * Instance data: Alice (30) and Carol (40) work for Acme, Bob (25) and
  * Carol for Globex; Dave (35) works nowhere; Initech employs nobody.
+ * Employments: Alice at Acme as CTO since 2015-03-01, Carol at Acme as
+ * Engineer since 2018-06-01, Bob at Globex as Engineer since 2022-09-15,
+ * Carol at Globex as CTO since 2025-02-01.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -68,13 +72,18 @@ beforeEach(async () => {
   const bob = await create(`${LENS}/entities/person`, { name: "Bob", age: 25 });
   const carol = await create(`${LENS}/entities/person`, { name: "Carol", age: 40 });
   await create(`${LENS}/entities/person`, { name: "Dave", age: 35 });
-  for (const [from, to] of [
-    [alice, acme],
-    [bob, globex],
-    [carol, acme],
-    [carol, globex],
-  ]) {
-    await create(`${LENS}/relations/works_for`, { fromEntityId: from!._id, toEntityId: to!._id });
+  for (const [from, to, role, since] of [
+    [alice, acme, "CTO", "2015-03-01"],
+    [bob, globex, "Engineer", "2022-09-15"],
+    [carol, acme, "Engineer", "2018-06-01"],
+    [carol, globex, "CTO", "2025-02-01"],
+  ] as [Row, Row, string, string][]) {
+    await create(`${LENS}/relations/works_for`, {
+      fromEntityId: from._id,
+      toEntityId: to._id,
+      role,
+      since,
+    });
   }
 });
 
@@ -186,6 +195,104 @@ describe("combination by AND", () => {
   });
 });
 
+describe("the relation-property form — the condition is evaluated on the relation alone", () => {
+  it("outgoing — persons holding a CTO employment", async () => {
+    expect(await names(`${LENS}/entities/person?filter.works_for@role=CTO`)).toEqual({
+      names: ["Alice", "Carol"],
+      total: 2,
+    });
+  });
+
+  it("incoming — companies with an employment that started before 2020", async () => {
+    expect(
+      await names(`${LENS}/entities/company?filter.works_for@since__lt=2020-01-01`),
+    ).toEqual({ names: ["Acme"], total: 1 });
+  });
+
+  describe("the six operators, coerced by the relation property's data type", () => {
+    it.each([
+      ["filter.works_for@since=2015-03-01", ["Alice"]],
+      ["filter.works_for@since__gt=2020-01-01", ["Bob", "Carol"]],
+      ["filter.works_for@since__gte=2022-09-15", ["Bob", "Carol"]],
+      ["filter.works_for@since__lt=2018-06-01", ["Alice"]],
+      ["filter.works_for@since__lte=2018-06-01", ["Alice", "Carol"]],
+      ["filter.works_for@role__contains=eng", ["Bob", "Carol"]],
+    ])("%s", async (query, expected) => {
+      const result = await names(`${LENS}/entities/person?${query}`);
+      expect(result.names).toEqual(expected);
+      expect(result.total).toBe(expected.length);
+    });
+
+    it.each([
+      ["filter.works_for@since=2022-09-15", ["Globex"]],
+      ["filter.works_for@since__gt=2018-06-01", ["Globex"]],
+      ["filter.works_for@since__gte=2018-06-01", ["Acme", "Globex"]],
+      ["filter.works_for@since__lt=2018-06-01", ["Acme"]],
+      ["filter.works_for@since__lte=2018-06-01", ["Acme"]],
+      ["filter.works_for@role__contains=cto", ["Acme", "Globex"]],
+    ])("incoming, %s", async (query, expected) => {
+      const result = await names(`${LENS}/entities/company?${query}`);
+      expect(result.names).toEqual(expected);
+      expect(result.total).toBe(expected.length);
+    });
+
+    it("a value the relation property cannot coerce is rejected under the path key", async () => {
+      const { message, fields } = await rejected(
+        `${LENS}/entities/person?filter.works_for@since__lt=soon`,
+      );
+      expect(message).toBe("Invalid filter value for 'works_for@since'");
+      expect(Object.keys(fields)).toEqual(["works_for@since__lt"]);
+    });
+  });
+
+  describe("existential matching across relations", () => {
+    it("a person with two employments matches when either carries the role", async () => {
+      // Carol is an Engineer at Acme and the CTO at Globex.
+      expect((await names(`${LENS}/entities/person?filter.works_for@role=CTO`)).names).toContain(
+        "Carol",
+      );
+      expect(
+        (await names(`${LENS}/entities/person?filter.works_for@role=Engineer`)).names,
+      ).toContain("Carol");
+    });
+
+    it("two relation-property conditions through the same relation type are independent", async () => {
+      // Alice: CTO since 2015, one employment. Carol: CTO since 2025 at
+      // Globex, Engineer since 2018 at Acme — each condition met by a
+      // different employment.
+      expect(
+        await names(
+          `${LENS}/entities/person?filter.works_for@role=CTO&filter.works_for@since__lt=2020-01-01`,
+        ),
+      ).toEqual({ names: ["Alice", "Carol"], total: 2 });
+    });
+
+    it("a related-entity condition and a relation-property condition through the same relation type are independent", async () => {
+      // Carol works for Acme (as Engineer) and holds a CTO role (at Globex).
+      expect(
+        await names(
+          `${LENS}/entities/person?filter.works_for.name=Acme&filter.works_for@role=CTO`,
+        ),
+      ).toEqual({ names: ["Alice", "Carol"], total: 2 });
+    });
+
+    it("an entity with no relation of the type never matches, in either direction", async () => {
+      expect(
+        (await names(`${LENS}/entities/person?filter.works_for@since__gte=1900-01-01`)).names,
+      ).toEqual(["Alice", "Bob", "Carol"]);
+      expect(
+        (await names(`${LENS}/entities/company?filter.works_for@since__gte=1900-01-01`)).names,
+      ).toEqual(["Acme", "Globex"]);
+    });
+  });
+
+  it("combines with plain conditions by AND", async () => {
+    expect(
+      (await names(`${LENS}/entities/person?filter.works_for@role=CTO&filter.age__gt=30`)).names,
+    ).toEqual(["Carol"]);
+  });
+});
+
 describe("rejections, collected under their filter keys", () => {
   /** Widen the schema with what the six fault kinds need: a relation type
    * not touching persons, a document property on companies, and a
@@ -226,15 +333,18 @@ describe("rejections, collected under their filter keys", () => {
         "?filter.ghost.name=x" +
         "&filter.supplies.name=x" +
         "&filter.works_for.ghost=x" +
+        "&filter.works_for@ghost=x" +
         "&filter.works_for.name.x=1" +
         "&filter.works_for.profile=x" +
         "&filter.manages.name=x" +
-        "&filter.works_for.name=Acme",
+        "&filter.works_for.name=Acme" +
+        "&filter.works_for@role=CTO",
     );
     expect(message).toBe(
       "Unknown filter property or relation type: 'ghost'; " +
         "Relation type 'supplies' does not touch entity type 'person'; " +
         "Unknown filter property: 'ghost' on related entity type 'company'; " +
+        "Unknown filter property: 'ghost' on relation type 'works_for'; " +
         "Query path 'works_for.name.x' crosses more than one relation; " +
         "Query path 'works_for.profile' ends in a document property; " +
         "Query path 'manages.name' is ambiguous",
@@ -248,8 +358,10 @@ describe("rejections, collected under their filter keys", () => {
         "Relation types touching 'person': manages, works_for",
       "works_for.ghost":
         "Not defined in type 'company'. Property keys: employee_count, founded, name, profile",
+      "works_for@ghost": "Not defined in type 'works_for'. Property keys: role, since",
       "works_for.name.x":
-        "A filter key may cross exactly one relation type: <relationTypeKey>.<propertyKey>",
+        "A filter key may cross exactly one relation type: " +
+        "<relationTypeKey>.<propertyKey> or <relationTypeKey>@<propertyKey>",
       "works_for.profile":
         "'profile' on 'company' is a document property; a query path cannot end in one",
       "manages.name": "'manages' connects 'person' to 'person', so the direction cannot be derived",
@@ -261,12 +373,10 @@ describe("rejections, collected under their filter keys", () => {
     expect(message).toBe("Sorting by query paths is not supported");
   });
 
-  it("a path key on the relation list", async () => {
-    const { message, fields } = await rejected(
-      `${LENS}/relations/works_for?filter.works_for.name=Acme`,
-    );
-    expect(message).toBe("Query paths apply to entity lists only: 'works_for.name'");
-    expect(Object.keys(fields)).toEqual(["works_for.name"]);
+  it.each(["works_for.name", "works_for@role"])("a path key on the relation list: %s", async (key) => {
+    const { message, fields } = await rejected(`${LENS}/relations/works_for?filter.${key}=x`);
+    expect(message).toBe(`Query paths apply to entity lists only: '${key}'`);
+    expect(Object.keys(fields)).toEqual([key]);
   });
 });
 

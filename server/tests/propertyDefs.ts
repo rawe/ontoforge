@@ -21,7 +21,8 @@ export function cond(
   return { kind: "property", propertyKey, dataType, op, value };
 }
 
-/** A resolved path condition to a property of the related entity. */
+/** A resolved path condition — to a property of the related entity unless
+ * `propertySource` names the relation itself. */
 export function pathCond(
   relationTypeKey: string,
   direction: PathFilterCondition["direction"],
@@ -29,12 +30,13 @@ export function pathCond(
   dataType: string,
   op: FilterCondition["op"],
   value: unknown,
+  propertySource: PathFilterCondition["propertySource"] = "relatedEntity",
 ): PathFilterCondition {
   return {
     kind: "path",
     relationTypeKey,
     direction,
-    propertySource: "relatedEntity",
+    propertySource,
     propertyKey,
     dataType,
     op,

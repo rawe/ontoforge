@@ -115,19 +115,23 @@ function buildPropertyClause(
 /**
  * The existential predicate for one path condition: a relation row of the
  * type, anchored on the listed row (`entity` — the outer query's table,
- * unaliased) at the near endpoint, joined to the related row at the far
- * endpoint, with the property comparison on that row. Self-contained per
- * condition, so two paths through one relation type may be satisfied by
- * two different related rows. The relation type key is bound like every
- * property key.
+ * unaliased) at the near endpoint. For a property of the related entity
+ * the relation row is joined to the related row at the far endpoint and
+ * the comparison is on that row; for a property of the relation itself
+ * the comparison is on the relation row's own properties and no entity
+ * is joined. Self-contained per condition, so two paths through one
+ * relation type may be satisfied by two different relation rows. The
+ * relation type key is bound like every property key.
  */
 function buildPathClause(condition: PathFilterCondition, params: unknown[]): string {
   const [near, far] =
     condition.direction === "outgoing" ? ["from_id", "to_id"] : ["to_id", "from_id"];
+  const onRelation = condition.propertySource === "relation";
+  const source = onRelation ? "relation r" : `relation r JOIN entity re ON re.id = r.${far}`;
   const typeP = bind(params, condition.relationTypeKey);
-  const predicate = buildPropertyClause(condition, "re.props", params);
+  const predicate = buildPropertyClause(condition, onRelation ? "r.props" : "re.props", params);
   return (
-    `EXISTS (SELECT 1 FROM relation r JOIN entity re ON re.id = r.${far} ` +
+    `EXISTS (SELECT 1 FROM ${source} ` +
     `WHERE r.${near} = entity.id AND r.type_key = $${typeP} AND ${predicate})`
   );
 }

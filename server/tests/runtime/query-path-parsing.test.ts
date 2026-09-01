@@ -112,6 +112,53 @@ describe("a query path resolves to the port's path condition", () => {
   });
 });
 
+describe("the relation-property form reads a property stored on the relation itself", () => {
+  it("outgoing: persons by the role on their employment", () => {
+    const scoped = scopedSchema();
+    const conditions = parseFilterConditions(
+      { "works_for@role": "CTO" },
+      scoped.entityTypes.person!.properties,
+      "person",
+      { pathSchema: scoped },
+    );
+    expect(conditions).toEqual([
+      {
+        kind: "path",
+        relationTypeKey: "works_for",
+        direction: "outgoing",
+        propertySource: "relation",
+        propertyKey: "role",
+        dataType: "string",
+        op: "eq",
+        value: "CTO",
+      },
+    ]);
+  });
+
+  it("incoming: companies by the start of an employment, the value coerced by the relation property", () => {
+    const scoped = scopedSchema();
+    scoped.relationTypes.works_for!.properties.since = prop("since", "date");
+    const conditions = parseFilterConditions(
+      { "works_for@since__lt": "2025-01-01" },
+      scoped.entityTypes.company!.properties,
+      "company",
+      { pathSchema: scoped },
+    );
+    expect(conditions).toEqual([
+      {
+        kind: "path",
+        relationTypeKey: "works_for",
+        direction: "incoming",
+        propertySource: "relation",
+        propertyKey: "since",
+        dataType: "date",
+        op: "lt",
+        value: "2025-01-01",
+      },
+    ]);
+  });
+});
+
 /** Parse, expecting one collected rejection; returns its message and fields. */
 function reject(
   filters: Record<string, string>,
@@ -192,12 +239,49 @@ describe("every path fault is collected under the filter key as sent", () => {
     });
   });
 
-  it("more than one relation segment is rejected before anything is resolved", () => {
-    const { message, fields } = reject({ "works_for.belongs_to.name": "x" }, "person");
-    expect(message).toBe("Query path 'works_for.belongs_to.name' crosses more than one relation");
+  it("an unknown property on the relation type lists that relation type's property keys", () => {
+    const { message, fields } = reject({ "works_for@ghost": "x" }, "person");
+    expect(message).toBe("Unknown filter property: 'ghost' on relation type 'works_for'");
     expect(fields).toEqual({
-      "works_for.belongs_to.name":
-        "A filter key may cross exactly one relation type: <relationTypeKey>.<propertyKey>",
+      "works_for@ghost": "Not defined in type 'works_for'. Property keys: role",
+    });
+  });
+
+  it("more than one relation segment is rejected before anything is resolved, whichever separators it uses", () => {
+    const { message, fields } = reject(
+      { "works_for.belongs_to.name": "x", "works_for@role@x": "y", "works_for.name@role": "z" },
+      "person",
+    );
+    expect(message).toBe(
+      "Query path 'works_for.belongs_to.name' crosses more than one relation; " +
+        "Query path 'works_for@role@x' crosses more than one relation; " +
+        "Query path 'works_for.name@role' crosses more than one relation",
+    );
+    const hint =
+      "A filter key may cross exactly one relation type: " +
+      "<relationTypeKey>.<propertyKey> or <relationTypeKey>@<propertyKey>";
+    expect(fields).toEqual({
+      "works_for.belongs_to.name": hint,
+      "works_for@role@x": hint,
+      "works_for.name@role": hint,
+    });
+  });
+
+  it("a relation-property path through a self-relation is ambiguous too", () => {
+    const scoped = scopedSchema();
+    scoped.relationTypes.manages = {
+      key: "manages",
+      displayName: "Manages",
+      description: null,
+      fromEntityTypeKey: "person",
+      toEntityTypeKey: "person",
+      properties: { since: prop("since", "date") },
+    };
+    const { message, fields } = reject({ "manages@since": "2020-01-01" }, "person", scoped);
+    expect(message).toBe("Query path 'manages@since' is ambiguous");
+    expect(fields).toEqual({
+      "manages@since":
+        "'manages' connects 'person' to 'person', so the direction cannot be derived",
     });
   });
 
@@ -233,17 +317,34 @@ describe("every path fault is collected under the filter key as sent", () => {
 });
 
 describe("surfaces that take no query paths", () => {
-  it("a sort key that is a query path is rejected", () => {
+  it.each(["works_for.name", "works_for@role"])("a sort key that is a query path is rejected: %s", (sort) => {
     const scoped = scopedSchema();
     try {
-      validateSortField("works_for.name", scoped.entityTypes.person!.properties);
+      validateSortField(sort, scoped.entityTypes.person!.properties);
       expect.unreachable();
     } catch (error) {
       expect(error).toBeInstanceOf(ValidationError);
       expect((error as ValidationError).message).toBe("Sorting by query paths is not supported");
       expect((error as ValidationError).details).toEqual({
-        fields: { sort: "'works_for.name' is a query path; sorting by query paths is not supported" },
+        fields: { sort: `'${sort}' is a query path; sorting by query paths is not supported` },
       });
+    }
+  });
+
+  it("without a path schema a relation-property key is rejected as an entity-list-only feature", () => {
+    const scoped = scopedSchema();
+    try {
+      parseFilterConditions(
+        { "works_for@role": "CTO" },
+        scoped.relationTypes.works_for!.properties,
+        "works_for",
+      );
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      expect((error as ValidationError).message).toBe(
+        "Query paths apply to entity lists only: 'works_for@role'",
+      );
     }
   });
 

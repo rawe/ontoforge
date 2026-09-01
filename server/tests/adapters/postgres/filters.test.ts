@@ -257,3 +257,31 @@ describe("path conditions — an existential subquery through the relation table
     expect(params).toEqual(["age", 18, "works_for", "name", "Acme"]);
   });
 });
+
+describe("relation-property path conditions — the subquery reads the relation row and joins no entity", () => {
+  it("outgoing: the comparison is on the relation row's own properties", () => {
+    const params: unknown[] = [];
+    const clauses = buildFilterClauses(
+      [pathCond("works_for", "outgoing", "role", "string", "eq", "CTO", "relation")],
+      params,
+    );
+    expect(clauses).toEqual([
+      "EXISTS (SELECT 1 FROM relation r " +
+        "WHERE r.from_id = entity.id AND r.type_key = $1 AND r.props->>$2 = $3)",
+    ]);
+    expect(params).toEqual(["works_for", "role", "CTO"]);
+  });
+
+  it("incoming: anchored on the target column, typed by the relation property", () => {
+    const params: unknown[] = [];
+    const clauses = buildFilterClauses(
+      [pathCond("works_for", "incoming", "since", "date", "lt", "2025-01-01", "relation")],
+      params,
+    );
+    expect(clauses).toEqual([
+      "EXISTS (SELECT 1 FROM relation r " +
+        "WHERE r.to_id = entity.id AND r.type_key = $1 AND (r.props->>$2)::date < $3)",
+    ]);
+    expect(params).toEqual(["works_for", "since", "2025-01-01"]);
+  });
+});

@@ -85,23 +85,30 @@ export function buildFilterClauses(
 
 /**
  * The existential pattern predicate for one path condition: from the
- * listed node, one relationship of the type in the resolved direction to
- * the related node `re`, with the property comparison on that node.
- * Self-contained per condition, so two paths through one relation type
- * may be satisfied by two different related nodes. The relationship type
- * is the stored relation type key's physical form.
+ * listed node, one relationship of the type in the resolved direction.
+ * For a property of the related entity the pattern binds the related
+ * node `re` and the comparison is on it; for a property of the relation
+ * itself the pattern binds the relationship `r`, the related node stays
+ * anonymous, and the comparison is on the relationship. Self-contained
+ * per condition, so two paths through one relation type may be satisfied
+ * by two different relationships. The relationship type is the stored
+ * relation type key's physical form. The names `r` and `re` are fixed:
+ * path conditions reach only entity lists, whose outer query binds `n`
+ * alone, so nothing they could shadow is in scope.
  */
 function buildPathClause(
   condition: PathFilterCondition,
   alias: string,
   paramName: string,
 ): [string, unknown] {
-  const [predicate, value] = buildPropertyClause(condition, "re", paramName);
-  const relationship = `[:${toUpperSnakeCase(condition.relationTypeKey)}]`;
+  const onRelation = condition.propertySource === "relation";
+  const [predicate, value] = buildPropertyClause(condition, onRelation ? "r" : "re", paramName);
+  const relationship = `[${onRelation ? "r" : ""}:${toUpperSnakeCase(condition.relationTypeKey)}]`;
+  const related = onRelation ? "()" : "(re)";
   const pattern =
     condition.direction === "outgoing"
-      ? `(${alias})-${relationship}->(re)`
-      : `(${alias})<-${relationship}-(re)`;
+      ? `(${alias})-${relationship}->${related}`
+      : `(${alias})<-${relationship}-${related}`;
   return [`EXISTS { MATCH ${pattern} WHERE ${predicate} }`, value];
 }
 

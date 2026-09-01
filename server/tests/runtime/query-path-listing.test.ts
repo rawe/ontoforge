@@ -71,6 +71,29 @@ describe("the entity list", () => {
     ]);
   });
 
+  it("hands the port a relation-property path condition from an unencoded '@' in the parameter name", async () => {
+    holder.store.listEntities.mockResolvedValue([[], 0]);
+
+    const res = await app.inject({
+      method: "GET",
+      url: `${ENTITIES}/person?filter.works_for@role=CTO`,
+    });
+
+    expect(res.statusCode, res.body).toBe(200);
+    expect(holder.store.listEntities.mock.calls[0]![2]).toEqual([
+      {
+        kind: "path",
+        relationTypeKey: "works_for",
+        direction: "outgoing",
+        propertySource: "relation",
+        propertyKey: "role",
+        dataType: "string",
+        op: "eq",
+        value: "CTO",
+      },
+    ]);
+  });
+
   it("a path in the fields projection matches nothing, as any unknown name does", async () => {
     holder.store.listEntities.mockResolvedValue([
       [makeEntity({ name: "Alice", age: 30 }, "person", "ent-1")],

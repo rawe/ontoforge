@@ -111,10 +111,12 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
         'less than ("__lt"), less or equal ("__lte"), contains ' +
         "(\"name__contains\": \"ali\"). A filter key may be a query path crossing one " +
         "relation type to a property of the related entity, " +
-        "\"<relationTypeKey>.<propertyKey>\": listing persons with " +
-        '("works_for.name": "Acme") returns the persons employed by Acme; the direction ' +
+        "\"<relationTypeKey>.<propertyKey>\", or to a property stored on the relation " +
+        "itself, \"<relationTypeKey>@<propertyKey>\": listing persons with " +
+        '("works_for.name": "Acme") returns the persons employed by Acme, and with ' +
+        '("works_for@role": "CTO") the persons holding a CTO employment; the direction ' +
         "follows the relation type's endpoints, and an entity matches when at least one " +
-        "related entity satisfies the condition. Use 'fields' to select which properties " +
+        "relation of the type satisfies the condition. Use 'fields' to select which properties " +
         "to include — only listed fields plus _id are returned. Omit for all fields.",
       inputSchema: {
         entity_type_key: z.string(),

@@ -65,9 +65,9 @@ export type FilterOperator = "eq" | "gt" | "gte" | "lt" | "lte" | "contains";
  * input, dispatch on the kind, and do pure predicate assembly. Two kinds:
  * the plain property condition names one property of the listed type;
  * the path condition crosses one relation type to a property of the
- * related entity. The value is already coerced to the final property's
- * declared data type (`contains` compares textually and carries the
- * string form).
+ * related entity or of the relation itself. The value is already coerced
+ * to the final property's declared data type (`contains` compares
+ * textually and carries the string form).
  */
 export interface PropertyFilterCondition {
   kind: "property";
@@ -81,14 +81,16 @@ export interface PropertyFilterCondition {
  * A query path, fully resolved above the port: the relation type crossed,
  * the direction to cross it in — always explicit here, derived by the
  * service from the relation type's endpoints — where the final property
- * lives, and the property itself. An entity matches when at least one
- * related entity reachable through the path satisfies the comparison.
+ * lives (on the related entity, or on the relation itself), and the
+ * property itself. An entity matches when at least one relation of the
+ * type reachable through the path carries, or reaches a related entity
+ * that carries, a value satisfying the comparison.
  */
 export interface PathFilterCondition {
   kind: "path";
   relationTypeKey: string;
   direction: "outgoing" | "incoming";
-  propertySource: "relatedEntity";
+  propertySource: "relatedEntity" | "relation";
   propertyKey: string;
   dataType: string;
   op: FilterOperator;

@@ -92,10 +92,11 @@ ISO text, whose wire serialization is byte-identical.
 is a list of parsed conditions, each tagged with its kind. The property condition carries
 a property key, its declared data type, an operator, and the value already coerced to
 that type. The path condition carries a relation type key, an explicit direction —
-outgoing or incoming — the source of the final property (the related entity), the final
-property key, its data type, an operator and the coerced value; the service resolves the
-path above the port, so an adapter receives only valid, fully resolved conditions and
-never a key to interpret. A sort is a property key plus a direction; a text search is
+outgoing or incoming — the source of the final property (the related entity, or the
+relation itself), the final property key, its data type, an operator and the coerced
+value; the service resolves the path above the port, so an adapter receives only valid,
+fully resolved conditions and never a key to interpret. A sort is a property key plus a
+direction; a text search is
 a string plus the list of property keys to match it against. No fragment of any query
 language enters or leaves the port. The one exception is the validated query object,
 described below, which is opaque rather than textual.
@@ -355,8 +356,10 @@ property's declared data type; the substring operator is the exception, comparin
 case-insensitively on the string form of both sides and carrying that string form as its
 value. A path condition's predicate is existential and self-contained: it holds when at
 least one relation of the type — leaving the listed instance for the outgoing direction,
-arriving at it for the incoming one — reaches a related entity whose property satisfies
-the comparison, evaluated per condition. One fault remains the adapter's to raise, as a
+arriving at it for the incoming one — satisfies the comparison, evaluated per condition:
+on the related entity's property when the property source is the related entity, on the
+relation's own property when the source is the relation, in which case the related
+entity is never read. One fault remains the adapter's to raise, as a
 domain validation error and not a storage error — Neo4j-specific, raised on the write path
 through the write-value constraint above: an indexed value exceeding the 32766-byte
 ceiling, in an error naming the property. Every value must reach the database as a bound
@@ -571,7 +574,9 @@ its declared data type; property keys and values are both bound parameters, neve
 text. A path condition is an existential subquery over the relation table — anchored on
 the listed row's id at the near endpoint column, joined to the related row at the far
 one, the relation type key bound like a property key — with the comparison evaluated on
-the related row's properties; the endpoint indexes serve it.
+the related row's properties; the endpoint indexes serve it. For a property of the
+relation itself the subquery joins no entity row: the comparison is evaluated on the
+relation row's own properties.
 
 ## Index inventory
 
@@ -698,7 +703,8 @@ natural traversal patterns, the engine's optimised relationship storage, and com
 with its graph algorithms and visualization tooling — at the cost noted under engine
 constraints below. A path condition is an existential pattern predicate: one relationship
 of the type from the listed node, in the resolved direction, to the related node, with the
-comparison on that node's properties.
+comparison on that node's properties — or, for a property of the relation itself, on the
+relationship's properties, the related node left anonymous.
 
 Chunks are separate nodes rather than a nested structure, because each needs its own
 vector and its own place in a vector index. Deleting an entity removes its chunk nodes in

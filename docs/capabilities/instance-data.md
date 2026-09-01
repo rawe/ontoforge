@@ -164,21 +164,31 @@ does not provide one.
 ### Query paths
 
 A filter key on an **entity** list may cross exactly one relation type and name a
-property of the related entity: `filter.<relationTypeKey>.<propertyKey>[__<op>]`.
-Listing persons with `filter.works_for.name=Acme` returns the persons employed by Acme;
-listing companies with `filter.works_for.age__gt=30` returns the companies with at least
-one employee over thirty. No schema key may contain a dot, so a path is never mistaken
-for a property key.
+property reached through it — a property of the related entity,
+`filter.<relationTypeKey>.<propertyKey>[__<op>]`, or a property stored on the relation
+itself, `filter.<relationTypeKey>@<propertyKey>[__<op>]`. Listing persons with
+`filter.works_for.name=Acme` returns the persons employed by Acme; listing companies
+with `filter.works_for.age__gt=30` returns the companies with at least one employee over
+thirty. Listing persons with `filter.works_for@role=CTO` returns the persons who hold a
+CTO employment; listing companies with `filter.works_for@since__lt=2025-01-01` returns
+the companies with an employment that began before 2025. No schema key may contain a
+dot or an at sign, so a path is never mistaken for a property key.
 
 - **Direction is derived.** When the listed type is only the relation type's source, the
   path is followed outgoing, to the target; when it is only the target, incoming, to the
   source. A relation type whose source and target are both the listed type is rejected
   as ambiguous.
-- **Matching is existential.** An entity matches when at least one related entity
-  satisfies the condition. Conditions are independent: two paths through the same
-  relation type may be satisfied by two different related entities, and paths combine
-  with each other and with plain filters by AND. An entity with no relation of the type
-  never matches — no null semantics, as with an absent property.
+- **The two forms differ only in where the property lives.** `.` reads the related
+  entity's property; `@` reads the relation's own property, and the related entity is
+  never read. Both cross the relation type under the same rules — direction, matching,
+  coercion, fault collection, and the lens exposing the relation type together with the
+  related entity type — and combine freely with each other and with plain filters.
+- **Matching is existential.** An entity matches when at least one relation of the type
+  satisfies the condition — one whose related entity carries a matching value for the
+  `.` form, one that carries it itself for the `@` form. Conditions are independent: two
+  paths through the same relation type may be satisfied by two different relations, and
+  paths combine with each other and with plain filters by AND. An entity with no
+  relation of the type never matches — no null semantics, as with an absent property.
 - **The value is coerced by the final property**, exactly as a plain filter is coerced by
   its own; the substring operator stays textual. A path cannot end in a `document`
   property.
@@ -188,11 +198,11 @@ for a property key.
 Path faults are collected under their filter keys like every other: an unknown first
 segment (the detail lists the listed type's property keys and the relation types
 touching it), a relation type that does not touch the listed type, an unknown property
-on the related entity type (the detail lists that type's property keys), more than one
-relation segment, a document-typed final property, and a self-relation. Paths are a
-filter feature only: `sort` rejects them, `fields` treats them as any unknown name, no
-response ever carries a path value, and the relation list and semantic search reject
-them with a message saying so.
+on the related entity type or on the relation type (the detail lists that type's
+property keys), more than one relation segment, a document-typed final property, and a
+self-relation. Paths are a filter feature only: `sort` rejects them, `fields` treats
+them as any unknown name, no response ever carries a path value, and the relation list
+and semantic search reject them with a message saying so.
 
 ## Field projection
 

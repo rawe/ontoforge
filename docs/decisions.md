@@ -204,8 +204,9 @@ accepts exactly the same queries. Widening the surface is a deliberate, non-brea
 addition; narrowing it is a breaking change.
 
 **A structured filter key may cross exactly one relation.**
-A query path names one relation type and a property of the related entity; it is resolved
-against the lens-scoped schema at query time, and nothing is declared or stored for it.
+A query path names one relation type and a property reached through it — of the related
+entity or of the relation itself; it is resolved against the lens-scoped schema at query
+time, and nothing is declared or stored for it.
 One hop covers the case that would otherwise flatten a relation into a property; anything
 beyond it is OQL's job. Widening — more hops, quantifiers, path values in responses — is a
 deliberate future addition, never implied by the syntax. Deliberation:

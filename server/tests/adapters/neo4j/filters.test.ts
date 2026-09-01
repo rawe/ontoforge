@@ -130,3 +130,21 @@ describe("path conditions — an existential pattern predicate", () => {
     expect(Object.keys(params)).toEqual(["flt_0", "flt_1"]);
   });
 });
+
+describe("relation-property path conditions — the predicate reads the relationship's property", () => {
+  it("outgoing: the related node stays anonymous", () => {
+    const [clauses, params] = buildFilterClauses([
+      pathCond("works_for", "outgoing", "role", "string", "eq", "CTO", "relation"),
+    ]);
+    expect(clauses).toEqual(["EXISTS { MATCH (n)-[r:WORKS_FOR]->() WHERE r.role = $flt_0 }"]);
+    expect(params).toEqual({ flt_0: "CTO" });
+  });
+
+  it("incoming: the value converted by the relation property's type", () => {
+    const [clauses, params] = buildFilterClauses([
+      pathCond("works_for", "incoming", "since", "date", "lt", "2025-01-01", "relation"),
+    ]);
+    expect(clauses).toEqual(["EXISTS { MATCH (n)<-[r:WORKS_FOR]-() WHERE r.since < $flt_0 }"]);
+    expect(neo4j.isDate(params.flt_0)).toBe(true);
+  });
+});

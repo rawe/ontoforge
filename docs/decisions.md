@@ -127,6 +127,15 @@ Encoding those names above the port would tie database-agnostic code to one data
 enforcing them inside the adapter would deliver the error from the wrong layer and make
 every future adapter reimplement it.
 
+**Adapters declare whether semantic search evaluates path conditions; the service
+enforces it.**
+A query path on semantic search resolves and crosses the port only where the adapter
+declares support; elsewhere it is rejected above the port, naming the entity list as the
+alternative. Filters on a search are applied as part of the search, so a path condition
+an adapter cannot evaluate inside its vector query must be refused before the search
+runs — evaluating it afterwards would make the limit count unfiltered hits — and encoding
+the capability above the port would tie database-agnostic code to one database.
+
 **Adapters are peers under one contract; one is the default deployment.**
 The port contract and the conformance suite define behaviour — no adapter is the
 reference implementation. Every shipped adapter is fully supported, each with its own

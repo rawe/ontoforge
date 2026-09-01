@@ -169,6 +169,7 @@ export type MockRuntimeStore = {
 export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeStore {
   return {
     ontologyKey,
+    supportsSemanticSearchPathConditions: vi.fn(() => false),
     getFullSchema: vi.fn(async () => null),
     getAiAgentConfigs: vi.fn(async () => []),
     getSavedQueries: vi.fn(async () => []),

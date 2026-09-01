@@ -157,6 +157,17 @@ export class PostgresRuntimeStore implements RuntimeStore {
   }
 
   // ------------------------------------------------------------------
+  // Declarations
+  // ------------------------------------------------------------------
+
+  /** Path conditions filter both rankings here: the entity ranking
+   * carries them as ordinary predicates, and the passage ranking joins
+   * each passage to its parent entity inside the vector query. */
+  supportsSemanticSearchPathConditions(): boolean {
+    return true;
+  }
+
+  // ------------------------------------------------------------------
   // Schema reading (for the runtime schema cache)
   // ------------------------------------------------------------------
 
@@ -445,23 +456,43 @@ export class PostgresRuntimeStore implements RuntimeStore {
   }
 
   /** One document property's chunks, ranked. The floor lives in the
-   * service for this path — the port method takes no `minScore`. */
+   * service for this path — the port method takes no `minScore`.
+   *
+   * Filters are evaluated on the parent entity inside the statement: a
+   * semi-join to the `entity` row, carrying the same predicate fragments
+   * the entity ranking carries (`filters.ts`, which anchors a path
+   * condition on `entity.id` — the joined row here). The iterative scan
+   * therefore refills the page with passages whose parent passes, and
+   * the limit counts filtered hits. The join is written as EXISTS so the
+   * outer statement's column references stay unqualified and the index
+   * expression is repeated verbatim. */
   async searchDocumentChunks(
     entityTypeKey: string,
     propertyKey: string,
     queryEmbedding: number[],
     limit: number,
+    filters: FilterCondition[] | null = null,
   ): Promise<Row[]> {
     const params = vectorParams(queryEmbedding);
-    params.push(entityTypeKey, propertyKey, limit);
+    params.push(entityTypeKey, propertyKey);
+    const where = ["entity_type_key = $2", "property_key = $3", EMBEDDED];
+    const parentClauses = buildFilterClauses(filters ?? [], params);
+    if (parentClauses.length > 0) {
+      where.push(
+        "EXISTS (SELECT 1 FROM entity WHERE entity.id = document_chunk.entity_id AND " +
+          `${parentClauses.join(" AND ")})`,
+      );
+    }
+    params.push(limit);
+    const limitP = params.length;
     const rows = await vectorSearch(
       (querier) => chunkIndexNameOf(querier, entityTypeKey, propertyKey),
       queryEmbedding,
       params,
       (width) =>
         `SELECT ${CHUNK_COLS}, ${similarity(width)} FROM document_chunk
-         WHERE entity_type_key = $2 AND property_key = $3 AND ${EMBEDDED}
-         ORDER BY ${distance(width)} LIMIT $4`,
+         WHERE ${where.join(" AND ")}
+         ORDER BY ${distance(width)} LIMIT $${limitP}`,
       this.namespace,
     );
     return rows.map((row) => ({ chunk: chunkRow(row), score: row.score }));

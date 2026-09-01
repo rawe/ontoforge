@@ -73,7 +73,7 @@ contract tier only.
 
 ## What crosses the port
 
-Five rules govern the boundary itself. They hold for every operation without exception.
+Six rules govern the boundary itself. They hold for every operation without exception.
 
 **Only JSON-safe values cross.** Scalars, strings, booleans, numbers, lists, maps. No
 driver objects, no cursors, no result handles, no lazily-evaluated streams. An operation
@@ -112,6 +112,14 @@ or an absent value, and a failed delete is a false return. See the error table i
 type keys and one for relation type keys. They are returned as schema-level keys, never
 as physical names, so the modeling service can reject a colliding key without knowing what
 it would collide with. An adapter with no collisions returns two empty sets.
+
+**An adapter declares whether its semantic search evaluates path conditions.** One plain
+flag on the runtime store, in the same spirit as the reserved keys: the constraint is the
+adapter's, the enforcement point is shared. The runtime service reads it before any search
+runs. On an adapter declaring support, a query path on semantic search resolves exactly
+as on the entity list and crosses the port as a path condition with both rankings; on one
+declaring none, it is rejected above the port as a validation error naming the entity
+list as the alternative, and no search ever receives a path condition.
 
 One further caution, because it is invisible from the signatures: the port carries a
 discriminator distinguishing an entity type from a relation type — as the owner of a
@@ -272,12 +280,14 @@ the port.
 | Kind | Input | Returns |
 |---|---|---|
 | Entities | A query vector, and either one entity type key with its scoped property definitions and optional filter conditions, or nothing — meaning all of the ontology's types at once | Entities with scores |
-| Document chunks | A query vector, an entity type key and a document property key | Chunks with scores |
+| Document chunks | A query vector, an entity type key, a document property key and optional filter conditions | Chunks with scores |
 | Saved queries | A query vector and a lens key | Saved-query summaries with scores |
 
-The per-type entity search accepts the same parsed filter conditions that listing does and
-must apply them as part of the search, not after it, so that the limit counts filtered hits.
-Cross-type entity search takes no filter; narrowing to a lens happens above the port —
+The per-type entity search and the document-chunk search accept the same parsed filter
+conditions that listing does and must apply them as part of the search, not after it, so
+that the limit counts filtered hits — a chunk's conditions are evaluated on its parent
+entity, so a page holds chunks whose parent passes. A path condition reaches either search
+only where the adapter declares support (above). Cross-type entity search takes no filter; narrowing to a lens happens above the port —
 but never crosses the binding: through a bound store, "all types" means all of that
 ontology's types, and another ontology's better-matching entity must never appear.
 Saved-query search is always narrowed to a single lens.
@@ -439,6 +449,14 @@ multi-ontology conformance tier runs on PostgreSQL only.
 - **String sort order.** PostgreSQL sorts strings by the database's default collation,
   dictionary-style, as the documented behaviour states; Neo4j sorts by Unicode code
   points, capitals before lowercase.
+- **Path conditions on semantic search.** PostgreSQL declares support and evaluates them
+  in both rankings; Neo4j declares none, so a query path on semantic search is rejected
+  above the port with a validation error naming the entity list — where paths work on
+  both adapters.
+- **Filtered passage pages.** PostgreSQL applies filter conditions inside the passage
+  search, on the parent entity under the iterative scan, so a page holds the requested
+  number of matching passages; Neo4j applies them after its index lookup, so a filtered
+  passage page may come back short.
 - **Vector-index removal on drop.** On PostgreSQL, a dropped entity type's or document
   property's vector index survives as an orphan until the next ensure-all pass sweeps it;
   on Neo4j the drop removes it immediately.
@@ -607,8 +625,12 @@ Search behaviour: the similarity returned is `1 − cosine_distance / 2` — alg
 identical to the Neo4j adapter's cosine index score, the same 0-to-1 scale, pinned by a
 fixed-vector conformance case. Every vector query runs as a strict-order iterative scan,
 so a result limit counts rows that passed the filters, delivered in exact distance
-order. A minimum score is applied after the limit, so a page may shrink — including when
-the iterative scan gives up at its tuple cap.
+order. The passage search evaluates its filter conditions on the parent entity inside the
+statement — a semi-join from the chunk row to its `entity` row, carrying the same
+predicate fragments the entity ranking carries, path conditions included — so the
+iterative scan refills a filtered page with passages whose parent passes. A minimum score
+is applied after the limit, so a page may shrink — including when the iterative scan
+gives up at its tuple cap.
 
 ## Engine constraints worth knowing
 
@@ -753,6 +775,13 @@ property values are exempt — they are never part of an entity's embedding or i
 metadata. The same mechanism is why a saved query carries its owning lens key as a
 node property: the vector index can filter on node properties but not across
 relationships, so the key is denormalized onto the node.
+
+**The in-index filter sees the indexed node alone.** A vector search's WHERE can name
+properties of the node being searched and nothing beyond it — no pattern, no neighbouring
+node. Path conditions on semantic search are therefore declared unsupported and rejected
+above the port; the entity list evaluates them as a graph traversal. A plain filter on the
+passage search is applied after the index lookup, by matching the chunk's parent entity
+and evaluating the conditions on it, so a filtered passage page may come back short.
 
 **Community Edition has no relationship property indexes.** Looking up a relation by its
 id therefore scans the relationships of that type. Acceptable at expected volumes; a

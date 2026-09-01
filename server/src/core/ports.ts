@@ -38,6 +38,11 @@
  *    modeling store. They return plain type keys, never physical names, so
  *    the modeling service can reject a colliding key without knowing why it
  *    collides. An adapter with no such collisions returns empty sets.
+ * 6. Adapters declare whether their semantic search evaluates path
+ *    conditions, through `supportsSemanticSearchPathConditions()` on the
+ *    runtime store, and the runtime service enforces the declaration: on
+ *    an adapter declaring none, a query path on semantic search is
+ *    rejected above the port, naming the entity list as the alternative.
  *
  * The `ModelingStore` and `RuntimeStore` interfaces below, together with
  * the conformance suite, are the authoritative contract — adapters are
@@ -408,11 +413,12 @@ export interface ModelingStore {
  * Capability grouping follows `docs/storage-adapters.md` ("The two store
  * surfaces"); the section comments below mirror it.
  *
- * Filter-taking methods (`listEntities`, `listRelations`, and the
- * per-type entity search via `semanticSearch`) receive parsed, coerced
- * `FilterCondition`s built by the service — filter validation happens
- * above the port, so adapters receive only valid input and raise no
- * validation errors. Three reads carry the property definitions for row
+ * Filter-taking methods (`listEntities`, `listRelations`, and the two
+ * per-type searches, `semanticSearch` and `searchDocumentChunks`) receive
+ * parsed, coerced `FilterCondition`s built by the service — filter
+ * validation happens above the port, so adapters receive only valid
+ * input and raise no validation errors. A path condition reaches a
+ * search only where the adapter declares support (contract rule 6). Three reads carry the property definitions for row
  * decoding — `getEntityById`, `getEntitiesByIds`, and `getNeighbors` (an
  * adapter whose storage is self-describing may ignore them); listing
  * paths carry them for the same reason. `getEntity` and `getRelation`
@@ -422,6 +428,16 @@ export interface RuntimeStore {
   /** The ontology this store is bound to. The runtime schema cache keys
    * its entries by this binding plus the lens key. */
   readonly ontologyKey: string;
+
+  // ------------------------------------------------------------------
+  // Declarations
+  // ------------------------------------------------------------------
+
+  /** Whether this adapter's semantic search evaluates path conditions —
+   * in both rankings, entities and document passages (contract rule 6).
+   * Declared as a plain flag so the service can reject a query path on
+   * semantic search without knowing why the adapter cannot evaluate it. */
+  supportsSemanticSearchPathConditions(): boolean;
 
   // ------------------------------------------------------------------
   // Schema reading (for the runtime schema cache)
@@ -508,11 +524,16 @@ export interface RuntimeStore {
     chunks: Row[],
   ): Promise<void>;
 
+  /** One document property's passages, ranked. The filter conditions are
+   * the parsed conditions the entity ranking takes, evaluated on each
+   * passage's parent entity as part of the search — not after it — so
+   * that the limit counts passages whose parent passes. */
   searchDocumentChunks(
     entityTypeKey: string,
     propertyKey: string,
     queryEmbedding: number[],
     limit: number,
+    filters?: FilterCondition[] | null,
   ): Promise<Row[]>;
 
   getEntitiesByIds(

@@ -222,8 +222,8 @@ can match and return a passage rather than a whole document. Not addressable dir
 written in type keys and property keys. Anchored to the ISO GQL standard and its GPML
 pattern sublanguage. See [capabilities/oql.md](capabilities/oql.md).
 
-**Query path** — a filter key on an entity list that crosses exactly one relation type
-to a property reached through it: a property of the related entity, written
+**Query path** — a filter key, on an entity list or on semantic search, that crosses
+exactly one relation type to a property reached through it: a property of the related entity, written
 `<relationTypeKey>.<propertyKey>`, or a property stored on the relation itself, written
 `<relationTypeKey>@<propertyKey>`; the relation segment may carry a direction marker,
 `:out` or `:in`. Resolved against the lens-scoped schema at query time; nothing is

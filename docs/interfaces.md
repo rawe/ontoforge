@@ -87,8 +87,8 @@ Entity and relation list routes share one parameter vocabulary.
 | `order` | `asc` or `desc`, default `asc` |
 | `q` | Case-insensitive substring match across every `string` property in scope; entity lists only, and `document` properties are not searched |
 | `filter.<propertyKey>[__<op>]` | Property filter, repeatable |
-| `filter.<relationTypeKey>[:out\|:in].<propertyKey>[__<op>]` | Query path — filter by a property of the related entity; entity lists only, repeatable |
-| `filter.<relationTypeKey>[:out\|:in]@<propertyKey>[__<op>]` | Query path — filter by a property stored on the relation itself; entity lists only, repeatable |
+| `filter.<relationTypeKey>[:out\|:in].<propertyKey>[__<op>]` | Query path — filter by a property of the related entity; entity lists and semantic search, repeatable |
+| `filter.<relationTypeKey>[:out\|:in]@<propertyKey>[__<op>]` | Query path — filter by a property stored on the relation itself; entity lists and semantic search, repeatable |
 
 A list response carries `items`, `total`, `limit` and `offset`. `total` is the count
 before paging. String sorting follows the database's default collation.
@@ -114,7 +114,7 @@ filter is evaluated, and the trap in the suffix rule, are in
 [capabilities/instance-data.md](capabilities/instance-data.md#listing). Relation lists
 additionally accept `fromEntityId` and `toEntityId`.
 
-A filter key on an entity list may be a query path — `filter.works_for.name=Acme` for a
+A filter key on an entity list, or on semantic search, may be a query path — `filter.works_for.name=Acme` for a
 property of the related entity, `filter.works_for@role=CTO` for a property stored on the
 relation itself — with the same operator suffixes and the value coerced by the final
 property. The direction follows the relation type's endpoints; a `:out` or `:in` marker

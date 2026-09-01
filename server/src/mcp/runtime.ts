@@ -617,7 +617,13 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
         "Use 'filters' for property-based filtering on results " +
         "(requires entity_type_key): exact match " +
         '("location": "Berlin"), operators ("age__gt": "25", "__gte", "__lt", ' +
-        '"__lte"). Use \'fields\' to select which entity properties to include — ' +
+        '"__lte"). A filter key may be a query path crossing one relation type, ' +
+        "\"<relationTypeKey>.<propertyKey>\" for a property of the related entity or " +
+        "\"<relationTypeKey>@<propertyKey>\" for a property stored on the relation " +
+        'itself: ("works_for.name": "Acme") narrows a search over persons to the ' +
+        "persons employed by Acme, in both rankings. Where the storage adapter does not " +
+        "support query paths on semantic search the filter is rejected; list_entities " +
+        "takes the same path. Use 'fields' to select which entity properties to include — " +
         "only listed fields plus _id (and _entityTypeKey for cross-type search) " +
         "are returned. Omit for all fields.",
       inputSchema: {

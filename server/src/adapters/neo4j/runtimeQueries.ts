@@ -569,14 +569,37 @@ export async function createDocumentChunks(
   );
 }
 
-/** Semantic search over one document property's chunk vector index. */
+/**
+ * Semantic search over one document property's chunk vector index.
+ *
+ * Conditions on the parent entity are applied AFTER the index lookup: the
+ * in-index WHERE can only see the chunk node, so the parent is matched
+ * through `_HAS_CHUNK` once the index has answered and the clauses —
+ * written against the alias `n` — are evaluated on it. The index still
+ * answers `limit` chunks, so a filtered page may come back short: the
+ * adapter's documented deviation from the port rule that the limit counts
+ * filtered hits.
+ */
 export async function searchDocumentChunks(
   session: Session,
   virtualLabel: string,
   indexName: string,
   queryEmbedding: number[],
   limit: number,
+  whereClauses: string[] | null = null,
+  filterParams: Row | null = null,
 ): Promise<Row[]> {
+  const params: Row = {
+    query_embedding: queryEmbedding,
+    limit: neo4j.int(limit),
+  };
+
+  let parentMatch = "";
+  if (whereClauses !== null && whereClauses.length > 0) {
+    parentMatch = `MATCH (n:_Entity)-[:_HAS_CHUNK]->(c) WHERE ${whereClauses.join(" AND ")} `;
+    Object.assign(params, filterParams ?? {});
+  }
+
   const query =
     `MATCH (c:${virtualLabel}) ` +
     "SEARCH c IN (" +
@@ -584,11 +607,9 @@ export async function searchDocumentChunks(
     "FOR $query_embedding " +
     "LIMIT $limit" +
     ") SCORE AS score " +
+    parentMatch +
     "RETURN c {.*} AS chunk, score";
-  const result = await session.run(query, {
-    query_embedding: queryEmbedding,
-    limit: neo4j.int(limit),
-  });
+  const result = await session.run(query, params);
   return result.records.map((record) => ({
     chunk: stripEmbedding(convertNeo4jProperties({ ...(record.get("chunk") as Row) })),
     score: record.get("score") as number,

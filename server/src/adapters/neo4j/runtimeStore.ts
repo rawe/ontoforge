@@ -57,12 +57,38 @@ function toWriteProperties(
   return converted;
 }
 
+/** The WHERE fragments and bound parameters for a search's filter
+ * conditions on the node aliased `alias` — `null` for both when there
+ * are none, which is how the query functions read "unfiltered". */
+function filterFragments(
+  filters: FilterCondition[] | null,
+  alias: string,
+): [string[] | null, Row | null] {
+  if (filters === null || filters.length === 0) {
+    return [null, null];
+  }
+  const [whereClauses, params] = buildFilterClauses(filters, alias);
+  return [whereClauses, params];
+}
+
 export class Neo4jRuntimeStore implements RuntimeStore {
   /** Bound to one ontology; unbound (tests only) carries the empty key. */
   constructor(
     private readonly driver: Driver,
     public readonly ontologyKey: string = "",
   ) {}
+
+  // ------------------------------------------------------------------
+  // Declarations
+  // ------------------------------------------------------------------
+
+  /** Declared unsupported: the in-index WHERE of a vector search cannot
+   * express a pattern predicate, so a path condition on semantic search
+   * is rejected above the port and the entity list is the alternative
+   * (`docs/storage-adapters.md`, the divergence list). */
+  supportsSemanticSearchPathConditions(): boolean {
+    return false;
+  }
 
   // ------------------------------------------------------------------
   // Schema reading (for the runtime schema cache)
@@ -236,12 +262,19 @@ export class Neo4jRuntimeStore implements RuntimeStore {
     );
   }
 
+  /** Conditions are built against the parent node alias `n` and applied
+   * below the port, after the index lookup (`runtimeQueries.ts`). Only
+   * plain conditions arrive: this adapter declares no path-condition
+   * support for semantic search, so the service rejects paths above the
+   * port before any search runs. */
   async searchDocumentChunks(
     entityTypeKey: string,
     propertyKey: string,
     queryEmbedding: number[],
     limit: number,
+    filters: FilterCondition[] | null = null,
   ): Promise<Row[]> {
+    const [whereClauses, filterParams] = filterFragments(filters, "n");
     return runSession(this.driver, (session) =>
       queries.searchDocumentChunks(
         session,
@@ -249,6 +282,8 @@ export class Neo4jRuntimeStore implements RuntimeStore {
         documentIndexName(entityTypeKey, propertyKey),
         queryEmbedding,
         limit,
+        whereClauses,
+        filterParams,
       ),
     );
   }
@@ -272,11 +307,7 @@ export class Neo4jRuntimeStore implements RuntimeStore {
     minScore: number | null,
     filters: FilterCondition[] | null = null,
   ): Promise<Row[]> {
-    let whereClauses: string[] = [];
-    let filterParams: Row = {};
-    if (filters !== null && filters.length > 0) {
-      [whereClauses, filterParams] = buildFilterClauses(filters, "n");
-    }
+    const [whereClauses, filterParams] = filterFragments(filters, "n");
     return runSession(this.driver, (session) =>
       queries.semanticSearch(
         session,
@@ -285,8 +316,8 @@ export class Neo4jRuntimeStore implements RuntimeStore {
         queryEmbedding,
         limit,
         minScore,
-        whereClauses.length > 0 ? whereClauses : null,
-        Object.keys(filterParams).length > 0 ? filterParams : null,
+        whereClauses,
+        filterParams,
       ),
     );
   }

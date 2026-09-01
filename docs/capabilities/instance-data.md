@@ -213,7 +213,8 @@ self-relation path without a direction marker, and a marker that contradicts the
 derivable direction; text after the colon that is neither marker makes the first segment
 unknown. Paths are a filter feature only: `sort` rejects them, `fields` treats
 them as any unknown name, no response ever carries a path value, and the relation list
-and semantic search reject them with a message saying so.
+rejects them with a message saying so. Semantic search takes them under its own rules
+([search.md](search.md#property-filters-on-search)).
 
 ## Field projection
 

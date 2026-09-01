@@ -6,7 +6,8 @@
  * type's endpoints; an entity matches when at least one relation of the
  * type satisfies the condition; faults are collected under their keys.
  * A relation segment may carry a direction marker, `:out` or `:in` —
- * required on the self-relation `manages`, optional elsewhere.
+ * required on the self-relation `manages`, optional elsewhere. Through a
+ * scoped lens, what the lens hides fails exactly as what does not exist.
  *
  * Instance data: Alice (30) and Carol (40) work for Acme, Bob (25) and
  * Carol for Globex; Dave (35) works nowhere; Initech employs nobody.
@@ -471,6 +472,137 @@ describe("rejections, collected under their filter keys", () => {
     const { message, fields } = await rejected(`${LENS}/relations/works_for?filter.${key}=x`);
     expect(message).toBe(`Query paths apply to entity lists only: '${key}'`);
     expect(Object.keys(fields)).toEqual([key]);
+  });
+});
+
+describe("through a scoped lens, what the lens hides fails exactly as what does not exist", () => {
+  const HR = runtimePrefix("test_ont", "hr_view");
+
+  /** The one fault a rejected request carries: its message and the detail
+   * under its only key. */
+  interface Fault {
+    message: string;
+    detail: string;
+  }
+
+  async function fault(url: string): Promise<Fault> {
+    const { message, fields } = await rejected(url);
+    const details = Object.values(fields);
+    expect(details, `fields of ${url}`).toHaveLength(1);
+    return { message, detail: details[0] as string };
+  }
+
+  /** A path through a hidden key must produce the fault the same path
+   * through a key that does not exist produces: the same detail, and the
+   * same message once the key is substituted. `urlFor` builds the request
+   * for one key. */
+  async function expectHiddenAsNonexistent(
+    urlFor: (key: string) => string,
+    hiddenKey: string,
+    expected: Fault,
+  ): Promise<void> {
+    expect(await fault(urlFor(hiddenKey))).toEqual(expected);
+    expect(await fault(urlFor("ghost"))).toEqual({
+      message: expected.message.replace(`'${hiddenKey}'`, "'ghost'"),
+      detail: expected.detail,
+    });
+  }
+
+  it("a property of the related entity type left out of its allowlist — companies by works_for.age", async () => {
+    // hr_view narrows persons to name and email; age is hidden.
+    await expectHiddenAsNonexistent(
+      (key) => `${HR}/entities/company?filter.works_for.${key}=30`,
+      "age",
+      {
+        message: "Unknown filter property: 'age' on related entity type 'person'",
+        detail: "Not defined in type 'person'. Property keys: email, name",
+      },
+    );
+  });
+
+  it("a property of the relation type left out of its allowlist — persons by works_for@role", async () => {
+    // Narrow hr_view's works_for inclusion to `since`; role is now hidden.
+    const narrowed = await app.inject({
+      method: "PUT",
+      url: `${modelPrefix(fixture.ontologyKey)}/lenses/${fixture.hrViewId}/includes/relation-types/${fixture.worksForId}`,
+      payload: { properties: ["since"] },
+    });
+    expect(narrowed.statusCode, narrowed.body).toBe(200);
+    await expectHiddenAsNonexistent(
+      (key) => `${HR}/entities/person?filter.works_for@${key}=CTO`,
+      "role",
+      {
+        message: "Unknown filter property: 'role' on relation type 'works_for'",
+        detail: "Not defined in type 'works_for'. Property keys: since",
+      },
+    );
+  });
+
+  describe("the relation type left out — hr_view does not include manages", () => {
+    it.each([
+      ["the related-entity form", (key: string) => `${HR}/entities/person?filter.${key}:out.name=Bob`],
+      ["the relation-property form", (key: string) => `${HR}/entities/person?filter.${key}:out@since=2019-01-01`],
+      ["without a marker, which the lens does not know is needed", (key: string) => `${HR}/entities/person?filter.${key}.name=Bob`],
+    ])("%s fails as an unknown first segment", async (_form, urlFor) => {
+      await expectHiddenAsNonexistent(urlFor, "manages", {
+        message: "Unknown filter property or relation type: 'manages'",
+        detail:
+          "Not defined in type 'person'. Property keys: email, name. " +
+          "Relation types touching 'person': works_for",
+      });
+    });
+  });
+
+  describe("the related entity type left out", () => {
+    const forms: [string, (lens: string, key: string) => string][] = [
+      ["the related-entity form", (lens, key) => `${lens}/entities/person?filter.${key}.name=Acme`],
+      ["the relation-property form", (lens, key) => `${lens}/entities/person?filter.${key}@role=CTO`],
+    ];
+
+    describe("through a lens with entity inclusions only — hiding company hides every relation type touching it", () => {
+      /** A lens including persons alone: relation types are inferred, so
+       * works_for (to the hidden company) is not exposed while manages
+       * (person to person) is. */
+      async function createPeopleOnlyLens(): Promise<string> {
+        const model = modelPrefix(fixture.ontologyKey);
+        const lens = await create(`${model}/lenses`, { key: "people_only", name: "People Only" });
+        await create(`${model}/lenses/${lens.lensId as string}/includes/entity-types`, { key: "person" });
+        return runtimePrefix(fixture.ontologyKey, "people_only");
+      }
+
+      it.each(forms)("%s fails as an unknown first segment, and the detail names only manages", async (_form, urlFor) => {
+        const lens = await createPeopleOnlyLens();
+        await expectHiddenAsNonexistent((key) => urlFor(lens, key), "works_for", {
+          message: "Unknown filter property or relation type: 'works_for'",
+          detail:
+            "Not defined in type 'person'. Property keys: active, age, email, hired_at, name. " +
+            "Relation types touching 'person': manages",
+        });
+      });
+    });
+
+    describe("through hr_view with company dropped while works_for stays included", () => {
+      /** Drop company from hr_view; works_for stays included with its target
+       * hidden — reachable only in this order, because including a relation
+       * type whose endpoint is absent is refused. */
+      async function hideCompany(): Promise<void> {
+        const dropped = await app.inject({
+          method: "DELETE",
+          url: `${modelPrefix(fixture.ontologyKey)}/lenses/${fixture.hrViewId}/includes/entity-types/${fixture.companyId}`,
+        });
+        expect(dropped.statusCode, dropped.body).toBe(204);
+      }
+
+      it.each(forms)("%s fails as an unknown first segment, and the detail no longer names works_for", async (_form, urlFor) => {
+        await hideCompany();
+        await expectHiddenAsNonexistent((key) => urlFor(HR, key), "works_for", {
+          message: "Unknown filter property or relation type: 'works_for'",
+          detail:
+            "Not defined in type 'person'. Property keys: email, name. " +
+            "Relation types touching 'person': none",
+        });
+      });
+    });
   });
 });
 

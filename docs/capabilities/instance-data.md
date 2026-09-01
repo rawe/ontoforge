@@ -199,7 +199,10 @@ never mistaken for a property key.
   its own; the substring operator stays textual. A path cannot end in a `document`
   property.
 - **Resolution uses the lens-scoped schema**, at query time. Nothing is declared or
-  stored: every exposed relation type is queryable the moment it exists.
+  stored: every exposed relation type is queryable the moment it exists. A path sees
+  the lens-scoped schema and nothing else: one through a relation type, a related
+  entity type or a property the lens hides fails exactly as one through something that
+  does not exist, and a fault's detail lists only what the lens exposes.
 
 Path faults are collected under their filter keys like every other: an unknown first
 segment (the detail lists the listed type's property keys and the relation types

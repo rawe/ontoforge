@@ -80,7 +80,8 @@ export interface PropertyFilterCondition {
 /**
  * A query path, fully resolved above the port: the relation type crossed,
  * the direction to cross it in — always explicit here, derived by the
- * service from the relation type's endpoints — where the final property
+ * service from the relation type's endpoints or taken from the key's
+ * direction marker — where the final property
  * lives (on the related entity, or on the relation itself), and the
  * property itself. An entity matches when at least one relation of the
  * type reachable through the path carries, or reaches a related entity

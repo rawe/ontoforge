@@ -225,8 +225,9 @@ pattern sublanguage. See [capabilities/oql.md](capabilities/oql.md).
 **Query path** — a filter key on an entity list that crosses exactly one relation type
 to a property reached through it: a property of the related entity, written
 `<relationTypeKey>.<propertyKey>`, or a property stored on the relation itself, written
-`<relationTypeKey>@<propertyKey>`. Resolved against the lens-scoped schema at query
-time; nothing is declared or stored for it. See
+`<relationTypeKey>@<propertyKey>`; the relation segment may carry a direction marker,
+`:out` or `:in`. Resolved against the lens-scoped schema at query time; nothing is
+declared or stored for it. See
 [capabilities/instance-data.md](capabilities/instance-data.md#query-paths).
 
 **Related entity** — the entity at the other end of a query path's relation: the

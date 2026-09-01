@@ -115,7 +115,9 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
         "itself, \"<relationTypeKey>@<propertyKey>\": listing persons with " +
         '("works_for.name": "Acme") returns the persons employed by Acme, and with ' +
         '("works_for@role": "CTO") the persons holding a CTO employment; the direction ' +
-        "follows the relation type's endpoints, and an entity matches when at least one " +
+        "follows the relation type's endpoints, or a \":out\"/\":in\" marker on the relation " +
+        'segment, required where source and target are the same type ("manages:out.name": ' +
+        '"Bob" for the persons managing a Bob); an entity matches when at least one ' +
         "relation of the type satisfies the condition. Use 'fields' to select which properties " +
         "to include — only listed fields plus _id are returned. Omit for all fields.",
       inputSchema: {

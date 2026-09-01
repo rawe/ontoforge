@@ -5,12 +5,16 @@
  * the relation itself (`@`); the direction is derived from the relation
  * type's endpoints; an entity matches when at least one relation of the
  * type satisfies the condition; faults are collected under their keys.
+ * A relation segment may carry a direction marker, `:out` or `:in` —
+ * required on the self-relation `manages`, optional elsewhere.
  *
  * Instance data: Alice (30) and Carol (40) work for Acme, Bob (25) and
  * Carol for Globex; Dave (35) works nowhere; Initech employs nobody.
  * Employments: Alice at Acme as CTO since 2015-03-01, Carol at Acme as
  * Engineer since 2018-06-01, Bob at Globex as Engineer since 2022-09-15,
- * Carol at Globex as CTO since 2025-02-01.
+ * Carol at Globex as CTO since 2025-02-01. Management: Alice manages Bob
+ * since 2019-01-01 and Carol since 2021-05-01; Carol manages Dave since
+ * 2023-01-01.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -71,7 +75,7 @@ beforeEach(async () => {
   const alice = await create(`${LENS}/entities/person`, { name: "Alice", age: 30 });
   const bob = await create(`${LENS}/entities/person`, { name: "Bob", age: 25 });
   const carol = await create(`${LENS}/entities/person`, { name: "Carol", age: 40 });
-  await create(`${LENS}/entities/person`, { name: "Dave", age: 35 });
+  const dave = await create(`${LENS}/entities/person`, { name: "Dave", age: 35 });
   for (const [from, to, role, since] of [
     [alice, acme, "CTO", "2015-03-01"],
     [bob, globex, "Engineer", "2022-09-15"],
@@ -82,6 +86,17 @@ beforeEach(async () => {
       fromEntityId: from._id,
       toEntityId: to._id,
       role,
+      since,
+    });
+  }
+  for (const [from, to, since] of [
+    [alice, bob, "2019-01-01"],
+    [alice, carol, "2021-05-01"],
+    [carol, dave, "2023-01-01"],
+  ] as [Row, Row, string][]) {
+    await create(`${LENS}/relations/manages`, {
+      fromEntityId: from._id,
+      toEntityId: to._id,
       since,
     });
   }
@@ -293,10 +308,83 @@ describe("the relation-property form — the condition is evaluated on the relat
   });
 });
 
+describe("direction markers on the relation segment", () => {
+  describe("on the self-relation, where the marker is required", () => {
+    it("':out' — persons who manage a Bob; ':in' — persons managed by an Alice", async () => {
+      expect(await names(`${LENS}/entities/person?filter.manages:out.name=Bob`)).toEqual({
+        names: ["Alice"],
+        total: 1,
+      });
+      expect(await names(`${LENS}/entities/person?filter.manages:in.name=Alice`)).toEqual({
+        names: ["Bob", "Carol"],
+        total: 2,
+      });
+    });
+
+    it("the relation-property form follows the marker too", async () => {
+      expect(
+        await names(`${LENS}/entities/person?filter.manages:out@since__lt=2020-01-01`),
+      ).toEqual({ names: ["Alice"], total: 1 });
+      // Alice through Carol (2021), Carol through Dave (2023).
+      expect(
+        await names(`${LENS}/entities/person?filter.manages:out@since__gte=2020-01-01`),
+      ).toEqual({ names: ["Alice", "Carol"], total: 2 });
+      expect(
+        await names(`${LENS}/entities/person?filter.manages:in@since__gte=2020-01-01`),
+      ).toEqual({ names: ["Carol", "Dave"], total: 2 });
+    });
+
+    it("without a marker the path is rejected, naming both forms", async () => {
+      const { message, fields } = await rejected(
+        `${LENS}/entities/person?filter.manages@since=2019-01-01`,
+      );
+      expect(message).toBe("Query path 'manages@since' needs a direction marker");
+      expect(fields).toEqual({
+        "manages@since":
+          "'manages' connects 'person' to 'person', so the direction cannot be derived; " +
+          "write 'manages:out@since' or 'manages:in@since'",
+      });
+    });
+  });
+
+  describe("on a non-self relation, where the marker is optional", () => {
+    it("an agreeing marker returns what the derived direction returns", async () => {
+      expect((await names(`${LENS}/entities/person?filter.works_for:out.name=Acme`)).names).toEqual(
+        ["Alice", "Carol"],
+      );
+      expect((await names(`${LENS}/entities/company?filter.works_for:in@role=CTO`)).names).toEqual(
+        ["Acme", "Globex"],
+      );
+    });
+
+    it("a contradicting marker is rejected, naming the direction the schema allows", async () => {
+      const person = await rejected(`${LENS}/entities/person?filter.works_for:in.name=Acme`);
+      expect(person.message).toBe(
+        "Query path 'works_for:in.name' contradicts the derivable direction",
+      );
+      expect(person.fields).toEqual({
+        "works_for:in.name":
+          "'works_for' connects 'person' to 'company', so from 'person' it is followed " +
+          "outgoing: write 'works_for:out.name' or omit the marker",
+      });
+
+      const company = await rejected(`${LENS}/entities/company?filter.works_for:out@role=CTO`);
+      expect(company.message).toBe(
+        "Query path 'works_for:out@role' contradicts the derivable direction",
+      );
+      expect(company.fields).toEqual({
+        "works_for:out@role":
+          "'works_for' connects 'person' to 'company', so from 'company' it is followed " +
+          "incoming: write 'works_for:in@role' or omit the marker",
+      });
+    });
+  });
+});
+
 describe("rejections, collected under their filter keys", () => {
-  /** Widen the schema with what the six fault kinds need: a relation type
-   * not touching persons, a document property on companies, and a
-   * self-relation on persons. */
+  /** Widen the schema with what the fault kinds need beyond the fixture:
+   * a relation type not touching persons and a document property on
+   * companies. */
   async function widenSchema(): Promise<void> {
     const model = modelPrefix(fixture.ontologyKey);
     const product = await create(`${model}/entity-types`, { key: "product", displayName: "Product" });
@@ -318,12 +406,6 @@ describe("rejections, collected under their filter keys", () => {
       dataType: "document",
       required: false,
     });
-    await create(`${model}/relation-types`, {
-      key: "manages",
-      displayName: "Manages",
-      sourceEntityTypeKey: "person",
-      targetEntityTypeKey: "person",
-    });
   }
 
   it("every fault kind in one answer, each under its own key", async () => {
@@ -337,6 +419,8 @@ describe("rejections, collected under their filter keys", () => {
         "&filter.works_for.name.x=1" +
         "&filter.works_for.profile=x" +
         "&filter.manages.name=x" +
+        "&filter.manages:sideways.name=x" +
+        "&filter.works_for:in.name=x" +
         "&filter.works_for.name=Acme" +
         "&filter.works_for@role=CTO",
     );
@@ -347,7 +431,9 @@ describe("rejections, collected under their filter keys", () => {
         "Unknown filter property: 'ghost' on relation type 'works_for'; " +
         "Query path 'works_for.name.x' crosses more than one relation; " +
         "Query path 'works_for.profile' ends in a document property; " +
-        "Query path 'manages.name' is ambiguous",
+        "Query path 'manages.name' needs a direction marker; " +
+        "Unknown filter property or relation type: 'manages:sideways'; " +
+        "Query path 'works_for:in.name' contradicts the derivable direction",
     );
     expect(fields).toEqual({
       "ghost.name":
@@ -364,7 +450,15 @@ describe("rejections, collected under their filter keys", () => {
         "<relationTypeKey>.<propertyKey> or <relationTypeKey>@<propertyKey>",
       "works_for.profile":
         "'profile' on 'company' is a document property; a query path cannot end in one",
-      "manages.name": "'manages' connects 'person' to 'person', so the direction cannot be derived",
+      "manages.name":
+        "'manages' connects 'person' to 'person', so the direction cannot be derived; " +
+        "write 'manages:out.name' or 'manages:in.name'",
+      "manages:sideways.name":
+        "Not defined in type 'person'. Property keys: active, age, email, hired_at, name. " +
+        "Relation types touching 'person': manages, works_for",
+      "works_for:in.name":
+        "'works_for' connects 'person' to 'company', so from 'person' it is followed " +
+        "outgoing: write 'works_for:out.name' or omit the marker",
     });
   });
 

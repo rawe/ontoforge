@@ -165,19 +165,25 @@ does not provide one.
 
 A filter key on an **entity** list may cross exactly one relation type and name a
 property reached through it — a property of the related entity,
-`filter.<relationTypeKey>.<propertyKey>[__<op>]`, or a property stored on the relation
-itself, `filter.<relationTypeKey>@<propertyKey>[__<op>]`. Listing persons with
-`filter.works_for.name=Acme` returns the persons employed by Acme; listing companies
-with `filter.works_for.age__gt=30` returns the companies with at least one employee over
-thirty. Listing persons with `filter.works_for@role=CTO` returns the persons who hold a
-CTO employment; listing companies with `filter.works_for@since__lt=2025-01-01` returns
-the companies with an employment that began before 2025. No schema key may contain a
-dot or an at sign, so a path is never mistaken for a property key.
+`filter.<relationTypeKey>[:out|:in].<propertyKey>[__<op>]`, or a property stored on the
+relation itself, `filter.<relationTypeKey>[:out|:in]@<propertyKey>[__<op>]`. Listing
+persons with `filter.works_for.name=Acme` returns the persons employed by Acme; listing
+companies with `filter.works_for.age__gt=30` returns the companies with at least one
+employee over thirty. Listing persons with `filter.works_for@role=CTO` returns the
+persons who hold a CTO employment; listing companies with
+`filter.works_for@since__lt=2025-01-01` returns the companies with an employment that
+began before 2025. No schema key may contain a dot, an at sign or a colon, so a path is
+never mistaken for a property key.
 
-- **Direction is derived.** When the listed type is only the relation type's source, the
-  path is followed outgoing, to the target; when it is only the target, incoming, to the
-  source. A relation type whose source and target are both the listed type is rejected
-  as ambiguous.
+- **Direction is derived, or marked.** When the listed type is only the relation type's
+  source, the path is followed outgoing, to the target; when it is only the target,
+  incoming, to the source. The relation segment may carry a direction marker, `:out` or
+  `:in` — `filter.works_for:out.name=Acme` — and a marker must agree with the derived
+  direction; one that contradicts it is rejected, naming the direction the schema allows.
+  On a self-relation, whose source and target are both the listed type, the marker is
+  required: listing persons with `filter.manages:out.name=Bob` returns the persons who
+  manage a Bob, `filter.manages:in.name=Alice` the persons managed by an Alice, and a
+  path without a marker is rejected, naming both forms.
 - **The two forms differ only in where the property lives.** `.` reads the related
   entity's property; `@` reads the relation's own property, and the related entity is
   never read. Both cross the relation type under the same rules — direction, matching,
@@ -199,8 +205,10 @@ Path faults are collected under their filter keys like every other: an unknown f
 segment (the detail lists the listed type's property keys and the relation types
 touching it), a relation type that does not touch the listed type, an unknown property
 on the related entity type or on the relation type (the detail lists that type's
-property keys), more than one relation segment, a document-typed final property, and a
-self-relation. Paths are a filter feature only: `sort` rejects them, `fields` treats
+property keys), more than one relation segment, a document-typed final property, a
+self-relation path without a direction marker, and a marker that contradicts the
+derivable direction; text after the colon that is neither marker makes the first segment
+unknown. Paths are a filter feature only: `sort` rejects them, `fields` treats
 them as any unknown name, no response ever carries a path value, and the relation list
 and semantic search reject them with a message saying so.
 

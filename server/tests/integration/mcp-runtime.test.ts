@@ -780,7 +780,7 @@ describe("query paths", () => {
       });
       expect(faulty.isError).toBe(true);
       expect(text(faulty)).toContain("Unknown filter property or relation type: 'ghost'");
-      expect(text(faulty)).toContain("Relation types touching 'person': works_for");
+      expect(text(faulty)).toContain("Relation types touching 'person': manages, works_for");
     } finally {
       await client.close();
     }

@@ -108,8 +108,9 @@ Never as query text or fragments. A fragment crossing the port would put query s
 the service layer and make the port unimplementable by a different kind of database.
 
 **Query paths are resolved above the port and cross it as structured path conditions.**
-The service parses the key, checks it against the lens-scoped schema and derives the
-direction; the adapter receives a condition carrying relation type key, explicit direction,
+The service parses the key, checks it against the lens-scoped schema and settles the
+direction — derived from the endpoints, or named by the key's marker where they cannot
+decide it; the adapter receives a condition carrying relation type key, explicit direction,
 property source, final property key, data type, operator and value — never a key to
 interpret. Resolving in one place is what keeps the faults identical on every backend and
 the lens a complete horizon.

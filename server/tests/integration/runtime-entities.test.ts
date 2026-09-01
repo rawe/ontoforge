@@ -53,7 +53,7 @@ describe("schema introspection through both lenses", () => {
     const body = res.json();
     expect(body.lens.key).toBe("test_lens");
     expect(body.entityTypes.map((et: Row) => et.key).sort()).toEqual(["company", "person"]);
-    expect(body.relationTypes.map((rt: Row) => rt.key)).toEqual(["works_for"]);
+    expect(body.relationTypes.map((rt: Row) => rt.key).sort()).toEqual(["manages", "works_for"]);
     const person = body.entityTypes.find((et: Row) => et.key === "person");
     expect(person.properties.map((p: Row) => p.key).sort()).toEqual([
       "active",

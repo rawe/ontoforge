@@ -161,7 +161,18 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       "Use 'filters' to filter on specific properties: exact match " +
       '("name": "Alice"), greater than ("age__gt": "25"), greater or equal ' +
       '("__gte"), less than ("__lt"), less or equal ("__lte"), contains ' +
-      '("name__contains": "ali"). All filter values must be strings.',
+      '("name__contains": "ali"). All filter values must be strings. ' +
+      "A filter key may also reach through ONE relation type, which answers a " +
+      "question about connections in a single call — use it instead of listing " +
+      "relations and matching ids by hand. Write the relation type key, then a " +
+      "dot for a property of the entity at the other end, or an at sign for a " +
+      'property of the relation itself. Listing person: ("works_for.name": ' +
+      '"Acme") are the people employed by Acme, ("works_for@role": "CTO") those ' +
+      'whose employment role is CTO, ("works_for@since__gte": "2021-01-01") ' +
+      "those employed since 2021. The direction follows the relation type's " +
+      "endpoints, so it needs no marker. A relation type that joins one type to " +
+      "itself is the exception: there the direction cannot be derived, and the " +
+      "error tells you which marker to add.",
     schema: z.object({
       entity_type_key: z.string(),
       search: z.string().nullish(),

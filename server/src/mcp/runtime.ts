@@ -611,40 +611,31 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
     "semantic_search",
     {
       description:
-        "Search entity instances by semantic similarity to a natural language query. " +
-        "Returns entities ranked by relevance. " +
-        "entity_type_key is optional — omit it to search across all entity types " +
-        "at once (each result carries _entityTypeKey), or set it to search a " +
-        "single type. 'search_in' selects the ranking: 'entities' (entity " +
-        "embeddings), 'documents' (passage-level matches inside document " +
-        "properties), or 'all' (default — both, fused via reciprocal rank " +
-        "fusion). Every hit carries 'matchedVia': document hits include the " +
-        "property key, charOffset/charLength (usable with get_document), a " +
-        "~200-char snippet (disable with snippets=false), and the raw cosine " +
-        "'similarity'; entity hits carry only source and similarity. " +
-        "Use 'filters' to narrow the search before ranking, in both rankings; the limit " +
-        "counts filtered hits. Filters require entity_type_key. Operators: exact match " +
-        '("location": "Berlin"), greater than ("age__gt": "25"), greater or equal ' +
-        '("__gte"), less than ("__lt"), less or equal ("__lte"); "__contains" is rejected ' +
-        "on semantic search. A filter key may be a query path crossing one relation type " +
-        "to a property of the related entity, \"<relationTypeKey>.<propertyKey>\", or to a " +
-        "property stored on the relation itself, \"<relationTypeKey>@<propertyKey>\": " +
-        '("works_for.name": "Acme") narrows a search over persons to the persons employed ' +
-        'by Acme, ("works_for@role": "CTO") to the persons holding a CTO employment; ' +
-        'operator suffixes attach to a path key as to a plain one ("works_for@since__gte": ' +
-        '"2021-01-01"); the direction follows the relation type\'s endpoints, outgoing ' +
-        "from its source type and incoming from its target type, or a \":out\"/\":in\" " +
-        "marker on the relation segment, required where source and target are the same " +
-        'type ("manages:out.name": "Bob" for the persons managing a Bob, "manages:in.name": ' +
-        '"Alice" for the persons managed by an Alice); an entity matches when at least one ' +
-        "relation of the type satisfies the condition. Several path conditions are ANDed, " +
-        "but each is checked on its own, so two paths through one relation type may be " +
-        "satisfied by two different relations. To bind both conditions to one relation use " +
-        "execute_query. A storage adapter that does not evaluate query paths inside " +
-        "semantic search rejects the path filter. " +
-        "Use 'fields' to select which entity properties to include — " +
-        "only listed fields plus _id (and _entityTypeKey for cross-type search) " +
-        "are returned. Omit for all fields.",
+        "Search entity instances by semantic similarity to a natural language query, " +
+        "ranked by relevance. Omit entity_type_key to search all entity types at once " +
+        "(each result carries _entityTypeKey) or set it to search one type. 'search_in' " +
+        "selects the ranking: 'entities' (entity embeddings), 'documents' (passages inside " +
+        "document properties) or 'all' (default, both combined). Each hit carries " +
+        "'matchedVia' with its source and cosine 'similarity'; document hits add the " +
+        "property key, charOffset/charLength (usable with get_document) and a ~200-char " +
+        "snippet (snippets=false disables). 'filters' narrow the search before ranking, so " +
+        "the limit counts filtered hits; they require entity_type_key. Operators: exact " +
+        'match ("location": "Berlin"), greater than ("age__gt": "25"), "__gte", "__lt", ' +
+        '"__lte"; "__contains" is rejected here. A filter key may be a query path crossing ' +
+        "one relation type: \"<relationTypeKey>.<propertyKey>\" reads a property of the " +
+        "related entity, \"<relationTypeKey>@<propertyKey>\" a property stored on the " +
+        'relation itself, operator suffixes included ("works_for.name": "Acme" for the ' +
+        'persons employed by Acme, "works_for@since__gte": "2021-01-01" for those with an ' +
+        "employment begun since 2021). Direction follows the relation type's endpoints, " +
+        "outgoing from its source type and incoming from its target type; where both " +
+        "endpoints are the same type a \":out\"/\":in\" marker on the relation segment is " +
+        'required ("manages:out.name": "Bob" for the persons managing a Bob, ' +
+        '"manages:in.name": "Alice" for the persons managed by an Alice). An entity ' +
+        "matches when at least one relation of the type satisfies the condition; several " +
+        "path conditions are ANDed but each is checked on its own, so two paths through " +
+        "one relation type may be satisfied by two different relations; to bind both to " +
+        "one relation use execute_query. 'fields' selects the properties to return; _id " +
+        "(and _entityTypeKey on cross-type search) is always included.",
       inputSchema: {
         query: z.string(),
         entity_type_key: z.string().optional(),

@@ -619,19 +619,23 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
         "property key, charOffset/charLength (usable with get_document), a " +
         "~200-char snippet (disable with snippets=false), and the raw cosine " +
         "'similarity'; entity hits carry only source and similarity. " +
-        "Use 'filters' for property-based filtering on results " +
-        "(requires entity_type_key): exact match " +
-        '("location": "Berlin"), operators ("age__gt": "25", "__gte", "__lt", ' +
-        '"__lte"). A filter key may be a query path crossing one relation type, ' +
-        "\"<relationTypeKey>.<propertyKey>\" for a property of the related entity or " +
-        "\"<relationTypeKey>@<propertyKey>\" for a property stored on the relation " +
-        'itself: ("works_for.name": "Acme") narrows a search over persons to the ' +
-        "persons employed by Acme, in both rankings. Direction markers and matching follow " +
-        "the list_entities rules: \":out\"/\":in\", required on a self-relation; path " +
-        "conditions ANDed, each satisfied by any one relation on its own. Where the storage " +
-        "adapter does not support query paths on semantic search the filter is rejected; " +
-        "list_entities takes the same path. Use 'fields' to select which entity properties " +
-        "to include — " +
+        "Use 'filters' to narrow the search before ranking, in both rankings; the limit " +
+        "counts filtered hits. Requires entity_type_key. Operators: exact match " +
+        '("location": "Berlin"), greater than ("age__gt": "25"), greater or equal ' +
+        '("__gte"), less than ("__lt"), less or equal ("__lte"); "__contains" is rejected ' +
+        "on semantic search. A filter key may be a query path crossing one relation type " +
+        "to a property of the related entity, \"<relationTypeKey>.<propertyKey>\", or to a " +
+        "property stored on the relation itself, \"<relationTypeKey>@<propertyKey>\": " +
+        '("works_for.name": "Acme") narrows a search over persons to the persons employed ' +
+        'by Acme, ("works_for@role": "CTO") to the persons holding a CTO employment; the ' +
+        "direction follows the relation type's endpoints, or a \":out\"/\":in\" marker on " +
+        "the relation segment, required where source and target are the same type " +
+        '("manages:out.name": "Bob" for the persons managing a Bob); an entity matches ' +
+        "when at least one relation of the type satisfies the condition. Several path " +
+        "conditions are ANDed, but each is checked on its own, so two paths through one " +
+        "relation type may be satisfied by two different relations. A storage adapter that " +
+        "does not evaluate query paths inside semantic search rejects the path filter. " +
+        "Use 'fields' to select which entity properties to include — " +
         "only listed fields plus _id (and _entityTypeKey for cross-type search) " +
         "are returned. Omit for all fields.",
       inputSchema: {

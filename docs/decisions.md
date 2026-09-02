@@ -195,6 +195,23 @@ network hop and a second contract to keep in agreement with the first.
 **Two MCP servers, one for modeling and one for runtime.**
 Mirroring the REST split, so that no client can reach both through one connection.
 
+**An MCP tool description stands alone.**
+It states every rule of its own parameters in full, including where a sibling tool with
+similar input behaves differently. It may name another tool as a next step in the
+process, never as the place where one of its own parameters is explained. Tools are
+loaded and enabled one at a time, so a description that leans on another is incomplete
+the moment that other tool is absent.
+
+**A tool description is at most 2000 characters.**
+Clients cut longer descriptions without notice, and everything after the cut is
+invisible to the caller. The budget is met by tightening the text, never by pointing at
+another tool.
+
+**A tool description carries caller-facing facts only.**
+What a call accepts, what it returns, and how it behaves. Nothing about the backend, the
+storage adapter or the ranking algorithm; a rejection message already tells the caller
+what to do instead.
+
 **Transport is stateless HTTP with plain JSON responses.**
 No event stream. Statelessness is what allows the same mount to serve many clients
 without per-connection state.

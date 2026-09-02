@@ -40,8 +40,9 @@ default ontology and no default lens: both must be resolved before any call is g
 4. If entity type keys, relation type keys, or property keys are unknown, start with the
    schema introspection endpoints before generating write or query calls. They are
    already filtered to the lens, so what they omit is not reachable through it.
-5. Preserve documented filter syntax exactly: `filter.{key}` and `filter.{key}__{op}`.
-   Repeat `fields` rather than comma-separating it.
+5. Preserve documented filter syntax exactly: `filter.{key}` and `filter.{key}__{op}`;
+   on entity lists and semantic search `{key}` may also be a query path, whose rules are
+   in the reference. Repeat `fields` rather than comma-separating it.
 6. Set `Content-Type: application/json` on JSON `POST` and `PATCH` requests.
 7. Probe `GET /api/server/features` before building anything on semantic search or the
    AI routes — both need an external provider and are absent without one.

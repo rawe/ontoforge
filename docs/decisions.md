@@ -229,8 +229,9 @@ AND. Existential is the only quantifier, so an entity with no relation of the ty
 does not match — as an entity lacking a property does not.
 
 **Validation collects every error before answering.**
-A rejected write names all offending fields at once, so a caller can correct in one round
-trip rather than discovering faults one at a time.
+A rejected write names all offending fields at once, and a rejected read all of its
+faulty filters, so a caller can correct in one round trip rather than discovering faults
+one at a time.
 
 **Writes validate against the lens; defaults come from the full schema.**
 A property a lens hides cannot be written through it, but a required property with a

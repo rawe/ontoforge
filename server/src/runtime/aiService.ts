@@ -34,6 +34,7 @@ import { loadSchema, type SchemaCacheValue } from "./schemaCache.js";
 import * as service from "./service.js";
 import {
   TOOL_EXECUTE_QUERY,
+  TOOL_GET_DOCUMENT,
   TOOL_GET_ENTITY,
   TOOL_GET_NEIGHBORS,
   TOOL_GET_SCHEMA,
@@ -41,6 +42,7 @@ import {
   TOOL_LIST_RELATIONS,
   TOOL_LIST_SAVED_QUERIES,
   TOOL_RUN_SAVED_QUERY,
+  TOOL_SEARCH_DOCUMENTS,
   TOOL_SEARCH_SAVED_QUERIES,
   TOOL_SEMANTIC_SEARCH,
 } from "./toolNames.js";
@@ -56,9 +58,11 @@ export const CHAT_TOOLS = [
   TOOL_GET_SCHEMA,
   TOOL_LIST_ENTITIES,
   TOOL_GET_ENTITY,
+  TOOL_GET_DOCUMENT,
   TOOL_LIST_RELATIONS,
   TOOL_GET_NEIGHBORS,
   TOOL_SEMANTIC_SEARCH,
+  TOOL_SEARCH_DOCUMENTS,
   TOOL_EXECUTE_QUERY,
   TOOL_LIST_SAVED_QUERIES,
   TOOL_RUN_SAVED_QUERY,
@@ -67,6 +71,7 @@ export const CHAT_TOOLS = [
 
 const EMBEDDING_TOOLS: ReadonlySet<string> = new Set([
   TOOL_SEMANTIC_SEARCH,
+  TOOL_SEARCH_DOCUMENTS,
   TOOL_SEARCH_SAVED_QUERIES,
 ]);
 
@@ -208,6 +213,34 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       ),
   },
   {
+    name: TOOL_GET_DOCUMENT,
+    description:
+      "Read a document property's content, whole or by character range. " +
+      "Document properties hold large text and are never returned inline by " +
+      'the other tools — they appear as {"document": true, "length": N} ' +
+      "stubs. 'offset' and 'limit' count characters; omit both to read the " +
+      "whole document. Read a segment rather than the whole document when you " +
+      "know where to look: pass the charOffset and charLength of a " +
+      "search_documents hit to read exactly the passage it matched.",
+    schema: z.object({
+      entity_type_key: z.string(),
+      entity_id: z.string(),
+      property_key: z.string(),
+      offset: z.number().int().nullish(),
+      limit: z.number().int().nullish(),
+    }),
+    run: async (lensKey, store, args) =>
+      service.getDocument(
+        lensKey,
+        args.entity_type_key as string,
+        args.entity_id as string,
+        args.property_key as string,
+        Math.max(0, (args.offset as number | null | undefined) ?? 0),
+        typeof args.limit === "number" ? Math.max(1, args.limit) : null,
+        store,
+      ),
+  },
+  {
     name: TOOL_LIST_RELATIONS,
     description:
       "List relations of a type. Each result includes _id, source and target " +
@@ -272,6 +305,34 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
         clampLimit(args.limit, 10, 20),
         null,
         store,
+      ),
+  },
+  {
+    name: TOOL_SEARCH_DOCUMENTS,
+    description:
+      "Search INSIDE document properties: ranks passages of document text by " +
+      "semantic similarity to a natural language query and returns the " +
+      "entities they belong to. Use this when the answer is likely written in " +
+      "a document rather than in a short property — semantic_search ranks " +
+      "entities, this one ranks passages. Omit entity_type_key to search every " +
+      "type. Each hit carries the entity, a score, and 'matchedVia' with the " +
+      "propertyKey, the charOffset/charLength of the matching passage and a " +
+      "short snippet. Pass that propertyKey and charOffset/charLength to " +
+      "get_document to read the full passage.",
+    schema: z.object({
+      query: z.string(),
+      entity_type_key: z.string().nullish(),
+      limit: z.number().int().nullish(),
+    }),
+    run: async (lensKey, store, args) =>
+      service.semanticSearch(
+        lensKey,
+        args.query as string,
+        (args.entity_type_key as string | null | undefined) ?? null,
+        clampLimit(args.limit, 5, 20),
+        null,
+        store,
+        { searchIn: "documents", snippets: true },
       ),
   },
   {
@@ -867,6 +928,10 @@ STRATEGY — use the exact keys from the schema as tool arguments (e.g. entity_t
 3. For fuzzy or "find something like..." questions, use semantic_search.
 4. For exploring an entity's connections when you have its _id, use get_neighbors.
 5. For browsing entities of a type, use list_entities.
+6. A property shown as {"document": true, "length": N} is a large text held back
+   from the result. To answer from its content, use search_documents to find the
+   matching passage, then get_document with that propertyKey and
+   charOffset/charLength to read it — read a segment, not the whole document.
 
 Never make up answers — only use data from tool results. If the data doesn't contain the answer, say so. Be concise.
 `;

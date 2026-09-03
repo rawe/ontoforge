@@ -198,7 +198,11 @@ The full index of routes and tools is [interfaces.md](../interfaces.md).
 
 REST exposes one write operation with the mode named in the body; MCP splits it into two
 tools, so a model chooses by tool rather than by argument. Both reach the same service and
-obey the identical rules. Declaring the property at all is
+obey the identical rules.
+
+An agent reads documents too, and only reads them: `get_document` is grantable to one,
+alongside a passage search that MCP spells as an argument on semantic search. The rules
+are in [ai-agents.md](ai-agents.md). Declaring the property at all is
 [schema modeling](schema-modeling.md), over its own routes and tools.
 
 In the web UI, document properties appear as a compact size badge in tables and as a

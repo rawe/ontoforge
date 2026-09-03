@@ -551,11 +551,14 @@ Everything a client can do to instance data through one lens.
 | `run_saved_query` | Execute a saved query with parameter values |
 | `search_saved_queries` | Find a saved query by describing what it should do |
 
-An agent configuration may grant exactly ten of them: `get_schema`, `list_entities`,
-`get_entity`, `list_relations`, `get_neighbors`, `semantic_search`, `execute_query`,
-`list_saved_queries`, `run_saved_query`, `search_saved_queries`. Every write tool is
-outside that set, and so are the read-only `get_document` and `get_relation` — being
-read-only is not sufficient to be grantable. See
+An agent configuration may grant twelve tools: `get_schema`, `list_entities`,
+`get_entity`, `get_document`, `list_relations`, `get_neighbors`, `semantic_search`,
+`search_documents`, `execute_query`, `list_saved_queries`, `run_saved_query`,
+`search_saved_queries`. Every write tool is outside that set, and so is the read-only
+`get_relation` — being read-only is not sufficient to be grantable. Eleven of the twelve
+are the tools above under the same names and the same arguments; `search_documents` is
+the one an agent has and MCP does not — it is `semantic_search` restricted to document
+passages, a tool of its own rather than an argument, chosen by name. See
 [capabilities/ai-agents.md](capabilities/ai-agents.md).
 
 `write_document` has no REST counterpart of its own: over REST both document edit forms

@@ -99,15 +99,22 @@ without naming an agent is a run of this default agent.
   agent the ability to create, update or delete anything. This is what makes it safe to
   expose an agent to an untrusted caller over A2A.
 - The grantable set is *narrower* than the read tools available over MCP — being read-only
-  is not sufficient to be grantable. The tools are named, and the read-only ones left out
-  of the set are called out, in
-  [../interfaces.md](../interfaces.md#runtime-tools). The exclusion that shapes behaviour
-  most: fetching document content is not grantable, so an agent reads document properties
-  as the stubs described in [documents.md](documents.md).
-- Tools that need an embedding provider — semantic search and saved-query search — are
-  dropped from the effective toolset when none is configured. This applies to the default
-  agent and to explicit allowlists alike, so an allowlist naming them still works on a
-  server without embeddings; it just yields fewer tools.
+  is not sufficient to be grantable. The tools are named, and the read-only one left out
+  of the set is called out, in [../interfaces.md](../interfaces.md#runtime-tools).
+- **An agent reads documents, and reads them by the passage.** A document property is
+  returned to it as the stub described in [documents.md](documents.md), never inline; two
+  grantable tools open it. One ranks passages of document text by meaning and hands back
+  the property, the character range and a snippet for each hit; the other reads a document
+  property, whole or by character range, so the coordinates of a hit are read back
+  directly as the passage that matched. Passage ranking is a tool of its own here, where
+  MCP spells it as an argument on semantic search: an agent may be running the weakest
+  model of any caller on the surface, and choosing a tool by name is more reliable than
+  choosing a mode by argument. Without an embedding provider the ranking tool goes with
+  the other search tools; reading stays, addressed by the stub's length.
+- Tools that need an embedding provider — entity search, document-passage search and
+  saved-query search — are dropped from the effective toolset when none is configured.
+  This applies to the default agent and to explicit allowlists alike, so an allowlist
+  naming them still works on a server without embeddings; it just yields fewer tools.
 - An unknown tool name in an allowlist is rejected, and the error names the valid set.
 - When an agent defines a system prompt, that prompt is used and the schema description is
   appended to it. When it does not, a built-in prompt containing the schema is used. The

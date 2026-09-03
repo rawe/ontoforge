@@ -212,6 +212,15 @@ What a call accepts, what it returns, and how it behaves. Nothing about the back
 storage adapter or the ranking algorithm; a rejection message already tells the caller
 what to do instead.
 
+**An agent may be granted every read tool but one, and one tool MCP does not have.**
+Reading a document is grantable: an agent that can see a document stub but never open it
+can only report that text exists. Ranking document passages is a tool of its own for an
+agent, where MCP selects it with an argument on semantic search, because an agent may run
+the weakest model of any caller on the surface and a name is chosen more reliably than a
+mode. Reading a single relation by identifier stays out — a relation is reached by listing
+or traversal. No write tool is ever grantable, whatever a configuration or system prompt
+asks for.
+
 **Transport is stateless HTTP with plain JSON responses.**
 No event stream. Statelessness is what allows the same mount to serve many clients
 without per-connection state.

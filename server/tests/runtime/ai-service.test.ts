@@ -28,6 +28,7 @@ import {
   asRuntimeStore,
   createMockRuntimeStore,
   makeEntity,
+  makeFullSchema,
   makeRelation,
   makeUnscopedSchema,
   type MockRuntimeStore,
@@ -71,11 +72,13 @@ describe("toolset computation", () => {
     await aiChat("full_lens", "hello", asRuntimeStore(store));
 
     expect(boundToolNames(fake)).toEqual(
-      CHAT_TOOLS.filter((t) => t !== "semantic_search" && t !== "search_saved_queries"),
+      CHAT_TOOLS.filter(
+        (t) => t !== "semantic_search" && t !== "search_documents" && t !== "search_saved_queries",
+      ),
     );
   });
 
-  it("default agent with embedding provider gets all ten tools", async () => {
+  it("default agent with embedding provider gets every tool", async () => {
     setEmbeddingProvider(fakeEmbedding);
     const fake = installFake([new AIMessage("hi")]);
 
@@ -180,6 +183,139 @@ describe("prompt assembly", () => {
     expect(desc).toContain("    - name: string (required)");
     expect(desc).toContain("    - age: integer");
     expect(desc).toContain("  - works_for: person -> company");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Document reads
+// ---------------------------------------------------------------------------
+
+/** The unscoped fixture with a document property on person. */
+function schemaWithDocument(): Row {
+  const schema = makeFullSchema({ lensKey: "full_lens", lensName: "Full Lens" });
+  const person = (schema.entityTypes as Row[])[0]!;
+  (person.properties as Row[]).push({
+    key: "bio",
+    displayName: "Bio",
+    dataType: "document",
+    required: false,
+    defaultValue: null,
+  });
+  return schema;
+}
+
+describe("document reads", () => {
+  const BIO = "Alice joined in 2019. ".repeat(20);
+
+  beforeEach(() => {
+    store.getFullSchema.mockResolvedValue(schemaWithDocument());
+    invalidateLoadedSchemaCache();
+  });
+
+  it("get_document reads the segment the model asked for", async () => {
+    const fake = installFake([
+      toolCallMessage("get_document", {
+        entity_type_key: "person",
+        entity_id: "ent-1",
+        property_key: "bio",
+        offset: 22,
+        limit: 21,
+      }),
+      new AIMessage("She joined in 2019."),
+    ]);
+    store.getEntity.mockResolvedValue(makeEntity({ name: "Alice", bio: BIO }));
+
+    const result = await aiChat("full_lens", "what does her bio say?", asRuntimeStore(store));
+
+    expect(result.reply).toBe("She joined in 2019.");
+    const toolMessages = fake.calls[1]!.filter((m) => m instanceof ToolMessage);
+    expect(JSON.parse(String(toolMessages[0]!.content))).toEqual({
+      propertyKey: "bio",
+      content: "Alice joined in 2019.",
+      offset: 22,
+      length: 21,
+      totalLength: BIO.length,
+    });
+  });
+
+  it("get_document without offset and limit reads the whole document, as the MCP tool does", async () => {
+    const fake = installFake([
+      toolCallMessage("get_document", {
+        entity_type_key: "person",
+        entity_id: "ent-1",
+        property_key: "bio",
+      }),
+      new AIMessage("read it"),
+    ]);
+    store.getEntity.mockResolvedValue(makeEntity({ name: "Alice", bio: BIO }));
+
+    await aiChat("full_lens", "read the bio", asRuntimeStore(store));
+
+    const toolMessages = fake.calls[1]!.filter((m) => m instanceof ToolMessage);
+    const payload = JSON.parse(String(toolMessages[0]!.content)) as Row;
+    expect(payload.content).toBe(BIO);
+    expect(payload.offset).toBe(0);
+  });
+
+  it("search_documents ranks passages and hands back retrieval coordinates", async () => {
+    setEmbeddingProvider(fakeEmbedding);
+    const fake = installFake([
+      toolCallMessage("search_documents", { query: "when did she join" }),
+      new AIMessage("In 2019."),
+    ]);
+    store.searchDocumentChunks.mockResolvedValue([
+      {
+        chunk: {
+          _id: "chunk-1",
+          _entityId: "ent-1",
+          _entityTypeKey: "person",
+          _propertyKey: "bio",
+          _index: 0,
+          startChar: 22,
+          charLength: 21,
+          text: "Alice joined in 2019.",
+        },
+        score: 0.91,
+      },
+    ]);
+    store.getEntitiesByIds.mockResolvedValue({
+      "ent-1": makeEntity({ name: "Alice", bio: BIO }),
+    });
+
+    const result = await aiChat("full_lens", "when did Alice join?", asRuntimeStore(store), null, true);
+
+    expect(result.reply).toBe("In 2019.");
+    const toolMessages = fake.calls[1]!.filter((m) => m instanceof ToolMessage);
+    const payload = JSON.parse(String(toolMessages[0]!.content)) as Row;
+    const hit = (payload.results as Row[])[0]!;
+    expect(hit.matchedVia).toEqual({
+      source: "document",
+      propertyKey: "bio",
+      charOffset: 22,
+      charLength: 21,
+      similarity: 0.91,
+      snippet: "Alice joined in 2019.",
+    });
+    // Only the passage ranking runs — the entity ranking is not consulted.
+    expect(store.semanticSearch).not.toHaveBeenCalled();
+    expect(result.toolCalls).toEqual([
+      { tool: "search_documents", args: { query: "when did she join" } },
+    ]);
+  });
+
+  it("search_documents is dropped without an embedding provider", async () => {
+    const fake = installFake([new AIMessage("hi")]);
+    const config: AgentConfig = {
+      key: "reader",
+      name: "Reader",
+      description: null,
+      systemPrompt: null,
+      tools: ["get_document", "search_documents"],
+    };
+
+    await runAgentChat(config, "full_lens", "hello", asRuntimeStore(store));
+
+    expect(boundToolNames(fake)).toEqual(["get_document"]);
   });
 });
 

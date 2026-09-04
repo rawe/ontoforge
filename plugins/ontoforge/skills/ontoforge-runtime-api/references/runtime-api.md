@@ -37,8 +37,10 @@ the deployment rather than any ontology: `GET /api/server/features`.
 - Use `Content-Type: application/json` for JSON `POST` and `PATCH` requests
 - If type keys or property keys are unknown, inspect the schema first
 - Field names are `camelCase`; keys are `lower_snake_case`
-- Property filter syntax is `filter.{key}` or `filter.{key}__{op}`
-- Supported filter operators: `__gt`, `__gte`, `__lt`, `__lte`, `__contains`
+- Property filter syntax is `filter.{key}` or `filter.{key}__{op}`; on entity lists and
+  semantic search `{key}` may also be a query path (see Listing, Sorting, Filtering)
+- Supported filter operators, on properties and query paths alike: no suffix for
+  equality, `__gt`, `__gte`, `__lt`, `__lte`, `__contains`
 - `fields` is repeated, not comma-separated: `fields=name&fields=email`
 - Two query parameters are `snake_case` against the surrounding convention:
   `min_score` on semantic search and on saved-query search
@@ -54,14 +56,48 @@ Entity and relation lists share one parameter vocabulary.
 | `sort` | Property key, or `_createdAt` / `_updatedAt`; default `_createdAt`. The underscore may be omitted |
 | `order` | `asc` or `desc`, default `asc` |
 | `q` | Case-insensitive substring across every `string` property in scope. **Entity lists only**; `document` properties are not searched |
-| `filter.{key}[__{op}]` | Property filter, repeatable |
+| `filter.{propertyKey}[__{op}]` | Property filter, repeatable |
+| `filter.{relationTypeKey}[:out\|:in].{propertyKey}[__{op}]` | Query path — a property of the related entity; entity lists and semantic search, repeatable |
+| `filter.{relationTypeKey}[:out\|:in]@{propertyKey}[__{op}]` | Query path — a property stored on the relation itself; entity lists and semantic search, repeatable |
 
 A list response carries `items`, `total`, `limit` and `offset`. `total` is the count
 before paging.
 
 Filter values arrive as text and are coerced to the property's declared data type before
 comparison; `__contains` is compared as text. An unknown property key, an unknown
-operator suffix and an uncoercible value are each rejected.
+operator suffix and an uncoercible value are each rejected — and a request carrying
+several faulty filters is rejected once, every fault under its own filter key as sent
+(`age__gt`, not `age`) in `details.fields`, so one rejection is enough to correct every
+filter of the next attempt.
+
+A **query path** crosses exactly one relation type and filters by a property reached
+through it: `.` reads the related entity's property, `@` reads the relation's own
+property and never touches the related entity. Listing persons with
+`filter.works_for.name=Acme` returns the persons employed by Acme, with
+`filter.works_for@role=CTO` the persons holding a CTO employment; listing companies with
+`filter.works_for.age__gt=30` returns the companies with at least one employee over
+thirty.
+
+- **Direction is derived, or marked.** When the listed type is only the relation type's
+  source the path runs outgoing, to the target; when only its target, incoming, to the
+  source. A `:out` or `:in` marker on the relation segment must agree with that
+  direction. On a self-relation, whose source and target are both the listed type, the
+  marker is required: `filter.manages:out.name=Bob` returns the persons who manage a
+  Bob, `filter.manages:in.name=Alice` the persons managed by an Alice.
+- **Matching is existential.** An entity matches when at least one relation of the type
+  satisfies the condition. Conditions are independent — two paths through the same
+  relation type may be satisfied by two different relations — and paths combine with
+  each other and with plain filters by AND. An entity with no relation of the type
+  never matches.
+- **The value is coerced by the final property**, with the same operators as a plain
+  filter; `__contains` stays textual. A path cannot end in a `document` property.
+- **Paths are a filter feature of entity lists and semantic search only.** Relation
+  lists reject them, `sort` rejects them, `fields` treats one as an unknown name, and no
+  response carries a path value.
+- **Path faults are collected like any other**, each under the filter key as sent. A
+  path resolves against the lens: a relation type, related entity type or property the
+  lens hides fails exactly as one that does not exist, and a detail lists only what the
+  lens exposes.
 
 ## Schema Introspection
 
@@ -90,7 +126,7 @@ types, relation types or property keys are unknown.
 - `GET /entities/{entityTypeKey}`
   Lists entities of one type.
   Query parameters: `limit`, `offset`, `sort`, `order`, `q`, `fields`,
-  `filter.{key}`, `filter.{key}__{op}`
+  `filter.{key}`, `filter.{key}__{op}` — `{key}` a property key or a query path
 
 - `GET /entities/{entityTypeKey}/{entityId}`
   Reads one entity.
@@ -179,10 +215,17 @@ carry `_id` and `_entityTypeKey`; relations carry `_id`, `_relationTypeKey` and
   Query parameters:
   `q` (required), `type` (optional entity type key), `searchIn` (`entities`, `documents`
   or `all`; default `all`), `snippets` (default `true`), `limit` (1–100, default 10),
-  `min_score`, `fields`, `filter.{key}`, `filter.{key}__{op}`
+  `min_score`, `fields`, `filter.{key}`, `filter.{key}__{op}` — `{key}` a property key
+  or a query path
 
   Omit `type` to search every entity type in the lens at once, in which case every hit
   also carries `_entityTypeKey`.
+
+  Filters, query paths included, require `type` and reject `__contains`; their faults
+  are collected into one answer as on the entity list. Whether semantic search evaluates
+  a query path depends on the storage adapter: where it does not, the path filter is
+  rejected as a validation error naming the entity list as the alternative, and the
+  entity list takes the same filter.
 
   Each hit carries `matchedVia`: `{source: "entity", similarity}` for entity-embedding
   matches, or `{source: "document", propertyKey, charOffset, charLength, snippet,

@@ -21,7 +21,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { initPool } from "../../../src/adapters/postgres/errors.js";
 import { PostgresRuntimeStore } from "../../../src/adapters/postgres/runtimeStore.js";
-import { DEFS } from "../../propertyDefs.js";
+import { cond, DEFS, pathCond } from "../../propertyDefs.js";
 import { fakeDb } from "./support.js";
 
 vi.mock("pg", async (importOriginal) => {
@@ -143,7 +143,7 @@ describe.each(PATHS)("$name", ({ index, run }) => {
 describe("filtered semanticSearch", () => {
   it("keeps the scan setting and the pinned score beside the filter", async () => {
     await store.semanticSearch("person", DEFS, QUERY_VECTOR, 5, null, [
-      { key: "name", dataType: "string", op: "eq", value: "Ada" },
+      cond("name", "string", "eq", "Ada"),
     ]);
 
     const sql = statements();
@@ -158,5 +158,56 @@ describe("filtered semanticSearch", () => {
     expect(scoring.sql).toContain("type_key = $2");
     expect(scoring.params).toContain("Ada");
     expect(scoring.sql).toContain(`LIMIT $${scoring.params!.length}`);
+  });
+});
+
+describe("filtered searchDocumentChunks", () => {
+  it("joins each passage to its parent entity inside the vector query and carries the predicates", async () => {
+    await store.searchDocumentChunks("person", "bio", QUERY_VECTOR, 5, [
+      cond("age", "integer", "gt", 25),
+      pathCond("works_for", "outgoing", "name", "string", "eq", "Acme"),
+    ]);
+
+    const sql = statements();
+    expect(sql[1]).toBe("SET LOCAL hnsw.iterative_scan = strict_order");
+
+    const scoring = scoringQuery();
+    expect(scoring.sql).toContain(
+      `1 - (embedding::vector(${INDEX_WIDTH}) <=> $1::vector) / 2 AS score`,
+    );
+    // The parent entity is joined inside the statement, and the entity
+    // ranking's own predicates — plain and path alike — are evaluated on
+    // it, so the iterative scan refills the page with passages whose
+    // parent passes; the limit is bound last.
+    expect(scoring.sql).toContain(
+      "FROM document_chunk WHERE entity_type_key = $2 AND property_key = $3 " +
+        "AND embedding IS NOT NULL AND EXISTS (SELECT 1 FROM entity " +
+        "WHERE entity.id = document_chunk.entity_id AND (props->$4)::numeric > $5 AND " +
+        "EXISTS (SELECT 1 FROM relation r JOIN entity re ON re.id = r.to_id " +
+        "WHERE r.from_id = entity.id AND r.type_key = $6 AND re.props->>$7 = $8))",
+    );
+    expect(scoring.sql).toContain(
+      `ORDER BY embedding::vector(${INDEX_WIDTH}) <=> $1::vector LIMIT $9`,
+    );
+    expect(scoring.params).toEqual([
+      "[0.5,-0.25,0.125]",
+      "person",
+      "bio",
+      "age",
+      25,
+      "works_for",
+      "name",
+      "Acme",
+      5,
+    ]);
+  });
+
+  it("without conditions the statement carries no parent join", async () => {
+    await store.searchDocumentChunks("person", "bio", QUERY_VECTOR, 5, []);
+
+    const scoring = scoringQuery();
+    expect(scoring.sql).not.toContain("EXISTS");
+    expect(scoring.sql).toContain("LIMIT $4");
+    expect(scoring.params).toEqual(["[0.5,-0.25,0.125]", "person", "bio", 5]);
   });
 });

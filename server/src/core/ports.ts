@@ -38,6 +38,11 @@
  *    modeling store. They return plain type keys, never physical names, so
  *    the modeling service can reject a colliding key without knowing why it
  *    collides. An adapter with no such collisions returns empty sets.
+ * 6. Adapters declare whether their semantic search evaluates path
+ *    conditions, through `supportsSemanticSearchPathConditions()` on the
+ *    runtime store, and the runtime service enforces the declaration: on
+ *    an adapter declaring none, a query path on semantic search is
+ *    rejected above the port, naming the entity list as the alternative.
  *
  * The `ModelingStore` and `RuntimeStore` interfaces below, together with
  * the conformance suite, are the authoritative contract — adapters are
@@ -59,18 +64,46 @@ export type Row = Record<string, unknown>;
 export type FilterOperator = "eq" | "gt" | "gte" | "lt" | "lte" | "contains";
 
 /**
- * One parsed, coerced filter condition. Built by the runtime service —
- * which validates the property, coerces the value, and checks the
- * operator above the port — so adapters receive only valid input and do
- * pure predicate assembly. The value is already coerced to the declared
- * data type (`contains` compares textually and carries the string form).
+ * One parsed, coerced filter condition, tagged by `kind`. Built by the
+ * runtime service — which validates the key, coerces the value, and
+ * checks the operator above the port — so adapters receive only valid
+ * input, dispatch on the kind, and do pure predicate assembly. Two kinds:
+ * the plain property condition names one property of the listed type;
+ * the path condition crosses one relation type to a property of the
+ * related entity or of the relation itself. The value is already coerced
+ * to the final property's declared data type (`contains` compares
+ * textually and carries the string form).
  */
-export interface FilterCondition {
-  key: string;
+export interface PropertyFilterCondition {
+  kind: "property";
+  propertyKey: string;
   dataType: string;
   op: FilterOperator;
   value: unknown;
 }
+
+/**
+ * A query path, fully resolved above the port: the relation type crossed,
+ * the direction to cross it in — always explicit here, derived by the
+ * service from the relation type's endpoints or taken from the key's
+ * direction marker — where the final property
+ * lives (on the related entity, or on the relation itself), and the
+ * property itself. An entity matches when at least one relation of the
+ * type reachable through the path carries, or reaches a related entity
+ * that carries, a value satisfying the comparison.
+ */
+export interface PathFilterCondition {
+  kind: "path";
+  relationTypeKey: string;
+  direction: "outgoing" | "incoming";
+  propertySource: "relatedEntity" | "relation";
+  propertyKey: string;
+  dataType: string;
+  op: FilterOperator;
+  value: unknown;
+}
+
+export type FilterCondition = PropertyFilterCondition | PathFilterCondition;
 
 /** One stored type whose key the active adapter now reserves. */
 export interface ReservedTypeKeyInUse {
@@ -380,11 +413,12 @@ export interface ModelingStore {
  * Capability grouping follows `docs/storage-adapters.md` ("The two store
  * surfaces"); the section comments below mirror it.
  *
- * Filter-taking methods (`listEntities`, `listRelations`, and the
- * per-type entity search via `semanticSearch`) receive parsed, coerced
- * `FilterCondition`s built by the service — filter validation happens
- * above the port, so adapters receive only valid input and raise no
- * validation errors. Three reads carry the property definitions for row
+ * Filter-taking methods (`listEntities`, `listRelations`, and the two
+ * per-type searches, `semanticSearch` and `searchDocumentChunks`) receive
+ * parsed, coerced `FilterCondition`s built by the service — filter
+ * validation happens above the port, so adapters receive only valid
+ * input and raise no validation errors. A path condition reaches a
+ * search only where the adapter declares support (contract rule 6). Three reads carry the property definitions for row
  * decoding — `getEntityById`, `getEntitiesByIds`, and `getNeighbors` (an
  * adapter whose storage is self-describing may ignore them); listing
  * paths carry them for the same reason. `getEntity` and `getRelation`
@@ -394,6 +428,16 @@ export interface RuntimeStore {
   /** The ontology this store is bound to. The runtime schema cache keys
    * its entries by this binding plus the lens key. */
   readonly ontologyKey: string;
+
+  // ------------------------------------------------------------------
+  // Declarations
+  // ------------------------------------------------------------------
+
+  /** Whether this adapter's semantic search evaluates path conditions —
+   * in both rankings, entities and document passages (contract rule 6).
+   * Declared as a plain flag so the service can reject a query path on
+   * semantic search without knowing why the adapter cannot evaluate it. */
+  supportsSemanticSearchPathConditions(): boolean;
 
   // ------------------------------------------------------------------
   // Schema reading (for the runtime schema cache)
@@ -480,11 +524,16 @@ export interface RuntimeStore {
     chunks: Row[],
   ): Promise<void>;
 
+  /** One document property's passages, ranked. The filter conditions are
+   * the parsed conditions the entity ranking takes, evaluated on each
+   * passage's parent entity as part of the search — not after it — so
+   * that the limit counts passages whose parent passes. */
   searchDocumentChunks(
     entityTypeKey: string,
     propertyKey: string,
     queryEmbedding: number[],
     limit: number,
+    filters?: FilterCondition[] | null,
   ): Promise<Row[]>;
 
   getEntitiesByIds(

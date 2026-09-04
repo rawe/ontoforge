@@ -248,6 +248,27 @@ describe("relation CRUD round trip", () => {
     expect(filtered.json().items[0].role).toBe("Advisor");
   });
 
+  it("several faulty filters are rejected once, every fault under its own filter key", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url:
+        "/api/ontologies/test_ont/runtime/lenses/test_lens/relations/works_for" +
+        "?filter.ghost=1&filter.since=not-a-date&filter.role__between=1&filter.role=Engineer",
+    });
+    expect(res.statusCode).toBe(422);
+    const error = res.json().error as { message: string; details: { fields: Record<string, string> } };
+    expect(error.message).toBe(
+      "Unknown filter property: 'ghost'; " +
+        "Invalid filter value for 'since'; " +
+        "Unknown filter operator: 'between'",
+    );
+    expect(error.details.fields).toEqual({
+      ghost: "Not defined in type 'works_for'",
+      since: expect.stringContaining("date"),
+      role__between: "Unsupported operator 'between'",
+    });
+  });
+
   it("a garbage relation id answers not-found on read, update and delete", async () => {
     for (const id of ["not-a-uuid", "4F2D8A31-0000-4000-8000-000000000000"]) {
       const read = await app.inject({

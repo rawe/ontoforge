@@ -107,6 +107,14 @@ suite tier that only multi-capable adapters run. Deliberation:
 Never as query text or fragments. A fragment crossing the port would put query syntax in
 the service layer and make the port unimplementable by a different kind of database.
 
+**Query paths are resolved above the port and cross it as structured path conditions.**
+The service parses the key, checks it against the lens-scoped schema and settles the
+direction — derived from the endpoints, or named by the key's marker where they cannot
+decide it; the adapter receives a condition carrying relation type key, explicit direction,
+property source, final property key, data type, operator and value — never a key to
+interpret. Resolving in one place is what keeps the faults identical on every backend and
+the lens a complete horizon.
+
 **Driver exceptions never cross the port.**
 Any storage failure surfaces as a single storage error carrying a generated id. The
 original is logged against that id, because a driver message names the vendor and its
@@ -118,6 +126,15 @@ on every write path, with an error naming neither the vendor nor the physical na
 Encoding those names above the port would tie database-agnostic code to one database;
 enforcing them inside the adapter would deliver the error from the wrong layer and make
 every future adapter reimplement it.
+
+**Adapters declare whether semantic search evaluates path conditions; the service
+enforces it.**
+A query path on semantic search resolves and crosses the port only where the adapter
+declares support; elsewhere it is rejected above the port, naming the entity list as the
+alternative. Filters on a search are applied as part of the search, so a path condition
+an adapter cannot evaluate inside its vector query must be refused before the search
+runs — evaluating it afterwards would make the limit count unfiltered hits — and encoding
+the capability above the port would tie database-agnostic code to one database.
 
 **Adapters are peers under one contract; one is the default deployment.**
 The port contract and the conformance suite define behaviour — no adapter is the
@@ -178,6 +195,32 @@ network hop and a second contract to keep in agreement with the first.
 **Two MCP servers, one for modeling and one for runtime.**
 Mirroring the REST split, so that no client can reach both through one connection.
 
+**An MCP tool description stands alone.**
+It states every rule of its own parameters in full, including where a sibling tool with
+similar input behaves differently. It may name another tool as a next step in the
+process, never as the place where one of its own parameters is explained. Tools are
+loaded and enabled one at a time, so a description that leans on another is incomplete
+the moment that other tool is absent.
+
+**A tool description is at most 2000 characters.**
+Clients cut longer descriptions without notice, and everything after the cut is
+invisible to the caller. The budget is met by tightening the text, never by pointing at
+another tool.
+
+**A tool description carries caller-facing facts only.**
+What a call accepts, what it returns, and how it behaves. Nothing about the backend, the
+storage adapter or the ranking algorithm; a rejection message already tells the caller
+what to do instead.
+
+**An agent may be granted every read tool but one, and one tool MCP does not have.**
+Reading a document is grantable: an agent that can see a document stub but never open it
+can only report that text exists. Ranking document passages is a tool of its own for an
+agent, where MCP selects it with an argument on semantic search, because an agent may run
+the weakest model of any caller on the surface and a name is chosen more reliably than a
+mode. Reading a single relation by identifier stays out — a relation is reached by listing
+or traversal. No write tool is ever grantable, whatever a configuration or system prompt
+asks for.
+
 **Transport is stateless HTTP with plain JSON responses.**
 No event stream. Statelessness is what allows the same mount to serve many clients
 without per-connection state.
@@ -196,9 +239,25 @@ enumeration does not name is rejected with a self-correction hint. Every backend
 accepts exactly the same queries. Widening the surface is a deliberate, non-breaking
 addition; narrowing it is a breaking change.
 
+**A structured filter key may cross exactly one relation.**
+A query path names one relation type and a property reached through it — of the related
+entity or of the relation itself; it is resolved against the lens-scoped schema at query
+time, and nothing is declared or stored for it.
+One hop covers the case that would otherwise flatten a relation into a property; anything
+beyond it is OQL's job. Widening — more hops, quantifiers, path values in responses — is a
+deliberate future addition, never implied by the syntax. Deliberation:
+[adr/0019](adr/0019-inline-query-paths-over-declared-query-fields.md).
+
+**A path condition holds when at least one reachable value satisfies it.**
+Conditions are independent: two paths through one relation type may be satisfied by two
+different related entities, and they combine with each other and with plain filters by
+AND. Existential is the only quantifier, so an entity with no relation of the type simply
+does not match — as an entity lacking a property does not.
+
 **Validation collects every error before answering.**
-A rejected write names all offending fields at once, so a caller can correct in one round
-trip rather than discovering faults one at a time.
+A rejected write names all offending fields at once, and a rejected read all of its
+faulty filters, so a caller can correct in one round trip rather than discovering faults
+one at a time.
 
 **Writes validate against the lens; defaults come from the full schema.**
 A property a lens hides cannot be written through it, but a required property with a

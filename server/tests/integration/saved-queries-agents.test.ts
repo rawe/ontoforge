@@ -482,7 +482,7 @@ describe("modeling MCP tools", () => {
         lens_key: "test_lens",
         key: "mcp-agent",
         name: "X",
-        tools: ["get_document"],
+        tools: ["get_relation"],
       });
       expect(refused.isError).toBe(true);
       expect(text(refused)).toContain("Unknown tool(s)");

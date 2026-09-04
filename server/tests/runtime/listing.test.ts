@@ -252,8 +252,8 @@ describe("free-text search and filters", () => {
 
     const call = holder.store.listEntities.mock.calls[0]!;
     expect(call[2]).toEqual([
-      { key: "age", dataType: "integer", op: "gte", value: 30 },
-      { key: "name", dataType: "string", op: "eq", value: "Alice" },
+      { kind: "property", propertyKey: "age", dataType: "integer", op: "gte", value: 30 },
+      { kind: "property", propertyKey: "name", dataType: "string", op: "eq", value: "Alice" },
     ]);
   });
 
@@ -267,7 +267,7 @@ describe("free-text search and filters", () => {
     });
 
     expect(holder.store.listEntities.mock.calls[0]![2]).toEqual([
-      { key: "name", dataType: "string", op: "eq", value: "Bob" },
+      { kind: "property", propertyKey: "name", dataType: "string", op: "eq", value: "Bob" },
     ]);
   });
 

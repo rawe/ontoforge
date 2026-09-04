@@ -142,10 +142,11 @@ npm run test:integration:ai
 - Place in `tests/integration/` — plain suite, or `embedding/` / `ai/` when the test
   configures a live provider
 - Adapter-specific tests live in per-adapter folders beside the shared files —
-  `tests/integration/neo4j/`, `tests/integration/postgres/`,
-  `tests/integration/embedding/neo4j/`, and the adapter-internal unit folders
-  `tests/adapters/neo4j/` and `tests/adapters/postgres/` — gated so they skip when the
-  other backend is selected. The store-error and vector-drift tests among them
+  `tests/integration/neo4j/`, `tests/integration/postgres/` and
+  `tests/integration/embedding/neo4j/`, gated so they skip when the other backend is
+  selected, and the adapter-internal unit folders `tests/adapters/neo4j/` and
+  `tests/adapters/postgres/`, which mock the drivers and run under any backend. The
+  store-error and vector-drift tests among them
   deliberately reach past the persistence port: inducing a genuine driver failure means
   putting the database into a state the code never produces on its own.
 - The embedding and AI suites include availability checks that skip when their provider

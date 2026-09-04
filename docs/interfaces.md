@@ -87,6 +87,8 @@ Entity and relation list routes share one parameter vocabulary.
 | `order` | `asc` or `desc`, default `asc` |
 | `q` | Case-insensitive substring match across every `string` property in scope; entity lists only, and `document` properties are not searched |
 | `filter.<propertyKey>[__<op>]` | Property filter, repeatable |
+| `filter.<relationTypeKey>[:out\|:in].<propertyKey>[__<op>]` | Query path — filter by a property of the related entity; entity lists and semantic search, repeatable |
+| `filter.<relationTypeKey>[:out\|:in]@<propertyKey>[__<op>]` | Query path — filter by a property stored on the relation itself; entity lists and semantic search, repeatable |
 
 A list response carries `items`, `total`, `limit` and `offset`. `total` is the count
 before paging. String sorting follows the database's default collation.
@@ -106,10 +108,23 @@ Filter values arrive as text and are coerced to the property's declared data typ
 comparison; `__contains` is compared as text. Non-string values are matched against
 their text form — numbers as printed, booleans as `true`/`false`, datetimes as their
 ISO-8601 string. An unknown property key, an unknown operator
-suffix and an uncoercible value are each rejected. How a filter is evaluated, and the trap
-in the suffix rule, are in
+suffix and an uncoercible value are each rejected; a request carrying several faulty
+filters is rejected once, every fault under its own filter key in `details.fields`. How a
+filter is evaluated, and the trap in the suffix rule, are in
 [capabilities/instance-data.md](capabilities/instance-data.md#listing). Relation lists
 additionally accept `fromEntityId` and `toEntityId`.
+
+A filter key on an entity list, or on semantic search, may be a query path — `filter.works_for.name=Acme` for a
+property of the related entity, `filter.works_for@role=CTO` for a property stored on the
+relation itself — with the same operator suffixes and the value coerced by the final
+property. The direction follows the relation type's endpoints; a `:out` or `:in` marker
+on the relation segment must agree with it, and on a self-relation the marker is required
+(`filter.manages:out.name=Bob`). An entity matches when at least one relation of the type
+satisfies the condition, and every path fault is collected like a property fault; the
+rules are in
+[capabilities/instance-data.md](capabilities/instance-data.md#query-paths). `sort` rejects
+paths, and relation lists take none. The MCP `filters` object takes path keys as ordinary
+keys.
 
 Semantic search accepts filters through the same `filter.` syntax, but not all of them, and
 not on every request shape — the restrictions and their reasons are in
@@ -536,11 +551,14 @@ Everything a client can do to instance data through one lens.
 | `run_saved_query` | Execute a saved query with parameter values |
 | `search_saved_queries` | Find a saved query by describing what it should do |
 
-An agent configuration may grant exactly ten of them: `get_schema`, `list_entities`,
-`get_entity`, `list_relations`, `get_neighbors`, `semantic_search`, `execute_query`,
-`list_saved_queries`, `run_saved_query`, `search_saved_queries`. Every write tool is
-outside that set, and so are the read-only `get_document` and `get_relation` — being
-read-only is not sufficient to be grantable. See
+An agent configuration may grant twelve tools: `get_schema`, `list_entities`,
+`get_entity`, `get_document`, `list_relations`, `get_neighbors`, `semantic_search`,
+`search_documents`, `execute_query`, `list_saved_queries`, `run_saved_query`,
+`search_saved_queries`. Every write tool is outside that set, and so is the read-only
+`get_relation` — being read-only is not sufficient to be grantable. Eleven of the twelve
+are the tools above under the same names and the same arguments; `search_documents` is
+the one an agent has and MCP does not — it is `semantic_search` restricted to document
+passages, a tool of its own rather than an argument, chosen by name. See
 [capabilities/ai-agents.md](capabilities/ai-agents.md).
 
 `write_document` has no REST counterpart of its own: over REST both document edit forms

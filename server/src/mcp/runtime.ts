@@ -104,13 +104,31 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
     "list_entities",
     {
       description:
-        "List entities of a type with optional filtering, search, sorting, and " +
-        "pagination. Use 'search' for substring matching across all string properties. " +
+        "List entities of a type with optional filtering, search, sorting and pagination: " +
+        "'limit' (default 50) and 'offset' (items to skip); the response echoes total. Use " +
+        "'search' for case-insensitive substring matching across all string properties. " +
         "Use 'filters' for property-based filtering with operators: exact match " +
-        '("name": "Alice"), greater than ("age__gt": "25"), greater or equal ("__gte"), ' +
+        '("name": "Alice"), greater than ("age__gt": 25), greater or equal ("__gte"), ' +
         'less than ("__lt"), less or equal ("__lte"), contains ' +
-        "(\"name__contains\": \"ali\"). Use 'fields' to select which properties to " +
-        "include — only listed fields plus _id are returned. Omit for all fields.",
+        "(\"name__contains\": \"ali\"). A filter key may be a query path crossing one " +
+        "relation type to a property of the related entity, " +
+        "\"<relationTypeKey>.<propertyKey>\", or to a property stored on the relation " +
+        "itself, \"<relationTypeKey>@<propertyKey>\": listing persons with " +
+        '("works_for.name": "Acme") returns the persons employed by Acme, and with ' +
+        '("works_for@role": "CTO") the persons holding a CTO employment; operator ' +
+        'suffixes attach to a path key as to a plain one ("works_for@since__gte": ' +
+        '"2021-01-01"); the direction follows the relation type\'s endpoints, outgoing ' +
+        "from its source type and incoming from its target type; a \":out\"/\":in\" " +
+        "marker on the relation segment must agree with it and is required where both " +
+        'endpoints are the same type ("manages:out.name": "Bob" for the persons managing ' +
+        'a Bob, "manages:in.name": "Alice" for the persons managed by an Alice); an ' +
+        "entity matches when at least one relation of the type satisfies the condition. " +
+        "Several path conditions are ANDed, but each is checked on its own, so two paths " +
+        "through one relation type may be satisfied by two different relations: " +
+        '("works_for.name": "Acme", "works_for@role": "CTO") also returns a person who is ' +
+        "CTO at one company and a non-CTO at Acme. To bind both conditions to one " +
+        "relation use execute_query. Use 'fields' to select which properties to include " +
+        "— only listed fields plus _id are returned. Omit for all fields.",
       inputSchema: {
         entity_type_key: z.string(),
         search: z.string().optional(),
@@ -594,23 +612,33 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
     "semantic_search",
     {
       description:
-        "Search entity instances by semantic similarity to a natural language query. " +
-        "Returns entities ranked by relevance. " +
-        "entity_type_key is optional — omit it to search across all entity types " +
-        "at once (each result carries _entityTypeKey), or set it to search a " +
-        "single type. 'search_in' selects the ranking: 'entities' (entity " +
-        "embeddings), 'documents' (passage-level matches inside document " +
-        "properties), or 'all' (default — both, fused via reciprocal rank " +
-        "fusion). Every hit carries 'matchedVia': document hits include the " +
-        "property key, charOffset/charLength (usable with get_document), a " +
-        "~200-char snippet (disable with snippets=false), and the raw cosine " +
-        "'similarity'; entity hits carry only source and similarity. " +
-        "Use 'filters' for property-based filtering on results " +
-        "(requires entity_type_key): exact match " +
-        '("location": "Berlin"), operators ("age__gt": "25", "__gte", "__lt", ' +
-        '"__lte"). Use \'fields\' to select which entity properties to include — ' +
-        "only listed fields plus _id (and _entityTypeKey for cross-type search) " +
-        "are returned. Omit for all fields.",
+        "Search entities by semantic similarity to a natural language query; ranking has " +
+        "no similarity cutoff. Omit entity_type_key to search all types (each hit " +
+        "carries _entityTypeKey). 'search_in' " +
+        "selects the ranking: 'entities' (entity embeddings), 'documents' (passages inside " +
+        "document properties) or 'all' (default, both combined). 'limit' defaults to 10. " +
+        "Each hit carries 'matchedVia' with its source and cosine 'similarity', and " +
+        "'score': the similarity under one ranking, a rank-fusion value under 'all'. " +
+        "Document hits add propertyKey, charOffset/charLength (for " +
+        "get_document) and a ~200-char snippet (snippets=false omits it). 'filters' " +
+        "narrow the search before ranking, so the limit counts filtered hits; they " +
+        'require entity_type_key. Operators: exact match ("location": "Berlin"), greater ' +
+        'than ("age__gt": 25), "__gte", "__lt", "__lte"; "__contains" is rejected here. ' +
+        "A filter key may be a query path crossing one relation type: " +
+        "\"<relationTypeKey>.<propertyKey>\" reads a property of the related entity, " +
+        "\"<relationTypeKey>@<propertyKey>\" a property stored on the relation itself, " +
+        'operator suffixes included ("works_for.name": "Acme" for persons employed by ' +
+        'Acme, "works_for@since__gte": "2021-01-01" for an employment begun since 2021). ' +
+        "Direction follows the relation type's endpoints, outgoing from its source type " +
+        "and incoming from its target type; a \":out\"/\":in\" marker on the relation " +
+        "segment must agree with it and is required where both endpoints are the same " +
+        'type ("manages:out.name": "Bob" for persons managing a Bob, ' +
+        '"manages:in.name": "Alice" for persons managed by an Alice). An entity ' +
+        "matches when at least one relation of the type satisfies the condition; several " +
+        "path conditions are ANDed but each is checked on its own, so two paths through " +
+        "one relation type may be satisfied by two different relations; to bind both to " +
+        "one relation use execute_query. 'fields' selects the properties to return; _id " +
+        "(and _entityTypeKey on cross-type search) is always included.",
       inputSchema: {
         query: z.string(),
         entity_type_key: z.string().optional(),

@@ -26,6 +26,7 @@ import type { PropertyDef } from "../core/schemas.js";
 import { chunkDocument } from "./chunking.js";
 import { cpIndexOf, cpLength, cpSlice, countOccurrences } from "./codePoints.js";
 import { buildTextRepr } from "./embedding.js";
+import { isQueryPath, resolveQueryPath, type ResolvedQueryPath } from "./queryPaths.js";
 import {
   loadSchema,
   type EntityTypeDef,
@@ -262,21 +263,60 @@ const FILTER_OPERATORS: ReadonlySet<FilterOperator> = new Set([
   "contains",
 ]);
 
+/** One rejected filter key: the caller-facing message and the detail
+ * reported under `field` in `details.fields`. */
+interface FilterFault {
+  field: string;
+  message: string;
+  detail: string;
+}
+
+interface FilterParseOptions {
+  /** A surface that cannot evaluate substring containment rejects
+   * `__contains` with its own wording — one more collected fault, checked
+   * before the key's other faults so a lone rejection reads unchanged. */
+  rejectContains?: Omit<FilterFault, "field">;
+  /** The lens-scoped schema query paths are resolved against, `typeKey`
+   * being the listed entity type. Absent on the surfaces that take no
+   * paths, where a path key is one more collected fault. */
+  pathSchema?: SchemaCacheValue;
+  /** With no path schema, the fault a path key raises — for a surface
+   * that takes paths in principle but whose adapter declares no support.
+   * Absent, the surface is one paths never reach, and the fault says so. */
+  rejectPaths?: (path: string) => Omit<FilterFault, "field">;
+}
+
+/** The single rejection for a set of filter faults: every fault under its
+ * own field, the distinct messages joined — so a lone fault reads exactly
+ * as it always did. */
+function filterFaultsError(faults: FilterFault[]): ValidationError {
+  const fields: Record<string, string> = {};
+  for (const fault of faults) {
+    fields[fault.field] = fault.detail;
+  }
+  const messages = [...new Set(faults.map((fault) => fault.message))];
+  return new ValidationError(messages.join("; "), { fields });
+}
+
 /**
  * Parse a list-endpoint filter map into the conditions that cross the
  * port. The operator is the segment after the LAST double underscore —
  * so a property whose own key contains `__` cannot be filtered
- * (documented trap). The three faults — unknown property, uncoercible
- * value, unknown operator — raise `ValidationError`, checked in that
- * order; they are raised here, above the port, identically for every
- * backend. `contains` compares textually and skips type coercion.
+ * (documented trap). Each key yields at most one fault — unknown
+ * property, uncoercible value, unknown operator, checked in that order —
+ * reported under the filter key as sent; the faults of all keys are
+ * collected into one `ValidationError`, raised here, above the port,
+ * identically for every backend.
+ * `contains` compares textually and skips type coercion.
  */
 export function parseFilterConditions(
   filters: Record<string, string>,
   propertyDefs: Record<string, PropertyDef>,
   typeKey: string,
+  options: FilterParseOptions = {},
 ): FilterCondition[] {
   const conditions: FilterCondition[] = [];
+  const faults: FilterFault[] = [];
 
   for (const [filterExpr, rawValue] of Object.entries(filters)) {
     let propKey: string;
@@ -290,11 +330,41 @@ export function parseFilterConditions(
       opName = null;
     }
 
-    const propDef = propertyDefs[propKey];
+    if (opName === "contains" && options.rejectContains !== undefined) {
+      faults.push({ field: filterExpr, ...options.rejectContains });
+      continue;
+    }
+
+    let propDef: PropertyDef | undefined;
+    let path: ResolvedQueryPath | null = null;
+    if (isQueryPath(propKey)) {
+      if (options.pathSchema === undefined) {
+        const fault = options.rejectPaths?.(propKey) ?? {
+          message: `Query paths apply to entity lists only: '${propKey}'`,
+          detail:
+            `'${propKey}' is a query path; only a property key of '${typeKey}' ` +
+            "can be filtered here",
+        };
+        faults.push({ field: filterExpr, ...fault });
+        continue;
+      }
+      const resolved = resolveQueryPath(propKey, typeKey, options.pathSchema);
+      if (!("propertyDef" in resolved)) {
+        faults.push({ field: filterExpr, ...resolved });
+        continue;
+      }
+      path = resolved;
+      propDef = resolved.propertyDef;
+    } else {
+      propDef = propertyDefs[propKey];
+    }
     if (propDef === undefined) {
-      throw new ValidationError(`Unknown filter property: '${propKey}'`, {
-        fields: { [propKey]: `Not defined in type '${typeKey}'` },
+      faults.push({
+        field: filterExpr,
+        message: `Unknown filter property: '${propKey}'`,
+        detail: `Not defined in type '${typeKey}'`,
       });
+      continue;
     }
 
     let value: unknown;
@@ -308,9 +378,12 @@ export function parseFilterConditions(
       }
     } catch (error) {
       if (!(error instanceof CoercionError)) throw error;
-      throw new ValidationError(`Invalid filter value for '${propKey}'`, {
-        fields: { [propKey]: error.message },
+      faults.push({
+        field: filterExpr,
+        message: `Invalid filter value for '${propKey}'`,
+        detail: error.message,
       });
+      continue;
     }
 
     let op: FilterOperator;
@@ -319,14 +392,39 @@ export function parseFilterConditions(
     } else if (FILTER_OPERATORS.has(opName as FilterOperator)) {
       op = opName as FilterOperator;
     } else {
-      throw new ValidationError(`Unknown filter operator: '${opName}'`, {
-        fields: { [filterExpr]: `Unsupported operator '${opName}'` },
+      faults.push({
+        field: filterExpr,
+        message: `Unknown filter operator: '${opName}'`,
+        detail: `Unsupported operator '${opName}'`,
       });
+      continue;
     }
 
-    conditions.push({ key: propKey, dataType: propDef.dataType, op, value });
+    if (path !== null) {
+      conditions.push({
+        kind: "path",
+        relationTypeKey: path.relationTypeKey,
+        direction: path.direction,
+        propertySource: path.propertySource,
+        propertyKey: path.propertyKey,
+        dataType: propDef.dataType,
+        op,
+        value,
+      });
+    } else {
+      conditions.push({
+        kind: "property",
+        propertyKey: propKey,
+        dataType: propDef.dataType,
+        op,
+        value,
+      });
+    }
   }
 
+  if (faults.length > 0) {
+    throw filterFaultsError(faults);
+  }
   return conditions;
 }
 
@@ -349,6 +447,11 @@ export function validateSortField(
   }
   if (sort in propertyDefs) {
     return sort;
+  }
+  if (isQueryPath(sort)) {
+    throw new ValidationError("Sorting by query paths is not supported", {
+      fields: { sort: `'${sort}' is a query path; sorting by query paths is not supported` },
+    });
   }
   throw new ValidationError(`Invalid sort field: '${sort}'`, {
     fields: { sort: `'${sort}' is not a valid sort field` },
@@ -579,7 +682,9 @@ export async function listEntities(
     .map((p) => p.key);
 
   const sortField = validateSortField(sort, scopedEt.properties);
-  const conditions = parseFilterConditions(filters, scopedEt.properties, entityTypeKey);
+  const conditions = parseFilterConditions(filters, scopedEt.properties, entityTypeKey, {
+    pathSchema: loaded.scoped,
+  });
 
   const [rawItems, total] = await store.listEntities(
     entityTypeKey,
@@ -1392,6 +1497,14 @@ export async function getNeighbors(
 // ---------------------------------------------------------------------------
 
 const SEARCH_IN_VALUES = ["entities", "documents", "all"] as const;
+
+/** Substring containment cannot be evaluated inside a vector index. */
+const SEARCH_CONTAINS_REJECTION = {
+  message:
+    "The '__contains' filter is not supported on semantic search. " +
+    "Use exact match or range operators (=, __gt, __gte, __lt, __lte).",
+  detail: "Not supported on semantic search",
+};
 const RRF_K = 60;
 const SNIPPET_CHARS = 200;
 
@@ -1400,6 +1513,17 @@ export interface SemanticSearchOptions {
   fields?: string[] | null;
   searchIn?: string;
   snippets?: boolean;
+}
+
+/** The fault for a query path on semantic search when the active adapter
+ * declares no support for path conditions there (port contract rule 6). */
+function searchPathRejection(path: string): Omit<FilterFault, "field"> {
+  return {
+    message: `Query path '${path}' is not supported on semantic search by the active storage adapter`,
+    detail:
+      "Not supported on semantic search by the active storage adapter; " +
+      "filter by the query path on the entity list instead",
+  };
 }
 
 /**
@@ -1442,11 +1566,23 @@ export async function semanticSearch(
   const snippets = options.snippets ?? true;
 
   let scopedEt: EntityTypeDef | null = null;
+  let conditions: FilterCondition[] = [];
   if (entityTypeKey !== null) {
     scopedEt = loaded.scoped.entityTypes[entityTypeKey] ?? null;
     if (scopedEt === null) {
       throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
     }
+    // Parsed once, for every search scope, so a faulty filter is rejected
+    // before any index is consulted — every fault in one answer. Query
+    // paths resolve against the lens-scoped schema only where the adapter
+    // declares its semantic search evaluates them; elsewhere a path key
+    // is one more collected fault, rejected above the port.
+    conditions = parseFilterConditions(filters, scopedEt.properties, entityTypeKey, {
+      rejectContains: SEARCH_CONTAINS_REJECTION,
+      ...(store.supportsSemanticSearchPathConditions()
+        ? { pathSchema: loaded.scoped }
+        : { rejectPaths: searchPathRejection }),
+    });
   } else if (Object.keys(filters).length > 0) {
     const fieldErrors: Record<string, string> = {};
     for (const k of Object.keys(filters)) {
@@ -1456,18 +1592,6 @@ export async function semanticSearch(
       "Property filters require 'type' — filters are defined per entity type",
       { fields: fieldErrors },
     );
-  }
-
-  // Reject __contains — not supported by in-index WHERE (SEARCH clause).
-  // Use the entity list endpoint for substring filtering.
-  for (const filterKey of Object.keys(filters)) {
-    if (filterKey.endsWith("__contains")) {
-      throw new ValidationError(
-        "The '__contains' filter is not supported on semantic search. " +
-          "Use exact match or range operators (=, __gt, __gte, __lt, __lte).",
-        { fields: { [filterKey]: "Not supported on semantic search" } },
-      );
-    }
   }
 
   const queryEmbedding = await provider.embed(query);
@@ -1493,7 +1617,7 @@ export async function semanticSearch(
         queryEmbedding,
         limit,
         minScore,
-        filters,
+        conditions,
         store,
         fields,
       );
@@ -1508,7 +1632,7 @@ export async function semanticSearch(
       queryEmbedding,
       limit,
       minScore,
-      filters,
+      conditions,
       snippets,
       store,
       fields,
@@ -1545,12 +1669,10 @@ async function semanticSearchSingleType(
   queryEmbedding: number[],
   limit: number,
   minScore: number | null,
-  filters: Record<string, string>,
+  conditions: FilterCondition[],
   store: RuntimeStore,
   fields: string[] | null,
 ): Promise<Row[]> {
-  const conditions = parseFilterConditions(filters, scopedEt.properties, entityTypeKey);
-
   const results = await store.semanticSearch(
     entityTypeKey,
     scopedEt.properties,
@@ -1611,99 +1733,15 @@ async function semanticSearchAllTypes(
   return results;
 }
 
-/** Compare two coerced/stored values with a list-filter operator. Dates
- * cross the port as ISO strings and datetimes as JS `Date`s; both are
- * reduced to comparable primitives first. */
-function compareFilterValues(op: string, actual: unknown, expected: unknown): boolean {
-  let a = actual;
-  let b = expected;
-  if (a instanceof Date) a = a.getTime();
-  if (b instanceof Date) b = b.getTime();
-  if (typeof a !== typeof b) {
-    return false; // Values of different types never compare equal or ordered
-  }
-  switch (op) {
-    case "eq":
-      return a === b;
-    case "gt":
-      return (a as number | string) > (b as number | string);
-    case "gte":
-      return (a as number | string) >= (b as number | string);
-    case "lt":
-      return (a as number | string) < (b as number | string);
-    case "lte":
-      return (a as number | string) <= (b as number | string);
-    default:
-      return false;
-  }
-}
-
-const DOC_FILTER_OPERATORS = new Set(["gt", "gte", "lt", "lte"]);
-
-/**
- * Evaluate list-endpoint-style property filters against an entity in
- * process. Used for document-chunk hits, where filters cannot be applied
- * in-index. `__contains` is rejected upstream; supported operators mirror
- * the in-index ones (=, __gt, __gte, __lt, __lte).
- */
-export function entityMatchesFilters(
-  entity: Row,
-  filters: Record<string, string>,
-  propertyDefs: Record<string, PropertyDef>,
-  typeKey: string,
-): boolean {
-  for (const [filterExpr, rawValue] of Object.entries(filters)) {
-    let propKey: string;
-    let opName: string | null;
-    const splitAt = filterExpr.lastIndexOf("__");
-    if (splitAt >= 0) {
-      propKey = filterExpr.slice(0, splitAt);
-      opName = filterExpr.slice(splitAt + 2);
-    } else {
-      propKey = filterExpr;
-      opName = null;
-    }
-
-    const propDef = propertyDefs[propKey];
-    if (propDef === undefined) {
-      throw new ValidationError(`Unknown filter property: '${propKey}'`, {
-        fields: { [propKey]: `Not defined in type '${typeKey}'` },
-      });
-    }
-    if (opName !== null && !DOC_FILTER_OPERATORS.has(opName)) {
-      throw new ValidationError(`Unknown filter operator: '${opName}'`, {
-        fields: { [filterExpr]: `Unsupported operator '${opName}'` },
-      });
-    }
-
-    let expected: unknown;
-    try {
-      expected = coerceValue(rawValue, propDef.dataType, propKey);
-    } catch (error) {
-      if (!(error instanceof CoercionError)) throw error;
-      throw new ValidationError(`Invalid filter value for '${propKey}'`, {
-        fields: { [propKey]: error.message },
-      });
-    }
-
-    const actual = entity[propKey];
-    if (actual === null || actual === undefined) {
-      return false;
-    }
-    if (!compareFilterValues(opName ?? "eq", actual, expected)) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
 /**
  * Rank entities by their best-matching document chunk.
  *
  * Queries each in-scope (entity type, document property) virtual index,
  * merges chunk hits by raw score, and dedupes to parent entities — the
- * best chunk per entity wins and provides `matchedVia`.
+ * best chunk per entity wins and provides `matchedVia`. The parsed
+ * conditions — the same the entity ranking takes, plain and path alike —
+ * cross the port with each passage search, which applies them to the
+ * passage's parent entity as part of the search.
  */
 async function semanticSearchDocuments(
   loaded: LoadedSchema,
@@ -1711,7 +1749,7 @@ async function semanticSearchDocuments(
   queryEmbedding: number[],
   limit: number,
   minScore: number | null,
-  filters: Record<string, string>,
+  conditions: FilterCondition[],
   snippets: boolean,
   store: RuntimeStore,
   fields: string[] | null,
@@ -1738,7 +1776,13 @@ async function semanticSearchDocuments(
 
   const chunkHits: Row[] = [];
   for (const [tk, pk] of pairs) {
-    const hits = await store.searchDocumentChunks(tk, pk, queryEmbedding, limit);
+    const hits = await store.searchDocumentChunks(
+      tk,
+      pk,
+      queryEmbedding,
+      limit,
+      conditions.length > 0 ? conditions : null,
+    );
     chunkHits.push(...hits);
   }
 
@@ -1790,15 +1834,8 @@ async function semanticSearchDocuments(
     if (entity === undefined) {
       continue;
     }
-    const etKey = entity._entityTypeKey as string;
-    const scopedEt = loaded.scoped.entityTypes[etKey];
+    const scopedEt = loaded.scoped.entityTypes[entity._entityTypeKey as string];
     if (scopedEt === undefined) {
-      continue;
-    }
-    if (
-      Object.keys(filters).length > 0 &&
-      !entityMatchesFilters(entity, filters, scopedEt.properties, etKey)
-    ) {
       continue;
     }
 

@@ -73,7 +73,7 @@ contract tier only.
 
 ## What crosses the port
 
-Five rules govern the boundary itself. They hold for every operation without exception.
+Six rules govern the boundary itself. They hold for every operation without exception.
 
 **Only JSON-safe values cross.** Scalars, strings, booleans, numbers, lists, maps. No
 driver objects, no cursors, no result handles, no lazily-evaluated streams. An operation
@@ -89,8 +89,14 @@ there one deviation exists — PostgreSQL-specific: datetime values return as th
 ISO text, whose wire serialization is byte-identical.
 
 **Filters, sorts and searches cross as structured values, never as query text.** A filter
-is a list of parsed conditions — property key, declared data type, operator, and the value
-already coerced to that type; a sort is a property key plus a direction; a text search is
+is a list of parsed conditions, each tagged with its kind. The property condition carries
+a property key, its declared data type, an operator, and the value already coerced to
+that type. The path condition carries a relation type key, an explicit direction —
+outgoing or incoming — the source of the final property (the related entity, or the
+relation itself), the final property key, its data type, an operator and the coerced
+value; the service resolves the path above the port, so an adapter receives only valid,
+fully resolved conditions and never a key to interpret. A sort is a property key plus a
+direction; a text search is
 a string plus the list of property keys to match it against. No fragment of any query
 language enters or leaves the port. The one exception is the validated query object,
 described below, which is opaque rather than textual.
@@ -106,6 +112,14 @@ or an absent value, and a failed delete is a false return. See the error table i
 type keys and one for relation type keys. They are returned as schema-level keys, never
 as physical names, so the modeling service can reject a colliding key without knowing what
 it would collide with. An adapter with no collisions returns two empty sets.
+
+**An adapter declares whether its semantic search evaluates path conditions.** One plain
+flag on the runtime store, in the same spirit as the reserved keys: the constraint is the
+adapter's, the enforcement point is shared. The runtime service reads it before any search
+runs. On an adapter declaring support, a query path on semantic search resolves exactly
+as on the entity list and crosses the port as a path condition with both rankings; on one
+declaring none, it is rejected above the port as a validation error naming the entity
+list as the alternative, and no search ever receives a path condition.
 
 One further caution, because it is invisible from the signatures: the port carries a
 discriminator distinguishing an entity type from a relation type — as the owner of a
@@ -266,12 +280,14 @@ the port.
 | Kind | Input | Returns |
 |---|---|---|
 | Entities | A query vector, and either one entity type key with its scoped property definitions and optional filter conditions, or nothing — meaning all of the ontology's types at once | Entities with scores |
-| Document chunks | A query vector, an entity type key and a document property key | Chunks with scores |
+| Document chunks | A query vector, an entity type key, a document property key and optional filter conditions | Chunks with scores |
 | Saved queries | A query vector and a lens key | Saved-query summaries with scores |
 
-The per-type entity search accepts the same parsed filter conditions that listing does and
-must apply them as part of the search, not after it, so that the limit counts filtered hits.
-Cross-type entity search takes no filter; narrowing to a lens happens above the port —
+The per-type entity search and the document-chunk search accept the same parsed filter
+conditions that listing does and must apply them as part of the search, not after it, so
+that the limit counts filtered hits — a chunk's conditions are evaluated on its parent
+entity, so a page holds chunks whose parent passes. A path condition reaches either search
+only where the adapter declares support (above). Cross-type entity search takes no filter; narrowing to a lens happens above the port —
 but never crosses the binding: through a bound store, "all types" means all of that
 ontology's types, and another ontology's better-matching entity must never appear.
 Saved-query search is always narrowed to a single lens.
@@ -337,21 +353,29 @@ report must describe the index the way the API does — by entity type, by docum
 or by search scope — and never by its physical name.
 
 **Building predicates from structured filters.** Filters arrive as parsed conditions, and
-the adapter must turn every condition into a predicate the database can evaluate. The
+the adapter, dispatching on each condition's kind, must turn every condition into a
+predicate the database can evaluate. The
 operator vocabulary is fixed by the caller-facing surface, not by the adapter, and is
 enumerated once in [interfaces.md](interfaces.md#listing-sorting-filtering); an adapter
-supports all of it and invents none of it. Validation happens above the port: the three
-filter faults — an unknown property, an unknown operator, a value that will not coerce —
-are raised there as domain validation errors, identically on every backend, so the adapter
-receives only valid conditions and raises no filter validation error of its own. Each
-condition's value is already coerced to the property's declared data type; the substring
-operator is the exception, comparing case-insensitively on the string form of both sides
-and carrying that string form as its value. One fault remains the adapter's to raise, as a
+supports all of it and invents none of it. Validation happens above the port: every filter
+fault — an unknown property, an unknown operator, a value that will not coerce, a query
+path that does not resolve — is collected there into one domain validation error,
+identically on every backend, so the adapter receives only valid conditions and raises no
+filter validation error of its own. Each condition's value is already coerced to the
+property's declared data type; the substring operator is the exception, comparing
+case-insensitively on the string form of both sides and carrying that string form as its
+value. A path condition's predicate is existential and self-contained: it holds when at
+least one relation of the type — leaving the listed instance for the outgoing direction,
+arriving at it for the incoming one — satisfies the comparison, evaluated per condition:
+on the related entity's property when the property source is the related entity, on the
+relation's own property when the source is the relation, in which case the related
+entity is never read. One fault remains the adapter's to raise, as a
 domain validation error and not a storage error — Neo4j-specific, raised on the write path
 through the write-value constraint above: an indexed value exceeding the 32766-byte
 ceiling, in an error naming the property. Every value must reach the database as a bound
-parameter. Type keys and property keys may be interpolated into generated query text —
-they originate from the stored schema, never from request input — but values never may.
+parameter. Type keys, relation type keys and property keys may be interpolated into
+generated query text — they originate from the stored schema, never from request input —
+but values never may.
 
 **Compiling a validated query.** The adapter turns the validated query into its native
 dialect and runs it read-only. How it compiles is its own business — rewriting tokens in
@@ -425,6 +449,14 @@ multi-ontology conformance tier runs on PostgreSQL only.
 - **String sort order.** PostgreSQL sorts strings by the database's default collation,
   dictionary-style, as the documented behaviour states; Neo4j sorts by Unicode code
   points, capitals before lowercase.
+- **Path conditions on semantic search.** PostgreSQL declares support and evaluates them
+  in both rankings; Neo4j declares none, so a query path on semantic search is rejected
+  above the port with a validation error naming the entity list — where paths work on
+  both adapters.
+- **Filtered passage pages.** PostgreSQL applies filter conditions inside the passage
+  search, on the parent entity under the iterative scan, so a page holds the requested
+  number of matching passages; Neo4j applies them after its index lookup, so a filtered
+  passage page may come back short.
 - **Vector-index removal on drop.** On PostgreSQL, a dropped entity type's or document
   property's vector index survives as an orphan until the next ensure-all pass sweeps it;
   on Neo4j the drop removes it immediately.
@@ -557,7 +589,12 @@ Five B-tree indexes back the hot paths: entity rows by type key; relation rows b
 key, by source entity and by target entity; chunk rows by owning entity and property
 key. Filters, sorts and text search evaluate jsonb expressions that cast a property to
 its declared data type; property keys and values are both bound parameters, never SQL
-text.
+text. A path condition is an existential subquery over the relation table — anchored on
+the listed row's id at the near endpoint column, joined to the related row at the far
+one, the relation type key bound like a property key — with the comparison evaluated on
+the related row's properties; the endpoint indexes serve it. For a property of the
+relation itself the subquery joins no entity row: the comparison is evaluated on the
+relation row's own properties.
 
 ## Index inventory
 
@@ -588,8 +625,12 @@ Search behaviour: the similarity returned is `1 − cosine_distance / 2` — alg
 identical to the Neo4j adapter's cosine index score, the same 0-to-1 scale, pinned by a
 fixed-vector conformance case. Every vector query runs as a strict-order iterative scan,
 so a result limit counts rows that passed the filters, delivered in exact distance
-order. A minimum score is applied after the limit, so a page may shrink — including when
-the iterative scan gives up at its tuple cap.
+order. The passage search evaluates its filter conditions on the parent entity inside the
+statement — a semi-join from the chunk row to its `entity` row, carrying the same
+predicate fragments the entity ranking carries, path conditions included — so the
+iterative scan refills a filtered page with passages whose parent passes. A minimum score
+is applied after the limit, so a page may shrink — including when the iterative scan
+gives up at its tuple cap.
 
 ## Engine constraints worth knowing
 
@@ -682,7 +723,10 @@ counterparts, and a document property to a string.
 Relations are native relationships rather than intermediate nodes. That choice buys
 natural traversal patterns, the engine's optimised relationship storage, and compatibility
 with its graph algorithms and visualization tooling — at the cost noted under engine
-constraints below.
+constraints below. A path condition is an existential pattern predicate: one relationship
+of the type from the listed node, in the resolved direction, to the related node, with the
+comparison on that node's properties — or, for a property of the relation itself, on the
+relationship's properties, the related node left anonymous.
 
 Chunks are separate nodes rather than a nested structure, because each needs its own
 vector and its own place in a vector index. Deleting an entity removes its chunk nodes in
@@ -731,6 +775,13 @@ property values are exempt — they are never part of an entity's embedding or i
 metadata. The same mechanism is why a saved query carries its owning lens key as a
 node property: the vector index can filter on node properties but not across
 relationships, so the key is denormalized onto the node.
+
+**The in-index filter sees the indexed node alone.** A vector search's WHERE can name
+properties of the node being searched and nothing beyond it — no pattern, no neighbouring
+node. Path conditions on semantic search are therefore declared unsupported and rejected
+above the port; the entity list evaluates them as a graph traversal. A plain filter on the
+passage search is applied after the index lookup, by matching the chunk's parent entity
+and evaluating the conditions on it, so a filtered passage page may come back short.
 
 **Community Edition has no relationship property indexes.** Looking up a relation by its
 id therefore scans the relationships of that type. Acceptable at expected volumes; a

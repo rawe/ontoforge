@@ -13,7 +13,7 @@ import {
   buildFilterClauses,
   buildSearchClause,
 } from "../../../src/adapters/neo4j/filters.js";
-import { cond } from "../../propertyDefs.js";
+import { cond, pathCond } from "../../propertyDefs.js";
 
 describe("clause construction", () => {
   it("eq binds the value — never interpolated", () => {
@@ -88,5 +88,63 @@ describe("free-text search clause", () => {
         "toLower(toString(n.email)) CONTAINS toLower($q_search))",
     );
     expect(params).toEqual({ q_search: "ali" });
+  });
+});
+
+describe("path conditions — an existential pattern predicate", () => {
+  it("outgoing: the listed node is the relationship's start, the related node its end", () => {
+    const [clauses, params] = buildFilterClauses([
+      pathCond("works_for", "outgoing", "name", "string", "eq", "Acme"),
+    ]);
+    expect(clauses).toEqual(["EXISTS { MATCH (n)-[:WORKS_FOR]->(re) WHERE re.name = $flt_0 }"]);
+    expect(params).toEqual({ flt_0: "Acme" });
+  });
+
+  it("incoming: the listed node is the relationship's end, the value converted by the final property's type", () => {
+    const [clauses, params] = buildFilterClauses([
+      pathCond("works_for", "incoming", "age", "integer", "gt", 30),
+    ]);
+    expect(clauses).toEqual(["EXISTS { MATCH (n)<-[:WORKS_FOR]-(re) WHERE re.age > $flt_0 }"]);
+    expect(neo4j.isInt(params.flt_0)).toBe(true);
+  });
+
+  it("contains compares the related node's lowered text form", () => {
+    const [clauses, params] = buildFilterClauses([
+      pathCond("works_for", "outgoing", "name", "string", "contains", "ac"),
+    ]);
+    expect(clauses).toEqual([
+      "EXISTS { MATCH (n)-[:WORKS_FOR]->(re) WHERE toLower(toString(re.name)) CONTAINS toLower($flt_0) }",
+    ]);
+    expect(params).toEqual({ flt_0: "ac" });
+  });
+
+  it("path and property conditions compose with distinct parameters", () => {
+    const [clauses, params] = buildFilterClauses([
+      cond("age", "integer", "gte", 18),
+      pathCond("works_for", "outgoing", "name", "string", "eq", "Acme"),
+    ]);
+    expect(clauses).toEqual([
+      "n.age >= $flt_0",
+      "EXISTS { MATCH (n)-[:WORKS_FOR]->(re) WHERE re.name = $flt_1 }",
+    ]);
+    expect(Object.keys(params)).toEqual(["flt_0", "flt_1"]);
+  });
+});
+
+describe("relation-property path conditions — the predicate reads the relationship's property", () => {
+  it("outgoing: the related node stays anonymous", () => {
+    const [clauses, params] = buildFilterClauses([
+      pathCond("works_for", "outgoing", "role", "string", "eq", "CTO", "relation"),
+    ]);
+    expect(clauses).toEqual(["EXISTS { MATCH (n)-[r:WORKS_FOR]->() WHERE r.role = $flt_0 }"]);
+    expect(params).toEqual({ flt_0: "CTO" });
+  });
+
+  it("incoming: the value converted by the relation property's type", () => {
+    const [clauses, params] = buildFilterClauses([
+      pathCond("works_for", "incoming", "since", "date", "lt", "2025-01-01", "relation"),
+    ]);
+    expect(clauses).toEqual(["EXISTS { MATCH (n)<-[r:WORKS_FOR]-() WHERE r.since < $flt_0 }"]);
+    expect(neo4j.isDate(params.flt_0)).toBe(true);
   });
 });

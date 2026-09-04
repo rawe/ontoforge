@@ -5,7 +5,7 @@
  * `semantic-search.test.ts`.
  */
 
-import type { Driver } from "neo4j-driver";
+import neo4j, { type Driver } from "neo4j-driver";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import { Neo4jRuntimeStore } from "../../src/adapters/neo4j/runtimeStore.js";
@@ -268,25 +268,39 @@ describe("searchIn=documents", () => {
     expect(mockedSearchChunks).not.toHaveBeenCalled();
   });
 
-  it("applies property filters to resolved parents", async () => {
+  it("hands property filters to the passage search below the port, nothing matched in process", async () => {
     mockedSearchChunks.mockImplementation(
       async (_s: unknown, _l: string, indexName: string) =>
-        indexName === "person_document_bio_embedding"
-          ? [chunkHit("e1", 0.9), chunkHit("e2", 0.8)]
-          : [],
+        indexName === "person_document_bio_embedding" ? [chunkHit("e1", 0.9)] : [],
     );
-    mockedGetByIds.mockResolvedValue({
-      e1: person("e1", "Ada", { age: 30 }),
-      e2: person("e2", "Grace", { age: 20 }),
-    });
+    mockedGetByIds.mockResolvedValue({ e1: person("e1", "Ada", { age: 30 }) });
 
     const result = await semanticSearch("test", "q", "person", 10, null, store, {
       filters: { age__gt: "25" },
       searchIn: "documents",
     });
 
+    // The parsed condition crossed the port as a WHERE on the parent
+    // node, the limit unchanged — the adapter applies it in the search.
+    const calls = mockedSearchChunks.mock.calls.filter(
+      (c) => c[2] === "person_document_bio_embedding",
+    );
+    expect(calls).toHaveLength(1);
+    const [, , , , limit, whereClauses, filterParams] = calls[0]!;
+    expect(limit).toBe(10);
+    expect(whereClauses).toEqual(["n.age > $flt_0"]);
+    expect(neo4j.isInt((filterParams as Row).flt_0)).toBe(true);
+    expect(((filterParams as Row).flt_0 as { toNumber(): number }).toNumber()).toBe(25);
     expect(result.total).toBe(1);
-    expect(((result.results as Row[])[0]!.entity as Row)._id).toBe("e1");
+  });
+
+  it("without filters the passage search receives no clauses", async () => {
+    await semanticSearch("test", "q", "person", 10, null, store, { searchIn: "documents" });
+
+    for (const call of mockedSearchChunks.mock.calls) {
+      expect(call[5]).toBeNull();
+      expect(call[6]).toBeNull();
+    }
   });
 });
 

@@ -1,8 +1,9 @@
 /**
  * Integration fixture, built through the registry and modeling APIs: one
- * ontology (`test_ont`) holding person/company/works_for, an unscoped
- * lens `test_lens`, and a scoped lens `hr_view` (person narrowed to
- * name+email, company whole, works_for included).
+ * ontology (`test_ont`) holding person/company/works_for plus the
+ * self-relation manages (person to person, carrying `since`), an
+ * unscoped lens `test_lens`, and a scoped lens `hr_view` (person narrowed
+ * to name+email, company whole, works_for included, manages not).
  *
  * The MCP mounts, like REST, name their ontology in the URL — files
  * that hit them bind to `test_ont`.
@@ -94,6 +95,20 @@ export async function buildFixture(app: FastifyInstance): Promise<FixtureIds> {
   ]) {
     await post(app, `${model}/relation-types/${worksForId}/properties`, prop);
   }
+
+  const manages = await post(app, `${model}/relation-types`, {
+    key: "manages",
+    displayName: "Manages",
+    description: "Line management, person to person",
+    sourceEntityTypeKey: "person",
+    targetEntityTypeKey: "person",
+  });
+  await post(app, `${model}/relation-types/${manages.relationTypeId as string}/properties`, {
+    key: "since",
+    displayName: "Since",
+    dataType: "date",
+    required: false,
+  });
 
   const testLens = await post(app, `${model}/lenses`, {
     key: "test_lens",

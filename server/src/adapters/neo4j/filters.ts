@@ -9,14 +9,19 @@
  * Validation happens above the port: the service parses, checks, and
  * coerces every filter, so what arrives here is valid by construction
  * and the builder is pure fragment assembly. VALUES are always bound
- * parameters; the only interpolated identifiers are property keys taken
- * from the STORED schema via the parsed conditions, never from raw
- * request input.
+ * parameters; the only interpolated identifiers are property keys and
+ * relation type keys taken from the STORED schema via the parsed
+ * conditions, never from raw request input.
  */
 
 import neo4j from "neo4j-driver";
 
-import type { FilterCondition } from "../../core/ports.js";
+import type {
+  FilterCondition,
+  PathFilterCondition,
+  PropertyFilterCondition,
+} from "../../core/ports.js";
+import { toUpperSnakeCase } from "./ddl.js";
 import { toNeo4jDate, toNeo4jDateTime } from "./temporal.js";
 
 const OPERATORS: Record<string, string> = {
@@ -44,7 +49,8 @@ export function toNeo4jParameter(value: unknown, dataType: string): unknown {
   }
 }
 
-/** Build WHERE fragments and parameters from parsed filter conditions. */
+/** Build WHERE fragments and parameters from parsed filter conditions —
+ * one fragment per condition, dispatched on its kind. */
 export function buildFilterClauses(
   conditions: FilterCondition[],
   nodeAlias = "n",
@@ -54,23 +60,78 @@ export function buildFilterClauses(
 
   for (const condition of conditions) {
     const paramName = `flt_${Object.keys(params).length}`;
-
-    if (condition.op === "contains") {
-      // Substring comparison is textual — the parsed value is already the
-      // string form and crosses untouched.
-      whereClauses.push(
-        `toLower(toString(${nodeAlias}.${condition.key})) CONTAINS toLower($${paramName})`,
-      );
-      params[paramName] = condition.value;
-    } else {
-      whereClauses.push(
-        `${nodeAlias}.${condition.key} ${OPERATORS[condition.op]} $${paramName}`,
-      );
-      params[paramName] = toNeo4jParameter(condition.value, condition.dataType);
+    switch (condition.kind) {
+      case "property": {
+        const [clause, value] = buildPropertyClause(condition, nodeAlias, paramName);
+        whereClauses.push(clause);
+        params[paramName] = value;
+        break;
+      }
+      case "path": {
+        const [clause, value] = buildPathClause(condition, nodeAlias, paramName);
+        whereClauses.push(clause);
+        params[paramName] = value;
+        break;
+      }
+      default: {
+        const unhandled: never = condition;
+        throw new Error(`Unhandled filter condition kind: ${String(unhandled)}`);
+      }
     }
   }
 
   return [whereClauses, params];
+}
+
+/**
+ * The existential pattern predicate for one path condition: from the
+ * listed node, one relationship of the type in the resolved direction.
+ * For a property of the related entity the pattern binds the related
+ * node `re` and the comparison is on it; for a property of the relation
+ * itself the pattern binds the relationship `r`, the related node stays
+ * anonymous, and the comparison is on the relationship. Self-contained
+ * per condition, so two paths through one relation type may be satisfied
+ * by two different relationships. The relationship type is the stored
+ * relation type key's physical form. The names `r` and `re` are fixed:
+ * path conditions reach only entity lists, whose outer query binds `n`
+ * alone, so nothing they could shadow is in scope.
+ */
+function buildPathClause(
+  condition: PathFilterCondition,
+  alias: string,
+  paramName: string,
+): [string, unknown] {
+  const onRelation = condition.propertySource === "relation";
+  const [predicate, value] = buildPropertyClause(condition, onRelation ? "r" : "re", paramName);
+  const relationship = `[${onRelation ? "r" : ""}:${toUpperSnakeCase(condition.relationTypeKey)}]`;
+  const related = onRelation ? "()" : "(re)";
+  const pattern =
+    condition.direction === "outgoing"
+      ? `(${alias})-${relationship}->${related}`
+      : `(${alias})<-${relationship}-${related}`;
+  return [`EXISTS { MATCH ${pattern} WHERE ${predicate} }`, value];
+}
+
+/** The fragment for one property condition on the aliased node or
+ * relationship, plus the value to bind under `paramName`. Substring
+ * comparison is textual — the parsed value is already the string form
+ * and crosses untouched; every other value is converted to its
+ * driver-native form. */
+function buildPropertyClause(
+  condition: Pick<PropertyFilterCondition, "propertyKey" | "dataType" | "op" | "value">,
+  alias: string,
+  paramName: string,
+): [string, unknown] {
+  if (condition.op === "contains") {
+    return [
+      `toLower(toString(${alias}.${condition.propertyKey})) CONTAINS toLower($${paramName})`,
+      condition.value,
+    ];
+  }
+  return [
+    `${alias}.${condition.propertyKey} ${OPERATORS[condition.op]} $${paramName}`,
+    toNeo4jParameter(condition.value, condition.dataType),
+  ];
 }
 
 /** The case-insensitive substring search clause over string properties. */

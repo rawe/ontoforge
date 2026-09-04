@@ -13,6 +13,7 @@ import { NotFoundError, ValidationError } from "../../src/core/exceptions.js";
 import type { RuntimeStore } from "../../src/core/ports.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { semanticSearch } from "../../src/runtime/service.js";
+import { asRuntimeStore, createMockRuntimeStore, makeUnscopedSchema } from "./helpers.js";
 
 vi.mock("../../src/adapters/neo4j/runtimeQueries.js", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
@@ -329,5 +330,149 @@ describe("cross-type search (no entity type)", () => {
     expect(result.total).toBe(0);
     expect(mockedSemanticSearch).not.toHaveBeenCalled();
     expect(mockedSearchChunks).not.toHaveBeenCalled();
+  });
+});
+
+describe("filter faults are collected on semantic search", () => {
+  it("every faulty key, including __contains, is rejected once under its own key", async () => {
+    setEmbeddingProvider(provider());
+    const error = await semanticSearch("test", "query", "person", 10, null, store, {
+      filters: { nonexistent: "v", age: "abc", name__contains: "Ali", age__between: "1" },
+    }).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ValidationError);
+    expect((error as ValidationError).details).toEqual({
+      fields: {
+        nonexistent: "Not defined in type 'person'",
+        age: expect.stringContaining("Expected integer"),
+        name__contains: "Not supported on semantic search",
+        age__between: "Unsupported operator 'between'",
+      },
+    });
+    expect(mockedSemanticSearch).not.toHaveBeenCalled();
+  });
+
+  it("a lone __contains keeps its message and its field", async () => {
+    setEmbeddingProvider(provider());
+    const error = await semanticSearch("test", "query", "person", 10, null, store, {
+      filters: { name__contains: "Ali" },
+    }).catch((e: unknown) => e);
+
+    expect((error as ValidationError).message).toBe(
+      "The '__contains' filter is not supported on semantic search. " +
+        "Use exact match or range operators (=, __gt, __gte, __lt, __lte).",
+    );
+    expect((error as ValidationError).details).toEqual({
+      fields: { name__contains: "Not supported on semantic search" },
+    });
+  });
+
+  it("a passage-only search is rejected up front, not per hit", async () => {
+    setEmbeddingProvider(provider());
+    await expect(
+      semanticSearch("test", "query", "person", 10, null, store, {
+        searchIn: "documents",
+        filters: { nonexistent: "v" },
+      }),
+    ).rejects.toThrow(/Unknown filter property/);
+  });
+});
+
+describe("the adapter declares whether semantic search supports path conditions", () => {
+  /** The unscoped fixture (person -works_for-> company) with a document
+   * property on person, so both rankings run. */
+  function schemaWithDocument(): Row {
+    const schema = makeUnscopedSchema();
+    (schema.entityTypes as Row[])[0]!.properties = [
+      ...((schema.entityTypes as Row[])[0]!.properties as Row[]),
+      { key: "bio", displayName: "Bio", dataType: "document", required: false, defaultValue: null },
+    ];
+    return schema;
+  }
+
+  it("an adapter declaring none rejects a path filter above the port, naming the entity list", async () => {
+    setEmbeddingProvider(provider());
+    // The Neo4j store declares no support.
+    const error = await semanticSearch("test", "query", "person", 10, null, store, {
+      filters: { "works_for.name": "Acme" },
+    }).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ValidationError);
+    expect((error as ValidationError).message).toBe(
+      "Query path 'works_for.name' is not supported on semantic search by the active storage adapter",
+    );
+    expect((error as ValidationError).details).toEqual({
+      fields: {
+        "works_for.name":
+          "Not supported on semantic search by the active storage adapter; " +
+          "filter by the query path on the entity list instead",
+      },
+    });
+    expect(mockedSemanticSearch).not.toHaveBeenCalled();
+    expect(mockedSearchChunks).not.toHaveBeenCalled();
+  });
+
+  it("the rejection is collected with the other filter faults", async () => {
+    setEmbeddingProvider(provider());
+    const error = await semanticSearch("test", "query", "person", 10, null, store, {
+      filters: { "works_for@role": "CTO", age: "abc", name__contains: "Ali" },
+    }).catch((e: unknown) => e);
+
+    expect((error as ValidationError).details).toEqual({
+      fields: {
+        "works_for@role":
+          "Not supported on semantic search by the active storage adapter; " +
+          "filter by the query path on the entity list instead",
+        age: expect.stringContaining("Expected integer"),
+        name__contains: "Not supported on semantic search",
+      },
+    });
+  });
+
+  it("an adapter declaring support receives the resolved path condition in both rankings", async () => {
+    setEmbeddingProvider(provider());
+    const mock = createMockRuntimeStore();
+    mock.supportsSemanticSearchPathConditions.mockReturnValue(true);
+    mock.getFullSchema.mockResolvedValue(schemaWithDocument());
+
+    await semanticSearch("full_lens", "query", "person", 10, null, asRuntimeStore(mock), {
+      filters: { "works_for.name": "Acme", age__gt: "25" },
+    });
+
+    const expected = [
+      {
+        kind: "path",
+        relationTypeKey: "works_for",
+        direction: "outgoing",
+        propertySource: "relatedEntity",
+        propertyKey: "name",
+        dataType: "string",
+        op: "eq",
+        value: "Acme",
+      },
+      { kind: "property", propertyKey: "age", dataType: "integer", op: "gt", value: 25 },
+    ];
+    expect(mock.semanticSearch).toHaveBeenCalledTimes(1);
+    expect(mock.semanticSearch.mock.calls[0]![5]).toEqual(expected);
+    expect(mock.searchDocumentChunks).toHaveBeenCalledTimes(1);
+    expect(mock.searchDocumentChunks.mock.calls[0]!.slice(0, 2)).toEqual(["person", "bio"]);
+    expect(mock.searchDocumentChunks.mock.calls[0]![3]).toBe(10);
+    expect(mock.searchDocumentChunks.mock.calls[0]![4]).toEqual(expected);
+  });
+
+  it("with support declared, a path that does not resolve is the ordinary resolution fault", async () => {
+    setEmbeddingProvider(provider());
+    const mock = createMockRuntimeStore();
+    mock.supportsSemanticSearchPathConditions.mockReturnValue(true);
+    mock.getFullSchema.mockResolvedValue(schemaWithDocument());
+
+    const error = await semanticSearch("full_lens", "query", "person", 10, null, asRuntimeStore(mock), {
+      filters: { "ghost.name": "Acme" },
+    }).catch((e: unknown) => e);
+
+    expect((error as ValidationError).message).toBe(
+      "Unknown filter property or relation type: 'ghost'",
+    );
+    expect(mock.semanticSearch).not.toHaveBeenCalled();
   });
 });

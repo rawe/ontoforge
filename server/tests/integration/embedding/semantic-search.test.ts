@@ -184,6 +184,24 @@ describe.skipIf(!ollamaUp)("semantic search (Ollama)", () => {
     expect(typeKeys.has("company")).toBe(true);
   });
 
+  it("several faulty filters, the substring one included, are rejected once", async () => {
+    await buildSearchFixture();
+    const res = await app.inject({
+      method: "GET",
+      url:
+        "/api/ontologies/test_ont/runtime/lenses/search_test/search/semantic?q=anything&type=person" +
+        "&filter.ghost=1&filter.age=abc&filter.name__contains=Ali&filter.age__between=1",
+    });
+    expect(res.statusCode).toBe(422);
+    const body = res.json() as { error: { details: { fields: Record<string, string> } } };
+    expect(body.error.details.fields).toEqual({
+      ghost: "Not defined in type 'person'",
+      age: expect.stringContaining("Expected integer"),
+      name__contains: "Not supported on semantic search",
+      age__between: "Unsupported operator 'between'",
+    });
+  });
+
   it("cross-type search rejects property filters", async () => {
     await buildSearchFixture();
     const res = await app.inject({

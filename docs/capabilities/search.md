@@ -31,11 +31,13 @@ reachable only through semantic retrieval and through document reads
 
 Property filters are the exact half of the same surface, available on both entity and
 relation lists; the operators they offer are listed in
-[../interfaces.md](../interfaces.md#listing-sorting-filtering). Every filter names a
-property that must exist in the scoped property set of the type being listed, and its value
-must coerce to that property's data type; either failure is a validation error naming the
-property. Relation lists take property filters and endpoint constraints but no free-text
-term.
+[../interfaces.md](../interfaces.md#listing-sorting-filtering). A filter names a property
+in the scoped property set of the type being listed or — on an entity list — a query path
+to a property reached through one relation type
+([instance-data.md](instance-data.md#query-paths)); its value must coerce to the final
+property's data type, and every fault is collected into one validation error, reported
+under the filter key as sent. Relation lists take property filters and endpoint
+constraints but no free-text term and no query paths.
 
 ## Semantic retrieval
 
@@ -136,10 +138,22 @@ exist. This is a known limit of cross-type search, not an error condition.
   are per entity type and a filter key means nothing without one.
 - **Substring containment is rejected.** Equality and the ordered
   comparisons are supported; for substring filtering, use the entity list operation.
-- Everything else matches the list operation's filter syntax, including validation against
-  the scoped property set and coercion to the declared data type.
-- Document hits are filtered after their parent entities have been resolved, against the
-  same filter set and the same operators, so both scopes honour the same constraints.
+- **Query paths are accepted**, in both forms and both directions, under the rules of the
+  entity list ([instance-data.md](instance-data.md#query-paths)): `filter.works_for.name=Acme`
+  narrows a search over persons to the persons employed by Acme,
+  `filter.works_for@role=CTO` to those holding a CTO employment. Whether semantic search
+  evaluates path conditions is declared by the storage adapter and enforced by the server:
+  on an adapter declaring none, a path filter is rejected as a validation error naming the
+  entity list as the alternative
+  ([../storage-adapters.md](../storage-adapters.md#what-crosses-the-port)).
+- Everything else matches the entity list operation's filter syntax, including resolution
+  against the lens-scoped schema, coercion to the declared data type, and the collection
+  of every fault — the substring and path rejections among them — into one answer.
+- **Every filter narrows both rankings, and the limit counts filtered hits.** Filters are
+  applied inside the search, never to its results: on the default deployment the passage
+  search joins each passage to its parent entity and evaluates the same conditions the
+  entity ranking evaluates, so a page is filled with matching hits and a filter never
+  shrinks it.
 
 Result entities are filtered to the lens's properties and document properties appear as
 stubs, exactly as on any other read. Stored vectors never appear in a response.

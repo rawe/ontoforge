@@ -149,13 +149,72 @@ in [interfaces.md](../interfaces.md#listing-sorting-filtering). What matters her
 filter is evaluated: values arrive as text and are coerced to the property's data type by
 the same rules as writes — except under the substring operator, which compares as text and
 therefore accepts anything. An unknown property, an unrecognized suffix or an uncoercible
-value is a validation error naming the filter. The operator is taken as the segment after
-the **last** double underscore, so a property whose own key contains a double underscore
-cannot be filtered.
+value is a validation error. **Faults are collected**, as they are on writes: one rejection
+names every faulty filter of the request at once, each under the filter key as sent
+(`age__gt`, not `age`) with its own detail, and a filter key carries at most one fault. The
+rejection's message lists the distinct faults, so a lone fault reads as it always did. The
+operator is
+taken as the segment after the **last** double underscore, so a property whose own key
+contains a double underscore cannot be filtered.
 
 Relation lists additionally filter by source id, target id, or both, which is how the
 relations of one entity are enumerated with a real total — the traversal operation below
 does not provide one.
+
+### Query paths
+
+A filter key on an **entity** list may cross exactly one relation type and name a
+property reached through it — a property of the related entity,
+`filter.<relationTypeKey>[:out|:in].<propertyKey>[__<op>]`, or a property stored on the
+relation itself, `filter.<relationTypeKey>[:out|:in]@<propertyKey>[__<op>]`. Listing
+persons with `filter.works_for.name=Acme` returns the persons employed by Acme; listing
+companies with `filter.works_for.age__gt=30` returns the companies with at least one
+employee over thirty. Listing persons with `filter.works_for@role=CTO` returns the
+persons who hold a CTO employment; listing companies with
+`filter.works_for@since__lt=2025-01-01` returns the companies with an employment that
+began before 2025. No schema key may contain a dot, an at sign or a colon, so a path is
+never mistaken for a property key.
+
+- **Direction is derived, or marked.** When the listed type is only the relation type's
+  source, the path is followed outgoing, to the target; when it is only the target,
+  incoming, to the source. The relation segment may carry a direction marker, `:out` or
+  `:in` — `filter.works_for:out.name=Acme` — and a marker must agree with the derived
+  direction; one that contradicts it is rejected, naming the direction the schema allows.
+  On a self-relation, whose source and target are both the listed type, the marker is
+  required: listing persons with `filter.manages:out.name=Bob` returns the persons who
+  manage a Bob, `filter.manages:in.name=Alice` the persons managed by an Alice, and a
+  path without a marker is rejected, naming both forms.
+- **The two forms differ only in where the property lives.** `.` reads the related
+  entity's property; `@` reads the relation's own property, and the related entity is
+  never read. Both cross the relation type under the same rules — direction, matching,
+  coercion, fault collection, and the lens exposing the relation type together with the
+  related entity type — and combine freely with each other and with plain filters.
+- **Matching is existential.** An entity matches when at least one relation of the type
+  satisfies the condition — one whose related entity carries a matching value for the
+  `.` form, one that carries it itself for the `@` form. Conditions are independent: two
+  paths through the same relation type may be satisfied by two different relations, and
+  paths combine with each other and with plain filters by AND. An entity with no
+  relation of the type never matches — no null semantics, as with an absent property.
+- **The value is coerced by the final property**, exactly as a plain filter is coerced by
+  its own; the substring operator stays textual. A path cannot end in a `document`
+  property.
+- **Resolution uses the lens-scoped schema**, at query time. Nothing is declared or
+  stored: every exposed relation type is queryable the moment it exists. A path sees
+  the lens-scoped schema and nothing else: one through a relation type, a related
+  entity type or a property the lens hides fails exactly as one through something that
+  does not exist, and a fault's detail lists only what the lens exposes.
+
+Path faults are collected under their filter keys like every other: an unknown first
+segment (the detail lists the listed type's property keys and the relation types
+touching it), a relation type that does not touch the listed type, an unknown property
+on the related entity type or on the relation type (the detail lists that type's
+property keys), more than one relation segment, a document-typed final property, a
+self-relation path without a direction marker, and a marker that contradicts the
+derivable direction; text after the colon that is neither marker makes the first segment
+unknown. Paths are a filter feature only: `sort` rejects them, `fields` treats
+them as any unknown name, no response ever carries a path value, and the relation list
+rejects them with a message saying so. Semantic search takes them under its own rules
+([search.md](search.md#property-filters-on-search)).
 
 ## Field projection
 

@@ -1,7 +1,7 @@
 /**
  * AI agent configuration modeling endpoints over a mocked store, including
  * the allowlist assertions: an unknown tool name is rejected and the error
- * names the exact ten-name grantable set.
+ * names the exact twelve-name grantable set.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -230,11 +230,10 @@ describe("tool allowlist validation", () => {
     expect(holder.store.upsertAiAgent).not.toHaveBeenCalled();
   });
 
-  it("every write tool and the non-grantable reads are OUTSIDE the set", () => {
-    // The set is exactly ten names; being read-only is not sufficient.
-    expect(VALID_AGENT_TOOLS.size).toBe(10);
+  it("every write tool and the non-grantable read are OUTSIDE the set", () => {
+    // The set is exactly twelve names; being read-only is not sufficient.
+    expect(VALID_AGENT_TOOLS.size).toBe(12);
     for (const excluded of [
-      "get_document",
       "get_relation",
       "create_entity",
       "update_entity",
@@ -247,6 +246,11 @@ describe("tool allowlist validation", () => {
     ]) {
       expect(VALID_AGENT_TOOLS.has(excluded), excluded).toBe(false);
     }
+  });
+
+  it("the document reads ARE grantable", () => {
+    expect(VALID_AGENT_TOOLS.has("get_document")).toBe(true);
+    expect(VALID_AGENT_TOOLS.has("search_documents")).toBe(true);
   });
 
   it("a valid tool name is accepted", async () => {

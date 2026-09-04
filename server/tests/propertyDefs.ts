@@ -1,10 +1,11 @@
 /**
- * Shared unit-test builders: a minimal `PropertyDef`, a parsed
- * `FilterCondition`, and the canonical one-property-per-data-type DEFS
- * map the filter and encoding tests exercise.
+ * Shared unit-test builders: a minimal `PropertyDef`, a parsed property
+ * `FilterCondition` and a resolved path condition in their tagged forms,
+ * and the canonical one-property-per-data-type DEFS map the filter and
+ * encoding tests exercise.
  */
 
-import type { FilterCondition } from "../src/core/ports.js";
+import type { FilterCondition, PathFilterCondition } from "../src/core/ports.js";
 import type { PropertyDef } from "../src/core/schemas.js";
 
 export function prop(key: string, dataType: string): PropertyDef {
@@ -12,12 +13,35 @@ export function prop(key: string, dataType: string): PropertyDef {
 }
 
 export function cond(
-  key: string,
+  propertyKey: string,
   dataType: string,
   op: FilterCondition["op"],
   value: unknown,
 ): FilterCondition {
-  return { key, dataType, op, value };
+  return { kind: "property", propertyKey, dataType, op, value };
+}
+
+/** A resolved path condition — to a property of the related entity unless
+ * `propertySource` names the relation itself. */
+export function pathCond(
+  relationTypeKey: string,
+  direction: PathFilterCondition["direction"],
+  propertyKey: string,
+  dataType: string,
+  op: FilterCondition["op"],
+  value: unknown,
+  propertySource: PathFilterCondition["propertySource"] = "relatedEntity",
+): PathFilterCondition {
+  return {
+    kind: "path",
+    relationTypeKey,
+    direction,
+    propertySource,
+    propertyKey,
+    dataType,
+    op,
+    value,
+  };
 }
 
 export const DEFS: Record<string, PropertyDef> = {

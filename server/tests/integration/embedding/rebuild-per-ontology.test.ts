@@ -72,7 +72,7 @@ async function buildOntology(ontologyKey: string, personName: string): Promise<s
 async function personHits(ontologyKey: string, query: string): Promise<Row[]> {
   const embedding = await getEmbeddingProvider()!.embed(query);
   const store = await getRuntimeStore(ontologyKey);
-  return store.semanticSearch("person", DEFS, embedding!, 10, null);
+  return store.propertySearchSemantic([{ entityTypeKey: "person", propertyDefs: DEFS, conditions: [] }], embedding!, 10);
 }
 
 describe.skipIf(!ollamaUp || !supportsMultipleOntologies)(

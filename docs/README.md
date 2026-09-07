@@ -36,7 +36,7 @@ what rules bind it, and how it is reached from every interface.
 | [ontology-lenses](capabilities/ontology-lenses.md) | Scoping a lens to part of an ontology's schema |
 | [instance-data](capabilities/instance-data.md) | Creating, reading and traversing entities and relations |
 | [documents](capabilities/documents.md) | Long-text properties, stubs and partial edits |
-| [search](capabilities/search.md) | Text matching and semantic retrieval |
+| [search](capabilities/search.md) | Literal matching and ranked search |
 | [oql](capabilities/oql.md) | The query language |
 | [saved-queries](capabilities/saved-queries.md) | Stored, parameterized query pipelines |
 | [ai-agents](capabilities/ai-agents.md) | Natural-language querying, extraction, chat, A2A |
@@ -139,8 +139,7 @@ See [interfaces.md](interfaces.md).
 Two capabilities depend on external providers and are absent unless one is configured.
 The server reports what is available, and clients hide what is not.
 
-- **Semantic search** needs an embedding provider. Without it, only literal text matching
-  works.
+- **Semantic search** needs an embedding provider. Without it, keyword ranking remains available where the adapter supports it.
 - **AI features** need a language-model provider. Without it, natural-language querying,
   extraction, chat and the agent protocol are unavailable.
 
@@ -222,7 +221,7 @@ can match and return a passage rather than a whole document. Not addressable dir
 written in type keys and property keys. Anchored to the ISO GQL standard and its GPML
 pattern sublanguage. See [capabilities/oql.md](capabilities/oql.md).
 
-**Query path** — a filter key, on an entity list or on semantic search, that crosses
+**Query path** — a filter key, on an entity list or on ranked search, that crosses
 exactly one relation type to a property reached through it: a property of the related entity, written
 `<relationTypeKey>.<propertyKey>`, or a property stored on the relation itself, written
 `<relationTypeKey>@<propertyKey>`; the relation segment may carry a direction marker,
@@ -234,8 +233,41 @@ declared or stored for it. See
 relation type's target for an outgoing path, its source for an incoming one. A position
 in the schema, whereas a neighbour is an instance in a traversal result.
 
-**Semantic search** — retrieval by meaning rather than by literal match, over entities,
-over document passages, or over both fused into one ranking.
+**Query** — the plain text submitted to ranked search.
+
+**Literal term** — the entity list's case-insensitive substring filter over string values.
+
+**Single-type search** — ranking over one named entity type.
+
+**Cross-type search** — ranking across every type the lens exposes, narrowed by filters.
+
+**Searched types** — the one-or-many type set passed to storage for one ranking.
+
+**Search kind** — the ranked unit and match: property search or document search.
+
+**Property search** — ranking by one composed text of an entity's string properties.
+
+**Document search** — ranking passages and collapsing them to parent entities.
+
+**Search strategy** — semantic, keyword or hybrid scoring, with requirements deciding
+whether the strategy is available. The applied strategy is named in the response.
+
+**Hit** — one entity in a search result with its matches and relative score.
+
+**Match** — a place the query met the entity: an entity match names the entity as a whole;
+a passage match names a document property and its best passage's coordinates.
+
+**Relative score** — 1.0 for the best hit and each other hit's ordering number as a fraction
+of the best, comparable only within that response. See [search](capabilities/search.md#response)
+for the promise about its shape.
+
+**Search request / entry** — the common request object and service operation used by every
+search caller.
+
+**Search tool / document search tool** — `search` / `search_documents`, choosing both kinds
+or documents only, with the default strategy.
+
+**Search step** — a saved-query step running default search over one required type.
 
 **Saved query** — a stored, named, parameterized pipeline of one or more query steps.
 Discoverable by listing or by searching descriptions, so a client can find a suitable

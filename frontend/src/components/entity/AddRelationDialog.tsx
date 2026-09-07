@@ -1,3 +1,4 @@
+import { EntitySearchRow } from '@/components/palette/EntitySearchRow'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowRight, ChevronLeft, Loader2, Plus } from 'lucide-react'
 import { useMemo, useState } from 'react'
@@ -142,7 +143,7 @@ function AddRelationFlow({
     lensKey,
     q: debouncedQuery,
     typeKey: targetTypeKey,
-    semantic: features?.semanticSearch === true,
+    ranked: (features?.searchStrategies.length ?? 0) > 0,
     allTypeKeys: [],
     enabled: step === 'target' && targetTypeKey !== undefined,
   })
@@ -356,9 +357,7 @@ function AddRelationFlow({
                   <Plus className="size-4 text-muted-foreground" />
                   New connected {targetType.displayName}…
                 </CommandItem>
-                {(targetSearch.data ?? []).map(({ entity: candidate, score, matchedVia }) => {
-                  // Similarity from matchedVia (raw cosine) — score is RRF-fused.
-                  const similarity = matchedVia?.similarity ?? score
+                {(targetSearch.data ?? []).map(({ entity: candidate, matches }) => {
                   return (
                     <CommandItem
                       key={candidate._id}
@@ -366,14 +365,7 @@ function AddRelationFlow({
                       disabled={pending}
                       onSelect={() => pickTarget(candidate)}
                     >
-                      <span className="min-w-0 flex-1 truncate">
-                        {displayLabel(candidate)}
-                      </span>
-                      {similarity !== undefined && (
-                        <span className="font-mono text-[10px] text-muted-foreground">
-                          {Math.round(similarity * 100)}%
-                        </span>
-                      )}
+                      <EntitySearchRow entity={candidate} matches={matches} typeName={targetType.displayName} />
                     </CommandItem>
                   )
                 })}

@@ -29,7 +29,7 @@ import {
   type PropertyDef,
   type TypeKind,
 } from "../core/schemas.js";
-import { buildTextRepr } from "../runtime/embedding.js";
+import { buildTextRepr } from "../runtime/search/property.js";
 import { invalidateLoadedSchemaCache, loadSchemaUncached } from "../runtime/schemaCache.js";
 import { syncDocumentChunks } from "../runtime/service.js";
 import { VALID_AGENT_TOOLS } from "../runtime/toolNames.js";
@@ -1127,8 +1127,8 @@ export async function* rebuildEmbeddings(
       const text = buildTextRepr(etKey, userProps, propertyDefs);
       const embedding = await provider.embed(text);
 
+      await store.setEntitySearchText(entityId, text, embedding);
       if (embedding !== null) {
-        await store.setEntityEmbedding(entityId, embedding);
         processed += 1;
       } else {
         failed += 1;
@@ -1304,6 +1304,7 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
 
   return {
     formatVersion: TRANSFER_FORMAT_VERSION,
+    textSearchLanguage: store.textSearchLanguage,
     entityTypes,
     relationTypes,
     lenses,
@@ -1338,6 +1339,12 @@ export async function importSchema(
   payload: ExportPayloadInput,
   store: ModelingStore,
 ): Promise<Row> {
+  if (payload.textSearchLanguage !== store.textSearchLanguage) {
+    throw new ValidationError("Text-search language differs from the target ontology", {
+      fields: { textSearchLanguage: `Expected ${store.textSearchLanguage}` },
+    });
+  }
+
   // ---- Phase 1: payload-intrinsic validation (collect everything) ----
   const errors: string[] = [];
 
@@ -1462,10 +1469,10 @@ export async function importSchema(
       }
       let stepsKnown = true;
       for (const s of sq.steps) {
-        if (s.type !== "oql" && s.type !== "semantic_search") {
+        if (s.type !== "oql" && s.type !== "search") {
           errors.push(
             `Import error: saved query '${sq.key}' has step '${s.name}' with ` +
-              `unknown type '${s.type}'; expected oql or semantic_search`,
+              `unknown type '${s.type}'; expected oql or search`,
           );
           stepsKnown = false;
         }
@@ -1645,7 +1652,6 @@ export async function importSchema(
           ...(s.entityTypeKey ? { entityTypeKey: s.entityTypeKey } : {}),
           ...(s.query ? { query: s.query } : {}),
           ...(s.limit !== null && s.limit !== undefined ? { limit: s.limit } : {}),
-          ...(s.minScore !== null && s.minScore !== undefined ? { minScore: s.minScore } : {}),
           ...(s.bindings && Object.keys(s.bindings).length > 0 ? { bindings: s.bindings } : {}),
         })),
       );
@@ -1800,7 +1806,6 @@ function toStepResponse(s: Row): StepResponseBody {
     entityTypeKey: (s.entityTypeKey as string | undefined) ?? null,
     query: (s.query as string | undefined) ?? null,
     limit: (s.limit as number | undefined) ?? null,
-    minScore: (s.minScore as number | undefined) ?? null,
     bindings: (s.bindings as Record<string, string> | undefined) ?? null,
   };
 }
@@ -1856,12 +1861,12 @@ function validatePipeline(steps: StepInput[], paramNames: string[], queryKey: st
       if (!step.oql) {
         errors.push(`${prefix}.oql: Required for oql steps`);
       }
-    } else if (step.type === "semantic_search") {
+    } else if (step.type === "search") {
       if (!step.entityTypeKey) {
-        errors.push(`${prefix}.entityTypeKey: Required for semantic_search steps`);
+        errors.push(`${prefix}.entityTypeKey: Required for search steps`);
       }
       if (!step.query) {
-        errors.push(`${prefix}.query: Required for semantic_search steps`);
+        errors.push(`${prefix}.query: Required for search steps`);
       }
     }
 
@@ -1906,9 +1911,9 @@ function validatePipeline(steps: StepInput[], paramNames: string[], queryKey: st
 
   // Params needed from the caller = all $refs minus those a binding supplies.
   const neededFromUser = new Set([...allQueryParams].filter((p) => !allBindingNames.has(p)));
-  // $param refs in semantic_search query fields are always caller-supplied.
+  // $param refs in search query fields are always caller-supplied.
   for (const step of steps) {
-    if (step.type === "semantic_search" && step.query) {
+    if (step.type === "search" && step.query) {
       for (const m of step.query.matchAll(PARAM_REF_PATTERN)) {
         neededFromUser.add(m[1]!);
       }
@@ -2013,7 +2018,6 @@ export async function upsertSavedQuery(
       ...(s.entityTypeKey ? { entityTypeKey: s.entityTypeKey } : {}),
       ...(s.query ? { query: s.query } : {}),
       ...(s.limit !== null && s.limit !== undefined ? { limit: s.limit } : {}),
-      ...(s.minScore !== null && s.minScore !== undefined ? { minScore: s.minScore } : {}),
       ...(s.bindings && Object.keys(s.bindings).length > 0 ? { bindings: s.bindings } : {}),
     })),
   );

@@ -44,8 +44,8 @@ The dev compose file carries both databases. PostgreSQL — the default — star
 docker compose up -d
 ```
 
-A Neo4j run additionally needs the `neo4j` service block in `docker-compose.yml`
-uncommented; both databases run side by side with no port conflicts.
+The same command starts Neo4j alongside PostgreSQL, with independent health checks and
+no port conflicts. Both adapters are exercised on fresh test data.
 
 ### The test database
 

@@ -26,27 +26,29 @@
  * - The runtime `getFullSchema` (lens view) is one REPEATABLE READ
  *   transaction (M2.3's coherent-snapshot obligation).
  *
- * - Semantic search and the chunk primitives are M4's: the four search
- *   paths go through `search.ts`'s vector-query door (iterative scan,
- *   the index's own cast width, the pinned similarity), and the floor,
- *   where the path has one, is applied here on the returned page.
+ * - Semantic rankings use iterative scans at each index's own cast width.
+ *   Keyword rankings read stored tsvectors. Saved-query discovery alone
+ *   applies a score floor after ranking.
  *
  * - `executeOql` compiles the validated query to one SQL SELECT
  *   (`oql/`) and runs it through the array-mode door; the compiled plan
  *   names the columns and drives the value conversion.
  */
 
+import type { TextSearchLanguage } from "../../registry/schemas.js";
+
 import { fromSql, toSql } from "pgvector";
 
 import type { ValidatedQuery } from "../../core/oql/index.js";
-import type { FilterCondition, Row, RuntimeStore } from "../../core/ports.js";
+import type {
+  FilterCondition,
+  Row,
+  RuntimeStore,
+  SearchedType,
+  SearchedProperty,
+} from "../../core/ports.js";
 import type { PropertyDef } from "../../core/schemas.js";
-import {
-  chunkIndexNameOf,
-  entityIndexNameOf,
-  ENTITY_ALL_INDEX,
-  SAVED_QUERY_INDEX,
-} from "./ddl.js";
+import { chunkIndexNameOf, entityIndexNameOf, indexWidth, SAVED_QUERY_INDEX } from "./ddl.js";
 import {
   runArrayQuery,
   runQuery,
@@ -65,13 +67,7 @@ import {
 import { fromJson, toJson } from "./json.js";
 import { camelizeRow, isUuid } from "./rows.js";
 import { LENS_COLS, readTypesWithProperties, splitInclusions } from "./schemaRead.js";
-import {
-  distance,
-  minScoreFloor,
-  similarity,
-  vectorParams,
-  vectorSearch,
-} from "./search.js";
+import { distance, minScoreFloor, similarity, vectorParams, vectorSearch } from "./search.js";
 
 type PropertyDefs = Record<string, PropertyDef>;
 
@@ -141,6 +137,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
   constructor(
     public readonly ontologyKey: string = "",
     private readonly namespace?: string,
+    public readonly textSearchLanguage: TextSearchLanguage = "english",
   ) {}
 
   /** Door one, carrying this store's binding. */
@@ -163,7 +160,11 @@ export class PostgresRuntimeStore implements RuntimeStore {
   /** Path conditions filter both rankings here: the entity ranking
    * carries them as ordinary predicates, and the passage ranking joins
    * each passage to its parent entity inside the vector query. */
-  supportsSemanticSearchPathConditions(): boolean {
+  supportsKeywordRanking(): boolean {
+    return true;
+  }
+
+  supportsSearchPathConditions(): boolean {
     return true;
   }
 
@@ -176,10 +177,9 @@ export class PostgresRuntimeStore implements RuntimeStore {
    * Answers null when no lens has the key. */
   async getFullSchema(lensKey: string): Promise<Row | null> {
     return this.tx(async (querier) => {
-      const lensResult = await querier.query(
-        `SELECT ${LENS_COLS} FROM lens WHERE key = $1`,
-        [lensKey],
-      );
+      const lensResult = await querier.query(`SELECT ${LENS_COLS} FROM lens WHERE key = $1`, [
+        lensKey,
+      ]);
       const lensRow = lensResult.rows[0];
       if (lensRow === undefined) {
         return null;
@@ -249,16 +249,18 @@ export class PostgresRuntimeStore implements RuntimeStore {
     properties: Row,
     propertyDefs: PropertyDefs,
     embedding: number[] | null = null,
+    propertyText = "",
   ): Promise<Row> {
     const result = await this.query(
-      `INSERT INTO entity (id, type_key, props, embedding)
-       VALUES ($1, $2, $3::jsonb, $4::vector)
+      `INSERT INTO entity (id, type_key, props, embedding, property_text)
+       VALUES ($1, $2, $3::jsonb, $4::vector, $5)
        RETURNING ${ENTITY_COLS}`,
       [
         entityId,
         entityTypeKey,
         propsJson(properties, propertyDefs),
         embedding === null ? null : toSql(embedding),
+        propertyText,
       ],
     );
     return entityRow(result.rows[0]!, propertyDefs);
@@ -320,9 +322,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
     if (!isUuid(entityId)) {
       return null;
     }
-    const result = await this.query(`SELECT ${ENTITY_COLS} FROM entity WHERE id = $1`, [
-      entityId,
-    ]);
+    const result = await this.query(`SELECT ${ENTITY_COLS} FROM entity WHERE id = $1`, [entityId]);
     const row = result.rows[0];
     return row === undefined ? null : entityRow(row, propertyDefs);
   }
@@ -337,6 +337,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
     propertyDefs: PropertyDefs,
     embedding: number[] | null = null,
     hasEmbeddingUpdate = false,
+    propertyText = "",
   ): Promise<Row | null> {
     if (!isUuid(entityId)) {
       return null;
@@ -351,6 +352,8 @@ export class PostgresRuntimeStore implements RuntimeStore {
     if (hasEmbeddingUpdate) {
       params.push(embedding === null ? null : toSql(embedding));
       embeddingSet = `, embedding = $${params.length}::vector`;
+      params.push(propertyText);
+      embeddingSet += `, property_text = $${params.length}`;
     }
     const result = await this.query(
       `UPDATE entity
@@ -466,36 +469,12 @@ export class PostgresRuntimeStore implements RuntimeStore {
    * the limit counts filtered hits. The join is written as EXISTS so the
    * outer statement's column references stay unqualified and the index
    * expression is repeated verbatim. */
-  async searchDocumentChunks(
-    entityTypeKey: string,
-    propertyKey: string,
-    queryEmbedding: number[],
+  async documentSearchSemantic(
+    properties: SearchedProperty[],
+    embedding: number[],
     limit: number,
-    filters: FilterCondition[] | null = null,
   ): Promise<Row[]> {
-    const params = vectorParams(queryEmbedding);
-    params.push(entityTypeKey, propertyKey);
-    const where = ["entity_type_key = $2", "property_key = $3", EMBEDDED];
-    const parentClauses = buildFilterClauses(filters ?? [], params);
-    if (parentClauses.length > 0) {
-      where.push(
-        "EXISTS (SELECT 1 FROM entity WHERE entity.id = document_chunk.entity_id AND " +
-          `${parentClauses.join(" AND ")})`,
-      );
-    }
-    params.push(limit);
-    const limitP = params.length;
-    const rows = await vectorSearch(
-      (querier) => chunkIndexNameOf(querier, entityTypeKey, propertyKey),
-      queryEmbedding,
-      params,
-      (width) =>
-        `SELECT ${CHUNK_COLS}, ${similarity(width)} FROM document_chunk
-         WHERE ${where.join(" AND ")}
-         ORDER BY ${distance(width)} LIMIT $${limitP}`,
-      this.namespace,
-    );
-    return rows.map((row) => ({ chunk: chunkRow(row), score: row.score }));
+    return this.rankedSemantic(properties, embedding, limit, true);
   }
 
   /** Off-format ids are dropped from the batch (they can match no row);
@@ -521,62 +500,129 @@ export class PostgresRuntimeStore implements RuntimeStore {
   }
 
   // ------------------------------------------------------------------
-  // Semantic search
+  // Search rankings
   // ------------------------------------------------------------------
 
-  /**
-   * One entity type, ranked by similarity, on that type's partial index.
-   *
-   * Filters are M3.3's ordinary `WHERE` fragments beside the vector scan
-   * — every property of the type filters, whatever the index was created
-   * with, because the index holds the vector and nothing else.
-   */
-  async semanticSearch(
-    entityTypeKey: string,
-    propertyDefs: PropertyDefs,
-    queryEmbedding: number[],
+  async propertySearchKeyword(types: SearchedType[], query: string, limit: number): Promise<Row[]> {
+    return this.rankedKeyword(types, query, limit, false);
+  }
+  async documentSearchKeyword(
+    properties: SearchedProperty[],
+    query: string,
     limit: number,
-    minScore: number | null,
-    filters: FilterCondition[] | null = null,
   ): Promise<Row[]> {
-    const params = vectorParams(queryEmbedding);
-    params.push(entityTypeKey);
-    const where = ["type_key = $2", EMBEDDED, ...buildFilterClauses(filters ?? [], params)];
-    params.push(limit);
-    const limitP = params.length;
-    const rows = await vectorSearch(
-      (querier) => entityIndexNameOf(querier, entityTypeKey),
-      queryEmbedding,
-      params,
-      (width) =>
-        `SELECT ${ENTITY_COLS}, ${similarity(width)} FROM entity
-         WHERE ${where.join(" AND ")}
-         ORDER BY ${distance(width)} LIMIT $${limitP}`,
-      this.namespace,
-    );
-    return entityHits(rows, propertyDefs, minScore);
+    return this.rankedKeyword(properties, query, limit, true);
   }
 
-  /** Every entity type at once, on the full-table index. No property
-   * definitions cross this read, so datetime values stay the stored ISO
-   * text — as on `getEntity`. */
-  async semanticSearchAll(
-    queryEmbedding: number[],
+  /** Plain words, stemmed in the immutable ontology language. Reads stored tsvectors. */
+  private async rankedKeyword(
+    searched: (SearchedType | SearchedProperty)[],
+    query: string,
     limit: number,
-    minScore: number | null,
+    document: boolean,
   ): Promise<Row[]> {
-    const params = vectorParams(queryEmbedding);
+    if (!searched.length) return [];
+    const params: unknown[] = [query, this.textSearchLanguage];
+    const scopes = searched.map((item) => {
+      params.push(item.entityTypeKey);
+      const where = [`${document ? "entity_type_key" : "type_key"} = $${params.length}`];
+      if ("propertyKey" in item) {
+        params.push(item.propertyKey);
+        where.push(`property_key = $${params.length}`);
+      }
+      const filters = buildFilterClauses(item.conditions, params);
+      if (document && filters.length)
+        where.push(
+          `EXISTS (SELECT 1 FROM entity WHERE entity.id = document_chunk.entity_id AND ${filters.join(" AND ")})`,
+        );
+      else where.push(...filters);
+      return `(${where.join(" AND ")})`;
+    });
     params.push(limit);
-    const rows = await vectorSearch(
-      () => Promise.resolve(ENTITY_ALL_INDEX),
-      queryEmbedding,
+    const result = await this.query(
+      `SELECT ${document ? CHUNK_COLS : ENTITY_COLS}, ts_rank_cd(search_vector, query) AS score
+      FROM ${document ? "document_chunk" : "entity"}, plainto_tsquery($2::regconfig, $1) AS query
+      WHERE search_vector @@ query AND (${scopes.join(" OR ")})
+      ORDER BY score DESC, id LIMIT $${params.length}`,
       params,
-      (width) =>
-        `SELECT ${ENTITY_COLS}, ${similarity(width)} FROM entity
-         WHERE ${EMBEDDED} ORDER BY ${distance(width)} LIMIT $2`,
-      this.namespace,
     );
-    return entityHits(rows, NO_DEFS, minScore);
+    return result.rows.map((row) =>
+      document
+        ? { chunk: chunkRow(row), score: row.score }
+        : {
+            entity: entityRow(
+              row,
+              (searched.find((t) => t.entityTypeKey === row.type_key) as SearchedType).propertyDefs,
+            ),
+            score: row.score,
+          },
+    );
+  }
+
+  async propertySearchSemantic(
+    types: SearchedType[],
+    embedding: number[],
+    limit: number,
+  ): Promise<Row[]> {
+    return this.rankedSemantic(types, embedding, limit, false);
+  }
+
+  /** One scan per per-type index, one UNION ALL ranking statement. */
+  private async rankedSemantic(
+    searched: (SearchedType | SearchedProperty)[],
+    embedding: number[],
+    limit: number,
+    document: boolean,
+  ): Promise<Row[]> {
+    if (!searched.length) return [];
+    return this.tx(async (querier) => {
+      await querier.query("SET LOCAL hnsw.iterative_scan = strict_order");
+      const params = vectorParams(embedding);
+      const scans: string[] = [];
+      for (const item of searched) {
+        const index =
+          "propertyKey" in item
+            ? await chunkIndexNameOf(querier, item.entityTypeKey, item.propertyKey)
+            : await entityIndexNameOf(querier, item.entityTypeKey);
+        const width = (index ? await indexWidth(querier, index) : null) ?? embedding.length;
+        params.push(item.entityTypeKey);
+        const where = [
+          `${document ? "entity_type_key" : "type_key"} = $${params.length}`,
+          EMBEDDED,
+        ];
+        if ("propertyKey" in item) {
+          params.push(item.propertyKey);
+          where.push(`property_key = $${params.length}`);
+        }
+        const clauses = buildFilterClauses(item.conditions, params);
+        if (document && clauses.length)
+          where.push(
+            `EXISTS (SELECT 1 FROM entity WHERE entity.id = document_chunk.entity_id AND ${clauses.join(" AND ")})`,
+          );
+        else where.push(...clauses);
+        params.push(limit);
+        scans.push(
+          `(SELECT ${document ? CHUNK_COLS : ENTITY_COLS}, ${similarity(width)} FROM ${document ? "document_chunk" : "entity"} WHERE ${where.join(" AND ")} ORDER BY ${distance(width)} LIMIT $${params.length})`,
+        );
+      }
+      params.push(limit);
+      const result = await querier.query(
+        `SELECT * FROM (${scans.join(" UNION ALL ")}) AS ranked ORDER BY score DESC LIMIT $${params.length}`,
+        params,
+      );
+      return result.rows.map((row) =>
+        document
+          ? { chunk: chunkRow(row), score: row.score }
+          : {
+              entity: entityRow(
+                row,
+                (searched.find((t) => t.entityTypeKey === row.type_key) as SearchedType)
+                  .propertyDefs,
+              ),
+              score: row.score,
+            },
+      );
+    });
   }
 
   /** Saved-query descriptions for one lens. The lens is a plain
@@ -793,14 +839,6 @@ export class PostgresRuntimeStore implements RuntimeStore {
       propertyDefsByType,
     );
   }
-}
-
-/** Scored `entity` rows → the `{entity, score}` port shape, floored. */
-function entityHits(rows: Row[], propertyDefs: PropertyDefs, minScore: number | null): Row[] {
-  return minScoreFloor(
-    rows.map((row) => ({ entity: entityRow(row, propertyDefs), score: row.score })),
-    minScore,
-  );
 }
 
 /** `count(*)` over one FROM/WHERE fragment; bigint arrives as text. */

@@ -114,7 +114,7 @@ export function AiPage() {
               ontologyKey={ontologyKey}
               lensKey={lensKey}
               schema={schema.data}
-              semanticEnabled={features?.semanticSearch === true}
+              searchEnabled={(features?.searchStrategies.length ?? 0) > 0}
             />
           </TabsContent>
         </>

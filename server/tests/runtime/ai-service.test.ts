@@ -11,6 +11,7 @@ import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from "@langchain/
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { setAiModel, type AgentConfig } from "../../src/core/ai.js";
+import { RELATIVE_SCORE_PROMISE } from "../../src/runtime/search/strategies.js";
 import { setEmbeddingProvider } from "../../src/core/embedding.js";
 import { NotFoundError, ValidationError } from "../../src/core/exceptions.js";
 import {
@@ -73,7 +74,7 @@ describe("toolset computation", () => {
 
     expect(boundToolNames(fake)).toEqual(
       CHAT_TOOLS.filter(
-        (t) => t !== "semantic_search" && t !== "search_documents" && t !== "search_saved_queries",
+        (t) => t !== "search" && t !== "search_documents" && t !== "search_saved_queries",
       ),
     );
   });
@@ -87,6 +88,40 @@ describe("toolset computation", () => {
     expect(boundToolNames(fake)).toEqual(CHAT_TOOLS);
   });
 
+  it("keeps both search tools with keyword ranking and no embedding provider", async () => {
+    store.supportsKeywordRanking.mockReturnValue(true);
+    const fake = installFake([
+      toolCallMessage("search", { query: "engineer" }),
+      new AIMessage("Found them."),
+    ]);
+    await aiChat("full_lens", "find an engineer", asRuntimeStore(store));
+    expect(boundToolNames(fake)).toContain("search");
+    expect(boundToolNames(fake)).toContain("search_documents");
+    expect(boundToolNames(fake)).not.toContain("semantic_search");
+    expect(boundToolNames(fake)).not.toContain("search_saved_queries");
+    const payload = JSON.parse(String(fake.calls[1]!.find((m) => m instanceof ToolMessage)!.content));
+    expect(payload).toEqual({ query: "engineer", type: null, in: ["properties", "document"], strategy: "keyword", filter: {}, hits: [] });
+    expect(store.propertySearchKeyword.mock.calls[0]![2]).toBe(10);
+    for (const tool of fake.boundTools[0]! as { name: string; description: string; schema: { shape: Record<string, unknown> } }[]) {
+      if (!["search", "search_documents"].includes(tool.name)) continue;
+      expect(tool.description).toContain(RELATIVE_SCORE_PROMISE);
+      expect(Object.keys(tool.schema.shape).sort()).toEqual((tool.name === "search" ? ["query", "entity_type_key", "limit"] : ["query", "entity_type_key", "limit", "property"]).sort());
+    }
+  });
+
+  it("run_saved_query preserves a final search envelope", async () => {
+    store.supportsKeywordRanking.mockReturnValue(true);
+    store.getSavedQueries.mockResolvedValue([{
+      key: "find_people", name: "Find people", description: "Find people",
+      steps: JSON.stringify([{ name: "people", type: "search", entityTypeKey: "person", query: "engineer" }]),
+      parameters: "[]",
+    }]);
+    const fake = installFake([toolCallMessage("run_saved_query", { query_key: "find_people" }), new AIMessage("Done")]);
+    await aiChat("full_lens", "run the query", asRuntimeStore(store));
+    const payload = JSON.parse(String(fake.calls[1]!.find((m) => m instanceof ToolMessage)!.content));
+    expect(payload).toEqual({ query: "engineer", type: "person", in: ["properties", "document"], strategy: "keyword", filter: {}, hits: [] });
+  });
+
   it("explicit allowlist is intersected with availability, keeping its order", async () => {
     const fake = installFake([new AIMessage("hi")]);
     const config: AgentConfig = {
@@ -94,12 +129,12 @@ describe("toolset computation", () => {
       name: "Restricted",
       description: null,
       systemPrompt: null,
-      tools: ["semantic_search", "execute_query", "get_schema", "not_a_tool"],
+      tools: ["search", "execute_query", "get_schema", "not_a_tool"],
     };
 
     await runAgentChat(config, "full_lens", "hello", asRuntimeStore(store));
 
-    // semantic_search dropped (no provider), unknown name dropped silently.
+    // search dropped (no provider), unknown name dropped silently.
     expect(boundToolNames(fake)).toEqual(["execute_query", "get_schema"]);
   });
 
@@ -111,12 +146,12 @@ describe("toolset computation", () => {
       name: "Searcher",
       description: null,
       systemPrompt: null,
-      tools: ["semantic_search"],
+      tools: ["search"],
     };
 
     await runAgentChat(config, "full_lens", "hello", asRuntimeStore(store));
 
-    expect(boundToolNames(fake)).toEqual(["semantic_search"]);
+    expect(boundToolNames(fake)).toEqual(["search"]);
   });
 
   it("an empty effective toolset still answers (plain model call)", async () => {
@@ -126,7 +161,7 @@ describe("toolset computation", () => {
       name: "Toolless",
       description: null,
       systemPrompt: null,
-      tools: ["semantic_search"], // dropped without a provider -> empty
+      tools: ["search"], // dropped without a provider -> empty
     };
 
     const result = await runAgentChat(config, "full_lens", "hello", asRuntimeStore(store));
@@ -263,7 +298,7 @@ describe("document reads", () => {
       toolCallMessage("search_documents", { query: "when did she join" }),
       new AIMessage("In 2019."),
     ]);
-    store.searchDocumentChunks.mockResolvedValue([
+    store.documentSearchSemantic.mockResolvedValue([
       {
         chunk: {
           _id: "chunk-1",
@@ -287,17 +322,11 @@ describe("document reads", () => {
     expect(result.reply).toBe("In 2019.");
     const toolMessages = fake.calls[1]!.filter((m) => m instanceof ToolMessage);
     const payload = JSON.parse(String(toolMessages[0]!.content)) as Row;
-    const hit = (payload.results as Row[])[0]!;
-    expect(hit.matchedVia).toEqual({
-      source: "document",
-      propertyKey: "bio",
-      charOffset: 22,
-      charLength: 21,
-      similarity: 0.91,
-      snippet: "Alice joined in 2019.",
-    });
+    const hit = (payload.hits as Row[])[0]!;
+    expect(hit.matches).toEqual([{ kind: "document", propertyKey: "bio", charOffset: 22, charLength: 21 }]);
+    expect(hit.relativeScore).toBe(1);
     // Only the passage ranking runs — the entity ranking is not consulted.
-    expect(store.semanticSearch).not.toHaveBeenCalled();
+    expect(store.propertySearchSemantic).not.toHaveBeenCalled();
     expect(result.toolCalls).toEqual([
       { tool: "search_documents", args: { query: "when did she join" } },
     ]);

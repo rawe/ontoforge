@@ -1,3 +1,4 @@
+import { settings } from "../../src/config.js";
 /**
  * Runtime isolation between ontologies: the same type key, lens key, and
  * saved-query key exist independently in two ontologies, and every
@@ -325,6 +326,6 @@ describe("the runtime surface itself", () => {
   it("the feature report answers at /api/server/features", async () => {
     const res = await app.inject({ method: "GET", url: "/api/server/features" });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ semanticSearch: false, ai: false });
+    expect(res.json()).toEqual({ semanticSearch: false, ai: false, searchStrategies: settings.DB_BACKEND === "postgres" ? ["keyword"] : [] });
   });
 });

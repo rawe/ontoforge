@@ -90,7 +90,7 @@ Once connected to the runtime server, an AI assistant can work with your knowled
 
 1. **Inspect the schema** — `get_schema()` returns all entity types, relation types, and property definitions so the assistant knows what data structures are available.
 2. **Create data** — `create_entity(entity_type_key="person", properties={"name": "Alice", "age": 30})` creates a schema-validated entity. Required properties are enforced, types are checked.
-3. **Search by meaning** — `semantic_search(query="distributed systems engineers")` finds entities by semantic similarity, not just keyword matching. Requires `EMBEDDING_PROVIDER` to be configured.
+3. **Search** — `search(query="distributed systems engineers")` ranks entities by properties and documents using the best available strategy. PostgreSQL keyword search works without an embedding provider; a local provider also enables semantic and hybrid search.
 4. **Explore the graph** — `get_neighbors(entity_type_key="person", entity_id="...", direction="outgoing")` discovers what an entity is connected to.
 
 Every write is validated against the ontology's schema — the assistant cannot invent entity types, add undefined properties, or write structurally invalid data.

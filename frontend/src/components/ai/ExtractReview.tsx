@@ -21,7 +21,7 @@ import type {
   ExtractResponse,
   JsonValue,
   RuntimeSchema,
-  SemanticSearchResult,
+  SearchHit,
 } from '@/api/types'
 import { TypeChip } from '@/components/TypeChip'
 import {
@@ -83,7 +83,7 @@ function EntityCard({
   onChange,
 }: {
   item: ReviewEntityItem
-  similar: SemanticSearchResult[]
+  similar: SearchHit[]
   disabled: boolean
   onChange: (patch: Partial<ReviewEntityItem>) => void
 }) {
@@ -166,7 +166,7 @@ function EntityCard({
             <div className="mt-3 rounded-md border border-dashed bg-muted/30 p-2.5">
               <p className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
                 <Users className="size-3" />
-                Similar existing:
+                Existing {item.entityTypeKey} entities — use one instead?
               </p>
               <RadioGroup
                 value={item.useExisting ?? '__new__'}
@@ -187,7 +187,7 @@ function EntityCard({
                   <RadioGroupItem value="__new__" />
                   Create new
                 </Label>
-                {similar.map(({ entity, score, matchedVia }) => (
+                {similar.map(({ entity }) => (
                   <Label
                     key={entity._id}
                     className="flex cursor-pointer items-center gap-2 text-xs font-normal"
@@ -196,10 +196,7 @@ function EntityCard({
                     <span className="min-w-0 truncate">
                       Use existing <span className="font-medium">{displayLabel(entity)}</span>
                     </span>
-                    <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground">
-                      {/* Raw cosine similarity — top-level score is RRF-fused. */}
-                      {Math.round((matchedVia?.similarity ?? score) * 100)}%
-                    </span>
+
                   </Label>
                 ))}
               </RadioGroup>
@@ -317,14 +314,14 @@ interface ExtractReviewProps {
   lensKey: string
   schema: RuntimeSchema
   response: ExtractResponse
-  semanticEnabled: boolean
+  searchEnabled: boolean
   /** Back to the input stage (text preserved by the parent). */
   onBack: () => void
 }
 
 /**
  * Review stage for AI extraction: proposed entities (left, grouped by type,
- * inline-editable, semantic dedupe with "use existing") and proposed
+ * inline-editable, existing-entity candidates with "use existing") and proposed
  * relations (right, endpoint-aware). Accept creates checked items
  * sequentially — entities first, then relations with endpoints resolved from
  * the created/existing id mapping. Failed items stay editable for retry.
@@ -334,7 +331,7 @@ export function ExtractReview({
   lensKey,
   schema,
   response,
-  semanticEnabled,
+  searchEnabled,
   onBack,
 }: ExtractReviewProps) {
   const queryClient = useQueryClient()
@@ -347,7 +344,7 @@ export function ExtractReview({
     null,
   )
 
-  const similar = useSimilarEntities(ontologyKey, lensKey, initial.entities, semanticEnabled)
+  const similar = useSimilarEntities(ontologyKey, lensKey, initial.entities, searchEnabled)
 
   const entitiesById = useMemo(
     () => new Map(entities.map((e) => [e.id, e])),
@@ -512,10 +509,10 @@ export function ExtractReview({
             <ArrowLeft className="size-3.5" />
             Edit text
           </Button>
-          {semanticEnabled && similar.pending && (
+          {searchEnabled && similar.pending && (
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Loader2 className="size-3 animate-spin" />
-              Checking for similar existing entities…
+              Checking existing entities…
             </span>
           )}
           <button

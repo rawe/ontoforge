@@ -127,9 +127,9 @@ Encoding those names above the port would tie database-agnostic code to one data
 enforcing them inside the adapter would deliver the error from the wrong layer and make
 every future adapter reimplement it.
 
-**Adapters declare whether semantic search evaluates path conditions; the service
+**Adapters declare whether search evaluates path conditions; the service
 enforces it.**
-A query path on semantic search resolves and crosses the port only where the adapter
+A query path on search resolves and crosses the port only where the adapter
 declares support; elsewhere it is rejected above the port, naming the entity list as the
 alternative. Filters on a search are applied as part of the search, so a path condition
 an adapter cannot evaluate inside its vector query must be refused before the search
@@ -212,14 +212,27 @@ What a call accepts, what it returns, and how it behaves. Nothing about the back
 storage adapter or the ranking algorithm; a rejection message already tells the caller
 what to do instead.
 
-**An agent may be granted every read tool but one, and one tool MCP does not have.**
-Reading a document is grantable: an agent that can see a document stub but never open it
-can only report that text exists. Ranking document passages is a tool of its own for an
-agent, where MCP selects it with an argument on semantic search, because an agent may run
-the weakest model of any caller on the surface and a name is chosen more reliably than a
-mode. Reading a single relation by identifier stays out — a relation is reached by listing
-or traversal. No write tool is ever grantable, whatever a configuration or system prompt
-asks for.
+**Search and document search are separate tools on MCP and agents.** The first runs both
+kinds, the second promises a passage on every hit. Both choose the default strategy and
+return the search envelope. Reading a single relation by id remains outside the grantable
+set; no write tool is grantable.
+
+**Search strategies have implementations and availability requirements.** Defaults choose
+the first available of hybrid, keyword, semantic; every response names the applied one.
+
+**Search hits carry only a relative score.** It is comparable within one response and
+never an absolute similarity or confidence. Saved-query discovery retains cosine scores.
+
+**Text-search language is an immutable ontology setting.** Chosen at creation, default
+English, carried in export, and checked against the import target.
+
+**Keyword index families are fixed at ontology creation.** Their language is the ontology's
+language; no keyword lifecycle hooks or per-type DDL exist. Property text and document
+chunks are stored even without embeddings.
+
+**The list filters and the search ranks.** Neither server operation falls back to the
+other. Cross-type search uses per-type indexes and an exact searched set, with no shared
+cross-type vector index.
 
 **Transport is stateless HTTP with plain JSON responses.**
 No event stream. Statelessness is what allows the same mount to serve many clients

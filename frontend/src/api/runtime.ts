@@ -23,7 +23,7 @@ import type {
   SavedQuerySearchHit,
   SchemaEntityType,
   SchemaRelationType,
-  SemanticSearchResponse,
+  SearchResponse,
 } from './types'
 
 const base = (ontologyKey: string, lensKey: string) =>
@@ -202,32 +202,20 @@ export const deleteRelation = (
     method: 'DELETE',
   })
 
-/* ------------------------------ semantic search ------------------------------ */
+/* ---------------------------------- search ---------------------------------- */
 
-export interface SemanticSearchParams {
+export interface SearchParams {
   q: string
-  /** Omit for cross-type search (results carry `_entityTypeKey`). */
   type?: string
+  in?: readonly ('properties' | 'document')[]
+  strategy?: 'semantic' | 'keyword' | 'hybrid'
+  'document.property'?: string
   limit?: number
-  /** 0–1 raw similarity; serialized snake_case per the contract. */
-  minScore?: number
   fields?: readonly string[]
-  /** Requires `type`; `contains` is rejected on semantic search. */
   filter?: FilterMap
-  /** What to rank: entity embeddings, document chunks, or both (default `all`). */
-  searchIn?: 'entities' | 'documents' | 'all'
-  /** Include ~200-char snippets on document matches (default true). */
-  snippets?: boolean
 }
-
-export const semanticSearch = (
-  ontologyKey: string,
-  lensKey: string,
-  { minScore, ...params }: SemanticSearchParams,
-) =>
-  request<SemanticSearchResponse>(
-    `${base(ontologyKey, lensKey)}/search/semantic${buildQuery({ ...params, min_score: minScore })}`,
-  )
+export const search = (ontologyKey: string, lensKey: string, params: SearchParams) =>
+  request<SearchResponse>(`${base(ontologyKey, lensKey)}/search${buildQuery(params)}`)
 
 /* ----------------------------------- query ----------------------------------- */
 

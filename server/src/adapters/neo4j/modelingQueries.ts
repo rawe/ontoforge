@@ -887,7 +887,7 @@ export async function getEntityTypesWithProperties(session: Session): Promise<Ro
 export async function setEntityEmbedding(
   session: Session,
   entityId: string,
-  embedding: number[],
+  embedding: number[] | null,
 ): Promise<void> {
   await session.run("MATCH (n:_Entity {_id: $id}) SET n._embedding = $embedding", {
     id: entityId,

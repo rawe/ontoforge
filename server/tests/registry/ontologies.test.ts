@@ -33,6 +33,7 @@ vi.mock("../../src/core/ports.js", () => ({
 }));
 
 const ONTOLOGY_DATA = {
+  textSearchLanguage: "english",
   ontologyId: "11111111-1111-4111-8111-111111111111",
   key: "crm",
   displayName: "Customer Relations",

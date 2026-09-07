@@ -205,7 +205,7 @@ describe("ontology registry", () => {
 
     it("createOntology returns the port row shape and getOntology round-trips it", async () => {
       const registry = getOntologyRegistry();
-      const created = await registry.createOntology(ID_A, "crm", "Customer Relations", null);
+      const created = await registry.createOntology(ID_A, "crm", "Customer Relations", null, "english");
       expect(created.ontologyId).toBe(ID_A);
       expect(created.key).toBe("crm");
       expect(created.displayName).toBe("Customer Relations");
@@ -219,7 +219,7 @@ describe("ontology registry", () => {
 
     it("getOntologyByDisplayName finds by the other uniqueness dimension", async () => {
       const registry = getOntologyRegistry();
-      await registry.createOntology(ID_A, "crm", "Customer Relations", null);
+      await registry.createOntology(ID_A, "crm", "Customer Relations", null, "english");
       const found = await registry.getOntologyByDisplayName("Customer Relations");
       expect(found?.key).toBe("crm");
       expect(await registry.getOntologyByDisplayName("Nope")).toBeNull();
@@ -227,15 +227,15 @@ describe("ontology registry", () => {
 
     it.skipIf(!supportsMultipleOntologies)("listOntologies orders by key", async () => {
       const registry = getOntologyRegistry();
-      await registry.createOntology(ID_B, "zeta", null, null);
-      await registry.createOntology(ID_A, "alpha", null, null);
+      await registry.createOntology(ID_B, "zeta", null, null, "english");
+      await registry.createOntology(ID_A, "alpha", null, null, "english");
       const rows = await registry.listOntologies();
       expect(rows.map((row) => row.key)).toEqual(["alpha", "zeta"]);
     });
 
     it("renameOntology updates the display name, null for an unknown key", async () => {
       const registry = getOntologyRegistry();
-      await registry.createOntology(ID_A, "crm", null, null);
+      await registry.createOntology(ID_A, "crm", null, null, "english");
       const renamed = await registry.renameOntology("crm", "Sales");
       expect(renamed?.displayName).toBe("Sales");
       expect(await registry.renameOntology("nope", "Anything")).toBeNull();
@@ -243,7 +243,7 @@ describe("ontology registry", () => {
 
     it("deleteOntology answers true once and false for a gone key", async () => {
       const registry = getOntologyRegistry();
-      await registry.createOntology(ID_A, "crm", null, null);
+      await registry.createOntology(ID_A, "crm", null, null, "english");
       expect(await registry.deleteOntology("crm")).toBe(true);
       expect(await registry.deleteOntology("crm")).toBe(false);
       expect(await registry.getOntology("crm")).toBeNull();

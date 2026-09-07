@@ -334,7 +334,7 @@ describe("executeSavedQuery pipelines", () => {
     expect(result.results).toEqual([]);
   });
 
-  it("search -> oql: textual substitution reaches the search, _score is a binding field", async () => {
+  it("search -> oql: textual substitution reaches the search, _score is absent from bindings", async () => {
     setEmbeddingProvider({ dimensions: 3, embed: vi.fn(async () => [0.1, 0.2, 0.3]) });
     stubSavedQueries([
       {
@@ -344,7 +344,7 @@ describe("executeSavedQuery pipelines", () => {
         steps: [
           {
             name: "skills",
-            type: "semantic_search",
+            type: "search",
             entityTypeKey: "person",
             query: "$skill_query",
             limit: 5,
@@ -361,7 +361,7 @@ describe("executeSavedQuery pipelines", () => {
         ],
       },
     ]);
-    store.semanticSearch.mockResolvedValue([
+    store.propertySearchSemantic.mockResolvedValue([
       { entity: { _id: "skill-1", name: "Python" }, score: 0.95 },
       { entity: { _id: "skill-2", name: "ML" }, score: 0.85 },
     ]);
@@ -376,20 +376,20 @@ describe("executeSavedQuery pipelines", () => {
 
     // The store-level search ran against the named type with the
     // substituted text's embedding.
-    expect(store.semanticSearch).toHaveBeenCalledTimes(1);
-    expect(store.semanticSearch.mock.calls[0]![0]).toBe("person");
+    expect(store.propertySearchSemantic).toHaveBeenCalledTimes(1);
+    expect(store.propertySearchSemantic.mock.calls[0]![0][0].entityTypeKey).toBe("person");
 
     // The oql step got the flat _id list plus the _score binding field.
     const params = store.executeOql.mock.calls[0]![1] as Row;
     expect(params.skill_ids).toEqual(["skill-1", "skill-2"]);
-    expect((params.scores as number[]).length).toBe(2);
+    expect(params.scores).toEqual([]);
     expect(params.skill_query).toBe("machine learning");
 
     // The last step's output is the response.
     expect(result.columns).toEqual(["p"]);
   });
 
-  it("bindings on a semantic_search step are ignored — only parameters reach the text", async () => {
+  it("bindings on a search step are ignored — only parameters reach the text", async () => {
     const embed = vi.fn(async () => [0.1, 0.2, 0.3]);
     setEmbeddingProvider({ dimensions: 3, embed });
     stubSavedQueries([
@@ -401,7 +401,7 @@ describe("executeSavedQuery pipelines", () => {
           { name: "first", type: "oql", oql: "MATCH (p:person) RETURN p.name AS name" },
           {
             name: "second",
-            type: "semantic_search",
+            type: "search",
             entityTypeKey: "person",
             query: "people like $q and $name",
             bindings: { name: "{{first.name}}" },
@@ -411,7 +411,7 @@ describe("executeSavedQuery pipelines", () => {
       },
     ]);
     store.executeOql.mockResolvedValue([["name"], [{ name: "Alice" }]]);
-    store.semanticSearch.mockResolvedValue([]);
+    store.propertySearchSemantic.mockResolvedValue([]);
 
     await executeSavedQuery(
       "full_lens",
@@ -424,14 +424,14 @@ describe("executeSavedQuery pipelines", () => {
     expect(embed).toHaveBeenCalledWith("people like engineers and $name");
   });
 
-  it("a pipeline containing a semantic_search step fails without a provider", async () => {
+  it("a pipeline containing a search step fails without a provider", async () => {
     stubSavedQueries([
       {
         key: "needs-provider",
         name: "Needs Provider",
         description: "search then oql",
         steps: [
-          { name: "skills", type: "semantic_search", entityTypeKey: "person", query: "x" },
+          { name: "skills", type: "search", entityTypeKey: "person", query: "x" },
           {
             name: "persons",
             type: "oql",

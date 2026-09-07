@@ -131,7 +131,7 @@ describe("round-trip against a stored export document", () => {
     expect(agents.statusCode).toBe(200);
     const agentRows = agents.json() as Row[];
     expect(agentRows.map((a) => a.key)).toEqual(["assistant", "unrestricted"]);
-    expect(agentRows[0]!.tools).toEqual(["execute_query", "get_entity", "semantic_search"]);
+    expect(agentRows[0]!.tools).toEqual(["execute_query", "get_entity", "search"]);
 
     const queries = await app.inject({
       method: "GET",
@@ -150,6 +150,7 @@ describe("round-trip against a stored export document", () => {
       "formatVersion",
       "lenses",
       "relationTypes",
+      "textSearchLanguage",
     ]);
   });
 });
@@ -168,7 +169,8 @@ describe("transfer between ontologies", () => {
 
     // Into the now-populated target: a disjoint payload still lands.
     const disjoint: Row = {
-      formatVersion: "4.0",
+      formatVersion: "5.0",
+      textSearchLanguage: "english",
       entityTypes: [
         { key: "project", displayName: "Project", description: null, properties: [] },
       ],

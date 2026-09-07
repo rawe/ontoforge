@@ -38,12 +38,12 @@ the deployment rather than any ontology: `GET /api/server/features`.
 - If type keys or property keys are unknown, inspect the schema first
 - Field names are `camelCase`; keys are `lower_snake_case`
 - Property filter syntax is `filter.{key}` or `filter.{key}__{op}`; on entity lists and
-  semantic search `{key}` may also be a query path (see Listing, Sorting, Filtering)
+  search `{key}` may also be a query path (see Listing, Sorting, Filtering)
 - Supported filter operators, on properties and query paths alike: no suffix for
   equality, `__gt`, `__gte`, `__lt`, `__lte`, `__contains`
 - `fields` is repeated, not comma-separated: `fields=name&fields=email`
-- Two query parameters are `snake_case` against the surrounding convention:
-  `min_score` on semantic search and on saved-query search
+- One query parameter is `snake_case` against the surrounding convention:
+  `min_score` on saved-query search
 
 ## Listing, Sorting, Filtering
 
@@ -57,8 +57,8 @@ Entity and relation lists share one parameter vocabulary.
 | `order` | `asc` or `desc`, default `asc` |
 | `q` | Case-insensitive substring across every `string` property in scope. **Entity lists only**; `document` properties are not searched |
 | `filter.{propertyKey}[__{op}]` | Property filter, repeatable |
-| `filter.{relationTypeKey}[:out\|:in].{propertyKey}[__{op}]` | Query path — a property of the related entity; entity lists and semantic search, repeatable |
-| `filter.{relationTypeKey}[:out\|:in]@{propertyKey}[__{op}]` | Query path — a property stored on the relation itself; entity lists and semantic search, repeatable |
+| `filter.{relationTypeKey}[:out\|:in].{propertyKey}[__{op}]` | Query path — a property of the related entity; entity lists and search, repeatable |
+| `filter.{relationTypeKey}[:out\|:in]@{propertyKey}[__{op}]` | Query path — a property stored on the relation itself; entity lists and search, repeatable |
 
 A list response carries `items`, `total`, `limit` and `offset`. `total` is the count
 before paging.
@@ -91,7 +91,7 @@ thirty.
   never matches.
 - **The value is coerced by the final property**, with the same operators as a plain
   filter; `__contains` stays textual. A path cannot end in a `document` property.
-- **Paths are a filter feature of entity lists and semantic search only.** Relation
+- **Paths are a filter feature of entity lists and search only.** Relation
   lists reject them, `sort` rejects them, `fields` treats one as an unknown name, and no
   response carries a path value.
 - **Path faults are collected like any other**, each under the filter key as sent. A
@@ -208,34 +208,31 @@ Regardless of projection: the centre entity always carries `_id`; neighbour enti
 carry `_id` and `_entityTypeKey`; relations carry `_id`, `_relationTypeKey` and
 `direction`.
 
-## Semantic Search
+## Search
 
-- `GET /search/semantic`
-  Ranks entities, document passages, or both fused into one ranking.
-  Query parameters:
-  `q` (required), `type` (optional entity type key), `searchIn` (`entities`, `documents`
-  or `all`; default `all`), `snippets` (default `true`), `limit` (1–100, default 10),
-  `min_score`, `fields`, `filter.{key}`, `filter.{key}__{op}` — `{key}` a property key
-  or a query path
+`GET /search` ranks entities for plain query text `q` (required). Optional parameters:
+`type` (omit to search across the lens), repeatable `in=properties` / `in=document`
+(default both), `strategy=semantic|keyword|hybrid` (default best available),
+`document.property` (one document property, only valid when documents are searched),
+`limit` (1–100, default 10), `fields`, and `filter.<key>`.
 
-  Omit `type` to search every entity type in the lens at once, in which case every hit
-  also carries `_entityTypeKey`.
+Filters narrow cross-type search to declaring types; conflicting data types and unknown
+keys are collected validation faults. Substring operators are rejected. Query paths work
+where the adapter declares support; otherwise use the entity list.
 
-  Filters, query paths included, require `type` and reject `__contains`; their faults
-  are collected into one answer as on the entity list. Whether semantic search evaluates
-  a query path depends on the storage adapter: where it does not, the path filter is
-  rejected as a validation error naming the entity list as the alternative, and the
-  entity list takes the same filter.
+The envelope is `{query, type, in, strategy, filter, hits}`. Each hit carries `entity`,
+`relativeScore` and `matches`. An entity match is `{kind: "properties"}`; each matching
+document property contributes `{kind: "document", propertyKey, charOffset, charLength}`.
+The entity match comes first. Use document coordinates as `offset` and `limit` on a read.
+No snippet or absolute score is returned. The best relative score is 1.0; all scores are
+comparable only within this response, never confidence or absolute similarity.
 
-  Each hit carries `matchedVia`: `{source: "entity", similarity}` for entity-embedding
-  matches, or `{source: "document", propertyKey, charOffset, charLength, snippet,
-  similarity}` for document-passage matches. Pass `charOffset`/`charLength` as
-  `offset`/`limit` to the documents endpoint to read the exact matched passage.
+The relative-score promise: under `semantic` or `keyword` alone the shape is real, a ratio of similarities or of engine scores; under `hybrid`, or with two kinds fused, it is rank-made: a hit found by both rankings sits clearly above one found by one, then the numbers trail smoothly whatever the closeness. It shows where the ranking degrades and how steeply, never whether the best hit is good.
 
-  In `all` mode `score` is a rank-fusion value for ordering only — threshold on
-  `matchedVia.similarity`.
-
-  Requires an embedding provider.
+MCP `search` runs both kinds, `search_documents` runs only documents and accepts optional
+`property`. Both accept `query`, optional `entity_type_key`, `limit`, `filters`, `fields`;
+neither takes a strategy. They return the same envelope. Keyword needs adapter support;
+semantic needs embeddings; hybrid needs both. Defaults prefer hybrid, keyword, semantic.
 
 ## Read-Only OQL Query
 
@@ -314,7 +311,7 @@ Every route here requires a language-model provider.
   Converses with one named agent.
 
 An agent may be granted exactly ten runtime tools: `get_schema`, `list_entities`,
-`get_entity`, `list_relations`, `get_neighbors`, `semantic_search`, `execute_query`,
+`get_entity`, `list_relations`, `get_neighbors`, `search`, `execute_query`,
 `list_saved_queries`, `run_saved_query`, `search_saved_queries`. Every write tool is
 outside that set, and so are the read-only `get_document` and `get_relation`.
 
@@ -334,7 +331,7 @@ A card advertises absolute URLs whose host is derived from the request rather th
 
 - `GET /api/server/features`
   Describes the deployment, not any ontology — it takes no ontology and no lens.
-  Response fields: `semanticSearch`, `ai`
+  Response fields: `semanticSearch`, `searchStrategies`, `ai`
 
 Semantic search and the AI routes depend on external providers and are unavailable unless
 one is configured. Call this **before** offering either, rather than relying on the
@@ -362,8 +359,9 @@ There are exactly six codes:
 `details.code` narrows, it does not replace: where it appears, the top-level code stays
 one of the six.
 
-The one narrowing that matters on this surface is `FEATURE_DISABLED`. A request needing a
-provider that is not configured — semantic search, saved-query search, or any AI route —
+The one narrowing that matters on this surface is `FEATURE_DISABLED`. A request for an
+unavailable search strategy, search without any available strategy, or saved-query
+discovery or AI without the required provider
 answers `422 VALIDATION_ERROR` with `details: {"code": "FEATURE_DISABLED"}`, which is what
 separates it from an ordinary rejected request on the same route:
 
@@ -409,7 +407,7 @@ Reasonable things to look for that are absent — do not generate calls for them
 
 1. Resolve the **ontology key** and the **lens key** — both are required, and neither has
    a default
-2. Probe `GET /api/server/features` before using semantic search or any AI route
+2. Probe `GET /api/server/features` before using search or any AI route
 3. Read the schema endpoints if the type or property shape is not already known
 4. Choose the narrowest runtime endpoint that solves the task
 5. Generate the request with exact path params, query params and JSON body

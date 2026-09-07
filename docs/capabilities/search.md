@@ -1,162 +1,104 @@
 # Search
 
-Finding things. Two mechanisms answer two different questions: literal text matching,
-which is always available, and semantic retrieval, which needs an embedding provider.
-
-## What it does
-
-|  | Literal matching | Semantic retrieval |
-|---|---|---|
-| Answers | "which records contain this text" | "which records mean this" |
-| Lives on | list operations | one dedicated search operation |
-| Available | always | only with an embedding provider |
-| Ordering | the requested sort field | by vector similarity |
-| Reaches document content | no | yes, passage by passage |
-| Spans types | one type per request | one type or all in-scope types |
-
-They are not layered. Literal matching is not a fallback the server substitutes when
-semantics are unavailable, and semantic retrieval never consults the literal matcher. A
-client picks per request. Both obey the lens: nothing out of scope is searched, and
-nothing out of scope is returned.
+The entity list filters by a literal term. The search operation ranks entities for a query.
+Neither server operation falls back to the other.
 
 ## Literal matching
 
-The entity list operation accepts a free-text term. It is matched case-insensitively as a
-substring against every `string` property the lens exposes on that type; matching one
-property is enough. This is substring containment, not tokenized full-text search — no
-stemming, no word boundaries, no relevance ranking. Results come back in the sort order
-the request asked for. `document` properties are never searched this way; their content is
-reachable only through semantic retrieval and through document reads
-([documents.md](documents.md)).
+The entity list's `q` is a case-insensitive substring filter over the lens-exposed `string`
+properties of one type. It has no stemming, word boundaries, language or relevance order.
+It composes with property filters, sort and offset. With no string property it is silently
+ignored. It excludes documents; a per-property substring filter can reach document text.
+See [instance-data.md](instance-data.md#query-paths) for property and query-path filters.
 
-Property filters are the exact half of the same surface, available on both entity and
-relation lists; the operators they offer are listed in
-[../interfaces.md](../interfaces.md#listing-sorting-filtering). A filter names a property
-in the scoped property set of the type being listed or — on an entity list — a query path
-to a property reached through one relation type
-([instance-data.md](instance-data.md#query-paths)); its value must coerce to the final
-property's data type, and every fault is collected into one validation error, reported
-under the filter key as sent. Relation lists take property filters and endpoint
-constraints but no free-text term and no query paths.
+## Ranked search
 
-## Semantic retrieval
+Three independent dimensions select a ranking: scope (one entity type or every type the
+lens exposes), search kind (properties, document, or both), and strategy. The query is
+plain words, not an engine query language. The limit counts entities, from 1 to 100,
+default 10; search has no paging, offset or minimum score.
 
-### Without a provider
-
-The search operation is rejected as a validation error carrying the disabled-feature
-refinement described in [../architecture.md](../architecture.md#error-model). The
-server's feature report states availability so clients can hide the surface instead
-of failing.
-
-The consequence that is easy to miss: with no provider, **no vectors are written either**.
-Entities and documents created while the provider is absent, or while it is failing, carry
-no vector. Configuring a provider afterwards does not retroactively embed them — they stay
-invisible to semantic retrieval until an explicit rebuild.
-
-### The three scopes
-
-A request selects what is ranked. The default is both.
-
-| Scope | Ranks | A hit is |
+| Search kind | Ranked unit | Match |
 |---|---|---|
-| Entities | one vector per entity, built from its string properties | the entity as a whole |
-| Documents | passage vectors over document properties | the parent entity of the best-matching passage |
-| Both | both rankings, fused | either, with fused ordering |
+| Property search | one composed text per entity, from string properties | entity as a whole, without a property key |
+| Document search | a passage of a document property | property key and the best passage's character coordinates |
 
-Document ranking runs over every (entity type, document property) pair the lens exposes
-and no others: a lens that hides a document property never touches its passages. Passage
-hits are deduplicated to their parent entities — the highest-scoring passage per entity
-wins and supplies that hit's match information; other passages of the same entity are
-discarded.
+Both kinds run by default. A kind with nothing to search contributes nothing by default;
+requesting it explicitly is a validation error. A named document property restricts only
+document search: on one type it must be an exposed document property; across types it
+selects the types declaring that document property. No matching property is an error.
 
-### Fusion, and what a fused score is not
+Long text belongs in a `document` property, which is chunked, ranked passage by passage,
+and whose match names the property and the passage.
 
-Searching both scopes fuses them by reciprocal rank fusion: each entity scores the sum of
-`1 / (60 + rank)` over the rankings it appears in, and results are ordered by that sum. An
-entity found in both rankings therefore outranks one found in either alone, regardless of
-raw similarity.
+### Strategies and availability
 
-**A fused score is not a similarity and must never be shown as one.** It is a
-rank-derived ordering number: it has no relation to 1.0, no meaning in isolation, and no
-comparability across responses. It must not be rendered as a similarity, a confidence or a
-percentage, and it must not be compared against a similarity threshold. Every hit carries
-its raw similarity separately; that is the number to display and to threshold.
-
-When exactly one scope was searched, the hit's score *is* the raw cosine similarity, and
-the match information repeats it. Only the fused case differs — so a client that displays
-a score must know which scope produced it.
-
-### What a hit reports
-
-Every hit carries the entity, a score, and a `matchedVia` object saying what actually
-matched.
-
-| Field | Present on | Meaning |
+| Strategy | Requirement | Scoring |
 |---|---|---|
-| `source` | every hit | `entity` or `document` |
-| `similarity` | every hit | raw cosine similarity of the matched vector — the comparable number |
-| `propertyKey` | document hits | which document property matched |
-| `charOffset` | document hits | where the matching passage starts in the full property value |
-| `charLength` | document hits | how long it is |
-| `snippet` | document hits, unless suppressed | the passage's leading ~200 characters |
+| `semantic` | an embedding provider | vector similarity |
+| `keyword` | the adapter supports keyword ranking | stemmed full-text ranking in the ontology language |
+| `hybrid` | both requirements | reciprocal rank fusion of semantic and keyword rankings |
 
-The offsets are character coordinates into the complete property value, and they are
-directly usable as the offset and length of a document read — so a client can fetch
-exactly the passage that matched without downloading the document
-([documents.md](documents.md)). Suppressing snippets removes only the text; the
-coordinates remain.
+The default is the first available of `hybrid`, `keyword`, `semantic`. The feature report
+lists available strategies in that order, and every response names the applied strategy.
+An unknown strategy is a validation error; a built but unavailable strategy is rejected
+with the disabled-feature refinement and a message naming the available strategies. With
+no available strategy the operation is disabled. The semantic-search feature boolean is
+kept for embedding rebuild and saved-query discovery.
 
-When an entity appears in both rankings, the document match information wins regardless of
-which similarity is higher, because it carries the retrieval coordinates and those are the
-more actionable information. That hit's entity-side similarity is not surfaced at all.
+Without a provider, composed property text and document chunks are still stored. Keyword
+search works on a supporting adapter. Configuring a provider later does not retroactively
+embed data: the rebuild below supplies missing vectors.
 
-### Minimum score
+### Fusion and matches
 
-An optional floor between 0 and 1 is applied to the **raw similarity within each ranking,
-before fusion** — never to the fused score. Raising it therefore changes which entities
-enter the fusion, and so reorders fused results, but it never filters on the number a
-fused response reports.
+Hybrid first fuses rankings of the same units within each kind, using the sum of
+`1 / (60 + rank)` with ranks starting at one. Document search then collapses passages to
+entities: the best passage determines entity order, while each matching document property
+contributes its best passage. The service grows the passage budget until the ranking is exhausted, so a long
+document cannot hide another entity or another matching document property. When both kinds run, they are fused by the same rule
+at entity level. An entity appears once, and its matches survive fusion.
 
-### One type or all types
+### Response
 
-Naming an entity type restricts the search to it; a type the lens does not expose is not
-found. Omitting the type searches every entity type in scope at once, and then the only
-thing identifying what a hit is, is the entity type key carried as a system property on
-the returned entity. Field projection consequently always retains that system property in
-cross-type mode, on top of the identifier it always retains.
+The envelope carries `query`, `type` (null across types), `in` (defaults filled), `strategy`,
+`filter` (empty when absent), and `hits`. Each hit carries `entity`, `relativeScore`, and
+`matches`. There is no absolute score, similarity, snippet or total.
 
-Cross-type search is ontology-scoped like everything else: it ranks over the ontology's
-own cross-type index, and another ontology's entities can never appear, however well
-they match. A scoped lens searching all types over-fetches from that index and
-discards hits whose type is out of scope. The candidate pool is capped, so a narrow lens
-over a large graph can return fewer hits than requested even when more matching entities
-exist. This is a known limit of cross-type search, not an error condition.
+The relative score is 1.0 for the best hit and each other hit's ordering number as a
+fraction of the best, comparable only within that response. Its promise:
 
-### Property filters on search
+under `semantic` or `keyword` alone the shape is real, a ratio of similarities or of engine scores; under `hybrid`, or with two kinds fused, it is rank-made: a hit found by both rankings sits clearly above one found by one, then the numbers trail smoothly whatever the closeness. It shows where the ranking degrades and how steeply, never whether the best hit is good.
 
-- **Filters require a type.** Cross-type search rejects them, because property definitions
-  are per entity type and a filter key means nothing without one.
-- **Substring containment is rejected.** Equality and the ordered
-  comparisons are supported; for substring filtering, use the entity list operation.
-- **Query paths are accepted**, in both forms and both directions, under the rules of the
-  entity list ([instance-data.md](instance-data.md#query-paths)): `filter.works_for.name=Acme`
-  narrows a search over persons to the persons employed by Acme,
-  `filter.works_for@role=CTO` to those holding a CTO employment. Whether semantic search
-  evaluates path conditions is declared by the storage adapter and enforced by the server:
-  on an adapter declaring none, a path filter is rejected as a validation error naming the
-  entity list as the alternative
-  ([../storage-adapters.md](../storage-adapters.md#what-crosses-the-port)).
-- Everything else matches the entity list operation's filter syntax, including resolution
-  against the lens-scoped schema, coercion to the declared data type, and the collection
-  of every fault — the substring and path rejections among them — into one answer.
-- **Every filter narrows both rankings, and the limit counts filtered hits.** Filters are
-  applied inside the search, never to its results: on the default deployment the passage
-  search joins each passage to its parent entity and evaluates the same conditions the
-  entity ranking evaluates, so a page is filled with matching hits and a filter never
-  shrinks it.
+Matches carry no number. An entity match is `{kind: "properties"}`. A passage match carries
+`kind: "document"`, `propertyKey`, `charOffset` and `charLength`, directly usable with a
+[document read](documents.md). The entity match comes first, then passage matches in
+document-ranking order, with one per document property.
 
-Result entities are filtered to the lens's properties and document properties appear as
-stubs, exactly as on any other read. Stored vectors never appear in a response.
+Entities carry every lens-exposed property by default, with document values stubbed.
+Projection works as on the entity list, including raw document text when explicitly
+named. It never projects matches; the entity id always survives and the type key survives
+across types. Technical text and vectors never appear in entities or design exports.
+
+### Scope and filters
+
+Cross-type search ranks the exact exposed set through per-type indexes in one statement,
+with one globally ordered page and no per-type quota. No shared cross-type index exists.
+Property filters narrow this set to types declaring every key. A key declared nowhere,
+or with conflicting data types across its declaring types, is a validation error. A query
+path similarly drops types its relation does not touch. This set feeds both kinds.
+
+Filters run inside every ranking. They follow entity-list resolution, coercion and
+collected-error rules, but substring operators are rejected. Path conditions are accepted
+only where the adapter declares support; rejection names the entity list as the
+alternative. Adapter limitations are recorded in [../storage-adapters.md](../storage-adapters.md).
+
+### Text-search language
+
+An ontology's `textSearchLanguage` is chosen at creation, defaults to `english`, and is
+immutable. `english` and `german` are supported. The bound store carries it; requests and
+environment variables cannot override it. Export includes the language as a required
+field, and import rejects a language differing from the existing target ontology.
 
 ## What gets embedded
 
@@ -187,7 +129,7 @@ The rules behind that line are what a reimplementation has to match:
 
 ## Keeping embeddings current
 
-Recomputed automatically, when a provider is configured:
+Property text and document chunks are recomputed automatically; vectors are added when a provider is configured:
 
 - on entity creation, always;
 - on entity update, whenever the update touches any `string` property — the vector is
@@ -217,7 +159,7 @@ embedding provider is configured. It:
 
 1. drops every one of the ontology's semantic indexes whose vector width no longer
    matches the provider's, and only those;
-2. recomposes the text of every entity of every entity type and rewrites its vector;
+2. recomposes and stores the property text of every entity and rewrites its optional vector;
 3. discards and re-chunks every document property value, embedding every passage whose
    stored vector is not already of the provider's width — after a model switch that is all
    of them;
@@ -235,8 +177,7 @@ regardless.
 It streams progress while running, as newline-delimited JSON: a progress record per
 processed item carrying the entity type key it belongs to, the count so far and that
 group's total, then a final summary with per-type processed and failed counts and the
-overall totals. An item whose embedding call fails is counted as failed and keeps whatever
-vector it already had.
+overall totals. An item whose embedding call fails is counted as failed; its refreshed property text remains searchable by keyword.
 
 So rebuild repairs: missing indexes, drifted index widths, entities and passages that were
 never embedded, vectors stale with respect to a schema change, and chunking stale with
@@ -253,8 +194,7 @@ error on the first operation that touches the index.
 Startup detects the condition rather than the symptom: with a provider configured, the
 check walks every registered ontology, compares each semantic index's configured width
 against the provider's, and reports every mismatch as a warning identifying the index by
-what it covers — an entity type, a document property on an entity type, cross-type entity
-search, or saved-query descriptions
+what it covers — an entity type, a document property on an entity type, or saved-query descriptions
 — never by a physical index name, and naming rebuild as the remedy.
 
 Startup warns and does not repair; the reasoning is in
@@ -265,20 +205,18 @@ does not stop the server from starting.
 
 ## Through the interfaces
 
-Complete operation and tool index: [../interfaces.md](../interfaces.md).
+The full contract is in [../interfaces.md](../interfaces.md). REST `GET /search`, MCP,
+agent tools and saved-query search steps use one search entry and the same envelope.
+MCP and agents expose `search` (both kinds) and `search_documents` (documents only, every
+hit carrying a passage); neither tool takes a strategy. Both allow an omitted entity type.
+MCP additionally accepts filters and fields. Agent limits are 10 by default for search,
+5 for document search, and 20 maximum. A saved-query search step requires one type and
+uses the default kinds and strategy; see [saved-queries.md](saved-queries.md).
 
-| Capability | REST | MCP | Web client |
-|---|---|---|---|
-| Literal matching | query parameters on the runtime list operations | the runtime list tools | list and table views |
-| Semantic retrieval | one runtime search operation | `semantic_search` on the runtime server | command palette, relation target picker, extraction dedupe |
-| Availability | the server's feature report | — | drives what the client shows |
-| Rebuild | one per-ontology modeling operation, streaming | — | alongside schema transfer |
+Saved-query discovery is separate: it retains its absolute cosine score and minimum
+score, description-only embedding, and embedding-provider requirement.
 
-One difference worth knowing: the MCP tool exposes scope, snippets, filters and field
-projection, but **no minimum score** — it always searches without a floor. A model that
-needs a similarity threshold has to apply it to the reported raw similarity itself.
-
-In the web client, the command palette uses semantic retrieval where available and falls
-back to per-type substring listing otherwise; entity deduplication during extraction
-review deliberately searches the entity scope only, so that a similarity threshold remains
-meaningful. See [../product-surface.md](../product-surface.md).
+The palette and relation picker use ranked search whenever the strategy list is nonempty,
+falling back to literal entity lists otherwise. They show labels, type chips and one badge
+per document match, with no score or passage text. Extraction review searches properties
+for up to three existing candidates with no score threshold or displayed number.

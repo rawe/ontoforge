@@ -158,7 +158,6 @@ function toSavedQueryConfig(row: Row): SavedQueryConfig {
     entityTypeKey: (s.entityTypeKey as string | undefined) ?? null,
     query: (s.query as string | undefined) ?? null,
     limit: (s.limit as number | undefined) ?? null,
-    minScore: (s.minScore as number | undefined) ?? null,
     bindings: (s.bindings as Record<string, string> | undefined) ?? null,
   }));
   const parameters: SavedQueryParameter[] = paramsList.map((p) => ({

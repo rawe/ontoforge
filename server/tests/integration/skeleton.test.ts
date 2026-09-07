@@ -1,3 +1,4 @@
+import { settings } from "../../src/config.js";
 /**
  * Skeleton contract, database-blind — runs against whichever adapter
  * `DB_BACKEND` selects. Covers: the adapter lifecycle (close→init cycle,
@@ -40,7 +41,7 @@ describe("adapter lifecycle", () => {
     await closeStores();
     await closeStores(); // the port contract's "Close. Idempotent."
     await initStores(); // boot again against the same store
-    await getOntologyRegistry().createOntology(randomUUID(), "lifecycle_probe", null, null);
+    await getOntologyRegistry().createOntology(randomUUID(), "lifecycle_probe", null, null, "english");
     const store = await getModelingStore("lifecycle_probe");
     expect(await store.listLenses()).toEqual([]);
   });
@@ -62,7 +63,7 @@ describe("features route on a fully booted server", () => {
     try {
       const res = await app.inject({ method: "GET", url: "/api/server/features" });
       expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ semanticSearch: false, ai: false });
+      expect(res.json()).toEqual({ semanticSearch: false, ai: false, searchStrategies: settings.DB_BACKEND === "postgres" ? ["keyword"] : [] });
     } finally {
       await shutdownServer(app);
     }

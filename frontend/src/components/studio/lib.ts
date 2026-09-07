@@ -44,7 +44,7 @@ export const PARAMETER_DATA_TYPES: readonly DataType[] = DATA_TYPES.filter(
 /** Hint shown for data types that need explanation beyond their name. */
 export const DATA_TYPE_DESCRIPTIONS: Partial<Record<DataType, string>> = {
   document:
-    'Large text, interpreted as Markdown. Chunked for semantic search when embeddings are enabled.',
+    'Large text, interpreted as Markdown. Always chunked for passage-level search; embeddings are optional.',
 }
 
 /**

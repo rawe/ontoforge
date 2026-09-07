@@ -8,7 +8,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 import { settings } from "../../src/config.js";
 import { setEmbeddingProvider, type EmbeddingProvider } from "../../src/core/embedding.js";
-import { chunkDocument } from "../../src/runtime/chunking.js";
+import { chunkDocument } from "../../src/runtime/search/document.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { syncDocumentChunks } from "../../src/runtime/service.js";
 import {
@@ -360,7 +360,7 @@ describe("chunk re-sync + embedding reuse", () => {
     expect(rows.map((r) => r.text)).toEqual(expected.map((c) => c.text));
   });
 
-  it("an edit without a provider skips chunk sync", async () => {
+  it("an edit without a provider refreshes chunk text", async () => {
     mockEdit(makeEntity({ name: "Ada", bio: "Hello world" }));
 
     const res = await patchDoc({ op: "str_replace", oldString: "world", newString: "docs" });
@@ -368,8 +368,9 @@ describe("chunk re-sync + embedding reuse", () => {
     expect(res.statusCode).toBe(200);
     // Value + length still written; chunks untouched without a provider.
     expect((holder.store.updateEntity.mock.calls[0]![2] as Row).bio).toBe("Hello docs");
-    expect(holder.store.deleteChunksForEntityProperty).not.toHaveBeenCalled();
-    expect(holder.store.createDocumentChunks).not.toHaveBeenCalled();
+    expect(holder.store.deleteChunksForEntityProperty).toHaveBeenCalled();
+    expect(holder.store.createDocumentChunks).toHaveBeenCalled();
+    for (const chunk of holder.store.createDocumentChunks.mock.calls[0]![3] as Row[]) expect(chunk).not.toHaveProperty("_embedding");
   });
 
   it("re-embeds unchanged chunks whose stored vector is of another model's width", async () => {

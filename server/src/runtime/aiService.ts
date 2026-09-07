@@ -11,6 +11,8 @@
  * any other error aborts the run.
  */
 
+import { availableStrategies, RELATIVE_SCORE_PROMISE } from "./search/strategies.js";
+
 import { randomUUID } from "node:crypto";
 
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
@@ -21,7 +23,11 @@ import {
   ToolMessage,
   type BaseMessage,
 } from "@langchain/core/messages";
-import { tool, ToolInputParsingException, type StructuredToolInterface } from "@langchain/core/tools";
+import {
+  tool,
+  ToolInputParsingException,
+  type StructuredToolInterface,
+} from "@langchain/core/tools";
 import { ToolNode, createReactAgent } from "@langchain/langgraph/prebuilt";
 import { z } from "zod";
 
@@ -44,7 +50,7 @@ import {
   TOOL_RUN_SAVED_QUERY,
   TOOL_SEARCH_DOCUMENTS,
   TOOL_SEARCH_SAVED_QUERIES,
-  TOOL_SEMANTIC_SEARCH,
+  TOOL_SEARCH,
 } from "./toolNames.js";
 
 type Row = Record<string, unknown>;
@@ -61,7 +67,7 @@ export const CHAT_TOOLS = [
   TOOL_GET_DOCUMENT,
   TOOL_LIST_RELATIONS,
   TOOL_GET_NEIGHBORS,
-  TOOL_SEMANTIC_SEARCH,
+  TOOL_SEARCH,
   TOOL_SEARCH_DOCUMENTS,
   TOOL_EXECUTE_QUERY,
   TOOL_LIST_SAVED_QUERIES,
@@ -69,11 +75,7 @@ export const CHAT_TOOLS = [
   TOOL_SEARCH_SAVED_QUERIES,
 ];
 
-const EMBEDDING_TOOLS: ReadonlySet<string> = new Set([
-  TOOL_SEMANTIC_SEARCH,
-  TOOL_SEARCH_DOCUMENTS,
-  TOOL_SEARCH_SAVED_QUERIES,
-]);
+const EMBEDDING_TOOLS: ReadonlySet<string> = new Set([TOOL_SEARCH_SAVED_QUERIES]);
 
 // ---------------------------------------------------------------------------
 // Schema description builder (for system prompts)
@@ -205,12 +207,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       entity_id: z.string(),
     }),
     run: async (lensKey, store, args) =>
-      service.getEntity(
-        lensKey,
-        args.entity_type_key as string,
-        args.entity_id as string,
-        store,
-      ),
+      service.getEntity(lensKey, args.entity_type_key as string, args.entity_id as string, store),
   },
   {
     name: TOOL_GET_DOCUMENT,
@@ -286,55 +283,37 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
         store,
       ),
   },
-  {
-    name: TOOL_SEMANTIC_SEARCH,
+  ...[false, true].map((document) => ({
+    name: document ? TOOL_SEARCH_DOCUMENTS : TOOL_SEARCH,
     description:
-      "Search entities by semantic similarity to a natural language query. " +
-      "Returns entities ranked by relevance with similarity scores. " +
-      "Best for finding entities when you don't know exact property values.",
-    schema: z.object({
-      query: z.string(),
-      entity_type_key: z.string(),
-      limit: z.number().int().nullish(),
-    }),
-    run: async (lensKey, store, args) =>
-      service.semanticSearch(
-        lensKey,
-        args.query as string,
-        args.entity_type_key as string,
-        clampLimit(args.limit, 10, 20),
-        null,
-        store,
-      ),
-  },
-  {
-    name: TOOL_SEARCH_DOCUMENTS,
-    description:
-      "Search INSIDE document properties: ranks passages of document text by " +
-      "semantic similarity to a natural language query and returns the " +
-      "entities they belong to. Use this when the answer is likely written in " +
-      "a document rather than in a short property — semantic_search ranks " +
-      "entities, this one ranks passages. Omit entity_type_key to search every " +
-      "type. Each hit carries the entity, a score, and 'matchedVia' with the " +
-      "propertyKey, the charOffset/charLength of the matching passage and a " +
-      "short snippet. Pass that propertyKey and charOffset/charLength to " +
-      "get_document to read the full passage.",
+      (document
+        ? "Find entities whose document text matches the query. Every hit has passage matches with propertyKey, charOffset and charLength for get_document. "
+        : "Find entities for a text across properties and documents. Omit entity_type_key to search across the lens. ") +
+      "Returns the search envelope. relativeScore is comparable only within this response: " +
+      RELATIVE_SCORE_PROMISE,
     schema: z.object({
       query: z.string(),
       entity_type_key: z.string().nullish(),
       limit: z.number().int().nullish(),
+      ...(document ? { property: z.string().nullish() } : {}),
     }),
-    run: async (lensKey, store, args) =>
-      service.semanticSearch(
+    run: async (lensKey: string, store: RuntimeStore, args: Row) =>
+      service.search(
         lensKey,
-        args.query as string,
-        (args.entity_type_key as string | null | undefined) ?? null,
-        clampLimit(args.limit, 5, 20),
-        null,
+        {
+          query: args.query as string,
+          type: (args.entity_type_key as string | null) ?? null,
+          limit: clampLimit(args.limit, document ? 5 : 10, 20),
+          ...(document
+            ? {
+                in: ["document" as const],
+                document: { property: (args.property as string | undefined) ?? undefined },
+              }
+            : {}),
+        },
         store,
-        { searchIn: "documents", snippets: true },
       ),
-  },
+  })),
   {
     name: TOOL_EXECUTE_QUERY,
     description:
@@ -352,8 +331,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
     schema: z.object({
       query: z.string(),
     }),
-    run: async (lensKey, store, args) =>
-      service.executeQuery(lensKey, args.query as string, store),
+    run: async (lensKey, store, args) => service.executeQuery(lensKey, args.query as string, store),
   },
   {
     name: TOOL_LIST_SAVED_QUERIES,
@@ -478,8 +456,7 @@ function withArgumentSelfCorrection(
         throw error;
       }
       const [input] = invokeArgs;
-      const isToolCall =
-        input !== null && typeof input === "object" && "args" in (input as object);
+      const isToolCall = input !== null && typeof input === "object" && "args" in (input as object);
       const args = ((isToolCall ? (input as { args?: unknown }).args : input) ?? {}) as Row;
       const result = { error: `Invalid arguments for ${toolName}: ${error.message}` };
       recorder.push({ tool: toolName, args, result });
@@ -925,7 +902,7 @@ STRATEGY — use the exact keys from the schema as tool arguments (e.g. entity_t
    relationship pattern. Example: "What does Lena do?" →
    MATCH (p:person)-[r:works_for]->(c:company) WHERE p.name CONTAINS 'Lena' RETURN p.name, c.name
 2. For counting, filtering, or combining conditions, use execute_query.
-3. For fuzzy or "find something like..." questions, use semantic_search.
+3. For fuzzy or "find something like..." questions, use search.
 4. For exploring an entity's connections when you have its _id, use get_neighbors.
 5. For browsing entities of a type, use list_entities.
 6. A property shown as {"document": true, "length": N} is a large text held back
@@ -944,14 +921,15 @@ export interface ChatHistoryEntry {
 /** Effective toolset: allowlist ∩ available. Embedding-dependent tools are
  * dropped without an embedding provider — for the default agent and
  * explicit allowlists alike. */
-export function resolveChatToolNames(agentConfig: AgentConfig): string[] {
+export function resolveChatToolNames(agentConfig: AgentConfig, store: RuntimeStore): string[] {
   const hasEmbedding = getEmbeddingProvider() !== null;
-  if (agentConfig.tools !== null) {
-    return agentConfig.tools.filter(
-      (t) => ALL_TOOL_NAMES.has(t) && (!EMBEDDING_TOOLS.has(t) || hasEmbedding),
-    );
-  }
-  return CHAT_TOOLS.filter((t) => !EMBEDDING_TOOLS.has(t) || hasEmbedding);
+  const hasSearch = availableStrategies(store).length > 0;
+  return (agentConfig.tools ?? CHAT_TOOLS).filter(
+    (t) =>
+      ALL_TOOL_NAMES.has(t) &&
+      (!EMBEDDING_TOOLS.has(t) || hasEmbedding) &&
+      (![TOOL_SEARCH, TOOL_SEARCH_DOCUMENTS].includes(t) || hasSearch),
+  );
 }
 
 /** Unified engine function for agent-powered chat. */
@@ -973,7 +951,7 @@ export async function runAgentChat(
     systemPrompt += "\n\nSCHEMA:\n" + schemaDesc;
   }
 
-  const toolNames = resolveChatToolNames(agentConfig);
+  const toolNames = resolveChatToolNames(agentConfig, store);
   const model = requireModel();
   const recorder: ToolCallRecord[] = [];
   const tools = buildTools(lensKey, store, toolNames, recorder);
@@ -1031,10 +1009,7 @@ export async function aiAgentChat(
 // ---------------------------------------------------------------------------
 
 /** List all agents (default + configured) for a lens. */
-export async function listRuntimeAgents(
-  lensKey: string,
-  store: RuntimeStore,
-): Promise<Row[]> {
+export async function listRuntimeAgents(lensKey: string, store: RuntimeStore): Promise<Row[]> {
   const loaded = await loadSchema(lensKey, store);
   const agents: Row[] = [
     {

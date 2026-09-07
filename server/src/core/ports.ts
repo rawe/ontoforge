@@ -38,10 +38,10 @@
  *    modeling store. They return plain type keys, never physical names, so
  *    the modeling service can reject a colliding key without knowing why it
  *    collides. An adapter with no such collisions returns empty sets.
- * 6. Adapters declare whether their semantic search evaluates path
- *    conditions, through `supportsSemanticSearchPathConditions()` on the
+ * 6. Adapters declare whether their search evaluates path
+ *    conditions, through `supportsSearchPathConditions()` on the
  *    runtime store, and the runtime service enforces the declaration: on
- *    an adapter declaring none, a query path on semantic search is
+ *    an adapter declaring none, a query path on search is
  *    rejected above the port, naming the entity list as the alternative.
  *
  * The `ModelingStore` and `RuntimeStore` interfaces below, together with
@@ -51,6 +51,8 @@
  * `adapters/neo4j/modelingStore.ts` and `adapters/neo4j/runtimeStore.ts`)
  * and its package is registered as one thunk line in `ADAPTERS`.
  */
+
+import type { TextSearchLanguage } from "../registry/schemas.js";
 
 import { settings } from "../config.js";
 import { NotFoundError } from "./exceptions.js";
@@ -118,6 +120,7 @@ export interface ReservedTypeKeyInUse {
  * surfaces"); the section comments below mirror it.
  */
 export interface ModelingStore {
+  readonly textSearchLanguage: TextSearchLanguage;
   // ------------------------------------------------------------------
   // Reserved keys
   // ------------------------------------------------------------------
@@ -357,7 +360,7 @@ export interface ModelingStore {
 
   getEntityTypesWithProperties(): Promise<Row[]>;
 
-  setEntityEmbedding(entityId: string, embedding: number[]): Promise<void>;
+  setEntitySearchText(entityId: string, propertyText: string, embedding: number[] | null): Promise<void>;
 
   listSavedQueryRefs(): Promise<Row[]>;
 
@@ -414,7 +417,7 @@ export interface ModelingStore {
  * surfaces"); the section comments below mirror it.
  *
  * Filter-taking methods (`listEntities`, `listRelations`, and the two
- * per-type searches, `semanticSearch` and `searchDocumentChunks`) receive
+ * property and document rankings) receive
  * parsed, coerced `FilterCondition`s built by the service — filter
  * validation happens above the port, so adapters receive only valid
  * input and raise no validation errors. A path condition reaches a
@@ -424,20 +427,33 @@ export interface ModelingStore {
  * paths carry them for the same reason. `getEntity` and `getRelation`
  * carry none.
  */
+export interface SearchedType {
+  entityTypeKey: string;
+  propertyDefs: Record<string, PropertyDef>;
+  conditions: FilterCondition[];
+}
+export interface SearchedProperty {
+  entityTypeKey: string;
+  propertyKey: string;
+  conditions: FilterCondition[];
+}
+
 export interface RuntimeStore {
   /** The ontology this store is bound to. The runtime schema cache keys
    * its entries by this binding plus the lens key. */
   readonly ontologyKey: string;
+  readonly textSearchLanguage: TextSearchLanguage;
 
   // ------------------------------------------------------------------
   // Declarations
   // ------------------------------------------------------------------
 
-  /** Whether this adapter's semantic search evaluates path conditions —
+  /** Whether this adapter's search evaluates path conditions —
    * in both rankings, entities and document passages (contract rule 6).
    * Declared as a plain flag so the service can reject a query path on
-   * semantic search without knowing why the adapter cannot evaluate it. */
-  supportsSemanticSearchPathConditions(): boolean;
+   * search without knowing why the adapter cannot evaluate it. */
+  supportsSearchPathConditions(): boolean;
+  supportsKeywordRanking(): boolean;
 
   // ------------------------------------------------------------------
   // Schema reading (for the runtime schema cache)
@@ -473,6 +489,7 @@ export interface RuntimeStore {
     properties: Row,
     propertyDefs: Record<string, PropertyDef>,
     embedding?: number[] | null,
+    propertyText?: string,
   ): Promise<Row>;
 
   listEntities(
@@ -502,6 +519,7 @@ export interface RuntimeStore {
     propertyDefs: Record<string, PropertyDef>,
     embedding?: number[] | null,
     hasEmbeddingUpdate?: boolean,
+    propertyText?: string,
   ): Promise<Row | null>;
 
   deleteEntity(entityTypeKey: string, entityId: string): Promise<boolean>;
@@ -524,18 +542,6 @@ export interface RuntimeStore {
     chunks: Row[],
   ): Promise<void>;
 
-  /** One document property's passages, ranked. The filter conditions are
-   * the parsed conditions the entity ranking takes, evaluated on each
-   * passage's parent entity as part of the search — not after it — so
-   * that the limit counts passages whose parent passes. */
-  searchDocumentChunks(
-    entityTypeKey: string,
-    propertyKey: string,
-    queryEmbedding: number[],
-    limit: number,
-    filters?: FilterCondition[] | null,
-  ): Promise<Row[]>;
-
   getEntitiesByIds(
     entityIds: string[],
     propertyDefs: Record<string, PropertyDef>,
@@ -545,21 +551,10 @@ export interface RuntimeStore {
   // Semantic search
   // ------------------------------------------------------------------
 
-  semanticSearch(
-    entityTypeKey: string,
-    propertyDefs: Record<string, PropertyDef>,
-    queryEmbedding: number[],
-    limit: number,
-    minScore: number | null,
-    filters?: FilterCondition[] | null,
-  ): Promise<Row[]>;
-
-  /** Search across all entity types at once. */
-  semanticSearchAll(
-    queryEmbedding: number[],
-    limit: number,
-    minScore: number | null,
-  ): Promise<Row[]>;
+  propertySearchKeyword(searchedTypes: SearchedType[], queryText: string, limit: number): Promise<Row[]>;
+  documentSearchKeyword(searchedProperties: SearchedProperty[], queryText: string, limit: number): Promise<Row[]>;
+  propertySearchSemantic(searchedTypes: SearchedType[], queryEmbedding: number[], limit: number): Promise<Row[]>;
+  documentSearchSemantic(searchedProperties: SearchedProperty[], queryEmbedding: number[], limit: number): Promise<Row[]>;
 
   /** Rank SavedQuery descriptions for one lens by vector similarity. */
   searchSavedQueries(
@@ -657,6 +652,7 @@ export interface OntologyRegistry {
     key: string,
     displayName: string | null,
     embeddingDimensions: number | null,
+    textSearchLanguage: TextSearchLanguage,
   ): Promise<Row>;
 
   listOntologies(): Promise<Row[]>;
@@ -688,9 +684,10 @@ export interface OntologyRegistry {
  * the registry lists and does nothing when there are none.
  */
 export interface AdapterModule {
+  supportsKeywordRanking(): boolean;
   initAdapter(): Promise<void>;
-  createModelingStore(ontologyKey: string): ModelingStore;
-  createRuntimeStore(ontologyKey: string): RuntimeStore;
+  createModelingStore(ontologyKey: string, language: TextSearchLanguage): ModelingStore;
+  createRuntimeStore(ontologyKey: string, language: TextSearchLanguage): RuntimeStore;
   createRegistry(): OntologyRegistry;
   closeStores(): Promise<void>;
   ensureSemanticIndexes(dimensions: number): Promise<void>;
@@ -751,25 +748,26 @@ function requireAdapter(): AdapterModule {
 }
 
 /** The binding check: an unknown ontology key fails with not-found. */
-async function requireOntology(ontologyKey: string): Promise<void> {
+async function requireOntology(ontologyKey: string): Promise<Row> {
   const existing = await getOntologyRegistry().getOntology(ontologyKey);
   if (existing === null) {
     throw new NotFoundError(`Ontology '${ontologyKey}' not found`);
   }
+  return existing;
 }
 
 /** A modeling store bound to one ontology. Unknown key -> not found. */
 export async function getModelingStore(ontologyKey: string): Promise<ModelingStore> {
   const adapter = requireAdapter();
-  await requireOntology(ontologyKey);
-  return adapter.createModelingStore(ontologyKey);
+  const ontology = await requireOntology(ontologyKey);
+  return adapter.createModelingStore(ontologyKey, ontology.textSearchLanguage as TextSearchLanguage);
 }
 
 /** A runtime store bound to one ontology. Unknown key -> not found. */
 export async function getRuntimeStore(ontologyKey: string): Promise<RuntimeStore> {
   const adapter = requireAdapter();
-  await requireOntology(ontologyKey);
-  return adapter.createRuntimeStore(ontologyKey);
+  const ontology = await requireOntology(ontologyKey);
+  return adapter.createRuntimeStore(ontologyKey, ontology.textSearchLanguage as TextSearchLanguage);
 }
 
 export function getOntologyRegistry(): OntologyRegistry {
@@ -777,4 +775,10 @@ export function getOntologyRegistry(): OntologyRegistry {
     throw new Error("Stores not initialized");
   }
   return ontologyRegistry;
+}
+
+/** Server-level declaration, available even before an ontology exists. */
+export async function supportsKeywordRanking(): Promise<boolean> {
+  const adapter = activeAdapter ?? await (ADAPTERS[settings.DB_BACKEND] ?? unknownBackend())();
+  return adapter.supportsKeywordRanking();
 }

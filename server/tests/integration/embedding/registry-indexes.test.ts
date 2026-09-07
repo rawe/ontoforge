@@ -72,7 +72,7 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "postgres")(
 
       const width = getEmbeddingProvider()?.dimensions;
       expect(width).toBeDefined();
-      expect(await indexWidthIn("ont_crm", "entity_embedding_all_idx")).toBe(width);
+      expect(await indexWidthIn("ont_crm", "entity_embedding_all_idx")).toBeNull();
       expect(await indexWidthIn("ont_crm", "saved_query_embedding_idx")).toBe(width);
     });
   },

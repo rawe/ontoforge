@@ -41,17 +41,16 @@ export interface SavedQueryParameter {
   dataType: string;
 }
 
-/** One pipeline step: `oql` carries its query in `oql`; `semantic_search`
+/** One pipeline step: `oql` carries its query in `oql`; `search`
  * carries its search text in `query`. */
 export interface StepConfig {
   name: string;
-  /** "oql" or "semantic_search". */
+  /** "oql" or "search". */
   type: string;
   oql?: string | null;
   entityTypeKey?: string | null;
   query?: string | null;
   limit?: number | null;
-  minScore?: number | null;
   bindings?: Record<string, string> | null;
 }
 

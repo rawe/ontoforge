@@ -10,7 +10,7 @@ import type {
   EntityInstance,
   SavedQuery,
   SavedQuerySearchHit,
-  SearchMatchedVia,
+  SearchMatch,
 } from '@/api/types'
 
 export function useDebouncedValue<T>(value: T, delayMs: number): T {
@@ -24,10 +24,7 @@ export function useDebouncedValue<T>(value: T, delayMs: number): T {
 
 export interface EntitySearchResult {
   entity: EntityInstance
-  /** Only present for semantic results (RRF fusion score — ordering only). */
-  score?: number
-  /** Only present for semantic results; carries the raw cosine similarity. */
-  matchedVia?: SearchMatchedVia
+  matches?: SearchMatch[]
 }
 
 export interface EntitySearchOptions {
@@ -37,8 +34,8 @@ export interface EntitySearchOptions {
   q: string
   /** Restrict to one entity type (scoped mode / target picker). */
   typeKey?: string
-  /** Whether the backend has semantic search enabled. */
-  semantic: boolean
+  /** Whether the backend has ranked search enabled. */
+  ranked: boolean
   /** All in-scope entity type keys — used for the cross-type substring fallback. */
   allTypeKeys: readonly string[]
   enabled: boolean
@@ -46,7 +43,7 @@ export interface EntitySearchOptions {
 }
 
 /**
- * Entity search. Semantic (cross-type or `type=`-scoped) when available and
+ * Entity search. Ranked (cross-type or `type=`-scoped) when available and
  * the query has ≥2 chars; substring `q` queries otherwise (parallel per-type
  * when unscoped). An empty query with a typeKey lists the first entities of
  * that type; an empty unscoped query returns nothing.
@@ -56,7 +53,7 @@ export function useEntitySearch({
   lensKey,
   q,
   typeKey,
-  semantic,
+  ranked,
   allTypeKeys,
   enabled,
   limit = 15,
@@ -69,7 +66,7 @@ export function useEntitySearch({
       lensKey,
       typeKey ?? '*',
       q,
-      semantic,
+      ranked,
       limit,
     ],
     enabled,
@@ -80,16 +77,14 @@ export function useEntitySearch({
         const res = await runtime.listEntities(ontologyKey, lensKey, typeKey, { limit: 10 })
         return res.items.map((entity) => ({ entity }))
       }
-      if (semantic && q.length >= 2) {
-        const res = await runtime.semanticSearch(ontologyKey, lensKey, {
+      if (ranked && q.length >= 2) {
+        const res = await runtime.search(ontologyKey, lensKey, {
           q,
           ...(typeKey !== undefined ? { type: typeKey } : {}),
           limit,
         })
-        return res.results.map(({ entity, score, matchedVia }) => ({
-          entity,
-          score,
-          matchedVia,
+        return res.hits.map(({ entity, matches }) => ({
+          entity: { ...entity, _entityTypeKey: entity._entityTypeKey ?? typeKey! }, matches,
         }))
       }
       if (typeKey !== undefined) {

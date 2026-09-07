@@ -99,7 +99,7 @@ describe("off-format ids short-circuit to the not-found shape, database untouche
   });
 
   it("embedding writes resolve as silent no-ops", async () => {
-    await store.setEntityEmbedding("nope", [0.1, 0.2]);
+    await store.setEntitySearchText("nope", "person: name=Test", [0.1, 0.2]);
     await store.setSavedQueryEmbedding("nope", [0.1, 0.2]);
     expect(fakeDb.queries).toEqual([]);
   });

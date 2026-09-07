@@ -26,9 +26,6 @@ export function documentPropertyScope(entityTypeKey: string, propertyKey: string
   return `document property '${propertyKey}' on entity type '${entityTypeKey}'`;
 }
 
-/** The cross-type entity index. */
-export const ALL_ENTITY_TYPES_SCOPE = "search across all entity types";
-
 /** The saved-query description index. */
 export const SAVED_QUERY_SCOPE = "saved-query descriptions";
 

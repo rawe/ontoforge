@@ -7,6 +7,8 @@
  * delegates to the query functions in `modelingQueries.ts`.
  */
 
+import type { TextSearchLanguage } from "../../registry/schemas.js";
+
 import type { Driver } from "neo4j-driver";
 
 import type { ModelingStore, ReservedTypeKeyInUse, Row } from "../../core/ports.js";
@@ -17,7 +19,7 @@ import { runSession } from "./errors.js";
 import * as queries from "./modelingQueries.js";
 
 export class Neo4jModelingStore implements ModelingStore {
-  constructor(private readonly driver: Driver) {}
+  constructor(private readonly driver: Driver, public readonly textSearchLanguage: TextSearchLanguage = "english") {}
 
   // ------------------------------------------------------------------
   // Reserved keys
@@ -494,7 +496,7 @@ export class Neo4jModelingStore implements ModelingStore {
     return runSession(this.driver, (session) => queries.getEntityTypesWithProperties(session));
   }
 
-  async setEntityEmbedding(entityId: string, embedding: number[]): Promise<void> {
+  async setEntitySearchText(entityId: string, propertyText: string, embedding: number[] | null): Promise<void> {
     return runSession(this.driver, (session) =>
       queries.setEntityEmbedding(session, entityId, embedding),
     );

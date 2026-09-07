@@ -21,12 +21,12 @@ import { CoercionError, assertNoNulCharacter, coerceValue, valueToText } from ".
 import { getEmbeddingProvider } from "../core/embedding.js";
 import { ConflictError, NotFoundError, ValidationError } from "../core/exceptions.js";
 import { SYSTEM_PROPERTIES, getReturnVariables, parseAndValidate } from "../core/oql/index.js";
-import type { FilterCondition, FilterOperator, RuntimeStore } from "../core/ports.js";
+import type { RuntimeStore } from "../core/ports.js";
 import type { PropertyDef } from "../core/schemas.js";
-import { chunkDocument } from "./chunking.js";
+import { chunkDocument } from "./search/document.js";
 import { cpIndexOf, cpLength, cpSlice, countOccurrences } from "./codePoints.js";
-import { buildTextRepr } from "./embedding.js";
-import { isQueryPath, resolveQueryPath, type ResolvedQueryPath } from "./queryPaths.js";
+import { buildTextRepr } from "./search/property.js";
+import { isQueryPath } from "./queryPaths.js";
 import {
   loadSchema,
   type EntityTypeDef,
@@ -34,6 +34,23 @@ import {
   type RelationTypeDef,
   type SchemaCacheValue,
 } from "./schemaCache.js";
+
+import {
+  docLengthKey,
+  documentPropertyKeys,
+  stubDocumentProperties,
+  filterEntityProperties,
+  filterRelationProperties,
+  applyFieldProjection,
+  parseFilterConditions,
+  ENTITY_ALWAYS_FIELDS,
+  ENTITY_NEIGHBOR_ALWAYS_FIELDS,
+  RELATION_ALWAYS_FIELDS,
+} from "./readHelpers.js";
+import { search } from "./search/entry.js";
+
+export { parseFilters, parseFilterConditions, docLengthKey } from "./readHelpers.js";
+export { search } from "./search/entry.js";
 
 type Row = Record<string, unknown>;
 
@@ -113,320 +130,6 @@ export function validateProperties(
 // ---------------------------------------------------------------------------
 // Document properties (stub read model)
 // ---------------------------------------------------------------------------
-
-const DOC_LENGTH_PREFIX = "_doc_";
-const DOC_LENGTH_SUFFIX = "_length";
-
-/** Internal entity property storing a document property's character count. */
-export function docLengthKey(propertyKey: string): string {
-  return `${DOC_LENGTH_PREFIX}${propertyKey}${DOC_LENGTH_SUFFIX}`;
-}
-
-function documentPropertyKeys(propertyDefs: Record<string, PropertyDef>): Set<string> {
-  const keys = new Set<string>();
-  for (const [k, p] of Object.entries(propertyDefs)) {
-    if (p.dataType === "document") {
-      keys.add(k);
-    }
-  }
-  return keys;
-}
-
-/**
- * Replace document property values with `{"document": true, "length": N}`
- * stubs. Internal `_doc_{key}_length` bookkeeping is consumed for the stub
- * length — measured from the value when missing — and removed from the
- * payload. Properties named in the `fields` projection keep their raw value.
- */
-function stubDocumentProperties(
-  entity: Row,
-  propertyDefs: Record<string, PropertyDef>,
-  fields?: string[] | null,
-): Row {
-  const requested = new Set(fields ?? []);
-
-  const lengths: Record<string, unknown> = {};
-  const result: Row = {};
-  for (const [k, v] of Object.entries(entity)) {
-    if (k.startsWith(DOC_LENGTH_PREFIX) && k.endsWith(DOC_LENGTH_SUFFIX)) {
-      lengths[k.slice(DOC_LENGTH_PREFIX.length, k.length - DOC_LENGTH_SUFFIX.length)] = v;
-      continue;
-    }
-    result[k] = v;
-  }
-
-  for (const key of documentPropertyKeys(propertyDefs)) {
-    if (requested.has(key)) {
-      continue; // raw value explicitly requested via fields projection
-    }
-    const value = result[key];
-    if (value === null || value === undefined) {
-      continue;
-    }
-    let length = lengths[key];
-    if (length === null || length === undefined) {
-      length = typeof value === "string" ? cpLength(value) : 0;
-    }
-    result[key] = { document: true, length };
-  }
-
-  return result;
-}
-
-// ---------------------------------------------------------------------------
-// Response property filtering and field projection
-// ---------------------------------------------------------------------------
-
-/** Filter entity properties to the scoped schema and stub document values. */
-function filterEntityProperties(
-  entity: Row,
-  scopedEt: EntityTypeDef,
-  fields?: string[] | null,
-): Row {
-  const filtered: Row = {};
-  for (const [k, v] of Object.entries(entity)) {
-    if (k.startsWith("_") || k in scopedEt.properties) {
-      filtered[k] = v;
-    }
-  }
-  return stubDocumentProperties(filtered, scopedEt.properties, fields);
-}
-
-const ENTITY_ALWAYS_FIELDS: ReadonlySet<string> = new Set(["_id"]);
-const ENTITY_NEIGHBOR_ALWAYS_FIELDS: ReadonlySet<string> = new Set(["_id", "_entityTypeKey"]);
-const RELATION_ALWAYS_FIELDS: ReadonlySet<string> = new Set([
-  "_id",
-  "_relationTypeKey",
-  "direction",
-]);
-
-/** Filter relation properties to the scoped schema. Endpoint ids — the
- * documented exception to the underscore convention — and the computed
- * `direction` always survive. */
-function filterRelationProperties(relation: Row, scopedRt: RelationTypeDef): Row {
-  const filtered: Row = {};
-  for (const [k, v] of Object.entries(relation)) {
-    if (
-      k.startsWith("_") ||
-      k in scopedRt.properties ||
-      k === "fromEntityId" ||
-      k === "toEntityId" ||
-      k === "direction"
-    ) {
-      filtered[k] = v;
-    }
-  }
-  return filtered;
-}
-
-function applyFieldProjection(
-  data: Row,
-  fields: string[] | null | undefined,
-  alwaysInclude: ReadonlySet<string>,
-): Row {
-  if (fields === null || fields === undefined) {
-    return data;
-  }
-  const keep = new Set([...alwaysInclude, ...fields]);
-  const result: Row = {};
-  for (const [k, v] of Object.entries(data)) {
-    if (keep.has(k)) {
-      result[k] = v;
-    }
-  }
-  return result;
-}
-
-// ---------------------------------------------------------------------------
-// Filter / sort helpers (list endpoints)
-// ---------------------------------------------------------------------------
-
-/** Extract `filter.<key>` query parameters; a repeated parameter keeps its
- * last value. */
-export function parseFilters(queryParams: Record<string, unknown>): Record<string, string> {
-  const filters: Record<string, string> = {};
-  for (const [paramName, value] of Object.entries(queryParams)) {
-    if (paramName.startsWith("filter.")) {
-      const filterKey = paramName.slice("filter.".length);
-      const single = Array.isArray(value) ? value[value.length - 1] : value;
-      filters[filterKey] = String(single);
-    }
-  }
-  return filters;
-}
-
-const FILTER_OPERATORS: ReadonlySet<FilterOperator> = new Set([
-  "gt",
-  "gte",
-  "lt",
-  "lte",
-  "contains",
-]);
-
-/** One rejected filter key: the caller-facing message and the detail
- * reported under `field` in `details.fields`. */
-interface FilterFault {
-  field: string;
-  message: string;
-  detail: string;
-}
-
-interface FilterParseOptions {
-  /** A surface that cannot evaluate substring containment rejects
-   * `__contains` with its own wording — one more collected fault, checked
-   * before the key's other faults so a lone rejection reads unchanged. */
-  rejectContains?: Omit<FilterFault, "field">;
-  /** The lens-scoped schema query paths are resolved against, `typeKey`
-   * being the listed entity type. Absent on the surfaces that take no
-   * paths, where a path key is one more collected fault. */
-  pathSchema?: SchemaCacheValue;
-  /** With no path schema, the fault a path key raises — for a surface
-   * that takes paths in principle but whose adapter declares no support.
-   * Absent, the surface is one paths never reach, and the fault says so. */
-  rejectPaths?: (path: string) => Omit<FilterFault, "field">;
-}
-
-/** The single rejection for a set of filter faults: every fault under its
- * own field, the distinct messages joined — so a lone fault reads exactly
- * as it always did. */
-function filterFaultsError(faults: FilterFault[]): ValidationError {
-  const fields: Record<string, string> = {};
-  for (const fault of faults) {
-    fields[fault.field] = fault.detail;
-  }
-  const messages = [...new Set(faults.map((fault) => fault.message))];
-  return new ValidationError(messages.join("; "), { fields });
-}
-
-/**
- * Parse a list-endpoint filter map into the conditions that cross the
- * port. The operator is the segment after the LAST double underscore —
- * so a property whose own key contains `__` cannot be filtered
- * (documented trap). Each key yields at most one fault — unknown
- * property, uncoercible value, unknown operator, checked in that order —
- * reported under the filter key as sent; the faults of all keys are
- * collected into one `ValidationError`, raised here, above the port,
- * identically for every backend.
- * `contains` compares textually and skips type coercion.
- */
-export function parseFilterConditions(
-  filters: Record<string, string>,
-  propertyDefs: Record<string, PropertyDef>,
-  typeKey: string,
-  options: FilterParseOptions = {},
-): FilterCondition[] {
-  const conditions: FilterCondition[] = [];
-  const faults: FilterFault[] = [];
-
-  for (const [filterExpr, rawValue] of Object.entries(filters)) {
-    let propKey: string;
-    let opName: string | null;
-    const splitAt = filterExpr.lastIndexOf("__");
-    if (splitAt >= 0) {
-      propKey = filterExpr.slice(0, splitAt);
-      opName = filterExpr.slice(splitAt + 2);
-    } else {
-      propKey = filterExpr;
-      opName = null;
-    }
-
-    if (opName === "contains" && options.rejectContains !== undefined) {
-      faults.push({ field: filterExpr, ...options.rejectContains });
-      continue;
-    }
-
-    let propDef: PropertyDef | undefined;
-    let path: ResolvedQueryPath | null = null;
-    if (isQueryPath(propKey)) {
-      if (options.pathSchema === undefined) {
-        const fault = options.rejectPaths?.(propKey) ?? {
-          message: `Query paths apply to entity lists only: '${propKey}'`,
-          detail:
-            `'${propKey}' is a query path; only a property key of '${typeKey}' ` +
-            "can be filtered here",
-        };
-        faults.push({ field: filterExpr, ...fault });
-        continue;
-      }
-      const resolved = resolveQueryPath(propKey, typeKey, options.pathSchema);
-      if (!("propertyDef" in resolved)) {
-        faults.push({ field: filterExpr, ...resolved });
-        continue;
-      }
-      path = resolved;
-      propDef = resolved.propertyDef;
-    } else {
-      propDef = propertyDefs[propKey];
-    }
-    if (propDef === undefined) {
-      faults.push({
-        field: filterExpr,
-        message: `Unknown filter property: '${propKey}'`,
-        detail: `Not defined in type '${typeKey}'`,
-      });
-      continue;
-    }
-
-    let value: unknown;
-    try {
-      if (opName === "contains") {
-        const text = String(rawValue); // substring comparison is textual
-        assertNoNulCharacter(text, propKey);
-        value = text;
-      } else {
-        value = coerceValue(rawValue, propDef.dataType, propKey);
-      }
-    } catch (error) {
-      if (!(error instanceof CoercionError)) throw error;
-      faults.push({
-        field: filterExpr,
-        message: `Invalid filter value for '${propKey}'`,
-        detail: error.message,
-      });
-      continue;
-    }
-
-    let op: FilterOperator;
-    if (opName === null) {
-      op = "eq";
-    } else if (FILTER_OPERATORS.has(opName as FilterOperator)) {
-      op = opName as FilterOperator;
-    } else {
-      faults.push({
-        field: filterExpr,
-        message: `Unknown filter operator: '${opName}'`,
-        detail: `Unsupported operator '${opName}'`,
-      });
-      continue;
-    }
-
-    if (path !== null) {
-      conditions.push({
-        kind: "path",
-        relationTypeKey: path.relationTypeKey,
-        direction: path.direction,
-        propertySource: path.propertySource,
-        propertyKey: path.propertyKey,
-        dataType: propDef.dataType,
-        op,
-        value,
-      });
-    } else {
-      conditions.push({
-        kind: "property",
-        propertyKey: propKey,
-        dataType: propDef.dataType,
-        op,
-        value,
-      });
-    }
-  }
-
-  if (faults.length > 0) {
-    throw filterFaultsError(faults);
-  }
-  return conditions;
-}
 
 const SYSTEM_SORT_FIELDS: Record<string, string> = {
   createdAt: "_createdAt",
@@ -620,6 +323,7 @@ export async function createEntity(
 
   // Embed the composed entity text (FULL schema, never the lens). A failed
   // embedding call yields null and the write proceeds without a vector.
+  const propertyText = buildTextRepr(entityTypeKey, coerced, fullEt?.properties ?? scopedEt.properties);
   let embedding: number[] | null = null;
   const provider = getEmbeddingProvider();
   if (provider && fullEt !== undefined) {
@@ -628,8 +332,7 @@ export async function createEntity(
       coerced,
       Object.keys(fullEt.properties).filter((k) => !docKeys.has(k)),
     );
-    const text = buildTextRepr(entityTypeKey, coerced, fullEt.properties);
-    embedding = await provider.embed(text);
+    embedding = await provider.embed(propertyText);
   }
 
   const entity = await store.createEntity(
@@ -638,9 +341,10 @@ export async function createEntity(
     coerced,
     fullEt?.properties ?? {},
     embedding,
+    propertyText,
   );
 
-  // Chunk + embed document properties (no-op without embedding provider).
+  // Chunk + embed document properties.
   await syncDocumentChunks(store, entityTypeKey, entityId, docValues);
 
   return filterEntityProperties(entity, scopedEt);
@@ -788,8 +492,9 @@ export async function updateEntity(
   // distinguishes "no new vector" from "store null".
   let embedding: number[] | null = null;
   let hasEmbeddingUpdate = false;
+  let propertyText = "";
   const provider = getEmbeddingProvider();
-  if (provider && fullEt !== undefined) {
+  if (fullEt !== undefined) {
     const hasStringChanges = Object.keys(coerced).some(
       (k) => k in fullEt.properties && fullEt.properties[k]!.dataType === "string",
     );
@@ -806,14 +511,14 @@ export async function updateEntity(
         for (const k of removeProps) {
           delete merged[k];
         }
-        store.validateVectorIndexedProperties(
+        if (provider) store.validateVectorIndexedProperties(
           entityTypeKey,
           merged,
           Object.keys(fullEt.properties).filter((k) => !docKeys.has(k)),
           entityId,
         );
-        const text = buildTextRepr(entityTypeKey, merged, fullEt.properties);
-        embedding = await provider.embed(text);
+        propertyText = buildTextRepr(entityTypeKey, merged, fullEt.properties);
+        embedding = provider ? await provider.embed(propertyText) : null;
         hasEmbeddingUpdate = true;
       }
     }
@@ -827,12 +532,13 @@ export async function updateEntity(
     fullEt?.properties ?? {},
     embedding,
     hasEmbeddingUpdate,
+    propertyText,
   );
   if (entity === null) {
     throw new NotFoundError(`Entity '${entityId}' not found`);
   }
 
-  // Re-chunk changed document properties only (no-op without provider).
+  // Re-chunk changed document properties only.
   await syncDocumentChunks(store, entityTypeKey, entityId, docChanges);
 
   return filterEntityProperties(entity, scopedEt);
@@ -881,9 +587,6 @@ export async function syncDocumentChunks(
     return;
   }
   const provider = getEmbeddingProvider();
-  if (!provider) {
-    return;
-  }
 
   for (const [propertyKey, value] of Object.entries(docValues)) {
     // Reuse embeddings of chunks whose text is unchanged — after a partial
@@ -898,7 +601,7 @@ export async function syncDocumentChunks(
     // built over. The width check is what makes a rebuild after such a
     // switch actually re-embed: the text is unchanged there, so every
     // chunk would otherwise be reused and none regenerated.
-    const reusable = await store.getChunkEmbeddingsForEntityProperty(entityId, propertyKey);
+    const reusable = provider ? await store.getChunkEmbeddingsForEntityProperty(entityId, propertyKey) : {};
     await store.deleteChunksForEntityProperty(entityId, propertyKey);
     if (!value) {
       continue;
@@ -924,8 +627,8 @@ export async function syncDocumentChunks(
       };
       const stored = reusable[chunk.text] ?? null;
       let chunkEmbedding =
-        stored !== null && stored.length === provider.dimensions ? stored : null;
-      if (chunkEmbedding === null) {
+        stored !== null && stored.length === provider?.dimensions ? stored : null;
+      if (chunkEmbedding === null && provider) {
         chunkEmbedding = await provider.embed(chunk.text);
       }
       if (chunkEmbedding !== null) {
@@ -1496,413 +1199,6 @@ export async function getNeighbors(
 // Semantic search
 // ---------------------------------------------------------------------------
 
-const SEARCH_IN_VALUES = ["entities", "documents", "all"] as const;
-
-/** Substring containment cannot be evaluated inside a vector index. */
-const SEARCH_CONTAINS_REJECTION = {
-  message:
-    "The '__contains' filter is not supported on semantic search. " +
-    "Use exact match or range operators (=, __gt, __gte, __lt, __lte).",
-  detail: "Not supported on semantic search",
-};
-const RRF_K = 60;
-const SNIPPET_CHARS = 200;
-
-export interface SemanticSearchOptions {
-  filters?: Record<string, string> | null;
-  fields?: string[] | null;
-  searchIn?: string;
-  snippets?: boolean;
-}
-
-/** The fault for a query path on semantic search when the active adapter
- * declares no support for path conditions there (port contract rule 6). */
-function searchPathRejection(path: string): Omit<FilterFault, "field"> {
-  return {
-    message: `Query path '${path}' is not supported on semantic search by the active storage adapter`,
-    detail:
-      "Not supported on semantic search by the active storage adapter; " +
-      "filter by the query path on the entity list instead",
-  };
-}
-
-/**
- * Semantic retrieval over one lens (`docs/capabilities/search.md`).
- *
- * Ranks entities (per-type or cross-type index), document passages
- * (per-property chunk indexes, deduped to parents), or both fused by
- * reciprocal rank fusion. Rejected with `details.code: "FEATURE_DISABLED"`
- * when no embedding provider is configured.
- */
-export async function semanticSearch(
-  lensKey: string,
-  query: string,
-  entityTypeKey: string | null,
-  limit: number,
-  minScore: number | null,
-  store: RuntimeStore,
-  options: SemanticSearchOptions = {},
-): Promise<Row> {
-  const loaded = await loadSchema(lensKey, store);
-
-  const provider = getEmbeddingProvider();
-  if (!provider) {
-    throw new ValidationError(
-      "Semantic search requires EMBEDDING_PROVIDER to be configured",
-      { code: "FEATURE_DISABLED" },
-    );
-  }
-
-  const searchIn = options.searchIn ?? "all";
-  if (!(SEARCH_IN_VALUES as readonly string[]).includes(searchIn)) {
-    throw new ValidationError(
-      `Invalid searchIn value: '${searchIn}'. Must be one of: ${SEARCH_IN_VALUES.join(", ")}`,
-      { fields: { searchIn: `Invalid value '${searchIn}'` } },
-    );
-  }
-
-  const filters = options.filters ?? {};
-  const fields = options.fields ?? null;
-  const snippets = options.snippets ?? true;
-
-  let scopedEt: EntityTypeDef | null = null;
-  let conditions: FilterCondition[] = [];
-  if (entityTypeKey !== null) {
-    scopedEt = loaded.scoped.entityTypes[entityTypeKey] ?? null;
-    if (scopedEt === null) {
-      throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
-    }
-    // Parsed once, for every search scope, so a faulty filter is rejected
-    // before any index is consulted — every fault in one answer. Query
-    // paths resolve against the lens-scoped schema only where the adapter
-    // declares its semantic search evaluates them; elsewhere a path key
-    // is one more collected fault, rejected above the port.
-    conditions = parseFilterConditions(filters, scopedEt.properties, entityTypeKey, {
-      rejectContains: SEARCH_CONTAINS_REJECTION,
-      ...(store.supportsSemanticSearchPathConditions()
-        ? { pathSchema: loaded.scoped }
-        : { rejectPaths: searchPathRejection }),
-    });
-  } else if (Object.keys(filters).length > 0) {
-    const fieldErrors: Record<string, string> = {};
-    for (const k of Object.keys(filters)) {
-      fieldErrors[k] = "Requires 'type'";
-    }
-    throw new ValidationError(
-      "Property filters require 'type' — filters are defined per entity type",
-      { fields: fieldErrors },
-    );
-  }
-
-  const queryEmbedding = await provider.embed(query);
-  if (queryEmbedding === null) {
-    throw new ValidationError("Failed to generate embedding for search query");
-  }
-
-  let entityRanking: Row[] = [];
-  if (searchIn === "entities" || searchIn === "all") {
-    if (entityTypeKey === null) {
-      entityRanking = await semanticSearchAllTypes(
-        loaded,
-        queryEmbedding,
-        limit,
-        minScore,
-        store,
-        fields,
-      );
-    } else {
-      entityRanking = await semanticSearchSingleType(
-        entityTypeKey,
-        scopedEt!,
-        queryEmbedding,
-        limit,
-        minScore,
-        conditions,
-        store,
-        fields,
-      );
-    }
-  }
-
-  let documentRanking: Row[] = [];
-  if (searchIn === "documents" || searchIn === "all") {
-    documentRanking = await semanticSearchDocuments(
-      loaded,
-      entityTypeKey,
-      queryEmbedding,
-      limit,
-      minScore,
-      conditions,
-      snippets,
-      store,
-      fields,
-    );
-  }
-
-  let results: Row[];
-  if (searchIn === "entities") {
-    results = entityRanking.map((r) => ({
-      entity: r.entity,
-      score: r.score,
-      matchedVia: { source: "entity", similarity: r.score },
-    }));
-  } else if (searchIn === "documents") {
-    results = documentRanking;
-  } else {
-    results = rrfFuse(entityRanking, documentRanking, limit);
-  }
-
-  if (fields !== null) {
-    const always = entityTypeKey !== null ? ENTITY_ALWAYS_FIELDS : ENTITY_NEIGHBOR_ALWAYS_FIELDS;
-    for (const r of results) {
-      r.entity = applyFieldProjection(r.entity as Row, fields, always);
-    }
-  }
-
-  return { results, query, total: results.length };
-}
-
-/** Rank entities of a single type via its per-type vector index. */
-async function semanticSearchSingleType(
-  entityTypeKey: string,
-  scopedEt: EntityTypeDef,
-  queryEmbedding: number[],
-  limit: number,
-  minScore: number | null,
-  conditions: FilterCondition[],
-  store: RuntimeStore,
-  fields: string[] | null,
-): Promise<Row[]> {
-  const results = await store.semanticSearch(
-    entityTypeKey,
-    scopedEt.properties,
-    queryEmbedding,
-    limit,
-    minScore,
-    conditions.length > 0 ? conditions : null,
-  );
-
-  // Filter result properties to the scoped schema.
-  for (const r of results) {
-    r.entity = filterEntityProperties(r.entity as Row, scopedEt, fields);
-  }
-  return results;
-}
-
-/**
- * Search the shared cross-type entity vector index across all scoped
- * entity types. The in-index WHERE cannot express membership in a set of
- * type keys, so scoped lenses over-fetch and filter to scoped types
- * here. The candidate pool is capped, so a heavily restricted scope may
- * return fewer than `limit` results even when more matches exist.
- */
-async function semanticSearchAllTypes(
-  loaded: LoadedSchema,
-  queryEmbedding: number[],
-  limit: number,
-  minScore: number | null,
-  store: RuntimeStore,
-  fields: string[] | null,
-): Promise<Row[]> {
-  const scopedTypeKeys = new Set(Object.keys(loaded.scoped.entityTypes));
-  if (scopedTypeKeys.size === 0) {
-    return [];
-  }
-
-  const fullTypeKeys = new Set(Object.keys(loaded.full.entityTypes));
-  const isRestricted =
-    scopedTypeKeys.size !== fullTypeKeys.size ||
-    [...scopedTypeKeys].some((k) => !fullTypeKeys.has(k));
-  const fetchLimit = isRestricted ? Math.min(limit * 5, 500) : limit;
-
-  const raw = await store.semanticSearchAll(queryEmbedding, fetchLimit, minScore);
-
-  const results: Row[] = [];
-  for (const r of raw) {
-    const entity = r.entity as Row;
-    const scopedEt = loaded.scoped.entityTypes[entity._entityTypeKey as string];
-    if (scopedEt === undefined) {
-      continue;
-    }
-    r.entity = filterEntityProperties(entity, scopedEt, fields);
-    results.push(r);
-    if (results.length >= limit) {
-      break;
-    }
-  }
-  return results;
-}
-
-/**
- * Rank entities by their best-matching document chunk.
- *
- * Queries each in-scope (entity type, document property) virtual index,
- * merges chunk hits by raw score, and dedupes to parent entities — the
- * best chunk per entity wins and provides `matchedVia`. The parsed
- * conditions — the same the entity ranking takes, plain and path alike —
- * cross the port with each passage search, which applies them to the
- * passage's parent entity as part of the search.
- */
-async function semanticSearchDocuments(
-  loaded: LoadedSchema,
-  entityTypeKey: string | null,
-  queryEmbedding: number[],
-  limit: number,
-  minScore: number | null,
-  conditions: FilterCondition[],
-  snippets: boolean,
-  store: RuntimeStore,
-  fields: string[] | null,
-): Promise<Row[]> {
-  const typeKeys =
-    entityTypeKey !== null ? [entityTypeKey] : Object.keys(loaded.scoped.entityTypes);
-
-  const pairs: [string, string][] = [];
-  for (const tk of typeKeys) {
-    const etDef = loaded.scoped.entityTypes[tk];
-    if (etDef === undefined) {
-      continue;
-    }
-    for (const pk of Object.keys(etDef.properties)) {
-      if (etDef.properties[pk]!.dataType === "document") {
-        pairs.push([tk, pk]);
-      }
-    }
-  }
-
-  if (pairs.length === 0) {
-    return [];
-  }
-
-  const chunkHits: Row[] = [];
-  for (const [tk, pk] of pairs) {
-    const hits = await store.searchDocumentChunks(
-      tk,
-      pk,
-      queryEmbedding,
-      limit,
-      conditions.length > 0 ? conditions : null,
-    );
-    chunkHits.push(...hits);
-  }
-
-  // Dedupe to parent entities: the best chunk per entity wins.
-  const bestPerEntity = new Map<string, Row>();
-  for (const hit of chunkHits) {
-    if (minScore !== null && (hit.score as number) < minScore) {
-      continue;
-    }
-    const parentId = (hit.chunk as Row)._entityId as string | undefined;
-    if (!parentId) {
-      continue;
-    }
-    const current = bestPerEntity.get(parentId);
-    if (current === undefined || (hit.score as number) > (current.score as number)) {
-      bestPerEntity.set(parentId, hit);
-    }
-  }
-
-  if (bestPerEntity.size === 0) {
-    return [];
-  }
-
-  const ranked = [...bestPerEntity.values()].sort(
-    (a, b) => (b.score as number) - (a.score as number),
-  );
-
-  // Scoped defs for row decoding: the named type's when the search is
-  // type-scoped, otherwise the union across the scoped entity types.
-  let batchDefs: Record<string, PropertyDef>;
-  if (entityTypeKey !== null) {
-    batchDefs = loaded.scoped.entityTypes[entityTypeKey]?.properties ?? {};
-  } else {
-    batchDefs = {};
-    for (const etDef of Object.values(loaded.scoped.entityTypes)) {
-      batchDefs = { ...batchDefs, ...etDef.properties };
-    }
-  }
-
-  const entities = await store.getEntitiesByIds(
-    ranked.map((h) => (h.chunk as Row)._entityId as string),
-    batchDefs,
-  );
-
-  const results: Row[] = [];
-  for (const hit of ranked) {
-    const chunk = hit.chunk as Row;
-    const entity = entities[chunk._entityId as string];
-    if (entity === undefined) {
-      continue;
-    }
-    const scopedEt = loaded.scoped.entityTypes[entity._entityTypeKey as string];
-    if (scopedEt === undefined) {
-      continue;
-    }
-
-    const matchedVia: Row = {
-      source: "document",
-      propertyKey: chunk._propertyKey,
-      charOffset: chunk.startChar,
-      charLength: chunk.charLength,
-      similarity: hit.score,
-    };
-    if (snippets) {
-      matchedVia.snippet = cpSlice(chunk.text as string, 0, SNIPPET_CHARS);
-    }
-
-    results.push({
-      entity: filterEntityProperties(entity, scopedEt, fields),
-      score: hit.score,
-      matchedVia,
-    });
-    if (results.length >= limit) {
-      break;
-    }
-  }
-
-  return results;
-}
-
-/**
- * Reciprocal Rank Fusion over entity and document rankings.
- *
- * `score = Σ 1/(K + rank)` with K=60. Document `matchedVia` wins when an
- * entity appears in both rankings (it carries retrieval coordinates).
- */
-function rrfFuse(entityRanking: Row[], documentRanking: Row[], limit: number): Row[] {
-  const fused = new Map<string, Row>();
-
-  entityRanking.forEach((r, index) => {
-    const rank = index + 1;
-    const eid = (r.entity as Row)._id as string;
-    let item = fused.get(eid);
-    if (item === undefined) {
-      item = { entity: r.entity, score: 0, matchedVia: null };
-      fused.set(eid, item);
-    }
-    item.score = (item.score as number) + 1 / (RRF_K + rank);
-    if (item.matchedVia === null) {
-      item.matchedVia = { source: "entity", similarity: r.score };
-    }
-  });
-
-  documentRanking.forEach((r, index) => {
-    const rank = index + 1;
-    const eid = (r.entity as Row)._id as string;
-    let item = fused.get(eid);
-    if (item === undefined) {
-      item = { entity: r.entity, score: 0, matchedVia: null };
-      fused.set(eid, item);
-    }
-    item.score = (item.score as number) + 1 / (RRF_K + rank);
-    item.matchedVia = r.matchedVia;
-  });
-
-  return [...fused.values()]
-    .sort((a, b) => (b.score as number) - (a.score as number))
-    .slice(0, limit);
-}
-
 // ---------------------------------------------------------------------------
 // OQL query execution
 // ---------------------------------------------------------------------------
@@ -2146,34 +1442,18 @@ export async function executeSavedQuery(
 
       stepResults[step.name] = rows;
       lastOutput = { columns, results: rows };
-    } else if (step.type === "semantic_search") {
+    } else if (step.type === "search") {
       // Bindings are resolved but IGNORED here — only declared parameters
       // reach the search text, textually substituted.
       const queryText = substituteParams(step.query!, coercedParams);
 
-      const limit = step.limit || 10;
-      const minScore = step.minScore ?? null;
-
-      const result = await semanticSearch(
-        lensKey,
-        queryText,
-        step.entityTypeKey!,
-        limit,
-        minScore,
-        store,
-      );
-
-      // Flatten for bindings: each hit's entity map becomes a row, with
-      // the similarity score available under `_score`.
-      const results = (result.results as Row[] | undefined) ?? [];
-      const rows = results.map((r) => {
-        const row = r.entity as Row;
-        row._score = r._score ?? r.score;
-        return row;
-      });
+      const result = await search(lensKey, {
+        query: queryText, type: step.entityTypeKey!, limit: step.limit || 10,
+      }, store);
+      const rows = result.hits.map((hit) => hit.entity);
 
       stepResults[step.name] = rows;
-      lastOutput = result;
+      lastOutput = { ...result };
     }
   }
 
@@ -2197,7 +1477,6 @@ function savedQueryToWire(sq: {
     entityTypeKey?: string | null;
     query?: string | null;
     limit?: number | null;
-    minScore?: number | null;
     bindings?: Record<string, string> | null;
   }[];
   parameters: { name: string; description: string; dataType: string }[];
@@ -2213,7 +1492,6 @@ function savedQueryToWire(sq: {
       ...(s.entityTypeKey ? { entityTypeKey: s.entityTypeKey } : {}),
       ...(s.query ? { query: s.query } : {}),
       ...(s.limit !== null && s.limit !== undefined ? { limit: s.limit } : {}),
-      ...(s.minScore !== null && s.minScore !== undefined ? { minScore: s.minScore } : {}),
       ...(s.bindings && Object.keys(s.bindings).length > 0 ? { bindings: s.bindings } : {}),
     })),
     parameters: sq.parameters.map((p) => ({

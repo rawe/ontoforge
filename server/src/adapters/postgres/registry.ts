@@ -21,15 +21,17 @@
  * `DROP SCHEMA … CASCADE`.
  */
 
+import type { TextSearchLanguage } from "../../registry/schemas.js";
+
 import type { OntologyRegistry, Row } from "../../core/ports.js";
-import { fixedVectorIndexStatements, ONTOLOGY_DDL_STATEMENTS } from "./ddl.js";
+import { fixedVectorIndexStatements, ontologyDdlStatements } from "./ddl.js";
 import { runQuery, withTransaction } from "./errors.js";
 import { quoteIdent } from "./oql/bindings.js";
 import { camelizeRow, camelizeRows } from "./rows.js";
 
 // The port-visible shape; the physical `namespace` column stays inside
 // the adapter.
-const ONTOLOGY_COLS = "ontology_id, key, display_name, created_at, updated_at";
+const ONTOLOGY_COLS = "ontology_id, key, display_name, text_search_language, created_at, updated_at";
 
 /** The namespace an ontology key names — the binding the bound stores
  * carry (`index.ts`). */
@@ -62,18 +64,19 @@ export class PostgresOntologyRegistry implements OntologyRegistry {
     key: string,
     displayName: string | null,
     embeddingDimensions: number | null,
+    textSearchLanguage: TextSearchLanguage,
   ): Promise<Row> {
     const namespace = ontologyNamespace(key);
     return withTransaction(async (querier) => {
       const result = await querier.query(
-        `INSERT INTO public.ontology (ontology_id, key, display_name, namespace)
-         VALUES ($1, $2, $3, $4)
+        `INSERT INTO public.ontology (ontology_id, key, display_name, namespace, text_search_language)
+         VALUES ($1, $2, $3, $4, $5)
          RETURNING ${ONTOLOGY_COLS}`,
-        [ontologyId, key, displayName, namespace],
+        [ontologyId, key, displayName, namespace, textSearchLanguage],
       );
       await querier.query(`CREATE SCHEMA ${quoteIdent(namespace)}`);
       await querier.query(`SET LOCAL search_path TO ${quoteIdent(namespace)}, public`);
-      for (const statement of ONTOLOGY_DDL_STATEMENTS) {
+      for (const statement of ontologyDdlStatements(textSearchLanguage)) {
         await querier.query(statement);
       }
       if (embeddingDimensions !== null) {

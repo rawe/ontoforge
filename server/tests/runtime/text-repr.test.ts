@@ -6,7 +6,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { MAX_TEXT_CHARS, buildTextRepr } from "../../src/runtime/embedding.js";
+import { MAX_TEXT_CHARS, buildTextRepr } from "../../src/runtime/search/property.js";
 import type { PropertyDef } from "../../src/core/schemas.js";
 
 function prop(key: string, dataType = "string", required = false): PropertyDef {

@@ -116,7 +116,7 @@ async function indexNames(): Promise<string[]> {
 }
 
 async function provisionOntology(): Promise<void> {
-  await getOntologyRegistry().createOntology(randomUUID(), ONTOLOGY_KEY, null, null);
+  await getOntologyRegistry().createOntology(randomUUID(), ONTOLOGY_KEY, null, null, "english");
 }
 
 async function assertCatalogComplete(): Promise<void> {

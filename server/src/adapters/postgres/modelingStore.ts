@@ -32,6 +32,8 @@
  * naming and index DDL live there, beside the init DDL.
  */
 
+import type { TextSearchLanguage } from "../../registry/schemas.js";
+
 import { toSql } from "pgvector";
 
 import type { ModelingStore, ReservedTypeKeyInUse, Row } from "../../core/ports.js";
@@ -104,7 +106,7 @@ function toIncludeRow(row: Row): Row {
 export class PostgresModelingStore implements ModelingStore {
   /** Bound to one ontology's namespace; unbound (tests only) runs against
    * the connection's default namespace. */
-  constructor(private readonly namespace?: string) {}
+  constructor(private readonly namespace?: string, public readonly textSearchLanguage: TextSearchLanguage = "english") {}
 
   /** Door one, carrying this store's binding. */
   private query(text: string, params?: unknown[]): Promise<DbResult> {
@@ -919,13 +921,14 @@ export class PostgresModelingStore implements ModelingStore {
 
   /** No `updated_at` stamp: re-embedding is not a content change, and the
    * reference adapter leaves the timestamp untouched here too. */
-  async setEntityEmbedding(entityId: string, embedding: number[]): Promise<void> {
+  async setEntitySearchText(entityId: string, propertyText: string, embedding: number[] | null): Promise<void> {
     if (!isUuid(entityId)) {
       return;
     }
-    await this.query(`UPDATE entity SET embedding = $2::vector WHERE id = $1`, [
+    await this.query(`UPDATE entity SET embedding = $2::vector, property_text = $3 WHERE id = $1`, [
       entityId,
-      toSql(embedding),
+      embedding === null ? null : toSql(embedding),
+      propertyText,
     ]);
   }
 

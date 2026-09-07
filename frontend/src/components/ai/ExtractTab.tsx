@@ -15,7 +15,7 @@ interface ExtractTabProps {
   ontologyKey: string
   lensKey: string
   schema: RuntimeSchema
-  semanticEnabled: boolean
+  searchEnabled: boolean
 }
 
 /**
@@ -23,7 +23,7 @@ interface ExtractTabProps {
  * `/ai/extract` (create:false — nothing is persisted), then review and accept
  * the proposals. The review stage owns all creation.
  */
-export function ExtractTab({ ontologyKey, lensKey, schema, semanticEnabled }: ExtractTabProps) {
+export function ExtractTab({ ontologyKey, lensKey, schema, searchEnabled }: ExtractTabProps) {
   const [text, setText] = useState('')
   const [restrictTypes, setRestrictTypes] = useState<string[]>([])
   const [response, setResponse] = useState<ExtractResponse | null>(null)
@@ -52,7 +52,7 @@ export function ExtractTab({ ontologyKey, lensKey, schema, semanticEnabled }: Ex
         lensKey={lensKey}
         schema={schema}
         response={response}
-        semanticEnabled={semanticEnabled}
+        searchEnabled={searchEnabled}
         onBack={() => setResponse(null)}
       />
     )

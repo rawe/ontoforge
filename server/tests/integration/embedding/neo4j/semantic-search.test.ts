@@ -1,3 +1,4 @@
+import { getEmbeddingProvider, setEmbeddingProvider } from "../../../../src/core/embedding.js";
 /**
  * The Neo4j indexed-string write constraint: values headed for vector-index
  * filter metadata are capped at `MAX_VECTOR_FILTER_VALUE_BYTES`; oversized
@@ -89,6 +90,18 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")(
       expect(body.error.message).toContain("'bio'");
       expect(body.error.message).not.toMatch(/eo4j/); // never the engine
       expect((body.error.details.fields as Row).bio).toBeDefined();
+    });
+
+    it("accepts composed property text above the indexed-value ceiling when each property fits", async () => {
+      await buildSearchFixture();
+      const provider = getEmbeddingProvider()!;
+      const vector = await provider.embed("Ada researcher");
+      setEmbeddingProvider({ dimensions: provider.dimensions, embed: async () => vector });
+      try {
+        const res = await app.inject({ method: "POST", url: "/api/ontologies/test_ont/runtime/lenses/search_test/entities/person", payload: { name: "ä".repeat(10000), bio: "ö".repeat(10000) } });
+        expect(res.statusCode, res.body).toBe(201);
+        expect(res.json()).not.toHaveProperty("propertyText");
+      } finally { setEmbeddingProvider(provider); }
     });
 
     it("document values are exempt from the indexed-string size limit", async () => {

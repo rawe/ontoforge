@@ -275,9 +275,9 @@ There are exactly six top-level codes:
 Two refinements:
 
 **`details.code` narrows, it does not replace.** Where it appears, the top-level code
-stays one of the six. A request for semantic search or saved-query search with no
-embedding provider configured — or an AI request with no language-model provider
-configured — answers `422 VALIDATION_ERROR` with `details.code` of `FEATURE_DISABLED`.
+stays one of the six. A request for an unavailable search strategy, search with no available strategy,
+saved-query discovery with no embedding provider — or an AI request with no
+language-model provider configured — answers `422 VALIDATION_ERROR` with `details.code` of `FEATURE_DISABLED`.
 
 **`STORAGE_ERROR` carries an id, not a cause.** A driver message names the vendor and its
 physical objects, which must not reach a client. The adapter logs the original against a

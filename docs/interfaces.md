@@ -87,8 +87,8 @@ Entity and relation list routes share one parameter vocabulary.
 | `order` | `asc` or `desc`, default `asc` |
 | `q` | Case-insensitive substring match across every `string` property in scope; entity lists only, and `document` properties are not searched |
 | `filter.<propertyKey>[__<op>]` | Property filter, repeatable |
-| `filter.<relationTypeKey>[:out\|:in].<propertyKey>[__<op>]` | Query path — filter by a property of the related entity; entity lists and semantic search, repeatable |
-| `filter.<relationTypeKey>[:out\|:in]@<propertyKey>[__<op>]` | Query path — filter by a property stored on the relation itself; entity lists and semantic search, repeatable |
+| `filter.<relationTypeKey>[:out\|:in].<propertyKey>[__<op>]` | Query path — filter by a property of the related entity; entity lists and search, repeatable |
+| `filter.<relationTypeKey>[:out\|:in]@<propertyKey>[__<op>]` | Query path — filter by a property stored on the relation itself; entity lists and search, repeatable |
 
 A list response carries `items`, `total`, `limit` and `offset`. `total` is the count
 before paging. String sorting follows the database's default collation.
@@ -114,7 +114,7 @@ filter is evaluated, and the trap in the suffix rule, are in
 [capabilities/instance-data.md](capabilities/instance-data.md#listing). Relation lists
 additionally accept `fromEntityId` and `toEntityId`.
 
-A filter key on an entity list, or on semantic search, may be a query path — `filter.works_for.name=Acme` for a
+A filter key on an entity list, or on search, may be a query path — `filter.works_for.name=Acme` for a
 property of the related entity, `filter.works_for@role=CTO` for a property stored on the
 relation itself — with the same operator suffixes and the value coerced by the final
 property. The direction follows the relation type's endpoints; a `:out` or `:in` marker
@@ -137,7 +137,7 @@ not on every request shape — the restrictions and their reasons are in
 
 | Route | Always returned regardless of projection |
 |---|---|
-| Entity list, entity read, semantic search | `_id` (plus `_entityTypeKey` on cross-type search) |
+| Entity list, entity read, search | `_id` (plus `_entityTypeKey` on cross-type search) |
 | Neighbours — the centre entity | `_id` |
 | Neighbours — neighbour entities | `_id`, `_entityTypeKey` |
 | Neighbours — relations, via `relationFields` | `_id`, `_relationTypeKey`, `direction` |
@@ -147,14 +147,13 @@ raw content inline instead of the usual size stub. See
 [capabilities/documents.md](capabilities/documents.md).
 
 Projection is available on entity list and read, on neighbours (as `fields` and
-`relationFields`) and on semantic search. Relation list and relation read do not take it.
+`relationFields`) and on search. Relation list and relation read do not take it.
 
 ### Naming irregularities
 
-Two query parameters are `snake_case` on the wire where the surrounding convention would
-predict otherwise: `min_score` on semantic search and on saved-query search. Neighbouring
-parameters on the same routes (`searchIn`, `relationTypeKey`, `relationFields`,
-`fromEntityId`, `toEntityId`) are camelCase.
+`min_score` on saved-query discovery is the one snake_case runtime query parameter.
+Other runtime parameters follow their documented names, including kind-prefixed
+`document.property` and `filter.<key>`.
 
 ### Errors
 
@@ -165,7 +164,8 @@ MCP reports the same failures as tool errors. Because a tool error is a single s
 per-field detail that REST returns under `details.fields` is flattened into the message
 text, so a model still sees every offending field in one response.
 
-Requesting a capability whose provider is not configured answers `VALIDATION_ERROR` with
+Requesting an unavailable search strategy or a capability whose provider is not configured
+answers `VALIDATION_ERROR` with
 `details.code` of `FEATURE_DISABLED` — on the two routes that need an embedding provider,
 semantic search and saved-query search, and on the AI routes alike. A client can therefore
 tell a switched-off capability from a rejected request. Two AI routes are exempt because
@@ -202,11 +202,11 @@ exist.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/server/features` | Report whether semantic search and AI are available |
+| GET | `/api/server/features` | Report `semanticSearch`, `searchStrategies` and `ai` |
 
 The one route that concerns neither the ontologies nor their content — it describes the
 deployment. Clients call it before
-offering semantic search or AI, since both depend on external providers.
+offering search or AI. `searchStrategies` lists available strategies in preference order.
 
 ## Modeling REST
 
@@ -386,18 +386,20 @@ against a stale offset. Insert and append are the range form with zero length.
 | PATCH | `/relations/{relationTypeKey}/{relationId}` | Partial update of properties; endpoints cannot change | — |
 | DELETE | `/relations/{relationTypeKey}/{relationId}` | Delete a relation; its endpoints are untouched | — |
 
-### Semantic search
+### Search
 
 Semantics: [capabilities/search.md](capabilities/search.md).
 
 | Method | Path | Purpose | Parameters |
 |---|---|---|---|
-| GET | `/search/semantic` | Rank entities, document passages, or both, by meaning | `q`, `type`, `limit`, `min_score`, `searchIn`, `snippets`, `fields`, `filter.*` |
+| GET | `/search` | Rank entities by properties, document passages, or both | `q`, `type`, repeatable `in`, `strategy`, `document.property`, `limit`, `fields`, `filter.*` |
 
-`type` is optional — omit it to search every entity type in the lens at once, in which case
-every hit carries `_entityTypeKey`. `searchIn` is `entities`, `documents` or `all`
-(default). `limit` is 1–100, default 10. `snippets` defaults to true and controls whether
-document hits carry a passage excerpt. Requires an embedding provider.
+`q` is required. Omit `type` for cross-type search; `in` accepts `properties` and
+`document`, defaulting to both. `strategy` accepts `semantic`, `keyword`, `hybrid`,
+defaulting to the best available. `document.property` restricts document search only and
+requires that kind. `limit` counts entities, 1–100, default 10. Filters also work across
+types, narrowing the searched set. The response carries `query`, `type`, `in`, `strategy`,
+`filter`, `hits`; each hit has an entity, a within-response relative score and matches.
 
 ### Query
 
@@ -421,7 +423,8 @@ Runtime runs them; modeling defines them. Semantics:
 | POST | `/saved-queries/{queryKey}/run` | Execute a saved query with parameter values | — |
 
 Search ranks saved-query descriptions semantically, so it needs an embedding provider.
-`limit` is 1–20, default 3; `min_score` defaults to 0.7.
+`limit` is 1–20, default 3; `min_score` defaults to 0.7. The bare result array keeps
+`key`, `name`, `description`, `parameters` and absolute cosine `score` (0–1).
 
 ### AI
 
@@ -546,20 +549,19 @@ Everything a client can do to instance data through one lens.
 | `delete_relation` | Delete a relation |
 | `get_neighbors` | An entity's local neighbourhood, with projection on both entities and relations |
 | `execute_query` | Run a read-only OQL query |
-| `semantic_search` | Rank entities and document passages by meaning |
+| `search` | Rank entities by properties and documents, using the default strategy |
+| `search_documents` | Rank entities by document passages; optionally restrict to one property |
 | `list_saved_queries` | Discover saved queries and their parameters |
 | `run_saved_query` | Execute a saved query with parameter values |
 | `search_saved_queries` | Find a saved query by describing what it should do |
 
 An agent configuration may grant twelve tools: `get_schema`, `list_entities`,
-`get_entity`, `get_document`, `list_relations`, `get_neighbors`, `semantic_search`,
+`get_entity`, `get_document`, `list_relations`, `get_neighbors`, `search`,
 `search_documents`, `execute_query`, `list_saved_queries`, `run_saved_query`,
 `search_saved_queries`. Every write tool is outside that set, and so is the read-only
-`get_relation` — being read-only is not sufficient to be grantable. Eleven of the twelve
-are the tools above under the same names and the same arguments; `search_documents` is
-the one an agent has and MCP does not — it is `semantic_search` restricted to document
-passages, a tool of its own rather than an argument, chosen by name. See
-[capabilities/ai-agents.md](capabilities/ai-agents.md).
+`get_relation` — being read-only is not sufficient to be grantable. The two search tools
+return the REST envelope and take no strategy; MCP also accepts filters and fields.
+See [capabilities/ai-agents.md](capabilities/ai-agents.md).
 
 `write_document` has no REST counterpart of its own: over REST both document edit forms
 share one route, selected by the operation in the body.

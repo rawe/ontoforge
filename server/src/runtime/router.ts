@@ -50,26 +50,14 @@ const ListQuery = z.looseObject({
 
 const ReadQuery = z.looseObject({ fields: FieldsParam });
 
-/** Boolean query parameter: accepts true/false, 1/0, yes/no, on/off in any
- * case. */
-const BoolParam = z.preprocess((value) => {
-  if (typeof value !== "string") return value;
-  const lowered = value.toLowerCase();
-  if (["true", "1", "yes", "on"].includes(lowered)) return true;
-  if (["false", "0", "no", "off"].includes(lowered)) return false;
-  return value;
-}, z.boolean());
-
-/** `GET /search/semantic` — bounds and defaults per `docs/interfaces.md`,
- * including the documented `min_score` snake_case irregularity. */
-const SemanticSearchQuery = z.looseObject({
-  q: z.string().min(1),
+const SearchQuery = z.looseObject({
+  q: z.string(),
   type: z.string().optional(),
-  limit: z.coerce.number().int().min(1).max(100).default(10),
-  min_score: z.coerce.number().min(0).max(1).optional(),
+  limit: z.coerce.number().default(10),
   fields: FieldsParam,
-  searchIn: z.enum(["entities", "documents", "all"]).default("all"),
-  snippets: BoolParam.default(true),
+  in: z.union([z.string(), z.array(z.string())]).optional(),
+  strategy: z.string().optional(),
+  "document.property": z.union([z.string(), z.array(z.string())]).optional(),
 });
 
 /** Arbitrary property payloads: shape is decided by the schema at runtime,
@@ -150,14 +138,11 @@ const NeighborsQuery = z.looseObject({
 export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
   // --- Schema introspection (read-only, already filtered to the lens) ---
 
-  app.get(
-    "/schema",
-    { schema: { tags: ["runtime"], params: LensParams } },
-    async (request) =>
-      service.getFullSchema(
-        request.params.lensKey,
-        await getRuntimeStore(request.params.ontologyKey),
-      ),
+  app.get("/schema", { schema: { tags: ["runtime"], params: LensParams } }, async (request) =>
+    service.getFullSchema(
+      request.params.lensKey,
+      await getRuntimeStore(request.params.ontologyKey),
+    ),
   );
 
   app.get(
@@ -202,22 +187,26 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
       ),
   );
 
-  // --- Semantic search ---
-
   app.get(
-    "/search/semantic",
-    { schema: { tags: ["runtime"], params: LensParams, querystring: SemanticSearchQuery } },
+    "/search",
+    { schema: { tags: ["runtime"], params: LensParams, querystring: SearchQuery } },
     async (request) => {
-      const { q, type, limit, min_score, fields, searchIn, snippets } = request.query;
-      const filters = parseFilters(request.query as Record<string, unknown>);
-      return service.semanticSearch(
+      const q = request.query;
+      return service.search(
         request.params.lensKey,
-        q,
-        type ?? null,
-        limit,
-        min_score ?? null,
+        {
+          query: q.q,
+          type: q.type ?? null,
+          limit: q.limit,
+          fields: q.fields ?? null,
+          in: (q.in === undefined ? null : Array.isArray(q.in) ? q.in : [q.in]) as
+            | import("./search/request.js").SearchKind[]
+            | null,
+          strategy: (q.strategy ?? null) as import("./search/strategies.js").SearchStrategy | null,
+          filter: parseFilters(q),
+          document: { property: q["document.property"] as string | undefined },
+        },
         await getRuntimeStore(request.params.ontologyKey),
-        { filters, fields: fields ?? null, searchIn, snippets },
       );
     },
   );

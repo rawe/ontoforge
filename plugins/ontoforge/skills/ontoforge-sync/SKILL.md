@@ -67,7 +67,7 @@ node scripts/export-schema.mjs [-o <output>] [--ontology <key>] [--base-url <url
 
 **API used**: `GET /api/ontologies/{ontologyKey}/model/export`
 
-The output file is the OntoForge transfer format (v4.0) and can be committed to version
+The output file is the OntoForge transfer format (v5.0) and can be committed to version
 control. It carries the design only — no entities, no relations, no document content,
 and not the ontology's own key or display name. It is not a backup.
 
@@ -230,13 +230,14 @@ node scripts/import-schema.mjs /tmp/design.json --ontology clone
 
 ## File Formats
 
-### Schema file (transfer format v4.0)
+### Schema file (transfer format v5.0)
 
 Produced by `GET /api/ontologies/{ontologyKey}/model/export`:
 
 ```json
 {
-  "formatVersion": "4.0",
+  "formatVersion": "5.0",
+  "textSearchLanguage": "english",
   "entityTypes": [
     {
       "key": "person",
@@ -270,9 +271,9 @@ Produced by `GET /api/ontologies/{ontologyKey}/model/export`:
 A lens with `"includes": null` is **unscoped** and sees the whole schema. A scoped lens
 lists the type keys it exposes and optionally restricts the visible properties.
 
-The format version is informational — import never dispatches on it. A pre-4.0 document
-carries its lenses under `ontologies` and is rejected on its shape; no converter exists,
-so re-export the design from a current server.
+The text-search language is required and must match the existing target ontology.
+The format version is informational — import never dispatches on it. Required fields
+are validated directly; no converter exists.
 
 ### Data file (v1.0)
 

@@ -184,13 +184,9 @@ describe("the fixed indexes", () => {
     );
   });
 
-  it("ensures the cross-type index full-table, with no port method of its own", async () => {
+  it("has no shared cross-type entity index", async () => {
     await store.ensureVectorIndexes(768);
-    expect(only("entity_embedding_all_idx")).toBe(
-      "CREATE INDEX IF NOT EXISTS entity_embedding_all_idx ON entity " +
-        "USING hnsw ((embedding::vector(768)) vector_cosine_ops)",
-    );
-    expect(store).not.toHaveProperty("ensureEntityVectorIndex");
+    expect(statements().join("\n")).not.toContain("entity_embedding_all_idx");
   });
 });
 
@@ -237,10 +233,9 @@ describe("ensureVectorIndexes", () => {
     expect(dropped.join("\n")).not.toContain(ENTITY_INDEX);
 
     const created = sql.filter((s) => s.includes("CREATE INDEX"));
-    expect(created).toHaveLength(4); // per-type, chunk, cross-type, saved-query
+    expect(created).toHaveLength(3); // per-type, chunk, saved-query
     expect(created.join("\n")).toContain(ENTITY_INDEX);
     expect(created.join("\n")).toContain(CHUNK_INDEX);
-    expect(created.join("\n")).toContain("entity_embedding_all_idx");
     expect(created.join("\n")).toContain("saved_query_embedding_idx");
   });
 });

@@ -28,7 +28,7 @@ export const RESERVED_RELATION_TYPE_KEYS = [
 ];
 
 /** Every port method as a mock — completeness is compiler-enforced. */
-export type MockModelingStore = { [K in keyof ModelingStore]: Mock };
+export type MockModelingStore = { [K in Exclude<keyof ModelingStore, "textSearchLanguage">]: Mock } & { textSearchLanguage: "english" | "german" };
 
 /**
  * A mock store whose reads default to "nothing stored" and whose reserved
@@ -36,6 +36,7 @@ export type MockModelingStore = { [K in keyof ModelingStore]: Mock };
  */
 export function createMockModelingStore(): MockModelingStore {
   return {
+    textSearchLanguage: "english",
     reservedEntityTypeKeys: vi.fn(() => new Set(RESERVED_ENTITY_TYPE_KEYS)),
     reservedRelationTypeKeys: vi.fn(() => new Set(RESERVED_RELATION_TYPE_KEYS)),
     findReservedTypeKeysInUse: vi.fn(async () => []),
@@ -85,7 +86,7 @@ export function createMockModelingStore(): MockModelingStore {
     deleteSavedQuery: vi.fn(async () => false),
     getFullSchema: vi.fn(async () => ({ entityTypes: [], relationTypes: [], lenses: [] })),
     getEntityTypesWithProperties: vi.fn(async () => []),
-    setEntityEmbedding: vi.fn(async () => undefined),
+    setEntitySearchText: vi.fn(async () => undefined),
     listSavedQueryRefs: vi.fn(async () => []),
     setSavedQueryEmbedding: vi.fn(async () => undefined),
     createVectorIndex: vi.fn(async () => undefined),

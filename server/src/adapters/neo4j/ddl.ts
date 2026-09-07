@@ -13,7 +13,6 @@ import type { Driver } from "neo4j-driver";
 
 import { ValidationError } from "../../core/exceptions.js";
 import {
-  ALL_ENTITY_TYPES_SCOPE,
   documentPropertyScope,
   entityTypeScope,
   reportWidthMismatch,
@@ -122,7 +121,7 @@ export const CONSTRAINTS: readonly string[] = [
  * not exceed it (`docs/storage-adapters.md`, engine constraints). */
 export const MAX_VECTOR_FILTER_VALUE_BYTES = 32766;
 
-export const ENTITY_VECTOR_INDEX_NAME = "entity_embedding";
+
 
 /**
  * Reject string values too large for vector-index filter metadata.
@@ -329,8 +328,6 @@ export async function ensureVectorIndexes(
     await createDocumentVectorIndex(driver, entityTypeKey, propertyKey, dimensions);
   }
 
-  // Cross-type entity vector index (semantic search across all types).
-  await ensureEntityVectorIndex(driver, dimensions);
 
   // Saved-query vector index (semantic search over descriptions).
   await ensureSavedQueryVectorIndex(driver, dimensions);
@@ -388,43 +385,10 @@ export async function dropMismatchedVectorIndexes(
 
   await dropIfDimensionsDrifted(
     driver,
-    ENTITY_VECTOR_INDEX_NAME,
-    ALL_ENTITY_TYPES_SCOPE,
-    dimensions,
-  );
-  await dropIfDimensionsDrifted(
-    driver,
     "saved_query_embedding",
     SAVED_QUERY_SCOPE,
     dimensions,
   );
-}
-
-/**
- * Create the cross-type vector index on the shared `_Entity` label
- * (IF NOT EXISTS). Type/scope filtering happens in the service layer, so
- * no in-index filter properties are needed.
- */
-export async function ensureEntityVectorIndex(
-  driver: Driver,
-  dimensions: number,
-): Promise<void> {
-  await dropFailedIndexIfExists(driver, ENTITY_VECTOR_INDEX_NAME);
-  await reportIfDimensionsDrifted(
-    driver,
-    ENTITY_VECTOR_INDEX_NAME,
-    ALL_ENTITY_TYPES_SCOPE,
-    dimensions,
-  );
-  const query =
-    `CREATE VECTOR INDEX ${ENTITY_VECTOR_INDEX_NAME} IF NOT EXISTS ` +
-    "FOR (n:_Entity) ON (n._embedding) " +
-    `OPTIONS {indexConfig: {\`vector.dimensions\`: ${dimensions}, ` +
-    "`vector.similarity_function`: 'cosine'}}";
-  await runSession(driver, async (session) => {
-    await session.run(query);
-  });
-  console.info(`Vector index ensured: ${ENTITY_VECTOR_INDEX_NAME}`);
 }
 
 /**

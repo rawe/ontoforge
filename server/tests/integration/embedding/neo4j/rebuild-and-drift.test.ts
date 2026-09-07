@@ -14,7 +14,7 @@
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ENTITY_VECTOR_INDEX_NAME } from "../../../../src/adapters/neo4j/ddl.js";
+
 import { createApp } from "../../../../src/app.js";
 import { settings } from "../../../../src/config.js";
 import { getEmbeddingProvider } from "../../../../src/core/embedding.js";
@@ -36,8 +36,8 @@ const ollamaUp = await checkOllamaModel();
 const MISMATCHED_DIMENSIONS = 1024;
 
 /** The two index-creation paths the reconcile has to be wired into: the
- * cross-type index and the per-entity-type one. */
-const DRIFTING_INDEXES = [ENTITY_VECTOR_INDEX_NAME, "person_embedding"];
+ * per-entity-type index. */
+const DRIFTING_INDEXES = ["person_embedding"];
 
 let app: FastifyInstance;
 
@@ -118,7 +118,6 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
       expect(driftWarnings, warnings.join("\n")).toHaveLength(DRIFTING_INDEXES.length);
       const reported = driftWarnings.join("\n");
       expect(reported).toContain("entity type 'person'");
-      expect(reported).toContain("search across all entity types");
       expect(reported).toContain(String(MISMATCHED_DIMENSIONS));
       expect(reported).toContain(String(getEmbeddingProvider()!.dimensions));
       expect(reported).toContain("/api/ontologies/{ontologyKey}/model/rebuild-embeddings");
@@ -140,7 +139,7 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
     await withDriftedIndexes(async () => {
       const res = await app.inject({
         method: "GET",
-        url: "/api/ontologies/test_ont/runtime/lenses/index_drift_test/search/semantic?q=Alice&searchIn=entities&type=person",
+        url: "/api/ontologies/test_ont/runtime/lenses/index_drift_test/search?strategy=semantic&q=Alice&in=properties&type=person",
       });
 
       expect(res.statusCode, "expected the drift to break search").toBe(500);
@@ -168,7 +167,7 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
     await withDriftedIndexes(async () => {
       const before = await app.inject({
         method: "GET",
-        url: "/api/ontologies/test_ont/runtime/lenses/index_drift_test/search/semantic?q=Alice&searchIn=entities&type=person",
+        url: "/api/ontologies/test_ont/runtime/lenses/index_drift_test/search?strategy=semantic&q=Alice&in=properties&type=person",
       });
       expect(before.statusCode, "expected the drift to break search first").toBe(500);
 
@@ -183,10 +182,10 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
 
       const after = await app.inject({
         method: "GET",
-        url: "/api/ontologies/test_ont/runtime/lenses/index_drift_test/search/semantic?q=Alice&searchIn=entities&type=person",
+        url: "/api/ontologies/test_ont/runtime/lenses/index_drift_test/search?strategy=semantic&q=Alice&in=properties&type=person",
       });
       expect(after.statusCode, after.body).toBe(200);
-      expect((after.json() as { total: number }).total).toBeGreaterThan(0);
+      expect((after.json() as { hits: unknown[] }).hits.length).toBeGreaterThan(0);
     });
   });
 
@@ -307,11 +306,11 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/ontologies/test_ont/runtime/lenses/index_drift_test/search/semantic?q=Grace%20Hopper&type=person&searchIn=entities",
+      url: "/api/ontologies/test_ont/runtime/lenses/index_drift_test/search?strategy=semantic&q=Grace%20Hopper&type=person&in=properties",
     });
     expect(res.statusCode).toBe(200);
-    const data = res.json() as { results: Row[] };
-    expect(data.results.some((r) => (r.entity as Row).name === "Grace Hopper")).toBe(true);
+    const data = res.json() as { hits: Row[] };
+    expect(data.hits.some((r) => (r.entity as Row).name === "Grace Hopper")).toBe(true);
   });
 
   it("rebuild is refused without a provider", async () => {

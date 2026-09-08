@@ -169,7 +169,9 @@ export function ontologyDdlStatements(language: TextSearchLanguage): string[] {
   type_key   text        NOT NULL,                           -- NO FK: deleting a type orphans its instances by design
   props      jsonb       NOT NULL DEFAULT '{}'::jsonb,       -- user properties; system props are columns, not keys here
   property_text text NOT NULL DEFAULT '',
-  search_vector tsvector GENERATED ALWAYS AS (to_tsvector('${config}'::regconfig, property_text)) STORED,
+  keyword_text text NOT NULL DEFAULT '',
+  keyword_segments jsonb,
+  search_vector tsvector GENERATED ALWAYS AS (to_tsvector('${config}'::regconfig, keyword_text)) STORED,
   embedding  vector,                                         -- dimensionless; NULL until written; width policed by the HNSW index
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()

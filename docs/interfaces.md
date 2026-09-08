@@ -400,6 +400,9 @@ defaulting to the best available. `document.property` restricts document search 
 requires that kind. `limit` counts entities, 1–100, default 10. Filters also work across
 types, narrowing the searched set. The response carries `query`, `type`, `in`, `strategy`,
 `filter`, `hits`; each hit has an entity, a within-response relative score and matches.
+Matches carry nullable semantic/keyword evidence; property matches also carry nullable
+contributing keyword property keys. Scores are not confidence. Evidence scope and null
+semantics are defined in [the search response contract](capabilities/search.md#response).
 
 ### Query
 

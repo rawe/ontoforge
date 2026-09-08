@@ -175,17 +175,26 @@ export interface NeighborsResponse {
 
 export type SearchStrategy = 'semantic' | 'keyword' | 'hybrid'
 export type SearchKind = 'properties' | 'document'
-export type SearchMatch = { kind: 'properties' } | {
-  kind: 'document'; propertyKey: string; charOffset: number; charLength: number
+export interface SearchEvidence {
+  /** Original (1 + cosine) / 2 measurement, not confidence; null is unmeasured. */
+  semanticSimilarity: number | null
+  /** True for a native keyword match; null is unknown, including limited-list absence. */
+  keywordMatch: boolean | null
+}
+export type SearchMatch = {
+  kind: 'properties'; evidence: SearchEvidence & { keywordPropertyKeys: string[] | null }
+} | {
+  kind: 'document'; propertyKey: string; charOffset: number; charLength: number; evidence: SearchEvidence
 }
 export interface SearchHit {
   entity: EntityInstance
   /** 1.0 for the best hit; comparable only within this response.
-   * Under `semantic` or `keyword` alone the shape is real, a ratio of similarities
-   * or of engine scores; under `hybrid`, or with two kinds fused, it is rank-made:
-   * a hit found by both rankings sits clearly above one found by one, then the
-   * numbers trail smoothly whatever the closeness. It shows where the ranking
-   * degrades and how steeply, never whether the best hit is good.
+   * One unfused ranking uses source scores; hybrid sums reciprocal ranks.
+   * Cross-kind fusion uses the best rank contribution for multiple searched types,
+   * and sum for one searched type. Cross-type ties prefer best returned similarity
+   * only when all tied hits have a measurement; otherwise they stay stable.
+   * A tie does not prove equal relevance.
+   * Never indicates confidence or whether the best hit is good.
    */
   relativeScore: number
   matches: SearchMatch[]

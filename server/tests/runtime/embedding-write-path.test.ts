@@ -75,6 +75,7 @@ describe("entity create", () => {
     expect(provider.embed).toHaveBeenCalledWith("person: name=Alice, email=a@b.c");
     const call = holder.store.createEntity.mock.calls[0]!;
     expect(call[4]).toEqual([0.1, 0.2]); // embedding argument
+    expect(call[6]).toEqual([{ propertyKey: "name", text: "Alice" }, { propertyKey: "email", text: "a@b.c" }]);
     expect(holder.store.validateVectorIndexedProperties).toHaveBeenCalledTimes(1);
   });
 
@@ -150,6 +151,7 @@ describe("entity update", () => {
     const call = holder.store.updateEntity.mock.calls[0]!;
     expect(call[5]).toEqual([0.1, 0.2]); // embedding
     expect(call[6]).toBe(true); // hasEmbeddingUpdate
+    expect(call[8]).toEqual([{ propertyKey: "name", text: "Alice" }, { propertyKey: "email", text: "new@b.c" }]);
   });
 
   it("removing a string property (null) re-embeds without it", async () => {
@@ -167,6 +169,7 @@ describe("entity update", () => {
     );
 
     expect(provider.embed).toHaveBeenCalledWith("person: name=Alice");
+    expect(holder.store.updateEntity.mock.calls[0]![8]).toEqual([{ propertyKey: "name", text: "Alice" }]);
   });
 
   it("does not re-embed when only a non-string property changes", async () => {
@@ -186,6 +189,7 @@ describe("entity update", () => {
     const call = holder.store.updateEntity.mock.calls[0]!;
     expect(call[5]).toBeNull(); // no embedding
     expect(call[6]).toBe(false); // no embedding update
+    expect(call[8]).toBeUndefined(); // preserve stored keyword data
   });
 
   it("without a provider, updates recompose the stored property text", async () => {
@@ -203,5 +207,6 @@ describe("entity update", () => {
     expect(holder.store.getEntity).toHaveBeenCalled();
     expect(holder.store.updateEntity.mock.calls[0]![6]).toBe(true);
     expect(holder.store.updateEntity.mock.calls[0]![7]).toContain("name=Bob");
+    expect(holder.store.updateEntity.mock.calls[0]![8]).toEqual([{ propertyKey: "name", text: "Bob" }]);
   });
 });

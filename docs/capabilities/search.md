@@ -20,7 +20,7 @@ default 10; search has no paging, offset or minimum score.
 
 | Search kind | Ranked unit | Match |
 |---|---|---|
-| Property search | one composed text per entity, from string properties | entity as a whole, without a property key |
+| Property search | one entity, using its string properties | entity-level semantic evidence and, when known, contributing keyword property keys |
 | Document search | a passage of a document property | property key and the best passage's character coordinates |
 
 Both kinds run by default. A kind with nothing to search contributes nothing by default;
@@ -46,7 +46,7 @@ with the disabled-feature refinement and a message naming the available strategi
 no available strategy the operation is disabled. The semantic-search feature boolean is
 kept for embedding rebuild and saved-query discovery.
 
-Without a provider, composed property text and document chunks are still stored. Keyword
+Without a provider, property keyword values and document chunks are still stored. Keyword
 search works on a supporting adapter. Configuring a provider later does not retroactively
 embed data: the rebuild below supplies missing vectors.
 
@@ -55,25 +55,56 @@ embed data: the rebuild below supplies missing vectors.
 Hybrid first fuses rankings of the same units within each kind, using the sum of
 `1 / (60 + rank)` with ranks starting at one. Document search then collapses passages to
 entities: the best passage determines entity order, while each matching document property
-contributes its best passage. The service grows the passage budget until the ranking is exhausted, so a long
-document cannot hide another entity or another matching document property. When both kinds run, they are fused by the same rule
-at entity level. An entity appears once, and its matches survive fusion.
+contributes its best passage. The service grows the passage budget until the ranking is
+exhausted, so a long document cannot hide another entity or another matching document
+property. An entity appears once, and its matches survive fusion.
+
+When both kinds run over more than one searched type, the entity score is the maximum
+of its reciprocal kind-rank contributions, using the same constant and one-based ranks.
+Having a document therefore supplies no additive cross-kind bonus. Equal scores prefer
+the greater semantic similarity found in each entity's returned matches, but only when
+every entity in that tied group has a measured similarity. Otherwise the whole group
+retains encounter order, with properties encountered before document-only entities.
+Equal similarities also retain encounter order. Discarded passages supply no tie evidence.
+
+With at most one searched type, including a lens or filter narrowed to one type, both
+kinds still use summed reciprocal ranks. A single kind keeps its strategy ranking.
 
 ### Response
 
 The envelope carries `query`, `type` (null across types), `in` (defaults filled), `strategy`,
 `filter` (empty when absent), and `hits`. Each hit carries `entity`, `relativeScore`, and
-`matches`. There is no absolute score, similarity, snippet or total.
+`matches`. There is no aggregate confidence, snippet or total.
 
 The relative score is 1.0 for the best hit and each other hit's ordering number as a
-fraction of the best, comparable only within that response. Its promise:
+fraction of the best, comparable only within that response. For one kind under semantic
+or keyword search it is a ratio of source scores; under hybrid or cross-kind fusion it
+is rank-derived. Cross-type best-kind scoring can produce multiple 1.0 hits whose tie
+order is resolved separately. Neither a 1.0 score nor a smooth tail says that the query
+has a relevant answer. Search returns candidates even for an unrelated query.
 
-under `semantic` or `keyword` alone the shape is real, a ratio of similarities or of engine scores; under `hybrid`, or with two kinds fused, it is rank-made: a hit found by both rankings sits clearly above one found by one, then the numbers trail smoothly whatever the closeness. It shows where the ranking degrades and how steeply, never whether the best hit is good.
-
-Matches carry no number. An entity match is `{kind: "properties"}`. A passage match carries
+An entity match carries `kind: "properties"`. A passage match carries
 `kind: "document"`, `propertyKey`, `charOffset` and `charLength`, directly usable with a
 [document read](documents.md). The entity match comes first, then passage matches in
 document-ranking order, with one per document property.
+
+Every match also carries `evidence`:
+
+| Field | Meaning |
+|---|---|
+| `semanticSimilarity` | Original measured similarity, `(1 + cosine) / 2`, or null when unavailable or unmeasured. It is not a probability or calibrated confidence. |
+| `keywordMatch` | True when the normalized query terms matched this stored search unit; null when unavailable or unmeasured. False requires an explicit negative evaluation; source rankings alone emit only true/null. |
+| `keywordPropertyKeys` (property matches only) | Keys whose indexed values supplied keyword query terms, or null when complete, lens-safe attribution is unavailable. A listed property need not satisfy the whole query on its own. |
+
+Evidence belongs to the composed entity representation or to the precise returned
+passage. Missing from a limited ranking does not prove a non-match. Keywords can span
+several properties; semantic matching over composed text does not identify an individual
+property. Property-key attribution is withheld if any supporting key is hidden by the
+lens or no longer an exposed string property. Null must not be read as false.
+
+Callers should inspect entity values and read passages before making claims from them.
+Related content can provide a useful starting entity for graph traversal without
+containing the requested answer. There is no automatic similarity floor.
 
 Entities carry every lens-exposed property by default, with document values stubbed.
 Projection works as on the entity list, including raw document text when explicitly
@@ -99,6 +130,26 @@ An ontology's `textSearchLanguage` is chosen at creation, defaults to `english`,
 immutable. `english` and `german` are supported. The bound store carries it; requests and
 environment variables cannot override it. Export includes the language as a required
 field, and import rejects a language differing from the existing target ontology.
+
+### Property keyword text
+
+Keyword search uses a separate values-only representation. Only nonempty values of
+schema-declared `string` properties contribute, in full-schema order, separated by one
+newline. Type keys, property keys and display labels are not searchable keyword content.
+Documents, numbers, dates, datetimes and booleans do not enter this representation.
+An entity without contributing values has no property keyword match.
+
+The combined value text has a 30,000-codepoint budget including separators. The last
+included value is truncated to that budget, and the exact indexed property segments
+are retained for attribution. Query terms are normalized in the ontology's language;
+all surviving terms must match the aggregate, potentially across multiple properties.
+Short content terms are often more useful than a full question for keyword search.
+
+Creation, string-value updates and embedding rebuild maintain the keyword representation.
+Non-string updates leave it intact. Schema edits do not refresh stored representations;
+keyword-only maintenance refreshes them without recomputing semantic vectors or document
+passages. Until refreshed, membership can reflect stale stored values and unavailable
+property attribution remains null. Document keywords continue to use passage text.
 
 ## What gets embedded
 
@@ -159,7 +210,8 @@ embedding provider is configured. It:
 
 1. drops every one of the ontology's semantic indexes whose vector width no longer
    matches the provider's, and only those;
-2. recomposes and stores the property text of every entity and rewrites its optional vector;
+2. recomposes and stores each entity's semantic text and keyword value segments, and
+   rewrites its optional vector;
 3. discards and re-chunks every document property value, embedding every passage whose
    stored vector is not already of the provider's width — after a model switch that is all
    of them;
@@ -177,7 +229,8 @@ regardless.
 It streams progress while running, as newline-delimited JSON: a progress record per
 processed item carrying the entity type key it belongs to, the count so far and that
 group's total, then a final summary with per-type processed and failed counts and the
-overall totals. An item whose embedding call fails is counted as failed; its refreshed property text remains searchable by keyword.
+overall totals. An item whose embedding call fails is counted as failed; its refreshed
+keyword values remain searchable without a vector.
 
 So rebuild repairs: missing indexes, drifted index widths, entities and passages that were
 never embedded, vectors stale with respect to a schema change, and chunking stale with

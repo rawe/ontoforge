@@ -25,7 +25,7 @@ import type { RuntimeStore } from "../core/ports.js";
 import type { PropertyDef } from "../core/schemas.js";
 import { chunkDocument } from "./search/document.js";
 import { cpIndexOf, cpLength, cpSlice, countOccurrences } from "./codePoints.js";
-import { buildTextRepr } from "./search/property.js";
+import { buildTextRepr, buildKeywordSegments } from "./search/propertyText.js";
 import { isQueryPath } from "./queryPaths.js";
 import {
   loadSchema,
@@ -342,6 +342,7 @@ export async function createEntity(
     fullEt?.properties ?? {},
     embedding,
     propertyText,
+    buildKeywordSegments(coerced, fullEt?.properties ?? scopedEt.properties),
   );
 
   // Chunk + embed document properties.
@@ -493,6 +494,7 @@ export async function updateEntity(
   let embedding: number[] | null = null;
   let hasEmbeddingUpdate = false;
   let propertyText = "";
+  let keywordSegments: import("../core/ports.js").KeywordPropertySegment[] | undefined;
   const provider = getEmbeddingProvider();
   if (fullEt !== undefined) {
     const hasStringChanges = Object.keys(coerced).some(
@@ -518,6 +520,7 @@ export async function updateEntity(
           entityId,
         );
         propertyText = buildTextRepr(entityTypeKey, merged, fullEt.properties);
+        keywordSegments = buildKeywordSegments(merged, fullEt.properties);
         embedding = provider ? await provider.embed(propertyText) : null;
         hasEmbeddingUpdate = true;
       }
@@ -533,6 +536,7 @@ export async function updateEntity(
     embedding,
     hasEmbeddingUpdate,
     propertyText,
+    keywordSegments,
   );
   if (entity === null) {
     throw new NotFoundError(`Entity '${entityId}' not found`);

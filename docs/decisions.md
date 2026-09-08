@@ -220,15 +220,60 @@ set; no write tool is grantable.
 **Search strategies have implementations and availability requirements.** Defaults choose
 the first available of hybrid, keyword, semantic; every response names the applied one.
 
-**Search hits carry only a relative score.** It is comparable within one response and
-never an absolute similarity or confidence. Saved-query discovery retains cosine scores.
+**Search ranking scores are relative; match evidence is separate.** A hit's
+`relativeScore` is comparable only within one response and is never absolute similarity
+or confidence. Each match's `evidence` carries `semanticSimilarity` (the supported
+similarity on the `(1 + cosine) / 2` scale, or null) and `keywordMatch` (a supported
+boolean result, or null). Null means unknown or unmeasured, including unavailable
+signals; false requires an explicit negative evaluation, never absence from a limited
+ranking. Evidence describes the composed entity text or the particular returned document
+passage, not which signals contributed to ranking. Do not add a `via` or source-membership
+field to this contract. Retaining evidence itself preserves ranking and passage selection.
+Property matches also expose nullable `keywordPropertyKeys`, naming exposed string values
+that supplied query terms; withhold incomplete or unsupported attribution rather than
+invent it. They do not attribute semantic matches to individual properties.
+Saved-query discovery retains its separate cosine scores.
+
+**Search ranking and evidence have distinct meanings.** Relative rank, semantic
+similarity and keyword evidence must not be presented as interchangeable measures.
+A similarity bounded by zero and one is not, by itself, calibrated confidence.
+
+**Search provenance must be supported by evidence.** Unknown or unmeasured evidence
+must not be represented as a negative match. Absence from a limited ranking does not
+prove that a unit failed to match. A semantic match over composed entity text does
+not, by itself, establish which individual property caused the match.
+
+**A correction to cross-type search fusion must preserve single-type behaviour.**
+Changing single-type behaviour requires separate explicit approval, because a fix for
+unequal eligibility across types must not silently change callers searching one type.
+
+**Cross-type kind fusion uses the best reciprocal kind rank.** When both kinds run
+over more than one searched type, take the maximum contribution; keep summed fusion
+within each kind and for at-most-one-type requests. Resolve equal cross-kind scores by
+the best semantic similarity in returned matches only if every tied entity has one;
+otherwise retain the group's encounter order. This removes additive schema participation
+credit without treating missing measurements as negative evidence. Deliberation:
+[adr/0020](adr/0020-search-ranking-and-evidence.md).
+
+**Property keyword content contains values, not schema labels.** Preserve ordered
+schema-string value segments separately from labeled semantic text, so keys cannot count
+as matching content and keyword attribution can name contributing values. The values-only
+correction applies to keyword and hybrid property retrieval, including single-type queries;
+this is distinct from preserving single-type fusion. Keyword maintenance must not require
+embedding inference or rewrite existing semantic vectors or document passages.
+
+**Search evidence does not establish answer sufficiency.** Keep search candidates
+available without an automatic similarity floor. A model-specific similarity and a lexical
+match are evidence to inspect, not guarantees that the requested answer exists. Unknown
+signals do not justify silently removing a candidate.
 
 **Text-search language is an immutable ontology setting.** Chosen at creation, default
 English, carried in export, and checked against the import target.
 
 **Keyword index families are fixed at ontology creation.** Their language is the ontology's
-language; no keyword lifecycle hooks or per-type DDL exist. Property text and document
-chunks are stored even without embeddings.
+language; no per-type keyword DDL exists. Property keyword values and document chunks are
+stored even without embeddings. Explicit keyword-only maintenance refreshes stored entity
+representations; schema changes do not silently run it.
 
 **The list filters and the search ranks.** Neither server operation falls back to the
 other. Cross-type search uses per-type indexes and an exact searched set, with no shared

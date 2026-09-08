@@ -11,14 +11,23 @@ import { validateRequest, type SearchRequest, type SearchKind } from "./request.
 import { strategies, availableStrategies, type SearchStrategy } from "./strategies.js";
 import { propertyKind } from "./property.js";
 import { documentKind, collapsePassages } from "./document.js";
-import { fuse, relativeScore, type Ranked } from "./fusion.js";
+import {
+  emptyEvidence, fuse, refineTies, relativeScore, type Ranked, type SearchEvidence,
+} from "./fusion.js";
 export type { SearchRequest } from "./request.js";
+export type { SearchEvidence } from "./fusion.js";
 export type SearchMatch =
-  | { kind: "properties" }
-  | { kind: "document"; propertyKey: string; charOffset: number; charLength: number };
+  | { kind: "properties"; evidence: SearchEvidence & { keywordPropertyKeys: string[] | null } }
+  | {
+      kind: "document";
+      propertyKey: string;
+      charOffset: number;
+      charLength: number;
+      evidence: SearchEvidence;
+    };
 export interface SearchHit {
   entity: Row;
-  /** under `semantic` or `keyword` alone the shape is real, a ratio of similarities or of engine scores; under `hybrid`, or with two kinds fused, it is rank-made: a hit found by both rankings sits clearly above one found by one, then the numbers trail smoothly whatever the closeness. It shows where the ranking degrades and how steeply, never whether the best hit is good. */
+  /** Ratio to the best score in this response; see RELATIVE_SCORE_PROMISE. Never confidence. */
   relativeScore: number;
   matches: SearchMatch[];
 }
@@ -53,7 +62,23 @@ export async function search(
     rankings.push(
       (
         await strategy.rank(propertyKind(store, searchedTypes, embedding, limit, request.query))
-      ).map((r) => ({ ...r, value: { entity: r.value, matches: [{ kind: "properties" }] } })),
+      ).map((r) => ({
+        key: r.key,
+        score: r.score,
+        value: {
+          entity: r.value,
+          matches: [
+            {
+              kind: "properties",
+              evidence: {
+                ...emptyEvidence(),
+                ...r.evidence,
+                keywordPropertyKeys: r.evidence?.keywordPropertyKeys ?? null,
+              },
+            },
+          ],
+        },
+      })),
     );
   if (kinds.includes("document")) {
     // Exhaust the passage ranking so a second document property cannot be hidden
@@ -78,14 +103,27 @@ export async function search(
       })),
     );
   }
-  let ranked = (
+  const useBestKind = rankings.length > 1 && searchedTypes.length > 1;
+  let ranked =
     rankings.length === 1
       ? rankings[0]!
-      : fuse(rankings, (a, b) => ({
-          entity: a.matches.some((m) => m.kind === "properties") ? a.entity : b.entity,
-          matches: [...a.matches, ...b.matches],
-        }))
-  ).slice(0, limit);
+      : fuse(
+          rankings,
+          (a, b) => ({
+            entity: a.matches.some((m) => m.kind === "properties") ? a.entity : b.entity,
+            matches: [...a.matches, ...b.matches],
+          }),
+          useBestKind ? "max" : "sum",
+        );
+  if (useBestKind) {
+    ranked = refineTies(ranked, (hit) => {
+      const measurements = hit.matches
+        .map((match) => match.evidence.semanticSimilarity)
+        .filter((value): value is number => value !== null && Number.isFinite(value));
+      return measurements.length ? Math.max(...measurements) : null;
+    });
+  }
+  ranked = ranked.slice(0, limit);
   // Retrieve only final document-only hits. Keeping all collapsed candidates until
   // fusion preserves a property hit's passages even below the document page cutoff.
   const documentOnly = ranked.filter((r) => !r.value.matches.some((m) => m.kind === "properties"));
@@ -104,6 +142,17 @@ export async function search(
   });
   const hits = ranked.map((r) => {
     const typeKey = String(r.value.entity._entityTypeKey ?? type);
+    const exposedProperties = loaded.scoped.entityTypes[typeKey]!.properties;
+    // A partial list would claim complete attribution. Projection is not lens permission.
+    for (const match of r.value.matches) {
+      if (
+        match.kind === "properties" &&
+        match.evidence.keywordPropertyKeys?.some(
+          (key) => exposedProperties[key]?.dataType !== "string",
+        )
+      )
+        match.evidence.keywordPropertyKeys = null;
+    }
     const entity = filterEntityProperties(
       r.value.entity,
       loaded.scoped.entityTypes[typeKey]!,

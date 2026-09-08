@@ -105,6 +105,10 @@ describe("toolset computation", () => {
     for (const tool of fake.boundTools[0]! as { name: string; description: string; schema: { shape: Record<string, unknown> } }[]) {
       if (!["search", "search_documents"].includes(tool.name)) continue;
       expect(tool.description).toContain(RELATIVE_SCORE_PROMISE);
+      expect(tool.description).toContain("semanticSimilarity");
+      expect(tool.description).toContain("keywordPropertyKeys");
+      expect(tool.description).toContain("unknown or unmeasured");
+      expect(tool.description.length).toBeLessThanOrEqual(2000);
       expect(Object.keys(tool.schema.shape).sort()).toEqual((tool.name === "search" ? ["query", "entity_type_key", "limit"] : ["query", "entity_type_key", "limit", "property"]).sort());
     }
   });
@@ -323,7 +327,7 @@ describe("document reads", () => {
     const toolMessages = fake.calls[1]!.filter((m) => m instanceof ToolMessage);
     const payload = JSON.parse(String(toolMessages[0]!.content)) as Row;
     const hit = (payload.hits as Row[])[0]!;
-    expect(hit.matches).toEqual([{ kind: "document", propertyKey: "bio", charOffset: 22, charLength: 21 }]);
+    expect(hit.matches).toEqual([{ kind: "document", propertyKey: "bio", charOffset: 22, charLength: 21, evidence: { semanticSimilarity: 0.91, keywordMatch: null } }]);
     expect(hit.relativeScore).toBe(1);
     // Only the passage ranking runs — the entity ranking is not consulted.
     expect(store.propertySearchSemantic).not.toHaveBeenCalled();

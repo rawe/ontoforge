@@ -11,7 +11,7 @@
  * any other error aborts the run.
  */
 
-import { availableStrategies, RELATIVE_SCORE_PROMISE } from "./search/strategies.js";
+import { availableStrategies, RELATIVE_SCORE_PROMISE, SEARCH_EVIDENCE_GUIDANCE } from "./search/strategies.js";
 
 import { randomUUID } from "node:crypto";
 
@@ -290,7 +290,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
         ? "Find entities whose document text matches the query. Every hit has passage matches with propertyKey, charOffset and charLength for get_document. "
         : "Find entities for a text across properties and documents. Omit entity_type_key to search across the lens. ") +
       "Returns the search envelope. relativeScore is comparable only within this response: " +
-      RELATIVE_SCORE_PROMISE,
+      RELATIVE_SCORE_PROMISE + " " + SEARCH_EVIDENCE_GUIDANCE,
     schema: z.object({
       query: z.string(),
       entity_type_key: z.string().nullish(),

@@ -9,6 +9,40 @@ import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { wipeDatabase } from "./reset.js";
 import { enableOllamaProvider, disableProvider } from "./embedding/support.js";
 
+function expectEvidence(match: Record<string, any>, strategy: string) {
+  expect(Object.keys(match).sort()).toEqual(
+    match.kind === "properties"
+      ? ["evidence", "kind"]
+      : ["charLength", "charOffset", "evidence", "kind", "propertyKey"],
+  );
+  const evidence = match.evidence;
+  expect(Object.keys(evidence).sort()).toEqual(
+    match.kind === "properties"
+      ? ["keywordMatch", "keywordPropertyKeys", "semanticSimilarity"]
+      : ["keywordMatch", "semanticSimilarity"],
+  );
+  if (evidence.semanticSimilarity !== null) {
+    expect(Number.isFinite(evidence.semanticSimilarity)).toBe(true);
+    expect(evidence.semanticSimilarity).toBeGreaterThanOrEqual(0);
+    expect(evidence.semanticSimilarity).toBeLessThanOrEqual(1);
+  }
+  expect([true, null]).toContain(evidence.keywordMatch);
+  if (strategy === "semantic") {
+    expect(evidence.semanticSimilarity).not.toBeNull();
+    expect(evidence.keywordMatch).toBeNull();
+  } else if (strategy === "keyword") {
+    expect(evidence.semanticSimilarity).toBeNull();
+    expect(evidence.keywordMatch).toBe(true);
+  } else {
+    // A hybrid unit can be absent from either limited source ranking, but not both.
+    expect(evidence.semanticSimilarity !== null || evidence.keywordMatch === true).toBe(true);
+  }
+  if (match.kind === "properties") {
+    // These freshly created fixtures have exactly one declared string property.
+    expect(evidence.keywordPropertyKeys).toEqual(evidence.keywordMatch === true ? ["title"] : null);
+  }
+}
+
 export function searchContract(embedding: boolean, enabled = true) {
   const keyword = settings.DB_BACKEND === "postgres";
   const strategies = embedding
@@ -129,6 +163,7 @@ export function searchContract(embedding: boolean, enabled = true) {
             expect(hit.entity._entityTypeKey).toBeDefined();
             expect(hit.matches.length).toBeGreaterThan(0);
             expect(hit.matches.every((m: any) => m.kind === kind)).toBe(true);
+            for (const match of hit.matches) expectEvidence(match, strategy);
           }
           expect(new Set(body.hits.map((h: any) => h.entity._id)).size).toBe(2);
           if (kind === "document") {
@@ -142,6 +177,7 @@ export function searchContract(embedding: boolean, enabled = true) {
               expect(Object.keys(match).sort()).toEqual([
                 "charLength",
                 "charOffset",
+                "evidence",
                 "kind",
                 "propertyKey",
               ]);
@@ -167,7 +203,8 @@ export function searchContract(embedding: boolean, enabled = true) {
         );
         for (const hit of hits) {
           expect(Object.keys(hit.entity).sort()).toEqual(["_entityTypeKey", "_id", "title"]);
-          expect(hit.matches[0]).toEqual({ kind: "properties" });
+          expect(hit.matches[0].kind).toBe("properties");
+          for (const match of hit.matches) expectEvidence(match, strategy);
           expect(hit.matches.some((m: any) => m.kind === "document")).toBe(true);
         }
       });
@@ -270,11 +307,19 @@ export function searchContract(embedding: boolean, enabled = true) {
         const hit = after.json().hits.find((h: any) => h.entity._id === entity!._id);
         expect(hit.matches).toEqual(
           expect.arrayContaining([
-            { kind: "properties" },
+            {
+              kind: "properties",
+              evidence: {
+                semanticSimilarity: expect.any(Number),
+                keywordMatch: null,
+                keywordPropertyKeys: null,
+              },
+            },
             expect.objectContaining({ kind: "document", propertyKey: "body" }),
             expect.objectContaining({ kind: "document", propertyKey: "appendix" }),
           ]),
         );
+        for (const match of hit.matches) expectEvidence(match, "semantic");
         if (keyword)
           expect(
             (await find("astronomy", { type: "paper", strategy: "keyword", in: "properties" }))

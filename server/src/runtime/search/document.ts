@@ -1,5 +1,5 @@
 import type { Row, RuntimeStore, SearchedProperty } from "../../core/ports.js";
-import type { Ranked } from "./fusion.js";
+import { emptyEvidence, type Ranked } from "./fusion.js";
 import type { SearchMatch } from "./entry.js";
 export { chunkDocument } from "./chunking.js";
 export function documentKind(
@@ -9,19 +9,25 @@ export function documentKind(
   limit: number,
   query: string,
 ) {
-  const rows = (hits: Row[]): Ranked<Row>[] =>
+  const rows = (hits: Row[], source: "semantic" | "keyword"): Ranked<Row>[] =>
     hits.map((r) => ({
       key: String((r.chunk as Row)._id),
       score: r.score as number,
       value: r.chunk as Row,
+      evidence: {
+        semanticSimilarity: source === "semantic" ? (r.score as number) : null,
+        keywordMatch: source === "keyword" ? true : null,
+      },
     }));
   return {
     semantic: async () =>
       properties.length
-        ? rows(await store.documentSearchSemantic(properties, embedding, limit))
+        ? rows(await store.documentSearchSemantic(properties, embedding, limit), "semantic")
         : [],
     keyword: async () =>
-      properties.length ? rows(await store.documentSearchKeyword(properties, query, limit)) : [],
+      properties.length
+        ? rows(await store.documentSearchKeyword(properties, query, limit), "keyword")
+        : [],
   };
 }
 export function collapsePassages(
@@ -50,6 +56,7 @@ export function collapsePassages(
         propertyKey: String(chunk._propertyKey),
         charOffset: Number(chunk.startChar),
         charLength: Number(chunk.charLength),
+        evidence: row.evidence ?? emptyEvidence(),
       });
   }
   return [...entities.values()];

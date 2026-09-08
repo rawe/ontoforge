@@ -29,7 +29,7 @@ import {
   type PropertyDef,
   type TypeKind,
 } from "../core/schemas.js";
-import { buildTextRepr } from "../runtime/search/property.js";
+import { buildTextRepr, buildKeywordSegments } from "../runtime/search/propertyText.js";
 import { invalidateLoadedSchemaCache, loadSchemaUncached } from "../runtime/schemaCache.js";
 import { syncDocumentChunks } from "../runtime/service.js";
 import { VALID_AGENT_TOOLS } from "../runtime/toolNames.js";
@@ -1127,7 +1127,7 @@ export async function* rebuildEmbeddings(
       const text = buildTextRepr(etKey, userProps, propertyDefs);
       const embedding = await provider.embed(text);
 
-      await store.setEntitySearchText(entityId, text, embedding);
+      await store.setEntitySearchText(entityId, text, embedding, buildKeywordSegments(userProps, propertyDefs));
       if (embedding !== null) {
         processed += 1;
       } else {

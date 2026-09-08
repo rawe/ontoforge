@@ -33,4 +33,6 @@ export function availableStrategies(store: SearchCapabilities): SearchStrategy[]
   return strategies.filter((s) => s.available(store)).map((s) => s.key);
 }
 export const RELATIVE_SCORE_PROMISE =
-  "under `semantic` or `keyword` alone the shape is real, a ratio of similarities or of engine scores; under `hybrid`, or with two kinds fused, it is rank-made: a hit found by both rankings sits clearly above one found by one, then the numbers trail smoothly whatever the closeness. It shows where the ranking degrades and how steeply, never whether the best hit is good.";
+  "1.0 for the best hit; multiple hits can tie. Comparable only within this response, never confidence. Even an unrelated query can return a best hit. Tied scores can be ordered by available evidence and do not mean equal relevance.";
+export const SEARCH_EVIDENCE_GUIDANCE =
+  "Results are candidates, not verified answers. Each match has evidence: semanticSimilarity is a normalized similarity measurement from 0 to 1, not confidence; keywordMatch=true means normalized query terms matched that unit. Null means unknown or unmeasured, never false. Property keywordPropertyKeys lists keys whose values supply query terms, not fields each matching the entire query; null means complete attribution is unavailable. Keyword queries use plain words with all surviving terms required, not operators. Use short content terms and type/filter scope. Read entity values and get_document at returned passage coordinates before making claims; if the content does not support an answer, say so.";

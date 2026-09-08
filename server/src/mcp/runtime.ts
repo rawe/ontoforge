@@ -15,7 +15,7 @@
  * into the message text (shared `formatToolError`).
  */
 
-import { RELATIVE_SCORE_PROMISE } from "../runtime/search/strategies.js";
+import { RELATIVE_SCORE_PROMISE, SEARCH_EVIDENCE_GUIDANCE } from "../runtime/search/strategies.js";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -654,7 +654,7 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
             ? "Find entities whose document text matches. Every hit carries passage matches with propertyKey, charOffset and charLength for get_document. "
             : "Find entities for a text across properties and documents. ") +
           "Omit entity_type_key to search all exposed types. Filters apply before ranking and narrow the searched types; fields projects each entity. Returns the search envelope. relativeScore is comparable only within this response: " +
-          RELATIVE_SCORE_PROMISE,
+          RELATIVE_SCORE_PROMISE + " " + SEARCH_EVIDENCE_GUIDANCE,
         inputSchema: {
           query: z.string(),
           entity_type_key: z.string().optional(),

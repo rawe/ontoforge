@@ -58,3 +58,31 @@ Relations reference entities by type + filename (no UUIDs):
   "properties": {}
 }
 ```
+
+## Property keyword index migration / refresh
+
+Stop backend writers, then run from the repository root. Replace `/path/to/your.env`
+with the existing environment file used by your backend, configured for the PostgreSQL
+database you intend to migrate:
+
+```bash
+ENV_FILE=/path/to/your.env server/node_modules/.bin/tsx scripts/rebuild_property_keywords.mts --ontology YOUR_KEY
+```
+
+Use `--all` instead of `--ontology YOUR_KEY` to process every PostgreSQL ontology.
+The command uses the configured database credentials without displaying them. It takes
+an exclusive entity-table lock for each ontology transaction, adds values-only keyword
+columns to legacy namespaces, rebuilds their data from current schema-declared string
+values, and replaces the old keyword generated column/index when needed. It never calls
+inference, rewrites embeddings or semantic text, modifies documents, or changes entity
+timestamps. Each ontology commits atomically; an error rolls back that ontology. Already
+completed ontologies remain committed. It is safe to rerun: unchanged keyword rows are
+skipped and the index is not replaced again.
+
+Run this before starting updated code against an existing database. Fresh ontologies
+already have the new columns. Run again after removing/re-adding schema string properties
+when existing stored keyword text needs refreshing; schema editing alone does not rebuild
+stored search representations. Deleted or lens-hidden supporting keys yield unknown
+property attribution until refresh, rather than exposing a partial key list. The command
+prints only each ontology key and scanned/updated/migrated counts. Take a database backup
+before production maintenance; this command does not create one.

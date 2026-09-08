@@ -157,7 +157,17 @@ for (const document of [false, true])
     expect(scoring.sql).toContain("ts_rank_cd(search_vector, query)");
     expect(scoring.sql).toContain("search_vector @@ query");
     expect(scoring.sql).toContain("plainto_tsquery($2::regconfig, $1)");
-    expect(scoring.sql).not.toContain("to_tsvector");
+    if (document) expect(scoring.sql).not.toContain("to_tsvector");
+    else {
+      expect(scoring.sql).toContain("WITH ranked AS MATERIALIZED");
+      expect(scoring.sql).toContain("AS keyword_property_keys");
+      expect(scoring.sql).toContain("ts_parse('default', keyword_text)");
+      expect(scoring.sql).toContain("ts_parse('default', source.segment->>'text')");
+      expect(scoring.sql).toContain("ORDER BY source.segment_position, parsed.token_position");
+      expect(scoring.sql).toContain("IS DISTINCT FROM");
+      expect(scoring.sql).toContain("WHERE parsed.tokid <> 12");
+      expect(scoring.sql).toContain("<@ coalesce(array_agg(DISTINCT term.lexeme)");
+    }
     expect(scoring.sql).not.toContain(query);
     expect(scoring.params?.slice(0, 2)).toEqual([query, "german"]);
   });

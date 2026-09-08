@@ -1,3 +1,4 @@
+import type { KeywordPropertySegment } from "../../core/ports.js";
 /**
  * Neo4j implementation of the modeling store (schema persistence).
  *
@@ -496,7 +497,7 @@ export class Neo4jModelingStore implements ModelingStore {
     return runSession(this.driver, (session) => queries.getEntityTypesWithProperties(session));
   }
 
-  async setEntitySearchText(entityId: string, propertyText: string, embedding: number[] | null): Promise<void> {
+  async setEntitySearchText(entityId: string, propertyText: string, embedding: number[] | null, _keywordSegments?: KeywordPropertySegment[]): Promise<void> {
     return runSession(this.driver, (session) =>
       queries.setEntityEmbedding(session, entityId, embedding),
     );

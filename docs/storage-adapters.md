@@ -274,7 +274,7 @@ exact score order. Hybrid fusion belongs above the port.
 | Ranking | Input | Returns |
 |---|---|---|
 | Property semantic | searched types, query vector, limit | entities and scores |
-| Property keyword | searched types, query text, limit | entities and scores |
+| Property keyword | searched types, query text, limit | entities, scores, and nullable contributing keyword property keys |
 | Document semantic | searched document properties, query vector, limit | passages and scores |
 | Document keyword | searched document properties, query text, limit | passages and scores |
 
@@ -286,10 +286,32 @@ the per-type indexes in one statement and merges globally; no shared index exist
 
 The runtime store declares keyword-ranking support for both kinds together, and declares
 path-condition support for all search strategies. The bound store carries the ontology's
-language; queries do not take a language. Entity creation carries composed property text
-alongside the optional vector. String changes recompose text under the vector-update flag;
-the rebuild setter writes text and an optional vector. These are technical values,
-absent from entity properties, schemas, lenses and transfer payloads.
+language; queries do not take a language. Semantic scores are pinned to `(1 + cosine) / 2`,
+higher is better; arbitrary native scores must not be labeled semantic similarity. A
+keyword source row establishes a positive match, while non-membership in a limited
+ranking establishes no negative evidence.
+
+Entity creation carries labeled semantic text alongside the optional vector and separate
+ordered keyword segments, each with a property key and its exact indexed value text.
+Only segment values enter the keyword index. String changes recompose both from merged
+values; the rebuild setter accepts both representations. An omitted segment update must
+not erase existing keyword data. A creation without segments has no keyword content or
+known attribution. These are technical values, absent from entity properties, schemas,
+lenses and transfer payloads.
+
+Property keyword attribution names segments containing contributing normalized query
+terms; independently matching the whole query against each segment is insufficient for
+cross-field matches. Use the same language and tokenizer as aggregate retrieval, returning
+null when faithful coverage is unavailable. Character-span attribution is not required.
+The service suppresses keys that are no longer exposed string properties. An adapter
+without keyword support does not fabricate a negative result or property attribution.
+
+PostgreSQL stores keyword text and retained segments separately from semantic text. Its
+generated keyword vector uses values-only text; attribution tokenizes the already limited
+keyword ranking in the same statement. Explicit keyword-only maintenance migrates existing
+ontology tables and refreshes their segments without changing semantic vectors, passages
+or instance values. It runs with writers stopped and locks the entity table for each
+ontology transaction. Fresh ontology provisioning installs the representation directly.
 
 Saved-query discovery remains a separate vector ranking over descriptions, scoped to one
 lens, with its own absolute score, limit and optional minimum score.

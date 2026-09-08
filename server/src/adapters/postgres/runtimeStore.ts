@@ -41,6 +41,7 @@ import { fromSql, toSql } from "pgvector";
 
 import type { ValidatedQuery } from "../../core/oql/index.js";
 import type {
+  KeywordPropertySegment,
   FilterCondition,
   Row,
   RuntimeStore,
@@ -250,10 +251,11 @@ export class PostgresRuntimeStore implements RuntimeStore {
     propertyDefs: PropertyDefs,
     embedding: number[] | null = null,
     propertyText = "",
+    keywordSegments?: KeywordPropertySegment[],
   ): Promise<Row> {
     const result = await this.query(
-      `INSERT INTO entity (id, type_key, props, embedding, property_text)
-       VALUES ($1, $2, $3::jsonb, $4::vector, $5)
+      `INSERT INTO entity (id, type_key, props, embedding, property_text, keyword_text, keyword_segments)
+       VALUES ($1, $2, $3::jsonb, $4::vector, $5, $6, $7::jsonb)
        RETURNING ${ENTITY_COLS}`,
       [
         entityId,
@@ -261,6 +263,8 @@ export class PostgresRuntimeStore implements RuntimeStore {
         propsJson(properties, propertyDefs),
         embedding === null ? null : toSql(embedding),
         propertyText,
+        (keywordSegments ?? []).map((segment) => segment.text).join("\n"),
+        keywordSegments === undefined ? null : JSON.stringify(keywordSegments),
       ],
     );
     return entityRow(result.rows[0]!, propertyDefs);
@@ -338,6 +342,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
     embedding: number[] | null = null,
     hasEmbeddingUpdate = false,
     propertyText = "",
+    keywordSegments?: KeywordPropertySegment[],
   ): Promise<Row | null> {
     if (!isUuid(entityId)) {
       return null;
@@ -354,6 +359,12 @@ export class PostgresRuntimeStore implements RuntimeStore {
       embeddingSet = `, embedding = $${params.length}::vector`;
       params.push(propertyText);
       embeddingSet += `, property_text = $${params.length}`;
+    }
+    if (keywordSegments !== undefined) {
+      params.push(keywordSegments.map((segment) => segment.text).join("\n"));
+      embeddingSet += `, keyword_text = $${params.length}`;
+      params.push(JSON.stringify(keywordSegments));
+      embeddingSet += `, keyword_segments = $${params.length}::jsonb`;
     }
     const result = await this.query(
       `UPDATE entity
@@ -539,13 +550,40 @@ export class PostgresRuntimeStore implements RuntimeStore {
       return `(${where.join(" AND ")})`;
     });
     params.push(limit);
-    const result = await this.query(
-      `SELECT ${document ? CHUNK_COLS : ENTITY_COLS}, ts_rank_cd(search_vector, query) AS score
+    const ranking = `SELECT ${document ? CHUNK_COLS : `${ENTITY_COLS}, keyword_text, keyword_segments`}, ts_rank_cd(search_vector, query) AS score
       FROM ${document ? "document_chunk" : "entity"}, plainto_tsquery($2::regconfig, $1) AS query
       WHERE search_vector @@ query AND (${scopes.join(" OR ")})
-      ORDER BY score DESC, id LIMIT $${params.length}`,
-      params,
-    );
+      ORDER BY score DESC, id LIMIT $${params.length}`;
+    // Materialize the bounded ranking BEFORE tokenizing its retained fields. Query
+    // lexemes use the same parser/dictionary as plainto_tsquery. Before attributing
+    // fields, require the ordered native token stream (including duplicate tokens)
+    // to agree with parsing each segment separately. Markup can span the joining
+    // newline and hide a term from one field even when another field supplies it.
+    // Default-parser token 12 is blank: ignore only these intentional separators.
+    // Any other boundary effect yields unknown, preserving aggregate ranking.
+    const sql = document ? ranking : `WITH ranked AS MATERIALIZED (${ranking})
+      SELECT ranked.*, CASE WHEN keyword_segments IS NULL OR (
+        SELECT coalesce(jsonb_agg(jsonb_build_array(parsed.tokid, parsed.token)
+          ORDER BY parsed.token_position), '[]'::jsonb)
+        FROM ts_parse('default', keyword_text) WITH ORDINALITY AS parsed(tokid, token, token_position)
+        WHERE parsed.tokid <> 12
+      ) IS DISTINCT FROM (
+        SELECT coalesce(jsonb_agg(jsonb_build_array(parsed.tokid, parsed.token)
+          ORDER BY source.segment_position, parsed.token_position), '[]'::jsonb)
+        FROM jsonb_array_elements(keyword_segments) WITH ORDINALITY AS source(segment, segment_position)
+        CROSS JOIN LATERAL ts_parse('default', source.segment->>'text')
+          WITH ORDINALITY AS parsed(tokid, token, token_position)
+        WHERE parsed.tokid <> 12
+      ) THEN NULL ELSE (
+        SELECT CASE WHEN tsvector_to_array(to_tsvector($2::regconfig, $1))
+          <@ coalesce(array_agg(DISTINCT term.lexeme), ARRAY[]::text[])
+          THEN array_agg(DISTINCT segment->>'propertyKey' ORDER BY segment->>'propertyKey')
+          ELSE NULL END
+        FROM jsonb_array_elements(keyword_segments) AS segment
+        CROSS JOIN LATERAL unnest(tsvector_to_array(to_tsvector($2::regconfig, segment->>'text'))) AS term(lexeme)
+        WHERE term.lexeme = ANY(tsvector_to_array(to_tsvector($2::regconfig, $1)))
+      ) END AS keyword_property_keys FROM ranked ORDER BY score DESC, id`;
+    const result = await this.query(sql, params);
     return result.rows.map((row) =>
       document
         ? { chunk: chunkRow(row), score: row.score }
@@ -555,6 +593,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
               (searched.find((t) => t.entityTypeKey === row.type_key) as SearchedType).propertyDefs,
             ),
             score: row.score,
+            keywordPropertyKeys: row.keyword_property_keys ?? null,
           },
     );
   }

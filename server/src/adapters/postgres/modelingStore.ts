@@ -1,3 +1,4 @@
+import type { KeywordPropertySegment } from "../../core/ports.js";
 /**
  * `ModelingStore` on PostgreSQL.
  *
@@ -921,15 +922,17 @@ export class PostgresModelingStore implements ModelingStore {
 
   /** No `updated_at` stamp: re-embedding is not a content change, and the
    * reference adapter leaves the timestamp untouched here too. */
-  async setEntitySearchText(entityId: string, propertyText: string, embedding: number[] | null): Promise<void> {
+  async setEntitySearchText(entityId: string, propertyText: string, embedding: number[] | null, keywordSegments?: KeywordPropertySegment[]): Promise<void> {
     if (!isUuid(entityId)) {
       return;
     }
-    await this.query(`UPDATE entity SET embedding = $2::vector, property_text = $3 WHERE id = $1`, [
-      entityId,
-      embedding === null ? null : toSql(embedding),
-      propertyText,
-    ]);
+    const params: unknown[] = [entityId, embedding === null ? null : toSql(embedding), propertyText];
+    let keywordSet = "";
+    if (keywordSegments !== undefined) {
+      keywordSet = ", keyword_text = $4, keyword_segments = $5::jsonb";
+      params.push(keywordSegments.map((segment) => segment.text).join("\n"), JSON.stringify(keywordSegments));
+    }
+    await this.query(`UPDATE entity SET embedding = $2::vector, property_text = $3${keywordSet} WHERE id = $1`, params);
   }
 
   async listSavedQueryRefs(): Promise<Row[]> {

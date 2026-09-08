@@ -360,7 +360,12 @@ export interface ModelingStore {
 
   getEntityTypesWithProperties(): Promise<Row[]>;
 
-  setEntitySearchText(entityId: string, propertyText: string, embedding: number[] | null): Promise<void>;
+  setEntitySearchText(
+    entityId: string,
+    propertyText: string,
+    embedding: number[] | null,
+    keywordSegments?: KeywordPropertySegment[],
+  ): Promise<void>;
 
   listSavedQueryRefs(): Promise<Row[]>;
 
@@ -438,6 +443,12 @@ export interface SearchedProperty {
   conditions: FilterCondition[];
 }
 
+/** Exact ordered value segments used by property keyword indexing, never semantic text. */
+export interface KeywordPropertySegment {
+  propertyKey: string;
+  text: string;
+}
+
 export interface RuntimeStore {
   /** The ontology this store is bound to. The runtime schema cache keys
    * its entries by this binding plus the lens key. */
@@ -490,6 +501,7 @@ export interface RuntimeStore {
     propertyDefs: Record<string, PropertyDef>,
     embedding?: number[] | null,
     propertyText?: string,
+    keywordSegments?: KeywordPropertySegment[],
   ): Promise<Row>;
 
   listEntities(
@@ -520,6 +532,7 @@ export interface RuntimeStore {
     embedding?: number[] | null,
     hasEmbeddingUpdate?: boolean,
     propertyText?: string,
+    keywordSegments?: KeywordPropertySegment[],
   ): Promise<Row | null>;
 
   deleteEntity(entityTypeKey: string, entityId: string): Promise<boolean>;
@@ -551,8 +564,13 @@ export interface RuntimeStore {
   // Semantic search
   // ------------------------------------------------------------------
 
+  /** Keyword source rows carry a native internal score and optional
+   * keywordPropertyKeys: all retained value segments supplying normalized query
+   * terms, or null when unsupported/unmeasured. Keys need not independently
+   * satisfy the full query. The runtime checks current lens exposure. */
   propertySearchKeyword(searchedTypes: SearchedType[], queryText: string, limit: number): Promise<Row[]>;
   documentSearchKeyword(searchedProperties: SearchedProperty[], queryText: string, limit: number): Promise<Row[]>;
+  /** Semantic score is the original (1 + cosine) / 2 similarity, not confidence. */
   propertySearchSemantic(searchedTypes: SearchedType[], queryEmbedding: number[], limit: number): Promise<Row[]>;
   documentSearchSemantic(searchedProperties: SearchedProperty[], queryEmbedding: number[], limit: number): Promise<Row[]>;
 

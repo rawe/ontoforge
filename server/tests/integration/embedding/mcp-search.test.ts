@@ -11,6 +11,7 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createApp } from "../../../src/app.js";
+import { settings } from "../../../src/config.js";
 import { closeStores, initStores } from "../../../src/core/ports.js";
 import { wipeDatabase } from "../reset.js";
 import { invalidateLoadedSchemaCache } from "../../../src/runtime/schemaCache.js";
@@ -106,6 +107,15 @@ describe.skipIf(!ollamaUp)("MCP search (Ollama)", () => {
     const results = data.hits as Row[];
     expect((results[0]!.entity as Row).name).toBe("Alice Chen");
     expect(results[0]!.relativeScore).toBe(1);
+    const properties = (results[0]!.matches as Row[]).find((match) => match.kind === "properties");
+    expect(properties).toEqual({
+      kind: "properties",
+      evidence: {
+        semanticSimilarity: expect.any(Number),
+        keywordMatch: settings.DB_BACKEND === "postgres" ? true : null,
+        keywordPropertyKeys: settings.DB_BACKEND === "postgres" ? ["role"] : null,
+      },
+    });
   });
 
   it("supports filters and field projection", async () => {
@@ -140,6 +150,12 @@ describe.skipIf(!ollamaUp)("MCP search (Ollama)", () => {
       "query",
     ]);
     expect(properties).not.toHaveProperty("min_score");
+    for (const searchTool of tools.tools.filter((item) => ["search", "search_documents"].includes(item.name))) {
+      expect(searchTool.description).toContain("semanticSimilarity");
+      expect(searchTool.description).toContain("keywordPropertyKeys");
+      expect(searchTool.description!.length).toBeLessThanOrEqual(2000);
+      expect(searchTool.outputSchema).toBeUndefined();
+    }
   });
 
   it("search_documents returns the same envelope with passage matches and projection", async () => {
@@ -149,7 +165,16 @@ describe.skipIf(!ollamaUp)("MCP search (Ollama)", () => {
     expect(body.in).toEqual(["document"]);
     expect(body.filter).toEqual({ age__lt: "40" });
     const hit = (body.hits as Row[])[0]!;
-    expect((hit.matches as Row[])[0]).toMatchObject({ kind: "document", propertyKey: "bio" });
+    expect((hit.matches as Row[])[0]).toEqual({
+      kind: "document",
+      propertyKey: "bio",
+      charOffset: expect.any(Number),
+      charLength: expect.any(Number),
+      evidence: {
+        semanticSimilarity: expect.any(Number),
+        keywordMatch: settings.DB_BACKEND === "postgres" ? true : null,
+      },
+    });
     expect(hit.entity).not.toHaveProperty("bio");
     const list = await client.listTools();
     expect(list.tools.map((t) => t.name)).not.toContain("semantic_search");

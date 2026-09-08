@@ -7,6 +7,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { MAX_TEXT_CHARS, buildTextRepr } from "../../src/runtime/search/property.js";
+import { buildKeywordSegments, keywordText } from "../../src/runtime/search/propertyText.js";
 import type { PropertyDef } from "../../src/core/schemas.js";
 
 function prop(key: string, dataType = "string", required = false): PropertyDef {
@@ -95,5 +96,35 @@ describe("buildTextRepr", () => {
     const defs = { name: prop("name"), role: prop("role") };
     const props = { role: "Lead", name: "Alice" };
     expect(buildTextRepr("person", props, defs)).toBe(buildTextRepr("person", props, defs));
+  });
+});
+
+describe("property keyword source segments", () => {
+  it("retains values and full schema order, excluding keys, documents, dates and undeclared values", () => {
+    const defs = { role: prop("role"), name: prop("name"), doc: prop("doc", "document"), date: prop("date", "date") };
+    const segments = buildKeywordSegments({ name: "Alice", role: "Engineer", doc: "secret", date: "2025-01-01", extra: "no" }, defs);
+    expect(segments).toEqual([{ propertyKey: "role", text: "Engineer" }, { propertyKey: "name", text: "Alice" }]);
+    expect(keywordText(segments)).toBe("Engineer\nAlice");
+  });
+  it("indexes nothing for missing, empty or invalid non-string values", () => {
+    expect(buildKeywordSegments({ name: null, role: "", age: 1 }, { name: prop("name"), role: prop("role"), age: prop("age") })).toEqual([]);
+    expect(keywordText([])).toBe("");
+  });
+  it("preserves punctuation and delimiters without trying to parse labeled semantic text", () => {
+    const value = "name=Alice, role=Engineer\nstate-of-the-art: alpha-beta; user's@example.com";
+    const segments = buildKeywordSegments({ name: value }, { name: prop("name") });
+    expect(segments).toEqual([{ propertyKey: "name", text: value }]);
+    expect(keywordText(segments)).toBe(value);
+  });
+  it("truncates by codepoint and includes separators in the exact 30,000-character budget", () => {
+    const segments = buildKeywordSegments({ name: "😀".repeat(MAX_TEXT_CHARS - 3), role: "ABCD", extra: "ignored" },
+      { name: prop("name"), role: prop("role"), extra: prop("extra") });
+    expect(segments[1]).toEqual({ propertyKey: "role", text: "AB" });
+    expect(segments).toHaveLength(2);
+    expect([...keywordText(segments)]).toHaveLength(MAX_TEXT_CHARS);
+  });
+  it("does not retain a phantom field when the remaining budget is only its separator", () => {
+    const segments = buildKeywordSegments({ name: "x".repeat(MAX_TEXT_CHARS - 1), role: "engineer" }, { name: prop("name"), role: prop("role") });
+    expect(segments).toHaveLength(1);
   });
 });

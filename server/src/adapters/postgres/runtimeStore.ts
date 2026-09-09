@@ -525,7 +525,20 @@ export class PostgresRuntimeStore implements RuntimeStore {
     return this.rankedKeyword(properties, query, limit, true);
   }
 
-  /** Plain words, stemmed in the immutable ontology language. Reads stored tsvectors. */
+  /**
+   * Plain words, stemmed in the immutable ontology language. Reads stored tsvectors.
+   *
+   * Terms are OR-ed and prefix-matched, never AND-ed (`docs/decisions.md` —
+   * "Keyword matching is permissive; ranking decides"): Snowball reduces neither
+   * compounds nor derivations, so a conjunction let one absent term empty the
+   * result. `ts_rank_cd` still ranks a row matching every term far above one
+   * matching a single term, which is where term coverage now shows.
+   *
+   * The query is built from the lexemes `to_tsvector` itself produced for the
+   * search text, quoted with `quote_literal`, so no caller input reaches tsquery
+   * syntax. Only stop words yields NULL, matching nothing — as the empty query
+   * did before.
+   */
   private async rankedKeyword(
     searched: (SearchedType | SearchedProperty)[],
     query: string,
@@ -550,12 +563,18 @@ export class PostgresRuntimeStore implements RuntimeStore {
       return `(${where.join(" AND ")})`;
     });
     params.push(limit);
-    const ranking = `SELECT ${document ? CHUNK_COLS : `${ENTITY_COLS}, keyword_text, keyword_segments`}, ts_rank_cd(search_vector, query) AS score
-      FROM ${document ? "document_chunk" : "entity"}, plainto_tsquery($2::regconfig, $1) AS query
-      WHERE search_vector @@ query AND (${scopes.join(" OR ")})
+    const tsquery = `(SELECT string_agg(quote_literal(lexeme) || ':*', ' | ')::tsquery AS q
+      FROM unnest(tsvector_to_array(to_tsvector($2::regconfig, $1))) AS lexeme) AS query`;
+    const ranking = `SELECT ${document ? CHUNK_COLS : `${ENTITY_COLS}, keyword_text, keyword_segments`}, ts_rank_cd(search_vector, query.q) AS score
+      FROM ${document ? "document_chunk" : "entity"}, ${tsquery}
+      WHERE search_vector @@ query.q AND (${scopes.join(" OR ")})
       ORDER BY score DESC, id LIMIT $${params.length}`;
     // Materialize the bounded ranking BEFORE tokenizing its retained fields. Query
-    // lexemes use the same parser/dictionary as plainto_tsquery. Before attributing
+    // lexemes come from the same to_tsvector call the ranking query is built from.
+    // Attribution still demands EXACT presence of every query lexeme, so permissive
+    // matching (a row matching one term of several, or matching only by prefix)
+    // now yields null — "complete attribution unavailable", never a wrong key.
+    // Before attributing
     // fields, require the ordered native token stream (including duplicate tokens)
     // to agree with parsing each segment separately. Markup can span the joining
     // newline and hide a term from one field even when another field supplies it.

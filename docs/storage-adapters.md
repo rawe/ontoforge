@@ -640,9 +640,10 @@ per-type scans in one statement, with a limit per scan and a global score order 
 
 Two GIN indexes are fixed at ontology creation: one on a stored generated tsvector of
 composed property text, one on a stored generated tsvector of chunk text. Their
-`to_tsvector` configuration is the ontology's English or German language. Queries use
-`plainto_tsquery` and rank the stored vectors with `ts_rank_cd`; no engine query syntax is
-accepted from callers. The filters restrict candidates before ordering and limiting.
+`to_tsvector` configuration is the ontology's English or German language. Queries are assembled
+from the lexemes `to_tsvector` produced for the search text, quoted and OR-ed with a
+prefix marker on each, and rank the stored vectors with `ts_rank_cd`; no engine query
+syntax is accepted from callers, and search text never reaches tsquery syntax. The filters restrict candidates before ordering and limiting.
 There are no keyword lifecycle hooks or per-type keyword DDL. A common term may rank many
 candidates before the limit, the inherent cost of full-text ranking.
 

@@ -141,8 +141,12 @@ An entity without contributing values has no property keyword match.
 
 The combined value text has a 30,000-codepoint budget including separators. The last
 included value is truncated to that budget, and the exact indexed property segments
-are retained for attribution. Query terms are normalized in the ontology's language;
-all surviving terms must match the aggregate, potentially across multiple properties.
+are retained for attribution. Query terms are normalized in the ontology's language and
+matched permissively: a hit carries at least one surviving term, each term also matching
+as a prefix, potentially across multiple properties. Rank order, not membership,
+separates a hit carrying every term from one carrying a single term. Property attribution
+requires every surviving term to be present exactly, so a hit matched on part of the
+query, or by prefix alone, reports unavailable attribution rather than a partial list.
 Short content terms are often more useful than a full question for keyword search.
 
 Creation, string-value updates and embedding rebuild maintain the keyword representation.

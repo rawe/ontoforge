@@ -267,6 +267,17 @@ available without an automatic similarity floor. A model-specific similarity and
 match are evidence to inspect, not guarantees that the requested answer exists. Unknown
 signals do not justify silently removing a candidate.
 
+**Keyword matching is permissive; ranking decides.** A keyword query matches rows
+carrying any of its terms, each also matching as a prefix — never a conjunction over all
+of them. A conjunction let one absent term empty the whole result, which for a
+compounding language is ordinary rather than exceptional: stemming reduces neither
+compounds nor derivations, so a row holding what was asked drops out over a term it
+carries in another form. Rank order, not membership, expresses term coverage. Prefix
+matching admits unrelated words sharing a stem; ranking carries that cost. The query is
+assembled from the lexemes the adapter's own tokenizer produced for the search text,
+quoted, so search text never reaches query syntax. Precision belongs to the stage after
+retrieval, not to the match condition.
+
 **Text-search language is an immutable ontology setting.** Chosen at creation, default
 English, carried in export, and checked against the import target.
 

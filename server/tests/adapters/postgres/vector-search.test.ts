@@ -143,7 +143,7 @@ it("document scans filter their parents inside each ranking", async () => {
   expect(scoringQuery().params).toContain("Acme");
 });
 for (const document of [false, true])
-  it(`${document ? "document" : "property"} keyword ranking reads stored vectors with a plain bound query`, async () => {
+  it(`${document ? "document" : "property"} keyword ranking ORs prefixed lexemes from a bound query`, async () => {
     const query = `graph & database | ! ' words`;
     const german = new PostgresRuntimeStore("test", undefined, "german");
     if (document)
@@ -154,11 +154,18 @@ for (const document of [false, true])
       );
     else await german.propertySearchKeyword(searched, query, 5);
     const scoring = scoringQuery();
-    expect(scoring.sql).toContain("ts_rank_cd(search_vector, query)");
-    expect(scoring.sql).toContain("search_vector @@ query");
-    expect(scoring.sql).toContain("plainto_tsquery($2::regconfig, $1)");
-    if (document) expect(scoring.sql).not.toContain("to_tsvector");
-    else {
+    expect(scoring.sql).toContain("ts_rank_cd(search_vector, query.q)");
+    expect(scoring.sql).toContain("search_vector @@ query.q");
+    // Terms are OR-ed and prefixed, never AND-ed: one absent word must not empty
+    // the result. The lexemes come from Postgres and are quoted, so the raw search
+    // text never reaches tsquery syntax (asserted by `not.toContain(query)` below).
+    expect(scoring.sql).toContain("string_agg(quote_literal(lexeme) || ':*', ' | ')::tsquery");
+    expect(scoring.sql).toContain("unnest(tsvector_to_array(to_tsvector($2::regconfig, $1)))");
+    expect(scoring.sql).not.toContain("plainto_tsquery");
+    if (document) {
+      expect(scoring.sql).not.toContain("keyword_property_keys");
+      expect(scoring.sql).not.toContain("ts_parse");
+    } else {
       expect(scoring.sql).toContain("WITH ranked AS MATERIALIZED");
       expect(scoring.sql).toContain("AS keyword_property_keys");
       expect(scoring.sql).toContain("ts_parse('default', keyword_text)");

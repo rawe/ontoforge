@@ -54,7 +54,7 @@ default ontology and no default lens: both must be resolved before any call is g
   the AI runtime endpoints, and feature discovery.
 - Not modeling: creating or changing entity types, relation types, properties or lenses;
   defining saved queries; configuring AI agents; schema export and import; rebuilding
-  embeddings.
+  search data.
 - Not the registry: creating, listing, renaming or deleting ontologies.
 - Absent everywhere: there is no data-wipe endpoint, no bulk write, no instance-data
   export and no health endpoint. Do not generate calls for them.

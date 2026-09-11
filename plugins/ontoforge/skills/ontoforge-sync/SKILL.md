@@ -146,7 +146,7 @@ a scoped lens rejects what it hides.
 **API used**: `POST /api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/entities/{type}`,
 `POST /api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/relations/{type}`
 
-### Rebuild Embeddings
+### Rebuild Search Data
 
 Rebuild one ontology's search data: every entity's keyword text, every document
 passage and, where an embedding provider is configured, the vectors, the saved-query

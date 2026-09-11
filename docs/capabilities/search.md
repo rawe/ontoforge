@@ -44,7 +44,7 @@ lists available strategies in that order, and every response names the applied s
 An unknown strategy is a validation error; a built but unavailable strategy is rejected
 with the disabled-feature refinement and a message naming the available strategies. With
 no available strategy the operation is disabled. The semantic-search feature boolean is
-kept for embedding rebuild and saved-query discovery.
+kept for saved-query discovery, which ranks by vector alone.
 
 Without a provider, property keyword values and document chunks are still stored. Keyword
 search works on a supporting adapter. Configuring a provider later does not retroactively
@@ -149,11 +149,10 @@ requires every surviving term to be present exactly, so a hit matched on part of
 query, or by prefix alone, reports unavailable attribution rather than a partial list.
 Short content terms are often more useful than a full question for keyword search.
 
-Creation, string-value updates and embedding rebuild maintain the keyword representation.
-Non-string updates leave it intact. Schema edits do not refresh stored representations;
-keyword-only maintenance refreshes them without recomputing semantic vectors or document
-passages. Until refreshed, membership can reflect stale stored values and unavailable
-property attribution remains null. Document keywords continue to use passage text.
+Creation, string-value updates and the rebuild below maintain the keyword representation.
+Non-string updates leave it intact. Schema edits do not refresh stored representations.
+Until refreshed, membership can reflect stale stored values and unavailable property
+attribution remains null. Document keywords continue to use passage text.
 
 ## What gets embedded
 
@@ -182,7 +181,7 @@ The rules behind that line are what a reimplementation has to match:
 - Composition is deterministic, so re-embedding an unchanged entity reproduces the same
   text.
 
-## Keeping embeddings current
+## Keeping search data current
 
 Property text and document chunks are recomputed automatically; vectors are added when a provider is configured:
 
@@ -195,22 +194,27 @@ Property text and document chunks are recomputed automatically; vectors are adde
   — so editing part of a large document re-embeds only the passages the edit touched
   ([documents.md](documents.md)).
 
-Not recomputed, and both are traps:
+Not recomputed, and all three are traps:
 
-- **A schema change does not re-embed anything.** Adding a string property to an entity
-  type leaves every existing entity's vector reflecting the schema as of its last write.
-  The property contributes to retrieval only for entities written afterwards.
+- **A schema change refreshes nothing.** Adding a string property to an entity type leaves
+  every existing entity's stored text reflecting the schema as of its last write. The
+  property contributes to retrieval only for entities written afterwards.
+- **Deleting a string property leaves its values behind.** Deleting the definition does not
+  delete stored values, and neither stored text records which property a word came from, so
+  an entity keeps matching on a value the schema no longer declares — in keyword search and
+  semantic search alike. The match cannot say which property it came from, because the
+  property is gone. This is deliberate: a schema edit stays instant and writes no instance
+  data. The leftovers are cleared on the next rebuild.
 - **A failed embedding does not fail the write.** The entity or passage is stored without
   a vector and is simply absent from semantic results. The failure is logged, not returned.
 
-Both are repaired by the same operation.
+All three are repaired by the same operation.
 
 ### Rebuild
 
 One modeling operation per ontology — it covers that ontology's whole schema and all its
 data, not one lens and nothing beyond the ontology. There is no server-wide rebuild:
-after an embedding-provider switch it is run once per ontology. It is rejected if no
-embedding provider is configured. It:
+after an embedding-provider switch it is run once per ontology. It:
 
 1. drops every one of the ontology's semantic indexes whose vector width no longer
    matches the provider's, and only those;
@@ -223,6 +227,13 @@ embedding provider is configured. It:
 5. builds every semantic index the schema calls for and does not have — the ones it
    dropped in step 1, at the provider's width, and any that never existed.
 
+**It runs without an embedding provider.** Steps 2 and 3 are then the whole operation, minus
+the vectors: keyword segments are recomposed and passages re-chunked, neither of which needs
+a model, and passages are themselves the document keyword index. Steps 1, 4 and 5 are
+skipped, because without a provider there is no width to reconcile, no vector index to hold
+and saved-query discovery — which ranks descriptions by vector alone — has nothing to
+rebuild. The summary reports the omission; nothing is counted as failed.
+
 The order is forced, not chosen: an index rejects every vector of a width other than its
 own, so while a drifted one stands the new vectors cannot be written, and it cannot be
 built over the old ones. Between step 1 and step 5 the ontology has no semantic index, and
@@ -232,13 +243,16 @@ regardless.
 
 It streams progress while running, as newline-delimited JSON: a progress record per
 processed item carrying the entity type key it belongs to, the count so far and that
-group's total, then a final summary with per-type processed and failed counts and the
-overall totals. An item whose embedding call fails is counted as failed; its refreshed
-keyword values remain searchable without a vector.
+group's total, then a final summary with per-type processed and failed counts, the overall
+totals, and whether the embeddings were skipped. An item whose embedding call fails is
+counted as failed; its refreshed keyword values remain searchable without a vector. A run
+with no provider fails nothing — a missing vector is the intended result there, not a
+failure — so the skip flag is what distinguishes it from a complete run.
 
 So rebuild repairs: missing indexes, drifted index widths, entities and passages that were
-never embedded, vectors stale with respect to a schema change, and chunking stale with
-respect to changed chunk-size configuration.
+never embedded, stored text stale with respect to a schema change — including the values of
+a deleted string property — and chunking stale with respect to changed chunk-size
+configuration.
 
 ### Vector index width drift
 

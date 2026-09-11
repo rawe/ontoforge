@@ -254,7 +254,7 @@ describe("width drift", () => {
     expect(reported).toContain("entity type 'person'");
     expect(reported).toContain("1024");
     expect(reported).toContain("768");
-    expect(reported).toContain("/model/rebuild-embeddings");
+    expect(reported).toContain("/model/rebuild-search-data");
     expect(statements().filter((sql) => sql.includes("DROP INDEX"))).toEqual([]);
   });
 
@@ -291,7 +291,7 @@ describe("width drift", () => {
     }
 
     expect(statements().filter((sql) => sql.includes("DROP INDEX"))).toEqual([]);
-    expect(captured.lines.join("\n")).toContain("/model/rebuild-embeddings");
+    expect(captured.lines.join("\n")).toContain("/model/rebuild-search-data");
   });
 
   it("drops a drifted index and only a drifted one, creating nothing", async () => {
@@ -311,7 +311,7 @@ describe("width drift", () => {
     expect(statements().filter((sql) => sql.includes("CREATE INDEX"))).toEqual([]);
     // A repair announcement, not the operator advice the ensure gives.
     expect(captured.lines.join("\n")).toContain("Recreating the semantic index");
-    expect(captured.lines.join("\n")).not.toContain("/model/rebuild-embeddings");
+    expect(captured.lines.join("\n")).not.toContain("/model/rebuild-search-data");
   });
 
   it("leaves an index alone when its width already agrees", async () => {

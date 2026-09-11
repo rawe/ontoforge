@@ -262,7 +262,7 @@ Find entities by meaning rather than exact keywords — within a single entity t
 | `EMBEDDING_API_KEY` | *(unset)* | API key (required for `openai` provider) |
 | `EMBEDDING_DIMENSIONS` | *(auto)* | Vector dimensions (defaults: ollama=768, openai=1536) |
 
-Semantic indexes are built for the vector width of the model that created them, so changing `EMBEDDING_MODEL` or `EMBEDDING_DIMENSIONS` on an existing database — including a reused Docker volume — leaves indexes the new model cannot be searched against. Startup names each one in a warning; `POST /api/ontologies/{ontologyKey}/model/rebuild-embeddings` rebuilds one ontology's indexes at the new width and regenerates its vectors — run it once per ontology after a provider switch.
+Semantic indexes are built for the vector width of the model that created them, so changing `EMBEDDING_MODEL` or `EMBEDDING_DIMENSIONS` on an existing database — including a reused Docker volume — leaves indexes the new model cannot be searched against. Startup names each one in a warning; `POST /api/ontologies/{ontologyKey}/model/rebuild-search-data` rebuilds one ontology's indexes at the new width and regenerates its vectors — run it once per ontology after a provider switch.
 
 ### AI-Powered Runtime
 

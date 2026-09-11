@@ -15,8 +15,6 @@ import { Readable } from "node:stream";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 
-import { getEmbeddingProvider } from "../core/embedding.js";
-import { ValidationError } from "../core/exceptions.js";
 import { getModelingStore, getRuntimeStore } from "../core/ports.js";
 import {
   AiAgentConfigResponse,
@@ -818,25 +816,22 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
     },
   );
 
-  // --- Rebuild embeddings (per-ontology; a provider switch = run once
+  // --- Rebuild search data (per-ontology; a provider switch = run once
   // per ontology) ---
 
   app.post(
-    "/rebuild-embeddings",
+    "/rebuild-search-data",
     { schema: { tags: ["modeling"], params: OntologyParams } },
     async (request, reply) => {
-      // Both refusals land before any streaming starts, so they reach
-      // the client in the standard error envelope rather than
-      // mid-stream: an unknown ontology key answers 404 from the
-      // binding, then a missing provider 422.
+      // The one refusal lands before any streaming starts, so it reaches
+      // the client in the standard error envelope rather than mid-stream:
+      // an unknown ontology key answers 404 from the binding. A missing
+      // provider is not a refusal — the run then rebuilds the keyword
+      // segments and passages, which need no inference, and says so in
+      // its summary.
       const store = await getModelingStore(request.params.ontologyKey);
       const runtimeStore = await getRuntimeStore(request.params.ontologyKey);
-      if (!getEmbeddingProvider()) {
-        throw new ValidationError(
-          "Embedding provider is not configured. Set EMBEDDING_PROVIDER to enable semantic search.",
-        );
-      }
-      const stream = Readable.from(service.rebuildEmbeddings(store, runtimeStore));
+      const stream = Readable.from(service.rebuildSearchData(store, runtimeStore));
       return reply.type("application/x-ndjson").send(stream);
     },
   );

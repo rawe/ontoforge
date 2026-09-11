@@ -280,6 +280,65 @@ export function searchContract(embedding: boolean, enabled = true) {
           }
       },
     );
+    it.skipIf(!keyword)(
+      "a deleted string property keeps matching until the rebuild recomposes the text",
+      async () => {
+        // The stored keyword text is one blob per entity, written when the
+        // entity was written. Deleting the property definition does not delete
+        // the stored value, and the blob does not record which property a word
+        // came from — so the value keeps matching. This is the documented
+        // trade: a schema edit stays instant and writes no instance data.
+        const property = await post(`${model}/entity-types/${paperId}/properties`, {
+          key: "notes",
+          displayName: "notes",
+          dataType: "string",
+        });
+        const entity = await post(`${runtime}/entities/paper`, {
+          title: "Field notes",
+          notes: "Reticulated splines",
+          year: 2021,
+        });
+        const hits = async () =>
+          (await find("reticulated", { type: "paper", strategy: "keyword", in: "properties" }))
+            .json()
+            .hits;
+
+        const indexed = await hits();
+        expect(indexed.map((h: any) => h.entity._id)).toEqual([entity._id]);
+        expect(indexed[0].matches[0].evidence.keywordPropertyKeys).toEqual(["notes"]);
+
+        const deleted = await app.inject({
+          method: "DELETE",
+          url: `${model}/entity-types/${paperId}/properties/${property.propertyId}?cascade=true`,
+        });
+        expect(deleted.statusCode, deleted.body).toBe(204);
+        invalidateLoadedSchemaCache();
+
+        // Still matching, and now unable to say why: the supporting key is no
+        // longer an exposed string property, so attribution is withheld rather
+        // than naming a property the schema no longer declares.
+        const stale = await hits();
+        expect(stale.map((h: any) => h.entity._id)).toEqual([entity._id]);
+        expect(stale[0].entity).not.toHaveProperty("notes");
+        expect(stale[0].matches[0].evidence.keywordPropertyKeys).toBeNull();
+
+        const rebuild = await app.inject({ method: "POST", url: `${model}/rebuild-search-data` });
+        expect(rebuild.statusCode, rebuild.body).toBe(200);
+        const summary = JSON.parse(rebuild.body.trim().split("\n").at(-1)!);
+        expect(summary).toMatchObject({ type: "summary", totalFailed: 0 });
+        // The run is refused for no provider on neither surface; it reports the
+        // vector work it skipped instead.
+        expect(summary.embeddingsSkipped).toBe(!embedding);
+
+        expect(await hits()).toEqual([]);
+        // The entity itself is untouched — only its derived search text changed.
+        expect(
+          (await find("field", { type: "paper", strategy: "keyword", in: "properties" }))
+            .json()
+            .hits.map((h: any) => h.entity._id),
+        ).toContain(entity._id);
+      },
+    );
     it.skipIf(!embedding)(
       "rebuild makes providerless property text and document chunks searchable semantically",
       async () => {
@@ -297,7 +356,7 @@ export function searchContract(embedding: boolean, enabled = true) {
         }
         const before = await find("astronomy", { type: "paper", strategy: "semantic" });
         expect(before.json().hits.map((h: any) => h.entity._id)).not.toContain(entity!._id);
-        const rebuild = await app.inject({ method: "POST", url: `${model}/rebuild-embeddings` });
+        const rebuild = await app.inject({ method: "POST", url: `${model}/rebuild-search-data` });
         expect(rebuild.statusCode, rebuild.body).toBe(200);
         expect(JSON.parse(rebuild.body.trim().split("\n").at(-1)!)).toMatchObject({
           type: "summary",

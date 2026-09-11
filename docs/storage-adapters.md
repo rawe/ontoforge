@@ -198,10 +198,11 @@ does not interpret them. A saved query also accepts an embedding of its descript
 the key of its owning lens alongside it, so that a search over descriptions can be
 narrowed to one lens without a join.
 
-**Embedding maintenance.** Backing the rebuild operation: list every entity type with its
-property keys; set the embedding vector on one entity by id; list every saved query with
-enough identity to re-embed it; set the embedding on one saved query. Plus the vector
-index operations under obligations, below.
+**Search-data maintenance.** Backing the rebuild operation: list every entity type with its
+property keys; set one entity's composed search text, its keyword segments and its optional
+vector by id; list every saved query with enough identity to re-embed it; set the embedding
+on one saved query. Plus the vector index operations under obligations, below. The setter
+takes a vector that may be absent, because the rebuild runs without an embedding provider.
 
 **Reserved-key reporting.** Alongside the two declared sets, one operation scans stored
 types and returns those whose key is now reserved, as kind-and-key pairs. Startup reports
@@ -308,10 +309,8 @@ without keyword support does not fabricate a negative result or property attribu
 
 PostgreSQL stores keyword text and retained segments separately from semantic text. Its
 generated keyword vector uses values-only text; attribution tokenizes the already limited
-keyword ranking in the same statement. Explicit keyword-only maintenance migrates existing
-ontology tables and refreshes their segments without changing semantic vectors, passages
-or instance values. It runs with writers stopped and locks the entity table for each
-ontology transaction. Fresh ontology provisioning installs the representation directly.
+keyword ranking in the same statement. Ontology provisioning installs the representation
+directly, at creation and only there.
 
 Saved-query discovery remains a separate vector ranking over descriptions, scoped to one
 lens, with its own absolute score, limit and optional minimum score.

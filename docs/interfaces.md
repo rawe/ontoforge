@@ -315,11 +315,13 @@ beyond it.
 | POST | `/schema/validate` | Check the ontology's schema and every lens for consistency |
 | GET | `/export` | Export the ontology's design in the transfer format |
 | POST | `/import` | Import a transfer payload into this ontology |
-| POST | `/rebuild-embeddings` | Regenerate the ontology's embeddings and repair its vector index widths |
+| POST | `/rebuild-search-data` | Rebuild everything search reads and repair the ontology's vector index widths |
 
 Rebuild answers with a stream of newline-delimited JSON progress records rather than one
-body, because it runs over the ontology's whole dataset. It is refused when no embedding
-provider is configured; after an embedding-provider switch it is run once per ontology.
+body, because it runs over the ontology's whole dataset. It is never refused for a missing
+embedding provider: without one it rebuilds the keyword text and the document passages,
+skips the vector work and says so in its summary. After an embedding-provider switch it is
+run once per ontology.
 Transfer carries the design only — schema, lenses, agents, saved queries; no instance
 data and no ontology identity — see
 [capabilities/transfer.md](capabilities/transfer.md) and
@@ -528,7 +530,7 @@ exist; its tools answer not-found tool errors otherwise.
 The per-lens tools take a `lens_key` naming a lens of the bound ontology.
 `add_property`, `delete_property`, `delete_entity_type` and
 `delete_relation_type` take a `cascade` flag with the same meaning as the REST
-parameter. There is no modeling tool for rebuilding embeddings.
+parameter. There is no modeling tool for rebuilding search data.
 
 ### Runtime tools
 

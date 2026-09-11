@@ -515,7 +515,7 @@ describe("ontology scoping", () => {
       },
       { method: "GET" as const, url: "/api/ontologies/nope/model/export" },
       { method: "GET" as const, url: "/api/ontologies/nope/model/lenses" },
-      { method: "POST" as const, url: "/api/ontologies/nope/model/rebuild-embeddings" },
+      { method: "POST" as const, url: "/api/ontologies/nope/model/rebuild-search-data" },
     ]) {
       const res = await app.inject(probe);
       expect(res.statusCode, `${probe.method} ${probe.url}: ${res.body}`).toBe(404);

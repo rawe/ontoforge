@@ -175,9 +175,10 @@ Chunks are removed with the thing they belong to:
 | The property definition is deleted | Every chunk of that entity type and property is dropped, with its vector index |
 | The entity type is deleted | The same, for each of its document properties |
 
-The embedding rebuild operation regenerates chunks along with entity embeddings, which is
+The search-data rebuild regenerates chunks along with each entity's stored text, which is
 how documents written while no provider was configured — or imported without their derived
-data — acquire vectors. See [search.md](search.md).
+data — acquire vectors. It also re-chunks with no provider configured, because the passages
+are themselves the document keyword index. See [search.md](search.md).
 
 ### Searching document content
 

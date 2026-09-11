@@ -32,17 +32,18 @@ interface RebuildProgress {
 interface RebuildSummary {
   totalProcessed: number
   totalFailed: number
+  embeddingsSkipped: boolean
 }
 
 /**
- * POST /rebuild-embeddings streams NDJSON progress lines; the shared JSON
+ * POST /rebuild-search-data streams NDJSON progress lines; the shared JSON
  * client can't consume that, so read the stream here and surface progress.
  */
-async function rebuildEmbeddingsStream(
+async function rebuildSearchDataStream(
   ontologyKey: string,
   onProgress: (p: RebuildProgress) => void,
 ): Promise<RebuildSummary> {
-  const res = await fetch(`/api/ontologies/${ontologyKey}/model/rebuild-embeddings`, {
+  const res = await fetch(`/api/ontologies/${ontologyKey}/model/rebuild-search-data`, {
     method: 'POST',
   })
   if (!res.ok) {
@@ -103,7 +104,7 @@ function TransferCard({
   )
 }
 
-/** `/o/:ontologyKey/studio/transfer` — export, import, rebuild embeddings. */
+/** `/o/:ontologyKey/studio/transfer` — export, import, rebuild search data. */
 export function TransferPage() {
   const { ontologyKey } = useParams<{ ontologyKey: string }>()
   const queryClient = useQueryClient()
@@ -158,13 +159,13 @@ export function TransferPage() {
   })
 
   const rebuildMutation = useMutation({
-    mutationFn: () => rebuildEmbeddingsStream(ontologyKey!, setProgress),
+    mutationFn: () => rebuildSearchDataStream(ontologyKey!, setProgress),
     onSuccess: (summary) => {
       setProgress(null)
       toast.success(
-        `Embeddings rebuilt — ${summary.totalProcessed} processed${
+        `Search data rebuilt — ${summary.totalProcessed} processed${
           summary.totalFailed > 0 ? `, ${summary.totalFailed} failed` : ''
-        }`,
+        }${summary.embeddingsSkipped ? ' (embeddings skipped: no provider)' : ''}`,
       )
     },
     onError: (error) => {
@@ -181,7 +182,7 @@ export function TransferPage() {
     <div>
       <PageHeader
         title="Transfer"
-        description="Export the schema as JSON, import it elsewhere, and rebuild semantic embeddings."
+        description="Export the schema as JSON, import it elsewhere, and rebuild this ontology's search data."
       />
       <div className="grid max-w-3xl gap-4 p-6">
         <TransferCard
@@ -234,28 +235,29 @@ export function TransferPage() {
 
         <TransferCard
           icon={RefreshCw}
-          title="Rebuild embeddings"
-          description="Re-embed this ontology's entities and saved queries with the configured embedding provider. Use after bulk imports or provider changes."
+          title="Rebuild search data"
+          description="Rebuild everything search reads: keyword text, document passages and — with an embedding provider — the vectors and saved-query descriptions. Use after schema edits, bulk imports or provider changes."
         >
           <div className="flex items-center gap-3">
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button
                   variant="outline"
-                  disabled={rebuildMutation.isPending || semanticOff}
+                  disabled={rebuildMutation.isPending}
                 >
                   <RefreshCw
                     className={rebuildMutation.isPending ? 'size-4 animate-spin' : 'size-4'}
                   />
-                  {rebuildMutation.isPending ? 'Rebuilding…' : 'Rebuild embeddings'}
+                  {rebuildMutation.isPending ? 'Rebuilding…' : 'Rebuild search data'}
                 </Button>
               </AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>
-                  <AlertDialogTitle>Rebuild all embeddings?</AlertDialogTitle>
+                  <AlertDialogTitle>Rebuild all search data?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    Every entity and saved query of this ontology is re-embedded. Depending on data volume
-                    this can take a while and calls the embedding provider for each item.
+                    Every entity's keyword text and every document passage of this ontology is rebuilt.
+                    With an embedding provider configured, each item is also re-embedded, which
+                    depending on data volume can take a while.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
@@ -274,8 +276,8 @@ export function TransferPage() {
           </div>
           {semanticOff && (
             <p className="mt-3 text-[12px] text-muted-foreground">
-              Semantic search is disabled — configure an embedding provider
-              (EMBEDDING_PROVIDER) to enable rebuilding.
+              No embedding provider is configured (EMBEDDING_PROVIDER), so this
+              rebuilds keyword text and document passages only.
             </p>
           )}
         </TransferCard>

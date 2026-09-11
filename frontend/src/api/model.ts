@@ -246,11 +246,6 @@ export const importSchema = (ontologyKey: string, data: Record<string, JsonValue
     body: data,
   })
 
-export const rebuildEmbeddings = (ontologyKey: string) =>
-  request<Record<string, JsonValue>>(`${base(ontologyKey)}/rebuild-embeddings`, {
-    method: 'POST',
-  })
-
 /* ---------------------------------- AI agents -------------------------------- */
 /* Unlike the routes above, ai-agent and saved-query routes address the lens
    by its KEY, not its UUID. */

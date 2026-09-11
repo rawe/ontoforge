@@ -173,7 +173,8 @@ in [../interfaces.md](../interfaces.md#saved-queries-1).
 
 A saved query's description is embedded when it is written and when it is imported, so
 editing a description re-embeds it. The bulk rebuild operation described in
-[search.md](search.md) also re-embeds every saved query.
+[search.md](search.md) also re-embeds every saved query, when a provider is configured;
+with none, discovery has nothing to rebuild and the rebuild leaves the descriptions alone.
 
 ## Through the interfaces
 

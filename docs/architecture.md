@@ -74,7 +74,7 @@ Five modules, with a deliberately acyclic dependency graph:
 never looks inside one.
 
 **Modeling** owns one ontology's schema: types, properties, lens definitions, cascade
-rules, schema validation, transfer, embedding rebuild.
+rules, schema validation, transfer, search-data rebuild.
 
 **Runtime** owns one ontology's instance data: entity and relation lifecycle, traversal,
 documents, search, query execution, saved-query pipelines, agents.

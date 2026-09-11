@@ -294,10 +294,12 @@ Three operations, each with its own explanation. See
   key conflict explains that pre-existing objects with the same keys block the import and
   that the clashes must be resolved (or a bare ontology used). A successful import
   refreshes every cached view.
-- **Rebuild embeddings** — for this ontology, behind a confirmation warning about
+- **Rebuild search data** — for this ontology, behind a confirmation warning about
   duration and provider cost,
   then live progress per entity type while it runs and a summary when it finishes. The
-  action is disabled with an explanation when no embedding provider is configured.
+  action stays available with no embedding provider configured, explaining that it then
+  rebuilds keyword text and document passages only; the summary repeats that the
+  embeddings were skipped.
 
 ---
 
@@ -570,7 +572,7 @@ existence while the report is loading.
 |---|---|
 | AI | The AI navigation entry, the AI palette action and the AI quick action are gone. The AI screen itself renders an explanation. The empty-state extraction step stays visible but dimmed, with an explanation. |
 | No search strategies | Entity search falls back to substring matching — per type in parallel when unscoped. Extraction review skips the duplicate check. |
-| Semantic search | Saved-query search falls back to client-side substring filtering over the full list. Embedding rebuild is disabled with an explanation. |
+| Semantic search | Saved-query search falls back to client-side substring filtering over the full list. The search-data rebuild stays available and explains that it will skip the embeddings. |
 
 Everything else works unchanged. See [capabilities/search.md](capabilities/search.md).
 
@@ -630,13 +632,14 @@ the current page and the currently visible columns, plus the identifier; from a 
 it covers every row and the result's own columns. Object values are JSON-encoded; any value
 containing a quote, a comma or a newline is quoted with its quotes doubled.
 
-**Embedding rebuild is a stream, not a response.** The rebuild call answers with
+**The search-data rebuild is a stream, not a response.** The rebuild call answers with
 newline-delimited JSON objects, one per line, which must be read incrementally — a client
 that waits for a complete JSON body will hang until the whole rebuild finishes. Two event
 kinds appear: progress events carrying an entity type key, a processed count and a total
-(saved queries appear as their own pseudo-type at the end), and exactly one final summary
-carrying the overall processed and failed counts. A stream that ends without a summary is
-an error, not a success.
+(saved queries appear as their own pseudo-type at the end, and only when a provider is
+configured), and exactly one final summary carrying the overall processed and failed counts
+and whether the embeddings were skipped. A stream that ends without a summary is an error,
+not a success.
 
 **Entity search shows no number.** The palette, relation target picker and extraction
 review use the server’s ranking order and ignore relative scores. Document matches
@@ -704,7 +707,7 @@ Workbench addresses live under `/o/{ontologyKey}/w/{lensKey}`, Studio addresses 
 | `/o/{ontologyKey}/studio/lenses` | The lens list |
 | `/o/{ontologyKey}/studio/lenses/{id}` | A lens, Scope tab |
 | `/o/{ontologyKey}/studio/lenses/{id}?tab=agents` · `?tab=queries` · `?tab=connect` | The other lens tabs |
-| `/o/{ontologyKey}/studio/transfer` | Export, import, rebuild |
+| `/o/{ontologyKey}/studio/transfer` | Export, import, rebuild search data |
 
 Two consumed parameters are stripped from the address as soon as they are acted on, so that
 a reload does not repeat the action: the quick-add trigger and the Explorer focus target.

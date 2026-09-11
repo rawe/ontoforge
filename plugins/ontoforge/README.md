@@ -16,7 +16,7 @@ Export and import one ontology's design and instance data via the REST API.
 
 - **Design export/import**: save and restore one ontology's schema, lenses, agents and saved queries as JSON, in the server's own transfer format
 - **Data export/import**: save and restore instance data (entities, relations) with automatic ID remapping — this is the only instance-data export there is, since the transfer format carries the design alone
-- **Embedding rebuild**: regenerate one ontology's semantic-search vectors, with streamed progress
+- **Search-data rebuild**: regenerate one ontology's keyword text, document passages and semantic vectors, with streamed progress
 - Resolves the ontology key from `--ontology` or `ONTOFORGE_ONTOLOGY`, and stops with a clear message when neither is set
 - Uses Node.js 18+ with built-in `fetch` — no external dependencies
 

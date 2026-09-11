@@ -244,7 +244,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
       }
       expect(reported).toContain(String(DRIFTED_WIDTH));
       expect(reported).toContain(String(MODEL_WIDTH));
-      expect(reported).toContain("/model/rebuild-embeddings");
+      expect(reported).toContain("/model/rebuild-search-data");
       // API vocabulary only: no vendor, no physical name.
       for (const leak of POSTGRES_LEAKS) {
         expect(reported, `'${leak}' leaked into the report`).not.toContain(leak);
@@ -265,7 +265,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
       const reported = await logsOf(() => store.dropMismatchedVectorIndexes(MODEL_WIDTH));
 
       expect(reported).toContain("Recreating the semantic index for entity type 'person'");
-      expect(reported).not.toContain("/model/rebuild-embeddings");
+      expect(reported).not.toContain("/model/rebuild-search-data");
       for (const name of [
         entityIndex,
         chunkIndex,

@@ -120,7 +120,7 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
       expect(reported).toContain("entity type 'person'");
       expect(reported).toContain(String(MISMATCHED_DIMENSIONS));
       expect(reported).toContain(String(getEmbeddingProvider()!.dimensions));
-      expect(reported).toContain("/api/ontologies/{ontologyKey}/model/rebuild-embeddings");
+      expect(reported).toContain("/api/ontologies/{ontologyKey}/model/rebuild-search-data");
 
       // Operator-facing text stays in API vocabulary: no vendor, no
       // physical index name.
@@ -171,7 +171,7 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
       });
       expect(before.statusCode, "expected the drift to break search first").toBe(500);
 
-      const rebuild = await app.inject({ method: "POST", url: "/api/ontologies/test_ont/model/rebuild-embeddings" });
+      const rebuild = await app.inject({ method: "POST", url: "/api/ontologies/test_ont/model/rebuild-search-data" });
       expect(rebuild.statusCode, rebuild.body).toBe(200);
 
       const width = getEmbeddingProvider()!.dimensions;
@@ -204,7 +204,7 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
     });
     expect(defined.statusCode, defined.body).toBe(201);
 
-    const res = await app.inject({ method: "POST", url: "/api/ontologies/test_ont/model/rebuild-embeddings" });
+    const res = await app.inject({ method: "POST", url: "/api/ontologies/test_ont/model/rebuild-search-data" });
     expect(res.statusCode, res.body).toBe(200);
     expect(res.headers["content-type"]).toContain("application/x-ndjson");
 
@@ -275,7 +275,7 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
     expect(before.statusCode).toBe(200);
     expect((before.json() as Row[]).map((h) => h.key)).not.toContain("find-people");
 
-    const rebuild = await app.inject({ method: "POST", url: "/api/ontologies/test_ont/model/rebuild-embeddings" });
+    const rebuild = await app.inject({ method: "POST", url: "/api/ontologies/test_ont/model/rebuild-search-data" });
     expect(rebuild.statusCode, rebuild.body).toBe(200);
 
     const after = await app.inject({
@@ -301,7 +301,7 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
       enableOllamaProvider();
     }
 
-    const rebuild = await app.inject({ method: "POST", url: "/api/ontologies/test_ont/model/rebuild-embeddings" });
+    const rebuild = await app.inject({ method: "POST", url: "/api/ontologies/test_ont/model/rebuild-search-data" });
     expect(rebuild.statusCode, rebuild.body).toBe(200);
 
     const res = await app.inject({
@@ -319,7 +319,7 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
     await post("/api/ontologies", { key: "test_ont" });
     disableProvider();
     try {
-      const res = await app.inject({ method: "POST", url: "/api/ontologies/test_ont/model/rebuild-embeddings" });
+      const res = await app.inject({ method: "POST", url: "/api/ontologies/test_ont/model/rebuild-search-data" });
       expect(res.statusCode).toBe(422);
       const body = res.json() as { error: { code: string; message: string } };
       expect(body.error.code).toBe("VALIDATION_ERROR");

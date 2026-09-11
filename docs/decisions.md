@@ -177,7 +177,7 @@ ontology delete is a plain request, guarded only by UI confirmation.
 
 **Server surface** — server-wide, phase-neutral capability reads live under
 `/api/server`. Ontology-scoped operations never live there; server-wide data
-operations do not exist (rebuild-embeddings is per-ontology).
+operations do not exist (the search-data rebuild is per-ontology).
 
 **MCP addressing** — every MCP mount is bound by URL, mirroring REST spelling:
 modeling at `/mcp/ontologies/:key/model`, runtime at
@@ -259,8 +259,7 @@ credit without treating missing measurements as negative evidence. Deliberation:
 schema-string value segments separately from labeled semantic text, so keys cannot count
 as matching content and keyword attribution can name contributing values. The values-only
 correction applies to keyword and hybrid property retrieval, including single-type queries;
-this is distinct from preserving single-type fusion. Keyword maintenance must not require
-embedding inference or rewrite existing semantic vectors or document passages.
+this is distinct from preserving single-type fusion.
 
 **Search evidence does not establish answer sufficiency.** Keep search candidates
 available without an automatic similarity floor. A model-specific similarity and a lexical
@@ -283,8 +282,24 @@ English, carried in export, and checked against the import target.
 
 **Keyword index families are fixed at ontology creation.** Their language is the ontology's
 language; no per-type keyword DDL exists. Property keyword values and document chunks are
-stored even without embeddings. Explicit keyword-only maintenance refreshes stored entity
-representations; schema changes do not silently run it.
+stored even without embeddings. Schema changes do not silently refresh stored entity
+representations.
+
+**A schema edit never writes instance data; the rebuild repairs what it leaves behind.**
+Deleting a string property leaves its values inside every entity's stored keyword text and
+semantic text, where they keep matching until a rebuild recomposes them — in both kinds,
+since neither stored text records which property a word came from. Cleaning up at deletion
+time was rejected: it would turn a schema edit into a write over all instance data, and for
+the semantic half a bulk re-embedding that a server with no provider could not perform at
+all. The staleness is bounded, visible in the documented behaviour, and repaired by one
+explicit call.
+
+**One rebuild covers every stored representation search reads, and it needs no provider.**
+Keyword text and document passages are rebuilt by a run that calls no model — passages are
+themselves the document keyword index — so the operation runs with an embedding provider
+absent, skips the vectors, the vector indexes and the saved-query descriptions, and reports
+that skip in its summary rather than counting it as failure. A vector-only name for it would
+be wrong: the operation is named for the search data it rebuilds, not for one half of it.
 
 **The list filters and the search ranks.** Neither server operation falls back to the
 other. Cross-type search uses per-type indexes and an exact searched set, with no shared
@@ -359,7 +374,7 @@ cannot accept vectors at the new width. Startup warns per mismatch and names the
 It does not repair, because repair means dropping the index and re-embedding everything it
 covered — downtime and one model call per stored item, which no adapter may spend unbidden.
 The stored vectors are never at stake: they live in the store's own column, not in the
-index. The rebuild operation does repair, because
+index. The search-data rebuild does repair, because
 there the caller has asked for exactly that.
 
 **Repair is three phases, in this order: drop, regenerate, build.** A drifted index

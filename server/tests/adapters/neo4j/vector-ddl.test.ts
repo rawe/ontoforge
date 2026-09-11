@@ -137,7 +137,7 @@ describe("reportIfDimensionsDrifted", () => {
     expect(text).toContain(ENTITY_TYPE_SCOPE);
     expect(text).toContain("1024");
     expect(text).toContain("768");
-    expect(text).toContain("/model/rebuild-embeddings");
+    expect(text).toContain("/model/rebuild-search-data");
   });
 
   it("names no vendor or physical index in the warning", async () => {

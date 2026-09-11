@@ -229,6 +229,7 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
     const summary = lines[lines.length - 1]!;
     expect(summary.type).toBe("summary");
     expect(Object.keys(summary).sort()).toEqual([
+      "embeddingsSkipped",
       "entityTypes",
       "savedQueriesFailed",
       "savedQueriesProcessed",
@@ -236,6 +237,7 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
       "totalProcessed",
       "type",
     ]);
+    expect(summary.embeddingsSkipped).toBe(false);
     expect(summary.entityTypes).toEqual([{ entityTypeKey: "person", processed: 2, failed: 0 }]);
     expect(summary.savedQueriesProcessed).toBe(1);
     expect(summary.savedQueriesFailed).toBe(0);
@@ -313,17 +315,26 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
     expect(data.hits.some((r) => (r.entity as Row).name === "Grace Hopper")).toBe(true);
   });
 
-  it("rebuild is refused without a provider", async () => {
-    // The ontology must exist: rebuild answers 404 for an unknown
-    // ontology before the provider check.
-    await post("/api/ontologies", { key: "test_ont" });
+  it("rebuild runs without a provider, skipping the vector work", async () => {
+    // Neo4j indexes no keyword text, so the effect is not observable through
+    // a ranking here. What is asserted is that the run completes instead of
+    // being refused, writes the entity's text with no vector, and says which
+    // half it left out.
+    await buildDriftFixture();
     disableProvider();
     try {
       const res = await app.inject({ method: "POST", url: "/api/ontologies/test_ont/model/rebuild-search-data" });
-      expect(res.statusCode).toBe(422);
-      const body = res.json() as { error: { code: string; message: string } };
-      expect(body.error.code).toBe("VALIDATION_ERROR");
-      expect(body.error.message).toContain("EMBEDDING_PROVIDER");
+      expect(res.statusCode, res.body).toBe(200);
+      const summary = JSON.parse(res.body.trim().split("\n").at(-1)!) as Row;
+      expect(summary.type).toBe("summary");
+      expect(summary.embeddingsSkipped).toBe(true);
+      // A missing vector is the intended result here, not a failure.
+      expect(summary.totalFailed).toBe(0);
+      expect(summary.entityTypes).toEqual([
+        { entityTypeKey: "person", processed: 1, failed: 0 },
+      ]);
+      // Saved-query discovery ranks by vector alone, so its pass is skipped.
+      expect(summary.savedQueriesProcessed).toBe(0);
     } finally {
       enableOllamaProvider();
     }

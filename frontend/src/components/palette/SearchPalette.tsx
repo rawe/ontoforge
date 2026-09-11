@@ -1,7 +1,6 @@
 import { Command as CommandPrimitive } from 'cmdk'
 import {
   Clock,
-  FileText,
   LayoutDashboard,
   Loader2,
   Moon,
@@ -29,7 +28,7 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command'
-import { displayLabel } from '@/lib/displayLabel'
+import { EntitySearchRow } from './EntitySearchRow'
 import { readRecents, type RecentEntity } from '@/lib/recents'
 import { cn } from '@/lib/utils'
 import {
@@ -59,25 +58,6 @@ function StatusRow({ children }: { children: ReactNode }) {
     <div className="flex items-center justify-center gap-2 px-4 py-8 text-center text-[13px] text-muted-foreground">
       {children}
     </div>
-  )
-}
-
-/** Similarity bar — feed it the raw cosine (`matchedVia.similarity`), never
- * the RRF fusion `score` (ordering only, tiny values). */
-function ScoreBar({ score }: { score: number }) {
-  const pct = Math.round(score * 100)
-  return (
-    <span className="ml-auto flex shrink-0 items-center gap-1.5" aria-label={`Score ${pct}%`}>
-      <span className="h-1 w-10 overflow-hidden rounded-full bg-muted">
-        <span
-          className="block h-full rounded-full bg-primary/60"
-          style={{ width: `${pct}%` }}
-        />
-      </span>
-      <span className="w-7 text-right font-mono text-[10px] text-muted-foreground">
-        {pct}%
-      </span>
-    </span>
   )
 }
 
@@ -175,7 +155,7 @@ function PaletteContent({
     lensKey,
     q: mode === 'entities' ? debouncedQ : '',
     typeKey: scopedType ?? undefined,
-    semantic,
+    ranked: (features?.searchStrategies.length ?? 0) > 0,
     allTypeKeys: entityTypes.map((t) => t.key),
     enabled: entitySearchEnabled,
   })
@@ -189,17 +169,6 @@ function PaletteContent({
   )
 
   /* -------------------------------- grouping -------------------------------- */
-
-  const groups = useMemo(() => {
-    const map = new Map<string, EntitySearchResult[]>()
-    for (const result of entitySearch.data ?? []) {
-      const key = result.entity._entityTypeKey
-      const list = map.get(key)
-      if (list === undefined) map.set(key, [result])
-      else list.push(result)
-    }
-    return [...map.entries()]
-  }, [entitySearch.data])
 
   /* --------------------------------- actions --------------------------------- */
 
@@ -296,46 +265,12 @@ function PaletteContent({
   /* ------------------------------ result renders ----------------------------- */
 
   const entityItem = (result: EntitySearchResult, valuePrefix: 'entity' | 'recent') => {
-    const { entity, score, matchedVia } = result
-    // Display similarity comes from matchedVia (raw cosine); the top-level
-    // score is an RRF fusion value and only meaningful for ordering.
-    const similarity = matchedVia?.similarity ?? score
-    const documentMatch =
-      matchedVia?.source === 'document' && matchedVia.propertyKey !== undefined
-        ? matchedVia
-        : undefined
+    const { entity, matches } = result
     return (
-      <CommandItem
-        key={`${valuePrefix}:${entity._id}`}
-        value={`${valuePrefix}:${entity._entityTypeKey}:${entity._id}`}
-        onSelect={() => go(`${base}/e/${entity._entityTypeKey}/${entity._id}`)}
-        className={documentMatch !== undefined ? 'flex-col items-stretch gap-1' : undefined}
-      >
-        <span className="flex min-w-0 items-center gap-2">
-          {valuePrefix === 'recent' && (
-            <Clock className="size-3.5 shrink-0 text-muted-foreground" />
-          )}
-          <TypeChip
-            typeKey={entity._entityTypeKey}
-            displayName={typeName(entity._entityTypeKey)}
-            size="sm"
-          />
-          <span className="min-w-0 flex-1 truncate">{displayLabel(entity)}</span>
-          {similarity !== undefined && <ScoreBar score={similarity} />}
-        </span>
-        {documentMatch !== undefined && (
-          <span className="flex min-w-0 items-center gap-1.5 pl-0.5">
-            <span className="inline-flex shrink-0 items-center gap-1 rounded border bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-              <FileText className="size-2.5" aria-hidden />
-              matched in {documentMatch.propertyKey}
-            </span>
-            {documentMatch.snippet !== undefined && (
-              <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
-                {documentMatch.snippet}
-              </span>
-            )}
-          </span>
-        )}
+      <CommandItem key={`${valuePrefix}:${entity._id}`} value={`${valuePrefix}:${entity._entityTypeKey}:${entity._id}`}
+        onSelect={() => go(`${base}/e/${entity._entityTypeKey}/${entity._id}`)}>
+        {valuePrefix === 'recent' && <Clock className="size-3.5 shrink-0 text-muted-foreground" />}
+        <EntitySearchRow entity={entity} matches={matches} typeName={typeName(entity._entityTypeKey)} />
       </CommandItem>
     )
   }
@@ -462,7 +397,7 @@ function PaletteContent({
             : 'Keep typing — search starts at 2 characters.'}
         </StatusRow>
       )
-  } else if (groups.length === 0) {
+  } else if ((entitySearch.data?.length ?? 0) === 0) {
     listContent = searching ? (
       <StatusRow>
         <Loader2 className="size-4 animate-spin" /> Searching…
@@ -474,11 +409,9 @@ function PaletteContent({
       </StatusRow>
     )
   } else {
-    listContent = groups.map(([typeKey, results]) => (
-      <CommandGroup key={typeKey} heading={typeName(typeKey)}>
-        {results.map((r) => entityItem(r, 'entity'))}
-      </CommandGroup>
-    ))
+    listContent = <CommandGroup heading="Entities">
+      {(entitySearch.data ?? []).map((r) => entityItem(r, 'entity'))}
+    </CommandGroup>
   }
 
   const placeholder =

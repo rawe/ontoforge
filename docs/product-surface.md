@@ -294,10 +294,12 @@ Three operations, each with its own explanation. See
   key conflict explains that pre-existing objects with the same keys block the import and
   that the clashes must be resolved (or a bare ontology used). A successful import
   refreshes every cached view.
-- **Rebuild embeddings** — for this ontology, behind a confirmation warning about
+- **Rebuild search data** — for this ontology, behind a confirmation warning about
   duration and provider cost,
   then live progress per entity type while it runs and a summary when it finishes. The
-  action is disabled with an explanation when no embedding provider is configured.
+  action stays available with no embedding provider configured, explaining that it then
+  rebuilds keyword text and document passages only; the summary repeats that the
+  embeddings were skipped.
 
 ---
 
@@ -319,12 +321,18 @@ Scoping to a type replaces the prefix with a persistent type chip; the search th
 within that type, an empty query lists that type's first entities, and Backspace on an
 empty input removes the scope. Prefixes are inert while a type scope is active.
 
-Entity results are grouped by type. Each row carries a type chip, the display label, and —
-for semantic hits — a similarity bar. A hit matched inside a document additionally shows
-which document property matched and a snippet of the matching passage. Enter opens the
-entity's detail page; Cmd/Ctrl+Enter opens it focused in the Explorer instead. Selection is
-maintained explicitly so that results arriving after a debounce still leave the first row
-highlighted.
+Entity results retain global ranking order. Each row carries a type chip, display label,
+and one `in <property>` badge per document match in match order. No number, score bar,
+percentage, numeric aria label or passage text is displayed. The relation target picker
+uses the same search hook and row; its empty input lists the first ten entities.
+Both use ranked search whenever the strategy list is nonempty, falling back to literal
+entity lists otherwise. Enter opens entity detail; Cmd/Ctrl+Enter focuses the Explorer.
+
+The ontology creation dialog offers English or German text-search language, defaulting
+to English; the ontology card shows the immutable choice. Saved-query editing offers a
+`search` step with no minimum score. Extraction review searches only properties for up to
+three existing candidates, with no score threshold or displayed number; “Create new” is
+the default and the prompt asks whether to use an existing entity instead.
 
 ### Quick add
 
@@ -474,8 +482,8 @@ place where nothing is written without an explicit second step.
    Properties the schema does not define are listed as explicitly ignored rather than
    silently dropped. A proposal whose type is not in the lens's scope is shown, disabled,
    and explained. Missing required values are counted on the card.
-   Where semantic search is available, each proposal is checked against existing entities
-   of its own type; close matches are offered as a "use this existing one instead" choice,
+   Where ranked search is available, each proposal is checked against up to three existing entities
+   of its own type by their properties; candidates are offered as a "use this existing one instead" choice,
    which turns that proposal into a link rather than a creation. A relation is blocked —
    with the reason spelled out — when its type is out of scope, when an endpoint is not
    among the proposals, or when an endpoint is neither checked for creation nor mapped to
@@ -552,7 +560,7 @@ on the API for programmatic callers. See
 ## Feature gating
 
 The client asks the server once per session which optional capabilities exist, and treats
-the answer as never going stale. Two flags are reported: semantic search and AI. Neither is
+the answer as never going stale. The report contains the available search strategies plus semantic-search and AI flags. None is
 inferred from a failed call — the client never probes.
 
 Gated areas explain themselves rather than vanishing, except in navigation, where a dead
@@ -563,7 +571,8 @@ existence while the report is loading.
 | Off | What changes |
 |---|---|
 | AI | The AI navigation entry, the AI palette action and the AI quick action are gone. The AI screen itself renders an explanation. The empty-state extraction step stays visible but dimmed, with an explanation. |
-| Semantic search | Entity search everywhere falls back to substring matching — per type in parallel when unscoped. Saved-query search falls back to client-side substring filtering over the full list. Extraction review skips the duplicate check entirely. Embedding rebuild is disabled with an explanation. |
+| No search strategies | Entity search falls back to substring matching — per type in parallel when unscoped. Extraction review skips the duplicate check. |
+| Semantic search | Saved-query search falls back to client-side substring filtering over the full list. The search-data rebuild stays available and explains that it will skip the embeddings. |
 
 Everything else works unchanged. See [capabilities/search.md](capabilities/search.md).
 
@@ -623,25 +632,20 @@ the current page and the currently visible columns, plus the identifier; from a 
 it covers every row and the result's own columns. Object values are JSON-encoded; any value
 containing a quote, a comma or a newline is quoted with its quotes doubled.
 
-**Embedding rebuild is a stream, not a response.** The rebuild call answers with
+**The search-data rebuild is a stream, not a response.** The rebuild call answers with
 newline-delimited JSON objects, one per line, which must be read incrementally — a client
 that waits for a complete JSON body will hang until the whole rebuild finishes. Two event
 kinds appear: progress events carrying an entity type key, a processed count and a total
-(saved queries appear as their own pseudo-type at the end), and exactly one final summary
-carrying the overall processed and failed counts. A stream that ends without a summary is
-an error, not a success.
+(saved queries appear as their own pseudo-type at the end, and only when a provider is
+configured), and exactly one final summary carrying the overall processed and failed counts
+and whether the embeddings were skipped. A stream that ends without a summary is an error,
+not a success.
 
-**Two scores exist, and only one may be shown.** A semantic result carries a top-level
-score and a per-match similarity, and what each one means is in
-[capabilities/search.md](capabilities/search.md#fusion-and-what-a-fused-score-is-not). The
-client contract on top of that: **only the match similarity is ever displayed or
-thresholded**; the fusion score is used for nothing but the order the server already put
-the results in. Every percentage in the product — the palette's similarity bar, the
-relation target picker, the duplicate suggestions in extraction review — reads the match
-similarity. When a search runs in a single mode the two numbers happen to coincide; nothing
-may depend on that. For the same reason the extraction duplicate check restricts itself to
-entity embeddings: mixing in document matches would fuse the ranking and make its
-similarity threshold incomparable.
+**Entity search shows no number.** The palette, relation target picker and extraction
+review use the server’s ranking order and ignore relative scores. Document matches
+appear as property badges in match order; no passage text is shown. Extraction review
+searches properties only, offers up to three candidates without a floor, and defaults
+to creating a new entity. Saved-query discovery keeps its separate cosine score.
 
 **Scoped-versus-unscoped cannot be read from the lens.** The lens's runtime schema does not
 report its own inclusions, so "scoped" and "unscoped" are determined by asking the modeling
@@ -703,7 +707,7 @@ Workbench addresses live under `/o/{ontologyKey}/w/{lensKey}`, Studio addresses 
 | `/o/{ontologyKey}/studio/lenses` | The lens list |
 | `/o/{ontologyKey}/studio/lenses/{id}` | A lens, Scope tab |
 | `/o/{ontologyKey}/studio/lenses/{id}?tab=agents` · `?tab=queries` · `?tab=connect` | The other lens tabs |
-| `/o/{ontologyKey}/studio/transfer` | Export, import, rebuild |
+| `/o/{ontologyKey}/studio/transfer` | Export, import, rebuild search data |
 
 Two consumed parameters are stripped from the address as soon as they are acted on, so that
 a reload does not repeat the action: the quick-add trigger and the Explorer focus target.

@@ -82,7 +82,7 @@ describe.skipIf(settings.DB_BACKEND !== "neo4j")("Neo4j physical skeleton", () =
     it("a stored type with a now-reserved key triggers the startup warning", async () => {
       // The report walks the registry, so the graph must belong to a
       // registered ontology.
-      await getOntologyRegistry().createOntology(randomUUID(), "legacy_ont", null, null);
+      await getOntologyRegistry().createOntology(randomUUID(), "legacy_ont", null, null, "english");
       // Seed directly via the driver: types that predate the reserved-key check.
       await runSession(getDriver(), async (session) => {
         await session.run(
@@ -125,7 +125,7 @@ describe.skipIf(settings.DB_BACKEND !== "neo4j")("Neo4j physical skeleton", () =
     it("reports nothing when no stored key is reserved", async () => {
       await initStores();
       // A registered ontology, so the walk actually inspects the graph.
-      await getOntologyRegistry().createOntology(randomUUID(), "clean_ont", null, null);
+      await getOntologyRegistry().createOntology(randomUUID(), "clean_ont", null, null, "english");
       const warnings: string[] = [];
       const warnSpy = vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
         warnings.push(args.map(String).join(" "));

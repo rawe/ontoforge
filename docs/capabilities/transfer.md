@@ -37,17 +37,18 @@ they belong ([ai-agents.md](ai-agents.md), [saved-queries.md](saved-queries.md))
 Server-managed timestamps are not carried either. Imported objects are new objects and are
 timestamped as such.
 
+The payload carries the immutable `textSearchLanguage`. Import rejects a language that
+differs from the target ontology, before writing any design objects.
+
 ## The format version
 
-The payload declares a format version, and export always writes the current one: `4.0`.
+The payload declares a format version, and export always writes the current one: `5.0`.
 
 **It is informational.** Import reads no meaning from it: the version is never dispatched
 on, and a payload with an unknown version or no version at all is processed identically.
 There is no negotiation, no compatibility check, and **no conversion of older payloads**
-— an old document fails on its shape, not on its version. Concretely, a pre-4.0 document
-carries its lenses under a field name the current shape does not accept, and is rejected
-as a plain validation error like any other malformed payload. That rejection is intended
-and final; no converter exists. A reimplementer should treat the version as a label for
+— a document fails on its shape, not its version. The language and lenses fields are
+required. A reimplementer should treat the version as a label for
 humans, bumped only when the payload shape changes incompatibly — never as a dispatch
 key.
 

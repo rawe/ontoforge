@@ -299,7 +299,7 @@ describe("parameter cross-checks (both directions)", () => {
 
   it("a $param in a search text must be declared even when a binding shares its name", async () => {
     holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
-    // Bindings on a semantic_search step are ignored at run time, so the
+    // Bindings on a search step are ignored at run time, so the
     // $q in the search text is caller-supplied and must be declared.
     const res = await put("test-query", {
       name: "Test",
@@ -308,7 +308,7 @@ describe("parameter cross-checks (both directions)", () => {
         { name: "first", type: "oql", oql: "MATCH (p:person) RETURN p" },
         {
           name: "second",
-          type: "semantic_search",
+          type: "search",
           entityTypeKey: "person",
           query: "$q",
           bindings: { q: "{{first.name}}" },
@@ -451,19 +451,19 @@ describe("pipeline validation", () => {
     expect(res.statusCode).toBe(422);
   });
 
-  it("a semantic_search step missing its fields collects BOTH failures", async () => {
+  it("a search step missing its fields collects BOTH failures", async () => {
     holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     const res = await put("test-query", {
       name: "Test",
       description: "test",
-      steps: [{ name: "search", type: "semantic_search" }],
+      steps: [{ name: "search", type: "search" }],
       parameters: [],
     });
     expect(res.statusCode).toBe(422);
     const details = res.json().error.details as { errors: string[] };
     expect(details.errors).toEqual([
-      "steps[0].entityTypeKey: Required for semantic_search steps",
-      "steps[0].query: Required for semantic_search steps",
+      "steps[0].entityTypeKey: Required for search steps",
+      "steps[0].query: Required for search steps",
     ]);
   });
 
@@ -497,7 +497,7 @@ describe("pipeline validation", () => {
       steps: [
         {
           name: "skills",
-          type: "semantic_search",
+          type: "search",
           entityTypeKey: "skill",
           query: "$skill_query",
           limit: 5,

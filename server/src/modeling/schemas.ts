@@ -4,6 +4,8 @@
  * explicit `null`.
  */
 
+import { TextSearchLanguage } from "../registry/schemas.js";
+
 import { z } from "zod";
 
 import { DATA_TYPES, KEY_PATTERN, MAX_KEY_LENGTH } from "../core/schemas.js";
@@ -177,15 +179,14 @@ export const AiAgentConfigResponse = z.object({
 export const STEP_NAME_PATTERN = /^[a-zA-Z_]\w*$/;
 
 /** One saved-query step. `oql` steps carry the query text in `oql`;
- * `semantic_search` steps carry their search text in `query`. */
+ * `search` steps carry their search text in `query`. */
 export const StepSchema = z.object({
   name: z.string().regex(STEP_NAME_PATTERN),
-  type: z.enum(["oql", "semantic_search"]),
+  type: z.enum(["oql", "search"]),
   oql: z.string().nullable().optional(),
   entityTypeKey: z.string().nullable().optional(),
   query: z.string().nullable().optional(),
   limit: z.number().int().min(1).max(100).nullable().optional(),
-  minScore: z.number().min(0).max(1).nullable().optional(),
   bindings: z.record(z.string(), z.string()).nullable().optional(),
 });
 
@@ -210,7 +211,6 @@ export const StepResponse = z.object({
   entityTypeKey: z.string().nullable(),
   query: z.string().nullable(),
   limit: z.number().nullable(),
-  minScore: z.number().nullable(),
   bindings: z.record(z.string(), z.string()).nullable(),
 });
 
@@ -234,7 +234,7 @@ export const SavedQueryResponse = z.object({
 // what catches those later.
 
 /** Current transfer format version — informational, never dispatched on. */
-export const TRANSFER_FORMAT_VERSION = "4.0";
+export const TRANSFER_FORMAT_VERSION = "5.0";
 
 export const ExportProperty = z.object({
   key: z.string(),
@@ -290,12 +290,11 @@ export const ExportSavedQueryParameter = z.object({
  * against the definition-time rules itself, collecting the failures. */
 export const ExportSavedQueryStep = z.object({
   name: z.string(),
-  type: z.string(),
+  type: StepSchema.shape.type,
   oql: z.string().nullable().optional(),
   entityTypeKey: z.string().nullable().optional(),
   query: z.string().nullable().optional(),
   limit: z.number().int().nullable().optional(),
-  minScore: z.number().nullable().optional(),
   bindings: z.record(z.string(), z.string()).nullable().optional(),
 });
 
@@ -317,6 +316,7 @@ export const ExportLens = z.object({
 });
 
 export const ExportPayload = z.object({
+  textSearchLanguage: TextSearchLanguage,
   formatVersion: z.string().optional().default(TRANSFER_FORMAT_VERSION),
   entityTypes: z.array(ExportEntityType).default([]),
   relationTypes: z.array(ExportRelationType).default([]),

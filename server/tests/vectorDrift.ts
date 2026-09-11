@@ -62,8 +62,6 @@ export const ENTITY_TYPE_SCOPE = "entity type 'person'";
 /** The chunk index of the fixture document property. */
 export const DOCUMENT_PROPERTY_SCOPE = "document property 'bio' on entity type 'person'";
 
-/** The cross-type entity index. */
-export const ALL_TYPES_SCOPE = "search across all entity types";
 
 /** The saved-query description index. */
 export const SAVED_QUERY_SCOPE = "saved-query descriptions";
@@ -72,7 +70,6 @@ export const SAVED_QUERY_SCOPE = "saved-query descriptions";
 export const DRIFT_SCOPES = [
   ENTITY_TYPE_SCOPE,
   DOCUMENT_PROPERTY_SCOPE,
-  ALL_TYPES_SCOPE,
   SAVED_QUERY_SCOPE,
 ];
 

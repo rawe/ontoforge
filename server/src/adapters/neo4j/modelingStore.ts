@@ -1,3 +1,4 @@
+import type { KeywordPropertySegment } from "../../core/ports.js";
 /**
  * Neo4j implementation of the modeling store (schema persistence).
  *
@@ -6,6 +7,8 @@
  * `runSession`, so driver failures surface as `StoreError` (rule 4) — and
  * delegates to the query functions in `modelingQueries.ts`.
  */
+
+import type { TextSearchLanguage } from "../../registry/schemas.js";
 
 import type { Driver } from "neo4j-driver";
 
@@ -17,7 +20,7 @@ import { runSession } from "./errors.js";
 import * as queries from "./modelingQueries.js";
 
 export class Neo4jModelingStore implements ModelingStore {
-  constructor(private readonly driver: Driver) {}
+  constructor(private readonly driver: Driver, public readonly textSearchLanguage: TextSearchLanguage = "english") {}
 
   // ------------------------------------------------------------------
   // Reserved keys
@@ -494,7 +497,7 @@ export class Neo4jModelingStore implements ModelingStore {
     return runSession(this.driver, (session) => queries.getEntityTypesWithProperties(session));
   }
 
-  async setEntityEmbedding(entityId: string, embedding: number[]): Promise<void> {
+  async setEntitySearchText(entityId: string, propertyText: string, embedding: number[] | null, _keywordSegments?: KeywordPropertySegment[]): Promise<void> {
     return runSession(this.driver, (session) =>
       queries.setEntityEmbedding(session, entityId, embedding),
     );

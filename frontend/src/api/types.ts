@@ -11,6 +11,7 @@ export type JsonPrimitive = string | number | boolean | null
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }
 
 export interface Features {
+  searchStrategies: SearchStrategy[]
   semanticSearch: boolean
   ai: boolean
 }
@@ -71,14 +72,13 @@ export interface SchemaRelationType {
 
 export interface SavedQueryStep {
   name: string
-  type: 'oql' | 'semantic_search'
+  type: 'oql' | 'search'
   /** OQL text — `oql` steps only. */
   oql?: string
   entityTypeKey?: string
-  /** Semantic-search text — `semantic_search` steps only. */
+  /** Semantic-search text — `search` steps only. */
   query?: string
   limit?: number
-  minScore?: number
   bindings?: Record<string, string>
 }
 
@@ -173,34 +173,39 @@ export interface NeighborsResponse {
 
 /* ------------------------------ runtime — search ----------------------------- */
 
-/**
- * How a semantic hit matched. `similarity` is the raw cosine of the winning
- * vector — use it for any display or threshold. Document matches also carry
- * the property key, character coordinates and (unless disabled) a snippet.
- */
-export interface SearchMatchedVia {
-  source: 'entity' | 'document'
-  similarity: number
-  propertyKey?: string
-  charOffset?: number
-  charLength?: number
-  snippet?: string
+export type SearchStrategy = 'semantic' | 'keyword' | 'hybrid'
+export type SearchKind = 'properties' | 'document'
+export interface SearchEvidence {
+  /** Original (1 + cosine) / 2 measurement, not confidence; null is unmeasured. */
+  semanticSimilarity: number | null
+  /** True for a native keyword match; null is unknown, including limited-list absence. */
+  keywordMatch: boolean | null
 }
-
-export interface SemanticSearchResult {
+export type SearchMatch = {
+  kind: 'properties'; evidence: SearchEvidence & { keywordPropertyKeys: string[] | null }
+} | {
+  kind: 'document'; propertyKey: string; charOffset: number; charLength: number; evidence: SearchEvidence
+}
+export interface SearchHit {
   entity: EntityInstance
-  /**
-   * RRF fusion score — ordering only (small values like 0.016). For a
-   * user-facing similarity use `matchedVia.similarity`.
+  /** 1.0 for the best hit; comparable only within this response.
+   * One unfused ranking uses source scores; hybrid sums reciprocal ranks.
+   * Cross-kind fusion uses the best rank contribution for multiple searched types,
+   * and sum for one searched type. Cross-type ties prefer best returned similarity
+   * only when all tied hits have a measurement; otherwise they stay stable.
+   * A tie does not prove equal relevance.
+   * Never indicates confidence or whether the best hit is good.
    */
-  score: number
-  matchedVia?: SearchMatchedVia
+  relativeScore: number
+  matches: SearchMatch[]
 }
-
-export interface SemanticSearchResponse {
-  results: SemanticSearchResult[]
+export interface SearchResponse {
   query: string
-  total: number
+  type: string | null
+  in: SearchKind[]
+  strategy: SearchStrategy
+  filter: Record<string, string>
+  hits: SearchHit[]
 }
 
 /* ----------------------------- runtime — documents ---------------------------- */
@@ -271,6 +276,7 @@ export interface ChatResponse {
 /* --------------------------------- registry --------------------------------- */
 
 export interface Ontology {
+  textSearchLanguage: 'english' | 'german'
   ontologyId: string
   key: string
   /** Mutable server-wide-unique display name; `null` when never named. */
@@ -280,6 +286,7 @@ export interface Ontology {
 }
 
 export interface OntologyCreateInput {
+  textSearchLanguage?: 'english' | 'german'
   /** Immutable, server-wide unique; snake_case, max 59 chars. */
   key: string
   /** Optional — an ontology starts nameless unless one is chosen here. */
@@ -401,7 +408,7 @@ export const AGENT_TOOL_NAMES = [
   'get_document',
   'list_relations',
   'get_neighbors',
-  'semantic_search',
+  'search',
   'search_documents',
   'execute_query',
   'list_saved_queries',

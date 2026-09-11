@@ -162,14 +162,16 @@ export function makeRelation(
 /** Every port method as a mock — completeness is compiler-enforced. The
  * one non-method member, the store's ontology binding, stays a value. */
 export type MockRuntimeStore = {
-  [K in Exclude<keyof RuntimeStore, "ontologyKey">]: Mock;
-} & { ontologyKey: string };
+  [K in Exclude<keyof RuntimeStore, "ontologyKey" | "textSearchLanguage">]: Mock;
+} & { ontologyKey: string; textSearchLanguage: "english" | "german" };
 
 /** A mock store whose reads default to "nothing stored". */
 export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeStore {
   return {
     ontologyKey,
-    supportsSemanticSearchPathConditions: vi.fn(() => false),
+    textSearchLanguage: "english",
+    supportsKeywordRanking: vi.fn(() => false),
+    supportsSearchPathConditions: vi.fn(() => false),
     getFullSchema: vi.fn(async () => null),
     getAiAgentConfigs: vi.fn(async () => []),
     getSavedQueries: vi.fn(async () => []),
@@ -183,10 +185,11 @@ export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeSto
     deleteChunksForEntityProperty: vi.fn(async () => undefined),
     createDocumentChunks: vi.fn(async () => undefined),
     validateVectorIndexedProperties: vi.fn(() => undefined),
-    searchDocumentChunks: vi.fn(async () => []),
+    documentSearchSemantic: vi.fn(async () => []),
+    documentSearchKeyword: vi.fn(async () => []),
     getEntitiesByIds: vi.fn(async () => ({})),
-    semanticSearch: vi.fn(async () => []),
-    semanticSearchAll: vi.fn(async () => []),
+    propertySearchSemantic: vi.fn(async () => []),
+    propertySearchKeyword: vi.fn(async () => []),
     searchSavedQueries: vi.fn(async () => []),
     createRelation: vi.fn(),
     listRelations: vi.fn(async () => [[], 0]),

@@ -149,9 +149,8 @@ tends to leak:
   through a relation type the lens does not expose is omitted from the
   neighbourhood entirely, not returned with an empty relation.
 - **Search is restricted to exposed types**, and passage search only to exposed
-  document properties. Because a restricted lens filters a fixed candidate pool
-  after ranking, a narrow lens can return fewer hits than requested even when more
-  matches exist ([search.md](search.md)).
+  document properties. The searched set reaches the per-type rankings directly, so
+  outside types do not consume a narrow lens's candidate budget ([search.md](search.md)).
 
 Filtering is applied per type, not per response, and that has one visible
 consequence during traversal: a neighbour whose own entity type is out of scope

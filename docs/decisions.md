@@ -127,9 +127,9 @@ Encoding those names above the port would tie database-agnostic code to one data
 enforcing them inside the adapter would deliver the error from the wrong layer and make
 every future adapter reimplement it.
 
-**Adapters declare whether semantic search evaluates path conditions; the service
+**Adapters declare whether search evaluates path conditions; the service
 enforces it.**
-A query path on semantic search resolves and crosses the port only where the adapter
+A query path on search resolves and crosses the port only where the adapter
 declares support; elsewhere it is rejected above the port, naming the entity list as the
 alternative. Filters on a search are applied as part of the search, so a path condition
 an adapter cannot evaluate inside its vector query must be refused before the search
@@ -177,7 +177,7 @@ ontology delete is a plain request, guarded only by UI confirmation.
 
 **Server surface** — server-wide, phase-neutral capability reads live under
 `/api/server`. Ontology-scoped operations never live there; server-wide data
-operations do not exist (rebuild-embeddings is per-ontology).
+operations do not exist (the search-data rebuild is per-ontology).
 
 **MCP addressing** — every MCP mount is bound by URL, mirroring REST spelling:
 modeling at `/mcp/ontologies/:key/model`, runtime at
@@ -212,14 +212,98 @@ What a call accepts, what it returns, and how it behaves. Nothing about the back
 storage adapter or the ranking algorithm; a rejection message already tells the caller
 what to do instead.
 
-**An agent may be granted every read tool but one, and one tool MCP does not have.**
-Reading a document is grantable: an agent that can see a document stub but never open it
-can only report that text exists. Ranking document passages is a tool of its own for an
-agent, where MCP selects it with an argument on semantic search, because an agent may run
-the weakest model of any caller on the surface and a name is chosen more reliably than a
-mode. Reading a single relation by identifier stays out — a relation is reached by listing
-or traversal. No write tool is ever grantable, whatever a configuration or system prompt
-asks for.
+**Search and document search are separate tools on MCP and agents.** The first runs both
+kinds, the second promises a passage on every hit. Both choose the default strategy and
+return the search envelope. Reading a single relation by id remains outside the grantable
+set; no write tool is grantable.
+
+**Search strategies have implementations and availability requirements.** Defaults choose
+the first available of hybrid, keyword, semantic; every response names the applied one.
+
+**Search ranking scores are relative; match evidence is separate.** A hit's
+`relativeScore` is comparable only within one response and is never absolute similarity
+or confidence. Each match's `evidence` carries `semanticSimilarity` (the supported
+similarity on the `(1 + cosine) / 2` scale, or null) and `keywordMatch` (a supported
+boolean result, or null). Null means unknown or unmeasured, including unavailable
+signals; false requires an explicit negative evaluation, never absence from a limited
+ranking. Evidence describes the composed entity text or the particular returned document
+passage, not which signals contributed to ranking. Do not add a `via` or source-membership
+field to this contract. Retaining evidence itself preserves ranking and passage selection.
+Property matches also expose nullable `keywordPropertyKeys`, naming exposed string values
+that supplied query terms; withhold incomplete or unsupported attribution rather than
+invent it. They do not attribute semantic matches to individual properties.
+Saved-query discovery retains its separate cosine scores.
+
+**Search ranking and evidence have distinct meanings.** Relative rank, semantic
+similarity and keyword evidence must not be presented as interchangeable measures.
+A similarity bounded by zero and one is not, by itself, calibrated confidence.
+
+**Search provenance must be supported by evidence.** Unknown or unmeasured evidence
+must not be represented as a negative match. Absence from a limited ranking does not
+prove that a unit failed to match. A semantic match over composed entity text does
+not, by itself, establish which individual property caused the match.
+
+**A correction to cross-type search fusion must preserve single-type behaviour.**
+Changing single-type behaviour requires separate explicit approval, because a fix for
+unequal eligibility across types must not silently change callers searching one type.
+
+**Cross-type kind fusion uses the best reciprocal kind rank.** When both kinds run
+over more than one searched type, take the maximum contribution; keep summed fusion
+within each kind and for at-most-one-type requests. Resolve equal cross-kind scores by
+the best semantic similarity in returned matches only if every tied entity has one;
+otherwise retain the group's encounter order. This removes additive schema participation
+credit without treating missing measurements as negative evidence. Deliberation:
+[adr/0020](adr/0020-search-ranking-and-evidence.md).
+
+**Property keyword content contains values, not schema labels.** Preserve ordered
+schema-string value segments separately from labeled semantic text, so keys cannot count
+as matching content and keyword attribution can name contributing values. The values-only
+correction applies to keyword and hybrid property retrieval, including single-type queries;
+this is distinct from preserving single-type fusion.
+
+**Search evidence does not establish answer sufficiency.** Keep search candidates
+available without an automatic similarity floor. A model-specific similarity and a lexical
+match are evidence to inspect, not guarantees that the requested answer exists. Unknown
+signals do not justify silently removing a candidate.
+
+**Keyword matching is permissive; ranking decides.** A keyword query matches rows
+carrying any of its terms, each also matching as a prefix — never a conjunction over all
+of them. A conjunction let one absent term empty the whole result, which for a
+compounding language is ordinary rather than exceptional: stemming reduces neither
+compounds nor derivations, so a row holding what was asked drops out over a term it
+carries in another form. Rank order, not membership, expresses term coverage. Prefix
+matching admits unrelated words sharing a stem; ranking carries that cost. The query is
+assembled from the lexemes the adapter's own tokenizer produced for the search text,
+quoted, so search text never reaches query syntax. Precision belongs to the stage after
+retrieval, not to the match condition.
+
+**Text-search language is an immutable ontology setting.** Chosen at creation, default
+English, carried in export, and checked against the import target.
+
+**Keyword index families are fixed at ontology creation.** Their language is the ontology's
+language; no per-type keyword DDL exists. Property keyword values and document chunks are
+stored even without embeddings. Schema changes do not silently refresh stored entity
+representations.
+
+**A schema edit never writes instance data; the rebuild repairs what it leaves behind.**
+Deleting a string property leaves its values inside every entity's stored keyword text and
+semantic text, where they keep matching until a rebuild recomposes them — in both kinds,
+since neither stored text records which property a word came from. Cleaning up at deletion
+time was rejected: it would turn a schema edit into a write over all instance data, and for
+the semantic half a bulk re-embedding that a server with no provider could not perform at
+all. The staleness is bounded, visible in the documented behaviour, and repaired by one
+explicit call.
+
+**One rebuild covers every stored representation search reads, and it needs no provider.**
+Keyword text and document passages are rebuilt by a run that calls no model — passages are
+themselves the document keyword index — so the operation runs with an embedding provider
+absent, skips the vectors, the vector indexes and the saved-query descriptions, and reports
+that skip in its summary rather than counting it as failure. A vector-only name for it would
+be wrong: the operation is named for the search data it rebuilds, not for one half of it.
+
+**The list filters and the search ranks.** Neither server operation falls back to the
+other. Cross-type search uses per-type indexes and an exact searched set, with no shared
+cross-type vector index.
 
 **Transport is stateless HTTP with plain JSON responses.**
 No event stream. Statelessness is what allows the same mount to serve many clients
@@ -290,7 +374,7 @@ cannot accept vectors at the new width. Startup warns per mismatch and names the
 It does not repair, because repair means dropping the index and re-embedding everything it
 covered — downtime and one model call per stored item, which no adapter may spend unbidden.
 The stored vectors are never at stake: they live in the store's own column, not in the
-index. The rebuild operation does repair, because
+index. The search-data rebuild does repair, because
 there the caller has asked for exactly that.
 
 **Repair is three phases, in this order: drop, regenerate, build.** A drifted index

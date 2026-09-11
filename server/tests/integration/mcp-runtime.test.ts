@@ -203,7 +203,7 @@ describe.skipIf(!supportsMultipleOntologies)("ontology isolation", () => {
 });
 
 describe("tool surface", () => {
-  it("lists exactly the twenty runtime tools", async () => {
+  it("lists exactly the twenty-one runtime tools", async () => {
     const client = await connectClient(`${baseUrl}/mcp/ontologies/test_ont/runtime/lenses/test_lens`);
     try {
       const tools = await client.listTools();
@@ -223,8 +223,9 @@ describe("tool surface", () => {
         "list_relations",
         "list_saved_queries",
         "run_saved_query",
+        "search",
+        "search_documents",
         "search_saved_queries",
-        "semantic_search",
         "update_entity",
         "update_relation",
         "write_document",

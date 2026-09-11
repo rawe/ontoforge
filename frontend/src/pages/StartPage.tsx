@@ -55,6 +55,7 @@ function CreateOntologyDialog({
   const navigate = useNavigate()
   const [name, setName] = useState('')
   const [key, setKey] = useState('')
+  const [textSearchLanguage, setTextSearchLanguage] = useState<'english' | 'german'>('english')
   const [keyTouched, setKeyTouched] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
 
@@ -64,6 +65,7 @@ function CreateOntologyDialog({
     if (open) {
       setName('')
       setKey('')
+      setTextSearchLanguage('english')
       setKeyTouched(false)
       setFieldErrors({})
     }
@@ -72,7 +74,7 @@ function CreateOntologyDialog({
   const create = useMutation({
     mutationFn: () =>
       registry.createOntology({
-        key,
+        key, textSearchLanguage,
         ...(name.trim() === '' ? {} : { displayName: name.trim() }),
       }),
     onSuccess: (created) => {
@@ -135,6 +137,14 @@ function CreateOntologyDialog({
             }}
             error={fieldErrors.key}
           />
+          <div className="grid gap-1.5">
+            <Label htmlFor="text-search-language">Text-search language</Label>
+            <select id="text-search-language" className="h-9 rounded-md border bg-background px-3 text-sm" value={textSearchLanguage}
+              onChange={(e) => setTextSearchLanguage(e.target.value as 'english' | 'german')}>
+              <option value="english">English</option><option value="german">German</option>
+            </select>
+            <p className="text-xs text-muted-foreground">Sets word stemming for keyword search. Fixed at creation.</p>
+          </div>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel
@@ -265,6 +275,9 @@ function OntologyCard({ ontology }: { ontology: Ontology }) {
           <div className="truncate text-sm font-medium">{label}</div>
           <div className="truncate font-mono text-[11px] text-muted-foreground">
             {ontology.key}
+          </div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            Text-search language: {ontology.textSearchLanguage === 'german' ? 'German' : 'English'}
           </div>
         </div>
         <DropdownMenu>

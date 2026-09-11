@@ -18,11 +18,13 @@
  * server-wide skeleton.
  */
 
+import type { TextSearchLanguage } from "../../registry/schemas.js";
+
 import type { Driver } from "neo4j-driver";
 
 import { ConflictError } from "../../core/exceptions.js";
 import type { OntologyRegistry, Row } from "../../core/ports.js";
-import { ensureEntityVectorIndex, ensureSavedQueryVectorIndex } from "./ddl.js";
+import { ensureSavedQueryVectorIndex } from "./ddl.js";
 import { runSession } from "./errors.js";
 import { convertNeo4jProperties } from "./temporal.js";
 
@@ -74,6 +76,7 @@ export class Neo4jOntologyRegistry implements OntologyRegistry {
     key: string,
     displayName: string | null,
     embeddingDimensions: number | null,
+    textSearchLanguage: TextSearchLanguage,
   ): Promise<Row> {
     // The cap first, so a rejected create touches nothing — the
     // conflict is an expected condition and must have no side effects.
@@ -89,7 +92,6 @@ export class Neo4jOntologyRegistry implements OntologyRegistry {
     // re-ensures idempotently. The reverse order could register an
     // ontology whose home lacks its indexes.
     if (embeddingDimensions !== null) {
-      await ensureEntityVectorIndex(this.driver, embeddingDimensions);
       await ensureSavedQueryVectorIndex(this.driver, embeddingDimensions);
     }
     const created = await runSession(this.driver, async (session) => {
@@ -105,12 +107,13 @@ export class Neo4jOntologyRegistry implements OntologyRegistry {
             ontologyId: $ontologyId,
             key: $key,
             displayName: $displayName,
+            textSearchLanguage: $textSearchLanguage,
             createdAt: datetime(),
             updatedAt: datetime()
         })
         RETURN r {.*} AS ontology
         `,
-        { ontologyId, key, displayName },
+        { ontologyId, key, displayName, textSearchLanguage },
       );
       const record = result.records[0];
       return record === undefined ? null : (record.get("ontology") as Row);

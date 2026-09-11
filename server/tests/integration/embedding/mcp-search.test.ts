@@ -1,5 +1,5 @@
 /**
- * Runtime MCP `semantic_search` round-trip — official SDK client against a
+ * Runtime MCP `search` round-trip — official SDK client against a
  * real listening server with the Ollama provider active. Also pins the
  * documented interface difference: the tool exposes NO min_score.
  * SKIPPED when Ollama or the model is unavailable.
@@ -11,6 +11,7 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createApp } from "../../../src/app.js";
+import { settings } from "../../../src/config.js";
 import { closeStores, initStores } from "../../../src/core/ports.js";
 import { wipeDatabase } from "../reset.js";
 import { invalidateLoadedSchemaCache } from "../../../src/runtime/schemaCache.js";
@@ -29,7 +30,7 @@ let app: FastifyInstance;
 let baseUrl: string;
 let client: Client;
 
-describe.skipIf(!ollamaUp)("MCP semantic_search (Ollama)", () => {
+describe.skipIf(!ollamaUp)("MCP search (Ollama)", () => {
   beforeAll(async () => {
     await initStores();
     await wipeDatabase();
@@ -54,18 +55,21 @@ describe.skipIf(!ollamaUp)("MCP semantic_search (Ollama)", () => {
     const et = await post("/api/ontologies/test_ont/model/entity-types", { key: "person", displayName: "Person" });
     for (const prop of [
       { key: "name", displayName: "Name", dataType: "string", required: true },
-      { key: "bio", displayName: "Bio", dataType: "string", required: false },
+      { key: "bio", displayName: "Bio", dataType: "document", required: false },
+      { key: "role", displayName: "Role", dataType: "string", required: false },
       { key: "age", displayName: "Age", dataType: "integer", required: false },
     ]) {
       await post(`/api/ontologies/test_ont/model/entity-types/${et.entityTypeId as string}/properties`, prop);
     }
     await post("/api/ontologies/test_ont/runtime/lenses/mcp_search/entities/person", {
       name: "Alice Chen",
+      role: "Distributed systems engineer",
       bio: "Expert in distributed systems and microservices",
       age: 34,
     });
     await post("/api/ontologies/test_ont/runtime/lenses/mcp_search/entities/person", {
       name: "Bob Smith",
+      role: "Marketing manager",
       bio: "Leads brand strategy and market research",
       age: 51,
     });
@@ -93,20 +97,29 @@ describe.skipIf(!ollamaUp)("MCP semantic_search (Ollama)", () => {
   }
 
   it("round-trips a type-scoped search", async () => {
-    const result = await call("semantic_search", {
+    const result = await call("search", {
       query: "distributed systems engineer",
       entity_type_key: "person",
     });
     expect(result.isError).toBeFalsy();
     const data = json(result);
-    expect(data.total as number).toBeGreaterThan(0);
-    const results = data.results as Row[];
+    expect((data.hits as Row[]).length).toBeGreaterThan(0);
+    const results = data.hits as Row[];
     expect((results[0]!.entity as Row).name).toBe("Alice Chen");
-    expect((results[0]!.matchedVia as Row).similarity).toBeTypeOf("number");
+    expect(results[0]!.relativeScore).toBe(1);
+    const properties = (results[0]!.matches as Row[]).find((match) => match.kind === "properties");
+    expect(properties).toEqual({
+      kind: "properties",
+      evidence: {
+        semanticSimilarity: expect.any(Number),
+        keywordMatch: settings.DB_BACKEND === "postgres" ? true : null,
+        keywordPropertyKeys: settings.DB_BACKEND === "postgres" ? ["role"] : null,
+      },
+    });
   });
 
   it("supports filters and field projection", async () => {
-    const result = await call("semantic_search", {
+    const result = await call("search", {
       query: "engineer",
       entity_type_key: "person",
       filters: { age__lt: "40" },
@@ -114,7 +127,7 @@ describe.skipIf(!ollamaUp)("MCP semantic_search (Ollama)", () => {
     });
     expect(result.isError).toBeFalsy();
     const data = json(result);
-    const results = data.results as Row[];
+    const results = data.hits as Row[];
     expect(results.length).toBeGreaterThan(0);
     for (const hit of results) {
       const entity = hit.entity as Row;
@@ -126,7 +139,7 @@ describe.skipIf(!ollamaUp)("MCP semantic_search (Ollama)", () => {
 
   it("exposes no min_score input (documented interface difference)", async () => {
     const tools = await client.listTools();
-    const tool = tools.tools.find((t) => t.name === "semantic_search");
+    const tool = tools.tools.find((t) => t.name === "search");
     expect(tool).toBeDefined();
     const properties = (tool!.inputSchema as { properties: Row }).properties;
     expect(Object.keys(properties).sort()).toEqual([
@@ -135,19 +148,46 @@ describe.skipIf(!ollamaUp)("MCP semantic_search (Ollama)", () => {
       "filters",
       "limit",
       "query",
-      "search_in",
-      "snippets",
     ]);
     expect(properties).not.toHaveProperty("min_score");
+    for (const searchTool of tools.tools.filter((item) => ["search", "search_documents"].includes(item.name))) {
+      expect(searchTool.description).toContain("semanticSimilarity");
+      expect(searchTool.description).toContain("keywordPropertyKeys");
+      expect(searchTool.description!.length).toBeLessThanOrEqual(2000);
+      expect(searchTool.outputSchema).toBeUndefined();
+    }
+  });
+
+  it("search_documents returns the same envelope with passage matches and projection", async () => {
+    const response = await call("search_documents", { query: "distributed systems", property: "bio", fields: ["name"], filters: { age__lt: "40" } });
+    expect(response.isError).toBeFalsy();
+    const body = json(response);
+    expect(body.in).toEqual(["document"]);
+    expect(body.filter).toEqual({ age__lt: "40" });
+    const hit = (body.hits as Row[])[0]!;
+    expect((hit.matches as Row[])[0]).toEqual({
+      kind: "document",
+      propertyKey: "bio",
+      charOffset: expect.any(Number),
+      charLength: expect.any(Number),
+      evidence: {
+        semanticSimilarity: expect.any(Number),
+        keywordMatch: settings.DB_BACKEND === "postgres" ? true : null,
+      },
+    });
+    expect(hit.entity).not.toHaveProperty("bio");
+    const list = await client.listTools();
+    expect(list.tools.map((t) => t.name)).not.toContain("semantic_search");
+    expect(list.tools.find((t) => t.name === "search_documents")?.inputSchema.properties).not.toHaveProperty("strategy");
   });
 
   it("reports a search failure as a tool error", async () => {
-    const result = await call("semantic_search", {
+    const result = await call("search", {
       query: "anything",
       entity_type_key: "person",
       filters: { name__contains: "Ali" },
     });
     expect(result.isError).toBe(true);
-    expect(result.content[0]!.text).toContain("__contains");
+    expect(result.content[0]!.text).toContain("Not supported on search");
   });
 });

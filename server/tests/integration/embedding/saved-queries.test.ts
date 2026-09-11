@@ -177,7 +177,7 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
         steps: [
           {
             name: "skills",
-            type: "semantic_search",
+            type: "search",
             entityTypeKey: "skill",
             query: "$topic",
             limit: 1,
@@ -247,6 +247,14 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
       ),
     );
     try {
+      await inject("PUT", "/api/ontologies/test_ont/model/lenses/sq_test/saved-queries/only-search", {
+        name: "Only search", description: "Search skills", parameters: [],
+        steps: [{ name: "skills", type: "search", entityTypeKey: "skill", query: "Python", limit: 2 }],
+      });
+      const run = await client.callTool({ name: "run_saved_query", arguments: { query_key: "only-search" } }) as { content: { text: string }[]; isError?: boolean };
+      expect(run.isError).toBeUndefined();
+      const direct = await inject("GET", "/api/ontologies/test_ont/runtime/lenses/sq_test/search?q=Python&type=skill&limit=2");
+      expect(JSON.parse(run.content[0]!.text)).toEqual(direct.body);
       const result = (await client.callTool({
         name: "search_saved_queries",
         arguments: { query: "who is an expert in a programming topic" },

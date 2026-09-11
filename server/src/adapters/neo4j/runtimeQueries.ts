@@ -20,7 +20,7 @@ function stripEmbedding(data: Row): Row {
   return data;
 }
 
-function toEntityRow(raw: unknown): Row {
+export function toEntityRow(raw: unknown): Row {
   return stripEmbedding(convertNeo4jProperties(raw as Row));
 }
 
@@ -580,42 +580,6 @@ export async function createDocumentChunks(
  * adapter's documented deviation from the port rule that the limit counts
  * filtered hits.
  */
-export async function searchDocumentChunks(
-  session: Session,
-  virtualLabel: string,
-  indexName: string,
-  queryEmbedding: number[],
-  limit: number,
-  whereClauses: string[] | null = null,
-  filterParams: Row | null = null,
-): Promise<Row[]> {
-  const params: Row = {
-    query_embedding: queryEmbedding,
-    limit: neo4j.int(limit),
-  };
-
-  let parentMatch = "";
-  if (whereClauses !== null && whereClauses.length > 0) {
-    parentMatch = `MATCH (n:_Entity)-[:_HAS_CHUNK]->(c) WHERE ${whereClauses.join(" AND ")} `;
-    Object.assign(params, filterParams ?? {});
-  }
-
-  const query =
-    `MATCH (c:${virtualLabel}) ` +
-    "SEARCH c IN (" +
-    `VECTOR INDEX ${indexName} ` +
-    "FOR $query_embedding " +
-    "LIMIT $limit" +
-    ") SCORE AS score " +
-    parentMatch +
-    "RETURN c {.*} AS chunk, score";
-  const result = await session.run(query, params);
-  return result.records.map((record) => ({
-    chunk: stripEmbedding(convertNeo4jProperties({ ...(record.get("chunk") as Row) })),
-    score: record.get("score") as number,
-  }));
-}
-
 /** Fetch entities by `_id`. Returns a map of `_id` -> entity row. */
 export async function getEntitiesByIds(
   session: Session,
@@ -637,54 +601,6 @@ export async function getEntitiesByIds(
 }
 
 /** Semantic search via the Cypher 25 SEARCH clause with in-index filtering. */
-export async function semanticSearch(
-  session: Session,
-  pascalLabel: string,
-  entityTypeKey: string,
-  queryEmbedding: number[],
-  limit: number,
-  minScore: number | null,
-  whereClauses: string[] | null = null,
-  filterParams: Row | null = null,
-  indexName: string | null = null,
-): Promise<Row[]> {
-  const index = indexName ?? `${entityTypeKey}_embedding`;
-
-  const params: Row = {
-    query_embedding: queryEmbedding,
-    limit: neo4j.int(limit),
-  };
-
-  let inIndexWhere = "";
-  if (whereClauses !== null && whereClauses.length > 0) {
-    inIndexWhere = "WHERE " + whereClauses.join(" AND ");
-    Object.assign(params, filterParams ?? {});
-  }
-
-  const query =
-    `MATCH (n:${pascalLabel}) ` +
-    "SEARCH n IN (" +
-    `VECTOR INDEX ${index} ` +
-    "FOR $query_embedding " +
-    `${inIndexWhere} ` +
-    "LIMIT $limit" +
-    ") SCORE AS score " +
-    "RETURN n {.*} AS entity, score";
-
-  const result = await session.run(query, params);
-
-  const items: Row[] = [];
-  for (const record of result.records) {
-    const entity = toEntityRow(record.get("entity"));
-    const score = record.get("score") as number;
-    if (minScore !== null && score < minScore) {
-      continue;
-    }
-    items.push({ entity, score });
-  }
-  return items;
-}
-
 /**
  * Semantic search over SavedQuery descriptions via the shared
  * `saved_query_embedding` vector index, scoped to one lens through

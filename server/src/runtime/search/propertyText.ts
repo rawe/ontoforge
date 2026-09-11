@@ -10,8 +10,9 @@
  * - deterministic.
  */
 
-import type { PropertyDef } from "../core/schemas.js";
-import { cpLength, cpSlice } from "./codePoints.js";
+import type { KeywordPropertySegment } from "../../core/ports.js";
+import type { PropertyDef } from "../../core/schemas.js";
+import { cpLength, cpSlice } from "../codePoints.js";
 
 // nomic-embed-text has an 8192-token limit; ~4 chars/token → 30000 chars
 // as a safe threshold.
@@ -50,4 +51,29 @@ export function buildTextRepr(
   }
 
   return text;
+}
+
+/** Values only, in full-schema order. Retain precisely the truncated indexed values;
+ * a newline separates fields without adding key/type lexemes. Semantic text is unchanged. */
+export function buildKeywordSegments(
+  properties: Record<string, unknown>,
+  propertyDefs: Record<string, PropertyDef>,
+): KeywordPropertySegment[] {
+  const segments: KeywordPropertySegment[] = [];
+  let remaining = MAX_TEXT_CHARS;
+  for (const [propertyKey, definition] of Object.entries(propertyDefs)) {
+    const value = properties[propertyKey];
+    if (definition.dataType !== "string" || typeof value !== "string" || value === "") continue;
+    const separator = segments.length === 0 ? 0 : 1;
+    if (remaining <= separator) break;
+    const text = cpSlice(value, 0, remaining - separator);
+    segments.push({ propertyKey, text });
+    remaining -= cpLength(text) + separator;
+    if (remaining === 0) break;
+  }
+  return segments;
+}
+
+export function keywordText(segments: KeywordPropertySegment[]): string {
+  return segments.map((segment) => segment.text).join("\n");
 }

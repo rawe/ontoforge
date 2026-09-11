@@ -45,7 +45,7 @@ key, the optional display name and timestamps. Six operations:
 
 | Operation | Obligation |
 |---|---|
-| Create | Given an internal id, a key, an optional display name and an optional embedding width, create the registry entry **and provision the ontology's physical home atomically** — a failed create leaves no entry and no home. When a width is given, the home carries the fixed semantic indexes at that width; when none is (no embedding provider), it carries none. |
+| Create | Given an internal id, a key, an optional display name, an immutable text-search language and an optional embedding width, create the registry entry **and provision the ontology's physical home atomically** — a failed create leaves no entry and no home. When a width is given, the home carries the fixed semantic indexes at that width; when none is given, it carries no vector indexes. Keyword index families are provisioned at creation in the ontology language. |
 | List | Every ontology, as registry rows. |
 | Read by key | One row, or an absent result. |
 | Read by display name | One row, or an absent result — display names are unique server-wide, and the pre-write conflict check needs the lookup. |
@@ -113,11 +113,11 @@ type keys and one for relation type keys. They are returned as schema-level keys
 as physical names, so the modeling service can reject a colliding key without knowing what
 it would collide with. An adapter with no collisions returns two empty sets.
 
-**An adapter declares whether its semantic search evaluates path conditions.** One plain
+**An adapter declares whether its search evaluates path conditions.** One plain
 flag on the runtime store, in the same spirit as the reserved keys: the constraint is the
 adapter's, the enforcement point is shared. The runtime service reads it before any search
-runs. On an adapter declaring support, a query path on semantic search resolves exactly
-as on the entity list and crosses the port as a path condition with both rankings; on one
+runs. On an adapter declaring support, a query path on search resolves exactly
+as on the entity list and crosses the port as a path condition with every ranking; on one
 declaring none, it is rejected above the port as a validation error naming the entity
 list as the alternative, and no search ever receives a path condition.
 
@@ -198,10 +198,11 @@ does not interpret them. A saved query also accepts an embedding of its descript
 the key of its owning lens alongside it, so that a search over descriptions can be
 narrowed to one lens without a join.
 
-**Embedding maintenance.** Backing the rebuild operation: list every entity type with its
-property keys; set the embedding vector on one entity by id; list every saved query with
-enough identity to re-embed it; set the embedding on one saved query. Plus the vector
-index operations under obligations, below.
+**Search-data maintenance.** Backing the rebuild operation: list every entity type with its
+property keys; set one entity's composed search text, its keyword segments and its optional
+vector by id; list every saved query with enough identity to re-embed it; set the embedding
+on one saved query. Plus the vector index operations under obligations, below. The setter
+takes a vector that may be absent, because the rebuild runs without an embedding provider.
 
 **Reserved-key reporting.** Alongside the two declared sets, one operation scans stored
 types and returns those whose key is now reserved, as kind-and-key pairs. Startup reports
@@ -263,34 +264,56 @@ incoming edges receive only what remains, so the two are not independently limit
 that costs a caller is in
 [capabilities/instance-data.md](capabilities/instance-data.md#traversal).
 
-**Document chunk management.** Chunks are internal and never addressed directly. Four
-operations: return the existing chunk text to vector mapping for one entity's document
-property, so that re-chunking can reuse the vectors of unchanged text; delete all chunks
-of one entity's document property; create a batch of chunks for one entity's document
-property; and search one document property's chunks by vector. A chunk carries its own
-id, its owning entity id, the entity type key, the property key, its ordinal, its start
-offset and character length, its text, and optionally its vector. The adapter stores that
-payload as given and returns it unchanged except for stripping the vector.
+**Document chunk management.** Chunks are always stored, independently of embedding
+availability. They carry id, entity id, type key, property key, ordinal, character offset
+and length, text and an optional vector. Maintenance reads reusable vectors, deletes a
+property's chunks and writes its replacement batch; ordinary results omit vectors.
 
-**Search.** Three kinds, all by vector, all returning a similarity score with each hit and
-honouring a result limit. Entity search and saved-query search also honour an optional
-minimum score; document-chunk search takes none at the port — its floor is applied above
-the port.
+**Search.** Four rankings take the complete searched set in one call and return rows in
+exact score order. Hybrid fusion belongs above the port.
 
-| Kind | Input | Returns |
+| Ranking | Input | Returns |
 |---|---|---|
-| Entities | A query vector, and either one entity type key with its scoped property definitions and optional filter conditions, or nothing — meaning all of the ontology's types at once | Entities with scores |
-| Document chunks | A query vector, an entity type key, a document property key and optional filter conditions | Chunks with scores |
-| Saved queries | A query vector and a lens key | Saved-query summaries with scores |
+| Property semantic | searched types, query vector, limit | entities and scores |
+| Property keyword | searched types, query text, limit | entities, scores, and nullable contributing keyword property keys |
+| Document semantic | searched document properties, query vector, limit | passages and scores |
+| Document keyword | searched document properties, query text, limit | passages and scores |
 
-The per-type entity search and the document-chunk search accept the same parsed filter
-conditions that listing does and must apply them as part of the search, not after it, so
-that the limit counts filtered hits — a chunk's conditions are evaluated on its parent
-entity, so a page holds chunks whose parent passes. A path condition reaches either search
-only where the adapter declares support (above). Cross-type entity search takes no filter; narrowing to a lens happens above the port —
-but never crosses the binding: through a bound store, "all types" means all of that
-ontology's types, and another ontology's better-matching entity must never appear.
-Saved-query search is always narrowed to a single lens.
+A searched type carries its key, property definitions and parsed filter conditions. A
+searched document property carries its type key, property key and parsed conditions on
+its parent. Filters apply within ranking, so the limit counts filtered units. The
+service computes lens scope and filter narrowing once. Cross-type vector search scans
+the per-type indexes in one statement and merges globally; no shared index exists.
+
+The runtime store declares keyword-ranking support for both kinds together, and declares
+path-condition support for all search strategies. The bound store carries the ontology's
+language; queries do not take a language. Semantic scores are pinned to `(1 + cosine) / 2`,
+higher is better; arbitrary native scores must not be labeled semantic similarity. A
+keyword source row establishes a positive match, while non-membership in a limited
+ranking establishes no negative evidence.
+
+Entity creation carries labeled semantic text alongside the optional vector and separate
+ordered keyword segments, each with a property key and its exact indexed value text.
+Only segment values enter the keyword index. String changes recompose both from merged
+values; the rebuild setter accepts both representations. An omitted segment update must
+not erase existing keyword data. A creation without segments has no keyword content or
+known attribution. These are technical values, absent from entity properties, schemas,
+lenses and transfer payloads.
+
+Property keyword attribution names segments containing contributing normalized query
+terms; independently matching the whole query against each segment is insufficient for
+cross-field matches. Use the same language and tokenizer as aggregate retrieval, returning
+null when faithful coverage is unavailable. Character-span attribution is not required.
+The service suppresses keys that are no longer exposed string properties. An adapter
+without keyword support does not fabricate a negative result or property attribution.
+
+PostgreSQL stores keyword text and retained segments separately from semantic text. Its
+generated keyword vector uses values-only text; attribution tokenizes the already limited
+keyword ranking in the same statement. Ontology provisioning installs the representation
+directly, at creation and only there.
+
+Saved-query discovery remains a separate vector ranking over descriptions, scoped to one
+lens, with its own absolute score, limit and optional minimum score.
 
 Literal text matching is not a separate operation — it is the search string on the listing
 operations, matched case-insensitively as a substring against the named string properties,
@@ -439,8 +462,7 @@ multi-ontology conformance tier runs on PostgreSQL only.
 
 - **Decoding through a shared type key.** An entity type and a relation type may share a
   key; if both declare the same property key at different data types, the traversal read
-  and the batch read behind cross-type document search can decode the value through the
-  wrong definition, silently. A known limitation, accepted.
+  can decode the value through the wrong definition, silently. A known limitation, accepted.
 - **Substring matching against non-string values.** The substring filter compares text
   forms. PostgreSQL renders them as the documented behaviour states — numbers as
   printed, booleans as `true`/`false`, datetimes as their ISO-8601 string — while
@@ -449,8 +471,13 @@ multi-ontology conformance tier runs on PostgreSQL only.
 - **String sort order.** PostgreSQL sorts strings by the database's default collation,
   dictionary-style, as the documented behaviour states; Neo4j sorts by Unicode code
   points, capitals before lowercase.
-- **Path conditions on semantic search.** PostgreSQL declares support and evaluates them
-  in both rankings; Neo4j declares none, so a query path on semantic search is rejected
+- **Keyword ranking on Neo4j.** The adapter declares no keyword support, so it offers
+  only semantic search with a provider and no ranked search without one. It accepts
+  composed property text and the language without indexing them and stores chunks without
+  vectors. The 32766-byte indexed-value ceiling does not apply to the composed text,
+  which is not indexed; individual vector filter metadata values retain their ceiling.
+- **Path conditions on search.** PostgreSQL declares support and evaluates them
+  in both rankings; Neo4j declares none, so a query path on search is rejected
   above the port with a validation error naming the entity list — where paths work on
   both adapters.
 - **Filtered passage pages.** PostgreSQL applies filter conditions inside the passage
@@ -605,12 +632,19 @@ column cast to the provider's width, all cosine, all per namespace:
 |---|---|---|
 | One per entity type | partial index on `entity`, predicated on the type key | that type's rows |
 | One per document property | partial index on `document_chunk`, predicated on the entity type key and property key | that property's passages |
-| One across all entity types | full-table on `entity`, fixed name | cross-type entity search within the ontology |
 | One for saved queries | full-table on `saved_query`, fixed name | description search within the ontology |
 
-The two fixed-name indexes exist once per namespace — cross-type search and saved-query
-search are ontology-scoped by construction, because a bound store's search can only see
-its own namespace's index.
+The saved-query vector index is fixed per namespace. Cross-type entity ranking unions
+per-type scans in one statement, with a limit per scan and a global score order and limit.
+
+Two GIN indexes are fixed at ontology creation: one on a stored generated tsvector of
+composed property text, one on a stored generated tsvector of chunk text. Their
+`to_tsvector` configuration is the ontology's English or German language. Queries are assembled
+from the lexemes `to_tsvector` produced for the search text, quoted and OR-ed with a
+prefix marker on each, and rank the stored vectors with `ts_rank_cd`; no engine query
+syntax is accepted from callers, and search text never reaches tsquery syntax. The filters restrict candidates before ordering and limiting.
+There are no keyword lifecycle hooks or per-type keyword DDL. A common term may rank many
+candidates before the limit, the inherent cost of full-text ranking.
 
 An index's width is read back from its own indexed column type in the catalog — the
 `vector(D)` of the cast expression — and that is what width reconciliation compares,
@@ -628,9 +662,9 @@ so a result limit counts rows that passed the filters, delivered in exact distan
 order. The passage search evaluates its filter conditions on the parent entity inside the
 statement — a semi-join from the chunk row to its `entity` row, carrying the same
 predicate fragments the entity ranking carries, path conditions included — so the
-iterative scan refills a filtered page with passages whose parent passes. A minimum score
-is applied after the limit, so a page may shrink — including when the iterative scan
-gives up at its tuple cap.
+iterative scan refills a filtered page with passages whose parent passes. A page may
+still shrink if the iterative scan reaches its tuple cap. Only saved-query discovery
+applies a minimum score after the limit.
 
 ## Engine constraints worth knowing
 

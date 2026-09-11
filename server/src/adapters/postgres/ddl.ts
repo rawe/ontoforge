@@ -24,8 +24,9 @@
  * lifecycle is the second half of this module.
  */
 
+import type { TextSearchLanguage } from "../../registry/schemas.js";
+
 import {
-  ALL_ENTITY_TYPES_SCOPE,
   documentPropertyScope,
   entityTypeScope,
   reportWidthMismatch,
@@ -49,6 +50,7 @@ const SERVER_DDL_STATEMENTS: string[] = [
   ontology_id  uuid        CONSTRAINT ontology_pk PRIMARY KEY,   -- caller-supplied, no default
   key          text        NOT NULL CONSTRAINT ontology_key_unique UNIQUE,
   display_name text        CONSTRAINT ontology_display_name_unique UNIQUE,  -- nullable: absent names never collide
+  text_search_language text NOT NULL CHECK (text_search_language IN ('english', 'german')),
   namespace    text        NOT NULL,   -- the ontology's physical home, ont_<key>
   created_at   timestamptz NOT NULL DEFAULT now(),
   updated_at   timestamptz NOT NULL DEFAULT now()
@@ -61,7 +63,10 @@ const SERVER_DDL_STATEMENTS: string[] = [
  * `ont_<key>` namespace via the transaction's search path
  * (`registry.ts`).
  */
-export const ONTOLOGY_DDL_STATEMENTS: string[] = [
+export function ontologyDdlStatements(language: TextSearchLanguage): string[] {
+  // Closed mapping; language is fixed in both generated columns at provisioning.
+  const config = language === "german" ? "german" : "english";
+  return [
   // --- Schema side -------------------------------------------------------
 
   `CREATE TABLE IF NOT EXISTS lens (
@@ -163,10 +168,15 @@ export const ONTOLOGY_DDL_STATEMENTS: string[] = [
   id         uuid        CONSTRAINT entity_pk PRIMARY KEY,   -- caller-supplied (service randomUUID), no default
   type_key   text        NOT NULL,                           -- NO FK: deleting a type orphans its instances by design
   props      jsonb       NOT NULL DEFAULT '{}'::jsonb,       -- user properties; system props are columns, not keys here
+  property_text text NOT NULL DEFAULT '',
+  keyword_text text NOT NULL DEFAULT '',
+  keyword_segments jsonb,
+  search_vector tsvector GENERATED ALWAYS AS (to_tsvector('${config}'::regconfig, keyword_text)) STORED,
   embedding  vector,                                         -- dimensionless; NULL until written; width policed by the HNSW index
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 )`,
+  `CREATE INDEX entity_keyword_idx ON entity USING gin (search_vector)`,
   `CREATE INDEX IF NOT EXISTS entity_type_key_idx ON entity (type_key)`,
 
   `CREATE TABLE IF NOT EXISTS relation (
@@ -192,11 +202,14 @@ export const ONTOLOGY_DDL_STATEMENTS: string[] = [
   start_char      integer NOT NULL,   -- code-point offset
   char_length     integer NOT NULL,   -- code-point length
   text            text    NOT NULL,
+  search_vector tsvector GENERATED ALWAYS AS (to_tsvector('${config}'::regconfig, text)) STORED,
   embedding       vector              -- dimensionless; optional per chunk
   -- no timestamps (chunks carry none)
 )`,
+  `CREATE INDEX document_keyword_idx ON document_chunk USING gin (search_vector)`,
   `CREATE INDEX IF NOT EXISTS document_chunk_entity_property_idx ON document_chunk (entity_id, property_key)`,
 ];
+}
 
 /** Create the server-wide objects if absent, in one transaction. Boot
  * DDL creates nothing ontology-scoped — ontologies are provisioned by
@@ -237,9 +250,6 @@ export async function initSchema(): Promise<void> {
  * Writers to the one table wait during a build; builds happen only on
  * schema changes and provider setup.
  */
-
-/** Cross-type entity search — full-table, fixed name. */
-export const ENTITY_ALL_INDEX = "entity_embedding_all_idx";
 
 /** Saved-query descriptions — full-table, fixed name. */
 export const SAVED_QUERY_INDEX = "saved_query_embedding_idx";
@@ -323,16 +333,6 @@ function chunkIndexSpec(
   };
 }
 
-/** Cross-type entity search: no schema row, no predicate — and no port
- * method of its own, since the schema lifecycle never names it and
- * nothing above the port has anything to say about it. */
-const CROSS_TYPE_SPEC: IndexSpec = {
-  name: ENTITY_ALL_INDEX,
-  describes: ALL_ENTITY_TYPES_SCOPE,
-  table: "entity",
-  predicate: null,
-};
-
 /** Saved-query descriptions. Lens scoping is a plain query-time
  * predicate, so the index needs no scoping of its own. */
 const SAVED_QUERY_SPEC: IndexSpec = {
@@ -356,7 +356,7 @@ function createHnsw(spec: IndexSpec, dimensions: number): string {
  * namespace's search path (`registry.ts`).
  */
 export function fixedVectorIndexStatements(dimensions: number): string[] {
-  return [createHnsw(CROSS_TYPE_SPEC, dimensions), createHnsw(SAVED_QUERY_SPEC, dimensions)];
+  return [createHnsw(SAVED_QUERY_SPEC, dimensions)];
 }
 
 /** Drop one index. Callers pass a plain name — derived from a schema row
@@ -684,7 +684,7 @@ export async function ensureSavedQueryVectorIndex(
 /**
  * Every semantic index the schema calls for, handed to a visitor one at
  * a time: the per-type indexes, the chunk index of every document
- * property, the cross-type index, and the saved-query index.
+ * property, and the saved-query index.
  *
  * A rebuild walks this twice — once to drop what has drifted, once to
  * build what is missing — and the two passes have to agree on the
@@ -717,7 +717,6 @@ async function forEachIndexSpec(
     );
   }
 
-  await visit(CROSS_TYPE_SPEC);
   await visit(SAVED_QUERY_SPEC);
 }
 

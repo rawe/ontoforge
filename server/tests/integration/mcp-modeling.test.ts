@@ -258,7 +258,7 @@ describe("schema lifecycle over MCP (keys, never ids)", () => {
 
     // get_schema reflects it all in the transfer shape.
     const schema = json(await call(client, "get_schema"));
-    expect(schema.formatVersion).toBe("4.0");
+    expect(schema.formatVersion).toBe("5.0");
     expect(schema.lenses).toEqual([]);
     const entityTypes = schema.entityTypes as Record<string, unknown>[];
     expect(entityTypes.map((et) => et.key)).toEqual(["company", "person"]);

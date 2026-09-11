@@ -56,7 +56,7 @@ describe("ensureSemanticIndexes", () => {
       infoSpy.mockRestore();
     }
 
-    expect(queries.some((q) => q.includes("CREATE VECTOR INDEX entity_embedding"))).toBe(
+    expect(queries.some((q) => q.includes("CREATE VECTOR INDEX saved_query_embedding"))).toBe(
       true,
     );
     expect(

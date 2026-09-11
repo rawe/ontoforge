@@ -102,7 +102,7 @@ describe("export", () => {
     const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.formatVersion).toBe("4.0");
+    expect(body.formatVersion).toBe("5.0");
     expect(body.entityTypes).toHaveLength(2);
     expect(body.relationTypes).toHaveLength(1);
     expect(body.lenses).toHaveLength(1);
@@ -133,7 +133,8 @@ describe("export", () => {
     const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({
-      formatVersion: "4.0",
+      formatVersion: "5.0",
+      textSearchLanguage: "english",
       entityTypes: [],
       relationTypes: [],
       lenses: [],
@@ -225,7 +226,6 @@ describe("export", () => {
             entityTypeKey: null,
             query: null,
             limit: 5,
-            minScore: null,
             bindings: null,
           },
         ],
@@ -286,7 +286,7 @@ function importPayload(overrides: Record<string, unknown> = {}): Record<string, 
 }
 
 async function postImport(payload: Record<string, unknown>) {
-  return app.inject({ method: "POST", url: "/api/ontologies/onto/model/import", payload });
+  return app.inject({ method: "POST", url: "/api/ontologies/onto/model/import", payload: { textSearchLanguage: "english", ...payload } });
 }
 
 describe("import", () => {
@@ -568,7 +568,9 @@ describe("import validations", () => {
       ],
     });
     expect(res.statusCode).toBe(422);
-    expect(res.json().error.message).toContain("unknown type 'sql'");
+    expect(res.json().error.code).toBe("VALIDATION_ERROR");
+    expect(res.json().error.details.errors).toEqual([expect.objectContaining({ path: "/lenses/0/savedQueries/0/steps/0/type" })]);
+    expect(holder.store.upsertSavedQuery).not.toHaveBeenCalled();
   });
 
   it("validates pipelines structurally like definition time — but never against a lens", async () => {

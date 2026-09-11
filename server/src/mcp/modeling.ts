@@ -415,9 +415,8 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
         "type_kind must be 'entity_type' or 'relation_type'. " +
         "data_type must be one of: string, integer, float, boolean, date, " +
         "datetime, document. The 'document' type holds large text interpreted " +
-        "as Markdown; it is chunked for passage-level semantic search when " +
-        "embeddings are enabled and is returned as a stub (never inline) by " +
-        "runtime reads. Document properties are only allowed on entity types " +
+        "as Markdown; it is always chunked for passage-level search with optional " +
+        "embeddings and is returned as a stub by default in runtime reads. Document properties are only allowed on entity types " +
         "— on relation types they are rejected. " +
         "Use cascade=True to auto-add required properties to scoped lens property lists.",
       inputSchema: {
@@ -896,13 +895,13 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
         "Step types: " +
         "'oql' — needs 'oql' field with a read-only OQL query (OQL-style " +
         "pattern syntax over entity/relation type keys) using $param placeholders. " +
-        "'semantic_search' — needs 'entityTypeKey' and 'query' (use $param_name to reference a declared parameter). " +
-        "Optional: 'limit' (default 10), 'minScore'. " +
+        "'search' — needs 'entityTypeKey' and 'query' (use $param_name to reference a declared parameter). " +
+        "Optional: 'limit' (default 10). " +
         "Data flow: steps can have 'bindings' dict mapping param names to '{{prevStepName.fieldName}}' " +
         "which collects that field from all rows of a previous step's output into a list. " +
         "Parameters define top-level $param placeholders. " +
         "Each parameter needs: name, description, dataType (string/integer/float/boolean/date/datetime). " +
-        "Example: steps=[{name:'skills', type:'semantic_search', entityTypeKey:'skill', query:'$q', limit:5}, " +
+        "Example: steps=[{name:'skills', type:'search', entityTypeKey:'skill', query:'$q', limit:5}, " +
         "{name:'results', type:'oql', oql:'MATCH (p:person)-[:has_skill]->(s:skill) " +
         "WHERE s._id IN $ids RETURN p', bindings:{ids:'{{skills._id}}'}}], parameters=[{name:'q', ...}]",
       inputSchema: {

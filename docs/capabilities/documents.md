@@ -19,8 +19,8 @@ answers each:
 - **It cannot be edited in parts.** Changing one sentence would mean sending the whole text
   back. Two partial-write operations edit in place.
 
-With an embedding provider configured, document values are additionally split into chunks
-that carry their own vectors, so [search](search.md) can match a passage and resolve it
+Document values are always split into chunks carrying text and, with an embedding
+provider, their own vectors, so [search](search.md) can match a passage and resolve it
 back to the owning entity. Without a provider, a document property is simply long text: it
 stores, reads, slices and edits exactly the same, with no chunks and no vectors.
 
@@ -113,7 +113,7 @@ Both persist the whole new value and then re-synchronize the property's chunks.
 
 ### Chunking
 
-Chunks are produced only when an embedding provider is configured, synchronously with the
+Chunks are produced synchronously with the
 write that changed the value.
 
 The text is walked from the start. For each chunk a target end is set at the configured
@@ -175,16 +175,17 @@ Chunks are removed with the thing they belong to:
 | The property definition is deleted | Every chunk of that entity type and property is dropped, with its vector index |
 | The entity type is deleted | The same, for each of its document properties |
 
-The embedding rebuild operation regenerates chunks along with entity embeddings, which is
+The search-data rebuild regenerates chunks along with each entity's stored text, which is
 how documents written while no provider was configured — or imported without their derived
-data — acquire vectors. See [search.md](search.md).
+data — acquire vectors. It also re-chunks with no provider configured, because the passages
+are themselves the document keyword index. See [search.md](search.md).
 
 ### Searching document content
 
 Literal text search on an entity list does **not** cover documents, so a term appearing in a
 document but nowhere else returns nothing from it. Two things do reach the content: a
-property filter naming the document property with the substring operator, and semantic
-search, which matches passage by passage. Both are in [search.md](search.md).
+property filter naming the document property with the substring operator, and ranked
+document search, which matches passage by passage. Both are in [search.md](search.md).
 
 ## Through the interfaces
 
@@ -201,7 +202,7 @@ tools, so a model chooses by tool rather than by argument. Both reach the same s
 obey the identical rules.
 
 An agent reads documents too, and only reads them: `get_document` is grantable to one,
-alongside a passage search that MCP spells as an argument on semantic search. The rules
+alongside the same document-search tool that MCP exposes. The rules
 are in [ai-agents.md](ai-agents.md). Declaring the property at all is
 [schema modeling](schema-modeling.md), over its own routes and tools.
 

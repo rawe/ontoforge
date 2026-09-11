@@ -3,7 +3,7 @@
  * allowlists. The grantable set is exactly twelve names — the document reads
  * included, `get_relation` still deliberately not grantable
  * (`docs/interfaces.md#runtime-tools`). `search_documents` is agent-only: it
- * is the MCP `semantic_search` restricted to document passages, split off as
+ * is the MCP `search` restricted to document passages, split off as
  * its own tool so a small model chooses it by name rather than by argument.
  */
 
@@ -14,7 +14,7 @@ export const TOOL_GET_ENTITY = "get_entity";
 export const TOOL_GET_DOCUMENT = "get_document";
 export const TOOL_LIST_RELATIONS = "list_relations";
 export const TOOL_GET_NEIGHBORS = "get_neighbors";
-export const TOOL_SEMANTIC_SEARCH = "semantic_search";
+export const TOOL_SEARCH = "search";
 export const TOOL_SEARCH_DOCUMENTS = "search_documents";
 export const TOOL_EXECUTE_QUERY = "execute_query";
 export const TOOL_LIST_SAVED_QUERIES = "list_saved_queries";
@@ -29,7 +29,7 @@ export const VALID_AGENT_TOOLS: ReadonlySet<string> = new Set([
   TOOL_GET_DOCUMENT,
   TOOL_LIST_RELATIONS,
   TOOL_GET_NEIGHBORS,
-  TOOL_SEMANTIC_SEARCH,
+  TOOL_SEARCH,
   TOOL_SEARCH_DOCUMENTS,
   TOOL_EXECUTE_QUERY,
   TOOL_LIST_SAVED_QUERIES,

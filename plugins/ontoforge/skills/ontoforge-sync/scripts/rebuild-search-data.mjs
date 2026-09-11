@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Rebuild one ontology's embedding vectors for semantic search.
+// Rebuild one ontology's search data: keyword text, document passages and,
+// where an embedding provider is configured, vectors and vector indexes.
 
 import { die, getBaseUrl, getOntologyKey, modelPath, parseCliArgs } from './lib.mjs';
 
@@ -10,7 +11,7 @@ const { flags } = parseCliArgs({
 
 const baseUrl = getBaseUrl(flags);
 const ontologyKey = getOntologyKey(flags);
-const path = `${modelPath(ontologyKey)}/rebuild-embeddings`;
+const path = `${modelPath(ontologyKey)}/rebuild-search-data`;
 
 let res;
 try {
@@ -50,7 +51,7 @@ for await (const chunk of res.body) {
       console.error('Rebuild complete:');
       for (const et of event.entityTypes) {
         const status = et.failed ? ` (${et.failed} failed)` : '';
-        console.error(`  ${et.entityTypeKey}: ${et.processed} embedded${status}`);
+        console.error(`  ${et.entityTypeKey}: ${et.processed} rebuilt${status}`);
       }
       const sqFailed = event.savedQueriesFailed
         ? ` (${event.savedQueriesFailed} failed)`
@@ -59,6 +60,9 @@ for await (const chunk of res.body) {
       console.error(
         `  Total: ${event.totalProcessed} processed, ${event.totalFailed} failed`,
       );
+      if (event.embeddingsSkipped) {
+        console.error('  Embeddings skipped: no embedding provider configured.');
+      }
     }
   }
 }

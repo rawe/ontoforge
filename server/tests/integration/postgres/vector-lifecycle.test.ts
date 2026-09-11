@@ -106,7 +106,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
     await wipeDatabase();
     // A bare provisioning (no embedding width): no fixed vector indexes
     // yet — every test decides how indexes come into existence.
-    await getOntologyRegistry().createOntology(randomUUID(), ONTOLOGY_KEY, null, null);
+    await getOntologyRegistry().createOntology(randomUUID(), ONTOLOGY_KEY, null, null, "english");
     store = await getModelingStore(ONTOLOGY_KEY);
     runtime = await getRuntimeStore(ONTOLOGY_KEY);
     entityTypeId = randomUUID();
@@ -138,7 +138,6 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
     chunkIndex = `vec_document_chunk_${nameId(documentPropertyId)}`;
     // The two fixed indexes survive a wipe by design; drop them so each
     // test starts from a known width.
-    await runQuery(`DROP INDEX IF EXISTS entity_embedding_all_idx`, undefined, NAMESPACE);
     await runQuery(`DROP INDEX IF EXISTS saved_query_embedding_idx`, undefined, NAMESPACE);
   });
 
@@ -149,7 +148,6 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
     for (const name of [
       entityIndex,
       chunkIndex,
-      "entity_embedding_all_idx",
       "saved_query_embedding_idx",
     ]) {
       expect(indexes.has(name), `${name} missing`).toBe(true);
@@ -162,7 +160,6 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
     expect(indexes.get(entityIndex)!.definition).toContain("WHERE (type_key = 'person'");
     expect(indexes.get(chunkIndex)!.definition).toContain("entity_type_key = 'person'");
     expect(indexes.get(chunkIndex)!.definition).toContain("property_key = 'bio'");
-    expect(indexes.get("entity_embedding_all_idx")!.definition).not.toContain("WHERE");
     expect(indexes.get("saved_query_embedding_idx")!.definition).not.toContain("WHERE");
 
     // Relations carry no embedding column, so no relation index exists.
@@ -176,7 +173,6 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
     for (const name of [
       entityIndex,
       chunkIndex,
-      "entity_embedding_all_idx",
       "saved_query_embedding_idx",
     ]) {
       expect(await widthOf(name), `${name} missing`).toBe(MODEL_WIDTH);
@@ -222,7 +218,6 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
   it("ensures the saved-query index on its own", async () => {
     await store.ensureSavedQueryVectorIndex(MODEL_WIDTH);
     expect(await widthOf("saved_query_embedding_idx")).toBe(MODEL_WIDTH);
-    expect(await widthOf("entity_embedding_all_idx")).toBeNull();
   });
 
   describe("width drift", () => {
@@ -232,7 +227,6 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
       for (const name of [
         entityIndex,
         chunkIndex,
-        "entity_embedding_all_idx",
         "saved_query_embedding_idx",
       ]) {
         expect(await widthOf(name)).toBe(DRIFTED_WIDTH);
@@ -250,7 +244,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
       }
       expect(reported).toContain(String(DRIFTED_WIDTH));
       expect(reported).toContain(String(MODEL_WIDTH));
-      expect(reported).toContain("/model/rebuild-embeddings");
+      expect(reported).toContain("/model/rebuild-search-data");
       // API vocabulary only: no vendor, no physical name.
       for (const leak of POSTGRES_LEAKS) {
         expect(reported, `'${leak}' leaked into the report`).not.toContain(leak);
@@ -259,7 +253,6 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
       for (const name of [
         entityIndex,
         chunkIndex,
-        "entity_embedding_all_idx",
         "saved_query_embedding_idx",
       ]) {
         expect(await widthOf(name), `${name} was touched`).toBe(DRIFTED_WIDTH);
@@ -272,11 +265,10 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
       const reported = await logsOf(() => store.dropMismatchedVectorIndexes(MODEL_WIDTH));
 
       expect(reported).toContain("Recreating the semantic index for entity type 'person'");
-      expect(reported).not.toContain("/model/rebuild-embeddings");
+      expect(reported).not.toContain("/model/rebuild-search-data");
       for (const name of [
         entityIndex,
         chunkIndex,
-        "entity_embedding_all_idx",
         "saved_query_embedding_idx",
       ]) {
         expect(await widthOf(name), `${name} was not dropped`).toBeNull();
@@ -291,7 +283,6 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
       for (const name of [
         entityIndex,
         chunkIndex,
-        "entity_embedding_all_idx",
         "saved_query_embedding_idx",
       ]) {
         expect(await widthOf(name), `${name} was dropped`).toBe(MODEL_WIDTH);
@@ -343,10 +334,10 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
       await expect(store.ensureVectorIndexes(MODEL_WIDTH)).rejects.toThrow();
 
       // Phase two regenerates, and only then can phase three build.
-      await store.setEntityEmbedding(entityId, vectorOf(MODEL_WIDTH));
+      await store.setEntitySearchText(entityId, "person: name=Test", vectorOf(MODEL_WIDTH));
       await store.ensureVectorIndexes(MODEL_WIDTH);
 
-      for (const name of [entityIndex, "entity_embedding_all_idx"]) {
+      for (const name of [entityIndex]) {
         expect(await widthOf(name), `${name} was not rebuilt`).toBe(MODEL_WIDTH);
       }
     });
@@ -420,7 +411,6 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
       const indexes = await catalog();
       expect(indexes.has(entityIndex)).toBe(false);
       expect(indexes.has(chunkIndex)).toBe(false);
-      expect(indexes.has("entity_embedding_all_idx")).toBe(true);
     });
 
     it("collects the chunk index of a property that is no longer a document", async () => {
@@ -447,7 +437,6 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
       await store.ensureVectorIndexes(MODEL_WIDTH);
       await store.ensureVectorIndexes(MODEL_WIDTH);
       const indexes = await catalog();
-      expect(indexes.has("entity_embedding_all_idx")).toBe(true);
       expect(indexes.has("saved_query_embedding_idx")).toBe(true);
     });
   });
@@ -455,7 +444,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
   describe("startup maintenance across the registry", () => {
     it("one startup ensure covers every registered ontology's namespace", async () => {
       // A second ontology with its own typed schema beside the fixture one.
-      await getOntologyRegistry().createOntology(randomUUID(), "vec_other", null, null);
+      await getOntologyRegistry().createOntology(randomUUID(), "vec_other", null, null, "english");
       const other = await getModelingStore("vec_other");
       const otherTypeId = randomUUID();
       await other.createEntityType(otherTypeId, "ticket", "Ticket", null);
@@ -471,7 +460,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
       await ensureSemanticIndexes(MODEL_WIDTH);
 
       // The fixture ontology got its full inventory ...
-      for (const name of [entityIndex, chunkIndex, "entity_embedding_all_idx"]) {
+      for (const name of [entityIndex, chunkIndex]) {
         expect((await catalog()).get(name)?.width, `${name} missing in ${NAMESPACE}`).toBe(
           MODEL_WIDTH,
         );
@@ -479,7 +468,6 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
       // ... and so did the second, per ITS schema, in ITS namespace.
       const otherIndexes = await catalog("ont_vec_other");
       expect(otherIndexes.get(`vec_entity_${nameId(otherTypeId)}`)?.width).toBe(MODEL_WIDTH);
-      expect(otherIndexes.get("entity_embedding_all_idx")?.width).toBe(MODEL_WIDTH);
       expect(otherIndexes.get("saved_query_embedding_idx")?.width).toBe(MODEL_WIDTH);
       // The orphan in the second namespace was swept by the same call.
       expect(otherIndexes.has(orphan)).toBe(false);

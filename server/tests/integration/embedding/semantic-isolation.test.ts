@@ -2,7 +2,7 @@
  * Semantic search isolation between ontologies, against the
  * docker-compose database and a local Ollama: the same type key and lens
  * key exist in two ontologies, and every retrieval path — per-type
- * search, cross-type search (`semanticSearchAll`), and saved-query
+ * search, cross-type search (`cross-type ranking`), and saved-query
  * discovery — sees only the ontology the path names, even when the other
  * ontology holds the semantically better match. Two ontologies at
  * once — multi-ontology tier (`tiers.ts`). SKIPPED when Ollama or the
@@ -54,10 +54,10 @@ describe.skipIf(!ollamaUp || !supportsMultipleOntologies)("semantic search isola
   async function search(prefix: string, query: string): Promise<Row[]> {
     const res = await app.inject({
       method: "GET",
-      url: `${prefix}/search/semantic?q=${encodeURIComponent(query)}&searchIn=entities`,
+      url: `${prefix}/search?strategy=semantic&q=${encodeURIComponent(query)}&in=properties`,
     });
     expect(res.statusCode, res.body).toBe(200);
-    return (res.json() as { results: Row[] }).results;
+    return (res.json() as { hits: Row[] }).hits;
   }
 
   /** Both ontologies: entity type `person` (name/bio) and an unscoped
@@ -95,7 +95,7 @@ describe.skipIf(!ollamaUp || !supportsMultipleOntologies)("semantic search isola
     });
   });
 
-  it("cross-type search (semanticSearchAll) sees only the addressed ontology", async () => {
+  it("cross-type search (cross-type ranking) sees only the addressed ontology", async () => {
     const crmHits = await search(crm, "distributed systems expert");
     expect(crmHits.map((r) => (r.entity as Row).name)).not.toContain("Dana Fischer");
 
@@ -106,10 +106,10 @@ describe.skipIf(!ollamaUp || !supportsMultipleOntologies)("semantic search isola
   it("per-type search sees only the addressed ontology", async () => {
     const res = await app.inject({
       method: "GET",
-      url: `${crm}/search/semantic?q=${encodeURIComponent("distributed systems expert")}&type=person&searchIn=entities`,
+      url: `${crm}/search?strategy=semantic&q=${encodeURIComponent("distributed systems expert")}&type=person&in=properties`,
     });
     expect(res.statusCode, res.body).toBe(200);
-    const names = ((res.json() as { results: Row[] }).results).map(
+    const names = ((res.json() as { hits: Row[] }).hits).map(
       (r) => (r.entity as Row).name,
     );
     expect(names).not.toContain("Dana Fischer");

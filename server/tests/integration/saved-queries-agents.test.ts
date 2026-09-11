@@ -1,8 +1,9 @@
+import { settings } from "../../src/config.js";
 /**
  * Saved queries and agent configurations against the real docker-compose
  * Neo4j, WITHOUT an embedding provider: definition, listing and running of
  * oql-only pipelines work; saved-query search answers FEATURE_DISABLED; a
- * pipeline containing a semantic_search step fails at run time; deleting
+ * pipeline containing a search step fails at run time; deleting
  * the lens cascades to both configuration kinds; and the runtime listing
  * (served from the schema cache) reflects every modeling upsert. Includes
  * all six modeling MCP tools and the three runtime MCP tools.
@@ -412,12 +413,12 @@ describe("runtime run (no provider)", () => {
     expect(run.statusCode).toBe(404);
   });
 
-  it("a pipeline containing a semantic_search step fails without a provider", async () => {
+  it("a pipeline containing a search step uses keyword without a provider where supported", async () => {
     await inject("PUT", "/api/ontologies/test_ont/model/lenses/test_lens/saved-queries/needs-embeddings", {
       name: "Needs embeddings",
       description: "search feeding a query",
       steps: [
-        { name: "hits", type: "semantic_search", entityTypeKey: "person", query: "$who" },
+        { name: "hits", type: "search", entityTypeKey: "person", query: "$who" },
         {
           name: "detail",
           type: "oql",
@@ -433,6 +434,7 @@ describe("runtime run (no provider)", () => {
       "/api/ontologies/test_ont/runtime/lenses/test_lens/saved-queries/needs-embeddings/run",
       { params: { who: "engineers" } },
     );
+    if (settings.DB_BACKEND === "postgres") { expect(run.statusCode).toBe(200); return; }
     expect(run.statusCode).toBe(422);
     const error = (run.body as Row).error as Row;
     expect((error.details as Row).code).toBe("FEATURE_DISABLED");

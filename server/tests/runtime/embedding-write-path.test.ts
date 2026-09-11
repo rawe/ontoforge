@@ -75,6 +75,7 @@ describe("entity create", () => {
     expect(provider.embed).toHaveBeenCalledWith("person: name=Alice, email=a@b.c");
     const call = holder.store.createEntity.mock.calls[0]!;
     expect(call[4]).toEqual([0.1, 0.2]); // embedding argument
+    expect(call[6]).toEqual([{ propertyKey: "name", text: "Alice" }, { propertyKey: "email", text: "a@b.c" }]);
     expect(holder.store.validateVectorIndexedProperties).toHaveBeenCalledTimes(1);
   });
 
@@ -91,6 +92,7 @@ describe("entity create", () => {
 
     expect(result.name).toBe("Alice");
     expect(holder.store.createEntity.mock.calls[0]![4]).toBeNull();
+    expect(holder.store.createEntity.mock.calls[0]![5]).toContain("name=Alice");
   });
 
   it("without a provider, neither embed nor size validation runs", async () => {
@@ -105,6 +107,7 @@ describe("entity create", () => {
 
     expect(holder.store.validateVectorIndexedProperties).not.toHaveBeenCalled();
     expect(holder.store.createEntity.mock.calls[0]![4]).toBeNull();
+    expect(holder.store.createEntity.mock.calls[0]![5]).toContain("name=Alice");
   });
 
   it("an oversized indexed string is rejected before the write", async () => {
@@ -148,6 +151,7 @@ describe("entity update", () => {
     const call = holder.store.updateEntity.mock.calls[0]!;
     expect(call[5]).toEqual([0.1, 0.2]); // embedding
     expect(call[6]).toBe(true); // hasEmbeddingUpdate
+    expect(call[8]).toEqual([{ propertyKey: "name", text: "Alice" }, { propertyKey: "email", text: "new@b.c" }]);
   });
 
   it("removing a string property (null) re-embeds without it", async () => {
@@ -165,6 +169,7 @@ describe("entity update", () => {
     );
 
     expect(provider.embed).toHaveBeenCalledWith("person: name=Alice");
+    expect(holder.store.updateEntity.mock.calls[0]![8]).toEqual([{ propertyKey: "name", text: "Alice" }]);
   });
 
   it("does not re-embed when only a non-string property changes", async () => {
@@ -184,9 +189,11 @@ describe("entity update", () => {
     const call = holder.store.updateEntity.mock.calls[0]!;
     expect(call[5]).toBeNull(); // no embedding
     expect(call[6]).toBe(false); // no embedding update
+    expect(call[8]).toBeUndefined(); // preserve stored keyword data
   });
 
-  it("without a provider, updates never consult the current entity for embedding", async () => {
+  it("without a provider, updates recompose the stored property text", async () => {
+    holder.store.getEntity.mockResolvedValue(makeEntity({ name: "Alice" }));
     holder.store.updateEntity.mockResolvedValue(makeEntity({ name: "Bob" }));
 
     await service.updateEntity(
@@ -197,54 +204,9 @@ describe("entity update", () => {
       asRuntimeStore(holder.store),
     );
 
-    expect(holder.store.getEntity).not.toHaveBeenCalled();
-    expect(holder.store.updateEntity.mock.calls[0]![6]).toBe(false);
-  });
-});
-
-describe("semantic search route", () => {
-  it("answers 422 VALIDATION_ERROR with details.code FEATURE_DISABLED without a provider", async () => {
-    const res = await app.inject({
-      method: "GET",
-      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/search/semantic?q=anything",
-    });
-
-    expect(res.statusCode).toBe(422);
-    const body = res.json() as { error: { code: string; message: string; details: Row } };
-    expect(body.error.code).toBe("VALIDATION_ERROR");
-    expect(body.error.message).toContain("EMBEDDING_PROVIDER");
-    expect(body.error.details).toEqual({ code: "FEATURE_DISABLED" });
-  });
-
-  it("passes min_score through to the entity ranking (pre-fusion floor)", async () => {
-    setEmbeddingProvider(mockProvider());
-    holder.store.semanticSearch.mockResolvedValue([]);
-
-    const res = await app.inject({
-      method: "GET",
-      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/search/semantic?q=alice&type=person&min_score=0.75",
-    });
-
-    expect(res.statusCode).toBe(200);
-    // store.semanticSearch(entityTypeKey, propertyDefs, embedding, limit, minScore, filters)
-    expect(holder.store.semanticSearch.mock.calls[0]![4]).toBe(0.75);
-  });
-
-  it("rejects a missing q as a request-shape error", async () => {
-    setEmbeddingProvider(mockProvider());
-    const res = await app.inject({
-      method: "GET",
-      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/search/semantic",
-    });
-    expect(res.statusCode).toBe(422);
-  });
-
-  it("rejects an out-of-range limit", async () => {
-    setEmbeddingProvider(mockProvider());
-    const res = await app.inject({
-      method: "GET",
-      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/search/semantic?q=x&limit=101",
-    });
-    expect(res.statusCode).toBe(422);
+    expect(holder.store.getEntity).toHaveBeenCalled();
+    expect(holder.store.updateEntity.mock.calls[0]![6]).toBe(true);
+    expect(holder.store.updateEntity.mock.calls[0]![7]).toContain("name=Bob");
+    expect(holder.store.updateEntity.mock.calls[0]![8]).toEqual([{ propertyKey: "name", text: "Bob" }]);
   });
 });

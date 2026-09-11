@@ -1,5 +1,5 @@
 {
-    "formatVersion": "4.0",
+    "formatVersion": "5.0",
     "entityTypes": [
         {
             "key": "company",
@@ -142,7 +142,7 @@
                     "tools": [
                         "execute_query",
                         "get_entity",
-                        "semantic_search"
+                        "search"
                     ]
                 },
                 {
@@ -166,7 +166,6 @@
                             "entityTypeKey": null,
                             "query": null,
                             "limit": null,
-                            "minScore": null,
                             "bindings": null
                         }
                     ],
@@ -185,12 +184,11 @@
                     "steps": [
                         {
                             "name": "people",
-                            "type": "semantic_search",
+                            "type": "search",
                             "oql": null,
                             "entityTypeKey": "person",
                             "query": "$q",
                             "limit": 5,
-                            "minScore": 0.5,
                             "bindings": null
                         },
                         {
@@ -200,7 +198,6 @@
                             "entityTypeKey": null,
                             "query": null,
                             "limit": null,
-                            "minScore": null,
                             "bindings": {
                                 "ids": "{{people._id}}"
                             }
@@ -224,5 +221,6 @@
             "aiAgents": [],
             "savedQueries": []
         }
-    ]
+    ],
+    "textSearchLanguage": "english"
 }

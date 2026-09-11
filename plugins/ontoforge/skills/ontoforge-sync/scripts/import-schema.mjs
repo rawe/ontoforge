@@ -24,16 +24,9 @@ try {
   die(`Cannot read ${file}: ${err.message}`);
 }
 
-// `lenses` is the one field the transfer format requires. A pre-4.0 document
-// carries them under `ontologies` and is rejected on its shape — there is no
-// converter, so say so here rather than letting the server answer 422.
-if (!Array.isArray(payload.lenses)) {
-  die(
-    Array.isArray(payload.ontologies)
-      ? `${file} is a pre-4.0 export: its lenses are stored under "ontologies". ` +
-          'There is no converter — re-export the design from a current server.'
-      : `${file} is not an OntoForge transfer payload: no "lenses" array.`,
-  );
+// Reject incomplete transfer payloads before sending them to the server.
+if (!Array.isArray(payload.lenses) || !['english', 'german'].includes(payload.textSearchLanguage)) {
+  die(`${file} is not an OntoForge transfer payload: expected a "lenses" array and a supported "textSearchLanguage".`);
 }
 
 try {

@@ -43,7 +43,7 @@ through a lens, so the two data scripts take a lens key as well. An **unscoped**
 sees the whole schema and is the one to use for a complete export; a **scoped** lens
 exposes only the types and properties it names, and exports only that subset.
 
-Design operations — schema export and import, embedding rebuild — cover the whole
+Design operations — schema export and import, search-data rebuild — cover the whole
 ontology and need no lens.
 
 ## Commands
@@ -67,7 +67,7 @@ node scripts/export-schema.mjs [-o <output>] [--ontology <key>] [--base-url <url
 
 **API used**: `GET /api/ontologies/{ontologyKey}/model/export`
 
-The output file is the OntoForge transfer format (v4.0) and can be committed to version
+The output file is the OntoForge transfer format (v5.0) and can be committed to version
 control. It carries the design only — no entities, no relations, no document content,
 and not the ontology's own key or display name. It is not a backup.
 
@@ -146,15 +146,17 @@ a scoped lens rejects what it hides.
 **API used**: `POST /api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/entities/{type}`,
 `POST /api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/relations/{type}`
 
-### Rebuild Embeddings
+### Rebuild Search Data
 
-Regenerate one ontology's embedding vectors for semantic search, and repair its vector
-index widths. Run this after data import, after changing the embedding model, or to
-repair missing indexes. It covers the whole ontology, so no lens is involved; after an
+Rebuild one ontology's search data: every entity's keyword text, every document
+passage and, where an embedding provider is configured, the vectors, the saved-query
+descriptions and the vector index widths. Run this after a schema edit that removed a
+string property, after data import, after changing the embedding model, or to repair
+missing indexes. It covers the whole ontology, so no lens is involved; after an
 embedding-provider switch, run it once per ontology.
 
 ```bash
-node scripts/rebuild-embeddings.mjs [--ontology <key>] [--base-url <url>]
+node scripts/rebuild-search-data.mjs [--ontology <key>] [--base-url <url>]
 ```
 
 | Parameter | Required | Description |
@@ -162,10 +164,11 @@ node scripts/rebuild-embeddings.mjs [--ontology <key>] [--base-url <url>]
 | `--ontology` | see Environment | Ontology key |
 | `--base-url` | no | OntoForge server URL |
 
-**API used**: `POST /api/ontologies/{ontologyKey}/model/rebuild-embeddings`
+**API used**: `POST /api/ontologies/{ontologyKey}/model/rebuild-search-data`
 
-Streams progress to stderr. On completion, prints a per-type summary. Fails when no
-embedding provider is configured on the server.
+Streams progress to stderr. On completion, prints a per-type summary. It runs without an
+embedding provider, rebuilding keyword text and passages and reporting the vectors as
+skipped.
 
 ## Ordering Rules
 
@@ -174,7 +177,9 @@ embedding provider is configured on the server.
 2. **Schema before data.** The schema defines entity types and relation types. Data
    cannot be imported until the schema exists.
 3. **Entities before relations.** The data import script handles this automatically.
-4. **Rebuild embeddings after data import.** Semantic search requires embedding vectors.
+4. **Rebuild search data after data import.** Imported entities carry no derived search
+   data; the rebuild supplies the keyword text, the document passages and — with a provider
+   configured — the vectors.
 5. **A clear key space for a schema import.** The import API does not overwrite or merge.
    If the target ontology already holds a type or lens with the same key, the import
    fails with a 409 Conflict naming every clash. Import into a bare ontology, or delete
@@ -201,8 +206,8 @@ node scripts/import-schema.mjs ./ontoforge/schema.json --ontology my_ontology
 # 5. Optionally import seed data
 node scripts/import-data.mjs ./ontoforge/data.json --ontology my_ontology
 
-# 6. Rebuild embeddings for semantic search
-node scripts/rebuild-embeddings.mjs --ontology my_ontology
+# 6. Rebuild search data
+node scripts/rebuild-search-data.mjs --ontology my_ontology
 ```
 
 Set `ONTOFORGE_ONTOLOGY=my_ontology` once instead of repeating `--ontology`.
@@ -230,13 +235,14 @@ node scripts/import-schema.mjs /tmp/design.json --ontology clone
 
 ## File Formats
 
-### Schema file (transfer format v4.0)
+### Schema file (transfer format v5.0)
 
 Produced by `GET /api/ontologies/{ontologyKey}/model/export`:
 
 ```json
 {
-  "formatVersion": "4.0",
+  "formatVersion": "5.0",
+  "textSearchLanguage": "english",
   "entityTypes": [
     {
       "key": "person",
@@ -270,9 +276,9 @@ Produced by `GET /api/ontologies/{ontologyKey}/model/export`:
 A lens with `"includes": null` is **unscoped** and sees the whole schema. A scoped lens
 lists the type keys it exposes and optionally restricts the visible properties.
 
-The format version is informational — import never dispatches on it. A pre-4.0 document
-carries its lenses under `ontologies` and is rejected on its shape; no converter exists,
-so re-export the design from a current server.
+The text-search language is required and must match the existing target ontology.
+The format version is informational — import never dispatches on it. Required fields
+are validated directly; no converter exists.
 
 ### Data file (v1.0)
 

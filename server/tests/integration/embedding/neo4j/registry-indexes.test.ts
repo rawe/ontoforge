@@ -91,7 +91,7 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")(
         payload: { key: "crm" },
       });
       expect(created.statusCode, created.body).toBe(201);
-      expect(await indexDimensions("entity_embedding")).toBe(width);
+      expect(await indexDimensions("entity_embedding")).toBeNull();
       expect(await indexDimensions("saved_query_embedding")).toBe(width);
 
       // A per-type index joins as the schema grows.
@@ -118,7 +118,6 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")(
       });
       expect(again.statusCode, again.body).toBe(201);
       expect((await vectorIndexNames()).sort()).toEqual([
-        "entity_embedding",
         "saved_query_embedding",
       ]);
     });

@@ -26,9 +26,6 @@ export function documentPropertyScope(entityTypeKey: string, propertyKey: string
   return `document property '${propertyKey}' on entity type '${entityTypeKey}'`;
 }
 
-/** The cross-type entity index. */
-export const ALL_ENTITY_TYPES_SCOPE = "search across all entity types";
-
 /** The saved-query description index. */
 export const SAVED_QUERY_SCOPE = "saved-query descriptions";
 
@@ -52,7 +49,7 @@ export function reportWidthMismatch(
     `The semantic index for ${describes} holds ${existingWidth}-dimensional ` +
       `vectors, but the configured embedding model produces ${configuredWidth}. ` +
       "Semantic search over it fails until the widths agree. Run " +
-      "POST /api/ontologies/{ontologyKey}/model/rebuild-embeddings on the " +
+      "POST /api/ontologies/{ontologyKey}/model/rebuild-search-data on the " +
       "ontology holding it to recreate it at the model's width and " +
       "regenerate its vectors.",
   );
@@ -94,7 +91,7 @@ export function reportEnsureFailed(ontologyKey: string): void {
     `The semantic indexes of ontology '${ontologyKey}' could not be brought ` +
       "up to the width of the configured embedding model, so semantic " +
       "search over it fails. An unfinished rebuild leaves exactly this " +
-      "behind. Run POST /api/ontologies/{ontologyKey}/model/rebuild-embeddings " +
+      "behind. Run POST /api/ontologies/{ontologyKey}/model/rebuild-search-data " +
       "on it to regenerate its vectors and build its indexes.",
   );
 }

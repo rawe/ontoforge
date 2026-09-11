@@ -160,10 +160,10 @@ function stepBadges(query: SavedQueryHit) {
   // them) — render those cards without step badges.
   if (!('steps' in query)) return []
   const queryCount = query.steps.filter((s) => s.type === 'oql').length
-  const semanticCount = query.steps.filter((s) => s.type === 'semantic_search').length
+  const searchCount = query.steps.filter((s) => s.type === 'search').length
   const badges: string[] = []
   if (queryCount > 0) badges.push(`${queryCount} query`)
-  if (semanticCount > 0) badges.push(`${semanticCount} semantic`)
+  if (searchCount > 0) badges.push(`${searchCount} search`)
   return badges
 }
 

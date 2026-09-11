@@ -10,7 +10,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { settings } from "../../src/config.js";
 import { coerceValue } from "../../src/core/dataTypes.js";
 import { setEmbeddingProvider, type EmbeddingProvider } from "../../src/core/embedding.js";
-import { chunkDocument } from "../../src/runtime/chunking.js";
+import { chunkDocument } from "../../src/runtime/search/document.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import {
   asRuntimeStore,
@@ -361,7 +361,7 @@ describe("chunk sync on create / update", () => {
     });
   });
 
-  it("create without a provider writes no chunks", async () => {
+  it("create without a provider writes chunks without vectors", async () => {
     holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
     holder.store.createEntity.mockResolvedValue(
       makeEntity({ name: "Ada", bio: BIO, _doc_bio_length: BIO.length }),
@@ -378,8 +378,9 @@ describe("chunk sync on create / update", () => {
     const stored = holder.store.createEntity.mock.calls[0]![2] as Row;
     expect(stored.bio).toBe(BIO);
     expect(stored._doc_bio_length).toBe(BIO.length);
-    expect(holder.store.deleteChunksForEntityProperty).not.toHaveBeenCalled();
-    expect(holder.store.createDocumentChunks).not.toHaveBeenCalled();
+    expect(holder.store.deleteChunksForEntityProperty).toHaveBeenCalled();
+    expect(holder.store.createDocumentChunks).toHaveBeenCalled();
+    for (const chunk of holder.store.createDocumentChunks.mock.calls[0]![3] as Row[]) expect(chunk).not.toHaveProperty("_embedding");
   });
 
   it("length bookkeeping counts code points on writes", async () => {

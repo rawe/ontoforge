@@ -15,6 +15,8 @@
  * into the message text (shared `formatToolError`).
  */
 
+import { RELATIVE_SCORE_PROMISE, SEARCH_EVIDENCE_GUIDANCE } from "../runtime/search/strategies.js";
+
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
@@ -86,18 +88,18 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
         properties: z.record(z.string(), z.unknown()),
       },
     },
-    wrap("create_entity", async (args: {
-      entity_type_key: string;
-      properties: Record<string, unknown>;
-    }) => {
-      const result = await service.createEntity(
-        lensKey,
-        args.entity_type_key,
-        args.properties,
-        await getRuntimeStore(ontologyKey),
-      );
-      return jsonResult(result);
-    }),
+    wrap(
+      "create_entity",
+      async (args: { entity_type_key: string; properties: Record<string, unknown> }) => {
+        const result = await service.createEntity(
+          lensKey,
+          args.entity_type_key,
+          args.properties,
+          await getRuntimeStore(ontologyKey),
+        );
+        return jsonResult(result);
+      },
+    ),
   );
 
   server.registerTool(
@@ -110,15 +112,15 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
         "Use 'filters' for property-based filtering with operators: exact match " +
         '("name": "Alice"), greater than ("age__gt": 25), greater or equal ("__gte"), ' +
         'less than ("__lt"), less or equal ("__lte"), contains ' +
-        "(\"name__contains\": \"ali\"). A filter key may be a query path crossing one " +
+        '("name__contains": "ali"). A filter key may be a query path crossing one ' +
         "relation type to a property of the related entity, " +
-        "\"<relationTypeKey>.<propertyKey>\", or to a property stored on the relation " +
-        "itself, \"<relationTypeKey>@<propertyKey>\": listing persons with " +
+        '"<relationTypeKey>.<propertyKey>", or to a property stored on the relation ' +
+        'itself, "<relationTypeKey>@<propertyKey>": listing persons with ' +
         '("works_for.name": "Acme") returns the persons employed by Acme, and with ' +
         '("works_for@role": "CTO") the persons holding a CTO employment; operator ' +
         'suffixes attach to a path key as to a plain one ("works_for@since__gte": ' +
         '"2021-01-01"); the direction follows the relation type\'s endpoints, outgoing ' +
-        "from its source type and incoming from its target type; a \":out\"/\":in\" " +
+        'from its source type and incoming from its target type; a ":out"/":in" ' +
         "marker on the relation segment must agree with it and is required where both " +
         'endpoints are the same type ("manages:out.name": "Bob" for the persons managing ' +
         'a Bob, "manages:in.name": "Alice" for the persons managed by an Alice); an ' +
@@ -141,38 +143,41 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
         fields: z.array(z.string()).optional(),
       },
     },
-    wrap("list_entities", async (args: {
-      entity_type_key: string;
-      search?: string | undefined;
-      filters?: Record<string, unknown> | undefined;
-      sort?: string | undefined;
-      order?: "asc" | "desc" | undefined;
-      limit?: number | undefined;
-      offset?: number | undefined;
-      fields?: string[] | undefined;
-    }) => {
-      const strFilters: Record<string, string> = {};
-      for (const [k, v] of Object.entries(args.filters ?? {})) {
-        // Filter values travel as strings, in the same spelling the write
-        // path stores them in.
-        strFilters[k] = valueToText(v);
-      }
-      const limit = clamp(args.limit ?? 50, 1, 200);
-      const offset = Math.max(0, args.offset ?? 0);
-      const result = await service.listEntities(
-        lensKey,
-        args.entity_type_key,
-        limit,
-        offset,
-        args.sort ?? "_createdAt",
-        args.order ?? "asc",
-        args.search ?? null,
-        strFilters,
-        await getRuntimeStore(ontologyKey),
-        args.fields ?? null,
-      );
-      return jsonResult(result);
-    }),
+    wrap(
+      "list_entities",
+      async (args: {
+        entity_type_key: string;
+        search?: string | undefined;
+        filters?: Record<string, unknown> | undefined;
+        sort?: string | undefined;
+        order?: "asc" | "desc" | undefined;
+        limit?: number | undefined;
+        offset?: number | undefined;
+        fields?: string[] | undefined;
+      }) => {
+        const strFilters: Record<string, string> = {};
+        for (const [k, v] of Object.entries(args.filters ?? {})) {
+          // Filter values travel as strings, in the same spelling the write
+          // path stores them in.
+          strFilters[k] = valueToText(v);
+        }
+        const limit = clamp(args.limit ?? 50, 1, 200);
+        const offset = Math.max(0, args.offset ?? 0);
+        const result = await service.listEntities(
+          lensKey,
+          args.entity_type_key,
+          limit,
+          offset,
+          args.sort ?? "_createdAt",
+          args.order ?? "asc",
+          args.search ?? null,
+          strFilters,
+          await getRuntimeStore(ontologyKey),
+          args.fields ?? null,
+        );
+        return jsonResult(result);
+      },
+    ),
   );
 
   server.registerTool(
@@ -190,20 +195,23 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
         fields: z.array(z.string()).optional(),
       },
     },
-    wrap("get_entity", async (args: {
-      entity_type_key: string;
-      entity_id: string;
-      fields?: string[] | undefined;
-    }) => {
-      const result = await service.getEntity(
-        lensKey,
-        args.entity_type_key,
-        args.entity_id,
-        await getRuntimeStore(ontologyKey),
-        args.fields ?? null,
-      );
-      return jsonResult(result);
-    }),
+    wrap(
+      "get_entity",
+      async (args: {
+        entity_type_key: string;
+        entity_id: string;
+        fields?: string[] | undefined;
+      }) => {
+        const result = await service.getEntity(
+          lensKey,
+          args.entity_type_key,
+          args.entity_id,
+          await getRuntimeStore(ontologyKey),
+          args.fields ?? null,
+        );
+        return jsonResult(result);
+      },
+    ),
   );
 
   server.registerTool(
@@ -211,11 +219,11 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
     {
       description:
         "Read (a slice of) a document property's content. Document properties " +
-        "hold large Markdown text and are never returned inline by other tools " +
+        "hold large Markdown text and are stubbed by default in other tools " +
         '— they appear as {"document": true, "length": N} stubs. ' +
         "'offset' and 'limit' are character-based; omit both to read the full " +
-        "document. Use the charOffset/charLength from a semantic search hit's " +
-        "matchedVia to read exactly the matching passage.",
+        "document. Use the charOffset/charLength from a search hit's " +
+        "matches to read exactly the matching passage.",
       inputSchema: {
         entity_type_key: z.string(),
         entity_id: z.string(),
@@ -224,26 +232,30 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
         limit: z.number().optional(),
       },
     },
-    wrap("get_document", async (args: {
-      entity_type_key: string;
-      entity_id: string;
-      property_key: string;
-      offset?: number | undefined;
-      limit?: number | undefined;
-    }) => {
-      const offset = Math.max(0, args.offset ?? 0);
-      const limit = args.limit === undefined || args.limit === null ? null : Math.max(1, args.limit);
-      const result = await service.getDocument(
-        lensKey,
-        args.entity_type_key,
-        args.entity_id,
-        args.property_key,
-        offset,
-        limit,
-        await getRuntimeStore(ontologyKey),
-      );
-      return jsonResult(result);
-    }),
+    wrap(
+      "get_document",
+      async (args: {
+        entity_type_key: string;
+        entity_id: string;
+        property_key: string;
+        offset?: number | undefined;
+        limit?: number | undefined;
+      }) => {
+        const offset = Math.max(0, args.offset ?? 0);
+        const limit =
+          args.limit === undefined || args.limit === null ? null : Math.max(1, args.limit);
+        const result = await service.getDocument(
+          lensKey,
+          args.entity_type_key,
+          args.entity_id,
+          args.property_key,
+          offset,
+          limit,
+          await getRuntimeStore(ontologyKey),
+        );
+        return jsonResult(result);
+      },
+    ),
   );
 
   server.registerTool(
@@ -260,20 +272,23 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
         properties: z.record(z.string(), z.unknown()),
       },
     },
-    wrap("update_entity", async (args: {
-      entity_type_key: string;
-      entity_id: string;
-      properties: Record<string, unknown>;
-    }) => {
-      const result = await service.updateEntity(
-        lensKey,
-        args.entity_type_key,
-        args.entity_id,
-        args.properties,
-        await getRuntimeStore(ontologyKey),
-      );
-      return jsonResult(result);
-    }),
+    wrap(
+      "update_entity",
+      async (args: {
+        entity_type_key: string;
+        entity_id: string;
+        properties: Record<string, unknown>;
+      }) => {
+        const result = await service.updateEntity(
+          lensKey,
+          args.entity_type_key,
+          args.entity_id,
+          args.properties,
+          await getRuntimeStore(ontologyKey),
+        );
+        return jsonResult(result);
+      },
+    ),
   );
 
   server.registerTool(
@@ -295,29 +310,32 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
         replace_all: z.boolean().optional(),
       },
     },
-    wrap("edit_document", async (args: {
-      entity_type_key: string;
-      entity_id: string;
-      property_key: string;
-      old_string: string;
-      new_string: string;
-      replace_all?: boolean | undefined;
-    }) => {
-      const result = await service.editDocument(
-        lensKey,
-        args.entity_type_key,
-        args.entity_id,
-        args.property_key,
-        {
-          op: "str_replace",
-          oldString: args.old_string,
-          newString: args.new_string,
-          replaceAll: args.replace_all ?? false,
-        },
-        await getRuntimeStore(ontologyKey),
-      );
-      return jsonResult(result);
-    }),
+    wrap(
+      "edit_document",
+      async (args: {
+        entity_type_key: string;
+        entity_id: string;
+        property_key: string;
+        old_string: string;
+        new_string: string;
+        replace_all?: boolean | undefined;
+      }) => {
+        const result = await service.editDocument(
+          lensKey,
+          args.entity_type_key,
+          args.entity_id,
+          args.property_key,
+          {
+            op: "str_replace",
+            oldString: args.old_string,
+            newString: args.new_string,
+            replaceAll: args.replace_all ?? false,
+          },
+          await getRuntimeStore(ontologyKey),
+        );
+        return jsonResult(result);
+      },
+    ),
   );
 
   server.registerTool(
@@ -327,7 +345,7 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
         "Overwrite a character range of a document property: replaces " +
         "[offset, offset+length) with content. Insert with length=0; append " +
         "with offset=totalLength and length=0. Offsets pair with get_document " +
-        "reads and the charOffset/charLength of semantic search hits. Pass " +
+        "reads and the charOffset/charLength of search matches. Pass " +
         "'expect' (the text currently in the range) to fail safely if the " +
         "document changed since it was read. Returns the new totalLength, the " +
         "edited range, and ~200 chars of context around the edit.",
@@ -341,31 +359,34 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
         expect: z.string().optional(),
       },
     },
-    wrap("write_document", async (args: {
-      entity_type_key: string;
-      entity_id: string;
-      property_key: string;
-      offset: number;
-      length: number;
-      content: string;
-      expect?: string | undefined;
-    }) => {
-      const result = await service.editDocument(
-        lensKey,
-        args.entity_type_key,
-        args.entity_id,
-        args.property_key,
-        {
-          op: "replace_range",
-          offset: args.offset,
-          length: args.length,
-          content: args.content,
-          expect: args.expect ?? null,
-        },
-        await getRuntimeStore(ontologyKey),
-      );
-      return jsonResult(result);
-    }),
+    wrap(
+      "write_document",
+      async (args: {
+        entity_type_key: string;
+        entity_id: string;
+        property_key: string;
+        offset: number;
+        length: number;
+        content: string;
+        expect?: string | undefined;
+      }) => {
+        const result = await service.editDocument(
+          lensKey,
+          args.entity_type_key,
+          args.entity_id,
+          args.property_key,
+          {
+            op: "replace_range",
+            offset: args.offset,
+            length: args.length,
+            content: args.content,
+            expect: args.expect ?? null,
+          },
+          await getRuntimeStore(ontologyKey),
+        );
+        return jsonResult(result);
+      },
+    ),
   );
 
   server.registerTool(
@@ -403,29 +424,31 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
         properties: z.record(z.string(), z.unknown()).optional(),
       },
     },
-    wrap("create_relation", async (args: {
-      relation_type_key: string;
-      from_entity_id: string;
-      to_entity_id: string;
-      properties?: Record<string, unknown> | undefined;
-    }) => {
-      const result = await service.createRelation(
-        lensKey,
-        args.relation_type_key,
-        args.from_entity_id,
-        args.to_entity_id,
-        args.properties ?? {},
-        await getRuntimeStore(ontologyKey),
-      );
-      return jsonResult(result);
-    }),
+    wrap(
+      "create_relation",
+      async (args: {
+        relation_type_key: string;
+        from_entity_id: string;
+        to_entity_id: string;
+        properties?: Record<string, unknown> | undefined;
+      }) => {
+        const result = await service.createRelation(
+          lensKey,
+          args.relation_type_key,
+          args.from_entity_id,
+          args.to_entity_id,
+          args.properties ?? {},
+          await getRuntimeStore(ontologyKey),
+        );
+        return jsonResult(result);
+      },
+    ),
   );
 
   server.registerTool(
     "list_relations",
     {
-      description:
-        "List relations of a type. Optionally filter by source or target entity.",
+      description: "List relations of a type. Optionally filter by source or target entity.",
       inputSchema: {
         relation_type_key: z.string(),
         from_entity_id: z.string().optional(),
@@ -438,38 +461,41 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
         offset: z.number().optional(),
       },
     },
-    wrap("list_relations", async (args: {
-      relation_type_key: string;
-      from_entity_id?: string | undefined;
-      to_entity_id?: string | undefined;
-      filters?: Record<string, unknown> | undefined;
-      sort?: string | undefined;
-      order?: "asc" | "desc" | undefined;
-      limit?: number | undefined;
-      offset?: number | undefined;
-    }) => {
-      const strFilters: Record<string, string> = {};
-      for (const [k, v] of Object.entries(args.filters ?? {})) {
-        // Filter values travel as strings, in the same spelling the write
-        // path stores them in.
-        strFilters[k] = valueToText(v);
-      }
-      const limit = clamp(args.limit ?? 50, 1, 200);
-      const offset = Math.max(0, args.offset ?? 0);
-      const result = await service.listRelations(
-        lensKey,
-        args.relation_type_key,
-        limit,
-        offset,
-        args.sort ?? "_createdAt",
-        args.order ?? "asc",
-        args.from_entity_id ?? null,
-        args.to_entity_id ?? null,
-        strFilters,
-        await getRuntimeStore(ontologyKey),
-      );
-      return jsonResult(result);
-    }),
+    wrap(
+      "list_relations",
+      async (args: {
+        relation_type_key: string;
+        from_entity_id?: string | undefined;
+        to_entity_id?: string | undefined;
+        filters?: Record<string, unknown> | undefined;
+        sort?: string | undefined;
+        order?: "asc" | "desc" | undefined;
+        limit?: number | undefined;
+        offset?: number | undefined;
+      }) => {
+        const strFilters: Record<string, string> = {};
+        for (const [k, v] of Object.entries(args.filters ?? {})) {
+          // Filter values travel as strings, in the same spelling the write
+          // path stores them in.
+          strFilters[k] = valueToText(v);
+        }
+        const limit = clamp(args.limit ?? 50, 1, 200);
+        const offset = Math.max(0, args.offset ?? 0);
+        const result = await service.listRelations(
+          lensKey,
+          args.relation_type_key,
+          limit,
+          offset,
+          args.sort ?? "_createdAt",
+          args.order ?? "asc",
+          args.from_entity_id ?? null,
+          args.to_entity_id ?? null,
+          strFilters,
+          await getRuntimeStore(ontologyKey),
+        );
+        return jsonResult(result);
+      },
+    ),
   );
 
   server.registerTool(
@@ -504,20 +530,23 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
         properties: z.record(z.string(), z.unknown()),
       },
     },
-    wrap("update_relation", async (args: {
-      relation_type_key: string;
-      relation_id: string;
-      properties: Record<string, unknown>;
-    }) => {
-      const result = await service.updateRelation(
-        lensKey,
-        args.relation_type_key,
-        args.relation_id,
-        args.properties,
-        await getRuntimeStore(ontologyKey),
-      );
-      return jsonResult(result);
-    }),
+    wrap(
+      "update_relation",
+      async (args: {
+        relation_type_key: string;
+        relation_id: string;
+        properties: Record<string, unknown>;
+      }) => {
+        const result = await service.updateRelation(
+          lensKey,
+          args.relation_type_key,
+          args.relation_id,
+          args.properties,
+          await getRuntimeStore(ontologyKey),
+        );
+        return jsonResult(result);
+      },
+    ),
   );
 
   server.registerTool(
@@ -559,29 +588,32 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
         relation_fields: z.array(z.string()).optional(),
       },
     },
-    wrap("get_neighbors", async (args: {
-      entity_type_key: string;
-      entity_id: string;
-      direction?: string | undefined;
-      relation_type_key?: string | undefined;
-      limit?: number | undefined;
-      fields?: string[] | undefined;
-      relation_fields?: string[] | undefined;
-    }) => {
-      const limit = clamp(args.limit ?? 50, 1, 200);
-      const result = await service.getNeighbors(
-        lensKey,
-        args.entity_type_key,
-        args.entity_id,
-        args.direction ?? "both",
-        args.relation_type_key ?? null,
-        limit,
-        await getRuntimeStore(ontologyKey),
-        args.fields ?? null,
-        args.relation_fields ?? null,
-      );
-      return jsonResult(result);
-    }),
+    wrap(
+      "get_neighbors",
+      async (args: {
+        entity_type_key: string;
+        entity_id: string;
+        direction?: string | undefined;
+        relation_type_key?: string | undefined;
+        limit?: number | undefined;
+        fields?: string[] | undefined;
+        relation_fields?: string[] | undefined;
+      }) => {
+        const limit = clamp(args.limit ?? 50, 1, 200);
+        const result = await service.getNeighbors(
+          lensKey,
+          args.entity_type_key,
+          args.entity_id,
+          args.direction ?? "both",
+          args.relation_type_key ?? null,
+          limit,
+          await getRuntimeStore(ontologyKey),
+          args.fields ?? null,
+          args.relation_fields ?? null,
+        );
+        return jsonResult(result);
+      },
+    ),
   );
 
   server.registerTool(
@@ -603,88 +635,70 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
       },
     },
     wrap("execute_query", async (args: { query: string }) => {
-      const result = await service.executeQuery(lensKey, args.query, await getRuntimeStore(ontologyKey));
-      return jsonResult(result);
-    }),
-  );
-
-  server.registerTool(
-    "semantic_search",
-    {
-      description:
-        "Search entities by semantic similarity to a natural language query; ranking has " +
-        "no similarity cutoff. Omit entity_type_key to search all types (each hit " +
-        "carries _entityTypeKey). 'search_in' " +
-        "selects the ranking: 'entities' (entity embeddings), 'documents' (passages inside " +
-        "document properties) or 'all' (default, both combined). 'limit' defaults to 10. " +
-        "Each hit carries 'matchedVia' with its source and cosine 'similarity', and " +
-        "'score': the similarity under one ranking, a rank-fusion value under 'all'. " +
-        "Document hits add propertyKey, charOffset/charLength (for " +
-        "get_document) and a ~200-char snippet (snippets=false omits it). 'filters' " +
-        "narrow the search before ranking, so the limit counts filtered hits; they " +
-        'require entity_type_key. Operators: exact match ("location": "Berlin"), greater ' +
-        'than ("age__gt": 25), "__gte", "__lt", "__lte"; "__contains" is rejected here. ' +
-        "A filter key may be a query path crossing one relation type: " +
-        "\"<relationTypeKey>.<propertyKey>\" reads a property of the related entity, " +
-        "\"<relationTypeKey>@<propertyKey>\" a property stored on the relation itself, " +
-        'operator suffixes included ("works_for.name": "Acme" for persons employed by ' +
-        'Acme, "works_for@since__gte": "2021-01-01" for an employment begun since 2021). ' +
-        "Direction follows the relation type's endpoints, outgoing from its source type " +
-        "and incoming from its target type; a \":out\"/\":in\" marker on the relation " +
-        "segment must agree with it and is required where both endpoints are the same " +
-        'type ("manages:out.name": "Bob" for persons managing a Bob, ' +
-        '"manages:in.name": "Alice" for persons managed by an Alice). An entity ' +
-        "matches when at least one relation of the type satisfies the condition; several " +
-        "path conditions are ANDed but each is checked on its own, so two paths through " +
-        "one relation type may be satisfied by two different relations; to bind both to " +
-        "one relation use execute_query. 'fields' selects the properties to return; _id " +
-        "(and _entityTypeKey on cross-type search) is always included.",
-      inputSchema: {
-        query: z.string(),
-        entity_type_key: z.string().optional(),
-        limit: z.number().optional(),
-        filters: z.record(z.string(), z.unknown()).optional(),
-        fields: z.array(z.string()).optional(),
-        search_in: z.string().optional(),
-        snippets: z.boolean().optional(),
-      },
-    },
-    wrap("semantic_search", async (args: {
-      query: string;
-      entity_type_key?: string | undefined;
-      limit?: number | undefined;
-      filters?: Record<string, unknown> | undefined;
-      fields?: string[] | undefined;
-      search_in?: string | undefined;
-      snippets?: boolean | undefined;
-    }) => {
-      // No min_score on the MCP tool — the documented difference
-      // (`docs/capabilities/search.md#through-the-interfaces`): a model
-      // that needs a threshold applies it to the reported similarity.
-      const limit = clamp(args.limit ?? 10, 1, 100);
-      const strFilters: Record<string, string> = {};
-      for (const [k, v] of Object.entries(args.filters ?? {})) {
-        // Filter values travel as strings, in the same spelling the write
-        // path stores them in.
-        strFilters[k] = valueToText(v);
-      }
-      const result = await service.semanticSearch(
+      const result = await service.executeQuery(
         lensKey,
         args.query,
-        args.entity_type_key ?? null,
-        limit,
-        null,
         await getRuntimeStore(ontologyKey),
-        {
-          filters: strFilters,
-          fields: args.fields ?? null,
-          searchIn: args.search_in ?? "all",
-          snippets: args.snippets ?? true,
-        },
       );
       return jsonResult(result);
     }),
   );
+
+  for (const document of [false, true]) {
+    const name = document ? "search_documents" : "search";
+    server.registerTool(
+      name,
+      {
+        description:
+          (document
+            ? "Find entities whose document text matches. Every hit carries passage matches with propertyKey, charOffset and charLength for get_document. "
+            : "Find entities for a text across properties and documents. ") +
+          "Omit entity_type_key to search all exposed types. Filters apply before ranking and narrow the searched types; fields projects each entity. Returns the search envelope. relativeScore is comparable only within this response: " +
+          RELATIVE_SCORE_PROMISE + " " + SEARCH_EVIDENCE_GUIDANCE,
+        inputSchema: {
+          query: z.string(),
+          entity_type_key: z.string().optional(),
+          limit: z.number().optional(),
+          filters: z.record(z.string(), z.unknown()).optional(),
+          fields: z.array(z.string()).optional(),
+          ...(document ? { property: z.string().optional() } : {}),
+        },
+      },
+      wrap(
+        name,
+        async (args: {
+          query: string;
+          entity_type_key?: string;
+          limit?: number;
+          filters?: Record<string, unknown>;
+          fields?: string[];
+          property?: string;
+        }) => {
+          return jsonResult(
+            await service.search(
+              lensKey,
+              {
+                query: args.query,
+                type: args.entity_type_key ?? null,
+                limit: clamp(args.limit ?? 10, 1, 100),
+                filter: Object.fromEntries(
+                  Object.entries(args.filters ?? {}).map(([key, value]) => [
+                    key,
+                    valueToText(value),
+                  ]),
+                ),
+                fields: args.fields ?? null,
+                ...(document
+                  ? { in: ["document" as const], document: { property: args.property } }
+                  : {}),
+              },
+              await getRuntimeStore(ontologyKey),
+            ),
+          );
+        },
+      ),
+    );
+  }
 
   server.registerTool(
     "list_saved_queries",
@@ -713,18 +727,18 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
         params: z.record(z.string(), z.unknown()).optional(),
       },
     },
-    wrap("run_saved_query", async (args: {
-      query_key: string;
-      params?: Record<string, unknown> | undefined;
-    }) => {
-      const result = await service.executeSavedQuery(
-        lensKey,
-        args.query_key,
-        args.params ?? {},
-        await getRuntimeStore(ontologyKey),
-      );
-      return jsonResult(result);
-    }),
+    wrap(
+      "run_saved_query",
+      async (args: { query_key: string; params?: Record<string, unknown> | undefined }) => {
+        const result = await service.executeSavedQuery(
+          lensKey,
+          args.query_key,
+          args.params ?? {},
+          await getRuntimeStore(ontologyKey),
+        );
+        return jsonResult(result);
+      },
+    ),
   );
 
   server.registerTool(

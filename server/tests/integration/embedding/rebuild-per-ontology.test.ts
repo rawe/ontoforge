@@ -1,6 +1,6 @@
 /**
  * Rebuild-embeddings is per-ontology: `POST
- * /api/ontologies/:key/model/rebuild-embeddings` regenerates vectors for
+ * /api/ontologies/:key/model/rebuild-search-data` regenerates vectors for
  * the addressed ontology alone — a sibling ontology's rows stay
  * untouched (unembedded rows are invisible to semantic search, which is
  * what makes the difference observable through the port).
@@ -72,11 +72,11 @@ async function buildOntology(ontologyKey: string, personName: string): Promise<s
 async function personHits(ontologyKey: string, query: string): Promise<Row[]> {
   const embedding = await getEmbeddingProvider()!.embed(query);
   const store = await getRuntimeStore(ontologyKey);
-  return store.semanticSearch("person", DEFS, embedding!, 10, null);
+  return store.propertySearchSemantic([{ entityTypeKey: "person", propertyDefs: DEFS, conditions: [] }], embedding!, 10);
 }
 
 describe.skipIf(!ollamaUp || !supportsMultipleOntologies)(
-  "per-ontology rebuild-embeddings (Ollama)",
+  "per-ontology rebuild-search-data (Ollama)",
   () => {
     beforeAll(async () => {
       await initStores();
@@ -103,7 +103,7 @@ describe.skipIf(!ollamaUp || !supportsMultipleOntologies)(
 
       const res = await app.inject({
         method: "POST",
-        url: "/api/ontologies/alpha/model/rebuild-embeddings",
+        url: "/api/ontologies/alpha/model/rebuild-search-data",
       });
       expect(res.statusCode, res.body).toBe(200);
       const lines = res.body
@@ -123,7 +123,7 @@ describe.skipIf(!ollamaUp || !supportsMultipleOntologies)(
     it("rebuild for an unknown ontology answers 404", async () => {
       const res = await app.inject({
         method: "POST",
-        url: "/api/ontologies/no_such_ont/model/rebuild-embeddings",
+        url: "/api/ontologies/no_such_ont/model/rebuild-search-data",
       });
       expect(res.statusCode).toBe(404);
     });

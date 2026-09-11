@@ -29,7 +29,7 @@ import {
   type PropertyDef,
   type TypeKind,
 } from "../core/schemas.js";
-import { buildTextRepr } from "../runtime/embedding.js";
+import { buildTextRepr, buildKeywordSegments } from "../runtime/search/propertyText.js";
 import { invalidateLoadedSchemaCache, loadSchemaUncached } from "../runtime/schemaCache.js";
 import { syncDocumentChunks } from "../runtime/service.js";
 import { VALID_AGENT_TOOLS } from "../runtime/toolNames.js";
@@ -1027,36 +1027,43 @@ export async function validateAll(store: ModelingStore): Promise<ValidationResul
   return { valid: errors.length === 0, errors };
 }
 
-// --- Rebuild embeddings ---
+// --- Rebuild search data ---
 
-// Page size for iterating all entities of a type during embedding rebuild.
+// Page size for iterating all entities of a type during a search-data rebuild.
 const REBUILD_PAGE_SIZE = 500;
 
 /**
- * Re-embed all entities, document chunks, and saved-query descriptions.
+ * Rebuild every stored representation search reads: each entity's keyword
+ * segments and semantic text, every document property's passages, and —
+ * where an embedding provider is configured — the vectors of all three plus
+ * the saved-query descriptions and the vector indexes.
+ *
+ * It runs without a provider. Keyword text and passages need no inference,
+ * and passages are themselves the document keyword index, so the run that
+ * repairs a keyword-only ontology is the same run, minus the vector work.
+ * The summary reports that omission as `embeddingsSkipped`.
+ *
  * Yields NDJSON progress lines (`docs/capabilities/search.md#rebuild`):
  * one progress record per processed item carrying the group's type key,
  * the count so far and the group total, then a final summary with
  * per-type processed/failed counts and the overall totals.
  */
-export async function* rebuildEmbeddings(
+export async function* rebuildSearchData(
   store: ModelingStore,
   runtimeStore: RuntimeStore,
 ): AsyncGenerator<string> {
   const provider = getEmbeddingProvider();
-  if (!provider) {
-    throw new ValidationError(
-      "Embedding provider is not configured. Set EMBEDDING_PROVIDER to enable semantic search.",
-    );
-  }
 
   // Phase one of three: drop every index whose width no longer matches
   // the provider. It cannot be merged into the create below. An index
   // fixes its width when it is created, so while a drifted one stands,
   // storing a vector of the provider's width fails — the vectors cannot
   // be regenerated underneath it, and it cannot be built over the old
-  // ones. Nothing is dropped when the widths already agree.
-  await store.dropMismatchedVectorIndexes(provider.dimensions);
+  // ones. Nothing is dropped when the widths already agree. With no
+  // provider there is no width to reconcile against and no index to hold.
+  if (provider) {
+    await store.dropMismatchedVectorIndexes(provider.dimensions);
+  }
 
   // Discover all entity types with their property definitions.
   const entityTypes: { key: string; properties: Record<string, PropertyDef> }[] = [];
@@ -1125,13 +1132,17 @@ export async function* rebuildEmbeddings(
       }
 
       const text = buildTextRepr(etKey, userProps, propertyDefs);
-      const embedding = await provider.embed(text);
+      const embedding = provider ? await provider.embed(text) : null;
 
-      if (embedding !== null) {
-        await store.setEntityEmbedding(entityId, embedding);
-        processed += 1;
-      } else {
+      await store.setEntitySearchText(entityId, text, embedding, buildKeywordSegments(userProps, propertyDefs));
+      // A null vector counts as a failure only when a provider was there to
+      // produce one. Without a provider it is the intended result: the
+      // entity's keyword segments and semantic text were rewritten, which
+      // is all this run promised.
+      if (provider && embedding === null) {
         failed += 1;
+      } else {
+        processed += 1;
       }
 
       // Rebuild document chunks (delete + re-chunk + re-embed).
@@ -1156,41 +1167,45 @@ export async function* rebuildEmbeddings(
     totalFailed += failed;
   }
 
-  // Re-embed every saved-query description.
-  const savedQueries = await store.listSavedQueryRefs();
-
-  const sqTotal = savedQueries.length;
+  // Re-embed every saved-query description. Discovery ranks descriptions by
+  // vector alone, so with no provider there is nothing here to rebuild.
   let sqProcessed = 0;
   let sqFailed = 0;
 
-  for (const sq of savedQueries) {
-    const embedding = await provider.embed(sq.description as string);
-    if (embedding !== null) {
-      await store.setSavedQueryEmbedding(sq.savedQueryId as string, embedding);
-      sqProcessed += 1;
-    } else {
-      sqFailed += 1;
+  if (provider) {
+    const savedQueries = await store.listSavedQueryRefs();
+    const sqTotal = savedQueries.length;
+
+    for (const sq of savedQueries) {
+      const embedding = await provider.embed(sq.description as string);
+      if (embedding !== null) {
+        await store.setSavedQueryEmbedding(sq.savedQueryId as string, embedding);
+        sqProcessed += 1;
+      } else {
+        sqFailed += 1;
+      }
+
+      yield `${JSON.stringify({
+        type: "progress",
+        entityTypeKey: "saved_queries",
+        processed: sqProcessed + sqFailed,
+        total: sqTotal,
+      })}\n`;
     }
 
-    yield `${JSON.stringify({
-      type: "progress",
-      entityTypeKey: "saved_queries",
-      processed: sqProcessed + sqFailed,
-      total: sqTotal,
-    })}\n`;
+    totalProcessed += sqProcessed;
+    totalFailed += sqFailed;
+
+    // Phase three: every vector now has the provider's width, so the
+    // indexes phase one dropped — and any the schema calls for and never
+    // had — can be built. It comes before the summary: that line is what
+    // tells the caller the rebuild is done, and it is not done while the
+    // indexes it dropped are still missing.
+    await store.ensureVectorIndexes(provider.dimensions);
   }
 
-  totalProcessed += sqProcessed;
-  totalFailed += sqFailed;
-
-  // Phase three: every vector now has the provider's width, so the
-  // indexes phase one dropped — and any the schema calls for and never
-  // had — can be built. It comes before the summary: that line is what
-  // tells the caller the rebuild is done, and it is not done while the
-  // indexes it dropped are still missing.
-  await store.ensureVectorIndexes(provider.dimensions);
-
-  // Final summary.
+  // Final summary. `embeddingsSkipped` is what tells a caller that a run
+  // reporting no failures nevertheless wrote no vectors.
   yield `${JSON.stringify({
     type: "summary",
     entityTypes: typeResults,
@@ -1198,10 +1213,12 @@ export async function* rebuildEmbeddings(
     savedQueriesFailed: sqFailed,
     totalProcessed,
     totalFailed,
+    embeddingsSkipped: !provider,
   })}\n`;
 
   console.info(
-    `Rebuild embeddings complete: ${totalProcessed} processed, ${totalFailed} failed`,
+    `Rebuild search data complete: ${totalProcessed} processed, ${totalFailed} failed` +
+      (provider ? "" : " (embeddings skipped: no provider)"),
   );
 }
 
@@ -1304,6 +1321,7 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
 
   return {
     formatVersion: TRANSFER_FORMAT_VERSION,
+    textSearchLanguage: store.textSearchLanguage,
     entityTypes,
     relationTypes,
     lenses,
@@ -1338,6 +1356,12 @@ export async function importSchema(
   payload: ExportPayloadInput,
   store: ModelingStore,
 ): Promise<Row> {
+  if (payload.textSearchLanguage !== store.textSearchLanguage) {
+    throw new ValidationError("Text-search language differs from the target ontology", {
+      fields: { textSearchLanguage: `Expected ${store.textSearchLanguage}` },
+    });
+  }
+
   // ---- Phase 1: payload-intrinsic validation (collect everything) ----
   const errors: string[] = [];
 
@@ -1462,10 +1486,10 @@ export async function importSchema(
       }
       let stepsKnown = true;
       for (const s of sq.steps) {
-        if (s.type !== "oql" && s.type !== "semantic_search") {
+        if (s.type !== "oql" && s.type !== "search") {
           errors.push(
             `Import error: saved query '${sq.key}' has step '${s.name}' with ` +
-              `unknown type '${s.type}'; expected oql or semantic_search`,
+              `unknown type '${s.type}'; expected oql or search`,
           );
           stepsKnown = false;
         }
@@ -1645,7 +1669,6 @@ export async function importSchema(
           ...(s.entityTypeKey ? { entityTypeKey: s.entityTypeKey } : {}),
           ...(s.query ? { query: s.query } : {}),
           ...(s.limit !== null && s.limit !== undefined ? { limit: s.limit } : {}),
-          ...(s.minScore !== null && s.minScore !== undefined ? { minScore: s.minScore } : {}),
           ...(s.bindings && Object.keys(s.bindings).length > 0 ? { bindings: s.bindings } : {}),
         })),
       );
@@ -1800,7 +1823,6 @@ function toStepResponse(s: Row): StepResponseBody {
     entityTypeKey: (s.entityTypeKey as string | undefined) ?? null,
     query: (s.query as string | undefined) ?? null,
     limit: (s.limit as number | undefined) ?? null,
-    minScore: (s.minScore as number | undefined) ?? null,
     bindings: (s.bindings as Record<string, string> | undefined) ?? null,
   };
 }
@@ -1856,12 +1878,12 @@ function validatePipeline(steps: StepInput[], paramNames: string[], queryKey: st
       if (!step.oql) {
         errors.push(`${prefix}.oql: Required for oql steps`);
       }
-    } else if (step.type === "semantic_search") {
+    } else if (step.type === "search") {
       if (!step.entityTypeKey) {
-        errors.push(`${prefix}.entityTypeKey: Required for semantic_search steps`);
+        errors.push(`${prefix}.entityTypeKey: Required for search steps`);
       }
       if (!step.query) {
-        errors.push(`${prefix}.query: Required for semantic_search steps`);
+        errors.push(`${prefix}.query: Required for search steps`);
       }
     }
 
@@ -1906,9 +1928,9 @@ function validatePipeline(steps: StepInput[], paramNames: string[], queryKey: st
 
   // Params needed from the caller = all $refs minus those a binding supplies.
   const neededFromUser = new Set([...allQueryParams].filter((p) => !allBindingNames.has(p)));
-  // $param refs in semantic_search query fields are always caller-supplied.
+  // $param refs in search query fields are always caller-supplied.
   for (const step of steps) {
-    if (step.type === "semantic_search" && step.query) {
+    if (step.type === "search" && step.query) {
       for (const m of step.query.matchAll(PARAM_REF_PATTERN)) {
         neededFromUser.add(m[1]!);
       }
@@ -2013,7 +2035,6 @@ export async function upsertSavedQuery(
       ...(s.entityTypeKey ? { entityTypeKey: s.entityTypeKey } : {}),
       ...(s.query ? { query: s.query } : {}),
       ...(s.limit !== null && s.limit !== undefined ? { limit: s.limit } : {}),
-      ...(s.minScore !== null && s.minScore !== undefined ? { minScore: s.minScore } : {}),
       ...(s.bindings && Object.keys(s.bindings).length > 0 ? { bindings: s.bindings } : {}),
     })),
   );

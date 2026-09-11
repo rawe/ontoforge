@@ -30,7 +30,7 @@ type Row = Record<string, unknown>;
 const ollamaUp = await checkOllamaModel();
 
 const LENS = "/api/ontologies/test_ont/runtime/lenses/path_search";
-const SEARCH = `${LENS}/search/semantic?q=punched%20cards%20and%20polynomial%20tables`;
+const SEARCH = `${LENS}/search?strategy=semantic&q=punched%20cards%20and%20polynomial%20tables`;
 
 /** Near the query: the passages that rank first. */
 const NEAR_BIO = "The analytical engine reads punched cards and computes polynomial tables.";
@@ -50,7 +50,7 @@ describe.skipIf(!ollamaUp)("query paths on semantic search (Ollama)", () => {
     app = await createApp();
     await app.ready();
     await buildFixture();
-    pathsSupported = (await getRuntimeStore("test_ont")).supportsSemanticSearchPathConditions();
+    pathsSupported = (await getRuntimeStore("test_ont")).supportsSearchPathConditions();
   });
 
   afterAll(async () => {
@@ -135,7 +135,7 @@ describe.skipIf(!ollamaUp)("query paths on semantic search (Ollama)", () => {
   async function hits(query: string): Promise<{ names: string[]; results: Row[] }> {
     const res = await app.inject({ method: "GET", url: `${SEARCH}&${query}` });
     expect(res.statusCode, `GET ${query}: ${res.body}`).toBe(200);
-    const results = (res.json() as { results: Row[] }).results;
+    const results = (res.json() as { hits: Row[] }).hits;
     return { names: results.map((r) => (r.entity as Row).name as string), results };
   }
 
@@ -161,22 +161,22 @@ describe.skipIf(!ollamaUp)("query paths on semantic search (Ollama)", () => {
   describe("on an adapter declaring support", () => {
     it("the entity ranking, outgoing, related-entity form: persons by their company's name", async (ctx) => {
       whenSupported(ctx);
-      const { names } = await hits("type=person&searchIn=entities&filter.works_for.name=Acme");
+      const { names } = await hits("type=person&in=properties&filter.works_for.name=Acme");
       expect(names.sort()).toEqual(["Alice", "Carol", "Erin"]);
     });
 
     it("the passage ranking, outgoing, relation-property form: passages on entities whose employment fails the filter are excluded", async (ctx) => {
       whenSupported(ctx);
-      const { names, results } = await hits("type=person&searchIn=documents&filter.works_for@role=CTO");
+      const { names, results } = await hits("type=person&in=document&filter.works_for@role=CTO");
       expect(names).toEqual(["Alice"]);
-      expect((results[0]!.matchedVia as Row).source).toBe("document");
+      expect((results[0]!.matches as Row[])[0]!.kind).toBe("document");
     });
 
     it("the passage ranking, incoming, related-entity form: companies by an employee's name", async (ctx) => {
       whenSupported(ctx);
-      const { names, results } = await hits("type=company&searchIn=documents&filter.works_for.name=Bob");
+      const { names, results } = await hits("type=company&in=document&filter.works_for.name=Bob");
       expect(names).toEqual(["Globex"]);
-      expect((results[0]!.matchedVia as Row).source).toBe("document");
+      expect((results[0]!.matches as Row[])[0]!.kind).toBe("document");
     });
 
     it("both rankings fused, incoming, relation-property form: companies with a CTO", async (ctx) => {
@@ -187,7 +187,7 @@ describe.skipIf(!ollamaUp)("query paths on semantic search (Ollama)", () => {
 
     it("an explicit direction marker that agrees with the endpoints is accepted", async (ctx) => {
       whenSupported(ctx);
-      const { names } = await hits("type=person&searchIn=entities&filter.works_for:out@role=Engineer");
+      const { names } = await hits("type=person&in=properties&filter.works_for:out@role=Engineer");
       expect(names.sort()).toEqual(["Bob", "Carol", "Erin"]);
     });
 
@@ -201,17 +201,17 @@ describe.skipIf(!ollamaUp)("query paths on semantic search (Ollama)", () => {
       whenSupported(ctx);
       // The premise: unfiltered, the two best passages belong to Bob and
       // Dave, neither of whom works for Acme.
-      const unfiltered = await hits("type=person&searchIn=documents&limit=2");
+      const unfiltered = await hits("type=person&in=document&limit=2");
       expect(unfiltered.names.sort()).toEqual(["Bob", "Dave"]);
 
       // Filtered to Acme's employees, a page of two is still full — with
       // passages that ranked behind the excluded ones.
-      const two = await hits("type=person&searchIn=documents&limit=2&filter.works_for.name=Acme");
+      const two = await hits("type=person&in=document&limit=2&filter.works_for.name=Acme");
       expect(two.names).toHaveLength(2);
       for (const name of two.names) {
         expect(["Alice", "Carol", "Erin"]).toContain(name);
       }
-      const three = await hits("type=person&searchIn=documents&limit=3&filter.works_for.name=Acme");
+      const three = await hits("type=person&in=document&limit=3&filter.works_for.name=Acme");
       expect(three.names.sort()).toEqual(["Alice", "Carol", "Erin"]);
     });
 
@@ -224,19 +224,18 @@ describe.skipIf(!ollamaUp)("query paths on semantic search (Ollama)", () => {
         "ghost.name":
           "Not defined in type 'person'. Property keys: age, bio, name. " +
           "Relation types touching 'person': works_for",
-        "works_for.name__contains": "Not supported on semantic search",
+        "works_for.name__contains": "Not supported on search; use the entity list",
         age: expect.stringContaining("Expected integer"),
       });
-      expect(message).toContain("Unknown filter property or relation type: 'ghost'");
-      expect(message).toContain("'__contains' filter is not supported on semantic search");
-      expect(message).toContain("Invalid filter value for 'age'");
+      expect(message).toContain("Not defined in type 'person'");
+      expect(message).toContain("Not supported on search");
+      expect(message).toContain("Expected integer");
     });
   });
 
   describe("on an adapter declaring none", () => {
     const REJECTION =
-      "Not supported on semantic search by the active storage adapter; " +
-      "filter by the query path on the entity list instead";
+      "Not supported on search by the active storage adapter; use the entity list";
 
     it.for(["works_for.name", "works_for@role"])(
       "a path filter is rejected above the port, naming the entity list, together with the other faults: %s",
@@ -248,7 +247,7 @@ describe.skipIf(!ollamaUp)("query paths on semantic search (Ollama)", () => {
           age: expect.stringContaining("Expected integer"),
         });
         expect(message).toContain(
-          `Query path '${key}' is not supported on semantic search by the active storage adapter`,
+          `Not supported on search by the active storage adapter`,
         );
       },
     );
@@ -267,17 +266,17 @@ describe.skipIf(!ollamaUp)("query paths on semantic search (Ollama)", () => {
 
   describe("on every adapter", () => {
     it("a plain filter narrows the passage ranking", async () => {
-      const { names, results } = await hits("type=person&searchIn=documents&filter.age__gt=40");
+      const { names, results } = await hits("type=person&in=document&filter.age__gt=40");
       expect(names.sort()).toEqual(["Carol", "Dave"]);
       for (const hit of results) {
-        expect((hit.matchedVia as Row).source).toBe("document");
+        expect((hit.matches as Row[])[0]!.kind).toBe("document");
       }
     });
 
-    it("a path filter without a type is rejected as every filter is", async () => {
-      const { message, fields } = await rejected("filter.works_for.name=Acme");
-      expect(message).toContain("require 'type'");
-      expect(fields).toEqual({ "works_for.name": "Requires 'type'" });
+    it("cross-type path filters narrow the searched types where supported", async (ctx) => {
+      whenSupported(ctx);
+      const { names } = await hits("filter.works_for.name=Acme");
+      expect(names.sort()).toEqual(["Alice", "Carol", "Erin"]);
     });
   });
 });

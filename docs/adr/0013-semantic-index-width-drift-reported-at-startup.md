@@ -16,7 +16,7 @@ Startup reads each existing index's width, compares it against the configured pr
 and warns per mismatch — naming the entity type, document property, or search scope, both
 widths, and the remedy. It does not repair.
 
-The rebuild-embeddings operation does repair, in three phases: it drops every mismatched
+The search-data rebuild does repair, in three phases: it drops every mismatched
 index, regenerates every vector at the new width, and only then builds the indexes it
 dropped. The three cannot be collapsed into fewer — an index rejects every vector of a
 width other than its own, so while a drifted one stands the new vectors cannot be written,

@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { chunkDocument, type Chunk } from "../../src/runtime/chunking.js";
+import { chunkDocument, type Chunk } from "../../src/runtime/search/document.js";
 
 /** Code-point slice, for asserting chunk coordinates. */
 function cpSlice(text: string, start: number, end: number): string {

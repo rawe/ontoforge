@@ -175,9 +175,9 @@ function StepEditor({
                 <SquareTerminal className="size-3.5" /> Query
               </span>
             </SelectItem>
-            <SelectItem value="semantic_search">
+            <SelectItem value="search">
               <span className="flex items-center gap-1.5">
-                <Braces className="size-3.5" /> Semantic search
+                <Braces className="size-3.5" /> Search
               </span>
             </SelectItem>
           </SelectContent>
@@ -226,7 +226,7 @@ function StepEditor({
         />
       )}
 
-      {step.type === 'semantic_search' && (
+      {step.type === 'search' && (
         <div className="grid gap-2">
           <div className="grid grid-cols-2 gap-2">
             <div className="grid gap-1">
@@ -277,23 +277,7 @@ function StepEditor({
                 placeholder="10"
               />
             </div>
-            <div className="grid gap-1">
-              <Label className="text-xs">Min score</Label>
-              <Input
-                type="number"
-                min={0}
-                max={1}
-                step="0.05"
-                value={step.minScore ?? ''}
-                onChange={(e) =>
-                  onChange({
-                    minScore: e.target.value === '' ? undefined : Number(e.target.value),
-                  })
-                }
-                className="h-7 text-xs"
-                placeholder="0.7"
-              />
-            </div>
+
           </div>
         </div>
       )}
@@ -383,7 +367,6 @@ function SavedQueryDialog({
         base.entityTypeKey = s.entityTypeKey
         base.query = s.query ?? ''
         if (s.limit !== undefined) base.limit = s.limit
-        if (s.minScore !== undefined) base.minScore = s.minScore
       }
       if (i > 0 && s.bindings !== undefined && Object.keys(s.bindings).length > 0) {
         base.bindings = s.bindings
@@ -426,7 +409,7 @@ function SavedQueryDialog({
         <DialogHeader>
           <DialogTitle>{isEdit ? `Edit query "${query.key}"` : 'New saved query'}</DialogTitle>
           <DialogDescription>
-            Multi-step pipelines of query and semantic-search steps. Later steps can bind
+            Multi-step pipelines of query and search steps. Later steps can bind
             values from earlier results.
           </DialogDescription>
         </DialogHeader>
@@ -498,7 +481,7 @@ function SavedQueryDialog({
                       ...prev,
                       {
                         name: `step${prev.length + 1}`,
-                        type: 'semantic_search',
+                        type: 'search',
                         entityTypeKey: entityTypeKeys[0] ?? '',
                         query: '',
                         limit: 10,
@@ -506,7 +489,7 @@ function SavedQueryDialog({
                     ])
                   }
                 >
-                  <Plus className="size-3" /> Semantic step
+                  <Plus className="size-3" /> Search step
                 </Button>
               </span>
             </div>

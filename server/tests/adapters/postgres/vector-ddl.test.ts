@@ -184,13 +184,9 @@ describe("the fixed indexes", () => {
     );
   });
 
-  it("ensures the cross-type index full-table, with no port method of its own", async () => {
+  it("has no shared cross-type entity index", async () => {
     await store.ensureVectorIndexes(768);
-    expect(only("entity_embedding_all_idx")).toBe(
-      "CREATE INDEX IF NOT EXISTS entity_embedding_all_idx ON entity " +
-        "USING hnsw ((embedding::vector(768)) vector_cosine_ops)",
-    );
-    expect(store).not.toHaveProperty("ensureEntityVectorIndex");
+    expect(statements().join("\n")).not.toContain("entity_embedding_all_idx");
   });
 });
 
@@ -237,10 +233,9 @@ describe("ensureVectorIndexes", () => {
     expect(dropped.join("\n")).not.toContain(ENTITY_INDEX);
 
     const created = sql.filter((s) => s.includes("CREATE INDEX"));
-    expect(created).toHaveLength(4); // per-type, chunk, cross-type, saved-query
+    expect(created).toHaveLength(3); // per-type, chunk, saved-query
     expect(created.join("\n")).toContain(ENTITY_INDEX);
     expect(created.join("\n")).toContain(CHUNK_INDEX);
-    expect(created.join("\n")).toContain("entity_embedding_all_idx");
     expect(created.join("\n")).toContain("saved_query_embedding_idx");
   });
 });
@@ -259,7 +254,7 @@ describe("width drift", () => {
     expect(reported).toContain("entity type 'person'");
     expect(reported).toContain("1024");
     expect(reported).toContain("768");
-    expect(reported).toContain("/model/rebuild-embeddings");
+    expect(reported).toContain("/model/rebuild-search-data");
     expect(statements().filter((sql) => sql.includes("DROP INDEX"))).toEqual([]);
   });
 
@@ -296,7 +291,7 @@ describe("width drift", () => {
     }
 
     expect(statements().filter((sql) => sql.includes("DROP INDEX"))).toEqual([]);
-    expect(captured.lines.join("\n")).toContain("/model/rebuild-embeddings");
+    expect(captured.lines.join("\n")).toContain("/model/rebuild-search-data");
   });
 
   it("drops a drifted index and only a drifted one, creating nothing", async () => {
@@ -316,7 +311,7 @@ describe("width drift", () => {
     expect(statements().filter((sql) => sql.includes("CREATE INDEX"))).toEqual([]);
     // A repair announcement, not the operator advice the ensure gives.
     expect(captured.lines.join("\n")).toContain("Recreating the semantic index");
-    expect(captured.lines.join("\n")).not.toContain("/model/rebuild-embeddings");
+    expect(captured.lines.join("\n")).not.toContain("/model/rebuild-search-data");
   });
 
   it("leaves an index alone when its width already agrees", async () => {

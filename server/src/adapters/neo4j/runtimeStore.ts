@@ -1,3 +1,4 @@
+import type { KeywordPropertySegment } from "../../core/ports.js";
 /**
  * Neo4j implementation of the runtime store (instance-data persistence).
  *
@@ -20,13 +21,20 @@
  * this adapter ignores those parameters.
  */
 
+import type { TextSearchLanguage } from "../../registry/schemas.js";
+
 import neo4j, { type Driver } from "neo4j-driver";
 
 import type { ValidatedQuery } from "../../core/oql/index.js";
-import type { FilterCondition, Row, RuntimeStore } from "../../core/ports.js";
+import type {
+  FilterCondition,
+  Row,
+  RuntimeStore,
+  SearchedType,
+  SearchedProperty,
+} from "../../core/ports.js";
 import type { PropertyDef } from "../../core/schemas.js";
 import {
-  ENTITY_VECTOR_INDEX_NAME,
   documentIndexName,
   documentVirtualLabel,
   toPascalCase,
@@ -41,10 +49,7 @@ import * as queries from "./runtimeQueries.js";
 /** Convert a property map to driver-native parameter values. Internal
  * `_doc_*_length` counters are integers; everything else follows its
  * property definition's data type. */
-function toWriteProperties(
-  properties: Row,
-  propertyDefs: Record<string, PropertyDef>,
-): Row {
+function toWriteProperties(properties: Row, propertyDefs: Record<string, PropertyDef>): Row {
   const converted: Row = {};
   for (const [key, value] of Object.entries(properties)) {
     if (key.startsWith("_doc_") && key.endsWith("_length")) {
@@ -76,6 +81,7 @@ export class Neo4jRuntimeStore implements RuntimeStore {
   constructor(
     private readonly driver: Driver,
     public readonly ontologyKey: string = "",
+    public readonly textSearchLanguage: TextSearchLanguage = "english",
   ) {}
 
   // ------------------------------------------------------------------
@@ -83,10 +89,14 @@ export class Neo4jRuntimeStore implements RuntimeStore {
   // ------------------------------------------------------------------
 
   /** Declared unsupported: the in-index WHERE of a vector search cannot
-   * express a pattern predicate, so a path condition on semantic search
+   * express a pattern predicate, so a path condition on search
    * is rejected above the port and the entity list is the alternative
    * (`docs/storage-adapters.md`, the divergence list). */
-  supportsSemanticSearchPathConditions(): boolean {
+  supportsKeywordRanking(): boolean {
+    return false;
+  }
+
+  supportsSearchPathConditions(): boolean {
     return false;
   }
 
@@ -99,9 +109,7 @@ export class Neo4jRuntimeStore implements RuntimeStore {
   }
 
   async getAiAgentConfigs(lensKey: string): Promise<Row[]> {
-    return runSession(this.driver, (session) =>
-      queries.getAiAgentConfigs(session, lensKey),
-    );
+    return runSession(this.driver, (session) => queries.getAiAgentConfigs(session, lensKey));
   }
 
   async getSavedQueries(lensKey: string): Promise<Row[]> {
@@ -133,6 +141,8 @@ export class Neo4jRuntimeStore implements RuntimeStore {
     properties: Row,
     propertyDefs: Record<string, PropertyDef>,
     embedding: number[] | null = null,
+    _propertyText = "",
+    _keywordSegments?: KeywordPropertySegment[],
   ): Promise<Row> {
     return runSession(this.driver, (session) =>
       queries.createEntity(
@@ -199,6 +209,8 @@ export class Neo4jRuntimeStore implements RuntimeStore {
     propertyDefs: Record<string, PropertyDef>,
     embedding: number[] | null = null,
     hasEmbeddingUpdate = false,
+    _propertyText = "",
+    _keywordSegments?: KeywordPropertySegment[],
   ): Promise<Row | null> {
     return runSession(this.driver, (session) =>
       queries.updateEntity(
@@ -267,25 +279,12 @@ export class Neo4jRuntimeStore implements RuntimeStore {
    * plain conditions arrive: this adapter declares no path-condition
    * support for semantic search, so the service rejects paths above the
    * port before any search runs. */
-  async searchDocumentChunks(
-    entityTypeKey: string,
-    propertyKey: string,
-    queryEmbedding: number[],
+  async documentSearchSemantic(
+    properties: SearchedProperty[],
+    embedding: number[],
     limit: number,
-    filters: FilterCondition[] | null = null,
   ): Promise<Row[]> {
-    const [whereClauses, filterParams] = filterFragments(filters, "n");
-    return runSession(this.driver, (session) =>
-      queries.searchDocumentChunks(
-        session,
-        documentVirtualLabel(entityTypeKey, propertyKey),
-        documentIndexName(entityTypeKey, propertyKey),
-        queryEmbedding,
-        limit,
-        whereClauses,
-        filterParams,
-      ),
-    );
+    return this.rankedSemantic(properties, embedding, limit, true);
   }
 
   async getEntitiesByIds(
@@ -299,48 +298,64 @@ export class Neo4jRuntimeStore implements RuntimeStore {
   // Semantic search
   // ------------------------------------------------------------------
 
-  async semanticSearch(
-    entityTypeKey: string,
-    _propertyDefs: Record<string, PropertyDef>,
-    queryEmbedding: number[],
-    limit: number,
-    minScore: number | null,
-    filters: FilterCondition[] | null = null,
-  ): Promise<Row[]> {
-    const [whereClauses, filterParams] = filterFragments(filters, "n");
-    return runSession(this.driver, (session) =>
-      queries.semanticSearch(
-        session,
-        toPascalCase(entityTypeKey),
-        entityTypeKey,
-        queryEmbedding,
-        limit,
-        minScore,
-        whereClauses,
-        filterParams,
-      ),
-    );
+  async propertySearchKeyword(): Promise<Row[]> {
+    throw new Error("Keyword ranking is not supported");
+  }
+  async documentSearchKeyword(): Promise<Row[]> {
+    throw new Error("Keyword ranking is not supported");
   }
 
-  /** Search the shared cross-type entity vector index. */
-  async semanticSearchAll(
-    queryEmbedding: number[],
+  async propertySearchSemantic(
+    types: SearchedType[],
+    embedding: number[],
     limit: number,
-    minScore: number | null,
   ): Promise<Row[]> {
-    return runSession(this.driver, (session) =>
-      queries.semanticSearch(
-        session,
-        "_Entity",
-        "",
-        queryEmbedding,
-        limit,
-        minScore,
-        null,
-        null,
-        ENTITY_VECTOR_INDEX_NAME,
-      ),
-    );
+    return this.rankedSemantic(types, embedding, limit, false);
+  }
+
+  private async rankedSemantic(
+    searched: (SearchedType | SearchedProperty)[],
+    embedding: number[],
+    limit: number,
+    document: boolean,
+  ): Promise<Row[]> {
+    if (!searched.length) return [];
+    const params: Row = { embedding, limit: neo4j.int(limit) };
+    const scans = searched.map((item, i) => {
+      const [clauses, filterParams] = filterFragments(item.conditions, "n");
+      let where = (clauses ?? []).join(" AND ");
+      for (const [key, value] of Object.entries(filterParams ?? {}).sort(
+        ([a], [b]) => b.length - a.length,
+      )) {
+        where = where.replaceAll(`$${key}`, `$s${i}_${key}`);
+        params[`s${i}_${key}`] = value;
+      }
+      const label =
+        "propertyKey" in item
+          ? documentVirtualLabel(item.entityTypeKey, item.propertyKey)
+          : toPascalCase(item.entityTypeKey);
+      const index =
+        "propertyKey" in item
+          ? documentIndexName(item.entityTypeKey, item.propertyKey)
+          : `${item.entityTypeKey}_embedding`;
+      const alias = document ? "c" : "n";
+      const parent = document && where ? "MATCH (n:_Entity)-[:_HAS_CHUNK]->(c) " : "WITH n, score ";
+      return (
+        `MATCH (${alias}:${label}) SEARCH ${alias} IN (VECTOR INDEX ${index} FOR $embedding LIMIT $limit) SCORE AS score ` +
+        (where ? `${parent}WHERE ${where} ` : "") +
+        `RETURN ${alias} {.*} AS value, score`
+      );
+    });
+    return runSession(this.driver, async (session) => {
+      const result = await session.run(
+        `CALL () { ${scans.join(" UNION ALL ")} } RETURN value, score ORDER BY score DESC LIMIT $limit`,
+        params,
+      );
+      return result.records.map((record) => ({
+        [document ? "chunk" : "entity"]: queries.toEntityRow(record.get("value")),
+        score: record.get("score"),
+      }));
+    });
   }
 
   /** Rank SavedQuery descriptions for one lens by vector similarity. */
@@ -458,10 +473,7 @@ export class Neo4jRuntimeStore implements RuntimeStore {
    * number crosses the wire as a Float, which the server rejects as a
    * paging count.
    */
-  async executeOql(
-    validated: ValidatedQuery,
-    params: Row = {},
-  ): Promise<[string[], Row[]]> {
+  async executeOql(validated: ValidatedQuery, params: Row = {}): Promise<[string[], Row[]]> {
     const cypher = compileQuery(validated);
     const converted: Row = { ...params };
     for (const name of validated.analysis.skipLimitParams) {

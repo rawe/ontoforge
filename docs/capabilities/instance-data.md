@@ -148,7 +148,10 @@ are ANDed. The operator suffixes themselves, and the parameter form that carries
 in [interfaces.md](../interfaces.md#listing-sorting-filtering). What matters here is how a
 filter is evaluated: values arrive as text and are coerced to the property's data type by
 the same rules as writes — except under the substring operator, which compares as text and
-therefore accepts anything. An unknown property, an unrecognized suffix or an uncoercible
+therefore accepts anything. Every comparison, negation included, is evaluated against a
+value that is there: an instance lacking the property matches neither `status=archived`
+nor `status__ne=archived`, because the negation asks for a value that exists and differs,
+not for the absence of one. An unknown property, an unrecognized suffix or an uncoercible
 value is a validation error. **Faults are collected**, as they are on writes: one rejection
 names every faulty filter of the request at once, each under the filter key as sent
 (`age__gt`, not `age`) with its own detail, and a filter key carries at most one fault. The
@@ -156,6 +159,15 @@ rejection's message lists the distinct faults, so a lone fault reads as it alway
 operator is
 taken as the segment after the **last** double underscore, so a property whose own key
 contains a double underscore cannot be filtered.
+
+**Existence filters.** `__exists` and `__missing` ask whether a value is there at all,
+and take a boolean flag rather than a comparison value: `email__exists=true` keeps the
+instances carrying an email, `email__missing=true` — the readable spelling of
+`email__exists=false` — the instances without one. A property written as null is absent;
+so is one never written. The property's data type plays no part, so a document property
+is testable like any other and nothing but the flag is coerced; a flag that is not a
+boolean is a validation error under the filter key. The subject may also be a query path
+(below), or on entity lists a bare relation type (further below).
 
 Relation lists additionally filter by source id, target id, or both, which is how the
 relations of one entity are enumerated with a real total — the traversal operation below
@@ -198,6 +210,12 @@ never mistaken for a property key.
 - **The value is coerced by the final property**, exactly as a plain filter is coerced by
   its own; the substring operator stays textual. A path cannot end in a `document`
   property.
+- **Existence rides the same path.** `filter.works_for@role__missing=true` returns the
+  persons with an employment that carries no role; `filter.works_for.founded__exists=true`
+  the persons employed by a company with a founding date. The quantifier is the same
+  existential one: at least one relation of the type reaches a value that is present, or
+  absent, so an entity with no relation of the type matches neither form. Whether the
+  entity has any relation of the type at all is the next section's question.
 - **Resolution uses the lens-scoped schema**, at query time. Nothing is declared or
   stored: every exposed relation type is queryable the moment it exists. A path sees
   the lens-scoped schema and nothing else: one through a relation type, a related
@@ -215,6 +233,38 @@ unknown. Paths are a filter feature only: `sort` rejects them, `fields` treats
 them as any unknown name, no response ever carries a path value, and the relation list
 rejects them with a message saying so. Semantic search takes them under its own rules
 ([search.md](search.md#property-filters-on-search)).
+
+### Relation existence
+
+Under `__exists` or `__missing`, and only there, a filter key on an **entity** list may be
+a relation type alone — `filter.<relationTypeKey>[:out|:in]__exists=true` or
+`__missing=true` — asking whether the entity has any relation of the type, in the
+direction implied by the schema. Listing persons with `filter.works_for__missing=true`
+returns the persons employed nowhere; listing versions with
+`filter.supersedes__missing=true` returns the current ones — the entities no newer entity
+supersedes — which is the invariant a derived flag such as "is current" would only
+approximate, and the reason no such flag needs to be stored or kept consistent.
+
+- **The relation segment resolves as a query path's does.** The relation type must be
+  exposed together with the entity type at its other end, must touch the listed type, and
+  is followed outgoing from its source type or incoming from its target type; a marker must
+  agree, and on a self-relation it is required — `filter.manages:in__missing=true` for the
+  persons nobody manages, `filter.manages:out__exists=true` for the managers. The same
+  faults are collected under the same keys, worded for a relation filter rather than a
+  path.
+- **A property of the listed type wins.** When the listed type declares a property whose
+  key is also a relation type's, the bare key tests the property; a direction marker names
+  the relation type unambiguously.
+- **Absence is an anti-existence test, never a comparison.** `__missing=true` holds when
+  no relation of the type reaches the entity in that direction — nothing about the
+  relation or the related entity is read or compared. `__exists=true` is the plain
+  existential, and combines with every other filter by AND: `filter.works_for__exists=true`
+  with `filter.manages:in__missing=true` lists the employed persons at the top of their
+  reporting lines.
+- **A relation type takes no comparison.** `filter.supersedes=x` and
+  `filter.supersedes__ne=x` are validation errors naming the two operators the key takes
+  and the query-path alternative. Relation lists take no relation subject at all: there a
+  relation type key is an unknown property.
 
 ## Field projection
 

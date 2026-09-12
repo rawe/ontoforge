@@ -120,9 +120,12 @@ or with conflicting data types across its declaring types, is a validation error
 path similarly drops types its relation does not touch. This set feeds both kinds.
 
 Filters run inside every ranking. They follow entity-list resolution, coercion and
-collected-error rules, but substring operators are rejected. Path conditions are accepted
-only where the adapter declares support; rejection names the entity list as the
-alternative. Adapter limitations are recorded in [../storage-adapters.md](../storage-adapters.md).
+collected-error rules — negation and existence included — but substring operators are
+rejected. An existence key naming a bare relation type narrows the set to the types the
+relation touches, as a query path does. Path conditions and relation existence conditions
+are accepted only where the adapter declares support; rejection names the entity list as
+the alternative. Adapter limitations are recorded in
+[../storage-adapters.md](../storage-adapters.md).
 
 ### Text-search language
 

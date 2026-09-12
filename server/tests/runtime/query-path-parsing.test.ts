@@ -235,6 +235,247 @@ describe("a direction marker on the relation segment", () => {
   });
 });
 
+describe("existence on a query path resolves like a comparison path, minus the value", () => {
+  it("the related-entity form: at least one related entity carrying — or lacking — the property", () => {
+    const scoped = scopedSchema();
+    expect(
+      parseFilterConditions(
+        { "works_for.founded__exists": "true", "works_for.founded__missing": "true" },
+        scoped.entityTypes.person!.properties,
+        "person",
+        { pathSchema: scoped },
+      ),
+    ).toEqual([
+      {
+        kind: "path-existence",
+        relationTypeKey: "works_for",
+        direction: "outgoing",
+        propertySource: "relatedEntity",
+        propertyKey: "founded",
+        exists: true,
+      },
+      {
+        kind: "path-existence",
+        relationTypeKey: "works_for",
+        direction: "outgoing",
+        propertySource: "relatedEntity",
+        propertyKey: "founded",
+        exists: false,
+      },
+    ]);
+  });
+
+  it("the relation-property form, incoming, with a marker", () => {
+    const scoped = scopedSchema();
+    expect(
+      parseFilterConditions(
+        { "works_for:in@role__missing": "true" },
+        scoped.entityTypes.company!.properties,
+        "company",
+        { pathSchema: scoped },
+      ),
+    ).toEqual([
+      {
+        kind: "path-existence",
+        relationTypeKey: "works_for",
+        direction: "incoming",
+        propertySource: "relation",
+        propertyKey: "role",
+        exists: false,
+      },
+    ]);
+  });
+
+  it("a path fault is reported before the flag is read", () => {
+    const { message, fields } = reject({ "works_for.profile__exists": "maybe" }, "person");
+    expect(message).toBe("Query path 'works_for.profile' ends in a document property");
+    expect(Object.keys(fields)).toEqual(["works_for.profile__exists"]);
+  });
+});
+
+describe("a bare relation type under an existence operator resolves to the relation existence condition", () => {
+  it("the direction derives from the endpoints: outgoing from the source type", () => {
+    const scoped = scopedSchema();
+    expect(
+      parseFilterConditions(
+        { works_for__exists: "true", works_for__missing: "true" },
+        scoped.entityTypes.person!.properties,
+        "person",
+        { pathSchema: scoped },
+      ),
+    ).toEqual([
+      { kind: "relation-existence", relationTypeKey: "works_for", direction: "outgoing", exists: true },
+      { kind: "relation-existence", relationTypeKey: "works_for", direction: "outgoing", exists: false },
+    ]);
+  });
+
+  it("incoming from the target type, with or without an agreeing marker", () => {
+    const scoped = scopedSchema();
+    expect(
+      parseFilterConditions(
+        { works_for__missing: "true", "works_for:in__exists": "false" },
+        scoped.entityTypes.company!.properties,
+        "company",
+        { pathSchema: scoped },
+      ),
+    ).toEqual([
+      { kind: "relation-existence", relationTypeKey: "works_for", direction: "incoming", exists: false },
+      { kind: "relation-existence", relationTypeKey: "works_for", direction: "incoming", exists: false },
+    ]);
+  });
+
+  it("a property of the listed type wins over a relation type of the same key", () => {
+    const scoped = scopedSchema();
+    scoped.entityTypes.person!.properties.works_for = prop("works_for", "string");
+    expect(
+      parseFilterConditions(
+        { works_for__exists: "true", "works_for:out__exists": "true" },
+        scoped.entityTypes.person!.properties,
+        "person",
+        { pathSchema: scoped },
+      ),
+    ).toEqual([
+      { kind: "property-existence", propertyKey: "works_for", exists: true },
+      { kind: "relation-existence", relationTypeKey: "works_for", direction: "outgoing", exists: true },
+    ]);
+  });
+
+  it("a self-relation needs the marker, naming both forms", () => {
+    const scoped = scopedSchema();
+    scoped.relationTypes.manages = {
+      key: "manages",
+      displayName: "Manages",
+      description: null,
+      fromEntityTypeKey: "person",
+      toEntityTypeKey: "person",
+      properties: {},
+    };
+    const { message, fields } = reject({ manages__missing: "true" }, "person", scoped);
+    expect(message).toBe("Relation filter 'manages' needs a direction marker");
+    expect(fields).toEqual({
+      manages__missing:
+        "'manages' connects 'person' to 'person', so the direction cannot be derived; " +
+        "write 'manages:out' or 'manages:in'",
+    });
+    expect(
+      parseFilterConditions(
+        { "manages:in__missing": "true" },
+        scoped.entityTypes.person!.properties,
+        "person",
+        { pathSchema: scoped },
+      ),
+    ).toEqual([
+      { kind: "relation-existence", relationTypeKey: "manages", direction: "incoming", exists: false },
+    ]);
+  });
+
+  it("a marker contradicting the derivable direction is rejected, naming the derived form", () => {
+    const { message, fields } = reject({ "works_for:in__exists": "true" }, "person");
+    expect(message).toBe("Relation filter 'works_for:in' contradicts the derivable direction");
+    expect(fields["works_for:in__exists"]).toBe(
+      "'works_for' connects 'person' to 'company', so from 'person' it is followed outgoing: " +
+        "write 'works_for:out' or omit the marker",
+    );
+  });
+
+  it("a relation type not touching the listed type, and one the lens hides, fail as on a path", () => {
+    const { message } = reject({ belongs_to__exists: "true" }, "person");
+    expect(message).toBe("Relation type 'belongs_to' does not touch entity type 'person'");
+    const scoped = scopedSchema();
+    delete scoped.entityTypes.company;
+    const hidden = reject({ works_for__missing: "true" }, "person", scoped);
+    expect(hidden.message).toBe("Unknown filter property or relation type: 'works_for'");
+    expect(hidden.fields.works_for__missing).toBe(
+      "Not defined in type 'person'. Property keys: age, name. " +
+        "Relation types touching 'person': none",
+    );
+  });
+
+  it("a subject that is neither a property nor a relation type is unknown, listing both", () => {
+    const { message, fields } = reject({ ghost__exists: "true" }, "person");
+    expect(message).toBe("Unknown filter property or relation type: 'ghost'");
+    expect(fields.ghost__exists).toBe(
+      "Not defined in type 'person'. Property keys: age, name. " +
+        "Relation types touching 'person': works_for",
+    );
+  });
+
+  it("a relation type under a comparison operator is rejected, naming what it takes", () => {
+    const { message, fields } = reject({ works_for: "x", "works_for:out__ne": "y" }, "person");
+    expect(message).toBe(
+      "Relation type 'works_for' takes only an existence operator; " +
+        "Relation type 'works_for:out' takes only an existence operator",
+    );
+    expect(fields.works_for).toBe(
+      "'works_for' names a relation type; write 'works_for__exists' or 'works_for__missing' " +
+        "with true or false, or a query path to one of its properties",
+    );
+  });
+
+  it("the flag is read after the subject resolves", () => {
+    const { message, fields } = reject({ works_for__exists: "sometimes" }, "person");
+    expect(message).toBe("Invalid filter value for 'works_for'");
+    expect(fields.works_for__exists).toBe("Expected boolean for 'works_for', got 'sometimes'");
+  });
+});
+
+describe("a surface whose adapter cannot evaluate relation conditions rejects them after resolution", () => {
+  const rejection = (key: string) => ({
+    message: `Not here: '${key}'`,
+    detail: "not here",
+  });
+
+  it("a resolved path, a path existence test and a relation existence test each raise the surface's fault", () => {
+    const scoped = scopedSchema();
+    try {
+      parseFilterConditions(
+        {
+          "works_for.name": "Acme",
+          "works_for@role__missing": "true",
+          works_for__exists: "true",
+          age: "3",
+        },
+        scoped.entityTypes.person!.properties,
+        "person",
+        { pathSchema: scoped, rejectRelationConditions: rejection },
+      );
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      expect((error as ValidationError).details).toEqual({
+        fields: {
+          "works_for.name": "not here",
+          "works_for@role__missing": "not here",
+          works_for__exists: "not here",
+        },
+      });
+    }
+  });
+
+  it("a malformed key is still reported as malformed, and a property condition still crosses", () => {
+    const scoped = scopedSchema();
+    try {
+      parseFilterConditions(
+        { "ghost.name": "x" },
+        scoped.entityTypes.person!.properties,
+        "person",
+        { pathSchema: scoped, rejectRelationConditions: rejection },
+      );
+      expect.unreachable();
+    } catch (error) {
+      expect((error as ValidationError).message).toBe(
+        "Unknown filter property or relation type: 'ghost'",
+      );
+    }
+    expect(
+      parseFilterConditions({ age__missing: "true" }, scoped.entityTypes.person!.properties, "person", {
+        pathSchema: scoped,
+        rejectRelationConditions: rejection,
+      }),
+    ).toEqual([{ kind: "property-existence", propertyKey: "age", exists: false }]);
+  });
+});
+
 /** Parse, expecting one collected rejection; returns its message and fields. */
 function reject(
   filters: Record<string, string>,

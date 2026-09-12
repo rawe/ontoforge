@@ -16,7 +16,7 @@ import {
   buildOrderBy,
   buildSearchClause,
 } from "../../../src/adapters/postgres/filters.js";
-import { cond, DEFS, pathCond } from "../../propertyDefs.js";
+import { cond, DEFS, existsCond, pathCond, pathExistsCond, relationCond } from "../../propertyDefs.js";
 
 describe("operator x type mapping — key and value both bound", () => {
   it("string equality reads the text accessor", () => {
@@ -66,11 +66,12 @@ describe("operator x type mapping — key and value both bound", () => {
     expect(params[1]).toBe(when);
   });
 
-  it("all five comparison operators map to their SQL forms", () => {
+  it("all six comparison operators map to their SQL forms", () => {
     const params: unknown[] = [];
     const clauses = buildFilterClauses(
       [
         cond("age", "integer", "eq", 1),
+        cond("age", "integer", "ne", 0),
         cond("age", "integer", "gt", 2),
         cond("age", "integer", "gte", 3),
         cond("age", "integer", "lt", 4),
@@ -80,12 +81,36 @@ describe("operator x type mapping — key and value both bound", () => {
     );
     expect(clauses).toEqual([
       "(props->$1)::numeric = $2",
-      "(props->$3)::numeric > $4",
-      "(props->$5)::numeric >= $6",
-      "(props->$7)::numeric < $8",
-      "(props->$9)::numeric <= $10",
+      "(props->$3)::numeric <> $4",
+      "(props->$5)::numeric > $6",
+      "(props->$7)::numeric >= $8",
+      "(props->$9)::numeric < $10",
+      "(props->$11)::numeric <= $12",
     ]);
-    expect(params).toEqual(["age", 1, "age", 2, "age", 3, "age", 4, "age", 5]);
+    expect(params).toEqual(["age", 1, "age", 0, "age", 2, "age", 3, "age", 4, "age", 5]);
+  });
+
+  it("ne reads the typed accessor, so a missing property yields NULL and never matches", () => {
+    const params: unknown[] = [];
+    const clauses = buildFilterClauses([cond("name", "string", "ne", "archived")], params);
+    expect(clauses).toEqual(["props->>$1 <> $2"]);
+    expect(params).toEqual(["name", "archived"]);
+  });
+});
+
+describe("existence — jsonb key presence, the key bound, no value", () => {
+  it("exists is the ? operator over the props column", () => {
+    const params: unknown[] = ["person"];
+    const clauses = buildFilterClauses([existsCond("email", true)], params);
+    expect(clauses).toEqual(["props ? $2"]);
+    expect(params).toEqual(["person", "email"]);
+  });
+
+  it("missing negates it", () => {
+    const params: unknown[] = [];
+    const clauses = buildFilterClauses([existsCond("email", false)], params);
+    expect(clauses).toEqual(["NOT (props ? $1)"]);
+    expect(params).toEqual(["email"]);
   });
 });
 
@@ -255,6 +280,68 @@ describe("path conditions — an existential subquery through the relation table
         "WHERE r.from_id = entity.id AND r.type_key = $3 AND re.props->>$4 = $5)",
     ]);
     expect(params).toEqual(["age", 18, "works_for", "name", "Acme"]);
+  });
+});
+
+describe("existence on a path — the same subquery, the presence test on the reached row", () => {
+  it("related-entity form: at least one related row carrying the property", () => {
+    const params: unknown[] = [];
+    const clauses = buildFilterClauses(
+      [pathExistsCond("works_for", "outgoing", "founded", true)],
+      params,
+    );
+    expect(clauses).toEqual([
+      "EXISTS (SELECT 1 FROM relation r JOIN entity re ON re.id = r.to_id " +
+        "WHERE r.from_id = entity.id AND r.type_key = $1 AND re.props ? $2)",
+    ]);
+    expect(params).toEqual(["works_for", "founded"]);
+  });
+
+  it("relation-property form, incoming, missing: at least one relation row lacking the property", () => {
+    const params: unknown[] = [];
+    const clauses = buildFilterClauses(
+      [pathExistsCond("works_for", "incoming", "role", false, "relation")],
+      params,
+    );
+    expect(clauses).toEqual([
+      "EXISTS (SELECT 1 FROM relation r " +
+        "WHERE r.to_id = entity.id AND r.type_key = $1 AND NOT (r.props ? $2))",
+    ]);
+    expect(params).toEqual(["works_for", "role"]);
+  });
+});
+
+describe("relation existence — EXISTS or NOT EXISTS over the relation table, nothing compared", () => {
+  it("outgoing, exists: any relation row leaving the listed row", () => {
+    const params: unknown[] = ["person"];
+    const clauses = buildFilterClauses([relationCond("works_for", "outgoing", true)], params);
+    expect(clauses).toEqual([
+      "EXISTS (SELECT 1 FROM relation r WHERE r.from_id = entity.id AND r.type_key = $2)",
+    ]);
+    expect(params).toEqual(["person", "works_for"]);
+  });
+
+  it("incoming, missing: the anti-existence predicate, no relation row arriving", () => {
+    const params: unknown[] = [];
+    const clauses = buildFilterClauses([relationCond("supersedes", "incoming", false)], params);
+    expect(clauses).toEqual([
+      "NOT EXISTS (SELECT 1 FROM relation r WHERE r.to_id = entity.id AND r.type_key = $1)",
+    ]);
+    expect(params).toEqual(["supersedes"]);
+  });
+
+  it("composes with property conditions over the shared params", () => {
+    const params: unknown[] = [];
+    const clauses = buildFilterClauses(
+      [cond("name", "string", "ne", "x"), relationCond("supersedes", "incoming", false), existsCond("email", true)],
+      params,
+    );
+    expect(clauses).toEqual([
+      "props->>$1 <> $2",
+      "NOT EXISTS (SELECT 1 FROM relation r WHERE r.to_id = entity.id AND r.type_key = $3)",
+      "props ? $4",
+    ]);
+    expect(params).toEqual(["name", "x", "supersedes", "email"]);
   });
 });
 

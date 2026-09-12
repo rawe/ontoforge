@@ -2,24 +2,26 @@
  * Query paths — filter keys that cross exactly one relation type to a
  * property of the related entity (`<relationTypeKey>.<propertyKey>`) or
  * to a property stored on the relation itself
- * (`<relationTypeKey>@<propertyKey>`). The relation segment may carry a
- * direction marker, `:out` or `:in`.
+ * (`<relationTypeKey>@<propertyKey>`) — and relation subjects, a bare
+ * relation type key under an existence operator. The relation segment
+ * may carry a direction marker, `:out` or `:in`.
  *
  * Resolution happens here, above the persistence port, against the
  * lens-scoped schema: the relation type must be exposed and touch the
  * listed entity type; the direction follows from which endpoint the
  * listed type is — a marker must agree with it, and on a self-relation,
  * where the listed type is both endpoints, the marker is what settles
- * it and is required; and the final property must be exposed on the
- * related entity type or on the relation type. What the lens hides fails exactly
- * as what does not exist. A resolved path becomes the port's
- * `PathFilterCondition`; a fault is returned, not thrown, so the filter
+ * it and is required; and a path's final property must be exposed on
+ * the related entity type or on the relation type. What the lens hides
+ * fails exactly as what does not exist. A resolved path becomes the
+ * port's path condition, a resolved relation subject its relation
+ * existence condition; a fault is returned, not thrown, so the filter
  * parser can collect it with the faults of every other key.
  */
 
 import type { PathFilterCondition } from "../core/ports.js";
 import type { PropertyDef } from "../core/schemas.js";
-import type { SchemaCacheValue } from "./schemaCache.js";
+import type { RelationTypeDef, SchemaCacheValue } from "./schemaCache.js";
 
 /** The segment separators — `.` for a property of the related entity,
  * `@` for a property of the relation itself. No schema key may contain
@@ -55,6 +57,13 @@ function splitRelationSegment(segment: string): { relationTypeKey: string; marke
   return { relationTypeKey: segment };
 }
 
+/** Whether a filter subject (operator suffix removed, not a query path)
+ * names a relation type the lens exposes — with or without a direction
+ * marker. Decides only the wording of a fault, never a condition. */
+export function namesRelationType(subject: string, scoped: SchemaCacheValue): boolean {
+  return splitRelationSegment(subject).relationTypeKey in scoped.relationTypes;
+}
+
 /** A resolved path: everything the port condition carries except the
  * comparison, plus the final property definition the value is coerced by. */
 export interface ResolvedQueryPath {
@@ -63,6 +72,13 @@ export interface ResolvedQueryPath {
   propertySource: PathFilterCondition["propertySource"];
   propertyKey: string;
   propertyDef: PropertyDef;
+}
+
+/** A resolved relation subject: the relation type and the direction it is
+ * followed in from the listed type. */
+export interface ResolvedRelationSubject {
+  relationTypeKey: string;
+  direction: Direction;
 }
 
 /** One rejected path: the caller-facing message and the per-key detail. */
@@ -110,6 +126,74 @@ function unknownFirstSegment(
   };
 }
 
+/** The relation type a segment names, exposed and touching the listed
+ * type, and the direction it is followed in — derived from the
+ * endpoints, or taken from the segment's marker where the listed type is
+ * both endpoints. `subject` words the two direction faults: the noun and
+ * key the message names, and how the key reads with a given marker. */
+function resolveRelationSegment(
+  segment: string,
+  listedTypeKey: string,
+  scoped: SchemaCacheValue,
+  subject: {
+    noun: string;
+    key: string;
+    withMarker: (relationTypeKey: string, direction: Direction) => string;
+  },
+): { relationType: RelationTypeDef; direction: Direction } | QueryPathFault {
+  const { relationTypeKey, marker } = splitRelationSegment(segment);
+  const relationType = scoped.relationTypes[relationTypeKey];
+  if (relationType === undefined) {
+    return unknownFirstSegment(relationTypeKey, listedTypeKey, scoped);
+  }
+  const isSource = relationType.fromEntityTypeKey === listedTypeKey;
+  const isTarget = relationType.toEntityTypeKey === listedTypeKey;
+  if (!isSource && !isTarget) {
+    return {
+      message: `Relation type '${relationTypeKey}' does not touch entity type '${listedTypeKey}'`,
+      detail:
+        `'${relationTypeKey}' connects '${relationType.fromEntityTypeKey}' ` +
+        `to '${relationType.toEntityTypeKey}'. ` +
+        `Relation types touching '${listedTypeKey}': ` +
+        keyList(crossableRelationTypeKeys(listedTypeKey, scoped)),
+    };
+  }
+  // The direction the endpoints derive — none when the listed type is both.
+  const derived: Direction | undefined =
+    isSource && isTarget ? undefined : isSource ? "outgoing" : "incoming";
+  const withMarker = (direction: Direction): string => subject.withMarker(relationTypeKey, direction);
+  let direction: Direction;
+  if (marker === undefined) {
+    if (derived === undefined) {
+      return {
+        message: `${subject.noun} '${subject.key}' needs a direction marker`,
+        detail:
+          `'${relationTypeKey}' connects '${listedTypeKey}' to '${listedTypeKey}', ` +
+          `so the direction cannot be derived; write '${withMarker("outgoing")}' ` +
+          `or '${withMarker("incoming")}'`,
+      };
+    }
+    direction = derived;
+  } else {
+    if (derived !== undefined && marker !== derived) {
+      return {
+        message: `${subject.noun} '${subject.key}' contradicts the derivable direction`,
+        detail:
+          `'${relationTypeKey}' connects '${relationType.fromEntityTypeKey}' ` +
+          `to '${relationType.toEntityTypeKey}', so from '${listedTypeKey}' it is followed ` +
+          `${derived}: write '${withMarker(derived)}' or omit the marker`,
+      };
+    }
+    direction = marker;
+  }
+  const relatedTypeKey =
+    direction === "outgoing" ? relationType.toEntityTypeKey : relationType.fromEntityTypeKey;
+  if (scoped.entityTypes[relatedTypeKey] === undefined) {
+    return unknownFirstSegment(relationTypeKey, listedTypeKey, scoped);
+  }
+  return { relationType, direction };
+}
+
 /**
  * Resolve one query path for the entity type being listed. Returns the
  * resolved path or the first fault found, in this order: too many
@@ -136,68 +220,29 @@ export function resolveQueryPath(
     };
   }
   const [relationSegment, propertyKey] = segments as [string, string];
-  const { relationTypeKey, marker } = splitRelationSegment(relationSegment);
   const propertySource: ResolvedQueryPath["propertySource"] = path.includes(RELATION_SEPARATOR)
     ? "relation"
     : "relatedEntity";
-  const relationType = scoped.relationTypes[relationTypeKey];
-  if (relationType === undefined) {
-    return unknownFirstSegment(relationTypeKey, listedTypeKey, scoped);
-  }
-  const isSource = relationType.fromEntityTypeKey === listedTypeKey;
-  const isTarget = relationType.toEntityTypeKey === listedTypeKey;
-  if (!isSource && !isTarget) {
-    return {
-      message: `Relation type '${relationTypeKey}' does not touch entity type '${listedTypeKey}'`,
-      detail:
-        `'${relationTypeKey}' connects '${relationType.fromEntityTypeKey}' ` +
-        `to '${relationType.toEntityTypeKey}'. ` +
-        `Relation types touching '${listedTypeKey}': ` +
-        keyList(crossableRelationTypeKeys(listedTypeKey, scoped)),
-    };
-  }
-  // The direction the endpoints derive — none when the listed type is both.
-  const derived: Direction | undefined =
-    isSource && isTarget ? undefined : isSource ? "outgoing" : "incoming";
   const separator = propertySource === "relation" ? RELATION_SEPARATOR : RELATED_ENTITY_SEPARATOR;
-  const withMarker = (direction: Direction): string =>
-    `${relationTypeKey}${DIRECTION_MARKERS[direction]}${separator}${propertyKey}`;
-  let direction: Direction;
-  if (marker === undefined) {
-    if (derived === undefined) {
-      return {
-        message: `Query path '${path}' needs a direction marker`,
-        detail:
-          `'${relationTypeKey}' connects '${listedTypeKey}' to '${listedTypeKey}', ` +
-          `so the direction cannot be derived; write '${withMarker("outgoing")}' ` +
-          `or '${withMarker("incoming")}'`,
-      };
-    }
-    direction = derived;
-  } else {
-    if (derived !== undefined && marker !== derived) {
-      return {
-        message: `Query path '${path}' contradicts the derivable direction`,
-        detail:
-          `'${relationTypeKey}' connects '${relationType.fromEntityTypeKey}' ` +
-          `to '${relationType.toEntityTypeKey}', so from '${listedTypeKey}' it is followed ` +
-          `${derived}: write '${withMarker(derived)}' or omit the marker`,
-      };
-    }
-    direction = marker;
+  const resolved = resolveRelationSegment(relationSegment, listedTypeKey, scoped, {
+    noun: "Query path",
+    key: path,
+    withMarker: (relationTypeKey, direction) =>
+      `${relationTypeKey}${DIRECTION_MARKERS[direction]}${separator}${propertyKey}`,
+  });
+  if (!("relationType" in resolved)) {
+    return resolved;
   }
+  const { relationType, direction } = resolved;
   const relatedTypeKey =
     direction === "outgoing" ? relationType.toEntityTypeKey : relationType.fromEntityTypeKey;
-  const relatedType = scoped.entityTypes[relatedTypeKey];
-  if (relatedType === undefined) {
-    return unknownFirstSegment(relationTypeKey, listedTypeKey, scoped);
-  }
   // The final property's owner: the relation type for the `@` form, the
-  // related entity type for the `.` form.
+  // related entity type for the `.` form — the related type is exposed,
+  // or the segment would not have resolved.
   const [owner, ownerKind] =
     propertySource === "relation"
       ? [relationType, "relation type"]
-      : [relatedType, "related entity type"];
+      : [scoped.entityTypes[relatedTypeKey]!, "related entity type"];
   const propertyDef = owner.properties[propertyKey];
   if (propertyDef === undefined) {
     return {
@@ -216,10 +261,34 @@ export function resolveQueryPath(
     };
   }
   return {
-    relationTypeKey,
+    relationTypeKey: relationType.key,
     direction,
     propertySource,
     propertyKey,
     propertyDef,
   };
+}
+
+/**
+ * Resolve a bare relation subject — `<relationTypeKey>[:out|:in]`, the
+ * key of an existence filter — for the entity type being listed, under
+ * the rules a query path's relation segment follows: unknown relation
+ * type (or one whose related entity type the lens hides), relation type
+ * not touching the listed type, self-relation without a marker, marker
+ * contradicting the derivable direction.
+ */
+export function resolveRelationSubject(
+  key: string,
+  listedTypeKey: string,
+  scoped: SchemaCacheValue,
+): ResolvedRelationSubject | QueryPathFault {
+  const resolved = resolveRelationSegment(key, listedTypeKey, scoped, {
+    noun: "Relation filter",
+    key,
+    withMarker: (relationTypeKey, direction) => `${relationTypeKey}${DIRECTION_MARKERS[direction]}`,
+  });
+  if (!("relationType" in resolved)) {
+    return resolved;
+  }
+  return { relationTypeKey: resolved.relationType.key, direction: resolved.direction };
 }

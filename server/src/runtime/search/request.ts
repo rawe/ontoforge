@@ -53,18 +53,27 @@ export async function validateRequest(
   for (const [expr, value] of Object.entries(filter)) {
     const split = expr.lastIndexOf("__");
     const key = split < 0 ? expr : expr.slice(0, split);
+    const op = split < 0 ? null : expr.slice(split + 2);
+    // An existence key may name a bare relation type; it carries no data
+    // type, so its declaring types cannot conflict.
+    const existence = op === "exists" || op === "missing";
+    const touches = (tk: string): boolean => {
+      const rt = loaded.scoped.relationTypes[key.split(/[.@]/)[0]!.replace(/:(in|out)$/, "")];
+      return rt !== undefined && (rt.fromEntityTypeKey === tk || rt.toEntityTypeKey === tk);
+    };
     const declaring =
       type !== null
         ? types
         : types.filter(([tk, def]) => {
-            if (!isQueryPath(key)) return key in def.properties;
-            const rt = loaded.scoped.relationTypes[key.split(/[.@]/)[0]!.replace(/:(in|out)$/, "")];
-            return rt && (rt.fromEntityTypeKey === tk || rt.toEntityTypeKey === tk);
+            if (!isQueryPath(key) && key in def.properties) return true;
+            return (isQueryPath(key) || existence) && touches(tk);
           });
     if (!declaring.length) errors[expr] = `Unknown filter property or relation type: '${key}'`;
     const dataTypes = new Set<string>();
     for (const [tk, def] of declaring) {
-      if (isQueryPath(key)) {
+      if (existence) {
+        // no data type
+      } else if (isQueryPath(key)) {
         const path = resolveQueryPath(key, tk, loaded.scoped);
         if ("propertyDef" in path) dataTypes.add(path.propertyDef.dataType);
       } else if (def.properties[key]) dataTypes.add(def.properties[key]!.dataType);
@@ -74,12 +83,13 @@ export async function validateRequest(
             message: "Substring filters are not supported on search; use the entity list",
             detail: "Not supported on search; use the entity list",
           },
+          pathSchema: loaded.scoped,
           ...(store.supportsSearchPathConditions()
-            ? { pathSchema: loaded.scoped }
+            ? {}
             : {
-                rejectPaths: () => ({
+                rejectRelationConditions: () => ({
                   message:
-                    "Query paths are not supported on search by the active storage adapter; use the entity list",
+                    "Query paths and relation filters are not supported on search by the active storage adapter; use the entity list",
                   detail:
                     "Not supported on search by the active storage adapter; use the entity list",
                 }),

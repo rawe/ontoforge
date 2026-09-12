@@ -1,10 +1,12 @@
 /**
- * Query paths on the entity list — conformance over REST, on whichever
- * adapter `DB_BACKEND` selects. A filter key crosses one relation type
- * to a property of the related entity (`.`) or to a property stored on
- * the relation itself (`@`); the direction is derived from the relation
- * type's endpoints; an entity matches when at least one relation of the
- * type satisfies the condition; faults are collected under their keys.
+ * Query paths and relation existence on the entity list — conformance
+ * over REST, on whichever adapter `DB_BACKEND` selects. A filter key
+ * crosses one relation type to a property of the related entity (`.`)
+ * or to a property stored on the relation itself (`@`); the direction is
+ * derived from the relation type's endpoints; an entity matches when at
+ * least one relation of the type satisfies the condition; faults are
+ * collected under their keys. A bare relation type key under `__exists`
+ * or `__missing` tests whether any relation of the type exists at all.
  * A relation segment may carry a direction marker, `:out` or `:in` —
  * required on the self-relation `manages`, optional elsewhere. Through a
  * scoped lens, what the lens hides fails exactly as what does not exist.
@@ -306,6 +308,168 @@ describe("the relation-property form — the condition is evaluated on the relat
     expect(
       (await names(`${LENS}/entities/person?filter.works_for@role=CTO&filter.age__gt=30`)).names,
     ).toEqual(["Carol"]);
+  });
+});
+
+/** Dave joins Umbrella, a company without a founding date, in an
+ * employment without a role. */
+async function employDaveAtUmbrella(): Promise<void> {
+  const umbrella = await create(`${LENS}/entities/company`, { name: "Umbrella" });
+  const list = await app.inject({ method: "GET", url: `${LENS}/entities/person?filter.name=Dave` });
+  await create(`${LENS}/relations/works_for`, {
+    fromEntityId: (list.json().items[0] as Row)._id,
+    toEntityId: umbrella._id,
+  });
+}
+
+describe("negation on a path — the reached value exists and differs", () => {
+  it("relation-property form: persons with an employment whose role is not CTO", async () => {
+    // Carol is CTO at Globex and Engineer at Acme: existential, so she matches.
+    expect(await names(`${LENS}/entities/person?filter.works_for@role__ne=CTO`)).toEqual({
+      names: ["Bob", "Carol"],
+      total: 2,
+    });
+  });
+
+  it("related-entity form: companies with an employee who is not 40", async () => {
+    expect(await names(`${LENS}/entities/company?filter.works_for.age__ne=40`)).toEqual({
+      names: ["Acme", "Globex"],
+      total: 2,
+    });
+  });
+
+  it("a relation lacking the property never matches a negation", async () => {
+    await employDaveAtUmbrella();
+    expect((await names(`${LENS}/entities/person?filter.works_for@role__ne=CTO`)).names).toEqual([
+      "Bob",
+      "Carol",
+    ]);
+  });
+});
+
+describe("existence on a path — the reached value is present, or absent", () => {
+  it("relation-property form: persons with an employment lacking a role, and with one carrying it", async () => {
+    await employDaveAtUmbrella();
+    expect(await names(`${LENS}/entities/person?filter.works_for@role__missing=true`)).toEqual({
+      names: ["Dave"],
+      total: 1,
+    });
+    expect((await names(`${LENS}/entities/person?filter.works_for@role__exists=true`)).names).toEqual([
+      "Alice",
+      "Bob",
+      "Carol",
+    ]);
+  });
+
+  it("related-entity form: persons employed by a company without a founding date", async () => {
+    await employDaveAtUmbrella();
+    expect((await names(`${LENS}/entities/person?filter.works_for.founded__missing=true`)).names).toEqual([
+      "Dave",
+    ]);
+    expect((await names(`${LENS}/entities/person?filter.works_for.founded__exists=true`)).names).toEqual([
+      "Alice",
+      "Bob",
+      "Carol",
+    ]);
+  });
+
+  it("an entity with no relation of the type matches neither form", async () => {
+    expect((await names(`${LENS}/entities/company?filter.works_for@role__missing=true`)).names).toEqual(
+      [],
+    );
+    expect((await names(`${LENS}/entities/company?filter.works_for@role__exists=true`)).names).toEqual([
+      "Acme",
+      "Globex",
+    ]);
+  });
+});
+
+describe("relation existence — a bare relation type under __exists or __missing", () => {
+  it("outgoing from the source type: persons with, and without, any employment", async () => {
+    expect(await names(`${LENS}/entities/person?filter.works_for__exists=true`)).toEqual({
+      names: ["Alice", "Bob", "Carol"],
+      total: 3,
+    });
+    expect(await names(`${LENS}/entities/person?filter.works_for__missing=true`)).toEqual({
+      names: ["Dave"],
+      total: 1,
+    });
+  });
+
+  it("incoming from the target type: companies employing nobody", async () => {
+    expect((await names(`${LENS}/entities/company?filter.works_for__missing=true`)).names).toEqual([
+      "Initech",
+    ]);
+    expect((await names(`${LENS}/entities/company?filter.works_for:in__missing=true`)).names).toEqual([
+      "Initech",
+    ]);
+    expect((await names(`${LENS}/entities/company?filter.works_for__exists=false`)).names).toEqual([
+      "Initech",
+    ]);
+  });
+
+  it("on the self-relation the marker settles the direction: the persons nobody manages, and the managers", async () => {
+    expect((await names(`${LENS}/entities/person?filter.manages:in__missing=true`)).names).toEqual([
+      "Alice",
+    ]);
+    expect((await names(`${LENS}/entities/person?filter.manages:out__exists=true`)).names).toEqual([
+      "Alice",
+      "Carol",
+    ]);
+    expect((await names(`${LENS}/entities/person?filter.manages:out__missing=true`)).names).toEqual([
+      "Bob",
+      "Dave",
+    ]);
+  });
+
+  it("combines with plain conditions and paths by AND", async () => {
+    expect(
+      (await names(`${LENS}/entities/person?filter.manages:in__missing=true&filter.works_for__exists=true`))
+        .names,
+    ).toEqual(["Alice"]);
+    expect(
+      (await names(`${LENS}/entities/person?filter.manages:out__missing=true&filter.works_for.name=Globex`))
+        .names,
+    ).toEqual(["Bob"]);
+    expect(
+      (await names(`${LENS}/entities/person?filter.works_for__missing=true&filter.age__gte=30`)).names,
+    ).toEqual(["Dave"]);
+  });
+
+  it("rejections: no marker on the self-relation, a contradicting marker, a comparison on a relation type, a non-boolean flag", async () => {
+    const { message, fields } = await rejected(
+      `${LENS}/entities/person?filter.manages__missing=true&filter.works_for:in__exists=true` +
+        "&filter.works_for=Acme&filter.works_for__exists=maybe&filter.ghost__exists=true",
+    );
+    expect(message).toBe(
+      "Relation filter 'manages' needs a direction marker; " +
+        "Relation filter 'works_for:in' contradicts the derivable direction; " +
+        "Relation type 'works_for' takes only an existence operator; " +
+        "Invalid filter value for 'works_for'; " +
+        "Unknown filter property or relation type: 'ghost'",
+    );
+    expect(fields).toEqual({
+      manages__missing:
+        "'manages' connects 'person' to 'person', so the direction cannot be derived; " +
+        "write 'manages:out' or 'manages:in'",
+      "works_for:in__exists":
+        "'works_for' connects 'person' to 'company', so from 'person' it is followed outgoing: " +
+        "write 'works_for:out' or omit the marker",
+      works_for:
+        "'works_for' names a relation type; write 'works_for__exists' or 'works_for__missing' " +
+        "with true or false, or a query path to one of its properties",
+      works_for__exists: "Expected boolean for 'works_for', got 'maybe'",
+      ghost__exists:
+        "Not defined in type 'person'. Property keys: active, age, email, hired_at, name. " +
+        "Relation types touching 'person': manages, works_for",
+    });
+  });
+
+  it("through a lens that does not expose the relation type, it is unknown", async () => {
+    const hr = runtimePrefix("test_ont", "hr_view");
+    // hr_view exposes person, company and works_for but not manages.
+    const { message } = await rejected(`${hr}/entities/person?filter.manages:in__missing=true`);
+    expect(message).toBe("Unknown filter property or relation type: 'manages'");
   });
 });
 

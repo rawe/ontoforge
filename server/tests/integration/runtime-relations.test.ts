@@ -248,6 +248,45 @@ describe("relation CRUD round trip", () => {
     expect(filtered.json().items[0].role).toBe("Advisor");
   });
 
+  it("negation and existence filter relation properties; a relation type is never a subject here", async () => {
+    const alice = await createEntity("test_lens", "person", { name: "Alice" });
+    const acme = await createEntity("test_lens", "company", { name: "Acme" });
+    const globex = await createEntity("test_lens", "company", { name: "Globex" });
+    await createRelation("test_lens", "works_for", {
+      fromEntityId: alice._id,
+      toEntityId: acme._id,
+      role: "Engineer",
+    });
+    await createRelation("test_lens", "works_for", {
+      fromEntityId: alice._id,
+      toEntityId: globex._id,
+    });
+    const roles = async (query: string): Promise<unknown[]> => {
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/ontologies/test_ont/runtime/lenses/test_lens/relations/works_for?${query}`,
+      });
+      expect(res.statusCode, res.body).toBe(200);
+      return (res.json().items as Row[]).map((r) => r.role ?? null);
+    };
+    expect(await roles("filter.role__ne=Advisor")).toEqual(["Engineer"]);
+    expect(await roles("filter.role__exists=true")).toEqual(["Engineer"]);
+    expect(await roles("filter.role__missing=true")).toEqual([null]);
+    expect(await roles(`filter.role__missing=true&toEntityId=${acme._id}`)).toEqual([]);
+
+    const res = await app.inject({
+      method: "GET",
+      url:
+        "/api/ontologies/test_ont/runtime/lenses/test_lens/relations/works_for" +
+        "?filter.works_for__exists=true&filter.role__exists=maybe",
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details.fields).toEqual({
+      works_for__exists: "Not defined in type 'works_for'",
+      role__exists: "Expected boolean for 'role', got 'maybe'",
+    });
+  });
+
   it("several faulty filters are rejected once, every fault under its own filter key", async () => {
     const res = await app.inject({
       method: "GET",

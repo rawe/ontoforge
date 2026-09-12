@@ -9,11 +9,16 @@
  *
  * Binding discipline: property keys AND values are bound parameters —
  * `(props->>$1)::cast <op> $2` — nothing interpolated, nothing to
- * escape; injection via key is impossible by construction. The substring
+ * escape; injection via key is impossible by construction. A missing
+ * property yields NULL under every comparison, `<>` included, and
+ * excludes the row. The substring
  * idiom is `position(lower($v) in lower(props->>$k)) > 0`: no ILIKE, no
  * escape helper, no wildcard bug class; an empty search string matches
  * every row and a missing property yields NULL and excludes the row,
- * matching Cypher `CONTAINS`. The sort direction is a build-time literal
+ * matching Cypher `CONTAINS`. Existence is jsonb key presence, `props ?
+ * $k` — the service stores no nulls, so a stored key is a present value
+ * — and relation existence is an `EXISTS` / `NOT EXISTS` over the
+ * relation table with no value compared. The sort direction is a build-time literal
  * from a closed enum, never caller text, and every listing ORDER BY ends
  * with the `id` tie-break for deterministic pagination among equal sort
  * values. Callers guard endpoint ids with `isUuid()` first and
@@ -23,13 +28,16 @@
 
 import type {
   FilterCondition,
+  PathExistenceCondition,
   PathFilterCondition,
   PropertyFilterCondition,
+  RelationExistenceCondition,
 } from "../../core/ports.js";
 import type { PropertyDef } from "../../core/schemas.js";
 
-const OPERATORS: Record<Exclude<FilterCondition["op"], "contains">, string> = {
+const OPERATORS: Record<Exclude<PropertyFilterCondition["op"], "contains">, string> = {
   eq: "=",
+  ne: "<>",
   gt: ">",
   gte: ">=",
   lt: "<",
@@ -82,8 +90,25 @@ export function buildFilterClauses(
       case "property":
         clauses.push(buildPropertyClause(condition, "props", params));
         break;
+      case "property-existence":
+        clauses.push(buildExistenceClause(condition.propertyKey, condition.exists, "props", params));
+        break;
       case "path":
-        clauses.push(buildPathClause(condition, params));
+        clauses.push(
+          buildPathClause(condition, params, (container) =>
+            buildPropertyClause(condition, container, params),
+          ),
+        );
+        break;
+      case "path-existence":
+        clauses.push(
+          buildPathClause(condition, params, (container) =>
+            buildExistenceClause(condition.propertyKey, condition.exists, container, params),
+          ),
+        );
+        break;
+      case "relation-existence":
+        clauses.push(buildRelationExistenceClause(condition, params));
         break;
       default: {
         const unhandled: never = condition;
@@ -112,28 +137,63 @@ function buildPropertyClause(
   return `${accessor(condition.dataType, container, keyP)} ${OPERATORS[condition.op]} $${valueP}`;
 }
 
+/** The predicate for one property's presence — jsonb key existence over
+ * the given `props` column, the key bound — or its absence. */
+function buildExistenceClause(
+  propertyKey: string,
+  exists: boolean,
+  container: string,
+  params: unknown[],
+): string {
+  const keyP = bind(params, propertyKey);
+  return exists ? `${container} ? $${keyP}` : `NOT (${container} ? $${keyP})`;
+}
+
+/** The near and far endpoint columns of a relation row followed in the
+ * given direction from the listed row. */
+function endpoints(direction: PathFilterCondition["direction"]): [string, string] {
+  return direction === "outgoing" ? ["from_id", "to_id"] : ["to_id", "from_id"];
+}
+
 /**
  * The existential predicate for one path condition: a relation row of the
  * type, anchored on the listed row (`entity` — the outer query's table,
  * unaliased) at the near endpoint. For a property of the related entity
  * the relation row is joined to the related row at the far endpoint and
- * the comparison is on that row; for a property of the relation itself
- * the comparison is on the relation row's own properties and no entity
- * is joined. Self-contained per condition, so two paths through one
- * relation type may be satisfied by two different relation rows. The
- * relation type key is bound like every property key.
+ * the predicate is on that row; for a property of the relation itself
+ * the predicate is on the relation row's own properties and no entity
+ * is joined. `predicate` builds it over the `props` column it is handed —
+ * a comparison or an existence test. Self-contained per condition, so
+ * two paths through one relation type may be satisfied by two different
+ * relation rows. The relation type key is bound like every property key.
  */
-function buildPathClause(condition: PathFilterCondition, params: unknown[]): string {
-  const [near, far] =
-    condition.direction === "outgoing" ? ["from_id", "to_id"] : ["to_id", "from_id"];
+function buildPathClause(
+  condition: Pick<PathExistenceCondition, "relationTypeKey" | "direction" | "propertySource">,
+  params: unknown[],
+  predicate: (container: string) => string,
+): string {
+  const [near, far] = endpoints(condition.direction);
   const onRelation = condition.propertySource === "relation";
   const source = onRelation ? "relation r" : `relation r JOIN entity re ON re.id = r.${far}`;
   const typeP = bind(params, condition.relationTypeKey);
-  const predicate = buildPropertyClause(condition, onRelation ? "r.props" : "re.props", params);
   return (
     `EXISTS (SELECT 1 FROM ${source} ` +
-    `WHERE r.${near} = entity.id AND r.type_key = $${typeP} AND ${predicate})`
+    `WHERE r.${near} = entity.id AND r.type_key = $${typeP} AND ${predicate(onRelation ? "r.props" : "re.props")})`
   );
+}
+
+/** The anti-existence predicate for a relation existence condition: any
+ * relation row of the type anchored on the listed row at the near
+ * endpoint (`EXISTS`), or none at all (`NOT EXISTS`); no related row is
+ * read and no value compared. */
+function buildRelationExistenceClause(
+  condition: RelationExistenceCondition,
+  params: unknown[],
+): string {
+  const [near] = endpoints(condition.direction);
+  const typeP = bind(params, condition.relationTypeKey);
+  const subquery = `SELECT 1 FROM relation r WHERE r.${near} = entity.id AND r.type_key = $${typeP}`;
+  return `${condition.exists ? "EXISTS" : "NOT EXISTS"} (${subquery})`;
 }
 
 /** The free-text search fragment: the contains idiom ORed over the

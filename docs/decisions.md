@@ -127,11 +127,13 @@ Encoding those names above the port would tie database-agnostic code to one data
 enforcing them inside the adapter would deliver the error from the wrong layer and make
 every future adapter reimplement it.
 
-**Adapters declare whether search evaluates path conditions; the service
+**Adapters declare whether search evaluates relation conditions; the service
 enforces it.**
-A query path on search resolves and crosses the port only where the adapter
+A query path or a relation existence test on search resolves and crosses the port only
+where the adapter
 declares support; elsewhere it is rejected above the port, naming the entity list as the
-alternative. Filters on a search are applied as part of the search, so a path condition
+alternative. Filters on a search are applied as part of the search, so a relation
+condition
 an adapter cannot evaluate inside its vector query must be refused before the search
 runs — evaluating it afterwards would make the limit count unfiltered hits — and encoding
 the capability above the port would tie database-agnostic code to one database.
@@ -336,7 +338,25 @@ deliberate future addition, never implied by the syntax. Deliberation:
 Conditions are independent: two paths through one relation type may be satisfied by two
 different related entities, and they combine with each other and with plain filters by
 AND. Existential is the only quantifier, so an entity with no relation of the type simply
-does not match — as an entity lacking a property does not.
+does not match — as an entity lacking a property does not. An existence test on a path
+is the same quantifier over presence: at least one reachable value is there, or is not.
+
+**A comparison never matches a missing value; existence is its own condition.**
+Not-equal holds only where the property exists and differs, like every other
+comparison, so no operator smuggles in null semantics. Whether a value is there at all is
+asked with `__exists` and `__missing`, which take a flag and no value and cross the port
+as existence conditions of their own — a property, a path, or a relation type — separate
+from the comparison conditions, because a comparison carries a data type and a coerced
+value and an existence test carries neither.
+
+**A relation type is a filter subject only under an existence test, and absence is
+anti-existence.**
+`filter.<relationTypeKey>__missing=true` asks whether no relation of the type reaches
+the entity in the direction the schema implies, resolved by the query-path rules; nothing
+about the relation is compared. This states an invariant such as "no newer version
+supersedes this one" directly, so no derived flag has to be stored and kept consistent
+with the relations it summarizes. A relation type under a comparison operator is
+rejected, because there is no value to compare.
 
 **Validation collects every error before answering.**
 A rejected write names all offending fields at once, and a rejected read all of its

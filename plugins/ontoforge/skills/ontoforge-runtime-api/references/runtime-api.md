@@ -40,7 +40,9 @@ the deployment rather than any ontology: `GET /api/server/features`.
 - Property filter syntax is `filter.{key}` or `filter.{key}__{op}`; on entity lists and
   search `{key}` may also be a query path (see Listing, Sorting, Filtering)
 - Supported filter operators, on properties and query paths alike: no suffix for
-  equality, `__gt`, `__gte`, `__lt`, `__lte`, `__contains`
+  equality, `__ne`, `__gt`, `__gte`, `__lt`, `__lte`, `__contains`, plus the existence
+  tests `__exists` and `__missing`, which take `true`/`false` and also accept a bare
+  relation type as the key
 - `fields` is repeated, not comma-separated: `fields=name&fields=email`
 - One query parameter is `snake_case` against the surrounding convention:
   `min_score` on saved-query search
@@ -59,13 +61,20 @@ Entity and relation lists share one parameter vocabulary.
 | `filter.{propertyKey}[__{op}]` | Property filter, repeatable |
 | `filter.{relationTypeKey}[:out\|:in].{propertyKey}[__{op}]` | Query path — a property of the related entity; entity lists and search, repeatable |
 | `filter.{relationTypeKey}[:out\|:in]@{propertyKey}[__{op}]` | Query path — a property stored on the relation itself; entity lists and search, repeatable |
+| `filter.{relationTypeKey}[:out\|:in]__exists` / `__missing` | Relation existence — whether any relation of the type exists; entity lists and search, repeatable |
 
 A list response carries `items`, `total`, `limit` and `offset`. `total` is the count
 before paging.
 
 Filter values arrive as text and are coerced to the property's declared data type before
-comparison; `__contains` is compared as text. An unknown property key, an unknown
-operator suffix and an uncoercible value are each rejected — and a request carrying
+comparison; `__contains` is compared as text. A comparison never matches a missing
+value — `filter.status__ne=archived` keeps the entities whose status exists and is not
+`archived`, not the ones without a status. `__exists` and `__missing` test presence and
+take a boolean flag instead of a value: `filter.email__missing=true` (the readable form
+of `filter.email__exists=false`) keeps the entities without an email; the property's data
+type plays no part. An unknown property key, an unknown
+operator suffix, an uncoercible value and a non-boolean existence flag are each
+rejected — and a request carrying
 several faulty filters is rejected once, every fault under its own filter key as sent
 (`age__gt`, not `age`) in `details.fields`, so one rejection is enough to correct every
 filter of the next attempt.
@@ -91,9 +100,19 @@ thirty.
   never matches.
 - **The value is coerced by the final property**, with the same operators as a plain
   filter; `__contains` stays textual. A path cannot end in a `document` property.
-- **Paths are a filter feature of entity lists and search only.** Relation
-  lists reject them, `sort` rejects them, `fields` treats one as an unknown name, and no
-  response carries a path value.
+  `__exists`/`__missing` on a path test the reached value under the same existential
+  quantifier: `filter.works_for@role__missing=true` returns the persons with an
+  employment that carries no role.
+- **A bare relation type tests relation existence.** Under `__exists` or `__missing`
+  only, the key may be the relation type alone: `filter.works_for__missing=true` returns
+  the persons employed nowhere, `filter.supersedes__missing=true` the entities nothing
+  supersedes — the current versions, without any stored flag. The direction follows the
+  relation type's endpoints as for a path, and the `:out`/`:in` marker is required on a
+  self-relation (`filter.manages:in__missing=true` for the persons nobody manages). A
+  relation type under any comparison operator is rejected.
+- **Paths and relation existence are a filter feature of entity lists and search
+  only.** Relation lists reject them, `sort` rejects them, `fields` treats one as an
+  unknown name, and no response carries a path value.
 - **Path faults are collected like any other**, each under the filter key as sent. A
   path resolves against the lens: a relation type, related entity type or property the
   lens hides fails exactly as one that does not exist, and a detail lists only what the

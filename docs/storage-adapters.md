@@ -89,14 +89,19 @@ there one deviation exists — PostgreSQL-specific: datetime values return as th
 ISO text, whose wire serialization is byte-identical.
 
 **Filters, sorts and searches cross as structured values, never as query text.** A filter
-is a list of parsed conditions, each tagged with its kind. The property condition carries
-a property key, its declared data type, an operator, and the value already coerced to
-that type. The path condition carries a relation type key, an explicit direction —
-outgoing or incoming — the source of the final property (the related entity, or the
-relation itself), the final property key, its data type, an operator and the coerced
-value; the service resolves the path above the port, so an adapter receives only valid,
-fully resolved conditions and never a key to interpret. A sort is a property key plus a
-direction; a text search is
+is a list of parsed conditions, each tagged with its kind, in two families. The comparison
+conditions carry an operator and a value: the property condition names a property key,
+its declared data type, the operator, and the value already coerced to that type; the
+path condition carries a relation type key, an explicit direction — outgoing or incoming
+— the source of the final property (the related entity, or the relation itself), the
+final property key, its data type, the operator and the coerced value. The existence
+conditions carry no value, only whether the subject must be present: the property
+existence condition names a property key; the path existence condition carries the same
+resolved path as a comparison path, minus the data type, operator and value; the relation
+existence condition carries a relation type key and an explicit direction alone. The
+service resolves every path and relation subject above the port, so an adapter receives
+only valid, fully resolved conditions and never a key to interpret. A sort is a property
+key plus a direction; a text search is
 a string plus the list of property keys to match it against. No fragment of any query
 language enters or leaves the port. The one exception is the validated query object,
 described below, which is opaque rather than textual.
@@ -113,13 +118,15 @@ type keys and one for relation type keys. They are returned as schema-level keys
 as physical names, so the modeling service can reject a colliding key without knowing what
 it would collide with. An adapter with no collisions returns two empty sets.
 
-**An adapter declares whether its search evaluates path conditions.** One plain
+**An adapter declares whether its search evaluates relation conditions** — path
+conditions and relation existence conditions alike. One plain
 flag on the runtime store, in the same spirit as the reserved keys: the constraint is the
 adapter's, the enforcement point is shared. The runtime service reads it before any search
-runs. On an adapter declaring support, a query path on search resolves exactly
-as on the entity list and crosses the port as a path condition with every ranking; on one
-declaring none, it is rejected above the port as a validation error naming the entity
-list as the alternative, and no search ever receives a path condition.
+runs. On an adapter declaring support, a query path or relation subject on search resolves
+exactly as on the entity list and crosses the port as its condition with every ranking; on
+one declaring none, it is rejected above the port as a validation error naming the entity
+list as the alternative — after resolution, so a malformed key is still reported as
+malformed — and no search ever receives a path or relation existence condition.
 
 One further caution, because it is invisible from the signatures: the port carries a
 discriminator distinguishing an entity type from a relation type — as the owner of a
@@ -382,17 +389,27 @@ operator vocabulary is fixed by the caller-facing surface, not by the adapter, a
 enumerated once in [interfaces.md](interfaces.md#listing-sorting-filtering); an adapter
 supports all of it and invents none of it. Validation happens above the port: every filter
 fault — an unknown property, an unknown operator, a value that will not coerce, a query
-path that does not resolve — is collected there into one domain validation error,
+path or relation subject that does not resolve — is collected there into one domain
+validation error,
 identically on every backend, so the adapter receives only valid conditions and raises no
-filter validation error of its own. Each condition's value is already coerced to the
+filter validation error of its own. Each comparison condition's value is already coerced
+to the
 property's declared data type; the substring operator is the exception, comparing
 case-insensitively on the string form of both sides and carrying that string form as its
-value. A path condition's predicate is existential and self-contained: it holds when at
+value. A missing property satisfies no comparison, the not-equal operator included: the
+predicate must fail, not hold, where there is no value. An existence condition compares
+nothing: its predicate is the presence of the property — the service stores no null, so
+a stored key is a present value — or its absence. A path condition's predicate is
+existential and self-contained: it holds when at
 least one relation of the type — leaving the listed instance for the outgoing direction,
-arriving at it for the incoming one — satisfies the comparison, evaluated per condition:
+arriving at it for the incoming one — satisfies the comparison, or the existence test,
+evaluated per condition:
 on the related entity's property when the property source is the related entity, on the
 relation's own property when the source is the relation, in which case the related
-entity is never read. One fault remains the adapter's to raise, as a
+entity is never read. A relation existence condition is the anti-existence predicate the
+runtime semantics require: it holds when at least one relation of the type leaves or
+arrives at the listed instance, or — for absence — when none does, with nothing about the
+relation or the related instance read or compared. One fault remains the adapter's to raise, as a
 domain validation error and not a storage error — Neo4j-specific, raised on the write path
 through the write-value constraint above: an indexed value exceeding the 32766-byte
 ceiling, in an error naming the property. Every value must reach the database as a bound
@@ -476,10 +493,10 @@ multi-ontology conformance tier runs on PostgreSQL only.
   composed property text and the language without indexing them and stores chunks without
   vectors. The 32766-byte indexed-value ceiling does not apply to the composed text,
   which is not indexed; individual vector filter metadata values retain their ceiling.
-- **Path conditions on search.** PostgreSQL declares support and evaluates them
-  in both rankings; Neo4j declares none, so a query path on search is rejected
-  above the port with a validation error naming the entity list — where paths work on
-  both adapters.
+- **Path and relation existence conditions on search.** PostgreSQL declares support and
+  evaluates them in both rankings; Neo4j declares none, so a query path or a relation
+  existence test on search is rejected above the port with a validation error naming the
+  entity list — where both work on both adapters.
 - **Filtered passage pages.** PostgreSQL applies filter conditions inside the passage
   search, on the parent entity under the iterative scan, so a page holds the requested
   number of matching passages; Neo4j applies them after its index lookup, so a filtered
@@ -616,12 +633,15 @@ Five B-tree indexes back the hot paths: entity rows by type key; relation rows b
 key, by source entity and by target entity; chunk rows by owning entity and property
 key. Filters, sorts and text search evaluate jsonb expressions that cast a property to
 its declared data type; property keys and values are both bound parameters, never SQL
-text. A path condition is an existential subquery over the relation table — anchored on
+text. Property existence is jsonb key presence, the key bound. A path condition is an
+existential subquery over the relation table — anchored on
 the listed row's id at the near endpoint column, joined to the related row at the far
-one, the relation type key bound like a property key — with the comparison evaluated on
+one, the relation type key bound like a property key — with the comparison, or the
+presence test, evaluated on
 the related row's properties; the endpoint indexes serve it. For a property of the
-relation itself the subquery joins no entity row: the comparison is evaluated on the
-relation row's own properties.
+relation itself the subquery joins no entity row: the predicate is evaluated on the
+relation row's own properties. A relation existence condition is the same subquery
+without a join and without a predicate, under `EXISTS` or `NOT EXISTS`.
 
 ## Index inventory
 

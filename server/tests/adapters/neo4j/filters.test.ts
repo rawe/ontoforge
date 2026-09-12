@@ -13,7 +13,7 @@ import {
   buildFilterClauses,
   buildSearchClause,
 } from "../../../src/adapters/neo4j/filters.js";
-import { cond, pathCond } from "../../propertyDefs.js";
+import { cond, existsCond, pathCond, pathExistsCond, relationCond } from "../../propertyDefs.js";
 
 describe("clause construction", () => {
   it("eq binds the value — never interpolated", () => {
@@ -24,16 +24,18 @@ describe("clause construction", () => {
 
   it("comparison operators map to their Cypher forms", () => {
     const [clauses] = buildFilterClauses([
+      cond("age", "integer", "ne", 0),
       cond("age", "integer", "gt", 1),
       cond("age", "integer", "gte", 2),
       cond("age", "integer", "lt", 3),
       cond("age", "integer", "lte", 4),
     ]);
     expect(clauses).toEqual([
-      "n.age > $flt_0",
-      "n.age >= $flt_1",
-      "n.age < $flt_2",
-      "n.age <= $flt_3",
+      "n.age <> $flt_0",
+      "n.age > $flt_1",
+      "n.age >= $flt_2",
+      "n.age < $flt_3",
+      "n.age <= $flt_4",
     ]);
   });
 
@@ -46,6 +48,55 @@ describe("clause construction", () => {
   it("a custom node alias is honoured", () => {
     const [clauses] = buildFilterClauses([cond("name", "string", "eq", "A")], "r");
     expect(clauses).toEqual(["r.name = $flt_0"]);
+  });
+});
+
+describe("existence conditions — null tests and pattern predicates, nothing bound", () => {
+  it("property existence is IS NOT NULL, absence IS NULL, on the aliased node", () => {
+    const [clauses, params] = buildFilterClauses(
+      [existsCond("email", true), existsCond("email", false)],
+      "r",
+    );
+    expect(clauses).toEqual(["r.email IS NOT NULL", "r.email IS NULL"]);
+    expect(params).toEqual({});
+  });
+
+  it("existence on a path keeps the path's pattern, the null test on the reached element", () => {
+    const [clauses, params] = buildFilterClauses([
+      pathExistsCond("works_for", "outgoing", "founded", true),
+      pathExistsCond("works_for", "incoming", "role", false, "relation"),
+    ]);
+    expect(clauses).toEqual([
+      "EXISTS { MATCH (n)-[:WORKS_FOR]->(re) WHERE re.founded IS NOT NULL }",
+      "EXISTS { MATCH (n)<-[r:WORKS_FOR]-() WHERE r.role IS NULL }",
+    ]);
+    expect(params).toEqual({});
+  });
+
+  it("relation existence is an EXISTS pattern, absence NOT EXISTS, binding nothing", () => {
+    const [clauses, params] = buildFilterClauses([
+      relationCond("works_for", "outgoing", true),
+      relationCond("supersedes", "incoming", false),
+    ]);
+    expect(clauses).toEqual([
+      "EXISTS { MATCH (n)-[:WORKS_FOR]->() }",
+      "NOT EXISTS { MATCH (n)<-[:SUPERSEDES]-() }",
+    ]);
+    expect(params).toEqual({});
+  });
+
+  it("parameter numbering skips the conditions that bind nothing", () => {
+    const [clauses, params] = buildFilterClauses([
+      cond("name", "string", "ne", "x"),
+      relationCond("supersedes", "incoming", false),
+      cond("age", "integer", "gt", 1),
+    ]);
+    expect(clauses).toEqual([
+      "n.name <> $flt_0",
+      "NOT EXISTS { MATCH (n)<-[:SUPERSEDES]-() }",
+      "n.age > $flt_1",
+    ]);
+    expect(Object.keys(params)).toEqual(["flt_0", "flt_1"]);
   });
 });
 

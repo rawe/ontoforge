@@ -110,27 +110,28 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
         "'limit' (default 50) and 'offset' (items to skip); the response echoes total. Use " +
         "'search' for case-insensitive substring matching across all string properties. " +
         "Use 'filters' for property-based filtering with operators: exact match " +
-        '("name": "Alice"), greater than ("age__gt": 25), greater or equal ("__gte"), ' +
-        'less than ("__lt"), less or equal ("__lte"), contains ' +
-        '("name__contains": "ali"). A filter key may be a query path crossing one ' +
-        "relation type to a property of the related entity, " +
-        '"<relationTypeKey>.<propertyKey>", or to a property stored on the relation ' +
-        'itself, "<relationTypeKey>@<propertyKey>": listing persons with ' +
-        '("works_for.name": "Acme") returns the persons employed by Acme, and with ' +
-        '("works_for@role": "CTO") the persons holding a CTO employment; operator ' +
-        'suffixes attach to a path key as to a plain one ("works_for@since__gte": ' +
-        '"2021-01-01"); the direction follows the relation type\'s endpoints, outgoing ' +
-        'from its source type and incoming from its target type; a ":out"/":in" ' +
-        "marker on the relation segment must agree with it and is required where both " +
-        'endpoints are the same type ("manages:out.name": "Bob" for the persons managing ' +
-        'a Bob, "manages:in.name": "Alice" for the persons managed by an Alice); an ' +
-        "entity matches when at least one relation of the type satisfies the condition. " +
-        "Several path conditions are ANDed, but each is checked on its own, so two paths " +
-        "through one relation type may be satisfied by two different relations: " +
-        '("works_for.name": "Acme", "works_for@role": "CTO") also returns a person who is ' +
-        "CTO at one company and a non-CTO at Acme. To bind both conditions to one " +
-        "relation use execute_query. Use 'fields' to select which properties to include " +
-        "— only listed fields plus _id are returned. Omit for all fields.",
+        '("name": "Alice"), not equal ("status__ne": "archived"), "__gt", "__gte", "__lt", ' +
+        '"__lte", contains ("name__contains": "ali"), present ("email__exists": true) and ' +
+        'absent ("email__missing": true). A missing value matches no comparison, __ne ' +
+        "included. Under __exists/__missing the key may be a bare relation type, testing " +
+        'whether any relation of the type exists: ("supersedes__missing": true) returns ' +
+        "the entities nothing supersedes. A filter key may also be a query path crossing " +
+        'one relation type to a property of the related entity, "<relationTypeKey>.' +
+        '<propertyKey>", or of the relation itself, "<relationTypeKey>@<propertyKey>": ' +
+        '("works_for.name": "Acme") lists the persons employed by Acme, ("works_for@role": ' +
+        '"CTO") the persons holding a CTO employment; operator suffixes attach as to a ' +
+        'plain key ("works_for@since__gte": "2021-01-01"). For paths and bare relation ' +
+        "types the direction follows the relation type's endpoints, outgoing from its " +
+        'source type and incoming from its target type; a ":out"/":in" marker on the ' +
+        "relation segment must agree with it and is required where both endpoints are the " +
+        'same type ("manages:out.name": "Bob" for the persons managing a Bob, ' +
+        '"manages:in__missing": true for the persons nobody manages). An entity matches ' +
+        "when at least one relation of the type satisfies the condition. Conditions are " +
+        "ANDed but each is checked on its own, so two paths through one relation type may " +
+        'be satisfied by two different relations: ("works_for.name": "Acme", ' +
+        '"works_for@role": "CTO") also returns a person who is CTO elsewhere and a non-CTO ' +
+        "at Acme; to bind both to one relation use execute_query. 'fields' selects the " +
+        "properties returned, plus _id always.",
       inputSchema: {
         entity_type_key: z.string(),
         search: z.string().optional(),
@@ -448,7 +449,11 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
   server.registerTool(
     "list_relations",
     {
-      description: "List relations of a type. Optionally filter by source or target entity.",
+      description:
+        "List relations of a type. Optionally filter by source or target entity. 'filters' " +
+        "takes the relation's own properties with the list_entities operators — exact " +
+        'match, "__ne", "__gt", "__gte", "__lt", "__lte", "__contains", "__exists", ' +
+        '"__missing" — but no query paths and no relation type as a subject.',
       inputSchema: {
         relation_type_key: z.string(),
         from_entity_id: z.string().optional(),
@@ -653,7 +658,7 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
           (document
             ? "Find entities whose document text matches. Every hit carries passage matches with propertyKey, charOffset and charLength for get_document. "
             : "Find entities for a text across properties and documents. ") +
-          "Omit entity_type_key to search all exposed types. Filters apply before ranking and narrow the searched types; fields projects each entity. Returns the search envelope. relativeScore is comparable only within this response: " +
+          "Omit entity_type_key to search all exposed types. Filters take the list_entities keys and operators except '__contains' and apply before ranking, narrowing the searched types; fields projects each entity. Returns the search envelope. relativeScore is comparable only within this response: " +
           RELATIVE_SCORE_PROMISE + " " + SEARCH_EVIDENCE_GUIDANCE,
         inputSchema: {
           query: z.string(),

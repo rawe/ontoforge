@@ -38,10 +38,11 @@
  *    modeling store. They return plain type keys, never physical names, so
  *    the modeling service can reject a colliding key without knowing why it
  *    collides. An adapter with no such collisions returns empty sets.
- * 6. Adapters declare whether their search evaluates path
- *    conditions, through `supportsSearchPathConditions()` on the
- *    runtime store, and the runtime service enforces the declaration: on
- *    an adapter declaring none, a query path on search is
+ * 6. Adapters declare whether their search evaluates relation
+ *    conditions — path conditions and relation existence — through
+ *    `supportsSearchPathConditions()` on the runtime store, and the
+ *    runtime service enforces the declaration: on an adapter declaring
+ *    none, a query path or a relation existence test on search is
  *    rejected above the port, naming the entity list as the alternative.
  *
  * The `ModelingStore` and `RuntimeStore` interfaces below, together with
@@ -62,19 +63,24 @@ import type { PropertyDef, TypeKind } from "./schemas.js";
 /** A raw store row: one entity, relation, or schema object as a plain map. */
 export type Row = Record<string, unknown>;
 
-/** The closed filter-operator vocabulary; a bare filter key means `eq`. */
-export type FilterOperator = "eq" | "gt" | "gte" | "lt" | "lte" | "contains";
+/** The closed comparison-operator vocabulary; a bare filter key means
+ * `eq`. `ne` holds only where the property exists and differs — a missing
+ * value never matches, as under every other comparison. */
+export type FilterOperator = "eq" | "ne" | "gt" | "gte" | "lt" | "lte" | "contains";
 
 /**
- * One parsed, coerced filter condition, tagged by `kind`. Built by the
- * runtime service — which validates the key, coerces the value, and
- * checks the operator above the port — so adapters receive only valid
- * input, dispatch on the kind, and do pure predicate assembly. Two kinds:
- * the plain property condition names one property of the listed type;
- * the path condition crosses one relation type to a property of the
- * related entity or of the relation itself. The value is already coerced
- * to the final property's declared data type (`contains` compares
- * textually and carries the string form).
+ * One parsed filter condition, tagged by `kind`. Built by the runtime
+ * service — which validates the key, coerces the value, and checks the
+ * operator above the port — so adapters receive only valid input,
+ * dispatch on the kind, and do pure predicate assembly. Two families:
+ * the comparison conditions carry an operator and a value already
+ * coerced to the final property's declared data type (`contains`
+ * compares textually and carries the string form); the existence
+ * conditions carry no value, only whether the subject must be present.
+ * In each family the plain condition names one property of the listed
+ * type and the path condition crosses one relation type to a property
+ * of the related entity or of the relation itself; the relation
+ * existence condition names a relation type alone.
  */
 export interface PropertyFilterCondition {
   kind: "property";
@@ -105,7 +111,46 @@ export interface PathFilterCondition {
   value: unknown;
 }
 
-export type FilterCondition = PropertyFilterCondition | PathFilterCondition;
+/** Whether one property of the listed type is present (`exists: true`)
+ * or absent (`exists: false`). A property set to null is absent — the
+ * service never stores a null — so presence is the key being stored. */
+export interface PropertyExistenceCondition {
+  kind: "property-existence";
+  propertyKey: string;
+  exists: boolean;
+}
+
+/** The existence test on a query path: the path is resolved exactly as
+ * a comparison path, and the entity matches when at least one relation
+ * of the type reaches a value — on the related entity or on the relation
+ * itself — that is present (`exists: true`) or absent (`exists: false`). */
+export interface PathExistenceCondition {
+  kind: "path-existence";
+  relationTypeKey: string;
+  direction: "outgoing" | "incoming";
+  propertySource: "relatedEntity" | "relation";
+  propertyKey: string;
+  exists: boolean;
+}
+
+/** Whether the listed entity has at least one relation of the type in
+ * the resolved direction (`exists: true`) or none at all (`exists:
+ * false`) — the latter an anti-existence predicate, `NOT EXISTS` over
+ * the relations of the type, never a value comparison. The direction is
+ * settled above the port exactly as for a query path. */
+export interface RelationExistenceCondition {
+  kind: "relation-existence";
+  relationTypeKey: string;
+  direction: "outgoing" | "incoming";
+  exists: boolean;
+}
+
+export type FilterCondition =
+  | PropertyFilterCondition
+  | PathFilterCondition
+  | PropertyExistenceCondition
+  | PathExistenceCondition
+  | RelationExistenceCondition;
 
 /** One stored type whose key the active adapter now reserves. */
 export interface ReservedTypeKeyInUse {
@@ -425,8 +470,9 @@ export interface ModelingStore {
  * property and document rankings) receive
  * parsed, coerced `FilterCondition`s built by the service — filter
  * validation happens above the port, so adapters receive only valid
- * input and raise no validation errors. A path condition reaches a
- * search only where the adapter declares support (contract rule 6). Three reads carry the property definitions for row
+ * input and raise no validation errors. A path or relation existence
+ * condition reaches a search only where the adapter declares support
+ * (contract rule 6). Three reads carry the property definitions for row
  * decoding — `getEntityById`, `getEntitiesByIds`, and `getNeighbors` (an
  * adapter whose storage is self-describing may ignore them); listing
  * paths carry them for the same reason. `getEntity` and `getRelation`
@@ -459,10 +505,11 @@ export interface RuntimeStore {
   // Declarations
   // ------------------------------------------------------------------
 
-  /** Whether this adapter's search evaluates path conditions —
-   * in both rankings, entities and document passages (contract rule 6).
-   * Declared as a plain flag so the service can reject a query path on
-   * search without knowing why the adapter cannot evaluate it. */
+  /** Whether this adapter's search evaluates relation conditions — path
+   * conditions and relation existence — in both rankings, entities and
+   * document passages (contract rule 6). Declared as a plain flag so the
+   * service can reject such a filter on search without knowing why the
+   * adapter cannot evaluate it. */
   supportsSearchPathConditions(): boolean;
   supportsKeywordRanking(): boolean;
 

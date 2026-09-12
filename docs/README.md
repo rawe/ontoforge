@@ -229,6 +229,12 @@ exactly one relation type to a property reached through it: a property of the re
 declared or stored for it. See
 [capabilities/instance-data.md](capabilities/instance-data.md#query-paths).
 
+**Relation existence** — a filter, on an entity list or on ranked search, whose key is
+a relation type alone under `__exists` or `__missing`, asking whether any relation of the
+type reaches the entity in the direction the schema implies; the relation segment
+follows the query path's rules. See
+[capabilities/instance-data.md](capabilities/instance-data.md#relation-existence).
+
 **Related entity** — the entity at the other end of a query path's relation: the
 relation type's target for an outgoing path, its source for an incoming one. A position
 in the schema, whereas a neighbour is an instance in a traversal result.

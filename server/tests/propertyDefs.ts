@@ -1,11 +1,19 @@
 /**
  * Shared unit-test builders: a minimal `PropertyDef`, a parsed property
- * `FilterCondition` and a resolved path condition in their tagged forms,
- * and the canonical one-property-per-data-type DEFS map the filter and
- * encoding tests exercise.
+ * `FilterCondition`, a resolved path condition and the three existence
+ * conditions in their tagged forms, and the canonical
+ * one-property-per-data-type DEFS map the filter and encoding tests
+ * exercise.
  */
 
-import type { FilterCondition, PathFilterCondition } from "../src/core/ports.js";
+import type {
+  FilterCondition,
+  PathExistenceCondition,
+  PathFilterCondition,
+  PropertyExistenceCondition,
+  PropertyFilterCondition,
+  RelationExistenceCondition,
+} from "../src/core/ports.js";
 import type { PropertyDef } from "../src/core/schemas.js";
 
 export function prop(key: string, dataType: string): PropertyDef {
@@ -15,10 +23,36 @@ export function prop(key: string, dataType: string): PropertyDef {
 export function cond(
   propertyKey: string,
   dataType: string,
-  op: FilterCondition["op"],
+  op: PropertyFilterCondition["op"],
   value: unknown,
 ): FilterCondition {
   return { kind: "property", propertyKey, dataType, op, value };
+}
+
+/** A property existence condition on the listed type. */
+export function existsCond(propertyKey: string, exists: boolean): PropertyExistenceCondition {
+  return { kind: "property-existence", propertyKey, exists };
+}
+
+/** A resolved path existence condition — on a property of the related
+ * entity unless `propertySource` names the relation itself. */
+export function pathExistsCond(
+  relationTypeKey: string,
+  direction: PathExistenceCondition["direction"],
+  propertyKey: string,
+  exists: boolean,
+  propertySource: PathExistenceCondition["propertySource"] = "relatedEntity",
+): PathExistenceCondition {
+  return { kind: "path-existence", relationTypeKey, direction, propertySource, propertyKey, exists };
+}
+
+/** A resolved relation existence condition. */
+export function relationCond(
+  relationTypeKey: string,
+  direction: RelationExistenceCondition["direction"],
+  exists: boolean,
+): RelationExistenceCondition {
+  return { kind: "relation-existence", relationTypeKey, direction, exists };
 }
 
 /** A resolved path condition — to a property of the related entity unless
@@ -28,7 +62,7 @@ export function pathCond(
   direction: PathFilterCondition["direction"],
   propertyKey: string,
   dataType: string,
-  op: FilterCondition["op"],
+  op: PathFilterCondition["op"],
   value: unknown,
   propertySource: PathFilterCondition["propertySource"] = "relatedEntity",
 ): PathFilterCondition {

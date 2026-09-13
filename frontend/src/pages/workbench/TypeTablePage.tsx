@@ -38,7 +38,13 @@ import { ColumnVisibilityMenu } from '@/components/table/ColumnVisibilityMenu'
 import { FilterChips } from '@/components/table/FilterChips'
 import { FilterPopover } from '@/components/table/FilterPopover'
 import { absoluteTime, relativeTime } from '@/components/table/format'
-import { filtersToParam, type FilterCondition } from '@/components/table/filters'
+import {
+  filtersToParam,
+  relationSubjects,
+  withCondition,
+  type FilterCondition,
+  type FilterSubjects,
+} from '@/components/table/filters'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -119,6 +125,17 @@ export function TypeTablePage() {
     if (type === undefined) return []
     return [...type.properties].sort((a, b) => Number(b.required) - Number(a.required))
   }, [type])
+
+  const filterSubjects = useMemo<FilterSubjects>(
+    () => ({
+      properties,
+      relations:
+        typeKey === undefined || schema.data === undefined
+          ? []
+          : relationSubjects(typeKey, schema.data.relationTypes, schema.data.entityTypes),
+    }),
+    [properties, typeKey, schema.data],
+  )
 
   const [page, setPage] = useState(0)
   const [sorting, setSorting] = useState<SortingState>([{ id: '_updatedAt', desc: true }])
@@ -497,8 +514,9 @@ export function TypeTablePage() {
               />
             </div>
             <FilterPopover
-              properties={properties}
-              onAdd={(f) => setFilters((prev) => [...prev, f])}
+              subjects={filterSubjects}
+              active={filters}
+              onAdd={(f) => setFilters((prev) => withCondition(prev, f))}
             />
             <div className="ml-auto flex items-center gap-2">
               <Button
@@ -519,7 +537,7 @@ export function TypeTablePage() {
             <div className="pb-3">
               <FilterChips
                 filters={filters}
-                properties={properties}
+                subjects={filterSubjects}
                 onRemove={(id) => setFilters((prev) => prev.filter((f) => f.id !== id))}
                 onClearAll={() => setFilters([])}
               />

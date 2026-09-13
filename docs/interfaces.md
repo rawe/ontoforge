@@ -89,26 +89,33 @@ Entity and relation list routes share one parameter vocabulary.
 | `filter.<propertyKey>[__<op>]` | Property filter, repeatable |
 | `filter.<relationTypeKey>[:out\|:in].<propertyKey>[__<op>]` | Query path — filter by a property of the related entity; entity lists and search, repeatable |
 | `filter.<relationTypeKey>[:out\|:in]@<propertyKey>[__<op>]` | Query path — filter by a property stored on the relation itself; entity lists and search, repeatable |
+| `filter.<relationTypeKey>[:out\|:in]__exists` / `__missing` | Relation existence — whether any relation of the type exists; entity lists and search, repeatable |
 
 A list response carries `items`, `total`, `limit` and `offset`. `total` is the count
 before paging. String sorting follows the database's default collation.
 
 The complete filter operator set:
 
-| Suffix | Comparison |
+| Suffix | Condition |
 |---|---|
 | *(none)* | Equal |
+| `__ne` | Present and not equal |
 | `__gt` | Greater than |
 | `__gte` | Greater than or equal |
 | `__lt` | Less than |
 | `__lte` | Less than or equal |
 | `__contains` | Case-insensitive substring |
+| `__exists` | Present (`true`) or absent (`false`) |
+| `__missing` | Absent (`true`) or present (`false`) — the readable inverse of `__exists` |
 
 Filter values arrive as text and are coerced to the property's declared data type before
 comparison; `__contains` is compared as text. Non-string values are matched against
 their text form — numbers as printed, booleans as `true`/`false`, datetimes as their
-ISO-8601 string. An unknown property key, an unknown operator
-suffix and an uncoercible value are each rejected; a request carrying several faulty
+ISO-8601 string. `__exists` and `__missing` take a boolean flag and no comparison value;
+their subject may be a property, a query path, or — on entity lists and search — a bare
+relation type, and its data type plays no part. An unknown property key, an unknown operator
+suffix, an uncoercible value, a non-boolean existence flag and a relation type under a
+comparison operator are each rejected; a request carrying several faulty
 filters is rejected once, every fault under its own filter key in `details.fields`. How a
 filter is evaluated, and the trap in the suffix rule, are in
 [capabilities/instance-data.md](capabilities/instance-data.md#listing). Relation lists
@@ -122,9 +129,13 @@ on the relation segment must agree with it, and on a self-relation the marker is
 (`filter.manages:out.name=Bob`). An entity matches when at least one relation of the type
 satisfies the condition, and every path fault is collected like a property fault; the
 rules are in
-[capabilities/instance-data.md](capabilities/instance-data.md#query-paths). `sort` rejects
-paths, and relation lists take none. The MCP `filters` object takes path keys as ordinary
-keys.
+[capabilities/instance-data.md](capabilities/instance-data.md#query-paths). Under
+`__exists` or `__missing` the relation type alone is a filter key —
+`filter.supersedes__missing=true` selects the entities no relation of the type reaches —
+resolved with the same direction rules
+([capabilities/instance-data.md](capabilities/instance-data.md#relation-existence)).
+`sort` rejects paths, and relation lists take neither paths nor relation subjects. The
+MCP `filters` object takes path and relation keys as ordinary keys.
 
 Semantic search accepts filters through the same `filter.` syntax, but not all of them, and
 not on every request shape — the restrictions and their reasons are in

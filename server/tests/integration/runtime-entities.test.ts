@@ -404,6 +404,53 @@ describe("listing with q + filters + sort + paging", () => {
     expect(badOp.statusCode).toBe(422);
   });
 
+  it("negation and existence: __ne skips missing values, __exists and __missing test presence", async () => {
+    await createPerson("test_lens", { name: "Eve", age: 50, email: "eve@x.io" });
+    const list = async (query: string): Promise<string[]> => {
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person?${query}`,
+      });
+      expect(res.statusCode, res.body).toBe(200);
+      return (res.json().items as Row[]).map((e) => e.name as string).sort();
+    };
+
+    expect(await list("filter.name__ne=Alice")).toEqual(["Albert", "Anna", "Bob", "Eve"]);
+    // Only Eve has an email; a missing value never satisfies a negation.
+    expect(await list("filter.email__ne=nobody@x.io")).toEqual(["Eve"]);
+    expect(await list("filter.email__exists=true")).toEqual(["Eve"]);
+    expect(await list("filter.email__missing=true")).toEqual(["Albert", "Alice", "Anna", "Bob"]);
+    expect(await list("filter.email__exists=false")).toEqual(["Albert", "Alice", "Anna", "Bob"]);
+    expect(await list("filter.email__missing=false")).toEqual(["Eve"]);
+    // A property set to null on update is absent afterwards.
+    const eve = (await app.inject({
+      method: "GET",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person?filter.name=Eve",
+    })).json().items[0] as Row;
+    const cleared = await app.inject({
+      method: "PATCH",
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person/${eve._id}`,
+      payload: { email: null },
+    });
+    expect(cleared.statusCode, cleared.body).toBe(200);
+    expect(await list("filter.email__exists=true")).toEqual([]);
+    // Existence and negation combine with the rest by AND.
+    expect(await list("filter.email__missing=true&filter.age__ne=30&q=a")).toEqual([
+      "Albert",
+      "Anna",
+    ]);
+
+    const bad = await app.inject({
+      method: "GET",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person?filter.email__exists=yes&filter.age__ne=x",
+    });
+    expect(bad.statusCode).toBe(422);
+    expect(bad.json().error.details.fields).toEqual({
+      email__exists: "Expected boolean for 'email', got 'yes'",
+      age__ne: expect.stringContaining("Expected integer"),
+    });
+  });
+
   it("several faulty filters are rejected once, every fault under its own filter key", async () => {
     const res = await app.inject({
       method: "GET",

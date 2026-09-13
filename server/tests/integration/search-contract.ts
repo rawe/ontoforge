@@ -278,6 +278,49 @@ export function searchContract(embedding: boolean, enabled = true) {
               expect(res.json().error.message).toContain("use the entity list");
             }
           }
+        // Relation existence follows the same declaration: the papers and
+        // companies (the types published_by touches) with no such relation.
+        for (const strategy of strategies) {
+          const res = await find("graph database", { strategy, "filter.published_by__missing": "true" });
+          if (keyword) {
+            expect(res.statusCode, res.body).toBe(200);
+            const ids = res.json().hits.map((h: any) => h.entity._id);
+            expect(ids).not.toContain(best._id);
+            expect(ids).not.toContain(second._id);
+            expect(ids.length).toBeGreaterThan(0);
+          } else {
+            expect(res.statusCode, res.body).toBe(422);
+            expect(res.json().error.details.fields.published_by__missing).toContain(
+              "use the entity list",
+            );
+          }
+        }
+      },
+    );
+    it.skipIf(!strategies.length)(
+      "existence and negation filters narrow the searched types and apply on every adapter",
+      async () => {
+        for (const strategy of strategies) {
+          // `year` is declared on papers and reports, both of which carry it.
+          const present = await find("graph database", { strategy, "filter.year__exists": "true" });
+          expect(present.statusCode, present.body).toBe(200);
+          const ids = present.json().hits.map((h: any) => h.entity._id);
+          expect(ids).toContain(best._id);
+          expect(ids).toContain(second._id);
+          for (const hit of present.json().hits)
+            expect(["paper", "report"]).toContain(hit.entity._entityTypeKey);
+          const absent = await find("graph database", { strategy, "filter.year__missing": "true" });
+          expect(absent.statusCode, absent.body).toBe(200);
+          expect(absent.json().hits).toEqual([]);
+          const negated = await find("graph database", { strategy, "filter.year__ne": "2024" });
+          expect(negated.statusCode, negated.body).toBe(200);
+          const rest = negated.json().hits.map((h: any) => h.entity._id);
+          expect(rest).not.toContain(best._id);
+          expect(rest).toContain(second._id);
+        }
+        const bad = await find("graph", { "filter.year__exists": "maybe", "filter.title__ne": "x" });
+        expect(bad.statusCode).toBe(422);
+        expect(Object.keys(bad.json().error.details.fields)).toEqual(["year__exists"]);
       },
     );
     it.skipIf(!keyword)(

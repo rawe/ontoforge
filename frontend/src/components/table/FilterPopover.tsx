@@ -1,21 +1,29 @@
 import { ListFilter } from 'lucide-react'
 import { useState } from 'react'
-import type { DataType, SchemaProperty } from '@/api/types'
+import type { DataType } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
 import {
-  OP_LABELS,
+  OP_VALUE,
+  RELATION_OPS,
+  opLabel,
   opsForDataType,
+  relationSubject,
+  subjectKey,
   type FilterCondition,
   type FilterOpUi,
+  type FilterSubject,
+  type FilterSubjects,
 } from './filters'
 
 let filterSeq = 0
@@ -35,48 +43,77 @@ function inputTypeFor(dataType: DataType): string {
 }
 
 /**
- * "Filter" toolbar button + popover: pick a property, an op appropriate to
- * its dataType, and value(s); applying calls `onAdd` with a FilterCondition.
+ * "Filter" toolbar button + popover: pick a subject — a property, or a
+ * relation type in one direction — an operator it offers, and value(s);
+ * applying calls `onAdd` with a FilterCondition. A subject holds one
+ * condition, so the popover says when applying replaces an active one.
  */
 export function FilterPopover({
-  properties,
+  subjects,
+  active,
   onAdd,
 }: {
-  properties: readonly SchemaProperty[]
+  subjects: FilterSubjects
+  active: readonly FilterCondition[]
   onAdd: (condition: FilterCondition) => void
 }) {
   const [open, setOpen] = useState(false)
-  const [propertyKey, setPropertyKey] = useState<string>()
+  const [selectedKey, setSelectedKey] = useState<string>()
   const [op, setOp] = useState<FilterOpUi>()
   const [value, setValue] = useState('')
   const [value2, setValue2] = useState('')
 
-  // Only properties with at least one operator (documents have none).
-  const filterable = properties.filter((p) => opsForDataType(p.dataType).length > 0)
-  const property = filterable.find((p) => p.key === propertyKey)
-  const ops = property !== undefined ? opsForDataType(property.dataType) : []
+  const property = subjects.properties.find((p) => p.key === selectedKey)
+  const relation = subjects.relations.find(
+    (r) => subjectKey(relationSubject(r)) === selectedKey,
+  )
+  const subject: FilterSubject | undefined =
+    property !== undefined
+      ? { kind: 'property', propertyKey: property.key }
+      : relation !== undefined
+        ? relationSubject(relation)
+        : undefined
+  const ops: readonly FilterOpUi[] =
+    property !== undefined ? opsForDataType(property.dataType) : relation !== undefined ? RELATION_OPS : []
+  const shape = op !== undefined ? OP_VALUE[op] : undefined
+  const replaces = active.some((f) => subjectKey(f.subject) === selectedKey)
 
   const valid =
-    property !== undefined &&
+    subject !== undefined &&
     op !== undefined &&
-    (op === 'is' || value !== '') &&
-    (op !== 'between' || value2 !== '')
+    (shape === 'none' || value !== '') &&
+    (shape !== 'range' || value2 !== '')
 
   const reset = () => {
-    setPropertyKey(undefined)
+    setSelectedKey(undefined)
     setOp(undefined)
     setValue('')
     setValue2('')
   }
 
+  const selectSubject = (key: string) => {
+    setSelectedKey(key)
+    setValue('')
+    setValue2('')
+    const p = subjects.properties.find((x) => x.key === key)
+    const nextOp = p !== undefined ? opsForDataType(p.dataType)[0] : RELATION_OPS[0]
+    setOp(nextOp)
+    if (nextOp !== undefined && OP_VALUE[nextOp] === 'boolean') setValue('true')
+  }
+
+  const selectOp = (next: FilterOpUi) => {
+    setOp(next)
+    if (OP_VALUE[next] === 'boolean' && value === '') setValue('true')
+  }
+
   const apply = () => {
-    if (!valid || property === undefined || op === undefined) return
+    if (!valid || subject === undefined || op === undefined) return
     onAdd({
       id: `f${filterSeq++}`,
-      propertyKey: property.key,
+      subject,
       op,
-      value: op === 'is' && value === '' ? 'true' : value,
-      ...(op === 'between' ? { value2 } : {}),
+      value,
+      ...(shape === 'range' ? { value2 } : {}),
     })
     setOpen(false)
     reset()
@@ -96,96 +133,119 @@ export function FilterPopover({
           Filter
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-72 p-3">
+      <PopoverContent align="start" className="w-80 p-3">
         <div className="space-y-2.5">
-          <Select
-            value={propertyKey ?? ''}
-            onValueChange={(key) => {
-              setPropertyKey(key)
-              setValue('')
-              setValue2('')
-              const p = filterable.find((x) => x.key === key)
-              const nextOps = p !== undefined ? opsForDataType(p.dataType) : []
-              setOp(nextOps[0])
-              if (p?.dataType === 'boolean') setValue('true')
-            }}
-          >
+          <Select value={selectedKey ?? ''} onValueChange={selectSubject}>
             <SelectTrigger size="sm" className="w-full">
-              <SelectValue placeholder="Property…" />
+              <SelectValue placeholder="Property or relation…" />
             </SelectTrigger>
             <SelectContent>
-              {filterable.map((p) => (
-                <SelectItem key={p.key} value={p.key}>
-                  <span className="flex items-center gap-2">
-                    {p.displayName}
-                    <span className="font-mono text-[11px] text-muted-foreground">
-                      {p.dataType}
-                    </span>
-                  </span>
-                </SelectItem>
-              ))}
+              {subjects.properties.length > 0 && (
+                <SelectGroup>
+                  <SelectLabel>Properties</SelectLabel>
+                  {subjects.properties.map((p) => (
+                    <SelectItem key={p.key} value={p.key}>
+                      <span className="flex items-center gap-2">
+                        {p.displayName}
+                        <span className="font-mono text-[11px] text-muted-foreground">
+                          {p.dataType}
+                        </span>
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              )}
+              {subjects.relations.length > 0 && (
+                <SelectGroup>
+                  <SelectLabel>Relations</SelectLabel>
+                  {subjects.relations.map((r) => {
+                    const key = subjectKey(relationSubject(r))
+                    return (
+                      <SelectItem key={key} value={key}>
+                        <span className="flex items-center gap-2">
+                          {r.relationType.displayName}
+                          <span className="text-[11px] text-muted-foreground">
+                            {r.direction === 'outgoing' ? '→' : '←'} {r.otherType.displayName}
+                          </span>
+                        </span>
+                      </SelectItem>
+                    )
+                  })}
+                </SelectGroup>
+              )}
             </SelectContent>
           </Select>
 
-          {property !== undefined && (
-            <Select value={op ?? ''} onValueChange={(v) => setOp(v as FilterOpUi)}>
+          {subject !== undefined && (
+            <Select value={op ?? ''} onValueChange={(v) => selectOp(v as FilterOpUi)}>
               <SelectTrigger size="sm" className="w-full">
                 <SelectValue placeholder="Operator…" />
               </SelectTrigger>
               <SelectContent>
                 {ops.map((o) => (
                   <SelectItem key={o} value={o}>
-                    {OP_LABELS[o]}
+                    {opLabel(subject, o)}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           )}
 
-          {property !== undefined &&
-            op !== undefined &&
-            (property.dataType === 'boolean' ? (
-              <Select value={value} onValueChange={setValue}>
-                <SelectTrigger size="sm" className="w-full">
-                  <SelectValue placeholder="Value…" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="true">true</SelectItem>
-                  <SelectItem value="false">false</SelectItem>
-                </SelectContent>
-              </Select>
-            ) : (
-              <div className="flex items-center gap-2">
+          {shape === 'boolean' && (
+            <Select value={value} onValueChange={setValue}>
+              <SelectTrigger size="sm" className="w-full">
+                <SelectValue placeholder="Value…" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="true">true</SelectItem>
+                <SelectItem value="false">false</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+
+          {property !== undefined && (shape === 'value' || shape === 'range') && (
+            <div className="flex items-center gap-2">
+              <Input
+                type={inputTypeFor(property.dataType)}
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') apply()
+                }}
+                placeholder={shape === 'range' ? 'From' : 'Value'}
+                className="h-8 text-[13px]"
+                autoFocus
+              />
+              {shape === 'range' && (
                 <Input
                   type={inputTypeFor(property.dataType)}
-                  value={value}
-                  onChange={(e) => setValue(e.target.value)}
+                  value={value2}
+                  onChange={(e) => setValue2(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') apply()
                   }}
-                  placeholder={op === 'between' ? 'From' : 'Value'}
+                  placeholder="To"
                   className="h-8 text-[13px]"
-                  autoFocus
                 />
-                {op === 'between' && (
-                  <Input
-                    type={inputTypeFor(property.dataType)}
-                    value={value2}
-                    onChange={(e) => setValue2(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') apply()
-                    }}
-                    placeholder="To"
-                    className="h-8 text-[13px]"
-                  />
-                )}
-              </div>
-            ))}
+              )}
+            </div>
+          )}
+
+          {op === 'ne' && (
+            <p className="text-[12px] text-muted-foreground">
+              Entities without a value are not included.
+            </p>
+          )}
+          {replaces && (
+            <p className="text-[12px] text-muted-foreground">
+              Replaces the active filter on this {property !== undefined ? 'property' : 'relation'}.
+            </p>
+          )}
 
           <div className="flex items-center justify-between pt-0.5">
-            {property !== undefined ? (
+            {subject !== undefined ? (
               <span className="font-mono text-[11px] text-muted-foreground">
-                {property.key}
+                {subjectKey(subject)}
               </span>
             ) : (
               <span />

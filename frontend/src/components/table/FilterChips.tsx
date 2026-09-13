@@ -1,17 +1,16 @@
 import { X } from 'lucide-react'
-import type { SchemaProperty } from '@/api/types'
 import { Button } from '@/components/ui/button'
-import { filterLabel, type FilterCondition } from './filters'
+import { filterLabel, type FilterCondition, type FilterSubjects } from './filters'
 
 /** Applied filter conditions as removable chips + a clear-all action. */
 export function FilterChips({
   filters,
-  properties,
+  subjects,
   onRemove,
   onClearAll,
 }: {
   filters: readonly FilterCondition[]
-  properties: readonly SchemaProperty[]
+  subjects: FilterSubjects
   onRemove: (id: string) => void
   onClearAll: () => void
 }) {
@@ -23,7 +22,7 @@ export function FilterChips({
           key={f.id}
           className="inline-flex items-center gap-1 rounded-md border bg-muted/40 py-0.5 pl-2 pr-1 text-xs"
         >
-          {filterLabel(f, properties)}
+          {filterLabel(f, subjects)}
           <button
             type="button"
             aria-label="Remove filter"

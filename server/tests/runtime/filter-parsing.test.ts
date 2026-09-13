@@ -22,12 +22,24 @@ describe("parsed conditions — the tagged property condition", () => {
 
   it("comparison suffixes map to their operators", () => {
     const conditions = parseFilterConditions(
-      { age__gt: "1", age__gte: "2", age__lt: "3", age__lte: "4" },
+      { age__ne: "0", age__gt: "1", age__gte: "2", age__lt: "3", age__lte: "4" },
       DEFS,
       "person",
     );
-    expect(conditions.map((c) => c.op)).toEqual(["gt", "gte", "lt", "lte"]);
-    expect(conditions.map((c) => c.value)).toEqual([1, 2, 3, 4]);
+    expect(conditions.map((c) => (c as { op: string }).op)).toEqual(["ne", "gt", "gte", "lt", "lte"]);
+    expect(conditions.map((c) => (c as { value: unknown }).value)).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it("__ne is a comparison: the value is coerced by the declared type", () => {
+    expect(parseFilterConditions({ active__ne: "true" }, DEFS, "person")).toEqual([
+      { kind: "property", propertyKey: "active", dataType: "boolean", op: "ne", value: true },
+    ]);
+    try {
+      parseFilterConditions({ age__ne: "abc" }, DEFS, "person");
+      expect.unreachable();
+    } catch (error) {
+      expect((error as ValidationError).message).toBe("Invalid filter value for 'age'");
+    }
   });
 
   it("__contains compares textually and skips type coercion", () => {
@@ -67,6 +79,57 @@ describe("parsed conditions — the tagged property condition", () => {
     expect(conditions[1]!.value).toBe(true);
     expect(conditions[2]!.value).toBe("2020-01-01");
     expect(conditions[3]!.value).toEqual(new Date("2024-01-15T10:30:00.000Z"));
+  });
+});
+
+describe("existence conditions — __exists and __missing carry a flag, never a value", () => {
+  it("__exists=true and __exists=false parse to the property existence condition", () => {
+    expect(
+      parseFilterConditions({ age__exists: "true", name__exists: "false" }, DEFS, "person"),
+    ).toEqual([
+      { kind: "property-existence", propertyKey: "age", exists: true },
+      { kind: "property-existence", propertyKey: "name", exists: false },
+    ]);
+  });
+
+  it("__missing inverts the flag, so __missing=true is __exists=false", () => {
+    expect(
+      parseFilterConditions({ age__missing: "true", name__missing: "false" }, DEFS, "person"),
+    ).toEqual([
+      { kind: "property-existence", propertyKey: "age", exists: false },
+      { kind: "property-existence", propertyKey: "name", exists: true },
+    ]);
+  });
+
+  it("the property's data type takes no part — a document property is testable and nothing is coerced by it", () => {
+    expect(parseFilterConditions({ bio__exists: "TRUE" }, DEFS, "person")).toEqual([
+      { kind: "property-existence", propertyKey: "bio", exists: true },
+    ]);
+  });
+
+  it("the flag must be a boolean, reported as an invalid value under the key as sent", () => {
+    try {
+      parseFilterConditions({ age__exists: "yes" }, DEFS, "person");
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      expect((error as ValidationError).message).toBe("Invalid filter value for 'age'");
+      expect((error as ValidationError).details).toEqual({
+        fields: { age__exists: "Expected boolean for 'age', got 'yes'" },
+      });
+    }
+  });
+
+  it("an unknown subject is the unknown-property fault; without a path schema a relation type cannot be the subject", () => {
+    try {
+      parseFilterConditions({ ghost__missing: "true" }, DEFS, "person");
+      expect.unreachable();
+    } catch (error) {
+      expect((error as ValidationError).message).toBe("Unknown filter property: 'ghost'");
+      expect((error as ValidationError).details).toEqual({
+        fields: { ghost__missing: "Not defined in type 'person'" },
+      });
+    }
   });
 });
 

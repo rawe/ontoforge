@@ -358,6 +358,13 @@ supersedes this one" directly, so no derived flag has to be stored and kept cons
 with the relations it summarizes. A relation type under a comparison operator is
 rejected, because there is no value to compare.
 
+**The type table offers a listed subset of the entity-list filter vocabulary.**
+Which operators and filter subjects the web client's type table offers, and which it
+leaves out, is listed in [product-surface.md](product-surface.md#type-table). A change to
+the filter vocabulary — an operator or a kind of filter subject — settles whether the type
+table offers it and updates that list, so every difference between the table and the
+server is a recorded choice.
+
 **Validation collects every error before answering.**
 A rejected write names all offending fields at once, and a rejected read all of its
 faulty filters, so a caller can correct in one round trip rather than discovering faults

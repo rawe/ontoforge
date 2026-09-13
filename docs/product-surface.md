@@ -130,17 +130,29 @@ created column starts hidden). Document values render as a size badge that opens
 [document viewer](#document-viewer-and-editor) — never as inline content, and never as
 something the row click can swallow.
 
-Filter operators are constrained by data type:
+A filter condition has a subject — a property of the type, or a relation type in one
+direction — and the operators on offer depend on it:
 
-| Data type | Operators |
+| Subject | Operators |
 |---|---|
-| string | contains, equals |
-| integer, float, date, datetime | equals, ≥, ≤, between |
-| boolean | is |
-| document | none — not filterable |
+| string property | contains, equals, does not equal, is set, is not set |
+| integer, float, date or datetime property | equals, does not equal, ≥, ≤, between, is set, is not set |
+| boolean property | is, is set, is not set |
+| document property | is set, is not set |
+| relation type, per direction | has any, has none |
 
-`between` is a client convenience: it is sent as a ≥ / ≤ pair on the same property.
-Applied conditions appear as removable chips with a clear-all action.
+A relation type is offered once for each direction in which it touches the type, so a
+self-referential type appears twice; each entry shows its direction and the entity type at
+its other end, and a relation type whose other end the lens does not expose is not
+offered. `between` is a client convenience: it is sent as a ≥ / ≤ pair on the same
+property. Choosing "does not equal" notes that entities without a value are not included.
+A subject holds at most one condition: applying another to it replaces the first, and the
+popover says so before applying. Applied conditions appear as removable chips with a
+clear-all action.
+
+The table offers a subset of the entity list's filter vocabulary
+([interfaces.md](interfaces.md#listing-sorting-filtering)): strict greater-than and
+less-than, and query paths in either form, are not offered.
 
 Any change to search, filters or sort returns to the first page. Switching to another type
 resets search, filters, sort, column visibility, selection and page. If deleting the last

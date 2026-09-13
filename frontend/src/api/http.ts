@@ -86,11 +86,14 @@ export async function request<T>(
 
 /* ------------------------------ query strings ------------------------------ */
 
-export type FilterOp = 'gt' | 'gte' | 'lt' | 'lte' | 'contains'
+/** The server's filter operator suffixes; equality has none. */
+export type FilterOp = 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains' | 'exists' | 'missing'
 
 /**
- * Filter conditions, keyed by property. A bare value means equality; use
+ * Filter conditions, keyed by property — or by relation type with a direction
+ * marker (`relationTypeKey:out`). A bare value means equality; use
  * `{op, value}` for operator filters — serialized as `filter.{key}__{op}`.
+ * `exists` and `missing` take `true` or `false` as their value.
  */
 export type FilterMap = Record<
   string,

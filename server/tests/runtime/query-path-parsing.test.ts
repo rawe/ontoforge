@@ -286,10 +286,39 @@ describe("existence on a query path resolves like a comparison path, minus the v
     ]);
   });
 
+  it("a document-typed final property takes an existence test, which reads no value", () => {
+    const scoped = scopedSchema();
+    expect(
+      parseFilterConditions(
+        { "works_for.profile__exists": "true", "works_for.profile__missing": "true" },
+        scoped.entityTypes.person!.properties,
+        "person",
+        { pathSchema: scoped },
+      ),
+    ).toEqual([
+      {
+        kind: "path-existence",
+        relationTypeKey: "works_for",
+        direction: "outgoing",
+        propertySource: "relatedEntity",
+        propertyKey: "profile",
+        exists: true,
+      },
+      {
+        kind: "path-existence",
+        relationTypeKey: "works_for",
+        direction: "outgoing",
+        propertySource: "relatedEntity",
+        propertyKey: "profile",
+        exists: false,
+      },
+    ]);
+  });
+
   it("a path fault is reported before the flag is read", () => {
-    const { message, fields } = reject({ "works_for.profile__exists": "maybe" }, "person");
-    expect(message).toBe("Query path 'works_for.profile' ends in a document property");
-    expect(Object.keys(fields)).toEqual(["works_for.profile__exists"]);
+    const { message, fields } = reject({ "works_for.ghost__exists": "maybe" }, "person");
+    expect(message).toBe("Unknown filter property: 'ghost' on related entity type 'company'");
+    expect(Object.keys(fields)).toEqual(["works_for.ghost__exists"]);
   });
 });
 
@@ -634,7 +663,7 @@ describe("every path fault is collected under the filter key as sent", () => {
     expect(Object.keys(fields)).toEqual(["manages:out.age"]);
   });
 
-  it("a document-typed final property is rejected", () => {
+  it("a document-typed final property is rejected under a comparison", () => {
     const { message, fields } = reject({ "works_for.profile__contains": "x" }, "person");
     expect(message).toBe("Query path 'works_for.profile' ends in a document property");
     expect(fields).toEqual({

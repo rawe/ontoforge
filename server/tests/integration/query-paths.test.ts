@@ -373,6 +373,35 @@ describe("existence on a path — the reached value is present, or absent", () =
     ]);
   });
 
+  it("a document property ends an existence path and agrees with the direct test", async () => {
+    await create(`${modelPrefix(fixture.ontologyKey)}/entity-types/${fixture.companyId}/properties`, {
+      key: "profile",
+      displayName: "Profile",
+      dataType: "document",
+      required: false,
+    });
+    const hooli = await create(`${LENS}/entities/company`, { name: "Hooli", profile: "# Hooli" });
+    const list = await app.inject({ method: "GET", url: `${LENS}/entities/person?filter.name=Dave` });
+    await create(`${LENS}/relations/works_for`, {
+      fromEntityId: (list.json().items[0] as Row)._id,
+      toEntityId: hooli._id,
+    });
+    expect((await names(`${LENS}/entities/company?filter.profile__exists=true`)).names).toEqual(["Hooli"]);
+    expect((await names(`${LENS}/entities/company?filter.profile__missing=true`)).names).toEqual([
+      "Acme",
+      "Globex",
+      "Initech",
+    ]);
+    expect((await names(`${LENS}/entities/person?filter.works_for.profile__exists=true`)).names).toEqual([
+      "Dave",
+    ]);
+    expect((await names(`${LENS}/entities/person?filter.works_for.profile__missing=true`)).names).toEqual([
+      "Alice",
+      "Bob",
+      "Carol",
+    ]);
+  });
+
   it("an entity with no relation of the type matches neither form", async () => {
     expect((await names(`${LENS}/entities/company?filter.works_for@role__missing=true`)).names).toEqual(
       [],

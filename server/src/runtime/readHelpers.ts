@@ -263,7 +263,7 @@ function parseComparison(
     if (options.pathSchema === undefined) {
       return pathsNotTaken(subject, typeKey);
     }
-    const resolved = resolveQueryPath(subject, typeKey, options.pathSchema);
+    const resolved = resolveQueryPath(subject, typeKey, options.pathSchema, "comparison");
     if (!("propertyDef" in resolved)) {
       return resolved;
     }
@@ -340,7 +340,7 @@ function parseExistence(
     if (options.pathSchema === undefined) {
       return pathsNotTaken(subject, typeKey);
     }
-    const resolved = resolveQueryPath(subject, typeKey, options.pathSchema);
+    const resolved = resolveQueryPath(subject, typeKey, options.pathSchema, "existence");
     if (!("propertyDef" in resolved)) {
       return resolved;
     }

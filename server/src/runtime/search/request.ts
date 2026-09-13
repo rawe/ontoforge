@@ -74,7 +74,7 @@ export async function validateRequest(
       if (existence) {
         // no data type
       } else if (isQueryPath(key)) {
-        const path = resolveQueryPath(key, tk, loaded.scoped);
+        const path = resolveQueryPath(key, tk, loaded.scoped, "comparison");
         if ("propertyDef" in path) dataTypes.add(path.propertyDef.dataType);
       } else if (def.properties[key]) dataTypes.add(def.properties[key]!.dataType);
       try {

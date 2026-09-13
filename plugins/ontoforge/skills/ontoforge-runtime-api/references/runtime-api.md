@@ -99,10 +99,12 @@ thirty.
   each other and with plain filters by AND. An entity with no relation of the type
   never matches.
 - **The value is coerced by the final property**, with the same operators as a plain
-  filter; `__contains` stays textual. A path cannot end in a `document` property.
-  `__exists`/`__missing` on a path test the reached value under the same existential
-  quantifier: `filter.works_for@role__missing=true` returns the persons with an
-  employment that carries no role.
+  filter; `__contains` stays textual. Under a comparison, a path cannot end in a
+  `document` property. `__exists`/`__missing` on a path test the reached value under the
+  same existential quantifier, and may end in a `document` property:
+  `filter.works_for@role__missing=true` returns the persons with an employment that
+  carries no role, `filter.works_for.profile__exists=true` the persons employed by a
+  company with a profile.
 - **A bare relation type tests relation existence.** Under `__exists` or `__missing`
   only, the key may be the relation type alone: `filter.works_for__missing=true` returns
   the persons employed nowhere, `filter.supersedes__missing=true` the entities nothing

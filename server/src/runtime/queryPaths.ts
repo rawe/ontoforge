@@ -202,13 +202,15 @@ function resolveRelationSegment(
  * unrecognised marker text), relation type not touching the listed type,
  * self-relation without a marker, marker contradicting the derivable
  * direction, unknown final property on its owner — the related entity
- * type for `.`, the relation type for `@` — and document-typed final
- * property.
+ * type for `.`, the relation type for `@` — and, for a comparison,
+ * document-typed final property. An existence test may end in a document
+ * property: it reads no value, so the data type plays no part.
  */
 export function resolveQueryPath(
   path: string,
   listedTypeKey: string,
   scoped: SchemaCacheValue,
+  use: "comparison" | "existence",
 ): ResolvedQueryPath | QueryPathFault {
   const segments = path.split(PATH_SEPARATORS);
   if (segments.length > 2) {
@@ -252,7 +254,7 @@ export function resolveQueryPath(
         `Property keys: ${keyList(Object.keys(owner.properties))}`,
     };
   }
-  if (propertyDef.dataType === "document") {
+  if (use === "comparison" && propertyDef.dataType === "document") {
     return {
       message: `Query path '${path}' ends in a document property`,
       detail:

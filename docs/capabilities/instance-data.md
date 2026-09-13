@@ -208,11 +208,14 @@ never mistaken for a property key.
   paths combine with each other and with plain filters by AND. An entity with no
   relation of the type never matches — no null semantics, as with an absent property.
 - **The value is coerced by the final property**, exactly as a plain filter is coerced by
-  its own; the substring operator stays textual. A path cannot end in a `document`
-  property.
+  its own; the substring operator stays textual. Under a comparison, a path cannot end in
+  a `document` property.
 - **Existence rides the same path.** `filter.works_for@role__missing=true` returns the
   persons with an employment that carries no role; `filter.works_for.founded__exists=true`
-  the persons employed by a company with a founding date. The quantifier is the same
+  the persons employed by a company with a founding date. As on a plain filter, the final
+  property's data type plays no part, so the path may end in a `document` property:
+  `filter.works_for.profile__exists=true` returns the persons employed by a company with a
+  profile. The quantifier is the same
   existential one: at least one relation of the type reaches a value that is present, or
   absent, so an entity with no relation of the type matches neither form. Whether the
   entity has any relation of the type at all is the next section's question.
@@ -226,7 +229,7 @@ Path faults are collected under their filter keys like every other: an unknown f
 segment (the detail lists the listed type's property keys and the relation types
 touching it), a relation type that does not touch the listed type, an unknown property
 on the related entity type or on the relation type (the detail lists that type's
-property keys), more than one relation segment, a document-typed final property, a
+property keys), more than one relation segment, a document-typed final property under a comparison, a
 self-relation path without a direction marker, and a marker that contradicts the
 derivable direction; text after the colon that is neither marker makes the first segment
 unknown. Paths are a filter feature only: `sort` rejects them, `fields` treats

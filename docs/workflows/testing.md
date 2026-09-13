@@ -44,8 +44,8 @@ The dev compose file carries both databases. PostgreSQL — the default — star
 docker compose up -d
 ```
 
-The same command starts Neo4j alongside PostgreSQL, with independent health checks and
-no port conflicts. Both adapters are exercised on fresh test data.
+Neo4j is commented out in the compose file; uncomment its service temporarily to test
+against it. Both adapters are exercised on fresh test data.
 
 ### The test database
 

@@ -400,78 +400,73 @@ export const ALL_TOOL_NAMES: ReadonlySet<string> = new Set(AGENT_TOOL_DEFS_BY_NA
  * arguments that fail the tool's schema are fed back the same way.
  * Anything else is rethrown and aborts the run.
  */
+export type ToolEvent =
+  | { type: "tool_call"; callId: string; tool: string; args: Row }
+  | { type: "tool_result"; callId: string; result: unknown };
+
+export interface ChatExecution {
+  signal?: AbortSignal;
+  onToolEvent?: (event: ToolEvent) => Promise<void>;
+}
+
 export function buildTools(
   lensKey: string,
   store: RuntimeStore,
   toolNames: string[],
   recorder: ToolCallRecord[],
+  execution: ChatExecution = {},
 ): StructuredToolInterface[] {
-  const tools: StructuredToolInterface[] = [];
-  for (const name of toolNames) {
+  return toolNames.flatMap((name) => {
     const def = AGENT_TOOL_DEFS_BY_NAME.get(name);
-    if (def === undefined) {
-      continue;
-    }
+    if (!def) return [];
     const structured = tool(
       async (args: unknown) => {
-        const record: ToolCallRecord = { tool: def.name, args: (args ?? {}) as Row };
-        recorder.push(record);
+        execution.signal?.throwIfAborted();
         let result: unknown;
         try {
           result = await def.run(lensKey, store, (args ?? {}) as Row);
         } catch (error) {
-          if (error instanceof NotFoundError || error instanceof ValidationError) {
-            result = { error: error.message };
-          } else {
-            throw error;
-          }
+          if (!(error instanceof NotFoundError || error instanceof ValidationError)) throw error;
+          result = { error: error.message };
         }
-        record.result = result;
-        return typeof result === "string" ? result : JSON.stringify(result);
+        execution.signal?.throwIfAborted();
+        return [typeof result === "string" ? result : JSON.stringify(result), result];
       },
-      { name: def.name, description: def.description, schema: def.schema },
+      { name: def.name, description: def.description, schema: def.schema,
+        responseFormat: "content_and_artifact" },
     ) as StructuredToolInterface;
-    tools.push(withArgumentSelfCorrection(structured, def.name, recorder));
-  }
-  return tools;
-}
-
-/**
- * Argument parsing happens inside the tool's `invoke`, before the handler
- * runs, so a schema-invalid tool call from the model would escape the
- * self-correction path in `buildTools` and abort the run. Catch it there
- * and return the validation failure as the tool's result instead.
- */
-function withArgumentSelfCorrection(
-  structured: StructuredToolInterface,
-  toolName: string,
-  recorder: ToolCallRecord[],
-): StructuredToolInterface {
-  const baseInvoke = structured.invoke.bind(structured);
-  structured.invoke = async (...invokeArgs: Parameters<typeof baseInvoke>) => {
-    try {
-      return await baseInvoke(...invokeArgs);
-    } catch (error) {
-      if (!(error instanceof ToolInputParsingException)) {
-        throw error;
-      }
-      const [input] = invokeArgs;
-      const isToolCall = input !== null && typeof input === "object" && "args" in (input as object);
-      const args = ((isToolCall ? (input as { args?: unknown }).args : input) ?? {}) as Row;
-      const result = { error: `Invalid arguments for ${toolName}: ${error.message}` };
-      recorder.push({ tool: toolName, args, result });
-      const content = JSON.stringify(result);
-      if (isToolCall) {
-        return new ToolMessage({
-          content,
-          name: toolName,
-          tool_call_id: String((input as { id?: unknown }).id ?? ""),
+    // Observe before schema parsing, so invalid arguments remain visible too.
+    const baseInvoke = structured.invoke.bind(structured);
+    structured.invoke = async (...invokeArgs: Parameters<typeof baseInvoke>) => {
+      execution.signal?.throwIfAborted();
+      const [input, config] = invokeArgs;
+      const isToolCall = input !== null && typeof input === "object" && "args" in input;
+      const args = ((isToolCall ? input.args : input) ?? {}) as Row;
+      const callId = randomUUID();
+      const record: ToolCallRecord = { tool: name, args };
+      recorder.push(record);
+      await execution.onToolEvent?.({ type: "tool_call", callId, tool: name, args });
+      execution.signal?.throwIfAborted();
+      let output: ToolMessage;
+      try {
+        output = await baseInvoke(isToolCall ? input : {
+          type: "tool_call", name, args, id: callId,
+        }, config) as ToolMessage;
+        record.result = output.artifact;
+      } catch (error) {
+        if (!(error instanceof ToolInputParsingException)) throw error;
+        record.result = { error: `Invalid arguments for ${name}: ${error.message}` };
+        output = new ToolMessage({
+          content: JSON.stringify(record.result), name,
+          tool_call_id: isToolCall ? String(input.id ?? "") : callId,
         });
       }
-      return content;
-    }
-  };
-  return structured;
+      execution.signal?.throwIfAborted();
+      await execution.onToolEvent?.({ type: "tool_result", callId, result: record.result });
+      return isToolCall ? output : output.content;
+    };
+    return [structured];
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -529,11 +524,13 @@ async function runReactAgent(
   systemPrompt: string,
   tools: StructuredToolInterface[],
   messages: BaseMessage[],
+  signal?: AbortSignal,
 ): Promise<string> {
+  signal?.throwIfAborted();
   if (tools.length === 0) {
     // No tools: a plain model call is the same conversation without the
     // tool loop (binding an empty toolset is rejected by providers).
-    const response = await model.invoke([new SystemMessage(systemPrompt), ...messages]);
+    const response = await model.invoke([new SystemMessage(systemPrompt), ...messages], { signal });
     return messageText(response);
   }
   const agent = createReactAgent({
@@ -541,7 +538,7 @@ async function runReactAgent(
     tools: new ToolNode(tools, { handleToolErrors: false }),
     prompt: systemPrompt,
   });
-  const state = await agent.invoke({ messages }, { recursionLimit: RECURSION_LIMIT });
+  const state = await agent.invoke({ messages }, { recursionLimit: RECURSION_LIMIT, signal });
   const finalMessages = state.messages as BaseMessage[];
   return messageText(finalMessages[finalMessages.length - 1]);
 }
@@ -940,7 +937,9 @@ export async function runAgentChat(
   store: RuntimeStore,
   history: ChatHistoryEntry[] | null = null,
   includeToolCalls = false,
+  execution: ChatExecution = {},
 ): Promise<Row> {
+  execution.signal?.throwIfAborted();
   const loaded = await loadSchema(lensKey, store);
   const schemaDesc = describeSchema(loaded.scoped);
 
@@ -954,7 +953,7 @@ export async function runAgentChat(
   const toolNames = resolveChatToolNames(agentConfig, store);
   const model = requireModel();
   const recorder: ToolCallRecord[] = [];
-  const tools = buildTools(lensKey, store, toolNames, recorder);
+  const tools = buildTools(lensKey, store, toolNames, recorder, execution);
 
   // Stateless history: caller-supplied user/assistant turns, text only.
   const messages: BaseMessage[] = [];
@@ -967,13 +966,23 @@ export async function runAgentChat(
   }
   messages.push(new HumanMessage(message));
 
-  const reply = await runReactAgent(model, systemPrompt, tools, messages);
+  const reply = await runReactAgent(model, systemPrompt, tools, messages, execution.signal);
+  execution.signal?.throwIfAborted();
 
   const response: Row = { reply, toolCalls: null };
   if (includeToolCalls) {
     response.toolCalls = recorder.map((record) => ({ tool: record.tool, args: record.args }));
   }
   return response;
+}
+
+/** Resolve all chat prerequisites before the REST response starts. */
+export async function prepareChat(lensKey: string, store: RuntimeStore, agentKey?: string) {
+  const loaded = await loadSchema(lensKey, store);
+  const config = agentKey === undefined ? DEFAULT_AGENT_CONFIG : loaded.agentConfigs[agentKey];
+  if (!config) throw new NotFoundError(`AI agent '${agentKey}' not found`);
+  requireModel();
+  return config;
 }
 
 /** Chat with the knowledge graph using AI and tools (default agent). */

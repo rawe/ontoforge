@@ -14,8 +14,7 @@ type TabKey = (typeof TABS)[number]
 /**
  * `/o/:ontologyKey/w/:lensKey/ai` — AI assistant with tabs Chat | Ask | Extract.
  * The active tab lives in `?tab=` so extract/ask can be deep-linked; all
- * three panels stay mounted so a long-running extraction survives tab
- * switches.
+ * extraction stays mounted across tab switches; leaving chat cancels its turn.
  */
 export function AiPage() {
   const { ontologyKey, lensKey } = useParams<{ ontologyKey: string; lensKey: string }>()
@@ -87,11 +86,11 @@ export function AiPage() {
             forceMount
             className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
           >
-            <ChatTab
+            {tab === 'chat' && <ChatTab
               key={`${ontologyKey}/${lensKey}`}
               ontologyKey={ontologyKey}
               lensKey={lensKey}
-            />
+            />}
           </TabsContent>
           <TabsContent
             value="ask"

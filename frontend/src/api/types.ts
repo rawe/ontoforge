@@ -264,13 +264,11 @@ export interface ChatMessage {
 }
 
 export interface ToolCall {
+  callId: string
   tool: string
-  args: Record<string, JsonValue>
-}
-
-export interface ChatResponse {
-  reply: string
-  toolCalls: ToolCall[] | null
+  args: Record<string, unknown>
+  result?: unknown
+  status: 'pending' | 'completed' | 'interrupted'
 }
 
 /* --------------------------------- registry --------------------------------- */

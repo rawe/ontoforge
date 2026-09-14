@@ -1,3 +1,4 @@
+import { requestChat, type ChatEvent } from './chatStream'
 /**
  * Runtime API client — `/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/...`,
  * addressed by ontology, lens and type KEY.
@@ -8,7 +9,6 @@ import type {
   AiAgent,
   AiQueryResponse,
   ChatMessage,
-  ChatResponse,
   DocumentContentResponse,
   EntityInstance,
   ExtractResponse,
@@ -276,12 +276,11 @@ export const aiExtract = (
 export const aiChat = (
   ontologyKey: string,
   lensKey: string,
-  body: { message: string; history?: ChatMessage[]; includeToolCalls?: boolean },
+  body: { message: string; history?: ChatMessage[] },
+  onEvent: (event: ChatEvent) => void,
+  signal: AbortSignal,
 ) =>
-  request<ChatResponse>(`${base(ontologyKey, lensKey)}/ai/chat`, {
-    method: 'POST',
-    body,
-  })
+  requestChat(`${base(ontologyKey, lensKey)}/ai/chat`, body, onEvent, signal)
 
 export const listAiAgents = (ontologyKey: string, lensKey: string) =>
   request<AiAgent[]>(`${base(ontologyKey, lensKey)}/ai/agents`)
@@ -290,9 +289,8 @@ export const aiAgentChat = (
   ontologyKey: string,
   lensKey: string,
   agentKey: string,
-  body: { message: string; history?: ChatMessage[]; includeToolCalls?: boolean },
+  body: { message: string; history?: ChatMessage[] },
+  onEvent: (event: ChatEvent) => void,
+  signal: AbortSignal,
 ) =>
-  request<ChatResponse>(`${base(ontologyKey, lensKey)}/ai/agents/${agentKey}/chat`, {
-    method: 'POST',
-    body,
-  })
+  requestChat(`${base(ontologyKey, lensKey)}/ai/agents/${agentKey}/chat`, body, onEvent, signal)

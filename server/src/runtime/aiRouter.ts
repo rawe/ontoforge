@@ -20,6 +20,7 @@ import { DEFAULT_AGENT_CONFIG } from "../core/ai.js";
 import { NotFoundError } from "../core/exceptions.js";
 import { getRuntimeStore } from "../core/ports.js";
 import * as aiService from "./aiService.js";
+import { sendChatStream } from "./chatStream.js";
 import { loadSchema } from "./schemaCache.js";
 
 const LensParams = z.object({ ontologyKey: z.string(), lensKey: z.string() });
@@ -46,8 +47,6 @@ const AiChatMessage = z.object({
 const AiChatPayload = z.looseObject({
   message: z.string().min(1),
   history: z.array(AiChatMessage).nullish(),
-  includeToolCalls: z.boolean().nullish(),
-  include_tool_calls: z.boolean().nullish(),
 });
 
 /** A2A task submissions carry a JSON-RPC 2.0 object; it is handed to the
@@ -98,14 +97,14 @@ export const aiRouter: FastifyPluginAsyncZod = async (app) => {
   app.post(
     "/ai/chat",
     { schema: { tags: ["ai"], params: LensParams, body: AiChatPayload } },
-    async (request) =>
-      aiService.aiChat(
-        request.params.lensKey,
-        request.body.message,
-        await getRuntimeStore(request.params.ontologyKey),
-        request.body.history ?? null,
-        request.body.includeToolCalls ?? request.body.include_tool_calls ?? false,
-      ),
+    async (request, reply) => {
+      const store = await getRuntimeStore(request.params.ontologyKey);
+      const config = await aiService.prepareChat(request.params.lensKey, store);
+      return sendChatStream(reply, (execution) => aiService.runAgentChat(
+        config, request.params.lensKey, request.body.message, store,
+        request.body.history ?? null, false, execution,
+      ));
+    },
   );
 
   // --- Agent discovery and per-agent chat ---
@@ -123,15 +122,14 @@ export const aiRouter: FastifyPluginAsyncZod = async (app) => {
   app.post(
     "/ai/agents/:agentKey/chat",
     { schema: { tags: ["ai"], params: AgentParams, body: AiChatPayload } },
-    async (request) =>
-      aiService.aiAgentChat(
-        request.params.lensKey,
-        request.params.agentKey,
-        request.body.message,
-        await getRuntimeStore(request.params.ontologyKey),
-        request.body.history ?? null,
-        request.body.includeToolCalls ?? request.body.include_tool_calls ?? false,
-      ),
+    async (request, reply) => {
+      const store = await getRuntimeStore(request.params.ontologyKey);
+      const config = await aiService.prepareChat(request.params.lensKey, store, request.params.agentKey);
+      return sendChatStream(reply, (execution) => aiService.runAgentChat(
+        config, request.params.lensKey, request.body.message, store,
+        request.body.history ?? null, false, execution,
+      ));
+    },
   );
 
   // --- A2A / Agent Card Endpoints ---

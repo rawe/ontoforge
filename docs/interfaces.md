@@ -445,7 +445,7 @@ Search ranks saved-query descriptions semantically, so it needs an embedding pro
 ### AI
 
 Semantics: [capabilities/ai-agents.md](capabilities/ai-agents.md). Every route here
-requires a language-model provider.
+requires a language-model provider for execution; agent discovery remains available without one.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -456,6 +456,26 @@ requires a language-model provider.
 | POST | `/ai/agents/{agentKey}/chat` | Converse with one named agent |
 
 The default agent is implicit — it needs no configuration and exists on every lens.
+
+Both chat POST routes accept `message` and optional user/assistant text `history`.
+Successful responses always use `application/x-ndjson`: one complete JSON object per line.
+Tool events are unconditional; there is no response-mode option.
+
+| Event `type` | Fields | Meaning |
+|---|---|---|
+| `tool_call` | `callId`, `tool`, `args` | One invocation begins, including schema-invalid arguments |
+| `tool_result` | `callId`, `result` | That invocation completes; result retains its native JSON structure |
+| `final` | `reply` | The complete assistant answer, with no repeated tool payloads |
+| `error` | `error` | Terminal public error object with `code`, `message`, and optional `details` |
+
+Call IDs are unique within a turn. Calls precede their results, and parallel results arrive
+as each completes. A writable stream has exactly one terminal `final` or `error` event;
+there are no assistant text fragments. EOF without a terminal event means an incomplete
+turn. Invalid requests, unknown selections, and unavailable providers are rejected before
+streaming where possible, using the ordinary HTTP error response. Unexpected failures
+after streaming begins have the generic `INTERNAL_ERROR` message `Internal Server Error`.
+Disconnect cancels further agent work, with best-effort cancellation of running operations.
+Delivery bounds buffering and terminates stalled or oversized streams.
 
 ### Agent-to-agent
 

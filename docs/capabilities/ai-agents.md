@@ -119,13 +119,19 @@ without naming an agent is a run of this default agent.
   they travel with it through [transfer](transfer.md). Defining or deleting one
   invalidates the schema cache.
 
-### Tool-call trace
+### Live tool activity
 
-A chat call can ask for the trace of tool calls made while producing the answer. It comes
-back as an ordered list of tool names with the arguments each was called with — the
-arguments only, not the results. It is off by default and requested per call. This is how
-a client shows what the model actually did, and how a reviewer notices that an answer came
-from no tool call at all.
+REST chat reports every tool invocation as it starts, with complete arguments, and attaches
+its structured result as soon as it completes. Repeated calls remain distinguishable, and
+one slow parallel call does not hide another's result. Schema-invalid arguments and
+recoverable validation/not-found failures remain visible while the model corrects them.
+The assistant answer appears once, complete, after tool work finishes; a turn using no tools
+still produces an answer. The wire contract lives in [interfaces](../interfaces.md#ai).
+
+A fatal failure retains earlier results and marks the turn incomplete. Disconnect cancels
+further model and tool work; cancellation of already-running operations is best effort.
+Abandoned turns do not continue in the background or automatically restart. The shared
+execution service still returns a complete answer to callers such as A2A.
 
 ### Conversation history
 

@@ -215,7 +215,7 @@ Two tabs — Console and Library — which both stay live, so results survive a 
 
 ### AI
 
-Three tabs — Chat, Ask, Extract — all live simultaneously, so a long extraction survives a
+Three tabs — Chat, Ask, Extract — preserve long-running extraction across a
 tab switch. See [AI panel](#ai-panel). Absent entirely when no language-model provider is
 configured.
 
@@ -471,11 +471,16 @@ Three modes over one lens. All require a language-model provider; see
 
 **Chat** — a conversation with the lens's default assistant or with any configured agent,
 chosen from a picker. Each agent keeps its own persisted thread; switching agents switches
-threads. Messages render as Markdown. Where the assistant used tools, the message carries
-a collapsible list of the calls and their arguments. Sending keeps the pending message
-visible and shows a live elapsed-seconds indicator, because local models routinely take
-tens of seconds and silence would read as a hang. A failed send keeps the text, and offers
-retry or dismiss. Clearing the thread is confirmed.
+threads. Assistant answers render once in full as Markdown. Tool calls appear immediately
+with complete arguments and pending/completed states; each completed structured result can
+be expanded while other calls or the answer are still pending. An elapsed-seconds indicator
+shows ongoing work. Failure or interruption preserves completed results, marks unfinished
+calls interrupted, and clearly labels the turn incomplete. A closed connection without a
+terminal event is a failure. Turns never retry automatically. Leaving chat or switching
+ontology, lens, or agent cancels the active request; late events cannot enter another thread.
+Clearing the thread is confirmed and cancels active work. Browser persistence keeps bounded
+text history and turn outcomes, without full tool payloads; storage failure does not break
+live chat. Empty pending answers and failed assistant turns are excluded from model history.
 
 **Ask** — one question, one answer. The response is Markdown, accompanied by a collapsible
 block holding the query the model generated (copyable, and openable directly in the

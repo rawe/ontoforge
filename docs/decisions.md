@@ -264,10 +264,13 @@ correction applies to keyword and hybrid property retrieval, including single-ty
 this is distinct from preserving single-type fusion.
 
 **Search evidence does not establish answer sufficiency.** Keep search candidates
-available without an automatic similarity floor. A caller may set an explicit floor; it
-removes only semantic candidates measured below it, never a keyword hit. A model-specific
-similarity and a lexical match are evidence to inspect, not guarantees that the requested
-answer exists. Unknown signals do not justify silently removing a candidate.
+available without an automatic similarity floor over REST, where a caller may set an
+explicit one. The MCP and agent search tools apply a fixed floor of 0.75 whenever the
+default strategy ranks semantically, hidden from the caller like the strategy itself, and
+none when it ranks by keyword. A floor removes only semantic candidates measured below
+it, never a keyword hit. A model-specific similarity and a lexical match are evidence to
+inspect, not guarantees that the requested answer exists. Unknown signals do not justify
+silently removing a candidate.
 
 **Keyword matching is permissive; ranking decides.** A keyword query matches rows
 carrying any of its terms, each also matching as a prefix — never a conjunction over all

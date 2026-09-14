@@ -587,8 +587,8 @@ Everything a client can do to instance data through one lens.
 | `delete_relation` | Delete a relation |
 | `get_neighbors` | An entity's local neighbourhood, with projection on both entities and relations |
 | `execute_query` | Run a read-only OQL query |
-| `search` | Rank entities by properties and documents, using the default strategy |
-| `search_documents` | Rank entities by document passages; optionally restrict to one property |
+| `search` | Rank entities by properties and documents, using the default strategy and the fixed similarity floor |
+| `search_documents` | Rank entities by document passages under the same defaults; optionally restrict to one property |
 | `list_saved_queries` | Discover saved queries and their parameters |
 | `run_saved_query` | Execute a saved query with parameter values |
 | `search_saved_queries` | Find a saved query by describing what it should do |
@@ -598,8 +598,10 @@ An agent configuration may grant twelve tools: `get_schema`, `list_entities`,
 `search_documents`, `execute_query`, `list_saved_queries`, `run_saved_query`,
 `search_saved_queries`. Every write tool is outside that set, and so is the read-only
 `get_relation` — being read-only is not sufficient to be grantable. The two search tools
-return the REST envelope and take no strategy; MCP also accepts filters and fields.
-See [capabilities/ai-agents.md](capabilities/ai-agents.md).
+return the REST envelope and take no strategy and no `min_similarity`; they apply the
+fixed floor of [capabilities/search.md](capabilities/search.md#similarity-floor) whenever
+the default strategy ranks semantically, echoed as `minSimilarity`. MCP also accepts
+filters and fields. See [capabilities/ai-agents.md](capabilities/ai-agents.md).
 
 `write_document` has no REST counterpart of its own: over REST both document edit forms
 share one route, selected by the operation in the body.

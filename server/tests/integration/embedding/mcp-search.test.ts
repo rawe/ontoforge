@@ -15,6 +15,7 @@ import { settings } from "../../../src/config.js";
 import { closeStores, initStores } from "../../../src/core/ports.js";
 import { wipeDatabase } from "../reset.js";
 import { invalidateLoadedSchemaCache } from "../../../src/runtime/schemaCache.js";
+import { TOOL_MIN_SIMILARITY } from "../../../src/runtime/search/strategies.js";
 import { checkOllamaModel, disableProvider, enableOllamaProvider } from "./support.js";
 
 type Row = Record<string, unknown>;
@@ -103,6 +104,8 @@ describe.skipIf(!ollamaUp)("MCP search (Ollama)", () => {
     });
     expect(result.isError).toBeFalsy();
     const data = json(result);
+    // The tool applies the fixed floor whenever the default strategy ranks semantically.
+    expect(data.minSimilarity).toBe(TOOL_MIN_SIMILARITY);
     expect((data.hits as Row[]).length).toBeGreaterThan(0);
     const results = data.hits as Row[];
     expect((results[0]!.entity as Row).name).toBe("Alice Chen");
@@ -135,6 +138,17 @@ describe.skipIf(!ollamaUp)("MCP search (Ollama)", () => {
       expect(entity).not.toHaveProperty("age");
       expect(entity).not.toHaveProperty("bio");
     }
+  });
+
+  it("omits every candidate below the fixed floor: a nonsense query returns no hits", async () => {
+    const result = await call("search", { query: "xqzv plork wumble" });
+    expect(result.isError).toBeFalsy();
+    const data = json(result);
+    expect(data.minSimilarity).toBe(TOOL_MIN_SIMILARITY);
+    expect(data.hits).toEqual([]);
+    const documents = json(await call("search_documents", { query: "xqzv plork wumble" }));
+    expect(documents.minSimilarity).toBe(TOOL_MIN_SIMILARITY);
+    expect(documents.hits).toEqual([]);
   });
 
   it("exposes no min_score input (documented interface difference)", async () => {

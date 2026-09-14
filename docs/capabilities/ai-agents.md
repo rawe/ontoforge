@@ -103,7 +103,9 @@ without naming an agent is a run of this default agent.
   of the set is called out, in [../interfaces.md](../interfaces.md#runtime-tools).
 - **An agent reads documents by passage.** `search_documents` returns entities with
   document matches naming the property and character range. `get_document` reads those
-  coordinates. MCP exposes the same document-search tool; neither surface takes a strategy.
+  coordinates. MCP exposes the same document-search tool; neither surface takes a strategy
+  or a similarity floor, and both apply the fixed floor of [search.md](search.md#similarity-floor)
+  whenever the default strategy ranks semantically.
 - Entity and document search tools are available whenever a search strategy is available.
   Only saved-query discovery requires an embedding provider specifically. This applies to
   the default toolset and explicit allowlists. The search tools return the full envelope

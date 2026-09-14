@@ -255,7 +255,9 @@ The relative-score promise: under `semantic` or `keyword` alone the shape is rea
 
 MCP `search` runs both kinds, `search_documents` runs only documents and accepts optional
 `property`. Both accept `query`, optional `entity_type_key`, `limit`, `filters`, `fields`;
-neither takes a strategy. They return the same envelope. Keyword needs adapter support;
+neither takes a strategy or `min_similarity` — both apply a fixed floor of 0.75 whenever
+the default strategy ranks semantically (echoed as `minSimilarity`, null under a keyword
+default). They return the same envelope. Keyword needs adapter support;
 semantic needs embeddings; hybrid needs both. Defaults prefer hybrid, keyword, semantic.
 
 ## Read-Only OQL Query

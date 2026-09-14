@@ -72,11 +72,15 @@ kinds still use summed reciprocal ranks. A single kind keeps its strategy rankin
 
 ### Similarity floor
 
-A caller may supply a minimum similarity, a number from 0 to 1 on the `semanticSimilarity`
-scale below; absent means no floor. The floor is model-specific — what counts as related
-depends on the embedding model — so the server never chooses one. It applies to semantic
-candidates only: each semantic ranking, entity text and document passages alike, drops
-every candidate measured below the floor before any fusion, above the storage adapter.
+A REST caller may supply a minimum similarity, a number from 0 to 1 on the
+`semanticSimilarity` scale below; absent means no floor. The floor is model-specific —
+what counts as related depends on the embedding model — so REST never chooses one. The
+MCP and agent search tools take none from the caller and instead apply the fixed floor
+pinned by the rule *Search evidence does not establish answer sufficiency* in
+[../decisions.md](../decisions.md) whenever the default strategy ranks semantically. A
+floor applies to semantic candidates only: each semantic ranking, entity text and
+document passages alike, drops every candidate measured below the floor before any
+fusion, above the storage adapter.
 Under `semantic` the filtered ranking is the result, and zero hits is a valid outcome.
 Under `hybrid` only the semantic branch is filtered; keyword-only hits are untouched and
 keep an unmeasured similarity, which is not a negative. Under `keyword`, explicit or as
@@ -118,8 +122,9 @@ lens or no longer an exposed string property. Null must not be read as false.
 
 Callers should inspect entity values and read passages before making claims from them.
 Related content can provide a useful starting entity for graph traversal without
-containing the requested answer. There is no automatic similarity floor; only a caller
-sets one.
+containing the requested answer. Over REST there is no automatic similarity floor; only a
+caller sets one. The MCP and agent search tools apply the fixed floor described under
+[Similarity floor](#similarity-floor).
 
 Entities carry every lens-exposed property by default, with document values stubbed.
 Projection works as on the entity list, including raw document text when explicitly
@@ -297,7 +302,9 @@ does not stop the server from starting.
 The full contract is in [../interfaces.md](../interfaces.md). REST `GET /search`, MCP,
 agent tools and saved-query search steps use one search entry and the same envelope.
 MCP and agents expose `search` (both kinds) and `search_documents` (documents only, every
-hit carrying a passage); neither tool takes a strategy. Both allow an omitted entity type.
+hit carrying a passage); neither tool takes a strategy or a floor — both apply the fixed
+floor whenever the default strategy ranks semantically and echo it as `minSimilarity`,
+null under a keyword default. Both allow an omitted entity type.
 MCP additionally accepts filters and fields. Agent limits are 10 by default for search,
 5 for document search, and 20 maximum. A saved-query search step requires one type and
 uses the default kinds and strategy; see [saved-queries.md](saved-queries.md).

@@ -472,3 +472,26 @@ it("disconnect during storage work prevents a follow-up model call and handles l
   await new Promise<void>((resolve) => setImmediate(resolve));
   expect(laterModel).not.toHaveBeenCalled();
 });
+
+it("delivers a root string result without JSON double encoding", async () => {
+  setAiModel(new FakeToolCallingModel([
+    toolCallMessage("get_schema", {}), new AIMessage("Schema ready"),
+  ]));
+  const res = await app.inject({ method: "POST", url: chatPath + "/chat", payload: { message: "Schema" } });
+  const stream = events(res.body);
+  expect(stream[1].result).toMatch(/^Lens: HR View/);
+  expect(stream[1].result).toContain("\nEntity types:\n");
+  expect(stream.at(-1)).toEqual({ type: "final", reply: "Schema ready" });
+});
+
+it("terminates an oversized result with one public error instead of buffering it", async () => {
+  holder.store.getEntity.mockResolvedValue({ _id: "huge", name: "x".repeat(8 * 1024 * 1024) });
+  setAiModel(new FakeToolCallingModel([
+    toolCallMessage("get_entity", { entity_type_key: "person", entity_id: "huge" }),
+    new AIMessage("Must not appear"),
+  ]));
+  const res = await app.inject({ method: "POST", url: chatPath + "/chat", payload: { message: "Go" } });
+  const stream = events(res.body);
+  expect(stream.map((event) => event.type)).toEqual(["tool_call", "error"]);
+  expect(stream[1].error).toEqual({ code: "VALIDATION_ERROR", message: "Chat stream exceeded its buffer limit" });
+});

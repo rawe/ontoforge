@@ -41,7 +41,7 @@ export function ToolCallList({ toolCalls }: { toolCalls: ToolCall[] }) {
                 <details className="mt-2 text-xs">
                   <summary className="cursor-pointer text-muted-foreground">Result</summary>
                   <pre className="mt-1 max-h-80 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed">
-                    {JSON.stringify(call.result, null, 2)}
+                    {typeof call.result === 'string' ? call.result : JSON.stringify(call.result, null, 2)}
                   </pre>
                 </details>
               )}

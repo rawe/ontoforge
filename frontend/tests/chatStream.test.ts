@@ -21,10 +21,15 @@ test('consumer sees complete events across fragmented UTF-8 and an unterminated 
   assert.deepEqual(received, expected)
 })
 
-test('consumer receives several events in a single chunk', async () => {
+test('consumer receives several events in a single chunk, preserving string results', async () => {
+  const expected = [
+    { type: 'tool_call', callId: '1', tool: 'get_schema', args: {} },
+    { type: 'tool_result', callId: '1', result: 'null' },
+    { type: 'final', reply: 'Hi' },
+  ]
   const received: unknown[] = []
-  await readChatStream(response([new TextEncoder().encode('{"type":"final","reply":"Hi"}\n')]), (e) => received.push(e))
-  assert.deepEqual(received, [{ type: 'final', reply: 'Hi' }])
+  await readChatStream(response([new TextEncoder().encode(expected.map((e) => JSON.stringify(e)).join('\n') + '\n')]), (e) => received.push(e))
+  assert.deepEqual(received, expected)
 })
 
 for (const [name, body] of [

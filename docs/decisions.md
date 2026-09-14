@@ -307,9 +307,19 @@ be wrong: the operation is named for the search data it rebuilds, not for one ha
 other. Cross-type search uses per-type indexes and an exact searched set, with no shared
 cross-type vector index.
 
-**Transport is stateless HTTP with plain JSON responses.**
-No event stream. Statelessness is what allows the same mount to serve many clients
-without per-connection state.
+**MCP transport is stateless HTTP with plain JSON responses.**
+MCP has no event stream. Statelessness allows the same mount to serve many clients
+without per-connection state. This rule applies to MCP, as established in
+[the MCP transport deliberation](adr/0005-mcp-transport-streamable-http-embedded-in-fastapi.md).
+
+**REST chat always delivers tool activity and the complete answer as NDJSON.**
+Both default and configured chat use their existing routes and one response contract.
+Results retain their JSON structure; only the final answer carries assistant text.
+Failures preserve received results and mark the turn incomplete. Disconnect cancels further
+work, and delivery bounds buffering. Shared execution remains usable by complete-response
+callers; A2A and MCP retain their own transport contracts. The wire details live in
+[interfaces](interfaces.md#ai); the delivery alternatives are weighed in
+[the chat transport deliberation](adr/0021-rest-chat-tool-streaming.md).
 
 ## Behaviour
 

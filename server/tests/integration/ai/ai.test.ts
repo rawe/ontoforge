@@ -56,7 +56,12 @@ async function inject(
   });
   let body: Row = {};
   if (res.body !== "") {
-    body = res.json() as Row;
+    if (res.headers["content-type"]?.includes("application/x-ndjson")) {
+      const events = res.body.trim().split("\n").map((line) => JSON.parse(line) as Row);
+      expect(events.filter((event) => ["final", "error"].includes(String(event.type)))).toHaveLength(1);
+      expect(events.at(-1)?.type).toBe("final");
+      body = { events };
+    } else body = res.json() as Row;
   }
   return { statusCode: res.statusCode, body };
 }
@@ -271,25 +276,24 @@ describe("POST /ai/extract", () => {
 // ---------------------------------------------------------------------------
 
 describe("POST /ai/chat", () => {
-  ifAvailable("returns a reply; toolCalls stays null without the trace flag", async () => {
+  ifAvailable("returns one complete final reply", async () => {
     const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/chat", {
       message: "How many companies are in the database?",
     });
     expect(statusCode).toBe(200);
-    expect(typeof body.reply).toBe("string");
-    expect((body.reply as string).length).toBeGreaterThan(0);
-    expect(body.toolCalls ?? null).toBeNull();
+    expect(typeof (body.events as Row[]).at(-1)!.reply).toBe("string");
+    expect(((body.events as Row[]).at(-1)!.reply as string).length).toBeGreaterThan(0);
+    expect((body.events as Row[]).at(-1)).not.toHaveProperty("toolCalls");
   });
 
-  ifAvailable("returns the tool-call trace on request", async () => {
+  ifAvailable("always includes tool activity", async () => {
     const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/chat", {
       message: "List all persons",
-      includeToolCalls: true,
     });
     expect(statusCode).toBe(200);
-    expect(body).toHaveProperty("reply");
-    expect(Array.isArray(body.toolCalls)).toBe(true);
-    for (const call of body.toolCalls as Row[]) {
+    expect((body.events as Row[]).at(-1)).toHaveProperty("reply");
+    expect(Array.isArray(body.events)).toBe(true);
+    for (const call of (body.events as Row[]).filter((event) => event.type === "tool_call")) {
       expect(call).toHaveProperty("tool");
       expect(call).toHaveProperty("args");
     }
@@ -304,7 +308,7 @@ describe("POST /ai/chat", () => {
       ],
     });
     expect(statusCode).toBe(200);
-    expect(typeof body.reply).toBe("string");
+    expect(typeof (body.events as Row[]).at(-1)!.reply).toBe("string");
   });
 
   ifAvailable("rejects an empty message", async () => {
@@ -335,12 +339,11 @@ describe("agents", () => {
       "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/agents/analyst/chat",
       {
         message: "How many persons are stored? Answer using your tools.",
-        includeToolCalls: true,
-      },
+        },
     );
     expect(statusCode).toBe(200);
-    expect(typeof body.reply).toBe("string");
-    const calls = body.toolCalls as Row[];
+    expect(typeof (body.events as Row[]).at(-1)!.reply).toBe("string");
+    const calls = (body.events as Row[]).filter((event) => event.type === "tool_call");
     expect(Array.isArray(calls)).toBe(true);
     for (const call of calls) {
       expect(call.tool).toBe("execute_query");

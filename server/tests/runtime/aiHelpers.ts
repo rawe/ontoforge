@@ -26,6 +26,7 @@ export class FakeToolCallingModel extends BaseChatModel {
   /** Returned verbatim by `withStructuredOutput(...).invoke(...)`. */
   structuredOutput: unknown = null;
   private index = 0;
+  beforeResponse?: (messages: BaseMessage[], signal?: AbortSignal) => Promise<void>;
 
   constructor(responses: AIMessage[], params: BaseChatModelParams = {}) {
     super(params);
@@ -41,7 +42,8 @@ export class FakeToolCallingModel extends BaseChatModel {
     return this;
   }
 
-  async _generate(messages: BaseMessage[]): Promise<ChatResult> {
+  async _generate(messages: BaseMessage[], options: this["ParsedCallOptions"]): Promise<ChatResult> {
+    await this.beforeResponse?.(messages, options.signal);
     this.calls.push(messages);
     const message = this.responses[Math.min(this.index, this.responses.length - 1)]!;
     this.index += 1;

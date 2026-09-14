@@ -40,7 +40,7 @@ export class ApiError extends Error {
   }
 }
 
-async function parseError(res: Response): Promise<ApiError> {
+export async function parseError(res: Response): Promise<ApiError> {
   let body: unknown
   try {
     body = await res.json()

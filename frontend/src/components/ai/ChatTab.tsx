@@ -1,9 +1,10 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
-import { AlertCircle, Bot, RotateCcw, SendHorizonal, Trash2, X } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { AlertCircle, Bot, SendHorizonal, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { qk } from '@/api/queryKeys'
 import { aiAgentChat, aiChat, listAiAgents } from '@/api/runtime'
 import type { ChatMessage } from '@/api/types'
+import type { ChatEvent } from '@/api/chatStream'
 import { EmptyState } from '@/components/EmptyState'
 import { ElapsedIndicator } from '@/components/ai/ElapsedIndicator'
 import { Markdown } from '@/components/ai/Markdown'
@@ -58,51 +59,75 @@ export function ChatTab({ ontologyKey, lensKey }: { ontologyKey: string; lensKey
     readChatHistory(ontologyKey, lensKey, DEFAULT_AGENT),
   )
   const [input, setInput] = useState('')
-  /** Message optimistically shown while the request is in flight / failed. */
-  const [pendingText, setPendingText] = useState<string | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const conversations = useRef(new Map<string, StoredChatMessage[]>())
+  const active = useRef<{ interrupt: () => void } | null>(null)
+  const isPending = messages.some((m) => m.status === 'pending')
 
-  const send = useMutation({
-    mutationFn: async (text: string) => {
-      const history: ChatMessage[] = messages.map(({ role, content }) => ({
-        role,
-        content,
-      }))
-      const body = { message: text, history, includeToolCalls: true }
-      return agentKey === DEFAULT_AGENT
-        ? aiChat(ontologyKey, lensKey, body)
-        : aiAgentChat(ontologyKey, lensKey, agentKey, body)
-    },
-    onSuccess: (response, text) => {
-      const userMessage: StoredChatMessage = { role: 'user', content: text }
-      const assistantMessage: StoredChatMessage = {
-        role: 'assistant',
-        content: response.reply,
-      }
-      if (response.toolCalls !== null && response.toolCalls.length > 0) {
-        assistantMessage.toolCalls = response.toolCalls
-      }
-      const next = [...messages, userMessage, assistantMessage].slice(-50)
-      setMessages(next)
-      writeChatHistory(ontologyKey, lensKey, agentKey, next)
-      setPendingText(null)
-    },
-  })
-
-  // Keep the list pinned to the bottom as messages/pending states change.
+  useEffect(() => () => active.current?.interrupt(), [])
   useEffect(() => {
     const el = scrollRef.current
     if (el !== null) el.scrollTop = el.scrollHeight
-  }, [messages, pendingText, send.isPending, send.isError])
+  }, [messages])
 
-  const submit = (text: string) => {
+  const submit = async (text: string) => {
     const trimmed = text.trim()
-    if (trimmed === '' || send.isPending) return
-    setPendingText(trimmed)
+    if (!trimmed || active.current) return
+    const history: ChatMessage[] = messages
+      .filter((m) => m.content && (m.role === 'user' || !m.status || m.status === 'completed'))
+      .map(({ role, content }) => ({ role, content }))
+    const controller = new AbortController()
+    let turn: StoredChatMessage = { role: 'assistant', content: '', status: 'pending', toolCalls: [] }
+    const preceding = [...messages, { role: 'user' as const, content: trimmed }].slice(-49)
+    const save = () => {
+      const next = [...preceding, turn]
+      setMessages(next)
+      conversations.current.set(agentKey, next)
+      writeChatHistory(ontologyKey, lensKey, agentKey, next)
+    }
+    const fail = (message: string) => {
+      turn = { ...turn, status: 'failed', error: message,
+        toolCalls: turn.toolCalls?.map((call) => call.status === 'pending'
+          ? { ...call, status: 'interrupted' } : call) }
+      save()
+    }
+    const request = { interrupt: () => {
+      if (active.current !== request) return
+      active.current = null
+      controller.abort()
+      if (turn.status === 'pending') fail('Turn interrupted')
+    } }
+    active.current = request
     setInput('')
-    send.mutate(trimmed)
+    save()
+    const onEvent = (event: ChatEvent) => {
+      if (active.current !== request) return
+      switch (event.type) {
+        case 'tool_call':
+          turn = { ...turn, toolCalls: [...(turn.toolCalls ?? []), {
+            callId: event.callId, tool: event.tool, args: event.args, status: 'pending',
+          }] }
+          break
+        case 'tool_result':
+          turn = { ...turn, toolCalls: turn.toolCalls?.map((call) => call.callId === event.callId
+            ? { ...call, result: event.result, status: 'completed' } : call) }
+          break
+        case 'final': turn = { ...turn, content: event.reply, status: 'completed' }; break
+        case 'error': fail(event.error.message); return
+      }
+      save()
+    }
+    try {
+      const body = { message: trimmed, history }
+      if (agentKey === DEFAULT_AGENT) await aiChat(ontologyKey, lensKey, body, onEvent, controller.signal)
+      else await aiAgentChat(ontologyKey, lensKey, agentKey, body, onEvent, controller.signal)
+    } catch (error) {
+      if (active.current === request) fail(error instanceof Error ? error.message : 'Chat failed')
+    } finally {
+      if (active.current === request) active.current = null
+    }
   }
 
   const onInputKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -110,12 +135,6 @@ export function ChatTab({ ontologyKey, lensKey }: { ontologyKey: string; lensKey
       e.preventDefault()
       submit(input)
     }
-  }
-
-  const dismissError = () => {
-    setPendingText(null)
-    send.reset()
-    inputRef.current?.focus()
   }
 
   return (
@@ -127,10 +146,9 @@ export function ChatTab({ ontologyKey, lensKey }: { ontologyKey: string; lensKey
           value={agentKey}
           onValueChange={(key) => {
             // Each agent keeps its own persisted thread.
+            active.current?.interrupt()
             setAgentKey(key)
-            setMessages(readChatHistory(ontologyKey, lensKey, key))
-            setPendingText(null)
-            send.reset()
+            setMessages(conversations.current.get(key) ?? readChatHistory(ontologyKey, lensKey, key))
           }}
         >
           <SelectTrigger size="sm" className="h-7 w-56 text-[13px]">
@@ -165,7 +183,7 @@ export function ChatTab({ ontologyKey, lensKey }: { ontologyKey: string; lensKey
 
       {/* Messages */}
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        {messages.length === 0 && pendingText === null ? (
+        {messages.length === 0 ? (
           <EmptyState
             icon={Bot}
             title="Chat with your knowledge graph"
@@ -187,56 +205,20 @@ export function ChatTab({ ontologyKey, lensKey }: { ontologyKey: string; lensKey
                     <Bot className="size-3.5 text-muted-foreground" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <Markdown>{m.content}</Markdown>
+                    {m.content && <Markdown>{m.content}</Markdown>}
+                    {m.status === 'pending' && <ElapsedIndicator label="Thinking" />}
+                    {m.status === 'failed' && (
+                      <p role="alert" className="flex items-center gap-1.5 text-[13px] text-destructive">
+                        <AlertCircle className="size-3.5" /> Incomplete: {m.error}
+                      </p>
+                    )}
                     {m.toolCalls !== undefined && <ToolCallList toolCalls={m.toolCalls} />}
                   </div>
                 </div>
               ),
             )}
 
-            {pendingText !== null && (
-              <div className="flex justify-end">
-                <div className="max-w-[85%] whitespace-pre-wrap rounded-lg bg-primary/10 px-3 py-2 text-[13px] opacity-70">
-                  {pendingText}
-                </div>
-              </div>
-            )}
-            {send.isPending && (
-              <div className="flex gap-2.5">
-                <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md border bg-muted/40">
-                  <Bot className="size-3.5 text-muted-foreground" />
-                </div>
-                <ElapsedIndicator label="Thinking" />
-              </div>
-            )}
-            {send.isError && pendingText !== null && (
-              <div className="mx-auto flex max-w-lg items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-[13px]">
-                <AlertCircle className="mt-0.5 size-3.5 shrink-0 text-destructive" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-destructive">{send.error.message}</p>
-                  <div className="mt-1.5 flex gap-1.5">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-6 gap-1 px-2 text-xs"
-                      onClick={() => send.mutate(pendingText)}
-                    >
-                      <RotateCcw className="size-3" />
-                      Retry
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 gap-1 px-2 text-xs text-muted-foreground"
-                      onClick={dismissError}
-                    >
-                      <X className="size-3" />
-                      Dismiss
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            )}
+
           </div>
         )}
       </div>
@@ -252,13 +234,13 @@ export function ChatTab({ ontologyKey, lensKey }: { ontologyKey: string; lensKey
             placeholder="Ask about your data… (Enter to send, Shift+Enter for a new line)"
             rows={2}
             className="min-h-9 resize-none text-[13px]"
-            disabled={send.isPending}
+            disabled={isPending}
           />
           <Button
             size="icon"
             className="size-9 shrink-0"
             aria-label="Send message"
-            disabled={input.trim() === '' || send.isPending}
+            disabled={input.trim() === '' || isPending}
             onClick={() => submit(input)}
           >
             <SendHorizonal className="size-4" />
@@ -279,10 +261,10 @@ export function ChatTab({ ontologyKey, lensKey }: { ontologyKey: string; lensKey
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
+                active.current?.interrupt()
+                conversations.current.delete(agentKey)
                 clearChatHistory(ontologyKey, lensKey, agentKey)
                 setMessages([])
-                setPendingText(null)
-                send.reset()
               }}
             >
               Clear

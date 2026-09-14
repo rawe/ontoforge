@@ -5,10 +5,10 @@ import { cn } from '@/lib/utils'
 
 /**
  * Collapsible tool-call inspection attached to an assistant chat message:
- * count badge in the summary row, tool name + pretty-printed args per call.
+ * count badge in the summary row, tool name, arguments, lifecycle state, and native JSON result per call.
  */
 export function ToolCallList({ toolCalls }: { toolCalls: ToolCall[] }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(true)
   if (toolCalls.length === 0) return null
 
   return (
@@ -30,12 +30,21 @@ export function ToolCallList({ toolCalls }: { toolCalls: ToolCall[] }) {
       </button>
       {open && (
         <ol className="mt-1.5 space-y-1.5 border-l pl-3">
-          {toolCalls.map((call, i) => (
-            <li key={i} className="rounded-md border bg-muted/30 p-2">
-              <div className="font-mono text-xs font-medium">{call.tool}</div>
+          {toolCalls.map((call) => (
+            <li key={call.callId} className="rounded-md border bg-muted/30 p-2">
+              <div className="font-mono text-xs font-medium">{call.tool} <span className="font-sans font-normal text-muted-foreground">{call.status}</span></div>
+              <div className="mt-1 text-xs text-muted-foreground">Arguments</div>
               <pre className="mt-1 overflow-x-auto font-mono text-[11px] leading-relaxed text-muted-foreground">
                 {JSON.stringify(call.args, null, 2)}
               </pre>
+              {call.status === 'completed' && (
+                <details className="mt-2 text-xs">
+                  <summary className="cursor-pointer text-muted-foreground">Result</summary>
+                  <pre className="mt-1 max-h-80 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed">
+                    {typeof call.result === 'string' ? call.result : JSON.stringify(call.result, null, 2)}
+                  </pre>
+                </details>
+              )}
             </li>
           ))}
         </ol>

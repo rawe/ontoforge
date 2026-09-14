@@ -41,7 +41,7 @@ let store: MockRuntimeStore;
 
 beforeEach(() => {
   store = createMockRuntimeStore();
-  store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+  store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
   invalidateLoadedSchemaCache();
 });
 
@@ -247,7 +247,7 @@ describe("document reads", () => {
   const BIO = "Alice joined in 2019. ".repeat(20);
 
   beforeEach(() => {
-    store.getFullSchema.mockResolvedValue(schemaWithDocument());
+    store.getFullSchemaWithLensInclusions.mockResolvedValue(schemaWithDocument());
     invalidateLoadedSchemaCache();
   });
 
@@ -772,7 +772,7 @@ describe("without a language-model provider", () => {
   });
 
   it("an unknown lens still answers not-found before the provider check", async () => {
-    store.getFullSchema.mockResolvedValue(null);
+    store.getFullSchemaWithLensInclusions.mockResolvedValue(null);
     await expect(aiQuery("missing", "q", asRuntimeStore(store))).rejects.toThrow(NotFoundError);
   });
 });

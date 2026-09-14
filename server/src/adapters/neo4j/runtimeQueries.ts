@@ -31,7 +31,7 @@ export function toEntityRow(raw: unknown): Row {
  * types globally, plus this lens's INCLUDES_TYPE edges for scope
  * filtering. Returns null when no matching lens exists.
  */
-export async function getFullSchema(session: Session, lensKey: string): Promise<Row | null> {
+export async function getFullSchemaWithLensInclusions(session: Session, lensKey: string): Promise<Row | null> {
   const lensResult = await session.run(
     "MATCH (o:Ontology {key: $key}) RETURN o {.*} AS lens",
     { key: lensKey },

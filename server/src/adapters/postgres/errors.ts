@@ -57,9 +57,10 @@ export interface Querier {
   query(text: string, params?: unknown[]): Promise<DbResult>;
 }
 
-/** Transaction isolation. REPEATABLE READ is used by the two
- * `getFullSchema`s only (their coherent-snapshot obligation); everything
- * else stays at the READ COMMITTED default. */
+/** Transaction isolation. REPEATABLE READ is used only by modeling's
+ * `getFullSchema` and runtime's `getFullSchemaWithLensInclusions` (their
+ * coherent-snapshot obligation); everything else stays at the READ
+ * COMMITTED default. */
 export type IsolationLevel = "READ COMMITTED" | "REPEATABLE READ";
 
 let pool: pg.Pool | null = null;

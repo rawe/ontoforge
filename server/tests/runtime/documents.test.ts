@@ -101,7 +101,7 @@ describe("coercion + config", () => {
 
 describe("read-model stubs", () => {
   it("get entity stubs a document with the stored length", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
     holder.store.getEntity.mockResolvedValue(
       makeEntity({ name: "Ada", bio: BIO, _doc_bio_length: 40213 }),
     );
@@ -121,7 +121,7 @@ describe("read-model stubs", () => {
   });
 
   it("stub length falls back to the value's length", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
     holder.store.getEntity.mockResolvedValue(makeEntity({ name: "Ada", bio: BIO }));
 
     const res = await app.inject({
@@ -134,7 +134,7 @@ describe("read-model stubs", () => {
 
   it("fallback length counts code points, not UTF-16 units", async () => {
     const emojiBio = "Rocket 🚀 to Mars 🌍!"; // 2 astral code points
-    holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
     holder.store.getEntity.mockResolvedValue(makeEntity({ name: "Ada", bio: emojiBio }));
 
     const res = await app.inject({
@@ -147,7 +147,7 @@ describe("read-model stubs", () => {
   });
 
   it("list entities stubs documents", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
     holder.store.listEntities.mockResolvedValue([
       [makeEntity({ name: "Ada", bio: BIO, _doc_bio_length: BIO.length })],
       1,
@@ -164,7 +164,7 @@ describe("read-model stubs", () => {
   });
 
   it("fields projection returns the raw document value", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
     holder.store.getEntity.mockResolvedValue(
       makeEntity({ name: "Ada", bio: BIO, _doc_bio_length: BIO.length }),
     );
@@ -182,7 +182,7 @@ describe("read-model stubs", () => {
 
 describe("document read endpoint", () => {
   it("returns the full document", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
     holder.store.getEntity.mockResolvedValue(makeEntity({ name: "Ada", bio: BIO }));
 
     const res = await app.inject({
@@ -201,7 +201,7 @@ describe("document read endpoint", () => {
   });
 
   it("returns a slice", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
     holder.store.getEntity.mockResolvedValue(makeEntity({ name: "Ada", bio: BIO }));
 
     const res = await app.inject({
@@ -219,7 +219,7 @@ describe("document read endpoint", () => {
   it("slices by code points, never UTF-16 units", async () => {
     const emojiBio = "Intro 👩‍🚀🚀 then the body text 🌍 continues to the end.";
     const cps = Array.from(emojiBio);
-    holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
     holder.store.getEntity.mockResolvedValue(makeEntity({ name: "Ada", bio: emojiBio }));
 
     const res = await app.inject({
@@ -236,7 +236,7 @@ describe("document read endpoint", () => {
   });
 
   it("offset beyond the end returns empty content", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
     holder.store.getEntity.mockResolvedValue(makeEntity({ name: "Ada", bio: "short" }));
 
     const res = await app.inject({
@@ -251,7 +251,7 @@ describe("document read endpoint", () => {
   });
 
   it("unset value reads as an empty document", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
     holder.store.getEntity.mockResolvedValue(makeEntity({ name: "Ada" })); // bio never written
 
     const res = await app.inject({
@@ -265,7 +265,7 @@ describe("document read endpoint", () => {
   });
 
   it("404 for a non-document property", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
     const res = await app.inject({
       method: "GET",
       url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person/ent-1/documents/name",
@@ -274,7 +274,7 @@ describe("document read endpoint", () => {
   });
 
   it("404 for an unknown property", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
     const res = await app.inject({
       method: "GET",
       url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person/ent-1/documents/nonexistent",
@@ -284,7 +284,7 @@ describe("document read endpoint", () => {
 
   it("404 for a property the lens hides", async () => {
     // A lens excluding bio from person must 404 the document endpoint.
-    holder.store.getFullSchema.mockResolvedValue(
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(
       makeDocSchema([{ key: "person", properties: ["name"] }]),
     );
     const res = await app.inject({
@@ -295,7 +295,7 @@ describe("document read endpoint", () => {
   });
 
   it("404 for a missing entity", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
     holder.store.getEntity.mockResolvedValue(null);
     const res = await app.inject({
       method: "GET",
@@ -305,7 +305,7 @@ describe("document read endpoint", () => {
   });
 
   it("404 for a missing entity type", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
     const res = await app.inject({
       method: "GET",
       url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/nonexistent/ent-1/documents/bio",
@@ -317,7 +317,7 @@ describe("document read endpoint", () => {
 describe("chunk sync on create / update", () => {
   it("create stores the length and writes chunks", async () => {
     setEmbeddingProvider(mockProvider());
-    holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
     holder.store.createEntity.mockResolvedValue(
       makeEntity({ name: "Ada", bio: BIO, _doc_bio_length: BIO.length }),
     );
@@ -362,7 +362,7 @@ describe("chunk sync on create / update", () => {
   });
 
   it("create without a provider writes chunks without vectors", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
     holder.store.createEntity.mockResolvedValue(
       makeEntity({ name: "Ada", bio: BIO, _doc_bio_length: BIO.length }),
     );
@@ -386,7 +386,7 @@ describe("chunk sync on create / update", () => {
   it("length bookkeeping counts code points on writes", async () => {
     const emojiBio = "Astronauts 👩‍🚀👨‍🚀 orbit 🌍."; // ZWJ sequences: units != code points
     const cpLen = Array.from(emojiBio).length;
-    holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
     holder.store.createEntity.mockResolvedValue(
       makeEntity({ name: "Ada", bio: emojiBio, _doc_bio_length: cpLen }),
     );
@@ -405,7 +405,7 @@ describe("chunk sync on create / update", () => {
 
   it("updating a document property re-chunks and updates the length", async () => {
     setEmbeddingProvider(mockProvider());
-    holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
     holder.store.updateEntity.mockResolvedValue(
       makeEntity({ name: "Ada", bio: "new text", _doc_bio_length: 8 }),
     );
@@ -426,7 +426,7 @@ describe("chunk sync on create / update", () => {
 
   it("removing a document property deletes its chunks", async () => {
     setEmbeddingProvider(mockProvider());
-    holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
     holder.store.updateEntity.mockResolvedValue(makeEntity({ name: "Ada" }));
 
     const res = await app.inject({
@@ -445,7 +445,7 @@ describe("chunk sync on create / update", () => {
 
   it("updating another property leaves chunks untouched", async () => {
     setEmbeddingProvider(mockProvider());
-    holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
     const raw = makeEntity({ name: "Grace", bio: BIO, _doc_bio_length: BIO.length });
     holder.store.getEntity.mockResolvedValue(raw);
     holder.store.updateEntity.mockResolvedValue(raw);

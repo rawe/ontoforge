@@ -75,7 +75,7 @@ function makeNeighbor(options: {
 
 describe("scope filtering", () => {
   it("drops relations whose type the lens does not expose, with their neighbour", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.getEntity.mockResolvedValue(
       makeEntity({ name: "Alice", email: "a@b.com" }, "person", "ent-1"),
     );
@@ -109,7 +109,7 @@ describe("scope filtering", () => {
   });
 
   it("filters centre and neighbour entity properties to the lens", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.getEntity.mockResolvedValue(
       makeEntity({ name: "Alice", email: "a@b.com", age: 30 }, "person", "ent-1"),
     );
@@ -140,7 +140,7 @@ describe("scope filtering", () => {
   });
 
   it("filters relation properties to a property-narrowed inclusion", async () => {
-    holder.store.getFullSchema.mockResolvedValue(
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(
       makeFullSchema({
         lensKey: "restricted_view",
         entityInclusions: [
@@ -177,7 +177,7 @@ describe("scope filtering", () => {
   it("the documented leak: an out-of-scope neighbour escapes property stripping", async () => {
     // A lens exposing person and belongs_to (department -> company) but NOT
     // department: the department neighbour comes back with ALL properties.
-    holder.store.getFullSchema.mockResolvedValue(
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(
       makeFullSchema({
         lensKey: "leaky_view",
         entityInclusions: [
@@ -211,7 +211,7 @@ describe("scope filtering", () => {
   });
 
   it("an unscoped lens returns neighbours of every relation type", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
     holder.store.getEntity.mockResolvedValue(
       makeEntity({ name: "Alice", age: 30, email: "a@b.com" }, "person", "ent-1"),
     );
@@ -249,7 +249,7 @@ describe("scope filtering", () => {
 
 describe("addressing", () => {
   it("an entity type outside the lens answers 404", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
 
     const res = await app.inject({
       method: "GET",
@@ -260,7 +260,7 @@ describe("addressing", () => {
   });
 
   it("a missing centre entity answers 404", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.getEntity.mockResolvedValue(null);
 
     const res = await app.inject({
@@ -272,7 +272,7 @@ describe("addressing", () => {
   });
 
   it("passes direction, relation type filter and limit to the store", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.getEntity.mockResolvedValue(makeEntity({ name: "Alice" }, "person", "ent-1"));
     holder.store.getNeighbors.mockResolvedValue([]);
 
@@ -294,7 +294,7 @@ describe("addressing", () => {
   });
 
   it("an unknown relationTypeKey yields no neighbours, not an error", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.getEntity.mockResolvedValue(makeEntity({ name: "Alice" }, "person", "ent-1"));
     holder.store.getNeighbors.mockResolvedValue([]);
 
@@ -324,7 +324,7 @@ describe("addressing", () => {
 
 describe("field projection", () => {
   function projectionFixture(): void {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
     holder.store.getEntity.mockResolvedValue(
       makeEntity({ name: "Alice", age: 30, email: "a@b.com" }, "person", "ent-1"),
     );

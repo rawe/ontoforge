@@ -74,7 +74,7 @@ beforeEach(() => {
 describe("listRuntimeAgents", () => {
   it("returns the default agent plus any configured agents", async () => {
     const store = createMockRuntimeStore();
-    store.getFullSchema.mockResolvedValue(makeFullSchema({ lensKey: "test_lens" }));
+    store.getFullSchemaWithLensInclusions.mockResolvedValue(makeFullSchema({ lensKey: "test_lens" }));
     store.getAiAgentConfigs.mockResolvedValue([
       {
         key: "my-agent",
@@ -99,7 +99,7 @@ describe("listRuntimeAgents", () => {
 
   it("with no configured agents, returns only the default", async () => {
     const store = createMockRuntimeStore();
-    store.getFullSchema.mockResolvedValue(makeFullSchema({ lensKey: "test_lens" }));
+    store.getFullSchemaWithLensInclusions.mockResolvedValue(makeFullSchema({ lensKey: "test_lens" }));
 
     const agents = await listRuntimeAgents("test_lens", asRuntimeStore(store));
 

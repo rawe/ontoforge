@@ -1032,7 +1032,7 @@ beforeEach(async () => {
   holder.store = createMockRuntimeStore();
   invalidateLoadedSchemaCache();
   const { makeUnscopedSchema } = await import("./helpers.js");
-  holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+  holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
 });
 
 describe("query endpoint", () => {
@@ -1087,7 +1087,7 @@ describe("query endpoint", () => {
 
   it("scoped lens strips out-of-scope properties from results", async () => {
     const { makeScopedSchema } = await import("./helpers.js");
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.executeOql.mockResolvedValue([
       ["p"],
       [{ p: makeEntity({ name: "Alice", age: 30, email: "a@b.com" }) }],
@@ -1107,7 +1107,7 @@ describe("query endpoint", () => {
   });
 
   it("stubs document values inside full nodes", async () => {
-    holder.store.getFullSchema.mockResolvedValue(docSchemaPayload());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(docSchemaPayload());
     holder.store.executeOql.mockResolvedValue([
       ["p"],
       [{ p: makeEntity({ name: "Ada", bio: "x".repeat(500), _doc_bio_length: 500 }) }],
@@ -1127,7 +1127,7 @@ describe("query endpoint", () => {
   });
 
   it("stubs scalar document projections (`RETURN p.bio`)", async () => {
-    holder.store.getFullSchema.mockResolvedValue(docSchemaPayload());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(docSchemaPayload());
     holder.store.executeOql.mockResolvedValue([
       ["p.bio", "p.name"],
       [{ "p.bio": "x".repeat(500), "p.name": "Ada" }],
@@ -1146,7 +1146,7 @@ describe("query endpoint", () => {
   });
 
   it("an ALIASED document projection returns the full text", async () => {
-    holder.store.getFullSchema.mockResolvedValue(docSchemaPayload());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(docSchemaPayload());
     holder.store.executeOql.mockResolvedValue([
       ["biography"],
       [{ biography: "x".repeat(500) }],

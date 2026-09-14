@@ -517,7 +517,9 @@ export interface RuntimeStore {
   // Schema reading (for the runtime schema cache)
   // ------------------------------------------------------------------
 
-  getFullSchema(lensKey: string): Promise<Row | null>;
+  /** Unfiltered: the adapter never applies the inclusions. Null when no
+   * lens has the key. Contract: `docs/storage-adapters.md`, "Schema reading". */
+  getFullSchemaWithLensInclusions(lensKey: string): Promise<Row | null>;
 
   getAiAgentConfigs(lensKey: string): Promise<Row[]>;
 

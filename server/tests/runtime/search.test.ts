@@ -28,7 +28,7 @@ beforeEach(() => {
   (schema.entityTypes as any[])[0].properties.push(
     ...["body", "appendix"].map((key) => ({ key, displayName: key, dataType: "document" })),
   );
-  store.getFullSchema.mockResolvedValue(schema);
+  store.getFullSchemaWithLensInclusions.mockResolvedValue(schema);
   store.getEntitiesByIds.mockImplementation(async (ids: string[]) =>
     Object.fromEntries(ids.map((id) => [id, entity(id)])),
   );
@@ -197,7 +197,7 @@ describe("search evidence and scoped fusion", () => {
 
   it.each([["name", "email"], ["name", "missing"], ["name", "age"]])(
     "redacts complete attribution when a supporting key is hidden or not string: %j", async (...keys) => {
-      store.getFullSchema.mockResolvedValue(makeFullSchema({ entityInclusions: [{ key: "person", properties: ["name", "age"] }] }));
+      store.getFullSchemaWithLensInclusions.mockResolvedValue(makeFullSchema({ entityInclusions: [{ key: "person", properties: ["name", "age"] }] }));
       store.propertySearchKeyword.mockResolvedValue([{ entity: entity("a"), score: 1, keywordPropertyKeys: keys }]);
       const result = await search("full_lens", { query: "x", strategy: "keyword", in: ["properties"] }, store);
       expect(result.hits[0]!.matches[0]!.evidence).toEqual({ semanticSimilarity: null, keywordMatch: true, keywordPropertyKeys: null });
@@ -230,7 +230,7 @@ describe("search evidence and scoped fusion", () => {
       const schema = makeUnscopedSchema();
       (schema.entityTypes as any[])[0].properties.push({ key: "body", displayName: "body", dataType: "document" });
       schema.entityInclusions = [{ key: "person", properties: null }];
-      store.getFullSchema.mockResolvedValue(schema);
+      store.getFullSchemaWithLensInclusions.mockResolvedValue(schema);
     }
     store.propertySearchSemantic.mockResolvedValue(entities(["a", "b"]));
     store.documentSearchSemantic.mockResolvedValue([passage("b", "b", "body", 90, 0.99)]);

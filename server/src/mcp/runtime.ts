@@ -71,7 +71,7 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
       inputSchema: {},
     },
     wrap("get_schema", async () => {
-      const result = await service.getFullSchema(lensKey, await getRuntimeStore(ontologyKey));
+      const result = await service.getLensSchema(lensKey, await getRuntimeStore(ontologyKey));
       return jsonResult(result);
     }),
   );

@@ -38,7 +38,7 @@ afterAll(async () => {
 beforeEach(() => {
   holder.store = createMockRuntimeStore();
   invalidateLoadedSchemaCache();
-  holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+  holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
 });
 
 const ENTITIES = "/api/ontologies/test_ont/runtime/lenses/full_lens/entities";

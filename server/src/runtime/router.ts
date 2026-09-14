@@ -139,7 +139,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
   // --- Schema introspection (read-only, already filtered to the lens) ---
 
   app.get("/schema", { schema: { tags: ["runtime"], params: LensParams } }, async (request) =>
-    service.getFullSchema(
+    service.getLensSchema(
       request.params.lensKey,
       await getRuntimeStore(request.params.ontologyKey),
     ),

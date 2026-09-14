@@ -197,7 +197,7 @@ function relationTypeDefToExport(rtDef: RelationTypeDef): Row {
 }
 
 /** The whole scoped schema in one response. */
-export async function getFullSchema(lensKey: string, store: RuntimeStore): Promise<Row> {
+export async function getLensSchema(lensKey: string, store: RuntimeStore): Promise<Row> {
   const loaded = await loadSchema(lensKey, store);
   const cache = loaded.scoped;
   return {

@@ -42,7 +42,7 @@ beforeEach(() => {
 
 describe("GET /schema", () => {
   it("scoped: only included types, each with only its scoped properties", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
 
     const res = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/hr_view/schema" });
 
@@ -66,7 +66,7 @@ describe("GET /schema", () => {
   });
 
   it("unscoped: the full schema", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
 
     const res = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/full_lens/schema" });
 
@@ -91,7 +91,7 @@ describe("GET /schema", () => {
   });
 
   it("relation types carry their endpoint keys in the wire shape", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
 
     const res = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/hr_view/schema" });
 
@@ -101,7 +101,7 @@ describe("GET /schema", () => {
   });
 
   it("an unknown lens answers 404", async () => {
-    holder.store.getFullSchema.mockResolvedValue(null);
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(null);
 
     const res = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/nonexistent/schema" });
 
@@ -111,7 +111,7 @@ describe("GET /schema", () => {
 
 describe("GET /schema/entity-types", () => {
   it("scoped: lists only included entity types", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
 
     const res = await app.inject({
       method: "GET",
@@ -126,7 +126,7 @@ describe("GET /schema/entity-types", () => {
   });
 
   it("unscoped: lists every entity type", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
 
     const res = await app.inject({
       method: "GET",
@@ -143,7 +143,7 @@ describe("GET /schema/entity-types", () => {
 
 describe("GET /schema/entity-types/{key}", () => {
   it("scoped: returns only the scoped properties", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
 
     const res = await app.inject({
       method: "GET",
@@ -160,7 +160,7 @@ describe("GET /schema/entity-types/{key}", () => {
   });
 
   it("an out-of-scope type answers 404 — indistinguishable from nonexistent", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
 
     const outOfScope = await app.inject({
       method: "GET",
@@ -180,7 +180,7 @@ describe("GET /schema/entity-types/{key}", () => {
 
 describe("GET /schema/relation-types", () => {
   it("scoped: lists only included relation types", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
 
     const res = await app.inject({
       method: "GET",
@@ -191,7 +191,7 @@ describe("GET /schema/relation-types", () => {
   });
 
   it("unscoped: lists every relation type", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
 
     const res = await app.inject({
       method: "GET",
@@ -207,7 +207,7 @@ describe("GET /schema/relation-types", () => {
 
 describe("GET /schema/relation-types/{key}", () => {
   it("scoped: returns the relation type with its properties", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
 
     const res = await app.inject({
       method: "GET",
@@ -224,7 +224,7 @@ describe("GET /schema/relation-types/{key}", () => {
   });
 
   it("an out-of-scope relation type answers 404", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
 
     const res = await app.inject({
       method: "GET",

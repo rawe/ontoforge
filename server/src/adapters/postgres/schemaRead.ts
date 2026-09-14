@@ -1,9 +1,9 @@
 /**
  * Shared full-schema assembly for the PostgreSQL adapter.
  *
- * Both stores' `getFullSchema` — modeling's whole schema and the
- * runtime lens view — read the same type, property and inclusion tables,
- * so the type SELECTs, the props-bucketing, and the inclusion
+ * Modeling's `getFullSchema` and runtime's
+ * `getFullSchemaWithLensInclusions` read the same type, property and
+ * inclusion tables, so the type SELECTs, the props-bucketing, and the inclusion
  * classification live here once. Callers pass the `Querier` of their own
  * open REPEATABLE READ transaction and keep their lens and inclusion
  * SELECTs, which differ (all lenses vs. one by key).
@@ -22,7 +22,7 @@ const PROPERTY_COLS =
 /**
  * Every entity type and relation type with its property rows attached,
  * all ordered by key. Modeling's whole schema keeps timestamps on
- * property rows; the runtime lens view carries them without — the flag
+ * property rows; the runtime read carries them without — the flag
  * preserves each caller's shape.
  */
 export async function readTypesWithProperties(

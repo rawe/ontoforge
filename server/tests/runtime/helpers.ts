@@ -18,7 +18,7 @@ interface InclusionRow {
 
 /**
  * Build a full-schema payload as returned by the runtime store's
- * `getFullSchema`. With no inclusions the lens is fully unscoped.
+ * `getFullSchemaWithLensInclusions`. With no inclusions the lens is fully unscoped.
  */
 export function makeFullSchema(options?: {
   lensKey?: string;
@@ -172,7 +172,7 @@ export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeSto
     textSearchLanguage: "english",
     supportsKeywordRanking: vi.fn(() => false),
     supportsSearchPathConditions: vi.fn(() => false),
-    getFullSchema: vi.fn(async () => null),
+    getFullSchemaWithLensInclusions: vi.fn(async () => null),
     getAiAgentConfigs: vi.fn(async () => []),
     getSavedQueries: vi.fn(async () => []),
     createEntity: vi.fn(),

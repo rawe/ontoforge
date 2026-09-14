@@ -33,7 +33,7 @@ let store: MockRuntimeStore;
 /** Store a saved query as the adapter would return it: steps and
  * parameters as serialized text the store does not interpret. */
 function stubSavedQueries(rows: Row[]): void {
-  store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+  store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
   store.getSavedQueries.mockResolvedValue(
     rows.map((row) => ({
       ...row,

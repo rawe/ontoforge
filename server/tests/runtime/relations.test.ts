@@ -45,7 +45,7 @@ beforeEach(() => {
 
 describe("create relation", () => {
   it("creates a relation through a scoped lens; response is property-filtered", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.getEntityById
       .mockResolvedValueOnce(makeEntity({ name: "Alice" }, "person", "ent-1"))
       .mockResolvedValueOnce(makeEntity({ name: "Acme" }, "company", "ent-2"));
@@ -69,7 +69,7 @@ describe("create relation", () => {
   });
 
   it("a relation type outside the lens answers 404", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
 
     const res = await app.inject({
       method: "POST",
@@ -83,7 +83,7 @@ describe("create relation", () => {
   it("endpoint type mismatch is checked against the FULL schema through a narrow lens", async () => {
     // hr_view does not expose 'department' at all, yet the endpoint check
     // names the full schema's declared source type in its error.
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.getEntityById
       .mockResolvedValueOnce(makeEntity({ name: "R&D" }, "department", "ent-9"))
       .mockResolvedValueOnce(makeEntity({ name: "Acme" }, "company", "ent-2"));
@@ -104,7 +104,7 @@ describe("create relation", () => {
   });
 
   it("collects endpoint errors alongside property errors in ONE response", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.getEntityById
       .mockResolvedValueOnce(null) // source missing
       .mockResolvedValueOnce(makeEntity({ name: "Alice" }, "person", "ent-1")); // target wrong type
@@ -143,7 +143,7 @@ describe("create relation", () => {
 
 describe("read relation", () => {
   it("returns endpoint ids and scoped properties", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.getRelation.mockResolvedValue(
       makeRelation({ role: "Engineer", since: "2024-01-15" }),
     );
@@ -162,7 +162,7 @@ describe("read relation", () => {
   });
 
   it("a property-filtered inclusion hides the excluded relation property", async () => {
-    holder.store.getFullSchema.mockResolvedValue(
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(
       makeFullSchema({
         lensKey: "restricted_view",
         entityInclusions: [
@@ -188,7 +188,7 @@ describe("read relation", () => {
   });
 
   it("a missing relation answers 404", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.getRelation.mockResolvedValue(null);
 
     const res = await app.inject({
@@ -202,7 +202,7 @@ describe("read relation", () => {
 
 describe("list relations", () => {
   it("returns items, total, limit, offset", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.listRelations.mockResolvedValue([
       [
         makeRelation({ role: "Engineer" }, { relationId: "rel-1" }),
@@ -225,7 +225,7 @@ describe("list relations", () => {
   });
 
   it("a relation type outside the lens answers 404", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
 
     const res = await app.inject({
       method: "GET",
@@ -236,7 +236,7 @@ describe("list relations", () => {
   });
 
   it("passes fromEntityId / toEntityId endpoint filters to the store", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.listRelations.mockResolvedValue([[], 0]);
 
     const res = await app.inject({
@@ -251,7 +251,7 @@ describe("list relations", () => {
   });
 
   it("either endpoint filter alone reaches the store", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.listRelations.mockResolvedValue([[], 0]);
 
     const res = await app.inject({
@@ -266,7 +266,7 @@ describe("list relations", () => {
   });
 
   it("takes no free-text term: a q parameter is ignored, not an error", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.listRelations.mockResolvedValue([[], 0]);
 
     const res = await app.inject({
@@ -291,7 +291,7 @@ describe("list relations", () => {
 
 describe("update relation", () => {
   it("applies a partial property update", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.updateRelation.mockResolvedValue(
       makeRelation({ role: "Senior Engineer", since: "2024-01-15" }),
     );
@@ -307,7 +307,7 @@ describe("update relation", () => {
   });
 
   it("SILENTLY ignores endpoint ids in the payload; properties still apply", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.updateRelation.mockResolvedValue(makeRelation({ role: "Senior Engineer" }));
 
     const res = await app.inject({
@@ -333,7 +333,7 @@ describe("update relation", () => {
   });
 
   it("a payload of ONLY endpoint ids changes nothing and returns the current relation", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.getRelation.mockResolvedValue(makeRelation({ role: "Engineer" }));
 
     const res = await app.inject({
@@ -348,7 +348,7 @@ describe("update relation", () => {
   });
 
   it("a relation type outside the lens answers 404", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
 
     const res = await app.inject({
       method: "PATCH",
@@ -362,7 +362,7 @@ describe("update relation", () => {
 
 describe("delete relation", () => {
   it("deletes and answers 204", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.deleteRelation.mockResolvedValue(true);
 
     const res = await app.inject({
@@ -374,7 +374,7 @@ describe("delete relation", () => {
   });
 
   it("a relation type outside the lens answers 404", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
 
     const res = await app.inject({
       method: "DELETE",
@@ -385,7 +385,7 @@ describe("delete relation", () => {
   });
 
   it("a missing relation answers 404", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.deleteRelation.mockResolvedValue(false);
 
     const res = await app.inject({

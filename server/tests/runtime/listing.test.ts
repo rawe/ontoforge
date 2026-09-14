@@ -42,7 +42,7 @@ beforeEach(() => {
 
 describe("the list envelope", () => {
   it("carries items, total, limit and offset; total counts before paging", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
     holder.store.listEntities.mockResolvedValue([
       [makeEntity({ name: "Alice" }, "person", "ent-1")],
       42,
@@ -62,7 +62,7 @@ describe("the list envelope", () => {
   });
 
   it("scoped listing filters properties on every item", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.listEntities.mockResolvedValue([
       [
         makeEntity({ name: "Alice", age: 30, email: "a@b.com", active: true }, "person", "ent-1"),
@@ -83,7 +83,7 @@ describe("the list envelope", () => {
   });
 
   it("fields projection narrows every item to the named fields plus _id", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
     holder.store.listEntities.mockResolvedValue([
       [makeEntity({ name: "Alice", age: 30, email: "a@b.com" }, "person", "ent-1")],
       1,
@@ -105,7 +105,7 @@ describe("paging bounds — REST rejects where MCP clamps", () => {
     ["offset=-1", "offset"],
     ["limit=abc", "limit"],
   ])("%s answers 422 VALIDATION_ERROR", async (queryString) => {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
 
     const res = await app.inject({
       method: "GET",
@@ -118,7 +118,7 @@ describe("paging bounds — REST rejects where MCP clamps", () => {
   });
 
   it("defaults are limit 50, offset 0, sort _createdAt ascending", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
     holder.store.listEntities.mockResolvedValue([[], 0]);
 
     const res = await app.inject({
@@ -144,7 +144,7 @@ describe("sorting", () => {
     ["_updatedAt", "_updatedAt"],
     ["name", "name"],
   ])("sort=%s resolves to %s", async (sort, resolved) => {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
     holder.store.listEntities.mockResolvedValue([[], 0]);
 
     const res = await app.inject({
@@ -157,7 +157,7 @@ describe("sorting", () => {
   });
 
   it("an unknown sort field answers 422 naming the field", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
 
     const res = await app.inject({
       method: "GET",
@@ -169,7 +169,7 @@ describe("sorting", () => {
   });
 
   it("a hidden property is not a valid sort field through the lens", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
 
     const res = await app.inject({
       method: "GET",
@@ -180,7 +180,7 @@ describe("sorting", () => {
   });
 
   it("an invalid order answers 422", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
 
     const res = await app.inject({
       method: "GET",
@@ -193,7 +193,7 @@ describe("sorting", () => {
 
 describe("free-text search and filters", () => {
   it("q and the in-scope string properties cross the port together", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.listEntities.mockResolvedValue([[], 0]);
 
     await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person?q=ali" });
@@ -204,7 +204,7 @@ describe("free-text search and filters", () => {
   });
 
   it("q rejects the NUL character before crossing the port", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
 
     const res = await app.inject({
       method: "GET",
@@ -220,7 +220,7 @@ describe("free-text search and filters", () => {
 
   it("q with no string property in scope is passed with an empty search set (silently ignored)", async () => {
     const { makeFullSchema } = await import("./helpers.js");
-    holder.store.getFullSchema.mockResolvedValue(
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(
       makeFullSchema({
         lensKey: "narrow",
         entityInclusions: [{ key: "person", properties: ["age", "active"] }],
@@ -242,7 +242,7 @@ describe("free-text search and filters", () => {
   });
 
   it("filter.* parameters cross the port as parsed, coerced conditions", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
     holder.store.listEntities.mockResolvedValue([[], 0]);
 
     await app.inject({
@@ -258,7 +258,7 @@ describe("free-text search and filters", () => {
   });
 
   it("a repeated filter parameter keeps the last value", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
     holder.store.listEntities.mockResolvedValue([[], 0]);
 
     await app.inject({
@@ -272,7 +272,7 @@ describe("free-text search and filters", () => {
   });
 
   it("an invalid filter answers 422 before the store is consulted", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
 
     const res = await app.inject({
       method: "GET",

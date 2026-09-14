@@ -104,8 +104,8 @@ export class Neo4jRuntimeStore implements RuntimeStore {
   // Schema reading (for the runtime schema cache)
   // ------------------------------------------------------------------
 
-  async getFullSchema(lensKey: string): Promise<Row | null> {
-    return runSession(this.driver, (session) => queries.getFullSchema(session, lensKey));
+  async getFullSchemaWithLensInclusions(lensKey: string): Promise<Row | null> {
+    return runSession(this.driver, (session) => queries.getFullSchemaWithLensInclusions(session, lensKey));
   }
 
   async getAiAgentConfigs(lensKey: string): Promise<Row[]> {

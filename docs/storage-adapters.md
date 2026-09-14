@@ -221,9 +221,10 @@ document property. Invoked when the property, or its owning type, is removed.
 ### Data side
 
 **Schema reading.** The runtime side reads the schema for itself rather than calling the
-modeling side. Three operations, all keyed by lens key within the binding: the full
-schema as that lens sees it — all of the ontology's types, plus that lens's inclusions,
-so the caller can compute the scope — its agent configurations, and its saved queries.
+modeling side. The runtime store exposes three operations, each keyed by lens key within
+its binding. One returns the full schema together with the lens and its inclusion rows,
+one returns the lens's agent configurations, and one returns the lens's saved queries. The
+caller uses the inclusion rows to compute the scoped schema.
 The first returns nothing at all when no lens has that key, which is how an unknown lens
 is detected. The runtime store also exposes the ontology key it is bound to, because the
 schema cache keys its entries by ontology plus lens.

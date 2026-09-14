@@ -520,7 +520,7 @@ describe("pipeline validation", () => {
 describe("definition-time OQL lens check", () => {
   it("an oql step naming a type the lens does not expose is rejected", async () => {
     holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
-    holder.runtimeStore.getFullSchema.mockResolvedValue(
+    holder.runtimeStore.getFullSchemaWithLensInclusions.mockResolvedValue(
       makeUnscopedSchema(),
     );
     const res = await app.inject({
@@ -540,7 +540,7 @@ describe("definition-time OQL lens check", () => {
   it("the check is skipped when the lens's schema cannot be loaded", async () => {
     holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     holder.store.upsertSavedQuery.mockResolvedValue([MOCK_QUERY, true]);
-    // Default runtime store: getFullSchema -> null -> NotFoundError.
+    // Default runtime store: getFullSchemaWithLensInclusions -> null -> NotFoundError.
     const res = await put("stored-anyway", {
       name: "Stored Anyway",
       description: "the run-time check still applies",

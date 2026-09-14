@@ -73,7 +73,7 @@ function makeDocumentSchema(): Record<string, unknown> {
 
 describe("create entity", () => {
   it("unscoped: validates against the full property set and returns everything", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
     holder.store.createEntity.mockResolvedValue(
       makeEntity({ name: "Alice", age: 30, email: "a@b.com", active: true }),
     );
@@ -94,7 +94,7 @@ describe("create entity", () => {
   });
 
   it("scoped: validates scoped properties, applies hidden defaults, filters the response", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.createEntity.mockResolvedValue(
       makeEntity({ name: "Alice", email: "a@b.com", active: true }),
     );
@@ -120,7 +120,7 @@ describe("create entity", () => {
   });
 
   it("scoped: a hidden property in the payload is an unknown property", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
 
     const res = await app.inject({
       method: "POST",
@@ -134,7 +134,7 @@ describe("create entity", () => {
   });
 
   it("a system property is rejected as unknown too", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
 
     const res = await app.inject({
       method: "POST",
@@ -147,7 +147,7 @@ describe("create entity", () => {
   });
 
   it("an out-of-scope entity type answers 404", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
 
     const res = await app.inject({
       method: "POST",
@@ -159,7 +159,7 @@ describe("create entity", () => {
   });
 
   it("an unknown lens key answers 404", async () => {
-    holder.store.getFullSchema.mockResolvedValue(null);
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(null);
 
     const res = await app.inject({
       method: "POST",
@@ -171,7 +171,7 @@ describe("create entity", () => {
   });
 
   it("collect-all: one write, several bad fields, one response naming every one", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
 
     const res = await app.inject({
       method: "POST",
@@ -189,7 +189,7 @@ describe("create entity", () => {
   });
 
   it("required property missing on explicit null", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
 
     const res = await app.inject({
       method: "POST",
@@ -225,7 +225,7 @@ describe("bad-default failure modes", () => {
   }
 
   it("mode 1 — validation applies the default (required, in scope): field error, write rejected", async () => {
-    holder.store.getFullSchema.mockResolvedValue(schemaWithBadDefault(true));
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(schemaWithBadDefault(true));
 
     const res = await app.inject({
       method: "POST",
@@ -239,7 +239,7 @@ describe("bad-default failure modes", () => {
   });
 
   it("mode 1 — explicit null routes through validation even for an optional property", async () => {
-    holder.store.getFullSchema.mockResolvedValue(schemaWithBadDefault(false));
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(schemaWithBadDefault(false));
 
     const res = await app.inject({
       method: "POST",
@@ -252,7 +252,7 @@ describe("bad-default failure modes", () => {
   });
 
   it("mode 2 — post-validation default application swallows the failure and skips the property", async () => {
-    holder.store.getFullSchema.mockResolvedValue(schemaWithBadDefault(false));
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(schemaWithBadDefault(false));
     holder.store.createEntity.mockResolvedValue(makeEntity({ name: "A" }, "thing"));
 
     const res = await app.inject({
@@ -269,7 +269,7 @@ describe("bad-default failure modes", () => {
 
 describe("get entity", () => {
   it("scoped: filters properties to the lens", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.getEntity.mockResolvedValue(
       makeEntity({ name: "Alice", age: 30, email: "a@b.com", active: true }),
     );
@@ -285,7 +285,7 @@ describe("get entity", () => {
   });
 
   it("unscoped: returns all properties", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
     holder.store.getEntity.mockResolvedValue(
       makeEntity({ name: "Alice", age: 30, email: "a@b.com", active: true }),
     );
@@ -302,7 +302,7 @@ describe("get entity", () => {
   });
 
   it("a missing entity answers 404", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.getEntity.mockResolvedValue(null);
 
     const res = await app.inject({
@@ -314,7 +314,7 @@ describe("get entity", () => {
   });
 
   it("fields projection keeps the named fields plus _id unconditionally", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
     holder.store.getEntity.mockResolvedValue(
       makeEntity({ name: "Alice", age: 30, email: "a@b.com", active: true }),
     );
@@ -329,7 +329,7 @@ describe("get entity", () => {
   });
 
   it("unknown names in fields are not an error; they match nothing", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
     holder.store.getEntity.mockResolvedValue(makeEntity({ name: "Alice" }));
 
     const res = await app.inject({
@@ -344,7 +344,7 @@ describe("get entity", () => {
 
 describe("update entity (partial)", () => {
   it("scoped: validates against scoped properties; response filtered", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.updateEntity.mockResolvedValue(
       makeEntity({ name: "Alice Updated", age: 30, email: "new@b.com", active: true }),
     );
@@ -364,7 +364,7 @@ describe("update entity (partial)", () => {
   });
 
   it("an out-of-scope property in the payload is rejected as unknown", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
 
     const res = await app.inject({
       method: "PATCH",
@@ -377,7 +377,7 @@ describe("update entity (partial)", () => {
   });
 
   it("null removes an optional property", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
     holder.store.updateEntity.mockResolvedValue(makeEntity({ name: "Alice" }));
 
     const res = await app.inject({
@@ -393,7 +393,7 @@ describe("update entity (partial)", () => {
   });
 
   it("null on a required property is rejected — no default rescues it", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
 
     const res = await app.inject({
       method: "PATCH",
@@ -407,7 +407,7 @@ describe("update entity (partial)", () => {
   });
 
   it("defaults are NOT re-applied on update", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
     holder.store.updateEntity.mockResolvedValue(makeEntity({ name: "Bob" }));
 
     await app.inject({
@@ -421,7 +421,7 @@ describe("update entity (partial)", () => {
   });
 
   it("a no-change update returns the current state WITHOUT advancing _updatedAt", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
     holder.store.getEntity.mockResolvedValue(makeEntity({ name: "Alice" }));
 
     const res = await app.inject({
@@ -437,7 +437,7 @@ describe("update entity (partial)", () => {
   });
 
   it("a missing entity answers 404", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
     holder.store.updateEntity.mockResolvedValue(null);
 
     const res = await app.inject({
@@ -452,7 +452,7 @@ describe("update entity (partial)", () => {
 
 describe("delete entity", () => {
   it("answers 204 on success", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.deleteEntity.mockResolvedValue(true);
 
     const res = await app.inject({
@@ -464,7 +464,7 @@ describe("delete entity", () => {
   });
 
   it("an out-of-scope type answers 404", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
 
     const res = await app.inject({
       method: "DELETE",
@@ -476,7 +476,7 @@ describe("delete entity", () => {
   });
 
   it("a missing entity answers 404", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeScopedSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.deleteEntity.mockResolvedValue(false);
 
     const res = await app.inject({
@@ -490,7 +490,7 @@ describe("delete entity", () => {
 
 describe("document stubs and projection interplay", () => {
   it("a document value reads as a stub with its recorded length", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeDocumentSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocumentSchema());
     holder.store.getEntity.mockResolvedValue(
       makeEntity(
         { title: "T", body: "full text here", _doc_body_length: 14 },
@@ -511,7 +511,7 @@ describe("document stubs and projection interplay", () => {
   });
 
   it("missing bookkeeping falls back to measuring the value on read", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeDocumentSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocumentSchema());
     holder.store.getEntity.mockResolvedValue(
       makeEntity({ title: "T", body: "12345" }, "article"),
     );
@@ -525,7 +525,7 @@ describe("document stubs and projection interplay", () => {
   });
 
   it("an unset document property is absent entirely — no stub", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeDocumentSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocumentSchema());
     holder.store.getEntity.mockResolvedValue(makeEntity({ title: "T" }, "article"));
 
     const res = await app.inject({
@@ -537,7 +537,7 @@ describe("document stubs and projection interplay", () => {
   });
 
   it("naming the document property in fields returns the raw content", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeDocumentSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocumentSchema());
     holder.store.getEntity.mockResolvedValue(
       makeEntity(
         { title: "T", body: "full text here", _doc_body_length: 14 },
@@ -555,7 +555,7 @@ describe("document stubs and projection interplay", () => {
   });
 
   it("create records the character count alongside the value", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeDocumentSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocumentSchema());
     holder.store.createEntity.mockResolvedValue(
       makeEntity({ title: "T", body: "hello", _doc_body_length: 5 }, "article"),
     );
@@ -574,7 +574,7 @@ describe("document stubs and projection interplay", () => {
   });
 
   it("update maintains the count for a changed value and removes it on null", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeDocumentSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocumentSchema());
     holder.store.updateEntity.mockResolvedValue(makeEntity({ title: "T" }, "article"));
 
     await app.inject({

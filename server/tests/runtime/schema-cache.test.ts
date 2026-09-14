@@ -25,7 +25,7 @@ beforeEach(() => {
 
 function storeWith(schema: Record<string, unknown> | null) {
   const mock = createMockRuntimeStore();
-  mock.getFullSchema.mockResolvedValue(schema);
+  mock.getFullSchemaWithLensInclusions.mockResolvedValue(schema);
   return mock;
 }
 
@@ -36,7 +36,7 @@ describe("lazy assembly and reuse", () => {
     const second = await loadSchema("hr_view", asRuntimeStore(mock));
     expect(first.scoped.lensKey).toBe("hr_view");
     expect(second).toBe(first); // the lens is a value, held per process
-    expect(mock.getFullSchema).toHaveBeenCalledTimes(1);
+    expect(mock.getFullSchemaWithLensInclusions).toHaveBeenCalledTimes(1);
   });
 
   it("an unknown lens key answers not found", async () => {
@@ -241,9 +241,9 @@ describe("the cache key carries the ontology dimension", () => {
   it("the same lens key in two ontologies yields two independent entries", async () => {
     // Both ontologies hold a lens `default`, with different schemas.
     const crm = createMockRuntimeStore("crm");
-    crm.getFullSchema.mockResolvedValue(makeFullSchema({ lensKey: "default" }));
+    crm.getFullSchemaWithLensInclusions.mockResolvedValue(makeFullSchema({ lensKey: "default" }));
     const hr = createMockRuntimeStore("hr");
-    hr.getFullSchema.mockResolvedValue(
+    hr.getFullSchemaWithLensInclusions.mockResolvedValue(
       makeFullSchema({
         lensKey: "default",
         entityInclusions: [{ key: "person", properties: ["name", "email"] }],
@@ -255,8 +255,8 @@ describe("the cache key carries the ontology dimension", () => {
 
     // Each entry was built from its own store — the second load must not
     // be served from the first ontology's entry.
-    expect(crm.getFullSchema).toHaveBeenCalledTimes(1);
-    expect(hr.getFullSchema).toHaveBeenCalledTimes(1);
+    expect(crm.getFullSchemaWithLensInclusions).toHaveBeenCalledTimes(1);
+    expect(hr.getFullSchemaWithLensInclusions).toHaveBeenCalledTimes(1);
     expect(Object.keys(fromCrm.scoped.entityTypes).sort()).toEqual([
       "company",
       "department",
@@ -267,8 +267,8 @@ describe("the cache key carries the ontology dimension", () => {
     // Repeat loads hit each ontology's own entry.
     expect(await loadSchema("default", asRuntimeStore(crm))).toBe(fromCrm);
     expect(await loadSchema("default", asRuntimeStore(hr))).toBe(fromHr);
-    expect(crm.getFullSchema).toHaveBeenCalledTimes(1);
-    expect(hr.getFullSchema).toHaveBeenCalledTimes(1);
+    expect(crm.getFullSchemaWithLensInclusions).toHaveBeenCalledTimes(1);
+    expect(hr.getFullSchemaWithLensInclusions).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -279,23 +279,23 @@ describe("wholesale invalidation via the modeling seam", () => {
 
     await loadSchema("hr_view", asRuntimeStore(hrMock));
     await loadSchema("full_lens", asRuntimeStore(fullMock));
-    expect(hrMock.getFullSchema).toHaveBeenCalledTimes(1);
-    expect(fullMock.getFullSchema).toHaveBeenCalledTimes(1);
+    expect(hrMock.getFullSchemaWithLensInclusions).toHaveBeenCalledTimes(1);
+    expect(fullMock.getFullSchemaWithLensInclusions).toHaveBeenCalledTimes(1);
 
     // What every mutating modeling service path calls.
     invalidateLoadedSchemaCache();
 
     await loadSchema("hr_view", asRuntimeStore(hrMock));
     await loadSchema("full_lens", asRuntimeStore(fullMock));
-    expect(hrMock.getFullSchema).toHaveBeenCalledTimes(2);
-    expect(fullMock.getFullSchema).toHaveBeenCalledTimes(2);
+    expect(hrMock.getFullSchemaWithLensInclusions).toHaveBeenCalledTimes(2);
+    expect(fullMock.getFullSchemaWithLensInclusions).toHaveBeenCalledTimes(2);
   });
 
   it("a real modeling service write invalidates the cache", async () => {
     const runtimeMock = storeWith(makeScopedSchema());
     await loadSchema("hr_view", asRuntimeStore(runtimeMock));
     await loadSchema("hr_view", asRuntimeStore(runtimeMock));
-    expect(runtimeMock.getFullSchema).toHaveBeenCalledTimes(1);
+    expect(runtimeMock.getFullSchemaWithLensInclusions).toHaveBeenCalledTimes(1);
 
     const { createMockModelingStore, asModelingStore, NOW } = await import(
       "../modeling/helpers.js"
@@ -316,6 +316,6 @@ describe("wholesale invalidation via the modeling seam", () => {
     );
 
     await loadSchema("hr_view", asRuntimeStore(runtimeMock));
-    expect(runtimeMock.getFullSchema).toHaveBeenCalledTimes(2);
+    expect(runtimeMock.getFullSchemaWithLensInclusions).toHaveBeenCalledTimes(2);
   });
 });

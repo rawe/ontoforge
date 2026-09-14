@@ -103,7 +103,7 @@ export async function loadSchemaUncached(
   lensKey: string,
   store: RuntimeStore,
 ): Promise<LoadedSchema> {
-  const schema = await store.getFullSchema(lensKey);
+  const schema = await store.getFullSchemaWithLensInclusions(lensKey);
   if (schema === null) {
     throw new NotFoundError(`Lens '${lensKey}' not found or has no schema loaded`);
   }

@@ -44,7 +44,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   holder.store = createMockRuntimeStore();
-  holder.store.getFullSchema.mockResolvedValue(makeUnscopedSchema());
+  holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
   invalidateLoadedSchemaCache();
 });
 

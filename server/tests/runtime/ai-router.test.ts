@@ -42,7 +42,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   holder.store = createMockRuntimeStore();
-  holder.store.getFullSchema.mockResolvedValue(makeFullSchema({ lensKey: "test_lens" }));
+  holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeFullSchema({ lensKey: "test_lens" }));
   holder.store.getAiAgentConfigs.mockResolvedValue([
     {
       key: "my-agent",
@@ -427,7 +427,7 @@ it("unknown lens and agent are ordinary pre-stream JSON errors", async () => {
   const agent = await app.inject({ method: "POST", url: chatPath + "/agents/ghost/chat", payload: { message: "Hi" } });
   expect(agent.statusCode).toBe(404);
   expect(agent.json().error.code).toBe("RESOURCE_NOT_FOUND");
-  holder.store.getFullSchema.mockRejectedValue(new NotFoundError("Lens missing"));
+  holder.store.getFullSchemaWithLensInclusions.mockRejectedValue(new NotFoundError("Lens missing"));
   invalidateLoadedSchemaCache();
   const lens = await app.inject({ method: "POST", url: chatPath + "/chat", payload: { message: "Hi" } });
   expect(lens.statusCode).toBe(404);

@@ -23,7 +23,7 @@
  * - Relation deletes and lookups carry the type key in the WHERE — the
  *   reference adapter's typed relationship match answers not-found for a
  *   mismatched type key, and the PK alone would not.
- * - The runtime `getFullSchema` (lens view) is one REPEATABLE READ
+ * - `getFullSchemaWithLensInclusions` is one REPEATABLE READ
  *   transaction (M2.3's coherent-snapshot obligation).
  *
  * - Semantic rankings use iterative scans at each index's own cast width.
@@ -173,10 +173,10 @@ export class PostgresRuntimeStore implements RuntimeStore {
   // Schema reading (for the runtime schema cache)
   // ------------------------------------------------------------------
 
-  /** The lens view: the lens, ALL types with their properties, and
-   * this lens's inclusions — one coherent REPEATABLE READ snapshot.
+  /** The lens, ALL types with their properties, and this lens's
+   * inclusions — one coherent REPEATABLE READ snapshot.
    * Answers null when no lens has the key. */
-  async getFullSchema(lensKey: string): Promise<Row | null> {
+  async getFullSchemaWithLensInclusions(lensKey: string): Promise<Row | null> {
     return this.tx(async (querier) => {
       const lensResult = await querier.query(`SELECT ${LENS_COLS} FROM lens WHERE key = $1`, [
         lensKey,

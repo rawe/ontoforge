@@ -89,7 +89,7 @@ function mockProvider(dims = 8): EmbeddingProvider & { embed: ReturnType<typeof 
 
 /** Wire the whole repo surface an edit touches. */
 function mockEdit(entity: Row, updated?: Row): void {
-  holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
+  holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
   holder.store.getEntity.mockResolvedValue(entity);
   holder.store.updateEntity.mockResolvedValue(updated ?? entity);
 }
@@ -298,7 +298,7 @@ describe("request shape", () => {
   });
 
   it("404 for a non-document property", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
     const res = await patchDoc(
       { op: "str_replace", oldString: "a", newString: "b" },
       "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person/ent-1/documents/name",
@@ -307,7 +307,7 @@ describe("request shape", () => {
   });
 
   it("404 for a property the lens hides", async () => {
-    holder.store.getFullSchema.mockResolvedValue(
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(
       makeDocSchema([{ key: "person", properties: ["name"] }]),
     );
     const res = await patchDoc({ op: "str_replace", oldString: "a", newString: "b" });
@@ -315,7 +315,7 @@ describe("request shape", () => {
   });
 
   it("404 for a missing entity", async () => {
-    holder.store.getFullSchema.mockResolvedValue(makeDocSchema());
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
     holder.store.getEntity.mockResolvedValue(null);
     const res = await patchDoc({ op: "str_replace", oldString: "a", newString: "b" });
     expect(res.statusCode).toBe(404);

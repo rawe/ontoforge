@@ -44,8 +44,8 @@ the deployment rather than any ontology: `GET /api/server/features`.
   tests `__exists` and `__missing`, which take `true`/`false` and also accept a bare
   relation type as the key
 - `fields` is repeated, not comma-separated: `fields=name&fields=email`
-- One query parameter is `snake_case` against the surrounding convention:
-  `min_score` on saved-query search
+- Two query parameters are `snake_case` against the surrounding convention:
+  `min_score` on saved-query search and `min_similarity` on search
 
 ## Listing, Sorting, Filtering
 
@@ -234,6 +234,8 @@ carry `_id` and `_entityTypeKey`; relations carry `_id`, `_relationTypeKey` and
 `GET /search` ranks entities for plain query text `q` (required). Optional parameters:
 `type` (omit to search across the lens), repeatable `in=properties` / `in=document`
 (default both), `strategy=semantic|keyword|hybrid` (default best available),
+`min_similarity` (0–1 on the `semanticSimilarity` scale; drops semantic candidates below
+it, never keyword hits; rejected under `keyword`, explicit or default),
 `document.property` (one document property, only valid when documents are searched),
 `limit` (1–100, default 10), `fields`, and `filter.<key>`.
 
@@ -241,7 +243,8 @@ Filters narrow cross-type search to declaring types; conflicting data types and 
 keys are collected validation faults. Substring operators are rejected. Query paths work
 where the adapter declares support; otherwise use the entity list.
 
-The envelope is `{query, type, in, strategy, filter, hits}`. Each hit carries `entity`,
+The envelope is `{query, type, in, strategy, minSimilarity, filter, hits}`; `minSimilarity`
+echoes the applied floor, null when none was set. Each hit carries `entity`,
 `relativeScore` and `matches`. An entity match is `{kind: "properties"}`; each matching
 document property contributes `{kind: "document", propertyKey, charOffset, charLength}`.
 The entity match comes first. Use document coordinates as `offset` and `limit` on a read.

@@ -162,7 +162,8 @@ Projection is available on entity list and read, on neighbours (as `fields` and
 
 ### Naming irregularities
 
-`min_score` on saved-query discovery is the one snake_case runtime query parameter.
+`min_score` on saved-query discovery and `min_similarity` on search are the two
+snake_case runtime query parameters.
 Other runtime parameters follow their documented names, including kind-prefixed
 `document.property` and `filter.<key>`.
 
@@ -405,14 +406,15 @@ Semantics: [capabilities/search.md](capabilities/search.md).
 
 | Method | Path | Purpose | Parameters |
 |---|---|---|---|
-| GET | `/search` | Rank entities by properties, document passages, or both | `q`, `type`, repeatable `in`, `strategy`, `document.property`, `limit`, `fields`, `filter.*` |
+| GET | `/search` | Rank entities by properties, document passages, or both | `q`, `type`, repeatable `in`, `strategy`, `min_similarity`, `document.property`, `limit`, `fields`, `filter.*` |
 
 `q` is required. Omit `type` for cross-type search; `in` accepts `properties` and
 `document`, defaulting to both. `strategy` accepts `semantic`, `keyword`, `hybrid`,
 defaulting to the best available. `document.property` restricts document search only and
-requires that kind. `limit` counts entities, 1–100, default 10. Filters also work across
-types, narrowing the searched set. The response carries `query`, `type`, `in`, `strategy`,
-`filter`, `hits`; each hit has an entity, a within-response relative score and matches.
+requires that kind. `min_similarity`, 0–1, drops semantic candidates measured below it
+and needs a strategy that ranks semantically. `limit` counts entities, 1–100, default 10.
+Filters also work across types, narrowing the searched set. The response carries `query`,
+`type`, `in`, `strategy`, `minSimilarity`, `filter`, `hits`; each hit has an entity, a within-response relative score and matches.
 Matches carry nullable semantic/keyword evidence; property matches also carry nullable
 contributing keyword property keys. Scores are not confidence. Evidence scope and null
 semantics are defined in [the search response contract](capabilities/search.md#response).

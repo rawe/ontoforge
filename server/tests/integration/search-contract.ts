@@ -152,8 +152,9 @@ export function searchContract(embedding: boolean, enabled = true) {
           expect(result.statusCode, result.body).toBe(200);
           const body = result.json();
           expect(Object.keys(body).sort()).toEqual(
-            ["query", "type", "in", "strategy", "filter", "hits"].sort(),
+            ["query", "type", "in", "strategy", "minSimilarity", "filter", "hits"].sort(),
           );
+          expect(body.minSimilarity).toBeNull();
           expect(body.hits).toHaveLength(2);
           expect(body.hits[0].relativeScore).toBe(1);
           for (const hit of body.hits) {
@@ -465,11 +466,49 @@ export function searchContract(embedding: boolean, enabled = true) {
         expect(run.json().hits[0].entity).not.toHaveProperty("_entityTypeKey");
       },
     );
+    it.skipIf(!embedding)("a similarity floor removes semantic candidates only", async () => {
+      const none = await find("graph database", { strategy: "semantic" });
+      expect(none.statusCode, none.body).toBe(200);
+      expect(none.json().hits.length).toBeGreaterThan(0);
+      const zero = await find("graph database", { strategy: "semantic", min_similarity: "0" });
+      expect(zero.statusCode, zero.body).toBe(200);
+      expect(zero.json()).toEqual({ ...none.json(), minSimilarity: 0 });
+      const all = await find("graph database", { strategy: "semantic", min_similarity: "1" });
+      expect(all.statusCode, all.body).toBe(200);
+      expect(all.json().minSimilarity).toBe(1);
+      expect(all.json().hits).toEqual([]);
+      if (keyword) {
+        const hybrid = await find("graph database", { strategy: "hybrid", min_similarity: "1" });
+        expect(hybrid.statusCode, hybrid.body).toBe(200);
+        const hits = hybrid.json().hits;
+        expect(hits.length).toBeGreaterThan(0);
+        for (const hit of hits)
+          for (const match of hit.matches) {
+            expectEvidence(match, "hybrid");
+            expect(match.evidence.keywordMatch).toBe(true);
+            expect(match.evidence.semanticSimilarity).toBeNull();
+          }
+        const rejected = await find("graph", { strategy: "keyword", min_similarity: "0.5" });
+        expect(rejected.statusCode).toBe(422);
+        expect(rejected.json().error.code).toBe("VALIDATION_ERROR");
+        expect(Object.keys(rejected.json().error.details.fields)).toEqual(["min_similarity"]);
+      }
+    });
+    it.skipIf(embedding || !keyword)(
+      "a similarity floor is refused when the default strategy ranks by keyword",
+      async () => {
+        const rejected = await find("graph", { min_similarity: "0.5" });
+        expect(rejected.statusCode).toBe(422);
+        expect(rejected.json().error.code).toBe("VALIDATION_ERROR");
+        expect(Object.keys(rejected.json().error.details.fields)).toEqual(["min_similarity"]);
+      },
+    );
     it("collects invalid request dimensions and filters before ranking", async () => {
       const result = await find("graph", {
         strategy: "bogus",
         in: "invalid",
         limit: "0",
+        min_similarity: "1.5",
         "document.property": "missing",
         "filter.ghost": "1",
         "filter.year": "bad",
@@ -481,6 +520,7 @@ export function searchContract(embedding: boolean, enabled = true) {
           "strategy",
           "in",
           "limit",
+          "min_similarity",
           "document.property",
           "ghost",
           "year",

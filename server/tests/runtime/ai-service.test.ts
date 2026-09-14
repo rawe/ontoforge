@@ -100,7 +100,7 @@ describe("toolset computation", () => {
     expect(boundToolNames(fake)).not.toContain("semantic_search");
     expect(boundToolNames(fake)).not.toContain("search_saved_queries");
     const payload = JSON.parse(String(fake.calls[1]!.find((m) => m instanceof ToolMessage)!.content));
-    expect(payload).toEqual({ query: "engineer", type: null, in: ["properties", "document"], strategy: "keyword", filter: {}, hits: [] });
+    expect(payload).toEqual({ query: "engineer", type: null, in: ["properties", "document"], strategy: "keyword", minSimilarity: null, filter: {}, hits: [] });
     expect(store.propertySearchKeyword.mock.calls[0]![2]).toBe(10);
     for (const tool of fake.boundTools[0]! as { name: string; description: string; schema: { shape: Record<string, unknown> } }[]) {
       if (!["search", "search_documents"].includes(tool.name)) continue;
@@ -123,7 +123,7 @@ describe("toolset computation", () => {
     const fake = installFake([toolCallMessage("run_saved_query", { query_key: "find_people" }), new AIMessage("Done")]);
     await aiChat("full_lens", "run the query", asRuntimeStore(store));
     const payload = JSON.parse(String(fake.calls[1]!.find((m) => m instanceof ToolMessage)!.content));
-    expect(payload).toEqual({ query: "engineer", type: "person", in: ["properties", "document"], strategy: "keyword", filter: {}, hits: [] });
+    expect(payload).toEqual({ query: "engineer", type: "person", in: ["properties", "document"], strategy: "keyword", minSimilarity: null, filter: {}, hits: [] });
   });
 
   it("explicit allowlist is intersected with availability, keeping its order", async () => {

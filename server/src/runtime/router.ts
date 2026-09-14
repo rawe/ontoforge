@@ -57,6 +57,7 @@ const SearchQuery = z.looseObject({
   fields: FieldsParam,
   in: z.union([z.string(), z.array(z.string())]).optional(),
   strategy: z.string().optional(),
+  min_similarity: z.coerce.number().optional(),
   "document.property": z.union([z.string(), z.array(z.string())]).optional(),
 });
 
@@ -203,6 +204,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
             | import("./search/request.js").SearchKind[]
             | null,
           strategy: (q.strategy ?? null) as import("./search/strategies.js").SearchStrategy | null,
+          minSimilarity: q.min_similarity ?? null,
           filter: parseFilters(q),
           document: { property: q["document.property"] as string | undefined },
         },

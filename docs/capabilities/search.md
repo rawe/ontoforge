@@ -16,7 +16,7 @@ See [instance-data.md](instance-data.md#query-paths) for property and query-path
 Three independent dimensions select a ranking: scope (one entity type or every type the
 lens exposes), search kind (properties, document, or both), and strategy. The query is
 plain words, not an engine query language. The limit counts entities, from 1 to 100,
-default 10; search has no paging, offset or minimum score.
+default 10; search has no paging or offset.
 
 | Search kind | Ranked unit | Match |
 |---|---|---|
@@ -70,11 +70,25 @@ Equal similarities also retain encounter order. Discarded passages supply no tie
 With at most one searched type, including a lens or filter narrowed to one type, both
 kinds still use summed reciprocal ranks. A single kind keeps its strategy ranking.
 
+### Similarity floor
+
+A caller may supply a minimum similarity, a number from 0 to 1 on the `semanticSimilarity`
+scale below; absent means no floor. The floor is model-specific — what counts as related
+depends on the embedding model — so the server never chooses one. It applies to semantic
+candidates only: each semantic ranking, entity text and document passages alike, drops
+every candidate measured below the floor before any fusion, above the storage adapter.
+Under `semantic` the filtered ranking is the result, and zero hits is a valid outcome.
+Under `hybrid` only the semantic branch is filtered; keyword-only hits are untouched and
+keep an unmeasured similarity, which is not a negative. Under `keyword`, explicit or as
+the default, the floor has nothing to apply to and is a validation error naming the
+parameter rather than silently ignored.
+
 ### Response
 
 The envelope carries `query`, `type` (null across types), `in` (defaults filled), `strategy`,
-`filter` (empty when absent), and `hits`. Each hit carries `entity`, `relativeScore`, and
-`matches`. There is no aggregate confidence, snippet or total.
+`minSimilarity` (null when absent), `filter` (empty when absent), and `hits`. Each hit
+carries `entity`, `relativeScore`, and `matches`. There is no aggregate confidence, snippet
+or total.
 
 The relative score is 1.0 for the best hit and each other hit's ordering number as a
 fraction of the best, comparable only within that response. For one kind under semantic
@@ -104,7 +118,8 @@ lens or no longer an exposed string property. Null must not be read as false.
 
 Callers should inspect entity values and read passages before making claims from them.
 Related content can provide a useful starting entity for graph traversal without
-containing the requested answer. There is no automatic similarity floor.
+containing the requested answer. There is no automatic similarity floor; only a caller
+sets one.
 
 Entities carry every lens-exposed property by default, with document values stubbed.
 Projection works as on the entity list, including raw document text when explicitly

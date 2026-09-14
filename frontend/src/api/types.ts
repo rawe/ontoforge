@@ -204,6 +204,8 @@ export interface SearchResponse {
   type: string | null
   in: SearchKind[]
   strategy: SearchStrategy
+  /** The applied similarity floor on the `semanticSimilarity` scale; null when none was set. */
+  minSimilarity: number | null
   filter: Record<string, string>
   hits: SearchHit[]
 }

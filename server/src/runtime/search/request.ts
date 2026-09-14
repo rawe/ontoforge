@@ -3,13 +3,15 @@ import type { RuntimeStore, SearchedType, SearchedProperty } from "../../core/po
 import { parseFilterConditions } from "../readHelpers.js";
 import { isQueryPath, resolveQueryPath } from "../queryPaths.js";
 import { loadSchema } from "../schemaCache.js";
-import { SEARCH_STRATEGIES, type SearchStrategy } from "./strategies.js";
+import { SEARCH_STRATEGIES, availableStrategies, type SearchStrategy } from "./strategies.js";
 export type SearchKind = "properties" | "document";
 export interface SearchRequest {
   query: string;
   type?: string | null;
   in?: SearchKind[] | null;
   strategy?: SearchStrategy | null;
+  /** Floor on measured similarity, 0..1 on the `semanticSimilarity` scale; null means none. */
+  minSimilarity?: number | null;
   limit?: number;
   filter?: Record<string, string>;
   fields?: string[] | null;
@@ -35,6 +37,15 @@ export async function validateRequest(
   const limit = request.limit ?? 10;
   if (!Number.isInteger(limit) || limit < 1 || limit > 100)
     errors.limit = "Expected integer from 1 to 100";
+  const minSimilarity = request.minSimilarity ?? null;
+  if (minSimilarity !== null) {
+    if (!(typeof minSimilarity === "number" && minSimilarity >= 0 && minSimilarity <= 1))
+      errors.min_similarity = "Expected number from 0 to 1";
+    // The floor removes semantic candidates only; a ranking without any has nothing
+    // it could apply to, so it is refused rather than silently ignored.
+    else if ((request.strategy ?? availableStrategies(store)[0]) === "keyword")
+      errors.min_similarity = "min_similarity requires a strategy that ranks semantically";
+  }
   const type = request.type ?? null;
   if (type !== null && !loaded.scoped.entityTypes[type])
     errors.type = `Entity type '${type}' not found`;
@@ -133,5 +144,5 @@ export async function validateRequest(
     errors.in = "No entity types to search";
   if (Object.keys(errors).length)
     throw new ValidationError(Object.values(errors).join("; "), { fields: errors });
-  return { loaded, kinds, type, limit, filter, searchedTypes, searchedProperties };
+  return { loaded, kinds, type, limit, minSimilarity, filter, searchedTypes, searchedProperties };
 }

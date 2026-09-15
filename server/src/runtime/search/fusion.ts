@@ -1,12 +1,22 @@
+declare const scoreKind: unique symbol;
+/** The kinds a ranking score can have. A ranking holds exactly one kind, assigned once
+ * where the runtime reads the storage port's rows; scores are compared only within one
+ * ranking and never combined across kinds. A sum of two kinds is a plain number and fits
+ * no typed slot. */
+export type SemanticSimilarity = number & { readonly [scoreKind]: "semanticSimilarity" };
+export type KeywordScore = number & { readonly [scoreKind]: "keywordScore" };
+export type FusionScore = number & { readonly [scoreKind]: "fusionScore" };
+export type RankingScore = SemanticSimilarity | KeywordScore | FusionScore;
+
 export interface SearchEvidence {
   /** Original normalized cosine measurement; not confidence or a fused score. */
-  semanticSimilarity: number | null;
+  semanticSimilarity: SemanticSimilarity | null;
   /** Missing from a limited source ranking means unknown, never a negative. */
   keywordMatch: boolean | null;
   /** The adapter's native full-text ranking measurement, passed through raw. Unbounded,
    * comparable neither to semanticSimilarity nor across responses; never used to rank.
    * A number exactly when keywordMatch is true, null exactly when it is null. */
-  keywordScore: number | null;
+  keywordScore: KeywordScore | null;
   /** Complete contributing string-property keys, when measured and lens-exposed. */
   keywordPropertyKeys?: string[] | null;
 }
@@ -29,19 +39,66 @@ function mergeEvidence(a?: SearchEvidence, b?: SearchEvidence): SearchEvidence |
       : {}),
   };
 }
-/** Rank fusion operates on the same unit in every input. Stable ties retain input order. */
-export interface Ranked<T> {
+/** An ordered list whose position is the rank; all fusion ever reads. */
+export interface Ordered<T> {
   key: string;
-  score: number;
   value: T;
   evidence?: SearchEvidence;
 }
+/** A ranking ordered by one score kind. Source rankings keep their measurement here,
+ * duplicating evidence, because the similarity floor and the single-strategy relative
+ * score read it from the ranking. */
+export interface Ranked<T, Kind extends RankingScore> extends Ordered<T> {
+  score: Kind;
+}
+/** Source rows take their kind here, per the port contract of the method that returned
+ * them; the measurement is both the ranking score and the evidence. A keyword row lists its
+ * contributing property keys only for units that attribute (entity text, not passages). */
+export function semanticRow<T>(
+  key: string,
+  value: T,
+  score: unknown,
+  keywordPropertyKeys?: null,
+): Ranked<T, SemanticSimilarity> {
+  const similarity = score as SemanticSimilarity;
+  return {
+    key,
+    score: similarity,
+    value,
+    evidence: {
+      semanticSimilarity: similarity,
+      keywordMatch: null,
+      keywordScore: null,
+      ...(keywordPropertyKeys !== undefined ? { keywordPropertyKeys } : {}),
+    },
+  };
+}
+export function keywordRow<T>(
+  key: string,
+  value: T,
+  score: unknown,
+  keywordPropertyKeys?: string[] | null,
+): Ranked<T, KeywordScore> {
+  const keywordScore = score as KeywordScore;
+  return {
+    key,
+    score: keywordScore,
+    value,
+    evidence: {
+      semanticSimilarity: null,
+      keywordMatch: true,
+      keywordScore,
+      ...(keywordPropertyKeys !== undefined ? { keywordPropertyKeys } : {}),
+    },
+  };
+}
+/** Rank fusion operates on the same unit in every input. Stable ties retain input order. */
 export function fuse<T>(
-  rankings: Ranked<T>[][],
+  rankings: Ordered<T>[][],
   merge: (a: T, b: T) => T = (a) => a,
   mode: "sum" | "max" = "sum",
-): Ranked<T>[] {
-  const result = new Map<string, Ranked<T>>();
+): Ranked<T, FusionScore>[] {
+  const result = new Map<string, Ranked<T, FusionScore>>();
   for (const ranking of rankings) {
     const seen = new Set<string>();
     ranking.forEach((row, index) => {
@@ -50,12 +107,15 @@ export function fuse<T>(
       const prior = result.get(row.key);
       const contribution = 1 / (60 + index + 1);
       const evidence = mergeEvidence(prior?.evidence, row.evidence);
+      // Arithmetic on a brand yields a plain number; this is the one place a fusion score is made.
+      const score = (
+        mode === "max"
+          ? Math.max(prior?.score ?? 0, contribution)
+          : (prior?.score ?? 0) + contribution
+      ) as FusionScore;
       result.set(row.key, {
         key: row.key,
-        score:
-          mode === "max"
-            ? Math.max(prior?.score ?? 0, contribution)
-            : (prior?.score ?? 0) + contribution,
+        score,
         value: prior ? merge(prior.value, row.value) : row.value,
         ...(evidence ? { evidence } : {}),
       });
@@ -68,11 +128,11 @@ export function relativeScore(score: number, best: number): number {
 }
 
 /** Unknown measurements leave the whole tied group in stable input order. */
-export function refineTies<T>(
-  ranking: Ranked<T>[],
+export function refineTies<T, Kind extends RankingScore>(
+  ranking: Ranked<T, Kind>[],
   measurement: (value: T) => number | null,
-): Ranked<T>[] {
-  const result: Ranked<T>[] = [];
+): Ranked<T, Kind>[] {
+  const result: Ranked<T, Kind>[] = [];
   for (let start = 0; start < ranking.length;) {
     let end = start + 1;
     while (end < ranking.length && ranking[end]!.score === ranking[start]!.score) end++;

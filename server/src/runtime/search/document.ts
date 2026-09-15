@@ -1,5 +1,7 @@
 import type { Row, RuntimeStore, SearchedProperty } from "../../core/ports.js";
-import { emptyEvidence, type Ranked } from "./fusion.js";
+import {
+  emptyEvidence, keywordRow, semanticRow, type Ranked, type RankingScore,
+} from "./fusion.js";
 import type { SearchMatch } from "./entry.js";
 export { chunkDocument } from "./chunking.js";
 export function documentKind(
@@ -9,32 +11,27 @@ export function documentKind(
   limit: number,
   query: string,
 ) {
-  const rows = (hits: Row[], source: "semantic" | "keyword"): Ranked<Row>[] =>
-    hits.map((r) => ({
-      key: String((r.chunk as Row)._id),
-      score: r.score as number,
-      value: r.chunk as Row,
-      evidence: {
-        semanticSimilarity: source === "semantic" ? (r.score as number) : null,
-        keywordMatch: source === "keyword" ? true : null,
-        keywordScore: source === "keyword" ? (r.score as number) : null,
-      },
-    }));
+  const key = (r: Row) => String((r.chunk as Row)._id);
   return {
     semantic: async () =>
       properties.length
-        ? rows(await store.documentSearchSemantic(properties, embedding, limit), "semantic")
+        ? (await store.documentSearchSemantic(properties, embedding, limit)).map((r) =>
+            semanticRow(key(r), r.chunk as Row, r.score),
+          )
         : [],
     keyword: async () =>
       properties.length
-        ? rows(await store.documentSearchKeyword(properties, query, limit), "keyword")
+        ? (await store.documentSearchKeyword(properties, query, limit)).map((r) =>
+            keywordRow(key(r), r.chunk as Row, r.score),
+          )
         : [],
   };
 }
-export function collapsePassages(
-  ranking: Ranked<Row>[],
-): Ranked<{ type: string; matches: SearchMatch[] }>[] {
-  const entities = new Map<string, Ranked<{ type: string; matches: SearchMatch[] }>>();
+/** Keeps the passage ranking's score kind: the best passage's score becomes the entity's. */
+export function collapsePassages<Kind extends RankingScore>(
+  ranking: Ranked<Row, Kind>[],
+): Ranked<{ type: string; matches: SearchMatch[] }, Kind>[] {
+  const entities = new Map<string, Ranked<{ type: string; matches: SearchMatch[] }, Kind>>();
   for (const row of ranking) {
     const chunk = row.value;
     const id = String(chunk._entityId);

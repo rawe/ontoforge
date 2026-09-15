@@ -14,7 +14,8 @@ import {
 import { propertyKind } from "./property.js";
 import { documentKind, collapsePassages } from "./document.js";
 import {
-  emptyEvidence, fuse, refineTies, relativeScore, type Ranked, type SearchEvidence,
+  emptyEvidence, fuse, refineTies, relativeScore,
+  type Ranked, type RankingScore, type SearchEvidence, type SemanticSimilarity,
 } from "./fusion.js";
 export type { SearchRequest } from "./request.js";
 export type { SearchEvidence } from "./fusion.js";
@@ -71,7 +72,8 @@ export async function search(
     strategy.key === "keyword" ? [] : await getEmbeddingProvider()!.embed(request.query);
   if (!embedding) throw new ValidationError("Failed to generate embedding for search query");
   type Hit = { entity: Row; matches: SearchMatch[] };
-  const rankings: Ranked<Hit>[][] = [];
+  // The strategy is chosen at runtime, so a ranking's score kind is one of the three here.
+  const rankings: Ranked<Hit, RankingScore>[][] = [];
   if (kinds.includes("properties"))
     rankings.push(
       (
@@ -123,7 +125,7 @@ export async function search(
     );
   }
   const useBestKind = rankings.length > 1 && searchedTypes.length > 1;
-  let ranked =
+  let ranked: Ranked<Hit, RankingScore>[] =
     rankings.length === 1
       ? rankings[0]!
       : fuse(
@@ -138,7 +140,7 @@ export async function search(
     ranked = refineTies(ranked, (hit) => {
       const measurements = hit.matches
         .map((match) => match.evidence.semanticSimilarity)
-        .filter((value): value is number => value !== null && Number.isFinite(value));
+        .filter((value): value is SemanticSimilarity => value !== null && Number.isFinite(value));
       return measurements.length ? Math.max(...measurements) : null;
     });
   }

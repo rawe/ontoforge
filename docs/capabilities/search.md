@@ -52,19 +52,19 @@ embed data: the rebuild below supplies missing vectors.
 
 ### Fusion and matches
 
-Hybrid first fuses rankings of the same units within each kind, using the sum of
-`1 / (60 + rank)` with ranks starting at one. Document search then collapses passages to
-entities: the best passage determines entity order, while each matching document property
-contributes its best passage. The service grows the passage budget until the ranking is
-exhausted, so a long document cannot hide another entity or another matching document
-property. An entity appears once, and its matches survive fusion.
+Hybrid first fuses rankings of the same units within each kind; the fusion score is the
+sum of `1 / (60 + rank)` with ranks starting at one. Document search then collapses
+passages to entities: the best passage determines entity order, while each matching
+document property contributes its best passage. The service grows the passage budget until
+the ranking is exhausted, so a long document cannot hide another entity or another
+matching document property. An entity appears once, and its matches survive fusion.
 
-When both kinds run over more than one searched type, the entity score is the maximum
-of its reciprocal kind-rank contributions, using the same constant and one-based ranks.
-Having a document therefore supplies no additive cross-kind bonus. Equal scores prefer
-the greater semantic similarity found in each entity's returned matches, but only when
-every entity in that tied group has a measured similarity. Otherwise the whole group
-retains encounter order, with properties encountered before document-only entities.
+When both kinds run over more than one searched type, the entity's fusion score is the
+maximum of its reciprocal kind-rank contributions, using the same constant and one-based
+ranks. Having a document therefore supplies no additive cross-kind bonus. Equal fusion
+scores prefer the greater semantic similarity found in each entity's returned matches, but
+only when every entity in that tied group has a measured similarity. Otherwise the whole
+group retains encounter order, with properties encountered before document-only entities.
 Equal similarities also retain encounter order. Discarded passages supply no tie evidence.
 
 With at most one searched type, including a lens or filter narrowed to one type, both
@@ -97,9 +97,10 @@ or total.
 The relative score is 1.0 for the best hit and each other hit's ordering number as a
 fraction of the best, comparable only within that response. For one kind under semantic
 or keyword search it is a ratio of source scores; under hybrid or cross-kind fusion it
-is rank-derived. Cross-type best-kind scoring can produce multiple 1.0 hits whose tie
-order is resolved separately. Neither a 1.0 score nor a smooth tail says that the query
-has a relevant answer. Search returns candidates even for an unrelated query.
+is a ratio of rank-derived fusion scores. Cross-type best-kind scoring can produce
+multiple 1.0 hits whose tie order is resolved separately. Neither a 1.0 score nor a smooth
+tail says that the query has a relevant answer. Search returns candidates even for an
+unrelated query.
 
 An entity match carries `kind: "properties"`. A passage match carries
 `kind: "document"`, `propertyKey`, `charOffset` and `charLength`, directly usable with a

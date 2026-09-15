@@ -1,5 +1,5 @@
 import type { Row, RuntimeStore, SearchedType } from "../../core/ports.js";
-import type { Ranked } from "./fusion.js";
+import { keywordRow, semanticRow } from "./fusion.js";
 export { buildTextRepr, MAX_TEXT_CHARS } from "./propertyText.js";
 export function propertyKind(
   store: RuntimeStore,
@@ -8,25 +8,21 @@ export function propertyKind(
   limit: number,
   query: string,
 ) {
-  const rows = (hits: Row[], source: "semantic" | "keyword"): Ranked<Row>[] =>
-    hits.map((r) => ({
-      key: String((r.entity as Row)._id),
-      score: r.score as number,
-      value: r.entity as Row,
-      evidence: {
-        semanticSimilarity: source === "semantic" ? (r.score as number) : null,
-        keywordMatch: source === "keyword" ? true : null,
-        keywordScore: source === "keyword" ? (r.score as number) : null,
-        keywordPropertyKeys:
-          source === "keyword" ? ((r.keywordPropertyKeys as string[] | null) ?? null) : null,
-      },
-    }));
+  const key = (r: Row) => String((r.entity as Row)._id);
   return {
     semantic: async () =>
       types.length
-        ? rows(await store.propertySearchSemantic(types, embedding, limit), "semantic")
+        ? (await store.propertySearchSemantic(types, embedding, limit)).map((r) =>
+            semanticRow(key(r), r.entity as Row, r.score, null),
+          )
         : [],
     keyword: async () =>
-      types.length ? rows(await store.propertySearchKeyword(types, query, limit), "keyword") : [],
+      types.length
+        ? (await store.propertySearchKeyword(types, query, limit)).map((r) =>
+            keywordRow(
+              key(r), r.entity as Row, r.score, (r.keywordPropertyKeys as string[] | null) ?? null,
+            ),
+          )
+        : [],
   };
 }

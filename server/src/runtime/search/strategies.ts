@@ -1,30 +1,39 @@
 import { getEmbeddingProvider } from "../../core/embedding.js";
-import { fuse, type Ranked } from "./fusion.js";
+import {
+  fuse, type FusionScore, type KeywordScore, type Ranked, type RankingScore, type SemanticSimilarity,
+} from "./fusion.js";
 export const SEARCH_STRATEGIES = ["semantic", "keyword", "hybrid"] as const;
 export type SearchStrategy = (typeof SEARCH_STRATEGIES)[number];
+/** The two source rankings of one search kind, each ordered by its own score kind. */
 export interface RankingKind<T> {
-  semantic(): Promise<Ranked<T>[]>;
-  keyword(): Promise<Ranked<T>[]>;
+  semantic(): Promise<Ranked<T, SemanticSimilarity>[]>;
+  keyword(): Promise<Ranked<T, KeywordScore>[]>;
 }
 export interface SearchCapabilities {
   supportsKeywordRanking(): boolean;
 }
+/** A strategy's ranking holds one score kind, which one is known only at runtime. */
+interface Strategy {
+  key: SearchStrategy;
+  available(store: SearchCapabilities): boolean;
+  rank<T>(kind: RankingKind<T>): Promise<Ranked<T, RankingScore>[]>;
+}
 /** Fixed preference order; every listed strategy has an implementation and requirements. */
-export const strategies = [
+export const strategies: Strategy[] = [
   {
-    key: "hybrid" as const,
+    key: "hybrid",
     available: (store: SearchCapabilities) =>
       Boolean(getEmbeddingProvider()) && store.supportsKeywordRanking(),
-    rank: async <T>(kind: RankingKind<T>) =>
+    rank: async <T>(kind: RankingKind<T>): Promise<Ranked<T, FusionScore>[]> =>
       fuse(await Promise.all([kind.semantic(), kind.keyword()])),
   },
   {
-    key: "keyword" as const,
+    key: "keyword",
     available: (store: SearchCapabilities) => store.supportsKeywordRanking(),
     rank: <T>(kind: RankingKind<T>) => kind.keyword(),
   },
   {
-    key: "semantic" as const,
+    key: "semantic",
     available: () => Boolean(getEmbeddingProvider()),
     rank: <T>(kind: RankingKind<T>) => kind.semantic(),
   },

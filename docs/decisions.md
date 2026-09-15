@@ -240,7 +240,8 @@ invent it. They do not attribute semantic matches to individual properties.
 Saved-query discovery retains its separate cosine scores.
 
 **Search ranking and evidence have distinct meanings.** Relative rank, semantic
-similarity and keyword evidence must not be presented as interchangeable measures.
+similarity and keyword evidence must not be presented as interchangeable measures or
+combined arithmetically; fusion reads rank positions only.
 A similarity bounded by zero and one is not, by itself, calibrated confidence.
 
 **Search provenance must be supported by evidence.** Unknown or unmeasured evidence
@@ -254,10 +255,10 @@ unequal eligibility across types must not silently change callers searching one 
 
 **Cross-type kind fusion uses the best reciprocal kind rank.** When both kinds run
 over more than one searched type, take the maximum contribution; keep summed fusion
-within each kind and for at-most-one-type requests. Resolve equal cross-kind scores by
-the best semantic similarity in returned matches only if every tied entity has one;
-otherwise retain the group's encounter order. This removes additive schema participation
-credit without treating missing measurements as negative evidence. Deliberation:
+within each kind and for at-most-one-type requests. Resolve equal cross-kind fusion
+scores by the best semantic similarity in returned matches only if every tied entity has
+one; otherwise retain the group's encounter order. This removes additive schema
+participation credit without treating missing measurements as negative evidence. Deliberation:
 [adr/0020](adr/0020-search-ranking-and-evidence.md).
 
 **Property keyword content contains values, not schema labels.** Preserve ordered

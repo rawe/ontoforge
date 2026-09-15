@@ -296,3 +296,76 @@ it("preserves single-type stable ties even when the later hit has higher similar
   expect(result.hits.map((hit) => hit.entity._id)).toEqual(["a", "b"]);
   expect(result.hits.map((hit) => hit.relativeScore)).toEqual([1, 1]);
 });
+
+
+describe("caller-supplied similarity floor", () => {
+  it("semantic drops rows below the floor and can return no hits", async () => {
+    store.propertySearchSemantic.mockResolvedValue([
+      { entity: entity("a"), score: 0.8 }, { entity: entity("b"), score: 0.7 }, { entity: entity("c"), score: 0.6 },
+    ]);
+    const floored = await search("full_lens", { query: "x", in: ["properties"], strategy: "semantic", minSimilarity: 0.7 }, store);
+    expect(floored.hits.map((h) => h.entity._id)).toEqual(["a", "b"]);
+    expect(floored.minSimilarity).toBe(0.7);
+    const empty = await search("full_lens", { query: "x", in: ["properties"], strategy: "semantic", minSimilarity: 0.9 }, store);
+    expect(empty.hits).toEqual([]);
+    expect(empty.minSimilarity).toBe(0.9);
+  });
+
+  it("hybrid floors the semantic branch only and keeps keyword-only hits with unknown similarity", async () => {
+    store.propertySearchSemantic.mockResolvedValue([
+      { entity: entity("a"), score: 0.9 }, { entity: entity("b"), score: 0.5 },
+    ]);
+    store.propertySearchKeyword.mockResolvedValue([
+      { entity: entity("b"), score: 42, keywordPropertyKeys: ["name"] },
+      { entity: entity("c"), score: 12, keywordPropertyKeys: ["name"] },
+    ]);
+    const result = await search("full_lens", { query: "x", in: ["properties"], strategy: "hybrid", minSimilarity: 0.8 }, store);
+    expect(result.hits.map((h) => h.entity._id)).toEqual(["a", "b", "c"]);
+    const evidence = Object.fromEntries(result.hits.map((h) => [h.entity._id, h.matches[0]!.evidence]));
+    expect(evidence.a).toEqual({ semanticSimilarity: 0.9, keywordMatch: null, keywordPropertyKeys: null });
+    expect(evidence.b).toEqual({ semanticSimilarity: null, keywordMatch: true, keywordPropertyKeys: ["name"] });
+    expect(evidence.c).toEqual({ semanticSimilarity: null, keywordMatch: true, keywordPropertyKeys: ["name"] });
+    // The floor never reaches the storage port: the semantic page is requested unchanged.
+    expect(store.propertySearchSemantic.mock.calls[0]![2]).toBe(10);
+  });
+
+  it("drops document passages below the floor before collapsing", async () => {
+    store.documentSearchSemantic.mockResolvedValue([
+      passage("a1", "a", "body", 0, 0.9),
+      passage("a2", "a", "appendix", 0, 0.6),
+      passage("b1", "b", "body", 0, 0.5),
+    ]);
+    const result = await search("full_lens", { query: "x", in: ["document"], strategy: "semantic", minSimilarity: 0.7 }, store);
+    expect(result.hits.map((h) => h.entity._id)).toEqual(["a"]);
+    expect(result.hits[0]!.matches).toEqual([
+      { kind: "document", propertyKey: "body", charOffset: 0, charLength: 50, evidence: { semanticSimilarity: 0.9, keywordMatch: null } },
+    ]);
+  });
+
+  it("rejects the floor under keyword ranking, explicit or resolved by default", async () => {
+    const explicit = search("full_lens", { query: "x", strategy: "keyword", minSimilarity: 0.5 }, store);
+    await expect(explicit).rejects.toMatchObject({
+      message: "min_similarity requires a strategy that ranks semantically",
+      details: { fields: { min_similarity: "min_similarity requires a strategy that ranks semantically" } },
+    });
+    setEmbeddingProvider(null);
+    const resolved = search("full_lens", { query: "x", minSimilarity: 0.5 }, store);
+    await expect(resolved).rejects.toMatchObject({ details: { fields: { min_similarity: expect.any(String) } } });
+    expect(store.propertySearchKeyword).not.toHaveBeenCalled();
+  });
+
+  it("echoes the floor in the envelope, null when absent", async () => {
+    store.propertySearchSemantic.mockResolvedValue(entities(["a"]));
+    const without = await search("full_lens", { query: "x", in: ["properties"], strategy: "semantic" }, store);
+    expect(without.minSimilarity).toBeNull();
+    const zero = await search("full_lens", { query: "x", in: ["properties"], strategy: "semantic", minSimilarity: 0 }, store);
+    expect(zero.minSimilarity).toBe(0);
+    expect(zero.hits.map((h) => h.entity._id)).toEqual(["a"]);
+  });
+
+  it.each([-0.1, 1.1])("rejects a floor outside 0..1: %s", async (minSimilarity) => {
+    await expect(
+      search("full_lens", { query: "x", strategy: "semantic", minSimilarity }, store),
+    ).rejects.toMatchObject({ details: { fields: { min_similarity: "Expected number from 0 to 1" } } });
+  });
+});

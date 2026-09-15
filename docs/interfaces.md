@@ -162,7 +162,8 @@ Projection is available on entity list and read, on neighbours (as `fields` and
 
 ### Naming irregularities
 
-`min_score` on saved-query discovery is the one snake_case runtime query parameter.
+`min_score` on saved-query discovery and `min_similarity` on search are the two
+snake_case runtime query parameters.
 Other runtime parameters follow their documented names, including kind-prefixed
 `document.property` and `filter.<key>`.
 
@@ -405,14 +406,15 @@ Semantics: [capabilities/search.md](capabilities/search.md).
 
 | Method | Path | Purpose | Parameters |
 |---|---|---|---|
-| GET | `/search` | Rank entities by properties, document passages, or both | `q`, `type`, repeatable `in`, `strategy`, `document.property`, `limit`, `fields`, `filter.*` |
+| GET | `/search` | Rank entities by properties, document passages, or both | `q`, `type`, repeatable `in`, `strategy`, `min_similarity`, `document.property`, `limit`, `fields`, `filter.*` |
 
 `q` is required. Omit `type` for cross-type search; `in` accepts `properties` and
 `document`, defaulting to both. `strategy` accepts `semantic`, `keyword`, `hybrid`,
 defaulting to the best available. `document.property` restricts document search only and
-requires that kind. `limit` counts entities, 1–100, default 10. Filters also work across
-types, narrowing the searched set. The response carries `query`, `type`, `in`, `strategy`,
-`filter`, `hits`; each hit has an entity, a within-response relative score and matches.
+requires that kind. `min_similarity`, 0–1, drops semantic candidates measured below it
+and needs a strategy that ranks semantically. `limit` counts entities, 1–100, default 10.
+Filters also work across types, narrowing the searched set. The response carries `query`,
+`type`, `in`, `strategy`, `minSimilarity`, `filter`, `hits`; each hit has an entity, a within-response relative score and matches.
 Matches carry nullable semantic/keyword evidence; property matches also carry nullable
 contributing keyword property keys. Scores are not confidence. Evidence scope and null
 semantics are defined in [the search response contract](capabilities/search.md#response).
@@ -585,8 +587,8 @@ Everything a client can do to instance data through one lens.
 | `delete_relation` | Delete a relation |
 | `get_neighbors` | An entity's local neighbourhood, with projection on both entities and relations |
 | `execute_query` | Run a read-only OQL query |
-| `search` | Rank entities by properties and documents, using the default strategy |
-| `search_documents` | Rank entities by document passages; optionally restrict to one property |
+| `search` | Rank entities by properties and documents, using the default strategy and the fixed similarity floor |
+| `search_documents` | Rank entities by document passages under the same defaults; optionally restrict to one property |
 | `list_saved_queries` | Discover saved queries and their parameters |
 | `run_saved_query` | Execute a saved query with parameter values |
 | `search_saved_queries` | Find a saved query by describing what it should do |
@@ -596,8 +598,10 @@ An agent configuration may grant twelve tools: `get_schema`, `list_entities`,
 `search_documents`, `execute_query`, `list_saved_queries`, `run_saved_query`,
 `search_saved_queries`. Every write tool is outside that set, and so is the read-only
 `get_relation` — being read-only is not sufficient to be grantable. The two search tools
-return the REST envelope and take no strategy; MCP also accepts filters and fields.
-See [capabilities/ai-agents.md](capabilities/ai-agents.md).
+return the REST envelope and take no strategy and no `min_similarity`; they apply the
+fixed floor of [capabilities/search.md](capabilities/search.md#similarity-floor) whenever
+the default strategy ranks semantically, echoed as `minSimilarity`. MCP also accepts
+filters and fields. See [capabilities/ai-agents.md](capabilities/ai-agents.md).
 
 `write_document` has no REST counterpart of its own: over REST both document edit forms
 share one route, selected by the operation in the body.

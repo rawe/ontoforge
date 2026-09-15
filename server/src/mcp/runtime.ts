@@ -15,7 +15,12 @@
  * into the message text (shared `formatToolError`).
  */
 
-import { RELATIVE_SCORE_PROMISE, SEARCH_EVIDENCE_GUIDANCE } from "../runtime/search/strategies.js";
+import {
+  RELATIVE_SCORE_PROMISE,
+  SEARCH_EVIDENCE_GUIDANCE,
+  TOOL_MIN_SIMILARITY_GUIDANCE,
+  toolMinSimilarity,
+} from "../runtime/search/strategies.js";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -658,7 +663,8 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
           (document
             ? "Find entities whose document text matches. Every hit carries passage matches with propertyKey, charOffset and charLength for get_document. "
             : "Find entities for a text across properties and documents. ") +
-          "Omit entity_type_key to search all exposed types. Filters take the list_entities keys and operators except '__contains' and apply before ranking, narrowing the searched types; fields projects each entity. Returns the search envelope. relativeScore is comparable only within this response: " +
+          "Omit entity_type_key to search all exposed types. Filters take the list_entities keys and operators except '__contains' and apply before ranking, narrowing the searched types; fields projects each entity. Returns the search envelope. " +
+          TOOL_MIN_SIMILARITY_GUIDANCE + " relativeScore is comparable only within this response: " +
           RELATIVE_SCORE_PROMISE + " " + SEARCH_EVIDENCE_GUIDANCE,
         inputSchema: {
           query: z.string(),
@@ -679,6 +685,7 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
           fields?: string[];
           property?: string;
         }) => {
+          const store = await getRuntimeStore(ontologyKey);
           return jsonResult(
             await service.search(
               lensKey,
@@ -686,6 +693,7 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
                 query: args.query,
                 type: args.entity_type_key ?? null,
                 limit: clamp(args.limit ?? 10, 1, 100),
+                minSimilarity: toolMinSimilarity(store),
                 filter: Object.fromEntries(
                   Object.entries(args.filters ?? {}).map(([key, value]) => [
                     key,
@@ -697,7 +705,7 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
                   ? { in: ["document" as const], document: { property: args.property } }
                   : {}),
               },
-              await getRuntimeStore(ontologyKey),
+              store,
             ),
           );
         },

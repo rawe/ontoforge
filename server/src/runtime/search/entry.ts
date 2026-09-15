@@ -8,7 +8,9 @@ import {
   ENTITY_NEIGHBOR_ALWAYS_FIELDS,
 } from "../readHelpers.js";
 import { validateRequest, type SearchRequest, type SearchKind } from "./request.js";
-import { strategies, availableStrategies, type SearchStrategy } from "./strategies.js";
+import {
+  strategies, availableStrategies, type RankingKind, type SearchStrategy,
+} from "./strategies.js";
 import { propertyKind } from "./property.js";
 import { documentKind, collapsePassages } from "./document.js";
 import {
@@ -36,15 +38,27 @@ export interface SearchResponse {
   type: string | null;
   in: SearchKind[];
   strategy: SearchStrategy;
+  /** The applied similarity floor, or null when the caller set none. */
+  minSimilarity: number | null;
   filter: Record<string, string>;
   hits: SearchHit[];
+}
+/** The floor drops semantic candidates below it before any fusion, above the storage
+ * port; keyword rankings are never touched. A semantic row's score is its measured
+ * similarity, so a floored page is short exactly when the ranking is exhausted. */
+function floored<T>(kind: RankingKind<T>, minSimilarity: number | null): RankingKind<T> {
+  if (minSimilarity === null) return kind;
+  return {
+    ...kind,
+    semantic: async () => (await kind.semantic()).filter((r) => r.score >= minSimilarity),
+  };
 }
 export async function search(
   lensKey: string,
   request: SearchRequest,
   store: RuntimeStore,
 ): Promise<SearchResponse> {
-  const { loaded, kinds, type, limit, filter, searchedTypes, searchedProperties } =
+  const { loaded, kinds, type, limit, minSimilarity, filter, searchedTypes, searchedProperties } =
     await validateRequest(lensKey, request, store);
   const available = availableStrategies(store);
   const strategy = strategies.find((s) => s.key === (request.strategy ?? available[0]));
@@ -61,7 +75,9 @@ export async function search(
   if (kinds.includes("properties"))
     rankings.push(
       (
-        await strategy.rank(propertyKind(store, searchedTypes, embedding, limit, request.query))
+        await strategy.rank(
+          floored(propertyKind(store, searchedTypes, embedding, limit, request.query), minSimilarity),
+        )
       ).map((r) => ({
         key: r.key,
         score: r.score,
@@ -87,7 +103,10 @@ export async function search(
     let collapsed: ReturnType<typeof collapsePassages> = [];
     while (searchedProperties.length) {
       const passages = await strategy.rank(
-        documentKind(store, searchedProperties, embedding, budget, request.query),
+        floored(
+          documentKind(store, searchedProperties, embedding, budget, request.query),
+          minSimilarity,
+        ),
       );
       collapsed = collapsePassages(passages);
       if (passages.length < budget) break;
@@ -171,5 +190,7 @@ export async function search(
       ),
     };
   });
-  return { query: request.query, type, in: kinds, strategy: strategy.key, filter, hits };
+  return {
+    query: request.query, type, in: kinds, strategy: strategy.key, minSimilarity, filter, hits,
+  };
 }

@@ -32,6 +32,16 @@ export const strategies = [
 export function availableStrategies(store: SearchCapabilities): SearchStrategy[] {
   return strategies.filter((s) => s.available(store)).map((s) => s.key);
 }
+/** The fixed similarity floor the MCP and agent search tools apply, hidden from the
+ * caller like the strategy itself. */
+export const TOOL_MIN_SIMILARITY = 0.75;
+/** The floor the tools pass: the constant when the default strategy ranks semantically,
+ * null under a keyword default, where a floor would be rejected. */
+export function toolMinSimilarity(store: SearchCapabilities): number | null {
+  return availableStrategies(store)[0] === "keyword" ? null : TOOL_MIN_SIMILARITY;
+}
+export const TOOL_MIN_SIMILARITY_GUIDANCE =
+  "Semantic candidates below a fixed similarity floor are omitted; the applied floor is echoed as minSimilarity in the envelope (null when the server ranks by keyword only).";
 export const RELATIVE_SCORE_PROMISE =
   "1.0 for the best hit; multiple hits can tie. Comparable only within this response, never confidence. Even an unrelated query can return a best hit. Tied scores can be ordered by available evidence and do not mean equal relevance.";
 export const SEARCH_EVIDENCE_GUIDANCE =

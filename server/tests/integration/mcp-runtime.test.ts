@@ -502,6 +502,22 @@ describe("entity tools", () => {
     }
   });
 
+  it("search applies no similarity floor without a provider (keyword default)", async () => {
+    const client = await connectClient(`${baseUrl}/mcp/ontologies/test_ont/runtime/lenses/test_lens`);
+    try {
+      await call(client, "create_entity", {
+        entity_type_key: "person",
+        properties: { name: "Ada Lovelace" },
+      });
+      const found = json(await call(client, "search", { query: "Lovelace" }));
+      expect(found.strategy).toBe("keyword");
+      expect(found.minSimilarity).toBeNull();
+      expect((found.hits as Record<string, unknown>[]).length).toBe(1);
+    } finally {
+      await client.close();
+    }
+  });
+
   it("refuses a sort direction outside asc/desc at the tool boundary", async () => {
     const client = await connectClient(`${baseUrl}/mcp/ontologies/test_ont/runtime/lenses/test_lens`);
     try {

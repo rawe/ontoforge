@@ -17,6 +17,7 @@ export function documentKind(
       evidence: {
         semanticSimilarity: source === "semantic" ? (r.score as number) : null,
         keywordMatch: source === "keyword" ? true : null,
+        keywordScore: source === "keyword" ? (r.score as number) : null,
       },
     }));
   return {

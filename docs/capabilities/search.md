@@ -112,6 +112,7 @@ Every match also carries `evidence`:
 |---|---|
 | `semanticSimilarity` | Original measured similarity, `(1 + cosine) / 2`, or null when unavailable or unmeasured. It is not a probability or calibrated confidence. |
 | `keywordMatch` | True when the normalized query terms matched this stored search unit; null when unavailable or unmeasured. False requires an explicit negative evaluation; source rankings alone emit only true/null. |
+| `keywordScore` | The adapter's native full-text ranking measurement for this unit, passed through raw, or null when unavailable or unmeasured. A number exactly when `keywordMatch` is true. Higher is better within one ranking; it has no fixed upper bound and no meaning across responses, ontologies or languages, and is not comparable to `semanticSimilarity`. It exists for inspection and retrieval evaluation and never enters any ranking step. |
 | `keywordPropertyKeys` (property matches only) | Keys whose indexed values supplied keyword query terms, or null when complete, lens-safe attribution is unavailable. A listed property need not satisfy the whole query on its own. |
 
 Evidence belongs to the composed entity representation or to the precise returned

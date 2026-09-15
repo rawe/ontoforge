@@ -29,16 +29,17 @@ describe("rank fusion", () => {
 
   it("evidence merging is independent of input order and does not change either source", () => {
     const semantic = { key: "a", value: ["semantic"], score: 0.87654321,
-      evidence: { semanticSimilarity: 0.87654321, keywordMatch: null, keywordPropertyKeys: null } };
+      evidence: { semanticSimilarity: 0.87654321, keywordMatch: null, keywordScore: null, keywordPropertyKeys: null } };
     const keyword = { key: "a", value: ["keyword"], score: 42,
-      evidence: { semanticSimilarity: null, keywordMatch: true, keywordPropertyKeys: ["name", "role"] } };
+      evidence: { semanticSimilarity: null, keywordMatch: true, keywordScore: 42, keywordPropertyKeys: ["name", "role"] } };
     for (const inputs of [[[semantic], [keyword]], [[keyword], [semantic]]]) {
       expect(fuse(inputs)[0]!.evidence).toEqual({
-        semanticSimilarity: 0.87654321, keywordMatch: true, keywordPropertyKeys: ["name", "role"],
+        semanticSimilarity: 0.87654321, keywordMatch: true, keywordScore: 42, keywordPropertyKeys: ["name", "role"],
       });
     }
     expect(semantic.evidence.keywordMatch).toBeNull();
     expect(keyword.evidence.semanticSimilarity).toBeNull();
+    expect(semantic.evidence.keywordScore).toBeNull();
   });
 });
 

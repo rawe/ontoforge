@@ -3,12 +3,17 @@ export interface SearchEvidence {
   semanticSimilarity: number | null;
   /** Missing from a limited source ranking means unknown, never a negative. */
   keywordMatch: boolean | null;
+  /** The adapter's native full-text ranking measurement, passed through raw. Unbounded,
+   * comparable neither to semanticSimilarity nor across responses; never used to rank.
+   * A number exactly when keywordMatch is true, null exactly when it is null. */
+  keywordScore: number | null;
   /** Complete contributing string-property keys, when measured and lens-exposed. */
   keywordPropertyKeys?: string[] | null;
 }
 export const emptyEvidence = (): SearchEvidence => ({
   semanticSimilarity: null,
   keywordMatch: null,
+  keywordScore: null,
 });
 
 /** Source measurements merge only for identical units, before passage collapse. */
@@ -18,6 +23,7 @@ function mergeEvidence(a?: SearchEvidence, b?: SearchEvidence): SearchEvidence |
   return {
     semanticSimilarity: a.semanticSimilarity ?? b.semanticSimilarity,
     keywordMatch: a.keywordMatch ?? b.keywordMatch,
+    keywordScore: a.keywordScore ?? b.keywordScore,
     ...(a.keywordPropertyKeys !== undefined || b.keywordPropertyKeys !== undefined
       ? { keywordPropertyKeys: a.keywordPropertyKeys ?? b.keywordPropertyKeys ?? null }
       : {}),

@@ -18,8 +18,8 @@ function expectEvidence(match: Record<string, any>, strategy: string) {
   const evidence = match.evidence;
   expect(Object.keys(evidence).sort()).toEqual(
     match.kind === "properties"
-      ? ["keywordMatch", "keywordPropertyKeys", "semanticSimilarity"]
-      : ["keywordMatch", "semanticSimilarity"],
+      ? ["keywordMatch", "keywordPropertyKeys", "keywordScore", "semanticSimilarity"]
+      : ["keywordMatch", "keywordScore", "semanticSimilarity"],
   );
   if (evidence.semanticSimilarity !== null) {
     expect(Number.isFinite(evidence.semanticSimilarity)).toBe(true);
@@ -27,6 +27,12 @@ function expectEvidence(match: Record<string, any>, strategy: string) {
     expect(evidence.semanticSimilarity).toBeLessThanOrEqual(1);
   }
   expect([true, null]).toContain(evidence.keywordMatch);
+  // The native keyword score is present exactly when the unit matched; it is raw and
+  // unbounded, so only finiteness and positivity are contractual.
+  if (evidence.keywordMatch === true) {
+    expect(Number.isFinite(evidence.keywordScore)).toBe(true);
+    expect(evidence.keywordScore).toBeGreaterThan(0);
+  } else expect(evidence.keywordScore).toBeNull();
   if (strategy === "semantic") {
     expect(evidence.semanticSimilarity).not.toBeNull();
     expect(evidence.keywordMatch).toBeNull();
@@ -415,6 +421,7 @@ export function searchContract(embedding: boolean, enabled = true) {
               evidence: {
                 semanticSimilarity: expect.any(Number),
                 keywordMatch: null,
+                keywordScore: null,
                 keywordPropertyKeys: null,
               },
             },

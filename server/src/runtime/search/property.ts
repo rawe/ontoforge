@@ -16,6 +16,7 @@ export function propertyKind(
       evidence: {
         semanticSimilarity: source === "semantic" ? (r.score as number) : null,
         keywordMatch: source === "keyword" ? true : null,
+        keywordScore: source === "keyword" ? (r.score as number) : null,
         keywordPropertyKeys:
           source === "keyword" ? ((r.keywordPropertyKeys as string[] | null) ?? null) : null,
       },

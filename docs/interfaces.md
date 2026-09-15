@@ -415,8 +415,8 @@ requires that kind. `min_similarity`, 0–1, drops semantic candidates measured 
 and needs a strategy that ranks semantically. `limit` counts entities, 1–100, default 10.
 Filters also work across types, narrowing the searched set. The response carries `query`,
 `type`, `in`, `strategy`, `minSimilarity`, `filter`, `hits`; each hit has an entity, a within-response relative score and matches.
-Matches carry nullable semantic/keyword evidence; property matches also carry nullable
-contributing keyword property keys. Scores are not confidence. Evidence scope and null
+Matches carry nullable semantic/keyword evidence including the native keyword score;
+property matches also carry nullable contributing keyword property keys. Scores are not confidence. Evidence scope and null
 semantics are defined in [the search response contract](capabilities/search.md#response).
 
 ### Query

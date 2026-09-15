@@ -225,10 +225,13 @@ the first available of hybrid, keyword, semantic; every response names the appli
 **Search ranking scores are relative; match evidence is separate.** A hit's
 `relativeScore` is comparable only within one response and is never absolute similarity
 or confidence. Each match's `evidence` carries `semanticSimilarity` (the supported
-similarity on the `(1 + cosine) / 2` scale, or null) and `keywordMatch` (a supported
-boolean result, or null). Null means unknown or unmeasured, including unavailable
+similarity on the `(1 + cosine) / 2` scale, or null), `keywordMatch` (a supported
+boolean result, or null) and `keywordScore` (the adapter's native full-text ranking
+measurement, raw and unbounded, a number exactly when `keywordMatch` is true and null
+exactly when it is null). Null means unknown or unmeasured, including unavailable
 signals; false requires an explicit negative evaluation, never absence from a limited
-ranking. Evidence describes the composed entity text or the particular returned document
+ranking. The keyword score is not comparable to semantic similarity, not across
+responses, and never enters fusion or tie refinement. Evidence describes the composed entity text or the particular returned document
 passage, not which signals contributed to ranking. Do not add a `via` or source-membership
 field to this contract. Retaining evidence itself preserves ranking and passage selection.
 Property matches also expose nullable `keywordPropertyKeys`, naming exposed string values

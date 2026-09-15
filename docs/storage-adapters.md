@@ -283,9 +283,9 @@ exact score order. Hybrid fusion belongs above the port.
 | Ranking | Input | Returns |
 |---|---|---|
 | Property semantic | searched types, query vector, limit | entities and scores |
-| Property keyword | searched types, query text, limit | entities, scores, and nullable contributing keyword property keys |
+| Property keyword | searched types, query text, limit | entities, native keyword scores, and nullable contributing keyword property keys |
 | Document semantic | searched document properties, query vector, limit | passages and scores |
-| Document keyword | searched document properties, query text, limit | passages and scores |
+| Document keyword | searched document properties, query text, limit | passages and native keyword scores |
 
 A searched type carries its key, property definitions and parsed filter conditions. A
 searched document property carries its type key, property key and parsed conditions on
@@ -297,8 +297,10 @@ The runtime store declares keyword-ranking support for both kinds together, and 
 path-condition support for all search strategies. The bound store carries the ontology's
 language; queries do not take a language. Semantic scores are pinned to `(1 + cosine) / 2`,
 higher is better; arbitrary native scores must not be labeled semantic similarity. A
-keyword source row establishes a positive match, while non-membership in a limited
-ranking establishes no negative evidence.
+keyword score is the adapter's native ranking measurement, higher is better, its scale
+unpinned; the runtime passes it through as evidence unchanged. A keyword source row
+establishes a positive match, while non-membership in a limited ranking establishes no
+negative evidence.
 
 Entity creation carries labeled semantic text alongside the optional vector and separate
 ordered keyword segments, each with a property key and its exact indexed value text.

@@ -180,6 +180,9 @@ export interface SearchEvidence {
   semanticSimilarity: number | null
   /** True for a native keyword match; null is unknown, including limited-list absence. */
   keywordMatch: boolean | null
+  /** The adapter's native full-text ranking measurement, raw and unbounded; a number
+   * exactly when keywordMatch is true. Not comparable to semanticSimilarity. */
+  keywordScore: number | null
 }
 export type SearchMatch = {
   kind: 'properties'; evidence: SearchEvidence & { keywordPropertyKeys: string[] | null }

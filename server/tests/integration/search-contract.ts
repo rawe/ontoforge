@@ -9,6 +9,9 @@ import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { wipeDatabase } from "./reset.js";
 import { enableOllamaProvider, disableProvider } from "./embedding/support.js";
 
+// The keyword family: recall keyword matching under the first two, strict under the last.
+const keywordStrategies = ["keyword", "keyword-recall", "keyword-strict"];
+
 function expectEvidence(match: Record<string, any>, strategy: string) {
   expect(Object.keys(match).sort()).toEqual(
     match.kind === "properties"
@@ -36,7 +39,7 @@ function expectEvidence(match: Record<string, any>, strategy: string) {
   if (strategy === "semantic") {
     expect(evidence.semanticSimilarity).not.toBeNull();
     expect(evidence.keywordMatch).toBeNull();
-  } else if (strategy === "keyword") {
+  } else if (keywordStrategies.includes(strategy)) {
     expect(evidence.semanticSimilarity).toBeNull();
     expect(evidence.keywordMatch).toBe(true);
   } else {
@@ -53,17 +56,17 @@ export function searchContract(embedding: boolean, enabled = true) {
   const keyword = settings.DB_BACKEND === "postgres";
   const strategies = embedding
     ? keyword
-      ? ["semantic", "keyword", "hybrid"]
+      ? ["semantic", ...keywordStrategies, "hybrid"]
       : ["semantic"]
     : keyword
-      ? ["keyword"]
+      ? keywordStrategies
       : [];
   const defaults = embedding
     ? keyword
-      ? ["hybrid", "keyword", "semantic"]
+      ? ["hybrid", ...keywordStrategies, "semantic"]
       : ["semantic"]
     : keyword
-      ? ["keyword"]
+      ? keywordStrategies
       : [];
   const base = "/api/ontologies/search_test";
   const model = `${base}/model`;
@@ -160,6 +163,7 @@ export function searchContract(embedding: boolean, enabled = true) {
           expect(Object.keys(body).sort()).toEqual(
             ["query", "type", "in", "strategy", "minSimilarity", "filter", "hits"].sort(),
           );
+          expect(body.strategy).toBe(strategy);
           expect(body.minSimilarity).toBeNull();
           expect(body.hits).toHaveLength(2);
           expect(body.hits[0].relativeScore).toBe(1);
@@ -495,10 +499,12 @@ export function searchContract(embedding: boolean, enabled = true) {
             expect(match.evidence.keywordMatch).toBe(true);
             expect(match.evidence.semanticSimilarity).toBeNull();
           }
-        const rejected = await find("graph", { strategy: "keyword", min_similarity: "0.5" });
-        expect(rejected.statusCode).toBe(422);
-        expect(rejected.json().error.code).toBe("VALIDATION_ERROR");
-        expect(Object.keys(rejected.json().error.details.fields)).toEqual(["min_similarity"]);
+        for (const strategy of keywordStrategies) {
+          const rejected = await find("graph", { strategy, min_similarity: "0.5" });
+          expect(rejected.statusCode).toBe(422);
+          expect(rejected.json().error.code).toBe("VALIDATION_ERROR");
+          expect(Object.keys(rejected.json().error.details.fields)).toEqual(["min_similarity"]);
+        }
       }
     });
     it.skipIf(embedding || !keyword)(
@@ -568,14 +574,55 @@ export function searchContract(embedding: boolean, enabled = true) {
         const result = await find("graph", { strategy: "semantic" });
         expect(result.statusCode).toBe(422);
         expect(result.json().error.details.code).toBe("FEATURE_DISABLED");
-        expect(result.json().error.message).toContain(keyword ? "keyword" : "none");
+        expect(result.json().error.message).toContain(
+          keyword ? "keyword, keyword-recall, keyword-strict" : "none",
+        );
       }
       if (!keyword)
-        for (const strategy of ["keyword", "hybrid"]) {
+        for (const strategy of [...keywordStrategies, "hybrid"]) {
           const result = await find("graph", { strategy });
           expect(result.statusCode).toBe(422);
           expect(result.json().error.message).toContain(embedding ? "semantic" : "none");
         }
+    });
+    it.skipIf(!keyword)("strict keyword matching requires every query term", async () => {
+      // Only the company title carries both terms; the paper and report titles carry
+      // "database" alone. Recall keyword matching keeps them as hits, strict drops them.
+      // Rank order is not asserted: the native ranking counts a repeated term like
+      // several distinct terms, so the partial rows can outrank the complete one.
+      const ids = async (strategy: string, query = "database consulting") =>
+        (await find(query, { strategy, in: "properties" })).json().hits.map((h: any) => h.entity._id);
+      const company = (await find("consulting", { strategy: "keyword" })).json().hits[0].entity._id;
+      for (const strategy of ["keyword", "keyword-recall"])
+        expect((await ids(strategy)).sort()).toEqual([best._id, company, second._id].sort());
+      expect(await ids("keyword-strict")).toEqual([company]);
+      // No row carries both terms in any kind: an honest empty answer, not partial hits.
+      const none = await find("graph cakes", { strategy: "keyword-strict" });
+      expect(none.statusCode, none.body).toBe(200);
+      expect(none.json()).toMatchObject({ strategy: "keyword-strict", hits: [] });
+      expect((await find("graph cakes", { strategy: "keyword" })).json().hits.length).toBeGreaterThan(0);
+    });
+    it.skipIf(!keyword)("strict keyword matching still matches a query term as a prefix", async () => {
+      // "surv" continues into "survey": a hit, but attribution needs every term exactly.
+      const prefixed = await find("surv graph", { strategy: "keyword-strict", in: "properties" });
+      expect(prefixed.statusCode, prefixed.body).toBe(200);
+      expect(prefixed.json().hits.map((h: any) => h.entity._id)).toEqual([second._id]);
+      for (const match of prefixed.json().hits[0].matches) {
+        expect(match.evidence.keywordMatch).toBe(true);
+        expect(match.evidence.keywordScore).toBeGreaterThan(0);
+        expect(match.evidence.keywordPropertyKeys).toBeNull();
+      }
+      const exact = await find("survey graph", { strategy: "keyword-strict", in: "properties" });
+      expect(exact.json().hits.map((h: any) => h.entity._id)).toEqual([second._id]);
+      expect(exact.json().hits[0].matches[0].evidence.keywordPropertyKeys).toEqual(["title"]);
+    });
+    it.skipIf(!keyword)("strict keyword matching never exposes query syntax", async () => {
+      const operators = await find(`graph & database | ! ' words`, { strategy: "keyword-strict" });
+      expect(operators.statusCode, operators.body).toBe(200);
+      expect(operators.json().hits).toEqual([]);
+      const quoted = await find(`"graph" & (database)`, { strategy: "keyword-strict" });
+      expect(quoted.statusCode, quoted.body).toBe(200);
+      expect(quoted.json().hits.map((h: any) => h.entity._id)).toContain(best._id);
     });
     it("keeps literal terms on entity lists, including document exclusion", async () => {
       const res = await app.inject({ url: `${runtime}/entities/paper?q=datab` });

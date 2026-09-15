@@ -173,7 +173,7 @@ export interface NeighborsResponse {
 
 /* ------------------------------ runtime — search ----------------------------- */
 
-export type SearchStrategy = 'semantic' | 'keyword' | 'hybrid'
+export type SearchStrategy = 'semantic' | 'keyword' | 'keyword-recall' | 'keyword-strict' | 'hybrid'
 export type SearchKind = 'properties' | 'document'
 export interface SearchEvidence {
   /** Original (1 + cosine) / 2 measurement, not confidence; null is unmeasured. */

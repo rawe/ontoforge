@@ -1,4 +1,4 @@
-import type { Row, RuntimeStore, SearchedType } from "../../core/ports.js";
+import type { KeywordMatching, Row, RuntimeStore, SearchedType } from "../../core/ports.js";
 import { keywordRow, semanticRow } from "./fusion.js";
 export { buildTextRepr, MAX_TEXT_CHARS } from "./propertyText.js";
 export function propertyKind(
@@ -16,9 +16,9 @@ export function propertyKind(
             semanticRow(key(r), r.entity as Row, r.score, null),
           )
         : [],
-    keyword: async () =>
+    keyword: async (matching: KeywordMatching) =>
       types.length
-        ? (await store.propertySearchKeyword(types, query, limit)).map((r) =>
+        ? (await store.propertySearchKeyword(types, query, limit, matching)).map((r) =>
             keywordRow(
               key(r), r.entity as Row, r.score, (r.keywordPropertyKeys as string[] | null) ?? null,
             ),

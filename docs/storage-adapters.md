@@ -283,15 +283,21 @@ exact score order. Hybrid fusion belongs above the port.
 | Ranking | Input | Returns |
 |---|---|---|
 | Property semantic | searched types, query vector, limit | entities and scores |
-| Property keyword | searched types, query text, limit | entities, native keyword scores, and nullable contributing keyword property keys |
+| Property keyword | searched types, query text, limit, keyword matching | entities, native keyword scores, and nullable contributing keyword property keys |
 | Document semantic | searched document properties, query vector, limit | passages and scores |
-| Document keyword | searched document properties, query text, limit | passages and native keyword scores |
+| Document keyword | searched document properties, query text, limit, keyword matching | passages and native keyword scores |
 
 A searched type carries its key, property definitions and parsed filter conditions. A
 searched document property carries its type key, property key and parsed conditions on
 its parent. Filters apply within ranking, so the limit counts filtered units. The
 service computes lens scope and filter narrowing once. Cross-type vector search scans
 the per-type indexes in one statement and merges globally; no shared index exists.
+
+The keyword matching argument names the retrieval method, `recall` or `strict`. Recall
+admits a row carrying any query term; strict requires every query term; both match each
+term as a prefix, and both build the query from the adapter's own tokenizer output so
+search text never reaches query syntax. The runtime passes the matching of the selected
+strategy; an adapter without keyword ranking never receives the call.
 
 The runtime store declares keyword-ranking support for both kinds together, and declares
 path-condition support for all search strategies. The bound store carries the ontology's
@@ -310,8 +316,7 @@ not erase existing keyword data. A creation without segments has no keyword cont
 known attribution. These are technical values, absent from entity properties, schemas,
 lenses and transfer payloads.
 
-Property keyword attribution names segments containing contributing normalized query
-terms; independently matching the whole query against each segment is insufficient for
+Property keyword attribution names segments containing contributing query terms; independently matching the whole query against each segment is insufficient for
 cross-field matches. Use the same language and tokenizer as aggregate retrieval, returning
 null when faithful coverage is unavailable. Character-span attribution is not required.
 The service suppresses keys that are no longer exposed string properties. An adapter
@@ -663,9 +668,11 @@ per-type scans in one statement, with a limit per scan and a global score order 
 Two GIN indexes are fixed at ontology creation: one on a stored generated tsvector of
 composed property text, one on a stored generated tsvector of chunk text. Their
 `to_tsvector` configuration is the ontology's English or German language. Queries are assembled
-from the lexemes `to_tsvector` produced for the search text, quoted and OR-ed with a
-prefix marker on each, and rank the stored vectors with `ts_rank_cd`; no engine query
-syntax is accepted from callers, and search text never reaches tsquery syntax. The filters restrict candidates before ordering and limiting.
+from the lexemes `to_tsvector` produced for the search text, quoted, each with a prefix
+marker, and joined with the OR operator under recall matching or the AND operator under
+strict matching — the matching selects that operator and nothing else. They rank the
+stored vectors with `ts_rank_cd`; no engine query syntax is accepted from callers, and
+search text never reaches tsquery syntax. The filters restrict candidates before ordering and limiting.
 There are no keyword lifecycle hooks or per-type keyword DDL. A common term may rank many
 candidates before the limit, the inherent cost of full-text ranking.
 

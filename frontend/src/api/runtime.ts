@@ -24,6 +24,7 @@ import type {
   SchemaEntityType,
   SchemaRelationType,
   SearchResponse,
+  SearchStrategy,
 } from './types'
 
 const base = (ontologyKey: string, lensKey: string) =>
@@ -208,7 +209,7 @@ export interface SearchParams {
   q: string
   type?: string
   in?: readonly ('properties' | 'document')[]
-  strategy?: 'semantic' | 'keyword' | 'hybrid'
+  strategy?: SearchStrategy
   'document.property'?: string
   limit?: number
   fields?: readonly string[]

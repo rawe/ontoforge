@@ -186,7 +186,11 @@ describe("features route", () => {
   it("reports both capabilities false with the exact field names", async () => {
     const res = await app.inject({ method: "GET", url: "/api/server/features" });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ semanticSearch: false, ai: false, searchStrategies: ["keyword"] });
+    expect(res.json()).toEqual({
+      semanticSearch: false,
+      ai: false,
+      searchStrategies: ["keyword", "keyword-recall", "keyword-strict"],
+    });
   });
 });
 

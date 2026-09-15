@@ -9,7 +9,7 @@ import {
 } from "../readHelpers.js";
 import { validateRequest, type SearchRequest, type SearchKind } from "./request.js";
 import {
-  strategies, availableStrategies, type RankingKind, type SearchStrategy,
+  strategies, availableStrategies, ranksSemantically, type RankingKind, type SearchStrategy,
 } from "./strategies.js";
 import { propertyKind } from "./property.js";
 import { documentKind, collapsePassages } from "./document.js";
@@ -68,8 +68,9 @@ export async function search(
       `Search strategy unavailable. Available strategies: ${available.join(", ") || "none"}`,
       { code: "FEATURE_DISABLED" },
     );
-  const embedding =
-    strategy.key === "keyword" ? [] : await getEmbeddingProvider()!.embed(request.query);
+  const embedding = ranksSemantically(strategy.key)
+    ? await getEmbeddingProvider()!.embed(request.query)
+    : [];
   if (!embedding) throw new ValidationError("Failed to generate embedding for search query");
   type Hit = { entity: Row; matches: SearchMatch[] };
   // The strategy is chosen at runtime, so a ranking's score kind is one of the three here.

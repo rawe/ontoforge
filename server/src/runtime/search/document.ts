@@ -1,4 +1,4 @@
-import type { Row, RuntimeStore, SearchedProperty } from "../../core/ports.js";
+import type { KeywordMatching, Row, RuntimeStore, SearchedProperty } from "../../core/ports.js";
 import {
   emptyEvidence, keywordRow, semanticRow, type Ranked, type RankingScore,
 } from "./fusion.js";
@@ -19,9 +19,9 @@ export function documentKind(
             semanticRow(key(r), r.chunk as Row, r.score),
           )
         : [],
-    keyword: async () =>
+    keyword: async (matching: KeywordMatching) =>
       properties.length
-        ? (await store.documentSearchKeyword(properties, query, limit)).map((r) =>
+        ? (await store.documentSearchKeyword(properties, query, limit, matching)).map((r) =>
             keywordRow(key(r), r.chunk as Row, r.score),
           )
         : [],

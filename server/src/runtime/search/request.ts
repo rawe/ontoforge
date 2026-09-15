@@ -3,7 +3,9 @@ import type { RuntimeStore, SearchedType, SearchedProperty } from "../../core/po
 import { parseFilterConditions } from "../readHelpers.js";
 import { isQueryPath, resolveQueryPath } from "../queryPaths.js";
 import { loadSchema } from "../schemaCache.js";
-import { SEARCH_STRATEGIES, availableStrategies, type SearchStrategy } from "./strategies.js";
+import {
+  SEARCH_STRATEGIES, availableStrategies, ranksSemantically, type SearchStrategy,
+} from "./strategies.js";
 export type SearchKind = "properties" | "document";
 export interface SearchRequest {
   query: string;
@@ -43,8 +45,11 @@ export async function validateRequest(
       errors.min_similarity = "Expected number from 0 to 1";
     // The floor removes semantic candidates only; a ranking without any has nothing
     // it could apply to, so it is refused rather than silently ignored.
-    else if ((request.strategy ?? availableStrategies(store)[0]) === "keyword")
-      errors.min_similarity = "min_similarity requires a strategy that ranks semantically";
+    else {
+      const applied = request.strategy ?? availableStrategies(store)[0];
+      if (applied && !ranksSemantically(applied))
+        errors.min_similarity = "min_similarity requires a strategy that ranks semantically";
+    }
   }
   const type = request.type ?? null;
   if (type !== null && !loaded.scoped.entityTypes[type])

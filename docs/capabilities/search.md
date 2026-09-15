@@ -33,14 +33,21 @@ and whose match names the property and the passage.
 
 ### Strategies and availability
 
-| Strategy | Requirement | Scoring |
+Each strategy is a composition of retrieval methods; the methods are defined in the
+[glossary](../README.md#glossary). Keyword ranking is stemmed full-text ranking in the
+ontology language.
+
+| Strategy | Requirement | Retrieval methods |
 |---|---|---|
-| `semantic` | an embedding provider | vector similarity |
-| `keyword` | the adapter supports keyword ranking | stemmed full-text ranking in the ontology language |
-| `hybrid` | both requirements | reciprocal rank fusion of semantic and keyword rankings |
+| `semantic` | an embedding provider | semantic ranking |
+| `keyword` | the adapter supports keyword ranking | recall keyword matching |
+| `keyword-recall` | as `keyword` | recall keyword matching, the same ranking as `keyword` under an explicit name |
+| `keyword-strict` | as `keyword` | strict keyword matching |
+| `hybrid` | both requirements | semantic ranking and recall keyword matching, fused by reciprocal rank |
 
 The default is the first available of `hybrid`, `keyword`, `semantic`. The feature report
-lists available strategies in that order, and every response names the applied strategy.
+lists available strategies in the order `hybrid`, `keyword`, `keyword-recall`,
+`keyword-strict`, `semantic`, and every response names the applied strategy.
 An unknown strategy is a validation error; a built but unavailable strategy is rejected
 with the disabled-feature refinement and a message naming the available strategies. With
 no available strategy the operation is disabled. The semantic-search feature boolean is
@@ -83,9 +90,9 @@ document passages alike, drops every candidate measured below the floor before a
 fusion, above the storage adapter.
 Under `semantic` the filtered ranking is the result, and zero hits is a valid outcome.
 Under `hybrid` only the semantic branch is filtered; keyword-only hits are untouched and
-keep an unmeasured similarity, which is not a negative. Under `keyword`, explicit or as
-the default, the floor has nothing to apply to and is a validation error naming the
-parameter rather than silently ignored.
+keep an unmeasured similarity, which is not a negative. Under `keyword`, `keyword-recall`
+or `keyword-strict`, requested or reached as the default, the floor has nothing to apply
+to and is a validation error naming the parameter rather than silently ignored.
 
 ### Response
 
@@ -112,7 +119,7 @@ Every match also carries `evidence`:
 | Field | Meaning |
 |---|---|
 | `semanticSimilarity` | Original measured similarity, `(1 + cosine) / 2`, or null when unavailable or unmeasured. It is not a probability or calibrated confidence. |
-| `keywordMatch` | True when the normalized query terms matched this stored search unit; null when unavailable or unmeasured. False requires an explicit negative evaluation; source rankings alone emit only true/null. |
+| `keywordMatch` | True when the query terms matched this stored search unit; null when unavailable or unmeasured. False requires an explicit negative evaluation; source rankings alone emit only true/null. |
 | `keywordScore` | The adapter's native full-text ranking measurement for this unit, passed through raw, or null when unavailable or unmeasured. A number exactly when `keywordMatch` is true. Higher is better within one ranking; it has no fixed upper bound and no meaning across responses, ontologies or languages, and is not comparable to `semanticSimilarity`. It exists for inspection and retrieval evaluation and never enters any ranking step. |
 | `keywordPropertyKeys` (property matches only) | Keys whose indexed values supplied keyword query terms, or null when complete, lens-safe attribution is unavailable. A listed property need not satisfy the whole query on its own. |
 
@@ -166,13 +173,15 @@ An entity without contributing values has no property keyword match.
 
 The combined value text has a 30,000-codepoint budget including separators. The last
 included value is truncated to that budget, and the exact indexed property segments
-are retained for attribution. Query terms are normalized in the ontology's language and
-matched permissively: a hit carries at least one surviving term, each term also matching
-as a prefix, potentially across multiple properties. Rank order, not membership,
-separates a hit carrying every term from one carrying a single term. Property attribution
-requires every surviving term to be present exactly, so a hit matched on part of the
-query, or by prefix alone, reports unavailable attribution rather than a partial list.
-Short content terms are often more useful than a full question for keyword search.
+are retained for attribution. Query terms are matched by the strategy's keyword
+retrieval method. Under recall keyword matching a hit carries at least one query term,
+each term also matching as a prefix, potentially across multiple properties; rank order
+reflects how often query terms occur, and a repeated term counts like several distinct
+terms, so rank order does not express term coverage. Under strict keyword matching a hit
+carries every query term, each term still matching as a prefix. Property attribution
+requires every query term to be present exactly, so a hit matched on part of the query,
+or by prefix alone, reports unavailable attribution rather than a partial list. Short
+content terms are often more useful than a full question for keyword search.
 
 Creation, string-value updates and the rebuild below maintain the keyword representation.
 Non-string updates leave it intact. Schema edits do not refresh stored representations.

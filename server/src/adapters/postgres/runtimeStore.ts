@@ -41,6 +41,7 @@ import { fromSql, toSql } from "pgvector";
 
 import type { ValidatedQuery } from "../../core/oql/index.js";
 import type {
+  KeywordMatching,
   KeywordPropertySegment,
   FilterCondition,
   Row,
@@ -514,25 +515,32 @@ export class PostgresRuntimeStore implements RuntimeStore {
   // Search rankings
   // ------------------------------------------------------------------
 
-  async propertySearchKeyword(types: SearchedType[], query: string, limit: number): Promise<Row[]> {
-    return this.rankedKeyword(types, query, limit, false);
+  async propertySearchKeyword(
+    types: SearchedType[],
+    query: string,
+    limit: number,
+    matching: KeywordMatching,
+  ): Promise<Row[]> {
+    return this.rankedKeyword(types, query, limit, false, matching);
   }
   async documentSearchKeyword(
     properties: SearchedProperty[],
     query: string,
     limit: number,
+    matching: KeywordMatching,
   ): Promise<Row[]> {
-    return this.rankedKeyword(properties, query, limit, true);
+    return this.rankedKeyword(properties, query, limit, true, matching);
   }
 
   /**
    * Plain words, stemmed in the immutable ontology language. Reads stored tsvectors.
    *
-   * Terms are OR-ed and prefix-matched, never AND-ed (`docs/decisions.md` —
-   * "Keyword matching is permissive; ranking decides"): Snowball reduces neither
-   * compounds nor derivations, so a conjunction let one absent term empty the
-   * result. `ts_rank_cd` still ranks a row matching every term far above one
-   * matching a single term, which is where term coverage now shows.
+   * The matching selects the join operator and nothing else (`docs/decisions.md` —
+   * "Recall keyword matching is the default keyword retrieval method; strict
+   * keyword matching is a strategy of its own"): recall ORs the terms, strict
+   * ANDs them, both prefix-matched.
+   * Under strict, Snowball reducing neither compounds nor derivations means one
+   * absent term empties the result; that is the documented trade of the method.
    *
    * The query is built from the lexemes `to_tsvector` itself produced for the
    * search text, quoted with `quote_literal`, so no caller input reaches tsquery
@@ -544,6 +552,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
     query: string,
     limit: number,
     document: boolean,
+    matching: KeywordMatching,
   ): Promise<Row[]> {
     if (!searched.length) return [];
     const params: unknown[] = [query, this.textSearchLanguage];
@@ -563,7 +572,8 @@ export class PostgresRuntimeStore implements RuntimeStore {
       return `(${where.join(" AND ")})`;
     });
     params.push(limit);
-    const tsquery = `(SELECT string_agg(quote_literal(lexeme) || ':*', ' | ')::tsquery AS q
+    const operator = matching === "strict" ? "&" : "|";
+    const tsquery = `(SELECT string_agg(quote_literal(lexeme) || ':*', ' ${operator} ')::tsquery AS q
       FROM unnest(tsvector_to_array(to_tsvector($2::regconfig, $1))) AS lexeme) AS query`;
     const ranking = `SELECT ${document ? CHUNK_COLS : `${ENTITY_COLS}, keyword_text, keyword_segments`}, ts_rank_cd(search_vector, query.q) AS score
       FROM ${document ? "document_chunk" : "entity"}, ${tsquery}
@@ -571,9 +581,9 @@ export class PostgresRuntimeStore implements RuntimeStore {
       ORDER BY score DESC, id LIMIT $${params.length}`;
     // Materialize the bounded ranking BEFORE tokenizing its retained fields. Query
     // lexemes come from the same to_tsvector call the ranking query is built from.
-    // Attribution still demands EXACT presence of every query lexeme, so permissive
-    // matching (a row matching one term of several, or matching only by prefix)
-    // now yields null — "complete attribution unavailable", never a wrong key.
+    // Attribution demands EXACT presence of every query lexeme under either matching,
+    // so a prefix-only match, or under recall a row carrying only part of the terms,
+    // yields null — "complete attribution unavailable", never a wrong key.
     // Before attributing
     // fields, require the ordered native token stream (including duplicate tokens)
     // to agree with parsing each segment separately. Markup can span the joining

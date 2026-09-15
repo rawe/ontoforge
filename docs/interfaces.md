@@ -409,8 +409,8 @@ Semantics: [capabilities/search.md](capabilities/search.md).
 | GET | `/search` | Rank entities by properties, document passages, or both | `q`, `type`, repeatable `in`, `strategy`, `min_similarity`, `document.property`, `limit`, `fields`, `filter.*` |
 
 `q` is required. Omit `type` for cross-type search; `in` accepts `properties` and
-`document`, defaulting to both. `strategy` accepts `semantic`, `keyword`, `hybrid`,
-defaulting to the best available. `document.property` restricts document search only and
+`document`, defaulting to both. `strategy` accepts `semantic`, `keyword`, `keyword-recall`,
+`keyword-strict`, `hybrid`, defaulting to the best available. `document.property` restricts document search only and
 requires that kind. `min_similarity`, 0–1, drops semantic candidates measured below it
 and needs a strategy that ranks semantically. `limit` counts entities, 1–100, default 10.
 Filters also work across types, narrowing the searched set. The response carries `query`,

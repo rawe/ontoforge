@@ -489,6 +489,11 @@ export interface SearchedProperty {
   conditions: FilterCondition[];
 }
 
+/** The keyword retrieval method: recall admits a row carrying any query term, strict
+ * requires every query term; both match each term as a prefix. Contract:
+ * `docs/storage-adapters.md`, "Search". */
+export type KeywordMatching = "recall" | "strict";
+
 /** Exact ordered value segments used by property keyword indexing, never semantic text. */
 export interface KeywordPropertySegment {
   propertyKey: string;
@@ -614,11 +619,21 @@ export interface RuntimeStore {
   // ------------------------------------------------------------------
 
   /** Keyword source rows carry a native internal score and optional
-   * keywordPropertyKeys: all retained value segments supplying normalized query
-   * terms, or null when unsupported/unmeasured. Keys need not independently
-   * satisfy the full query. The runtime checks current lens exposure. */
-  propertySearchKeyword(searchedTypes: SearchedType[], queryText: string, limit: number): Promise<Row[]>;
-  documentSearchKeyword(searchedProperties: SearchedProperty[], queryText: string, limit: number): Promise<Row[]>;
+   * keywordPropertyKeys: all retained value segments supplying query terms, or
+   * null when unsupported/unmeasured. Keys need not independently satisfy the
+   * full query. The runtime checks current lens exposure. */
+  propertySearchKeyword(
+    searchedTypes: SearchedType[],
+    queryText: string,
+    limit: number,
+    matching: KeywordMatching,
+  ): Promise<Row[]>;
+  documentSearchKeyword(
+    searchedProperties: SearchedProperty[],
+    queryText: string,
+    limit: number,
+    matching: KeywordMatching,
+  ): Promise<Row[]>;
   /** Semantic score is the original (1 + cosine) / 2 similarity, not confidence. */
   propertySearchSemantic(searchedTypes: SearchedType[], queryEmbedding: number[], limit: number): Promise<Row[]>;
   documentSearchSemantic(searchedProperties: SearchedProperty[], queryEmbedding: number[], limit: number): Promise<Row[]>;

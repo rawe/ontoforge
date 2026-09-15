@@ -47,3 +47,6 @@ neo4j/logs/
 # Default output of the ontoforge-sync export scripts. Anchored to the repo
 # root on purpose: an unanchored pattern would also swallow plugins/ontoforge/.
 /ontoforge/
+
+# Codex project config (personal MCP wiring)
+.codex/config.toml

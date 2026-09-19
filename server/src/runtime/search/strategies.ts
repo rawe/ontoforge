@@ -39,6 +39,8 @@ export const strategies: Strategy[] = [
       fuse(await Promise.all([kind.semantic(), kind.keyword("any")])),
   },
   {
+    // The default keyword matching, today any-term; `hybrid` fuses the same one.
+    // `keyword-any` and `keyword-all` each fix one method and never change meaning.
     key: "keyword",
     available: (store: SearchCapabilities) => store.supportsKeywordRanking(),
     rank: <T>(kind: RankingKind<T>) => kind.keyword("any"),

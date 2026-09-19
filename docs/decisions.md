@@ -280,13 +280,15 @@ silently removing a candidate.
 matching is a strategy of its own.** Two levels are named. A search strategy is what a
 caller selects: it uses one retrieval method directly or fuses several by rank. A
 retrieval method is how one source ranking is produced from storage. `keyword` and
-`keyword-any` use any-term keyword matching: a row matches when it carries any query
-term, each also matching as a prefix. `keyword-all` uses all-term keyword matching: every
-query term must be present, each still matching as a prefix. `hybrid` fuses semantic
-ranking with any-term keyword matching. Any-term is the default because a conjunction lets
-one absent term empty the whole result, which for a compounding language is ordinary rather
-than exceptional: stemming reduces neither compounds nor derivations, so a row holding
-what was asked drops out over a term it carries in another form. Rank order reflects how
+`hybrid` use the default keyword matching, `hybrid` fusing it with semantic ranking; both
+always use the same one, so changing the default changes both together. `keyword-any` and
+`keyword-all` each fix one method and never follow the default. Any-term keyword matching:
+a row matches when it carries any query term, each also matching as a prefix. All-term
+keyword matching: every query term must be present, each still matching as a prefix.
+Any-term is the default because a conjunction lets one absent term empty the whole result,
+which for a compounding language is ordinary rather than exceptional: stemming reduces
+neither compounds nor derivations, so a row holding what was asked drops out over a term
+it carries in another form. Rank order reflects how
 often query terms occur, and a repeated term counts like several distinct terms; it does
 not express term coverage. Prefix matching admits unrelated words sharing a stem; ranking
 carries that cost. Under either method the query is assembled from the query terms the

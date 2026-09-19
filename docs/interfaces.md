@@ -410,7 +410,8 @@ Semantics: [capabilities/search.md](capabilities/search.md).
 
 `q` is required. Omit `type` for cross-type search; `in` accepts `properties` and
 `document`, defaulting to both. `strategy` accepts `semantic`, `keyword`, `keyword-any`,
-`keyword-all`, `hybrid`, defaulting to the best available. `document.property` restricts document search only and
+`keyword-all`, `hybrid`, defaulting to the best available; `keyword` and `hybrid` use the
+default keyword matching, while `keyword-any` and `keyword-all` each fix one. `document.property` restricts document search only and
 requires that kind. `min_similarity`, 0–1, drops semantic candidates measured below it
 and needs a strategy that ranks semantically. `limit` counts entities, 1–100, default 10.
 Filters also work across types, narrowing the searched set. The response carries `query`,

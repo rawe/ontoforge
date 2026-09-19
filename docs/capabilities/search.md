@@ -40,10 +40,14 @@ ontology language.
 | Strategy | Requirement | Retrieval methods |
 |---|---|---|
 | `semantic` | an embedding provider | semantic ranking |
-| `keyword` | the adapter supports keyword ranking | any-term keyword matching |
-| `keyword-any` | as `keyword` | any-term keyword matching, the same ranking as `keyword` under an explicit name |
+| `keyword` | the adapter supports keyword ranking | the default keyword matching |
+| `keyword-any` | as `keyword` | any-term keyword matching |
 | `keyword-all` | as `keyword` | all-term keyword matching |
-| `hybrid` | both requirements | semantic ranking and any-term keyword matching, fused by reciprocal rank |
+| `hybrid` | both requirements | semantic ranking and the default keyword matching, fused by reciprocal rank |
+
+The default keyword matching is any-term keyword matching; `keyword` and `hybrid` always
+use the same one. `keyword-any` and `keyword-all` each fix one retrieval method, whatever
+the default is.
 
 The default is the first available of `hybrid`, `keyword`, `semantic`. The feature report
 lists available strategies in the order `hybrid`, `keyword`, `keyword-any`,

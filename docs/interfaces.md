@@ -409,14 +409,15 @@ Semantics: [capabilities/search.md](capabilities/search.md).
 | GET | `/search` | Rank entities by properties, document passages, or both | `q`, `type`, repeatable `in`, `strategy`, `min_similarity`, `document.property`, `limit`, `fields`, `filter.*` |
 
 `q` is required. Omit `type` for cross-type search; `in` accepts `properties` and
-`document`, defaulting to both. `strategy` accepts `semantic`, `keyword`, `hybrid`,
-defaulting to the best available. `document.property` restricts document search only and
+`document`, defaulting to both. `strategy` accepts `semantic`, `keyword`, `keyword-any`,
+`keyword-all`, `hybrid`, defaulting to the best available; `keyword` and `hybrid` use the
+default keyword matching, while `keyword-any` and `keyword-all` each fix one. `document.property` restricts document search only and
 requires that kind. `min_similarity`, 0–1, drops semantic candidates measured below it
 and needs a strategy that ranks semantically. `limit` counts entities, 1–100, default 10.
 Filters also work across types, narrowing the searched set. The response carries `query`,
 `type`, `in`, `strategy`, `minSimilarity`, `filter`, `hits`; each hit has an entity, a within-response relative score and matches.
-Matches carry nullable semantic/keyword evidence; property matches also carry nullable
-contributing keyword property keys. Scores are not confidence. Evidence scope and null
+Matches carry nullable semantic/keyword evidence including the native keyword score;
+property matches also carry nullable contributing keyword property keys. Scores are not confidence. Evidence scope and null
 semantics are defined in [the search response contract](capabilities/search.md#response).
 
 ### Query

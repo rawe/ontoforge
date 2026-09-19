@@ -375,7 +375,7 @@ describe("document reads", () => {
     const toolMessages = fake.calls[1]!.filter((m) => m instanceof ToolMessage);
     const payload = JSON.parse(String(toolMessages[0]!.content)) as Row;
     const hit = (payload.hits as Row[])[0]!;
-    expect(hit.matches).toEqual([{ kind: "document", propertyKey: "bio", charOffset: 22, charLength: 21, evidence: { semanticSimilarity: 0.91, keywordMatch: null } }]);
+    expect(hit.matches).toEqual([{ kind: "document", propertyKey: "bio", charOffset: 22, charLength: 21, evidence: { semanticSimilarity: 0.91, keywordMatch: null, keywordScore: null } }]);
     expect(hit.relativeScore).toBe(1);
     // Only the passage ranking runs — the entity ranking is not consulted.
     expect(store.propertySearchSemantic).not.toHaveBeenCalled();

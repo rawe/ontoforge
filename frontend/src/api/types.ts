@@ -173,13 +173,16 @@ export interface NeighborsResponse {
 
 /* ------------------------------ runtime — search ----------------------------- */
 
-export type SearchStrategy = 'semantic' | 'keyword' | 'hybrid'
+export type SearchStrategy = 'semantic' | 'keyword' | 'keyword-any' | 'keyword-all' | 'hybrid'
 export type SearchKind = 'properties' | 'document'
 export interface SearchEvidence {
   /** Original (1 + cosine) / 2 measurement, not confidence; null is unmeasured. */
   semanticSimilarity: number | null
   /** True for a native keyword match; null is unknown, including limited-list absence. */
   keywordMatch: boolean | null
+  /** The adapter's native full-text ranking measurement, raw and unbounded; a number
+   * exactly when keywordMatch is true. Not comparable to semanticSimilarity. */
+  keywordScore: number | null
 }
 export type SearchMatch = {
   kind: 'properties'; evidence: SearchEvidence & { keywordPropertyKeys: string[] | null }

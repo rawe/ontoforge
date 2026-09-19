@@ -33,14 +33,25 @@ and whose match names the property and the passage.
 
 ### Strategies and availability
 
-| Strategy | Requirement | Scoring |
+Each strategy is a composition of retrieval methods; the methods are defined in the
+[glossary](../README.md#glossary). Keyword ranking is stemmed full-text ranking in the
+ontology language.
+
+| Strategy | Requirement | Retrieval methods |
 |---|---|---|
-| `semantic` | an embedding provider | vector similarity |
-| `keyword` | the adapter supports keyword ranking | stemmed full-text ranking in the ontology language |
-| `hybrid` | both requirements | reciprocal rank fusion of semantic and keyword rankings |
+| `semantic` | an embedding provider | semantic ranking |
+| `keyword` | the adapter supports keyword ranking | the default keyword matching |
+| `keyword-any` | as `keyword` | any-term keyword matching |
+| `keyword-all` | as `keyword` | all-term keyword matching |
+| `hybrid` | both requirements | semantic ranking and the default keyword matching, fused by reciprocal rank |
+
+The default keyword matching is any-term keyword matching; `keyword` and `hybrid` always
+use the same one. `keyword-any` and `keyword-all` each fix one retrieval method, whatever
+the default is.
 
 The default is the first available of `hybrid`, `keyword`, `semantic`. The feature report
-lists available strategies in that order, and every response names the applied strategy.
+lists available strategies in the order `hybrid`, `keyword`, `keyword-any`,
+`keyword-all`, `semantic`, and every response names the applied strategy.
 An unknown strategy is a validation error; a built but unavailable strategy is rejected
 with the disabled-feature refinement and a message naming the available strategies. With
 no available strategy the operation is disabled. The semantic-search feature boolean is
@@ -52,19 +63,19 @@ embed data: the rebuild below supplies missing vectors.
 
 ### Fusion and matches
 
-Hybrid first fuses rankings of the same units within each kind, using the sum of
-`1 / (60 + rank)` with ranks starting at one. Document search then collapses passages to
-entities: the best passage determines entity order, while each matching document property
-contributes its best passage. The service grows the passage budget until the ranking is
-exhausted, so a long document cannot hide another entity or another matching document
-property. An entity appears once, and its matches survive fusion.
+Hybrid first fuses rankings of the same units within each kind; the fusion score is the
+sum of `1 / (60 + rank)` with ranks starting at one. Document search then collapses
+passages to entities: the best passage determines entity order, while each matching
+document property contributes its best passage. The service grows the passage budget until
+the ranking is exhausted, so a long document cannot hide another entity or another
+matching document property. An entity appears once, and its matches survive fusion.
 
-When both kinds run over more than one searched type, the entity score is the maximum
-of its reciprocal kind-rank contributions, using the same constant and one-based ranks.
-Having a document therefore supplies no additive cross-kind bonus. Equal scores prefer
-the greater semantic similarity found in each entity's returned matches, but only when
-every entity in that tied group has a measured similarity. Otherwise the whole group
-retains encounter order, with properties encountered before document-only entities.
+When both kinds run over more than one searched type, the entity's fusion score is the
+maximum of its reciprocal kind-rank contributions, using the same constant and one-based
+ranks. Having a document therefore supplies no additive cross-kind bonus. Equal fusion
+scores prefer the greater semantic similarity found in each entity's returned matches, but
+only when every entity in that tied group has a measured similarity. Otherwise the whole
+group retains encounter order, with properties encountered before document-only entities.
 Equal similarities also retain encounter order. Discarded passages supply no tie evidence.
 
 With at most one searched type, including a lens or filter narrowed to one type, both
@@ -83,9 +94,9 @@ document passages alike, drops every candidate measured below the floor before a
 fusion, above the storage adapter.
 Under `semantic` the filtered ranking is the result, and zero hits is a valid outcome.
 Under `hybrid` only the semantic branch is filtered; keyword-only hits are untouched and
-keep an unmeasured similarity, which is not a negative. Under `keyword`, explicit or as
-the default, the floor has nothing to apply to and is a validation error naming the
-parameter rather than silently ignored.
+keep an unmeasured similarity, which is not a negative. Under `keyword`, `keyword-any`
+or `keyword-all`, requested or reached as the default, the floor has nothing to apply
+to and is a validation error naming the parameter rather than silently ignored.
 
 ### Response
 
@@ -97,9 +108,10 @@ or total.
 The relative score is 1.0 for the best hit and each other hit's ordering number as a
 fraction of the best, comparable only within that response. For one kind under semantic
 or keyword search it is a ratio of source scores; under hybrid or cross-kind fusion it
-is rank-derived. Cross-type best-kind scoring can produce multiple 1.0 hits whose tie
-order is resolved separately. Neither a 1.0 score nor a smooth tail says that the query
-has a relevant answer. Search returns candidates even for an unrelated query.
+is a ratio of rank-derived fusion scores. Cross-type best-kind scoring can produce
+multiple 1.0 hits whose tie order is resolved separately. Neither a 1.0 score nor a smooth
+tail says that the query has a relevant answer. Search returns candidates even for an
+unrelated query.
 
 An entity match carries `kind: "properties"`. A passage match carries
 `kind: "document"`, `propertyKey`, `charOffset` and `charLength`, directly usable with a
@@ -111,7 +123,8 @@ Every match also carries `evidence`:
 | Field | Meaning |
 |---|---|
 | `semanticSimilarity` | Original measured similarity, `(1 + cosine) / 2`, or null when unavailable or unmeasured. It is not a probability or calibrated confidence. |
-| `keywordMatch` | True when the normalized query terms matched this stored search unit; null when unavailable or unmeasured. False requires an explicit negative evaluation; source rankings alone emit only true/null. |
+| `keywordMatch` | True when the query terms matched this stored search unit; null when unavailable or unmeasured. False requires an explicit negative evaluation; source rankings alone emit only true/null. |
+| `keywordScore` | The adapter's native full-text ranking measurement for this unit, passed through raw, or null when unavailable or unmeasured. A number exactly when `keywordMatch` is true. Higher is better within one ranking; it has no fixed upper bound and no meaning across responses, ontologies or languages, and is not comparable to `semanticSimilarity`. It exists for inspection and retrieval evaluation and never enters any ranking step. |
 | `keywordPropertyKeys` (property matches only) | Keys whose indexed values supplied keyword query terms, or null when complete, lens-safe attribution is unavailable. A listed property need not satisfy the whole query on its own. |
 
 Evidence belongs to the composed entity representation or to the precise returned
@@ -164,13 +177,15 @@ An entity without contributing values has no property keyword match.
 
 The combined value text has a 30,000-codepoint budget including separators. The last
 included value is truncated to that budget, and the exact indexed property segments
-are retained for attribution. Query terms are normalized in the ontology's language and
-matched permissively: a hit carries at least one surviving term, each term also matching
-as a prefix, potentially across multiple properties. Rank order, not membership,
-separates a hit carrying every term from one carrying a single term. Property attribution
-requires every surviving term to be present exactly, so a hit matched on part of the
-query, or by prefix alone, reports unavailable attribution rather than a partial list.
-Short content terms are often more useful than a full question for keyword search.
+are retained for attribution. Query terms are matched by the strategy's keyword
+retrieval method. Under any-term keyword matching a hit carries at least one query term,
+each term also matching as a prefix, potentially across multiple properties; rank order
+reflects how often query terms occur, and a repeated term counts like several distinct
+terms, so rank order does not express term coverage. Under all-term keyword matching a hit
+carries every query term, each term still matching as a prefix. Property attribution
+requires every query term to be present exactly, so a hit matched on part of the query,
+or by prefix alone, reports unavailable attribution rather than a partial list. Short
+content terms are often more useful than a full question for keyword search.
 
 Creation, string-value updates and the rebuild below maintain the keyword representation.
 Non-string updates leave it intact. Schema edits do not refresh stored representations.

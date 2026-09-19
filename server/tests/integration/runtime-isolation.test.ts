@@ -326,6 +326,11 @@ describe("the runtime surface itself", () => {
   it("the feature report answers at /api/server/features", async () => {
     const res = await app.inject({ method: "GET", url: "/api/server/features" });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ semanticSearch: false, ai: false, searchStrategies: settings.DB_BACKEND === "postgres" ? ["keyword"] : [] });
+    expect(res.json()).toEqual({
+      semanticSearch: false,
+      ai: false,
+      searchStrategies:
+        settings.DB_BACKEND === "postgres" ? ["keyword", "keyword-any", "keyword-all"] : [],
+    });
   });
 });

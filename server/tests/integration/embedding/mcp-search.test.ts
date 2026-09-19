@@ -116,6 +116,7 @@ describe.skipIf(!ollamaUp)("MCP search (Ollama)", () => {
       evidence: {
         semanticSimilarity: expect.any(Number),
         keywordMatch: settings.DB_BACKEND === "postgres" ? true : null,
+        keywordScore: settings.DB_BACKEND === "postgres" ? expect.any(Number) : null,
         keywordPropertyKeys: settings.DB_BACKEND === "postgres" ? ["role"] : null,
       },
     });
@@ -187,6 +188,7 @@ describe.skipIf(!ollamaUp)("MCP search (Ollama)", () => {
       evidence: {
         semanticSimilarity: expect.any(Number),
         keywordMatch: settings.DB_BACKEND === "postgres" ? true : null,
+        keywordScore: settings.DB_BACKEND === "postgres" ? expect.any(Number) : null,
       },
     });
     expect(hit.entity).not.toHaveProperty("bio");

@@ -28,6 +28,9 @@ interface Strategy {
   available(store: SearchCapabilities): boolean;
   rank<T>(kind: RankingKind<T>): Promise<Ranked<T, RankingScore>[]>;
 }
+/** The keyword matching `keyword` and `hybrid` use, always the same one; `keyword-any`
+ * and `keyword-all` each fix their own and never follow it. */
+const DEFAULT_KEYWORD_MATCHING: KeywordMatching = "any";
 /** Fixed preference order; every listed strategy has an implementation and requirements.
  * Each strategy uses one retrieval method directly or fuses several by rank. */
 export const strategies: Strategy[] = [
@@ -36,14 +39,12 @@ export const strategies: Strategy[] = [
     available: (store: SearchCapabilities) =>
       Boolean(getEmbeddingProvider()) && store.supportsKeywordRanking(),
     rank: async <T>(kind: RankingKind<T>): Promise<Ranked<T, FusionScore>[]> =>
-      fuse(await Promise.all([kind.semantic(), kind.keyword("any")])),
+      fuse(await Promise.all([kind.semantic(), kind.keyword(DEFAULT_KEYWORD_MATCHING)])),
   },
   {
-    // The default keyword matching, today any-term; `hybrid` fuses the same one.
-    // `keyword-any` and `keyword-all` each fix one method and never change meaning.
     key: "keyword",
     available: (store: SearchCapabilities) => store.supportsKeywordRanking(),
-    rank: <T>(kind: RankingKind<T>) => kind.keyword("any"),
+    rank: <T>(kind: RankingKind<T>) => kind.keyword(DEFAULT_KEYWORD_MATCHING),
   },
   {
     key: "keyword-any",

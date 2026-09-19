@@ -276,15 +276,15 @@ it, never a keyword hit. A model-specific similarity and a lexical match are evi
 inspect, not guarantees that the requested answer exists. Unknown signals do not justify
 silently removing a candidate.
 
-**Recall keyword matching is the default keyword retrieval method; strict keyword
+**Any-term keyword matching is the default keyword retrieval method; all-term keyword
 matching is a strategy of its own.** Two levels are named. A search strategy is what a
 caller selects: it uses one retrieval method directly or fuses several by rank. A
 retrieval method is how one source ranking is produced from storage. `keyword` and
-`keyword-recall` use recall keyword matching: a row matches when it carries any query
-term, each also matching as a prefix. `keyword-strict` uses strict keyword matching: every
+`keyword-any` use any-term keyword matching: a row matches when it carries any query
+term, each also matching as a prefix. `keyword-all` uses all-term keyword matching: every
 query term must be present, each still matching as a prefix. `hybrid` fuses semantic
-ranking with recall keyword matching. Recall is the default because a conjunction lets one
-absent term empty the whole result, which for a compounding language is ordinary rather
+ranking with any-term keyword matching. Any-term is the default because a conjunction lets
+one absent term empty the whole result, which for a compounding language is ordinary rather
 than exceptional: stemming reduces neither compounds nor derivations, so a row holding
 what was asked drops out over a term it carries in another form. Rank order reflects how
 often query terms occur, and a repeated term counts like several distinct terms; it does
@@ -294,9 +294,9 @@ adapter's own tokenizer produced for the search text, quoted, so search text nev
 reaches query syntax. Strategies are the extension point for retrieval behaviour and are
 added ahead of demand: a further method is one more strategy value and one more adapter
 branch. Rejected: a matching parameter beside the strategy, which splits one choice over
-two axes; a conjunction over exact query terms without prefix matching, since strictness
-means every term, not no morphology; and building no strict variant, which leaves the
-recall behaviour unnamed and the extension point unexercised.
+two axes; a conjunction over exact query terms without prefix matching, since all-term
+means every term, not no morphology; and building no all-term variant, which leaves the
+any-term behaviour unnamed and the extension point unexercised.
 
 **Text-search language is an immutable ontology setting.** Chosen at creation, default
 English, carried in export, and checked against the import target.

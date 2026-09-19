@@ -67,7 +67,7 @@ describe("features route on a fully booted server", () => {
         semanticSearch: false,
         ai: false,
         searchStrategies:
-          settings.DB_BACKEND === "postgres" ? ["keyword", "keyword-recall", "keyword-strict"] : [],
+          settings.DB_BACKEND === "postgres" ? ["keyword", "keyword-any", "keyword-all"] : [],
       });
     } finally {
       await shutdownServer(app);

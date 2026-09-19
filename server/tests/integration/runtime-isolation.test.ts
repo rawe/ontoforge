@@ -330,7 +330,7 @@ describe("the runtime surface itself", () => {
       semanticSearch: false,
       ai: false,
       searchStrategies:
-        settings.DB_BACKEND === "postgres" ? ["keyword", "keyword-recall", "keyword-strict"] : [],
+        settings.DB_BACKEND === "postgres" ? ["keyword", "keyword-any", "keyword-all"] : [],
     });
   });
 });

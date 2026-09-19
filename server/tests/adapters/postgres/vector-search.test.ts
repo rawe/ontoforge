@@ -143,8 +143,8 @@ it("document scans filter their parents inside each ranking", async () => {
   expect(scoringQuery().params).toContain("Acme");
 });
 for (const document of [false, true])
-  for (const matching of ["recall", "strict"] as const)
-    it(`${document ? "document" : "property"} keyword ranking under ${matching} matching joins prefixed lexemes from a bound query`, async () => {
+  for (const matching of ["any", "all"] as const)
+    it(`${document ? "document" : "property"} keyword ranking under ${matching}-term matching joins prefixed lexemes from a bound query`, async () => {
       const query = `graph & database | ! ' words`;
       const german = new PostgresRuntimeStore("test", undefined, "german");
       if (document)
@@ -158,15 +158,15 @@ for (const document of [false, true])
       const scoring = scoringQuery();
       expect(scoring.sql).toContain("ts_rank_cd(search_vector, query.q)");
       expect(scoring.sql).toContain("search_vector @@ query.q");
-      // Recall keyword matching ORs the terms, strict keyword matching ANDs them; both
+      // Any-term keyword matching ORs the terms, all-term keyword matching ANDs them; both
       // keep the prefix marker. The lexemes come from Postgres and are quoted, so the raw
       // search text never reaches tsquery syntax (asserted by `not.toContain(query)` below).
-      const operator = matching === "strict" ? "&" : "|";
+      const operator = matching === "all" ? "&" : "|";
       expect(scoring.sql).toContain(
         `string_agg(quote_literal(lexeme) || ':*', ' ${operator} ')::tsquery`,
       );
       expect(scoring.sql).not.toContain(
-        `string_agg(quote_literal(lexeme) || ':*', ' ${matching === "strict" ? "|" : "&"} ')`,
+        `string_agg(quote_literal(lexeme) || ':*', ' ${matching === "all" ? "|" : "&"} ')`,
       );
       expect(scoring.sql).toContain("unnest(tsvector_to_array(to_tsvector($2::regconfig, $1)))");
       expect(scoring.sql).not.toContain("plainto_tsquery");

@@ -489,10 +489,10 @@ export interface SearchedProperty {
   conditions: FilterCondition[];
 }
 
-/** The keyword retrieval method: recall admits a row carrying any query term, strict
+/** The keyword retrieval method: any admits a row carrying any query term, all
  * requires every query term; both match each term as a prefix. Contract:
  * `docs/storage-adapters.md`, "Search". */
-export type KeywordMatching = "recall" | "strict";
+export type KeywordMatching = "any" | "all";
 
 /** Exact ordered value segments used by property keyword indexing, never semantic text. */
 export interface KeywordPropertySegment {

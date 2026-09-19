@@ -536,10 +536,10 @@ export class PostgresRuntimeStore implements RuntimeStore {
    * Plain words, stemmed in the immutable ontology language. Reads stored tsvectors.
    *
    * The matching selects the join operator and nothing else (`docs/decisions.md` —
-   * "Recall keyword matching is the default keyword retrieval method; strict
-   * keyword matching is a strategy of its own"): recall ORs the terms, strict
-   * ANDs them, both prefix-matched.
-   * Under strict, Snowball reducing neither compounds nor derivations means one
+   * "Any-term keyword matching is the default keyword retrieval method; all-term
+   * keyword matching is a strategy of its own"): any ORs the terms, all ANDs
+   * them, both prefix-matched.
+   * Under all, Snowball reducing neither compounds nor derivations means one
    * absent term empties the result; that is the documented trade of the method.
    *
    * The query is built from the lexemes `to_tsvector` itself produced for the
@@ -572,7 +572,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
       return `(${where.join(" AND ")})`;
     });
     params.push(limit);
-    const operator = matching === "strict" ? "&" : "|";
+    const operator = matching === "all" ? "&" : "|";
     const tsquery = `(SELECT string_agg(quote_literal(lexeme) || ':*', ' ${operator} ')::tsquery AS q
       FROM unnest(tsvector_to_array(to_tsvector($2::regconfig, $1))) AS lexeme) AS query`;
     const ranking = `SELECT ${document ? CHUNK_COLS : `${ENTITY_COLS}, keyword_text, keyword_segments`}, ts_rank_cd(search_vector, query.q) AS score
@@ -582,7 +582,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
     // Materialize the bounded ranking BEFORE tokenizing its retained fields. Query
     // lexemes come from the same to_tsvector call the ranking query is built from.
     // Attribution demands EXACT presence of every query lexeme under either matching,
-    // so a prefix-only match, or under recall a row carrying only part of the terms,
+    // so a prefix-only match, or under any a row carrying only part of the terms,
     // yields null — "complete attribution unavailable", never a wrong key.
     // Before attributing
     // fields, require the ordered native token stream (including duplicate tokens)

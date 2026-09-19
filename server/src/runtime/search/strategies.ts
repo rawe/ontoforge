@@ -4,12 +4,12 @@ import {
   fuse, type FusionScore, type KeywordScore, type Ranked, type RankingScore, type SemanticSimilarity,
 } from "./fusion.js";
 export const SEARCH_STRATEGIES = [
-  "semantic", "keyword", "keyword-recall", "keyword-strict", "hybrid",
+  "semantic", "keyword", "keyword-any", "keyword-all", "hybrid",
 ] as const;
 export type SearchStrategy = (typeof SEARCH_STRATEGIES)[number];
 /** The strategies whose ranking has no semantic source; a similarity floor has nothing
  * to apply to under them. */
-const KEYWORD_ONLY: ReadonlySet<SearchStrategy> = new Set(["keyword", "keyword-recall", "keyword-strict"]);
+const KEYWORD_ONLY: ReadonlySet<SearchStrategy> = new Set(["keyword", "keyword-any", "keyword-all"]);
 export function ranksSemantically(strategy: SearchStrategy): boolean {
   return !KEYWORD_ONLY.has(strategy);
 }
@@ -36,22 +36,22 @@ export const strategies: Strategy[] = [
     available: (store: SearchCapabilities) =>
       Boolean(getEmbeddingProvider()) && store.supportsKeywordRanking(),
     rank: async <T>(kind: RankingKind<T>): Promise<Ranked<T, FusionScore>[]> =>
-      fuse(await Promise.all([kind.semantic(), kind.keyword("recall")])),
+      fuse(await Promise.all([kind.semantic(), kind.keyword("any")])),
   },
   {
     key: "keyword",
     available: (store: SearchCapabilities) => store.supportsKeywordRanking(),
-    rank: <T>(kind: RankingKind<T>) => kind.keyword("recall"),
+    rank: <T>(kind: RankingKind<T>) => kind.keyword("any"),
   },
   {
-    key: "keyword-recall",
+    key: "keyword-any",
     available: (store: SearchCapabilities) => store.supportsKeywordRanking(),
-    rank: <T>(kind: RankingKind<T>) => kind.keyword("recall"),
+    rank: <T>(kind: RankingKind<T>) => kind.keyword("any"),
   },
   {
-    key: "keyword-strict",
+    key: "keyword-all",
     available: (store: SearchCapabilities) => store.supportsKeywordRanking(),
-    rank: <T>(kind: RankingKind<T>) => kind.keyword("strict"),
+    rank: <T>(kind: RankingKind<T>) => kind.keyword("all"),
   },
   {
     key: "semantic",

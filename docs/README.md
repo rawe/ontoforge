@@ -256,18 +256,18 @@ in the schema, whereas a neighbour is an instance in a traversal result.
 **Document search** — ranking passages and collapsing them to parent entities.
 
 **Search strategy** — what a caller selects: it uses one retrieval method directly or
-fuses several by rank. The strategies are `semantic`, `keyword`, `keyword-recall`,
-`keyword-strict` and `hybrid`; requirements decide whether a strategy is available, and
+fuses several by rank. The strategies are `semantic`, `keyword`, `keyword-any`,
+`keyword-all` and `hybrid`; requirements decide whether a strategy is available, and
 the applied strategy is named in the response.
 
 **Retrieval method** — how one source ranking is produced from storage: semantic ranking,
-recall keyword matching or strict keyword matching. Rank fusion combines source rankings
+any-term keyword matching or all-term keyword matching. Rank fusion combines source rankings
 at the strategy level and is not a retrieval method.
 
-**Recall keyword matching** — a row matches when it carries any query term, each term also
+**Any-term keyword matching** — a row matches when it carries any query term, each term also
 matching as a prefix; rank order carries the rest.
 
-**Strict keyword matching** — a row matches only when it carries every query term, each
+**All-term keyword matching** — a row matches only when it carries every query term, each
 term also matching as a prefix.
 
 **Query term** — one word of the query after stop-word removal and stemming in the

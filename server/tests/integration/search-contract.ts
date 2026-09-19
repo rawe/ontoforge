@@ -9,8 +9,8 @@ import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { wipeDatabase } from "./reset.js";
 import { enableOllamaProvider, disableProvider } from "./embedding/support.js";
 
-// The keyword family: recall keyword matching under the first two, strict under the last.
-const keywordStrategies = ["keyword", "keyword-recall", "keyword-strict"];
+// The keyword family: any-term keyword matching under the first two, all-term under the last.
+const keywordStrategies = ["keyword", "keyword-any", "keyword-all"];
 
 function expectEvidence(match: Record<string, any>, strategy: string) {
   expect(Object.keys(match).sort()).toEqual(
@@ -575,7 +575,7 @@ export function searchContract(embedding: boolean, enabled = true) {
         expect(result.statusCode).toBe(422);
         expect(result.json().error.details.code).toBe("FEATURE_DISABLED");
         expect(result.json().error.message).toContain(
-          keyword ? "keyword, keyword-recall, keyword-strict" : "none",
+          keyword ? "keyword, keyword-any, keyword-all" : "none",
         );
       }
       if (!keyword)
@@ -585,26 +585,26 @@ export function searchContract(embedding: boolean, enabled = true) {
           expect(result.json().error.message).toContain(embedding ? "semantic" : "none");
         }
     });
-    it.skipIf(!keyword)("strict keyword matching requires every query term", async () => {
+    it.skipIf(!keyword)("all-term keyword matching requires every query term", async () => {
       // Only the company title carries both terms; the paper and report titles carry
-      // "database" alone. Recall keyword matching keeps them as hits, strict drops them.
+      // "database" alone. Any-term keyword matching keeps them as hits, all-term drops them.
       // Rank order is not asserted: the native ranking counts a repeated term like
       // several distinct terms, so the partial rows can outrank the complete one.
       const ids = async (strategy: string, query = "database consulting") =>
         (await find(query, { strategy, in: "properties" })).json().hits.map((h: any) => h.entity._id);
       const company = (await find("consulting", { strategy: "keyword" })).json().hits[0].entity._id;
-      for (const strategy of ["keyword", "keyword-recall"])
+      for (const strategy of ["keyword", "keyword-any"])
         expect((await ids(strategy)).sort()).toEqual([best._id, company, second._id].sort());
-      expect(await ids("keyword-strict")).toEqual([company]);
+      expect(await ids("keyword-all")).toEqual([company]);
       // No row carries both terms in any kind: an honest empty answer, not partial hits.
-      const none = await find("graph cakes", { strategy: "keyword-strict" });
+      const none = await find("graph cakes", { strategy: "keyword-all" });
       expect(none.statusCode, none.body).toBe(200);
-      expect(none.json()).toMatchObject({ strategy: "keyword-strict", hits: [] });
+      expect(none.json()).toMatchObject({ strategy: "keyword-all", hits: [] });
       expect((await find("graph cakes", { strategy: "keyword" })).json().hits.length).toBeGreaterThan(0);
     });
-    it.skipIf(!keyword)("strict keyword matching still matches a query term as a prefix", async () => {
+    it.skipIf(!keyword)("all-term keyword matching still matches a query term as a prefix", async () => {
       // "surv" continues into "survey": a hit, but attribution needs every term exactly.
-      const prefixed = await find("surv graph", { strategy: "keyword-strict", in: "properties" });
+      const prefixed = await find("surv graph", { strategy: "keyword-all", in: "properties" });
       expect(prefixed.statusCode, prefixed.body).toBe(200);
       expect(prefixed.json().hits.map((h: any) => h.entity._id)).toEqual([second._id]);
       for (const match of prefixed.json().hits[0].matches) {
@@ -612,15 +612,15 @@ export function searchContract(embedding: boolean, enabled = true) {
         expect(match.evidence.keywordScore).toBeGreaterThan(0);
         expect(match.evidence.keywordPropertyKeys).toBeNull();
       }
-      const exact = await find("survey graph", { strategy: "keyword-strict", in: "properties" });
+      const exact = await find("survey graph", { strategy: "keyword-all", in: "properties" });
       expect(exact.json().hits.map((h: any) => h.entity._id)).toEqual([second._id]);
       expect(exact.json().hits[0].matches[0].evidence.keywordPropertyKeys).toEqual(["title"]);
     });
-    it.skipIf(!keyword)("strict keyword matching never exposes query syntax", async () => {
-      const operators = await find(`graph & database | ! ' words`, { strategy: "keyword-strict" });
+    it.skipIf(!keyword)("all-term keyword matching never exposes query syntax", async () => {
+      const operators = await find(`graph & database | ! ' words`, { strategy: "keyword-all" });
       expect(operators.statusCode, operators.body).toBe(200);
       expect(operators.json().hits).toEqual([]);
-      const quoted = await find(`"graph" & (database)`, { strategy: "keyword-strict" });
+      const quoted = await find(`"graph" & (database)`, { strategy: "keyword-all" });
       expect(quoted.statusCode, quoted.body).toBe(200);
       expect(quoted.json().hits.map((h: any) => h.entity._id)).toContain(best._id);
     });

@@ -40,14 +40,14 @@ ontology language.
 | Strategy | Requirement | Retrieval methods |
 |---|---|---|
 | `semantic` | an embedding provider | semantic ranking |
-| `keyword` | the adapter supports keyword ranking | recall keyword matching |
-| `keyword-recall` | as `keyword` | recall keyword matching, the same ranking as `keyword` under an explicit name |
-| `keyword-strict` | as `keyword` | strict keyword matching |
-| `hybrid` | both requirements | semantic ranking and recall keyword matching, fused by reciprocal rank |
+| `keyword` | the adapter supports keyword ranking | any-term keyword matching |
+| `keyword-any` | as `keyword` | any-term keyword matching, the same ranking as `keyword` under an explicit name |
+| `keyword-all` | as `keyword` | all-term keyword matching |
+| `hybrid` | both requirements | semantic ranking and any-term keyword matching, fused by reciprocal rank |
 
 The default is the first available of `hybrid`, `keyword`, `semantic`. The feature report
-lists available strategies in the order `hybrid`, `keyword`, `keyword-recall`,
-`keyword-strict`, `semantic`, and every response names the applied strategy.
+lists available strategies in the order `hybrid`, `keyword`, `keyword-any`,
+`keyword-all`, `semantic`, and every response names the applied strategy.
 An unknown strategy is a validation error; a built but unavailable strategy is rejected
 with the disabled-feature refinement and a message naming the available strategies. With
 no available strategy the operation is disabled. The semantic-search feature boolean is
@@ -90,8 +90,8 @@ document passages alike, drops every candidate measured below the floor before a
 fusion, above the storage adapter.
 Under `semantic` the filtered ranking is the result, and zero hits is a valid outcome.
 Under `hybrid` only the semantic branch is filtered; keyword-only hits are untouched and
-keep an unmeasured similarity, which is not a negative. Under `keyword`, `keyword-recall`
-or `keyword-strict`, requested or reached as the default, the floor has nothing to apply
+keep an unmeasured similarity, which is not a negative. Under `keyword`, `keyword-any`
+or `keyword-all`, requested or reached as the default, the floor has nothing to apply
 to and is a validation error naming the parameter rather than silently ignored.
 
 ### Response
@@ -174,10 +174,10 @@ An entity without contributing values has no property keyword match.
 The combined value text has a 30,000-codepoint budget including separators. The last
 included value is truncated to that budget, and the exact indexed property segments
 are retained for attribution. Query terms are matched by the strategy's keyword
-retrieval method. Under recall keyword matching a hit carries at least one query term,
+retrieval method. Under any-term keyword matching a hit carries at least one query term,
 each term also matching as a prefix, potentially across multiple properties; rank order
 reflects how often query terms occur, and a repeated term counts like several distinct
-terms, so rank order does not express term coverage. Under strict keyword matching a hit
+terms, so rank order does not express term coverage. Under all-term keyword matching a hit
 carries every query term, each term still matching as a prefix. Property attribution
 requires every query term to be present exactly, so a hit matched on part of the query,
 or by prefix alone, reports unavailable attribution rather than a partial list. Short

@@ -293,8 +293,8 @@ its parent. Filters apply within ranking, so the limit counts filtered units. Th
 service computes lens scope and filter narrowing once. Cross-type vector search scans
 the per-type indexes in one statement and merges globally; no shared index exists.
 
-The keyword matching argument names the retrieval method, `recall` or `strict`. Recall
-admits a row carrying any query term; strict requires every query term; both match each
+The keyword matching argument names the retrieval method, `any` or `all`. Any admits a
+row carrying any query term; all requires every query term; both match each
 term as a prefix, and both build the query from the adapter's own tokenizer output so
 search text never reaches query syntax. The runtime passes the matching of the selected
 strategy; an adapter without keyword ranking never receives the call.
@@ -669,8 +669,8 @@ Two GIN indexes are fixed at ontology creation: one on a stored generated tsvect
 composed property text, one on a stored generated tsvector of chunk text. Their
 `to_tsvector` configuration is the ontology's English or German language. Queries are assembled
 from the lexemes `to_tsvector` produced for the search text, quoted, each with a prefix
-marker, and joined with the OR operator under recall matching or the AND operator under
-strict matching — the matching selects that operator and nothing else. They rank the
+marker, and joined with the OR operator under any-term matching or the AND operator under
+all-term matching — the matching selects that operator and nothing else. They rank the
 stored vectors with `ts_rank_cd`; no engine query syntax is accepted from callers, and
 search text never reaches tsquery syntax. The filters restrict candidates before ordering and limiting.
 There are no keyword lifecycle hooks or per-type keyword DDL. A common term may rank many

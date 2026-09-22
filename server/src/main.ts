@@ -10,6 +10,7 @@ import type { FastifyInstance } from "fastify";
 import { createApp } from "./app.js";
 import { settings } from "./config.js";
 import { closeAiModel, initAiModel } from "./core/ai.js";
+import { initDecisionModel } from "./core/decision.js";
 import {
   closeEmbeddingProvider,
   getEmbeddingProvider,
@@ -67,6 +68,7 @@ export async function startServer(): Promise<FastifyInstance> {
   await warnAboutReservedTypeKeysInUse();
   initEmbeddingProvider();
   initAiModel();
+  initDecisionModel();
   const embeddingProvider = getEmbeddingProvider();
   if (embeddingProvider) {
     await ensureSemanticIndexes(embeddingProvider.dimensions);

@@ -21,6 +21,7 @@ import { NotFoundError } from "../core/exceptions.js";
 import { getRuntimeStore } from "../core/ports.js";
 import * as aiService from "./aiService.js";
 import { sendChatStream } from "./chatStream.js";
+import { requireDecisionModels, runDecisionSearch } from "./decisionSearch.js";
 import { loadSchema } from "./schemaCache.js";
 
 const LensParams = z.object({ ontologyKey: z.string(), lensKey: z.string() });
@@ -103,6 +104,21 @@ export const aiRouter: FastifyPluginAsyncZod = async (app) => {
       return sendChatStream(reply, (execution) => aiService.runAgentChat(
         config, request.params.lensKey, request.body.message, store,
         request.body.history ?? null, false, execution,
+      ));
+    },
+  );
+
+  // Prototype: decision-model-guided search and graph walk, streamed as NDJSON.
+  app.post(
+    "/ai/decide",
+    { schema: { tags: ["ai"], params: LensParams, body: AiQueryPayload } },
+    async (request, reply) => {
+      const store = await getRuntimeStore(request.params.ontologyKey);
+      await loadSchema(request.params.lensKey, store);
+      const models = requireDecisionModels();
+      return sendChatStream(reply, ({ signal, onToolEvent }) => runDecisionSearch(
+        request.params.lensKey, request.body.question, store, models,
+        { signal, onEvent: onToolEvent },
       ));
     },
   );

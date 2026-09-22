@@ -1,4 +1,4 @@
-import { requestChat, type ChatEvent } from './chatStream'
+import { readNdjsonStream, requestChat, type ChatEvent } from './chatStream'
 /**
  * Runtime API client — `/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/...`,
  * addressed by ontology, lens and type KEY.
@@ -6,6 +6,7 @@ import { requestChat, type ChatEvent } from './chatStream'
 
 import { buildQuery, request, type FilterMap } from './http'
 import type {
+  DecideEvent,
   AiAgent,
   AiQueryResponse,
   ChatMessage,
@@ -282,6 +283,25 @@ export const aiChat = (
   signal: AbortSignal,
 ) =>
   requestChat(`${base(ontologyKey, lensKey)}/ai/chat`, body, onEvent, signal)
+
+/** Prototype: decision-model-guided search, streamed step by step. */
+export async function aiDecide(
+  ontologyKey: string,
+  lensKey: string,
+  question: string,
+  onEvent: (event: DecideEvent) => void,
+  signal: AbortSignal,
+) {
+  const response = await fetch(`${base(ontologyKey, lensKey)}/ai/decide`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question }), signal,
+  })
+  await readNdjsonStream(response, (event) => {
+    signal.throwIfAborted()
+    onEvent(event as DecideEvent)
+    return event.type === 'final' || event.type === 'error'
+  })
+}
 
 export const listAiAgents = (ontologyKey: string, lensKey: string) =>
   request<AiAgent[]>(`${base(ontologyKey, lensKey)}/ai/agents`)

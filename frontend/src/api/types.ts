@@ -419,3 +419,103 @@ export const AGENT_TOOL_NAMES = [
   'run_saved_query',
 ] as const
 export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number]
+
+/* ------------------------- decision search (prototype) ------------------------- */
+
+export interface DecideEntityRef {
+  id: string
+  entityTypeKey: string
+  label: string
+}
+
+export type DecidePath = 'walk' | 'query' | 'saved_query' | 'schema' | 'none'
+
+export type DecideStage = 'route' | 'saved_query' | 'schema_focus' | 'pick' | 'hop'
+
+export type DecideRows = {
+  type: 'rows'
+  attempt: number
+  columns: string[]
+  rows: Record<string, JsonValue>[]
+  total: number
+  error?: string
+}
+
+export type DecideEvent =
+  | { type: 'deciding'; stage: DecideStage; hop?: number; entityId?: string | null }
+  | {
+      type: 'route'
+      choice: DecidePath
+      path: DecidePath
+      probabilities: Record<string, number>
+      confidence: number
+      margin: number
+      confident: boolean
+      fallback: DecidePath | null
+      helpers: { many: number }
+      thresholds: { margin: number; many: number }
+      ms: number
+    }
+  | { type: 'fallback'; from: DecidePath; to: DecidePath; reason: string }
+  | {
+      type: 'schema_focus'
+      types: { key: string; p: number; chosen: boolean; connecting: boolean }[]
+      threshold: number
+      ms: number
+    }
+  | { type: 'writing_query'; attempt: number }
+  | { type: 'oql'; attempt: number; query: string }
+  | DecideRows
+  | {
+      type: 'saved_query'
+      choice: string
+      name: string
+      options: Record<string, string>
+      probabilities: Record<string, number>
+      confident: boolean
+      threshold: number
+      ms: number
+    }
+  | { type: 'writing_parameters' }
+  | {
+      type: 'saved_query_parameters'
+      choice: string
+      parameters: Record<string, JsonValue>
+      missing: string[]
+    }
+  | { type: 'search'; query: string; hits: DecideEntityRef[] }
+  | {
+      type: 'pick_hit'
+      choice: string
+      hit: DecideEntityRef
+      probabilities: Record<string, number>
+      confidence: number
+      margin: number
+      confident: boolean
+      ms: number
+    }
+  | { type: 'reading'; entityId: string }
+  | {
+      type: 'step'
+      hop: number
+      entity: DecideEntityRef
+      via: { direction: 'outgoing' | 'incoming'; relationTypeKey: string; fromId: string } | null
+      keep: number
+      kept: boolean
+      start: boolean
+      enough: number
+      next: {
+        choice: string
+        label: string
+        entity: DecideEntityRef
+        probabilities: Record<string, number>
+        options: Record<string, string>
+        confidence: number
+      } | null
+      ms: number
+    }
+  | { type: 'ready'; reason: string; fallback: boolean; visited: number; evidence: DecideEntityRef[] }
+  | { type: 'answering' }
+  | { type: 'token'; text: string }
+  | { type: 'final'; reply: string }
+  | { type: 'error'; error: { code: string; message: string } }

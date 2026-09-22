@@ -2,7 +2,14 @@
 import { once } from "node:events";
 import type { FastifyReply } from "fastify";
 import { NotFoundError, StoreError, ValidationError } from "../core/exceptions.js";
-import type { ChatExecution, ToolEvent } from "./aiService.js";
+
+/** Any NDJSON stream event; chat sends tool events, decision search its own steps. */
+export type StreamEvent = { type: string; [key: string]: unknown };
+
+export interface StreamExecution {
+  signal: AbortSignal;
+  onToolEvent: (event: StreamEvent) => Promise<void>;
+}
 
 function publicError(error: unknown) {
   if (error instanceof NotFoundError) return { code: "RESOURCE_NOT_FOUND", message: error.message };
@@ -18,7 +25,7 @@ function publicError(error: unknown) {
 
 export async function sendChatStream(
   reply: FastifyReply,
-  run: (execution: ChatExecution) => Promise<Record<string, unknown>>,
+  run: (execution: StreamExecution) => Promise<Record<string, unknown>>,
 ) {
   const controller = new AbortController();
   const { signal } = controller;
@@ -39,8 +46,7 @@ export async function sendChatStream(
 
   // Tool batches may finish concurrently. A bounded writable queue avoids
   // retaining arbitrarily many payloads while a slow consumer catches up.
-  const write = async (event: ToolEvent | { type: "final"; reply: unknown } |
-    { type: "error"; error: ReturnType<typeof publicError> }) => {
+  const write = async (event: StreamEvent) => {
     signal.throwIfAborted();
     if (terminal) return;
     const line = JSON.stringify(event) + "\n";

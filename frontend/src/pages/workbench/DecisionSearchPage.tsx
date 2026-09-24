@@ -302,8 +302,8 @@ function RouteSection({ run }: { run: Run }) {
               </span>
               <Prob value={p} wide />
               <span className="flex w-16 shrink-0 justify-end">
-                {taken && !route.confident && <AmberBadge>fallback</AmberBadge>}
-                {taken && route.confident && (
+                {taken && route.fallback !== null && <AmberBadge>fallback</AmberBadge>}
+                {taken && route.fallback === null && (
                   <Badge variant="outline" className="border-primary/30 text-primary">taken</Badge>
                 )}
                 {top && !taken && <Badge variant="outline" className="text-muted-foreground">top</Badge>}
@@ -314,7 +314,11 @@ function RouteSection({ run }: { run: Run }) {
       </ul>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-1 text-[11px] text-muted-foreground">
         <Prob label="many items?" value={route.helpers.many} threshold={route.thresholds.many} />
-        {!route.confident && (
+        {route.helpers.instance !== undefined && (
+          <Prob label="particular item?" value={route.helpers.instance} threshold={route.thresholds.instance} />
+        )}
+        {route.fallbackReason && <span>{route.fallbackReason}</span>}
+        {!route.confident && !route.fallbackReason && (
           <span>
             Nothing clearly ahead — {route.helpers.many >= route.thresholds.many ? 'many' : 'one'} item
             {route.helpers.many >= route.thresholds.many ? 's' : ''} asked for, so{' '}
@@ -361,6 +365,7 @@ function RowsTable({ rows }: { rows: DecideRows }) {
       <Fact>
         {rows.total} row{rows.total === 1 ? '' : 's'}
         {rows.total > rows.rows.length && ` · first ${rows.rows.length} shown`}
+        {rows.truncated && ' · rows or values shortened'}
       </Fact>
       {rows.total > 0 && (
         <div className="max-h-72 overflow-auto rounded-md border">
@@ -481,6 +486,7 @@ function SchemaFocusSection({ run, schema }: { run: Run; schema?: RuntimeSchema 
       <SectionHead title="Schema focus">
         <Fact>threshold {pct(focus.threshold)}</Fact>
         <Ms ms={focus.ms} />
+        {focus.requests !== undefined && focus.requests > 1 && <Fact>{focus.requests} requests</Fact>}
         <Fact>· {focus.types.filter((t) => t.chosen).length} of {focus.types.length} types to the query writer</Fact>
       </SectionHead>
       <ul className="divide-y overflow-hidden rounded-lg border bg-card">
@@ -703,7 +709,7 @@ function Walk({ run, labels, ...ctx }: {
                   variant="outline"
                   className={step.kept ? 'border-(--tc-emerald-border) text-(--tc-emerald)' : ''}
                 >
-                  {step.kept ? (step.start && step.keep < KEEP_THRESHOLD ? 'kept · start' : 'kept') : 'skipped'}
+                  {step.kept ? (step.keep >= KEEP_THRESHOLD ? 'kept' : step.named ? 'kept · named' : 'kept · start') : 'skipped'}
                 </Badge>
                 <Ms ms={step.ms} />
               </div>

@@ -9,12 +9,12 @@
  * - `walk` — search, pick the best hit, walk the graph hop by hop, keep
  *   entities as evidence, answer from the kept evidence.
  * - `query` — the decision model narrows the entity types, the language
- *   model writes one read-only OQL query (one retry on an error or no rows), the answer
+ *   model writes one read-only OQL query (one retry on an invalid query), the answer
  *   comes from the rows.
  * - `saved_query` — the decision model picks a saved query, the language
  *   model fills its parameters, the answer comes from the rows.
- * - `schema` — the answer comes from the routing view of the lens.
- * - `none` — a short honest reply, nothing is read.
+ * - `schema` — the answer comes from the scoped type and property definitions.
+ * - `none` — a short honest reply after checking for an explicitly named search hit.
  *
  * The decision model only ever sees the question, the short routing view
  * of the lens and short entity summaries — never result sets, full
@@ -34,9 +34,11 @@ import {
   type NoulAnswer,
 } from "../core/decision.js";
 import { NotFoundError, ValidationError } from "../core/exceptions.js";
+import { limitQueryResults } from "../core/oql/index.js";
 import type { Row, RuntimeStore } from "../core/ports.js";
 import type { StreamEvent } from "./chatStream.js";
 import { loadSchema, type LoadedSchema } from "./schemaCache.js";
+import type { SearchMatch } from "./search/entry.js";
 import * as service from "./service.js";
 
 // --- Route ---------------------------------------------------------------
@@ -46,7 +48,7 @@ const PATHS = {
   walk: "How to do something, how to fix a problem, or a fact about one named thing and what it belongs to.",
   query: "How many, list all, which has the most or fewest, or which items match a condition.",
   saved_query: "A question that one of the listed saved queries answers.",
-  schema: "What kinds of things are stored and how they connect.",
+  schema: "Definitions of entity types, property definitions or allowed relationship types. Not facts, property values or connections of a specific named record.",
   none: "Unrelated to everything stored here.",
 } as const;
 type Path = keyof typeof PATHS;
@@ -58,6 +60,8 @@ const MANY_INSTRUCTIONS =
 const ROUTE_MARGIN = 0.25;
 /** `many` at or above this sends a not-confident route to `query`, else to `walk`. */
 const MANY_THRESHOLD = 0.18;
+/** A schema route must not discard a clear question about an instance. */
+const INSTANCE_THRESHOLD = 0.5;
 
 // --- Query path ----------------------------------------------------------
 
@@ -66,13 +70,16 @@ const FOCUS_THRESHOLD = 0.5;
 /** Rows handed to the language model; the event carries fewer. */
 const ANSWER_ROWS = 200;
 const EVENT_ROWS = 50;
-/** Entity types with at most this many entities have their names listed for the query writer. */
-const NAMES_PER_TYPE = 25;
+/** Serialized data budgets, independent of row count (one cell can hold a document). */
+const ANSWER_DATA_CHARS = 40_000;
+const EVENT_DATA_CHARS = 20_000;
 
 // --- Saved-query path ----------------------------------------------------
 
 /** The chosen saved query's probability must reach this, else `query` (as when a parameter is missing). */
 const SAVED_QUERY_THRESHOLD = 0.7;
+/** A single candidate is judged for yes/no relevance, not relative to other options. */
+const SAVED_FIT_THRESHOLD = 0.5;
 
 // --- Walk path -----------------------------------------------------------
 
@@ -114,6 +121,9 @@ interface Ctx {
   models: Models;
   signal: AbortSignal;
   emit: (event: StreamEvent) => Promise<void>;
+  matches: Map<string, SearchMatch[]>;
+  documents: Map<string, Promise<string>>;
+  search: Promise<Awaited<ReturnType<typeof service.search>>> | null;
 }
 
 /** The language-model prompt a path ends with. */
@@ -202,7 +212,17 @@ async function decide(
   questions: Record<string, DecisionQuestion>,
 ): Promise<[Record<string, DecisionAnswer>, number]> {
   await ctx.emit({ type: "deciding", ...deciding });
-  return timed(() => ctx.models.decision.decide(state, questions, ctx.signal));
+  return timed(async () => {
+    const entries = Object.entries(questions);
+    const answers: Record<string, DecisionAnswer> = {};
+    for (let i = 0; i < entries.length; i += 32) {
+      ctx.signal.throwIfAborted();
+      Object.assign(answers, await ctx.models.decision.decide(
+        state, Object.fromEntries(entries.slice(i, i + 32)), ctx.signal,
+      ));
+    }
+    return answers;
+  });
 }
 
 function chunkText(content: unknown): string {
@@ -222,10 +242,12 @@ function chunkText(content: unknown): string {
 }
 
 async function llmText(ctx: Ctx, system: string, human: string): Promise<string> {
+  ctx.signal.throwIfAborted();
   const message = await ctx.models.llm.invoke(
     [new SystemMessage(system), new HumanMessage(human)],
     { signal: ctx.signal },
   );
+  ctx.signal.throwIfAborted();
   return chunkText(message.content);
 }
 
@@ -250,8 +272,8 @@ const isDomainError = (error: unknown) =>
  * A short rendering of the lens for routing: lens name and description,
  * each entity type with a one-sentence gloss and which properties hold long
  * text, relations as `from verb to` triples, saved queries as name(inputs):
- * first sentence of the description. No property keys, types or
- * per-property descriptions.
+ * first sentence of the description. Scalar property names help recognize
+ * instance questions; property types and descriptions are omitted.
  */
 function routingView(loaded: LoadedSchema): string {
   const s = loaded.scoped;
@@ -263,7 +285,8 @@ function routingView(loaded: LoadedSchema): string {
   for (const et of Object.values(s.entityTypes).sort((a, b) => a.key.localeCompare(b.key))) {
     const docs = Object.values(et.properties).filter((p) => p.dataType === "document").map((p) => p.key);
     const gloss = et.description ? `: ${firstSentence(et.description)}` : "";
-    lines.push(`  - ${et.key}${gloss}${docs.length ? ` — has long text: ${docs.join(", ")}` : ""}`);
+    const facts = Object.values(et.properties).filter((p) => p.dataType !== "document").map((p) => p.key);
+    lines.push(`  - ${et.key}${gloss}${facts.length ? ` (properties: ${facts.join(", ")})` : ""}${docs.length ? ` — has long text: ${docs.join(", ")}` : ""}`);
   }
   const relations = Object.values(s.relationTypes);
   if (relations.length) {
@@ -290,10 +313,13 @@ export async function runDecisionSearch(
   models: Models,
   execution: DecisionExecution,
 ): Promise<Row> {
+  execution.signal.throwIfAborted();
   const loaded = await loadSchema(lensKey, store);
+  execution.signal.throwIfAborted();
   const ctx: Ctx = {
     lensKey, question, store, loaded, view: routingView(loaded), models,
     signal: execution.signal, emit: execution.onEvent,
+    matches: new Map(), documents: new Map(), search: null,
   };
 
   let path = await route(ctx);
@@ -331,17 +357,52 @@ export async function runDecisionSearch(
 /** Walk or query, by the `many` helper — the fallback for anything not clearly decided. */
 const walkOrQuery = (many: number): Path => (many >= MANY_THRESHOLD ? "query" : "walk");
 
+/** Whole normalized label matching avoids treating a substring as a named subject. */
+function mentionsName(question: string, name: string): boolean {
+  const normalize = (text: string) => text.normalize("NFKC").toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  const label = normalize(name);
+  return label.length >= 3 && ` ${normalize(question)} `.includes(` ${label} `);
+}
+
 /** One decision call picks the handling path; not confident → walk or query by `many`. */
 async function route(ctx: Ctx): Promise<Path> {
+  const namesSavedQuery = Object.values(ctx.loaded.savedQueries).some((q) =>
+    mentionsName(ctx.question, q.name) || mentionsName(ctx.question, q.key));
+  const instructions = ROUTE_INSTRUCTIONS + (namesSavedQuery
+    ? " If the user explicitly asks to use or run one of the named saved queries listed in the lens, choose saved_query."
+    : "");
   const [answers, ms] = await decide(ctx, { stage: "route" }, { lens: ctx.view, question: ctx.question }, {
-    path: { type: "choice", instructions: ROUTE_INSTRUCTIONS, criteria: { ...PATHS } },
+    path: { type: "choice", instructions, criteria: { ...PATHS } },
     many: { type: "noul", instructions: MANY_INSTRUCTIONS },
+    instance: { type: "noul", instructions:
+      "Does the question ask for facts about a particular named item or person, rather than definitions of entity types, properties, or relationship types?" },
   });
   const choice = answers.path as ChoiceAnswer;
   const many = (answers.many as NoulAnswer).noul;
+  const instance = (answers.instance as NoulAnswer).noul;
   const m = margin(choice.probabilities);
   const confident = m >= ROUTE_MARGIN;
-  const path = confident ? (choice.choice as Path) : walkOrQuery(many);
+  let path = confident ? (choice.choice as Path) : walkOrQuery(many);
+  let fallbackReason: string | null = null;
+  if (path === "schema" && instance >= INSTANCE_THRESHOLD) {
+    path = walkOrQuery(many);
+    fallbackReason = "The question asks about a particular stored item, so instance evidence is needed.";
+  }
+  // A routing view describes types, not every stored name. Before rejecting
+  // the question, check whether it explicitly names a retrieved entity.
+  if (path === "none") {
+    try {
+      const found = await search(ctx);
+      if (found.hits.some((hit) => mentionsName(ctx.question, labelOf(hit.entity)))) {
+        path = walkOrQuery(many);
+        fallbackReason = "Search found a stored item explicitly named in the question.";
+      }
+    } catch (error) {
+      // The route remains usable without a configured search strategy.
+      if (!(error instanceof ValidationError)) throw error;
+    }
+  }
   await ctx.emit({
     type: "route",
     choice: choice.choice,
@@ -350,9 +411,10 @@ async function route(ctx: Ctx): Promise<Path> {
     confidence: choice.confidence,
     margin: m,
     confident,
-    fallback: confident ? null : path,
-    helpers: { many },
-    thresholds: { margin: ROUTE_MARGIN, many: MANY_THRESHOLD },
+    fallback: confident && path === choice.choice ? null : path,
+    fallbackReason,
+    helpers: { many, instance },
+    thresholds: { margin: ROUTE_MARGIN, many: MANY_THRESHOLD, instance: INSTANCE_THRESHOLD },
     ms,
   });
   return path;
@@ -382,7 +444,7 @@ function schemaPrompt(ctx: Ctx): AnswerPrompt {
       "You answer questions about the structure of a knowledge base: what kinds of things it " +
       "stores and how they connect. Use only the description below; name every kind of thing " +
       "that is relevant. Be concise. Reply in the language of the question.",
-    human: `${ctx.view}\n\nQuestion: ${ctx.question}`,
+    human: `${focusedSchema(ctx, new Set(Object.keys(ctx.loaded.scoped.entityTypes)), new Map())}\n\nQuestion: ${ctx.question}`,
   };
 }
 
@@ -401,7 +463,7 @@ RULES:
 - When the question names a stored item listed under the stored names, match it with = and that exact spelling, on the type it is listed under. Otherwise match text with CONTAINS on the most distinctive single word or code from the question, not on a whole phrase. Matching is case-sensitive. Compare dates as 'YYYY-MM-DD' strings.
 - Return property values, not whole nodes. Return names or titles, not only ids.
 - When counting or grouping per item, return the item's _id AND its name, so items that share a name stay apart. To list items without repeats, group them the same way (RETURN c._id AS id, c.name AS name, count(*) AS matches).
-- For a ranking, ORDER BY the aggregate DESC and return the top rows (LIMIT 10), never only one row, so ties stay visible.
+- For a ranking, use ASC for lowest/fewest and DESC for highest/most. For minimum or maximum questions, even when phrased in the singular, return up to 10 rows (LIMIT 10), never LIMIT 1, so ties are visible. Honor an explicitly numbered top-N request. A limit may still omit ties; never claim all ties are included.
 - For "how many", return a count.
 - _createdAt and _updatedAt are when a record was stored, not when something happened.
 
@@ -411,14 +473,14 @@ MATCH (p:person)-[:works_for]->(c:company) RETURN c._id AS id, c.name AS company
 Reply with the query only, in one \`\`\`oql code block.`;
 
 const QUERY_ANSWER_PROMPT = `You answer a question from the result of a database query over a knowledge graph.
-The query ran over all stored data: its rows are complete, not a sample, unless marked as cut.
+The rows are the output of the shown query, not a guarantee of complete coverage. Respect its filters and limits. A limit may omit matching items or ties; say when the answer is partial.
 
 Rules:
 - Use only the rows. Give the exact numbers and names from them.
 - Rows with the same name but a different id are different items.
 - If several items tie, name all of them.
 - State counts as numbers ("0 problems", "17 guides").
-- If nothing matches, say so plainly and name what was asked for ("No projects are in maintenance status.").
+- If nothing matches, say what this query found; do not conclude that a named item or fact does not exist elsewhere in the graph. Name what was asked for ("No projects are in maintenance status.").
 - If the question depends on something the data does not record (for example a date that no property holds, so the query used _createdAt, which is only when the record was stored), say so plainly.
 Be concise. Reply in the language of the question.`;
 
@@ -456,34 +518,55 @@ function connect(ctx: Ctx, chosen: Set<string>): Set<string> {
   return result;
 }
 
-/** The label property of an entity type: name → title → label → display_name → first string. */
-function labelKeyOf(properties: Record<string, { key: string; dataType: string }>): string | null {
-  for (const key of ["name", "title", "label", "display_name"]) if (key in properties) return key;
-  return Object.values(properties).find((p) => p.dataType === "string")?.key ?? null;
+/** Reuse bounded cross-type retrieval; give literal codes a keyword path into the candidates. */
+function search(ctx: Ctx): Promise<Awaited<ReturnType<typeof service.search>>> {
+  ctx.signal.throwIfAborted();
+  ctx.search ??= (async () => {
+    const result = await service.search(ctx.lensKey, { query: ctx.question, limit: SEARCH_LIMIT }, ctx.store);
+    const codes = [...new Set(ctx.question.match(/[\p{L}\p{N}_-]{3,}/gu) ?? [])]
+      .filter((term) => /\p{N}/u.test(term)).slice(0, 4);
+    if (!codes.length) return result;
+    ctx.signal.throwIfAborted();
+    try {
+      const literal = await service.search(ctx.lensKey, {
+        query: codes.join(" "), strategy: "keyword-any", limit: SEARCH_LIMIT,
+      }, ctx.store);
+      const hits = new Map<string, typeof result.hits[number]>();
+      for (const hit of [...literal.hits, ...result.hits]) {
+        const id = String(hit.entity._id);
+        const existing = hits.get(id);
+        if (existing) existing.matches = [...existing.matches, ...(hit.matches ?? [])];
+        else hits.set(id, { ...hit, matches: hit.matches ?? [] });
+      }
+      return { ...result, hits: [...hits.values()].slice(0, SEARCH_LIMIT) };
+    } catch (error) {
+      // Adapters without keyword search retain their normal retrieval strategy.
+      if (!(error instanceof ValidationError)) throw error;
+      return result;
+    }
+  })();
+  return ctx.search;
 }
 
-/**
- * The names of every entity of a type with at most NAMES_PER_TYPE entities —
- * lets the query writer spell a named value exactly and know its type.
- */
-async function smallTypeNames(ctx: Ctx): Promise<Map<string, string[]>> {
+async function candidateNames(ctx: Ctx): Promise<Map<string, string[]>> {
   const names = new Map<string, string[]>();
-  for (const et of Object.values(ctx.loaded.scoped.entityTypes)) {
-    const labelKey = labelKeyOf(et.properties);
-    if (labelKey === null) continue;
-    const { results } = await service.executeQuery(
-      ctx.lensKey,
-      `MATCH (x:${et.key}) RETURN x.${labelKey} AS label LIMIT ${NAMES_PER_TYPE + 1}`,
-      ctx.store,
-    );
-    if (results.length <= NAMES_PER_TYPE) {
-      names.set(et.key, [...new Set(results.map((r) => String(r.label)))]);
+  try {
+    const result = await search(ctx);
+    for (const hit of result.hits) {
+      const key = String(hit.entity._entityTypeKey);
+      const labels = names.get(key) ?? [];
+      const label = labelOf(hit.entity);
+      if (!labels.includes(label)) labels.push(label);
+      names.set(key, labels);
     }
+  } catch (error) {
+    // Querying remains available on deployments without a search strategy.
+    if (!(error instanceof ValidationError)) throw error;
   }
   return names;
 }
 
-/** Full detail for the focus types; the others as key + gloss + property keys; names of small types. */
+/** Full detail for focus types, abbreviated other types, relation facts and candidate names. */
 function focusedSchema(ctx: Ctx, focus: Set<string>, names: Map<string, string[]>): string {
   const s = ctx.loaded.scoped;
   const lines = ["Entity types in focus:"];
@@ -504,10 +587,13 @@ function focusedSchema(ctx: Ctx, focus: Set<string>, names: Map<string, string[]
   for (const rt of Object.values(s.relationTypes)) {
     lines.push(`  - (${rt.fromEntityTypeKey})-[:${rt.key}]->(${rt.toEntityTypeKey})` +
       (rt.description ? ` — ${rt.description}` : ""));
+    for (const p of Object.values(rt.properties)) {
+      lines.push(`    - ${p.key}: ${p.dataType}${p.description ? ` — ${p.description}` : ""}`);
+    }
   }
   lines.push("", "System properties on every entity: _id, _createdAt, _updatedAt");
   if (names.size) {
-    lines.push("", "Every stored name of the smaller entity types (exact spelling):");
+    lines.push("", "Search candidates (not exhaustive). Use exact spelling and the listed type only when the candidate matches the named item in the question:");
     for (const [key, list] of names) lines.push(`  - ${key}: ${list.map((n) => JSON.stringify(n)).join(", ")}`);
   }
   return lines.join("\n");
@@ -537,25 +623,92 @@ function compactRow(row: Row): Row {
   return out;
 }
 
+/** Bound nested results before serialization; preserve values and disclose any omission. */
+function boundedRows(source: Row[], rowLimit: number, charLimit: number): { rows: Row[]; truncated: boolean } {
+  let remaining = charLimit;
+  let truncated = source.length > rowLimit;
+  const omit = () => { truncated = true; return undefined; };
+  const value = (input: unknown, depth: number): unknown => {
+    if (remaining < 16 || depth > 6) return omit();
+    if (typeof input === "string") {
+      // Six characters cover the worst JSON escaping expansion of one code unit.
+      const length = Math.min(DOCUMENT_CHARS, Math.floor((remaining - 2) / 6));
+      let text = input.slice(0, length);
+      if (text.length < input.length) {
+        truncated = true;
+        if (/[\uD800-\uDBFF]$/.test(text)) text = text.slice(0, -1);
+      }
+      remaining -= JSON.stringify(text).length;
+      return text;
+    }
+    if (input === null || typeof input === "number" || typeof input === "boolean") {
+      const cost = JSON.stringify(input).length;
+      if (cost > remaining) return omit();
+      remaining -= cost;
+      return input;
+    }
+    if (Array.isArray(input)) {
+      remaining -= 2;
+      const out: unknown[] = [];
+      for (const item of input.slice(0, ANSWER_ROWS)) {
+        const next = value(item, depth + 1);
+        if (next === undefined) break;
+        out.push(next);
+        remaining--;
+      }
+      if (out.length < input.length) truncated = true;
+      return out;
+    }
+    if (input && typeof input === "object") {
+      remaining -= 2;
+      const out: Row = {};
+      for (const key of Object.keys(input)) {
+        if (key.length > 512 || remaining < key.length * 6 + 16) { truncated = true; break; }
+        remaining -= JSON.stringify(key).length + 2;
+        const next = value((input as Row)[key], depth + 1);
+        if (next === undefined) break;
+        Object.defineProperty(out, key, { value: next, enumerable: true });
+      }
+      return out;
+    }
+    return omit();
+  };
+  const rows: Row[] = [];
+  for (const row of source.slice(0, rowLimit)) {
+    if (remaining < 32) { truncated = true; break; }
+    rows.push(value(compactRow(row), 0) as Row);
+    remaining--;
+  }
+  return { rows, truncated };
+}
+
+function resultText(source: Row[]): string {
+  const bounded = boundedRows(source, ANSWER_ROWS, ANSWER_DATA_CHARS);
+  return `Result: ${source.length} row(s), ${bounded.rows.length} displayed.` +
+    (bounded.truncated ? " Rows or values were truncated to fit the answer budget; this is partial evidence. Do not infer totals from displayed collection sizes." : "") +
+    "\n" + bounded.rows.map((row) => JSON.stringify(row)).join("\n");
+}
+
 async function queryPath(ctx: Ctx): Promise<AnswerPrompt> {
   // 1. Which entity types are involved: two independent yes/no questions per type.
   const types = Object.values(ctx.loaded.scoped.entityTypes);
-  const perType = types.length <= 16 ? 2 : 1;
+  if (types.length === 0) {
+    return { system: QUERY_ANSWER_PROMPT,
+      human: `Question: ${ctx.question}\nThis lens has no entity types; no query was run.` };
+  }
   const questions: Record<string, DecisionQuestion> = {};
-  for (const et of types.slice(0, 32 / perType)) {
+  for (const et of types) {
     const gloss = et.description ? firstSentence(et.description) : et.key;
     questions[`m:${et.key}`] = {
       type: "noul",
       instructions: `Does the question mention a ${et.key} (${gloss}), by kind or by name?`,
     };
-    if (perType === 2) {
-      questions[`a:${et.key}`] = {
-        type: "noul",
-        instructions: `Is "${et.key}" one of the kinds of thing the question is about?`,
-      };
-    }
+    questions[`a:${et.key}`] = {
+      type: "noul",
+      instructions: `Is "${et.key}" (${gloss}) one of the kinds of thing the question is about?`,
+    };
   }
-  const [answers, ms] = await decide(ctx, { stage: "schema_focus" }, { lens: ctx.view, question: ctx.question }, questions);
+  const [answers, ms] = await decide(ctx, { stage: "schema_focus" }, { question: ctx.question }, questions);
   const scored = types.map((et) => {
     const m = (answers[`m:${et.key}`] as NoulAnswer | undefined)?.noul ?? 0;
     const a = (answers[`a:${et.key}`] as NoulAnswer | undefined)?.noul ?? 0;
@@ -570,11 +723,12 @@ async function queryPath(ctx: Ctx): Promise<AnswerPrompt> {
       key: t.key, p: t.p, chosen: focus.has(t.key), connecting: focus.has(t.key) && !chosen.has(t.key),
     })),
     threshold: FOCUS_THRESHOLD,
+    requests: Math.ceil(Object.keys(questions).length / 32),
     ms,
   });
 
-  // 2. The language model writes one query; one retry on an error or an empty result.
-  const schemaText = focusedSchema(ctx, focus, await smallTypeNames(ctx));
+  // 2. Resolve candidate names, then write one query; retry invalid syntax only.
+  const schemaText = focusedSchema(ctx, focus, await candidateNames(ctx));
   let human = `Question: ${ctx.question}\n\nSchema:\n${schemaText}`;
   let query = "";
   let result: { columns: string[]; results: Row[] } | null = null;
@@ -582,34 +736,39 @@ async function queryPath(ctx: Ctx): Promise<AnswerPrompt> {
   for (let attempt = 1; attempt <= 2; attempt++) {
     await ctx.emit({ type: "writing_query", attempt });
     query = extractQuery(await llmText(ctx, QUERY_WRITER_PROMPT, human));
-    await ctx.emit({ type: "oql", attempt, query });
+    lastError = null;
     try {
-      result = await service.executeQuery(ctx.lensKey, query, ctx.store);
-      lastError = null;
+      // One extra row lets the answer disclose clipping at ANSWER_ROWS.
+      query = limitQueryResults(query, ANSWER_ROWS + 1);
+    } catch (error) {
+      if (!isDomainError(error)) throw error;
+      lastError = errorText(error);
+    }
+    await ctx.emit({ type: "oql", attempt, query });
+    ctx.signal.throwIfAborted();
+    try {
+      if (lastError === null) result = await service.executeQuery(ctx.lensKey, query, ctx.store);
     } catch (error) {
       if (!isDomainError(error)) throw error;
       lastError = errorText(error);
     }
     const rows = result?.results ?? [];
+    const display = boundedRows(rows, EVENT_ROWS, EVENT_DATA_CHARS);
     await ctx.emit({
       type: "rows", attempt,
       columns: result?.columns ?? [],
-      rows: rows.slice(0, EVENT_ROWS).map(compactRow),
+      rows: display.rows,
+      truncated: display.truncated,
       total: rows.length,
       ...(lastError ? { error: lastError } : {}),
     });
-    if (attempt === 2 || (result && rows.length > 0)) break;
-    human += `\n\nYour query:\n\`\`\`oql\n${query}\n\`\`\`\n` + (result
-      ? "returned no rows. If a filter may be too strict (a phrase instead of one distinctive word, " +
-        "a different spelling or case), write a looser query. If no rows is the right answer, " +
-        "repeat the query unchanged."
-      : `failed:\n${lastError}\nWrite a corrected query.`);
+    if (attempt === 2 || result) break;
+    human += `\n\nYour query:\n\`\`\`oql\n${query}\n\`\`\`\nfailed:\n${lastError}\nWrite a corrected query without changing the question's constraints.`;
     result = null;
   }
 
   // 3. The answer comes from the rows.
-  const rows = (result?.results ?? []).map(compactRow);
-  const cut = rows.length > ANSWER_ROWS;
+  const rows = result?.results ?? [];
   const storedTime = /_(created|updated)At/.test(query)
     ? "Note: the query filters on when records were stored in the database (_createdAt/_updatedAt), " +
       "not on a date the data records; say so in the answer.\n\n"
@@ -619,8 +778,7 @@ async function queryPath(ctx: Ctx): Promise<AnswerPrompt> {
     human:
       `Question: ${ctx.question}\n\nSchema:\n${schemaText}\n\nQuery:\n${query}\n\n${storedTime}` +
       (result
-        ? `Result: ${rows.length} row(s)${cut ? `, the first ${ANSWER_ROWS} shown (cut)` : ""}.\n` +
-          rows.slice(0, ANSWER_ROWS).map((r) => JSON.stringify(r)).join("\n")
+        ? resultText(rows)
         : `The query failed twice, last error:\n${lastError}\nSay that the question could not be answered by a query.`),
   };
 }
@@ -633,7 +791,7 @@ const PARAMETER_PROMPT = `You fill the parameters of a saved query from a questi
 Reply with one JSON object only: each parameter name mapped to its value taken from the question, spelled exactly as in the question (without possessive endings such as 's), or null when the question does not give it.`;
 
 const SAVED_ANSWER_PROMPT = `You answer a question from the result of a saved query over a knowledge graph.
-The query ran over all stored data: its rows are complete, not a sample, unless marked as cut.
+The rows are the output of the shown query, not a guarantee of complete coverage. Respect its filters and limits. A limit may omit matching items or ties; say when the answer is partial.
 Use only the rows; give the exact names and numbers from them. If the rows are empty, say that nothing matching is recorded.
 Be concise but complete. Reply in the language of the question.`;
 
@@ -656,6 +814,7 @@ async function savedQueryPath(ctx: Ctx): Promise<AnswerPrompt | Path> {
     return to;
   };
   if (saved.length === 0) return fallback("query", "the lens has no saved queries");
+  if (saved.length > 255) return fallback("query", "saved-query candidates exceed the decision model option limit");
 
   // 1. Which saved query: a choice over name + description only.
   const keys = saved.map((q) => q.key);
@@ -681,8 +840,10 @@ async function savedQueryPath(ctx: Ctx): Promise<AnswerPrompt | Path> {
     ms = t;
   }
   const p = pick.probabilities[pick.choice] ?? 0;
-  const confident = p >= SAVED_QUERY_THRESHOLD;
-  const config = ctx.loaded.savedQueries[pick.choice]!;
+  const threshold = saved.length === 1 ? SAVED_FIT_THRESHOLD : SAVED_QUERY_THRESHOLD;
+  const confident = p >= threshold;
+  const config = ctx.loaded.savedQueries[pick.choice];
+  if (!config) return fallback("query", "the decision model returned an unknown saved query");
   await ctx.emit({
     type: "saved_query",
     choice: pick.choice,
@@ -690,12 +851,12 @@ async function savedQueryPath(ctx: Ctx): Promise<AnswerPrompt | Path> {
     options: Object.fromEntries(saved.map((q) => [q.key, q.name])),
     probabilities: pick.probabilities,
     confident,
-    threshold: SAVED_QUERY_THRESHOLD,
+    threshold,
     parameters: null,
     ms,
   });
   if (!confident || !keys.includes(pick.choice)) {
-    return fallback("query", `no saved query reached ${SAVED_QUERY_THRESHOLD}`);
+    return fallback("query", `no saved query reached ${threshold}`);
   }
 
   // 2. The language model fills the parameters.
@@ -724,22 +885,37 @@ async function savedQueryPath(ctx: Ctx): Promise<AnswerPrompt | Path> {
   let columns: string[] = [];
   try {
     const out = await service.executeSavedQuery(ctx.lensKey, pick.choice, filled, ctx.store);
-    rows = ((out.results as Row[] | undefined) ?? []).map(compactRow);
-    columns = (out.columns as string[] | undefined) ?? [];
+    if (Array.isArray(out.hits)) {
+      rows = [];
+      for (const hit of out.hits as { entity: Row; matches?: SearchMatch[] }[]) {
+        const entity: Row = { ...hit.entity,
+          _entityTypeKey: hit.entity._entityTypeKey ?? config.steps.at(-1)?.entityTypeKey };
+        ctx.matches.set(String(entity._id), hit.matches ?? []);
+        const row = compactRow(entity);
+        for (const match of hit.matches ?? []) {
+          if (match.kind === "document") {
+            row[match.propertyKey] = await excerpt(ctx, entity, match.propertyKey, DOCUMENT_CHARS);
+          }
+        }
+        rows.push(row);
+      }
+    } else {
+      rows = (out.results as Row[] | undefined) ?? [];
+    }
+    columns = (out.columns as string[] | undefined) ?? [...new Set(rows.flatMap((row) => Object.keys(row)))];
   } catch (error) {
     if (!isDomainError(error)) throw error;
     await ctx.emit({ type: "rows", attempt: 1, columns: [], rows: [], total: 0, error: errorText(error) });
     return fallback("query", "the saved query failed");
   }
-  await ctx.emit({ type: "rows", attempt: 1, columns, rows: rows.slice(0, EVENT_ROWS), total: rows.length });
-  const cut = rows.length > ANSWER_ROWS;
+  const display = boundedRows(rows, EVENT_ROWS, EVENT_DATA_CHARS);
+  await ctx.emit({ type: "rows", attempt: 1, columns, rows: display.rows, truncated: display.truncated, total: rows.length });
   return {
     system: SAVED_ANSWER_PROMPT,
     human:
       `Question: ${ctx.question}\n\nSaved query: ${config.name} — ${config.description}\n` +
-      `Parameters: ${JSON.stringify(filled)}\n\n` +
-      `Result: ${rows.length} row(s)${cut ? `, the first ${ANSWER_ROWS} shown (cut)` : ""}.\n` +
-      rows.slice(0, ANSWER_ROWS).map((r) => JSON.stringify(r)).join("\n"),
+      `Parameters: ${JSON.stringify(filled)}\nPipeline: ${JSON.stringify(config.steps)}\nSearch steps and explicit query limits return bounded results, not exhaustive coverage.\n\n` +
+      resultText(rows),
   };
 }
 
@@ -748,35 +924,69 @@ async function savedQueryPath(ctx: Ctx): Promise<AnswerPrompt | Path> {
 // ---------------------------------------------------------------------------
 
 const WALK_ANSWER_PROMPT = `You answer questions about a knowledge graph.
-Use only the evidence below. Each entity lists its properties and the entities it is connected to.
+Use only the evidence below. Each entity lists its properties and a bounded selection of connected entities. Documents contain excerpts only; this is not exhaustive coverage.
+When multiple entities could match the question, distinguish them using their recorded identifiers or properties. Present the differing answers or ask for clarification; do not silently choose one.
+If a requested text value is truncated, quote a short available excerpt and clearly say it is incomplete.
 If the evidence does not contain the answer, say so plainly.
 Be concise. Reply in the language of the question.`;
 
-/** Leading text of a document property, flattened. */
+/** Reuse one bounded document read, starting at its matched passage when available. */
 async function excerpt(ctx: Ctx, entity: Row, key: string, chars: number): Promise<string> {
-  const doc = await service.getDocument(
-    ctx.lensKey, String(entity._entityTypeKey), String(entity._id), key, 0, chars, ctx.store,
-  );
-  return String(doc.content);
+  ctx.signal.throwIfAborted();
+  const id = String(entity._id);
+  const match = ctx.matches.get(id)?.find((m) => m.kind === "document" && m.propertyKey === key);
+  const offset = match?.kind === "document" ? match.charOffset : 0;
+  const cacheKey = JSON.stringify([id, key, offset]);
+  let content = ctx.documents.get(cacheKey);
+  if (!content) {
+    content = service.getDocument(ctx.lensKey, String(entity._entityTypeKey), id, key,
+      offset, DOCUMENT_CHARS, ctx.store).then((doc) => String(doc.content));
+    ctx.documents.set(cacheKey, content);
+  }
+  const text = await content;
+  ctx.signal.throwIfAborted();
+  return Array.from(text).slice(0, chars).join("");
+}
+
+/** Keep a short window around question terms, not just a chunk's introductory text. */
+function relevantExcerpt(text: string, question: string): string {
+  const normalized = flat(text);
+  if (normalized.length <= EXCERPT_CHARS) return normalized;
+  const lower = normalized.toLocaleLowerCase();
+  const terms = [...new Set(question.toLocaleLowerCase().match(/[\p{L}\p{N}_-]{3,}/gu) ?? [])];
+  let best = normalized.slice(0, EXCERPT_CHARS);
+  let bestScore = 0;
+  for (const term of terms) {
+    let index = lower.indexOf(term);
+    while (index >= 0) {
+      const start = Math.max(0, index - 40);
+      const window = normalized.slice(start, start + EXCERPT_CHARS);
+      const folded = window.toLocaleLowerCase();
+      const score = terms.reduce((sum, t) => sum + (folded.includes(t) ? t.length : 0), 0);
+      if (score > bestScore) { best = window; bestScore = score; }
+      index = lower.indexOf(term, index + term.length);
+    }
+  }
+  return best;
 }
 
 /**
  * `<type>: <label> — <short text> · <doc>: <leading excerpt>…` — the short
- * text being the other string properties, the excerpt the first characters
+ * text being the other string properties, the excerpt the matched passage or leading characters
  * of each document property.
  */
 async function summaryOf(ctx: Ctx, entity: Row, withExcerpt: boolean): Promise<string> {
   const label = labelOf(entity);
   const rest = Object.entries(entity)
-    .filter(([k, v]) => !k.startsWith("_") && typeof v === "string" && v !== label)
-    .map(([, v]) => v as string)
+    .filter(([k, v]) => !k.startsWith("_") && ["string", "number", "boolean"].includes(typeof v) && v !== label)
+    .map(([k, v]) => `${k}: ${String(v)}`)
     .join(" · ")
     .replace(/\s+/g, " ")
     .slice(0, SUMMARY_CHARS);
   const docs: string[] = [];
   for (const [k, v] of Object.entries(entity)) {
     if (!withExcerpt || k.startsWith("_") || !isDocStub(v)) continue;
-    const text = flat(await excerpt(ctx, entity, k, EXCERPT_CHARS * 2)).slice(0, EXCERPT_CHARS);
+    const text = relevantExcerpt(await excerpt(ctx, entity, k, DOCUMENT_CHARS), ctx.question);
     if (text) docs.push(`${k}: ${text}…`);
   }
   const parts = [rest, ...docs].filter(Boolean).join(" · ");
@@ -786,36 +996,62 @@ async function summaryOf(ctx: Ctx, entity: Row, withExcerpt: boolean): Promise<s
 const describeNeighbor = (n: Row) => {
   const rel = n.relation as Row;
   const e = n.entity as Row;
-  return `${String(rel.direction)} ${String(rel._relationTypeKey)} → ${String(e._entityTypeKey)}: ${labelOf(e)}`;
+  const facts = Object.entries(rel).filter(([k]) => !k.startsWith("_") && k !== "direction")
+    .map(([k, v]) => `${k}: ${typeof v === "string" ? v.slice(0, SUMMARY_CHARS) : JSON.stringify(boundedRows([{ value: v }], 1, SUMMARY_CHARS).rows[0]?.value)}`)
+    .join(", ").slice(0, SUMMARY_CHARS);
+  return `${String(rel.direction)} ${String(rel._relationTypeKey)}${facts ? ` (${facts})` : ""} → ${String(e._entityTypeKey)}: ${labelOf(e)}`;
 };
 
-/** Evidence entity as prompt text: properties (documents read and cut) and its neighbours. */
-async function evidenceText(ctx: Ctx, entity: Row, neighbors: Row[]): Promise<string> {
-  const lines = [`## ${String(entity._entityTypeKey)}: ${labelOf(entity)}`];
+/** Structured evidence shares the query result budget, including scalar and relation values. */
+async function evidenceRow(ctx: Ctx, entity: Row, neighbors: Row[]): Promise<Row> {
+  const properties: Row = { ...entity };
   for (const [key, value] of Object.entries(entity)) {
-    if (key.startsWith("_") || value === null || value === undefined) continue;
-    if (isDocStub(value)) {
-      lines.push(`${key}:\n${await excerpt(ctx, entity, key, DOCUMENT_CHARS)}`);
-    } else {
-      lines.push(`${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`);
-    }
+    if (isDocStub(value)) properties[key] = await excerpt(ctx, entity, key, DOCUMENT_CHARS);
   }
-  if (neighbors.length) {
-    lines.push("connected to:");
-    for (const n of neighbors) lines.push(`  - ${describeNeighbor(n)}`);
-  }
-  return lines.join("\n");
+  return {
+    entity: properties,
+    connections: neighbors.map((n) => ({ relation: n.relation, entity: refOf(n.entity as Row) })),
+  };
+}
+
+/** Use lens topology before applying a read budget; don't let one direction starve the other. */
+async function readNeighborhood(ctx: Ctx, entity: Row) {
+  const type = String(entity._entityTypeKey);
+  const relations = Object.values(ctx.loaded.scoped.relationTypes).filter((r) =>
+    (r.fromEntityTypeKey === type || r.toEntityTypeKey === type) &&
+    r.fromEntityTypeKey in ctx.loaded.scoped.entityTypes &&
+    r.toEntityTypeKey in ctx.loaded.scoped.entityTypes);
+  const buckets = relations.flatMap((relation) => [
+    ...(relation.fromEntityTypeKey === type ? [{ relationType: relation.key, direction: "outgoing" }] : []),
+    ...(relation.toEntityTypeKey === type ? [{ relationType: relation.key, direction: "incoming" }] : []),
+  ]);
+  // Do not silently choose a prefix of a large relation schema.
+  if (buckets.length > NEIGHBOR_LIMIT) return null;
+  const read = (direction: string, relationType: string | null, limit: number) => {
+    ctx.signal.throwIfAborted();
+    return service.getNeighbors(ctx.lensKey, type, String(entity._id), direction,
+      relationType, limit, ctx.store);
+  };
+  if (!buckets.length) return read("both", null, NEIGHBOR_LIMIT);
+  const pages = await Promise.all(buckets.map((bucket, index) => read(
+    bucket.direction, bucket.relationType,
+    Math.floor(NEIGHBOR_LIMIT / buckets.length) + (index < NEIGHBOR_LIMIT % buckets.length ? 1 : 0),
+  )));
+  return { entity: pages[0]!.entity, neighbors: pages.flatMap((page) => page.neighbors) };
 }
 
 async function walkPath(ctx: Ctx): Promise<AnswerPrompt> {
-  const { lensKey, question, store, loaded } = ctx;
+  const { question, loaded } = ctx;
 
   // 1. Search.
-  const found = await service.search(lensKey, { query: question, limit: SEARCH_LIMIT }, store);
+  const found = await search(ctx);
   const hits = found.hits.map((h) => h.entity);
+  for (const hit of found.hits) ctx.matches.set(String(hit.entity._id), hit.matches ?? []);
   await ctx.emit({ type: "search", query: question, hits: hits.map(refOf) });
 
   const evidence: Row[] = [];
+  let coverage = "no search hits";
+  let uncertainPick = false;
   const neighborsOf = new Map<string, Row[]>();
   if (hits.length === 0) {
     await ctx.emit({
@@ -830,7 +1066,7 @@ async function walkPath(ctx: Ctx): Promise<AnswerPrompt> {
       pick = onlyOption("h1");
     } else {
       const criteria: Record<string, string> = {};
-      for (const [i, h] of hits.entries()) criteria[hitKeys[i]!] = await summaryOf(ctx, h, false);
+      for (const [i, h] of hits.entries()) criteria[hitKeys[i]!] = await summaryOf(ctx, h, true);
       const [answers, ms] = await decide(ctx, { stage: "pick", hop: 0, entityId: null }, { question }, {
         pick: {
           type: "choice",
@@ -842,6 +1078,7 @@ async function walkPath(ctx: Ctx): Promise<AnswerPrompt> {
       pickMs = ms;
     }
     const pickMargin = margin(pick.probabilities);
+    uncertainPick = pickMargin < CONFIDENT_MARGIN;
     await ctx.emit({
       type: "pick_hit",
       choice: pick.choice,
@@ -857,16 +1094,27 @@ async function walkPath(ctx: Ctx): Promise<AnswerPrompt> {
     // current entity is kept as evidence, whether the evidence is enough,
     // and which neighbour to read next. The starting entity is always kept.
     let current: Row = hits[hitKeys.indexOf(pick.choice)] ?? hits[0]!;
+    // A close choice is not evidence that the other hits are irrelevant.
+    // Spend the existing visit budget on competing seeds before following one chain.
+    const topProbability = Math.max(...Object.values(pick.probabilities));
+    const alternatives = uncertainPick ? hits.map((entity, i) => ({
+      entity, key: hitKeys[i]!, probability: pick.probabilities[hitKeys[i]!] ?? 0,
+    })).filter((hit) => hit.entity._id !== current._id &&
+      topProbability - hit.probability < CONFIDENT_MARGIN)
+      .sort((a, b) => b.probability - a.probability).slice(0, MAX_HOPS - 1) : [];
     let via: Row | null = null;
     const visited = new Set<string>();
     let reason = "max hops reached";
     for (let hop = 1; hop <= MAX_HOPS; hop++) {
       ctx.signal.throwIfAborted();
       await ctx.emit({ type: "reading", entityId: String(current._id) });
-      const { entity, neighbors } = await service.getNeighbors(
-        lensKey, String(current._entityTypeKey), String(current._id), "both", null,
-        NEIGHBOR_LIMIT, store,
-      );
+      const neighborhood = await readNeighborhood(ctx, current);
+      if (neighborhood === null) {
+        await ctx.emit({ type: "fallback", from: "walk", to: "query",
+          reason: "The exposed relationship directions exceed the traversal budget; using a bounded query." });
+        return queryPath(ctx);
+      }
+      const { entity, neighbors } = neighborhood;
       visited.add(String(entity._id));
       // Neighbours whose type the lens exposes.
       const inLens = (neighbors as Row[]).filter(
@@ -884,7 +1132,8 @@ async function walkPath(ctx: Ctx): Promise<AnswerPrompt> {
       });
       const candidateKeys = candidates.map((_, i) => `n${i + 1}`);
 
-      const askNext = candidates.length >= 2 && hop < MAX_HOPS;
+      const alternative = alternatives.find((hit) => !visited.has(String(hit.entity._id)));
+      const askNext = !alternative && candidates.length >= 2 && hop < MAX_HOPS;
       const questions: Record<string, DecisionQuestion> = {
         keep: {
           type: "noul",
@@ -905,7 +1154,7 @@ async function walkPath(ctx: Ctx): Promise<AnswerPrompt> {
         };
       }
       const keptSummaries: string[] = [];
-      for (const e of evidence) keptSummaries.push(await summaryOf(ctx, e, false));
+      for (const e of evidence) keptSummaries.push(await summaryOf(ctx, e, true));
       const [answers, ms] = await decide(
         ctx,
         { stage: "hop", hop, entityId: String(entity._id) },
@@ -914,12 +1163,13 @@ async function walkPath(ctx: Ctx): Promise<AnswerPrompt> {
       );
       const keep = (answers.keep as NoulAnswer).noul;
       const start = hop === 1;
-      const kept = keep >= KEEP_THRESHOLD || start;
+      const named = mentionsName(question, labelOf(entity));
+      const kept = keep >= KEEP_THRESHOLD || start || named;
       if (kept) evidence.push(entity);
       const enough = (answers.enough as NoulAnswer).noul;
       const next: ChoiceAnswer | null = askNext
         ? (answers.next as ChoiceAnswer)
-        : candidates.length === 1 && hop < MAX_HOPS
+        : !alternative && candidates.length === 1 && hop < MAX_HOPS
           ? onlyOption("n1")
           : null;
       const nextNeighbor = next ? candidates[candidateKeys.indexOf(next.choice)] ?? null : null;
@@ -931,8 +1181,18 @@ async function walkPath(ctx: Ctx): Promise<AnswerPrompt> {
         keep,
         kept,
         start,
+        named,
         enough,
-        next: next && nextNeighbor
+        next: alternative && hop < MAX_HOPS
+          ? {
+              choice: alternative.key,
+              label: `Competing search hit: ${labelOf(alternative.entity)}`,
+              entity: refOf(alternative.entity),
+              probabilities: pick.probabilities,
+              options: Object.fromEntries(hits.map((hit, i) => [hitKeys[i]!, labelOf(hit)])),
+              confidence: pick.confidence,
+            }
+          : next && nextNeighbor
           ? {
               choice: next.choice,
               label: describeNeighbor(nextNeighbor),
@@ -947,7 +1207,12 @@ async function walkPath(ctx: Ctx): Promise<AnswerPrompt> {
         ms,
       });
 
-      if (enough >= ENOUGH_THRESHOLD) { reason = "enough evidence"; break; }
+      if (alternative && hop < MAX_HOPS) {
+        current = alternative.entity;
+        via = null;
+        continue;
+      }
+      if (enough >= ENOUGH_THRESHOLD && keep >= KEEP_THRESHOLD) { reason = "enough evidence"; break; }
       if (candidates.length === 0) { reason = "no unvisited neighbours"; break; }
       if (hop === MAX_HOPS || nextNeighbor === null) { reason = "max hops reached"; break; }
       const rel = nextNeighbor.relation as Row;
@@ -958,6 +1223,7 @@ async function walkPath(ctx: Ctx): Promise<AnswerPrompt> {
       };
       current = nextNeighbor.entity as Row;
     }
+    coverage = reason;
     await ctx.emit({
       type: "ready",
       reason,
@@ -968,13 +1234,13 @@ async function walkPath(ctx: Ctx): Promise<AnswerPrompt> {
   }
 
   // 4. Answer from the evidence.
-  const blocks: string[] = [];
+  const blocks: Row[] = [];
   for (const entity of evidence) {
-    blocks.push(await evidenceText(ctx, entity, neighborsOf.get(String(entity._id)) ?? []));
+    blocks.push(await evidenceRow(ctx, entity, neighborsOf.get(String(entity._id)) ?? []));
   }
   return {
     system: WALK_ANSWER_PROMPT,
     human:
-      `Question: ${question}\n\nEvidence:\n\n` + (blocks.length ? blocks.join("\n\n") : "(none found)"),
+      `Question: ${question}\nRetrieval stopped: ${coverage}.${uncertainPick ? " Initial hit selection was uncertain; competing hits were checked within the visit budget. The evidence may describe different possible subjects." : ""} At most ${SEARCH_LIMIT} search hits, ${MAX_HOPS} visited entities and ${NEIGHBOR_LIMIT} neighbours per entity were considered. This is partial retrieval, not proof that other facts do not exist.\n\nEvidence:\n\n` + (blocks.length ? resultText(blocks) : "(none found)"),
   };
 }

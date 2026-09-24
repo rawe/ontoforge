@@ -434,6 +434,7 @@ export type DecideStage = 'route' | 'saved_query' | 'schema_focus' | 'pick' | 'h
 
 export type DecideRows = {
   type: 'rows'
+  truncated?: boolean
   attempt: number
   columns: string[]
   rows: Record<string, JsonValue>[]
@@ -452,8 +453,9 @@ export type DecideEvent =
       margin: number
       confident: boolean
       fallback: DecidePath | null
-      helpers: { many: number }
-      thresholds: { margin: number; many: number }
+      fallbackReason?: string | null
+      helpers: { many: number; instance?: number }
+      thresholds: { margin: number; many: number; instance?: number }
       ms: number
     }
   | { type: 'fallback'; from: DecidePath; to: DecidePath; reason: string }
@@ -461,6 +463,7 @@ export type DecideEvent =
       type: 'schema_focus'
       types: { key: string; p: number; chosen: boolean; connecting: boolean }[]
       threshold: number
+      requests?: number
       ms: number
     }
   | { type: 'writing_query'; attempt: number }
@@ -503,6 +506,7 @@ export type DecideEvent =
       keep: number
       kept: boolean
       start: boolean
+      named?: boolean
       enough: number
       next: {
         choice: string

@@ -11,6 +11,8 @@
  * `setDecisionModel`.
  */
 
+import { z } from "zod";
+
 import { settings } from "../config.js";
 
 /** Pick exactly one option; `criteria` maps option key → description (or null). */
@@ -53,6 +55,34 @@ export interface DecisionModel {
 
 const TIMEOUT_MS = 10_000;
 
+const probability = z.number().min(0).max(1);
+const answerSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("choice"), choice: z.string(),
+    probabilities: z.record(z.string(), probability), confidence: probability }),
+  z.object({ type: z.literal("noul"), noul: probability }),
+]);
+
+/** Validate at the provider seam before callers interpret a model judgment. */
+function parseAnswers(value: unknown, questions: Record<string, DecisionQuestion>): Record<string, DecisionAnswer> {
+  const parsed = z.object({ answers: z.record(z.string(), answerSchema) }).safeParse(value);
+  const invalid = () => new Error("Decision model returned an invalid answer");
+  if (!parsed.success) throw invalid();
+  for (const [key, question] of Object.entries(questions)) {
+    const answer = parsed.data.answers[key];
+    if (!answer || answer.type !== question.type) throw invalid();
+    if (question.type === "choice" && answer.type === "choice") {
+      const options = Object.keys(question.criteria);
+      if (!options.includes(answer.choice) ||
+          Object.keys(answer.probabilities).length !== options.length ||
+          options.some((option) => answer.probabilities[option] === undefined) ||
+          Math.abs(Object.values(answer.probabilities).reduce((sum, p) => sum + p, 0) - 1) > 0.02) {
+        throw invalid();
+      }
+    }
+  }
+  return parsed.data.answers;
+}
+
 export function createDecisionModel(
   baseUrl: string,
   modelName: string,
@@ -61,6 +91,11 @@ export function createDecisionModel(
   const url = `${baseUrl.replace(/\/+$/, "")}/v1/systemone`;
   return {
     async decide(state, questions, signal) {
+      const entries = Object.values(questions);
+      if (entries.length === 0 || entries.length > 32 || entries.some((q) =>
+        q.type === "choice" && (Object.keys(q.criteria).length < 2 || Object.keys(q.criteria).length > 255))) {
+        throw new Error("Decision requests require 1–32 questions and 2–255 options per choice");
+      }
       const timeout = AbortSignal.timeout(TIMEOUT_MS);
       const response = await fetch(url, {
         method: "POST",
@@ -84,8 +119,7 @@ export function createDecisionModel(
             (typeof detail === "string" ? detail : JSON.stringify(detail)),
         );
       }
-      const body = (await response.json()) as { answers: Record<string, DecisionAnswer> };
-      return body.answers;
+      return parseAnswers(await response.json(), questions);
     },
   };
 }

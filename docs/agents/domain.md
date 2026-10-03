@@ -12,7 +12,7 @@ This repo does not use a root `CONTEXT.md`. When a skill refers to `CONTEXT.md` 
 
 ## Recording decisions
 
-Follow the repo convention (root `CLAUDE.md`): every architectural decision requires user approval. The outcome is recorded as a rule in `docs/decisions.md`; an ADR in `docs/adr/` only when alternatives were seriously weighed — the ADR carries the deliberation and links to the rule, never the rule itself.
+Follow the repo convention (root `AGENTS.md`): every architectural decision requires user approval. The outcome is recorded as a rule in `docs/decisions.md`; an ADR in `docs/adr/` only when alternatives were seriously weighed — the ADR carries the deliberation and links to the rule, never the rule itself.
 
 ## Use the glossary's vocabulary
 

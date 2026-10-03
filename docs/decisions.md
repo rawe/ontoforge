@@ -7,7 +7,7 @@ the record of *when* a rule was adopted and what was weighed against it lives in
 [adr/](adr/).
 
 Design principles that govern how these rules are chosen — and the requirement that a new
-one be approved before it is adopted — are in the repository `CLAUDE.md`.
+one be approved before it is adopted — are in the repository `AGENTS.md`.
 
 ## System shape
 

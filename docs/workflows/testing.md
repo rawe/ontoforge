@@ -12,14 +12,15 @@ All commands are run from `server/`.
 | `npm run test:integration` | Integration | The test database |
 | `npm run test:integration:embedding` | Semantic search | The test database + Ollama (embedding model) |
 | `npm run test:integration:ai` | AI (slow, real model) | The test database + Ollama (tool-calling model) |
+| `npm run test:integration:decision` | Decision HTTP contract | Local decision API; no database |
 
 **Unit tests** (`tests/`, excluding `tests/integration/`) mock all external
 dependencies (database drivers, embedding providers, AI models). They run fast and
 require no infrastructure — but they still read `env/test.env`, because some assert that
 the capability flags are false, which only holds with no provider configured.
 
-**Integration tests** (`tests/integration/`) hit real services and run serially — they
-wipe the database between files. The integration suite *is* the conformance suite: the
+**Database integration tests** (`tests/integration/`, excluding `decision/`) hit real
+services and run serially — they wipe the database between files. The integration suite *is* the conformance suite: the
 same tests run against whichever adapter `DB_BACKEND` selects, and nothing is renamed
 per backend. It carries two tiers (`tests/integration/tiers.ts`): the contract tier
 every adapter runs, and a multi-ontology tier — cases that need several ontologies at
@@ -33,6 +34,10 @@ cause. The integration suite does not: it requires a running database and fails 
 design when the selected one is down.
 
 `npm run typecheck` runs the TypeScript compiler without emitting.
+
+The decision suite uses `env/ollama-decision.env` and its own configuration without
+any database setup or reset. It sends synthetic text to a loopback decision API and
+checks the wire contract, not model quality. See [decision-api.md](decision-api.md).
 
 ## Integration Test Requirements
 
@@ -157,7 +162,8 @@ npm run test:integration:ai
 ### Vitest Configuration
 
 One config per suite: `vitest.config.ts` (unit), `vitest.integration.config.ts`,
-`vitest.integration.embedding.config.ts`, `vitest.integration.ai.config.ts`. The unit
+`vitest.integration.embedding.config.ts`, `vitest.integration.ai.config.ts`, and
+`vitest.integration.decision.config.ts` (no database hooks). The unit
 config excludes `tests/integration/`, so `npm test` needs no services; the integration
 configs run files serially (`fileParallelism: false`) because the suites wipe the
 database and mutate global provider state.

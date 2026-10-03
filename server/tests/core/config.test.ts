@@ -97,3 +97,31 @@ describe("config env overrides", () => {
     );
   });
 });
+
+
+describe("decision provider configuration", () => {
+  it("is optional and has a default model identifier", () => {
+    const settings = loadSettings({});
+    expect(settings.DECISION_BASE_URL).toBeNull();
+    expect(settings.DECISION_MODEL).toBe("jev-1.13.0");
+    expect(settings.DECISION_API_KEY).toBeNull();
+  });
+
+  it("supports local configuration without a credential", () => {
+    const settings = loadSettings({
+      DECISION_BASE_URL: "http://localhost:8002",
+      DECISION_MODEL: "Mapika/decider-0.8b",
+    });
+    expect(settings.DECISION_BASE_URL).toBe("http://localhost:8002");
+    expect(settings.DECISION_MODEL).toBe("Mapika/decider-0.8b");
+    expect(settings.DECISION_API_KEY).toBeNull();
+  });
+
+  it("prefers the explicit credential and otherwise honours the provider alias", () => {
+    expect(loadSettings({ TYPESAFE_API_KEY: "provider-key" }).DECISION_API_KEY).toBe("provider-key");
+    expect(loadSettings({ DECISION_API_KEY: "explicit-key", TYPESAFE_API_KEY: "provider-key" })
+      .DECISION_API_KEY).toBe("explicit-key");
+    expect(loadSettings({ DECISION_API_KEY: "", TYPESAFE_API_KEY: "provider-key" })
+      .DECISION_API_KEY).toBe("provider-key");
+  });
+});

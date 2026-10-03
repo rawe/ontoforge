@@ -84,8 +84,8 @@ deployment has. It belongs to neither modeling nor runtime and is the only surfa
 is not ontology-scoped.
 
 **Core** owns what the others need and none should define twice: the persistence port,
-the exception taxonomy, the data-type enumeration, the embedding provider abstraction,
-and OQL parsing and validation.
+the exception taxonomy, the data-type enumeration, embedding and decision-model
+provider abstractions, and OQL parsing and validation.
 
 **Runtime never depends on modeling.** Everything runtime needs about the schema, it
 reads through the port. This keeps the schema a *value* to runtime rather than a service
@@ -292,7 +292,7 @@ Ordered, and failure at any step prevents serving:
    exist. Per-ontology storage is provisioned when an ontology is created, not at boot.
 2. Walk the registry and report any stored type key that the adapter now reserves.
 3. Initialize the embedding provider, if configured.
-4. Initialize the language-model provider, if configured.
+4. Initialize the language-model and decision-model providers, if configured.
 5. If embeddings are enabled, reconcile vector index widths against the provider for
    every registered ontology and warn on mismatch — see
    [capabilities/search.md](capabilities/search.md).
@@ -314,10 +314,17 @@ per-ontology configuration.
 | Embedding | Provider, model, endpoint, credential, vector width | Semantic search unavailable |
 | Documents | Chunk size and overlap | Defaults apply |
 | Language model | Provider, model, endpoint, credential | AI capabilities unavailable |
+| Decision model | Endpoint, model, credential | No decision model installed |
 | Public URL | Base address advertised in agent cards | Cards advertise a local address |
 
 Exact variable names are in the repository README; they are deployment surface, not
 architecture.
+
+The optional decision-model contract answers typed choices and yes/no probabilities
+about caller-supplied context. It is available for programmatic use inside the server;
+no REST, MCP or UI capability currently consumes it. It is independent of the language
+model and embeddings. Provider setup and the wire contract are documented in
+[workflows/decision-api.md](workflows/decision-api.md).
 
 ## What the architecture does not provide
 

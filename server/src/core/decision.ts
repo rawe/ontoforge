@@ -1,12 +1,12 @@
 /**
- * Decision-model provider seam (prototype). A decision model answers typed
+ * Decision-model provider contract. A decision model answers typed
  * questions — a choice among named options, or a yes/no probability — about
  * a small JSON state. It never abstains: every threshold lives with the
  * caller.
  *
  * One implementation: plain HTTP against a Jev-compatible API
  * (`POST {DECISION_BASE_URL}/v1/systemone`). The Bearer header is sent only
- * when a key is configured (a local clone needs none). With no
+ * when a key is configured (a local provider may need none). With no
  * `DECISION_BASE_URL`, no model is installed. Tests inject a fake via
  * `setDecisionModel`.
  */

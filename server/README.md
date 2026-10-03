@@ -43,7 +43,7 @@ working directory. A variable already set in the environment wins over the file,
 and a named file that is missing fails the boot rather than falling back.
 
 The optional decision-model client is available for programmatic use only. See
-[Decision API](../docs/workflows/decision-api.md) for its contract, configuration and
+[Decision API](../docs/providers/decision-api.md) for its contract, configuration and
 local integration test. No decision-specific REST endpoint or UI is exposed.
 
 ## Tests

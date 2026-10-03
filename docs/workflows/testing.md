@@ -36,8 +36,17 @@ design when the selected one is down.
 `npm run typecheck` runs the TypeScript compiler without emitting.
 
 The decision suite uses `env/test.env` with an explicitly configured local Decision
-API and its own test configuration without any database setup or reset. It sends synthetic text to a loopback decision API and
-checks the wire contract, not model quality. See [decision-api.md](decision-api.md).
+API and its own test configuration, without database setup or reset. It sends synthetic
+text and checks the wire contract, not model quality. The suite requires a loopback URL
+and no credential; it does not load the TypeSafe example template.
+
+```sh
+DECISION_BASE_URL=http://localhost:8002 DECISION_MODEL=Mapika/decider-0.8b \
+  DECISION_API_KEY= TYPESAFE_API_KEY= npm run test:integration:decision
+```
+
+The provider contract and configuration template are described in
+[Decision API](../providers/decision-api.md).
 
 ## Integration Test Requirements
 

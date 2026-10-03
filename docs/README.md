@@ -42,6 +42,11 @@ what rules bind it, and how it is reached from every interface.
 | [ai-agents](capabilities/ai-agents.md) | Natural-language querying, extraction, chat, A2A |
 | [transfer](capabilities/transfer.md) | Schema export and import |
 
+## Internal provider interfaces
+
+- **[Decision API](providers/decision-api.md)** — Optional internal client for typed
+  decisions; currently no REST, MCP or UI integration.
+
 ## The central idea
 
 Most graph tooling ties a schema to an application: you model `Person` and `Company`,

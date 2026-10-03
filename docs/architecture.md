@@ -324,7 +324,7 @@ The optional decision-model contract answers typed choices and yes/no probabilit
 about caller-supplied context. It is available for programmatic use inside the server;
 no REST, MCP or UI capability currently consumes it. It is independent of the language
 model and embeddings. Provider setup and the wire contract are documented in
-[workflows/decision-api.md](workflows/decision-api.md).
+[providers/decision-api.md](providers/decision-api.md).
 
 ## What the architecture does not provide
 

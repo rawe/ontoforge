@@ -50,7 +50,7 @@ key, the optional display name and timestamps. Six operations:
 | Read by key | One row, or an absent result. |
 | Read by display name | One row, or an absent result — display names are unique server-wide, and the pre-write conflict check needs the lookup. |
 | Rename | Set the display name; the key never changes. Absent result when not found. |
-| Delete | Hard cascade: the ontology's physical home and its registry entry go together — schema, lenses, agents, saved queries, instances, chunks, and every search index. False when not found. |
+| Delete | Hard cascade: the ontology's physical home and its registry entry go together — schema, lenses, agents, saved queries, retrievers, instances, chunks, and every search index. False when not found. |
 
 The registry — not the database's own catalog — is the authoritative list of ontologies.
 The store must enforce server-wide uniqueness of the ontology key and the display name;
@@ -204,6 +204,15 @@ carries name, description, and its steps and parameters as serialized text — t
 does not interpret them. A saved query also accepts an embedding of its description, and
 the key of its owning lens alongside it, so that a search over descriptions can be
 narrowed to one lens without a join.
+
+**Retriever configuration storage.** Lens-local list/read/upsert/delete and raw
+list-for-export preserve config version and payload even when unsupported or invalid.
+Owner/key uniqueness is enforced atomically. Copy creates an independent id; move
+preserves id and atomically changes owner/key, never overwriting a conflict. Both compare
+the source version/payload with the validated snapshot before changing storage. Lens
+delete cascades to these definitions. Readiness checks distinguish missing storage from
+an incompatible existing structure; only absent storage can export an empty list.
+No vector or conversation state is part of this resource.
 
 **Search-data maintenance.** Backing the rebuild operation: list every entity type with its
 property keys; set one entity's composed search text, its keyword segments and its optional
@@ -568,7 +577,7 @@ consulted only to sweep orphaned namespaces.
 
 Boot DDL creates only the `public` objects. **Registry create** is one transaction:
 the registry row first — so a concurrent same-key create dies on the named constraint as
-a conflict — then the fresh namespace, the ten tables below and, when an embedding width
+a conflict — then the fresh namespace, the eleven tables below and, when an embedding width
 is given, the fixed vector indexes inside it. **Registry delete** is one transaction:
 the registry row out, the namespace dropped in one cascade. A bound store applies its
 ontology's namespace to the search path per statement, inside the shared transaction
@@ -581,13 +590,14 @@ per namespace:
 
 | Logical | Table | Joined by |
 |---|---|---|
-| Lens | `lens` | referenced by its inclusions, agents and saved queries |
+| Lens | `lens` | referenced by its inclusions, agents, saved queries and retrievers |
 | Entity type | `entity_type` | referenced by its property definitions and inclusions |
 | Relation type | `relation_type` | endpoint entity type keys as deletion-restricted references to `entity_type`; referenced by its property definitions and inclusions |
 | Property definition | `property_def` | exactly one of two owner columns — entity type or relation type — enforced by a check constraint |
 | Scope inclusion | `lens_includes` | its lens plus exactly one of two type columns; the optional property allowlist is an array column, and an absent allowlist is stored as null, never as an empty array |
 | Agent configuration | `ai_agent_config` | its lens |
 | Saved query | `saved_query` | its lens, with the denormalized lens key alongside |
+| Retriever configuration | `retriever_config` | lens foreign key with delete cascade; unique lens/key |
 
 Every schema row carries a `uuid` primary key. That is load-bearing beyond identity: the
 name of a dynamically created vector index embeds the uuid of the schema row that causes
@@ -750,6 +760,7 @@ Schema objects are nodes, joined by relationships:
 | Property definition | `PropertyDefinition` | — |
 | Agent configuration | `AiAgentConfig` | `HAS_AI_AGENT` from its lens |
 | Saved query | `SavedQuery` | `HAS_SAVED_QUERY` from its lens |
+| Retriever configuration | `_RetrieverConfig` | `_HAS_RETRIEVER` from its lens; ownerLensId for lens/key uniqueness |
 
 Instance data lives in the same database, distinguished by underscore-prefixed internal
 names:
@@ -773,7 +784,7 @@ key is reserved when its PascalCase form is one of the six schema node labels, g
 `saved_query` — the first of those derives from the kept `Ontology` lens label. A
 relation type key is reserved when its upper-snake form is one of the six schema
 relationship types, giving `includes_type`, `has_property`, `relates_from`,
-`relates_to`, `has_ai_agent` and `has_saved_query`. The internal names `_Entity`,
+`relates_to`, `has_ai_agent` and `has_saved_query`. The internal names `_RetrieverConfig`, `_HAS_RETRIEVER`, `_Entity`,
 `_Chunk`, `_HAS_CHUNK` and `_OntologyRegistry` need no reservation, since no valid key
 can produce a leading underscore.
 
@@ -810,6 +821,10 @@ Created at startup, unconditionally:
 | Uniqueness constraint | `SavedQuery` internal id | Saved-query identity |
 | Uniqueness constraint | `_Entity` instance id | Instance identity |
 | Index | `_Entity` type key | Every listing filters on it |
+
+Retriever provisioning separately ensures two uniqueness constraints on
+`_RetrieverConfig`: internal identity, and the `ownerLensId`/key pair. Normal boot does
+not provision retriever storage for an existing ontology.
 
 With the registry capped at one ontology, per-database uniqueness and per-ontology
 uniqueness are the same thing.

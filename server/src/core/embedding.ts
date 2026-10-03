@@ -20,7 +20,7 @@ export interface EmbeddingProvider {
   /** Vector width, needed for index DDL. */
   readonly dimensions: number;
   /** Embed one text. `null` means the provider produced no vector. */
-  embed(text: string): Promise<number[] | null>;
+  embed(text: string, signal?: AbortSignal): Promise<number[] | null>;
 }
 
 /** `fetch`-shaped dependency so unit tests can inject a fake transport. */
@@ -45,13 +45,16 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
   }
 
-  async embed(text: string): Promise<number[] | null> {
+  async embed(text: string, signal?: AbortSignal): Promise<number[] | null> {
+    signal?.throwIfAborted();
     try {
       const response = await this.fetchFn(`${this.baseUrl}/api/embeddings`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ model: this.model, prompt: text }),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
+          : AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -59,6 +62,7 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
       const payload = (await response.json()) as { embedding: number[] };
       return payload.embedding;
     } catch (exc) {
+      signal?.throwIfAborted();
       console.warn(`Embedding failed: ${exc instanceof Error ? exc.message : String(exc)}`);
       return null;
     }
@@ -78,7 +82,8 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
   }
 
-  async embed(text: string): Promise<number[] | null> {
+  async embed(text: string, signal?: AbortSignal): Promise<number[] | null> {
+    signal?.throwIfAborted();
     try {
       const response = await this.fetchFn(`${this.baseUrl}/v1/embeddings`, {
         method: "POST",
@@ -87,7 +92,9 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
           authorization: `Bearer ${this.apiKey}`,
         },
         body: JSON.stringify({ input: text, model: this.model }),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
+          : AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -95,6 +102,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
       const payload = (await response.json()) as { data: { embedding: number[] }[] };
       return payload.data[0]!.embedding;
     } catch (exc) {
+      signal?.throwIfAborted();
       console.warn(`Embedding failed: ${exc instanceof Error ? exc.message : String(exc)}`);
       return null;
     }

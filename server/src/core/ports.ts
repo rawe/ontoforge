@@ -357,6 +357,18 @@ export interface ModelingStore {
 
   getFullSchema(): Promise<Row>;
 
+  // Lens-local saved retrievers. Atomic transfer never overwrites a target.
+  assertRetrieverStorageReady(): Promise<void>;
+  listRetrieversForExport(lensId: string): Promise<Row[]>;
+  listRetrievers(lensId: string): Promise<Row[]>;
+  getRetriever(lensId: string, key: string): Promise<Row | null>;
+  upsertRetriever(lensId: string, id: string, key: string, name: string,
+    description: string | null, configVersion: number, config: unknown,
+    createOnly?: boolean): Promise<[Row, boolean]>;
+  deleteRetriever(lensId: string, key: string): Promise<boolean>;
+  transferRetriever(sourceLensId: string, sourceKey: string, targetLensId: string,
+    targetKey: string, copyId: string | null, expectedConfig: string): Promise<Row>;
+
   // ------------------------------------------------------------------
   // AI agent configs
   // ------------------------------------------------------------------

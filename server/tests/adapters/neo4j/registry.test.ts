@@ -32,10 +32,20 @@ function fakeDriver(
   respond: (query: string) => Row[],
 ): { driver: Driver; queries: string[] } {
   const queries: string[] = [];
+  const constraints = new Map<string, Row>();
   const driver = {
     session: () => ({
       run: async (query: string) => {
         queries.push(query);
+        if (query.startsWith("SHOW CONSTRAINTS")) return toResult([...constraints.values()]);
+        if (query.startsWith("CREATE CONSTRAINT retriever_config_")) {
+          const name = query.split(" ")[2]!;
+          constraints.set(name, {
+            name, type: "UNIQUENESS", entityType: "NODE", labelsOrTypes: ["_RetrieverConfig"],
+            properties: name === "retriever_config_id_unique" ? ["retrieverConfigId"] : ["ownerLensId", "key"],
+          });
+          return toResult([]);
+        }
         return toResult(respond(query));
       },
       close: async () => undefined,
@@ -80,6 +90,7 @@ describe("the one-ontology cap", () => {
     ).rejects.toBeInstanceOf(ConflictError);
 
     expect(queries.some((q) => q.includes("CREATE VECTOR INDEX"))).toBe(false);
+    expect(queries.some((q) => q.includes("CREATE CONSTRAINT"))).toBe(false);
     expect(queries.some((q) => q.includes("CREATE ("))).toBe(false);
   });
 });

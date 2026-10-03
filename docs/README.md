@@ -4,7 +4,7 @@ OntoForge is a graph-native ontology studio. You design a graph schema, then use
 through generic, schema-driven APIs — no per-schema code is written or generated.
 
 One server holds many **ontologies** — totally isolated units, each with its own schema,
-lenses, saved queries, agents and instance data. Within an ontology the system has two
+lenses, saved queries, agents, retrievers and instance data. Within an ontology the system has two
 halves. **Modeling** designs that ontology's schema. **Runtime** reads and writes its
 instance data through one lens. Both run in one server, over one database, and are
 reachable over REST, over MCP, and through a web UI.
@@ -40,6 +40,7 @@ what rules bind it, and how it is reached from every interface.
 | [oql](capabilities/oql.md) | The query language |
 | [saved-queries](capabilities/saved-queries.md) | Stored, parameterized query pipelines |
 | [ai-agents](capabilities/ai-agents.md) | Natural-language querying, extraction, chat, A2A |
+| [retrievers](capabilities/retrievers.md) | Lens-local search configurations, saved execution and portable profiles |
 | [entity-identity-comparison](capabilities/entity-identity-comparison.md) | Optional judgments about two partial entity snapshots |
 | [transfer](capabilities/transfer.md) | Schema export and import |
 
@@ -162,7 +163,7 @@ Terms are used in exactly this sense throughout the documentation and the API.
 ### Schema and design
 
 **Ontology** — the independent, isolated unit: one domain's schema, its lenses, saved
-queries, agents, and all instance data. A server holds many; nothing spans two.
+queries, agents, retrievers, and all instance data. A server holds many; nothing spans two.
 Addressed by an immutable key, unique server-wide, with a mutable display name.
 
 **Registry** — the server's flat, listable set of ontologies, addressed by key. The

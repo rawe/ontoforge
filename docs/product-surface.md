@@ -269,7 +269,7 @@ everything.
 
 Inline-editable name and description, an immutable key, a scope marker, an entry into the
 Workbench for this lens, and deletion behind a confirmation stating that the lens, its
-scope, its agents and its saved queries go — while the schema and all instance data
+scope, its agents, saved queries and retrievers go — while the schema and all instance data
 stay. Four tabs:
 
 **Scope** — the [scope editor](#scope-editor).
@@ -468,6 +468,17 @@ expands automatically, and runs immediately when it has no parameters.
 
 Three modes over one lens. All require a language-model provider; see
 [capabilities/ai-agents.md](capabilities/ai-agents.md).
+
+**Retriever** — select a lens-local saved profile or keep the browser draft. Find,
+Search and Answer configure result types, search/category text, exact conditions,
+threshold and answer evidence without requiring JSON. Profile management saves, deletes,
+copies/moves within the ontology, and imports/exports one JSON definition, with explicit
+review before writes. Unsaved edits block saved execution until saved or explicitly
+previewed as a draft. Invalid references remain visible for repair; unsupported shapes
+can be exported or reviewed as a version 1 repair. Profile changes clear the conversation.
+Prepare and chat offer cancellation and expandable candidate/timing/model traces.
+See [capabilities/retrievers.md](capabilities/retrievers.md) for persistence and execution
+boundaries. The existing local draft is not automatically uploaded.
 
 **Chat** — a conversation with the lens's default assistant or with any configured agent,
 chosen from a picker. Each agent keeps its own persisted thread; switching agents switches
@@ -695,6 +706,7 @@ the address.
 | Recently opened entities | Per ontology + lens | 10 |
 | Recent query texts | Per ontology + lens | 10 |
 | Chat history | Per ontology + lens, then per agent | 50 messages per agent |
+| Retriever browser draft | Per ontology + lens | Configuration only; saved profiles live on the server |
 
 Per-lens state is keyed by ontology **and** lens because lens keys are unique only
 within their ontology — two ontologies' `default` lenses must never share a canvas or a

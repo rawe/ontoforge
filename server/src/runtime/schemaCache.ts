@@ -189,7 +189,7 @@ function toPropertyDefs(rows: Row[] | undefined): Record<string, PropertyDef> {
   return defs;
 }
 
-function buildSchemaCacheFromRaw(
+export function buildSchemaCacheFromRaw(
   lens: Row,
   entityTypesRaw: Row[],
   relationTypesRaw: Row[],
@@ -246,7 +246,7 @@ function filterProperties(
  * target entity types are both exposed. Inclusion keys that no longer
  * resolve are skipped silently.
  */
-function applyScopeFiltering(
+export function applyScopeFiltering(
   full: SchemaCacheValue,
   entityInclusions: InclusionRow[],
   relationInclusions: InclusionRow[],

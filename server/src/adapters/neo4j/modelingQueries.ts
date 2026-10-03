@@ -147,7 +147,8 @@ export async function deleteLens(session: Session, lensId: string): Promise<bool
     MATCH (o:Ontology {lensId: $lensId})
     OPTIONAL MATCH (o)-[:HAS_AI_AGENT]->(ac:AiAgentConfig)
     OPTIONAL MATCH (o)-[:HAS_SAVED_QUERY]->(sq:SavedQuery)
-    DETACH DELETE o, ac, sq
+    OPTIONAL MATCH (o)-[:_HAS_RETRIEVER]->(rc:_RetrieverConfig)
+    DETACH DELETE o, ac, sq, rc
     RETURN count(o) AS deleted
     `,
     { lensId },

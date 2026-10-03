@@ -3,7 +3,7 @@
  *
  * `initSchema` runs the server-wide DDL — the pgvector extension and the
  * `public.ontology` registry table — as one all-or-nothing transaction at
- * adapter init. The ten-table set is ontology-scoped and runs only at
+ * adapter init. The eleven-table set is ontology-scoped and runs only at
  * ontology creation, inside the fresh `ont_<key>` namespace
  * (`registry.ts`). Idempotence rides `CREATE TABLE IF NOT EXISTS` with
  * all constraints inline and explicitly named (PG has no
@@ -36,6 +36,7 @@ import {
 import type { Querier } from "./errors.js";
 import { withTransaction } from "./errors.js";
 import { quoteIdent } from "./oql/bindings.js";
+import { RETRIEVER_DDL } from "./retrieverStorage.js";
 
 /**
  * Server-wide DDL, executed at adapter init only: the pgvector extension
@@ -58,7 +59,7 @@ const SERVER_DDL_STATEMENTS: string[] = [
 ];
 
 /**
- * The ten-table set one ontology lives in. Deliberately unqualified —
+ * The eleven-table set one ontology lives in. Deliberately unqualified —
  * namespace-relocatable: ontology creation runs it inside a fresh
  * `ont_<key>` namespace via the transaction's search path
  * (`registry.ts`).
@@ -208,6 +209,7 @@ export function ontologyDdlStatements(language: TextSearchLanguage): string[] {
 )`,
   `CREATE INDEX document_keyword_idx ON document_chunk USING gin (search_vector)`,
   `CREATE INDEX IF NOT EXISTS document_chunk_entity_property_idx ON document_chunk (entity_id, property_key)`,
+  RETRIEVER_DDL,
 ];
 }
 
@@ -352,7 +354,7 @@ function createHnsw(spec: IndexSpec, dimensions: number): string {
 
 /**
  * The two fixed vector indexes as CREATE statements, unqualified like the
- * ten-table DDL: ontology provisioning runs them inside the fresh
+ * eleven-table DDL: ontology provisioning runs them inside the fresh
  * namespace's search path (`registry.ts`).
  */
 export function fixedVectorIndexStatements(dimensions: number): string[] {

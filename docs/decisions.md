@@ -475,7 +475,7 @@ no default ontology exists, and it ships as a major version bump. Deliberation:
 [adr/0018](adr/0018-multi-ontology-hard-cut.md).
 
 **Transfer scope** — export and import carry one ontology's design: schema, lenses,
-and their agents and saved queries. Never instance data, never the ontology's
+and their agents, saved queries and retrievers. Never instance data, never the ontology's
 identity. A transfer document is portable into any ontology.
 
 **Transfer target** — import writes into an existing ontology named by the request;
@@ -492,3 +492,31 @@ OntoForge assumes it is deployed behind something that provides them, or on a tr
 network. Ontologies are isolation units, not tenants: no ontology has an owner, an ACL
 or a quota. Building a permission model before a deployment requires one would be
 guessing at its shape.
+
+## Retrieval evaluation dataset
+
+**The fair evaluation ontology stores stand numbers on exhibitors.**
+A hall is its own entity, linked to the exhibitor; the stand number is an exhibitor
+property. This keeps exact hall filtering explicit without introducing a separate
+stand entity into the evaluation dataset.
+
+**Saved retrievers are a separate lens-local resource.** Each definition has a key,
+name, description, configuration version and structured configuration. Keys are unique
+within the lens. Copying creates an independent identity; moving within the same
+ontology preserves identity and is atomic. Neither operation overwrites a target key,
+and both validate the current target lens. Cross-ontology portability is an explicit
+JSON configuration copy with target validation, never a shared live definition.
+Retriever definitions travel with their lens in design transfer and are deleted with
+it. Invalidated definitions remain readable and exportable, while execution checks the
+current lens and rejects invalid configurations. Configuration storage carries no
+vectors, prepared snapshots, credentials or conversation state. Existing ontology
+storage is upgraded through an explicit targeted additive migration, with a dry run;
+ordinary configuration requests never migrate storage.
+
+**The retrieval evaluation draft stays browser-local.**
+Its configuration is browser-local and scoped to one ontology and lens. Selected
+text fields use a separate in-memory embedding cache; existing persisted embeddings
+and their storage format are unchanged. Planning and answering are the two model calls;
+retrieval and reranking are deterministic and embedding-based. The prototype emits
+answer deltas and phase metadata, disables automatic model retries and propagates
+caller cancellation to embedding requests.

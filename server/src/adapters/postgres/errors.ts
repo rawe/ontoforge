@@ -297,6 +297,7 @@ function translateConstraint(exc: pg.DatabaseError): OntoForgeError | null {
   const value = detailKeyValue(exc.detail) ?? "unknown";
   switch (exc.code) {
     case "23503": // insert side: the parent vanished between pre-check and INSERT
+      if (constraint === "retriever_config_lens_fk") return new NotFoundError("Lens not found");
       if (ENTITY_FKS.has(constraint)) {
         return new NotFoundError(`Entity '${value}' not found`);
       }
@@ -313,6 +314,8 @@ function translateConstraint(exc: pg.DatabaseError): OntoForgeError | null {
       return null;
     case "23505":
       switch (constraint) {
+        case "retriever_config_key_unique":
+          return new ConflictError("Retriever key already exists in the target lens");
         case "ontology_key_unique":
           return new ConflictError(`Ontology with key '${value}' already exists`);
         case "ontology_display_name_unique":

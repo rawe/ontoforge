@@ -1,3 +1,4 @@
+import { retrieverModelingRouter } from "./retrieverRouter.js";
 /**
  * Modeling REST routes, mounted at `/api/ontologies/:ontologyKey/model`.
  *
@@ -74,6 +75,7 @@ const CascadeQuery = z.object({
 
 /** Routes mounted at `/api/ontologies/:ontologyKey/model`. */
 export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
+  await app.register(retrieverModelingRouter);
   // --- Lenses ---
 
   app.post(

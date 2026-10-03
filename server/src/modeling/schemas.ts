@@ -1,3 +1,4 @@
+import { StoredRetrieverExport } from "./retrievers.js";
 /**
  * Zod schemas for the modeling REST surface: camelCase field names,
  * internal identifiers exposed by design, nullable optionals serialized as
@@ -311,6 +312,7 @@ export const ExportLens = z.object({
   name: z.string(),
   description: z.string().nullable().optional(),
   includes: ExportLensInclusions.nullable().optional(),
+  retrievers: z.array(StoredRetrieverExport).optional(),
   aiAgents: z.array(ExportAiAgent).default([]),
   savedQueries: z.array(ExportSavedQuery).default([]),
 });

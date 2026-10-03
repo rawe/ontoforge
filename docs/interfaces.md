@@ -38,8 +38,8 @@ data through one lens — never both.
 
 Modeling REST does **not** nest types under a lens. Entity types, relation types and
 their properties are resources of the ontology, at the top level of its modeling
-surface. Only three things are addressed per-lens: scope inclusions, agent
-configurations and saved queries.
+surface. Scope inclusions, agent configurations, saved queries and retriever configurations
+are addressed per lens.
 
 ### What a path segment identifies
 
@@ -50,7 +50,7 @@ This is the single most common source of mistakes against the modeling surface.
 | Registry | Ontology key |
 | Runtime REST, everywhere | Keys — ontology key, lens key, type key, property key; instance ids for entities and relations |
 | Modeling REST — lenses, entity types, relation types, properties, inclusions | **Internal identifiers**, not keys |
-| Modeling REST — agent configs, saved queries | Lens key, agent key, query key |
+| Modeling REST — agent configs, saved queries, retrievers | Lens key and the resource key |
 | Both MCP servers | Keys only |
 
 So `PUT .../model/lenses/{lensId}` takes an identifier while
@@ -181,9 +181,10 @@ answers `VALIDATION_ERROR` with
 `details.code` of `FEATURE_DISABLED` — on the two routes that need an embedding provider,
 semantic search and saved-query search, and on AI execution and entity identity
 comparison alike. A client can therefore
-tell a switched-off capability from a rejected request. Two AI routes are exempt because
-they never run a model: listing agents and fetching an agent card answer normally on a
-server with no provider, and only a task sent to an agent fails
+tell a switched-off capability from a rejected request. Model-free operations remain available: agent discovery, retriever schema discovery
+and stored-definition management do not require a language-model provider. Retriever
+preparation requires embeddings separately; execution requirements are listed with
+the routes below. Agent task execution requires a language-model provider
 ([capabilities/ai-agents.md](capabilities/ai-agents.md)).
 
 Call `GET /api/server/features` first all the same. Probing lets a client hide what is
@@ -318,6 +319,28 @@ Per-lens, addressed by lens key. Semantics:
 | PUT | `/lenses/{lensKey}/saved-queries/{queryKey}` | Create or replace one; answers 201 on create, 200 on replace |
 | DELETE | `/lenses/{lensKey}/saved-queries/{queryKey}` | Delete a saved query |
 
+### Retriever configurations
+
+Lens-local ownership and execution semantics: [capabilities/retrievers.md](capabilities/retrievers.md).
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/lenses/{lensKey}/retrievers` | List stored definitions with current validation results |
+| GET | `/lenses/{lensKey}/retrievers/{retrieverKey}` | Read one definition without converting invalid configurations |
+| PUT | `/lenses/{lensKey}/retrievers/{retrieverKey}` | Create or replace; 201 on create, 200 on replace |
+| DELETE | `/lenses/{lensKey}/retrievers/{retrieverKey}` | Delete the definition; 204 |
+| POST | `/lenses/{lensKey}/retrievers/{retrieverKey}/copy` | Independent copy to targetLensKey/targetKey in this ontology; 201 |
+| POST | `/lenses/{lensKey}/retrievers/{retrieverKey}/move` | Atomic ownership/key change to targetLensKey/targetKey; 200 |
+| GET | `/lenses/{lensKey}/retrievers/{retrieverKey}/export` | Portable single-definition JSON |
+| POST | `/lenses/{lensKey}/retrievers/import` | Validated create-only import; 201, never replaces a key |
+
+Writes carry `name`, optional `description`, `configVersion: 1` and `config`. Reads
+include identity, timestamps and `validation: {valid,errors}`. Portable JSON omits
+identity/timestamps. Config management has no model calls. Missing storage reports
+`VALIDATION_ERROR` with `details.code: RETRIEVER_MIGRATION_REQUIRED`; an incompatible
+existing structure reports `RETRIEVER_STORAGE_INCOMPATIBLE` instead. Design export may
+omit definitions from absent storage, never silently omit an incompatible structure.
+
 ### Schema-wide operations
 
 Schema-wide means ontology-wide: each of these covers the addressed ontology and nothing
@@ -335,7 +358,7 @@ body, because it runs over the ontology's whole dataset. It is never refused for
 embedding provider: without one it rebuilds the keyword text and the document passages,
 skips the vector work and says so in its summary. After an embedding-provider switch it is
 run once per ontology.
-Transfer carries the design only — schema, lenses, agents, saved queries; no instance
+Transfer carries the design only — schema, lenses, agents, saved queries, retrievers; no instance
 data and no ontology identity — see
 [capabilities/transfer.md](capabilities/transfer.md) and
 [capabilities/search.md](capabilities/search.md).
@@ -455,6 +478,26 @@ Requires a Decision provider, independently of AI and search.
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/decisions/compare-entities` | Judge the identity of two supplied partial snapshots of one scoped entity type |
+
+### Retriever execution
+
+Saved routes load configuration from the server; request bodies cannot override it.
+Contract: [capabilities/retrievers.md](capabilities/retrievers.md).
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/retrievers/{retrieverKey}/prepare` | Prepare selected texts; optional empty body |
+| POST | `/retrievers/{retrieverKey}/chat` | Stream a question using the stored definition |
+| GET | `/ai/retriever/catalog` | Visible schema and editor defaults for request-configured drafts |
+| POST | `/ai/retriever/prepare` | Prepare a supplied draft `config` |
+| POST | `/ai/retriever/chat` | Stream a question using supplied draft `config` |
+
+Saved chat accepts `message`, optional `history` and `turnToken`; unknown body fields
+are rejected. Chat streams newline-delimited `phase`, `delta`, `meta`, `final` and
+`error` events. Metadata distinguishes technical candidates, response-context omissions,
+phase timings and bounded system/user/output traces. Preparation requires embeddings,
+chat requires the language-model provider, semantic retrieval requires embeddings.
+These routes have no dedicated MCP or A2A equivalent.
 
 ### AI
 

@@ -1,3 +1,4 @@
+import { savedRetrieverRouter } from "./retrievalPrototype/savedRouter.js";
 /**
  * AI runtime routes, mounted at
  * `/api/ontologies/:ontologyKey/runtime/lenses/:lensKey` alongside the
@@ -22,6 +23,7 @@ import { getRuntimeStore } from "../core/ports.js";
 import * as aiService from "./aiService.js";
 import { sendChatStream } from "./chatStream.js";
 import { loadSchema } from "./schemaCache.js";
+import { retrievalPrototypeRouter } from "./retrievalPrototype/router.js";
 
 const LensParams = z.object({ ontologyKey: z.string(), lensKey: z.string() });
 const AgentParams = LensParams.extend({ agentKey: z.string() });
@@ -70,6 +72,8 @@ export function getBaseUrl(request: FastifyRequest): string {
 
 /** AI routes mounted at `/api/ontologies/:ontologyKey/runtime/lenses/:lensKey`. */
 export const aiRouter: FastifyPluginAsyncZod = async (app) => {
+  await app.register(retrievalPrototypeRouter);
+  await app.register(savedRetrieverRouter);
   app.post(
     "/ai/query",
     { schema: { tags: ["ai"], params: LensParams, body: AiQueryPayload } },

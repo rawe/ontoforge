@@ -4,11 +4,12 @@ import { useFeatures, useRuntimeSchema } from '@/api/hooks'
 import { AskTab } from '@/components/ai/AskTab'
 import { ChatTab } from '@/components/ai/ChatTab'
 import { ExtractTab } from '@/components/ai/ExtractTab'
+import { RetrievalPrototypeTab } from '@/components/ai/RetrievalPrototypeTab'
 import { EmptyState } from '@/components/EmptyState'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
-const TABS = ['chat', 'ask', 'extract'] as const
+const TABS = ['chat', 'ask', 'extract', 'retriever'] as const
 type TabKey = (typeof TABS)[number]
 
 /**
@@ -71,6 +72,10 @@ export function AiPage() {
             <ScanText className="size-3.5" />
             Extract
           </TabsTrigger>
+          <TabsTrigger value="retriever" className="gap-1.5 px-2.5 text-[13px]">
+            <Sparkles className="size-3.5" />
+            Retriever
+          </TabsTrigger>
         </TabsList>
       </header>
 
@@ -81,6 +86,9 @@ export function AiPage() {
         </div>
       ) : (
         <>
+          <TabsContent value="retriever" className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+            {tab === 'retriever' && <RetrievalPrototypeTab key={`${ontologyKey}/${lensKey}`} ontologyKey={ontologyKey} lensKey={lensKey} />}
+          </TabsContent>
           <TabsContent
             value="chat"
             forceMount

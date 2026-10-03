@@ -19,9 +19,10 @@ ontologies, transfer included.
 | Lenses | Key, name, description, and their inclusions — absent entirely for an unscoped lens |
 | Agents | Every agent of every lens: key, name, description, system prompt, tool allowlist |
 | Saved queries | Every saved query of every lens: key, name, description, steps, parameters |
+| Retrievers | Every retriever of every lens: key, name, description, configVersion, config |
 
-Agents and saved queries are nested inside the lens they belong to, because that is where
-they belong ([ai-agents.md](ai-agents.md), [saved-queries.md](saved-queries.md)).
+Agents, saved queries and retrievers are nested inside the lens they belong to, because that is where
+they belong ([ai-agents.md](ai-agents.md), [saved-queries.md](saved-queries.md), [retrievers.md](retrievers.md)).
 
 > **Instance data is not part of the format.** No entities, no relations, no document
 > content, no chunks, no embedding vectors. Exporting a design and importing it elsewhere
@@ -95,7 +96,7 @@ or deleting and recreating the whole ontology and importing into it bare.
 
 ### Identifiers are regenerated, keys are preserved
 
-Every imported object — type, property, lens, agent, saved query — receives a freshly
+Every imported object — type, property, lens, agent, saved query, retriever — receives a freshly
 generated internal identifier. Nothing in the payload carries one, and nothing from the
 source ontology's identifiers survives.
 
@@ -132,6 +133,13 @@ One difference from definition time is worth knowing: an imported saved query's 
 is **not** parsed and checked against the lens. A pipeline that is structurally sound but
 names a type the lens does not expose imports successfully and fails when it is first run.
 
+Retriever configurations are checked against the visible schema of their payload lens
+before any writes. Unsupported config versions, duplicate retriever keys and invalid
+references reject the import. Omitting `retrievers` remains valid. Export preserves raw
+stored configurations even if invalid; reimport rejects them until repaired. The outer
+format label does not validate `configVersion`; these are separate contracts. Older
+readers that ignore unknown fields do not preserve retriever definitions.
+
 ### Side effects of import
 
 Import is not purely additive to the target's schema — it also provisions search
@@ -149,7 +157,7 @@ artefacts and computes embeddings, all within the target ontology.
   is no instance data to embed.
 - **Cache invalidation.** Import clears the schema cache, as any modeling change does.
 
-Import answers with the lenses it created.
+Retriever definitions do not trigger embeddings on import. Import answers with the lenses it created.
 
 ## Through the interfaces
 

@@ -1,3 +1,5 @@
+import { checkRetrieverStorageReady, inspectRetrieverStorage } from "./retrieverStorage.js";
+import { ConflictError, NotFoundError } from "../../core/exceptions.js";
 import type { KeywordPropertySegment } from "../../core/ports.js";
 /**
  * `ModelingStore` on PostgreSQL.
@@ -120,6 +122,84 @@ export class PostgresModelingStore implements ModelingStore {
     isolation: IsolationLevel = "READ COMMITTED",
   ): Promise<T> {
     return withTransaction(work, isolation, this.namespace);
+  }
+
+  async assertRetrieverStorageReady(): Promise<void> {
+    await checkRetrieverStorageReady(this.namespace!);
+  }
+
+  async listRetrieversForExport(lensId: string): Promise<Row[]> {
+    const status = await this.tx(q => inspectRetrieverStorage(q, this.namespace!));
+    if(status === "missing")
+      return [];
+    return this.listRetrievers(lensId);
+  }
+
+  async listRetrievers(lensId: string): Promise<Row[]> {
+    await checkRetrieverStorageReady(this.namespace!);
+    return camelizeRows((await this.query("SELECT * FROM retriever_config WHERE lens_id=$1 ORDER BY name,key", [lensId])).rows);
+  }
+
+  async getRetriever(lensId: string, key: string): Promise<Row | null> {
+    await checkRetrieverStorageReady(this.namespace!);
+    const row = (await this.query("SELECT * FROM retriever_config WHERE lens_id=$1 AND key=$2", [lensId, key])).rows[0];
+    return row ? camelizeRow(row) : null;
+  }
+
+  async upsertRetriever(lensId: string, id: string, key: string, name: string, description: string | null, configVersion: number, config: unknown, createOnly = false): Promise<[
+    Row,
+    boolean
+  ]> {
+    await checkRetrieverStorageReady(this.namespace!);
+    return this.tx(async (q) => {
+      if(!(await q.query("SELECT lens_id FROM lens WHERE lens_id=$1 FOR UPDATE", [lensId])).rows.length)
+        throw new NotFoundError("Lens not found");
+      if(createOnly && (await q.query("SELECT key FROM retriever_config WHERE lens_id=$1 AND key=$2", [lensId, key])).rows.length) {
+        throw new ConflictError(`Retriever '${key}' already exists in the target lens`);
+      }
+      const conflict = createOnly
+        ? "ON CONFLICT(lens_id,key) DO NOTHING"
+        : `ON CONFLICT(lens_id,key) DO UPDATE SET name=EXCLUDED.name,
+                description=EXCLUDED.description,config_version=EXCLUDED.config_version,
+                config=EXCLUDED.config,updated_at=now()`;
+      const result = await q.query(`INSERT INTO retriever_config
+          (retriever_config_id,lens_id,key,name,description,config_version,config)
+          VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)
+          ${conflict}
+          RETURNING *, retriever_config_id=$1 AS created`, [id, lensId, key, name, description, configVersion, JSON.stringify(config)]);
+      if(!result.rows.length) throw new ConflictError(`Retriever '${key}' already exists in the target lens`);
+      const row = camelizeRow(result.rows[0]!);
+      return [row, row.created === true];
+    });
+  }
+
+  async deleteRetriever(lensId: string, key: string): Promise<boolean> {
+    await checkRetrieverStorageReady(this.namespace!);
+    return this.tx(async (q) => {
+      await q.query("SELECT lens_id FROM lens WHERE lens_id=$1 FOR UPDATE", [lensId]);
+      return (await q.query("DELETE FROM retriever_config WHERE lens_id=$1 AND key=$2", [lensId, key])).rowCount > 0;
+    });
+  }
+
+  async transferRetriever(sourceLensId: string, sourceKey: string, targetLensId: string, targetKey: string, copyId: string | null, expectedConfig: string): Promise<Row> {
+    await checkRetrieverStorageReady(this.namespace!);
+    return this.tx(async (q) => {
+      const lenses = await q.query("SELECT lens_id FROM lens WHERE lens_id=ANY($1::uuid[]) ORDER BY lens_id FOR UPDATE", [[sourceLensId, targetLensId]]);
+      if(lenses.rows.length !== new Set([sourceLensId, targetLensId]).size)
+        throw new NotFoundError("Source or target lens not found");
+      const source = (await q.query("SELECT * FROM retriever_config WHERE lens_id=$1 AND key=$2 FOR UPDATE", [sourceLensId, sourceKey])).rows[0];
+      if(source && JSON.stringify([source.config_version, source.config]) !== expectedConfig)
+        throw new ConflictError("Source retriever changed; reload before transfer");
+      if(!source)
+        throw new NotFoundError(`Retriever '${sourceKey}' not found`);
+      if((await q.query("SELECT key FROM retriever_config WHERE lens_id=$1 AND key=$2", [targetLensId, targetKey])).rows.length)
+        throw new ConflictError(`Retriever '${targetKey}' already exists in the target lens`);
+      const result = copyId
+        ? await q.query(`INSERT INTO retriever_config (retriever_config_id,lens_id,key,name,description,config_version,config)
+              SELECT $1,$2,$3,name,description,config_version,config FROM retriever_config WHERE lens_id=$4 AND key=$5 RETURNING *`, [copyId, targetLensId, targetKey, sourceLensId, sourceKey])
+        : await q.query("UPDATE retriever_config SET lens_id=$1,key=$2,updated_at=now() WHERE lens_id=$3 AND key=$4 RETURNING *", [targetLensId, targetKey, sourceLensId, sourceKey]);
+      return camelizeRow(result.rows[0]!);
+    });
   }
 
   // ------------------------------------------------------------------

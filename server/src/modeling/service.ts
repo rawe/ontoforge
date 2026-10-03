@@ -1,3 +1,4 @@
+import * as retrievers from "./retrievers.js";
 /**
  * Modeling service: every domain rule for one ontology's schema — entity
  * types, relation types, property definitions. REST and MCP are two
@@ -30,7 +31,7 @@ import {
   type TypeKind,
 } from "../core/schemas.js";
 import { buildTextRepr, buildKeywordSegments } from "../runtime/search/propertyText.js";
-import { invalidateLoadedSchemaCache, loadSchemaUncached } from "../runtime/schemaCache.js";
+import { invalidateLoadedSchemaCache, loadSchemaUncached, buildSchemaCacheFromRaw, applyScopeFiltering } from "../runtime/schemaCache.js";
 import { syncDocumentChunks } from "../runtime/service.js";
 import { VALID_AGENT_TOOLS } from "../runtime/toolNames.js";
 import {
@@ -1316,6 +1317,8 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
       })),
     }));
 
+    const retrieverRows = await store.listRetrieversForExport(lens.lensId as string);
+    exported.retrievers = retrieverRows.map(retrievers.portable);
     lenses.push(exported);
   }
 
@@ -1452,6 +1455,26 @@ export async function importSchema(
   }
 
   for (const lens of payload.lenses) {
+    const full = buildSchemaCacheFromRaw({ lensId: "import", key: lens.key, name: lens.name }, payload.entityTypes as unknown as Row[], payload.relationTypes.map(rt => ({ ...rt, sourceKey: rt.fromEntityTypeKey, targetKey: rt.toEntityTypeKey })) as unknown as Row[]);
+    const scope = applyScopeFiltering(full, (lens.includes?.entityTypes ?? []).map(inc => ({ key: inc.key, properties: inc.properties ?? null })), (lens.includes?.relationTypes ?? []).map(inc => ({ key: inc.key, properties: inc.properties ?? null })));
+    const seen = new Set<string>();
+    for (const retriever of lens.retrievers ?? []) {
+        if (seen.has(retriever.key))
+            errors.push(`Import error: duplicate retriever '${retriever.key}'`);
+        seen.add(retriever.key);
+        if (!/^[a-z][a-z0-9_-]*$/.test(retriever.key) || retriever.key.length > 64)
+            errors.push(`Import error: invalid retriever key '${retriever.key}'`);
+        try {
+            retrievers.RetrieverWrite.parse({ name: retriever.name, description: retriever.description, configVersion: retriever.configVersion, config: retriever.config });
+            retrievers.validateDefinition(retriever.configVersion, retriever.config, scope);
+        }
+        catch (error) {
+            if (error instanceof ValidationError || error instanceof z.ZodError)
+                errors.push(`Import error: retriever '${retriever.key}' has invalid configuration: ${error instanceof ValidationError ? error.message : "Invalid configuration format"}`);
+            else
+                throw error;
+        }
+    }
     if (!KEY_PATTERN.test(lens.key)) {
       errors.push(badKey("lens", lens.key, typeKeyPattern));
     }
@@ -1571,6 +1594,8 @@ export async function importSchema(
   if (conflicts.length > 0) {
     throw new ConflictError(conflicts.join("; "));
   }
+
+  if(payload.lenses.some(lens => (lens.retrievers?.length??0)>0)) await store.assertRetrieverStorageReady();
 
   // ---- Phase 3: write (internal ids regenerated, keys preserved) ----
   const provider = getEmbeddingProvider();
@@ -1698,6 +1723,9 @@ export async function importSchema(
       );
     }
 
+    for (const retriever of lens.retrievers??[]) {
+      await store.upsertRetriever(lensId,randomUUID(),retriever.key,retriever.name,retriever.description,1,retriever.config,true);
+    }
     createdLenses.push(toLensResponse(lensData));
   }
 
@@ -2004,8 +2032,8 @@ export async function upsertSavedQuery(
 
   // Validate each oql step against the lens's schema — skipped ONLY when
   // that schema cannot be loaded (the run-time check still applies then).
-  // Cache-free on purpose: the runtime cache is keyed by bare lens key,
-  // and this path runs against any ontology's bound store.
+  // Cache-free on purpose: validate against the currently persisted schema.
+  // The runtime cache is scoped by ontology and lens.
   try {
     const loaded = await loadSchemaUncached(lensKey, runtimeStore);
     for (const step of body.steps) {

@@ -28,7 +28,6 @@ import {
   CharStream,
   CommonTokenStream,
   ParseTreeWalker,
-  TokenStreamRewriter,
   type ATNSimulator,
   type RecognitionException,
   type Recognizer,
@@ -63,7 +62,6 @@ import {
   type RelationDetailContext,
   type RelationshipPatternContext,
   type ScriptContext,
-  type ReturnStContext,
   type SkipStContext,
   type StringExpPrefixContext,
   type UnaryAddSubExpressionContext,
@@ -913,33 +911,6 @@ export function parse(query: string): { tokenStream: CommonTokenStream; tree: Sc
     throw new ValidationError("Invalid query syntax: " + err.errors.join("; "));
   }
   return { tokenStream, tree };
-}
-
-/** Cap the final result projection without touching strings, comments, or WITH limits.
- * This is a syntax transform, not authorization: callers must still validate the result.
- */
-export function limitQueryResults(query: string, maximum: number): string {
-  if (!Number.isSafeInteger(maximum) || maximum < 1) throw new ValidationError("Invalid result row budget");
-  const { tokenStream, tree } = parse(query);
-  const collector = new class extends CypherParserListener {
-    projections: ProjectionBodyContext[] = [];
-    override enterReturnSt = (ctx: ReturnStContext): void => { this.projections.push(ctx.projectionBody()); };
-  }();
-  ParseTreeWalker.DEFAULT.walk(collector, tree);
-  if (collector.projections.length !== 1) throw new ValidationError("A bounded query needs exactly one RETURN projection");
-  const projection = collector.projections[0]!;
-  const limit = projection.limitSt();
-  const rewriter = new TokenStreamRewriter(tokenStream);
-  if (limit) {
-    const expression = limit.expression();
-    const text = expression.getText();
-    if (!/^\d+$/.test(text)) throw new ValidationError("Generated query LIMIT must be a non-negative integer");
-    if (Number(text) <= maximum) return query;
-    rewriter.replace(expression.start!, expression.stop!, String(maximum));
-  } else {
-    rewriter.insertAfter(projection.stop!, `\nLIMIT ${maximum}`);
-  }
-  return rewriter.getText();
 }
 
 export function analyze(tree: ScriptContext): Analysis {

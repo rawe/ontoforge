@@ -14,7 +14,7 @@ export async function readNdjsonStream(
 ) {
   if (!response.ok) throw await parseError(response)
   if (!response.headers.get('content-type')?.includes('application/x-ndjson') || !response.body) {
-    throw new Error('Invalid chat response')
+    throw new Error('Invalid NDJSON response')
   }
   const reader = response.body.getReader()
   const decoder = new TextDecoder('utf-8', { fatal: true })
@@ -23,7 +23,7 @@ export async function readNdjsonStream(
   const consumeLine = (line: string) => {
     if (!line.trim()) return
     const e = JSON.parse(line)
-    if (!e || typeof e !== 'object') throw new Error('Invalid chat event')
+    if (!e || typeof e !== 'object' || Array.isArray(e)) throw new Error('Invalid NDJSON event')
     if (consume(e)) terminal = true
   }
   try {
@@ -35,7 +35,7 @@ export async function readNdjsonStream(
         consumeLine(buffer.slice(0, end))
         buffer = buffer.slice(end + 1)
       }
-      if (buffer.length > 8 * 1024 * 1024) throw new Error('Chat event exceeded its size limit')
+      if (buffer.length > 8 * 1024 * 1024) throw new Error('NDJSON event exceeded its size limit')
       if (done) {
         if (!terminal && buffer.trim()) consumeLine(buffer)
         if (!terminal) throw new Error('Connection closed before the answer was complete')

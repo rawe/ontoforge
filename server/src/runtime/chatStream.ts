@@ -3,7 +3,7 @@ import { once } from "node:events";
 import type { FastifyReply } from "fastify";
 import { NotFoundError, StoreError, ValidationError } from "../core/exceptions.js";
 
-/** Any NDJSON stream event; chat sends tool events, decision search its own steps. */
+/** NDJSON event envelope; callers define their event payloads. */
 export type StreamEvent = { type: string; [key: string]: unknown };
 
 export interface StreamExecution {

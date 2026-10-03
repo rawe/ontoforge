@@ -6,7 +6,6 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
-  Route,
   Search,
   Settings2,
   Shapes,
@@ -275,9 +274,6 @@ export function Sidebar({
         <NavItem to={`${base}/query`} label="Query" icon={SquareTerminal} collapsed={collapsed} />
         {features?.ai !== false && (
           <NavItem to={`${base}/ai`} label="AI" icon={Sparkles} collapsed={collapsed} />
-        )}
-        {features?.ai !== false && (
-          <NavItem to={`${base}/decide`} label="Decision search" icon={Route} collapsed={collapsed} />
         )}
       </nav>
 

@@ -35,8 +35,8 @@ design when the selected one is down.
 
 `npm run typecheck` runs the TypeScript compiler without emitting.
 
-The decision suite uses `env/ollama-decision.env` and its own configuration without
-any database setup or reset. It sends synthetic text to a loopback decision API and
+The decision suite uses `env/test.env` with an explicitly configured local Decision
+API and its own test configuration without any database setup or reset. It sends synthetic text to a loopback decision API and
 checks the wire contract, not model quality. See [decision-api.md](decision-api.md).
 
 ## Integration Test Requirements

@@ -16,13 +16,25 @@ Startup installs the configured client without making a network request. Interna
 callers use `getDecisionModel()` and handle `null` when disabled. An independent client
 can also be constructed with `createDecisionModel(baseUrl, modelName, apiKey)`.
 
-`env/ollama.env` remains the ordinary Ollama preset. The separate
-`env/ollama-decision.env` copies that configuration and adds the local decision API at
-`http://localhost:8002`, model `Mapika/decider-0.8b`, without a key. This preset does not
-install or start the decision server. Its database and Ollama settings are unused by
-the decision-only integration test.
+`env/ollama.env` remains the ordinary Ollama preset. Use
+[`env/ollama-decision.env`](../../env/ollama-decision.env) as a template for local
+Ollama (BGE-M3, 1024 dimensions) plus TypeSafe's Decision API. It sets
+`DECISION_BASE_URL=https://api.typesafe.ai` and pins `DECISION_MODEL=jev-1.13.0`.
+These values follow TypeSafe's [API reference](https://docs.typesafe.ai/api) and
+[model list](https://docs.typesafe.ai/models).
 
-Credentials belong in uncommitted configuration, never committed presets.
+Copy the template before adding your own TypeSafe API key:
+
+```sh
+cp env/ollama-decision.env env/ollama-decision.local.env
+# Replace REPLACE_WITH_YOUR_TYPESAFE_API_KEY in the uncommitted copy.
+./dev.sh env/ollama-decision.local.env
+```
+
+The key in the committed template is a placeholder, not a usable credential.
+For another compatible provider, change the base URL, model identifier and key;
+its endpoint must implement the same `POST /v1/systemone` contract. Credentials
+belong in uncommitted configuration, never committed presets.
 
 ## Contract
 
@@ -31,7 +43,7 @@ The HTTP adapter implements the TypeSafe/System One-compatible contract:
 
 ```json
 {
-  "model": "Mapika/decider-0.8b",
+  "model": "jev-1.13.0",
   "state": "The support request is about a failed login.",
   "questions": {
     "category": {
@@ -66,11 +78,13 @@ From `server/`:
 
 ```sh
 npm test
-npm run test:integration:decision
+DECISION_BASE_URL=http://localhost:8002 DECISION_MODEL=Mapika/decider-0.8b \
+  DECISION_API_KEY= TYPESAFE_API_KEY= npm run test:integration:decision
 ```
 
 The unit suite covers the client contract and error paths with controlled responses.
-The integration suite uses the real local API with synthetic text and verifies
+The integration suite loads `env/test.env`, not the TypeSafe template, and uses
+the explicitly configured real local API with synthetic text and verifies
 response shape for both question types. It requires a loopback URL and no credential;
 it does not assess classification quality, access ontology data or reset a database.
 

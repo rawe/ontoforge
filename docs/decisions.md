@@ -7,7 +7,7 @@ the record of *when* a rule was adopted and what was weighed against it lives in
 [adr/](adr/).
 
 Design principles that govern how these rules are chosen — and the requirement that a new
-one be approved before it is adopted — are in the repository `CLAUDE.md`.
+one be approved before it is adopted — are in the repository `AGENTS.md`.
 
 ## System shape
 
@@ -343,6 +343,15 @@ callers; A2A and MCP retain their own transport contracts. The wire details live
 [the chat transport deliberation](adr/0021-rest-chat-tool-streaming.md).
 
 ## Behaviour
+
+**Entity identity comparison is optional, explicit and advisory.**
+It compares two caller-supplied partial scalar snapshots of one lens-scoped entity
+type through a fixed `choice` between `same`, `different` and `insufficient`.
+Its Decision-provider availability is independent of AI and embeddings. It neither
+participates in search nor writes, merges or automatically selects entities; failure
+does not invoke a fallback. Document, system, unknown and out-of-scope fields never
+enter its provider context. The bounded-context contract lives in
+[entity identity comparison](capabilities/entity-identity-comparison.md).
 
 **OQL is the query language, anchored to the ISO GQL standard.**
 Its normative reference is ISO GQL and its GPML pattern sublanguage — not any vendor's

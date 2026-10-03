@@ -13,7 +13,8 @@
     "test": "ENV_FILE=${ENV_FILE:-../env/test.env} vitest run",
     "test:integration": "ENV_FILE=${ENV_FILE:-../env/test.env} vitest run --config vitest.integration.config.ts",
     "test:integration:embedding": "ENV_FILE=${ENV_FILE:-../env/test-embedding.env} vitest run --config vitest.integration.embedding.config.ts",
-    "test:integration:ai": "ENV_FILE=${ENV_FILE:-../env/test-ai.env} vitest run --config vitest.integration.ai.config.ts"
+    "test:integration:ai": "ENV_FILE=${ENV_FILE:-../env/test-ai.env} vitest run --config vitest.integration.ai.config.ts",
+    "test:integration:decision": "ENV_FILE=${ENV_FILE:-../env/test.env} vitest run --config vitest.integration.decision.config.ts"
   },
   "engines": {
     "node": ">=22"

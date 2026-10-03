@@ -17,6 +17,7 @@ import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ApiError } from '@/api/http'
 import { createEntity, createRelation } from '@/api/runtime'
+import { useFeatures } from '@/api/hooks'
 import type {
   ExtractResponse,
   JsonValue,
@@ -34,6 +35,7 @@ import {
   type ReviewRelationItem,
 } from '@/components/ai/reviewModel'
 import { useSimilarEntities } from '@/components/ai/useSimilarEntities'
+import { IdentityComparison } from '@/components/ai/IdentityComparison'
 import { PropertyField } from '@/components/schema/PropertyField'
 import { coerceDrafts } from '@/components/schema/propertyDraft'
 import { Badge } from '@/components/ui/badge'
@@ -80,11 +82,17 @@ function EntityCard({
   item,
   similar,
   disabled,
+  ontologyKey,
+  lensKey,
+  comparisonEnabled,
   onChange,
 }: {
   item: ReviewEntityItem
   similar: SearchHit[]
   disabled: boolean
+  ontologyKey: string
+  lensKey: string
+  comparisonEnabled: boolean
   onChange: (patch: Partial<ReviewEntityItem>) => void
 }) {
   const missing = missingRequired(item)
@@ -200,6 +208,16 @@ function EntityCard({
                   </Label>
                 ))}
               </RadioGroup>
+              {comparisonEnabled && (
+                <IdentityComparison
+                  key={JSON.stringify([ontologyKey, lensKey, item.drafts, item.type, similar, locked])}
+                  ontologyKey={ontologyKey}
+                  lensKey={lensKey}
+                  item={item}
+                  candidates={similar}
+                  disabled={locked}
+                />
+              )}
             </div>
           )}
 
@@ -335,6 +353,7 @@ export function ExtractReview({
   onBack,
 }: ExtractReviewProps) {
   const queryClient = useQueryClient()
+  const { data: features } = useFeatures()
   const initial = useMemo(() => buildReviewModel(response, schema), [response, schema])
   const [entities, setEntities] = useState(initial.entities)
   const [relations, setRelations] = useState(initial.relations)
@@ -565,6 +584,9 @@ export function ExtractReview({
                         item={item}
                         similar={similar.hits[item.id] ?? []}
                         disabled={accepting}
+                        ontologyKey={ontologyKey}
+                        lensKey={lensKey}
+                        comparisonEnabled={features?.entityIdentityComparison === true}
                         onChange={(patch) => patchEntity(item.id, patch)}
                       />
                     ))}

@@ -179,7 +179,8 @@ text, so a model still sees every offending field in one response.
 Requesting an unavailable search strategy or a capability whose provider is not configured
 answers `VALIDATION_ERROR` with
 `details.code` of `FEATURE_DISABLED` — on the two routes that need an embedding provider,
-semantic search and saved-query search, and on the AI routes alike. A client can therefore
+semantic search and saved-query search, and on AI execution and entity identity
+comparison alike. A client can therefore
 tell a switched-off capability from a rejected request. Two AI routes are exempt because
 they never run a model: listing agents and fetching an agent card answer normally on a
 server with no provider, and only a task sent to an agent fails
@@ -214,11 +215,11 @@ exist.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/server/features` | Report `semanticSearch`, `searchStrategies` and `ai` |
+| GET | `/api/server/features` | Report `semanticSearch`, `searchStrategies`, `ai` and `entityIdentityComparison` |
 
 The one route that concerns neither the ontologies nor their content — it describes the
 deployment. Clients call it before
-offering search or AI. `searchStrategies` lists available strategies in preference order.
+offering optional capabilities. `searchStrategies` lists available strategies in preference order.
 
 ## Modeling REST
 
@@ -444,6 +445,16 @@ Runtime runs them; modeling defines them. Semantics:
 Search ranks saved-query descriptions semantically, so it needs an embedding provider.
 `limit` is 1–20, default 3; `min_score` defaults to 0.7. The bare result array keeps
 `key`, `name`, `description`, `parameters` and absolute cosine `score` (0–1).
+
+### Entity identity comparison
+
+Semantics and request/response contract:
+[capabilities/entity-identity-comparison.md](capabilities/entity-identity-comparison.md).
+Requires a Decision provider, independently of AI and search.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/decisions/compare-entities` | Judge the identity of two supplied partial snapshots of one scoped entity type |
 
 ### AI
 

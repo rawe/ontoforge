@@ -30,6 +30,7 @@ import { mountMcp } from "./mcp/mount.js";
 import { modelingRouter } from "./modeling/router.js";
 import { registryRouter } from "./registry/router.js";
 import { aiRouter } from "./runtime/aiRouter.js";
+import { decisionRouter } from "./runtime/decisionRouter.js";
 import { runtimeRouter } from "./runtime/router.js";
 import { serverRouter } from "./server/router.js";
 
@@ -168,6 +169,7 @@ export async function createApp(): Promise<FastifyInstance> {
   const runtimePrefix = "/api/ontologies/:ontologyKey/runtime/lenses/:lensKey";
   await app.register(runtimeRouter, { prefix: runtimePrefix });
   await app.register(aiRouter, { prefix: runtimePrefix });
+  await app.register(decisionRouter, { prefix: runtimePrefix });
 
   // Startup step 6: both MCP servers share the process and call the same
   // services as REST.

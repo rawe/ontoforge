@@ -12,11 +12,13 @@ import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 
 import { settings } from "../config.js";
+import { getDecisionModel } from "../core/decision.js";
 
 const FeaturesResponse = z.object({
   semanticSearch: z.boolean(),
   searchStrategies: z.array(z.string()),
   ai: z.boolean(),
+  entityIdentityComparison: z.boolean(),
 });
 
 /** Routes mounted at `/api/server`. */
@@ -35,6 +37,7 @@ export const serverRouter: FastifyPluginAsyncZod = async (app) => {
         semanticSearch: Boolean(settings.EMBEDDING_PROVIDER),
         searchStrategies: availableStrategies({ supportsKeywordRanking: () => keyword }),
         ai: Boolean(settings.AI_PROVIDER),
+        entityIdentityComparison: getDecisionModel() !== null,
       };
     },
   );

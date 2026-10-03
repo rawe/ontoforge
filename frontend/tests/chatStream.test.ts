@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readChatStream } from '../src/api/chatStream.ts'
+import { readChatStream, readNdjsonStream } from '../src/api/chatStream.ts'
 
 function response(chunks: Uint8Array[]) {
   return new Response(new ReadableStream({ start(controller) {
@@ -52,4 +52,77 @@ test('error preserves previously delivered results and terminates the consumer',
   const received: unknown[] = []
   await readChatStream(response([new TextEncoder().encode(expected.map((e) => JSON.stringify(e)).join('\n'))]), (e) => received.push(e))
   assert.deepEqual(received, expected)
+})
+
+test('generic reader delivers arbitrary events and lets its consumer choose the terminal event', async () => {
+  const expected = [
+    { type: 'progress', label: 'Zoë 🐈', percent: 50 },
+    { type: 'complete', result: { count: 2 } },
+  ]
+  // The terminal event has no newline; UTF-8 code points and JSON span chunks.
+  const bytes = new TextEncoder().encode('\n' + expected.map((event) => JSON.stringify(event)).join('\n'))
+  const received: unknown[] = []
+  await readNdjsonStream(response(Array.from(bytes, (byte) => Uint8Array.of(byte))), (event) => {
+    received.push(event)
+    return event.type === 'complete'
+  })
+  assert.deepEqual(received, expected)
+})
+
+test('generic reader cancels and unlocks the body as soon as its consumer terminates', async () => {
+  let cancelled = false
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('{"type":"complete"}\nnot JSON\n'))
+      // Keep the connection open: completion must not depend on server EOF.
+    },
+    cancel() { cancelled = true },
+  })
+  const received: unknown[] = []
+  await readNdjsonStream(new Response(body, { headers: { 'content-type': 'application/x-ndjson' } }), (event) => {
+    received.push(event)
+    return true
+  })
+  assert.deepEqual(received, [{ type: 'complete' }])
+  assert.equal(cancelled, true)
+  assert.equal(body.locked, false)
+})
+
+test('generic reader cancels and unlocks the body when the consumer throws', async () => {
+  let cancelled = false
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(new TextEncoder().encode('{"type":"progress"}\n')) },
+    cancel() { cancelled = true },
+  })
+  const failure = new Error('Consumer failed')
+  await assert.rejects(readNdjsonStream(
+    new Response(body, { headers: { 'content-type': 'application/x-ndjson' } }),
+    () => { throw failure },
+  ), (error) => error === failure)
+  assert.equal(cancelled, true)
+  assert.equal(body.locked, false)
+})
+
+test('generic reader reports EOF when its consumer has not accepted a terminal event', async () => {
+  const received: unknown[] = []
+  await assert.rejects(readNdjsonStream(response([new TextEncoder().encode('{"type":"progress"}')]), (event) => {
+    received.push(event)
+    return false
+  }), /Connection closed before the answer was complete/)
+  assert.deepEqual(received, [{ type: 'progress' }])
+})
+
+for (const body of ['null', '42', '"progress"', '[]']) {
+  test(`generic reader rejects a non-object event: ${body}`, async () => {
+    let delivered = false
+    await assert.rejects(readNdjsonStream(response([new TextEncoder().encode(body + '\n')]), () => {
+      delivered = true
+      return true
+    }), /Invalid .* event/)
+    assert.equal(delivered, false)
+  })
+}
+
+test('generic reader rejects invalid UTF-8 rather than replacing corrupted event text', async () => {
+  await assert.rejects(readNdjsonStream(response([Uint8Array.of(0xff)]), () => true), TypeError)
 })

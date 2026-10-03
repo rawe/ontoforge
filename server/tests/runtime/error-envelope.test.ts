@@ -189,6 +189,7 @@ describe("features route", () => {
     expect(res.json()).toEqual({
       semanticSearch: false,
       ai: false,
+      entityIdentityComparison: false,
       searchStrategies: ["keyword", "keyword-any", "keyword-all"],
     });
   });

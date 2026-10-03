@@ -14,6 +14,14 @@ export interface Features {
   searchStrategies: SearchStrategy[]
   semanticSearch: boolean
   ai: boolean
+  entityIdentityComparison: boolean
+}
+
+export interface EntityIdentityComparison {
+  decision: 'same' | 'different' | 'insufficient'
+  probabilities: { same: number; different: number; insufficient: number }
+  confidence: number
+  truncatedFields: string[]
 }
 
 export type DataType =

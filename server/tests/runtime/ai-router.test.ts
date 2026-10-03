@@ -283,6 +283,15 @@ describe("chat wire shape", () => {
 const chatPath = "/api/ontologies/test_ont/runtime/lenses/test_lens/ai";
 const events = (body: string) => body.trim().split("\n").map((line) => JSON.parse(line));
 
+it("does not expose the removed decision-search endpoint", async () => {
+  setAiModel(new FakeToolCallingModel([new AIMessage("Unused")]));
+  const response = await app.inject({
+    method: "POST", url: chatPath + "/decide", payload: { question: "Find something" },
+  });
+  expect(response.statusCode).toBe(404);
+  expect(holder.store.getFullSchemaWithLensInclusions).not.toHaveBeenCalled();
+});
+
 for (const route of ["/chat", "/agents/my-agent/chat"]) {
   describe(`streaming lifecycle ${route}`, () => {
     it("correlates repeated tools and retains native results and invalid attempts", async () => {

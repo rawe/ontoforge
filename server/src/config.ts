@@ -25,6 +25,10 @@ export interface Settings {
   AI_API_KEY: string | null;
   AI_REASONING_EFFORT: string | null;
 
+  DECISION_BASE_URL: string | null;
+  DECISION_MODEL: string;
+  DECISION_API_KEY: string | null;
+
   PUBLIC_URL: string | null;
 }
 
@@ -100,6 +104,11 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
     AI_BASE_URL: str(env, "AI_BASE_URL", "http://localhost:11434"),
     AI_API_KEY: optStr(env, "AI_API_KEY"),
     AI_REASONING_EFFORT: optOneOf(env, "AI_REASONING_EFFORT", AI_REASONING_EFFORTS),
+
+    DECISION_BASE_URL: optStr(env, "DECISION_BASE_URL"),
+    DECISION_MODEL: str(env, "DECISION_MODEL", "jev-1.13.0"),
+    // TypeSafe's own variable name is honoured as the fallback.
+    DECISION_API_KEY: optStr(env, "DECISION_API_KEY") ?? optStr(env, "TYPESAFE_API_KEY"),
 
     PUBLIC_URL: optStr(env, "PUBLIC_URL"),
   };

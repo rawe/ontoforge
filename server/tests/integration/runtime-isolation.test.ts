@@ -329,6 +329,7 @@ describe("the runtime surface itself", () => {
     expect(res.json()).toEqual({
       semanticSearch: false,
       ai: false,
+      entityIdentityComparison: false,
       searchStrategies:
         settings.DB_BACKEND === "postgres" ? ["keyword", "keyword-any", "keyword-all"] : [],
     });

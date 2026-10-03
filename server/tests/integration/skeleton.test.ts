@@ -66,6 +66,7 @@ describe("features route on a fully booted server", () => {
       expect(res.json()).toEqual({
         semanticSearch: false,
         ai: false,
+        entityIdentityComparison: false,
         searchStrategies:
           settings.DB_BACKEND === "postgres" ? ["keyword", "keyword-any", "keyword-all"] : [],
       });

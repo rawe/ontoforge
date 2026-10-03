@@ -42,6 +42,10 @@ Exactly one env file is read: the one `ENV_FILE` names, otherwise `.env` in the
 working directory. A variable already set in the environment wins over the file,
 and a named file that is missing fails the boot rather than falling back.
 
+The optional decision-model client is available for programmatic use only. See
+[Decision API](../docs/providers/decision-api.md) for its contract, configuration and
+local integration test. No decision-specific REST endpoint or UI is exposed.
+
 ## Tests
 
 | Command | Suite | Needs |
@@ -50,6 +54,7 @@ and a named file that is missing fails the boot rather than falling back.
 | `npm run test:integration` | Integration | docker-compose Neo4j |
 | `npm run test:integration:embedding` | Semantic search | Neo4j + Ollama |
 | `npm run test:integration:ai` | AI (slow, real model) | Neo4j + Ollama |
+| `npm run test:integration:decision` | Decision HTTP contract | Local decision API; no database |
 
 `npm run typecheck` runs the TypeScript compiler without emitting.
 

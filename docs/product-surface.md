@@ -501,7 +501,17 @@ place where nothing is written without an explicit second step.
    and explained. Missing required values are counted on the card.
    Where ranked search is available, each proposal is checked against up to three existing entities
    of its own type by their properties; candidates are offered as a "use this existing one instead" choice,
-   which turns that proposal into a link rather than a creation. A relation is blocked —
+   which turns that proposal into a link rather than a creation. When entity identity
+   comparison is available, an explicit **Compare identity** action compares the
+   edited scalar drafts with those candidates, up to three sequentially. Drafts use
+   the form's existing scalar conversion; invalid values must be corrected before
+   comparing, and document values are excluded. It shows
+   same, different or insufficient judgments; model probabilities and confidence
+   are expandable, and shortened context is identified. Editing the proposal or
+   changing the candidates discards old assessments and cancels pending comparisons.
+   Results never select an existing entity automatically; a failure is shown without
+   a fallback. See [entity identity comparison](capabilities/entity-identity-comparison.md).
+   A relation is blocked —
    with the reason spelled out — when its type is out of scope, when an endpoint is not
    among the proposals, or when an endpoint is neither checked for creation nor mapped to
    an existing entity. The raw response can be inspected at any point.
@@ -577,7 +587,8 @@ on the API for programmatic callers. See
 ## Feature gating
 
 The client asks the server once per session which optional capabilities exist, and treats
-the answer as never going stale. The report contains the available search strategies plus semantic-search and AI flags. None is
+the answer as never going stale. The report contains available search strategies plus
+semantic-search, AI and entity-identity-comparison flags. None is
 inferred from a failed call — the client never probes.
 
 Gated areas explain themselves rather than vanishing, except in navigation, where a dead
@@ -590,6 +601,7 @@ existence while the report is loading.
 | AI | The AI navigation entry, the AI palette action and the AI quick action are gone. The AI screen itself renders an explanation. The empty-state extraction step stays visible but dimmed, with an explanation. |
 | No search strategies | Entity search falls back to substring matching — per type in parallel when unscoped. Extraction review skips the duplicate check. |
 | Semantic search | Saved-query search falls back to client-side substring filtering over the full list. The search-data rebuild stays available and explains that it will skip the embeddings. |
+| Entity identity comparison | The extraction review's Compare identity action is absent; candidate discovery and manual selection still work. |
 
 Everything else works unchanged. See [capabilities/search.md](capabilities/search.md).
 

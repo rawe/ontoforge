@@ -314,16 +314,17 @@ per-ontology configuration.
 | Embedding | Provider, model, endpoint, credential, vector width | Semantic search unavailable |
 | Documents | Chunk size and overlap | Defaults apply |
 | Language model | Provider, model, endpoint, credential | AI capabilities unavailable |
-| Decision model | Endpoint, model, credential | No decision model installed |
+| Decision model | Endpoint, model, credential | Entity identity comparison unavailable |
 | Public URL | Base address advertised in agent cards | Cards advertise a local address |
 
 Exact variable names are in the repository README; they are deployment surface, not
 architecture.
 
 The optional decision-model contract answers typed choices, scores and yes/no
-probabilities about caller-supplied context. It is available for programmatic use inside
-the server; no REST, MCP or UI capability currently consumes it. It is independent of the language
-model and embeddings. Provider setup and the wire contract are documented in
+probabilities about caller-supplied context. It is independent of the language model
+and embeddings, and supports the explicit, read-only
+[entity identity comparison](capabilities/entity-identity-comparison.md) operation.
+Provider setup and the wire contract are documented in
 [providers/decision-api.md](providers/decision-api.md).
 
 ## What the architecture does not provide

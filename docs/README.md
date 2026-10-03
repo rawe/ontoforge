@@ -40,12 +40,13 @@ what rules bind it, and how it is reached from every interface.
 | [oql](capabilities/oql.md) | The query language |
 | [saved-queries](capabilities/saved-queries.md) | Stored, parameterized query pipelines |
 | [ai-agents](capabilities/ai-agents.md) | Natural-language querying, extraction, chat, A2A |
+| [entity-identity-comparison](capabilities/entity-identity-comparison.md) | Optional judgments about two partial entity snapshots |
 | [transfer](capabilities/transfer.md) | Schema export and import |
 
 ## Internal provider interfaces
 
 - **[Decision API](providers/decision-api.md)** — Optional internal client for typed
-  decisions; currently no REST, MCP or UI integration.
+  decisions, used by entity identity comparison.
 
 ## The central idea
 
@@ -141,12 +142,14 @@ See [interfaces.md](interfaces.md).
 
 ## Optional capabilities
 
-Two capabilities depend on external providers and are absent unless one is configured.
+Some capabilities depend on external providers and are absent unless one is configured.
 The server reports what is available, and clients hide what is not.
 
 - **Semantic search** needs an embedding provider. Without it, keyword ranking remains available where the adapter supports it.
 - **AI features** need a language-model provider. Without it, natural-language querying,
   extraction, chat and the agent protocol are unavailable.
+- **Entity identity comparison** needs a Decision provider. It remains independent of
+  language-model and embedding availability; see its [capability](capabilities/entity-identity-comparison.md).
 
 Everything else works with no external dependency beyond the database.
 

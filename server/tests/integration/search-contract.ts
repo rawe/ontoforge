@@ -142,6 +142,7 @@ export function searchContract(embedding: boolean, enabled = true) {
       expect((await app.inject({ url: "/api/server/features" })).json()).toEqual({
         semanticSearch: embedding,
         ai: false,
+        entityIdentityComparison: false,
         searchStrategies: defaults,
       });
       expect((await app.inject({ url: `${runtime}/search/semantic?q=graph` })).statusCode).toBe(

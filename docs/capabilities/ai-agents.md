@@ -67,6 +67,11 @@ existing data. Reviewing the proposals and creating through the ordinary entity 
 relation operations ([instance-data.md](instance-data.md)) is the path that gives you
 matching, deduplication and error reporting.
 
+The web review can additionally request an advisory
+[entity identity comparison](entity-identity-comparison.md) against existing candidates.
+That optional Decision-provider operation is separate from extraction and does not
+change its persistence rules.
+
 ### Chat
 
 Multi-turn conversation with tools. The model reads the schema, decides which tools to

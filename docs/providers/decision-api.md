@@ -2,8 +2,8 @@
 
 OntoForge provides an optional internal client for typed decisions about caller-supplied
 context. It returns structured judgments rather than generated text. It is independent
-of the language model, embeddings and storage. No REST endpoint, MCP tool or UI
-currently consumes it.
+of the language model, embeddings and storage. Its consumer is
+[entity identity comparison](../capabilities/entity-identity-comparison.md).
 
 ## Supported primitives
 

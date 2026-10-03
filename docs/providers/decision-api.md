@@ -10,11 +10,14 @@ currently consumes it.
 | Primitive | Input | Answer |
 |---|---|---|
 | `choice` | Named options with descriptions | Selected option, probability for every option, and confidence |
+| `score` | 2–10 ordered level descriptions | Fractional score, probability for every level, level legend, and confidence |
 | `noul` | A yes/no question | Probability of yes |
 
 Several named questions can share one state in a single call. Answers use the same
-question keys. Only these two primitives are supported; `score` is not implemented.
-The caller decides how to act on probabilities and uncertainty.
+question keys. For `score`, describe each level in words and order the descriptions
+from low to high. The score is the probability-weighted position on these zero-based
+levels, from 0 to the last level; it can fall between levels. The caller decides how
+to act on probabilities and uncertainty.
 
 ## Provider contract
 
@@ -31,7 +34,12 @@ The client implements the TypeSafe/System One-compatible HTTP contract:
       "instructions": "Classify the request.",
       "criteria": {"account": "Account access", "billing": "Payments"}
     },
-    "access": {"type": "noul", "instructions": "Is this about account access?"}
+    "access": {"type": "noul", "instructions": "Is this about account access?"},
+    "severity": {
+      "type": "score",
+      "instructions": "How severe is the reported issue?",
+      "criteria": ["Cosmetic issue", "Feature degraded; workaround exists", "Blocking issue"]
+    }
   }
 }
 ```

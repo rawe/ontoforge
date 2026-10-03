@@ -320,9 +320,9 @@ per-ontology configuration.
 Exact variable names are in the repository README; they are deployment surface, not
 architecture.
 
-The optional decision-model contract answers typed choices and yes/no probabilities
-about caller-supplied context. It is available for programmatic use inside the server;
-no REST, MCP or UI capability currently consumes it. It is independent of the language
+The optional decision-model contract answers typed choices, scores and yes/no
+probabilities about caller-supplied context. It is available for programmatic use inside
+the server; no REST, MCP or UI capability currently consumes it. It is independent of the language
 model and embeddings. Provider setup and the wire contract are documented in
 [providers/decision-api.md](providers/decision-api.md).
 

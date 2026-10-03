@@ -17,10 +17,15 @@ import {
 const questions: Record<string, DecisionQuestion> = {
   route: { type: "choice", instructions: "Choose a route", criteria: { graph: "Graph data", schema: null } },
   relevant: { type: "noul", instructions: "Is this relevant?" },
+  relevance: { type: "score", instructions: "Rate relevance", criteria: ["Unrelated", "Partly related", "Directly related"] },
 };
 const answers = {
   route: { type: "choice", choice: "graph", probabilities: { graph: 0.75, schema: 0.25 }, confidence: 0.75 },
   relevant: { type: "noul", noul: 0.6 },
+  relevance: {
+    type: "score", score: 1.5, legend: { "0": "Unrelated", "1": "Partly related", "2": "Directly related" },
+    probabilities: { "0": 0.1, "1": 0.3, "2": 0.6 }, confidence: 0.6,
+  },
 };
 
 describe("Decision HTTP contract", () => {
@@ -49,10 +54,13 @@ describe("Decision HTTP contract", () => {
     expect(new Headers(request?.headers).get("content-type")).toBe("application/json");
     expect(new Headers(request?.headers).get("authorization")).toBe(key ? `Bearer ${key}` : null);
     expect(JSON.parse(request?.body as string)).toEqual({ model: "local-decision", state, questions });
+    expect(JSON.parse(request?.body as string).questions.relevance.criteria)
+      .toEqual(["Unrelated", "Partly related", "Directly related"]);
   });
 
   it.each([
     ["missing answer", { route: answers.route }],
+    ["missing score answer", { route: answers.route, relevant: answers.relevant }],
     ["wrong answer type", { ...answers, relevant: answers.route }],
     ["unknown choice", { ...answers, route: { ...answers.route, choice: "other" } }],
     ["missing option probability", { ...answers, route: { ...answers.route, probabilities: { graph: 1 } } }],
@@ -73,6 +81,63 @@ describe("Decision HTTP contract", () => {
         .rejects.toThrow("invalid answer");
     },
   );
+
+  it.each([
+    ["missing score", { ...answers.relevance, score: undefined }],
+    ["malformed score", { ...answers.relevance, score: "1.5" }],
+    ["missing legend", { ...answers.relevance, legend: undefined }],
+    ["malformed legend", { ...answers.relevance, legend: { "0": null, "1": "Partly related", "2": "Directly related" } }],
+    ["missing legend level", { ...answers.relevance, legend: { "0": "Unrelated", "1": "Partly related" } }],
+    ["unknown legend level", { ...answers.relevance, legend: { ...answers.relevance.legend, "3": "Other" } }],
+    ["non-index legend level", { ...answers.relevance, legend: { "00": "Unrelated", "1": "Partly related", "2": "Directly related" } }],
+    ["wrong legend description", { ...answers.relevance, legend: { ...answers.relevance.legend, "1": "Other" } }],
+    ["missing probabilities", { ...answers.relevance, probabilities: undefined }],
+    ["missing probability level", { ...answers.relevance, probabilities: { "0": 0.4, "1": 0.6 } }],
+    ["unknown probability level", { ...answers.relevance, probabilities: { "0": 0.1, "1": 0.3, "3": 0.6 } }],
+    ["non-index probability level", { ...answers.relevance, probabilities: { "00": 0.1, "1": 0.3, "2": 0.6 } }],
+    ["extra probability level", { ...answers.relevance, probabilities: { ...answers.relevance.probabilities, "3": 0 } }],
+    ["negative score", { ...answers.relevance, score: -0.1 }],
+    ["score above last level", { ...answers.relevance, score: 2.1 }],
+    ["negative confidence", { ...answers.relevance, confidence: -0.1 }],
+    ["missing confidence", { ...answers.relevance, confidence: undefined }],
+    ["confidence above one", { ...answers.relevance, confidence: 1.1 }],
+    ["out-of-range score probability", { ...answers.relevance, probabilities: { "0": -0.1, "1": 0.3, "2": 0.8 } }],
+    ["unnormalized score probabilities", { ...answers.relevance, probabilities: { "0": 0.2, "1": 0.2, "2": 0.2 } }],
+    ["score inconsistent with weighted probabilities", { ...answers.relevance, score: 1.8 }],
+  ])("rejects %s before callers receive a score", async (_label, invalidScore) => {
+    fetchMock.mockResolvedValue(Response.json({ answers: { ...answers, relevance: invalidScore } }));
+    await expect(createDecisionModel("http://localhost:8002", "local", null).decide({}, questions))
+      .rejects.toThrow("invalid answer");
+  });
+
+  it("accepts rounded score probabilities and their fractional weighted mean", async () => {
+    const rounded = { ...answers, relevance: {
+      ...answers.relevance, score: 1.989, probabilities: { "0": 0.0012, "1": 0.0088, "2": 0.9901 }, confidence: 0.9901,
+    } };
+    fetchMock.mockResolvedValue(Response.json({ answers: rounded }));
+    await expect(createDecisionModel("http://localhost:8002", "local", null).decide({}, questions)).resolves.toEqual(rounded);
+  });
+
+  it.each([1, 11])("rejects a score of %i levels without sending it", async (count) => {
+    const criteria = Array.from({ length: count }, (_, i) => `Level ${i}`);
+    await expect(createDecisionModel("http://localhost:8002", "local", null).decide({}, {
+      rating: { type: "score", instructions: "Rate", criteria },
+    })).rejects.toThrow("2–10");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([2, 10])("accepts a score of %i ordered levels", async (count) => {
+    const criteria = Array.from({ length: count }, (_, i) => `Level ${i}`);
+    const expected = { rating: {
+      type: "score", score: count - 1, confidence: 1,
+      legend: Object.fromEntries(criteria.map((description, i) => [String(i), description])),
+      probabilities: Object.fromEntries(criteria.map((_, i) => [String(i), i === count - 1 ? 1 : 0])),
+    } };
+    fetchMock.mockResolvedValue(Response.json({ answers: expected }));
+    await expect(createDecisionModel("http://localhost:8002", "local", null).decide({}, {
+      rating: { type: "score", instructions: "Rate", criteria },
+    })).resolves.toEqual(expected);
+  });
 
   it.each([0, 33])("rejects a batch of %i questions without sending it", async (count) => {
     const batch = Object.fromEntries(Array.from({ length: count }, (_, i) => [String(i), questions.relevant!]));

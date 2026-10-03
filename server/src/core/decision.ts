@@ -1,6 +1,6 @@
 /**
  * Decision-model provider contract. A decision model answers typed
- * questions — a choice among named options, or a yes/no probability — about
+ * questions — a choice, a score on ordered levels, or a yes/no probability — about
  * a small JSON state. It never abstains: every threshold lives with the
  * caller.
  *
@@ -28,7 +28,14 @@ export interface NoulQuestion {
   instructions: string;
 }
 
-export type DecisionQuestion = ChoiceQuestion | NoulQuestion;
+/** Rate against 2..10 ordered levels; their positions start at zero. */
+export interface ScoreQuestion {
+  type: "score";
+  instructions: string;
+  criteria: string[];
+}
+
+export type DecisionQuestion = ChoiceQuestion | ScoreQuestion | NoulQuestion;
 
 export interface ChoiceAnswer {
   type: "choice";
@@ -42,7 +49,16 @@ export interface NoulAnswer {
   noul: number;
 }
 
-export type DecisionAnswer = ChoiceAnswer | NoulAnswer;
+/** A probability-weighted position on the requested levels, not an integer choice. */
+export interface ScoreAnswer {
+  type: "score";
+  score: number;
+  legend: Record<string, string>;
+  probabilities: Record<string, number>;
+  confidence: number;
+}
+
+export type DecisionAnswer = ChoiceAnswer | ScoreAnswer | NoulAnswer;
 
 export interface DecisionModel {
   /** Answer 1..32 questions about one state in a single call. */
@@ -59,6 +75,9 @@ const probability = z.number().min(0).max(1);
 const answerSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("choice"), choice: z.string(),
     probabilities: z.record(z.string(), probability), confidence: probability }),
+  z.object({ type: z.literal("score"), score: z.number(),
+    legend: z.record(z.string(), z.string()),
+    probabilities: z.record(z.string(), probability), confidence: probability }),
   z.object({ type: z.literal("noul"), noul: probability }),
 ]);
 
@@ -70,13 +89,23 @@ function parseAnswers(value: unknown, questions: Record<string, DecisionQuestion
   for (const [key, question] of Object.entries(questions)) {
     const answer = parsed.data.answers[key];
     if (!answer || answer.type !== question.type) throw invalid();
-    if (question.type === "choice" && answer.type === "choice") {
-      const options = Object.keys(question.criteria);
-      if (!options.includes(answer.choice) ||
-          Object.keys(answer.probabilities).length !== options.length ||
+    if (question.type !== "noul" && answer.type !== "noul") {
+      const options = question.type === "choice" ? Object.keys(question.criteria)
+        : question.criteria.map((_, index) => String(index));
+      if (Object.keys(answer.probabilities).length !== options.length ||
           options.some((option) => answer.probabilities[option] === undefined) ||
           Math.abs(Object.values(answer.probabilities).reduce((sum, p) => sum + p, 0) - 1) > 0.02) {
         throw invalid();
+      }
+      if (answer.type === "choice" && !options.includes(answer.choice)) throw invalid();
+      if (question.type === "score" && answer.type === "score") {
+        const expectedScore = options.reduce((sum, key) => sum + Number(key) * answer.probabilities[key]!, 0);
+        if (answer.score < 0 || answer.score > question.criteria.length - 1 ||
+            Math.abs(answer.score - expectedScore) > 0.02 ||
+            Object.keys(answer.legend).length !== options.length ||
+            options.some((key) => answer.legend[key] !== question.criteria[Number(key)])) {
+          throw invalid();
+        }
       }
     }
   }
@@ -93,8 +122,9 @@ export function createDecisionModel(
     async decide(state, questions, signal) {
       const entries = Object.values(questions);
       if (entries.length === 0 || entries.length > 32 || entries.some((q) =>
-        q.type === "choice" && (Object.keys(q.criteria).length < 2 || Object.keys(q.criteria).length > 255))) {
-        throw new Error("Decision requests require 1–32 questions and 2–255 options per choice");
+        (q.type === "choice" && (Object.keys(q.criteria).length < 2 || Object.keys(q.criteria).length > 255)) ||
+        (q.type === "score" && (q.criteria.length < 2 || q.criteria.length > 10)))) {
+        throw new Error("Decision requests require 1–32 questions, 2–255 options per choice and 2–10 levels per score");
       }
       const timeout = AbortSignal.timeout(TIMEOUT_MS);
       const response = await fetch(url, {

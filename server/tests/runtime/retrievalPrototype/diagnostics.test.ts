@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { diagnosticResults, TRACE_CHARACTERS } from './diagnostics.js';
-import { boundContext, type Retrieval } from './search.js';
+import { diagnosticResults, TRACE_CHARACTERS } from '../../../src/runtime/retrievalPrototype/diagnostics.js';
+import { boundContext, type Retrieval } from '../../../src/runtime/retrievalPrototype/search.js';
 
 function retrieval(count: number, detailCharacters: number): Retrieval {
   return {

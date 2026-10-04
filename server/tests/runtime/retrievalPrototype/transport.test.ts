@@ -1,8 +1,8 @@
-import { PLANNER_RESPONSE_FORMAT } from './plannerFormat.js';
+import { PLANNER_RESPONSE_FORMAT } from '../../../src/runtime/retrievalPrototype/plannerFormat.js';
 import { describe, it, expect, vi } from 'vitest';
 import type { ChatOpenAI } from '@langchain/openai';
-import { createAiModel } from '../../core/ai.js';
-import { parsePlannerOutput } from './plannerOutput.js';
+import { createAiModel } from '../../../src/core/ai.js';
+import { parsePlannerOutput } from '../../../src/runtime/retrievalPrototype/plannerOutput.js';
 
 function transport(model: unknown, fetchFn: typeof fetch) {
   (model as unknown as { completions: { clientConfig: { fetch?: typeof fetch } } }).completions.clientConfig.fetch = fetchFn;
@@ -19,7 +19,7 @@ function completion(content: string) {
 describe('planner JSON mode at the real SDK transport boundary', () => {
   it('transports the strict plan schema with every object closed and every property required', async () => {
     const requests: Record<string, unknown>[] = [];
-    const model = createAiModel('ollama', 'fake', 'http://fake.invalid', { maxRetries: 0, maxTokens: 1800 }) as ChatOpenAI;
+    const model = createAiModel('ollama', 'fake', 'http://fake.invalid', { maxRetries: 0 }) as ChatOpenAI;
     const planner = model.withConfig({ response_format: PLANNER_RESPONSE_FORMAT });
     const fetchFn = vi.fn(async (_url: unknown, init?: RequestInit) => {
       requests.push(JSON.parse(String(init!.body)));
@@ -47,7 +47,7 @@ describe('planner JSON mode at the real SDK transport boundary', () => {
 
   it('sends json_object for the planner only and keeps the response stream in text mode', async () => {
     const requests: Record<string, unknown>[] = [];
-    const model = createAiModel('ollama', 'fake', 'http://fake.invalid', { maxRetries: 0, maxTokens: 1800 }) as ChatOpenAI;
+    const model = createAiModel('ollama', 'fake', 'http://fake.invalid', { maxRetries: 0 }) as ChatOpenAI;
     const fetchFn = vi.fn(async (_url: unknown, init?: RequestInit) => {
       const body = JSON.parse(String(init!.body));
       requests.push(body);
@@ -66,7 +66,9 @@ describe('planner JSON mode at the real SDK transport boundary', () => {
     for await (const chunk of stream) response += chunk.content;
     expect(response).toBe('Hello');
     expect(requests).toHaveLength(2);
-    expect(requests[0]).toMatchObject({ response_format: { type: 'json_object' }, max_tokens: 1800 });
+    expect(requests[0]).toMatchObject({ response_format: { type: 'json_object' } });
+    expect(requests[0]).not.toHaveProperty('max_tokens');
+    expect(requests[1]).not.toHaveProperty('max_tokens');
     expect(requests[1]).not.toHaveProperty('response_format');
     expect(requests[1]).toHaveProperty('stream', true);
     expect(fetchFn).toHaveBeenCalledTimes(2);

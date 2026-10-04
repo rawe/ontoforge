@@ -7,29 +7,29 @@ import {
 import {
   validateConfig,
   type Config
-} from './config.js';
+} from '../../../src/runtime/retrievalPrototype/config.js';
 import {
   validatePlan,
   retrieve,
   boundContext,
   type Plan
-} from './search.js';
+} from '../../../src/runtime/retrievalPrototype/search.js';
 import {
   walk,
   vector,
   readSnapshot,
   type Snapshot,
   type EmbeddingStats
-} from './snapshot.js';
+} from '../../../src/runtime/retrievalPrototype/snapshot.js';
 import type {
   SchemaCacheValue
-} from '../schemaCache.js';
+} from '../../../src/runtime/schemaCache.js';
 import type {
   EmbeddingProvider
-} from '../../core/embedding.js';
+} from '../../../src/core/embedding.js';
 import type {
   RuntimeStore
-} from '../../core/ports.js';
+} from '../../../src/core/ports.js';
 const prop=(key:string)=>({
   key,
   displayName:key,

@@ -1,4 +1,4 @@
-import { PLANNER_RESPONSE_FORMAT } from './plannerFormat.js';
+import { PLANNER_RESPONSE_FORMAT } from '../../../src/runtime/retrievalPrototype/plannerFormat.js';
 import {
   describe,
   it,
@@ -11,28 +11,28 @@ const fake=vi.hoisted(()=>({
   stream:vi.fn(),
   withConfig:vi.fn()
 }));
-vi.mock('../../config.js',()=>({
+vi.mock('../../../src/config.js',()=>({
   settings:{
     AI_PROVIDER:'fake',
     AI_MODEL:'test',
     AI_BASE_URL:'http://unused'
   }
 }));
-vi.mock('../../core/ai.js',()=>({
+vi.mock('../../../src/core/ai.js',()=>({
   createAiModel:vi.fn(()=>fake)
 }));
-vi.mock('../../core/embedding.js',()=>({
+vi.mock('../../../src/core/embedding.js',()=>({
   getEmbeddingProvider:()=>null
 }));
 import {
   chat
-} from './runtime.js';
+} from '../../../src/runtime/retrievalPrototype/runtime.js';
 import type {
   RuntimeStore
-} from '../../core/ports.js';
+} from '../../../src/core/ports.js';
 import {
   createAiModel
-} from '../../core/ai.js';
+} from '../../../src/core/ai.js';
 const props=[{
   key:'name',
   displayName:'Name',

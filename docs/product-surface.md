@@ -476,8 +476,10 @@ copies/moves within the ontology, and imports/exports one JSON definition, with 
 review before writes. Unsaved edits block saved execution until saved or explicitly
 previewed as a draft. Invalid references remain visible for repair; unsupported shapes
 can be exported or reviewed as a version 1 repair. Profile changes clear the conversation.
-Prepare and chat offer cancellation. A "Show diagnostics" switch requests and shows
-expandable candidate/timing/model traces per answer; it is off by default.
+Prepare and chat offer cancellation. A "Show diagnostics" switch, off by default,
+requests diagnostics and opens a side panel for one selected answer with Overview
+(step timings, reuse, limitations), Plan, Results (ranked candidates, scores against
+the threshold, evidence) and Model calls.
 See [capabilities/retrievers.md](capabilities/retrievers.md) for persistence and execution
 boundaries. The existing local draft is not automatically uploaded.
 

@@ -16,6 +16,12 @@ import { chatSavedRetriever, prepareSavedRetriever, type RetrieverProfile } from
 import { RetrieverProfiles } from './RetrieverProfiles'
 import { editableRetrievalConfig, retrieverExecution } from './retrieverProfileState'
 
+const diagnosticsKey = 'ontoforge.retriever.diagnostics'
+
+function readDiagnostics() {
+  try { return localStorage.getItem(diagnosticsKey) === 'true' } catch { return false }
+}
+
 type PathChoice = { key: string; path: RetrievalPathStep[]; label: string; target: RetrievalType }
 type Turn = { id: string; question: string; reply: string; status: 'pending' | 'complete' | 'failed'; error?: string; meta: RetrievalMeta }
 const selectClass = 'h-8 rounded-md border bg-background px-2 text-sm disabled:opacity-50'
@@ -171,6 +177,7 @@ function RetrieverEditor({ ontologyKey, lensKey, catalog }: { ontologyKey: strin
   const [preview, setPreview] = useState(false)
   const [managementBusy, setManagementBusy] = useState(false)
   const [repairReviewed, setRepairReviewed] = useState(false)
+  const [diagnostics, setDiagnostics] = useState(readDiagnostics)
   const active = useRef<AbortController | null>(null)
   const turnToken = useRef<string | undefined>(undefined)
   const scroll = useRef<HTMLDivElement>(null)
@@ -206,6 +213,10 @@ function RetrieverEditor({ ontologyKey, lensKey, catalog }: { ontologyKey: strin
   function updateCondition(index: number, change: Partial<RetrievalCondition>) {
     if (bucket) updateBucket({ ...bucket, conditions: bucket.conditions.map((c, i) => i === index ? { ...c, ...change } : c) })
   }
+  function toggleDiagnostics(next: boolean) {
+    setDiagnostics(next)
+    try { localStorage.setItem(diagnosticsKey, String(next)) } catch { /* the choice applies until the tab is left */ }
+  }
   function cancel() { active.current?.abort() }
   async function prepare() {
     if (!valid || execution.mode === 'blocked' || busy || active.current) return
@@ -236,17 +247,23 @@ function RetrieverEditor({ ontologyKey, lensKey, catalog }: { ontologyKey: strin
         switch (event.type) {
           case 'phase': setPhase(`${phaseNames[event.phase] ?? event.phase}${event.status === 'start' ? ' …' : ' completed'}`); break
           case 'delta': turn = { ...turn, reply: turn.reply + event.text }; break
-          case 'meta': if (event.turnToken) nextToken = event.turnToken; turn = { ...turn, meta: { ...turn.meta, ...event,
-            timings: { ...turn.meta.timings, ...event.timings },
-            modelIO: event.modelIO ? [...(turn.meta.modelIO ?? []).filter((call) => !event.modelIO?.some((next) => next.phase === call.phase)), ...event.modelIO] : turn.meta.modelIO,
-            limitations: [...new Set([...(turn.meta.limitations ?? []), ...(event.limitations ?? [])])],
-          } }; break
+          case 'meta': {
+            // The follow-up token arrives in every stream; everything else only when diagnostics were requested.
+            const { turnToken: token, ...data } = event
+            if (token) nextToken = token
+            if (Object.keys(data).some((key) => key !== 'type')) turn = { ...turn, meta: { ...turn.meta, ...data,
+              timings: { ...turn.meta.timings, ...data.timings },
+              modelIO: data.modelIO ? [...(turn.meta.modelIO ?? []).filter((call) => !data.modelIO?.some((next) => next.phase === call.phase)), ...data.modelIO] : turn.meta.modelIO,
+              limitations: [...new Set([...(turn.meta.limitations ?? []), ...(data.limitations ?? [])])],
+            } }
+            break
+          }
           case 'final': turn = { ...turn, reply: event.reply, status: 'complete' }; turnToken.current = nextToken; setPhase('Answer complete'); break
           case 'error': turn = { ...turn, status: 'failed', error: event.error.message }; setPhase('Retrieval failed'); break
         }
         save()
       }
-      const body = { message: question, history, turnToken: turnToken.current }
+      const body = { message: question, history, turnToken: turnToken.current, diagnostics }
       if (execution.mode === 'saved') await chatSavedRetriever(ontologyKey, lensKey, execution.key, body, onEvent, controller.signal)
       else await chatRetrieval(ontologyKey, lensKey, { ...body, config }, onEvent, controller.signal)
     } catch (err) {
@@ -319,13 +336,13 @@ function RetrieverEditor({ ontologyKey, lensKey, catalog }: { ontologyKey: strin
       </div>
     </aside>
     <section className="flex min-h-[440px] min-w-0 flex-1 flex-col">
-      <div className="flex items-center justify-between gap-3 border-b px-4 py-3"><div><h2 className="text-sm font-medium">Questions for {profile?.name ?? 'the browser draft'}</h2><p className="mt-1 text-xs text-muted-foreground">{execution.mode === 'saved' ? `Server configuration: ${lensKey} / ${execution.key}` : execution.mode === 'draft' ? 'Draft preview · unsaved request configuration' : 'Unsaved or invalid configuration · execution blocked'}</p></div><Button size="sm" variant="ghost" disabled={busy || !turns.length} onClick={() => { setTurns([]); setPhase(''); turnToken.current = undefined }}>New conversation</Button></div>
+      <div className="flex items-center justify-between gap-3 border-b px-4 py-3"><div><h2 className="text-sm font-medium">Questions for {profile?.name ?? 'the browser draft'}</h2><p className="mt-1 text-xs text-muted-foreground">{execution.mode === 'saved' ? `Server configuration: ${lensKey} / ${execution.key}` : execution.mode === 'draft' ? 'Draft preview · unsaved request configuration' : 'Unsaved or invalid configuration · execution blocked'}</p></div><div className="flex shrink-0 items-center gap-3"><label className="flex cursor-pointer items-center gap-2 text-xs" title="Stream the search plan, scores, timings and model calls with each answer"><Checkbox checked={diagnostics} onCheckedChange={(checked) => toggleDiagnostics(checked === true)} />Show diagnostics</label><Button size="sm" variant="ghost" disabled={busy || !turns.length} onClick={() => { setTurns([]); setPhase(''); turnToken.current = undefined }}>New conversation</Button></div></div>
       <div ref={scroll} className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
         {!turns.length && <div className="mx-auto max-w-lg py-12 text-sm text-muted-foreground"><h3 className="mb-2 text-base font-medium text-foreground">Configure, prepare, ask</h3><p>Choose result types and contents on the left. Exact conditions narrow the search; descriptions help with related terms.</p><p className="mt-3">Ask about a topic, an exact assignment, or both. Follow-up questions refer to completed answers in this conversation.</p></div>}
         {turns.map((turn) => <article key={turn.id} className="mx-auto max-w-3xl space-y-3"><div className="ml-auto max-w-[90%] rounded-lg bg-muted px-4 py-3 text-sm whitespace-pre-wrap">{turn.question}</div>
           <div className="text-sm">{turn.reply ? <Markdown>{turn.reply}</Markdown> : turn.status === 'pending' ? <span className="text-muted-foreground">Retrieval in progress …</span> : null}
             {turn.error && <p role="alert" className="mt-2 text-destructive">{turn.error}</p>}
-            {Object.keys(turn.meta).length > 0 && <Inspection meta={turn.meta} catalog={catalog} />}
+            {diagnostics && Object.keys(turn.meta).length > 0 && <Inspection meta={turn.meta} catalog={catalog} />}
           </div></article>)}
       </div>
       <div className="space-y-2 border-t p-4"><div className="flex min-h-5 items-center gap-2 text-xs text-muted-foreground" role="status">{busy && <LoaderCircle className="size-3 animate-spin" />}{phase}{busy && <Button variant="ghost" size="sm" className="ml-auto h-6" onClick={cancel}><Square className="size-3" />Cancel</Button>}</div>

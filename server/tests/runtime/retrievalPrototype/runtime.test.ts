@@ -114,7 +114,7 @@ describe('fixed LangGraph prototype pipeline',()=>{
     await expect(chat('l', store, config, 'List entries', [], {
       signal: new AbortController().signal,
       onToolEvent: async event => { events.push(event); },
-    })).rejects.toThrow('token limit');
+    }, undefined, true)).rejects.toThrow('token limit');
     const metadata = events.find(event => event.type === 'meta' && event.modelIO);
     expect(metadata?.modelIO).toEqual([expect.objectContaining({ output: '{"buckets":[', finishReason: 'length', usage: { output_tokens: 1800 } })]);
     expect(fake.invoke).toHaveBeenCalledTimes(1);
@@ -130,7 +130,7 @@ describe('fixed LangGraph prototype pipeline',()=>{
       onToolEvent:async e=>{
         events.push(e);
       }
-    });
+    },undefined,true);
     expect(fake.invoke).toHaveBeenCalledTimes(1);
     expect(fake.withConfig).toHaveBeenCalledWith({ response_format: PLANNER_RESPONSE_FORMAT });
     expect(fake.stream).toHaveBeenCalledTimes(1);
@@ -139,8 +139,9 @@ describe('fixed LangGraph prototype pipeline',()=>{
     });
     expect(result.reply).toBe(events.filter(e=>e.type==='delta').map(e=>e.text).join(''));
     expect(events.at(-1)).toHaveProperty('turnToken');
-    expect(events.at(-1)).toHaveProperty('llmCalls',2);
-    const entries = events.at(-1)!.modelIO as { phase: string; input: string; systemPrompt: string; inputTruncated: boolean }[];
+    const summary = events.find(e => e.type === 'meta' && e.llmCalls !== undefined)!;
+    expect(summary).toHaveProperty('llmCalls',2);
+    const entries = summary.modelIO as { phase: string; input: string; systemPrompt: string; inputTruncated: boolean }[];
     expect(entries).toHaveLength(2);
     for (const entry of entries) {
       expect(entry.systemPrompt.length).toBeGreaterThan(0);
@@ -155,6 +156,17 @@ describe('fixed LangGraph prototype pipeline',()=>{
     expect(entries[1]!.input).toBe(responseMessages[1].content);
 
   });
+  it('without diagnostics streams progress, answer and only the turn token as metadata', async () => {
+    const events: Record<string, unknown>[] = [];
+    await chat('l', store, config, 'List all entries', [], {
+      signal: new AbortController().signal,
+      onToolEvent: async event => { events.push(event); },
+    }, undefined, false);
+    const metadata = events.filter(event => event.type === 'meta');
+    expect(metadata).toEqual([{ type: 'meta', turnToken: expect.any(String) }]);
+    expect(events.some(event => event.type === 'phase')).toBe(true);
+    expect(events.some(event => event.type === 'delta')).toBe(true);
+  });
   it('rejects unsupported invented semantics before any response call',async()=>{
     fake.invoke.mockResolvedValue({
       content:JSON.stringify({
@@ -168,7 +180,7 @@ describe('fixed LangGraph prototype pipeline',()=>{
       signal:new AbortController().signal,
       onToolEvent:async()=>{
       }
-    })).rejects.toThrow('user evidence');
+    },undefined,false)).rejects.toThrow('user evidence');
     expect(fake.invoke).toHaveBeenCalledTimes(1);
     expect(fake.withConfig).toHaveBeenCalledWith({ response_format: PLANNER_RESPONSE_FORMAT });
     expect(fake.stream).not.toHaveBeenCalled();
@@ -180,7 +192,7 @@ describe('fixed LangGraph prototype pipeline',()=>{
       signal:controller.signal,
       onToolEvent:async()=>{
       }
-    })).rejects.toBeDefined();
+    },undefined,false)).rejects.toBeDefined();
     expect(fake.invoke).not.toHaveBeenCalled();
     expect(fake.stream).not.toHaveBeenCalled();
   });

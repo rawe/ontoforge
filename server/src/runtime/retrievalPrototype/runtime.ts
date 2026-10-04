@@ -142,11 +142,15 @@ Use only selected buckets and configured conditions. Preserve all user-requested
 Pure exact lists: semanticQuery null, no soft conditions, all true if the user asks for all. For a topical search, semanticQuery must be the shortest useful verbatim topical phrase from the question or an explicitly referenced earlier USER message. Exclude question introductions, exact location/type constraints, and formatting or attribution instructions from semanticQuery. Activate only relevant softConditionIds; use category descriptions when the topic concerns the class of requested objects. Do not turn soft conditions into exact filters. Up to three short semantically equivalent variants are allowed; do not add requirements, [] is allowed. The original semanticQuery remains the reranking basis.
 For an explicit reference to previous results (this/these/those/their or equivalent in the user's language), set previous:{conditionId:null,quote:"verbatim user reference"} for the same result type, or use the ID of an allowed hard relation path leading to a previousVerifiedResults type. A singular reference requires exactly one previous entity; otherwise explain the ambiguity as unsupportedReason. Use previous:null for independent questions. Without previousVerifiedResults, ASSISTANT text cannot authorize an exact entity filter. Follow-up questions may retain only explicitly referenced earlier USER topics and add the newly requested constraints.
 If the visible schema cannot answer the requested facts (such as missing revenue or employee-count fields, or a requested entity class absent from the schema), return buckets:[] with a short unsupportedReason in the user's language. Do not substitute vaguely similar result types. No Markdown.`;
-export async function chat(lens:string,store:RuntimeStore,config:unknown,message:string,rawHistory:History[],execution:StreamExecution,turnToken?:string):Promise<Record<string,unknown>>{
+export async function chat(lens:string,store:RuntimeStore,config:unknown,message:string,rawHistory:History[],execution:StreamExecution,turnToken:string|undefined,diagnostics:boolean):Promise<Record<string,unknown>>{
   const {
     signal,
     onToolEvent:emit
   } = execution;
+  // Without diagnostics the stream carries progress, answer and the follow-up token only.
+  const meta=async(payload:Record<string,unknown>)=>{
+    if(diagnostics)await emit({type:'meta',...payload});
+  };
   const started=performance.now();
   const timings:Record<string,
   number>={
@@ -246,13 +250,12 @@ export async function chat(lens:string,store:RuntimeStore,config:unknown,message
       };
       io.push(modelIO);
       // Emit visible model output before parsing so failed plans remain diagnosable.
-      await emit({ type: 'meta', modelIO: [modelIO], timings: { planModel: timings.planModel } });
+      await meta({ modelIO: [modelIO], timings: { planModel: timings.planModel } });
       const validation = performance.now();
       const parsed = parsePlannerOutput(output, finishReason);
       const plan = validatePlan(parsed, snapshot, message, history, previous);
       timings.validation = performance.now() - validation;
-      await emit({
-        type:'meta',
+      await meta({
         plan,
         modelIO:[io[0]],
         fingerprint:snapshot.fingerprint
@@ -281,8 +284,7 @@ export async function chat(lens:string,store:RuntimeStore,config:unknown,message
       scoring:stats.scoringMs??0
     });
     const diagnostic = diagnosticResults(retrieval, context);
-    await emit({
-      type:'meta',
+    await meta({
       results: diagnostic.results,
       trace: diagnostic.trace,
       limitations: [...context.limitations, ...diagnostic.limitations],
@@ -364,13 +366,15 @@ Respect every limitation. An omitted count means technically selected candidates
   timings.total=performance.now()-started;
   timings.answerModel=timings.answer??0;
   const nextToken=remember(result.snapshot,result.plan,result.retrieval.results,result.previous,result.context);
-  await emit({
-    type:'meta',
+  await meta({
     timings,
     modelIO:io,
     ...stats,
     llmCalls:2,
-    limits:LIMITS,
+    limits:LIMITS
+  });
+  await emit({
+    type:'meta',
     turnToken:nextToken
   });
   return{

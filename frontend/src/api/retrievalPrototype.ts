@@ -106,7 +106,7 @@ function parseEvent(event: Record<string, unknown>): RetrievalEvent {
 
 export async function chatRetrieval(
   ontologyKey: string, lensKey: string,
-  body: { config: RetrievalConfig; message: string; history: ChatMessage[]; turnToken?: string },
+  body: { config: RetrievalConfig; message: string; history: ChatMessage[]; turnToken?: string; diagnostics?: boolean },
   onEvent: (event: RetrievalEvent) => void, signal: AbortSignal,
 ) {
   const response = await fetch(`${base(ontologyKey, lensKey)}/chat`, {

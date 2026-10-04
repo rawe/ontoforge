@@ -43,7 +43,7 @@ export const prepareSavedRetriever = (ontologyKey: string, lensKey: string, key:
 
 export async function chatSavedRetriever(
   ontologyKey: string, lensKey: string, key: string,
-  body: { message: string; history: ChatMessage[]; turnToken?: string },
+  body: { message: string; history: ChatMessage[]; turnToken?: string; diagnostics?: boolean },
   onEvent: (event: RetrievalEvent) => void, signal: AbortSignal,
 ) {
   const response = await fetch(`${runtimeProfile(ontologyKey, lensKey, key)}/chat`, {

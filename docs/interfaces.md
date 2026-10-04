@@ -492,11 +492,15 @@ Contract: [capabilities/retrievers.md](capabilities/retrievers.md).
 | POST | `/ai/retriever/prepare` | Prepare a supplied draft `config` |
 | POST | `/ai/retriever/chat` | Stream a question using supplied draft `config` |
 
-Saved chat accepts `message`, optional `history` and `turnToken`; unknown body fields
-are rejected. Chat streams newline-delimited `phase`, `delta`, `meta`, `final` and
-`error` events. Metadata distinguishes technical candidates, response-context omissions,
-phase timings and bounded system/user/output traces. Preparation requires embeddings,
-chat requires the language-model provider, semantic retrieval requires embeddings.
+Saved chat accepts `message`, optional `history`, `turnToken` and `diagnostics`; unknown
+body fields are rejected. Draft chat accepts the same fields plus `config`. Chat streams
+newline-delimited `phase`, `delta`, `meta`, `final` and `error` events. `diagnostics`
+defaults to `false`: then the only `meta` event carries the `turnToken` for follow-up
+questions. With `diagnostics: true`, further `meta` events carry the validated plan,
+scored candidates with their answer fields, response-context omissions, phase timings,
+embedding counts and bounded system/user/output traces of both model calls. Preparation
+requires embeddings, chat requires the language-model provider, semantic retrieval
+requires embeddings.
 These routes have no dedicated MCP or A2A equivalent.
 
 ### AI

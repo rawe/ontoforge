@@ -8,6 +8,7 @@ import { prepare, chat } from "./runtime.js";
 const Params = z.object({ ontologyKey: z.string(), lensKey: z.string(), retrieverKey: z.string() });
 const Chat = z.object({
   message: z.string().min(1).max(2000), turnToken: z.string().max(100).optional(),
+  diagnostics: z.boolean().default(false),
   history: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().max(12000) })).max(30).default([]),
 }).strict();
 export const savedRetrieverRouter: FastifyPluginAsyncZod = async (app) => {
@@ -28,6 +29,6 @@ export const savedRetrieverRouter: FastifyPluginAsyncZod = async (app) => {
   app.post('/retrievers/:retrieverKey/chat', { schema: { tags: ['ai'], params: Params, body: Chat } }, async (request, reply) => {
     const store = await getRuntimeStore(request.params.ontologyKey);
     const config = await executable(request.params.lensKey, request.params.retrieverKey, await getModelingStore(request.params.ontologyKey), store);
-    return sendChatStream(reply, execution => chat(request.params.lensKey, store, config, request.body.message, request.body.history, execution, request.body.turnToken));
+    return sendChatStream(reply, execution => chat(request.params.lensKey, store, config, request.body.message, request.body.history, execution, request.body.turnToken, request.body.diagnostics));
   });
 };

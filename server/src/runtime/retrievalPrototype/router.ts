@@ -31,6 +31,7 @@ const Body=z.object({
 const Chat=Body.extend({
   message:z.string().min(1).max(2000),
   turnToken:z.string().max(100).optional(),
+  diagnostics:z.boolean().default(false),
   history:z.array(z.object({
     role:z.enum(['user','assistant']),
     content:z.string().max(12000)
@@ -68,6 +69,6 @@ export const retrievalPrototypeRouter:FastifyPluginAsyncZod=async app=>{
     }
   },async(request,reply)=>{
     const store=await getRuntimeStore(request.params.ontologyKey);
-    return sendChatStream(reply,execution=>chat(request.params.lensKey,store,request.body.config,request.body.message,request.body.history,execution,request.body.turnToken));
+    return sendChatStream(reply,execution=>chat(request.params.lensKey,store,request.body.config,request.body.message,request.body.history,execution,request.body.turnToken,request.body.diagnostics));
   });
 };

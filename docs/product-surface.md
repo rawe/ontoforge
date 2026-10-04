@@ -476,7 +476,8 @@ copies/moves within the ontology, and imports/exports one JSON definition, with 
 review before writes. Unsaved edits block saved execution until saved or explicitly
 previewed as a draft. Invalid references remain visible for repair; unsupported shapes
 can be exported or reviewed as a version 1 repair. Profile changes clear the conversation.
-Prepare and chat offer cancellation and expandable candidate/timing/model traces.
+Prepare and chat offer cancellation. A "Show diagnostics" switch requests and shows
+expandable candidate/timing/model traces per answer; it is off by default.
 See [capabilities/retrievers.md](capabilities/retrievers.md) for persistence and execution
 boundaries. The existing local draft is not automatically uploaded.
 
@@ -707,6 +708,7 @@ the address.
 | Recent query texts | Per ontology + lens | 10 |
 | Chat history | Per ontology + lens, then per agent | 50 messages per agent |
 | Retriever browser draft | Per ontology + lens | Configuration only; saved profiles live on the server |
+| Retriever diagnostics switch | Global | — |
 
 Per-lens state is keyed by ontology **and** lens because lens keys are unique only
 within their ontology — two ontologies' `default` lenses must never share a canvas or a

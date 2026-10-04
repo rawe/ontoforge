@@ -479,7 +479,8 @@ can be exported or reviewed as a version 1 repair. Profile changes clear the con
 Prepare and chat offer cancellation. A "Show diagnostics" switch, off by default,
 requests diagnostics and opens a side panel for one selected answer with Overview
 (step timings, reuse, limitations), Plan, Results (ranked candidates, scores against
-the threshold, evidence) and Model calls.
+the threshold, evidence) and Model calls. The configuration panel collapses to a narrow
+strip on the left, leaving the width to the conversation and the diagnostics.
 See [capabilities/retrievers.md](capabilities/retrievers.md) for persistence and execution
 boundaries. The existing local draft is not automatically uploaded.
 
@@ -711,6 +712,7 @@ the address.
 | Chat history | Per ontology + lens, then per agent | 50 messages per agent |
 | Retriever browser draft | Per ontology + lens | Configuration only; saved profiles live on the server |
 | Retriever diagnostics switch | Global | — |
+| Retriever configuration collapsed | Global | — |
 
 Per-lens state is keyed by ontology **and** lens because lens keys are unique only
 within their ontology — two ontologies' `default` lenses must never share a canvas or a

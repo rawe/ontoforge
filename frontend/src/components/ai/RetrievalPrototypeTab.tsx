@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Activity, Check, LoaderCircle, Plus, SendHorizonal, Square, Trash2 } from 'lucide-react'
+import { Activity, Check, LoaderCircle, PanelLeftClose, PanelLeftOpen, Plus, SendHorizonal, Square, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   chatRetrieval, prepareRetrieval, retrievalCatalog,
@@ -19,9 +19,13 @@ import { RetrieverProfiles } from './RetrieverProfiles'
 import { editableRetrievalConfig, retrieverExecution } from './retrieverProfileState'
 
 const diagnosticsKey = 'ontoforge.retriever.diagnostics'
+const configCollapsedKey = 'ontoforge.retriever.configCollapsed'
 
-function readDiagnostics() {
-  try { return localStorage.getItem(diagnosticsKey) === 'true' } catch { return false }
+function readFlag(key: string) {
+  try { return localStorage.getItem(key) === 'true' } catch { return false }
+}
+function writeFlag(key: string, value: boolean) {
+  try { localStorage.setItem(key, String(value)) } catch { /* the choice applies until the tab is left */ }
 }
 
 type PathChoice = { key: string; path: RetrievalPathStep[]; label: string; target: RetrievalType }
@@ -141,7 +145,8 @@ function RetrieverEditor({ ontologyKey, lensKey, catalog }: { ontologyKey: strin
   const [preview, setPreview] = useState(false)
   const [managementBusy, setManagementBusy] = useState(false)
   const [repairReviewed, setRepairReviewed] = useState(false)
-  const [diagnostics, setDiagnostics] = useState(readDiagnostics)
+  const [diagnostics, setDiagnostics] = useState(() => readFlag(diagnosticsKey))
+  const [configCollapsed, setConfigCollapsed] = useState(() => readFlag(configCollapsedKey))
   const [inspected, setInspected] = useState<string | null>(null)
   const active = useRef<AbortController | null>(null)
   const turnToken = useRef<string | undefined>(undefined)
@@ -180,10 +185,8 @@ function RetrieverEditor({ ontologyKey, lensKey, catalog }: { ontologyKey: strin
   function updateCondition(index: number, change: Partial<RetrievalCondition>) {
     if (bucket) updateBucket({ ...bucket, conditions: bucket.conditions.map((c, i) => i === index ? { ...c, ...change } : c) })
   }
-  function toggleDiagnostics(next: boolean) {
-    setDiagnostics(next)
-    try { localStorage.setItem(diagnosticsKey, String(next)) } catch { /* the choice applies until the tab is left */ }
-  }
+  function toggleDiagnostics(next: boolean) { setDiagnostics(next); writeFlag(diagnosticsKey, next) }
+  function collapseConfig(next: boolean) { setConfigCollapsed(next); writeFlag(configCollapsedKey, next) }
   function cancel() { active.current?.abort() }
   async function prepare() {
     if (!valid || execution.mode === 'blocked' || busy || active.current) return
@@ -238,9 +241,14 @@ function RetrieverEditor({ ontologyKey, lensKey, catalog }: { ontologyKey: strin
     } finally { if (active.current === controller) { active.current = null; setPending(null) } }
   }
 
-  return <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-    <aside className={`max-h-[45%] w-full shrink-0 overflow-y-auto border-b p-4 lg:max-h-none lg:w-[420px] lg:border-r lg:border-b-0 ${diagnostics ? 'xl:w-[360px] 2xl:w-[420px]' : ''}`}>
-      <div className="mb-4"><h2 className="font-semibold">Configure retriever</h2><p className="mt-1 text-xs text-muted-foreground">Select a lens-local saved profile or try an explicit browser draft.</p></div>
+  // Container queries: the layout follows the width this tab really has, not the window width.
+  return <div className="@container flex min-h-0 flex-1 flex-col"><div className="flex min-h-0 flex-1 flex-col @2xl:flex-row">
+    {configCollapsed && <aside aria-label="Configuration (collapsed)" className="flex shrink-0 items-center gap-2 border-b px-2 py-1 @2xl:flex-col @2xl:border-r @2xl:border-b-0 @2xl:py-3">
+      <Button size="icon" variant="ghost" className="size-7" aria-label="Show configuration" title="Show configuration" onClick={() => collapseConfig(false)}><PanelLeftOpen className="size-4" /></Button>
+      <button type="button" className="text-xs text-muted-foreground hover:text-foreground @2xl:[writing-mode:vertical-rl] @2xl:rotate-180" onClick={() => collapseConfig(false)}>Configure retriever{profile ? ` · ${profile.name}` : ''}</button>
+    </aside>}
+    <aside className={`max-h-[45%] w-full shrink-0 overflow-y-auto border-b p-4 @2xl:max-h-none @2xl:w-[320px] @2xl:border-r @2xl:border-b-0 @5xl:w-[380px] @7xl:w-[420px] ${configCollapsed ? 'hidden' : ''}`}>
+      <div className="mb-4 flex items-start gap-2"><div className="min-w-0 flex-1"><h2 className="font-semibold">Configure retriever</h2><p className="mt-1 text-xs text-muted-foreground">Select a lens-local saved profile or try an explicit browser draft.</p></div><Button size="icon" variant="ghost" className="size-7 shrink-0" aria-label="Hide configuration" title="Hide configuration" onClick={() => collapseConfig(true)}><PanelLeftClose className="size-4" /></Button></div>
       <RetrieverProfiles key={`${profile?.retrieverConfigId ?? 'draft'}:${profile?.updatedAt ?? ''}`} ontologyKey={ontologyKey} lensKey={lensKey} config={config} profile={profile} dirty={dirty} disabled={pending !== null} repairReviewed={repairReviewed} onSelect={selectProfile} onConfig={(next) => { update(next); setRepairReviewed(true) }} onBusy={setManagementBusy} />
       {dirty && !hideEditor && <div className="mb-4 space-y-2 rounded border border-amber-500/30 p-3 text-xs"><p>Your edits are not saved. {preview ? 'Draft preview is active; the saved server profile is excluded from this run.' : 'Save them, or explicitly choose draft preview.'}</p><Button size="sm" variant="outline" disabled={busy || preview} onClick={() => { setPreview(true); setPrepared(null); setTurns([]); setPhase(''); turnToken.current = undefined }}>Preview draft changes</Button><Button size="sm" variant="ghost" disabled={busy} onClick={() => selectProfile(profile)}>Discard edits</Button></div>}
       {!hideEditor && <>
@@ -302,9 +310,9 @@ function RetrieverEditor({ ontologyKey, lensKey, catalog }: { ontologyKey: strin
         {storageError && <p role="alert" className="text-xs text-destructive">The browser could not save settings. They apply until you leave this tab.</p>}
       </div>
     </aside>
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col xl:flex-row">
+    <div className={`flex min-h-0 min-w-0 flex-1 flex-col ${configCollapsed ? '@2xl:flex-row' : '@6xl:flex-row'}`}>
     <section className="flex min-h-[440px] min-w-0 flex-1 flex-col">
-      <div className="flex items-center justify-between gap-3 border-b px-4 py-3"><div><h2 className="text-sm font-medium">Questions for {profile?.name ?? 'the browser draft'}</h2><p className="mt-1 text-xs text-muted-foreground">{execution.mode === 'saved' ? `Server configuration: ${lensKey} / ${execution.key}` : execution.mode === 'draft' ? 'Draft preview · unsaved request configuration' : 'Unsaved or invalid configuration · execution blocked'}</p></div><div className="flex shrink-0 items-center gap-3"><label className="flex cursor-pointer items-center gap-2 text-xs" title="Stream the search plan, scores, timings and model calls with each answer"><Checkbox checked={diagnostics} onCheckedChange={(checked) => toggleDiagnostics(checked === true)} />Show diagnostics</label><Button size="sm" variant="ghost" disabled={busy || !turns.length} onClick={() => { setTurns([]); setPhase(''); turnToken.current = undefined }}>New conversation</Button></div></div>
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b px-4 py-3"><div className="min-w-0"><h2 className="text-sm font-medium">Questions for {profile?.name ?? 'the browser draft'}</h2><p className="mt-1 text-xs text-muted-foreground">{execution.mode === 'saved' ? `Server configuration: ${lensKey} / ${execution.key}` : execution.mode === 'draft' ? 'Draft preview · unsaved request configuration' : 'Unsaved or invalid configuration · execution blocked'}</p></div><div className="flex shrink-0 items-center gap-3"><label className="flex cursor-pointer items-center gap-2 text-xs" title="Stream the search plan, scores, timings and model calls with each answer"><Checkbox checked={diagnostics} onCheckedChange={(checked) => toggleDiagnostics(checked === true)} />Show diagnostics</label><Button size="sm" variant="ghost" disabled={busy || !turns.length} onClick={() => { setTurns([]); setPhase(''); turnToken.current = undefined }}>New conversation</Button></div></div>
       <div ref={scroll} className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
         {!turns.length && <div className="mx-auto max-w-lg py-12 text-sm text-muted-foreground"><h3 className="mb-2 text-base font-medium text-foreground">Configure, prepare, ask</h3><p>Choose result types and contents on the left. Exact conditions narrow the search; descriptions help with related terms.</p><p className="mt-3">Ask about a topic, an exact assignment, or both. Follow-up questions refer to completed answers in this conversation.</p></div>}
         {turns.map((turn) => <article key={turn.id} className="mx-auto max-w-3xl space-y-3"><div className="ml-auto max-w-[90%] rounded-lg bg-muted px-4 py-3 text-sm whitespace-pre-wrap">{turn.question}</div>
@@ -318,13 +326,13 @@ function RetrieverEditor({ ontologyKey, lensKey, catalog }: { ontologyKey: strin
         <p className="text-xs text-muted-foreground">Enter sends · Shift+Enter adds a line. Context: last four completed pairs, at most 2000 characters per message. Changing settings starts a new conversation.</p>
       </div>
     </section>
-    {diagnostics && <aside aria-label="Diagnostics" className="flex max-h-[60vh] min-h-[320px] w-full shrink-0 flex-col border-t xl:max-h-none xl:w-[340px] xl:border-t-0 xl:border-l 2xl:w-[440px]">
+    {diagnostics && <aside aria-label="Diagnostics" className={`flex max-h-[60vh] min-h-[320px] w-full shrink-0 flex-col border-t ${configCollapsed ? '@2xl:max-h-none @2xl:w-[320px] @2xl:border-t-0 @2xl:border-l @4xl:w-[400px] @7xl:w-[460px]' : '@6xl:max-h-none @6xl:w-[360px] @6xl:border-t-0 @6xl:border-l @7xl:w-[440px]'}`}>
       <div className="border-b px-4 py-3"><h2 className="text-sm font-medium">Diagnostics</h2><p className="mt-1 text-xs text-muted-foreground">How the selected answer was found. Pick another answer with its Diagnostics button.</p></div>
       {inspectedTurn ? <RetrievalDiagnostics key={inspectedTurn.id} meta={inspectedTurn.meta} question={inspectedTurn.question} config={config} catalog={catalog} />
         : <p className="p-4 text-xs text-muted-foreground">Ask a question. Its plan, ranked results, timings and model calls appear here while it runs.</p>}
     </aside>}
     </div>
-  </div>
+  </div></div>
 }
 
 export function RetrievalPrototypeTab({ ontologyKey, lensKey }: { ontologyKey: string; lensKey: string }) {

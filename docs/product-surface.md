@@ -469,18 +469,21 @@ expands automatically, and runs immediately when it has no parameters.
 Three modes over one lens. All require a language-model provider; see
 [capabilities/ai-agents.md](capabilities/ai-agents.md).
 
-**Retriever** — select a lens-local saved profile or create a new one. Find,
+**Retriever** — a header picker selects which saved retriever of the lens answers
+questions; New creates one from a suggestion for the schema and saves it at once.
+Configure opens the editor for the selected retriever beside the conversation: Find,
 Search and Answer configure result types, search/category text, exact conditions,
-threshold and answer evidence without requiring JSON. Profile management saves, deletes,
-copies/moves within the ontology, and imports/exports one JSON definition, with explicit
-review before writes. Unsaved edits block execution until they are saved or
-discarded; a new retriever runs once saved. Invalid references remain visible for repair; unsupported shapes
-can be exported or reviewed as a version 1 repair. Profile changes clear the conversation.
-Prepare and chat offer cancellation. A "Show diagnostics" switch, off by default,
-requests diagnostics and opens a side panel for one selected answer with Overview
-(step timings, reuse, limitations), Plan, Results (ranked candidates, scores against
-the threshold, evidence) and Model calls. The configuration panel collapses to a narrow
-strip on the left, leaving the width to the conversation and the diagnostics.
+threshold and answer evidence without requiring JSON. Save stores the changes, Discard
+drops them, and Save as copy stores the current state, unsaved changes included, as a new
+retriever while the original stays as last saved. Any unsaved change blocks questions;
+switching retrievers with unsaved changes asks first. Rarer operations sit under More:
+export, import, copy or move to another lens of the ontology, the configuration as JSON
+and delete. Invalid references remain visible for repair; unsupported shapes can be
+exported or reviewed as a version 1 repair. Changes clear the conversation. Prepare and
+chat offer cancellation. A "Show diagnostics" switch, off by default, requests
+diagnostics and opens a side panel for one selected answer with Overview (step timings,
+reuse, limitations), Plan, Results (ranked candidates, scores against the threshold,
+evidence) and Model calls.
 See [capabilities/retrievers.md](capabilities/retrievers.md) for persistence and execution
 boundaries.
 
@@ -711,7 +714,8 @@ the address.
 | Recent query texts | Per ontology + lens | 10 |
 | Chat history | Per ontology + lens, then per agent | 50 messages per agent |
 | Retriever diagnostics switch | Global | — |
-| Retriever configuration collapsed | Global | — |
+| Retriever configuration open | Global | — |
+| Selected retriever | Per ontology + lens | — |
 
 Per-lens state is keyed by ontology **and** lens because lens keys are unique only
 within their ontology — two ontologies' `default` lenses must never share a canvas or a

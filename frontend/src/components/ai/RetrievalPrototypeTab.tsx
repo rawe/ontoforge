@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query'
-import { Activity, Check, LoaderCircle, PanelLeftClose, PanelLeftOpen, Plus, SendHorizonal, Square, Trash2 } from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Activity, Check, LoaderCircle, PanelLeftClose, Plus, SendHorizonal, Settings2, Square, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   retrievalCatalog,
@@ -14,19 +14,22 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
-import { chatSavedRetriever, prepareSavedRetriever, type RetrieverProfile } from '@/api/retrievers'
-import { RetrieverProfiles } from './RetrieverProfiles'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
+import { ApiError } from '@/api/http'
+import { chatSavedRetriever, importRetriever, listRetrievers, prepareSavedRetriever, saveRetriever, type RetrieverProfile } from '@/api/retrievers'
+import { NameKeyDialog, RetrieverDetails, RetrieverMore, RetrieverPicker, RetrieverSaveBar } from './RetrieverProfiles'
 import { editableRetrievalConfig, retrieverExecution } from './retrieverProfileState'
 
 const diagnosticsKey = 'ontoforge.retriever.diagnostics'
-const configCollapsedKey = 'ontoforge.retriever.configCollapsed'
+const configOpenKey = 'ontoforge.retriever.configOpen'
 
-function readFlag(key: string) {
-  try { return localStorage.getItem(key) === 'true' } catch { return false }
+function readStored(key: string) {
+  try { return localStorage.getItem(key) } catch { return null }
 }
-function writeFlag(key: string, value: boolean) {
-  try { localStorage.setItem(key, String(value)) } catch { /* the choice applies until the tab is left */ }
+function writeStored(key: string, value: string) {
+  try { localStorage.setItem(key, value) } catch { /* the choice applies until the tab is left */ }
 }
+const errorText = (error: unknown) => error instanceof ApiError && error.details ? `${error.message}\n${JSON.stringify(error.details, null, 2)}` : error instanceof Error ? error.message : 'Retriever operation failed.'
 
 type PathChoice = { key: string; path: RetrievalPathStep[]; label: string; target: RetrievalType }
 type Turn = { id: string; question: string; reply: string; status: 'pending' | 'complete' | 'failed'; error?: string; meta: RetrievalMeta }
@@ -119,44 +122,87 @@ function RetrieverEditor({ ontologyKey, lensKey, catalog }: { ontologyKey: strin
   const [profile, setProfile] = useState<RetrieverProfile | null>(null)
   const [managementBusy, setManagementBusy] = useState(false)
   const [repairReviewed, setRepairReviewed] = useState(false)
-  const [diagnostics, setDiagnostics] = useState(() => readFlag(diagnosticsKey))
-  const [configCollapsed, setConfigCollapsed] = useState(() => readFlag(configCollapsedKey))
+  const [diagnostics, setDiagnostics] = useState(() => readStored(diagnosticsKey) === 'true')
+  const [configOpen, setConfigOpen] = useState(() => readStored(configOpenKey) !== 'false')
   const [inspected, setInspected] = useState<string | null>(null)
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  const [saveError, setSaveError] = useState('')
+  const [dialog, setDialog] = useState<'new' | 'copy' | null>(null)
+  const [dialogBusy, setDialogBusy] = useState(false)
+  const [dialogError, setDialogError] = useState('')
+  const [pendingSwitch, setPendingSwitch] = useState<RetrieverProfile | null>(null)
+  const client = useQueryClient()
+  const profilesKey = ['retrievers', ontologyKey, lensKey]
+  const profiles = useQuery({ queryKey: profilesKey, queryFn: () => listRetrievers(ontologyKey, lensKey), retry: false })
+  const selectedKey = `ontoforge:retriever:selected:${ontologyKey}:${lensKey}`
   const active = useRef<AbortController | null>(null)
   const turnToken = useRef<string | undefined>(undefined)
   const scroll = useRef<HTMLDivElement>(null)
   const busy = pending !== null || managementBusy
   const unsupported = profile !== null && (profile.configVersion !== 1 || !editableRetrievalConfig(profile.config))
   const hideEditor = unsupported && !repairReviewed
-  const dirty = profile !== null && (JSON.stringify(profile.config) !== JSON.stringify(config) || (unsupported && repairReviewed))
-  const execution = retrieverExecution(profile, config, repairReviewed)
+  const dirty = profile !== null && (JSON.stringify(profile.config) !== JSON.stringify(config) || (unsupported && repairReviewed) || name !== profile.name || description !== (profile.description ?? ''))
   const bucket = config.buckets.find((b) => b.entityTypeKey === selectedType) ?? config.buckets[0]
   const type = catalog.entityTypes.find((t) => t.key === bucket?.entityTypeKey)
   const paths = useMemo(() => type ? pathChoices(catalog, type) : [], [catalog, type])
   const withMeta = turns.filter((t) => Object.keys(t.meta).length > 0)
   const inspectedTurn = withMeta.find((t) => t.id === inspected) ?? withMeta.at(-1)
+  // One rule for every unsaved change, configuration or name: questions wait until it is saved or discarded.
+  const execution = dirty ? { mode: 'blocked' as const, reason: 'Unsaved changes. Save or discard them before asking.' } : retrieverExecution(profile, config, repairReviewed)
+  const existingKeys = profiles.data?.map((item) => item.key) ?? []
+  const showConfig = configOpen && profile !== null
   const valid = config.buckets.length > 0 && config.buckets.every((b) => b.searchFields.length > 0 && b.answerFields.length > 0 && b.conditions.every((r) => r.mode === 'hard' || r.textFields.length > 0))
 
   useEffect(() => () => { active.current?.abort(); active.current = null }, [])
   useEffect(() => { if (scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight }, [turns, phase])
+  // Always run a saved retriever: the remembered one, else the first. Deleting one falls back the same way.
+  if (profiles.data && (profile === null ? profiles.data.length > 0 : !profiles.data.some((item) => item.key === profile.key))) {
+    const remembered = readStored(selectedKey)
+    selectProfile(profiles.data.find((item) => item.key === remembered) ?? profiles.data[0] ?? null)
+  }
 
   function update(next: RetrievalConfig) {
     setConfig(next); setPrepared(null); setError(''); setTurns([]); setPhase(''); turnToken.current = undefined
   }
-  /** `start` seeds a new, not yet saved retriever; it cannot run until it is saved. */
-  function selectProfile(next: RetrieverProfile | null, start?: RetrievalConfig) {
+  function selectProfile(next: RetrieverProfile | null) {
     active.current?.abort(); active.current = null; setPending(null)
-    const nextConfig = next ? editableRetrievalConfig(next.config) ? next.config : defaults(catalog) : start ?? defaults(catalog)
+    const nextConfig = next && editableRetrievalConfig(next.config) ? next.config : defaults(catalog)
     setProfile(next); setConfig(nextConfig); setSelectedType(nextConfig.buckets[0]?.entityTypeKey ?? '')
+    setName(next?.name ?? ''); setDescription(next?.description ?? ''); setSaveError('')
     setRepairReviewed(false)
     setPrepared(null); setTurns([]); setPhase(''); setError(''); turnToken.current = undefined
+    if (next) writeStored(selectedKey, next.key)
+  }
+  function choose(key: string) {
+    const next = profiles.data?.find((item) => item.key === key)
+    if (!next || next.key === profile?.key) return
+    if (dirty) setPendingSwitch(next); else selectProfile(next)
+  }
+  async function refreshProfiles() { await client.invalidateQueries({ queryKey: profilesKey }) }
+  async function save() {
+    if (!profile || busy) return
+    setManagementBusy(true); setSaveError('')
+    try {
+      const next = await saveRetriever(ontologyKey, lensKey, profile.key, { name: name.trim(), description: description.trim() || null, configVersion: 1, config })
+      await refreshProfiles(); selectProfile(next)
+    } catch (reason) { setSaveError(errorText(reason)) } finally { setManagementBusy(false) }
+  }
+  /** New starts from the schema suggestion; Save as copy takes the current editor state, unsaved changes included. */
+  async function create(newName: string, key: string) {
+    const copy = dialog === 'copy'
+    setDialogBusy(true); setDialogError('')
+    try {
+      const next = await importRetriever(ontologyKey, lensKey, { key, name: newName, description: copy ? description.trim() || null : null, configVersion: 1, config: copy ? config : defaults(catalog) })
+      await refreshProfiles(); selectProfile(next); setDialog(null); openConfig(true)
+    } catch (reason) { setDialogError(errorText(reason)) } finally { setDialogBusy(false) }
   }
   function updateBucket(next: RetrievalBucket) { update({ ...config, buckets: config.buckets.map((b) => b.entityTypeKey === next.entityTypeKey ? next : b) }) }
   function updateCondition(index: number, change: Partial<RetrievalCondition>) {
     if (bucket) updateBucket({ ...bucket, conditions: bucket.conditions.map((c, i) => i === index ? { ...c, ...change } : c) })
   }
-  function toggleDiagnostics(next: boolean) { setDiagnostics(next); writeFlag(diagnosticsKey, next) }
-  function collapseConfig(next: boolean) { setConfigCollapsed(next); writeFlag(configCollapsedKey, next) }
+  function toggleDiagnostics(next: boolean) { setDiagnostics(next); writeStored(diagnosticsKey, String(next)) }
+  function openConfig(next: boolean) { setConfigOpen(next); writeStored(configOpenKey, String(next)) }
   function cancel() { active.current?.abort() }
   async function prepare() {
     if (!valid || execution.mode === 'blocked' || busy || active.current) return
@@ -209,15 +255,22 @@ function RetrieverEditor({ ontologyKey, lensKey, catalog }: { ontologyKey: strin
   }
 
   // Container queries: the layout follows the width this tab really has, not the window width.
-  return <div className="@container flex min-h-0 flex-1 flex-col"><div className="flex min-h-0 flex-1 flex-col @2xl:flex-row">
-    {configCollapsed && <aside aria-label="Configuration (collapsed)" className="flex shrink-0 items-center gap-2 border-b px-2 py-1 @2xl:flex-col @2xl:border-r @2xl:border-b-0 @2xl:py-3">
-      <Button size="icon" variant="ghost" className="size-7" aria-label="Show configuration" title="Show configuration" onClick={() => collapseConfig(false)}><PanelLeftOpen className="size-4" /></Button>
-      <button type="button" className="text-xs text-muted-foreground hover:text-foreground @2xl:[writing-mode:vertical-rl] @2xl:rotate-180" onClick={() => collapseConfig(false)}>Configure retriever{profile ? ` · ${profile.name}` : ''}</button>
-    </aside>}
-    <aside className={`max-h-[45%] w-full shrink-0 overflow-y-auto border-b p-4 @2xl:max-h-none @2xl:w-[320px] @2xl:border-r @2xl:border-b-0 @5xl:w-[380px] @7xl:w-[420px] ${configCollapsed ? 'hidden' : ''}`}>
-      <div className="mb-4 flex items-start gap-2"><div className="min-w-0 flex-1"><h2 className="font-semibold">Configure retriever</h2><p className="mt-1 text-xs text-muted-foreground">Select a saved retriever of this lens, or create a new one. Changes run only after saving.</p></div><Button size="icon" variant="ghost" className="size-7 shrink-0" aria-label="Hide configuration" title="Hide configuration" onClick={() => collapseConfig(true)}><PanelLeftClose className="size-4" /></Button></div>
-      <RetrieverProfiles key={`${profile?.retrieverConfigId ?? 'new'}:${profile?.updatedAt ?? ''}`} ontologyKey={ontologyKey} lensKey={lensKey} config={config} profile={profile} dirty={dirty} disabled={pending !== null} repairReviewed={repairReviewed} onSelect={selectProfile} onConfig={(next) => { update(next); setRepairReviewed(true) }} onBusy={setManagementBusy} />
-      {dirty && !hideEditor && <div className="mb-4 space-y-2 rounded border border-amber-500/30 p-3 text-xs"><p>Your edits are not saved. Save them to run them, or discard them.</p><Button size="sm" variant="ghost" disabled={busy} onClick={() => selectProfile(profile)}>Discard edits</Button></div>}
+  return <div className="@container flex min-h-0 flex-1 flex-col">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b px-4 py-2">
+      <RetrieverPicker profiles={profiles.data} profile={profile} disabled={busy} onSelect={choose} onNew={() => { setDialogError(''); setDialog('new') }} />
+      <Button size="sm" variant={showConfig ? 'secondary' : 'ghost'} className="h-8 gap-1" disabled={!profile} aria-pressed={showConfig} onClick={() => openConfig(!configOpen)}><Settings2 className="size-3.5" />Configure</Button>
+      {profile && <span className={`text-xs ${dirty ? 'text-amber-600' : !profile.validation.valid ? 'text-destructive' : 'text-muted-foreground'}`}>{dirty ? 'Unsaved changes' : !profile.validation.valid ? 'Invalid in this lens' : 'Saved'}</span>}
+      {profiles.error && <span role="alert" className="text-xs text-destructive">{errorText(profiles.error)} <button type="button" className="underline" onClick={() => void profiles.refetch()}>Reload</button></span>}
+      <div className="ml-auto flex items-center gap-3"><label className="flex cursor-pointer items-center gap-2 text-xs" title="Stream the search plan, scores, timings and model calls with each answer"><Checkbox checked={diagnostics} onCheckedChange={(checked) => toggleDiagnostics(checked === true)} />Show diagnostics</label><Button size="sm" variant="ghost" disabled={busy || !turns.length} onClick={() => { setTurns([]); setPhase(''); turnToken.current = undefined }}>New conversation</Button></div>
+    </div>
+    <div className="flex min-h-0 flex-1 flex-col @2xl:flex-row">
+    {showConfig && profile && <aside aria-label="Configuration" className="max-h-[45%] w-full shrink-0 overflow-y-auto border-b p-4 @2xl:max-h-none @2xl:w-[320px] @2xl:border-r @2xl:border-b-0 @5xl:w-[380px] @7xl:w-[420px]">
+      <div className="mb-3 flex items-start gap-2"><div className="min-w-0 flex-1"><h2 className="truncate font-semibold">Configure {profile.name}</h2><p className="mt-1 text-xs text-muted-foreground">What a question searches and which facts the answer may use.</p></div><Button size="icon" variant="ghost" className="size-7 shrink-0" aria-label="Close configuration" title="Close configuration" onClick={() => openConfig(false)}><PanelLeftClose className="size-4" /></Button></div>
+      <RetrieverSaveBar dirty={dirty} canSave={valid && !hideEditor && !!name.trim()} busy={busy} onSave={() => void save()} onDiscard={() => selectProfile(profile)} onSaveAsCopy={() => { setDialogError(''); setDialog('copy') }} />
+      {saveError && <p role="alert" className="mb-3 whitespace-pre-wrap break-words text-xs text-destructive">{saveError}</p>}
+      {!profile.validation.valid && <div role="alert" className="mb-3 space-y-1 text-xs text-destructive"><p className="font-medium">Invalid in the current lens; questions are blocked until it is repaired and saved.</p><ul className="list-disc pl-4">{profile.validation.errors.map((item, index) => <li key={index}>{item}</li>)}</ul></div>}
+      {hideEditor && <p role="alert" className="mb-3 text-xs text-destructive">Unsupported configuration version or shape (version {profile.configVersion}). It is preserved under More → Configuration JSON, where you can export it or review it as version 1.</p>}
+      <RetrieverDetails key={`${profile.key}:${profile.updatedAt}`} profile={profile} name={name} description={description} disabled={busy} onChange={(nextName, nextDescription) => { setName(nextName); setDescription(nextDescription) }} />
       {!hideEditor && <>
       {config.buckets.filter((item) => !catalog.entityTypes.some((candidate) => candidate.key === item.entityTypeKey)).map((item) => <div key={item.entityTypeKey} className="mb-3 rounded border border-destructive/30 p-3 text-xs"><p className="text-destructive">Result type {item.entityTypeKey} is not visible in this lens. Its configuration has been preserved.</p><Button size="sm" variant="outline" disabled={busy} onClick={() => update({ ...config, buckets: config.buckets.filter((candidate) => candidate !== item) })}>Remove unavailable bucket</Button></div>)}
       <div className="mb-4 flex gap-1">{['Find', 'Search', 'Answer'].map((label, i) => <Button key={label} variant={step === i + 1 ? 'secondary' : 'ghost'} size="sm" onClick={() => setStep(i + 1)} className="flex-1 px-1 text-xs">{i + 1}. {label}</Button>)}</div>
@@ -269,36 +322,45 @@ function RetrieverEditor({ ontologyKey, lensKey, catalog }: { ontologyKey: strin
       </>}
       <div className="mt-5 space-y-2 border-t pt-4"><p className="text-xs text-muted-foreground">{!hideEditor && (config.buckets.map((b) => catalog.entityTypes.find((t) => t.key === b.entityTypeKey)?.displayName).join(' · ') || 'No result bucket selected')} {!hideEditor && `· Threshold ${config.threshold.toFixed(2)}`}</p>
         {!valid && <p className="text-xs text-destructive">Select result buckets with at least one search and answer field. Soft conditions need reference text.</p>}
-        {execution.mode === 'blocked' && <p role="alert" className="text-xs text-destructive">{execution.reason}</p>}
+        {execution.mode === 'blocked' && !dirty && <p role="alert" className="text-xs text-destructive">{execution.reason}</p>}
         <Button className="w-full" variant="outline" disabled={busy || !valid || execution.mode === 'blocked'} onClick={prepare}>{pending === 'prepare' ? <LoaderCircle className="size-4 animate-spin" /> : prepared ? <Check className="size-4" /> : <Plus className="size-4" />}{prepared ? 'Prepare again' : 'Prepare search index'}</Button>
         <p className="text-xs text-muted-foreground">Preparation does not change database data. Each question checks data freshness again.</p>
         {prepared && <p className="text-xs">Ready: {prepared.entityCount} entities, {prepared.relationCount} relations · {prepared.embeddingRequests} embedding requests, {prepared.cacheHits} texts reused.</p>}
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       </div>
-    </aside>
-    <div className={`flex min-h-0 min-w-0 flex-1 flex-col ${configCollapsed ? '@2xl:flex-row' : '@6xl:flex-row'}`}>
+      <div className="mt-5"><RetrieverMore key={`${profile.key}:${profile.updatedAt}`} ontologyKey={ontologyKey} lensKey={lensKey} profile={profile} config={config} needsRepair={hideEditor} existingKeys={existingKeys} disabled={pending !== null} onBusy={setManagementBusy}
+        onCreated={(next) => void refreshProfiles().then(() => selectProfile(next))} onDeleted={() => void refreshProfiles().then(() => selectProfile(null))} onConfig={(next) => { update(next); setRepairReviewed(true) }} /></div>
+    </aside>}
+    <div className={`flex min-h-0 min-w-0 flex-1 flex-col ${showConfig ? '@6xl:flex-row' : '@2xl:flex-row'}`}>
     <section className="flex min-h-[440px] min-w-0 flex-1 flex-col">
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b px-4 py-3"><div className="min-w-0"><h2 className="text-sm font-medium">Questions for {profile?.name ?? 'a new retriever'}</h2><p className="mt-1 text-xs text-muted-foreground">{execution.mode === 'saved' ? `Saved configuration: ${lensKey} / ${execution.key}` : execution.reason}</p></div><div className="flex shrink-0 items-center gap-3"><label className="flex cursor-pointer items-center gap-2 text-xs" title="Stream the search plan, scores, timings and model calls with each answer"><Checkbox checked={diagnostics} onCheckedChange={(checked) => toggleDiagnostics(checked === true)} />Show diagnostics</label><Button size="sm" variant="ghost" disabled={busy || !turns.length} onClick={() => { setTurns([]); setPhase(''); turnToken.current = undefined }}>New conversation</Button></div></div>
       <div ref={scroll} className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
-        {!turns.length && <div className="mx-auto max-w-lg py-12 text-sm text-muted-foreground"><h3 className="mb-2 text-base font-medium text-foreground">Configure, prepare, ask</h3><p>Choose result types and contents on the left. Exact conditions narrow the search; descriptions help with related terms.</p><p className="mt-3">Ask about a topic, an exact assignment, or both. Follow-up questions refer to completed answers in this conversation.</p></div>}
+        {profiles.data?.length === 0 && <div className="mx-auto max-w-lg py-12 text-sm text-muted-foreground"><h3 className="mb-2 text-base font-medium text-foreground">No retriever in this lens yet</h3><p>A retriever decides which records a question searches and which facts the answer may use. Create one, adjust it, save it, then ask.</p><Button size="sm" className="mt-4 gap-1" onClick={() => { setDialogError(''); setDialog('new') }}><Plus className="size-3.5" />Create retriever</Button></div>}
+        {profile && !turns.length && <div className="mx-auto max-w-lg py-12 text-sm text-muted-foreground"><h3 className="mb-2 text-base font-medium text-foreground">Ask {profile.name}</h3>{profile.description && <p className="mb-3">{profile.description}</p>}<p>Ask about a topic, an exact assignment, or both. Follow-up questions refer to completed answers in this conversation.</p><p className="mt-3">Configure changes what is searched; changes apply once saved.</p></div>}
         {turns.map((turn) => <article key={turn.id} className="mx-auto max-w-3xl space-y-3"><div className="ml-auto max-w-[90%] rounded-lg bg-muted px-4 py-3 text-sm whitespace-pre-wrap">{turn.question}</div>
           <div className="text-sm">{turn.reply ? <Markdown>{turn.reply}</Markdown> : turn.status === 'pending' ? <span className="text-muted-foreground">Retrieval in progress …</span> : null}
             {turn.error && <p role="alert" className="mt-2 text-destructive">{turn.error}</p>}
             {diagnostics && Object.keys(turn.meta).length > 0 && <Button size="sm" variant={turn.id === inspectedTurn?.id ? 'secondary' : 'ghost'} className="mt-2 h-6 gap-1.5 px-2 text-xs text-muted-foreground" aria-pressed={turn.id === inspectedTurn?.id} onClick={() => setInspected(turn.id)}><Activity className="size-3" />Diagnostics{turn.meta.timings?.total !== undefined && ` · ${(turn.meta.timings.total / 1000).toFixed(1)} s`}</Button>}
           </div></article>)}
       </div>
-      <div className="space-y-2 border-t p-4"><div className="flex min-h-5 items-center gap-2 text-xs text-muted-foreground" role="status">{busy && <LoaderCircle className="size-3 animate-spin" />}{phase}{busy && <Button variant="ghost" size="sm" className="ml-auto h-6" onClick={cancel}><Square className="size-3" />Cancel</Button>}</div>
-        <form className="flex items-end gap-2" onSubmit={(e) => { e.preventDefault(); void send() }}><Textarea aria-label="Question for the retriever" placeholder="What would you like to find?" value={input} disabled={busy} onChange={(e) => setInput(e.target.value)} rows={2} maxLength={2000} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send() } }} /><Button type="submit" aria-label="Send question" disabled={busy || !valid || execution.mode === 'blocked' || !input.trim()}><SendHorizonal className="size-4" /></Button></form>
+      <div className="space-y-2 border-t p-4">{profile && execution.mode === 'blocked' && <p className="rounded border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">{execution.reason}</p>}<div className="flex min-h-5 items-center gap-2 text-xs text-muted-foreground" role="status">{busy && <LoaderCircle className="size-3 animate-spin" />}{phase}{busy && <Button variant="ghost" size="sm" className="ml-auto h-6" onClick={cancel}><Square className="size-3" />Cancel</Button>}</div>
+        <form className="flex items-end gap-2" onSubmit={(e) => { e.preventDefault(); void send() }}><Textarea aria-label="Question for the retriever" placeholder="What would you like to find?" value={input} disabled={busy || !profile} onChange={(e) => setInput(e.target.value)} rows={2} maxLength={2000} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send() } }} /><Button type="submit" aria-label="Send question" disabled={busy || !valid || execution.mode === 'blocked' || !input.trim()}><SendHorizonal className="size-4" /></Button></form>
         <p className="text-xs text-muted-foreground">Enter sends · Shift+Enter adds a line. Context: last four completed pairs, at most 2000 characters per message. Changing settings starts a new conversation.</p>
       </div>
     </section>
-    {diagnostics && <aside aria-label="Diagnostics" className={`flex max-h-[60vh] min-h-[320px] w-full shrink-0 flex-col border-t ${configCollapsed ? '@2xl:max-h-none @2xl:w-[320px] @2xl:border-t-0 @2xl:border-l @4xl:w-[400px] @7xl:w-[460px]' : '@6xl:max-h-none @6xl:w-[360px] @6xl:border-t-0 @6xl:border-l @7xl:w-[440px]'}`}>
+    {diagnostics && <aside aria-label="Diagnostics" className={`flex max-h-[60vh] min-h-[320px] w-full shrink-0 flex-col border-t ${!showConfig ? '@2xl:max-h-none @2xl:w-[320px] @2xl:border-t-0 @2xl:border-l @4xl:w-[400px] @7xl:w-[460px]' : '@6xl:max-h-none @6xl:w-[360px] @6xl:border-t-0 @6xl:border-l @7xl:w-[440px]'}`}>
       <div className="border-b px-4 py-3"><h2 className="text-sm font-medium">Diagnostics</h2><p className="mt-1 text-xs text-muted-foreground">How the selected answer was found. Pick another answer with its Diagnostics button.</p></div>
       {inspectedTurn ? <RetrievalDiagnostics key={inspectedTurn.id} meta={inspectedTurn.meta} question={inspectedTurn.question} config={config} catalog={catalog} />
         : <p className="p-4 text-xs text-muted-foreground">Ask a question. Its plan, ranked results, timings and model calls appear here while it runs.</p>}
     </aside>}
     </div>
-  </div></div>
+    </div>
+    {dialog && <NameKeyDialog open title={dialog === 'new' ? 'New retriever' : `Save ${profile?.name ?? ''} as copy`}
+      description={dialog === 'new' ? `Starts from a suggestion for this schema and is saved right away; adjust it under Configure.${dirty ? ' Unsaved changes to the current retriever are discarded.' : ''}` : 'Saves the current configuration, unsaved changes included, as a new retriever. The original stays as last saved.'}
+      confirmLabel={dialog === 'new' ? 'Create' : 'Save copy'} initialName={dialog === 'copy' && profile ? `${name.trim() || profile.name} copy` : ''} existingKeys={existingKeys}
+      busy={dialogBusy} error={dialogError} onCancel={() => setDialog(null)} onConfirm={(newName, key) => void create(newName, key)} />}
+    <AlertDialog open={pendingSwitch !== null} onOpenChange={(open) => { if (!open) setPendingSwitch(null) }}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle><AlertDialogDescription>{profile?.name} has unsaved changes. Switching to {pendingSwitch?.name} discards them.</AlertDialogDescription></AlertDialogHeader>
+      <AlertDialogFooter><AlertDialogCancel>Keep editing</AlertDialogCancel><AlertDialogAction onClick={() => { if (pendingSwitch) selectProfile(pendingSwitch); setPendingSwitch(null) }}>Discard and switch</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
+  </div>
 }
 
 export function RetrievalPrototypeTab({ ontologyKey, lensKey }: { ontologyKey: string; lensKey: string }) {

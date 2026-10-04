@@ -2,7 +2,7 @@
  * Ontology provisioning under a live embedding provider — with a
  * configured provider, creating an ontology carries the two fixed vector
  * indexes into the fresh namespace at the provider's width, in the same
- * transaction as the ten tables. PostgreSQL-physical (catalog reads), so
+ * transaction as the eleven tables. PostgreSQL-physical (catalog reads), so
  * gated to that backend; SKIPPED when Ollama or the model is unavailable.
  */
 

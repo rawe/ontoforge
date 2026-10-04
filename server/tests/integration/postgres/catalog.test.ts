@@ -146,15 +146,15 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL physical catalog
     await closeStores();
   });
 
-  it("provisioning created the ten tables, the named constraints, and the fixed indexes", async () => {
+  it("provisioning created the eleven tables, the named constraints, and the fixed indexes", async () => {
     await assertCatalogComplete();
   });
 
-  it("boot only creates the server-wide home: public holds the registry, no ontology tables", async () => {
+  it("boot only creates the server-wide home: public holds the registry and the storage version, no ontology tables", async () => {
     const result = await runQuery(
-      `SELECT tablename FROM pg_tables WHERE schemaname = 'public'`,
+      `SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename`,
     );
-    expect(result.rows.map((row) => row.tablename)).toEqual(["ontology"]);
+    expect(result.rows.map((row) => row.tablename)).toEqual(["ontology", "storage_version"]);
   });
 
   it("boot is idempotent across a close→boot cycle and leaves provisioned namespaces alone", async () => {

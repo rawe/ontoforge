@@ -1,7 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockModelingStore } from "./helpers.js";
-import { ValidationError } from "../../src/core/exceptions.js";
 const holder = { store: createMockModelingStore() };
 const runtime = { ontologyKey: 'one', getFullSchemaWithLensInclusions: async () => ({ lens: { lensId: 'a', key: 'main', name: 'Main' }, entityTypes: [{ key: 'item', properties: [{ key: 'name', dataType: 'string' }] }], relationTypes: [], entityInclusions: [], relationInclusions: [] }), getAiAgentConfigs: async () => [], getSavedQueries: async () => [] };
 const models = vi.hoisted(() => ({ prepare: vi.fn(async () => ({ entityCount: 1, embeddingRequests: 0 })), chat: vi.fn() }));
@@ -38,12 +37,6 @@ describe('saved retriever REST', () => {
         const imported = await app.inject({ method: 'POST', url: base + '/import', payload: { ...body, configVersion: 9 } });
         expect(imported.statusCode).toBe(422);
         expect(holder.store.upsertRetriever).not.toHaveBeenCalled();
-    });
-    it('returns actionable migration errors without rewriting storage', async () => {
-        holder.store.listRetrievers.mockRejectedValue(new ValidationError('Retriever storage requires the targeted migration', { code: 'RETRIEVER_MIGRATION_REQUIRED' }));
-        const response = await app.inject({ method: 'GET', url: base });
-        expect(response.statusCode).toBe(422);
-        expect(response.json().error.details.code).toBe('RETRIEVER_MIGRATION_REQUIRED');
     });
     it('prepares with server-resolved config and rejects request overrides', async () => {
         const url = '/api/ontologies/one/runtime/lenses/main/retrievers/find/prepare';

@@ -1,4 +1,3 @@
-import { checkRetrieverStorageReady, inspectRetrieverStorage } from "./retrieverStorage.js";
 import * as retrievers from "./retrieverQueries.js";
 import type { KeywordPropertySegment } from "../../core/ports.js";
 /**
@@ -24,18 +23,7 @@ import * as queries from "./modelingQueries.js";
 export class Neo4jModelingStore implements ModelingStore {
   constructor(private readonly driver: Driver, public readonly textSearchLanguage: TextSearchLanguage = "english") {}
 
-  async assertRetrieverStorageReady(): Promise<void> {
-    await checkRetrieverStorageReady(this.driver);
-  }
-
-  async listRetrieversForExport(lensId: string): Promise<Row[]> {
-    if(await inspectRetrieverStorage(this.driver) === "missing")
-      return [];
-    return this.listRetrievers(lensId);
-  }
-
   async listRetrievers(lensId: string): Promise<Row[]> {
-    await checkRetrieverStorageReady(this.driver);
     return runSession(this.driver, session => retrievers.list(session, lensId));
   }
 
@@ -47,17 +35,14 @@ export class Neo4jModelingStore implements ModelingStore {
     Row,
     boolean
   ]> {
-    await checkRetrieverStorageReady(this.driver);
     return runSession(this.driver, session => retrievers.upsert(session, lensId, id, key, name, description, configVersion, config, createOnly));
   }
 
   async deleteRetriever(lensId: string, key: string): Promise<boolean> {
-    await checkRetrieverStorageReady(this.driver);
     return runSession(this.driver, session => retrievers.remove(session, lensId, key));
   }
 
   async transferRetriever(sourceLensId: string, sourceKey: string, targetLensId: string, targetKey: string, copyId: string | null, expectedConfig: string): Promise<Row> {
-    await checkRetrieverStorageReady(this.driver);
     return runSession(this.driver, session => retrievers.transfer(session, sourceLensId, sourceKey, targetLensId, targetKey, copyId, expectedConfig));
   }
 

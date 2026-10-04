@@ -63,17 +63,10 @@ describe("Saved retriever management", () => {
     });
     it("adds portable retrievers to design export without identities or timestamps", async () => {
         store.getFullSchema.mockResolvedValue({ entityTypes: [], relationTypes: [], lenses: [{ lensId: "a", key: "source", name: "Source" }] });
-        store.listRetrieversForExport.mockResolvedValue([raw]);
+        store.listRetrievers.mockResolvedValue([raw]);
         const exported = await getSchemaExport(store);
         const lens = (exported.lenses as Record<string, unknown>[])[0]!;
         expect(lens.retrievers).toEqual([retrievers.portable(raw)]);
         expect(lens.retrievers).not.toHaveProperty("retrieverConfigId");
-    });
-    it("preflights missing migration before any design import write", async () => {
-        store.getLensByKey.mockResolvedValue(null);
-        store.assertRetrieverStorageReady.mockRejectedValue(new ValidationError("Migration required", { code: "RETRIEVER_MIGRATION_REQUIRED" }));
-        await expect(importSchema({ textSearchLanguage: store.textSearchLanguage, formatVersion: "5.0", entityTypes: current.entityTypes.map(t => ({ ...t, description: null, properties: t.properties.map(p => ({ ...p, displayName: p.key, description: null, defaultValue: null })) })), relationTypes: [], lenses: [{ key: "source", name: "Source", aiAgents: [], savedQueries: [], retrievers: [retrievers.portable(raw)] }] }, store)).rejects.toThrow("Migration required");
-        expect(store.createEntityType).not.toHaveBeenCalled();
-        expect(store.createLens).not.toHaveBeenCalled();
     });
 });

@@ -1,9 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Session } from "neo4j-driver";
 import { ConflictError, NotFoundError } from "../../src/core/exceptions.js";
-const mocks = vi.hoisted(() => ({ query: vi.fn(), transaction: vi.fn(), ready: vi.fn(async () => undefined) }));
+const mocks = vi.hoisted(() => ({ query: vi.fn(), transaction: vi.fn() }));
 vi.mock('../../src/adapters/postgres/errors.js', () => ({ runQuery: mocks.query, withTransaction: mocks.transaction }));
-vi.mock('../../src/adapters/postgres/retrieverStorage.js', () => ({ checkRetrieverStorageReady: mocks.ready, inspectRetrieverStorage: vi.fn(async () => "ready") }));
 import { PostgresModelingStore } from "../../src/adapters/postgres/modelingStore.js";
 import * as neo from "../../src/adapters/neo4j/retrieverQueries.js";
 const config = { buckets: [] };

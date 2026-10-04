@@ -1317,7 +1317,7 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
       })),
     }));
 
-    const retrieverRows = await store.listRetrieversForExport(lens.lensId as string);
+    const retrieverRows = await store.listRetrievers(lens.lensId as string);
     exported.retrievers = retrieverRows.map(retrievers.portable);
     lenses.push(exported);
   }
@@ -1594,8 +1594,6 @@ export async function importSchema(
   if (conflicts.length > 0) {
     throw new ConflictError(conflicts.join("; "));
   }
-
-  if(payload.lenses.some(lens => (lens.retrievers?.length??0)>0)) await store.assertRetrieverStorageReady();
 
   // ---- Phase 3: write (internal ids regenerated, keys preserved) ----
   const provider = getEmbeddingProvider();

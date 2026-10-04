@@ -27,7 +27,6 @@ import type { OntologyRegistry, Row } from "../../core/ports.js";
 import { ensureSavedQueryVectorIndex } from "./ddl.js";
 import { runSession } from "./errors.js";
 import { convertNeo4jProperties } from "./temporal.js";
-import { ensureRetrieverStorage } from "./retrieverStorage.js";
 
 const REGISTRY_LABEL = "_OntologyRegistry";
 
@@ -84,8 +83,6 @@ export class Neo4jOntologyRegistry implements OntologyRegistry {
     if (await registryHoldsOntology(this.driver)) {
       throw capConflict();
     }
-    // New ontologies share exactly the retriever-only provisioning step used by migration.
-    await ensureRetrieverStorage(this.driver);
     // Then the fixed semantic indexes, then the node: index DDL cannot
     // share a transaction with the node write, and this order keeps the
     // port's atomicity promise — a create that dies mid-way has changed

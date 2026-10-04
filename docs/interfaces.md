@@ -336,10 +336,7 @@ Lens-local ownership and execution semantics: [capabilities/retrievers.md](capab
 
 Writes carry `name`, optional `description`, `configVersion: 1` and `config`. Reads
 include identity, timestamps and `validation: {valid,errors}`. Portable JSON omits
-identity/timestamps. Config management has no model calls. Missing storage reports
-`VALIDATION_ERROR` with `details.code: RETRIEVER_MIGRATION_REQUIRED`; an incompatible
-existing structure reports `RETRIEVER_STORAGE_INCOMPATIBLE` instead. Design export may
-omit definitions from absent storage, never silently omit an incompatible structure.
+identity/timestamps. Config management has no model calls.
 
 ### Schema-wide operations
 

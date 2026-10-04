@@ -112,7 +112,7 @@ function getPool(): pg.Pool {
 /** The `SET LOCAL` that binds a transaction to one ontology's namespace.
  * `public` stays on the path for the pgvector type; the namespace comes
  * first, so every unqualified name resolves there. */
-function searchPathStatement(namespace: string): string {
+export function searchPathStatement(namespace: string): string {
   return `SET LOCAL search_path TO ${quoteIdent(namespace)}, public`;
 }
 

@@ -138,7 +138,7 @@ physical objects that way; a new adapter accepts them and maps them to whatever 
 
 | Operation | Obligation |
 |---|---|
-| Initialize | Open connections, verify the database is reachable, create every **server-wide** constraint and index the adapter needs, and hand out the registry and the two bound-store factories. Per-ontology storage is provisioned by registry create, never at initialization. Failure prevents the server from serving. |
+| Initialize | Open connections, verify the database is reachable, create every **server-wide** constraint and index the adapter needs, bring storage of an older storage version up to date ([decisions.md](decisions.md#storage)), and hand out the registry and the two bound-store factories. Per-ontology storage is provisioned by registry create; at initialization only an upgrade reaches into it. Failure prevents the server from serving. |
 | Close | Release connections. Idempotent. |
 | Ensure semantic indexes | Given a vector width, create every vector index the current schemas imply, for **every ontology the registry lists** — doing nothing when there are none. Called at startup only when an embedding provider is configured. |
 
@@ -205,14 +205,13 @@ does not interpret them. A saved query also accepts an embedding of its descript
 the key of its owning lens alongside it, so that a search over descriptions can be
 narrowed to one lens without a join.
 
-**Retriever configuration storage.** Lens-local list/read/upsert/delete and raw
-list-for-export preserve config version and payload even when unsupported or invalid.
+**Retriever configuration storage.** Lens-local list/read/upsert/delete preserve config
+version and payload even when unsupported or invalid.
 Owner/key uniqueness is enforced atomically. Copy creates an independent id; move
 preserves id and atomically changes owner/key, never overwriting a conflict. Both compare
 the source version/payload with the validated snapshot before changing storage. Lens
-delete cascades to these definitions. Readiness checks distinguish missing storage from
-an incompatible existing structure; only absent storage can export an empty list.
-No vector or conversation state is part of this resource.
+delete cascades to these definitions. No vector or conversation state is part of this
+resource.
 
 **Search-data maintenance.** Backing the rebuild operation: list every entity type with its
 property keys; set one entity's composed search text, its keyword segments and its optional
@@ -570,12 +569,22 @@ own namespace, all DDL and queries run unqualified against the transaction's sea
 path, and no statement can name another ontology's namespace.
 
 `public` is the server-wide home. It holds the registry table `ontology` — one row per
-ontology, carrying the id, key, display name, timestamps and the namespace name — and
-nothing ontology-scoped; `ont_*` namespaces hold only ontology-scoped data. The registry
+ontology, carrying the id, key, display name, timestamps and the namespace name — the
+one-row table `storage_version`, and nothing ontology-scoped; `ont_*` namespaces hold only ontology-scoped data. The registry
 table, not the engine's catalog, is the authoritative ontology list; the catalog is
 consulted only to sweep orphaned namespaces.
 
-Boot DDL creates only the `public` objects. **Registry create** is one transaction:
+**Boot** is one transaction under a database-wide advisory lock, so servers starting
+together against one database serialize on it. It reads the storage version — storage
+from before the `storage_version` table counts as version 1 — then creates the `public`
+objects if absent. An empty database is recorded at the current version. Storage newer
+than the code, or older than the oldest upgradable version, fails the boot before
+anything is written. Older storage holds the registry table against concurrent creates,
+runs each missing upgrade step inside every `ont_*` namespace and records the new version
+last. The steps and both version constants live in the storage-version module beside the
+DDL.
+
+**Registry create** is one transaction:
 the registry row first — so a concurrent same-key create dies on the named constraint as
 a conflict — then the fresh namespace, the eleven tables below and, when an embedding width
 is given, the fixed vector indexes inside it. **Registry delete** is one transaction:
@@ -819,12 +828,12 @@ Created at startup, unconditionally:
 | Uniqueness constraint | `PropertyDefinition` internal id | Property identity |
 | Uniqueness constraint | `AiAgentConfig` internal id | Agent identity |
 | Uniqueness constraint | `SavedQuery` internal id | Saved-query identity |
+| Uniqueness constraint | `_RetrieverConfig` internal id; `ownerLensId` and key together | Retriever identity and lens-local key |
 | Uniqueness constraint | `_Entity` instance id | Instance identity |
 | Index | `_Entity` type key | Every listing filters on it |
 
-Retriever provisioning separately ensures two uniqueness constraints on
-`_RetrieverConfig`: internal identity, and the `ownerLensId`/key pair. Normal boot does
-not provision retriever storage for an existing ontology.
+The Neo4j adapter carries no storage version: every startup creates the objects above
+if absent, and that is its whole upgrade path.
 
 With the registry capped at one ontology, per-database uniqueness and per-ontology
 uniqueness are the same thing.

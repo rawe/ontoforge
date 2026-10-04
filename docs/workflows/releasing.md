@@ -31,6 +31,27 @@ the remote.
 
 The tag push triggers the GitHub Actions workflow (`.github/workflows/release-images.yml`), which runs `make release` to build and push container images to GHCR.
 
+## Storage version
+
+The storage version is its own number, not the release version — the rule is in
+[decisions.md](../decisions.md#storage). It lives with its upgrade steps in
+`server/src/adapters/postgres/storageVersion.ts`.
+
+**A release that changes the PostgreSQL layout** (a table, column or index):
+
+1. Change the ontology DDL — new storage is always created at the current layout.
+2. Add one upgrade step that only adds — tables, columns with a default, indexes — and
+   raise `STORAGE_VERSION` to it. Never edit a released step.
+3. `tests/integration/postgres/storage-version.test.ts` must still prove that upgraded
+   storage equals freshly created storage.
+
+**A major release:**
+
+1. Delete every upgrade step and set `OLDEST_UPGRADABLE_VERSION` to the version the
+   previous major line ended on.
+2. Renaming or removing storage happens only here, as the major release's own step.
+3. Adapt the upgrade test to start from the oldest upgradable layout.
+
 ## Local Build
 
 ```bash

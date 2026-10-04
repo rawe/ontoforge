@@ -289,7 +289,9 @@ its server-side record.
 Ordered, and failure at any step prevents serving:
 
 1. Connect storage, verify reachability, ensure the server-wide constraints and indexes
-   exist. Per-ontology storage is provisioned when an ontology is created, not at boot.
+   exist, and bring storage of an older storage version up to date
+   ([decisions.md](decisions.md#storage)). Per-ontology storage is provisioned when an
+   ontology is created; at boot only an upgrade reaches into it.
 2. Walk the registry and report any stored type key that the adapter now reserves.
 3. Initialize the embedding provider, if configured.
 4. Initialize the language-model and decision-model providers, if configured.

@@ -21,7 +21,7 @@ async function ensureConstraints(driver: Driver): Promise<void> {
   });
 }
 
-export async function initDriver(options: { ensureConstraints?: boolean } = {}): Promise<Driver> {
+export async function initDriver(): Promise<Driver> {
   driverInstance = neo4j.driver(
     settings.DB_URI,
     neo4j.auth.basic(settings.DB_USER, settings.DB_PASSWORD),
@@ -36,7 +36,7 @@ export async function initDriver(options: { ensureConstraints?: boolean } = {}):
     }
     throw exc;
   }
-  if (options.ensureConstraints !== false) await ensureConstraints(driverInstance);
+  await ensureConstraints(driverInstance);
   return driverInstance;
 }
 

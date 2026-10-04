@@ -211,7 +211,8 @@
                         }
                     ]
                 }
-            ]
+            ],
+            "retrievers": []
         },
         {
             "key": "test_lens",
@@ -219,7 +220,8 @@
             "description": "Person/Company lens for testing",
             "includes": null,
             "aiAgents": [],
-            "savedQueries": []
+            "savedQueries": [],
+            "retrievers": []
         }
     ],
     "textSearchLanguage": "english"

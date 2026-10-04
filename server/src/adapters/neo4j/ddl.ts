@@ -110,6 +110,8 @@ export const CONSTRAINTS: readonly string[] = [
   "CREATE INDEX entity_type_key_index IF NOT EXISTS FOR (n:_Entity) ON (n._entityTypeKey)",
   "CREATE CONSTRAINT agent_config_id_unique IF NOT EXISTS FOR (ac:AiAgentConfig) REQUIRE ac.agentConfigId IS UNIQUE",
   "CREATE CONSTRAINT saved_query_id_unique IF NOT EXISTS FOR (sq:SavedQuery) REQUIRE sq.savedQueryId IS UNIQUE",
+  "CREATE CONSTRAINT retriever_config_id_unique IF NOT EXISTS FOR (r:_RetrieverConfig) REQUIRE r.retrieverConfigId IS UNIQUE",
+  "CREATE CONSTRAINT retriever_config_owner_key_unique IF NOT EXISTS FOR (r:_RetrieverConfig) REQUIRE (r.ownerLensId, r.key) IS UNIQUE",
 ];
 
 // ---------------------------------------------------------------------------

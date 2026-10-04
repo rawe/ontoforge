@@ -1,4 +1,3 @@
-import { checkRetrieverStorageReady, inspectRetrieverStorage } from "./retrieverStorage.js";
 import { ConflictError, NotFoundError } from "../../core/exceptions.js";
 import type { KeywordPropertySegment } from "../../core/ports.js";
 /**
@@ -124,24 +123,11 @@ export class PostgresModelingStore implements ModelingStore {
     return withTransaction(work, isolation, this.namespace);
   }
 
-  async assertRetrieverStorageReady(): Promise<void> {
-    await checkRetrieverStorageReady(this.namespace!);
-  }
-
-  async listRetrieversForExport(lensId: string): Promise<Row[]> {
-    const status = await this.tx(q => inspectRetrieverStorage(q, this.namespace!));
-    if(status === "missing")
-      return [];
-    return this.listRetrievers(lensId);
-  }
-
   async listRetrievers(lensId: string): Promise<Row[]> {
-    await checkRetrieverStorageReady(this.namespace!);
     return camelizeRows((await this.query("SELECT * FROM retriever_config WHERE lens_id=$1 ORDER BY name,key", [lensId])).rows);
   }
 
   async getRetriever(lensId: string, key: string): Promise<Row | null> {
-    await checkRetrieverStorageReady(this.namespace!);
     const row = (await this.query("SELECT * FROM retriever_config WHERE lens_id=$1 AND key=$2", [lensId, key])).rows[0];
     return row ? camelizeRow(row) : null;
   }
@@ -150,7 +136,6 @@ export class PostgresModelingStore implements ModelingStore {
     Row,
     boolean
   ]> {
-    await checkRetrieverStorageReady(this.namespace!);
     return this.tx(async (q) => {
       if(!(await q.query("SELECT lens_id FROM lens WHERE lens_id=$1 FOR UPDATE", [lensId])).rows.length)
         throw new NotFoundError("Lens not found");
@@ -174,7 +159,6 @@ export class PostgresModelingStore implements ModelingStore {
   }
 
   async deleteRetriever(lensId: string, key: string): Promise<boolean> {
-    await checkRetrieverStorageReady(this.namespace!);
     return this.tx(async (q) => {
       await q.query("SELECT lens_id FROM lens WHERE lens_id=$1 FOR UPDATE", [lensId]);
       return (await q.query("DELETE FROM retriever_config WHERE lens_id=$1 AND key=$2", [lensId, key])).rowCount > 0;
@@ -182,7 +166,6 @@ export class PostgresModelingStore implements ModelingStore {
   }
 
   async transferRetriever(sourceLensId: string, sourceKey: string, targetLensId: string, targetKey: string, copyId: string | null, expectedConfig: string): Promise<Row> {
-    await checkRetrieverStorageReady(this.namespace!);
     return this.tx(async (q) => {
       const lenses = await q.query("SELECT lens_id FROM lens WHERE lens_id=ANY($1::uuid[]) ORDER BY lens_id FOR UPDATE", [[sourceLensId, targetLensId]]);
       if(lenses.rows.length !== new Set([sourceLensId, targetLensId]).size)

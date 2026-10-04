@@ -98,6 +98,24 @@ creation; ontology delete drops the namespace in one cascade. Physical lens name
 follow the locked vocabulary (`lens`, `lens_includes`, `lens_id`, `lens_key`).
 Deliberation: [adr/0017](adr/0017-postgres-namespace-per-ontology.md).
 
+**Storage carries its own version number.** The storage records a storage version — a
+whole number, independent of the release version and of the transfer format version, that
+changes only when a release changes the storage layout. One number covers the whole
+server. New storage is created directly at the current layout and version. At startup the
+server compares the recorded version with the one the code expects and brings older
+storage up to date automatically before it serves requests: every ontology is upgraded
+together, and the number advances only when all of them succeeded. Several servers
+starting against one database upgrade it once: the upgrade holds a database-wide lock and
+reads the version again under it. The server logs every upgrade it runs and never backs
+up storage itself. Requests never change the storage layout. Within a major release line
+upgrade steps only add — tables, columns with a default, indexes — so servers of the
+previous release keep working during a rolling update; renaming or removing waits for the
+next major release. Upgrade steps are kept for one major release line: a major release
+removes them all and accepts only new storage or storage at the version the previous
+major line ended on. Older storage stops the server with the instruction to upgrade
+through the last release of the previous major line first. Storage newer than the code
+also stops the server, untouched.
+
 **Neo4j ontology cap** — the Neo4j adapter supports at most one ontology; a second
 create is rejected as a domain condition. Multi-ontology conformance is a separate
 suite tier that only multi-capable adapters run. Deliberation:
@@ -509,9 +527,7 @@ JSON configuration copy with target validation, never a shared live definition.
 Retriever definitions travel with their lens in design transfer and are deleted with
 it. Invalidated definitions remain readable and exportable, while execution checks the
 current lens and rejects invalid configurations. Configuration storage carries no
-vectors, prepared snapshots, credentials or conversation state. Existing ontology
-storage is upgraded through an explicit targeted additive migration, with a dry run;
-ordinary configuration requests never migrate storage.
+vectors, prepared snapshots, credentials or conversation state.
 
 **The retrieval evaluation draft stays browser-local.**
 Its configuration is browser-local and scoped to one ontology and lens. Selected

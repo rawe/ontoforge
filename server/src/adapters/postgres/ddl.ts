@@ -1,9 +1,10 @@
 /**
  * Init DDL and the vector-index lifecycle.
  *
- * `initSchema` runs the server-wide DDL — the pgvector extension and the
- * `public.ontology` registry table — as one all-or-nothing transaction at
- * adapter init. The eleven-table set is ontology-scoped and runs only at
+ * `initSchema` runs the server-wide DDL — the pgvector extension, the
+ * `public.ontology` registry table and the storage version — and the
+ * storage upgrade as one all-or-nothing transaction at adapter init
+ * (`storageVersion.ts`). The eleven-table set is ontology-scoped and runs only at
  * ontology creation, inside the fresh `ont_<key>` namespace
  * (`registry.ts`). Idempotence rides `CREATE TABLE IF NOT EXISTS` with
  * all constraints inline and explicitly named (PG has no
@@ -36,12 +37,12 @@ import {
 import type { Querier } from "./errors.js";
 import { withTransaction } from "./errors.js";
 import { quoteIdent } from "./oql/bindings.js";
-import { RETRIEVER_DDL } from "./retrieverStorage.js";
+import { bringStorageUpToDate } from "./storageVersion.js";
 
 /**
  * Server-wide DDL, executed at adapter init only: the pgvector extension
- * and the `public` home — the ontology registry. Always
- * schema-qualified, because `public` is the fixed server-wide home
+ * and the `public` home — the ontology registry and the storage version.
+ * Always schema-qualified, because `public` is the fixed server-wide home
  * regardless of any search path.
  */
 const SERVER_DDL_STATEMENTS: string[] = [
@@ -55,6 +56,11 @@ const SERVER_DDL_STATEMENTS: string[] = [
   namespace    text        NOT NULL,   -- the ontology's physical home, ont_<key>
   created_at   timestamptz NOT NULL DEFAULT now(),
   updated_at   timestamptz NOT NULL DEFAULT now()
+)`,
+
+  // One row: the storage version (`storageVersion.ts`).
+  `CREATE TABLE IF NOT EXISTS public.storage_version (
+  version integer NOT NULL
 )`,
 ];
 
@@ -163,6 +169,20 @@ export function ontologyDdlStatements(language: TextSearchLanguage): string[] {
   CONSTRAINT saved_query_key_unique UNIQUE (lens_id, key)        -- upsert arbiter
 )`,
 
+  `CREATE TABLE IF NOT EXISTS retriever_config (
+  retriever_config_id uuid        CONSTRAINT retriever_config_pk PRIMARY KEY,
+  lens_id             uuid        NOT NULL CONSTRAINT retriever_config_lens_fk
+                                  REFERENCES lens (lens_id) ON DELETE CASCADE,
+  key                 text        NOT NULL,
+  name                text        NOT NULL,
+  description         text,
+  config_version      integer     NOT NULL,
+  config              jsonb       NOT NULL,
+  created_at          timestamptz NOT NULL DEFAULT now(),
+  updated_at          timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT retriever_config_key_unique UNIQUE (lens_id, key)
+)`,
+
   // --- Instance side -----------------------------------------------------
 
   `CREATE TABLE IF NOT EXISTS entity (
@@ -209,19 +229,15 @@ export function ontologyDdlStatements(language: TextSearchLanguage): string[] {
 )`,
   `CREATE INDEX document_keyword_idx ON document_chunk USING gin (search_vector)`,
   `CREATE INDEX IF NOT EXISTS document_chunk_entity_property_idx ON document_chunk (entity_id, property_key)`,
-  RETRIEVER_DDL,
 ];
 }
 
-/** Create the server-wide objects if absent, in one transaction. Boot
- * DDL creates nothing ontology-scoped — ontologies are provisioned by
- * the registry, each in its own namespace. */
+/** Create the server-wide objects if absent and bring older storage up
+ * to date, in one transaction (`storageVersion.ts`). Boot DDL creates
+ * nothing ontology-scoped — ontologies are provisioned by the registry,
+ * each in its own namespace; only an upgrade step reaches into them. */
 export async function initSchema(): Promise<void> {
-  await withTransaction(async (querier) => {
-    for (const statement of SERVER_DDL_STATEMENTS) {
-      await querier.query(statement);
-    }
-  });
+  await withTransaction((querier) => bringStorageUpToDate(querier, SERVER_DDL_STATEMENTS));
 }
 
 // ---------------------------------------------------------------------------

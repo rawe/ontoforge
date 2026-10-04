@@ -469,12 +469,12 @@ expands automatically, and runs immediately when it has no parameters.
 Three modes over one lens. All require a language-model provider; see
 [capabilities/ai-agents.md](capabilities/ai-agents.md).
 
-**Retriever** — select a lens-local saved profile or keep the browser draft. Find,
+**Retriever** — select a lens-local saved profile or create a new one. Find,
 Search and Answer configure result types, search/category text, exact conditions,
 threshold and answer evidence without requiring JSON. Profile management saves, deletes,
 copies/moves within the ontology, and imports/exports one JSON definition, with explicit
-review before writes. Unsaved edits block saved execution until saved or explicitly
-previewed as a draft. Invalid references remain visible for repair; unsupported shapes
+review before writes. Unsaved edits block execution until they are saved or
+discarded; a new retriever runs once saved. Invalid references remain visible for repair; unsupported shapes
 can be exported or reviewed as a version 1 repair. Profile changes clear the conversation.
 Prepare and chat offer cancellation. A "Show diagnostics" switch, off by default,
 requests diagnostics and opens a side panel for one selected answer with Overview
@@ -482,7 +482,7 @@ requests diagnostics and opens a side panel for one selected answer with Overvie
 the threshold, evidence) and Model calls. The configuration panel collapses to a narrow
 strip on the left, leaving the width to the conversation and the diagnostics.
 See [capabilities/retrievers.md](capabilities/retrievers.md) for persistence and execution
-boundaries. The existing local draft is not automatically uploaded.
+boundaries.
 
 **Chat** — a conversation with the lens's default assistant or with any configured agent,
 chosen from a picker. Each agent keeps its own persisted thread; switching agents switches
@@ -710,7 +710,6 @@ the address.
 | Recently opened entities | Per ontology + lens | 10 |
 | Recent query texts | Per ontology + lens | 10 |
 | Chat history | Per ontology + lens, then per agent | 50 messages per agent |
-| Retriever browser draft | Per ontology + lens | Configuration only; saved profiles live on the server |
 | Retriever diagnostics switch | Global | — |
 | Retriever configuration collapsed | Global | — |
 

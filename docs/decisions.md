@@ -529,9 +529,8 @@ it. Invalidated definitions remain readable and exportable, while execution chec
 current lens and rejects invalid configurations. Configuration storage carries no
 vectors, prepared snapshots, credentials or conversation state.
 
-**The retrieval evaluation draft stays browser-local.**
-Its configuration is browser-local and scoped to one ontology and lens. Selected
-text fields use a separate in-memory embedding cache; existing persisted embeddings
+**Retriever execution keeps its vectors in memory.**
+Selected text fields use a separate in-memory embedding cache; existing persisted embeddings
 and their storage format are unchanged. Planning and answering are the two model calls;
 retrieval and reranking are deterministic and embedding-based. The prototype emits
 answer deltas and phase metadata, disables automatic model retries and propagates

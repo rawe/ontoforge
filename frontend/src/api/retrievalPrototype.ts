@@ -1,7 +1,6 @@
-/** Isolated V2 prototype contract; configuration is sent per request, never saved as an agent. */
+/** Retriever configuration types, the editor catalog and the chat stream reader. Execution lives in retrievers.ts. */
 import { readNdjsonStream } from './chatStream.ts'
 import { request } from './http.ts'
-import type { ChatMessage } from './types'
 
 export interface RetrievalProperty { key: string; displayName: string; dataType: string }
 export interface RetrievalType { key: string; displayName: string; properties: RetrievalProperty[] }
@@ -70,9 +69,6 @@ const base = (ontologyKey: string, lensKey: string) =>
 export const retrievalCatalog = (ontologyKey: string, lensKey: string) =>
   request<RetrievalCatalog>(`${base(ontologyKey, lensKey)}/catalog`)
 
-export const prepareRetrieval = (ontologyKey: string, lensKey: string, config: RetrievalConfig, signal: AbortSignal) =>
-  request<RetrievalPreparation>(`${base(ontologyKey, lensKey)}/prepare`, { method: 'POST', body: { config }, signal })
-
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -102,17 +98,6 @@ function parseEvent(event: Record<string, unknown>): RetrievalEvent {
     }
   }
   throw new Error('Invalid event in the retriever stream.')
-}
-
-export async function chatRetrieval(
-  ontologyKey: string, lensKey: string,
-  body: { config: RetrievalConfig; message: string; history: ChatMessage[]; turnToken?: string; diagnostics?: boolean },
-  onEvent: (event: RetrievalEvent) => void, signal: AbortSignal,
-) {
-  const response = await fetch(`${base(ontologyKey, lensKey)}/chat`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal,
-  })
-  await readRetrievalStream(response, onEvent, signal)
 }
 
 export async function readRetrievalStream(response: Response, onEvent: (event: RetrievalEvent) => void, signal: AbortSignal) {

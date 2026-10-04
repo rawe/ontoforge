@@ -8,24 +8,21 @@ const config = { threshold: 0.3, buckets: [{ entityTypeKey: 'problem', searchFie
 const saved = { key: 'support', config, validation: { valid: true } }
 const changed = { ...config, threshold: 0.7 }
 
-test('browser drafts run as previews while unchanged saved profiles run by their server key', () => {
-  assert.deepEqual(retrieverExecution(null, config, false), { mode: 'draft' })
-  assert.deepEqual(retrieverExecution(saved, structuredClone(config), false), { mode: 'saved', key: 'support' })
+test('only an unchanged saved profile runs, by its server key', () => {
+  assert.equal(retrieverExecution(null, config).mode, 'blocked')
+  assert.deepEqual(retrieverExecution(saved, structuredClone(config)), { mode: 'saved', key: 'support' })
 })
 
-test('editing a selected saved profile blocks execution until draft preview is explicitly selected', () => {
-  assert.equal(retrieverExecution(saved, changed, false).mode, 'blocked')
-  assert.deepEqual(retrieverExecution(saved, changed, true), { mode: 'draft' })
+test('editing a saved profile blocks execution until it is saved or discarded', () => {
+  assert.equal(retrieverExecution(saved, changed).mode, 'blocked')
   assert.equal(saved.config.threshold, 0.3)
-  assert.deepEqual(retrieverExecution(saved, config, false), { mode: 'saved', key: 'support' })
+  assert.deepEqual(retrieverExecution(saved, config), { mode: 'saved', key: 'support' })
 })
 
-test('schema-invalid saved profiles cannot run or bypass validation by choosing preview without repair', () => {
+test('schema-invalid saved profiles cannot run, edited or not', () => {
   const invalid = { ...saved, validation: { valid: false } }
-  assert.equal(retrieverExecution(invalid, config, false).mode, 'blocked')
-  assert.equal(retrieverExecution(invalid, config, true).mode, 'blocked')
-  assert.equal(retrieverExecution(invalid, changed, false).mode, 'blocked')
-  assert.deepEqual(retrieverExecution(invalid, changed, true), { mode: 'draft' })
+  assert.equal(retrieverExecution(invalid, config).mode, 'blocked')
+  assert.equal(retrieverExecution(invalid, changed).mode, 'blocked')
 })
 
 test('editor preserves unavailable schema keys for repair and rejects malformed shapes', () => {
@@ -38,14 +35,13 @@ test('editor preserves unavailable schema keys for repair and rejects malformed 
   assert.equal(editableRetrievalConfig({ ...config, buckets: [{ ...config.buckets[0], conditions: [{ id: 'bad', mode: 'hard', targetField: 'name', textFields: [], path: [null] }] }] }), false)
 })
 
-test('unsupported configuration versions and malformed saved shapes require explicit repair, then explicit preview', () => {
+test('unsupported configuration versions and malformed saved shapes cannot run, even after a reviewed repair', () => {
   const unknownVersion = { ...saved, configVersion: 99 }
+  assert.equal(retrieverExecution(unknownVersion, config).mode, 'blocked')
   assert.equal(retrieverExecution(unknownVersion, config, true).mode, 'blocked')
-  assert.equal(retrieverExecution(unknownVersion, config, false, true).mode, 'blocked')
-  assert.deepEqual(retrieverExecution(unknownVersion, config, true, true), { mode: 'draft' })
   const malformed = { ...saved, config: { threshold: 0.3, buckets: [null] } as unknown as typeof config }
+  assert.equal(retrieverExecution(malformed, config).mode, 'blocked')
   assert.equal(retrieverExecution(malformed, config, true).mode, 'blocked')
-  assert.deepEqual(retrieverExecution(malformed, config, true, true), { mode: 'draft' })
 })
 
 function stream(events: unknown[]) {

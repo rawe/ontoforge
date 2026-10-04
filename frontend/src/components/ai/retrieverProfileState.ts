@@ -1,18 +1,16 @@
 import type { RetrievalConfig } from '../../api/retrievalPrototype'
 
-/** Saved execution must never silently consume an edited browser configuration. */
+/** A retriever runs only from its saved, unchanged and valid server configuration. */
 export function retrieverExecution(
   profile: { key: string; config: RetrievalConfig; configVersion?: number; validation: { valid: boolean } } | null,
   config: RetrievalConfig,
-  preview: boolean,
   repairReviewed = false,
-): { mode: 'saved'; key: string } | { mode: 'draft' } | { mode: 'blocked'; reason: string } {
-  if (!profile) return { mode: 'draft' }
+): { mode: 'saved'; key: string } | { mode: 'blocked'; reason: string } {
+  if (!profile) return { mode: 'blocked', reason: 'Save this new retriever before running it.' }
   if ((profile.configVersion !== undefined && profile.configVersion !== 1) || !editableRetrievalConfig(profile.config)) {
-    return repairReviewed && preview ? { mode: 'draft' } : { mode: 'blocked', reason: 'Unsupported saved configuration. Export or review and apply a version 1 repair before previewing or saving.' }
+    return { mode: 'blocked', reason: repairReviewed ? 'Save the reviewed version 1 repair before running.' : 'Unsupported saved configuration. Export it, or review and save a version 1 repair.' }
   }
-  const dirty = JSON.stringify(profile.config) !== JSON.stringify(config)
-  if (dirty) return preview ? { mode: 'draft' } : { mode: 'blocked', reason: 'Save these changes or explicitly preview the draft before running.' }
+  if (repairReviewed || JSON.stringify(profile.config) !== JSON.stringify(config)) return { mode: 'blocked', reason: 'Save or discard your changes before running.' }
   if (!profile.validation.valid) return { mode: 'blocked', reason: 'This saved retriever is invalid in the current lens. Repair its configuration before running.' }
   return { mode: 'saved', key: profile.key }
 }

@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Activity, Check, LoaderCircle, PanelLeftClose, PanelLeftOpen, Plus, SendHorizonal, Square, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  chatRetrieval, prepareRetrieval, retrievalCatalog,
+  retrievalCatalog,
   type RetrievalBucket, type RetrievalCatalog, type RetrievalCondition, type RetrievalConfig,
   type RetrievalEvent, type RetrievalMeta, type RetrievalPathStep, type RetrievalPreparation, type RetrievalProperty, type RetrievalType,
 } from '@/api/retrievalPrototype'
@@ -94,29 +94,6 @@ function defaults(catalog: RetrievalCatalog): RetrievalConfig {
   return { buckets: (mainTypes.length ? mainTypes : catalog.entityTypes.slice(0, 3)).map((t) => suggestedBucket(catalog, t)), threshold: catalog.defaults.threshold, answerFieldCharacters: 800 }
 }
 
-function readConfig(key: string, catalog: RetrievalCatalog): RetrievalConfig {
-  try {
-    const stored = JSON.parse(localStorage.getItem(key) ?? 'null') as { version: number; config: RetrievalConfig } | null
-    if (stored?.version !== 1 || !Array.isArray(stored.config.buckets)) return defaults(catalog)
-    const buckets = stored.config.buckets.flatMap((bucket) => {
-      const type = catalog.entityTypes.find((t) => t.key === bucket.entityTypeKey)
-      if (!type) return []
-      const choices = pathChoices(catalog, type)
-      return [{ ...bucket,
-        searchFields: bucket.searchFields.filter((f) => semanticProperties(type).some((p) => p.key === f)),
-        answerFields: bucket.answerFields.filter((f) => scalarProperties(type).some((p) => p.key === f)),
-        conditions: bucket.conditions.flatMap((condition) => {
-          const choice = choices.find((p) => p.key === pathKey(condition.path))
-          if (!choice || !['hard', 'soft'].includes(condition.mode) || !scalarProperties(choice.target).some((p) => p.key === condition.targetField)) return []
-          return [{ ...condition, textFields: condition.textFields.filter((f) => semanticProperties(choice.target).some((p) => p.key === f)) }]
-        }),
-      }]
-    })
-    return { buckets, threshold: Math.max(-1, Math.min(1, Number.isFinite(stored.config.threshold) ? stored.config.threshold : catalog.defaults.threshold)),
-      answerFieldCharacters: Math.max(100, Math.min(2000, stored.config.answerFieldCharacters ?? 800)) }
-  } catch { return defaults(catalog) }
-}
-
 function Fields({ properties, selected, disabled, onChange }: {
   properties: RetrievalProperty[]; selected: string[]; disabled: boolean; onChange: (fields: string[]) => void
 }) {
@@ -130,8 +107,7 @@ function Fields({ properties, selected, disabled, onChange }: {
 }
 
 function RetrieverEditor({ ontologyKey, lensKey, catalog }: { ontologyKey: string; lensKey: string; catalog: RetrievalCatalog }) {
-  const storageKey = `ontoforge:retriever-v2:${ontologyKey}:${lensKey}`
-  const [config, setConfig] = useState(() => readConfig(storageKey, catalog))
+  const [config, setConfig] = useState(() => defaults(catalog))
   const [selectedType, setSelectedType] = useState(config.buckets[0]?.entityTypeKey ?? '')
   const [step, setStep] = useState(1)
   const [turns, setTurns] = useState<Turn[]>([])
@@ -139,10 +115,8 @@ function RetrieverEditor({ ontologyKey, lensKey, catalog }: { ontologyKey: strin
   const [pending, setPending] = useState<'prepare' | 'chat' | null>(null)
   const [phase, setPhase] = useState('')
   const [error, setError] = useState('')
-  const [storageError, setStorageError] = useState(false)
   const [prepared, setPrepared] = useState<RetrievalPreparation | null>(null)
   const [profile, setProfile] = useState<RetrieverProfile | null>(null)
-  const [preview, setPreview] = useState(false)
   const [managementBusy, setManagementBusy] = useState(false)
   const [repairReviewed, setRepairReviewed] = useState(false)
   const [diagnostics, setDiagnostics] = useState(() => readFlag(diagnosticsKey))
@@ -155,7 +129,7 @@ function RetrieverEditor({ ontologyKey, lensKey, catalog }: { ontologyKey: strin
   const unsupported = profile !== null && (profile.configVersion !== 1 || !editableRetrievalConfig(profile.config))
   const hideEditor = unsupported && !repairReviewed
   const dirty = profile !== null && (JSON.stringify(profile.config) !== JSON.stringify(config) || (unsupported && repairReviewed))
-  const execution = retrieverExecution(profile, config, preview, repairReviewed)
+  const execution = retrieverExecution(profile, config, repairReviewed)
   const bucket = config.buckets.find((b) => b.entityTypeKey === selectedType) ?? config.buckets[0]
   const type = catalog.entityTypes.find((t) => t.key === bucket?.entityTypeKey)
   const paths = useMemo(() => type ? pathChoices(catalog, type) : [], [catalog, type])
@@ -166,20 +140,16 @@ function RetrieverEditor({ ontologyKey, lensKey, catalog }: { ontologyKey: strin
   useEffect(() => () => { active.current?.abort(); active.current = null }, [])
   useEffect(() => { if (scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight }, [turns, phase])
 
-  function persist(next: RetrievalConfig) {
-    try { localStorage.setItem(storageKey, JSON.stringify({ version: 1, config: next })); setStorageError(false) }
-    catch { setStorageError(true) }
-  }
   function update(next: RetrievalConfig) {
-    setConfig(next); if (!profile) persist(next); setPreview(false); setPrepared(null); setError(''); setTurns([]); setPhase(''); turnToken.current = undefined
+    setConfig(next); setPrepared(null); setError(''); setTurns([]); setPhase(''); turnToken.current = undefined
   }
-  function selectProfile(next: RetrieverProfile | null, draft?: RetrievalConfig) {
+  /** `start` seeds a new, not yet saved retriever; it cannot run until it is saved. */
+  function selectProfile(next: RetrieverProfile | null, start?: RetrievalConfig) {
     active.current?.abort(); active.current = null; setPending(null)
-    const nextConfig = next ? editableRetrievalConfig(next.config) ? next.config : defaults(catalog) : draft ?? readConfig(storageKey, catalog)
-    setProfile(next); setConfig(nextConfig); setSelectedType(nextConfig.buckets[0]?.entityTypeKey ?? ''); setPreview(false)
+    const nextConfig = next ? editableRetrievalConfig(next.config) ? next.config : defaults(catalog) : start ?? defaults(catalog)
+    setProfile(next); setConfig(nextConfig); setSelectedType(nextConfig.buckets[0]?.entityTypeKey ?? '')
     setRepairReviewed(false)
     setPrepared(null); setTurns([]); setPhase(''); setError(''); turnToken.current = undefined
-    if (!next && draft) persist(draft)
   }
   function updateBucket(next: RetrievalBucket) { update({ ...config, buckets: config.buckets.map((b) => b.entityTypeKey === next.entityTypeKey ? next : b) }) }
   function updateCondition(index: number, change: Partial<RetrievalCondition>) {
@@ -191,10 +161,9 @@ function RetrieverEditor({ ontologyKey, lensKey, catalog }: { ontologyKey: strin
   async function prepare() {
     if (!valid || execution.mode === 'blocked' || busy || active.current) return
     const controller = new AbortController(); active.current = controller
-    if (execution.mode === 'draft' && !profile) persist(config)
     setPending('prepare'); setPhase('Preparing search texts and relation context …'); setError('')
     try {
-      const result = execution.mode === 'saved' ? await prepareSavedRetriever(ontologyKey, lensKey, execution.key, controller.signal) : await prepareRetrieval(ontologyKey, lensKey, config, controller.signal)
+      const result = await prepareSavedRetriever(ontologyKey, lensKey, execution.key, controller.signal)
       if (active.current === controller && !controller.signal.aborted) { setPrepared(result); setPhase('Search index ready') }
     } catch (err) {
       if (active.current === controller) { setError(controller.signal.aborted ? 'Preparation cancelled.' : err instanceof Error ? err.message : 'Preparation failed.'); setPhase('') }
@@ -204,7 +173,6 @@ function RetrieverEditor({ ontologyKey, lensKey, catalog }: { ontologyKey: strin
     const question = input.trim()
     if (!valid || execution.mode === 'blocked' || !question || busy || active.current) return
     const controller = new AbortController(); active.current = controller
-    if (execution.mode === 'draft' && !profile) persist(config)
     const history = turns.filter((t) => t.status === 'complete').slice(-4).flatMap((t) => [{ role: 'user' as const, content: t.question.slice(0, 2000) }, { role: 'assistant' as const, content: t.reply.slice(0, 2000) }])
     let turn: Turn = { id: crypto.randomUUID(), question, reply: '', status: 'pending', meta: {} }
     let nextToken: string | undefined
@@ -234,8 +202,7 @@ function RetrieverEditor({ ontologyKey, lensKey, catalog }: { ontologyKey: strin
         save()
       }
       const body = { message: question, history, turnToken: turnToken.current, diagnostics }
-      if (execution.mode === 'saved') await chatSavedRetriever(ontologyKey, lensKey, execution.key, body, onEvent, controller.signal)
-      else await chatRetrieval(ontologyKey, lensKey, { ...body, config }, onEvent, controller.signal)
+      await chatSavedRetriever(ontologyKey, lensKey, execution.key, body, onEvent, controller.signal)
     } catch (err) {
       if (active.current === controller) { turn = { ...turn, status: 'failed', error: controller.signal.aborted ? 'Cancelled. This incomplete answer will not be used as conversation context.' : err instanceof Error ? err.message : 'Retrieval failed.' }; save(); setPhase('') }
     } finally { if (active.current === controller) { active.current = null; setPending(null) } }
@@ -248,9 +215,9 @@ function RetrieverEditor({ ontologyKey, lensKey, catalog }: { ontologyKey: strin
       <button type="button" className="text-xs text-muted-foreground hover:text-foreground @2xl:[writing-mode:vertical-rl] @2xl:rotate-180" onClick={() => collapseConfig(false)}>Configure retriever{profile ? ` · ${profile.name}` : ''}</button>
     </aside>}
     <aside className={`max-h-[45%] w-full shrink-0 overflow-y-auto border-b p-4 @2xl:max-h-none @2xl:w-[320px] @2xl:border-r @2xl:border-b-0 @5xl:w-[380px] @7xl:w-[420px] ${configCollapsed ? 'hidden' : ''}`}>
-      <div className="mb-4 flex items-start gap-2"><div className="min-w-0 flex-1"><h2 className="font-semibold">Configure retriever</h2><p className="mt-1 text-xs text-muted-foreground">Select a lens-local saved profile or try an explicit browser draft.</p></div><Button size="icon" variant="ghost" className="size-7 shrink-0" aria-label="Hide configuration" title="Hide configuration" onClick={() => collapseConfig(true)}><PanelLeftClose className="size-4" /></Button></div>
-      <RetrieverProfiles key={`${profile?.retrieverConfigId ?? 'draft'}:${profile?.updatedAt ?? ''}`} ontologyKey={ontologyKey} lensKey={lensKey} config={config} profile={profile} dirty={dirty} disabled={pending !== null} repairReviewed={repairReviewed} onSelect={selectProfile} onConfig={(next) => { update(next); setRepairReviewed(true) }} onBusy={setManagementBusy} />
-      {dirty && !hideEditor && <div className="mb-4 space-y-2 rounded border border-amber-500/30 p-3 text-xs"><p>Your edits are not saved. {preview ? 'Draft preview is active; the saved server profile is excluded from this run.' : 'Save them, or explicitly choose draft preview.'}</p><Button size="sm" variant="outline" disabled={busy || preview} onClick={() => { setPreview(true); setPrepared(null); setTurns([]); setPhase(''); turnToken.current = undefined }}>Preview draft changes</Button><Button size="sm" variant="ghost" disabled={busy} onClick={() => selectProfile(profile)}>Discard edits</Button></div>}
+      <div className="mb-4 flex items-start gap-2"><div className="min-w-0 flex-1"><h2 className="font-semibold">Configure retriever</h2><p className="mt-1 text-xs text-muted-foreground">Select a saved retriever of this lens, or create a new one. Changes run only after saving.</p></div><Button size="icon" variant="ghost" className="size-7 shrink-0" aria-label="Hide configuration" title="Hide configuration" onClick={() => collapseConfig(true)}><PanelLeftClose className="size-4" /></Button></div>
+      <RetrieverProfiles key={`${profile?.retrieverConfigId ?? 'new'}:${profile?.updatedAt ?? ''}`} ontologyKey={ontologyKey} lensKey={lensKey} config={config} profile={profile} dirty={dirty} disabled={pending !== null} repairReviewed={repairReviewed} onSelect={selectProfile} onConfig={(next) => { update(next); setRepairReviewed(true) }} onBusy={setManagementBusy} />
+      {dirty && !hideEditor && <div className="mb-4 space-y-2 rounded border border-amber-500/30 p-3 text-xs"><p>Your edits are not saved. Save them to run them, or discard them.</p><Button size="sm" variant="ghost" disabled={busy} onClick={() => selectProfile(profile)}>Discard edits</Button></div>}
       {!hideEditor && <>
       {config.buckets.filter((item) => !catalog.entityTypes.some((candidate) => candidate.key === item.entityTypeKey)).map((item) => <div key={item.entityTypeKey} className="mb-3 rounded border border-destructive/30 p-3 text-xs"><p className="text-destructive">Result type {item.entityTypeKey} is not visible in this lens. Its configuration has been preserved.</p><Button size="sm" variant="outline" disabled={busy} onClick={() => update({ ...config, buckets: config.buckets.filter((candidate) => candidate !== item) })}>Remove unavailable bucket</Button></div>)}
       <div className="mb-4 flex gap-1">{['Find', 'Search', 'Answer'].map((label, i) => <Button key={label} variant={step === i + 1 ? 'secondary' : 'ghost'} size="sm" onClick={() => setStep(i + 1)} className="flex-1 px-1 text-xs">{i + 1}. {label}</Button>)}</div>
@@ -307,12 +274,11 @@ function RetrieverEditor({ ontologyKey, lensKey, catalog }: { ontologyKey: strin
         <p className="text-xs text-muted-foreground">Preparation does not change database data. Each question checks data freshness again.</p>
         {prepared && <p className="text-xs">Ready: {prepared.entityCount} entities, {prepared.relationCount} relations · {prepared.embeddingRequests} embedding requests, {prepared.cacheHits} texts reused.</p>}
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-        {storageError && <p role="alert" className="text-xs text-destructive">The browser could not save settings. They apply until you leave this tab.</p>}
       </div>
     </aside>
     <div className={`flex min-h-0 min-w-0 flex-1 flex-col ${configCollapsed ? '@2xl:flex-row' : '@6xl:flex-row'}`}>
     <section className="flex min-h-[440px] min-w-0 flex-1 flex-col">
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b px-4 py-3"><div className="min-w-0"><h2 className="text-sm font-medium">Questions for {profile?.name ?? 'the browser draft'}</h2><p className="mt-1 text-xs text-muted-foreground">{execution.mode === 'saved' ? `Server configuration: ${lensKey} / ${execution.key}` : execution.mode === 'draft' ? 'Draft preview · unsaved request configuration' : 'Unsaved or invalid configuration · execution blocked'}</p></div><div className="flex shrink-0 items-center gap-3"><label className="flex cursor-pointer items-center gap-2 text-xs" title="Stream the search plan, scores, timings and model calls with each answer"><Checkbox checked={diagnostics} onCheckedChange={(checked) => toggleDiagnostics(checked === true)} />Show diagnostics</label><Button size="sm" variant="ghost" disabled={busy || !turns.length} onClick={() => { setTurns([]); setPhase(''); turnToken.current = undefined }}>New conversation</Button></div></div>
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b px-4 py-3"><div className="min-w-0"><h2 className="text-sm font-medium">Questions for {profile?.name ?? 'a new retriever'}</h2><p className="mt-1 text-xs text-muted-foreground">{execution.mode === 'saved' ? `Saved configuration: ${lensKey} / ${execution.key}` : execution.reason}</p></div><div className="flex shrink-0 items-center gap-3"><label className="flex cursor-pointer items-center gap-2 text-xs" title="Stream the search plan, scores, timings and model calls with each answer"><Checkbox checked={diagnostics} onCheckedChange={(checked) => toggleDiagnostics(checked === true)} />Show diagnostics</label><Button size="sm" variant="ghost" disabled={busy || !turns.length} onClick={() => { setTurns([]); setPhase(''); turnToken.current = undefined }}>New conversation</Button></div></div>
       <div ref={scroll} className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
         {!turns.length && <div className="mx-auto max-w-lg py-12 text-sm text-muted-foreground"><h3 className="mb-2 text-base font-medium text-foreground">Configure, prepare, ask</h3><p>Choose result types and contents on the left. Exact conditions narrow the search; descriptions help with related terms.</p><p className="mt-3">Ask about a topic, an exact assignment, or both. Follow-up questions refer to completed answers in this conversation.</p></div>}
         {turns.map((turn) => <article key={turn.id} className="mx-auto max-w-3xl space-y-3"><div className="ml-auto max-w-[90%] rounded-lg bg-muted px-4 py-3 text-sm whitespace-pre-wrap">{turn.question}</div>

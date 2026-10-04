@@ -488,13 +488,10 @@ Contract: [capabilities/retrievers.md](capabilities/retrievers.md).
 |---|---|---|
 | POST | `/retrievers/{retrieverKey}/prepare` | Prepare selected texts; optional empty body |
 | POST | `/retrievers/{retrieverKey}/chat` | Stream a question using the stored definition |
-| GET | `/ai/retriever/catalog` | Visible schema and editor defaults for request-configured drafts |
-| POST | `/ai/retriever/prepare` | Prepare a supplied draft `config` |
-| POST | `/ai/retriever/chat` | Stream a question using supplied draft `config` |
+| GET | `/ai/retriever/catalog` | Visible schema and editor defaults for the retriever editor |
 
 Saved chat accepts `message`, optional `history`, `turnToken` and `diagnostics`; unknown
-body fields are rejected. Draft chat accepts the same fields plus `config`. Chat streams
-newline-delimited `phase`, `delta`, `meta`, `final` and `error` events. `diagnostics`
+body fields are rejected. Chat streams newline-delimited `phase`, `delta`, `meta`, `final` and `error` events. `diagnostics`
 defaults to `false`: then the only `meta` event carries the `turnToken` for follow-up
 questions. With `diagnostics: true`, further `meta` events carry the validated plan,
 scored candidates with their answer fields, response-context omissions, phase timings,

@@ -48,17 +48,13 @@ language-model call. Preparation requires an embedding provider; chat requires a
 language-model provider, and semantic retrieval also requires embeddings. Management,
 copying and JSON transfer do not call models or prepare vectors.
 
-## Saved execution and browser drafts
+## Execution
 
-Named execution loads the definition from the server by lens and retriever key. Its
-request cannot override the stored configuration. A browser draft instead sends an
-explicit request configuration. These are separate execution modes.
-
-The web UI retains the local browser draft. Selecting a stored profile does not upload
-that draft. Editing a profile does not save it: the user must save or explicitly preview
-the draft before running. Profile/configuration changes clear the dependent conversation.
-Unknown stored shapes can be exported or explicitly reviewed as a version 1 draft repair;
-saving the repair still requires validation and confirmation.
+Execution loads the definition from the server by lens and retriever key; a request
+cannot supply or override a configuration. Changes therefore run only after they are
+saved, and a new definition runs only once it exists. Profile/configuration changes clear
+the dependent conversation. Unknown stored shapes can be exported or explicitly reviewed
+as a version 1 repair; saving the repair still requires validation.
 
 Conversation references are short-lived, scoped to ontology, lens and configuration.
 Only complete, purely exact previous results can authorize an unambiguous “those” or
@@ -96,7 +92,7 @@ selected retriever texts do not simply reuse full-schema instance vectors.
 
 ## Interfaces
 
-Definitions are managed through modeling REST. Saved preparation/chat run through runtime
-REST. The existing request-configured retriever routes remain the draft surface. No
+Definitions are managed through modeling REST. Preparation and chat run through runtime
+REST by retriever key; a catalog route supplies the visible schema to the editor. No
 dedicated retriever MCP tools or A2A discovery/task routes are provided. Design export
 and import through modeling MCP carry the same lens-local definitions as REST.

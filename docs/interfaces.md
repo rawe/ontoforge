@@ -462,6 +462,9 @@ Runtime runs them; modeling defines them. Semantics:
 | GET | `/saved-queries/search` | Find a saved query by describing what it should do | `q`, `limit`, `min_score` |
 | POST | `/saved-queries/{queryKey}/run` | Execute a saved query with parameter values | — |
 
+Run takes the parameter values in the body under `params`, keyed by parameter key, for
+example `{"params": {"hall": "2"}}`; a query without parameters accepts an empty body.
+
 Search ranks saved-query descriptions semantically, so it needs an embedding provider.
 `limit` is 1–20, default 3; `min_score` defaults to 0.7. The bare result array keeps
 `key`, `name`, `description`, `parameters` and absolute cosine `score` (0–1).

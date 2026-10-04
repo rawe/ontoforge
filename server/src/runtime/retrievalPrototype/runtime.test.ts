@@ -135,8 +135,7 @@ describe('fixed LangGraph prototype pipeline',()=>{
     expect(fake.withConfig).toHaveBeenCalledWith({ response_format: PLANNER_RESPONSE_FORMAT });
     expect(fake.stream).toHaveBeenCalledTimes(1);
     expect(createAiModel).toHaveBeenCalledWith('fake','test','http://unused',{
-      maxRetries:0,
-      maxTokens:1800
+      maxRetries:0
     });
     expect(result.reply).toBe(events.filter(e=>e.type==='delta').map(e=>e.text).join(''));
     expect(events.at(-1)).toHaveProperty('turnToken');

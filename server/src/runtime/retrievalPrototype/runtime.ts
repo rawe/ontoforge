@@ -169,8 +169,7 @@ export async function chat(lens:string,store:RuntimeStore,config:unknown,message
   let firstDelta=false;
   if(!settings.AI_PROVIDER)throw new ValidationError('Language model is unavailable for this prototype.');
   const model=createAiModel(settings.AI_PROVIDER,settings.AI_MODEL,settings.AI_BASE_URL,{
-    maxRetries:0,
-    maxTokens:1800
+    maxRetries:0
   });
   // JSON mode applies only to planning; the response model remains a plain text stream.
   const plannerModel = (model as ChatOpenAI).withConfig({ response_format: PLANNER_RESPONSE_FORMAT });

@@ -511,23 +511,6 @@ network. Ontologies are isolation units, not tenants: no ontology has an owner, 
 or a quota. Building a permission model before a deployment requires one would be
 guessing at its shape.
 
-## Development fixtures
-
-**Fixtures are plain OntoForge exports.** Development fixtures live in the repository's
-`fixtures/` folder, one folder per fixture: the schema is a design transfer document,
-the data is the ontoforge-sync plugin's data file. No fixture-only format exists to keep
-in step with the server.
-
-**A fixture's ontology key is always `fx_<folder name>`.** The prefix keeps fixture
-ontologies apart from real ones on a shared server.
-
-**One tool loads, saves and unloads fixtures, and deletes only registered ones.** Unload
-refuses a name without a fixture folder, so the tool can never delete an ontology that is
-not a fixture.
-
-**Format repair is load, then save.** After a format change the files are rewritten from
-the server; a file the server no longer accepts is fixed by hand once.
-
 ## Retrieval evaluation dataset
 
 **The fair evaluation ontology stores stand numbers on exhibitors.**

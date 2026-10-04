@@ -1,0 +1,77 @@
+# Development fixtures
+
+Known ontologies — schema plus instance data — that you load into a running OntoForge
+server, work with, save back, and remove. They are for development and manual or agent
+testing; the automated test suites use their own fixtures under `server/tests/fixtures/`
+(see [docs/workflows/testing.md](../docs/workflows/testing.md)).
+
+Each fixture is one folder under `ontologies/`. The folder name is the fixture name, and
+the fixture always lives on the server as the ontology `fx_<name>`.
+
+```
+ontologies/<name>/
+  README.md     purpose, types, lenses, sizes
+  schema.json   the ontology's design export, unchanged (GET /model/export)
+  data.json     instance data, in the ontoforge-sync plugin's data file format
+```
+
+## Commands
+
+`fixture.mjs` needs Node 18+ and nothing else. Run it from the repository root:
+
+```sh
+node fixtures/fixture.mjs load   people_basic   # create fx_people_basic, import schema + data
+node fixtures/fixture.mjs save   people_basic   # write fx_people_basic back into the folder
+node fixtures/fixture.mjs unload people_basic   # delete fx_people_basic from the server
+
+node fixtures/fixture.mjs load people_basic --base-url http://localhost:8010
+```
+
+The server is `--base-url`, else `ONTOFORGE_BASE_URL`, else `http://localhost:8000`.
+
+- **load** — creates `fx_<name>` with the schema's text-search language, imports
+  `schema.json`, writes `data.json` through the schema's unscoped lens, then rebuilds
+  search data. Refused when `fx_<name>` already exists (unload first). When a step after
+  creating the ontology fails, the tool prints the server's error and leaves the partial
+  ontology in place — run `unload` before loading again.
+- **save** — reads `fx_<name>` and overwrites `schema.json` and `data.json` (creating the
+  folder if needed). Data is read through the unscoped lens; IDs are the server's IDs as
+  returned.
+- **unload** — deletes `fx_<name>`. Refused when the folder `ontologies/<name>` does not
+  exist.
+
+## Typical flow
+
+1. `load <name>` against your server.
+2. Develop or test against ontology `fx_<name>`.
+3. `unload <name>` when done. If you changed the fixture on purpose, `save <name>` first.
+
+## Making a new fixture
+
+1. Build ontology `fx_<name>` on a server — at least one unscoped lens is required.
+   `<name>` matches `^[a-z][a-z0-9_]*$`; `fx_<name>` is at most 59 characters.
+2. `save <name>` — this creates `ontologies/<name>/` with `schema.json` and `data.json`.
+3. Add `ontologies/<name>/README.md` and a row to the registry below.
+4. Check it: `unload <name>`, `load <name>`.
+
+## Repairing after a format change
+
+When OntoForge changes its design or data format, `load` then `save` rewrites the files
+in the current format. If `load` fails on an old file, fix the JSON by hand once, then
+load and save.
+
+## Safety
+
+- Fixture ontologies are always named `fx_<name>`; nothing else is created.
+- `unload` deletes only ontologies whose fixture folder exists, so other ontologies on the
+  server are never touched.
+- Loading computes search data with whatever embedding provider the server is configured
+  with — a cloud provider is called (and billed) if the server uses one.
+- Neo4j holds at most one ontology per server: a fixture loads there only into an
+  otherwise empty server.
+
+## Registry
+
+| Name | Ontology key | Purpose | Size |
+|---|---|---|---|
+| [people_basic](ontologies/people_basic/README.md) | `fx_people_basic` | Simple general-purpose fixture: CRUD, scoped and unscoped lenses, agents, saved queries | 20 entities, 15 relations |

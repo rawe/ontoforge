@@ -1,0 +1,360 @@
+{
+  "formatVersion": "1.0",
+  "exportedAt": "2026-10-04T16:58:35.035Z",
+  "entities": {
+    "company": [
+      {
+        "_id": "ec3e93b4-4608-4861-adbe-a877156bf669",
+        "_entityTypeKey": "company",
+        "_createdAt": "2026-10-04T16:58:29.209Z",
+        "_updatedAt": "2026-10-04T16:58:29.209Z",
+        "name": "Northwind Analytics",
+        "founded": "2009-03-14",
+        "employee_count": 240
+      },
+      {
+        "_id": "5ce616b3-979c-4b94-af35-86df875715b1",
+        "_entityTypeKey": "company",
+        "_createdAt": "2026-10-04T16:58:29.212Z",
+        "_updatedAt": "2026-10-04T16:58:29.212Z",
+        "name": "Bluefield Robotics",
+        "founded": "2016-11-02",
+        "employee_count": 85
+      },
+      {
+        "_id": "2ba6b701-0297-43c2-9473-94b671e4a5dc",
+        "_entityTypeKey": "company",
+        "_createdAt": "2026-10-04T16:58:29.214Z",
+        "_updatedAt": "2026-10-04T16:58:29.214Z",
+        "name": "Harbor & Pine Consulting",
+        "founded": "1998-06-21",
+        "employee_count": 1200
+      },
+      {
+        "_id": "b0fb5f6a-0243-4f8f-b713-f0133a9c1e6a",
+        "_entityTypeKey": "company",
+        "_createdAt": "2026-10-04T16:58:29.216Z",
+        "_updatedAt": "2026-10-04T16:58:29.216Z",
+        "name": "Lumen Grid Energy",
+        "founded": "2012-01-09",
+        "employee_count": 430
+      },
+      {
+        "_id": "5854a35d-e090-43d0-9801-206009206069",
+        "_entityTypeKey": "company",
+        "_createdAt": "2026-10-04T16:58:29.218Z",
+        "_updatedAt": "2026-10-04T16:58:29.218Z",
+        "name": "Quarry Lane Books",
+        "founded": "1987-09-30",
+        "employee_count": 12
+      },
+      {
+        "_id": "52eabfd4-5838-4660-b8d4-76b078958127",
+        "_entityTypeKey": "company",
+        "_createdAt": "2026-10-04T16:58:29.222Z",
+        "_updatedAt": "2026-10-04T16:58:29.222Z",
+        "name": "Stillwater Health",
+        "employee_count": 3100
+      }
+    ],
+    "person": [
+      {
+        "_id": "1e5cb9fa-1784-426c-8e65-5fd46ee18e1b",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T16:58:29.225Z",
+        "_updatedAt": "2026-10-04T16:58:29.225Z",
+        "age": 34,
+        "bio": "Data engineer who builds ingestion pipelines for retail analytics. Previously worked on search relevance and enjoys long-distance cycling.",
+        "name": "Alice Moreau",
+        "email": "alice.moreau@example.com",
+        "active": true
+      },
+      {
+        "_id": "2f66d04d-bdbf-43a8-bb64-2151b467758c",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T16:58:29.230Z",
+        "_updatedAt": "2026-10-04T16:58:29.230Z",
+        "age": 41,
+        "bio": "Robotics lead focused on warehouse automation and safety certification of autonomous carts.",
+        "name": "Ben Okafor",
+        "email": "ben.okafor@example.com",
+        "active": true
+      },
+      {
+        "_id": "75f1d1cb-c783-448f-a397-719cd6d01f77",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T16:58:29.235Z",
+        "_updatedAt": "2026-10-04T16:58:29.235Z",
+        "age": 29,
+        "name": "Clara Jensen",
+        "email": "clara.jensen@example.com",
+        "active": true
+      },
+      {
+        "_id": "103970ce-f8fe-4c77-8d4a-227f767b5783",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T16:58:29.237Z",
+        "_updatedAt": "2026-10-04T16:58:29.237Z",
+        "age": 52,
+        "bio": "Retired partner in strategy consulting. Advises small publishers on digital distribution.",
+        "name": "Daniel Weiss",
+        "email": "daniel.weiss@example.com",
+        "active": false
+      },
+      {
+        "_id": "613b7c39-daec-452c-9af3-99758434ff06",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T16:58:29.241Z",
+        "_updatedAt": "2026-10-04T16:58:29.241Z",
+        "age": 38,
+        "bio": "Grid operations manager working on battery storage scheduling and demand forecasting.",
+        "name": "Elena Rossi",
+        "email": "elena.rossi@example.com",
+        "active": true
+      },
+      {
+        "_id": "6c928cd9-c035-4288-90e7-5f4db5659ec8",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T16:58:29.245Z",
+        "_updatedAt": "2026-10-04T16:58:29.245Z",
+        "age": 27,
+        "name": "Farid Haddad",
+        "active": true
+      },
+      {
+        "_id": "e62c0b26-edcb-42a4-a6e0-a68026edd181",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T16:58:29.247Z",
+        "_updatedAt": "2026-10-04T16:58:29.247Z",
+        "age": 45,
+        "bio": "Clinical informatics specialist bridging hospital IT and nursing teams.",
+        "name": "Grace Lin",
+        "email": "grace.lin@example.com",
+        "active": true
+      },
+      {
+        "_id": "ee8e3a7a-0b0c-412d-80bc-13537a6a9c1d",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T16:58:29.251Z",
+        "_updatedAt": "2026-10-04T16:58:29.251Z",
+        "age": 31,
+        "name": "Hugo Martins",
+        "email": "hugo.martins@example.com",
+        "active": true
+      },
+      {
+        "_id": "79034082-4a7c-4e25-b7e8-9b4c4faf3463",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T16:58:29.253Z",
+        "_updatedAt": "2026-10-04T16:58:29.253Z",
+        "age": 60,
+        "name": "Ingrid Svensson",
+        "email": "ingrid.svensson@example.com",
+        "active": false
+      },
+      {
+        "_id": "eecbbc6b-6112-4cec-96a2-63985de83987",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T16:58:29.255Z",
+        "_updatedAt": "2026-10-04T16:58:29.255Z",
+        "age": 36,
+        "bio": "Bookseller and events organiser who runs a monthly reading circle on science fiction.",
+        "name": "Jonas Becker",
+        "email": "jonas.becker@example.com",
+        "active": true
+      },
+      {
+        "_id": "369f0e90-9e52-4ba7-9795-1fd99aa96c8d",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T16:58:29.258Z",
+        "_updatedAt": "2026-10-04T16:58:29.258Z",
+        "age": 48,
+        "name": "Kenji Watanabe",
+        "email": "kenji.watanabe@example.com",
+        "active": true
+      },
+      {
+        "_id": "8bb7f320-1f33-4649-a58d-649e19db5c31",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T16:58:29.260Z",
+        "_updatedAt": "2026-10-04T16:58:29.260Z",
+        "age": 25,
+        "bio": "Junior consultant specialising in process mapping for public-sector clients.",
+        "name": "Lea Novak",
+        "email": "lea.novak@example.com",
+        "active": true
+      },
+      {
+        "_id": "7070b2b5-e156-4c7d-a028-2a22c655e5f6",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T16:58:29.263Z",
+        "_updatedAt": "2026-10-04T16:58:29.263Z",
+        "age": 39,
+        "name": "Marco Bianchi",
+        "active": true
+      },
+      {
+        "_id": "55d3b335-314a-46c6-8ee2-1682eb120fd9",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T16:58:29.265Z",
+        "_updatedAt": "2026-10-04T16:58:29.265Z",
+        "age": 33,
+        "bio": "Machine learning engineer training perception models for mobile robots.",
+        "name": "Nora Lindqvist",
+        "email": "nora.lindqvist@example.com",
+        "active": true
+      }
+    ]
+  },
+  "relations": {
+    "works_for": [
+      {
+        "_id": "faae86ad-e7ba-4ba1-83ed-e058e4971fc2",
+        "_relationTypeKey": "works_for",
+        "_createdAt": "2026-10-04T16:58:29.271Z",
+        "_updatedAt": "2026-10-04T16:58:29.271Z",
+        "fromEntityId": "1e5cb9fa-1784-426c-8e65-5fd46ee18e1b",
+        "toEntityId": "ec3e93b4-4608-4861-adbe-a877156bf669",
+        "role": "Data Engineer",
+        "since": "2019-04-01"
+      },
+      {
+        "_id": "ea059181-01d5-43ad-9283-86622b48a3e8",
+        "_relationTypeKey": "works_for",
+        "_createdAt": "2026-10-04T16:58:29.275Z",
+        "_updatedAt": "2026-10-04T16:58:29.275Z",
+        "fromEntityId": "2f66d04d-bdbf-43a8-bb64-2151b467758c",
+        "toEntityId": "5ce616b3-979c-4b94-af35-86df875715b1",
+        "role": "Head of Robotics",
+        "since": "2017-02-15"
+      },
+      {
+        "_id": "067b4069-3b1e-4a19-ad4d-5ed05eabd369",
+        "_relationTypeKey": "works_for",
+        "_createdAt": "2026-10-04T16:58:29.278Z",
+        "_updatedAt": "2026-10-04T16:58:29.278Z",
+        "fromEntityId": "75f1d1cb-c783-448f-a397-719cd6d01f77",
+        "toEntityId": "ec3e93b4-4608-4861-adbe-a877156bf669",
+        "role": "Analyst",
+        "since": "2023-09-01"
+      },
+      {
+        "_id": "95ddcff9-a8ca-47df-b09d-1b95ce73f090",
+        "_relationTypeKey": "works_for",
+        "_createdAt": "2026-10-04T16:58:29.281Z",
+        "_updatedAt": "2026-10-04T16:58:29.281Z",
+        "fromEntityId": "103970ce-f8fe-4c77-8d4a-227f767b5783",
+        "toEntityId": "2ba6b701-0297-43c2-9473-94b671e4a5dc",
+        "role": "Partner",
+        "since": "2001-01-10"
+      },
+      {
+        "_id": "4ca64acd-19a9-4281-856a-cb1816d5ceaa",
+        "_relationTypeKey": "works_for",
+        "_createdAt": "2026-10-04T16:58:29.284Z",
+        "_updatedAt": "2026-10-04T16:58:29.284Z",
+        "fromEntityId": "103970ce-f8fe-4c77-8d4a-227f767b5783",
+        "toEntityId": "5854a35d-e090-43d0-9801-206009206069",
+        "role": "Advisor"
+      },
+      {
+        "_id": "20aa14c1-9fc8-4a4a-be9a-1c328fd39f5b",
+        "_relationTypeKey": "works_for",
+        "_createdAt": "2026-10-04T16:58:29.288Z",
+        "_updatedAt": "2026-10-04T16:58:29.288Z",
+        "fromEntityId": "613b7c39-daec-452c-9af3-99758434ff06",
+        "toEntityId": "b0fb5f6a-0243-4f8f-b713-f0133a9c1e6a",
+        "role": "Operations Manager",
+        "since": "2015-05-18"
+      },
+      {
+        "_id": "12aeb060-414f-4e5b-bece-30d222931573",
+        "_relationTypeKey": "works_for",
+        "_createdAt": "2026-10-04T16:58:29.291Z",
+        "_updatedAt": "2026-10-04T16:58:29.291Z",
+        "fromEntityId": "6c928cd9-c035-4288-90e7-5f4db5659ec8",
+        "toEntityId": "5ce616b3-979c-4b94-af35-86df875715b1",
+        "since": "2024-03-04"
+      },
+      {
+        "_id": "fac4f6aa-098e-445c-8414-373c4e8f64fd",
+        "_relationTypeKey": "works_for",
+        "_createdAt": "2026-10-04T16:58:29.294Z",
+        "_updatedAt": "2026-10-04T16:58:29.294Z",
+        "fromEntityId": "e62c0b26-edcb-42a4-a6e0-a68026edd181",
+        "toEntityId": "52eabfd4-5838-4660-b8d4-76b078958127",
+        "role": "Informatics Specialist",
+        "since": "2011-08-22"
+      },
+      {
+        "_id": "86e1acb9-cd39-4183-8951-02adabddc1ae",
+        "_relationTypeKey": "works_for",
+        "_createdAt": "2026-10-04T16:58:29.298Z",
+        "_updatedAt": "2026-10-04T16:58:29.298Z",
+        "fromEntityId": "ee8e3a7a-0b0c-412d-80bc-13537a6a9c1d",
+        "toEntityId": "2ba6b701-0297-43c2-9473-94b671e4a5dc",
+        "role": "Consultant",
+        "since": "2020-10-05"
+      },
+      {
+        "_id": "76692b69-6ec6-482d-97de-4849ae01aed8",
+        "_relationTypeKey": "works_for",
+        "_createdAt": "2026-10-04T16:58:29.303Z",
+        "_updatedAt": "2026-10-04T16:58:29.303Z",
+        "fromEntityId": "eecbbc6b-6112-4cec-96a2-63985de83987",
+        "toEntityId": "5854a35d-e090-43d0-9801-206009206069",
+        "role": "Owner",
+        "since": "2010-06-01"
+      },
+      {
+        "_id": "caa2785f-702e-4699-8181-e0ae5b764669",
+        "_relationTypeKey": "works_for",
+        "_createdAt": "2026-10-04T16:58:29.306Z",
+        "_updatedAt": "2026-10-04T16:58:29.306Z",
+        "fromEntityId": "369f0e90-9e52-4ba7-9795-1fd99aa96c8d",
+        "toEntityId": "b0fb5f6a-0243-4f8f-b713-f0133a9c1e6a",
+        "role": "Chief Engineer",
+        "since": "2013-02-11"
+      },
+      {
+        "_id": "fbc5ce86-e71e-4b58-9167-ce74548172fa",
+        "_relationTypeKey": "works_for",
+        "_createdAt": "2026-10-04T16:58:29.309Z",
+        "_updatedAt": "2026-10-04T16:58:29.309Z",
+        "fromEntityId": "8bb7f320-1f33-4649-a58d-649e19db5c31",
+        "toEntityId": "2ba6b701-0297-43c2-9473-94b671e4a5dc",
+        "role": "Junior Consultant",
+        "since": "2025-01-13"
+      },
+      {
+        "_id": "e90ab50b-0855-4810-8651-785cc5855fd4",
+        "_relationTypeKey": "works_for",
+        "_createdAt": "2026-10-04T16:58:29.313Z",
+        "_updatedAt": "2026-10-04T16:58:29.313Z",
+        "fromEntityId": "7070b2b5-e156-4c7d-a028-2a22c655e5f6",
+        "toEntityId": "52eabfd4-5838-4660-b8d4-76b078958127",
+        "role": "Facilities Lead"
+      },
+      {
+        "_id": "e67899f9-61be-4210-837d-1ff6635efae0",
+        "_relationTypeKey": "works_for",
+        "_createdAt": "2026-10-04T16:58:29.316Z",
+        "_updatedAt": "2026-10-04T16:58:29.316Z",
+        "fromEntityId": "55d3b335-314a-46c6-8ee2-1682eb120fd9",
+        "toEntityId": "5ce616b3-979c-4b94-af35-86df875715b1",
+        "role": "ML Engineer",
+        "since": "2021-07-19"
+      },
+      {
+        "_id": "a0a73832-72c7-4a8e-895e-21311b2d45e2",
+        "_relationTypeKey": "works_for",
+        "_createdAt": "2026-10-04T16:58:29.319Z",
+        "_updatedAt": "2026-10-04T16:58:29.319Z",
+        "fromEntityId": "55d3b335-314a-46c6-8ee2-1682eb120fd9",
+        "toEntityId": "ec3e93b4-4608-4861-adbe-a877156bf669",
+        "role": "Contractor",
+        "since": "2019-01-07"
+      }
+    ]
+  }
+}

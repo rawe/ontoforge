@@ -1,0 +1,2074 @@
+{
+  "formatVersion": "1.0",
+  "exportedAt": "2026-10-04T17:53:39.298Z",
+  "entities": {
+    "person": [
+      {
+        "_id": "6d9385e1-7e13-4863-994c-ba88c168e2a8",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.572Z",
+        "_updatedAt": "2026-10-04T17:53:38.572Z",
+        "name": "Margit Olafsen",
+        "email": "margit.olafsen@corvane.example",
+        "level": 8,
+        "salary": 245000,
+        "status": "active",
+        "hired_at": "2011-03-01T08:00:00.000Z",
+        "birth_date": "1968-05-14",
+        "employee_number": "E-1001"
+      },
+      {
+        "_id": "bfb625cd-5aea-462e-a1a0-14437a34a2d2",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.574Z",
+        "_updatedAt": "2026-10-04T17:53:38.574Z",
+        "name": "Daniel Okafor",
+        "email": "daniel.okafor@corvane.example",
+        "level": 7,
+        "salary": 198000,
+        "status": "active",
+        "hired_at": "2013-07-15T08:00:00.000Z",
+        "birth_date": "1975-09-02",
+        "employee_number": "E-1002"
+      },
+      {
+        "_id": "a922877e-03ac-47d7-b4b4-b4910cea3c24",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.577Z",
+        "_updatedAt": "2026-10-04T17:53:38.577Z",
+        "name": "Priya Raman",
+        "email": "priya.raman@corvane.example",
+        "level": 7,
+        "salary": 189000,
+        "status": "active",
+        "hired_at": "2014-02-01T08:00:00.000Z",
+        "birth_date": "1979-01-23",
+        "employee_number": "E-1003"
+      },
+      {
+        "_id": "d4fec8b6-0a34-4bb8-b337-3b62e83b74d3",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.579Z",
+        "_updatedAt": "2026-10-04T17:53:38.579Z",
+        "name": "Tomas Bergqvist",
+        "email": "tomas.bergqvist@corvane.example",
+        "level": 7,
+        "salary": 185000,
+        "status": "active",
+        "hired_at": "2015-09-01T08:00:00.000Z",
+        "birth_date": "1971-11-30",
+        "employee_number": "E-1004"
+      },
+      {
+        "_id": "4209f239-abf1-496a-af1a-98a44628bae1",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.581Z",
+        "_updatedAt": "2026-10-04T17:53:38.581Z",
+        "name": "Lena Fischer",
+        "email": "lena.fischer@corvane.example",
+        "level": 6,
+        "salary": 142000,
+        "status": "active",
+        "hired_at": "2016-04-01T08:00:00.000Z",
+        "birth_date": "1982-06-08",
+        "employee_number": "E-1010"
+      },
+      {
+        "_id": "f94ab1ca-e7ba-4724-865f-f74b18ec4d7f",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.584Z",
+        "_updatedAt": "2026-10-04T17:53:38.584Z",
+        "name": "Marcus Webb",
+        "email": "marcus.webb@corvane.example",
+        "level": 6,
+        "salary": 148000,
+        "status": "active",
+        "hired_at": "2015-10-12T08:00:00.000Z",
+        "birth_date": "1980-03-17",
+        "employee_number": "E-1011"
+      },
+      {
+        "_id": "407cb89b-ca63-4655-80bd-0993083fa1f5",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.587Z",
+        "_updatedAt": "2026-10-04T17:53:38.587Z",
+        "name": "Sofia Marchetti",
+        "email": "sofia.marchetti@corvane.example",
+        "level": 5,
+        "salary": 121000,
+        "status": "active",
+        "hired_at": "2017-01-09T08:00:00.000Z",
+        "birth_date": "1984-12-01",
+        "employee_number": "E-1012"
+      },
+      {
+        "_id": "5c51550a-f4dc-4240-9df7-880d27fbe2b1",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.589Z",
+        "_updatedAt": "2026-10-04T17:53:38.589Z",
+        "name": "Hannah Cole",
+        "email": "hannah.cole@corvane.example",
+        "level": 5,
+        "salary": 112000,
+        "status": "active",
+        "hired_at": "2018-05-02T08:00:00.000Z",
+        "birth_date": "1986-08-19",
+        "employee_number": "E-1013"
+      },
+      {
+        "_id": "02331569-52ab-470a-ad6a-be3e994f46ab",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.591Z",
+        "_updatedAt": "2026-10-04T17:53:38.591Z",
+        "name": "Aisha Khan",
+        "email": "aisha.khan@corvane.example",
+        "level": 4,
+        "salary": 92000,
+        "status": "active",
+        "hired_at": "2019-03-04T08:00:00.000Z",
+        "birth_date": "1991-02-11",
+        "employee_number": "E-1030"
+      },
+      {
+        "_id": "f164ed26-1aee-4577-b983-f0b544696c51",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.593Z",
+        "_updatedAt": "2026-10-04T17:53:38.593Z",
+        "name": "Benedikt Sommer",
+        "email": "benedikt.sommer@corvane.example",
+        "level": 4,
+        "salary": 98000,
+        "status": "active",
+        "hired_at": "2018-11-05T08:00:00.000Z",
+        "birth_date": "1987-09-27",
+        "employee_number": "E-1031"
+      },
+      {
+        "_id": "cf8583f6-eba7-4ad2-ae5b-e52104044901",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.595Z",
+        "_updatedAt": "2026-10-04T17:53:38.595Z",
+        "name": "Chen Wei",
+        "email": "chen.wei@corvane.example",
+        "level": 4,
+        "salary": 95000,
+        "status": "active",
+        "hired_at": "2020-02-17T08:00:00.000Z",
+        "birth_date": "1990-04-12",
+        "employee_number": "E-1032"
+      },
+      {
+        "_id": "784528ff-d63d-45c6-80dd-a9f6222a8df9",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.596Z",
+        "_updatedAt": "2026-10-04T17:53:38.596Z",
+        "name": "Diego Alvarez",
+        "email": "diego.alvarez@corvane.example",
+        "level": 3,
+        "salary": 78000,
+        "status": "active",
+        "hired_at": "2021-09-01T08:00:00.000Z",
+        "birth_date": "1994-07-03",
+        "employee_number": "E-1033"
+      },
+      {
+        "_id": "b6d984b5-c6e6-440b-b1a1-52bab01400ef",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.599Z",
+        "_updatedAt": "2026-10-04T17:53:38.599Z",
+        "name": "Eva Lindqvist",
+        "email": "eva.lindqvist@corvane.example",
+        "level": 3,
+        "salary": 84000,
+        "status": "on_leave",
+        "hired_at": "2020-06-01T08:00:00.000Z",
+        "birth_date": "1992-12-19",
+        "employee_number": "E-1034"
+      },
+      {
+        "_id": "e3404eb5-8e3e-4d72-97b6-5687f13d5784",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.600Z",
+        "_updatedAt": "2026-10-04T17:53:38.600Z",
+        "name": "Felix Braun",
+        "email": "felix.braun@corvane.example",
+        "level": 3,
+        "status": "active",
+        "hired_at": "2022-01-10T08:00:00.000Z",
+        "employee_number": "E-1035"
+      },
+      {
+        "_id": "e8c1fbe8-00de-40d0-a711-f66d4223446e",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.602Z",
+        "_updatedAt": "2026-10-04T17:53:38.602Z",
+        "name": "Grace Mbeki",
+        "email": "grace.mbeki@corvane.example",
+        "level": 4,
+        "salary": 91000,
+        "status": "active",
+        "hired_at": "2019-08-12T08:00:00.000Z",
+        "birth_date": "1989-05-30",
+        "employee_number": "E-1036"
+      },
+      {
+        "_id": "fc6a7fa8-611e-4af5-a352-7abd789b2804",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.603Z",
+        "_updatedAt": "2026-10-04T17:53:38.603Z",
+        "name": "Hiro Tanaka",
+        "email": "hiro.tanaka@corvane.example",
+        "level": 2,
+        "salary": 64000,
+        "status": "active",
+        "hired_at": "2026-08-01T08:00:00.000Z",
+        "birth_date": "1998-01-08",
+        "employee_number": "E-1037"
+      },
+      {
+        "_id": "bcc68359-e5da-4b06-b6d3-adb6c057e396",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.605Z",
+        "_updatedAt": "2026-10-04T17:53:38.605Z",
+        "name": "Isabel Moreau",
+        "email": "isabel.moreau@corvane.example",
+        "level": 2,
+        "salary": 70000,
+        "status": "active",
+        "hired_at": "2024-04-15T08:00:00.000Z",
+        "birth_date": "1996-03-22",
+        "employee_number": "E-1038"
+      },
+      {
+        "_id": "7e5ea63c-b6f7-41af-8c66-4adb57fc13b4",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.606Z",
+        "_updatedAt": "2026-10-04T17:53:38.606Z",
+        "name": "Jonas Petersen",
+        "email": "jonas.petersen@corvane.example",
+        "level": 5,
+        "salary": 104000,
+        "status": "active",
+        "hired_at": "2017-05-02T08:00:00.000Z",
+        "birth_date": "1985-10-14",
+        "employee_number": "E-1040"
+      },
+      {
+        "_id": "7126e945-2b25-497f-8c0b-0590f25622d4",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.608Z",
+        "_updatedAt": "2026-10-04T17:53:38.608Z",
+        "name": "Kira Novak",
+        "email": "kira.novak@corvane.example",
+        "level": 4,
+        "salary": 88000,
+        "status": "active",
+        "hired_at": "2019-01-07T08:00:00.000Z",
+        "birth_date": "1990-08-25",
+        "employee_number": "E-1041"
+      },
+      {
+        "_id": "e71ad9a1-3bcd-48fa-9c42-9faaa6024a34",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.609Z",
+        "_updatedAt": "2026-10-04T17:53:38.609Z",
+        "name": "Liam O'Connor",
+        "email": "liam.oconnor@corvane.example",
+        "level": 4,
+        "salary": 90000,
+        "status": "active",
+        "hired_at": "2018-03-12T08:00:00.000Z",
+        "birth_date": "1988-07-21",
+        "employee_number": "E-1042"
+      },
+      {
+        "_id": "e0370836-145f-4d78-8e59-83f3ec130bac",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.611Z",
+        "_updatedAt": "2026-10-04T17:53:38.611Z",
+        "name": "Maja Horvat",
+        "level": 3,
+        "salary": 76000,
+        "status": "active",
+        "hired_at": "2022-10-03T08:00:00.000Z",
+        "birth_date": "1993-06-16",
+        "employee_number": "E-1043"
+      },
+      {
+        "_id": "4d47b75a-bbf3-4dde-afaf-586a4409da9e",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.612Z",
+        "_updatedAt": "2026-10-04T17:53:38.612Z",
+        "name": "Samuel Reyes",
+        "email": "samuel.reyes@corvane.example",
+        "level": 2,
+        "salary": 68000,
+        "status": "active",
+        "hired_at": "2023-02-01T08:00:00.000Z",
+        "birth_date": "1995-10-05",
+        "employee_number": "E-1044"
+      },
+      {
+        "_id": "65197f15-cd07-469c-9a6d-48ffc91d30fe",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.614Z",
+        "_updatedAt": "2026-10-04T17:53:38.614Z",
+        "name": "Tara Quinn",
+        "email": "tara.quinn@corvane.example",
+        "level": 2,
+        "salary": 62000,
+        "status": "active",
+        "hired_at": "2025-07-01T08:00:00.000Z",
+        "birth_date": "1997-04-09",
+        "employee_number": "E-1045"
+      },
+      {
+        "_id": "80fd833b-93da-4084-be86-40a8fc67a46f",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.615Z",
+        "_updatedAt": "2026-10-04T17:53:38.615Z",
+        "name": "Noah Schmitt",
+        "email": "noah.schmitt@corvane.example",
+        "level": 3,
+        "salary": 72000,
+        "status": "active",
+        "hired_at": "2020-09-14T08:00:00.000Z",
+        "birth_date": "1991-11-11",
+        "employee_number": "E-1050"
+      },
+      {
+        "_id": "475c75d2-00f7-479b-88e6-7526eff032cb",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.617Z",
+        "_updatedAt": "2026-10-04T17:53:38.617Z",
+        "name": "Olivia Grant",
+        "email": "olivia.grant@corvane.example",
+        "level": 4,
+        "salary": 81000,
+        "status": "active",
+        "hired_at": "2018-01-15T08:00:00.000Z",
+        "birth_date": "1983-02-27",
+        "employee_number": "E-1051"
+      },
+      {
+        "_id": "a46ab6b3-acc6-4b10-86ac-36b245489179",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.618Z",
+        "_updatedAt": "2026-10-04T17:53:38.618Z",
+        "name": "Pavel Dvorak",
+        "email": "pavel.dvorak@corvane.example",
+        "level": 4,
+        "salary": 79000,
+        "status": "left",
+        "hired_at": "2016-06-01T08:00:00.000Z",
+        "birth_date": "1979-09-09",
+        "employee_number": "E-1052"
+      },
+      {
+        "_id": "5a0adef6-9ac2-438e-8e55-005e6157c429",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.620Z",
+        "_updatedAt": "2026-10-04T17:53:38.620Z",
+        "name": "Chen Wei",
+        "email": "wei.chen@corvane.example",
+        "level": 3,
+        "salary": 74000,
+        "status": "active",
+        "hired_at": "2021-03-01T08:00:00.000Z",
+        "birth_date": "1978-11-03",
+        "employee_number": "E-1053"
+      },
+      {
+        "_id": "638f66fe-e73f-4166-8b10-9c96a75b497a",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.622Z",
+        "_updatedAt": "2026-10-04T17:53:38.622Z",
+        "name": "Rosa Delgado",
+        "email": "rosa.delgado@corvane.example",
+        "level": 3,
+        "salary": 69000,
+        "status": "active",
+        "hired_at": "2021-11-02T08:00:00.000Z",
+        "birth_date": "1992-05-05",
+        "employee_number": "E-1060"
+      },
+      {
+        "_id": "4751d45b-7b9c-4b45-aaca-003c9067985d",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.624Z",
+        "_updatedAt": "2026-10-04T17:53:38.624Z",
+        "name": "Liam OConnor",
+        "email": "liam.oconnor@corvane.example",
+        "status": "active",
+        "birth_date": "1988-07-21",
+        "employee_number": "E-1042"
+      },
+      {
+        "_id": "07ec7241-5db3-4abb-9e72-ba854b99981d",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-04T17:53:38.625Z",
+        "_updatedAt": "2026-10-04T17:53:38.625Z",
+        "name": "Sam Reyes",
+        "level": 2,
+        "status": "active"
+      }
+    ],
+    "policy_document": [
+      {
+        "_id": "c7c3e06f-e15a-4939-a00c-ab071032fab1",
+        "_entityTypeKey": "policy_document",
+        "_createdAt": "2026-10-04T17:53:38.627Z",
+        "_updatedAt": "2026-10-04T17:53:38.627Z",
+        "body": "Business travel must be approved in advance by the line manager. Economy class is used for all flights. Hotel costs are reimbursed up to 140 euros per night. Receipts are submitted within 30 days of return.",
+        "title": "Travel and Expenses Policy",
+        "version": 1,
+        "published_on": "2023-01-16"
+      },
+      {
+        "_id": "82b96e68-03f5-4186-b60d-a35650d1d24d",
+        "_entityTypeKey": "policy_document",
+        "_createdAt": "2026-10-04T17:53:38.630Z",
+        "_updatedAt": "2026-10-04T17:53:38.630Z",
+        "body": "Business travel must be approved in advance by the line manager. Economy class is used for flights under six hours; longer flights may be booked in premium economy. Hotel costs are reimbursed up to 160 euros per night. Receipts are submitted within 30 days of return.",
+        "title": "Travel and Expenses Policy",
+        "version": 2,
+        "published_on": "2024-06-03"
+      },
+      {
+        "_id": "522f4836-2d42-4931-8944-7ed3990300fd",
+        "_entityTypeKey": "policy_document",
+        "_createdAt": "2026-10-04T17:53:38.633Z",
+        "_updatedAt": "2026-10-04T17:53:38.633Z",
+        "body": "Business travel must be approved in advance by the line manager. Rail is preferred over flights for journeys under five hours. Economy class is used for flights under six hours; longer flights may be booked in premium economy. Hotel costs are reimbursed up to 170 euros per night. Receipts are submitted through the expense app within 30 days of return.",
+        "title": "Travel and Expenses Policy",
+        "version": 3,
+        "published_on": "2026-03-02"
+      },
+      {
+        "_id": "195d7aac-5da7-4da5-a3c0-cec5683e74e0",
+        "_entityTypeKey": "policy_document",
+        "_createdAt": "2026-10-04T17:53:38.636Z",
+        "_updatedAt": "2026-10-04T17:53:38.636Z",
+        "body": "Employees may work remotely up to two days per week after agreement with their line manager. Core hours are 10:00 to 15:00. Company equipment must not be used by family members.",
+        "title": "Remote Work Policy",
+        "version": 1,
+        "published_on": "2021-04-01"
+      },
+      {
+        "_id": "cab390cb-54f3-42af-a29a-167398e11523",
+        "_entityTypeKey": "policy_document",
+        "_createdAt": "2026-10-04T17:53:38.640Z",
+        "_updatedAt": "2026-10-04T17:53:38.640Z",
+        "body": "Employees may work remotely up to three days per week after agreement with their line manager. Core hours are 10:00 to 15:00. A one-time allowance of 300 euros is paid for home office equipment. Company equipment must not be used by family members.",
+        "title": "Remote Work Policy",
+        "version": 2,
+        "published_on": "2023-09-15"
+      },
+      {
+        "_id": "6531ba69-108f-4ffd-aefa-324461335e91",
+        "_entityTypeKey": "policy_document",
+        "_createdAt": "2026-10-04T17:53:38.644Z",
+        "_updatedAt": "2026-10-04T17:53:38.644Z",
+        "body": "Employees may work remotely up to three days per week after agreement with their line manager. Teams agree on at least one shared office day per week. Core hours are 10:00 to 15:00. A one-time allowance of 300 euros is paid for home office equipment. Working remotely from another country requires approval by HR for up to 20 days per year.",
+        "title": "Remote Work Policy",
+        "version": 3,
+        "published_on": "2025-11-03"
+      }
+    ],
+    "project": [
+      {
+        "_id": "2531f9b4-f819-4b7a-b016-0271c542c9fe",
+        "_entityTypeKey": "project",
+        "_createdAt": "2026-10-04T17:53:38.647Z",
+        "_updatedAt": "2026-10-04T17:53:38.647Z",
+        "code": "PRJ-ATL",
+        "name": "Atlas Gearbox Redesign",
+        "budget": 450000,
+        "status": "active",
+        "priority": 5,
+        "started_on": "2026-02-02"
+      },
+      {
+        "_id": "cb91bc22-ba5b-466b-9236-44589930cc20",
+        "_entityTypeKey": "project",
+        "_createdAt": "2026-10-04T17:53:38.648Z",
+        "_updatedAt": "2026-10-04T17:53:38.648Z",
+        "code": "PRJ-BCN",
+        "name": "Beacon Telemetry Platform",
+        "budget": 620000,
+        "status": "active",
+        "priority": 5,
+        "started_on": "2025-09-01"
+      },
+      {
+        "_id": "7c26dd34-f9eb-4e1d-9da7-068f48bea2e1",
+        "_entityTypeKey": "project",
+        "_createdAt": "2026-10-04T17:53:38.650Z",
+        "_updatedAt": "2026-10-04T17:53:38.650Z",
+        "code": "PRJ-CBT",
+        "name": "Cobalt Test Rig Automation",
+        "budget": 280000,
+        "status": "active",
+        "priority": 4,
+        "started_on": "2025-04-14"
+      },
+      {
+        "_id": "f3a099fe-5a96-4975-ab61-89e9f9ccb2e1",
+        "_entityTypeKey": "project",
+        "_createdAt": "2026-10-04T17:53:38.651Z",
+        "_updatedAt": "2026-10-04T17:53:38.651Z",
+        "code": "PRJ-DLT",
+        "name": "Delta Firmware Update Service",
+        "budget": 310000,
+        "status": "active",
+        "priority": 4,
+        "started_on": "2026-01-12"
+      },
+      {
+        "_id": "27f79996-dcf8-489e-9718-100121f9c152",
+        "_entityTypeKey": "project",
+        "_createdAt": "2026-10-04T17:53:38.653Z",
+        "_updatedAt": "2026-10-04T17:53:38.653Z",
+        "code": "PRJ-EMB",
+        "name": "Ember Supplier Portal",
+        "budget": 150000,
+        "status": "planned",
+        "priority": 3,
+        "started_on": "2026-10-01"
+      },
+      {
+        "_id": "76946f5a-6866-41b9-bca3-7fcb3b043682",
+        "_entityTypeKey": "project",
+        "_createdAt": "2026-10-04T17:53:38.654Z",
+        "_updatedAt": "2026-10-04T17:53:38.654Z",
+        "code": "PRJ-FJD",
+        "name": "Fjord Warehouse Layout",
+        "budget": 90000,
+        "status": "completed",
+        "priority": 2,
+        "started_on": "2024-03-04"
+      },
+      {
+        "_id": "96aa8a1c-a22e-4c03-a809-b547649004b9",
+        "_entityTypeKey": "project",
+        "_createdAt": "2026-10-04T17:53:38.656Z",
+        "_updatedAt": "2026-10-04T17:53:38.656Z",
+        "code": "PRJ-GRN",
+        "name": "Granite Cost Model",
+        "budget": 60000,
+        "status": "active",
+        "priority": 3,
+        "started_on": "2025-11-03"
+      },
+      {
+        "_id": "5864a9f1-5457-4fa1-9d8f-942f3a0ac83a",
+        "_entityTypeKey": "project",
+        "_createdAt": "2026-10-04T17:53:38.657Z",
+        "_updatedAt": "2026-10-04T17:53:38.657Z",
+        "code": "PRJ-HBR",
+        "name": "Harbor Sensor Calibration",
+        "status": "on_hold",
+        "priority": 1
+      }
+    ],
+    "skill": [
+      {
+        "_id": "3cea8f52-c6e8-43e5-989f-017f17f25f80",
+        "_entityTypeKey": "skill",
+        "_createdAt": "2026-10-04T17:53:38.659Z",
+        "_updatedAt": "2026-10-04T17:53:38.659Z",
+        "name": "Mechanical CAD",
+        "level": "mid",
+        "category": "engineering"
+      },
+      {
+        "_id": "5ef5da45-3406-4157-9ab6-110f2f65eef1",
+        "_entityTypeKey": "skill",
+        "_createdAt": "2026-10-04T17:53:38.660Z",
+        "_updatedAt": "2026-10-04T17:53:38.660Z",
+        "name": "Finite Element Analysis",
+        "level": "senior",
+        "category": "engineering"
+      },
+      {
+        "_id": "af94997b-cf29-4fdf-9b07-3675bb74733d",
+        "_entityTypeKey": "skill",
+        "_createdAt": "2026-10-04T17:53:38.662Z",
+        "_updatedAt": "2026-10-04T17:53:38.662Z",
+        "name": "Embedded C",
+        "level": "mid",
+        "category": "software"
+      },
+      {
+        "_id": "830d495c-5b0b-4cf2-aeee-801250f2c7ab",
+        "_entityTypeKey": "skill",
+        "_createdAt": "2026-10-04T17:53:38.663Z",
+        "_updatedAt": "2026-10-04T17:53:38.663Z",
+        "name": "Rust",
+        "level": "senior",
+        "category": "software"
+      },
+      {
+        "_id": "4020ecc0-da82-4b2e-8691-2a6188ced7c8",
+        "_entityTypeKey": "skill",
+        "_createdAt": "2026-10-04T17:53:38.666Z",
+        "_updatedAt": "2026-10-04T17:53:38.666Z",
+        "name": "TypeScript",
+        "level": "junior",
+        "category": "software"
+      },
+      {
+        "_id": "9d72ae03-81d4-4115-9753-c79b35efce4d",
+        "_entityTypeKey": "skill",
+        "_createdAt": "2026-10-04T17:53:38.668Z",
+        "_updatedAt": "2026-10-04T17:53:38.668Z",
+        "name": "Kubernetes",
+        "level": "senior",
+        "category": "infrastructure"
+      },
+      {
+        "_id": "78643f5e-ca0a-4962-b475-fdfd90e468e9",
+        "_entityTypeKey": "skill",
+        "_createdAt": "2026-10-04T17:53:38.670Z",
+        "_updatedAt": "2026-10-04T17:53:38.670Z",
+        "name": "PLC Programming",
+        "level": "mid",
+        "category": "automation"
+      },
+      {
+        "_id": "ae17578d-5f3a-4216-928b-f51644814676",
+        "_entityTypeKey": "skill",
+        "_createdAt": "2026-10-04T17:53:38.671Z",
+        "_updatedAt": "2026-10-04T17:53:38.671Z",
+        "name": "Supply Chain Planning",
+        "level": "mid",
+        "category": "operations"
+      },
+      {
+        "_id": "d1f9fcfe-bbef-4adc-8c9a-5a8d4d71d027",
+        "_entityTypeKey": "skill",
+        "_createdAt": "2026-10-04T17:53:38.673Z",
+        "_updatedAt": "2026-10-04T17:53:38.673Z",
+        "name": "Financial Modelling",
+        "level": "senior",
+        "category": "finance"
+      },
+      {
+        "_id": "6f5891ca-2882-4de2-b438-98c9c08ef6e3",
+        "_entityTypeKey": "skill",
+        "_createdAt": "2026-10-04T17:53:38.674Z",
+        "_updatedAt": "2026-10-04T17:53:38.674Z",
+        "name": "Technical Writing",
+        "category": "communication"
+      }
+    ],
+    "team": [
+      {
+        "_id": "28bb2c5c-2510-4067-97fe-6c913dd7bd8e",
+        "_entityTypeKey": "team",
+        "_createdAt": "2026-10-04T17:53:38.676Z",
+        "_updatedAt": "2026-10-04T17:53:38.676Z",
+        "name": "Executive Office",
+        "cost_center": "CC-100"
+      },
+      {
+        "_id": "a88b4a61-5759-4158-9cdc-432a94588d8d",
+        "_entityTypeKey": "team",
+        "_createdAt": "2026-10-04T17:53:38.677Z",
+        "_updatedAt": "2026-10-04T17:53:38.677Z",
+        "name": "Hardware Engineering",
+        "budget": 1850000,
+        "cost_center": "CC-210"
+      },
+      {
+        "_id": "4ac36552-3eb9-4420-a60d-c165c54b2649",
+        "_entityTypeKey": "team",
+        "_createdAt": "2026-10-04T17:53:38.679Z",
+        "_updatedAt": "2026-10-04T17:53:38.679Z",
+        "name": "Software Platform",
+        "budget": 2100000,
+        "cost_center": "CC-220"
+      },
+      {
+        "_id": "21c97a85-92d1-46da-922f-002ec3efc3f3",
+        "_entityTypeKey": "team",
+        "_createdAt": "2026-10-04T17:53:38.680Z",
+        "_updatedAt": "2026-10-04T17:53:38.680Z",
+        "name": "Operations",
+        "budget": 900000,
+        "cost_center": "CC-300"
+      },
+      {
+        "_id": "8980129a-b4dc-4b4c-9164-0d2fc0721f97",
+        "_entityTypeKey": "team",
+        "_createdAt": "2026-10-04T17:53:38.681Z",
+        "_updatedAt": "2026-10-04T17:53:38.681Z",
+        "name": "Finance",
+        "budget": 400000,
+        "cost_center": "CC-400"
+      }
+    ]
+  },
+  "relations": {
+    "has_skill": [
+      {
+        "_id": "bc68520b-70fb-481a-a67f-a5d8a40f37d1",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.684Z",
+        "_updatedAt": "2026-10-04T17:53:38.684Z",
+        "fromEntityId": "f94ab1ca-e7ba-4724-865f-f74b18ec4d7f",
+        "toEntityId": "830d495c-5b0b-4cf2-aeee-801250f2c7ab",
+        "proficiency": 4
+      },
+      {
+        "_id": "06c41443-9e5e-4c3d-87a9-5904bdb88382",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.688Z",
+        "_updatedAt": "2026-10-04T17:53:38.688Z",
+        "fromEntityId": "f94ab1ca-e7ba-4724-865f-f74b18ec4d7f",
+        "toEntityId": "9d72ae03-81d4-4115-9753-c79b35efce4d",
+        "proficiency": 5
+      },
+      {
+        "_id": "61118a46-4a67-47dd-a1c0-a3f2a02cad34",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.690Z",
+        "_updatedAt": "2026-10-04T17:53:38.690Z",
+        "fromEntityId": "f94ab1ca-e7ba-4724-865f-f74b18ec4d7f",
+        "toEntityId": "4020ecc0-da82-4b2e-8691-2a6188ced7c8",
+        "proficiency": 3
+      },
+      {
+        "_id": "e607aaea-3f2b-4560-a2f0-b86b324b5f88",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.694Z",
+        "_updatedAt": "2026-10-04T17:53:38.694Z",
+        "fromEntityId": "f94ab1ca-e7ba-4724-865f-f74b18ec4d7f",
+        "toEntityId": "6f5891ca-2882-4de2-b438-98c9c08ef6e3",
+        "proficiency": 3
+      },
+      {
+        "_id": "b2b5a9e4-400a-486a-b858-8680ecc0833a",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.697Z",
+        "_updatedAt": "2026-10-04T17:53:38.697Z",
+        "fromEntityId": "02331569-52ab-470a-ad6a-be3e994f46ab",
+        "toEntityId": "4020ecc0-da82-4b2e-8691-2a6188ced7c8",
+        "proficiency": 5
+      },
+      {
+        "_id": "2ce04c2f-6d25-44c6-b905-4baacbcf389b",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.699Z",
+        "_updatedAt": "2026-10-04T17:53:38.699Z",
+        "fromEntityId": "02331569-52ab-470a-ad6a-be3e994f46ab",
+        "toEntityId": "9d72ae03-81d4-4115-9753-c79b35efce4d",
+        "proficiency": 3
+      },
+      {
+        "_id": "52ca87b9-ec60-4227-a641-0eff038e9636",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.702Z",
+        "_updatedAt": "2026-10-04T17:53:38.702Z",
+        "fromEntityId": "cf8583f6-eba7-4ad2-ae5b-e52104044901",
+        "toEntityId": "830d495c-5b0b-4cf2-aeee-801250f2c7ab",
+        "proficiency": 5
+      },
+      {
+        "_id": "18ffc09e-68cc-47a1-a97e-df27788633e5",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.705Z",
+        "_updatedAt": "2026-10-04T17:53:38.705Z",
+        "fromEntityId": "cf8583f6-eba7-4ad2-ae5b-e52104044901",
+        "toEntityId": "af94997b-cf29-4fdf-9b07-3675bb74733d",
+        "proficiency": 3
+      },
+      {
+        "_id": "11c4d768-7609-4eec-9f20-50f1b8bf2944",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.708Z",
+        "_updatedAt": "2026-10-04T17:53:38.708Z",
+        "fromEntityId": "784528ff-d63d-45c6-80dd-a9f6222a8df9",
+        "toEntityId": "4020ecc0-da82-4b2e-8691-2a6188ced7c8",
+        "proficiency": 4
+      },
+      {
+        "_id": "eba8ecf6-9cc4-46f9-899c-8354b35c622b",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.711Z",
+        "_updatedAt": "2026-10-04T17:53:38.711Z",
+        "fromEntityId": "f164ed26-1aee-4577-b983-f0b544696c51",
+        "toEntityId": "af94997b-cf29-4fdf-9b07-3675bb74733d",
+        "proficiency": 5
+      },
+      {
+        "_id": "5be62260-e53f-484b-98af-fcb26284fb3b",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.714Z",
+        "_updatedAt": "2026-10-04T17:53:38.714Z",
+        "fromEntityId": "f164ed26-1aee-4577-b983-f0b544696c51",
+        "toEntityId": "830d495c-5b0b-4cf2-aeee-801250f2c7ab",
+        "proficiency": 3
+      },
+      {
+        "_id": "598d82c6-d5d1-4e3e-b382-cb8ca567b2a9",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.717Z",
+        "_updatedAt": "2026-10-04T17:53:38.717Z",
+        "fromEntityId": "fc6a7fa8-611e-4af5-a352-7abd789b2804",
+        "toEntityId": "af94997b-cf29-4fdf-9b07-3675bb74733d",
+        "proficiency": 4
+      },
+      {
+        "_id": "aa6c5856-6f6b-48ae-97da-6d3583c3ea90",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.720Z",
+        "_updatedAt": "2026-10-04T17:53:38.720Z",
+        "fromEntityId": "e8c1fbe8-00de-40d0-a711-f66d4223446e",
+        "toEntityId": "9d72ae03-81d4-4115-9753-c79b35efce4d",
+        "proficiency": 4
+      },
+      {
+        "_id": "bf2c3f92-5eb2-4f4d-b454-9e0be495a6b7",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.723Z",
+        "_updatedAt": "2026-10-04T17:53:38.723Z",
+        "fromEntityId": "e8c1fbe8-00de-40d0-a711-f66d4223446e",
+        "toEntityId": "4020ecc0-da82-4b2e-8691-2a6188ced7c8",
+        "proficiency": 3
+      },
+      {
+        "_id": "0c21f068-054d-4054-9938-21426a1262df",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.726Z",
+        "_updatedAt": "2026-10-04T17:53:38.726Z",
+        "fromEntityId": "bcc68359-e5da-4b06-b6d3-adb6c057e396",
+        "toEntityId": "830d495c-5b0b-4cf2-aeee-801250f2c7ab"
+      },
+      {
+        "_id": "39bd3c85-5c88-4377-842e-0cf380e9642a",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.729Z",
+        "_updatedAt": "2026-10-04T17:53:38.729Z",
+        "fromEntityId": "b6d984b5-c6e6-440b-b1a1-52bab01400ef",
+        "toEntityId": "4020ecc0-da82-4b2e-8691-2a6188ced7c8",
+        "proficiency": 4
+      },
+      {
+        "_id": "be249b71-e7db-4a80-afc6-02143639261b",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.732Z",
+        "_updatedAt": "2026-10-04T17:53:38.732Z",
+        "fromEntityId": "e3404eb5-8e3e-4d72-97b6-5687f13d5784",
+        "toEntityId": "6f5891ca-2882-4de2-b438-98c9c08ef6e3",
+        "proficiency": 5
+      },
+      {
+        "_id": "623427b4-dc8f-4eea-8fc4-d1ff34d9d2ed",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.735Z",
+        "_updatedAt": "2026-10-04T17:53:38.735Z",
+        "fromEntityId": "4209f239-abf1-496a-af1a-98a44628bae1",
+        "toEntityId": "3cea8f52-c6e8-43e5-989f-017f17f25f80",
+        "proficiency": 5
+      },
+      {
+        "_id": "24043b2b-4d81-448d-80f2-c13dd845740e",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.738Z",
+        "_updatedAt": "2026-10-04T17:53:38.738Z",
+        "fromEntityId": "4209f239-abf1-496a-af1a-98a44628bae1",
+        "toEntityId": "5ef5da45-3406-4157-9ab6-110f2f65eef1",
+        "proficiency": 4
+      },
+      {
+        "_id": "f6064e6f-db11-40e0-b8cf-097ef93795fe",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.741Z",
+        "_updatedAt": "2026-10-04T17:53:38.741Z",
+        "fromEntityId": "7e5ea63c-b6f7-41af-8c66-4adb57fc13b4",
+        "toEntityId": "3cea8f52-c6e8-43e5-989f-017f17f25f80",
+        "proficiency": 4
+      },
+      {
+        "_id": "d1ce3e51-0397-47b7-a763-fd213ecbd462",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.744Z",
+        "_updatedAt": "2026-10-04T17:53:38.744Z",
+        "fromEntityId": "7e5ea63c-b6f7-41af-8c66-4adb57fc13b4",
+        "toEntityId": "78643f5e-ca0a-4962-b475-fdfd90e468e9",
+        "proficiency": 4
+      },
+      {
+        "_id": "bca40f5b-3a98-4aed-b460-7c899cc9b998",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.747Z",
+        "_updatedAt": "2026-10-04T17:53:38.747Z",
+        "fromEntityId": "7e5ea63c-b6f7-41af-8c66-4adb57fc13b4",
+        "toEntityId": "af94997b-cf29-4fdf-9b07-3675bb74733d",
+        "proficiency": 3
+      },
+      {
+        "_id": "a94b236b-897b-4acc-a18c-9ac6d1815c37",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.749Z",
+        "_updatedAt": "2026-10-04T17:53:38.749Z",
+        "fromEntityId": "7126e945-2b25-497f-8c0b-0590f25622d4",
+        "toEntityId": "3cea8f52-c6e8-43e5-989f-017f17f25f80",
+        "proficiency": 4
+      },
+      {
+        "_id": "c55b7487-7c95-47cc-b1a7-28699be2dd2e",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.752Z",
+        "_updatedAt": "2026-10-04T17:53:38.752Z",
+        "fromEntityId": "7126e945-2b25-497f-8c0b-0590f25622d4",
+        "toEntityId": "5ef5da45-3406-4157-9ab6-110f2f65eef1",
+        "proficiency": 5
+      },
+      {
+        "_id": "52b7d0e3-087d-42e8-af59-8af727877515",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.756Z",
+        "_updatedAt": "2026-10-04T17:53:38.756Z",
+        "fromEntityId": "e71ad9a1-3bcd-48fa-9c42-9faaa6024a34",
+        "toEntityId": "78643f5e-ca0a-4962-b475-fdfd90e468e9",
+        "proficiency": 5
+      },
+      {
+        "_id": "3819a7cf-f293-4f01-bdc2-516b87722a41",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.758Z",
+        "_updatedAt": "2026-10-04T17:53:38.758Z",
+        "fromEntityId": "e71ad9a1-3bcd-48fa-9c42-9faaa6024a34",
+        "toEntityId": "af94997b-cf29-4fdf-9b07-3675bb74733d",
+        "proficiency": 2
+      },
+      {
+        "_id": "4971e6ff-1d35-4129-9f8a-67ef0ddd37d2",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.761Z",
+        "_updatedAt": "2026-10-04T17:53:38.761Z",
+        "fromEntityId": "e0370836-145f-4d78-8e59-83f3ec130bac",
+        "toEntityId": "3cea8f52-c6e8-43e5-989f-017f17f25f80",
+        "proficiency": 3
+      },
+      {
+        "_id": "62e7c719-7dd2-48e0-9c51-602682c4626d",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.764Z",
+        "_updatedAt": "2026-10-04T17:53:38.764Z",
+        "fromEntityId": "4d47b75a-bbf3-4dde-afaf-586a4409da9e",
+        "toEntityId": "78643f5e-ca0a-4962-b475-fdfd90e468e9",
+        "proficiency": 3
+      },
+      {
+        "_id": "ce9b3205-717b-4481-948b-c46c9800431a",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.767Z",
+        "_updatedAt": "2026-10-04T17:53:38.767Z",
+        "fromEntityId": "65197f15-cd07-469c-9a6d-48ffc91d30fe",
+        "toEntityId": "78643f5e-ca0a-4962-b475-fdfd90e468e9",
+        "proficiency": 4
+      },
+      {
+        "_id": "9b0775ae-8cc8-4997-bcea-68aa17500851",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.770Z",
+        "_updatedAt": "2026-10-04T17:53:38.770Z",
+        "fromEntityId": "65197f15-cd07-469c-9a6d-48ffc91d30fe",
+        "toEntityId": "6f5891ca-2882-4de2-b438-98c9c08ef6e3",
+        "proficiency": 2
+      },
+      {
+        "_id": "273041b4-a497-4f9f-9dbc-ef8ba764877c",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.773Z",
+        "_updatedAt": "2026-10-04T17:53:38.773Z",
+        "fromEntityId": "80fd833b-93da-4084-be86-40a8fc67a46f",
+        "toEntityId": "ae17578d-5f3a-4216-928b-f51644814676",
+        "proficiency": 4
+      },
+      {
+        "_id": "edd060f9-a962-49aa-9417-6625fca435dd",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.776Z",
+        "_updatedAt": "2026-10-04T17:53:38.776Z",
+        "fromEntityId": "475c75d2-00f7-479b-88e6-7526eff032cb",
+        "toEntityId": "ae17578d-5f3a-4216-928b-f51644814676",
+        "proficiency": 5
+      },
+      {
+        "_id": "c03bf671-118d-4edd-89b3-e4f7368225c3",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.779Z",
+        "_updatedAt": "2026-10-04T17:53:38.779Z",
+        "fromEntityId": "5a0adef6-9ac2-438e-8e55-005e6157c429",
+        "toEntityId": "ae17578d-5f3a-4216-928b-f51644814676",
+        "proficiency": 4
+      },
+      {
+        "_id": "1458c420-bc7b-4f03-8ed9-3289e337e84b",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.782Z",
+        "_updatedAt": "2026-10-04T17:53:38.782Z",
+        "fromEntityId": "407cb89b-ca63-4655-80bd-0993083fa1f5",
+        "toEntityId": "ae17578d-5f3a-4216-928b-f51644814676",
+        "proficiency": 3
+      },
+      {
+        "_id": "5ea370bd-6d48-4a7f-92da-f74fb371717c",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.785Z",
+        "_updatedAt": "2026-10-04T17:53:38.785Z",
+        "fromEntityId": "5c51550a-f4dc-4240-9df7-880d27fbe2b1",
+        "toEntityId": "d1f9fcfe-bbef-4adc-8c9a-5a8d4d71d027",
+        "proficiency": 5
+      },
+      {
+        "_id": "8993140c-d253-4efa-b46a-8213110196fd",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.788Z",
+        "_updatedAt": "2026-10-04T17:53:38.788Z",
+        "fromEntityId": "638f66fe-e73f-4166-8b10-9c96a75b497a",
+        "toEntityId": "d1f9fcfe-bbef-4adc-8c9a-5a8d4d71d027",
+        "proficiency": 4
+      },
+      {
+        "_id": "671a7e44-d11d-4f74-b967-46a60e8cb56d",
+        "_relationTypeKey": "has_skill",
+        "_createdAt": "2026-10-04T17:53:38.790Z",
+        "_updatedAt": "2026-10-04T17:53:38.790Z",
+        "fromEntityId": "d4fec8b6-0a34-4bb8-b337-3b62e83b74d3",
+        "toEntityId": "d1f9fcfe-bbef-4adc-8c9a-5a8d4d71d027",
+        "proficiency": 5
+      }
+    ],
+    "manages": [
+      {
+        "_id": "d2fbcbe4-a94d-46c3-aeaf-29a417d667f0",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-04T17:53:38.795Z",
+        "_updatedAt": "2026-10-04T17:53:38.795Z",
+        "fromEntityId": "6d9385e1-7e13-4863-994c-ba88c168e2a8",
+        "toEntityId": "bfb625cd-5aea-462e-a1a0-14437a34a2d2",
+        "since": "2013-07-15"
+      },
+      {
+        "_id": "bee9c0fd-2084-4daa-b105-fec64d1fd12a",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-04T17:53:38.797Z",
+        "_updatedAt": "2026-10-04T17:53:38.797Z",
+        "fromEntityId": "6d9385e1-7e13-4863-994c-ba88c168e2a8",
+        "toEntityId": "a922877e-03ac-47d7-b4b4-b4910cea3c24",
+        "since": "2016-01-04"
+      },
+      {
+        "_id": "dc6faaf4-8be6-4367-97dd-a57077e02084",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-04T17:53:38.800Z",
+        "_updatedAt": "2026-10-04T17:53:38.800Z",
+        "fromEntityId": "6d9385e1-7e13-4863-994c-ba88c168e2a8",
+        "toEntityId": "d4fec8b6-0a34-4bb8-b337-3b62e83b74d3",
+        "since": "2015-09-01"
+      },
+      {
+        "_id": "585fadb5-fe61-4081-9c83-cc94b731ca61",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-04T17:53:38.803Z",
+        "_updatedAt": "2026-10-04T17:53:38.803Z",
+        "fromEntityId": "bfb625cd-5aea-462e-a1a0-14437a34a2d2",
+        "toEntityId": "4209f239-abf1-496a-af1a-98a44628bae1",
+        "since": "2019-01-02"
+      },
+      {
+        "_id": "526e321c-5860-4fb1-b936-6d5b8cbd9d8e",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-04T17:53:38.806Z",
+        "_updatedAt": "2026-10-04T17:53:38.806Z",
+        "fromEntityId": "bfb625cd-5aea-462e-a1a0-14437a34a2d2",
+        "toEntityId": "f94ab1ca-e7ba-4724-865f-f74b18ec4d7f",
+        "since": "2018-06-01"
+      },
+      {
+        "_id": "e33b5784-835e-44fe-83ae-369782f229af",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-04T17:53:38.809Z",
+        "_updatedAt": "2026-10-04T17:53:38.809Z",
+        "fromEntityId": "a922877e-03ac-47d7-b4b4-b4910cea3c24",
+        "toEntityId": "407cb89b-ca63-4655-80bd-0993083fa1f5",
+        "since": "2017-01-09"
+      },
+      {
+        "_id": "de19cba6-3549-472f-a391-e2c8a2936a65",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-04T17:53:38.812Z",
+        "_updatedAt": "2026-10-04T17:53:38.812Z",
+        "fromEntityId": "d4fec8b6-0a34-4bb8-b337-3b62e83b74d3",
+        "toEntityId": "5c51550a-f4dc-4240-9df7-880d27fbe2b1",
+        "since": "2018-05-02"
+      },
+      {
+        "_id": "d2cedcb6-6e70-4ff7-b294-52e24c25f572",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-04T17:53:38.816Z",
+        "_updatedAt": "2026-10-04T17:53:38.816Z",
+        "fromEntityId": "f94ab1ca-e7ba-4724-865f-f74b18ec4d7f",
+        "toEntityId": "02331569-52ab-470a-ad6a-be3e994f46ab",
+        "since": "2019-03-04"
+      },
+      {
+        "_id": "832e4b72-17f9-4a80-bb48-fd746fdb434b",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-04T17:53:38.819Z",
+        "_updatedAt": "2026-10-04T17:53:38.819Z",
+        "fromEntityId": "f94ab1ca-e7ba-4724-865f-f74b18ec4d7f",
+        "toEntityId": "f164ed26-1aee-4577-b983-f0b544696c51",
+        "since": "2018-11-05"
+      },
+      {
+        "_id": "621c9412-dec8-41c6-8be6-11dddaf55e35",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-04T17:53:38.822Z",
+        "_updatedAt": "2026-10-04T17:53:38.822Z",
+        "fromEntityId": "f94ab1ca-e7ba-4724-865f-f74b18ec4d7f",
+        "toEntityId": "cf8583f6-eba7-4ad2-ae5b-e52104044901",
+        "since": "2020-02-17"
+      },
+      {
+        "_id": "e553ffd1-2b19-4b5d-9a44-ea817a80a496",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-04T17:53:38.825Z",
+        "_updatedAt": "2026-10-04T17:53:38.825Z",
+        "fromEntityId": "f94ab1ca-e7ba-4724-865f-f74b18ec4d7f",
+        "toEntityId": "784528ff-d63d-45c6-80dd-a9f6222a8df9",
+        "since": "2021-09-01"
+      },
+      {
+        "_id": "8617bebd-73b9-406f-9f97-3dea2079f48b",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-04T17:53:38.827Z",
+        "_updatedAt": "2026-10-04T17:53:38.827Z",
+        "fromEntityId": "f94ab1ca-e7ba-4724-865f-f74b18ec4d7f",
+        "toEntityId": "b6d984b5-c6e6-440b-b1a1-52bab01400ef",
+        "since": "2020-06-01"
+      },
+      {
+        "_id": "f4c9ead0-dfe9-4cbc-8716-b608fa90e5bc",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-04T17:53:38.830Z",
+        "_updatedAt": "2026-10-04T17:53:38.830Z",
+        "fromEntityId": "f94ab1ca-e7ba-4724-865f-f74b18ec4d7f",
+        "toEntityId": "e3404eb5-8e3e-4d72-97b6-5687f13d5784"
+      },
+      {
+        "_id": "deab5285-8805-4f2d-8bf8-e32523016ce1",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-04T17:53:38.834Z",
+        "_updatedAt": "2026-10-04T17:53:38.834Z",
+        "fromEntityId": "f94ab1ca-e7ba-4724-865f-f74b18ec4d7f",
+        "toEntityId": "e8c1fbe8-00de-40d0-a711-f66d4223446e",
+        "since": "2019-08-12"
+      },
+      {
+        "_id": "47141136-cfec-4c91-91be-c8928ecf60c6",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-04T17:53:38.837Z",
+        "_updatedAt": "2026-10-04T17:53:38.837Z",
+        "fromEntityId": "f94ab1ca-e7ba-4724-865f-f74b18ec4d7f",
+        "toEntityId": "fc6a7fa8-611e-4af5-a352-7abd789b2804",
+        "since": "2026-08-01"
+      },
+      {
+        "_id": "21bdfe4d-17fd-4564-9945-ac597618eff4",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-04T17:53:38.839Z",
+        "_updatedAt": "2026-10-04T17:53:38.839Z",
+        "fromEntityId": "f94ab1ca-e7ba-4724-865f-f74b18ec4d7f",
+        "toEntityId": "bcc68359-e5da-4b06-b6d3-adb6c057e396",
+        "since": "2024-04-15"
+      },
+      {
+        "_id": "db5377b9-a3ec-4a2f-9bf9-c420a1b02aea",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-04T17:53:38.843Z",
+        "_updatedAt": "2026-10-04T17:53:38.843Z",
+        "fromEntityId": "4209f239-abf1-496a-af1a-98a44628bae1",
+        "toEntityId": "7e5ea63c-b6f7-41af-8c66-4adb57fc13b4",
+        "since": "2017-05-02"
+      },
+      {
+        "_id": "807c7966-620d-41af-83d4-6ec9d0cdafd9",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-04T17:53:38.846Z",
+        "_updatedAt": "2026-10-04T17:53:38.846Z",
+        "fromEntityId": "4209f239-abf1-496a-af1a-98a44628bae1",
+        "toEntityId": "7126e945-2b25-497f-8c0b-0590f25622d4",
+        "since": "2019-01-07"
+      },
+      {
+        "_id": "02fa11b2-1c3b-4c2d-861c-f878e45a1d95",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-04T17:53:38.849Z",
+        "_updatedAt": "2026-10-04T17:53:38.849Z",
+        "fromEntityId": "4209f239-abf1-496a-af1a-98a44628bae1",
+        "toEntityId": "e71ad9a1-3bcd-48fa-9c42-9faaa6024a34",
+        "since": "2018-03-12"
+      },
+      {
+        "_id": "14f65214-fd61-433c-9150-a79fb2bfb26d",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-04T17:53:38.852Z",
+        "_updatedAt": "2026-10-04T17:53:38.852Z",
+        "fromEntityId": "4209f239-abf1-496a-af1a-98a44628bae1",
+        "toEntityId": "e0370836-145f-4d78-8e59-83f3ec130bac"
+      },
+      {
+        "_id": "18300421-e039-47b6-8a9a-f8b4c97ce255",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-04T17:53:38.854Z",
+        "_updatedAt": "2026-10-04T17:53:38.854Z",
+        "fromEntityId": "407cb89b-ca63-4655-80bd-0993083fa1f5",
+        "toEntityId": "80fd833b-93da-4084-be86-40a8fc67a46f",
+        "since": "2020-09-14"
+      },
+      {
+        "_id": "2d2656e8-ed6b-4d69-b76d-7f3c69577173",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-04T17:53:38.857Z",
+        "_updatedAt": "2026-10-04T17:53:38.857Z",
+        "fromEntityId": "407cb89b-ca63-4655-80bd-0993083fa1f5",
+        "toEntityId": "475c75d2-00f7-479b-88e6-7526eff032cb",
+        "since": "2018-01-15"
+      },
+      {
+        "_id": "cbf7805a-4769-4715-96ca-469349f0b52a",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-04T17:53:38.859Z",
+        "_updatedAt": "2026-10-04T17:53:38.859Z",
+        "fromEntityId": "407cb89b-ca63-4655-80bd-0993083fa1f5",
+        "toEntityId": "a46ab6b3-acc6-4b10-86ac-36b245489179",
+        "since": "2017-01-09"
+      },
+      {
+        "_id": "7c9d3b67-48e5-49a9-ab03-e1063828153d",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-04T17:53:38.862Z",
+        "_updatedAt": "2026-10-04T17:53:38.862Z",
+        "fromEntityId": "407cb89b-ca63-4655-80bd-0993083fa1f5",
+        "toEntityId": "5a0adef6-9ac2-438e-8e55-005e6157c429",
+        "since": "2021-03-01"
+      },
+      {
+        "_id": "ddaa0005-6525-4d2e-b556-cd54d44f55e6",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-04T17:53:38.865Z",
+        "_updatedAt": "2026-10-04T17:53:38.865Z",
+        "fromEntityId": "5c51550a-f4dc-4240-9df7-880d27fbe2b1",
+        "toEntityId": "638f66fe-e73f-4166-8b10-9c96a75b497a",
+        "since": "2021-11-02"
+      },
+      {
+        "_id": "55af39fc-e6cf-444b-8a00-27efff074978",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-04T17:53:38.868Z",
+        "_updatedAt": "2026-10-04T17:53:38.868Z",
+        "fromEntityId": "7e5ea63c-b6f7-41af-8c66-4adb57fc13b4",
+        "toEntityId": "4d47b75a-bbf3-4dde-afaf-586a4409da9e",
+        "since": "2023-02-01"
+      },
+      {
+        "_id": "3749deb9-59d6-40b5-9844-73333e3c5921",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-04T17:53:38.871Z",
+        "_updatedAt": "2026-10-04T17:53:38.871Z",
+        "fromEntityId": "7e5ea63c-b6f7-41af-8c66-4adb57fc13b4",
+        "toEntityId": "65197f15-cd07-469c-9a6d-48ffc91d30fe",
+        "since": "2025-07-01"
+      }
+    ],
+    "member_of": [
+      {
+        "_id": "4aa99542-410f-4efe-9d1c-d008c3a5a0a9",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.873Z",
+        "_updatedAt": "2026-10-04T17:53:38.873Z",
+        "fromEntityId": "6d9385e1-7e13-4863-994c-ba88c168e2a8",
+        "toEntityId": "28bb2c5c-2510-4067-97fe-6c913dd7bd8e",
+        "role": "Chief Executive Officer",
+        "allocation": 1
+      },
+      {
+        "_id": "af0d3795-f960-4d60-b21e-0ea7b8ec2f32",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.876Z",
+        "_updatedAt": "2026-10-04T17:53:38.876Z",
+        "fromEntityId": "bfb625cd-5aea-462e-a1a0-14437a34a2d2",
+        "toEntityId": "28bb2c5c-2510-4067-97fe-6c913dd7bd8e",
+        "role": "Chief Technology Officer",
+        "allocation": 1
+      },
+      {
+        "_id": "c4239266-f21a-42cf-9061-10a60c13a923",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.879Z",
+        "_updatedAt": "2026-10-04T17:53:38.879Z",
+        "fromEntityId": "a922877e-03ac-47d7-b4b4-b4910cea3c24",
+        "toEntityId": "28bb2c5c-2510-4067-97fe-6c913dd7bd8e",
+        "role": "Chief Operating Officer",
+        "allocation": 1
+      },
+      {
+        "_id": "65a5d6e0-be68-4935-ae9b-5e8935240863",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.882Z",
+        "_updatedAt": "2026-10-04T17:53:38.882Z",
+        "fromEntityId": "d4fec8b6-0a34-4bb8-b337-3b62e83b74d3",
+        "toEntityId": "28bb2c5c-2510-4067-97fe-6c913dd7bd8e",
+        "role": "Chief Financial Officer",
+        "allocation": 1
+      },
+      {
+        "_id": "54d44a8b-5b14-40b5-baa4-19ef018ef366",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.886Z",
+        "_updatedAt": "2026-10-04T17:53:38.886Z",
+        "fromEntityId": "4209f239-abf1-496a-af1a-98a44628bae1",
+        "toEntityId": "a88b4a61-5759-4158-9cdc-432a94588d8d",
+        "role": "Head of Hardware Engineering",
+        "allocation": 1
+      },
+      {
+        "_id": "31b0672d-636d-4de6-8adf-05e768077344",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.888Z",
+        "_updatedAt": "2026-10-04T17:53:38.888Z",
+        "fromEntityId": "f94ab1ca-e7ba-4724-865f-f74b18ec4d7f",
+        "toEntityId": "4ac36552-3eb9-4420-a60d-c165c54b2649",
+        "role": "Head of Software Platform",
+        "allocation": 1
+      },
+      {
+        "_id": "1ae50c44-b3de-411c-8966-11e33f563cd4",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.891Z",
+        "_updatedAt": "2026-10-04T17:53:38.891Z",
+        "fromEntityId": "407cb89b-ca63-4655-80bd-0993083fa1f5",
+        "toEntityId": "21c97a85-92d1-46da-922f-002ec3efc3f3",
+        "role": "Operations Manager",
+        "allocation": 1
+      },
+      {
+        "_id": "4a2eeb03-a60c-4536-958d-1dc4d20ca93d",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.894Z",
+        "_updatedAt": "2026-10-04T17:53:38.894Z",
+        "fromEntityId": "5c51550a-f4dc-4240-9df7-880d27fbe2b1",
+        "toEntityId": "8980129a-b4dc-4b4c-9164-0d2fc0721f97",
+        "role": "Financial Controller",
+        "allocation": 1
+      },
+      {
+        "_id": "a2626459-880d-4eec-9d56-0d41a56de4a2",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.896Z",
+        "_updatedAt": "2026-10-04T17:53:38.896Z",
+        "fromEntityId": "02331569-52ab-470a-ad6a-be3e994f46ab",
+        "toEntityId": "4ac36552-3eb9-4420-a60d-c165c54b2649",
+        "role": "Senior Software Engineer",
+        "allocation": 1
+      },
+      {
+        "_id": "2bbb98c4-761c-473a-bf55-3580ab3130ef",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.900Z",
+        "_updatedAt": "2026-10-04T17:53:38.900Z",
+        "fromEntityId": "f164ed26-1aee-4577-b983-f0b544696c51",
+        "toEntityId": "4ac36552-3eb9-4420-a60d-c165c54b2649",
+        "role": "Firmware Engineer",
+        "allocation": 1
+      },
+      {
+        "_id": "ecfc7349-e3a7-476a-aee7-b4957faa433a",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.904Z",
+        "_updatedAt": "2026-10-04T17:53:38.904Z",
+        "fromEntityId": "cf8583f6-eba7-4ad2-ae5b-e52104044901",
+        "toEntityId": "4ac36552-3eb9-4420-a60d-c165c54b2649",
+        "role": "Senior Software Engineer",
+        "allocation": 1
+      },
+      {
+        "_id": "d3546a12-bb51-4cff-95a9-abbb092a7139",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.908Z",
+        "_updatedAt": "2026-10-04T17:53:38.908Z",
+        "fromEntityId": "784528ff-d63d-45c6-80dd-a9f6222a8df9",
+        "toEntityId": "4ac36552-3eb9-4420-a60d-c165c54b2649",
+        "role": "Software Engineer",
+        "allocation": 1
+      },
+      {
+        "_id": "88275a93-5e8d-4827-81de-044e29fc029b",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.911Z",
+        "_updatedAt": "2026-10-04T17:53:38.911Z",
+        "fromEntityId": "b6d984b5-c6e6-440b-b1a1-52bab01400ef",
+        "toEntityId": "4ac36552-3eb9-4420-a60d-c165c54b2649",
+        "role": "Software Engineer",
+        "allocation": 1
+      },
+      {
+        "_id": "147e6fb8-7fa0-49b3-b46d-5a72d631e4e2",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.914Z",
+        "_updatedAt": "2026-10-04T17:53:38.914Z",
+        "fromEntityId": "e3404eb5-8e3e-4d72-97b6-5687f13d5784",
+        "toEntityId": "4ac36552-3eb9-4420-a60d-c165c54b2649",
+        "role": "Technical Writer"
+      },
+      {
+        "_id": "788b1062-b775-487f-beb9-2bf269f3daba",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.917Z",
+        "_updatedAt": "2026-10-04T17:53:38.917Z",
+        "fromEntityId": "e8c1fbe8-00de-40d0-a711-f66d4223446e",
+        "toEntityId": "4ac36552-3eb9-4420-a60d-c165c54b2649",
+        "role": "Site Reliability Engineer",
+        "allocation": 1
+      },
+      {
+        "_id": "ecae3d33-e387-4d4a-89c0-b4ed5aba983d",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.919Z",
+        "_updatedAt": "2026-10-04T17:53:38.919Z",
+        "fromEntityId": "fc6a7fa8-611e-4af5-a352-7abd789b2804",
+        "toEntityId": "4ac36552-3eb9-4420-a60d-c165c54b2649",
+        "role": "Junior Firmware Engineer",
+        "allocation": 1
+      },
+      {
+        "_id": "b0b2b62f-7f7b-48a6-9d54-6755edc3e9ee",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.923Z",
+        "_updatedAt": "2026-10-04T17:53:38.923Z",
+        "fromEntityId": "bcc68359-e5da-4b06-b6d3-adb6c057e396",
+        "toEntityId": "4ac36552-3eb9-4420-a60d-c165c54b2649",
+        "role": "Software Engineer",
+        "allocation": 1
+      },
+      {
+        "_id": "821cbd16-203f-4a03-b7b8-a49fee126417",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.926Z",
+        "_updatedAt": "2026-10-04T17:53:38.926Z",
+        "fromEntityId": "7e5ea63c-b6f7-41af-8c66-4adb57fc13b4",
+        "toEntityId": "a88b4a61-5759-4158-9cdc-432a94588d8d",
+        "role": "Team Lead Test Engineering",
+        "allocation": 0.8
+      },
+      {
+        "_id": "15896603-cf6c-4edd-bc20-c6718ea4ff86",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.929Z",
+        "_updatedAt": "2026-10-04T17:53:38.929Z",
+        "fromEntityId": "7e5ea63c-b6f7-41af-8c66-4adb57fc13b4",
+        "toEntityId": "4ac36552-3eb9-4420-a60d-c165c54b2649",
+        "role": "Embedded Liaison",
+        "allocation": 0.2
+      },
+      {
+        "_id": "eed58a34-1237-4714-ab2c-40e4b27f4349",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.931Z",
+        "_updatedAt": "2026-10-04T17:53:38.931Z",
+        "fromEntityId": "7126e945-2b25-497f-8c0b-0590f25622d4",
+        "toEntityId": "a88b4a61-5759-4158-9cdc-432a94588d8d",
+        "role": "Mechanical Engineer",
+        "allocation": 1
+      },
+      {
+        "_id": "a6406a0f-3140-4960-8b79-c9b91c996dc5",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.935Z",
+        "_updatedAt": "2026-10-04T17:53:38.935Z",
+        "fromEntityId": "e71ad9a1-3bcd-48fa-9c42-9faaa6024a34",
+        "toEntityId": "a88b4a61-5759-4158-9cdc-432a94588d8d",
+        "role": "Automation Engineer",
+        "allocation": 1
+      },
+      {
+        "_id": "28a0ebe6-9735-4446-873e-50761fc2ef32",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.937Z",
+        "_updatedAt": "2026-10-04T17:53:38.937Z",
+        "fromEntityId": "e0370836-145f-4d78-8e59-83f3ec130bac",
+        "toEntityId": "a88b4a61-5759-4158-9cdc-432a94588d8d",
+        "role": "Design Engineer",
+        "allocation": 1
+      },
+      {
+        "_id": "ba15da2f-4a6d-4b96-a958-3acf2f93639a",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.940Z",
+        "_updatedAt": "2026-10-04T17:53:38.940Z",
+        "fromEntityId": "4d47b75a-bbf3-4dde-afaf-586a4409da9e",
+        "toEntityId": "a88b4a61-5759-4158-9cdc-432a94588d8d",
+        "role": "Test Engineer",
+        "allocation": 1
+      },
+      {
+        "_id": "73f6886e-5b78-4373-bbc1-9491c37ec72e",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.943Z",
+        "_updatedAt": "2026-10-04T17:53:38.943Z",
+        "fromEntityId": "65197f15-cd07-469c-9a6d-48ffc91d30fe",
+        "toEntityId": "a88b4a61-5759-4158-9cdc-432a94588d8d",
+        "role": "Test Engineer",
+        "allocation": 1
+      },
+      {
+        "_id": "584f5526-1c75-47c4-95c8-0252af28c879",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.946Z",
+        "_updatedAt": "2026-10-04T17:53:38.946Z",
+        "fromEntityId": "80fd833b-93da-4084-be86-40a8fc67a46f",
+        "toEntityId": "21c97a85-92d1-46da-922f-002ec3efc3f3",
+        "role": "Procurement Specialist",
+        "allocation": 1
+      },
+      {
+        "_id": "235b58e3-365f-471c-8611-7e5c164d00c7",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.949Z",
+        "_updatedAt": "2026-10-04T17:53:38.949Z",
+        "fromEntityId": "475c75d2-00f7-479b-88e6-7526eff032cb",
+        "toEntityId": "21c97a85-92d1-46da-922f-002ec3efc3f3",
+        "role": "Logistics Lead",
+        "allocation": 1
+      },
+      {
+        "_id": "07905ca7-0cab-4a16-9fc2-363bcf69b986",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.951Z",
+        "_updatedAt": "2026-10-04T17:53:38.951Z",
+        "fromEntityId": "a46ab6b3-acc6-4b10-86ac-36b245489179",
+        "toEntityId": "21c97a85-92d1-46da-922f-002ec3efc3f3",
+        "role": "Facility Coordinator",
+        "allocation": 1
+      },
+      {
+        "_id": "d4048a73-4f92-460a-bac0-b57bf43978ff",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.954Z",
+        "_updatedAt": "2026-10-04T17:53:38.954Z",
+        "fromEntityId": "5a0adef6-9ac2-438e-8e55-005e6157c429",
+        "toEntityId": "21c97a85-92d1-46da-922f-002ec3efc3f3",
+        "role": "Logistics Planner",
+        "allocation": 1
+      },
+      {
+        "_id": "940383ff-e47d-4697-bc1d-7d7d99797bd0",
+        "_relationTypeKey": "member_of",
+        "_createdAt": "2026-10-04T17:53:38.957Z",
+        "_updatedAt": "2026-10-04T17:53:38.957Z",
+        "fromEntityId": "638f66fe-e73f-4166-8b10-9c96a75b497a",
+        "toEntityId": "8980129a-b4dc-4b4c-9164-0d2fc0721f97",
+        "role": "Financial Analyst",
+        "allocation": 1
+      }
+    ],
+    "owned_by": [
+      {
+        "_id": "97396fed-d258-4025-b752-fafa6db6cd9d",
+        "_relationTypeKey": "owned_by",
+        "_createdAt": "2026-10-04T17:53:38.960Z",
+        "_updatedAt": "2026-10-04T17:53:38.960Z",
+        "fromEntityId": "2531f9b4-f819-4b7a-b016-0271c542c9fe",
+        "toEntityId": "a88b4a61-5759-4158-9cdc-432a94588d8d"
+      },
+      {
+        "_id": "09477dee-c9d3-401b-ae63-a7547aacc588",
+        "_relationTypeKey": "owned_by",
+        "_createdAt": "2026-10-04T17:53:38.965Z",
+        "_updatedAt": "2026-10-04T17:53:38.965Z",
+        "fromEntityId": "cb91bc22-ba5b-466b-9236-44589930cc20",
+        "toEntityId": "4ac36552-3eb9-4420-a60d-c165c54b2649"
+      },
+      {
+        "_id": "03f975f4-b90d-4f56-8eed-dcfc89f79840",
+        "_relationTypeKey": "owned_by",
+        "_createdAt": "2026-10-04T17:53:38.967Z",
+        "_updatedAt": "2026-10-04T17:53:38.967Z",
+        "fromEntityId": "7c26dd34-f9eb-4e1d-9da7-068f48bea2e1",
+        "toEntityId": "a88b4a61-5759-4158-9cdc-432a94588d8d"
+      },
+      {
+        "_id": "0fd58831-5df1-43ee-98e3-de78867f3d53",
+        "_relationTypeKey": "owned_by",
+        "_createdAt": "2026-10-04T17:53:38.970Z",
+        "_updatedAt": "2026-10-04T17:53:38.970Z",
+        "fromEntityId": "f3a099fe-5a96-4975-ab61-89e9f9ccb2e1",
+        "toEntityId": "4ac36552-3eb9-4420-a60d-c165c54b2649"
+      },
+      {
+        "_id": "d6b80827-9f97-40de-b327-dcfecac721b7",
+        "_relationTypeKey": "owned_by",
+        "_createdAt": "2026-10-04T17:53:38.973Z",
+        "_updatedAt": "2026-10-04T17:53:38.973Z",
+        "fromEntityId": "27f79996-dcf8-489e-9718-100121f9c152",
+        "toEntityId": "21c97a85-92d1-46da-922f-002ec3efc3f3"
+      },
+      {
+        "_id": "b9d57541-5ce9-4ee8-a787-56adea542e2e",
+        "_relationTypeKey": "owned_by",
+        "_createdAt": "2026-10-04T17:53:38.976Z",
+        "_updatedAt": "2026-10-04T17:53:38.976Z",
+        "fromEntityId": "76946f5a-6866-41b9-bca3-7fcb3b043682",
+        "toEntityId": "21c97a85-92d1-46da-922f-002ec3efc3f3"
+      },
+      {
+        "_id": "86aae7a3-2a27-4a76-809a-d7ccc45ffd14",
+        "_relationTypeKey": "owned_by",
+        "_createdAt": "2026-10-04T17:53:38.978Z",
+        "_updatedAt": "2026-10-04T17:53:38.978Z",
+        "fromEntityId": "96aa8a1c-a22e-4c03-a809-b547649004b9",
+        "toEntityId": "8980129a-b4dc-4b4c-9164-0d2fc0721f97"
+      },
+      {
+        "_id": "b78c7fb0-207f-41e6-bbe8-94c6bcb685a6",
+        "_relationTypeKey": "owned_by",
+        "_createdAt": "2026-10-04T17:53:38.981Z",
+        "_updatedAt": "2026-10-04T17:53:38.981Z",
+        "fromEntityId": "5864a9f1-5457-4fa1-9d8f-942f3a0ac83a",
+        "toEntityId": "a88b4a61-5759-4158-9cdc-432a94588d8d"
+      }
+    ],
+    "requires_skill": [
+      {
+        "_id": "b70f035c-cdbc-4ba3-a503-5ee66709ca2c",
+        "_relationTypeKey": "requires_skill",
+        "_createdAt": "2026-10-04T17:53:38.983Z",
+        "_updatedAt": "2026-10-04T17:53:38.983Z",
+        "fromEntityId": "2531f9b4-f819-4b7a-b016-0271c542c9fe",
+        "toEntityId": "3cea8f52-c6e8-43e5-989f-017f17f25f80"
+      },
+      {
+        "_id": "4a748714-4539-4b73-a954-e01ff2e6e8ca",
+        "_relationTypeKey": "requires_skill",
+        "_createdAt": "2026-10-04T17:53:38.986Z",
+        "_updatedAt": "2026-10-04T17:53:38.986Z",
+        "fromEntityId": "2531f9b4-f819-4b7a-b016-0271c542c9fe",
+        "toEntityId": "5ef5da45-3406-4157-9ab6-110f2f65eef1"
+      },
+      {
+        "_id": "254abae1-f5b7-4035-b60f-903ef64d4717",
+        "_relationTypeKey": "requires_skill",
+        "_createdAt": "2026-10-04T17:53:38.989Z",
+        "_updatedAt": "2026-10-04T17:53:38.989Z",
+        "fromEntityId": "cb91bc22-ba5b-466b-9236-44589930cc20",
+        "toEntityId": "830d495c-5b0b-4cf2-aeee-801250f2c7ab"
+      },
+      {
+        "_id": "b8163c97-31c9-41d7-84ae-0962a5a4e5d7",
+        "_relationTypeKey": "requires_skill",
+        "_createdAt": "2026-10-04T17:53:38.992Z",
+        "_updatedAt": "2026-10-04T17:53:38.992Z",
+        "fromEntityId": "cb91bc22-ba5b-466b-9236-44589930cc20",
+        "toEntityId": "9d72ae03-81d4-4115-9753-c79b35efce4d"
+      },
+      {
+        "_id": "3eb7b3f8-0d23-49b1-a6c8-f70f2906d338",
+        "_relationTypeKey": "requires_skill",
+        "_createdAt": "2026-10-04T17:53:38.995Z",
+        "_updatedAt": "2026-10-04T17:53:38.995Z",
+        "fromEntityId": "cb91bc22-ba5b-466b-9236-44589930cc20",
+        "toEntityId": "4020ecc0-da82-4b2e-8691-2a6188ced7c8"
+      },
+      {
+        "_id": "1cde9501-62ec-43db-a38e-15060e42614b",
+        "_relationTypeKey": "requires_skill",
+        "_createdAt": "2026-10-04T17:53:38.997Z",
+        "_updatedAt": "2026-10-04T17:53:38.997Z",
+        "fromEntityId": "7c26dd34-f9eb-4e1d-9da7-068f48bea2e1",
+        "toEntityId": "78643f5e-ca0a-4962-b475-fdfd90e468e9"
+      },
+      {
+        "_id": "0e2f87a0-cef2-497b-be0e-8cfd94bd4050",
+        "_relationTypeKey": "requires_skill",
+        "_createdAt": "2026-10-04T17:53:39.000Z",
+        "_updatedAt": "2026-10-04T17:53:39.000Z",
+        "fromEntityId": "7c26dd34-f9eb-4e1d-9da7-068f48bea2e1",
+        "toEntityId": "af94997b-cf29-4fdf-9b07-3675bb74733d"
+      },
+      {
+        "_id": "732c4721-5ad2-4712-97bd-d5a4cefa8d5a",
+        "_relationTypeKey": "requires_skill",
+        "_createdAt": "2026-10-04T17:53:39.011Z",
+        "_updatedAt": "2026-10-04T17:53:39.011Z",
+        "fromEntityId": "f3a099fe-5a96-4975-ab61-89e9f9ccb2e1",
+        "toEntityId": "af94997b-cf29-4fdf-9b07-3675bb74733d"
+      },
+      {
+        "_id": "4f5f5dcb-108a-4be3-911c-d13640bd5d0b",
+        "_relationTypeKey": "requires_skill",
+        "_createdAt": "2026-10-04T17:53:39.017Z",
+        "_updatedAt": "2026-10-04T17:53:39.017Z",
+        "fromEntityId": "f3a099fe-5a96-4975-ab61-89e9f9ccb2e1",
+        "toEntityId": "830d495c-5b0b-4cf2-aeee-801250f2c7ab"
+      },
+      {
+        "_id": "6ed797f6-b30e-4e1c-9b66-2523afda43b7",
+        "_relationTypeKey": "requires_skill",
+        "_createdAt": "2026-10-04T17:53:39.019Z",
+        "_updatedAt": "2026-10-04T17:53:39.019Z",
+        "fromEntityId": "27f79996-dcf8-489e-9718-100121f9c152",
+        "toEntityId": "4020ecc0-da82-4b2e-8691-2a6188ced7c8"
+      },
+      {
+        "_id": "561953a3-5cd4-4739-8365-66aa9c237b92",
+        "_relationTypeKey": "requires_skill",
+        "_createdAt": "2026-10-04T17:53:39.023Z",
+        "_updatedAt": "2026-10-04T17:53:39.023Z",
+        "fromEntityId": "27f79996-dcf8-489e-9718-100121f9c152",
+        "toEntityId": "ae17578d-5f3a-4216-928b-f51644814676"
+      },
+      {
+        "_id": "6a3f33f8-c045-4611-8b0b-658b35e34e52",
+        "_relationTypeKey": "requires_skill",
+        "_createdAt": "2026-10-04T17:53:39.025Z",
+        "_updatedAt": "2026-10-04T17:53:39.025Z",
+        "fromEntityId": "76946f5a-6866-41b9-bca3-7fcb3b043682",
+        "toEntityId": "ae17578d-5f3a-4216-928b-f51644814676"
+      },
+      {
+        "_id": "254ce686-106d-4c44-800c-eaed041179aa",
+        "_relationTypeKey": "requires_skill",
+        "_createdAt": "2026-10-04T17:53:39.028Z",
+        "_updatedAt": "2026-10-04T17:53:39.028Z",
+        "fromEntityId": "96aa8a1c-a22e-4c03-a809-b547649004b9",
+        "toEntityId": "d1f9fcfe-bbef-4adc-8c9a-5a8d4d71d027"
+      },
+      {
+        "_id": "5702a46d-6bb4-447b-bb39-74055d5f44f9",
+        "_relationTypeKey": "requires_skill",
+        "_createdAt": "2026-10-04T17:53:39.030Z",
+        "_updatedAt": "2026-10-04T17:53:39.030Z",
+        "fromEntityId": "5864a9f1-5457-4fa1-9d8f-942f3a0ac83a",
+        "toEntityId": "78643f5e-ca0a-4962-b475-fdfd90e468e9"
+      },
+      {
+        "_id": "53dc01ad-9fb8-4172-9e1d-5e8bf2812424",
+        "_relationTypeKey": "requires_skill",
+        "_createdAt": "2026-10-04T17:53:39.033Z",
+        "_updatedAt": "2026-10-04T17:53:39.033Z",
+        "fromEntityId": "5864a9f1-5457-4fa1-9d8f-942f3a0ac83a",
+        "toEntityId": "6f5891ca-2882-4de2-b438-98c9c08ef6e3"
+      },
+      {
+        "_id": "f4631ba3-7d7b-4a5a-81a3-01d870db5433",
+        "_relationTypeKey": "requires_skill",
+        "_createdAt": "2026-10-04T17:53:39.035Z",
+        "_updatedAt": "2026-10-04T17:53:39.035Z",
+        "fromEntityId": "5864a9f1-5457-4fa1-9d8f-942f3a0ac83a",
+        "toEntityId": "5ef5da45-3406-4157-9ab6-110f2f65eef1"
+      }
+    ],
+    "supersedes": [
+      {
+        "_id": "f712f0fb-321a-4d2c-b927-9f17b3077a06",
+        "_relationTypeKey": "supersedes",
+        "_createdAt": "2026-10-04T17:53:39.038Z",
+        "_updatedAt": "2026-10-04T17:53:39.038Z",
+        "fromEntityId": "82b96e68-03f5-4186-b60d-a35650d1d24d",
+        "toEntityId": "c7c3e06f-e15a-4939-a00c-ab071032fab1"
+      },
+      {
+        "_id": "d21c74a0-42b3-4a2f-b511-63fcbfa11fa0",
+        "_relationTypeKey": "supersedes",
+        "_createdAt": "2026-10-04T17:53:39.041Z",
+        "_updatedAt": "2026-10-04T17:53:39.041Z",
+        "fromEntityId": "522f4836-2d42-4931-8944-7ed3990300fd",
+        "toEntityId": "82b96e68-03f5-4186-b60d-a35650d1d24d"
+      },
+      {
+        "_id": "c953c8f7-285f-4c5f-a126-cc8a7b4640b9",
+        "_relationTypeKey": "supersedes",
+        "_createdAt": "2026-10-04T17:53:39.044Z",
+        "_updatedAt": "2026-10-04T17:53:39.044Z",
+        "fromEntityId": "cab390cb-54f3-42af-a29a-167398e11523",
+        "toEntityId": "195d7aac-5da7-4da5-a3c0-cec5683e74e0"
+      },
+      {
+        "_id": "728d084b-3d2c-4dd3-a623-4efd57d6a641",
+        "_relationTypeKey": "supersedes",
+        "_createdAt": "2026-10-04T17:53:39.047Z",
+        "_updatedAt": "2026-10-04T17:53:39.047Z",
+        "fromEntityId": "6531ba69-108f-4ffd-aefa-324461335e91",
+        "toEntityId": "cab390cb-54f3-42af-a29a-167398e11523"
+      }
+    ],
+    "works_on": [
+      {
+        "_id": "7dd411c8-1453-41e4-82fe-1e688b53733e",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.049Z",
+        "_updatedAt": "2026-10-04T17:53:39.049Z",
+        "fromEntityId": "4209f239-abf1-496a-af1a-98a44628bae1",
+        "toEntityId": "2531f9b4-f819-4b7a-b016-0271c542c9fe",
+        "hours_per_week": 4
+      },
+      {
+        "_id": "ea6b1746-bb69-43ee-8671-b2044d4dcdb1",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.052Z",
+        "_updatedAt": "2026-10-04T17:53:39.052Z",
+        "fromEntityId": "7e5ea63c-b6f7-41af-8c66-4adb57fc13b4",
+        "toEntityId": "2531f9b4-f819-4b7a-b016-0271c542c9fe",
+        "hours_per_week": 16
+      },
+      {
+        "_id": "549227cc-ec2a-4c67-b03e-6f9a47cf41c2",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.055Z",
+        "_updatedAt": "2026-10-04T17:53:39.055Z",
+        "fromEntityId": "7126e945-2b25-497f-8c0b-0590f25622d4",
+        "toEntityId": "2531f9b4-f819-4b7a-b016-0271c542c9fe",
+        "hours_per_week": 32
+      },
+      {
+        "_id": "d20204af-8663-4362-a3a7-01e745704aa8",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.058Z",
+        "_updatedAt": "2026-10-04T17:53:39.058Z",
+        "fromEntityId": "4d47b75a-bbf3-4dde-afaf-586a4409da9e",
+        "toEntityId": "2531f9b4-f819-4b7a-b016-0271c542c9fe",
+        "hours_per_week": 24
+      },
+      {
+        "_id": "06a31421-0d0c-431f-ace8-a6a6d2f4f8ad",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.062Z",
+        "_updatedAt": "2026-10-04T17:53:39.062Z",
+        "fromEntityId": "e0370836-145f-4d78-8e59-83f3ec130bac",
+        "toEntityId": "2531f9b4-f819-4b7a-b016-0271c542c9fe",
+        "hours_per_week": 20
+      },
+      {
+        "_id": "c0bb3f1b-d64b-43ad-9726-2426931d8e3f",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.064Z",
+        "_updatedAt": "2026-10-04T17:53:39.064Z",
+        "fromEntityId": "f94ab1ca-e7ba-4724-865f-f74b18ec4d7f",
+        "toEntityId": "cb91bc22-ba5b-466b-9236-44589930cc20",
+        "hours_per_week": 6
+      },
+      {
+        "_id": "88cb031f-5cb7-4c7e-a8cb-ae0dc34e31f4",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.067Z",
+        "_updatedAt": "2026-10-04T17:53:39.067Z",
+        "fromEntityId": "02331569-52ab-470a-ad6a-be3e994f46ab",
+        "toEntityId": "cb91bc22-ba5b-466b-9236-44589930cc20",
+        "hours_per_week": 32
+      },
+      {
+        "_id": "b698a25b-0bdf-4bda-b3f0-70d4d4dd092b",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.070Z",
+        "_updatedAt": "2026-10-04T17:53:39.070Z",
+        "fromEntityId": "cf8583f6-eba7-4ad2-ae5b-e52104044901",
+        "toEntityId": "cb91bc22-ba5b-466b-9236-44589930cc20",
+        "hours_per_week": 30
+      },
+      {
+        "_id": "198f8d4d-676c-498d-85af-85135a32b4a2",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.072Z",
+        "_updatedAt": "2026-10-04T17:53:39.072Z",
+        "fromEntityId": "784528ff-d63d-45c6-80dd-a9f6222a8df9",
+        "toEntityId": "cb91bc22-ba5b-466b-9236-44589930cc20",
+        "hours_per_week": 36
+      },
+      {
+        "_id": "e7ae5894-89bb-4702-ad45-3997ec456fab",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.076Z",
+        "_updatedAt": "2026-10-04T17:53:39.076Z",
+        "fromEntityId": "e8c1fbe8-00de-40d0-a711-f66d4223446e",
+        "toEntityId": "cb91bc22-ba5b-466b-9236-44589930cc20",
+        "hours_per_week": 20
+      },
+      {
+        "_id": "64d9fa0a-a3bd-4688-a606-4e1f47540ed9",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.078Z",
+        "_updatedAt": "2026-10-04T17:53:39.078Z",
+        "fromEntityId": "7e5ea63c-b6f7-41af-8c66-4adb57fc13b4",
+        "toEntityId": "7c26dd34-f9eb-4e1d-9da7-068f48bea2e1",
+        "hours_per_week": 12
+      },
+      {
+        "_id": "3dceb832-58f8-4006-9a9a-c49163aefb79",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.080Z",
+        "_updatedAt": "2026-10-04T17:53:39.080Z",
+        "fromEntityId": "65197f15-cd07-469c-9a6d-48ffc91d30fe",
+        "toEntityId": "7c26dd34-f9eb-4e1d-9da7-068f48bea2e1",
+        "hours_per_week": 36
+      },
+      {
+        "_id": "a11db3e2-fe48-4fdf-a732-ae62a7b63ea5",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.083Z",
+        "_updatedAt": "2026-10-04T17:53:39.083Z",
+        "fromEntityId": "e71ad9a1-3bcd-48fa-9c42-9faaa6024a34",
+        "toEntityId": "7c26dd34-f9eb-4e1d-9da7-068f48bea2e1",
+        "hours_per_week": 30
+      },
+      {
+        "_id": "5edaa64f-1c78-4ab6-a95c-ca40a9350c6f",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.085Z",
+        "_updatedAt": "2026-10-04T17:53:39.085Z",
+        "fromEntityId": "4d47b75a-bbf3-4dde-afaf-586a4409da9e",
+        "toEntityId": "7c26dd34-f9eb-4e1d-9da7-068f48bea2e1",
+        "hours_per_week": 12
+      },
+      {
+        "_id": "c2d24f55-1715-40f7-97d8-c8c4607f4052",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.088Z",
+        "_updatedAt": "2026-10-04T17:53:39.088Z",
+        "fromEntityId": "f94ab1ca-e7ba-4724-865f-f74b18ec4d7f",
+        "toEntityId": "f3a099fe-5a96-4975-ab61-89e9f9ccb2e1",
+        "hours_per_week": 4
+      },
+      {
+        "_id": "fcb12995-7449-403e-90be-9944f4e804a4",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.092Z",
+        "_updatedAt": "2026-10-04T17:53:39.092Z",
+        "fromEntityId": "f164ed26-1aee-4577-b983-f0b544696c51",
+        "toEntityId": "f3a099fe-5a96-4975-ab61-89e9f9ccb2e1",
+        "hours_per_week": 32
+      },
+      {
+        "_id": "767ee2ea-32c6-416f-97fb-e7050704bcbd",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.094Z",
+        "_updatedAt": "2026-10-04T17:53:39.094Z",
+        "fromEntityId": "fc6a7fa8-611e-4af5-a352-7abd789b2804",
+        "toEntityId": "f3a099fe-5a96-4975-ab61-89e9f9ccb2e1",
+        "hours_per_week": 40
+      },
+      {
+        "_id": "ca9978e7-055a-4f70-b060-4e4310a93958",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.097Z",
+        "_updatedAt": "2026-10-04T17:53:39.097Z",
+        "fromEntityId": "e8c1fbe8-00de-40d0-a711-f66d4223446e",
+        "toEntityId": "f3a099fe-5a96-4975-ab61-89e9f9ccb2e1",
+        "hours_per_week": 16
+      },
+      {
+        "_id": "1ce7f0e3-5948-42f6-a4d9-846a457aa25d",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.099Z",
+        "_updatedAt": "2026-10-04T17:53:39.099Z",
+        "fromEntityId": "e71ad9a1-3bcd-48fa-9c42-9faaa6024a34",
+        "toEntityId": "f3a099fe-5a96-4975-ab61-89e9f9ccb2e1",
+        "hours_per_week": 8
+      },
+      {
+        "_id": "5b1193e2-cda4-4723-93c4-2546d6b6644e",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.102Z",
+        "_updatedAt": "2026-10-04T17:53:39.102Z",
+        "fromEntityId": "bcc68359-e5da-4b06-b6d3-adb6c057e396",
+        "toEntityId": "f3a099fe-5a96-4975-ab61-89e9f9ccb2e1"
+      },
+      {
+        "_id": "10baa9e7-0595-4079-97c0-9bbce1b5791d",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.104Z",
+        "_updatedAt": "2026-10-04T17:53:39.104Z",
+        "fromEntityId": "f94ab1ca-e7ba-4724-865f-f74b18ec4d7f",
+        "toEntityId": "27f79996-dcf8-489e-9718-100121f9c152",
+        "hours_per_week": 2
+      },
+      {
+        "_id": "6fb40f3e-cf7c-4579-a366-37c95b025348",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.107Z",
+        "_updatedAt": "2026-10-04T17:53:39.107Z",
+        "fromEntityId": "407cb89b-ca63-4655-80bd-0993083fa1f5",
+        "toEntityId": "27f79996-dcf8-489e-9718-100121f9c152",
+        "hours_per_week": 8
+      },
+      {
+        "_id": "85c2ab21-f806-4b21-a285-57d103193ffa",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.109Z",
+        "_updatedAt": "2026-10-04T17:53:39.109Z",
+        "fromEntityId": "80fd833b-93da-4084-be86-40a8fc67a46f",
+        "toEntityId": "27f79996-dcf8-489e-9718-100121f9c152",
+        "hours_per_week": 24
+      },
+      {
+        "_id": "b447d176-7e1e-42b3-bd16-8b96752a1343",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.112Z",
+        "_updatedAt": "2026-10-04T17:53:39.112Z",
+        "fromEntityId": "02331569-52ab-470a-ad6a-be3e994f46ab",
+        "toEntityId": "27f79996-dcf8-489e-9718-100121f9c152",
+        "hours_per_week": 8
+      },
+      {
+        "_id": "4f0f3cf8-4430-463d-9f27-7c1a163c3324",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.114Z",
+        "_updatedAt": "2026-10-04T17:53:39.114Z",
+        "fromEntityId": "5a0adef6-9ac2-438e-8e55-005e6157c429",
+        "toEntityId": "27f79996-dcf8-489e-9718-100121f9c152",
+        "hours_per_week": 16
+      },
+      {
+        "_id": "e7b373a0-d640-4f9d-8883-418daf10f916",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.117Z",
+        "_updatedAt": "2026-10-04T17:53:39.117Z",
+        "fromEntityId": "475c75d2-00f7-479b-88e6-7526eff032cb",
+        "toEntityId": "76946f5a-6866-41b9-bca3-7fcb3b043682",
+        "hours_per_week": 20
+      },
+      {
+        "_id": "2b07b853-f0b2-46e3-a013-2d65563ac87a",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.120Z",
+        "_updatedAt": "2026-10-04T17:53:39.120Z",
+        "fromEntityId": "5a0adef6-9ac2-438e-8e55-005e6157c429",
+        "toEntityId": "76946f5a-6866-41b9-bca3-7fcb3b043682",
+        "hours_per_week": 20
+      },
+      {
+        "_id": "f7c95325-73d4-43cb-b061-12a0cc485825",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.123Z",
+        "_updatedAt": "2026-10-04T17:53:39.123Z",
+        "fromEntityId": "5c51550a-f4dc-4240-9df7-880d27fbe2b1",
+        "toEntityId": "96aa8a1c-a22e-4c03-a809-b547649004b9",
+        "hours_per_week": 10
+      },
+      {
+        "_id": "39533df4-a6bf-4be6-afad-cf294929b8b1",
+        "_relationTypeKey": "works_on",
+        "_createdAt": "2026-10-04T17:53:39.125Z",
+        "_updatedAt": "2026-10-04T17:53:39.125Z",
+        "fromEntityId": "638f66fe-e73f-4166-8b10-9c96a75b497a",
+        "toEntityId": "96aa8a1c-a22e-4c03-a809-b547649004b9",
+        "hours_per_week": 30
+      }
+    ]
+  }
+}

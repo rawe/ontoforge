@@ -76,3 +76,4 @@ load and save.
 |---|---|---|---|
 | [people_basic](ontologies/people_basic/README.md) | `fx_people_basic` | Simple general-purpose fixture: CRUD, scoped and unscoped lenses, agents, saved queries | 20 entities, 15 relations |
 | [trade_fair](ontologies/trade_fair/README.md) | `fx_trade_fair` | Retrieval and search: saved retrievers, property and passage search over long documents, an agent, saved queries | 55 entities, 109 relations |
+| [org_graph](ontologies/org_graph/README.md) | `fx_org_graph` | Graph structure without providers: multi-hop traversal, self-relations, relation properties, OQL, saved query pipelines, every lens scoping variant, query-path filters, near-duplicates for identity comparison | 59 entities, 150 relations |

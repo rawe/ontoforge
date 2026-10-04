@@ -52,6 +52,32 @@ describe("search entry ordering", () => {
     expect(response.hits[0]!.relativeScore).toBe(1);
     expect(response.hits[1]!.relativeScore).toBeCloseTo(1 / 61 / (1 / 61 + 1 / 62));
   });
+  it("hybrid overfetches both property sources so a short limit is a prefix of a longer one", async () => {
+    // Ranked so that with each source cut at the limit, `a` beats `d` at limit 2
+    // but loses to it at limit 7.
+    const semantic = entities(["a", "b", "c", "d", "e", "f", "g"]);
+    const keyword = entities(["d", "b", "x", "y", "z", "w", "a"]);
+    store.propertySearchSemantic.mockImplementation(async (_t: unknown, _e: unknown, n: number) => semantic.slice(0, n));
+    store.propertySearchKeyword.mockImplementation(async (_t: unknown, _q: unknown, n: number) => keyword.slice(0, n));
+    const ids = async (limit: number) =>
+      (await search("full_lens", { query: "x", in: ["properties"], strategy: "hybrid", limit }, store))
+        .hits.map((h) => h.entity._id);
+    const short = await ids(2);
+    const long = await ids(7);
+    expect(short).toEqual(["b", "d"]);
+    expect(long.slice(0, 2)).toEqual(short);
+    expect(long).toHaveLength(7);
+    expect(store.propertySearchSemantic.mock.calls.map((c) => c[2])).toEqual([10, 35]);
+    expect(store.propertySearchKeyword.mock.calls.map((c) => c[2])).toEqual([10, 35]);
+  });
+  it("pure semantic and pure keyword rankings fetch exactly the limit", async () => {
+    store.propertySearchSemantic.mockResolvedValue(entities(["a"]));
+    store.propertySearchKeyword.mockResolvedValue(entities(["a"]));
+    await search("full_lens", { query: "x", in: ["properties"], strategy: "semantic", limit: 4 }, store);
+    await search("full_lens", { query: "x", in: ["properties"], strategy: "keyword", limit: 4 }, store);
+    expect(store.propertySearchSemantic.mock.calls[0]![2]).toBe(4);
+    expect(store.propertySearchKeyword.mock.calls[0]![2]).toBe(4);
+  });
   it("fuses passages before collapsing and keeps the best passage of every property", async () => {
     const a = passage("a", "one", "body", 0, 0.9),
       b = passage("b", "one", "body", 80, 0.8),
@@ -325,8 +351,9 @@ describe("caller-supplied similarity floor", () => {
     expect(evidence.a).toEqual({ semanticSimilarity: 0.9, keywordMatch: null, keywordScore: null, keywordPropertyKeys: null });
     expect(evidence.b).toEqual({ semanticSimilarity: null, keywordMatch: true, keywordScore: 42, keywordPropertyKeys: ["name"] });
     expect(evidence.c).toEqual({ semanticSimilarity: null, keywordMatch: true, keywordScore: 12, keywordPropertyKeys: ["name"] });
-    // The floor never reaches the storage port: the semantic page is requested unchanged.
-    expect(store.propertySearchSemantic.mock.calls[0]![2]).toBe(10);
+    // The floor never reaches the storage port: hybrid's semantic page is requested at the
+    // candidate count for limit 10, unchanged by the floor.
+    expect(store.propertySearchSemantic.mock.calls[0]![2]).toBe(50);
   });
 
   it("drops document passages below the floor before collapsing", async () => {

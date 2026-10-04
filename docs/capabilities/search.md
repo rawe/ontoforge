@@ -64,7 +64,10 @@ embed data: the rebuild below supplies missing vectors.
 ### Fusion and matches
 
 Hybrid first fuses rankings of the same units within each kind; the fusion score is the
-sum of `1 / (60 + rank)` with ranks starting at one. Document search then collapses
+sum of `1 / (60 + rank)` with ranks starting at one. For property search, each source
+ranking fetches five times the limit before fusion and the fused ranking is then cut to
+the limit, so an entity's fused score does not depend on where a short source page ended;
+the pure strategies fetch exactly the limit. Document search then collapses
 passages to entities: the best passage determines entity order, while each matching
 document property contributes its best passage. The service grows the passage budget until
 the ranking is exhausted, so a long document cannot hide another entity or another

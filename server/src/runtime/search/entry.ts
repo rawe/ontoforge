@@ -44,6 +44,9 @@ export interface SearchResponse {
   filter: Record<string, string>;
   hits: SearchHit[];
 }
+/** How many candidates per requested hit a ranking fetches before it is fused or
+ * collapsed and cut to the limit. */
+const CANDIDATE_FACTOR = 5;
 /** The floor drops semantic candidates below it before any fusion, above the storage
  * port; keyword rankings are never touched. A semantic row's score is its measured
  * similarity, so a floored page is short exactly when the ranking is exhausted. */
@@ -75,13 +78,19 @@ export async function search(
   type Hit = { entity: Row; matches: SearchMatch[] };
   // The strategy is chosen at runtime, so a ranking's score kind is one of the three here.
   const rankings: Ranked<Hit, RankingScore>[][] = [];
+  // Hybrid fuses two source rankings by rank. Each source fetches more candidates than the
+  // limit, so an entity's fused score does not depend on where a short source page ended.
+  const propertyCandidates = strategy.key === "hybrid" ? limit * CANDIDATE_FACTOR : limit;
   if (kinds.includes("properties"))
     rankings.push(
       (
         await strategy.rank(
-          floored(propertyKind(store, searchedTypes, embedding, limit, request.query), minSimilarity),
+          floored(
+            propertyKind(store, searchedTypes, embedding, propertyCandidates, request.query),
+            minSimilarity,
+          ),
         )
-      ).map((r) => ({
+      ).slice(0, limit).map((r) => ({
         key: r.key,
         score: r.score,
         value: {
@@ -102,7 +111,7 @@ export async function search(
   if (kinds.includes("document")) {
     // Exhaust the passage ranking so a second document property cannot be hidden
     // behind many passages of the first. Collapse and the entity limit live here.
-    let budget = limit * 5;
+    let budget = limit * CANDIDATE_FACTOR;
     let collapsed: ReturnType<typeof collapsePassages> = [];
     while (searchedProperties.length) {
       const passages = await strategy.rank(

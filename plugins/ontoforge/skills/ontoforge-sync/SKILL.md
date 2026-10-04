@@ -113,8 +113,9 @@ node scripts/export-data.mjs [-o <output>] [--ontology <key>] [--lens <key>] [--
 | `--lens` | auto-detected | Lens key the data is read through |
 | `--base-url` | see Environment | OntoForge server URL |
 
-If `--lens` is omitted, the script picks an unscoped lens of that ontology when there is
-one, and reports which lens it used. A scoped lens exports only the subset it exposes.
+If `--lens` is omitted, the script uses an unscoped lens of that ontology and reports
+which one; without an unscoped lens it stops. A scoped lens, named with `--lens`, exports
+only the subset it exposes.
 
 **API used**: `GET /api/ontologies/{ontologyKey}/model/export` (for type discovery),
 then `GET /api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/entities/{type}` and
@@ -140,8 +141,9 @@ node scripts/import-data.mjs <file> [--ontology <key>] [--lens <key>] [--base-ur
 
 The import creates all entities first (building a map from old IDs to new IDs), then
 creates all relations using the remapped IDs. Relations referencing unknown entities are
-skipped with a warning. The lens must expose every type and property the file carries —
-a scoped lens rejects what it hides.
+skipped with a warning. If `--lens` is omitted, the script uses an unscoped lens and stops
+when the ontology has none. The lens must expose every type and property the file
+carries — a scoped lens rejects what it hides.
 
 **API used**: `POST /api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/entities/{type}`,
 `POST /api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/relations/{type}`

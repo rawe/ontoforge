@@ -1,0 +1,1439 @@
+{
+  "formatVersion": "1.0",
+  "exportedAt": "2026-10-04T17:14:25.119Z",
+  "entities": {
+    "event": [
+      {
+        "_id": "68a28980-dd30-494b-b2a4-b50647db90e0",
+        "_entityTypeKey": "event",
+        "_createdAt": "2026-10-04T17:14:24.394Z",
+        "_updatedAt": "2026-10-04T17:14:24.394Z",
+        "title": "Hands-on Workshop: Risk Assessment for Machine Guarding",
+        "starts_at": "2027-03-16T10:00:00.000Z",
+        "event_type": "workshop",
+        "description": "This workshop teaches participants how to carry out a structured risk assessment for an industrial machine and how to select suitable guarding from the results. It is aimed at machine builders, maintenance engineers and safety officers who are responsible for new machines or for modifications to existing ones.\n\nThe first part covers the method. Participants define the limits of the machine, including its intended use, foreseeable misuse and all phases of its life from transport to dismantling. They identify hazards such as crushing, shearing, entanglement and ejected parts, and estimate the risk for each hazard from the severity of possible harm, the frequency of exposure and the possibility of avoiding the harm.\n\nIn the second part the groups work on a real demonstration machine: a small press with a manual loading station. They apply the three-step method of risk reduction, starting with inherently safe design, then adding technical protective measures and finally information for use. The trainers show how to determine the required performance level of each safety function and how to calculate the minimum distance between a light curtain and the hazard zone from the stopping time of the press.\n\nThe third part deals with documentation and validation. Participants learn which records a technical file must contain, how to verify that a safety function actually reaches its required performance level and how to test interlocked guard doors and emergency stop circuits after installation. Common mistakes are discussed using anonymised cases, for example light curtains mounted too close to the hazard or muting functions that could be triggered by a person.\n\nThe workshop is led by functional safety engineers from Sentinel Guarding Systems and Hollis Safety Engineering. The number of participants is limited to twenty, and each participant receives a template workbook for risk assessments. Basic knowledge of machine design is helpful but not required."
+      },
+      {
+        "_id": "ca30634e-0037-4cc0-8b8d-f9c9e2e57fb2",
+        "_entityTypeKey": "event",
+        "_createdAt": "2026-10-04T17:14:24.400Z",
+        "_updatedAt": "2026-10-04T17:14:24.400Z",
+        "title": "Commissioning Safety Light Curtains Without Downtime",
+        "starts_at": "2027-03-17T14:00:00.000Z",
+        "event_type": "workshop",
+        "description": "Short practical session on mounting, aligning and testing safety light curtains, including muting for conveyors and checking safety distances during a planned stop."
+      },
+      {
+        "_id": "37790dcc-0e36-4282-b573-6b3ff906c4c2",
+        "_entityTypeKey": "event",
+        "_createdAt": "2026-10-04T17:14:24.405Z",
+        "_updatedAt": "2026-10-04T17:14:24.405Z",
+        "title": "Panel: Closing the Loop on Packaging Plastics",
+        "starts_at": "2027-03-16T13:30:00.000Z",
+        "event_type": "panel",
+        "description": "Plastic packaging is one of the largest waste streams in industrialised countries, but only a small share returns into new packaging. In this panel a recycling machine builder, a sorting specialist and a materials producer discuss what has to change along the whole chain, from packaging design to collection, sorting, washing and reprocessing.\n\nThe discussion starts with design for recycling. Multilayer films that combine several polymers, full-body sleeves on bottles and dark pigments make sorting and recycling difficult or impossible. The panellists present examples of packaging that was redesigned as a single-material solution without losing its protective function, and explain which design guidelines recyclers would most like brand owners to follow.\n\nThe second topic is sorting quality. The sorting specialist explains how near-infrared, colour cameras and artificial intelligence can now separate food from non-food packaging and recover black plastics, and what purities can realistically be achieved in plants that receive mixed household waste. The panellists debate whether digital watermarks on packaging will be needed or whether camera-based recognition will be sufficient.\n\nThe third part is about the economics of recycled material. Recycled pellets compete with virgin plastics whose price follows the oil price, and recyclers struggle when demand falls. The panel discusses minimum recycled-content requirements, long-term purchase agreements between brand owners and recyclers, and the role of compostable materials, which the materials producer recommends only where packaging ends up in organic waste.\n\nThe audience can submit questions in advance through the fair app. The session ends with an open discussion, and the panellists remain available at their stands in Hall 2 for follow-up conversations."
+      },
+      {
+        "_id": "13237d2e-6643-4d21-9268-a056438ba6ed",
+        "_entityTypeKey": "event",
+        "_createdAt": "2026-10-04T17:14:24.409Z",
+        "_updatedAt": "2026-10-04T17:14:24.409Z",
+        "title": "Talk: Compostable Polymers - Myths and Measurements",
+        "starts_at": "2027-03-17T11:00:00.000Z",
+        "event_type": "talk",
+        "description": "What composting certificates actually test, how fast compostable films break down in industrial and home composting, and why they should stay out of plastic recycling streams."
+      },
+      {
+        "_id": "f2c2f184-f5c9-485c-8427-502e9e001b2c",
+        "_entityTypeKey": "event",
+        "_createdAt": "2026-10-04T17:14:24.413Z",
+        "_updatedAt": "2026-10-04T17:14:24.413Z",
+        "title": "Talk: Securing OT Networks in Brownfield Plants",
+        "starts_at": "2027-03-16T15:00:00.000Z",
+        "event_type": "talk",
+        "description": "How to protect old control systems that cannot be patched: network zones, asset inventories and monitoring for unusual traffic on the factory floor."
+      },
+      {
+        "_id": "40014562-d9de-44de-991e-839c6419b0ae",
+        "_entityTypeKey": "event",
+        "_createdAt": "2026-10-04T17:14:24.417Z",
+        "_updatedAt": "2026-10-04T17:14:24.417Z",
+        "title": "Workshop: Programming Your First Cobot Cell",
+        "starts_at": "2027-03-17T09:30:00.000Z",
+        "event_type": "workshop",
+        "description": "In this half-day workshop participants program a collaborative robot cell from scratch, starting with an empty arm and ending with a working pick-and-place application. The workshop is intended for production engineers and technicians who have not yet programmed a robot and want to judge whether a cobot fits a task in their own plant.\n\nThe workshop begins with an introduction to the coordinate systems of a robot, the difference between joint and linear moves and the meaning of tool centre point and payload settings. Participants then teach their first waypoints by guiding the arm by hand and learn how speed, acceleration and blending radius affect cycle time and precision.\n\nIn the second block each team of two mounts an electric gripper, configures its fingers and gripping force and programs a sequence that picks parts from a tray and places them into a fixture. They add simple logic with inputs and outputs, so the robot waits for a sensor signal before it continues. The trainers show how to structure a program into reusable subroutines and how to handle the situation when a part is missing.\n\nThe third block covers integration and safe operation. Participants connect the robot to a small PLC, exchange signals and discuss which applications can run without fencing. They review a sample risk assessment for their cell, set reduced speeds for collaborative zones and test the collision detection with a soft test object. The workshop deliberately points out that sharp parts or high speeds change the assessment completely.\n\nThe workshop is run by application engineers of Kestrel Robotics and Granite Gripper Co. Laptops and robots are provided, and the maximum group size is sixteen participants. Each participant receives the example programs to continue practising with a free offline simulator."
+      },
+      {
+        "_id": "52a4135a-776e-4699-88f7-23a7eb6aee70",
+        "_entityTypeKey": "event",
+        "_createdAt": "2026-10-04T17:14:24.423Z",
+        "_updatedAt": "2026-10-04T17:14:24.423Z",
+        "title": "Talk: Second-Life Batteries for Factory Peak Shaving",
+        "starts_at": "2027-03-17T13:00:00.000Z",
+        "event_type": "talk",
+        "description": "How used electric-vehicle batteries are tested, graded and reused in stationary storage, what warranties are realistic, and how cells are recycled at the very end."
+      },
+      {
+        "_id": "374fb1b2-9003-45ca-bd46-2a360c6bc66e",
+        "_entityTypeKey": "event",
+        "_createdAt": "2026-10-04T17:14:24.429Z",
+        "_updatedAt": "2026-10-04T17:14:24.429Z",
+        "title": "Panel: Predictive Maintenance Beyond the Pilot",
+        "starts_at": "2027-03-18T10:30:00.000Z",
+        "event_type": "panel",
+        "description": "Why condition-monitoring projects stall after the first sensors, and how maintenance planning, spare parts and production scheduling must change to benefit from sensor alarms."
+      },
+      {
+        "_id": "c0e35eb8-7c30-4f33-b95c-bd208e879ca2",
+        "_entityTypeKey": "event",
+        "_createdAt": "2026-10-04T17:14:24.433Z",
+        "_updatedAt": "2026-10-04T17:14:24.433Z",
+        "title": "Workshop: Ergonomic Risk Assessment with Wearable Sensors",
+        "starts_at": "2027-03-18T09:00:00.000Z",
+        "event_type": "workshop",
+        "description": "Participants wear motion sensors during simulated assembly tasks and learn to assess back and shoulder strain, then compare the results with and without exoskeletons."
+      },
+      {
+        "_id": "5585ed42-c20e-4abc-8c9b-a7ed6f5d7d9e",
+        "_entityTypeKey": "event",
+        "_createdAt": "2026-10-04T17:14:24.437Z",
+        "_updatedAt": "2026-10-04T17:14:24.437Z",
+        "title": "Opening Keynote: The Factory of 2035",
+        "starts_at": "2027-03-16T09:00:00.000Z",
+        "event_type": "talk",
+        "description": "The fair organiser opens the Meridian Industrial Technology Fair with an outlook on automation, circular materials and energy self-sufficiency in manufacturing."
+      }
+    ],
+    "exhibitor": [
+      {
+        "_id": "0b1b550f-3985-48a0-a61b-9ee4f4c56ac3",
+        "_entityTypeKey": "exhibitor",
+        "_createdAt": "2026-10-04T17:14:24.441Z",
+        "_updatedAt": "2026-10-04T17:14:24.441Z",
+        "name": "Kestrel Robotics Ltd",
+        "founded": 2011,
+        "website": "https://kestrel-robotics.example",
+        "description": "Kestrel Robotics builds collaborative robot arms for small and medium-sized manufacturers that want to automate repetitive handling tasks without redesigning their whole production floor. The product family covers payloads from three to twenty kilograms and reaches between 600 and 1,700 millimetres. All arms share one controller and one programming environment, so a cell built for a light arm can be moved to a heavier model with little rework.\n\nAt the Meridian fair the company shows three complete cells. The first cell tends a CNC lathe: the robot loads raw bar sections, waits for the machining cycle, removes the finished part and places it on a measuring station. The second cell palletises cartons at the end of a packaging line and switches between four pallet patterns that the operator selects on a tablet. The third cell performs screw driving on electronic housings, using a torque-controlled screwdriver mounted on the robot flange.\n\nProgramming is done by guiding the arm by hand and recording waypoints, or by arranging function blocks in a browser-based editor. For more demanding projects the controller offers a scripting interface and an open API that integrates with common PLCs over fieldbus. Kestrel publishes example programs for machine tending, palletising and quality inspection, and partners can sell their own grippers and software add-ons through a certified accessory catalogue.\n\nEvery arm has torque sensors in all six joints. When it detects an unexpected contact it stops within milliseconds, which allows many applications to run without fencing after a documented risk assessment. Speed and separation monitoring with external laser scanners is supported for applications in which the robot moves faster or carries sharp tools. The company stresses that collaborative operation always depends on the specific application and not on the robot alone.\n\nKestrel employs about 320 people, assembles all arms in its own plant and offers a five-year warranty on the gearboxes. Visitors to the stand can book a thirty-minute programming session on a demo arm, and the application engineers will review drawings of existing workstations to estimate cycle times and payback periods for a first cobot project.",
+        "stand_number": "1-A04"
+      },
+      {
+        "_id": "ea6dab87-88f3-4ed9-916d-2fe620511247",
+        "_entityTypeKey": "exhibitor",
+        "_createdAt": "2026-10-04T17:14:24.445Z",
+        "_updatedAt": "2026-10-04T17:14:24.445Z",
+        "name": "Arcwright Automation",
+        "founded": 1994,
+        "website": "https://arcwright-automation.example",
+        "description": "Arcwright Automation develops programmable logic controllers, remote input/output modules and motion controllers for machine builders. Its controllers are used in packaging machines, printing presses, wood-processing lines and water treatment plants. The hardware range runs from compact controllers with sixteen digital inputs to rack systems that coordinate more than one hundred servo axes on a single deterministic network.\n\nThe main launch at this year's fair is the ARC-9 controller generation. It combines the logic controller, motion control and a safety controller in one housing, which reduces wiring and cabinet space. Safety functions such as safe torque off, safely limited speed and safe stop are configured in the same engineering project as the standard logic, and the controller produces a validation report that lists every safety function with its parameters and test date.\n\nThe engineering software supports all five languages of the IEC 61131-3 standard and adds object-oriented extensions for reusable machine modules. Version control integration lets teams store projects in a Git repository and compare changes graphically. A simulation mode runs the full control program on a laptop against a virtual model of the machine, so that sequences can be tested before the hardware is built.\n\nArcwright puts strong emphasis on long-term availability. Every controller model is guaranteed to be available for at least fifteen years after launch, and new firmware versions remain compatible with existing projects. For older installations the company offers migration kits that replace discontinued controllers from its own previous generations while keeping the existing terminal wiring.\n\nAt the stand, machine builders can test the ARC-9 on a demonstration packaging machine with eight servo axes. The team also presents a retrofit service in which an existing machine is fitted with new controls during a planned shutdown of no more than one week, including updated documentation and operator training.",
+        "stand_number": "1-B12"
+      },
+      {
+        "_id": "01243c2b-c8c3-4786-8084-e899091a8d4e",
+        "_entityTypeKey": "exhibitor",
+        "_createdAt": "2026-10-04T17:14:24.448Z",
+        "_updatedAt": "2026-10-04T17:14:24.448Z",
+        "name": "Optiscan Vision Systems",
+        "founded": 2006,
+        "website": "https://optiscan-vision.example",
+        "description": "Smart industrial cameras and image processing software for surface inspection, dimensional measurement and code reading. Robot guidance packages locate randomly placed parts in bins so that a robot can pick them.",
+        "stand_number": "1-B20"
+      },
+      {
+        "_id": "303af9d2-06ea-46cf-9be2-1a9ae53c2238",
+        "_entityTypeKey": "exhibitor",
+        "_createdAt": "2026-10-04T17:14:24.452Z",
+        "_updatedAt": "2026-10-04T17:14:24.452Z",
+        "name": "Granite Gripper Co.",
+        "founded": 2015,
+        "website": "https://granitegripper.example",
+        "description": "Electric and vacuum grippers, tool changers and finger kits for collaborative and industrial robots. Plug-and-play adapters fit the flanges of all common cobot brands.",
+        "stand_number": "1-C03"
+      },
+      {
+        "_id": "057cbbb2-eb5e-414f-b09c-b6ab56a953bb",
+        "_entityTypeKey": "exhibitor",
+        "_createdAt": "2026-10-04T17:14:24.455Z",
+        "_updatedAt": "2026-10-04T17:14:24.455Z",
+        "name": "Tidewater Motion",
+        "founded": 1988,
+        "website": "https://tidewater-motion.example",
+        "description": "Servo drives, linear actuators and gear motors for packaging and assembly machines. The new compact drive series offers integrated safe torque off and energy recovery during braking.",
+        "stand_number": "1-C15"
+      },
+      {
+        "_id": "bee20f5f-814c-4941-a6b0-870681e141ec",
+        "_entityTypeKey": "exhibitor",
+        "_createdAt": "2026-10-04T17:14:24.458Z",
+        "_updatedAt": "2026-10-04T17:14:24.458Z",
+        "name": "Sentinel Guarding Systems",
+        "founded": 1979,
+        "website": "https://sentinel-guarding.example",
+        "description": "Sentinel Guarding Systems protects people from hazardous machine motion. The company manufactures safety light curtains, safety laser scanners, interlocked guard doors and modular mesh fencing, and it supplies them as individual components or as complete guarding packages for robot cells, presses and packaging lines.\n\nThe new SLC-40 light curtain family detects fingers at a resolution of 14 millimetres and hands at 30 millimetres, with protective heights from 150 millimetres to almost two metres. Muting and blanking functions are configured with a small display on the receiver, so a conveyor can carry material through the protective field while a person reaching in still stops the machine. Each curtain logs its last fifty interruptions, which helps maintenance teams find the cause of nuisance trips.\n\nFor robot cells Sentinel offers safety laser scanners that monitor up to sixteen switchable protective fields. As a person approaches, the scanner first slows the robot and only stops it when the person is close, which keeps productivity high in cells that require frequent manual loading. The company calculates the required safety distances from the stopping time of the machine, the approach speed defined in the standards and the detection capability of the device, and it measures the actual stopping time on site with a portable stop-time meter.\n\nMechanical guarding remains an important part of the portfolio. The modular fencing system is assembled from steel posts and mesh panels without welding, and guard doors are equipped with interlocks that keep the door closed until hazardous motion has ceased. All products are delivered with declarations of conformity and the data needed to calculate the performance level of the complete safety function.\n\nSentinel also offers engineering services: a team of certified functional safety engineers carries out risk assessments, designs safety functions, verifies them according to the relevant standards and trains operators. At the fair the company runs a guarded robot cell in which visitors can walk into the protective fields and watch the robot slow down and stop, and its engineers co-host the hands-on workshop on risk assessment for machine guarding.",
+        "stand_number": "1-D01"
+      },
+      {
+        "_id": "b18e5949-b3c1-46d6-b7a7-12835a6b3eef",
+        "_entityTypeKey": "exhibitor",
+        "_createdAt": "2026-10-04T17:14:24.462Z",
+        "_updatedAt": "2026-10-04T17:14:24.462Z",
+        "name": "Hollis Safety Engineering",
+        "founded": 2003,
+        "website": "https://hollis-safety.example",
+        "description": "Independent consultancy for machine safety: risk assessment, CE marking support, safety-function validation and stop-time measurement. Also sells retrofit guarding kits for older machine tools.",
+        "stand_number": "1-D09"
+      },
+      {
+        "_id": "8b4af6ce-793d-42cc-8950-e63f14fc477a",
+        "_entityTypeKey": "exhibitor",
+        "_createdAt": "2026-10-04T17:14:24.466Z",
+        "_updatedAt": "2026-10-04T17:14:24.466Z",
+        "name": "Polycycle Systems",
+        "founded": 2008,
+        "website": "https://polycycle-systems.example",
+        "description": "Polycycle Systems designs and builds complete mechanical recycling lines for post-consumer and post-industrial plastic waste. A typical line takes in baled packaging waste and delivers clean, homogeneous pellets that converters can use again for bottles, films or injection-molded parts. The company supplies lines with capacities from 500 kilograms to six tonnes per hour.\n\nThe process starts with a slow-running pre-shredder that opens bales and reduces the material to hand-sized pieces. Metals are removed by magnets and eddy-current separators. A wet granulator then cuts the plastic into flakes while water already begins to wash off labels and food residues. In the friction washer and the hot-wash stage, adhesives, paper fibres and organic contamination are removed, and a float-sink tank separates polyolefins, which float, from heavier polymers such as PET and PVC.\n\nAfter drying, the flakes are fed into a degassing extruder with a melt filter that continuously removes remaining particles down to 60 micrometres. Vacuum zones extract volatile substances, which is important for odour-sensitive applications. The resulting pellets are tested inline for melt flow index and colour, and the measurement data are stored for every big bag so that recyclers can prove the quality of their material to customers.\n\nPolycycle places great importance on water and energy consumption. Process water is cleaned in a closed circuit with flotation and filtration, so a line needs only a fraction of the fresh water used by older designs. Heat from the extruder and the hot-wash stage is recovered to preheat incoming washing water. The company publishes the measured consumption figures of reference plants in its customer brochures.\n\nAt the fair Polycycle shows a scaled demonstration of its float-sink separation and presents the new hot-wash line for agricultural film, which is designed for heavily soiled greenhouse and silage films that conventional washing lines cannot process. Visitors can bring samples of their own waste streams, and the process engineers will recommend a line configuration and estimate the achievable pellet quality.",
+        "stand_number": "2-A01"
+      },
+      {
+        "_id": "bc4d6817-4575-4291-bc7d-fb3ccf83105a",
+        "_entityTypeKey": "exhibitor",
+        "_createdAt": "2026-10-04T17:14:24.470Z",
+        "_updatedAt": "2026-10-04T17:14:24.470Z",
+        "name": "Verdant Polymers",
+        "founded": 2013,
+        "website": "https://verdant-polymers.example",
+        "description": "Verdant Polymers develops and produces bio-based and compostable polymer compounds for packaging, agriculture and consumer goods. The materials are made from starch, polylactic acid and fermentation-based polyesters and are designed to run on the same extrusion, thermoforming and injection-molding equipment as conventional plastics.\n\nThe best-known product line is used for thin films such as fruit and vegetable bags, organic waste bags and coffee capsules. These films are certified as industrially compostable, and selected grades are also certified for home composting at lower temperatures. For agriculture Verdant supplies mulch films that are ploughed into the soil after the harvest and biodegrade there, which saves farmers the costly collection of contaminated plastic film.\n\nVerdant is open about the limits of compostable plastics. Its technical team points out that composting only makes sense where products are likely to end up in organic waste together with food residues, and that compostable materials must not enter the mechanical recycling stream for conventional plastics, where they would reduce the quality of the recyclate. For durable products the company therefore recommends recycled-content compounds instead.\n\nFor this reason the portfolio also includes compounds that contain up to 70 percent post-consumer recyclate. Verdant buys washed flakes from recycling partners, upgrades them with additives that restore impact strength and processing stability, and sells them as pellets with a documented recycled content. Life-cycle assessments carried out by an independent institute are available for every grade.\n\nAt the fair Verdant presents a new compound for injection-molded cutlery and food containers that withstands dishwasher temperatures, and the materials scientists explain how converters can switch an existing mold to bio-based material. The company also takes part in the panel on closing the loop on packaging plastics and hosts its own talk on myths and measurements around compostable polymers.",
+        "stand_number": "2-A14"
+      },
+      {
+        "_id": "0fe793ed-d675-4285-ac1a-31c54761a776",
+        "_entityTypeKey": "exhibitor",
+        "_createdAt": "2026-10-04T17:14:24.475Z",
+        "_updatedAt": "2026-10-04T17:14:24.475Z",
+        "name": "ClearLoop Sorting",
+        "founded": 2016,
+        "website": "https://clearloop-sorting.example",
+        "description": "ClearLoop Sorting builds sensor-based sorting machines for plastic waste. Its machines identify individual pieces of packaging on a fast conveyor belt and blow them into the right fraction with precisely timed bursts of compressed air. Recycling plants use them to produce pure streams of PET, polyethylene, polypropylene and polystyrene from mixed household packaging.\n\nThe core of every machine is a near-infrared spectrometer that measures the light reflected from each object and recognises the polymer type within a fraction of a millisecond. A high-resolution colour camera adds the colour, so that clear PET bottles can be separated from coloured ones. The latest models also include a deep-learning camera that recognises object shapes and can tell food packaging from non-food packaging of the same polymer, which is required for food-grade recycled material.\n\nBlack plastics have long been a problem for near-infrared sorting because carbon-black pigments absorb the light. ClearLoop addresses this with a mid-infrared module that identifies the main polymers in dark objects. In pilot plants it has raised the recovery of black polypropylene trays considerably, material that previously went to incineration.\n\nAll machines are connected to a cloud dashboard that shows throughput, purity and the composition of the incoming material in real time. Plant operators can compare shifts, see when the input changes and adjust the sorting recipes remotely. ClearLoop offers sorting trials in its test centre, where customers send a few tonnes of their own material and receive a report with achievable purities and yields.\n\nAt the stand ClearLoop runs a sorting machine with a closed material circuit, in which mixed bottles and trays are sorted continuously and returned to the hopper. The company takes part in the panel on closing the loop on packaging plastics and explains how digital watermarks printed on packaging could make sorting even more precise in the future.",
+        "stand_number": "2-B07"
+      },
+      {
+        "_id": "a6c9fa11-83ea-4fa9-9fe5-cbaa51897bf6",
+        "_entityTypeKey": "exhibitor",
+        "_createdAt": "2026-10-04T17:14:24.478Z",
+        "_updatedAt": "2026-10-04T17:14:24.478Z",
+        "name": "Ferrum Reclaim",
+        "founded": 1972,
+        "website": "https://ferrum-reclaim.example",
+        "description": "Shredders, shears and balers for scrap metal, end-of-life vehicles and electronic waste. The company does not process plastics; its focus is steel, aluminium and copper recovery.",
+        "stand_number": "2-B19"
+      },
+      {
+        "_id": "8ef9d660-f9e4-49a2-8147-dcf859dce44c",
+        "_entityTypeKey": "exhibitor",
+        "_createdAt": "2026-10-04T17:14:24.482Z",
+        "_updatedAt": "2026-10-04T17:14:24.482Z",
+        "name": "Moldwell Injection Technologies",
+        "founded": 1985,
+        "website": "https://moldwell.example",
+        "description": "All-electric and hybrid injection molding machines with clamping forces from 50 to 1,200 tonnes. A new screw design processes high shares of recycled material without loss of part quality.",
+        "stand_number": "2-C02"
+      },
+      {
+        "_id": "12df5e0c-1e17-44f0-ae62-750f2fb6b509",
+        "_entityTypeKey": "exhibitor",
+        "_createdAt": "2026-10-04T17:14:24.486Z",
+        "_updatedAt": "2026-10-04T17:14:24.486Z",
+        "name": "Lakemere Compounds",
+        "founded": 1999,
+        "website": "https://lakemere-compounds.example",
+        "description": "Custom-coloured and glass-fibre-reinforced compounds for automotive and appliance parts, increasingly based on recycled polypropylene from household waste.",
+        "stand_number": "2-C11"
+      },
+      {
+        "_id": "0095c425-b281-4cf7-9e49-a7c518a816b4",
+        "_entityTypeKey": "exhibitor",
+        "_createdAt": "2026-10-04T17:14:24.489Z",
+        "_updatedAt": "2026-10-04T17:14:24.489Z",
+        "name": "Brightwater Mold Makers",
+        "founded": 2001,
+        "website": "https://brightwater-molds.example",
+        "description": "Multi-cavity molds and hot-runner systems for thin-walled packaging such as cups, lids and tubs. Conformal cooling channels made by metal 3D printing shorten cycle times.",
+        "stand_number": "2-D05"
+      },
+      {
+        "_id": "16e4bc3f-cda6-4eee-a4ea-aad607a25f27",
+        "_entityTypeKey": "exhibitor",
+        "_createdAt": "2026-10-04T17:14:24.493Z",
+        "_updatedAt": "2026-10-04T17:14:24.493Z",
+        "name": "Voltaris Storage",
+        "founded": 2014,
+        "website": "https://voltaris-storage.example",
+        "description": "Voltaris Storage supplies stationary battery systems for factories, warehouses and commercial buildings. The systems are delivered in outdoor cabinets of 100 to 500 kilowatt-hours or in containers with several megawatt-hours, complete with battery management, inverters, fire protection and climate control.\n\nThe most common application is peak shaving. Many industrial customers pay grid fees based on their highest load peak of the year, and a single unplanned peak, for example when several furnaces start at the same time, can cost tens of thousands. The Voltaris controller forecasts the site load from production plans and historical data and discharges the battery precisely when a peak is about to occur, so that the grid connection never exceeds the configured limit.\n\nA second application is the use of self-generated solar power. The battery stores midday surplus from rooftop photovoltaic systems and supplies it to evening shifts. In combination with peak shaving and participation in grid frequency markets, Voltaris reports payback periods of five to eight years for typical installations. The controller decides every fifteen minutes which use is the most valuable.\n\nVoltaris uses lithium iron phosphate cells, which it considers the safest chemistry for stationary use because they do not release oxygen when overheating. Each cabinet has gas detection, an aerosol extinguishing system and a ventilation path that leads gases away from people. The company also offers systems built from second-life electric-vehicle batteries, which are tested cell by cell and come with a shorter but documented warranty.\n\nAt the fair Voltaris presents a 250 kilowatt-hour cabinet with a live dashboard that replays the load profile of a real metal-processing plant. Together with a battery recycling partner the company hosts a talk on second-life batteries for factory peak shaving and explains how cells are collected and recycled at the end of their stationary life.",
+        "stand_number": "3-A02"
+      },
+      {
+        "_id": "739c17d3-7063-44a2-af6d-7e56dbcb3a05",
+        "_entityTypeKey": "exhibitor",
+        "_createdAt": "2026-10-04T17:14:24.497Z",
+        "_updatedAt": "2026-10-04T17:14:24.497Z",
+        "name": "Sunreach Power Electronics",
+        "founded": 2009,
+        "website": "https://sunreach-power.example",
+        "description": "Hybrid inverters and DC/DC converters that connect solar arrays, batteries and the factory grid. Grid-forming mode keeps critical loads running during outages.",
+        "stand_number": "3-A15"
+      },
+      {
+        "_id": "021289c6-e0c5-4a6a-bcac-cbbdc0f76531",
+        "_entityTypeKey": "exhibitor",
+        "_createdAt": "2026-10-04T17:14:24.500Z",
+        "_updatedAt": "2026-10-04T17:14:24.500Z",
+        "name": "Hearthline Heat Recovery",
+        "founded": 1997,
+        "website": "https://hearthline-heat.example",
+        "description": "Heat exchangers and industrial heat pumps that recover waste heat from compressors, ovens and cooling water and feed it back into process heating or building heating.",
+        "stand_number": "3-B04"
+      },
+      {
+        "_id": "326a98b0-511f-44a8-9ba3-cade3ef38c64",
+        "_entityTypeKey": "exhibitor",
+        "_createdAt": "2026-10-04T17:14:24.505Z",
+        "_updatedAt": "2026-10-04T17:14:24.505Z",
+        "name": "Gridwise Energy Analytics",
+        "founded": 2018,
+        "website": "https://gridwise-analytics.example",
+        "description": "Energy monitoring software and clamp-on meters that measure consumption per machine. Combines energy data with production counts to report energy per part and to detect failing motors from current signatures.",
+        "stand_number": "3-B10"
+      },
+      {
+        "_id": "4b37ac24-f1c5-435c-b4a8-ebc721b87c51",
+        "_entityTypeKey": "exhibitor",
+        "_createdAt": "2026-10-04T17:14:24.508Z",
+        "_updatedAt": "2026-10-04T17:14:24.508Z",
+        "name": "Cellforge Battery Recycling",
+        "founded": 2019,
+        "website": "https://cellforge-recycling.example",
+        "description": "Collection, discharge and hydrometallurgical recycling of lithium-ion batteries. Recovers lithium, nickel and cobalt; also grades used cells for second-life storage projects.",
+        "stand_number": "3-C01"
+      },
+      {
+        "_id": "702b97b8-9f8e-4944-b791-92c2dccb34d5",
+        "_entityTypeKey": "exhibitor",
+        "_createdAt": "2026-10-04T17:14:24.511Z",
+        "_updatedAt": "2026-10-04T17:14:24.511Z",
+        "name": "Loomstack Software",
+        "founded": 2010,
+        "website": "https://loomstack.example",
+        "description": "Loomstack Software develops a manufacturing execution system for discrete manufacturers with one to twenty plants. The system receives production orders from the business software, schedules them on machines and workstations, guides operators through each work step and records what was actually produced, by whom, with which material and in what quality.\n\nThe scheduling module plans orders on a visual board that shows every machine as a lane. Planners drag orders between machines, and the system immediately recalculates delivery dates, set-up times and material requirements. When a machine breaks down, the board highlights all affected orders and proposes alternatives. Finite capacity planning takes shift calendars, tool availability and personnel qualifications into account.\n\nOn the shop floor operators use touch terminals or tablets. Work instructions with images and videos appear step by step, and the operator confirms each step, scans material batches and enters measured values. If a value is out of tolerance the terminal blocks the next step and notifies quality assurance. This creates a complete genealogy for every serial number, which is required in regulated industries such as medical devices and aerospace.\n\nMachine data are collected through standard industrial protocols without additional hardware in most cases. Loomstack calculates overall equipment effectiveness per machine, shift and product and breaks down losses into availability, performance and quality. The company recently added an interface to vibration-based condition monitoring, so that maintenance orders created from sensor alarms appear on the same scheduling board as production orders.\n\nLoomstack runs as a cloud service or on servers in the customer's plant. At the fair the company shows a live production board connected to demonstration machines in Hall 4 and co-hosts the panel on predictive maintenance beyond the pilot stage. Visitors can register for a two-week test installation with sample data from their own industry.",
+        "stand_number": "4-A01"
+      },
+      {
+        "_id": "082d6ae7-0c9d-49d4-b018-fcdd1e9c78fe",
+        "_entityTypeKey": "exhibitor",
+        "_createdAt": "2026-10-04T17:14:24.516Z",
+        "_updatedAt": "2026-10-04T17:14:24.516Z",
+        "name": "Vibrasense Diagnostics",
+        "founded": 2012,
+        "website": "https://vibrasense.example",
+        "description": "Vibrasense Diagnostics makes wireless vibration and temperature sensors and the analytics software that turns their measurements into maintenance decisions. The sensors are glued or screwed onto motors, pumps, fans, gearboxes and spindles and transmit data for up to five years on one battery.\n\nEach sensor measures three-axis vibration at sampling rates of up to 25 kilohertz. Instead of sending raw data continuously, the sensor calculates characteristic values such as velocity, acceleration envelope and kurtosis on the device and transmits a full spectrum only when a value changes. This keeps the radio traffic low enough to monitor hundreds of machines through a single gateway.\n\nThe analytics software learns the normal behaviour of every machine during the first weeks of operation. It then detects deviations that point to typical faults: unbalance, misalignment, looseness, bearing damage, gear wear and cavitation in pumps. For each alarm the software names the probable fault, its severity and the recommended action, for example lubricating a bearing within the next two weeks or replacing it at the next planned stop.\n\nCustomers report that the main benefit is not the prevention of spectacular breakdowns but better planning. Maintenance teams replace parts when they are actually worn and not according to a fixed calendar, and spare parts can be ordered before they are needed. Vibrasense provides case studies from paper mills, water utilities and food plants, including the costs avoided and the number of false alarms per month.\n\nAt the fair Vibrasense demonstrates a test rig with a motor and a deliberately damaged bearing, so visitors can watch the fault signature develop on the screen. Together with a software partner the company hosts the panel on predictive maintenance beyond the pilot and discusses why many condition-monitoring projects stall after the first twenty sensors.",
+        "stand_number": "4-A09"
+      },
+      {
+        "_id": "f29e044f-dc5d-495a-b277-4f17d5a32f36",
+        "_entityTypeKey": "exhibitor",
+        "_createdAt": "2026-10-04T17:14:24.520Z",
+        "_updatedAt": "2026-10-04T17:14:24.520Z",
+        "name": "Fenwick Data Systems",
+        "founded": 2005,
+        "website": "https://fenwick-data.example",
+        "description": "Cybersecurity for operational technology: network segmentation, asset inventory and intrusion detection for control networks in plants that cannot be patched easily.",
+        "stand_number": "4-B03"
+      },
+      {
+        "_id": "3b9e66c2-6d95-45ff-8627-254c050e4db0",
+        "_entityTypeKey": "exhibitor",
+        "_createdAt": "2026-10-04T17:14:24.523Z",
+        "_updatedAt": "2026-10-04T17:14:24.523Z",
+        "name": "Northgate Training Academy",
+        "founded": 2007,
+        "website": "https://northgate-training.example",
+        "description": "Safety training for production staff: lockout and tagout, forklift operation, working at height and virtual-reality courses on safe behaviour around machines.",
+        "stand_number": "4-B12"
+      },
+      {
+        "_id": "3aa84e7f-d769-4f88-8cea-7213c089791e",
+        "_entityTypeKey": "exhibitor",
+        "_createdAt": "2026-10-04T17:14:24.526Z",
+        "_updatedAt": "2026-10-04T17:14:24.526Z",
+        "name": "Quillon Digital Twin",
+        "founded": 2017,
+        "website": "https://quillon-twin.example",
+        "description": "Simulation software that models production lines and robot cells as digital twins, used to test layouts, cycle times and control programs before commissioning.",
+        "stand_number": "4-C06"
+      },
+      {
+        "_id": "9a952f25-6d45-44b3-8868-e49303e07c10",
+        "_entityTypeKey": "exhibitor",
+        "_createdAt": "2026-10-04T17:14:24.530Z",
+        "_updatedAt": "2026-10-04T17:14:24.530Z",
+        "name": "Ashgrove Ergonomics",
+        "founded": 2016,
+        "website": "https://ashgrove-ergonomics.example",
+        "description": "Passive and powered exoskeletons that support the back and shoulders during lifting and overhead work, plus wearable sensors that measure physical strain on assembly lines.",
+        "stand_number": "4-C14"
+      }
+    ],
+    "hall": [
+      {
+        "_id": "f28766ca-1b53-4a4a-8552-15485c3ca785",
+        "_entityTypeKey": "hall",
+        "_createdAt": "2026-10-04T17:14:24.533Z",
+        "_updatedAt": "2026-10-04T17:14:24.533Z",
+        "name": "Hall 1 - Automation and Robotics",
+        "hall_number": "1",
+        "floor_area_sqm": 18400
+      },
+      {
+        "_id": "bcc24aaa-a531-4d31-a327-6a70101fde9c",
+        "_entityTypeKey": "hall",
+        "_createdAt": "2026-10-04T17:14:24.535Z",
+        "_updatedAt": "2026-10-04T17:14:24.535Z",
+        "name": "Hall 2 - Materials and Circular Economy",
+        "hall_number": "2",
+        "floor_area_sqm": 15250.5
+      },
+      {
+        "_id": "1b2a2cc4-7fa9-492a-ad3e-e4040de02351",
+        "_entityTypeKey": "hall",
+        "_createdAt": "2026-10-04T17:14:24.536Z",
+        "_updatedAt": "2026-10-04T17:14:24.536Z",
+        "name": "Hall 3 - Energy Technology",
+        "hall_number": "3",
+        "floor_area_sqm": 12800
+      },
+      {
+        "_id": "dd6d35cc-550c-4056-8c98-c2e0acdabfca",
+        "_entityTypeKey": "hall",
+        "_createdAt": "2026-10-04T17:14:24.538Z",
+        "_updatedAt": "2026-10-04T17:14:24.538Z",
+        "name": "Hall 4 - Digital Factory",
+        "hall_number": "4",
+        "floor_area_sqm": 9600.75
+      }
+    ],
+    "industry": [
+      {
+        "_id": "2f14adce-b14d-4ce4-ae9a-818c902ed09c",
+        "_entityTypeKey": "industry",
+        "_createdAt": "2026-10-04T17:14:24.539Z",
+        "_updatedAt": "2026-10-04T17:14:24.539Z",
+        "name": "Industrial Automation",
+        "description": "Control technology, drives, sensors and software that run production lines with little manual intervention."
+      },
+      {
+        "_id": "086052ab-120a-4291-b614-5d4f028e82aa",
+        "_entityTypeKey": "industry",
+        "_createdAt": "2026-10-04T17:14:24.541Z",
+        "_updatedAt": "2026-10-04T17:14:24.541Z",
+        "name": "Robotics",
+        "description": "Industrial and collaborative robots, grippers, end effectors and the software used to program and simulate robot cells."
+      },
+      {
+        "_id": "bb3b0d6f-ece4-42eb-9344-a0b8fb32f4ca",
+        "_entityTypeKey": "industry",
+        "_createdAt": "2026-10-04T17:14:24.542Z",
+        "_updatedAt": "2026-10-04T17:14:24.542Z",
+        "name": "Plastics and Polymers",
+        "description": "Polymer materials, compounds and the machinery used to process plastics into parts and packaging."
+      },
+      {
+        "_id": "ef4faba8-691d-4b8a-ae86-29e0f0374ada",
+        "_entityTypeKey": "industry",
+        "_createdAt": "2026-10-04T17:14:24.544Z",
+        "_updatedAt": "2026-10-04T17:14:24.544Z",
+        "name": "Recycling and Circular Economy",
+        "description": "Collecting, sorting and reprocessing waste streams so that materials and components return into production."
+      },
+      {
+        "_id": "5f5dd7df-ddf0-4485-8b42-0b8aa74ea1e2",
+        "_entityTypeKey": "industry",
+        "_createdAt": "2026-10-04T17:14:24.545Z",
+        "_updatedAt": "2026-10-04T17:14:24.545Z",
+        "name": "Energy Technology",
+        "description": "Energy storage, power electronics, heat recovery and energy management for industrial sites."
+      },
+      {
+        "_id": "7d8ea4f5-d621-427b-ba7c-5cdba8797728",
+        "_entityTypeKey": "industry",
+        "_createdAt": "2026-10-04T17:14:24.546Z",
+        "_updatedAt": "2026-10-04T17:14:24.546Z",
+        "name": "Occupational Safety",
+        "description": "Protecting people at work: machine guarding, risk assessment, ergonomics and safety training."
+      }
+    ],
+    "product_group": [
+      {
+        "_id": "d0c9adec-ed57-4da9-98b3-15e9dc18b369",
+        "_entityTypeKey": "product_group",
+        "_createdAt": "2026-10-04T17:14:24.548Z",
+        "_updatedAt": "2026-10-04T17:14:24.548Z",
+        "name": "Collaborative robots",
+        "description": "Robot arms designed to work next to people without fixed fencing, including grippers and tooling for them."
+      },
+      {
+        "_id": "333c6b70-fbb7-4b7b-95a0-dbf976aefdf2",
+        "_entityTypeKey": "product_group",
+        "_createdAt": "2026-10-04T17:14:24.549Z",
+        "_updatedAt": "2026-10-04T17:14:24.549Z",
+        "name": "PLC and control systems",
+        "description": "Programmable logic controllers, motion controllers, drives and the engineering software to configure them."
+      },
+      {
+        "_id": "14e60b3a-59a7-4f13-b818-9395e25523cb",
+        "_entityTypeKey": "product_group",
+        "_createdAt": "2026-10-04T17:14:24.551Z",
+        "_updatedAt": "2026-10-04T17:14:24.551Z",
+        "name": "Machine vision systems",
+        "description": "Industrial cameras, lighting and image processing for inspection, measurement and identification."
+      },
+      {
+        "_id": "e07239f3-00fc-4fb2-87f0-0851da0cf969",
+        "_entityTypeKey": "product_group",
+        "_createdAt": "2026-10-04T17:14:24.552Z",
+        "_updatedAt": "2026-10-04T17:14:24.552Z",
+        "name": "Plastic recycling equipment",
+        "description": "Shredders, washing lines, sorting systems and extruders that turn plastic waste into reusable material."
+      },
+      {
+        "_id": "f5fb8597-27e3-40dd-b75d-381f8b37f286",
+        "_entityTypeKey": "product_group",
+        "_createdAt": "2026-10-04T17:14:24.554Z",
+        "_updatedAt": "2026-10-04T17:14:24.554Z",
+        "name": "Sustainable materials and compounds",
+        "description": "Bio-based, compostable or recycled-content polymers and compounds for packaging and technical parts."
+      },
+      {
+        "_id": "cc2e585d-18c7-4c83-934c-1873bea5b812",
+        "_entityTypeKey": "product_group",
+        "_createdAt": "2026-10-04T17:14:24.555Z",
+        "_updatedAt": "2026-10-04T17:14:24.555Z",
+        "name": "Injection molding machines",
+        "description": "Machines and molds for producing plastic parts by injection molding, including auxiliary equipment."
+      },
+      {
+        "_id": "a804cb86-8a52-4af3-a93b-df085534f719",
+        "_entityTypeKey": "product_group",
+        "_createdAt": "2026-10-04T17:14:24.556Z",
+        "_updatedAt": "2026-10-04T17:14:24.556Z",
+        "name": "Battery storage systems",
+        "description": "Stationary battery systems, inverters and controllers for storing electricity on industrial sites."
+      },
+      {
+        "_id": "5a6139d9-0556-43a7-aec9-84cf3047e2a8",
+        "_entityTypeKey": "product_group",
+        "_createdAt": "2026-10-04T17:14:24.558Z",
+        "_updatedAt": "2026-10-04T17:14:24.558Z",
+        "name": "MES and production software",
+        "description": "Manufacturing execution systems, production scheduling, traceability and shop-floor data collection."
+      },
+      {
+        "_id": "a7b5d14c-6554-4e98-a9af-92aef2ac965d",
+        "_entityTypeKey": "product_group",
+        "_createdAt": "2026-10-04T17:14:24.559Z",
+        "_updatedAt": "2026-10-04T17:14:24.559Z",
+        "name": "Safety light curtains and guards",
+        "description": "Light curtains, safety laser scanners, interlocked doors and fencing that protect people from hazardous machine motion."
+      },
+      {
+        "_id": "0d4c605e-316b-4afd-8da3-4f8949adc605",
+        "_entityTypeKey": "product_group",
+        "_createdAt": "2026-10-04T17:14:24.561Z",
+        "_updatedAt": "2026-10-04T17:14:24.561Z",
+        "name": "Predictive maintenance sensors",
+        "description": "Vibration, temperature and current sensors with analytics that detect machine wear before a breakdown."
+      }
+    ]
+  },
+  "relations": {
+    "belongs_to_industry": [
+      {
+        "_id": "2d8fcc61-3aca-42dc-bc8a-c3831220d1be",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.564Z",
+        "_updatedAt": "2026-10-04T17:14:24.564Z",
+        "fromEntityId": "0b1b550f-3985-48a0-a61b-9ee4f4c56ac3",
+        "toEntityId": "086052ab-120a-4291-b614-5d4f028e82aa"
+      },
+      {
+        "_id": "e606a72f-b9fc-4564-84b1-dc90c8b0908c",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.567Z",
+        "_updatedAt": "2026-10-04T17:14:24.567Z",
+        "fromEntityId": "0b1b550f-3985-48a0-a61b-9ee4f4c56ac3",
+        "toEntityId": "2f14adce-b14d-4ce4-ae9a-818c902ed09c"
+      },
+      {
+        "_id": "b5990415-6c66-43cb-81fd-ab4c32bdffea",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.570Z",
+        "_updatedAt": "2026-10-04T17:14:24.570Z",
+        "fromEntityId": "ea6dab87-88f3-4ed9-916d-2fe620511247",
+        "toEntityId": "2f14adce-b14d-4ce4-ae9a-818c902ed09c"
+      },
+      {
+        "_id": "caef72ae-b8bf-4423-8b4e-cf5ec2cf7deb",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.573Z",
+        "_updatedAt": "2026-10-04T17:14:24.573Z",
+        "fromEntityId": "01243c2b-c8c3-4786-8084-e899091a8d4e",
+        "toEntityId": "2f14adce-b14d-4ce4-ae9a-818c902ed09c"
+      },
+      {
+        "_id": "8d76ecd2-14d0-4413-a2c0-8c6da46d8edc",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.576Z",
+        "_updatedAt": "2026-10-04T17:14:24.576Z",
+        "fromEntityId": "01243c2b-c8c3-4786-8084-e899091a8d4e",
+        "toEntityId": "086052ab-120a-4291-b614-5d4f028e82aa"
+      },
+      {
+        "_id": "d8098927-8206-471b-a754-5f9671c4e515",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.579Z",
+        "_updatedAt": "2026-10-04T17:14:24.579Z",
+        "fromEntityId": "303af9d2-06ea-46cf-9be2-1a9ae53c2238",
+        "toEntityId": "086052ab-120a-4291-b614-5d4f028e82aa"
+      },
+      {
+        "_id": "5e08f60d-6b9a-4e90-83be-7b25bc4272cf",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.582Z",
+        "_updatedAt": "2026-10-04T17:14:24.582Z",
+        "fromEntityId": "057cbbb2-eb5e-414f-b09c-b6ab56a953bb",
+        "toEntityId": "2f14adce-b14d-4ce4-ae9a-818c902ed09c"
+      },
+      {
+        "_id": "ec654425-8467-4b05-b3d3-8161b12f02d4",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.586Z",
+        "_updatedAt": "2026-10-04T17:14:24.586Z",
+        "fromEntityId": "bee20f5f-814c-4941-a6b0-870681e141ec",
+        "toEntityId": "7d8ea4f5-d621-427b-ba7c-5cdba8797728"
+      },
+      {
+        "_id": "9e67881b-7d91-4c37-8e1a-443c270e87db",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.589Z",
+        "_updatedAt": "2026-10-04T17:14:24.589Z",
+        "fromEntityId": "bee20f5f-814c-4941-a6b0-870681e141ec",
+        "toEntityId": "2f14adce-b14d-4ce4-ae9a-818c902ed09c"
+      },
+      {
+        "_id": "b7a0a4ad-a0e7-4ca4-be49-1c4a96aa2a4d",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.592Z",
+        "_updatedAt": "2026-10-04T17:14:24.592Z",
+        "fromEntityId": "b18e5949-b3c1-46d6-b7a7-12835a6b3eef",
+        "toEntityId": "7d8ea4f5-d621-427b-ba7c-5cdba8797728"
+      },
+      {
+        "_id": "761c4210-cd2c-4aa8-8eb9-2cec233633b8",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.596Z",
+        "_updatedAt": "2026-10-04T17:14:24.596Z",
+        "fromEntityId": "8b4af6ce-793d-42cc-8950-e63f14fc477a",
+        "toEntityId": "ef4faba8-691d-4b8a-ae86-29e0f0374ada"
+      },
+      {
+        "_id": "9a3e3412-c043-4308-8eb7-761904d8041d",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.601Z",
+        "_updatedAt": "2026-10-04T17:14:24.601Z",
+        "fromEntityId": "8b4af6ce-793d-42cc-8950-e63f14fc477a",
+        "toEntityId": "bb3b0d6f-ece4-42eb-9344-a0b8fb32f4ca"
+      },
+      {
+        "_id": "2b296837-5275-4d00-bd96-610087197286",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.604Z",
+        "_updatedAt": "2026-10-04T17:14:24.604Z",
+        "fromEntityId": "bc4d6817-4575-4291-bc7d-fb3ccf83105a",
+        "toEntityId": "bb3b0d6f-ece4-42eb-9344-a0b8fb32f4ca"
+      },
+      {
+        "_id": "7ce3e6b7-c15e-48d7-8bee-aac87982ac34",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.606Z",
+        "_updatedAt": "2026-10-04T17:14:24.606Z",
+        "fromEntityId": "bc4d6817-4575-4291-bc7d-fb3ccf83105a",
+        "toEntityId": "ef4faba8-691d-4b8a-ae86-29e0f0374ada"
+      },
+      {
+        "_id": "d6d2a303-36a2-4816-a51a-87d87123ba4d",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.611Z",
+        "_updatedAt": "2026-10-04T17:14:24.611Z",
+        "fromEntityId": "0fe793ed-d675-4285-ac1a-31c54761a776",
+        "toEntityId": "ef4faba8-691d-4b8a-ae86-29e0f0374ada"
+      },
+      {
+        "_id": "a60847f7-328b-4e19-ac12-91677e7ff5ca",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.615Z",
+        "_updatedAt": "2026-10-04T17:14:24.615Z",
+        "fromEntityId": "0fe793ed-d675-4285-ac1a-31c54761a776",
+        "toEntityId": "2f14adce-b14d-4ce4-ae9a-818c902ed09c"
+      },
+      {
+        "_id": "0e12bc1a-b208-42ff-8cdd-5820a5283c13",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.618Z",
+        "_updatedAt": "2026-10-04T17:14:24.618Z",
+        "fromEntityId": "a6c9fa11-83ea-4fa9-9fe5-cbaa51897bf6",
+        "toEntityId": "ef4faba8-691d-4b8a-ae86-29e0f0374ada"
+      },
+      {
+        "_id": "956bb9fa-6f4e-43f0-9684-66709fe6a1eb",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.621Z",
+        "_updatedAt": "2026-10-04T17:14:24.621Z",
+        "fromEntityId": "8ef9d660-f9e4-49a2-8147-dcf859dce44c",
+        "toEntityId": "bb3b0d6f-ece4-42eb-9344-a0b8fb32f4ca"
+      },
+      {
+        "_id": "04ba082a-f0f4-42af-997e-cf40cd561409",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.625Z",
+        "_updatedAt": "2026-10-04T17:14:24.625Z",
+        "fromEntityId": "12df5e0c-1e17-44f0-ae62-750f2fb6b509",
+        "toEntityId": "bb3b0d6f-ece4-42eb-9344-a0b8fb32f4ca"
+      },
+      {
+        "_id": "418daa72-d4d4-4942-9195-f8dac3728f3b",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.628Z",
+        "_updatedAt": "2026-10-04T17:14:24.628Z",
+        "fromEntityId": "12df5e0c-1e17-44f0-ae62-750f2fb6b509",
+        "toEntityId": "ef4faba8-691d-4b8a-ae86-29e0f0374ada"
+      },
+      {
+        "_id": "979bf9a0-f1cc-4569-9859-807a191e7c0c",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.631Z",
+        "_updatedAt": "2026-10-04T17:14:24.631Z",
+        "fromEntityId": "0095c425-b281-4cf7-9e49-a7c518a816b4",
+        "toEntityId": "bb3b0d6f-ece4-42eb-9344-a0b8fb32f4ca"
+      },
+      {
+        "_id": "111048bf-510a-4c58-a86c-d2e8b1ac00e2",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.635Z",
+        "_updatedAt": "2026-10-04T17:14:24.635Z",
+        "fromEntityId": "16e4bc3f-cda6-4eee-a4ea-aad607a25f27",
+        "toEntityId": "5f5dd7df-ddf0-4485-8b42-0b8aa74ea1e2"
+      },
+      {
+        "_id": "9f4a92a1-b5a8-4e41-8c65-8b8c2e48502d",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.638Z",
+        "_updatedAt": "2026-10-04T17:14:24.638Z",
+        "fromEntityId": "739c17d3-7063-44a2-af6d-7e56dbcb3a05",
+        "toEntityId": "5f5dd7df-ddf0-4485-8b42-0b8aa74ea1e2"
+      },
+      {
+        "_id": "a1d95c42-df94-41ec-99fa-1daa7a7d8002",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.641Z",
+        "_updatedAt": "2026-10-04T17:14:24.641Z",
+        "fromEntityId": "021289c6-e0c5-4a6a-bcac-cbbdc0f76531",
+        "toEntityId": "5f5dd7df-ddf0-4485-8b42-0b8aa74ea1e2"
+      },
+      {
+        "_id": "26e84f6b-805b-4313-ac4e-cb51593165a7",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.644Z",
+        "_updatedAt": "2026-10-04T17:14:24.644Z",
+        "fromEntityId": "021289c6-e0c5-4a6a-bcac-cbbdc0f76531",
+        "toEntityId": "ef4faba8-691d-4b8a-ae86-29e0f0374ada"
+      },
+      {
+        "_id": "7723715e-590e-4163-b0dd-dc041df0f655",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.647Z",
+        "_updatedAt": "2026-10-04T17:14:24.647Z",
+        "fromEntityId": "326a98b0-511f-44a8-9ba3-cade3ef38c64",
+        "toEntityId": "5f5dd7df-ddf0-4485-8b42-0b8aa74ea1e2"
+      },
+      {
+        "_id": "7cf121ab-c493-43b7-828a-da4707615dec",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.651Z",
+        "_updatedAt": "2026-10-04T17:14:24.651Z",
+        "fromEntityId": "326a98b0-511f-44a8-9ba3-cade3ef38c64",
+        "toEntityId": "2f14adce-b14d-4ce4-ae9a-818c902ed09c"
+      },
+      {
+        "_id": "6c669bfe-11ae-414d-abcd-de5b6d146eb1",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.654Z",
+        "_updatedAt": "2026-10-04T17:14:24.654Z",
+        "fromEntityId": "4b37ac24-f1c5-435c-b4a8-ebc721b87c51",
+        "toEntityId": "ef4faba8-691d-4b8a-ae86-29e0f0374ada"
+      },
+      {
+        "_id": "1b6c31e3-9bc9-4895-a482-a56653ac92be",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.657Z",
+        "_updatedAt": "2026-10-04T17:14:24.657Z",
+        "fromEntityId": "4b37ac24-f1c5-435c-b4a8-ebc721b87c51",
+        "toEntityId": "5f5dd7df-ddf0-4485-8b42-0b8aa74ea1e2"
+      },
+      {
+        "_id": "e8c0d71e-13ce-4974-b2f2-5119c448ad04",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.660Z",
+        "_updatedAt": "2026-10-04T17:14:24.660Z",
+        "fromEntityId": "702b97b8-9f8e-4944-b791-92c2dccb34d5",
+        "toEntityId": "2f14adce-b14d-4ce4-ae9a-818c902ed09c"
+      },
+      {
+        "_id": "2463b764-56b5-4b2b-aed0-c8d5ec309d50",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.664Z",
+        "_updatedAt": "2026-10-04T17:14:24.664Z",
+        "fromEntityId": "082d6ae7-0c9d-49d4-b018-fcdd1e9c78fe",
+        "toEntityId": "2f14adce-b14d-4ce4-ae9a-818c902ed09c"
+      },
+      {
+        "_id": "a556f7f3-8c67-4afc-9532-28651bf3ccb8",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.667Z",
+        "_updatedAt": "2026-10-04T17:14:24.667Z",
+        "fromEntityId": "f29e044f-dc5d-495a-b277-4f17d5a32f36",
+        "toEntityId": "2f14adce-b14d-4ce4-ae9a-818c902ed09c"
+      },
+      {
+        "_id": "fd648ce6-77d1-4cda-ba07-ba2a642d6e6d",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.670Z",
+        "_updatedAt": "2026-10-04T17:14:24.670Z",
+        "fromEntityId": "3b9e66c2-6d95-45ff-8627-254c050e4db0",
+        "toEntityId": "7d8ea4f5-d621-427b-ba7c-5cdba8797728"
+      },
+      {
+        "_id": "e82fa169-1c55-4d89-a2e9-aab9c69df8a2",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.673Z",
+        "_updatedAt": "2026-10-04T17:14:24.673Z",
+        "fromEntityId": "3aa84e7f-d769-4f88-8cea-7213c089791e",
+        "toEntityId": "2f14adce-b14d-4ce4-ae9a-818c902ed09c"
+      },
+      {
+        "_id": "6a0f531a-409b-4951-b588-68bd186b0962",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.675Z",
+        "_updatedAt": "2026-10-04T17:14:24.675Z",
+        "fromEntityId": "3aa84e7f-d769-4f88-8cea-7213c089791e",
+        "toEntityId": "086052ab-120a-4291-b614-5d4f028e82aa"
+      },
+      {
+        "_id": "8cc06740-2d53-4d6a-8cb3-dec14cb6447f",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.678Z",
+        "_updatedAt": "2026-10-04T17:14:24.678Z",
+        "fromEntityId": "9a952f25-6d45-44b3-8868-e49303e07c10",
+        "toEntityId": "7d8ea4f5-d621-427b-ba7c-5cdba8797728"
+      },
+      {
+        "_id": "1d6c83b7-7a05-4a30-8096-7d9173f0eaa6",
+        "_relationTypeKey": "belongs_to_industry",
+        "_createdAt": "2026-10-04T17:14:24.681Z",
+        "_updatedAt": "2026-10-04T17:14:24.681Z",
+        "fromEntityId": "9a952f25-6d45-44b3-8868-e49303e07c10",
+        "toEntityId": "086052ab-120a-4291-b614-5d4f028e82aa"
+      }
+    ],
+    "hosts": [
+      {
+        "_id": "7d52c6c3-3073-4af3-9b04-287aa18b656d",
+        "_relationTypeKey": "hosts",
+        "_createdAt": "2026-10-04T17:14:24.685Z",
+        "_updatedAt": "2026-10-04T17:14:24.685Z",
+        "fromEntityId": "bee20f5f-814c-4941-a6b0-870681e141ec",
+        "toEntityId": "68a28980-dd30-494b-b2a4-b50647db90e0"
+      },
+      {
+        "_id": "01120efb-3d7d-4082-a1a3-0b53cf19f798",
+        "_relationTypeKey": "hosts",
+        "_createdAt": "2026-10-04T17:14:24.688Z",
+        "_updatedAt": "2026-10-04T17:14:24.688Z",
+        "fromEntityId": "b18e5949-b3c1-46d6-b7a7-12835a6b3eef",
+        "toEntityId": "68a28980-dd30-494b-b2a4-b50647db90e0"
+      },
+      {
+        "_id": "d270a644-bf78-4a63-b772-a240419525f0",
+        "_relationTypeKey": "hosts",
+        "_createdAt": "2026-10-04T17:14:24.692Z",
+        "_updatedAt": "2026-10-04T17:14:24.692Z",
+        "fromEntityId": "bee20f5f-814c-4941-a6b0-870681e141ec",
+        "toEntityId": "ca30634e-0037-4cc0-8b8d-f9c9e2e57fb2"
+      },
+      {
+        "_id": "8b7225af-dff4-40b7-8aa5-599b580912bd",
+        "_relationTypeKey": "hosts",
+        "_createdAt": "2026-10-04T17:14:24.695Z",
+        "_updatedAt": "2026-10-04T17:14:24.695Z",
+        "fromEntityId": "8b4af6ce-793d-42cc-8950-e63f14fc477a",
+        "toEntityId": "37790dcc-0e36-4282-b573-6b3ff906c4c2"
+      },
+      {
+        "_id": "c9b0d35c-b91f-4ee0-a581-9c1236c99180",
+        "_relationTypeKey": "hosts",
+        "_createdAt": "2026-10-04T17:14:24.698Z",
+        "_updatedAt": "2026-10-04T17:14:24.698Z",
+        "fromEntityId": "bc4d6817-4575-4291-bc7d-fb3ccf83105a",
+        "toEntityId": "37790dcc-0e36-4282-b573-6b3ff906c4c2"
+      },
+      {
+        "_id": "a4d68b0b-ed29-4301-8f2c-21f680f55698",
+        "_relationTypeKey": "hosts",
+        "_createdAt": "2026-10-04T17:14:24.701Z",
+        "_updatedAt": "2026-10-04T17:14:24.701Z",
+        "fromEntityId": "0fe793ed-d675-4285-ac1a-31c54761a776",
+        "toEntityId": "37790dcc-0e36-4282-b573-6b3ff906c4c2"
+      },
+      {
+        "_id": "41a2eb73-703f-496c-9b96-4a5360f6dc23",
+        "_relationTypeKey": "hosts",
+        "_createdAt": "2026-10-04T17:14:24.704Z",
+        "_updatedAt": "2026-10-04T17:14:24.704Z",
+        "fromEntityId": "bc4d6817-4575-4291-bc7d-fb3ccf83105a",
+        "toEntityId": "13237d2e-6643-4d21-9268-a056438ba6ed"
+      },
+      {
+        "_id": "4c524f3d-5832-42d0-a5dc-ba4e4b3ad235",
+        "_relationTypeKey": "hosts",
+        "_createdAt": "2026-10-04T17:14:24.706Z",
+        "_updatedAt": "2026-10-04T17:14:24.706Z",
+        "fromEntityId": "f29e044f-dc5d-495a-b277-4f17d5a32f36",
+        "toEntityId": "f2c2f184-f5c9-485c-8427-502e9e001b2c"
+      },
+      {
+        "_id": "77f1f1b7-b5b8-436d-b615-3accc24edcc1",
+        "_relationTypeKey": "hosts",
+        "_createdAt": "2026-10-04T17:14:24.710Z",
+        "_updatedAt": "2026-10-04T17:14:24.710Z",
+        "fromEntityId": "0b1b550f-3985-48a0-a61b-9ee4f4c56ac3",
+        "toEntityId": "40014562-d9de-44de-991e-839c6419b0ae"
+      },
+      {
+        "_id": "b224b5ec-90b0-4d3d-85c8-30adcb551f63",
+        "_relationTypeKey": "hosts",
+        "_createdAt": "2026-10-04T17:14:24.714Z",
+        "_updatedAt": "2026-10-04T17:14:24.714Z",
+        "fromEntityId": "303af9d2-06ea-46cf-9be2-1a9ae53c2238",
+        "toEntityId": "40014562-d9de-44de-991e-839c6419b0ae"
+      },
+      {
+        "_id": "cf4dd688-f9cf-4d7a-8370-3e8fe4f11671",
+        "_relationTypeKey": "hosts",
+        "_createdAt": "2026-10-04T17:14:24.717Z",
+        "_updatedAt": "2026-10-04T17:14:24.717Z",
+        "fromEntityId": "16e4bc3f-cda6-4eee-a4ea-aad607a25f27",
+        "toEntityId": "52a4135a-776e-4699-88f7-23a7eb6aee70"
+      },
+      {
+        "_id": "d98eca08-a579-488f-adeb-180e87519674",
+        "_relationTypeKey": "hosts",
+        "_createdAt": "2026-10-04T17:14:24.720Z",
+        "_updatedAt": "2026-10-04T17:14:24.720Z",
+        "fromEntityId": "4b37ac24-f1c5-435c-b4a8-ebc721b87c51",
+        "toEntityId": "52a4135a-776e-4699-88f7-23a7eb6aee70"
+      },
+      {
+        "_id": "76dd3634-de4d-4f85-89fb-f75fe2c0edf2",
+        "_relationTypeKey": "hosts",
+        "_createdAt": "2026-10-04T17:14:24.722Z",
+        "_updatedAt": "2026-10-04T17:14:24.722Z",
+        "fromEntityId": "082d6ae7-0c9d-49d4-b018-fcdd1e9c78fe",
+        "toEntityId": "374fb1b2-9003-45ca-bd46-2a360c6bc66e"
+      },
+      {
+        "_id": "88c9a61a-61b9-4832-8aca-0a5a07bed1eb",
+        "_relationTypeKey": "hosts",
+        "_createdAt": "2026-10-04T17:14:24.730Z",
+        "_updatedAt": "2026-10-04T17:14:24.730Z",
+        "fromEntityId": "702b97b8-9f8e-4944-b791-92c2dccb34d5",
+        "toEntityId": "374fb1b2-9003-45ca-bd46-2a360c6bc66e"
+      },
+      {
+        "_id": "08e8e3e6-8d48-4c05-b922-2137d8f3e0b3",
+        "_relationTypeKey": "hosts",
+        "_createdAt": "2026-10-04T17:14:24.735Z",
+        "_updatedAt": "2026-10-04T17:14:24.735Z",
+        "fromEntityId": "9a952f25-6d45-44b3-8868-e49303e07c10",
+        "toEntityId": "c0e35eb8-7c30-4f33-b95c-bd208e879ca2"
+      },
+      {
+        "_id": "2dd74a05-f7a8-4dd8-9d60-72f06f2a07a7",
+        "_relationTypeKey": "hosts",
+        "_createdAt": "2026-10-04T17:14:24.738Z",
+        "_updatedAt": "2026-10-04T17:14:24.738Z",
+        "fromEntityId": "3b9e66c2-6d95-45ff-8627-254c050e4db0",
+        "toEntityId": "c0e35eb8-7c30-4f33-b95c-bd208e879ca2"
+      }
+    ],
+    "located_in": [
+      {
+        "_id": "2eb601a9-322c-4228-b7aa-3a7ed0376058",
+        "_relationTypeKey": "located_in",
+        "_createdAt": "2026-10-04T17:14:24.740Z",
+        "_updatedAt": "2026-10-04T17:14:24.740Z",
+        "fromEntityId": "0b1b550f-3985-48a0-a61b-9ee4f4c56ac3",
+        "toEntityId": "f28766ca-1b53-4a4a-8552-15485c3ca785"
+      },
+      {
+        "_id": "6d2c29a1-f62f-4d1e-9924-ef0c89cda6da",
+        "_relationTypeKey": "located_in",
+        "_createdAt": "2026-10-04T17:14:24.743Z",
+        "_updatedAt": "2026-10-04T17:14:24.743Z",
+        "fromEntityId": "ea6dab87-88f3-4ed9-916d-2fe620511247",
+        "toEntityId": "f28766ca-1b53-4a4a-8552-15485c3ca785"
+      },
+      {
+        "_id": "4d67c158-5101-4814-a5fb-2228ff081897",
+        "_relationTypeKey": "located_in",
+        "_createdAt": "2026-10-04T17:14:24.747Z",
+        "_updatedAt": "2026-10-04T17:14:24.747Z",
+        "fromEntityId": "01243c2b-c8c3-4786-8084-e899091a8d4e",
+        "toEntityId": "f28766ca-1b53-4a4a-8552-15485c3ca785"
+      },
+      {
+        "_id": "6bda4a59-f624-463c-ad9c-1cde267a4587",
+        "_relationTypeKey": "located_in",
+        "_createdAt": "2026-10-04T17:14:24.750Z",
+        "_updatedAt": "2026-10-04T17:14:24.750Z",
+        "fromEntityId": "303af9d2-06ea-46cf-9be2-1a9ae53c2238",
+        "toEntityId": "f28766ca-1b53-4a4a-8552-15485c3ca785"
+      },
+      {
+        "_id": "7f25f1fb-62d8-4fe7-9ad9-0fd0335d48b9",
+        "_relationTypeKey": "located_in",
+        "_createdAt": "2026-10-04T17:14:24.753Z",
+        "_updatedAt": "2026-10-04T17:14:24.753Z",
+        "fromEntityId": "057cbbb2-eb5e-414f-b09c-b6ab56a953bb",
+        "toEntityId": "f28766ca-1b53-4a4a-8552-15485c3ca785"
+      },
+      {
+        "_id": "331a3320-b64a-4ee6-ba3d-48c837e6e53b",
+        "_relationTypeKey": "located_in",
+        "_createdAt": "2026-10-04T17:14:24.756Z",
+        "_updatedAt": "2026-10-04T17:14:24.756Z",
+        "fromEntityId": "bee20f5f-814c-4941-a6b0-870681e141ec",
+        "toEntityId": "f28766ca-1b53-4a4a-8552-15485c3ca785"
+      },
+      {
+        "_id": "a1e96f05-e6c8-44c3-a621-559ff349b8f4",
+        "_relationTypeKey": "located_in",
+        "_createdAt": "2026-10-04T17:14:24.759Z",
+        "_updatedAt": "2026-10-04T17:14:24.759Z",
+        "fromEntityId": "b18e5949-b3c1-46d6-b7a7-12835a6b3eef",
+        "toEntityId": "f28766ca-1b53-4a4a-8552-15485c3ca785"
+      },
+      {
+        "_id": "a933330d-6cf8-4f02-9a34-94e0ba269389",
+        "_relationTypeKey": "located_in",
+        "_createdAt": "2026-10-04T17:14:24.762Z",
+        "_updatedAt": "2026-10-04T17:14:24.762Z",
+        "fromEntityId": "8b4af6ce-793d-42cc-8950-e63f14fc477a",
+        "toEntityId": "bcc24aaa-a531-4d31-a327-6a70101fde9c"
+      },
+      {
+        "_id": "dabafbce-24bb-4e58-8dcc-69a4a2c394e3",
+        "_relationTypeKey": "located_in",
+        "_createdAt": "2026-10-04T17:14:24.765Z",
+        "_updatedAt": "2026-10-04T17:14:24.765Z",
+        "fromEntityId": "bc4d6817-4575-4291-bc7d-fb3ccf83105a",
+        "toEntityId": "bcc24aaa-a531-4d31-a327-6a70101fde9c"
+      },
+      {
+        "_id": "994c32bc-92c3-429e-be4c-23b628433488",
+        "_relationTypeKey": "located_in",
+        "_createdAt": "2026-10-04T17:14:24.768Z",
+        "_updatedAt": "2026-10-04T17:14:24.768Z",
+        "fromEntityId": "0fe793ed-d675-4285-ac1a-31c54761a776",
+        "toEntityId": "bcc24aaa-a531-4d31-a327-6a70101fde9c"
+      },
+      {
+        "_id": "addc9588-1ef7-4a0a-9982-c22ecf4c735b",
+        "_relationTypeKey": "located_in",
+        "_createdAt": "2026-10-04T17:14:24.771Z",
+        "_updatedAt": "2026-10-04T17:14:24.771Z",
+        "fromEntityId": "a6c9fa11-83ea-4fa9-9fe5-cbaa51897bf6",
+        "toEntityId": "bcc24aaa-a531-4d31-a327-6a70101fde9c"
+      },
+      {
+        "_id": "23bfbcac-9114-4010-9bff-bdb86c6481d3",
+        "_relationTypeKey": "located_in",
+        "_createdAt": "2026-10-04T17:14:24.775Z",
+        "_updatedAt": "2026-10-04T17:14:24.775Z",
+        "fromEntityId": "8ef9d660-f9e4-49a2-8147-dcf859dce44c",
+        "toEntityId": "bcc24aaa-a531-4d31-a327-6a70101fde9c"
+      },
+      {
+        "_id": "701c67d8-e722-4e7f-89b0-83ce63f3f3bf",
+        "_relationTypeKey": "located_in",
+        "_createdAt": "2026-10-04T17:14:24.778Z",
+        "_updatedAt": "2026-10-04T17:14:24.778Z",
+        "fromEntityId": "12df5e0c-1e17-44f0-ae62-750f2fb6b509",
+        "toEntityId": "bcc24aaa-a531-4d31-a327-6a70101fde9c"
+      },
+      {
+        "_id": "e199e471-715d-463f-87e3-b68bd7de9cb2",
+        "_relationTypeKey": "located_in",
+        "_createdAt": "2026-10-04T17:14:24.781Z",
+        "_updatedAt": "2026-10-04T17:14:24.781Z",
+        "fromEntityId": "0095c425-b281-4cf7-9e49-a7c518a816b4",
+        "toEntityId": "bcc24aaa-a531-4d31-a327-6a70101fde9c"
+      },
+      {
+        "_id": "dbe3a97a-6395-4858-bed3-49c47fd06b72",
+        "_relationTypeKey": "located_in",
+        "_createdAt": "2026-10-04T17:14:24.783Z",
+        "_updatedAt": "2026-10-04T17:14:24.783Z",
+        "fromEntityId": "16e4bc3f-cda6-4eee-a4ea-aad607a25f27",
+        "toEntityId": "1b2a2cc4-7fa9-492a-ad3e-e4040de02351"
+      },
+      {
+        "_id": "6518edef-4453-4287-bece-0dca5b51a475",
+        "_relationTypeKey": "located_in",
+        "_createdAt": "2026-10-04T17:14:24.786Z",
+        "_updatedAt": "2026-10-04T17:14:24.786Z",
+        "fromEntityId": "739c17d3-7063-44a2-af6d-7e56dbcb3a05",
+        "toEntityId": "1b2a2cc4-7fa9-492a-ad3e-e4040de02351"
+      },
+      {
+        "_id": "30ddd2c6-8373-42bd-9646-1c8f43401ec0",
+        "_relationTypeKey": "located_in",
+        "_createdAt": "2026-10-04T17:14:24.790Z",
+        "_updatedAt": "2026-10-04T17:14:24.790Z",
+        "fromEntityId": "021289c6-e0c5-4a6a-bcac-cbbdc0f76531",
+        "toEntityId": "1b2a2cc4-7fa9-492a-ad3e-e4040de02351"
+      },
+      {
+        "_id": "9b9f0b13-0c72-4295-b267-32877392e59a",
+        "_relationTypeKey": "located_in",
+        "_createdAt": "2026-10-04T17:14:24.793Z",
+        "_updatedAt": "2026-10-04T17:14:24.793Z",
+        "fromEntityId": "326a98b0-511f-44a8-9ba3-cade3ef38c64",
+        "toEntityId": "1b2a2cc4-7fa9-492a-ad3e-e4040de02351"
+      },
+      {
+        "_id": "c4f13b27-3d73-48dd-9977-e5e74397b1b3",
+        "_relationTypeKey": "located_in",
+        "_createdAt": "2026-10-04T17:14:24.795Z",
+        "_updatedAt": "2026-10-04T17:14:24.795Z",
+        "fromEntityId": "4b37ac24-f1c5-435c-b4a8-ebc721b87c51",
+        "toEntityId": "1b2a2cc4-7fa9-492a-ad3e-e4040de02351"
+      },
+      {
+        "_id": "d5d4f7ff-d2f8-41cf-aa1b-8decd76c4956",
+        "_relationTypeKey": "located_in",
+        "_createdAt": "2026-10-04T17:14:24.799Z",
+        "_updatedAt": "2026-10-04T17:14:24.799Z",
+        "fromEntityId": "702b97b8-9f8e-4944-b791-92c2dccb34d5",
+        "toEntityId": "dd6d35cc-550c-4056-8c98-c2e0acdabfca"
+      },
+      {
+        "_id": "762a20ef-d657-4cc8-9b8c-a070ba4e73b5",
+        "_relationTypeKey": "located_in",
+        "_createdAt": "2026-10-04T17:14:24.802Z",
+        "_updatedAt": "2026-10-04T17:14:24.802Z",
+        "fromEntityId": "082d6ae7-0c9d-49d4-b018-fcdd1e9c78fe",
+        "toEntityId": "dd6d35cc-550c-4056-8c98-c2e0acdabfca"
+      },
+      {
+        "_id": "bd860996-2520-4153-ab9a-db6333e4beb3",
+        "_relationTypeKey": "located_in",
+        "_createdAt": "2026-10-04T17:14:24.805Z",
+        "_updatedAt": "2026-10-04T17:14:24.805Z",
+        "fromEntityId": "f29e044f-dc5d-495a-b277-4f17d5a32f36",
+        "toEntityId": "dd6d35cc-550c-4056-8c98-c2e0acdabfca"
+      },
+      {
+        "_id": "15cff186-5b71-4a81-bbd4-125efb919f53",
+        "_relationTypeKey": "located_in",
+        "_createdAt": "2026-10-04T17:14:24.807Z",
+        "_updatedAt": "2026-10-04T17:14:24.807Z",
+        "fromEntityId": "3b9e66c2-6d95-45ff-8627-254c050e4db0",
+        "toEntityId": "dd6d35cc-550c-4056-8c98-c2e0acdabfca"
+      },
+      {
+        "_id": "b8a3ae65-b9ea-4697-aafc-8aba4a273264",
+        "_relationTypeKey": "located_in",
+        "_createdAt": "2026-10-04T17:14:24.809Z",
+        "_updatedAt": "2026-10-04T17:14:24.809Z",
+        "fromEntityId": "3aa84e7f-d769-4f88-8cea-7213c089791e",
+        "toEntityId": "dd6d35cc-550c-4056-8c98-c2e0acdabfca"
+      },
+      {
+        "_id": "5e5b87fe-b9ba-41b0-9d47-ed1ea382f4bb",
+        "_relationTypeKey": "located_in",
+        "_createdAt": "2026-10-04T17:14:24.812Z",
+        "_updatedAt": "2026-10-04T17:14:24.812Z",
+        "fromEntityId": "9a952f25-6d45-44b3-8868-e49303e07c10",
+        "toEntityId": "dd6d35cc-550c-4056-8c98-c2e0acdabfca"
+      }
+    ],
+    "offers": [
+      {
+        "_id": "2fa1fbdb-44f3-476b-b843-065acdec8277",
+        "_relationTypeKey": "offers",
+        "_createdAt": "2026-10-04T17:14:24.815Z",
+        "_updatedAt": "2026-10-04T17:14:24.815Z",
+        "fromEntityId": "0b1b550f-3985-48a0-a61b-9ee4f4c56ac3",
+        "toEntityId": "d0c9adec-ed57-4da9-98b3-15e9dc18b369"
+      },
+      {
+        "_id": "d594abb7-9639-45a8-93d6-3766a902771a",
+        "_relationTypeKey": "offers",
+        "_createdAt": "2026-10-04T17:14:24.817Z",
+        "_updatedAt": "2026-10-04T17:14:24.817Z",
+        "fromEntityId": "ea6dab87-88f3-4ed9-916d-2fe620511247",
+        "toEntityId": "333c6b70-fbb7-4b7b-95a0-dbf976aefdf2"
+      },
+      {
+        "_id": "e688b37e-587f-4ff8-8ff4-8bd84ff36a72",
+        "_relationTypeKey": "offers",
+        "_createdAt": "2026-10-04T17:14:24.820Z",
+        "_updatedAt": "2026-10-04T17:14:24.820Z",
+        "fromEntityId": "01243c2b-c8c3-4786-8084-e899091a8d4e",
+        "toEntityId": "14e60b3a-59a7-4f13-b818-9395e25523cb"
+      },
+      {
+        "_id": "eb9d5a2b-d7df-4258-9ae7-c00727e18a79",
+        "_relationTypeKey": "offers",
+        "_createdAt": "2026-10-04T17:14:24.823Z",
+        "_updatedAt": "2026-10-04T17:14:24.823Z",
+        "fromEntityId": "303af9d2-06ea-46cf-9be2-1a9ae53c2238",
+        "toEntityId": "d0c9adec-ed57-4da9-98b3-15e9dc18b369"
+      },
+      {
+        "_id": "30f33dac-53d4-4927-aa9d-fc0301280e17",
+        "_relationTypeKey": "offers",
+        "_createdAt": "2026-10-04T17:14:24.826Z",
+        "_updatedAt": "2026-10-04T17:14:24.826Z",
+        "fromEntityId": "057cbbb2-eb5e-414f-b09c-b6ab56a953bb",
+        "toEntityId": "333c6b70-fbb7-4b7b-95a0-dbf976aefdf2"
+      },
+      {
+        "_id": "83f08534-db6e-410c-96e0-44578239920c",
+        "_relationTypeKey": "offers",
+        "_createdAt": "2026-10-04T17:14:24.828Z",
+        "_updatedAt": "2026-10-04T17:14:24.828Z",
+        "fromEntityId": "bee20f5f-814c-4941-a6b0-870681e141ec",
+        "toEntityId": "a7b5d14c-6554-4e98-a9af-92aef2ac965d"
+      },
+      {
+        "_id": "172a9e3d-2ac0-4431-8053-6cf01fd93c90",
+        "_relationTypeKey": "offers",
+        "_createdAt": "2026-10-04T17:14:24.831Z",
+        "_updatedAt": "2026-10-04T17:14:24.831Z",
+        "fromEntityId": "b18e5949-b3c1-46d6-b7a7-12835a6b3eef",
+        "toEntityId": "a7b5d14c-6554-4e98-a9af-92aef2ac965d"
+      },
+      {
+        "_id": "e5d73c70-a755-4cd2-ba30-f4133db43cc3",
+        "_relationTypeKey": "offers",
+        "_createdAt": "2026-10-04T17:14:24.833Z",
+        "_updatedAt": "2026-10-04T17:14:24.833Z",
+        "fromEntityId": "8b4af6ce-793d-42cc-8950-e63f14fc477a",
+        "toEntityId": "e07239f3-00fc-4fb2-87f0-0851da0cf969"
+      },
+      {
+        "_id": "53581f1d-b516-4b97-a86c-6d6a31da044f",
+        "_relationTypeKey": "offers",
+        "_createdAt": "2026-10-04T17:14:24.836Z",
+        "_updatedAt": "2026-10-04T17:14:24.836Z",
+        "fromEntityId": "bc4d6817-4575-4291-bc7d-fb3ccf83105a",
+        "toEntityId": "f5fb8597-27e3-40dd-b75d-381f8b37f286"
+      },
+      {
+        "_id": "89e85c99-ce61-4212-b27d-2df9be54d46f",
+        "_relationTypeKey": "offers",
+        "_createdAt": "2026-10-04T17:14:24.839Z",
+        "_updatedAt": "2026-10-04T17:14:24.839Z",
+        "fromEntityId": "0fe793ed-d675-4285-ac1a-31c54761a776",
+        "toEntityId": "e07239f3-00fc-4fb2-87f0-0851da0cf969"
+      },
+      {
+        "_id": "ff49716a-ee03-4313-a507-b88f9c6d27c7",
+        "_relationTypeKey": "offers",
+        "_createdAt": "2026-10-04T17:14:24.842Z",
+        "_updatedAt": "2026-10-04T17:14:24.842Z",
+        "fromEntityId": "0fe793ed-d675-4285-ac1a-31c54761a776",
+        "toEntityId": "14e60b3a-59a7-4f13-b818-9395e25523cb"
+      },
+      {
+        "_id": "f88cee36-1009-41aa-b6e2-2ffb56db7f94",
+        "_relationTypeKey": "offers",
+        "_createdAt": "2026-10-04T17:14:24.845Z",
+        "_updatedAt": "2026-10-04T17:14:24.845Z",
+        "fromEntityId": "8ef9d660-f9e4-49a2-8147-dcf859dce44c",
+        "toEntityId": "cc2e585d-18c7-4c83-934c-1873bea5b812"
+      },
+      {
+        "_id": "b5e391c2-58a8-40b2-9779-6d6dbbddcf84",
+        "_relationTypeKey": "offers",
+        "_createdAt": "2026-10-04T17:14:24.848Z",
+        "_updatedAt": "2026-10-04T17:14:24.848Z",
+        "fromEntityId": "12df5e0c-1e17-44f0-ae62-750f2fb6b509",
+        "toEntityId": "f5fb8597-27e3-40dd-b75d-381f8b37f286"
+      },
+      {
+        "_id": "e0feabf9-eac5-47c1-9b04-4ca886849e8a",
+        "_relationTypeKey": "offers",
+        "_createdAt": "2026-10-04T17:14:24.852Z",
+        "_updatedAt": "2026-10-04T17:14:24.852Z",
+        "fromEntityId": "0095c425-b281-4cf7-9e49-a7c518a816b4",
+        "toEntityId": "cc2e585d-18c7-4c83-934c-1873bea5b812"
+      },
+      {
+        "_id": "e7587a65-1753-4dda-935a-659da72d160a",
+        "_relationTypeKey": "offers",
+        "_createdAt": "2026-10-04T17:14:24.855Z",
+        "_updatedAt": "2026-10-04T17:14:24.855Z",
+        "fromEntityId": "16e4bc3f-cda6-4eee-a4ea-aad607a25f27",
+        "toEntityId": "a804cb86-8a52-4af3-a93b-df085534f719"
+      },
+      {
+        "_id": "ead59e85-dd9c-446d-be56-ac32e64a20b7",
+        "_relationTypeKey": "offers",
+        "_createdAt": "2026-10-04T17:14:24.858Z",
+        "_updatedAt": "2026-10-04T17:14:24.858Z",
+        "fromEntityId": "739c17d3-7063-44a2-af6d-7e56dbcb3a05",
+        "toEntityId": "a804cb86-8a52-4af3-a93b-df085534f719"
+      },
+      {
+        "_id": "16450773-8483-42e2-b381-57a457a86d11",
+        "_relationTypeKey": "offers",
+        "_createdAt": "2026-10-04T17:14:24.862Z",
+        "_updatedAt": "2026-10-04T17:14:24.862Z",
+        "fromEntityId": "326a98b0-511f-44a8-9ba3-cade3ef38c64",
+        "toEntityId": "5a6139d9-0556-43a7-aec9-84cf3047e2a8"
+      },
+      {
+        "_id": "4ab1fcfb-149c-4c1d-b682-f29e8f310b2f",
+        "_relationTypeKey": "offers",
+        "_createdAt": "2026-10-04T17:14:24.865Z",
+        "_updatedAt": "2026-10-04T17:14:24.865Z",
+        "fromEntityId": "326a98b0-511f-44a8-9ba3-cade3ef38c64",
+        "toEntityId": "0d4c605e-316b-4afd-8da3-4f8949adc605"
+      },
+      {
+        "_id": "8f19a0f1-c265-4fad-984c-0e634c3e02c5",
+        "_relationTypeKey": "offers",
+        "_createdAt": "2026-10-04T17:14:24.868Z",
+        "_updatedAt": "2026-10-04T17:14:24.868Z",
+        "fromEntityId": "702b97b8-9f8e-4944-b791-92c2dccb34d5",
+        "toEntityId": "5a6139d9-0556-43a7-aec9-84cf3047e2a8"
+      },
+      {
+        "_id": "b957c741-ee83-4648-98b8-a40b2ea0aae1",
+        "_relationTypeKey": "offers",
+        "_createdAt": "2026-10-04T17:14:24.870Z",
+        "_updatedAt": "2026-10-04T17:14:24.870Z",
+        "fromEntityId": "082d6ae7-0c9d-49d4-b018-fcdd1e9c78fe",
+        "toEntityId": "0d4c605e-316b-4afd-8da3-4f8949adc605"
+      },
+      {
+        "_id": "4b5420c6-96e9-49c1-ac47-60e30f55248d",
+        "_relationTypeKey": "offers",
+        "_createdAt": "2026-10-04T17:14:24.873Z",
+        "_updatedAt": "2026-10-04T17:14:24.873Z",
+        "fromEntityId": "3aa84e7f-d769-4f88-8cea-7213c089791e",
+        "toEntityId": "5a6139d9-0556-43a7-aec9-84cf3047e2a8"
+      }
+    ],
+    "takes_place_in": [
+      {
+        "_id": "e5a9ef6a-4216-4656-b01a-7d55dbdc61ac",
+        "_relationTypeKey": "takes_place_in",
+        "_createdAt": "2026-10-04T17:14:24.876Z",
+        "_updatedAt": "2026-10-04T17:14:24.876Z",
+        "fromEntityId": "68a28980-dd30-494b-b2a4-b50647db90e0",
+        "toEntityId": "f28766ca-1b53-4a4a-8552-15485c3ca785"
+      },
+      {
+        "_id": "0de387ec-2781-44ef-9b43-9d4d7369a2a6",
+        "_relationTypeKey": "takes_place_in",
+        "_createdAt": "2026-10-04T17:14:24.878Z",
+        "_updatedAt": "2026-10-04T17:14:24.878Z",
+        "fromEntityId": "ca30634e-0037-4cc0-8b8d-f9c9e2e57fb2",
+        "toEntityId": "f28766ca-1b53-4a4a-8552-15485c3ca785"
+      },
+      {
+        "_id": "81a410b1-95be-448e-b3d6-497fed76dd73",
+        "_relationTypeKey": "takes_place_in",
+        "_createdAt": "2026-10-04T17:14:24.881Z",
+        "_updatedAt": "2026-10-04T17:14:24.881Z",
+        "fromEntityId": "37790dcc-0e36-4282-b573-6b3ff906c4c2",
+        "toEntityId": "bcc24aaa-a531-4d31-a327-6a70101fde9c"
+      },
+      {
+        "_id": "e4c4a69f-cf12-4577-babf-ed0170c21cf4",
+        "_relationTypeKey": "takes_place_in",
+        "_createdAt": "2026-10-04T17:14:24.885Z",
+        "_updatedAt": "2026-10-04T17:14:24.885Z",
+        "fromEntityId": "13237d2e-6643-4d21-9268-a056438ba6ed",
+        "toEntityId": "bcc24aaa-a531-4d31-a327-6a70101fde9c"
+      },
+      {
+        "_id": "e6c1ce0d-533c-436c-a001-54daab377ebc",
+        "_relationTypeKey": "takes_place_in",
+        "_createdAt": "2026-10-04T17:14:24.888Z",
+        "_updatedAt": "2026-10-04T17:14:24.888Z",
+        "fromEntityId": "f2c2f184-f5c9-485c-8427-502e9e001b2c",
+        "toEntityId": "dd6d35cc-550c-4056-8c98-c2e0acdabfca"
+      },
+      {
+        "_id": "3a268578-1cad-430b-b144-d1914e31d976",
+        "_relationTypeKey": "takes_place_in",
+        "_createdAt": "2026-10-04T17:14:24.891Z",
+        "_updatedAt": "2026-10-04T17:14:24.891Z",
+        "fromEntityId": "40014562-d9de-44de-991e-839c6419b0ae",
+        "toEntityId": "f28766ca-1b53-4a4a-8552-15485c3ca785"
+      },
+      {
+        "_id": "d15ed279-0545-4a57-8a8c-13926350edbe",
+        "_relationTypeKey": "takes_place_in",
+        "_createdAt": "2026-10-04T17:14:24.894Z",
+        "_updatedAt": "2026-10-04T17:14:24.894Z",
+        "fromEntityId": "52a4135a-776e-4699-88f7-23a7eb6aee70",
+        "toEntityId": "1b2a2cc4-7fa9-492a-ad3e-e4040de02351"
+      },
+      {
+        "_id": "2b9563a5-7630-41f1-830e-29a1151c6e2d",
+        "_relationTypeKey": "takes_place_in",
+        "_createdAt": "2026-10-04T17:14:24.896Z",
+        "_updatedAt": "2026-10-04T17:14:24.896Z",
+        "fromEntityId": "374fb1b2-9003-45ca-bd46-2a360c6bc66e",
+        "toEntityId": "dd6d35cc-550c-4056-8c98-c2e0acdabfca"
+      },
+      {
+        "_id": "b75a8fde-cfa3-49bb-90f5-ab17b3823af0",
+        "_relationTypeKey": "takes_place_in",
+        "_createdAt": "2026-10-04T17:14:24.899Z",
+        "_updatedAt": "2026-10-04T17:14:24.899Z",
+        "fromEntityId": "c0e35eb8-7c30-4f33-b95c-bd208e879ca2",
+        "toEntityId": "dd6d35cc-550c-4056-8c98-c2e0acdabfca"
+      },
+      {
+        "_id": "03f73611-d831-463a-a649-fb1960aa18a7",
+        "_relationTypeKey": "takes_place_in",
+        "_createdAt": "2026-10-04T17:14:24.901Z",
+        "_updatedAt": "2026-10-04T17:14:24.901Z",
+        "fromEntityId": "5585ed42-c20e-4abc-8c9b-a7ed6f5d7d9e",
+        "toEntityId": "dd6d35cc-550c-4056-8c98-c2e0acdabfca"
+      }
+    ]
+  }
+}

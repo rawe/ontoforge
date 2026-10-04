@@ -75,3 +75,4 @@ load and save.
 | Name | Ontology key | Purpose | Size |
 |---|---|---|---|
 | [people_basic](ontologies/people_basic/README.md) | `fx_people_basic` | Simple general-purpose fixture: CRUD, scoped and unscoped lenses, agents, saved queries | 20 entities, 15 relations |
+| [trade_fair](ontologies/trade_fair/README.md) | `fx_trade_fair` | Retrieval and search: saved retrievers, property and passage search over long documents, an agent, saved queries | 55 entities, 109 relations |

@@ -1,0 +1,571 @@
+{
+  "formatVersion": "5.0",
+  "textSearchLanguage": "english",
+  "entityTypes": [
+    {
+      "key": "event",
+      "displayName": "Event",
+      "description": "A talk, workshop or panel discussion in the supporting programme of the fair, held in one of the halls.",
+      "properties": [
+        {
+          "key": "description",
+          "displayName": "Description",
+          "description": "Programme text describing the content, audience and organisers of the event.",
+          "dataType": "document",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "event_type",
+          "displayName": "Event Type",
+          "description": "Format of the event: one of \"talk\", \"workshop\" or \"panel\".",
+          "dataType": "string",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "starts_at",
+          "displayName": "Starts At",
+          "description": "Start date and time of the event (UTC).",
+          "dataType": "datetime",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "title",
+          "displayName": "Title",
+          "description": "Title of the event as printed in the programme.",
+          "dataType": "string",
+          "required": true,
+          "defaultValue": null
+        }
+      ]
+    },
+    {
+      "key": "exhibitor",
+      "displayName": "Exhibitor",
+      "description": "A company or organisation that presents its products and services at its own stand at the Meridian Industrial Technology Fair.",
+      "properties": [
+        {
+          "key": "description",
+          "displayName": "Description",
+          "description": "Catalogue text describing the company, its products and services, and what it presents at the fair.",
+          "dataType": "document",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "founded",
+          "displayName": "Founded",
+          "description": "Year in which the company was founded.",
+          "dataType": "integer",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "name",
+          "displayName": "Name",
+          "description": "Official company name of the exhibitor as shown in the fair catalogue.",
+          "dataType": "string",
+          "required": true,
+          "defaultValue": null
+        },
+        {
+          "key": "stand_number",
+          "displayName": "Stand Number",
+          "description": "Stand identifier in the form <hall number>-<row letter><position>, for example 1-A04. The first part is the hall number.",
+          "dataType": "string",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "website",
+          "displayName": "Website",
+          "description": "Public website of the exhibitor.",
+          "dataType": "string",
+          "required": false,
+          "defaultValue": null
+        }
+      ]
+    },
+    {
+      "key": "hall",
+      "displayName": "Hall",
+      "description": "An exhibition hall of the fair grounds. Each hall groups exhibitors of related topics.",
+      "properties": [
+        {
+          "key": "floor_area_sqm",
+          "displayName": "Floor Area (m²)",
+          "description": "Exhibition floor area of the hall in square metres.",
+          "dataType": "float",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "hall_number",
+          "displayName": "Hall Number",
+          "description": "Short hall number as used on signs and in stand numbers, for example \"2\".",
+          "dataType": "string",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "name",
+          "displayName": "Name",
+          "description": "Hall name including its number and theme, for example \"Hall 2 - Materials and Circular Economy\".",
+          "dataType": "string",
+          "required": true,
+          "defaultValue": null
+        }
+      ]
+    },
+    {
+      "key": "industry",
+      "displayName": "Industry",
+      "description": "An industry sector used to classify exhibitors in the fair catalogue. An exhibitor can belong to several industries.",
+      "properties": [
+        {
+          "key": "description",
+          "displayName": "Description",
+          "description": "What the industry sector covers.",
+          "dataType": "string",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "name",
+          "displayName": "Name",
+          "description": "Name of the industry sector.",
+          "dataType": "string",
+          "required": true,
+          "defaultValue": null
+        }
+      ]
+    },
+    {
+      "key": "product_group",
+      "displayName": "Product Group",
+      "description": "A category of products or services in the fair catalogue. Exhibitors list the product groups they offer.",
+      "properties": [
+        {
+          "key": "description",
+          "displayName": "Description",
+          "description": "Which products and services belong to the group.",
+          "dataType": "string",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "name",
+          "displayName": "Name",
+          "description": "Name of the product group.",
+          "dataType": "string",
+          "required": true,
+          "defaultValue": null
+        }
+      ]
+    }
+  ],
+  "relationTypes": [
+    {
+      "key": "belongs_to_industry",
+      "displayName": "Belongs To Industry",
+      "description": "An industry sector the exhibitor is classified under in the catalogue.",
+      "fromEntityTypeKey": "exhibitor",
+      "toEntityTypeKey": "industry",
+      "properties": []
+    },
+    {
+      "key": "hosts",
+      "displayName": "Hosts",
+      "description": "The exhibitor organises or co-hosts the event.",
+      "fromEntityTypeKey": "exhibitor",
+      "toEntityTypeKey": "event",
+      "properties": []
+    },
+    {
+      "key": "located_in",
+      "displayName": "Located In",
+      "description": "The hall in which the exhibitor has its stand.",
+      "fromEntityTypeKey": "exhibitor",
+      "toEntityTypeKey": "hall",
+      "properties": []
+    },
+    {
+      "key": "offers",
+      "displayName": "Offers",
+      "description": "A product group the exhibitor offers products or services in.",
+      "fromEntityTypeKey": "exhibitor",
+      "toEntityTypeKey": "product_group",
+      "properties": []
+    },
+    {
+      "key": "takes_place_in",
+      "displayName": "Takes Place In",
+      "description": "The hall in which the event is held.",
+      "fromEntityTypeKey": "event",
+      "toEntityTypeKey": "hall",
+      "properties": []
+    }
+  ],
+  "lenses": [
+    {
+      "key": "all",
+      "name": "All",
+      "description": "Unscoped lens over the whole fair: exhibitors, halls, industries, product groups and events.",
+      "aiAgents": [],
+      "savedQueries": [],
+      "retrievers": [
+        {
+          "key": "event_finder",
+          "name": "Event Finder",
+          "description": "Finds programme events by topic. Hall and event type can be required exactly; the host exhibitors' industries steer the semantic ranking.",
+          "configVersion": 1,
+          "config": {
+            "buckets": [
+              {
+                "conditions": [
+                  {
+                    "id": "hall",
+                    "mode": "hard",
+                    "path": [
+                      {
+                        "direction": "outgoing",
+                        "relationTypeKey": "takes_place_in"
+                      }
+                    ],
+                    "textFields": [
+                      "name"
+                    ],
+                    "targetField": "hall_number"
+                  },
+                  {
+                    "id": "event_type",
+                    "mode": "hard",
+                    "path": [],
+                    "textFields": [
+                      "event_type"
+                    ],
+                    "targetField": "event_type"
+                  },
+                  {
+                    "id": "host_industry",
+                    "mode": "soft",
+                    "path": [
+                      {
+                        "direction": "incoming",
+                        "relationTypeKey": "hosts"
+                      },
+                      {
+                        "direction": "outgoing",
+                        "relationTypeKey": "belongs_to_industry"
+                      }
+                    ],
+                    "textFields": [
+                      "name",
+                      "description"
+                    ],
+                    "targetField": "name"
+                  }
+                ],
+                "answerFields": [
+                  "title",
+                  "event_type",
+                  "starts_at",
+                  "description"
+                ],
+                "searchFields": [
+                  "title",
+                  "description"
+                ],
+                "entityTypeKey": "event"
+              }
+            ],
+            "threshold": 0.35,
+            "answerFieldCharacters": 800
+          }
+        },
+        {
+          "key": "fair_guide",
+          "name": "Fair Guide",
+          "description": "Searches exhibitors and events together. Hall is an exact condition for both; industry steers exhibitor ranking.",
+          "configVersion": 1,
+          "config": {
+            "buckets": [
+              {
+                "conditions": [
+                  {
+                    "id": "hall",
+                    "mode": "hard",
+                    "path": [
+                      {
+                        "direction": "outgoing",
+                        "relationTypeKey": "located_in"
+                      }
+                    ],
+                    "textFields": [
+                      "name"
+                    ],
+                    "targetField": "hall_number"
+                  },
+                  {
+                    "id": "industry",
+                    "mode": "soft",
+                    "path": [
+                      {
+                        "direction": "outgoing",
+                        "relationTypeKey": "belongs_to_industry"
+                      }
+                    ],
+                    "textFields": [
+                      "name",
+                      "description"
+                    ],
+                    "targetField": "name"
+                  }
+                ],
+                "answerFields": [
+                  "name",
+                  "stand_number",
+                  "founded",
+                  "description"
+                ],
+                "searchFields": [
+                  "name",
+                  "description"
+                ],
+                "entityTypeKey": "exhibitor"
+              },
+              {
+                "conditions": [
+                  {
+                    "id": "hall",
+                    "mode": "hard",
+                    "path": [
+                      {
+                        "direction": "outgoing",
+                        "relationTypeKey": "takes_place_in"
+                      }
+                    ],
+                    "textFields": [
+                      "name"
+                    ],
+                    "targetField": "hall_number"
+                  }
+                ],
+                "answerFields": [
+                  "title",
+                  "event_type",
+                  "starts_at"
+                ],
+                "searchFields": [
+                  "title",
+                  "description"
+                ],
+                "entityTypeKey": "event"
+              }
+            ],
+            "threshold": 0.35,
+            "answerFieldCharacters": 600
+          }
+        }
+      ]
+    },
+    {
+      "key": "visitor_guide",
+      "name": "Visitor Guide",
+      "description": "Visitor-facing view: exhibitors with their stands, halls, industries and product groups. Hides the founding year and the event programme.",
+      "includes": {
+        "entityTypes": [
+          {
+            "key": "exhibitor",
+            "properties": [
+              "name",
+              "stand_number",
+              "website",
+              "description"
+            ]
+          },
+          {
+            "key": "hall",
+            "properties": null
+          },
+          {
+            "key": "industry",
+            "properties": null
+          },
+          {
+            "key": "product_group",
+            "properties": null
+          }
+        ],
+        "relationTypes": [
+          {
+            "key": "belongs_to_industry",
+            "properties": null
+          },
+          {
+            "key": "located_in",
+            "properties": null
+          },
+          {
+            "key": "offers",
+            "properties": null
+          }
+        ]
+      },
+      "aiAgents": [
+        {
+          "key": "visitor_assistant",
+          "name": "Visitor Guide Assistant",
+          "description": "Helps fair visitors find exhibitors, stands and halls for their interests.",
+          "systemPrompt": "You are the visitor assistant of the Meridian Industrial Technology Fair 2027. Help visitors find exhibitors that match their interests and tell them where to find them. Use search to find exhibitors by topic, and search_documents with get_document to quote the relevant passage of an exhibitor description. Use list_entities and get_neighbors to resolve halls, industries and product groups of an exhibitor. Always give the exhibitor name, stand number and hall. Answer only from the data the tools return; if nothing matches, say so.",
+          "tools": [
+            "get_schema",
+            "search",
+            "search_documents",
+            "get_document",
+            "list_entities",
+            "get_entity",
+            "get_neighbors",
+            "execute_query",
+            "list_saved_queries",
+            "run_saved_query"
+          ]
+        }
+      ],
+      "savedQueries": [
+        {
+          "key": "exhibitors-in-hall",
+          "name": "Exhibitors In Hall",
+          "description": "List the exhibitors of one hall with their stand numbers, ordered by stand.",
+          "steps": [
+            {
+              "name": "main",
+              "type": "oql",
+              "oql": "MATCH (e:exhibitor)-[:located_in]->(h:hall) WHERE h.hall_number = $hall RETURN e.name, e.stand_number ORDER BY e.stand_number",
+              "entityTypeKey": null,
+              "query": null,
+              "limit": null,
+              "bindings": null
+            }
+          ],
+          "parameters": [
+            {
+              "name": "hall",
+              "description": "Hall number, for example \"2\"",
+              "dataType": "string"
+            }
+          ]
+        },
+        {
+          "key": "find-exhibitor-stands",
+          "name": "Find Exhibitor Stands",
+          "description": "Search exhibitors by topic, then return their stand numbers and halls.",
+          "steps": [
+            {
+              "name": "hits",
+              "type": "search",
+              "oql": null,
+              "entityTypeKey": "exhibitor",
+              "query": "$q",
+              "limit": 5,
+              "bindings": null
+            },
+            {
+              "name": "stands",
+              "type": "oql",
+              "oql": "MATCH (e:exhibitor)-[:located_in]->(h:hall) WHERE e._id IN $ids RETURN e.name, e.stand_number, h.name",
+              "entityTypeKey": null,
+              "query": null,
+              "limit": null,
+              "bindings": {
+                "ids": "{{hits._id}}"
+              }
+            }
+          ],
+          "parameters": [
+            {
+              "name": "q",
+              "description": "What the visitor is looking for",
+              "dataType": "string"
+            }
+          ]
+        }
+      ],
+      "retrievers": [
+        {
+          "key": "exhibitor_finder",
+          "name": "Exhibitor Finder",
+          "description": "Finds exhibitors by what they do. A hall can be required exactly; industry and product group steer the semantic ranking.",
+          "configVersion": 1,
+          "config": {
+            "buckets": [
+              {
+                "conditions": [
+                  {
+                    "id": "hall",
+                    "mode": "hard",
+                    "path": [
+                      {
+                        "direction": "outgoing",
+                        "relationTypeKey": "located_in"
+                      }
+                    ],
+                    "textFields": [
+                      "name"
+                    ],
+                    "targetField": "hall_number"
+                  },
+                  {
+                    "id": "industry",
+                    "mode": "soft",
+                    "path": [
+                      {
+                        "direction": "outgoing",
+                        "relationTypeKey": "belongs_to_industry"
+                      }
+                    ],
+                    "textFields": [
+                      "name",
+                      "description"
+                    ],
+                    "targetField": "name"
+                  },
+                  {
+                    "id": "product_group",
+                    "mode": "soft",
+                    "path": [
+                      {
+                        "direction": "outgoing",
+                        "relationTypeKey": "offers"
+                      }
+                    ],
+                    "textFields": [
+                      "name",
+                      "description"
+                    ],
+                    "targetField": "name"
+                  }
+                ],
+                "answerFields": [
+                  "name",
+                  "stand_number",
+                  "website",
+                  "description"
+                ],
+                "searchFields": [
+                  "name",
+                  "description"
+                ],
+                "entityTypeKey": "exhibitor"
+              }
+            ],
+            "threshold": 0.35,
+            "answerFieldCharacters": 800
+          }
+        }
+      ]
+    }
+  ]
+}

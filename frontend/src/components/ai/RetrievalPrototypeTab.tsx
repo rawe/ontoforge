@@ -299,9 +299,19 @@ function RetrieverEditor({ ontologyKey, lensKey, catalog }: { ontologyKey: strin
               return <div key={condition.id} className="space-y-2 rounded-lg border p-3">
                 <div className="flex items-start gap-2"><div className="min-w-0 flex-1 text-sm font-medium">{choice.label}<p className="mt-1 text-xs font-normal text-muted-foreground">{condition.path.map((p) => catalog.relationTypes.find((r) => r.key === p.relationTypeKey)?.displayName ?? p.relationTypeKey).join(' · ') || 'Property of this result'}</p></div>
                   <Button size="icon" variant="ghost" disabled={busy} aria-label={`Remove condition ${choice.label}`} className="size-6" onClick={() => updateBucket({ ...bucket, conditions: bucket.conditions.filter((_, n) => n !== i) })}><Trash2 className="size-3.5" /></Button></div>
-                <div className="flex gap-2"><select aria-label={`Search mode ${choice.label}`} className={`${selectClass} min-w-0 flex-1`} value={condition.mode} disabled={busy} onChange={(e) => updateCondition(i, { mode: e.target.value as 'hard' | 'soft' })}><option value="hard">Must match (exact)</option><option value="soft">By meaning</option></select>
-                  {condition.mode === 'hard' && <label className="min-w-0 flex-1 space-y-1 text-xs"><span>Compare field</span><select aria-label={`Comparison field ${choice.label}`} className={`${selectClass} w-full`} value={condition.targetField} disabled={busy} onChange={(e) => updateCondition(i, { targetField: e.target.value })}>{scalarProperties(choice.target).map((p) => <option key={p.key} value={p.key}>{p.displayName}</option>)}</select></label>}</div>
-                {condition.mode === 'soft' ? <><Fields properties={semanticProperties(choice.target)} selected={condition.textFields} disabled={busy} onChange={(textFields) => updateCondition(i, { textFields })} /><p className="text-xs text-muted-foreground">These category texts provide additional candidates and contribute to their ranking.</p></> : <p className="text-xs text-muted-foreground">{condition.path.length ? `When asked, the linked ${choice.target.displayName} must match exactly.` : 'When asked, this field must match exactly.'} Compare field selects the actual value to check, not an embedding field.</p>}
+                {/* Label column + full-width controls: rows stay aligned at every panel width and options stay readable. */}
+                <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2 text-xs">
+                  <span className="text-muted-foreground">Match</span>
+                  <select aria-label={`Search mode ${choice.label}`} className={`${selectClass} w-full`} value={condition.mode} disabled={busy} onChange={(e) => updateCondition(i, { mode: e.target.value as 'hard' | 'soft' })}><option value="hard">Must match (exact)</option><option value="soft">By meaning</option></select>
+                  {condition.mode === 'hard' ? <>
+                    <span className="text-muted-foreground">Field</span>
+                    <select aria-label={`Comparison field ${choice.label}`} className={`${selectClass} w-full`} value={condition.targetField} disabled={busy} onChange={(e) => updateCondition(i, { targetField: e.target.value })}>{scalarProperties(choice.target).map((p) => <option key={p.key} value={p.key}>{p.displayName}</option>)}</select>
+                  </> : <>
+                    <span className="self-start pt-0.5 text-muted-foreground">Texts</span>
+                    <Fields properties={semanticProperties(choice.target)} selected={condition.textFields} disabled={busy} onChange={(textFields) => updateCondition(i, { textFields })} />
+                  </>}
+                </div>
+                <p className="text-xs text-muted-foreground">{condition.mode === 'soft' ? 'These texts provide additional candidates and contribute to their ranking.' : `${condition.path.length ? `When asked, the linked ${choice.target.displayName} must match exactly` : 'When asked, this field must match exactly'}; the field is compared as a value, not embedded.`}</p>
               </div>
             })}
             <details className="rounded border p-3 text-sm"><summary className="cursor-pointer">Add another condition</summary><div className="mt-3 space-y-2"><label className="block text-xs">Select relation path<select className={`${selectClass} mt-1 w-full`} disabled={busy} value="" onChange={(e) => {

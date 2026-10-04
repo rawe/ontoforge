@@ -62,10 +62,11 @@ export function RetrieverSaveBar({ dirty, canSave, busy, onSave, onDiscard, onSa
 }) {
   return <div className={`mb-4 space-y-2 rounded-lg border p-3 ${dirty ? 'border-amber-500/40 bg-amber-500/5' : ''}`}>
     <p className="text-xs">{dirty ? <><b>Unsaved changes.</b> Save them to ask questions, or discard them.</> : <span className="text-muted-foreground">All changes saved. Questions use this configuration.</span>}</p>
-    <div className="flex flex-wrap gap-2">
+    {/* A fixed grid instead of wrapping flex: the panel is often too narrow for three buttons in one row. */}
+    <div className="grid grid-cols-2 gap-2">
       <Button size="sm" className="gap-1" disabled={busy || !dirty || !canSave} onClick={onSave}><Save className="size-3.5" />Save</Button>
-      <Button size="sm" variant="ghost" className="gap-1" disabled={busy || !dirty} onClick={onDiscard}><Undo2 className="size-3.5" />Discard</Button>
-      <Button size="sm" variant="outline" className="ml-auto gap-1" disabled={busy || !canSave} onClick={onSaveAsCopy} title="Save the current configuration as a new retriever; this one stays as saved"><Copy className="size-3.5" />Save as copy</Button>
+      <Button size="sm" variant="outline" className="gap-1" disabled={busy || !dirty} onClick={onDiscard}><Undo2 className="size-3.5" />Discard</Button>
+      <Button size="sm" variant="secondary" className="col-span-2 gap-1" disabled={busy || !canSave} onClick={onSaveAsCopy} title="Save the current configuration as a new retriever; this one stays as saved"><Copy className="size-3.5" />Save as copy</Button>
     </div>
   </div>
 }
@@ -137,7 +138,7 @@ export function RetrieverMore({ ontologyKey, lensKey, profile, config, needsRepa
         <Button size="sm" variant="outline" disabled={locked || !importText.trim()} onClick={reviewImport}>Review import</Button></section>
       {otherLenses.length > 0 && <section className="space-y-2"><h3 className="font-medium">Another lens</h3><p className="text-muted-foreground">Copies or moves the saved version, under the same key, to another lens of this ontology. That lens must show every type and field it uses.</p>
         <select className={`${selectClass} w-full`} aria-label="Target lens" value={targetLensKey} disabled={locked} onChange={(event) => setTargetLensKey(event.target.value)}><option value="">Choose a lens …</option>{otherLenses.map((lens) => <option key={lens.key} value={lens.key}>{lens.name}</option>)}</select>
-        <div className="flex gap-2">{(['copy', 'move'] as const).map((kind) => <Button key={kind} size="sm" variant="outline" disabled={locked || !targetLensKey} onClick={() => setConfirm({
+        <div className="grid grid-cols-2 gap-2">{(['copy', 'move'] as const).map((kind) => <Button key={kind} size="sm" variant="outline" disabled={locked || !targetLensKey} onClick={() => setConfirm({
           title: kind === 'copy' ? 'Copy to another lens?' : 'Move to another lens?', label: kind === 'copy' ? 'Copy' : 'Move',
           description: `${profile.name} (${profile.key}) → lens ${targetLensKey}. ${kind === 'copy' ? 'This retriever stays here.' : 'It is removed from this lens.'} Unsaved changes are not included.`,
           run: () => work(async (signal) => {

@@ -14,6 +14,9 @@
  *   statements uses it, reads included; there is deliberately no bare
  *   `withClient`.
  *
+ * Besides them, `listen` holds a dedicated connection for `LISTEN` — the
+ * search worker's wake-up — and issues no other statement.
+ *
  * Every door takes an optional `namespace` — the ontology binding. A
  * bound call runs inside a transaction whose first statement is
  * `SET LOCAL search_path TO <namespace>, public`, so every unqualified
@@ -77,14 +80,7 @@ let pool: pg.Pool | null = null;
  * Pool knobs stay at `pg` defaults.
  */
 export async function initPool(): Promise<void> {
-  const url = new URL(settings.DB_URI);
-  pool = new pg.Pool({
-    host: url.hostname,
-    port: url.port === "" ? 5432 : Number(url.port),
-    database: url.pathname.replace(/^\//, ""),
-    user: settings.DB_USER,
-    password: settings.DB_PASSWORD,
-  });
+  pool = new pg.Pool(connectionConfig());
   try {
     await pool.query("SELECT 1");
   } catch (exc) {
@@ -93,6 +89,61 @@ export async function initPool(): Promise<void> {
     await failed.end().catch(() => undefined);
     throw toStoreError(exc);
   }
+}
+
+/** The discrete connection settings parsed from the config surface. */
+function connectionConfig(): pg.ClientConfig {
+  const url = new URL(settings.DB_URI);
+  return {
+    host: url.hostname,
+    port: url.port === "" ? 5432 : Number(url.port),
+    database: url.pathname.replace(/^\//, ""),
+    user: settings.DB_USER,
+    password: settings.DB_PASSWORD,
+  };
+}
+
+/** A `LISTEN` subscription on a connection of its own. */
+export interface Listener {
+  /** True once closed or once the connection was lost. */
+  readonly closed: boolean;
+  close(): Promise<void>;
+}
+
+/**
+ * Door three: `LISTEN` on one channel over a dedicated connection — a
+ * pooled one would be handed back with the subscription on it. Each
+ * notification's payload goes to `onNotify`. A lost connection is logged
+ * and ends the subscription (`closed`); the caller subscribes again.
+ */
+export async function listen(channel: string, onNotify: (payload: string) => void): Promise<Listener> {
+  const client = new pg.Client(connectionConfig());
+  let closed = false;
+  client.on("notification", (message) => {
+    if (message.channel === channel) onNotify(message.payload ?? "");
+  });
+  client.on("error", (exc) => {
+    if (!closed) console.warn(`LISTEN ${channel} connection lost: ${exc.message}`);
+    closed = true;
+    void client.end().catch(() => undefined);
+  });
+  try {
+    await client.connect();
+    await client.query(`LISTEN ${quoteIdent(channel)}`);
+  } catch (exc) {
+    await client.end().catch(() => undefined);
+    throw translate(exc);
+  }
+  return {
+    get closed() {
+      return closed;
+    },
+    async close() {
+      if (closed) return;
+      closed = true;
+      await client.end().catch(() => undefined);
+    },
+  };
 }
 
 export async function closePool(): Promise<void> {

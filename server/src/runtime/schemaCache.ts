@@ -12,6 +12,11 @@
  * (wired in sessions 02/03). Wholesale rather than selective, because one
  * schema change can affect many lenses and rebuilding is cheap.
  *
+ * Beside the lenses it caches, per ontology, the search context: the
+ * index definitions with the dependency map derived from them
+ * (`core/searchDependencies.ts`), cleared with the rest — and by every
+ * change of the index definitions (`invalidateSearchContext`).
+ *
  * Scope filtering implements the four-row scoping matrix of
  * `docs/capabilities/ontology-lenses.md#the-scoping-matrix`, including the
  * inferred-relations row and the silent skipping of inclusion keys that no
@@ -20,8 +25,12 @@
 
 import type { AgentConfig, SavedQueryConfig, SavedQueryParameter, StepConfig } from "../core/ai.js";
 import { NotFoundError } from "../core/exceptions.js";
-import type { RuntimeStore } from "../core/ports.js";
+import type { RuntimeStore, SearchIndexRecord, SearchIndexStore } from "../core/ports.js";
 import type { PropertyDef } from "../core/schemas.js";
+import {
+  deriveSearchDependencies,
+  type SearchDependencies,
+} from "../core/searchDependencies.js";
 
 export interface EntityTypeDef {
   key: string;
@@ -68,11 +77,61 @@ interface InclusionRow {
   properties: string[] | null;
 }
 
-const loadedSchemaCache = new Map<string, LoadedSchema>();
+/** One ontology's search indices against its full schema. */
+export interface SearchContext {
+  /** Every type and property, unscoped. */
+  schema: Pick<SchemaCacheValue, "entityTypes" | "relationTypes">;
+  indices: SearchIndexRecord[];
+  dependencies: SearchDependencies;
+}
 
-/** Clear the whole loaded-schema cache. Called by every modeling mutation. */
+const loadedSchemaCache = new Map<string, LoadedSchema>();
+const searchContextCache = new Map<string, SearchContext>();
+
+/** Clear the whole loaded-schema cache, search contexts included. Called
+ * by every modeling mutation. */
 export function invalidateLoadedSchemaCache(): void {
   loadedSchemaCache.clear();
+  searchContextCache.clear();
+}
+
+/** Forget the search context of one ontology (or of all) — after a
+ * change of its index definitions. */
+export function invalidateSearchContext(ontologyKey?: string): void {
+  if (ontologyKey === undefined) {
+    searchContextCache.clear();
+  } else {
+    searchContextCache.delete(ontologyKey);
+  }
+}
+
+/** The search context of an ontology: from the cache, or read from its
+ * search-index store on a miss. */
+export async function loadSearchContext(
+  ontologyKey: string,
+  store: SearchIndexStore,
+): Promise<SearchContext> {
+  const cached = searchContextCache.get(ontologyKey);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const context = await loadSearchContextUncached(store);
+  searchContextCache.set(ontologyKey, context);
+  return context;
+}
+
+/** The cache-free read: index definitions and the full schema, now. */
+export async function loadSearchContextUncached(store: SearchIndexStore): Promise<SearchContext> {
+  const [indices, raw] = await Promise.all([store.listIndices(), store.readFullSchema()]);
+  const schema = buildTypesFromRaw(raw.entityTypes as Row[], raw.relationTypes as Row[]);
+  return {
+    schema,
+    indices,
+    dependencies: deriveSearchDependencies(
+      indices.map(({ searchIndexId, definition }) => ({ searchIndexId, definition })),
+      schema,
+    ),
+  };
 }
 
 /**
@@ -196,11 +255,21 @@ export function buildSchemaCacheFromRaw(
   entityTypesRaw: Row[],
   relationTypesRaw: Row[],
 ): SchemaCacheValue {
-  const cache: SchemaCacheValue = {
+  return {
     lensId: lens.lensId as string,
     lensKey: lens.key as string,
     lensName: lens.name as string,
     lensDescription: (lens.description as string | undefined) ?? null,
+    ...buildTypesFromRaw(entityTypesRaw, relationTypesRaw),
+  };
+}
+
+/** The types of a schema read, keyed by type key. */
+function buildTypesFromRaw(
+  entityTypesRaw: Row[],
+  relationTypesRaw: Row[],
+): Pick<SchemaCacheValue, "entityTypes" | "relationTypes"> {
+  const cache: Pick<SchemaCacheValue, "entityTypes" | "relationTypes"> = {
     entityTypes: {},
     relationTypes: {},
   };

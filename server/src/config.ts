@@ -21,6 +21,10 @@ export interface Settings {
   DOCUMENT_CHUNK_SIZE: number;
   DOCUMENT_CHUNK_OVERLAP: number;
 
+  SEARCH_MAX_ATTEMPTS: number;
+  SEARCH_WORKER_BATCH: number;
+  SEARCH_POLL_MS: number;
+
   AI_PROVIDER: string | null;
   AI_MODEL: string;
   AI_BASE_URL: string;
@@ -102,6 +106,13 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
 
     DOCUMENT_CHUNK_SIZE: int(env, "DOCUMENT_CHUNK_SIZE", 1500),
     DOCUMENT_CHUNK_OVERLAP: int(env, "DOCUMENT_CHUNK_OVERLAP", 200),
+
+    // The search worker: failed attempts before an item counts as failed,
+    // queue items claimed per batch, and the polling interval that backs up
+    // the wake-up notifications.
+    SEARCH_MAX_ATTEMPTS: positiveInt(env, "SEARCH_MAX_ATTEMPTS", 5),
+    SEARCH_WORKER_BATCH: positiveInt(env, "SEARCH_WORKER_BATCH", 64),
+    SEARCH_POLL_MS: positiveInt(env, "SEARCH_POLL_MS", 5000),
 
     AI_PROVIDER: optStr(env, "AI_PROVIDER"),
     AI_MODEL: str(env, "AI_MODEL", "qwen3:8b"),

@@ -371,8 +371,9 @@ function managedDefinition(
  * entries — with the model id (semantic) or the language set (keyword),
  * the identity of a generation. SHA-256 hex over canonical JSON (sorted
  * keys) of the content parts only: key, name, description and the enabled
- * switches change no entry. `semantic.template` belongs to the semantic
- * representation alone.
+ * switches change no entry. Templates and group labels belong to the
+ * semantic representation alone: keyword entries hold values only
+ * (`core/searchComposition.ts`).
  *
  * The definition is hashed as given — schema inputs to the rendered text
  * (display names, the name property behind a null header) are not part of
@@ -391,8 +392,7 @@ export function definitionHash(
       direction: group.direction,
       fields: group.fields,
       target: group.target,
-      label: group.label,
-      template: group.template,
+      ...(representation === "semantic" ? { label: group.label, template: group.template } : {}),
     })),
   };
   if (representation === "semantic") {

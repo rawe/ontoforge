@@ -78,7 +78,7 @@ never looks inside one.
 rules, schema validation, transfer, search-data rebuild.
 
 **Runtime** owns one ontology's instance data: entity and relation lifecycle, traversal,
-documents, search, query execution, saved-query pipelines, agents.
+documents, search, search indexing, query execution, saved-query pipelines, agents.
 
 **Server** carries the deployment's capability report — which optional providers this
 deployment has. It belongs to neither modeling nor runtime and is the only surface that
@@ -86,7 +86,9 @@ is not ontology-scoped.
 
 **Core** owns what the others need and none should define twice: the persistence port,
 the exception taxonomy, the data-type and text-search language enumerations, embedding and
-decision-model provider abstractions, and OQL parsing and validation.
+decision-model provider abstractions, OQL parsing and validation, and the storage-free
+parts of search indexing — entry composition and the map of which writes affect which
+entries.
 
 **Runtime never depends on modeling.** Everything runtime needs about the schema, it
 reads through the port. This keeps the schema a *value* to runtime rather than a service
@@ -228,6 +230,11 @@ wholesale by any modeling mutation, in any ontology, and by deleting an ontology
 the registry. Wholesale rather than selective, because a single schema change can affect
 many lenses and the cost of rebuilding is small.
 
+Beside the lenses, the cache holds one entry per ontology for
+[search indexing](#search-indexing): its index definitions and the map, derived from them
+and the schema, of which writes affect which entries. It is cleared with the rest, and by
+any change of the ontology's index definitions.
+
 It is **per process**. Multiple server instances against one database will not see each
 other's schema changes until each rebuilds — a real constraint on horizontal scaling that
 no interface currently exposes.
@@ -245,7 +252,8 @@ A runtime write, which is the longest path:
     → reject unknown properties; check required; apply defaults
     → coerce each value to its declared data type
     → embed text if a provider is configured
-    → cross the persistence port
+    → derive the search work the write causes, from the cached search context
+    → cross the persistence port (the write and its search work, one transaction)
     → adapter compiles and executes
     → filter response to the scoped properties
     → stub documents, apply field projection
@@ -260,6 +268,41 @@ rules rather than implementation choices:
 **Coercion is strict.** Values are converted, never guessed. What each data type converts
 and what it refuses is in
 [capabilities/schema-modeling.md](capabilities/schema-modeling.md#data-types).
+
+## Search indexing
+
+An adapter that stores search indices keeps, per index, entries composed from the
+current state of entities — their own fields, their relations together with the entities
+at the other end, and the passages of their documents. Entries are built in the
+background, never on the request path, so search over them is eventually consistent
+([decisions.md](decisions.md#storage)). On an adapter that stores no search indices,
+writes carry no search work and no worker runs.
+
+**Every write queues its work in its own transaction.** Entity and relation writes —
+create, update, delete, document edits — hand the store, with the write, the search work
+they cause: which parts of which entities to compose again. The store queues it in the
+write's transaction, so the work exists exactly when the write commits; the queue lives in
+the same database, behind the persistence port. A deletion removes the affected entries
+with the write instead of queueing anything. A change no index reads queues nothing.
+
+**A worker in every server process drains the queue.** It claims a batch under a
+time-limited lease — items another process holds are skipped, so any number of processes
+share one queue — and composes each claimed part's text from current state, outside any
+transaction. It skips parts whose text is unchanged, embeds the rest in provider batches,
+writes the entries and completes the claim. A write that queues an item again while it is
+claimed is never lost: completing the older claim leaves it queued. A failed batch is
+retried with exponentially growing delays; after the configured number of attempts its
+items count as failed and wait for a rebuild or a new write of their entity. The worker
+sleeps until the database notifies it that work was queued in any process, and polls at a
+configured interval in case a notification is missed.
+
+**Entries belong to generations.** Each index is built once per representation —
+semantic and keyword — as a generation identified by the definition it was built from
+and, for semantic entries, the embedding model, for keyword entries the keyword language
+set. When no generation matches, a new one is built from a full backfill beside the
+active one, which keeps serving until the new one is complete and takes its place in one
+step. An entry's semantic text is labelled with the schema's display names, unless the
+index renders it from a template; its keyword text holds values only ([decisions.md](decisions.md#interfaces)).
 
 ## Error model
 
@@ -306,9 +349,15 @@ Ordered, and failure at any step prevents serving:
 5. If embeddings are enabled, reconcile vector index widths against the provider for
    every registered ontology and warn on mismatch — see
    [capabilities/search.md](capabilities/search.md).
-6. Start both MCP servers.
+6. Start the [search indexing](#search-indexing) worker, if the adapter stores search
+   indices. It runs in the background: it first removes what interrupted generation
+   removals left behind and brings every ontology's generations in line with the current
+   definitions, embedding model and keyword language sets — a changed model or language
+   set starts its new generations here — then drains the queue. Its failures are logged
+   and never prevent serving; at shutdown it stops after the pass it is in.
+7. Start both MCP servers.
 
-The registry walks in steps 2 and 5 do nothing when no ontology exists — a zero-ontology
+The registry walks in steps 2, 5 and 6 do nothing when no ontology exists — a zero-ontology
 server boots clean. Note step 5 warns and does not repair — deliberately, for the reason
 given in [decisions.md](decisions.md#behaviour). Rebuild is where repair happens, one
 ontology at a time.
@@ -323,6 +372,7 @@ per-ontology deployment configuration.
 | Storage | Which adapter, and how to reach the database | Server cannot start |
 | Embedding | Provider, model, endpoint, credential, vector width, request batching | Semantic search unavailable |
 | Documents | Chunk size and overlap | Defaults apply |
+| Search indexing | Attempts before a queued item counts as failed, worker batch size, polling interval | Defaults apply |
 | Language model | Provider, model, endpoint, credential | AI capabilities unavailable |
 | Decision model | Endpoint, model, credential | Entity identity comparison unavailable |
 | Public URL | Base address advertised in agent cards | Cards advertise a local address |

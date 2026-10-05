@@ -328,6 +328,11 @@ function searchStorageStatements(): string[] {
   last_error    text,
   CONSTRAINT search_queue_pk PRIMARY KEY (generation_id, entity_id, part_kind, group_no, part_id)
 )`,
+  // The worker claims due items; a deleted entity or relation takes its
+  // queued items along.
+  `CREATE INDEX search_queue_due_idx ON search_queue (not_before)`,
+  `CREATE INDEX search_queue_entity_idx ON search_queue (entity_id)`,
+  `CREATE INDEX search_queue_part_idx ON search_queue (part_id)`,
 
   // One partition per generation (se_<generation uuid hex>). The vector
   // column carries no width: each semantic partition's HNSW index casts to

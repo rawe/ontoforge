@@ -14,8 +14,8 @@ import type { KeywordPropertySegment } from "../../core/ports.js";
 import type { PropertyDef } from "../../core/schemas.js";
 import { cpLength, cpSlice } from "../codePoints.js";
 
-// nomic-embed-text has an 8192-token limit; ~4 chars/token → 30000 chars
-// as a safe threshold.
+// Embedding models commonly take up to 8192 tokens (bge-m3 does); ~4
+// chars/token → 30000 chars as a safe threshold.
 export const MAX_TEXT_CHARS = 30_000;
 
 /**

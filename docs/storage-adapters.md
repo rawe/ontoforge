@@ -359,7 +359,10 @@ divergences below.
 in the same spirit as the declarations above; the server's feature report carries it
 ([interfaces.md](interfaces.md)). Only an adapter declaring support provides the store,
 and asking one that declares none for it is a programming error, not a domain condition.
-Registry delete removes everything the store holds.
+The runtime store of such an adapter also hands out the search-index store of its own
+ontology, so a write can plan its search work without a second binding. Registry delete
+removes everything the store holds. The pipeline that uses this store is described in
+[architecture.md](architecture.md#search-indexing).
 
 **Settings.** One per ontology, read and replaced whole: the keyword language set every
 keyword generation stems in, and a map of switched-off indices the store keeps without
@@ -383,11 +386,12 @@ entries go.
 
 | Operation | Obligation |
 |---|---|
-| Create | Start a building generation. One still building for the same index and representation is superseded: it retires. Absent result when the index does not exist. |
+| Create | Start a building generation. One still building for the same index and representation is superseded: it retires. Given a root entity type to backfill, queue every entity of that type — one whole-entity item each — in the same transaction and set the total to their count, so a generation never appears with a queue not yet filled. Absent result when the index does not exist. |
 | Read, list | One by id; all, or those of one index, oldest first. |
 | Record progress | Add to the counters. |
 | Finish | Make a building generation the active one in a single step: the previous active one retires. False when the generation is no longer building. |
 | Fail | Mark a building generation failed. False when it is no longer building. |
+| Retire | Retire a building or active generation no definition wants any more. False when it is neither. |
 | Sweep | Remove the entry storage of every generation neither building nor ready — what an interrupted removal left behind. Idempotent. |
 
 **Entries.** An entry is identified within its generation by entity id, part kind — the
@@ -396,7 +400,8 @@ part id: the relation id of a relation part, the chunk ordinal of a passage. It 
 the relation type and target of a relation part, the code-point offset and length of a
 passage, its text, the text's hash and, in a semantic generation, its vector. The text
 arrives capped at 8,000 code points and the hash — SHA-256 over text, representation
-and model id, as hex — is computed above the port; the store keeps both as given. A
+and the generation's model id (semantic) or keyword language set (keyword), as hex — is
+computed above the port; the store keeps both as given. A
 keyword generation receives no vector: the store derives the keyword representation from
 the text in the generation's language set.
 
@@ -405,7 +410,46 @@ identity, refused — false, nothing written — once the generation is neither 
 nor ready; a vector whose width differs from the generation's is a programming error.
 Read the stored hashes of given parts. Delete given parts; delete an entity's parts of
 one kind and group except a list to keep. Delete an entity's entries, or a relation's,
-in every generation of the ontology.
+in every generation of the ontology. The worker composes against the ontology's full
+schema, which the store reads for it — every type and property, unscoped.
+
+**Search work of a write.** Every entity and relation write of the runtime store — create,
+update, delete — takes an optional search write plan, derived above the port from the
+index definitions. It names, by index, the parts to compose again: parts of one entity;
+the part of one relation, owned by its source end or its target end; and the parts of
+every relation of a type that has a given entity at its other end — the fan-out of a
+changed target, resolved by the adapter in one step. It also names an entity or relation
+whose deletion removes its entries. An adapter that stores search indices applies the plan
+**in the write's own transaction**: an index stands for every building or ready generation
+of it, and the work is queued exactly when the write commits — only when a create or
+update touched a row. A deletion removes the entity's or relation's entries and queued
+work in every generation, together with those of the relations that cascade with a
+deleted entity, so it is applied before the rows go. An adapter that stores no search
+indices receives no plan.
+
+**The queue.** A queued item names a generation, an entity and a part — one part, or
+the whole entity (an entity created, a field every part renders changed, a backfill); a
+passage item with an empty part id stands for all of the entity's passages, re-chunked.
+Queueing an item already queued refreshes it instead of duplicating it: it is due at once,
+its attempts start afresh, and it carries a new token. The worker's surface:
+
+| Operation | Obligation |
+|---|---|
+| Queue a type | Queue every entity of a type, as one whole-entity item each, into the given generations — those neither building nor ready are skipped. Returns the count. |
+| Claim | Lease up to a limit of claimable items — due, not leased or with an expired lease, attempts below the maximum, of a building or ready generation — keyword items first, then oldest first; semantic items only of generations of the given model id. Items another claim holds are skipped, never waited for. The lease commits with the claim. Each item carries its attempts and its token. |
+| Complete | Remove claimed items — except one queued again since its claim (its token changed): that one stays, released for the next claim. A write during a lease is never lost. |
+| Fail | Record a failed attempt — attempts plus one, the error, the lease released, the item held back by its delay. An item queued again since its claim is not charged. |
+| Statistics | Per generation with queued items: pending and failed counts and a few distinct last errors. |
+
+An item whose attempts reached the maximum is failed for good and never claimed again; a
+new write of its entity, or a rebuild, gives it a fresh start. The delays, the maximum and
+the lease length are the caller's.
+
+**Wake-ups.** The adapter offers a subscription that calls back, with the ontology key,
+whenever search work was queued in any server process on the same database — after the
+queueing transaction commits, never before. A subscription may end on its own, a lost
+connection for instance; it then says so and the subscriber subscribes again. Polling
+above the port covers the time without one.
 
 ## Obligations beyond storage
 
@@ -566,8 +610,9 @@ multi-ontology conformance tier runs on PostgreSQL only.
   composed property text and the language without indexing them and stores chunks without
   vectors. The 32766-byte indexed-value ceiling does not apply to the composed text,
   which is not indexed; individual vector filter metadata values retain their ceiling.
-- **Search indices on Neo4j.** The adapter declares no support and provides no
-  search-index store.
+- **Search indices on Neo4j.** The adapter declares no support: it provides no
+  search-index store and no wake-ups, its writes carry no search work, and no worker
+  runs.
 - **Path and relation existence conditions on search.** PostgreSQL declares support and
   evaluates them in both rankings; Neo4j declares none, so a query path or a relation
   existence test on search is rejected above the port with a validation error naming the
@@ -764,7 +809,7 @@ Five tables per namespace hold search indices:
 | `search_settings` | One row, pinned by a check on its boolean key: the keyword language set as an array, the switched-off indices as `jsonb` |
 | `search_index` | One row per index: key, kind, the root entity type as a reference with delete cascade, the definition as `jsonb` |
 | `search_generation` | One row per generation: index reference with delete cascade, representation, definition hash, model id and dimensions or languages, state, counters. Two partial unique indexes — one over `building` rows, one over `ready` — allow one of each per index and representation |
-| `search_queue` | A generation's parts awaiting composition, keyed like an entry, with attempts, earliest retry, lease and last error; deleted with its generation, and cleared when the generation retires or fails |
+| `search_queue` | A generation's parts awaiting composition, keyed like an entry, with the time it was last queued, attempts, earliest retry, lease and last error; deleted with its generation, and cleared when the generation retires or fails. B-tree indexes on the earliest retry, the entity id and the part id |
 | `search_entry` | The entries, list-partitioned by generation |
 
 An entry row carries its identity — generation, entity, part kind, group number, part id,
@@ -800,7 +845,37 @@ Each generation's entries live in a table of its own (naming, above), which join
   concurrent detach cannot run in a transaction. What an interruption leaves, and what a
   cascade leaves — deleting an index or its root entity type removes rows, not tables —
   the sweep collects: every `se_` table whose generation is neither building nor ready.
-  Deleting an index runs it.
+  Deleting an index runs it. **Retire** sets the state and deletes the queued work in one
+  transaction; the table goes the same best-effort way.
+
+The queue works in plain SQL on `search_queue`:
+
+- **Enqueue** is `INSERT … ON CONFLICT DO UPDATE` on the item's key: a conflicting row
+  gets a new `enqueued_at` from `clock_timestamp()`, zero attempts, an earliest retry of
+  now and no error, and keeps its lease. `enqueued_at`, read back as text, is the claim
+  token. Each part of a write plan is one `INSERT … SELECT` joined to the index's
+  `building` and `ready` generations — relation parts and the fan-out also to `relation`,
+  which yields the owning end. A create's backfill is one `INSERT … SELECT` over `entity`
+  by type key, in the creating transaction.
+- **A write plan runs on the write's transaction.** The runtime store opens one
+  transaction for the instance statement and its plan: after the statement, and only when
+  it touched a row, for creates and updates; before it for deletes, while the relations
+  that cascade with a deleted entity still exist — their entries and queued items are
+  found through them.
+- **Claim** is one statement: a CTE selects the claimable rows joined to their
+  generation, ordered keyword first and then by `enqueued_at`, with the limit and
+  `FOR UPDATE SKIP LOCKED` on the queue rows; the `UPDATE` sets `lease_until` and returns each row's attempts
+  and token. It commits on its own, so no transaction is held while the worker composes
+  and calls the embedding provider.
+- **Complete** deletes the claimed rows whose `enqueued_at` still equals the token and
+  clears the lease of the rest; **fail** increments attempts, records the error and sets
+  the earliest retry on the rows whose token still matches, and clears every claimed
+  row's lease.
+- **Wake-ups** are `pg_notify('ontoforge_search_work', <ontology key>)`, issued in every
+  transaction that queued something; PostgreSQL delivers the notification only at commit.
+  One channel serves the whole database. Each process `LISTEN`s on a dedicated connection
+  outside the pool — a pooled connection would go back to the pool with the subscription
+  on it; a lost connection is logged and ends the subscription.
 
 ## Index inventory
 

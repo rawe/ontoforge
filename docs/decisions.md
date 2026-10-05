@@ -190,6 +190,17 @@ enumeration) validate in the service; the database provides no backstop for them
 exception: the PostgreSQL search-index tables check their closed vocabularies — index
 kind, representation, generation state.
 
+**Search-index entries are built asynchronously; search over them is eventually
+consistent.** A write commits without its semantic or keyword entries; they follow in the
+background, so building entries — embedding included — never delays or fails the write
+that caused them.
+
+**Search indexing is a transactional outbox drained by an in-process worker, behind the
+persistence port.** Every entity and relation write queues the search work it causes in
+its own transaction, in the same database; a worker in every server process claims and
+processes it. No external queue or broker. One database and one transaction keep the
+work exactly as durable as the write.
+
 **Documentation above the port describes the behaviour of the default
 deployment.** Adapter-specific deviations are documented with that adapter in
 storage-adapters.md, never as hedges in the shared documents.
@@ -291,7 +302,8 @@ participation credit without treating missing measurements as negative evidence.
 schema-string value segments separately from labeled semantic text, so keys cannot count
 as matching content and keyword attribution can name contributing values. The values-only
 correction applies to keyword and hybrid property retrieval, including single-type queries;
-this is distinct from preserving single-type fusion.
+this is distinct from preserving single-type fusion. Search-index entries follow the same
+rule: an entry's keyword text holds values only, its semantic text is labelled.
 
 **Search evidence does not establish answer sufficiency.** Keep search candidates
 available without an automatic similarity floor over REST, where a caller may set an

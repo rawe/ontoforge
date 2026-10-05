@@ -238,6 +238,9 @@ The backend reads settings from environment variables (or a `.env` file in `serv
 | `DB_USER` | `postgres` | Database username |
 | `DB_PASSWORD` | `ontoforge_dev` | Database password |
 | `PORT` | `8000` | HTTP listen port |
+| `SEARCH_MAX_ATTEMPTS` | `5` | Failed attempts before a queued search-indexing item counts as failed — a rebuild or a new write of its entity retries it (positive integer; PostgreSQL only) |
+| `SEARCH_WORKER_BATCH` | `64` | Queued search-indexing items the background worker claims per batch (positive integer; PostgreSQL only) |
+| `SEARCH_POLL_MS` | `5000` | Milliseconds the background worker waits between queue checks when no wake-up notification arrives (positive integer; PostgreSQL only) |
 
 In Docker, `DB_URI` is set to `postgresql://postgres:5432/ontoforge` automatically via `docker-compose.yml`.
 

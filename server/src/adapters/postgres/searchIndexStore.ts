@@ -32,6 +32,15 @@
  * table left behind — an interrupted retirement, a generation deleted by
  * an FK cascade (`search_index` → `entity_type` does not drop tables) — is
  * collected by `sweepGenerations`.
+ *
+ * The queue (`search_queue`) holds the parts waiting to be composed, per
+ * generation. Writes enqueue in their own transaction
+ * (`applySearchWritePlan`, run by the runtime store); a worker claims a
+ * batch under a lease (`FOR UPDATE SKIP LOCKED`), composes outside any
+ * transaction, then completes or fails the claim. An item's
+ * `enqueued_at` is the claim's token: enqueueing an item again while it
+ * is leased refreshes it, and the completion of the older claim leaves it
+ * queued.
  */
 
 import {
@@ -40,6 +49,7 @@ import {
   type KeywordLanguage,
 } from "../../core/keywordLanguage.js";
 import type {
+  ClaimedSearchQueueItem,
   NewSearchGeneration,
   Row,
   SearchEntryHash,
@@ -50,7 +60,10 @@ import type {
   SearchIndexRecord,
   SearchIndexStore,
   SearchPartKind,
+  SearchQueuePartKind,
+  SearchQueueStats,
   SearchSettings,
+  SearchWritePlan,
 } from "../../core/ports.js";
 import type {
   SearchIndexDefinition,
@@ -60,6 +73,7 @@ import type {
 import { runQuery, withTransaction, type DbResult, type Querier } from "./errors.js";
 import { quoteIdent } from "./oql/bindings.js";
 import { isUuid } from "./rows.js";
+import { readTypesWithProperties } from "./schemaRead.js";
 
 const INDEX_COLS = "search_index_id, key, kind, definition, created_at, updated_at";
 
@@ -79,6 +93,30 @@ const PART_MATCH =
   "AND e.group_no = p.group_no AND e.part_id = p.part_id";
 
 const PARTITION_PATTERN = /^se_([0-9a-f]{32})$/;
+
+/** The channel every server process listens on for queued search work;
+ * the payload is the ontology key. One channel per database: the
+ * listeners wake for any ontology. */
+export const SEARCH_WORK_CHANNEL = "ontoforge_search_work";
+
+/** Enqueueing an item that is already queued refreshes it instead: a new
+ * token (so a claim of the older state cannot complete it), a fresh start
+ * of its attempts, due now. The lease stays — the worker holding it
+ * releases it when it completes. */
+const ENQUEUE_CONFLICT =
+  `ON CONFLICT (${ENTRY_KEY}) DO UPDATE SET enqueued_at = clock_timestamp(), ` +
+  `attempts = 0, not_before = now(), last_error = NULL`;
+
+const LIVE_STATES = "('building', 'ready')";
+
+/** A list of claimed items as a row source, aliased `c`. */
+const CLAIMED_SOURCE =
+  "jsonb_to_recordset($1::jsonb) AS c(generation_id uuid, entity_id uuid, part_kind text, " +
+  "group_no integer, part_id text, token text, delay_ms double precision)";
+
+const CLAIMED_MATCH =
+  "q.generation_id = c.generation_id AND q.entity_id = c.entity_id AND q.part_kind = c.part_kind " +
+  "AND q.group_no = c.group_no AND q.part_id = c.part_id";
 
 /** The table one generation's entries live in. */
 function partitionName(generationId: string): string {
@@ -171,7 +209,10 @@ function checkNewGeneration(generation: NewSearchGeneration): void {
 }
 
 export class PostgresSearchIndexStore implements SearchIndexStore {
-  constructor(private readonly namespace: string) {}
+  constructor(
+    private readonly namespace: string,
+    private readonly ontologyKey: string,
+  ) {}
 
   private query(text: string, params?: unknown[]): Promise<DbResult> {
     return runQuery(text, params, this.namespace);
@@ -267,6 +308,7 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
 
   async createGeneration(
     generation: NewSearchGeneration,
+    options: { backfillEntityType?: string } = {},
   ): Promise<SearchGenerationRecord | null> {
     checkNewGeneration(generation);
     if (!isUuid(generation.searchIndexId)) return null;
@@ -302,7 +344,17 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
       );
       await querier.query(`CREATE INDEX ${table}_entity ON ${table} (entity_id)`);
       await querier.query(`CREATE INDEX ${table}_part ON ${table} (part_id)`);
-      return { record: toGeneration(inserted.rows[0]!), superseded };
+      let record = toGeneration(inserted.rows[0]!);
+      if (options.backfillEntityType !== undefined) {
+        const queued = await enqueueEntities(querier, [generation.generationId], options.backfillEntityType);
+        const counted = await querier.query(
+          `UPDATE search_generation SET total = $2 WHERE generation_id = $1 RETURNING ${GENERATION_COLS}`,
+          [generation.generationId, queued],
+        );
+        record = toGeneration(counted.rows[0]!);
+        if (queued > 0) await notifySearchWork(querier, this.ontologyKey);
+      }
+      return { record, superseded };
     });
     if (created === null) return null;
     await this.bestEffort(() => this.dropPartitions(created.superseded));
@@ -405,6 +457,22 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
     });
     if (failed) await this.bestEffort(() => this.dropPartitions([generationId]));
     return failed;
+  }
+
+  async retireGeneration(generationId: string): Promise<boolean> {
+    if (!isUuid(generationId)) return false;
+    const retired = await this.tx(async (querier) => {
+      const result = await querier.query(
+        `UPDATE search_generation SET state = 'retired'
+         WHERE generation_id = $1 AND state IN ${LIVE_STATES}`,
+        [generationId],
+      );
+      if (result.rowCount === 0) return false;
+      await querier.query(`DELETE FROM search_queue WHERE generation_id = $1`, [generationId]);
+      return true;
+    });
+    if (retired) await this.bestEffort(() => this.dropPartitions([generationId]));
+    return retired;
   }
 
   async sweepGenerations(): Promise<void> {
@@ -550,27 +618,130 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
   }
 
   // ------------------------------------------------------------------
+  // Queue
+  // ------------------------------------------------------------------
+
+  async readFullSchema(): Promise<Row> {
+    return withTransaction(
+      (querier) => readTypesWithProperties(querier, false),
+      "REPEATABLE READ",
+      this.namespace,
+    );
+  }
+
+  async enqueueEntityType(generationIds: string[], entityTypeKey: string): Promise<number> {
+    const ids = generationIds.filter(isUuid);
+    if (ids.length === 0) return 0;
+    return this.tx(async (querier) => {
+      const queued = await enqueueEntities(querier, ids, entityTypeKey);
+      if (queued > 0) await notifySearchWork(querier, this.ontologyKey);
+      return queued;
+    });
+  }
+
+  async claimQueueItems(options: {
+    limit: number;
+    leaseSeconds: number;
+    maxAttempts: number;
+    semanticModelId: string | null;
+  }): Promise<ClaimedSearchQueueItem[]> {
+    // One statement: the rows are locked, skipping those another claim
+    // holds, and leased; the lease commits with it.
+    const result = await this.query(
+      `WITH claimable AS (
+         SELECT q.generation_id, q.entity_id, q.part_kind, q.group_no, q.part_id, g.representation
+         FROM search_queue q JOIN search_generation g ON g.generation_id = q.generation_id
+         WHERE g.state IN ${LIVE_STATES}
+           AND q.attempts < $2 AND q.not_before <= now()
+           AND (q.lease_until IS NULL OR q.lease_until < now())
+           AND (g.representation = 'keyword' OR g.model_id = $3::text)
+         ORDER BY g.representation = 'keyword' DESC, q.enqueued_at
+         LIMIT $1
+         FOR UPDATE OF q SKIP LOCKED
+       )
+       UPDATE search_queue q SET lease_until = now() + make_interval(secs => $4::double precision)
+       FROM claimable c
+       WHERE ${CLAIMED_MATCH}
+       RETURNING q.generation_id, q.entity_id, q.part_kind, q.group_no, q.part_id, q.attempts,
+                 q.enqueued_at::text AS token, c.representation`,
+      [options.limit, options.maxAttempts, options.semanticModelId, options.leaseSeconds],
+    );
+    return result.rows.map((row) => ({
+      generationId: row["generation_id"] as string,
+      entityId: row["entity_id"] as string,
+      partKind: row["part_kind"] as SearchQueuePartKind,
+      groupNo: row["group_no"] as number,
+      partId: row["part_id"] as string,
+      representation: row["representation"] as SearchRepresentation,
+      attempts: row["attempts"] as number,
+      token: row["token"] as string,
+    }));
+  }
+
+  async completeQueueItems(items: ClaimedSearchQueueItem[]): Promise<void> {
+    if (items.length === 0) return;
+    await this.tx(async (querier) => {
+      const claimed = claimedJson(items.map((item) => ({ item, delayMs: 0 })));
+      await querier.query(
+        `DELETE FROM search_queue q USING ${CLAIMED_SOURCE}
+         WHERE ${CLAIMED_MATCH} AND q.enqueued_at = c.token::timestamptz`,
+        [claimed],
+      );
+      // Enqueued again while leased: keep it, released for the next claim.
+      await querier.query(
+        `UPDATE search_queue q SET lease_until = NULL FROM ${CLAIMED_SOURCE} WHERE ${CLAIMED_MATCH}`,
+        [claimed],
+      );
+    });
+  }
+
+  async failQueueItems(
+    failures: { item: ClaimedSearchQueueItem; delayMs: number }[],
+    error: string,
+  ): Promise<void> {
+    if (failures.length === 0) return;
+    await this.tx(async (querier) => {
+      const claimed = claimedJson(failures);
+      // An item enqueued again since its claim already starts afresh.
+      await querier.query(
+        `UPDATE search_queue q
+         SET attempts = q.attempts + 1, last_error = $2, lease_until = NULL,
+             not_before = now() + make_interval(secs => c.delay_ms / 1000.0)
+         FROM ${CLAIMED_SOURCE}
+         WHERE ${CLAIMED_MATCH} AND q.enqueued_at = c.token::timestamptz`,
+        [claimed, error.slice(0, 2000)],
+      );
+      await querier.query(
+        `UPDATE search_queue q SET lease_until = NULL FROM ${CLAIMED_SOURCE} WHERE ${CLAIMED_MATCH}`,
+        [claimed],
+      );
+    });
+  }
+
+  async queueStats(maxAttempts: number): Promise<SearchQueueStats[]> {
+    const result = await this.query(
+      `SELECT generation_id,
+              count(*) FILTER (WHERE attempts < $1)::int AS pending,
+              count(*) FILTER (WHERE attempts >= $1)::int AS failed,
+              (array_agg(DISTINCT last_error) FILTER (WHERE last_error IS NOT NULL))[1:5] AS last_errors
+       FROM search_queue GROUP BY generation_id`,
+      [maxAttempts],
+    );
+    return result.rows.map((row) => ({
+      generationId: row["generation_id"] as string,
+      pending: row["pending"] as number,
+      failed: row["failed"] as number,
+      lastErrors: (row["last_errors"] as string[] | null) ?? [],
+    }));
+  }
+
+  // ------------------------------------------------------------------
   // Internals
   // ------------------------------------------------------------------
 
-  /**
-   * Delete matching entries in every generation: through the parent for
-   * the attached partitions, and from each building generation's table,
-   * which is not attached yet.
-   */
+  /** Delete matching entries in every generation (`deleteEntriesEverywhere`). */
   private async deleteEverywhere(where: string, params: unknown[]): Promise<number> {
-    return this.tx(async (querier) => {
-      const building = await querier.query(
-        `SELECT generation_id FROM search_generation WHERE state = 'building'
-         ORDER BY generation_id FOR SHARE`,
-      );
-      let deleted = (await querier.query(`DELETE FROM search_entry WHERE ${where}`, params)).rowCount;
-      for (const row of building.rows) {
-        const table = partitionName(row["generation_id"] as string);
-        deleted += (await querier.query(`DELETE FROM ${table} WHERE ${where}`, params)).rowCount;
-      }
-      return deleted;
-    });
+    return this.tx((querier) => deleteEntriesEverywhere(querier, where, params));
   }
 
   /**
@@ -613,6 +784,174 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
       // Logged as a storage failure; `sweepGenerations` retries.
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Shared with the runtime store's writes
+// ---------------------------------------------------------------------------
+
+/**
+ * Delete matching entries in every generation: through the parent for
+ * the attached partitions, and from each building generation's table,
+ * which is not attached yet. Runs on the caller's transaction.
+ */
+export async function deleteEntriesEverywhere(
+  querier: Querier,
+  where: string,
+  params: unknown[],
+): Promise<number> {
+  const building = await querier.query(
+    `SELECT generation_id FROM search_generation WHERE state = 'building'
+     ORDER BY generation_id FOR SHARE`,
+  );
+  let deleted = (await querier.query(`DELETE FROM search_entry WHERE ${where}`, params)).rowCount;
+  for (const row of building.rows) {
+    const table = partitionName(row["generation_id"] as string);
+    deleted += (await querier.query(`DELETE FROM ${table} WHERE ${where}`, params)).rowCount;
+  }
+  return deleted;
+}
+
+/** The relations an entity is an end of, as relation-part ids. */
+const RELATIONS_OF_ENTITY =
+  "part_kind = 'relation' AND part_id IN (SELECT id::text FROM relation WHERE from_id = $1 OR to_id = $1)";
+
+/**
+ * Apply the search work of one write on the write's own transaction, so it
+ * commits — or not — with the write. Index ids resolve to every building
+ * or ready generation of the index. An entity deletion must be applied
+ * before the entity row goes: the relations that cascade with it name the
+ * entries of their other ends. The workers are woken by a notification
+ * that PostgreSQL delivers at commit.
+ */
+export async function applySearchWritePlan(
+  querier: Querier,
+  plan: SearchWritePlan,
+  ontologyKey: string,
+): Promise<void> {
+  if (plan.deleteEntity !== null && isUuid(plan.deleteEntity)) {
+    const where = `entity_id = $1 OR (${RELATIONS_OF_ENTITY})`;
+    await querier.query(`DELETE FROM search_queue WHERE ${where}`, [plan.deleteEntity]);
+    await deleteEntriesEverywhere(querier, where, [plan.deleteEntity]);
+  }
+  if (plan.deleteRelation !== null && isUuid(plan.deleteRelation)) {
+    const where = `part_kind = 'relation' AND part_id = $1`;
+    await querier.query(`DELETE FROM search_queue WHERE ${where}`, [plan.deleteRelation]);
+    await deleteEntriesEverywhere(querier, where, [plan.deleteRelation]);
+  }
+
+  let queued = 0;
+  if (plan.entityParts.length > 0) {
+    const result = await querier.query(
+      `INSERT INTO search_queue (${ENTRY_KEY})
+       SELECT DISTINCT g.generation_id, p.entity_id, p.part_kind, p.group_no, p.part_id
+       FROM jsonb_to_recordset($1::jsonb) AS p(search_index_id uuid, entity_id uuid,
+              part_kind text, group_no integer, part_id text)
+       JOIN search_generation g ON g.search_index_id = p.search_index_id AND g.state IN ${LIVE_STATES}
+       ${ENQUEUE_CONFLICT}`,
+      [
+        JSON.stringify(
+          plan.entityParts.map((part) => ({
+            search_index_id: part.searchIndexId,
+            entity_id: part.entityId,
+            part_kind: part.partKind,
+            group_no: part.groupNo,
+            part_id: part.partId,
+          })),
+        ),
+      ],
+    );
+    queued += result.rowCount;
+  }
+  if (plan.relationParts.length > 0) {
+    const result = await querier.query(
+      `INSERT INTO search_queue (${ENTRY_KEY})
+       SELECT DISTINCT g.generation_id,
+              CASE WHEN p.owner = 'from' THEN r.from_id ELSE r.to_id END,
+              'relation', p.group_no, r.id::text
+       FROM jsonb_to_recordset($1::jsonb) AS p(search_index_id uuid, group_no integer,
+              relation_id uuid, owner text)
+       JOIN relation r ON r.id = p.relation_id
+       JOIN search_generation g ON g.search_index_id = p.search_index_id AND g.state IN ${LIVE_STATES}
+       ${ENQUEUE_CONFLICT}`,
+      [
+        JSON.stringify(
+          plan.relationParts.map((part) => ({
+            search_index_id: part.searchIndexId,
+            group_no: part.groupNo,
+            relation_id: part.relationId,
+            owner: part.owner,
+          })),
+        ),
+      ],
+    );
+    queued += result.rowCount;
+  }
+  if (plan.fanOut.length > 0) {
+    const result = await querier.query(
+      `INSERT INTO search_queue (${ENTRY_KEY})
+       SELECT DISTINCT g.generation_id,
+              CASE WHEN p.owner = 'from' THEN r.from_id ELSE r.to_id END,
+              'relation', p.group_no, r.id::text
+       FROM jsonb_to_recordset($1::jsonb) AS p(search_index_id uuid, group_no integer,
+              relation_type text, owner text, target_entity_id uuid)
+       JOIN relation r ON r.type_key = p.relation_type
+        AND ((p.owner = 'from' AND r.to_id = p.target_entity_id)
+          OR (p.owner = 'to' AND r.from_id = p.target_entity_id))
+       JOIN search_generation g ON g.search_index_id = p.search_index_id AND g.state IN ${LIVE_STATES}
+       ${ENQUEUE_CONFLICT}`,
+      [
+        JSON.stringify(
+          plan.fanOut.map((part) => ({
+            search_index_id: part.searchIndexId,
+            group_no: part.groupNo,
+            relation_type: part.relationType,
+            owner: part.owner,
+            target_entity_id: part.targetEntityId,
+          })),
+        ),
+      ],
+    );
+    queued += result.rowCount;
+  }
+  if (queued > 0) await notifySearchWork(querier, ontologyKey);
+}
+
+/** Queue one `entity` item per entity of a type into each live generation
+ * of `generationIds`. The count queued. */
+async function enqueueEntities(
+  querier: Querier,
+  generationIds: string[],
+  entityTypeKey: string,
+): Promise<number> {
+  const result = await querier.query(
+    `INSERT INTO search_queue (${ENTRY_KEY})
+     SELECT g.generation_id, e.id, 'entity', 0, ''
+     FROM search_generation g, entity e
+     WHERE g.generation_id = ANY($1::uuid[]) AND g.state IN ${LIVE_STATES} AND e.type_key = $2
+     ${ENQUEUE_CONFLICT}`,
+    [generationIds, entityTypeKey],
+  );
+  return result.rowCount;
+}
+
+/** Wake the workers of every server process — delivered at commit. */
+async function notifySearchWork(querier: Querier, ontologyKey: string): Promise<void> {
+  await querier.query(`SELECT pg_notify($1, $2)`, [SEARCH_WORK_CHANNEL, ontologyKey]);
+}
+
+function claimedJson(failures: { item: ClaimedSearchQueueItem; delayMs: number }[]): string {
+  return JSON.stringify(
+    failures.map(({ item, delayMs }) => ({
+      generation_id: item.generationId,
+      entity_id: item.entityId,
+      part_kind: item.partKind,
+      group_no: item.groupNo,
+      part_id: item.partId,
+      token: item.token,
+      delay_ms: delayMs,
+    })),
+  );
 }
 
 function toSettings(row: Row): SearchSettings {

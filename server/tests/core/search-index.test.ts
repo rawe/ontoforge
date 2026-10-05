@@ -549,8 +549,15 @@ describe("definitionHash", () => {
     expect(definitionHash(relabelled, "keyword")).toBe(definitionHash(base, "keyword"));
   });
 
-  it("leaves the keyword hash alone when only the semantic template changes", () => {
-    const templated = { ...base, semantic: { enabled: true, template: "{name}" } };
-    expect(definitionHash(templated, "keyword")).toBe(definitionHash(base, "keyword"));
+  it("leaves the keyword hash alone when only templates or group labels change", () => {
+    const keyword = definitionHash(base, "keyword");
+    for (const definition of [
+      { ...base, semantic: { enabled: true, template: "{name}" } },
+      { ...base, relations: [{ ...base.relations[0]!, template: "{role} at {target.name}" }] },
+      { ...base, relations: [{ ...base.relations[0]!, label: "Job" }] },
+    ]) {
+      expect(definitionHash(definition, "keyword")).toBe(keyword);
+    }
+    expect(definitionHash({ ...base, fields: ["email", "name"] }, "keyword")).not.toBe(keyword);
   });
 });

@@ -17,7 +17,8 @@ import type { KeywordLanguage } from "../../core/keywordLanguage.js";
 
 import { reportEnsureFailed } from "../../core/vectorDrift.js";
 import { ensureVectorIndexes, initSchema, reportPgvectorVersion } from "./ddl.js";
-import { closePool, initPool } from "./errors.js";
+import type { SearchWorkSubscription } from "../../core/ports.js";
+import { closePool, initPool, listen } from "./errors.js";
 import { PostgresModelingStore } from "./modelingStore.js";
 import {
   listOntologyBindings,
@@ -25,7 +26,7 @@ import {
   PostgresOntologyRegistry,
 } from "./registry.js";
 import { PostgresRuntimeStore } from "./runtimeStore.js";
-import { PostgresSearchIndexStore } from "./searchIndexStore.js";
+import { PostgresSearchIndexStore, SEARCH_WORK_CHANNEL } from "./searchIndexStore.js";
 
 /** Initialize the PostgreSQL adapter: the pool, the pgvector version
  * report (before the upgrade, which needs `halfvec`) and the server-wide
@@ -49,7 +50,15 @@ export function createRuntimeStore(ontologyKey: string, language: KeywordLanguag
 
 /** A search-index store bound to one ontology's namespace. */
 export function createSearchIndexStore(ontologyKey: string): PostgresSearchIndexStore {
-  return new PostgresSearchIndexStore(ontologyNamespace(ontologyKey));
+  return new PostgresSearchIndexStore(ontologyNamespace(ontologyKey), ontologyKey);
+}
+
+/** Wake-ups for queued search work: `LISTEN` on the channel every
+ * enqueue notifies, on a connection of its own. */
+export function subscribeSearchWork(
+  onWake: (ontologyKey: string) => void,
+): Promise<SearchWorkSubscription> {
+  return listen(SEARCH_WORK_CHANNEL, onWake);
 }
 
 /** The ontology registry over the pool `initAdapter` opened. */

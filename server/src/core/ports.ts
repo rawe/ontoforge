@@ -567,7 +567,20 @@ export interface RuntimeStore {
   ): void;
 
   // ------------------------------------------------------------------
+  // Search indices
+  // ------------------------------------------------------------------
+
+  /** The search-index store of the same ontology. Present exactly when the
+   * adapter stores search indices (`supportsSearchIndices()`). */
+  searchIndices?(): SearchIndexStore;
+
+  // ------------------------------------------------------------------
   // Entity instances
+  //
+  // Each write takes an optional `search` plan: the search work the write
+  // causes (`core/searchDependencies.ts`). An adapter that stores search
+  // indices applies it in the write's own transaction, so the work is
+  // queued exactly when the write commits; one that does not ignores it.
   // ------------------------------------------------------------------
 
   createEntity(
@@ -578,6 +591,7 @@ export interface RuntimeStore {
     embedding?: number[] | null,
     propertyText?: string,
     keywordSegments?: KeywordPropertySegment[],
+    search?: SearchWritePlan | null,
   ): Promise<Row>;
 
   listEntities(
@@ -609,9 +623,14 @@ export interface RuntimeStore {
     hasEmbeddingUpdate?: boolean,
     propertyText?: string,
     keywordSegments?: KeywordPropertySegment[],
+    search?: SearchWritePlan | null,
   ): Promise<Row | null>;
 
-  deleteEntity(entityTypeKey: string, entityId: string): Promise<boolean>;
+  deleteEntity(
+    entityTypeKey: string,
+    entityId: string,
+    search?: SearchWritePlan | null,
+  ): Promise<boolean>;
 
   // ------------------------------------------------------------------
   // Document chunks
@@ -669,7 +688,7 @@ export interface RuntimeStore {
   ): Promise<Row[]>;
 
   // ------------------------------------------------------------------
-  // Relation instances
+  // Relation instances (`search` as for entity writes)
   // ------------------------------------------------------------------
 
   createRelation(
@@ -679,6 +698,7 @@ export interface RuntimeStore {
     toEntityId: string,
     properties: Row,
     propertyDefs: Record<string, PropertyDef>,
+    search?: SearchWritePlan | null,
   ): Promise<Row>;
 
   listRelations(
@@ -701,9 +721,14 @@ export interface RuntimeStore {
     setProperties: Row,
     removeProperties: string[],
     propertyDefs: Record<string, PropertyDef>,
+    search?: SearchWritePlan | null,
   ): Promise<Row | null>;
 
-  deleteRelation(relationTypeKey: string, relationId: string): Promise<boolean>;
+  deleteRelation(
+    relationTypeKey: string,
+    relationId: string,
+    search?: SearchWritePlan | null,
+  ): Promise<boolean>;
 
   // ------------------------------------------------------------------
   // OQL
@@ -812,6 +837,83 @@ export interface SearchEntryHash extends SearchEntryPart {
   textHash: string;
 }
 
+/** What a queued item asks for: one part, or — `entity` — every part of
+ * the entity (an entity created, a header field changed, a backfill).
+ * `passage` with part id `""` stands for all passages: a document is
+ * re-chunked whole. */
+export type SearchQueuePartKind = SearchPartKind | "entity";
+
+/** One queued piece of work: a part of an entity, in one generation. */
+export interface SearchQueueItem {
+  generationId: string;
+  entityId: string;
+  partKind: SearchQueuePartKind;
+  groupNo: number;
+  partId: string;
+}
+
+/** A queue item under this worker's lease. */
+export interface ClaimedSearchQueueItem extends SearchQueueItem {
+  representation: SearchRepresentation;
+  /** Failed attempts so far. */
+  attempts: number;
+  /** When the item was last enqueued — opaque. A write that enqueues the
+   * item again while it is leased changes it, and completing the claim
+   * then leaves the item queued: the newer write is never lost. */
+  token: string;
+}
+
+/** The queue of one generation, as status reads it. */
+export interface SearchQueueStats {
+  generationId: string;
+  /** Items still to be processed (not failed for good). */
+  pending: number;
+  /** Items whose attempts are used up: they wait for a rebuild or a new
+   * write of their entity. */
+  failed: number;
+  /** The most recent distinct errors of failed or retrying items. */
+  lastErrors: string[];
+}
+
+/**
+ * The search work one entity or relation write causes, derived from the
+ * ontology's index definitions (`core/searchDependencies.ts`). Index ids
+ * stand for every generation of the index that is building or ready —
+ * the adapter resolves them when it applies the plan.
+ */
+export interface SearchWritePlan {
+  /** Parts of an entity to (re)compose. */
+  entityParts: {
+    searchIndexId: string;
+    entityId: string;
+    partKind: SearchQueuePartKind;
+    groupNo: number;
+    partId: string;
+  }[];
+  /** The part of one relation in one relation group, owned by the
+   * relation's `from` end (outgoing group) or its `to` end (incoming). */
+  relationParts: {
+    searchIndexId: string;
+    groupNo: number;
+    relationId: string;
+    owner: "from" | "to";
+  }[];
+  /** A target entity changed: the parts of every relation of the type that
+   * has it on the non-owner end — one statement, fan-out = its degree. */
+  fanOut: {
+    searchIndexId: string;
+    groupNo: number;
+    relationType: string;
+    owner: "from" | "to";
+    targetEntityId: string;
+  }[];
+  /** An entity deleted: its entries and queued work go, and so do the
+   * entries of the relations that cascade with it. */
+  deleteEntity: string | null;
+  /** A relation deleted: its entries and queued work go — no recompose. */
+  deleteRelation: string | null;
+}
+
 /**
  * The search-index side of the persistence port: index definitions, their
  * generations and the entries a generation holds. Only adapters that
@@ -868,8 +970,15 @@ export interface SearchIndexStore {
    * Start a building generation. A generation still building for the same
    * index and representation is superseded: it retires with its queued
    * work and entries. Null when the index does not exist.
+   *
+   * `backfillEntityType` queues every entity of that type (one `entity`
+   * item each) in the same transaction and sets `total` to their count —
+   * a generation never appears with an empty queue that is not yet filled.
    */
-  createGeneration(generation: NewSearchGeneration): Promise<SearchGenerationRecord | null>;
+  createGeneration(
+    generation: NewSearchGeneration,
+    options?: { backfillEntityType?: string },
+  ): Promise<SearchGenerationRecord | null>;
 
   getGeneration(generationId: string): Promise<SearchGenerationRecord | null>;
 
@@ -893,6 +1002,11 @@ export interface SearchIndexStore {
   /** Mark a building generation failed and drop its queued work and
    * entries. False when it is no longer building. */
   failGeneration(generationId: string): Promise<boolean>;
+
+  /** Retire a building or ready generation that no definition wants any
+   * more (a representation switched off, a definition changed back), with
+   * its queued work and entries. False when it is neither. */
+  retireGeneration(generationId: string): Promise<boolean>;
 
   /** Remove the entries storage of every generation that is neither
    * building nor ready — what an interrupted retirement or an entity type
@@ -931,6 +1045,60 @@ export interface SearchIndexStore {
   /** Delete a relation's entries (its `relation` parts) in every
    * generation of the ontology. */
   deleteEntriesOfRelation(relationId: string): Promise<number>;
+
+  // ------------------------------------------------------------------
+  // Queue (the worker's surface)
+  //
+  // Writes enqueue through the runtime store's write methods (their
+  // `search` plan). An item's attempts count its failures; one whose
+  // attempts reached the maximum is failed for good and never claimed
+  // again — a new write of its entity, or a rebuild, gives it a fresh
+  // start. Every enqueue wakes the workers (after its commit).
+  // ------------------------------------------------------------------
+
+  /** Every type and property of the ontology — what the worker composes
+   * entries against: `{ entityTypes, relationTypes }` as rows, the shape
+   * `RuntimeStore.getFullSchemaWithLensInclusions` returns them in. */
+  readFullSchema(): Promise<Row>;
+
+  /** Queue every entity of a type, as one `entity` item each, into the
+   * given generations (those no longer building or ready are skipped).
+   * The count of items queued. */
+  enqueueEntityType(generationIds: string[], entityTypeKey: string): Promise<number>;
+
+  /** Lease up to `limit` claimable items — due, not leased (or the lease
+   * expired), attempts below `maxAttempts`, of a building or ready
+   * generation — keyword items first, then oldest first. Semantic items
+   * are claimed only for generations of `semanticModelId` (none when
+   * null). Items another worker holds are skipped, never waited for. */
+  claimQueueItems(options: {
+    limit: number;
+    leaseSeconds: number;
+    maxAttempts: number;
+    semanticModelId: string | null;
+  }): Promise<ClaimedSearchQueueItem[]>;
+
+  /** Remove processed items — unless one was enqueued again since its
+   * claim; that one stays, released for the next claim. */
+  completeQueueItems(items: ClaimedSearchQueueItem[]): Promise<void>;
+
+  /** Record a failed attempt: attempts + 1, the error, release the lease
+   * and hold each item back by its delay. */
+  failQueueItems(
+    failures: { item: ClaimedSearchQueueItem; delayMs: number }[],
+    error: string,
+  ): Promise<void>;
+
+  /** Pending and failed counts per generation that has queued items. */
+  queueStats(maxAttempts: number): Promise<SearchQueueStats[]>;
+}
+
+/** A subscription to search-work wake-ups (see `subscribeSearchWork`). */
+export interface SearchWorkSubscription {
+  /** True once the subscription has ended — closed, or its connection
+   * lost; the subscriber subscribes again. */
+  readonly closed: boolean;
+  close(): Promise<void>;
 }
 
 /**
@@ -999,6 +1167,10 @@ export interface AdapterModule {
   createRuntimeStore(ontologyKey: string, language: KeywordLanguage): RuntimeStore;
   /** Present exactly when `supportsSearchIndices()` is true. */
   createSearchIndexStore?(ontologyKey: string): SearchIndexStore;
+  /** Present exactly when `supportsSearchIndices()` is true: call
+   * `onWake` with the ontology key whenever search work was queued in any
+   * server process on this database. */
+  subscribeSearchWork?(onWake: (ontologyKey: string) => void): Promise<SearchWorkSubscription>;
   createRegistry(): OntologyRegistry;
   closeStores(): Promise<void>;
   ensureSemanticIndexes(dimensions: number): Promise<void>;
@@ -1091,6 +1263,15 @@ export async function getSearchIndexStore(ontologyKey: string): Promise<SearchIn
   }
   await requireOntology(ontologyKey);
   return adapter.createSearchIndexStore(ontologyKey);
+}
+
+/** Subscribe to search-work wake-ups; null when the active adapter
+ * stores no search indices. */
+export async function subscribeSearchWork(
+  onWake: (ontologyKey: string) => void,
+): Promise<SearchWorkSubscription | null> {
+  const adapter = requireAdapter();
+  return adapter.subscribeSearchWork === undefined ? null : adapter.subscribeSearchWork(onWake);
 }
 
 export function getOntologyRegistry(): OntologyRegistry {

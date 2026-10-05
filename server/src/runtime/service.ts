@@ -21,14 +21,16 @@ import { CoercionError, assertNoNulCharacter, coerceValue, valueToText } from ".
 import { getEmbeddingProvider } from "../core/embedding.js";
 import { ConflictError, NotFoundError, ValidationError } from "../core/exceptions.js";
 import { SYSTEM_PROPERTIES, getReturnVariables, parseAndValidate } from "../core/oql/index.js";
-import type { RuntimeStore } from "../core/ports.js";
+import type { RuntimeStore, SearchWritePlan } from "../core/ports.js";
 import type { PropertyDef } from "../core/schemas.js";
+import { planSearchWrite, type SearchChange } from "../core/searchDependencies.js";
 import { chunkDocument } from "./search/document.js";
 import { cpIndexOf, cpLength, cpSlice, countOccurrences } from "./codePoints.js";
 import { buildTextRepr, buildKeywordSegments } from "./search/propertyText.js";
 import { isQueryPath } from "./queryPaths.js";
 import {
   loadSchema,
+  loadSearchContext,
   type EntityTypeDef,
   type LoadedSchema,
   type RelationTypeDef,
@@ -53,6 +55,24 @@ export { parseFilters, parseFilterConditions, docLengthKey } from "./readHelpers
 export { search } from "./search/entry.js";
 
 type Row = Record<string, unknown>;
+
+// ---------------------------------------------------------------------------
+// Search work of a write
+// ---------------------------------------------------------------------------
+
+/**
+ * The search work a write causes, handed to the store with the write so
+ * both commit together; the search worker (`runtime/indexing/`) builds
+ * the entries from it later. Null when the adapter stores no search
+ * indices or no index reads what the write changes.
+ */
+async function searchPlan(store: RuntimeStore, change: SearchChange): Promise<SearchWritePlan | null> {
+  if (store.searchIndices === undefined) {
+    return null;
+  }
+  const context = await loadSearchContext(store.ontologyKey, store.searchIndices());
+  return planSearchWrite(context.dependencies, change);
+}
 
 // ---------------------------------------------------------------------------
 // Property validation
@@ -344,6 +364,7 @@ export async function createEntity(
     embedding,
     propertyText,
     buildKeywordSegments(coerced, fullEt?.properties ?? scopedEt.properties),
+    await searchPlan(store, { kind: "entityCreated", entityType: entityTypeKey, entityId }),
   );
 
   // Chunk + embed document properties.
@@ -538,6 +559,12 @@ export async function updateEntity(
     hasEmbeddingUpdate,
     propertyText,
     keywordSegments,
+    await searchPlan(store, {
+      kind: "entityUpdated",
+      entityType: entityTypeKey,
+      entityId,
+      changedKeys: Object.keys(coerced),
+    }),
   );
   if (entity === null) {
     throw new NotFoundError(`Entity '${entityId}' not found`);
@@ -565,7 +592,11 @@ export async function deleteEntity(
     throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
   }
 
-  const deleted = await store.deleteEntity(entityTypeKey, entityId);
+  const deleted = await store.deleteEntity(
+    entityTypeKey,
+    entityId,
+    await searchPlan(store, { kind: "entityDeleted", entityType: entityTypeKey, entityId }),
+  );
   if (!deleted) {
     throw new NotFoundError(`Entity '${entityId}' not found`);
   }
@@ -849,6 +880,16 @@ export async function editDocument(
     setProps,
     [],
     fullEt?.properties ?? {},
+    null,
+    false,
+    "",
+    undefined,
+    await searchPlan(store, {
+      kind: "entityUpdated",
+      entityType: entityTypeKey,
+      entityId,
+      changedKeys: [propertyKey],
+    }),
   );
   if (entity === null) {
     throw new NotFoundError(`Entity '${entityId}' not found`);
@@ -952,6 +993,7 @@ export async function createRelation(
     toEntityId,
     coerced,
     fullRtForValidation.properties,
+    await searchPlan(store, { kind: "relationCreated", relationType: relationTypeKey, relationId }),
   );
 
   return filterRelationProperties(relation, scopedRt);
@@ -1068,6 +1110,12 @@ export async function updateRelation(
     setProps,
     removeProps,
     fullRt?.properties ?? scopedRt.properties,
+    await searchPlan(store, {
+      kind: "relationUpdated",
+      relationType: relationTypeKey,
+      relationId,
+      changedKeys: Object.keys(coerced),
+    }),
   );
   if (relation === null) {
     throw new NotFoundError(`Relation '${relationId}' not found`);
@@ -1087,7 +1135,11 @@ export async function deleteRelation(
     throw new NotFoundError(`Relation type '${relationTypeKey}' not found`);
   }
 
-  const deleted = await store.deleteRelation(relationTypeKey, relationId);
+  const deleted = await store.deleteRelation(
+    relationTypeKey,
+    relationId,
+    await searchPlan(store, { kind: "relationDeleted", relationType: relationTypeKey, relationId }),
+  );
   if (!deleted) {
     throw new NotFoundError(`Relation '${relationId}' not found`);
   }

@@ -48,6 +48,8 @@ import type {
   RuntimeStore,
   SearchedType,
   SearchedProperty,
+  SearchIndexStore,
+  SearchWritePlan,
 } from "../../core/ports.js";
 import type { PropertyDef } from "../../core/schemas.js";
 import { chunkIndexNameOf, entityIndexNameOf, indexWidth, SAVED_QUERY_INDEX } from "./ddl.js";
@@ -69,6 +71,7 @@ import {
 import { fromJson, toJson } from "./json.js";
 import { camelizeRow, isUuid } from "./rows.js";
 import { LENS_COLS, readTypesWithProperties, splitInclusions } from "./schemaRead.js";
+import { applySearchWritePlan, PostgresSearchIndexStore } from "./searchIndexStore.js";
 import { distance, minScoreFloor, similarity, vectorParams, vectorSearch } from "./search.js";
 
 type PropertyDefs = Record<string, PropertyDef>;
@@ -153,6 +156,44 @@ export class PostgresRuntimeStore implements RuntimeStore {
     isolation: IsolationLevel = "READ COMMITTED",
   ): Promise<T> {
     return withTransaction(work, isolation, this.namespace);
+  }
+
+  /**
+   * One instance write, with the search work it causes in the same
+   * transaction when there is any (`applySearchWritePlan`). The work is
+   * queued only when the write touched a row; a deletion's work runs
+   * first, while the relations it names still exist.
+   */
+  private write(
+    text: string,
+    params: unknown[],
+    search: SearchWritePlan | null | undefined,
+    order: "after" | "before" = "after",
+  ): Promise<DbResult> {
+    if (search === null || search === undefined) {
+      return this.query(text, params);
+    }
+    return this.tx(async (querier) => {
+      if (order === "before") {
+        await applySearchWritePlan(querier, search, this.ontologyKey);
+      }
+      const result = await querier.query(text, params);
+      if (order === "after" && result.rowCount > 0) {
+        await applySearchWritePlan(querier, search, this.ontologyKey);
+      }
+      return result;
+    });
+  }
+
+  // ------------------------------------------------------------------
+  // Search indices
+  // ------------------------------------------------------------------
+
+  searchIndices(): SearchIndexStore {
+    if (this.namespace === undefined) {
+      throw new Error("An unbound runtime store has no search indices");
+    }
+    return new PostgresSearchIndexStore(this.namespace, this.ontologyKey);
   }
 
   // ------------------------------------------------------------------
@@ -254,8 +295,9 @@ export class PostgresRuntimeStore implements RuntimeStore {
     embedding: number[] | null = null,
     propertyText = "",
     keywordSegments?: KeywordPropertySegment[],
+    search?: SearchWritePlan | null,
   ): Promise<Row> {
-    const result = await this.query(
+    const result = await this.write(
       `INSERT INTO entity (id, type_key, props, embedding, property_text, keyword_text, keyword_segments)
        VALUES ($1, $2, $3::jsonb, $4::vector, $5, $6, $7::jsonb)
        RETURNING ${ENTITY_COLS}`,
@@ -268,6 +310,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
         (keywordSegments ?? []).map((segment) => segment.text).join("\n"),
         keywordSegments === undefined ? null : JSON.stringify(keywordSegments),
       ],
+      search,
     );
     return entityRow(result.rows[0]!, propertyDefs);
   }
@@ -345,6 +388,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
     hasEmbeddingUpdate = false,
     propertyText = "",
     keywordSegments?: KeywordPropertySegment[],
+    search?: SearchWritePlan | null,
   ): Promise<Row | null> {
     if (!isUuid(entityId)) {
       return null;
@@ -368,12 +412,13 @@ export class PostgresRuntimeStore implements RuntimeStore {
       params.push(JSON.stringify(keywordSegments));
       embeddingSet += `, keyword_segments = $${params.length}::jsonb`;
     }
-    const result = await this.query(
+    const result = await this.write(
       `UPDATE entity
        SET props = (props || $3::jsonb) - $4::text[], updated_at = now()${embeddingSet}
        WHERE type_key = $1 AND id = $2
        RETURNING ${ENTITY_COLS}`,
       params,
+      search,
     );
     const row = result.rows[0];
     return row === undefined ? null : entityRow(row, propertyDefs);
@@ -381,14 +426,20 @@ export class PostgresRuntimeStore implements RuntimeStore {
 
   /** One DELETE; relations (both directions) and chunks vanish by
    * CASCADE (M2.2). */
-  async deleteEntity(entityTypeKey: string, entityId: string): Promise<boolean> {
+  async deleteEntity(
+    entityTypeKey: string,
+    entityId: string,
+    search?: SearchWritePlan | null,
+  ): Promise<boolean> {
     if (!isUuid(entityId)) {
       return false;
     }
-    const result = await this.query(`DELETE FROM entity WHERE type_key = $1 AND id = $2`, [
-      entityTypeKey,
-      entityId,
-    ]);
+    const result = await this.write(
+      `DELETE FROM entity WHERE type_key = $1 AND id = $2`,
+      [entityTypeKey, entityId],
+      search,
+      "before",
+    );
     return result.rowCount > 0;
   }
 
@@ -731,12 +782,14 @@ export class PostgresRuntimeStore implements RuntimeStore {
     toEntityId: string,
     properties: Row,
     propertyDefs: PropertyDefs,
+    search?: SearchWritePlan | null,
   ): Promise<Row> {
-    const result = await this.query(
+    const result = await this.write(
       `INSERT INTO relation (id, type_key, from_id, to_id, props)
        VALUES ($1, $2, $3, $4, $5::jsonb)
        RETURNING ${RELATION_COLS}`,
       [relationId, relationTypeKey, fromEntityId, toEntityId, propsJson(properties, propertyDefs)],
+      search,
     );
     return relationRow(result.rows[0]!, propertyDefs);
   }
@@ -802,30 +855,38 @@ export class PostgresRuntimeStore implements RuntimeStore {
     setProperties: Row,
     removeProperties: string[],
     propertyDefs: PropertyDefs,
+    search?: SearchWritePlan | null,
   ): Promise<Row | null> {
     if (!isUuid(relationId)) {
       return null;
     }
-    const result = await this.query(
+    const result = await this.write(
       `UPDATE relation
        SET props = (props || $3::jsonb) - $4::text[], updated_at = now()
        WHERE type_key = $1 AND id = $2
        RETURNING ${RELATION_COLS}`,
       [relationTypeKey, relationId, propsJson(setProperties, propertyDefs), removeProperties],
+      search,
     );
     const row = result.rows[0];
     return row === undefined ? null : relationRow(row, propertyDefs);
   }
 
   /** One DELETE; neither endpoint is touched. */
-  async deleteRelation(relationTypeKey: string, relationId: string): Promise<boolean> {
+  async deleteRelation(
+    relationTypeKey: string,
+    relationId: string,
+    search?: SearchWritePlan | null,
+  ): Promise<boolean> {
     if (!isUuid(relationId)) {
       return false;
     }
-    const result = await this.query(`DELETE FROM relation WHERE type_key = $1 AND id = $2`, [
-      relationTypeKey,
-      relationId,
-    ]);
+    const result = await this.write(
+      `DELETE FROM relation WHERE type_key = $1 AND id = $2`,
+      [relationTypeKey, relationId],
+      search,
+      "before",
+    );
     return result.rowCount > 0;
   }
 

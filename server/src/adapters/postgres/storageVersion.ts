@@ -167,6 +167,9 @@ const STEPS: Step[] = [
   last_error    text,
   CONSTRAINT search_queue_pk PRIMARY KEY (generation_id, entity_id, part_kind, group_no, part_id)
 )`,
+      `CREATE INDEX search_queue_due_idx ON search_queue (not_before)`,
+      `CREATE INDEX search_queue_entity_idx ON search_queue (entity_id)`,
+      `CREATE INDEX search_queue_part_idx ON search_queue (part_id)`,
       `CREATE TABLE search_entry (
   generation_id uuid     NOT NULL,
   entity_id     uuid     NOT NULL,

@@ -234,8 +234,9 @@ document property. Invoked when the property, or its owning type, is removed.
 modeling side. The runtime store exposes three operations, each keyed by lens key within
 its binding. One returns the full schema together with the lens and its inclusion rows,
 one returns the lens's agent configurations, and one returns the lens's saved queries. The
-caller uses the inclusion rows to compute the scoped schema.
-The first returns nothing at all when no lens has that key, which is how an unknown lens
+caller uses the inclusion rows to compute the scoped schema. An adapter that stores
+search indices adds to the first the keys of the search indices the lens includes, in key
+order. The first returns nothing at all when no lens has that key, which is how an unknown lens
 is detected. The runtime store also exposes the ontology key it is bound to, because the
 schema cache keys its entries by ontology plus lens.
 
@@ -288,7 +289,9 @@ and length, text and an optional vector. Maintenance reads reusable vectors, del
 property's chunks and writes its replacement batch; ordinary results omit vectors.
 
 **Search.** Four rankings take the complete searched set in one call and return rows in
-exact score order. Hybrid fusion belongs above the port.
+exact score order. Hybrid fusion belongs above the port. The service ranks through them
+only on an adapter that stores no search indices; one that stores them ranks entries
+through its search-index store instead ([below](#the-search-index-store)).
 
 | Ranking | Input | Returns |
 |---|---|---|
@@ -329,7 +332,7 @@ lenses and transfer payloads.
 Property keyword attribution names segments containing contributing query terms; independently matching the whole query against each segment is insufficient for
 cross-field matches. Use the same language and tokenizer as aggregate retrieval, returning
 null when faithful coverage is unavailable. Character-span attribution is not required.
-The service suppresses keys that are no longer exposed string properties. An adapter
+The service returns no attribution to callers. An adapter
 without keyword support does not fabricate a negative result or property attribution.
 
 PostgreSQL stores keyword text and retained segments separately from semantic text. Its
@@ -360,7 +363,8 @@ in the same spirit as the declarations above; the server's feature report carrie
 ([interfaces.md](interfaces.md)). Only an adapter declaring support provides the store,
 and asking one that declares none for it is a programming error, not a domain condition.
 The runtime store of such an adapter also hands out the search-index store of its own
-ontology, so a write can plan its search work without a second binding. Registry delete
+ontology, so a write can plan its search work without a second binding, and so does its
+modeling store, so a schema change can keep the managed indices in step. Registry delete
 removes everything the store holds. The pipeline that uses this store is described in
 [architecture.md](architecture.md#search-indexing).
 
@@ -374,7 +378,10 @@ names its root entity type. Create, list in key order, read by key, replace the
 definition with the key unchanged, delete. Create and replace return an absent result
 when the root entity type does not exist; a taken key is a conflict. Deleting an index
 deletes its generations, their queued work and entries, and its lens inclusions; deleting
-the root entity type deletes the index.
+the root entity type deletes the index. One more operation includes an index in every
+scoped lens that exposes its root entity type — by an entity inclusion of the type, or,
+in a lens with relation inclusions only, because every type is exposed — skipping lenses
+that include it already, and returns how many it was added to.
 
 **Generations.** A generation is one build of one representation — semantic or keyword —
 of one index. It carries the definition hash it was built from, the model id and vector
@@ -412,6 +419,20 @@ Read the stored hashes of given parts. Delete given parts; delete an entity's pa
 one kind and group except a list to keep. Delete an entity's entries, or a relation's,
 in every generation of the ontology. The worker composes against the ontology's full
 schema, which the store reads for it — every type and property, unscoped.
+
+**Ranking entries.** One operation ranks the entries of one generation, best first, and
+returns nothing unless the generation is ready. A semantic generation takes a query vector
+of its width and ranks by nearest vector, the score pinned to `(1 + cosine) / 2`; a
+keyword generation takes the query text and the keyword matching and ranks by the
+adapter's native keyword measurement. The keyword query is built from the adapter's own
+tokenizer output for the text in each language of the generation's set — the terms of
+one language joined as any or all, each matching as a prefix, the languages as
+alternatives — so search text never reaches query syntax, and a text yielding no term
+matches nothing. Filter conditions apply to the entity owning each entry, inside the
+ranking, so the limit counts entries that pass them. Two optional type lists restrict
+relation entries only: one ranks only when its relation type is in the first and its
+target type in the second. Each ranked entry carries its identity, the relation type and
+target of a relation part, a passage's offset and length, its text and its score.
 
 **Search work of a write.** Every entity and relation write of the runtime store — create,
 update, delete — takes an optional search write plan, derived above the port from the
@@ -612,7 +633,18 @@ multi-ontology conformance tier runs on PostgreSQL only.
   which is not indexed; individual vector filter metadata values retain their ceiling.
 - **Search indices on Neo4j.** The adapter declares no support: it provides no
   search-index store and no wake-ups, its writes carry no search work, and no worker
-  runs.
+  runs. Ranked search there ranks the per-entity search data
+  ([capabilities/search.md](capabilities/search.md#per-entity-search-data)) through the
+  semantic rankings of the data side — the only ones it offers, since it declares no
+  keyword ranking — with these differences from the search over index entries the
+  search capability describes: a hit carries no `matched`; a lens's index inclusions
+  play no part; property search ranks one composed text per entity across all searched
+  types in one ranking; document search ranks passages, its budget doubling until the
+  ranking is exhausted, and collapses them to entities, each document property keeping
+  its best passage; and when both kinds run their rankings are summed by reciprocal rank,
+  or, over more than one searched type, combined by the best reciprocal kind rank
+  ([decisions.md](decisions.md#interfaces)). A floor drops semantic candidates — entities
+  or passages — before fusion.
 - **Path and relation existence conditions on search.** PostgreSQL declares support and
   evaluates them in both rankings; Neo4j declares none, so a query path or a relation
   existence test on search is rejected above the port with a validation error naming the
@@ -697,8 +729,11 @@ property by the derivation the `5.0` transfer import uses
 ([capabilities/transfer.md](capabilities/transfer.md#the-format-version)) — creating a
 `string` property where a type has none, with property creation order as the declaration
 order — and then makes the column mandatory and adds its reference. The same step creates
-the search-index tables and gives `lens_includes` its third inclusion column (both below);
-an upgraded namespace's keyword language set is its former text-search language alone.
+the search-index tables and gives `lens_includes` its third inclusion column (both below),
+writes a row for every managed index the namespace's schema implies, and includes each in
+every scoped lens exposing its root type, as the search-index store's inclusion operation
+does; the worker's first start then builds their generations from all existing entities.
+An upgraded namespace's keyword language set is its former text-search language alone.
 
 **Registry create** is one transaction:
 the registry row first — so a concurrent same-key create dies on the named constraint as
@@ -719,7 +754,7 @@ per namespace:
 | Entity type | `entity_type` | referenced by its property definitions and inclusions; its name property's key in `name_property`, a reference to `property_def` by entity type and key, checked at commit |
 | Relation type | `relation_type` | endpoint entity type keys as deletion-restricted references to `entity_type`; referenced by its property definitions and inclusions |
 | Property definition | `property_def` | exactly one of two owner columns — entity type or relation type — enforced by a check constraint |
-| Scope inclusion | `lens_includes` | its lens plus exactly one of three columns — entity type, relation type or search index; the optional property allowlist is an array column, and an absent allowlist is stored as null, never as an empty array. Search-index rows are not exposed through the port, and the type-inclusion reads skip them |
+| Scope inclusion | `lens_includes` | its lens plus exactly one of three columns — entity type, relation type or search index; the optional property allowlist is an array column, and an absent allowlist is stored as null, never as an empty array. Search-index rows reach the runtime schema read as index keys; the type-inclusion reads skip them |
 | Agent configuration | `ai_agent_config` | its lens |
 | Saved query | `saved_query` | its lens, with the denormalized lens key alongside |
 | Retriever configuration | `retriever_config` | lens foreign key with delete cascade; unique lens/key |
@@ -871,6 +906,15 @@ The queue works in plain SQL on `search_queue`:
   clears the lease of the rest; **fail** increments attempts, records the error and sets
   the earliest retry on the rows whose token still matches, and clears every claimed
   row's lease.
+- **Ranking** runs on the ready generation's table, the generation row held `FOR SHARE`
+  so the table stays while it is read. Semantic: a strict-order iterative HNSW scan over
+  `embedding::halfvec(D)` by cosine distance at the generation's width, the score
+  `1 − distance / 2`. Keyword: the query's lexemes from `to_tsvector` in each language of
+  the generation's set, quoted with a prefix marker, joined by `|` or `&` per language and
+  the languages by `|`, matched against `tsv` and ranked by `ts_rank_cd`, ties broken by
+  the entry key. Filter conditions run as an `EXISTS` on the owning `entity` row, the same
+  predicate fragments the instance listings use; the relation and target type lists as
+  `relation_type` and `target_type` predicates that let other parts pass.
 - **Wake-ups** are `pg_notify('ontoforge_search_work', <ontology key>)`, issued in every
   transaction that queued something; PostgreSQL delivers the notification only at commit.
   One channel serves the whole database. Each process `LISTEN`s on a dedicated connection

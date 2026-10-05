@@ -16,6 +16,7 @@ import {
   ensureSemanticIndexes,
   initStores,
 } from "../../../src/core/ports.js";
+import { drainSearchWork } from "../../../src/runtime/indexing/worker.js";
 import { wipeDatabase } from "../reset.js";
 import { checkOllamaModel, disableProvider, enableOllamaProvider } from "./support.js";
 import { defineEntityProperty } from "../fixture.js";
@@ -96,6 +97,8 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
       fromEntityId: alice._id as string,
       toEntityId: python._id as string,
     });
+    // Search entries are built in the background (none on Neo4j).
+    await drainSearchWork();
   }
 
   it("search ranks saved queries by description similarity, without steps", async () => {

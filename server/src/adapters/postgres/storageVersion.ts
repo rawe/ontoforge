@@ -25,9 +25,12 @@
 import { randomUUID } from "node:crypto";
 
 import { legacyNameProperty } from "../../core/legacyNameProperty.js";
+import type { Row } from "../../core/ports.js";
 import { namePropertyDisplayName } from "../../core/schemas.js";
+import { deriveManagedIndices, type SearchIndexSchema } from "../../core/searchIndex.js";
 import type { Querier } from "./errors.js";
 import { searchPathStatement } from "./errors.js";
+import { readTypesWithProperties } from "./schemaRead.js";
 
 /** The layout this code creates and serves. */
 export const STORAGE_VERSION = 3;
@@ -86,6 +89,74 @@ async function backfillNameProperties(querier: Querier): Promise<void> {
       entityTypeId,
       key,
     ]);
+  }
+}
+
+/**
+ * Write a row for every managed search index the schema implies
+ * (`deriveManagedIndices`) and include each in every scoped lens that
+ * exposes its root type — by an entity inclusion of the type, or, with
+ * relation inclusions only, every type. The worker's start then
+ * reconciles their generations, which queues the full backfill.
+ */
+async function writeManagedSearchIndices(querier: Querier): Promise<void> {
+  const { entityTypes, relationTypes } = await readTypesWithProperties(querier, false);
+  const properties = (rows: unknown) =>
+    Object.fromEntries(
+      (rows as Row[]).map((p) => [
+        p["key"] as string,
+        {
+          key: p["key"] as string,
+          displayName: p["displayName"] as string,
+          dataType: p["dataType"] as string,
+        },
+      ]),
+    );
+  const schema: SearchIndexSchema = {
+    entityTypes: Object.fromEntries(
+      entityTypes.map((et) => [
+        et["key"] as string,
+        {
+          key: et["key"] as string,
+          displayName: et["displayName"] as string,
+          nameProperty: et["nameProperty"] as string,
+          properties: properties(et["properties"]),
+        },
+      ]),
+    ),
+    relationTypes: Object.fromEntries(
+      relationTypes.map((rt) => [
+        rt["key"] as string,
+        {
+          key: rt["key"] as string,
+          displayName: rt["displayName"] as string,
+          fromEntityTypeKey: rt["sourceKey"] as string,
+          toEntityTypeKey: rt["targetKey"] as string,
+          properties: properties(rt["properties"]),
+        },
+      ]),
+    ),
+  };
+  for (const { kind, definition } of deriveManagedIndices(schema)) {
+    const searchIndexId = randomUUID();
+    await querier.query(
+      `INSERT INTO search_index (search_index_id, key, kind, entity_type_id, definition)
+       SELECT $1::uuid, $2, $3, entity_type_id, $5::jsonb FROM entity_type WHERE key = $4`,
+      [searchIndexId, definition.key, kind, definition.entityType, JSON.stringify(definition)],
+    );
+    await querier.query(
+      `INSERT INTO lens_includes (lens_id, search_index_id)
+       SELECT l.lens_id, si.search_index_id
+       FROM search_index si, lens l
+       WHERE si.search_index_id = $1 AND (
+         EXISTS (SELECT 1 FROM lens_includes i
+                 WHERE i.lens_id = l.lens_id AND i.entity_type_id = si.entity_type_id)
+         OR (NOT EXISTS (SELECT 1 FROM lens_includes i
+                         WHERE i.lens_id = l.lens_id AND i.entity_type_id IS NOT NULL)
+             AND EXISTS (SELECT 1 FROM lens_includes i
+                         WHERE i.lens_id = l.lens_id AND i.relation_type_id IS NOT NULL)))`,
+      [searchIndexId],
+    );
   }
 }
 
@@ -187,6 +258,9 @@ const STEPS: Step[] = [
   tsv           tsvector,
   CONSTRAINT search_entry_pk PRIMARY KEY (generation_id, entity_id, part_kind, group_no, part_id)
 ) PARTITION BY LIST (generation_id)`,
+      // 6.0: the managed indices of the existing schema, searchable in the
+      // scoped lenses that show their types.
+      writeManagedSearchIndices,
     ],
   },
 ];

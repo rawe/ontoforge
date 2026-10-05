@@ -40,7 +40,7 @@ export async function initAdapter(): Promise<void> {
 /** A modeling store bound to one ontology's namespace. The caller (the
  * port accessor) has already verified the ontology exists. */
 export function createModelingStore(ontologyKey: string, language: KeywordLanguage): PostgresModelingStore {
-  return new PostgresModelingStore(ontologyNamespace(ontologyKey), language);
+  return new PostgresModelingStore(ontologyNamespace(ontologyKey), language, ontologyKey);
 }
 
 /** A runtime store bound to one ontology's namespace. */

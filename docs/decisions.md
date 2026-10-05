@@ -268,12 +268,13 @@ measurement, raw and unbounded, a number exactly when `keywordMatch` is true and
 exactly when it is null). Null means unknown or unmeasured, including unavailable
 signals; false requires an explicit negative evaluation, never absence from a limited
 ranking. The keyword score is not comparable to semantic similarity, not across
-responses, and never enters fusion or tie refinement. Evidence describes the composed entity text or the particular returned document
-passage, not which signals contributed to ranking. Do not add a `via` or source-membership
-field to this contract. Retaining evidence itself preserves ranking and passage selection.
-Property matches also expose nullable `keywordPropertyKeys`, naming exposed string values
-that supplied query terms; withhold incomplete or unsupported attribution rather than
-invent it. They do not attribute semantic matches to individual properties.
+responses, and never enters fusion or tie refinement. Evidence describes the match's own
+entry — the entity's own-field text or the particular returned document passage — not
+which signals contributed to ranking. A hit's `matched` names the entry that matched best
+— its index, part and, for a relation entry, the relation and its target — never which
+retrieval method found it; do not add a `via` or source-membership field naming the
+contributing signals. Retaining evidence itself preserves ranking and passage selection.
+Matches do not attribute keyword or semantic matches to individual properties.
 Saved-query discovery retains its separate cosine scores.
 
 **Search ranking and evidence have distinct meanings.** Relative rank, semantic
@@ -290,17 +291,25 @@ not, by itself, establish which individual property caused the match.
 Changing single-type behaviour requires separate explicit approval, because a fix for
 unequal eligibility across types must not silently change callers searching one type.
 
-**Cross-type kind fusion uses the best reciprocal kind rank.** When both kinds run
-over more than one searched type, take the maximum contribution; keep summed fusion
-within each kind and for at-most-one-type requests. Resolve equal cross-kind fusion
-scores by the best semantic similarity in returned matches only if every tied entity has
-one; otherwise retain the group's encounter order. This removes additive schema
-participation credit without treating missing measurements as negative evidence. Deliberation:
+**Search merges indices by score within a retrieval method and fuses only the methods,
+by reciprocal rank.** Within one method, the rankings of every searched index — every
+type, own fields and passages alike — merge into one ranking by their own scores, which
+share one scale there (one embedding model's similarity, one query's native keyword
+score). Grouped by entity, an entity counts once, scored by its best entry, whichever
+index holds it. A single method keeps those scores; `hybrid` fuses the two entity rankings
+as the sum of `1 / (60 + rank)`. What matched is the best entry under the method in which
+the entity ranks best, semantic on equal ranks. Resolve equal scores by the best semantic
+similarity only if every tied entity has one; otherwise, and among equal similarities, by
+entity id. Being found by several indices — own fields and a document, say — never adds
+up, so an entity is not favoured because its type has a document property, and no
+missing measurement is treated as negative evidence. The Neo4j adapter stores no search
+indices and ranks per kind instead; when both kinds run there over more than one searched
+type, it takes the best reciprocal kind rank. Deliberation:
 [adr/0020](adr/0020-search-ranking-and-evidence.md).
 
 **Property keyword content contains values, not schema labels.** Preserve ordered
 schema-string value segments separately from labeled semantic text, so keys cannot count
-as matching content and keyword attribution can name contributing values. The values-only
+as matching content. The values-only
 correction applies to keyword and hybrid property retrieval, including single-type queries;
 this is distinct from preserving single-type fusion. Search-index entries follow the same
 rule: an entry's keyword text holds values only, its semantic text is labelled.
@@ -339,32 +348,39 @@ means every term, not no morphology; and building no all-term variant, which lea
 any-term behaviour unnamed and the extension point unexercised.
 
 **Text-search language is an immutable ontology setting.** Chosen at creation, default
-English, carried in export, and checked against the import target.
+English, carried in export, and checked against the import target. It is the language of
+the per-entity keyword representation, fixed when the ontology is created, with no
+per-type keyword DDL; it does not stem search-index entries.
 
-**Keyword index families are fixed at ontology creation.** Their language is the ontology's
-language; no per-type keyword DDL exists. Property keyword values and document chunks are
-stored even without embeddings. Schema changes do not silently refresh stored entity
-representations.
+**Keyword entries are stemmed in every language of the ontology's keyword language set.**
+The set is English, German, or both. One keyword representation per entry concatenates
+the stemming of each language; a query is stemmed in each, its terms combined within a
+language by the keyword matching and the languages OR-ed. No request names a language:
+which language a query is written in is unknown, and an ontology's content may mix both.
+Matches across languages are left to semantic ranking. A new ontology starts with both
+languages.
 
-**A schema edit never writes instance data; the rebuild repairs what it leaves behind.**
-Deleting a string property leaves its values inside every entity's stored keyword text and
-semantic text, where they keep matching until a rebuild recomposes them — in both kinds,
-since neither stored text records which property a word came from. Cleaning up at deletion
-time was rejected: it would turn a schema edit into a write over all instance data, and for
-the semantic half a bulk re-embedding that a server with no provider could not perform at
-all. The staleness is bounded, visible in the documented behaviour, and repaired by one
-explicit call.
+**A schema edit never writes instance data.** Managed search indices follow the schema
+asynchronously: a changed derived definition builds a new generation in the background,
+and the previous one serves until it is ready. The per-entity search data is not refreshed
+at all: deleting a string property leaves its values inside every entity's stored keyword
+text and semantic text until a rebuild recomposes them — in both kinds, since neither
+stored text records which property a word came from. Cleaning up at deletion time was
+rejected: it would turn a schema edit into a write over all instance data, and for the
+semantic half a bulk re-embedding that a server with no provider could not perform at
+all.
 
-**One rebuild covers every stored representation search reads, and it needs no provider.**
-Keyword text and document passages are rebuilt by a run that calls no model — passages are
-themselves the document keyword index — so the operation runs with an embedding provider
+**One rebuild covers every per-entity search representation and the saved-query
+description vectors, and it needs no provider.** Keyword text and document chunks are
+rebuilt by a run that calls no model, so the operation runs with an embedding provider
 absent, skips the vectors, the vector indexes and the saved-query descriptions, and reports
 that skip in its summary rather than counting it as failure. A vector-only name for it would
 be wrong: the operation is named for the search data it rebuilds, not for one half of it.
+Search indices keep themselves current and are not part of it.
 
 **The list filters and the search ranks.** Neither server operation falls back to the
-other. Cross-type search uses per-type indexes and an exact searched set, with no shared
-cross-type vector index.
+other. Cross-type search ranks each searched type's own indices over an exact searched
+set, with no shared cross-type index.
 
 **MCP transport is stateless HTTP with plain JSON responses.**
 MCP has no event stream. Statelessness allows the same mount to serve many clients
@@ -464,6 +480,40 @@ server never picks a replacement. Clients label an entity by its name property's
 alone, so a label never depends on guessing which property names a thing. Where data
 predates name properties — older storage, a previous-version transfer payload — one fixed
 derivation assigns it, and that derivation is used nowhere else.
+
+**Search indices are ontology-level design objects; lenses include them.** An index is
+defined and stored once per ontology and serves every lens. An unscoped lens searches
+every index; a scoped lens only the indices it includes, and only while it exposes their
+root entity type. Index inclusions never make a lens scoped. Lenses only subtract: a
+lens-owned index would duplicate entries and embedding cost across lenses and vanish with
+its lens without consent, while an index visible to every lens would expose content over
+types a scoped lens hides. Deliberation:
+[adr/0022](adr/0022-search-indices-ontology-level-included-per-lens.md).
+
+**Every entity type has a managed default index, and every document property a managed
+passage index; managed indices follow the schema.** The default index covers the type's
+own `string` properties; the passage index holds the document's chunks headed by the
+entity's name. The server derives both from the schema on every schema change, creates,
+updates and deletes them without a consent step, and includes a new one in every scoped
+lens exposing its root type. They cannot be edited. Search works with no index
+configuration, and a schema change can never leave search reading a stale field list.
+
+**A search entry holds at most one relation instance; entries never combine relations.**
+An entity's own fields form one entry; each relation instance, with the entity at its
+other end, forms one entry of its own, headed by the entity's own header fields. The best
+entry decides the entity's score. A fact spread over two relations is answered by an
+exact filter or by fusing rankings at entity level, never by one entry. Combinations would
+multiply, nobody can say which make sense, and one change would re-embed every combination
+containing it; kept apart, each relation's facts stay separately rankable, and a lens that
+hides a relation type or target type skips those entries at query time, with no rebuild
+and no hidden facts inside a combined vector. Deliberation:
+[adr/0023](adr/0023-one-search-entry-per-relation-instance.md).
+
+**A lens may search an index that reads properties it hides; results are projected and
+the snippet withheld.** Entries are composed from the full schema, so a hidden value can
+still drive a ranking through that lens — accepted, as two lenses share one stored record.
+The lens still governs everything returned: hits are projected through it, and a match
+whose index reads a hidden property carries no snippet of the entry's text.
 
 **Exactly one env file is read, and it is always named.**
 `ENV_FILE` names it; without that it is `.env` in the working directory. Files never

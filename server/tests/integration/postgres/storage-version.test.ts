@@ -3,8 +3,8 @@
  * purpose: storage at version 2 (the 5.x layout, before name properties
  * and search indices) is produced by dropping what the current code adds,
  * then the boot (`initSchema`) must bring it to exactly the layout of a
- * freshly created ontology, backfilling every entity type's name property
- * and the search settings, once,
+ * freshly created ontology, backfilling every entity type's name property,
+ * the search settings and the managed search indices, once,
  * however many servers start together; it must refuse storage older than
  * the previous major line and leave storage newer than the code
  * untouched. Requires the docker-compose PostgreSQL.
@@ -215,6 +215,71 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL storage version"
       ["note", "summary"],
       ["person", "name"],
       ["reading", "name_2"],
+    ]);
+  });
+
+  it("writes the managed search indices and includes them in the scoped lenses that show their types", async () => {
+    await getOntologyRegistry().createOntology(ID_A, "older", null, null, "english");
+    await makeVersion2("ont_older");
+    await seedVersion2Types("ont_older", {
+      note: [["body", "document"], ["summary", "string"]],
+      person: [["age", "integer"], ["name", "string"]],
+    });
+    await withTransaction(async (querier) => {
+      const ns = "ont_older";
+      await querier.query(
+        `INSERT INTO ${ns}.relation_type
+           (relation_type_id, key, display_name, source_entity_type_key, target_entity_type_key)
+         VALUES ($1, 'wrote', 'Wrote', 'person', 'note')`,
+        [randomUUID()],
+      );
+      const lens = async (key: string) => {
+        const id = randomUUID();
+        await querier.query(`INSERT INTO ${ns}.lens (lens_id, key, name) VALUES ($1, $2, $2)`, [id, key]);
+        return id;
+      };
+      await lens("everything");
+      const people = await lens("people");
+      await querier.query(
+        `INSERT INTO ${ns}.lens_includes (lens_id, entity_type_id, properties)
+         SELECT $1, entity_type_id, ARRAY['name'] FROM ${ns}.entity_type WHERE key = 'person'`,
+        [people],
+      );
+      const writing = await lens("writing");
+      await querier.query(
+        `INSERT INTO ${ns}.lens_includes (lens_id, relation_type_id)
+         SELECT $1, relation_type_id FROM ${ns}.relation_type WHERE key = 'wrote'`,
+        [writing],
+      );
+    });
+
+    await initSchema();
+
+    const indices = await runQuery(
+      `SELECT si.key, si.kind, et.key AS entity_type, si.definition->'fields' AS fields
+         FROM ont_older.search_index si
+         JOIN ont_older.entity_type et ON et.entity_type_id = si.entity_type_id
+        ORDER BY si.key`,
+    );
+    expect(indices.rows).toEqual([
+      { key: "note~body", kind: "passage", entity_type: "note", fields: ["body"] },
+      { key: "note~default", kind: "default", entity_type: "note", fields: ["summary"] },
+      { key: "person~default", kind: "default", entity_type: "person", fields: ["name"] },
+    ]);
+    // An unscoped lens needs no inclusions; a lens with relation inclusions
+    // only shows every type.
+    const included = await runQuery(
+      `SELECT l.key AS lens, si.key AS index
+         FROM ont_older.lens_includes li
+         JOIN ont_older.lens l ON l.lens_id = li.lens_id
+         JOIN ont_older.search_index si ON si.search_index_id = li.search_index_id
+        ORDER BY l.key, si.key`,
+    );
+    expect(included.rows).toEqual([
+      { lens: "people", index: "person~default" },
+      { lens: "writing", index: "note~body" },
+      { lens: "writing", index: "note~default" },
+      { lens: "writing", index: "person~default" },
     ]);
   });
 

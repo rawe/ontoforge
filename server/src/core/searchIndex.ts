@@ -403,6 +403,12 @@ export function definitionHash(
     .digest("hex");
 }
 
+/** Whether two definitions are the same, whatever their key order — a
+ * stored definition comes back from storage with its keys reordered. */
+export function definitionsEqual(a: SearchIndexDefinition, b: SearchIndexDefinition): boolean {
+  return canonicalJson(a) === canonicalJson(b);
+}
+
 /** JSON with object keys sorted at every level; array order is kept. */
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) {

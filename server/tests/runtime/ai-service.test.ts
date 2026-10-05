@@ -106,7 +106,8 @@ describe("toolset computation", () => {
       if (!["search", "search_documents"].includes(tool.name)) continue;
       expect(tool.description).toContain(RELATIVE_SCORE_PROMISE);
       expect(tool.description).toContain("semanticSimilarity");
-      expect(tool.description).toContain("keywordPropertyKeys");
+      // Matches carry no property attribution any more.
+      expect(tool.description).not.toContain("keywordPropertyKeys");
       expect(tool.description).toContain("unknown or unmeasured");
       expect(tool.description.length).toBeLessThanOrEqual(2000);
       expect(Object.keys(tool.schema.shape).sort()).toEqual((tool.name === "search" ? ["query", "entity_type_key", "limit"] : ["query", "entity_type_key", "limit", "property"]).sort());

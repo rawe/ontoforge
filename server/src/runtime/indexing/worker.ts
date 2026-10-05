@@ -20,9 +20,9 @@
  *    the one queries read.
  *
  * Between passes it sleeps until an enqueue notifies it or the polling
- * interval (`SEARCH_POLL_MS`) passes. At start it sweeps leftover
- * partitions and reconciles every ontology's generations
- * (`generations.ts`). Tests drive passes directly (`drainSearchWork`).
+ * interval (`SEARCH_POLL_MS`) passes. At start it syncs every ontology's
+ * managed indices, sweeps leftover partitions and reconciles the
+ * generations (`managed.ts`, `generations.ts`). Tests drive passes directly (`drainSearchWork`).
  *
  * The worker measures entries written per second per representation —
  * a moving average, kept in memory — for the cost preview
@@ -64,7 +64,7 @@ import {
 } from "../../core/searchPipeline.js";
 import { loadSearchContextUncached, type SearchContext } from "../schemaCache.js";
 import { chunkDocument } from "../search/chunking.js";
-import { reconcileSearchGenerations } from "./generations.js";
+import { syncManagedSearchIndices } from "./managed.js";
 
 type Row = Record<string, unknown>;
 
@@ -513,8 +513,10 @@ class SearchWorker {
     }
   }
 
-  /** Sweep leftover partitions and reconcile every ontology's generations
-   * — a changed model or language set starts its new generations here. */
+  /** Bring every ontology's managed indices in step with its schema, sweep
+   * leftover partitions and reconcile the generations — a changed model or
+   * language set starts its new generations here, and so does the backfill
+   * after a storage upgrade. */
   private async prepare(): Promise<void> {
     let keys: string[] = [];
     try {
@@ -525,8 +527,8 @@ class SearchWorker {
     for (const ontologyKey of keys) {
       if (!this.running) return;
       try {
-        await (await getSearchIndexStore(ontologyKey)).sweepGenerations();
-        await reconcileSearchGenerations(ontologyKey);
+        // Sweeps and reconciles as well.
+        await syncManagedSearchIndices(await getSearchIndexStore(ontologyKey));
       } catch (exc) {
         console.warn(`Search generations of ontology '${ontologyKey}' not reconciled: ${message(exc)}`);
       }

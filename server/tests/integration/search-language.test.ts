@@ -4,6 +4,7 @@ import { createApp } from "../../src/app.js";
 import { initStores, closeStores } from "../../src/core/ports.js";
 import { settings } from "../../src/config.js";
 import { wipeDatabase } from "./reset.js";
+import { drainSearchWork } from "../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 let app: FastifyInstance;
 beforeAll(async () => {
@@ -99,11 +100,59 @@ it.skipIf(settings.DB_BACKEND !== "postgres")(
       title: "Häuser",
       body: "Häuser werden gebaut.",
     });
+    await drainSearchWork();
     for (const kind of ["properties", "document"]) {
       const res = await app.inject({ url: `${runtime}/search?q=Haus&in=${kind}` });
       expect(res.statusCode, res.body).toBe(200);
       expect(res.json().hits[0].entity._id).toBe(entity._id);
     }
+  },
+);
+it.skipIf(settings.DB_BACKEND !== "postgres")(
+  "keyword search stems in German and English alike on a bilingual ontology",
+  async () => {
+    // A new ontology's keyword language set is {german, english}: each entry
+    // is stemmed in both, each query parsed in both and OR-ed.
+    await post("/api/ontologies", { key: "language_test" });
+    const model = "/api/ontologies/language_test/model";
+    const runtime = "/api/ontologies/language_test/runtime/lenses/all";
+    await post(`${model}/lenses`, { key: "all", name: "All" });
+    const type = await post(`${model}/entity-types`, { key: "listing", displayName: "Listing" });
+    await post(`${model}/entity-types/${type.entityTypeId}/properties`, {
+      key: "body",
+      displayName: "Body",
+      dataType: "document",
+    });
+    const german = await post(`${runtime}/entities/listing`, {
+      name: "Die Häuser am See",
+      body: "Wir kaufen alte Häuser.",
+    });
+    const english = await post(`${runtime}/entities/listing`, {
+      name: "The houses by the lake",
+      body: "We are buying old houses.",
+    });
+    await drainSearchWork();
+    const ids = async (q: string, kind: string, strategy = "keyword") => {
+      const res = await app.inject({
+        url: `${runtime}/search?${new URLSearchParams({ q, in: kind, strategy })}`,
+      });
+      expect(res.statusCode, res.body).toBe(200);
+      return res.json().hits.map((h: any) => h.entity._id);
+    };
+    for (const kind of ["properties", "document"]) {
+      // German inflections find the German text, English ones the English text.
+      expect(await ids("Haus", kind)).toEqual([german._id]);
+      expect(await ids("Häusern", kind)).toEqual([german._id]);
+      expect(await ids("house", kind)).toEqual([english._id]);
+    }
+    expect(await ids("kaufen", "document")).toEqual([german._id]);
+    expect(await ids("buy", "document")).toEqual([english._id]);
+    // Every term must match in one language: German and English terms mixed
+    // match nothing under all-term matching, either under any-term.
+    expect(await ids("Haus lake", "properties", "keyword-all")).toEqual([]);
+    expect((await ids("Haus lake", "properties", "keyword-any")).sort()).toEqual(
+      [german._id, english._id].sort(),
+    );
   },
 );
 it("rejects the old tool and step names, and strips minScore from a search step", async () => {

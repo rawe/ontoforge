@@ -22,7 +22,8 @@
  * the index's entities into its current generations instead
  * (`refreshSearchIndex`).
  *
- * A switched-off representation keeps no generation. Semantic entries
+ * A switched-off representation keeps no generation, and neither does a
+ * switched-off managed index (search settings). Semantic entries
  * need an embedding provider: without one no semantic generation is
  * created, and existing ones are left as they are.
  */
@@ -30,7 +31,7 @@
 import { randomUUID } from "node:crypto";
 
 import { getEmbeddingProvider } from "../../core/embedding.js";
-import { NotFoundError } from "../../core/exceptions.js";
+import { ConflictError, NotFoundError } from "../../core/exceptions.js";
 import {
   getSearchIndexStore,
   type NewSearchGeneration,
@@ -40,6 +41,7 @@ import {
 } from "../../core/ports.js";
 import type { KeywordLanguageSet } from "../../core/keywordLanguage.js";
 import { definitionHash, type SearchRepresentation } from "../../core/searchIndex.js";
+import { disabledIndexKeys } from "../../core/searchPipeline.js";
 import { invalidateSearchContext } from "../schemaCache.js";
 
 const REPRESENTATIONS: readonly SearchRepresentation[] = ["keyword", "semantic"];
@@ -69,13 +71,18 @@ export async function reconcileSearchGenerations(
     store.listGenerations(),
     store.getSearchSettings(),
   ]);
+  const disabled = disabledIndexKeys(settings);
   const changes: GenerationChange[] = [];
   for (const index of indices) {
     const live = generations.filter(
       (g) => g.searchIndexId === index.searchIndexId && (g.state === "building" || g.state === "ready"),
     );
     changes.push(
-      ...(await reconcileIndex(store, index, live, settings.keywordLanguages, force.includes(index.key))),
+      ...(await reconcileIndex(store, index, live, {
+        keywordLanguages: settings.keywordLanguages,
+        force: force.includes(index.key),
+        disabled: disabled.has(index.key),
+      })),
     );
   }
   return changes;
@@ -83,7 +90,7 @@ export async function reconcileSearchGenerations(
 
 /** Force new generations of one index — every enabled representation —
  * and rebuild them from scratch. Retries what failed. Unknown key ->
- * not found. */
+ * not found; a switched-off managed index -> conflict. */
 export async function rebuildSearchIndex(
   ontologyKey: string,
   indexKey: string,
@@ -91,6 +98,9 @@ export async function rebuildSearchIndex(
   const store = await getSearchIndexStore(ontologyKey);
   if ((await store.getIndex(indexKey)) === null) {
     throw new NotFoundError(`Search index '${indexKey}' not found`);
+  }
+  if (disabledIndexKeys(await store.getSearchSettings()).has(indexKey)) {
+    throw new ConflictError(`Search index '${indexKey}' is switched off`);
   }
   return reconcileSearchGenerations(ontologyKey, [indexKey]);
 }
@@ -116,8 +126,11 @@ async function reconcileIndex(
   store: SearchIndexStore,
   index: SearchIndexRecord,
   live: SearchGenerationRecord[],
-  keywordLanguages: KeywordLanguageSet,
-  force: boolean,
+  { keywordLanguages, force, disabled }: {
+    keywordLanguages: KeywordLanguageSet;
+    force: boolean;
+    disabled: boolean;
+  },
 ): Promise<GenerationChange[]> {
   const changes: GenerationChange[] = [];
   const change = (
@@ -129,7 +142,7 @@ async function reconcileIndex(
 
   for (const representation of REPRESENTATIONS) {
     const generations = live.filter((g) => g.representation === representation);
-    if (!index.definition[representation].enabled) {
+    if (disabled || !index.definition[representation].enabled) {
       for (const generation of generations) {
         if (await store.retireGeneration(generation.generationId)) {
           change(representation, "retired", generation.generationId);

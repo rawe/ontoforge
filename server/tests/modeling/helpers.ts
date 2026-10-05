@@ -37,6 +37,8 @@ export type MockModelingStore = { [K in Exclude<keyof ModelingStore, "textSearch
 export function createMockModelingStore(): MockModelingStore {
   return {
     textSearchLanguage: "english",
+    // No search indices: the managed-index sync is skipped.
+    searchIndices: vi.fn(() => undefined),
     reservedEntityTypeKeys: vi.fn(() => new Set(RESERVED_ENTITY_TYPE_KEYS)),
     reservedRelationTypeKeys: vi.fn(() => new Set(RESERVED_RELATION_TYPE_KEYS)),
     findReservedTypeKeysInUse: vi.fn(async () => []),

@@ -242,8 +242,22 @@ export class PostgresRuntimeStore implements RuntimeStore {
         [lensId],
       );
       const { entityInclusions, relationInclusions } = splitInclusions(incs.rows);
+      const indexIncs = await querier.query(
+        `SELECT si.key FROM lens_includes oi
+         JOIN search_index si ON si.search_index_id = oi.search_index_id
+         WHERE oi.lens_id = $1 ORDER BY si.key`,
+        [lensId],
+      );
+      const searchIndexInclusions = indexIncs.rows.map((row) => row["key"] as string);
 
-      return { lens, entityTypes, relationTypes, entityInclusions, relationInclusions };
+      return {
+        lens,
+        entityTypes,
+        relationTypes,
+        entityInclusions,
+        relationInclusions,
+        searchIndexInclusions,
+      };
     }, "REPEATABLE READ");
   }
 

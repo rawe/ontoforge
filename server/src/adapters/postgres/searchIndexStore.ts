@@ -43,6 +43,8 @@
  * queued.
  */
 
+import { toSql } from "pgvector";
+
 import {
   canonicalKeywordLanguages,
   KEYWORD_LANGUAGES,
@@ -51,9 +53,11 @@ import {
 import type {
   ClaimedSearchQueueItem,
   NewSearchGeneration,
+  RankedSearchEntry,
   Row,
   SearchEntryHash,
   SearchEntryPart,
+  SearchEntryQuery,
   SearchEntryWrite,
   SearchGenerationRecord,
   SearchGenerationState,
@@ -70,7 +74,9 @@ import type {
   SearchIndexKind,
   SearchRepresentation,
 } from "../../core/searchIndex.js";
+import { keywordTsquery } from "../../core/searchQuery.js";
 import { runQuery, withTransaction, type DbResult, type Querier } from "./errors.js";
+import { buildFilterClauses } from "./filters.js";
 import { quoteIdent } from "./oql/bindings.js";
 import { isUuid } from "./rows.js";
 import { readTypesWithProperties } from "./schemaRead.js";
@@ -211,7 +217,7 @@ function checkNewGeneration(generation: NewSearchGeneration): void {
 export class PostgresSearchIndexStore implements SearchIndexStore {
   constructor(
     private readonly namespace: string,
-    private readonly ontologyKey: string,
+    readonly ontologyKey: string,
   ) {}
 
   private query(text: string, params?: unknown[]): Promise<DbResult> {
@@ -300,6 +306,24 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
     if (result.rowCount === 0) return false;
     await this.bestEffort(() => this.sweepGenerations());
     return true;
+  }
+
+  async includeIndexInScopedLenses(key: string): Promise<number> {
+    const result = await this.query(
+      `INSERT INTO lens_includes (lens_id, search_index_id)
+       SELECT l.lens_id, si.search_index_id
+       FROM search_index si, lens l
+       WHERE si.key = $1 AND (
+         EXISTS (SELECT 1 FROM lens_includes i
+                 WHERE i.lens_id = l.lens_id AND i.entity_type_id = si.entity_type_id)
+         OR (NOT EXISTS (SELECT 1 FROM lens_includes i
+                         WHERE i.lens_id = l.lens_id AND i.entity_type_id IS NOT NULL)
+             AND EXISTS (SELECT 1 FROM lens_includes i
+                         WHERE i.lens_id = l.lens_id AND i.relation_type_id IS NOT NULL)))
+       ON CONFLICT DO NOTHING`,
+      [key],
+    );
+    return result.rowCount;
   }
 
   // ------------------------------------------------------------------
@@ -615,6 +639,94 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
   async deleteEntriesOfRelation(relationId: string): Promise<number> {
     if (!isUuid(relationId)) return 0;
     return this.deleteEverywhere(`part_kind = 'relation' AND part_id = $1`, [relationId]);
+  }
+
+  /**
+   * One ranking over a ready generation's partition, its row share-locked
+   * so the table stays while it is read. Semantic: an iterative HNSW scan
+   * (`strict_order`) at the generation's width, so the limit counts the
+   * entries that pass the filters. Keyword: the query's lexemes in each
+   * language of the generation's set (`keywordTsquery`), ranked by
+   * `ts_rank_cd`. Entity filters run as an `EXISTS` on the owning entity.
+   */
+  async rankEntries(query: SearchEntryQuery): Promise<RankedSearchEntry[]> {
+    if (!isUuid(query.generationId) || query.limit < 1) return [];
+    const table = partitionName(query.generationId);
+    return this.tx(async (querier) => {
+      const generation = await liveGeneration(querier, query.generationId);
+      if (generation === null || generation.state !== "ready") return [];
+
+      const params: unknown[] = [];
+      let rank: string;
+      let order: string;
+      const where: string[] = [];
+      if (generation.representation === "semantic") {
+        const dimensions = width(generation.dimensions);
+        if (query.vector === undefined || query.vector.length !== dimensions) {
+          throw new Error(
+            `Query vector width ${query.vector?.length} does not match the generation's ${dimensions}`,
+          );
+        }
+        await querier.query("SET LOCAL hnsw.iterative_scan = strict_order");
+        params.push(toSql(query.vector));
+        const distance = `s.embedding::halfvec(${dimensions}) <=> $1::halfvec(${dimensions})`;
+        rank = `1 - (${distance}) / 2`;
+        order = distance;
+        where.push("s.embedding IS NOT NULL");
+      } else {
+        const lexemes = await querier.query(
+          `SELECT tsvector_to_array(to_tsvector(language::regconfig, $1)) AS lexemes
+           FROM unnest($2::text[]) WITH ORDINALITY AS l(language, n) ORDER BY n`,
+          [query.text ?? "", generation.languages ?? []],
+        );
+        const tsquery = keywordTsquery(
+          lexemes.rows.map((row) => row["lexemes"] as string[]),
+          query.matching ?? "any",
+        );
+        if (tsquery === null) return [];
+        params.push(tsquery);
+        rank = "ts_rank_cd(s.tsv, $1::tsquery)";
+        order = "score DESC, s.entity_id, s.part_kind, s.group_no, s.part_id";
+        where.push("s.tsv @@ $1::tsquery");
+      }
+      if (query.relationTypes !== null) {
+        params.push(query.relationTypes);
+        where.push(`(s.relation_type IS NULL OR s.relation_type = ANY($${params.length}::text[]))`);
+      }
+      if (query.targetTypes !== null) {
+        params.push(query.targetTypes);
+        where.push(`(s.target_type IS NULL OR s.target_type = ANY($${params.length}::text[]))`);
+      }
+      const filters = buildFilterClauses(query.conditions, params);
+      if (filters.length > 0) {
+        where.push(
+          `EXISTS (SELECT 1 FROM entity WHERE entity.id = s.entity_id AND ${filters.join(" AND ")})`,
+        );
+      }
+      params.push(query.limit);
+      const result = await querier.query(
+        `SELECT s.entity_id, s.part_kind, s.group_no, s.part_id, s.relation_type, s.target_type,
+                s.target_id, s.start_char, s.char_length, s.text, ${rank} AS score
+         FROM ${table} s
+         WHERE ${where.join(" AND ")}
+         ORDER BY ${order}
+         LIMIT $${params.length}`,
+        params,
+      );
+      return result.rows.map((row) => ({
+        entityId: row["entity_id"] as string,
+        partKind: row["part_kind"] as SearchPartKind,
+        groupNo: row["group_no"] as number,
+        partId: row["part_id"] as string,
+        relationType: (row["relation_type"] as string | null) ?? null,
+        targetType: (row["target_type"] as string | null) ?? null,
+        targetId: (row["target_id"] as string | null) ?? null,
+        startChar: (row["start_char"] as number | null) ?? null,
+        charLength: (row["char_length"] as number | null) ?? null,
+        text: row["text"] as string,
+        score: Number(row["score"]),
+      }));
+    });
   }
 
   // ------------------------------------------------------------------

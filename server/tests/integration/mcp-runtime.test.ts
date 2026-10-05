@@ -18,6 +18,7 @@ import { createApp } from "../../src/app.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
 import { supportsMultipleOntologies } from "./tiers.js";
+import { drainSearchWork } from "../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { buildFixture, defineEntityProperty } from "./fixture.js";
 
@@ -509,6 +510,8 @@ describe("entity tools", () => {
         entity_type_key: "person",
         properties: { name: "Ada Lovelace" },
       });
+      // Search entries are built in the background (none on Neo4j).
+      await drainSearchWork();
       const found = json(await call(client, "search", { query: "Lovelace" }));
       expect(found.strategy).toBe("keyword");
       expect(found.minSimilarity).toBeNull();

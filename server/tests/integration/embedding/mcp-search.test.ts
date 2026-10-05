@@ -14,6 +14,7 @@ import { createApp } from "../../../src/app.js";
 import { settings } from "../../../src/config.js";
 import { closeStores, initStores } from "../../../src/core/ports.js";
 import { wipeDatabase } from "../reset.js";
+import { drainSearchWork } from "../../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache } from "../../../src/runtime/schemaCache.js";
 import { TOOL_MIN_SIMILARITY } from "../../../src/runtime/search/strategies.js";
 import { checkOllamaModel, disableProvider, enableOllamaProvider } from "./support.js";
@@ -75,6 +76,8 @@ describe.skipIf(!ollamaUp)("MCP search (Ollama)", () => {
       bio: "Leads brand strategy and market research",
       age: 51,
     });
+    // Search entries are built in the background (none on Neo4j).
+    await drainSearchWork();
 
     client = new Client({ name: "semantic-search-mcp-tests", version: "0.0.1" });
     await client.connect(
@@ -118,9 +121,12 @@ describe.skipIf(!ollamaUp)("MCP search (Ollama)", () => {
         semanticSimilarity: expect.any(Number),
         keywordMatch: settings.DB_BACKEND === "postgres" ? true : null,
         keywordScore: settings.DB_BACKEND === "postgres" ? expect.any(Number) : null,
-        keywordPropertyKeys: settings.DB_BACKEND === "postgres" ? ["role"] : null,
       },
     });
+    // On PostgreSQL the best entry of the type's default index matched.
+    if (settings.DB_BACKEND === "postgres") {
+      expect(results[0]!.matched).toMatchObject({ index: "person~default", partKind: "self" });
+    }
   });
 
   it("supports filters and field projection", async () => {
@@ -168,7 +174,7 @@ describe.skipIf(!ollamaUp)("MCP search (Ollama)", () => {
     expect(properties).not.toHaveProperty("min_score");
     for (const searchTool of tools.tools.filter((item) => ["search", "search_documents"].includes(item.name))) {
       expect(searchTool.description).toContain("semanticSimilarity");
-      expect(searchTool.description).toContain("keywordPropertyKeys");
+      expect(searchTool.description).not.toContain("keywordPropertyKeys");
       expect(searchTool.description!.length).toBeLessThanOrEqual(2000);
       expect(searchTool.outputSchema).toBeUndefined();
     }

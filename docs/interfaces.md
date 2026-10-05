@@ -148,7 +148,8 @@ not on every request shape — the restrictions and their reasons are in
 
 | Route | Always returned regardless of projection |
 |---|---|
-| Entity list, entity read, search | `_id` (plus `_entityTypeKey` on cross-type search) |
+| Entity list, entity read | `_id` |
+| Search | `_id`, `_entityTypeKey` |
 | Neighbours — the centre entity | `_id` |
 | Neighbours — neighbour entities | `_id`, `_entityTypeKey` |
 | Neighbours — relations, via `relationFields` | `_id`, `_relationTypeKey`, `direction` |
@@ -282,7 +283,7 @@ it such a change is refused with `CASCADE_REQUIRED` naming the lenses affected.
 
 ### Scope inclusions
 
-The routes that make a lens scoped. A lens with no inclusions exposes the whole schema.
+The routes that make a lens scoped. A lens with no type inclusions exposes the whole schema.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -349,12 +350,12 @@ beyond it.
 | POST | `/schema/validate` | Check the ontology's schema and every lens for consistency |
 | GET | `/export` | Export the ontology's design in the transfer format |
 | POST | `/import` | Import a transfer payload into this ontology |
-| POST | `/rebuild-search-data` | Rebuild everything search reads and repair the ontology's vector index widths |
+| POST | `/rebuild-search-data` | Rebuild the per-entity search data and the saved-query description vectors, and repair the ontology's vector index widths |
 
 Rebuild answers with a stream of newline-delimited JSON progress records rather than one
 body, because it runs over the ontology's whole dataset. It is never refused for a missing
-embedding provider: without one it rebuilds the keyword text and the document passages,
-skips the vector work and says so in its summary. After an embedding-provider switch it is
+embedding provider: without one it rebuilds the keyword text and the document chunks,
+skips the vector work and says so in its summary. It does not touch search indices. After an embedding-provider switch it is
 run once per ontology.
 Transfer carries the design only — schema, lenses, agents, saved queries, retrievers; no instance
 data and no ontology identity — see
@@ -437,10 +438,13 @@ default keyword matching, while `keyword-any` and `keyword-all` each fix one. `d
 requires that kind. `min_similarity`, 0–1, drops semantic candidates measured below it
 and needs a strategy that ranks semantically. `limit` counts entities, 1–100, default 10.
 Filters also work across types, narrowing the searched set. The response carries `query`,
-`type`, `in`, `strategy`, `minSimilarity`, `filter`, `hits`; each hit has an entity, a within-response relative score and matches.
-Matches carry nullable semantic/keyword evidence including the native keyword score;
-property matches also carry nullable contributing keyword property keys. Scores are not confidence. Evidence scope and null
-semantics are defined in [the search response contract](capabilities/search.md#response).
+`type`, `in`, `strategy`, `minSimilarity`, `filter`, `hits`; each hit has an entity, a
+within-response relative score, matches and `matched`. Matches — one per index that found
+the entity — carry nullable semantic/keyword evidence including the native keyword score.
+`matched` names the entry that matched best: `index`, `partKind`, `relationType`,
+`relationId`, `target`, `snippet`, `charOffset`, `charLength`. Scores are not confidence.
+Evidence scope, `matched` and null semantics are defined in
+[the search response contract](capabilities/search.md#response).
 
 ### Query
 

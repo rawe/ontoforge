@@ -185,9 +185,10 @@ operation that reports or removes them — short of deleting the whole ontology.
 This is the sharpest trap in the modeling surface.
 
 Deleting an entity type also discards the search artefacts derived from it — its
-vector index, and the stored passages and index of each of its document properties
-([search.md](search.md), [documents.md](documents.md)). Deleting a document
-property discards that property's passages and index alone.
+vector index, the stored passages and index of each of its document properties, and every
+search index rooted on it with its entries ([search.md](search.md),
+[search-indices.md](search-indices.md), [documents.md](documents.md)). Deleting a document
+property discards that property's passages, index and passage index alone.
 
 ### The cascade protocol
 

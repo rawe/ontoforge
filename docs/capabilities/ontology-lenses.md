@@ -38,9 +38,10 @@ the schema and all instance data with it.)
 
 ## Unscoped and scoped
 
-A lens is scoped **if and only if it has at least one inclusion.** There is no
-flag, no mode and no third state — declaring nothing is what makes a lens
-unscoped.
+A lens is scoped **if and only if it has at least one type inclusion.** There is no
+flag, no mode and no third state — declaring no type is what makes a lens
+unscoped. Search-index inclusions ([below](#search-through-a-lens)) never make a lens
+scoped.
 
 An unscoped lens exposes its ontology's entire schema, and keeps doing so as the
 schema changes: a type created tomorrow is visible through it immediately, with no
@@ -152,8 +153,9 @@ tends to leak:
   through a relation type the lens does not expose is omitted from the
   neighbourhood entirely, not returned with an empty relation.
 - **Search is restricted to exposed types**, and passage search only to exposed
-  document properties. The searched set reaches the per-type rankings directly, so
-  outside types do not consume a narrow lens's candidate budget ([search.md](search.md)).
+  document properties, through the search indices the lens may search
+  ([below](#search-through-a-lens)). Each index is ranked on its own, so outside types
+  do not consume a narrow lens's candidate budget ([search.md](search.md)).
 
 Filtering is applied per type, not per response, and that has one visible
 consequence during traversal: a neighbour whose own entity type is out of scope
@@ -176,11 +178,12 @@ broken under another:
 - **Relation endpoint checks use the full schema.** The source and target entity
   types a new relation is validated against are the type's real endpoints, not
   whatever the lens exposes.
-- **Embedding text is built from the full schema's properties.** A scoped lens's
-  semantic ranking can therefore be driven by text it cannot see — a result may be
+- **Search entries are composed from the full schema's properties.** A scoped
+  lens's ranking can therefore be driven by text it cannot see — a result may be
   highly ranked for reasons invisible through that lens. This is inherent to
   sharing one stored record between lenses, and is documented rather than
-  prevented.
+  prevented; the match's snippet is withheld instead
+  ([below](#search-through-a-lens)).
 
 "Full schema" always means the owning ontology's schema, never anything wider —
 no operation anywhere consults another ontology.
@@ -188,6 +191,34 @@ no operation anywhere consults another ontology.
 Defaults apply on creation only. A lens that hides a property never causes that
 property to be re-defaulted on update, so widening or narrowing a lens does not
 rewrite anything already stored.
+
+## Search through a lens
+
+[Search indices](search-indices.md) belong to the ontology, not to a lens; a lens only
+decides which of them it searches. An unscoped lens searches every index. A scoped lens
+searches the indices it **includes** — a third kind of inclusion, beside entity and
+relation types — and each only while it exposes the index's root entity type.
+
+Index inclusions are written by the server, not declared through an interface: a
+managed index that comes into existence is included in every scoped lens that exposes
+its root type — by an entity inclusion of the type, or, in a lens with relation
+inclusions only, because every type is exposed. Nothing else adds one: a scoped lens
+created after an index exists, or an entity type included in a scoped lens after its
+indices exist, has no inclusion of those indices, and ranked search through that lens
+finds nothing through them. Index inclusions are removed with their index or lens and
+are not carried by [transfer](transfer.md); an imported scoped lens includes the managed
+indices the import itself brings into existence.
+
+The lens still governs what a search returns:
+
+- **Hits are projected** through the lens like every read result.
+- **Relation entries the lens cannot see are skipped.** An entry of a relation whose
+  relation type or target entity type the lens hides does not rank — at query time,
+  with nothing rebuilt.
+- **Hidden properties stay inside entry text.** An index may read a property the lens
+  hides; its entries still carry the value, so it can still drive the ranking. The
+  match's snippet is then withheld, and the label of a relation's target is withheld
+  when the lens hides the target's name property.
 
 ## Instance data is shared
 

@@ -37,6 +37,7 @@ what rules bind it, and how it is reached from every interface.
 | [instance-data](capabilities/instance-data.md) | Creating, reading and traversing entities and relations |
 | [documents](capabilities/documents.md) | Long-text properties, stubs and partial edits |
 | [search](capabilities/search.md) | Literal matching and ranked search |
+| [search-indices](capabilities/search-indices.md) | What ranked search reads: indices, entries, managed indices, generations |
 | [oql](capabilities/oql.md) | The query language |
 | [saved-queries](capabilities/saved-queries.md) | Stored, parameterized query pipelines |
 | [ai-agents](capabilities/ai-agents.md) | Natural-language querying, extraction, chat, A2A |
@@ -212,7 +213,8 @@ properties, it exposes. Everything else is invisible through it: absent from sch
 reads, rejected on write, and stripped from query results.
 
 **Inclusion** — one declaration that a lens exposes a given type, optionally narrowed to
-a subset of that type's properties.
+a subset of that type's properties. A scoped lens also includes the search indices it
+searches; those inclusions never make a lens scoped.
 
 ### Data
 
@@ -226,8 +228,8 @@ are fixed once created; its properties are not.
 (`_id`, `_createdAt`, …). Always readable, never writable. Type and property keys cannot
 begin with an underscore, so the two namespaces cannot collide.
 
-**Chunk** — an internal fragment of a document property, held separately so that search
-can match and return a passage rather than a whole document. Not addressable directly.
+**Chunk** — an internal fragment of a document property, so that search can match and
+return a passage rather than a whole document. Not addressable directly.
 
 ### Using the graph
 
@@ -261,13 +263,14 @@ in the schema, whereas a neighbour is an instance in a traversal result.
 
 **Cross-type search** — ranking across every type the lens exposes, narrowed by filters.
 
-**Searched types** — the one-or-many type set passed to storage for one ranking.
+**Searched types** — the one-or-many type set one search ranks.
 
 **Search kind** — the ranked unit and match: property search or document search.
 
-**Property search** — ranking by one composed text of an entity's string properties.
+**Property search** — ranking entities by the entries of their types' default indices.
 
-**Document search** — ranking passages and collapsing them to parent entities.
+**Document search** — ranking passages through passage indices and grouping them by
+parent entity.
 
 **Search strategy** — what a caller selects: it uses one retrieval method directly or
 fuses several by rank. The strategies are `semantic`, `keyword`, `keyword-any`,
@@ -284,21 +287,45 @@ matching as a prefix; rank order carries the rest.
 **All-term keyword matching** — a row matches only when it carries every query term, each
 term also matching as a prefix.
 
-**Query term** — one word of the query after stop-word removal and stemming in the
-ontology's text-search language.
+**Query term** — one word of the query after stop-word removal and stemming in a language
+of the ontology's keyword language set.
 
-**Source ranking** — the ordered list one retrieval method returns for one search kind.
+**Source ranking** — the ordered list one retrieval method returns for one search index.
 
-**Hit** — one entity in a search result with its matches and relative score.
+**Hit** — one entity in a search result with its matches, relative score and the entry
+that matched it best.
 
 **Match** — a place the query met the entity: an entity match names the entity as a whole;
 a passage match names a document property and its best passage's coordinates.
+
+**Search index** — an ontology-level design object deciding what ranked search finds
+entities by: a root entity type, the text composed for each of its entities, and its
+representations — semantic, keyword or both. Hits are always entities of the root type.
+See [capabilities/search-indices.md](capabilities/search-indices.md).
+
+**Managed index** — a search index the server derives from the schema and keeps in step
+with it: a default index per entity type over its own `string` properties, and a passage
+index per document property.
+
+**Entry** — one indexed text of a search index, owned by one entity: its own fields, one
+relation instance with the entity at its other end, or one passage of a document.
+
+**Relation group** — the part of an index definition that follows one relation type in one
+direction and names the relation's and the target entity's properties to include; it
+yields one entry per relation instance. Managed indices have none.
+
+**Generation** — one build of one representation of one search index, identified by the
+definition and the embedding model (semantic) or the keyword language set (keyword).
+Search reads the ready one; a replacement is built beside it.
+
+**Keyword language set** — the languages, English, German or both, in which an
+ontology's keyword entries and queries are stemmed.
 
 **Relative score** — 1.0 for the best hit and each other hit's ordering number as a fraction
 of the best, comparable only within that response. See [search](capabilities/search.md#response)
 for the promise about its shape.
 
-**Search request / entry** — the common request object and service operation used by every
+**Search request / operation** — the common request object and service operation used by every
 search caller.
 
 **Search tool / document search tool** — `search` / `search_documents`, choosing both kinds

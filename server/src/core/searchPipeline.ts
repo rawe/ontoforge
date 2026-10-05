@@ -5,8 +5,27 @@
  * Pure — no storage, no I/O, no clock of its own.
  */
 
-import type { SearchGenerationRecord, SearchQueueStats } from "./ports.js";
+import type { SearchGenerationRecord, SearchQueueStats, SearchSettings } from "./ports.js";
 import type { SearchRepresentation } from "./searchIndex.js";
+
+// ---------------------------------------------------------------------------
+// Switched-off managed indices
+// ---------------------------------------------------------------------------
+
+/** The managed indices switched off, by key. Stored in the settings as
+ * `{ "<key>": true }`; any other value counts as on. */
+export function disabledIndexKeys(settings: Pick<SearchSettings, "disabledDefaults">): Set<string> {
+  return new Set(
+    Object.entries(settings.disabledDefaults)
+      .filter(([, off]) => off === true)
+      .map(([key]) => key),
+  );
+}
+
+/** The stored form of a set of switched-off managed indices. */
+export function disabledDefaultsOf(keys: Iterable<string>): Record<string, true> {
+  return Object.fromEntries([...new Set(keys)].sort().map((key) => [key, true] as const));
+}
 
 // ---------------------------------------------------------------------------
 // Backoff
@@ -41,7 +60,8 @@ export function backoffDelayMs(
  * - `stale` — the active generation has queued work (`pending`).
  * - `failed` — items failed for good (`failed`); a rebuild retries them.
  * - `unavailable` — semantic without an embedding provider.
- * - `disabled` — the definition switches the representation off.
+ * - `disabled` — the definition switches the representation off, or (for
+ *   the index as a whole) a managed index is switched off.
  */
 export type SearchIndexState =
   | "ready"
@@ -127,6 +147,12 @@ const SEVERITY: Record<SearchIndexState, number> = {
   building: 3,
   failed: 4,
 };
+
+/** The status of a switched-off managed index: no generations, nothing
+ * to report per representation. */
+export function disabledIndexStatus(): SearchIndexStatus {
+  return { state: "disabled", representations: [], lastErrors: [] };
+}
 
 /** The status of an index: its representations, and the most severe of
  * their states — `unavailable` only when no representation is usable. */

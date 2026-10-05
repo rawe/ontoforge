@@ -166,9 +166,14 @@ artefacts and computes embeddings, all within the target ontology.
   registered as in-index filter properties where the storage adapter supports them —
   plus one index per document property. The
   target ontology's index for saved-query descriptions is ensured once at the end.
-  Without an embedding provider none of this happens, and semantic search over the
-  imported schema stays unavailable until the rebuild operation described in
-  [search.md](search.md) is run against a configured provider.
+  Without an embedding provider none of this happens, and these vector indexes stay
+  missing until the rebuild operation described in [search.md](search.md#rebuild) is run
+  against a configured provider.
+- **Search indices.** The managed search indices of the imported schema come into
+  existence and are included in every scoped lens that exposes their root types — the
+  imported ones among them ([search-indices.md](search-indices.md#managed-indices)). Their entries are built in
+  the background; with no instance data imported, there is nothing to build until data
+  is written.
 - **Embedding.** Each imported saved query's description is embedded as it is written, so
   the queries are semantically discoverable immediately. Nothing else is embedded — there
   is no instance data to embed.

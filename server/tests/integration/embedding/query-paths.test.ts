@@ -21,6 +21,7 @@ import { afterAll, beforeAll, describe, expect, it, type TestContext } from "vit
 
 import { createApp } from "../../../src/app.js";
 import { closeStores, getRuntimeStore, initStores } from "../../../src/core/ports.js";
+import { drainSearchWork } from "../../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache } from "../../../src/runtime/schemaCache.js";
 import { wipeDatabase } from "../reset.js";
 import { checkOllamaModel, disableProvider, enableOllamaProvider } from "./support.js";
@@ -130,6 +131,8 @@ describe.skipIf(!ollamaUp)("query paths on semantic search (Ollama)", () => {
         role,
       });
     }
+    // Search entries are built in the background (none on Neo4j).
+    await drainSearchWork();
   }
 
   /** The hits of one search, as the entity names in rank order. */

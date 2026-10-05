@@ -68,6 +68,9 @@ export interface LoadedSchema {
   agentConfigs: Record<string, AgentConfig>;
   /** Saved-query pipelines keyed by query key. */
   savedQueries: Record<string, SavedQueryConfig>;
+  /** Whether the lens has type inclusions, and the search indices it
+   * includes by key (`core/searchQuery.ts` decides availability). */
+  searchIndexScope: { scoped: boolean; includedIndices: string[] };
 }
 
 type Row = Record<string, unknown>;
@@ -198,7 +201,14 @@ export async function loadSchemaUncached(
     savedQueries[row.key as string] = toSavedQueryConfig(row);
   }
 
-  return { scoped, full, agentConfigs, savedQueries };
+  const entityInclusions = schema.entityInclusions as InclusionRow[];
+  const relationInclusions = schema.relationInclusions as InclusionRow[];
+  const searchIndexScope = {
+    scoped: entityInclusions.length > 0 || relationInclusions.length > 0,
+    includedIndices: (schema.searchIndexInclusions as string[] | undefined) ?? [],
+  };
+
+  return { scoped, full, agentConfigs, savedQueries, searchIndexScope };
 }
 
 /** Deserialize one stored saved-query row: `steps` and `parameters` are

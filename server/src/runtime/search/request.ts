@@ -2,7 +2,7 @@ import { ValidationError } from "../../core/exceptions.js";
 import type { RuntimeStore, SearchedType, SearchedProperty } from "../../core/ports.js";
 import { parseFilterConditions } from "../readHelpers.js";
 import { isQueryPath, resolveQueryPath } from "../queryPaths.js";
-import { loadSchema } from "../schemaCache.js";
+import { loadSchema, type EntityTypeDef, type LoadedSchema } from "../schemaCache.js";
 import {
   SEARCH_STRATEGIES, availableStrategies, ranksSemantically, type SearchStrategy,
 } from "./strategies.js";
@@ -58,6 +58,51 @@ export async function validateRequest(
     ([key]) => type === null || key === type,
   );
   const filter = request.filter ?? {};
+  const searchedTypes = resolveSearchFilters(filter, types, type !== null, loaded, store, errors);
+  const property = request.document?.property;
+  if (
+    property !== undefined &&
+    (!kinds.includes("document") || typeof property !== "string" || !property)
+  )
+    errors["document.property"] = "Requires document search and one document property key";
+  const searchedProperties: SearchedProperty[] = searchedTypes.flatMap((t) =>
+    Object.entries(t.propertyDefs)
+      .filter(
+        ([key, def]) => def.dataType === "document" && (property === undefined || property === key),
+      )
+      .map(([propertyKey]) => ({
+        entityTypeKey: t.entityTypeKey,
+        propertyKey,
+        conditions: t.conditions,
+      })),
+  );
+  if (property !== undefined && !searchedProperties.length)
+    errors["document.property"] =
+      "No exposed document property with this key in the searched types";
+  if (request.in != null && kinds.includes("document") && !searchedProperties.length)
+    errors.in = "No document properties to search";
+  if (request.in != null && kinds.includes("properties") && !types.length)
+    errors.in = "No entity types to search";
+  if (Object.keys(errors).length)
+    throw new ValidationError(Object.values(errors).join("; "), { fields: errors });
+  return { loaded, kinds, type, limit, minSimilarity, filter, searchedTypes, searchedProperties };
+}
+
+/**
+ * Validate search filters against the types they may apply to and narrow
+ * those types: each key is checked against the types declaring it (with
+ * `fixedType`, against the given types whatever declares it), and the
+ * type set is the intersection over all keys. Failures are collected into
+ * `errors`. Returns the remaining types, each with its parsed conditions.
+ */
+export function resolveSearchFilters(
+  filter: Record<string, string>,
+  types: [string, EntityTypeDef][],
+  fixedType: boolean,
+  loaded: LoadedSchema,
+  store: RuntimeStore,
+  errors: Record<string, string>,
+): SearchedType[] {
   const eligible = new Map(
     types.map(([key, def]) => [
       key,
@@ -77,13 +122,12 @@ export async function validateRequest(
       const rt = loaded.scoped.relationTypes[key.split(/[.@]/)[0]!.replace(/:(in|out)$/, "")];
       return rt !== undefined && (rt.fromEntityTypeKey === tk || rt.toEntityTypeKey === tk);
     };
-    const declaring =
-      type !== null
-        ? types
-        : types.filter(([tk, def]) => {
-            if (!isQueryPath(key) && key in def.properties) return true;
-            return (isQueryPath(key) || existence) && touches(tk);
-          });
+    const declaring = fixedType
+      ? types
+      : types.filter(([tk, def]) => {
+          if (!isQueryPath(key) && key in def.properties) return true;
+          return (isQueryPath(key) || existence) && touches(tk);
+        });
     if (!declaring.length) errors[expr] = `Unknown filter property or relation type: '${key}'`;
     const dataTypes = new Set<string>();
     for (const [tk, def] of declaring) {
@@ -122,32 +166,5 @@ export async function validateRequest(
     const keys = new Set(declaring.map(([tk]) => tk));
     for (const tk of eligible.keys()) if (!keys.has(tk)) eligible.delete(tk);
   }
-  const searchedTypes = [...eligible.values()];
-  const property = request.document?.property;
-  if (
-    property !== undefined &&
-    (!kinds.includes("document") || typeof property !== "string" || !property)
-  )
-    errors["document.property"] = "Requires document search and one document property key";
-  const searchedProperties: SearchedProperty[] = searchedTypes.flatMap((t) =>
-    Object.entries(t.propertyDefs)
-      .filter(
-        ([key, def]) => def.dataType === "document" && (property === undefined || property === key),
-      )
-      .map(([propertyKey]) => ({
-        entityTypeKey: t.entityTypeKey,
-        propertyKey,
-        conditions: t.conditions,
-      })),
-  );
-  if (property !== undefined && !searchedProperties.length)
-    errors["document.property"] =
-      "No exposed document property with this key in the searched types";
-  if (request.in != null && kinds.includes("document") && !searchedProperties.length)
-    errors.in = "No document properties to search";
-  if (request.in != null && kinds.includes("properties") && !types.length)
-    errors.in = "No entity types to search";
-  if (Object.keys(errors).length)
-    throw new ValidationError(Object.values(errors).join("; "), { fields: errors });
-  return { loaded, kinds, type, limit, minSimilarity, filter, searchedTypes, searchedProperties };
+  return [...eligible.values()];
 }

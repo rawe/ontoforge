@@ -39,12 +39,13 @@ import type { KeywordLanguage } from "../../core/keywordLanguage.js";
 
 import { toSql } from "pgvector";
 
-import type { ModelingStore, ReservedTypeKeyInUse, Row } from "../../core/ports.js";
+import type { ModelingStore, ReservedTypeKeyInUse, Row, SearchIndexStore } from "../../core/ports.js";
 import type { NewPropertyDef, TypeKind } from "../../core/schemas.js";
 import * as vectorDdl from "./ddl.js";
 import { runQuery, withTransaction, type DbResult, type IsolationLevel, type Querier } from "./errors.js";
 import { camelizeRow, camelizeRows, isUuid } from "./rows.js";
 import { LENS_COLS, readTypesWithProperties, splitInclusions } from "./schemaRead.js";
+import { PostgresSearchIndexStore } from "./searchIndexStore.js";
 
 const NO_RESERVED_KEYS: ReadonlySet<string> = new Set();
 
@@ -139,7 +140,19 @@ async function insertProperty(
 export class PostgresModelingStore implements ModelingStore {
   /** Bound to one ontology's namespace; unbound (tests only) runs against
    * the connection's default namespace. */
-  constructor(private readonly namespace?: string, public readonly textSearchLanguage: KeywordLanguage = "english") {}
+  constructor(
+    private readonly namespace?: string,
+    public readonly textSearchLanguage: KeywordLanguage = "english",
+    private readonly ontologyKey: string = "",
+  ) {}
+
+  /** The search-index store of the same ontology. */
+  searchIndices(): SearchIndexStore {
+    if (this.namespace === undefined) {
+      throw new Error("An unbound modeling store has no search indices");
+    }
+    return new PostgresSearchIndexStore(this.namespace, this.ontologyKey);
+  }
 
   /** Door one, carrying this store's binding. */
   private query(text: string, params?: unknown[]): Promise<DbResult> {

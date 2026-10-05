@@ -200,7 +200,7 @@ is the summary; each one is stated with its consequences in
 
 ## Lens scoping
 
-A lens with no inclusions exposes its ontology's whole schema. A lens with inclusions
+A lens with no type inclusions exposes its ontology's whole schema. A lens with them
 exposes exactly what it declares, with one inference: naming entity types alone also
 admits the relation types whose *both* endpoints are in scope, because a relation with an
 invisible endpoint would be unusable. The full rules are in
@@ -304,6 +304,14 @@ active one, which keeps serving until the new one is complete and takes its plac
 step. An entry's semantic text is labelled with the schema's display names, unless the
 index renders it from a template; its keyword text holds values only ([decisions.md](decisions.md#interfaces)).
 
+**Managed indices follow the schema.** After every schema change the modeling side derives
+the managed indices again from the full schema — creating, updating and deleting their
+definitions, including a new one in every scoped lens that exposes its root type — and
+brings the generations in line. A changed display name or name property, which no
+definition captures, queues the entities of every index rendering that type again. The worker does the same for
+every ontology when it starts. Ranked search reads the ready generations
+([capabilities/search-indices.md](capabilities/search-indices.md)).
+
 ## Error model
 
 Every error response has the same envelope:
@@ -350,10 +358,11 @@ Ordered, and failure at any step prevents serving:
    every registered ontology and warn on mismatch — see
    [capabilities/search.md](capabilities/search.md).
 6. Start the [search indexing](#search-indexing) worker, if the adapter stores search
-   indices. It runs in the background: it first removes what interrupted generation
-   removals left behind and brings every ontology's generations in line with the current
-   definitions, embedding model and keyword language sets — a changed model or language
-   set starts its new generations here — then drains the queue. Its failures are logged
+   indices. It runs in the background: it first brings every ontology's managed indices
+   in line with its schema, removes what interrupted generation removals left behind and
+   brings every ontology's generations in line with the current definitions, embedding
+   model and keyword language sets — a changed model or language set starts its new
+   generations here — then drains the queue. Its failures are logged
    and never prevent serving; at shutdown it stops after the pass it is in.
 7. Start both MCP servers.
 

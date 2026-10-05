@@ -6,7 +6,8 @@ import * as retrievers from "./retrievers.js";
  *
  * Two seams are called on every mutating path: schema-cache invalidation
  * (`runtime/schemaCache.ts`) and the vector-index lifecycle hooks
- * (`vectorHooks.ts`).
+ * (`vectorHooks.ts`). Schema changes also keep the managed search indices
+ * in step (`syncSearchIndices`).
  */
 
 import { randomUUID } from "node:crypto";
@@ -35,6 +36,7 @@ import {
   type TypeKind,
 } from "../core/schemas.js";
 import { buildTextRepr, buildKeywordSegments } from "../runtime/search/propertyText.js";
+import { syncManagedSearchIndices } from "../runtime/indexing/managed.js";
 import { invalidateLoadedSchemaCache, loadSchemaUncached, buildSchemaCacheFromRaw, applyScopeFiltering } from "../runtime/schemaCache.js";
 import { syncDocumentChunks } from "../runtime/service.js";
 import { VALID_AGENT_TOOLS } from "../runtime/toolNames.js";
@@ -166,6 +168,19 @@ function toLensResponse(data: Row): LensResponseBody {
   };
 }
 
+/**
+ * After a schema change: bring the managed search indices in step and
+ * reconcile their generations; refresh the indices that read a type in
+ * `refreshTypes` (a display name or the name property changed). Nothing
+ * on an adapter without search indices.
+ */
+async function syncSearchIndices(store: ModelingStore, refreshTypes: string[] = []): Promise<void> {
+  const indices = store.searchIndices?.();
+  if (indices !== undefined) {
+    await syncManagedSearchIndices(indices, { refreshTypes });
+  }
+}
+
 // --- Lens ---
 
 export async function createLens(
@@ -255,6 +270,7 @@ export async function createEntityType(
   );
   invalidateLoadedSchemaCache();
   await onEntityTypeCreated(store, body.key, [body.nameProperty]);
+  await syncSearchIndices(store);
   return toEntityTypeResponse(data);
 }
 
@@ -302,8 +318,9 @@ export async function updateEntityType(
   store: ModelingStore,
 ): Promise<EntityTypeResponseBody> {
   const nameProperty = body.nameProperty ?? null;
+  const before = await store.getEntityType(entityTypeId);
   if (nameProperty !== null) {
-    const et = await store.getEntityType(entityTypeId);
+    const et = before;
     if (!et) {
       throw new NotFoundError(`Entity type '${entityTypeId}' not found`);
     }
@@ -322,6 +339,10 @@ export async function updateEntityType(
     throw new NotFoundError(`Entity type '${entityTypeId}' not found`);
   }
   invalidateLoadedSchemaCache();
+  const rendered =
+    before !== null &&
+    (before.displayName !== data.displayName || before.nameProperty !== data.nameProperty);
+  await syncSearchIndices(store, rendered ? [data.key as string] : []);
   return toEntityTypeResponse(data);
 }
 
@@ -362,6 +383,7 @@ export async function deleteEntityType(
   if (etData) {
     await onEntityTypeDeleted(store, etData.key as string, etProps);
   }
+  await syncSearchIndices(store);
 }
 
 // --- Relation Type (Global) ---
@@ -420,6 +442,7 @@ export async function updateRelationType(
   body: RelationTypeUpdateInput,
   store: ModelingStore,
 ): Promise<RelationTypeResponseBody> {
+  const before = await store.getRelationType(relationTypeId);
   const data = await store.updateRelationType(
     relationTypeId,
     body.displayName ?? null,
@@ -429,6 +452,9 @@ export async function updateRelationType(
     throw new NotFoundError(`Relation type '${relationTypeId}' not found`);
   }
   invalidateLoadedSchemaCache();
+  if (before !== null && before.displayName !== data.displayName) {
+    await syncSearchIndices(store, [data.key as string]);
+  }
   return toRelationTypeResponse(data);
 }
 
@@ -526,6 +552,7 @@ export async function createProperty(
   invalidateLoadedSchemaCache();
   if (typeKind === "EntityType") {
     await onEntityTypePropertyCreated(store, ownerId, data);
+    await syncSearchIndices(store);
   }
   return toPropertyResponse(data);
 }
@@ -547,7 +574,8 @@ export async function updateProperty(
   body: PropertyDefinitionUpdateInput,
   store: ModelingStore,
 ): Promise<PropertyDefinitionResponseBody> {
-  await ensureOwnerExists(store, ownerId, typeKind);
+  const owner = await ensureOwnerExists(store, ownerId, typeKind);
+  const before = await store.getProperty(ownerId, typeKind, propertyId);
   // An explicitly null defaultValue clears the default — the one exception
   // to sparse-update semantics. Omitted (`undefined`) means unchanged.
   const clearDefault = body.defaultValue === null;
@@ -565,6 +593,10 @@ export async function updateProperty(
     throw new NotFoundError(`Property '${propertyId}' not found on this type`);
   }
   invalidateLoadedSchemaCache();
+  const renamed = before !== null && before.displayName !== data.displayName;
+  if (typeKind === "EntityType" || renamed) {
+    await syncSearchIndices(store, renamed ? [owner.key as string] : []);
+  }
   return toPropertyResponse(data);
 }
 
@@ -603,6 +635,7 @@ export async function deleteProperty(
   invalidateLoadedSchemaCache();
   if (typeKind === "EntityType") {
     await onEntityTypePropertyDeleted(store, ownerId, prop);
+    await syncSearchIndices(store);
   }
 }
 
@@ -1850,6 +1883,7 @@ export async function importSchema(
   }
 
   invalidateLoadedSchemaCache();
+  await syncSearchIndices(store);
   return { lenses: createdLenses };
 }
 

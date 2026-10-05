@@ -171,6 +171,13 @@ export interface ReservedTypeKeyInUse {
  */
 export interface ModelingStore {
   readonly textSearchLanguage: KeywordLanguage;
+
+  /** The search-index store of the same ontology. Present exactly when the
+   * adapter stores search indices (`supportsSearchIndices()`): the
+   * modeling service keeps the managed indices in step with the schema
+   * through it. */
+  searchIndices?(): SearchIndexStore;
+
   // ------------------------------------------------------------------
   // Reserved keys
   // ------------------------------------------------------------------
@@ -545,7 +552,9 @@ export interface RuntimeStore {
   // ------------------------------------------------------------------
 
   /** Unfiltered: the adapter never applies the inclusions. Null when no
-   * lens has the key. Contract: `docs/storage-adapters.md`, "Schema reading". */
+   * lens has the key. Contract: `docs/storage-adapters.md`, "Schema reading".
+   * An adapter that stores search indices adds `searchIndexInclusions`,
+   * the keys of the indices the lens includes. */
   getFullSchemaWithLensInclusions(lensKey: string): Promise<Row | null>;
 
   getAiAgentConfigs(lensKey: string): Promise<Row[]>;
@@ -837,6 +846,37 @@ export interface SearchEntryHash extends SearchEntryPart {
   textHash: string;
 }
 
+/** One ranking over the entries of one generation (the query side). */
+export interface SearchEntryQuery {
+  generationId: string;
+  /** Semantic generations: the query vector, of the generation's width. */
+  vector?: number[];
+  /** Keyword generations: the query text, stemmed in the generation's
+   * languages, and how its terms combine. */
+  text?: string;
+  matching?: KeywordMatching;
+  /** Exact filters on the owning entity — candidate restrictions applied
+   * inside the ranking, so the limit counts entries that pass them. */
+  conditions: FilterCondition[];
+  /** A relation entry ranks only when its relation type is listed and its
+   * target type too; null lists every type. Other entries always rank. */
+  relationTypes: string[] | null;
+  targetTypes: string[] | null;
+  limit: number;
+}
+
+/** One ranked entry. `score` is `(1 + cosine) / 2` for a semantic
+ * generation and the native keyword ranking for a keyword one. */
+export interface RankedSearchEntry extends SearchEntryPart {
+  relationType: string | null;
+  targetType: string | null;
+  targetId: string | null;
+  startChar: number | null;
+  charLength: number | null;
+  text: string;
+  score: number;
+}
+
 /** What a queued item asks for: one part, or — `entity` — every part of
  * the entity (an entity created, a header field changed, a backfill).
  * `passage` with part id `""` stands for all passages: a document is
@@ -926,6 +966,9 @@ export interface SearchWritePlan {
  * are refused (false) once it is no longer building or ready.
  */
 export interface SearchIndexStore {
+  /** The ontology this store is bound to. */
+  readonly ontologyKey: string;
+
   // ------------------------------------------------------------------
   // Settings
   // ------------------------------------------------------------------
@@ -961,6 +1004,11 @@ export interface SearchIndexStore {
   /** Delete the index with its generations, queued work, entries and lens
    * inclusions. False = not found. */
   deleteIndex(key: string): Promise<boolean>;
+
+  /** Include an index in every scoped lens that exposes its root entity
+   * type — by an entity inclusion of the type, or, with relation
+   * inclusions only, every type. The count of lenses it was added to. */
+  includeIndexInScopedLenses(key: string): Promise<number>;
 
   // ------------------------------------------------------------------
   // Generations
@@ -1045,6 +1093,11 @@ export interface SearchIndexStore {
   /** Delete a relation's entries (its `relation` parts) in every
    * generation of the ontology. */
   deleteEntriesOfRelation(relationId: string): Promise<number>;
+
+  /** Rank the entries of one generation, best first: nearest by cosine
+   * (semantic) or by keyword ranking (keyword). Empty when the generation
+   * is not ready. */
+  rankEntries(query: SearchEntryQuery): Promise<RankedSearchEntry[]>;
 
   // ------------------------------------------------------------------
   // Queue (the worker's surface)

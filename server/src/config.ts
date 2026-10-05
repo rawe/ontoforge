@@ -14,7 +14,9 @@ export interface Settings {
   EMBEDDING_MODEL: string;
   EMBEDDING_BASE_URL: string;
   EMBEDDING_API_KEY: string | null;
-  EMBEDDING_DIMENSIONS: number | null;
+  EMBEDDING_DIMENSIONS: number;
+  EMBEDDING_BATCH_SIZE: number;
+  EMBEDDING_CONCURRENCY: number;
 
   DOCUMENT_CHUNK_SIZE: number;
   DOCUMENT_CHUNK_OVERLAP: number;
@@ -52,12 +54,10 @@ function int(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
   return parsed;
 }
 
-function optInt(env: NodeJS.ProcessEnv, name: string): number | null {
-  const value = env[name];
-  if (value === undefined || value === "") return null;
-  const parsed = Number.parseInt(value, 10);
-  if (Number.isNaN(parsed)) {
-    throw new Error(`Environment variable ${name} is not an integer: '${value}'`);
+function positiveInt(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
+  const parsed = int(env, name, fallback);
+  if (parsed < 1) {
+    throw new Error(`Environment variable ${name} must be a positive integer: '${env[name]}'`);
   }
   return parsed;
 }
@@ -91,10 +91,14 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
     PORT: int(env, "PORT", 8000),
 
     EMBEDDING_PROVIDER: optStr(env, "EMBEDDING_PROVIDER"),
-    EMBEDDING_MODEL: str(env, "EMBEDDING_MODEL", "nomic-embed-text"),
+    EMBEDDING_MODEL: str(env, "EMBEDDING_MODEL", "bge-m3"),
     EMBEDDING_BASE_URL: str(env, "EMBEDDING_BASE_URL", "http://localhost:11434"),
     EMBEDDING_API_KEY: optStr(env, "EMBEDDING_API_KEY"),
-    EMBEDDING_DIMENSIONS: optInt(env, "EMBEDDING_DIMENSIONS"),
+    EMBEDDING_DIMENSIONS: positiveInt(env, "EMBEDDING_DIMENSIONS", 1024),
+    // Texts per provider request, and requests in flight at once, when the
+    // provider embeds many texts (`embedBatch`).
+    EMBEDDING_BATCH_SIZE: positiveInt(env, "EMBEDDING_BATCH_SIZE", 1),
+    EMBEDDING_CONCURRENCY: positiveInt(env, "EMBEDDING_CONCURRENCY", 1),
 
     DOCUMENT_CHUNK_SIZE: int(env, "DOCUMENT_CHUNK_SIZE", 1500),
     DOCUMENT_CHUNK_OVERLAP: int(env, "DOCUMENT_CHUNK_OVERLAP", 200),

@@ -91,7 +91,7 @@ Run the embedding suite on both adapters whenever search behaviour is touched.
 Required by the embedding suite:
 
 ```bash
-ollama pull nomic-embed-text
+ollama pull bge-m3
 ```
 
 ### Testing a paid AI provider
@@ -132,7 +132,7 @@ before investigating.
 docker compose up -d
 
 # 2. Ensure Ollama models are available
-ollama pull nomic-embed-text
+ollama pull bge-m3
 ollama pull qwen3:8b
 
 # 3. Run the suites

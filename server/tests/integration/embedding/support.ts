@@ -17,10 +17,10 @@ import {
   type EmbeddingProvider,
 } from "../../../src/core/embedding.js";
 
-export const EMBEDDING_MODEL = "nomic-embed-text";
-
-/** True when Ollama answers at its default port with the model pulled. */
+/** True when Ollama answers at the configured base URL with the
+ * configured `EMBEDDING_MODEL` pulled. */
 export async function checkOllamaModel(): Promise<boolean> {
+  const model = settings.EMBEDDING_MODEL;
   try {
     const res = await fetch(`${settings.EMBEDDING_BASE_URL}/api/tags`, {
       signal: AbortSignal.timeout(3000),
@@ -30,7 +30,7 @@ export async function checkOllamaModel(): Promise<boolean> {
     }
     const payload = (await res.json()) as { models?: { name: string }[] };
     return (payload.models ?? []).some(
-      (m) => m.name === EMBEDDING_MODEL || m.name.startsWith(`${EMBEDDING_MODEL}:`),
+      (m) => m.name === model || m.name.startsWith(`${model}:`),
     );
   } catch {
     return false;
@@ -63,11 +63,16 @@ export function countEmbedCalls(): { calls: number; provider: EmbeddingProvider 
     calls: 0,
     provider: {
       dimensions: real.dimensions,
+      modelId: real.modelId,
       embed: async (text: string) => {
         counter.calls += 1;
         return real.embed(text);
       },
-    },
+      embedBatch: async (texts: string[]) => {
+        counter.calls += texts.length;
+        return real.embedBatch(texts);
+      },
+    } satisfies EmbeddingProvider,
   };
   setEmbeddingProvider(counter.provider);
   return counter;

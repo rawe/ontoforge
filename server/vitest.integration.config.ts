@@ -9,7 +9,7 @@ import { defineConfig } from "vitest/config";
 // providers, and this suite's `features: false` assertions depend on
 // running with no provider. Run them separately via
 // `npm run test:integration:embedding` (requires Ollama with
-// nomic-embed-text) and `npm run test:integration:ai` (requires Ollama
+// bge-m3) and `npm run test:integration:ai` (requires Ollama
 // with the `AI_MODEL` default).
 export default defineConfig({
   test: {

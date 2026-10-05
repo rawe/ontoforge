@@ -49,13 +49,13 @@ services:
       DB_PASSWORD: changeme
       # Semantic search — Ollama on the host machine.
       # EMBEDDING_PROVIDER: ollama
-      # EMBEDDING_MODEL: nomic-embed-text
+      # EMBEDDING_MODEL: bge-m3
       # EMBEDDING_BASE_URL: http://host.docker.internal:11434
       # If Ollama runs as a container in this compose (see ollama service below):
       # EMBEDDING_BASE_URL: http://ollama:11434
       # For OpenAI-compatible providers: set EMBEDDING_PROVIDER to "openai"
       # EMBEDDING_API_KEY: sk-...
-      # EMBEDDING_DIMENSIONS: 1536
+      # EMBEDDING_DIMENSIONS: 1024
       # AI-powered runtime — Ollama on the host machine.
       # Requires a model with tool calling support. Recommended Ollama models:
       #   gemma4:12b-mlx (~8 GB RAM, Apple Silicon), qwen3:8b (~6 GB), qwen3:32b (~22 GB)
@@ -84,7 +84,7 @@ services:
 
   # Ollama provider (optional — uncomment to run Ollama in Docker instead of on the host)
   # After first start, pull the models you need:
-  #   docker exec ollama ollama pull nomic-embed-text   (for semantic search)
+  #   docker exec ollama ollama pull bge-m3             (for semantic search)
   #   docker exec ollama ollama pull gemma4:12b-mlx     (for AI features)
   # ollama:
   #   image: ollama/ollama:latest

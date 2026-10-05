@@ -320,7 +320,7 @@ per-ontology deployment configuration.
 | Group | Purpose | Absent means |
 |---|---|---|
 | Storage | Which adapter, and how to reach the database | Server cannot start |
-| Embedding | Provider, model, endpoint, credential, vector width | Semantic search unavailable |
+| Embedding | Provider, model, endpoint, credential, vector width, request batching | Semantic search unavailable |
 | Documents | Chunk size and overlap | Defaults apply |
 | Language model | Provider, model, endpoint, credential | AI capabilities unavailable |
 | Decision model | Endpoint, model, credential | Entity identity comparison unavailable |

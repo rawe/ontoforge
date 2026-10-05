@@ -257,10 +257,12 @@ Find entities by meaning rather than exact keywords — within a single entity t
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `EMBEDDING_PROVIDER` | *(unset — disabled)* | `ollama` or `openai` |
-| `EMBEDDING_MODEL` | `nomic-embed-text` | Embedding model name |
+| `EMBEDDING_MODEL` | `bge-m3` | Embedding model name |
 | `EMBEDDING_BASE_URL` | `http://localhost:11434` | Embedding API endpoint |
 | `EMBEDDING_API_KEY` | *(unset)* | API key (required for `openai` provider) |
-| `EMBEDDING_DIMENSIONS` | *(auto)* | Vector dimensions (defaults: ollama=768, openai=1536) |
+| `EMBEDDING_DIMENSIONS` | `1024` | Vector dimensions — must match what the model returns |
+| `EMBEDDING_BATCH_SIZE` | `1` | Texts per embedding request when many texts are embedded together (positive integer; cloud endpoints typically take 16 or more) |
+| `EMBEDDING_CONCURRENCY` | `1` | Embedding requests in flight at once when many texts are embedded together (positive integer) |
 
 Semantic indexes are built for the vector width of the model that created them, so changing `EMBEDDING_MODEL` or `EMBEDDING_DIMENSIONS` on an existing database — including a reused Docker volume — leaves indexes the new model cannot be searched against. Startup names each one in a warning; `POST /api/ontologies/{ontologyKey}/model/rebuild-search-data` rebuilds one ontology's indexes at the new width and regenerates its vectors — run it once per ontology after a provider switch.
 

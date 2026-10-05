@@ -91,7 +91,9 @@ The setup skill only uses variables that OntoForge actually reads. See the full 
 
 OntoForge supports two embedding providers for semantic search:
 
-- **Ollama** (`EMBEDDING_PROVIDER=ollama`) — local, no API key needed. Default model: `nomic-embed-text`. Default 768 dimensions.
-- **OpenAI-compatible** (`EMBEDDING_PROVIDER=openai`) — works with OpenAI, Azure OpenAI, vLLM, LM Studio. Requires `EMBEDDING_API_KEY`. Default 1536 dimensions.
+- **Ollama** (`EMBEDDING_PROVIDER=ollama`) — local, no API key needed.
+- **OpenAI-compatible** (`EMBEDDING_PROVIDER=openai`) — works with OpenAI, Azure OpenAI, vLLM, LM Studio. Requires `EMBEDDING_API_KEY`.
+
+Both default to model `bge-m3` at 1024 dimensions; `EMBEDDING_DIMENSIONS` must match the model you configure.
 
 Omit `EMBEDDING_PROVIDER` entirely to disable semantic search.

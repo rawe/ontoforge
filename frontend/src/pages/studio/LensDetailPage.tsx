@@ -128,7 +128,7 @@ export function LensDetailPage() {
                 <AlertDialogHeader>
                   <AlertDialogTitle>Delete "{lens.name}"?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    This deletes the lens, its scope, agents and saved queries.
+                    This deletes the lens, its scope, agents, saved queries and retrievers.
                     The ontology's schema and instance data are not affected. This
                     cannot be undone.
                   </AlertDialogDescription>

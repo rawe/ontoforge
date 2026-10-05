@@ -190,7 +190,7 @@ only. Reads return a size stub rather than the content, so that listing entities
 cheap. See [capabilities/documents.md](capabilities/documents.md).
 
 **Key** — the stable, human-readable identifier of an ontology, type, property, lens,
-saved query or agent. Keys are what every interface speaks. They are never database
+saved query, agent or retriever. Keys are what every interface speaks. They are never database
 identifiers, and they are never exposed as UUIDs. Every key is unique within its owner;
 only ontology keys are unique server-wide.
 
@@ -323,6 +323,6 @@ compilation, index management, error translation, and the physical isolation bet
 ontologies. Exactly one is active.
 
 **Transfer format** — the versioned JSON representation of one ontology's design, used
-for export and import. Carries schema, lenses, agents and saved queries only — no
-instance data and no ontology identity. See
+for export and import. Carries schema, lenses, agents, saved queries and retrievers
+only — no instance data and no ontology identity. See
 [capabilities/transfer.md](capabilities/transfer.md).

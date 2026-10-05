@@ -35,7 +35,9 @@ async function dropDocumentPropertyArtifacts(
 }
 
 /** Rebuild the vector index for an entity type after property changes, so
- * its in-index filter properties stay in step with the schema. */
+ * that on an adapter with in-index filter properties they stay in step with
+ * the schema. An adapter whose index is width-only (PostgreSQL) still drops
+ * and recreates the index here. */
 async function rebuildEntityTypeVectorIndex(
   store: ModelingStore,
   entityTypeId: string,

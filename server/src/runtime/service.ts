@@ -578,8 +578,8 @@ export async function deleteEntity(
  * Replace the chunk nodes for the given document property values.
  *
  * For each property: delete its existing chunks, then (for non-null values)
- * re-chunk, embed, and write new chunk nodes. No-op when no embedding
- * provider is configured.
+ * re-chunk and write new chunk nodes. Chunks are always written; they carry
+ * an embedding only when an embedding provider is configured.
  */
 export async function syncDocumentChunks(
   store: RuntimeStore,

@@ -83,14 +83,14 @@ export class Neo4jOntologyRegistry implements OntologyRegistry {
     if (await registryHoldsOntology(this.driver)) {
       throw capConflict();
     }
-    // Then the fixed semantic indexes, then the node: index DDL cannot
+    // Then the fixed semantic index, then the node: index DDL cannot
     // share a transaction with the node write, and this order keeps the
     // port's atomicity promise — a create that dies mid-way has changed
     // nothing observable through the port (no registry entry, no
     // ontology; a retry provisions identically), because an empty fixed
     // index is an adapter-private physical object the next create
     // re-ensures idempotently. The reverse order could register an
-    // ontology whose home lacks its indexes.
+    // ontology whose home lacks its index.
     if (embeddingDimensions !== null) {
       await ensureSavedQueryVectorIndex(this.driver, embeddingDimensions);
     }

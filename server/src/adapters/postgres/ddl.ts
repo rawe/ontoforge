@@ -259,8 +259,8 @@ export async function initSchema(): Promise<void> {
  * to exist — the `entity_type` row, or the property-definition row for a
  * document property's chunks. The mapping is mechanically reversible in
  * both directions, which is what makes the orphan sweep possible; index
- * names are therefore never stored. The two full-table indexes are fixed
- * objects outside the `vec_` prefix.
+ * names are therefore never stored. The one full-table index (saved-query
+ * descriptions) is a fixed object outside the `vec_` prefix.
  *
  * Build mode is plain `CREATE INDEX`, never `CONCURRENTLY`: index DDL
  * joins the surrounding transaction, and a failed or interrupted build
@@ -369,9 +369,10 @@ function createHnsw(spec: IndexSpec, dimensions: number): string {
 }
 
 /**
- * The two fixed vector indexes as CREATE statements, unqualified like the
- * eleven-table DDL: ontology provisioning runs them inside the fresh
- * namespace's search path (`registry.ts`).
+ * The fixed vector indexes as CREATE statements — one, for saved-query
+ * descriptions — unqualified like the eleven-table DDL: ontology
+ * provisioning runs them inside the fresh namespace's search path
+ * (`registry.ts`).
  */
 export function fixedVectorIndexStatements(dimensions: number): string[] {
   return [createHnsw(SAVED_QUERY_SPEC, dimensions)];
@@ -618,9 +619,11 @@ export async function dropVectorIndex(entityTypeKey: string, namespace?: string)
  * Rebuild an entity type's vector index against its current properties.
  *
  * Width-only here: properties are never part of the index, so the rebuild
- * has nothing to pick up from a property change and the call is a
- * harmless no-op on those paths. The drop and the create share one
- * transaction.
+ * has nothing to pick up from a property change. It still drops and
+ * recreates the HNSW index on every call — including each property add or
+ * delete on the type. The drop and the create share one transaction, so
+ * the drop's exclusive lock on `entity` is held while the index builds:
+ * reads and writes of the ontology's entities wait until it commits.
  */
 export async function rebuildVectorIndex(
   entityTypeKey: string,

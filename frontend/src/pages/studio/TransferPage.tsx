@@ -188,7 +188,7 @@ export function TransferPage() {
         <TransferCard
           icon={Download}
           title="Export schema"
-          description="Download this ontology's schema — entity types, relation types, properties, lenses, agents and saved queries — as a portable JSON file."
+          description="Download this ontology's schema — entity types, relation types, properties, lenses, agents, saved queries and retrievers — as a portable JSON file."
         >
           <Button
             onClick={() => exportMutation.mutate()}

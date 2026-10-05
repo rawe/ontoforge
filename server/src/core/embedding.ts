@@ -6,12 +6,13 @@
  * (OpenAI-compatible `/v1/embeddings` — works with OpenAI, Azure, vLLM,
  * LM Studio, …). A failed embedding call is LOGGED and yields `null`; the
  * caller proceeds without a vector — an embedding failure never fails a
- * write (`docs/capabilities/search.md#keeping-embeddings-current`).
+ * write (`docs/capabilities/search.md#keeping-search-data-current`).
  *
  * With no `EMBEDDING_PROVIDER` configured, no provider is ever installed
- * and every consumer that gates on `getEmbeddingProvider()` — chunk
- * synchronization, entity embedding, semantic search, vector-index DDL —
- * is a no-op. Tests inject a fake provider to exercise the gated paths.
+ * and every consumer that gates on `getEmbeddingProvider()` — entity
+ * embedding, semantic search, vector-index DDL — is a no-op; chunk
+ * synchronization still writes chunks, without vectors. Tests inject a
+ * fake provider to exercise the gated paths.
  */
 
 import { settings } from "../config.js";

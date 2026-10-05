@@ -65,9 +65,10 @@ REST — a second path would be a second contract.
 Five modules, with a deliberately acyclic dependency graph:
 
 ```
-   registry ──▶
-   modeling ──▶  core  ◀── runtime
-   server   ──▶
+   registry ─┐
+   server   ─┼─┬──▶ runtime ──▶ core
+   modeling ─┘ │                  ▲
+               └──────────────────┘
 ```
 
 **Registry** manages ontologies as whole units: create, list, read, rename, delete. It
@@ -89,7 +90,12 @@ provider abstractions, and OQL parsing and validation.
 
 **Runtime never depends on modeling.** Everything runtime needs about the schema, it
 reads through the port. This keeps the schema a *value* to runtime rather than a service
-it calls, which is what makes the schema cache possible.
+it calls, which is what makes the schema cache possible. Runtime uses core alone. The
+other three may use runtime as well as core: modeling where it needs runtime's own view —
+assembling a lens's schema, composing search text and re-chunking documents during
+rebuild, and validating agent and retriever configurations against what runtime offers;
+registry to clear the schema cache when an ontology is deleted; server to report which
+search strategies the deployment offers.
 
 ## Ontology isolation
 
@@ -111,8 +117,8 @@ agent ever spans two. The architecture makes that structural rather than checked
 The registry — not any storage catalog — is the authoritative list of ontologies. Zero
 ontologies is a valid server state: a fresh server starts empty, nothing is auto-created
 at boot, and the last ontology is deletable. Deleting an ontology is one hard cascade
-over everything it contains — schema, lenses, saved queries, agents, instance data,
-chunks and search indexes.
+over everything it contains — schema, lenses, saved queries, agents, retriever
+configurations, instance data, chunks and search indexes.
 
 ## Logical data model
 
@@ -140,10 +146,11 @@ Per ontology. "Unique" here always means unique within the owning ontology.
 | Inclusion | lens + type | optional property allowlist; absent means all properties |
 | Agent config | lens + `key` | name, description, system prompt, tool allowlist |
 | Saved query | lens + `key` | name, description, ordered steps, parameters, bindings |
+| Retriever configuration | lens + `key` | name, description, configuration version, configuration |
 
-Inclusions, agent configs and saved queries are the three things that belong *to a
-lens*. Types and properties never do. The same type key, and the same lens key, can
-exist independently in two ontologies.
+Inclusions, agent configs, saved queries and retriever configurations are the four things
+that belong *to a lens*. Types and properties never do. The same type key, and the same
+lens key, can exist independently in two ontologies.
 
 ### Instance level
 
@@ -308,7 +315,7 @@ ontology at a time.
 ## Configuration
 
 Environment supplies all configuration. There is no configuration file and no
-per-ontology configuration.
+per-ontology deployment configuration.
 
 | Group | Purpose | Absent means |
 |---|---|---|

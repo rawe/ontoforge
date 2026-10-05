@@ -139,7 +139,7 @@ MCP `filters` object takes path and relation keys as ordinary keys.
 
 Semantic search accepts filters through the same `filter.` syntax, but not all of them, and
 not on every request shape — the restrictions and their reasons are in
-[capabilities/search.md](capabilities/search.md#property-filters-on-search).
+[capabilities/search.md](capabilities/search.md#scope-and-filters).
 
 ### Field projection
 
@@ -588,7 +588,7 @@ exist; its tools answer not-found tool errors otherwise.
 | Tool | Purpose |
 |---|---|
 | `ensure_ontology` | Create the ontology this mount is bound to if it does not exist yet; no-op if it does. Argument-less — it acts only on the mount's own ontology — and reports the key and whether it created. A created ontology starts bare and without a display name; naming is a REST/UI operation |
-| `get_schema` | The ontology's whole design — types, relation types, properties, and every lens with its inclusions, agents and saved queries. Identical to `export_schema`, and the only way to enumerate lenses: there is no `list_lenses` |
+| `get_schema` | The ontology's whole design — types, relation types, properties, and every lens with its inclusions, agents, saved queries and retrievers. Identical to `export_schema`, and the only way to enumerate lenses: there is no `list_lenses` |
 | `create_entity_type` | Add an entity type |
 | `update_entity_type` | Change display name or description; the key is immutable |
 | `delete_entity_type` | Remove an entity type and its properties |

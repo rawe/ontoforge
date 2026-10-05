@@ -146,8 +146,9 @@ Import is not purely additive to the target's schema — it also provisions sear
 artefacts and computes embeddings, all within the target ontology.
 
 - **Index creation.** For each imported entity type, if an embedding provider is
-  configured, a vector index is created for the type, with its non-document properties
-  registered as in-index filter properties, plus one index per document property. The
+  configured, a vector index is created for the type — with its non-document properties
+  registered as in-index filter properties where the storage adapter supports them —
+  plus one index per document property. The
   target ontology's index for saved-query descriptions is ensured once at the end.
   Without an embedding provider none of this happens, and semantic search over the
   imported schema stays unavailable until the rebuild operation described in

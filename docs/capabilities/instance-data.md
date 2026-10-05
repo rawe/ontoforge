@@ -235,7 +235,7 @@ derivable direction; text after the colon that is neither marker makes the first
 unknown. Paths are a filter feature only: `sort` rejects them, `fields` treats
 them as any unknown name, no response ever carries a path value, and the relation list
 rejects them with a message saying so. Semantic search takes them under its own rules
-([search.md](search.md#property-filters-on-search)).
+([search.md](search.md#scope-and-filters)).
 
 ### Relation existence
 

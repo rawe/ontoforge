@@ -21,8 +21,8 @@ answers each:
 
 Document values are always split into chunks carrying text and, with an embedding
 provider, their own vectors, so [search](search.md) can match a passage and resolve it
-back to the owning entity. Without a provider, a document property is simply long text: it
-stores, reads, slices and edits exactly the same, with no chunks and no vectors.
+back to the owning entity. Without a provider, a document property stores, reads, slices
+and edits exactly the same, and its chunks carry text only, with no vectors.
 
 ## Rules
 

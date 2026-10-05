@@ -39,8 +39,8 @@ key, unique server-wide, with a mutable display name, also unique server-wide.
 Interfaces speak the key.
 
 **Key scoping** — every key is unique within its owner: property keys per type,
-saved-query and agent keys per lens, type and lens keys per ontology, ontology keys
-per server.
+saved-query, agent and retriever keys per lens, type and lens keys per ontology,
+ontology keys per server.
 
 **Ontology lifecycle** — created bare (no types, no lenses, no data); rename changes
 the display name only; delete is a hard full cascade over everything the ontology
@@ -55,14 +55,14 @@ product names for its surfaces, and does.
 
 **Keys, never identifiers, on the runtime and MCP surfaces.**
 Everything an agent or a data client touches is addressed by human-readable key:
-ontologies, lenses, types, properties, saved queries and agents. Internal identifiers are
-resolved behind the interface. A language model should never have to carry an opaque
-identifier to name a type.
+ontologies, lenses, types, properties, saved queries, agents and retrievers. Internal
+identifiers are resolved behind the interface. A language model should never have to
+carry an opaque identifier to name a type.
 
 The modeling REST surface is the exception: it addresses lenses, types and properties
-by internal identifier, and only agent configurations and saved queries by key. It is a
-schema-design surface used by a client that has just listed the resource it is about to
-address, so the identifier is always at hand.
+by internal identifier, and only agent configurations, saved queries and retriever
+configurations by key. It is a schema-design surface used by a client that has just
+listed the resource it is about to address, so the identifier is always at hand.
 
 **Key length cap.** Every key — entity type, relation type, lens, property,
 agent, saved query — is at most 64 characters (`MAX_KEY_LENGTH`), enforced at
@@ -107,8 +107,11 @@ storage up to date automatically before it serves requests: every ontology is up
 together, and the number advances only when all of them succeeded. Several servers
 starting against one database upgrade it once: the upgrade holds a database-wide lock and
 reads the version again under it. The server logs every upgrade it runs and never backs
-up storage itself. Requests never change the storage layout. Within a major release line
-upgrade steps only add — tables, columns with a default, indexes — so servers of the
+up storage itself. The release defines the storage layout — tables, columns, fixed
+indexes — and only a storage-version upgrade changes it; the one exception is the search
+indexes derived from the schema, which schema changes and the search-data rebuild create
+and drop. Within a major release line upgrade steps only add — tables, columns with a
+default, indexes — so servers of the
 previous release keep working during a rolling update; renaming or removing waits for the
 next major release. Upgrade steps are kept for one major release line: a major release
 removes them all and accepts only new storage or storage at the version the previous
@@ -173,7 +176,9 @@ both behaviours.
 **PostgreSQL instance mapping: two generic jsonb tables.** The PostgreSQL adapter
 stores all instance data in two generic tables — `entity` and `relation`, with `uuid`
 primary keys and properties as jsonb — never a table per type. A schema change stays
-pure data; no DDL runs against a live database. The physical mapping is described in
+pure data for instance storage: no table or column is ever created per type or property.
+The only DDL a schema change runs maintains search indexes, named after the schema rows
+that cause them. The physical mapping is described in
 [storage-adapters.md](storage-adapters.md); deliberation:
 [adr/0015](adr/0015-generic-jsonb-instance-tables.md).
 

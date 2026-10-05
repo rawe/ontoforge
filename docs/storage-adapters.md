@@ -379,12 +379,12 @@ indexed — every listing depends on it.
 exposes exactly the hooks the schema lifecycle needs: create the index for an entity type
 at a given width, optionally naming the properties to be filterable inside it; drop it;
 rebuild it against the type's current properties; create and drop the index for a document
-property's chunks; ensure the saved-query index; and ensure all of them at once. All are
-called at the points where the schema changes shape — adding a type, deleting a type,
-adding or removing a property, adding or removing a document property — and are no-ops
-when no embedding provider is configured. Indexes are per ontology like everything else:
-created through a bound store, they serve that ontology alone, and registry delete
-removes them with the rest.
+property's chunks; ensure the saved-query index; drop every index whose width no longer
+matches; and ensure all of them at once. All are called at the points where the schema
+changes shape — adding a type, deleting a type, adding or removing a property, adding or
+removing a document property — and are no-ops when no embedding provider is configured.
+Indexes are per ontology like everything else: created through a bound store, they serve
+that ontology alone, and registry delete removes them with the rest.
 
 **Vector index width reconciliation.** An index fixes its vector width when it is created,
 and a create-if-absent is a no-op against an index that already exists — the failure mode
@@ -393,10 +393,11 @@ this produces, and why startup reports it instead of repairing it, are in
 [capabilities/search.md](capabilities/search.md#vector-index-width-drift). The adapter's
 obligation is threefold: before every create, read the existing index's configured width
 and compare it; on the startup path — which walks every registered ontology — report a
-mismatch and change nothing; on the rebuild path, which passes an explicit recreate flag,
-drop and recreate at the new width. The
-report must describe the index the way the API does — by entity type, by document property,
-or by search scope — and never by its physical name.
+mismatch and change nothing; on the rebuild path, drop every index whose width no longer
+matches before any vector is regenerated, then — once every vector has the new width —
+create every missing index at that width. The report must describe the index the way the
+API does — by entity type, by document property, or by search scope — and never by its
+physical name.
 
 **Building predicates from structured filters.** Filters arrive as parsed conditions, and
 the adapter, dispatching on each condition's kind, must turn every condition into a
@@ -587,8 +588,8 @@ DDL.
 **Registry create** is one transaction:
 the registry row first — so a concurrent same-key create dies on the named constraint as
 a conflict — then the fresh namespace, the eleven tables below and, when an embedding width
-is given, the fixed vector indexes inside it. **Registry delete** is one transaction:
-the registry row out, the namespace dropped in one cascade. A bound store applies its
+is given, the fixed saved-query vector index inside it. **Registry delete** is one
+transaction: the registry row out, the namespace dropped in one cascade. A bound store applies its
 ontology's namespace to the search path per statement, inside the shared transaction
 machinery.
 
@@ -613,8 +614,8 @@ name of a dynamically created vector index embeds the uuid of the schema row tha
 it to exist (naming, below).
 
 Deleting a schema object cascades through the foreign keys — property definitions,
-inclusions, agents and saved queries die with their owner. The DDL carries structure
-only, per the rule in [decisions.md](decisions.md#storage): identity, referential
+inclusions, agents, saved queries and retrievers die with their owner. The DDL carries
+structure only, per the rule in [decisions.md](decisions.md#storage): identity, referential
 integrity, exactly-one-owner and uniqueness, with no backstop for the business rules the
 service validates. The uniqueness constraints on type keys act per namespace, which is
 exactly the per-ontology key scoping the contract requires.
@@ -633,7 +634,7 @@ the property-definition row for a document property's chunk index. The name is
 reversible in both directions with no registry: name to uuid to schema row to type key,
 and type to uuid to name, so index names are never stored. The `vec_` prefix is barred
 to every fixed adapter object, keeping the dynamic and static namespaces disjoint by
-construction — the two fixed vector indexes live outside it.
+construction — the fixed saved-query vector index lives outside it.
 
 ## How instance data is stored
 
@@ -642,7 +643,9 @@ types its schema declares: `entity` and `relation`. Each row carries its `uuid` 
 type key, its user properties as one `jsonb` document, and its timestamps; an entity row
 additionally carries its embedding vector in a dedicated dimensionless column, never
 inside the properties document. A schema change — a new type, a new property — is
-therefore pure data: no DDL ever runs against a live database. The deliberation behind
+therefore pure data for instance storage: no table or column is ever created per type or
+property. The only DDL a schema change runs creates, drops or rebuilds vector indexes,
+named after the schema rows that cause them (naming, above). The deliberation behind
 this mapping is [adr/0015](adr/0015-generic-jsonb-instance-tables.md); the binding rule
 is in [decisions.md](decisions.md#storage).
 
@@ -749,9 +752,9 @@ against it.
 
 The registry entry lives on a single internal node labelled `_OntologyRegistry` —
 underscore-internal, like every physical name no key can produce. Registry create
-pre-checks the cap, creates the fixed vector indexes when an embedding width is given
-(index DDL cannot share a transaction with data writes in this engine; a mid-way failure
-leaves nothing observable through the port), then writes the registry node with a
+pre-checks the cap, creates the fixed saved-query vector index when an embedding width is
+given (index DDL cannot share a transaction with data writes in this engine; a mid-way
+failure leaves nothing observable through the port), then writes the registry node with a
 single-statement conditional create as the in-transaction backstop. Registry delete
 wipes the whole graph — schema nodes, instance nodes, chunks, and the registry node —
 and drops every vector index, so no width or filter-property imprint of the deleted
@@ -898,7 +901,7 @@ Provide, in this order:
 4. **Constraints and indexes.** Everything under the uniqueness obligation — the
    server-wide part at initialization, the per-ontology part at registry create.
 5. **The schema side.** Lenses, types, properties, inclusions, full-schema retrieval,
-   agents and saved queries. Nothing on the data side is useful until the schema can be
+   agents, saved queries and retrievers. Nothing on the data side is useful until the schema can be
    read back.
 6. **The data side.** Entities, relations, traversal, chunks.
 7. **Filters, sorts and text search.** The predicate builder, shared by listing and by

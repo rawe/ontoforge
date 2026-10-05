@@ -218,7 +218,7 @@ describe("transfer", () => {
   it("rejects a 6.0 entity type whose name property is not one of its string properties", async () => {
     const res = await request("POST", `${model}/import`, {
       formatVersion: "6.0",
-      textSearchLanguage: "english",
+      keywordLanguages: ["english"],
       entityTypes: [
         {
           key: "project",

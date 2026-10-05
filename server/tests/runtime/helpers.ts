@@ -166,14 +166,13 @@ export function makeRelation(
  * one non-method member, the store's ontology binding, stays a value. The
  * store keeps its own search storage: no search indices. */
 export type MockRuntimeStore = {
-  [K in Exclude<keyof RuntimeStore, "ontologyKey" | "textSearchLanguage" | "searchIndices">]: Mock;
-} & { ontologyKey: string; textSearchLanguage: "english" | "german" };
+  [K in Exclude<keyof RuntimeStore, "ontologyKey" | "searchIndices">]: Mock;
+} & { ontologyKey: string };
 
 /** A mock store whose reads default to "nothing stored". */
 export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeStore {
   return {
     ontologyKey,
-    textSearchLanguage: "english",
     supportsKeywordRanking: vi.fn(() => false),
     supportsSearchPathConditions: vi.fn(() => false),
     getFullSchemaWithLensInclusions: vi.fn(async () => null),

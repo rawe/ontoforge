@@ -80,6 +80,10 @@ describe("storage version at boot", () => {
       "SET LOCAL search_path TO public",
     ]);
     expect(queries.filter((q) => q.includes("ADD COLUMN name_property"))).toHaveLength(2);
+    // The registry's language goes once, after every namespace took it over.
+    const dropped = queries.indexOf("ALTER TABLE public.ontology DROP COLUMN text_search_language");
+    expect(dropped).toBeGreaterThan(queries.lastIndexOf("SET LOCAL search_path TO ont_b, public"));
+    expect(queries.filter((q) => q.includes("text_search_language"))).toHaveLength(3);
     expect(queries.at(-1)).toBe("INSERT INTO public.storage_version (version) VALUES ($1)");
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 2 to 3"));
   });

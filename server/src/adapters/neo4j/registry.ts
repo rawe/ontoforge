@@ -18,7 +18,6 @@
  * server-wide skeleton.
  */
 
-import type { KeywordLanguage } from "../../core/keywordLanguage.js";
 
 import type { Driver } from "neo4j-driver";
 
@@ -76,7 +75,6 @@ export class Neo4jOntologyRegistry implements OntologyRegistry {
     key: string,
     displayName: string | null,
     embeddingDimensions: number | null,
-    textSearchLanguage: KeywordLanguage,
   ): Promise<Row> {
     // The cap first, so a rejected create touches nothing — the
     // conflict is an expected condition and must have no side effects.
@@ -107,13 +105,12 @@ export class Neo4jOntologyRegistry implements OntologyRegistry {
             ontologyId: $ontologyId,
             key: $key,
             displayName: $displayName,
-            textSearchLanguage: $textSearchLanguage,
             createdAt: datetime(),
             updatedAt: datetime()
         })
         RETURN r {.*} AS ontology
         `,
-        { ontologyId, key, displayName, textSearchLanguage },
+        { ontologyId, key, displayName },
       );
       const record = result.records[0];
       return record === undefined ? null : (record.get("ontology") as Row);

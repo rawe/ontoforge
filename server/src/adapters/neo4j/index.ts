@@ -7,8 +7,6 @@
  * imported from anywhere else in the server.
  */
 
-import type { KeywordLanguage } from "../../core/keywordLanguage.js";
-
 import { reportEnsureFailed } from "../../core/vectorDrift.js";
 import type { OntologyRegistry } from "../../core/ports.js";
 import { ensureVectorIndexes } from "./ddl.js";
@@ -34,12 +32,12 @@ export async function initAdapter(): Promise<void> {
  * valid unchanged. The port accessors have already verified the key
  * against the registry.
  */
-export function createModelingStore(_ontologyKey: string, language: KeywordLanguage): Neo4jModelingStore {
-  return new Neo4jModelingStore(getDriver(), language);
+export function createModelingStore(_ontologyKey: string): Neo4jModelingStore {
+  return new Neo4jModelingStore(getDriver());
 }
 
-export function createRuntimeStore(ontologyKey: string, language: KeywordLanguage): Neo4jRuntimeStore {
-  return new Neo4jRuntimeStore(getDriver(), ontologyKey, language);
+export function createRuntimeStore(ontologyKey: string): Neo4jRuntimeStore {
+  return new Neo4jRuntimeStore(getDriver(), ontologyKey);
 }
 
 /** The one-ontology-capped registry (`registry.ts`). */

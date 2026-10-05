@@ -2,7 +2,7 @@
  * Entity embedding text composition on an adapter with its own search
  * storage (`keepsOwnSearch`); search indices compose their entries
  * themselves (`core/searchComposition.ts`). The composition rules are
- * normative in `docs/capabilities/search.md#what-gets-embedded`:
+ * normative in `docs/storage-adapters.md#what-gets-embedded`:
  *
  * - only `string` properties contribute (never document/numeric/temporal);
  * - `key=value` pairs in schema declaration order;

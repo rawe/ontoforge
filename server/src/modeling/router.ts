@@ -38,6 +38,8 @@ import {
   RelationTypeUpdate,
   SavedQueryResponse,
   SavedQueryUpsert,
+  SearchSettingsResponse,
+  SearchSettingsUpdate,
   ValidationResult,
 } from "./schemas.js";
 import * as service from "./service.js";
@@ -367,6 +369,40 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
       );
       return reply.status(201).send(result);
     },
+  );
+
+  // --- Search settings ---
+  // The keyword language set and the managed-index switches; an adapter
+  // without search indices answers FEATURE_DISABLED.
+
+  app.get(
+    "/search-settings",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: OntologyParams,
+        response: { 200: SearchSettingsResponse },
+      },
+    },
+    async (request) =>
+      service.getSearchSettings(await getModelingStore(request.params.ontologyKey)),
+  );
+
+  app.put(
+    "/search-settings",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: OntologyParams,
+        body: SearchSettingsUpdate,
+        response: { 200: SearchSettingsResponse },
+      },
+    },
+    async (request) =>
+      service.updateSearchSettings(
+        request.body,
+        await getModelingStore(request.params.ontologyKey),
+      ),
   );
 
   // --- Entity Types ---

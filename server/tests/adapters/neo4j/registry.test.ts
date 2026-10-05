@@ -55,7 +55,7 @@ describe("the one-ontology cap", () => {
       "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       "second",
       null,
-      null, "english"
+      null,
     );
     await expect(promise).rejects.toBeInstanceOf(ConflictError);
     await expect(promise).rejects.not.toBeInstanceOf(StoreError);
@@ -76,7 +76,7 @@ describe("the one-ontology cap", () => {
     const registry = new Neo4jOntologyRegistry(driver);
 
     await expect(
-      registry.createOntology("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "second", null, 768, "english"),
+      registry.createOntology("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "second", null, 768),
     ).rejects.toBeInstanceOf(ConflictError);
 
     expect(queries.some((q) => q.includes("CREATE VECTOR INDEX"))).toBe(false);
@@ -107,7 +107,7 @@ describe("port row shape", () => {
       "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       "crm",
       null,
-      null, "english"
+      null,
     );
     expect(created.displayName).toBeNull();
     expect(created.createdAt).toBeInstanceOf(Date);

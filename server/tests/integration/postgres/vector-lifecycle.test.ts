@@ -102,7 +102,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
    * every test decides how it comes into existence. */
   beforeEach(async () => {
     await wipeDatabase();
-    await getOntologyRegistry().createOntology(randomUUID(), ONTOLOGY_KEY, null, null, "english");
+    await getOntologyRegistry().createOntology(randomUUID(), ONTOLOGY_KEY, null, null);
     store = await getModelingStore(ONTOLOGY_KEY);
   });
 
@@ -241,7 +241,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
 
   describe("startup maintenance across the registry", () => {
     it("one startup ensure covers every registered ontology's namespace", async () => {
-      await getOntologyRegistry().createOntology(randomUUID(), "vec_other", null, null, "english");
+      await getOntologyRegistry().createOntology(randomUUID(), "vec_other", null, null);
 
       await ensureSemanticIndexes(MODEL_WIDTH);
 

@@ -51,9 +51,18 @@ const VEC_CHUNK_INDEX = "vec_document_chunk_0a1b2c3d999948888777666655554444";
 /** Storage of the previous major line (version 2): no name property, no
  * search-index tables, two lens inclusion kinds — and the per-entity
  * search storage: search columns on `entity`, `document_chunk`, their
- * keyword indexes and per-type vector indexes. */
-async function makeVersion2(namespace: string): Promise<void> {
+ * keyword indexes and per-type vector indexes — and the registry holding
+ * each ontology's text-search language. */
+async function makeVersion2(namespace: string, language = "english"): Promise<void> {
   await withTransaction(async (querier) => {
+    await querier.query(
+      `ALTER TABLE public.ontology ADD COLUMN IF NOT EXISTS text_search_language text NOT NULL
+         DEFAULT 'english' CHECK (text_search_language IN ('english', 'german'))`,
+    );
+    await querier.query(`UPDATE public.ontology SET text_search_language = $1 WHERE namespace = $2`, [
+      language,
+      namespace,
+    ]);
     await querier.query(
       `ALTER TABLE ${namespace}.entity
          ADD COLUMN property_text text NOT NULL DEFAULT '',
@@ -185,6 +194,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL storage version"
   afterEach(async () => {
     vi.restoreAllMocks();
     await recordVersion(STORAGE_VERSION);
+    await runQuery(`ALTER TABLE public.ontology DROP COLUMN IF EXISTS text_search_language`);
   });
 
   it("a fresh database is recorded at the current version", async () => {
@@ -192,24 +202,39 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL storage version"
   });
 
   it("upgrades version-2 storage to exactly the layout of a fresh ontology", async () => {
-    await getOntologyRegistry().createOntology(ID_A, "older", null, null, "english");
+    await getOntologyRegistry().createOntology(ID_A, "older", null, null);
     await makeVersion2("ont_older");
 
     await initSchema();
 
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     // Created after the upgrade: storage at one version holds one layout.
-    await getOntologyRegistry().createOntology(ID_B, "fresh", null, null, "english");
+    await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
     expect(await layout("ont_older")).toEqual(await layout("ont_fresh"));
   });
 
   it("keeps an upgraded ontology's keyword language; a fresh one stems in both", async () => {
-    await getOntologyRegistry().createOntology(ID_A, "older", null, null, "german");
-    await makeVersion2("ont_older");
+    await getOntologyRegistry().createOntology(ID_A, "older", null, null);
+    await makeVersion2("ont_older", "german");
 
     await initSchema();
 
-    await getOntologyRegistry().createOntology(ID_B, "fresh", null, null, "english");
+    // The language moved into the ontology; the registry no longer holds one.
+    const registryColumns = await runQuery(
+      `SELECT column_name FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'ontology' ORDER BY ordinal_position`,
+    );
+    expect(registryColumns.rows.map((row) => row["column_name"])).toEqual([
+      "ontology_id",
+      "key",
+      "display_name",
+      "namespace",
+      "created_at",
+      "updated_at",
+    ]);
+    expect((await getOntologyRegistry().getOntology("older"))!).not.toHaveProperty("textSearchLanguage");
+
+    await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
     const settingsOf = async (namespace: string) =>
       (await runQuery(`SELECT keyword_languages, disabled_defaults FROM ${namespace}.search_settings`)).rows;
     expect(await settingsOf("ont_older")).toEqual([{ keyword_languages: ["german"], disabled_defaults: {} }]);
@@ -219,7 +244,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL storage version"
   });
 
   it("gives every entity type a name property by the fallback chain", async () => {
-    await getOntologyRegistry().createOntology(ID_A, "older", null, null, "english");
+    await getOntologyRegistry().createOntology(ID_A, "older", null, null);
     await makeVersion2("ont_older");
     await seedVersion2Types("ont_older", {
       article: [["summary", "string"], ["label", "string"], ["title", "string"]],
@@ -269,7 +294,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL storage version"
   });
 
   it("writes the managed search indices and includes them in the scoped lenses that show their types", async () => {
-    await getOntologyRegistry().createOntology(ID_A, "older", null, null, "english");
+    await getOntologyRegistry().createOntology(ID_A, "older", null, null);
     await makeVersion2("ont_older");
     await seedVersion2Types("ont_older", {
       note: [["body", "document"], ["summary", "string"]],
@@ -334,7 +359,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL storage version"
   });
 
   it("drops the per-entity search storage and keeps every instance", async () => {
-    await getOntologyRegistry().createOntology(ID_A, "older", null, null, "english");
+    await getOntologyRegistry().createOntology(ID_A, "older", null, null);
     await makeVersion2("ont_older");
     const ada = randomUUID();
     const note = randomUUID();
@@ -379,7 +404,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL storage version"
   });
 
   it("refuses unversioned storage — older than the previous major line — and changes nothing", async () => {
-    await getOntologyRegistry().createOntology(ID_A, "older", null, null, "english");
+    await getOntologyRegistry().createOntology(ID_A, "older", null, null);
     await runQuery(`DROP TABLE public.storage_version`);
     const before = await layout("ont_older");
 
@@ -389,7 +414,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL storage version"
   });
 
   it("several servers starting together upgrade once", async () => {
-    await getOntologyRegistry().createOntology(ID_A, "older", null, null, "english");
+    await getOntologyRegistry().createOntology(ID_A, "older", null, null);
     await makeVersion2("ont_older");
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
 
@@ -401,7 +426,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL storage version"
   });
 
   it("storage newer than the code stops the boot and stays untouched", async () => {
-    await getOntologyRegistry().createOntology(ID_A, "newer", null, null, "english");
+    await getOntologyRegistry().createOntology(ID_A, "newer", null, null);
     await recordVersion(STORAGE_VERSION + 1);
     const before = await layout("ont_newer");
 

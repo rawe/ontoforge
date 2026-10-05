@@ -6,11 +6,9 @@
 
 import { z } from "zod";
 
-import { KeywordLanguage } from "../core/keywordLanguage.js";
 import { KEY_PATTERN, MAX_ONTOLOGY_KEY_LENGTH } from "../core/schemas.js";
 
 export const OntologyCreate = z.object({
-  textSearchLanguage: KeywordLanguage.optional(),
   key: z.string().regex(KEY_PATTERN).max(MAX_ONTOLOGY_KEY_LENGTH),
   // Absent means no display name — an ontology starts nameless unless
   // one is chosen at creation.
@@ -25,7 +23,6 @@ export const OntologyRename = z.object({
 
 export const OntologyResponse = z.object({
   ontologyId: z.string(),
-  textSearchLanguage: KeywordLanguage,
   key: z.string(),
   displayName: z.string().nullable(),
   createdAt: z.iso.datetime(),

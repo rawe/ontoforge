@@ -9,7 +9,7 @@
  * Two ways to call them:
  * - `embed(text)` — one text; a failed call is LOGGED and yields `null`, and
  *   the caller proceeds without a vector — an embedding failure never fails
- *   a write (`docs/capabilities/search.md#keeping-search-data-current`).
+ *   a write (`docs/storage-adapters.md#keeping-search-data-current`).
  * - `embedBatch(texts)` — many texts, sent `EMBEDDING_BATCH_SIZE` per request
  *   with up to `EMBEDDING_CONCURRENCY` requests in flight; vectors come back
  *   in input order. A failed request THROWS, so a caller that retries can

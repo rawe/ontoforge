@@ -52,10 +52,10 @@ describe.skipIf(settings.DB_BACKEND !== "neo4j")("Neo4j one-ontology cap", () =>
 
   it("port: first create succeeds, a second key is a domain conflict, delete reopens the slot", async () => {
     const registry = getOntologyRegistry();
-    const first = await registry.createOntology(ID_A, "crm", null, null, "english");
+    const first = await registry.createOntology(ID_A, "crm", null, null);
     expect(first.key).toBe("crm");
 
-    const second = registry.createOntology(ID_B, "hr", null, null, "english");
+    const second = registry.createOntology(ID_B, "hr", null, null);
     await expect(second).rejects.toBeInstanceOf(ConflictError);
     await expect(second).rejects.not.toBeInstanceOf(StoreError);
 
@@ -71,7 +71,7 @@ describe.skipIf(settings.DB_BACKEND !== "neo4j")("Neo4j one-ontology cap", () =>
     expect(await registry.listOntologies()).toEqual([]);
     expect(await nodeCount()).toBe(0);
 
-    const third = await registry.createOntology(ID_B, "hr", null, null, "english");
+    const third = await registry.createOntology(ID_B, "hr", null, null);
     expect(third.key).toBe("hr");
   });
 

@@ -174,7 +174,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL search-index sto
 
   beforeEach(async () => {
     await wipeDatabase();
-    await getOntologyRegistry().createOntology(randomUUID(), ONTOLOGY_KEY, null, null, "english");
+    await getOntologyRegistry().createOntology(randomUUID(), ONTOLOGY_KEY, null, null);
     modeling = await getModelingStore(ONTOLOGY_KEY);
     store = await getSearchIndexStore(ONTOLOGY_KEY);
     personTypeId = randomUUID();

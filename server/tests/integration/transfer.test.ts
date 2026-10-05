@@ -148,9 +148,9 @@ describe("round-trip against a stored export document", () => {
     expect(Object.keys(exported).sort()).toEqual([
       "entityTypes",
       "formatVersion",
+      "keywordLanguages",
       "lenses",
       "relationTypes",
-      "textSearchLanguage",
     ]);
   });
 });

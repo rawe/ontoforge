@@ -85,7 +85,7 @@ deployment has. It belongs to neither modeling nor runtime and is the only surfa
 is not ontology-scoped.
 
 **Core** owns what the others need and none should define twice: the persistence port,
-the exception taxonomy, the data-type and text-search language enumerations, embedding and
+the exception taxonomy, the data-type and keyword language enumerations, embedding and
 decision-model provider abstractions, OQL parsing and validation, and the storage-free
 parts of search indexing — entry composition and the map of which writes affect which
 entries.
@@ -334,8 +334,9 @@ Two refinements:
 
 **`details.code` narrows, it does not replace.** Where it appears, the top-level code
 stays one of the six. A request for an unavailable search strategy, search with no available strategy,
-saved-query discovery with no embedding provider — or an AI request with no
-language-model provider configured — answers `422 VALIDATION_ERROR` with `details.code` of `FEATURE_DISABLED`.
+saved-query discovery with no embedding provider, an AI request with no
+language-model provider configured — or a search-settings request to a storage adapter
+without search indices — answers `422 VALIDATION_ERROR` with `details.code` of `FEATURE_DISABLED`.
 
 **`STORAGE_ERROR` carries an id, not a cause.** A driver message names the vendor and its
 physical objects, which must not reach a client. The adapter logs the original against a

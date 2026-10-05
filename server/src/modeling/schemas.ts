@@ -5,7 +5,7 @@ import { StoredRetrieverExport } from "./retrievers.js";
  * explicit `null`.
  */
 
-import { KeywordLanguage } from "../core/keywordLanguage.js";
+import { KeywordLanguage, KeywordLanguageSetSchema } from "../core/keywordLanguage.js";
 
 import { z } from "zod";
 
@@ -339,13 +339,30 @@ export const ExportLens = z.object({
 });
 
 export const ExportPayload = z.object({
-  textSearchLanguage: KeywordLanguage,
   formatVersion: z.string().optional().default(TRANSFER_FORMAT_VERSION),
+  // Each required by its own version — 6.0 the keyword language set, 5.0
+  // its one text-search language — so import checks them itself.
+  keywordLanguages: KeywordLanguageSetSchema.optional(),
+  textSearchLanguage: KeywordLanguage.optional(),
   entityTypes: z.array(ExportEntityType).default([]),
   relationTypes: z.array(ExportRelationType).default([]),
   // Required, no default: a pre-4.0 document (`ontologies[]`) must fail
   // plain shape validation — the intended, final rejection of old payloads.
   lenses: z.array(ExportLens),
+});
+
+// --- Search settings ---
+
+export const SearchSettingsResponse = z.object({
+  keywordLanguages: z.array(KeywordLanguage),
+  /** The managed indices switched off, in key order. */
+  disabledIndices: z.array(z.string()),
+});
+
+/** Either field may be absent; an absent one stays as it is. */
+export const SearchSettingsUpdate = z.object({
+  keywordLanguages: KeywordLanguageSetSchema.optional(),
+  disabledIndices: z.array(z.string()).optional(),
 });
 
 export type LensCreateInput = z.infer<typeof LensCreate>;
@@ -372,6 +389,8 @@ export type SavedQueryUpsertInput = z.infer<typeof SavedQueryUpsert>;
 export type StepResponseBody = z.infer<typeof StepResponse>;
 export type SavedQueryResponseBody = z.infer<typeof SavedQueryResponse>;
 export type ExportPayloadInput = z.infer<typeof ExportPayload>;
+export type SearchSettingsUpdateInput = z.infer<typeof SearchSettingsUpdate>;
+export type SearchSettingsResponseBody = z.infer<typeof SearchSettingsResponse>;
 export type ExportEntityTypeInput = z.infer<typeof ExportEntityType>;
 export type ExportPropertyInput = z.infer<typeof ExportProperty>;
 export type ExportRelationTypeInput = z.infer<typeof ExportRelationType>;

@@ -29,7 +29,8 @@ import {
   type OwnSearchModelingStore,
   type OwnSearchRuntimeStore,
 } from "../core/ownSearch.js";
-import type { ModelingStore, RuntimeStore } from "../core/ports.js";
+import { DEFAULT_KEYWORD_LANGUAGES } from "../core/keywordLanguage.js";
+import type { ModelingStore, RuntimeStore, SearchIndexStore } from "../core/ports.js";
 import {
   DATA_TYPES,
   KEY_PATTERN,
@@ -42,6 +43,7 @@ import {
 } from "../core/schemas.js";
 import { buildTextRepr } from "../runtime/search/propertyText.js";
 import { syncManagedSearchIndices } from "../runtime/indexing/managed.js";
+import { readSearchSettings, updateSearchSettings as changeSearchSettings } from "../runtime/indexing/settings.js";
 import { invalidateLoadedSchemaCache, loadSchemaUncached, buildSchemaCacheFromRaw, applyScopeFiltering } from "../runtime/schemaCache.js";
 import { syncDocumentChunks } from "../runtime/service.js";
 import { VALID_AGENT_TOOLS } from "../runtime/toolNames.js";
@@ -55,6 +57,8 @@ import {
 import type {
   ExportEntityTypeInput,
   ExportPayloadInput,
+  SearchSettingsResponseBody,
+  SearchSettingsUpdateInput,
   ExportPropertyInput,
   AiAgentConfigResponseBody,
   AiAgentConfigUpsertInput,
@@ -1440,9 +1444,16 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
     lenses.push(exported);
   }
 
+  // An adapter without search indices stems in no language set; its
+  // design moves on with the set a new ontology starts with.
+  const indices = store.searchIndices?.();
+  const keywordLanguages = indices === undefined
+    ? [...DEFAULT_KEYWORD_LANGUAGES]
+    : [...(await indices.getSearchSettings()).keywordLanguages];
+
   return {
     formatVersion: TRANSFER_FORMAT_VERSION,
-    textSearchLanguage: store.textSearchLanguage,
+    keywordLanguages,
     entityTypes,
     relationTypes,
     lenses,
@@ -1476,6 +1487,11 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
  * legacy fallback (`core/legacyNameProperty.ts`), creating a `name`
  * property where a type has no string property. Any other version is
  * rejected.
+ *
+ * The payload's keyword language set becomes the target's (6.0
+ * `keywordLanguages`; 5.0 carries one `textSearchLanguage`, which becomes
+ * a set of that language alone). An adapter without search indices
+ * checks it and keeps nothing of it.
  */
 export async function importSchema(
   payload: ExportPayloadInput,
@@ -1488,9 +1504,14 @@ export async function importSchema(
     );
   }
   const legacy = payload.formatVersion === LEGACY_TRANSFER_FORMAT_VERSION;
-  if (payload.textSearchLanguage !== store.textSearchLanguage) {
-    throw new ValidationError("Text-search language differs from the target ontology", {
-      fields: { textSearchLanguage: `Expected ${store.textSearchLanguage}` },
+  // 5.0 conversion: the one text-search language is the whole set.
+  const keywordLanguages = legacy
+    ? payload.textSearchLanguage === undefined ? undefined : [payload.textSearchLanguage]
+    : payload.keywordLanguages;
+  if (keywordLanguages === undefined) {
+    const field = legacy ? "textSearchLanguage" : "keywordLanguages";
+    throw new ValidationError(`The payload carries no ${field}`, {
+      fields: { [field]: "Required" },
     });
   }
 
@@ -1913,9 +1934,47 @@ export async function importSchema(
     await store.ensureSavedQueryVectorIndex(provider.dimensions);
   }
 
+  const indices = store.searchIndices?.();
+  if (indices !== undefined) {
+    const settings = await indices.getSearchSettings();
+    await indices.setSearchSettings({ ...settings, keywordLanguages });
+  }
   invalidateLoadedSchemaCache();
   await syncSearchIndices(store);
   return { lenses: createdLenses };
+}
+
+// --- Search settings ---
+
+/** The search-index store of the ontology; an adapter without search
+ * indices answers `FEATURE_DISABLED`. */
+function requireSearchIndices(store: ModelingStore): SearchIndexStore {
+  const indices = store.searchIndices?.();
+  if (indices === undefined) {
+    throw new ValidationError("Search indices are not supported by this storage adapter", {
+      code: "FEATURE_DISABLED",
+    });
+  }
+  return indices;
+}
+
+export async function getSearchSettings(store: ModelingStore): Promise<SearchSettingsResponseBody> {
+  return readSearchSettings(requireSearchIndices(store));
+}
+
+/**
+ * Change the keyword language set and/or which managed indices are off;
+ * an absent field stays as it is. Every change reconciles the
+ * generations — a new language set yields new keyword generations for
+ * every index (`runtime/indexing/settings.ts`).
+ */
+export async function updateSearchSettings(
+  body: SearchSettingsUpdateInput,
+  store: ModelingStore,
+): Promise<SearchSettingsResponseBody> {
+  const result = await changeSearchSettings(requireSearchIndices(store), body);
+  invalidateLoadedSchemaCache();
+  return result;
 }
 
 // --- AI Agent Config ---

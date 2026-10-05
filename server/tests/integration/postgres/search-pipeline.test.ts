@@ -156,7 +156,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL search pipeline"
     invalidateLoadedSchemaCache();
     provider = fakeEmbeddingProvider();
     setEmbeddingProvider(provider);
-    await getOntologyRegistry().createOntology(randomUUID(), ONTOLOGY_KEY, null, null, "english");
+    await getOntologyRegistry().createOntology(randomUUID(), ONTOLOGY_KEY, null, null);
     modeling = await getModelingStore(ONTOLOGY_KEY);
     runtime = await getRuntimeStore(ONTOLOGY_KEY);
     store = await getSearchIndexStore(ONTOLOGY_KEY);

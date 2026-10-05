@@ -53,7 +53,6 @@ const SERVER_DDL_STATEMENTS: string[] = [
   ontology_id  uuid        CONSTRAINT ontology_pk PRIMARY KEY,   -- caller-supplied, no default
   key          text        NOT NULL CONSTRAINT ontology_key_unique UNIQUE,
   display_name text        CONSTRAINT ontology_display_name_unique UNIQUE,  -- nullable: absent names never collide
-  text_search_language text NOT NULL CHECK (text_search_language IN ('english', 'german')),
   namespace    text        NOT NULL,   -- the ontology's physical home, ont_<key>
   created_at   timestamptz NOT NULL DEFAULT now(),
   updated_at   timestamptz NOT NULL DEFAULT now()

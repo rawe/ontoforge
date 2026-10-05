@@ -177,11 +177,12 @@ MCP reports the same failures as tool errors. Because a tool error is a single s
 per-field detail that REST returns under `details.fields` is flattened into the message
 text, so a model still sees every offending field in one response.
 
-Requesting an unavailable search strategy or a capability whose provider is not configured
-answers `VALIDATION_ERROR` with
+Requesting an unavailable search strategy, a capability whose provider is not configured,
+or one the storage adapter does not support answers `VALIDATION_ERROR` with
 `details.code` of `FEATURE_DISABLED` — on the two routes that need an embedding provider,
-semantic search and saved-query search, and on AI execution and entity identity
-comparison alike. A client can therefore
+semantic search and saved-query search, on AI execution and entity identity
+comparison alike, and on the search settings of an adapter without search indices. A
+client can therefore
 tell a switched-off capability from a rejected request. Model-free operations remain available: agent discovery, retriever schema discovery
 and stored-definition management do not require a language-model provider. Retriever
 preparation requires embeddings separately; execution requirements are listed with
@@ -339,6 +340,21 @@ Lens-local ownership and execution semantics: [capabilities/retrievers.md](capab
 Writes carry `name`, optional `description`, `configVersion: 1` and `config`. Reads
 include identity, timestamps and `validation: {valid,errors}`. Portable JSON omits
 identity/timestamps. Config management has no model calls.
+
+### Search settings
+
+The ontology's keyword language set and its managed-index switches. Semantics:
+[capabilities/search.md](capabilities/search.md#keyword-language) and
+[capabilities/search-indices.md](capabilities/search-indices.md#managed-indices).
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/search-settings` | Read `keywordLanguages` and `disabledIndices`, the managed indices switched off |
+| PUT | `/search-settings` | Change either or both; an absent field stays as it is. Answers the settings now in force |
+
+A PUT is validated whole before anything is written; field errors name `keywordLanguages`
+or `disabledIndices.<i>` for a key that names no managed index. Both routes answer
+`FEATURE_DISABLED` on an adapter without search indices.
 
 ### Schema-wide operations
 
@@ -607,6 +623,8 @@ exist; its tools answer not-found tool errors otherwise.
 | `validate_schema` | Check the ontology's schema and every lens |
 | `export_schema` | Produce a transfer payload |
 | `import_schema` | Apply a transfer payload |
+| `get_search_settings` | Read the keyword language set and the managed indices switched off |
+| `set_search_settings` | Change `keyword_languages` and/or `disabled_indices`, as the REST route does |
 | `create_lens` | Create a lens |
 | `update_lens` | Change a lens's name or description |
 | `delete_lens` | Delete a lens |

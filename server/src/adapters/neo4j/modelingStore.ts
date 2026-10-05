@@ -8,7 +8,6 @@ import * as retrievers from "./retrieverQueries.js";
  * delegates to the query functions in `modelingQueries.ts`.
  */
 
-import type { KeywordLanguage } from "../../core/keywordLanguage.js";
 
 import type { Driver } from "neo4j-driver";
 
@@ -20,7 +19,7 @@ import { runSession } from "./errors.js";
 import * as queries from "./modelingQueries.js";
 
 export class Neo4jModelingStore implements ModelingStore {
-  constructor(private readonly driver: Driver, public readonly textSearchLanguage: KeywordLanguage = "english") {}
+  constructor(private readonly driver: Driver) {}
 
   async listRetrievers(lensId: string): Promise<Row[]> {
     return runSession(this.driver, session => retrievers.list(session, lensId));

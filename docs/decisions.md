@@ -345,17 +345,17 @@ two axes; a conjunction over exact query terms without prefix matching, since al
 means every term, not no morphology; and building no all-term variant, which leaves the
 any-term behaviour unnamed and the extension point unexercised.
 
-**Text-search language is an immutable ontology setting.** Chosen at creation, default
-English, carried in export, and checked against the import target. It does not stem
-search-index entries, and ranked search does not read it.
-
 **Keyword entries are stemmed in every language of the ontology's keyword language set.**
 The set is English, German, or both. One keyword representation per entry concatenates
 the stemming of each language; a query is stemmed in each, its terms combined within a
 language by the keyword matching and the languages OR-ed. No request names a language:
 which language a query is written in is unknown, and an ontology's content may mix both.
-Matches across languages are left to semantic ranking. A new ontology starts with both
-languages.
+Matches across languages are left to semantic ranking. The set is a modeling setting of
+the ontology, not a registry attribute: creating an ontology names no language, and a new
+ontology starts with both languages. It is editable; a change builds new keyword
+generations of every index in the background, without embedding calls, while the
+previous ones keep serving until they are ready. Import replaces the target's set with
+the payload's.
 
 **A schema edit never writes instance data.** Managed search indices follow the schema
 asynchronously: a changed derived definition builds a new generation in the background,
@@ -570,8 +570,9 @@ no default ontology exists, and it ships as a major version bump. Deliberation:
 [adr/0018](adr/0018-multi-ontology-hard-cut.md).
 
 **Transfer scope** — export and import carry one ontology's design: schema, lenses,
-and their agents, saved queries and retrievers. Never instance data, never the ontology's
-identity. A transfer document is portable into any ontology.
+and their agents, saved queries and retrievers, and the keyword language set. Never
+instance data, never the ontology's identity. A transfer document is portable into any
+ontology.
 
 **Transfer target** — import writes into an existing ontology named by the request;
 creating the ontology is a registry operation. Key conflicts are checked all-or-fail

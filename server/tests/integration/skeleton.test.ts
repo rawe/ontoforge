@@ -41,7 +41,7 @@ describe("adapter lifecycle", () => {
     await closeStores();
     await closeStores(); // the port contract's "Close. Idempotent."
     await initStores(); // boot again against the same store
-    await getOntologyRegistry().createOntology(randomUUID(), "lifecycle_probe", null, null, "english");
+    await getOntologyRegistry().createOntology(randomUUID(), "lifecycle_probe", null, null);
     const store = await getModelingStore("lifecycle_probe");
     expect(await store.listLenses()).toEqual([]);
   });

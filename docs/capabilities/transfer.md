@@ -20,6 +20,7 @@ ontologies, transfer included.
 | Agents | Every agent of every lens: key, name, description, system prompt, tool allowlist |
 | Saved queries | Every saved query of every lens: key, name, description, steps, parameters |
 | Retrievers | Every retriever of every lens: key, name, description, configVersion, config |
+| Keyword language set | The languages keyword search stems in, at the top level of the payload |
 
 Agents, saved queries and retrievers are nested inside the lens they belong to, because that is where
 they belong ([ai-agents.md](ai-agents.md), [saved-queries.md](saved-queries.md), [retrievers.md](retrievers.md)).
@@ -38,8 +39,12 @@ they belong ([ai-agents.md](ai-agents.md), [saved-queries.md](saved-queries.md),
 Server-managed timestamps are not carried either. Imported objects are new objects and are
 timestamped as such.
 
-The payload carries the immutable `textSearchLanguage`. Import rejects a language that
-differs from the target ontology, before writing any design objects.
+The payload carries the ontology's
+[keyword language set](search.md#keyword-language) as `keywordLanguages`. Import replaces
+the target's set with it once the design is written; the set is the one part of the
+target an import overwrites rather than adds to. An adapter without search indices has no
+set: its export writes the set a new ontology starts with, German and English, and its
+import validates the field and keeps nothing of it.
 
 ## The format version
 
@@ -55,8 +60,10 @@ field error on the version:
 | `6.0`, or no version at all | The current format, validated as described below |
 | `5.0` | The previous format, converted on the way in |
 
-A `5.0` payload differs from `6.0` only in that its entity types carry no name property
-([schema-modeling.md](schema-modeling.md#the-name-property)). Import derives one per
+A `5.0` payload differs from `6.0` in two ways. It carries one `textSearchLanguage`,
+`english` or `german`, in place of `keywordLanguages`; import takes that language alone as
+the set. And its entity types carry no name property
+([schema-modeling.md](schema-modeling.md#the-name-property)); import derives one per
 entity type: the first `string` property among `name`, `title`, `label` and
 `display_name`, in that order; otherwise the type's first `string` property in payload
 order. A type without any `string` property is given a new non-required `string`
@@ -64,7 +71,8 @@ property `name` — `name_2`, `name_3`, … when `name` is taken — and that be
 property. The same derivation brings storage written before name properties existed up to
 date ([../storage-adapters.md](../storage-adapters.md)).
 
-The language and lenses fields are required in both versions.
+Each version requires its own language field — `keywordLanguages` in `6.0`,
+`textSearchLanguage` in `5.0` — and both require the lenses field.
 
 ## Rules
 

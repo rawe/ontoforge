@@ -34,8 +34,9 @@ screen; there is no separate settings area.
   schema, lenses and all data go — because the API itself has no guard.
 - "+ New ontology" creates one: a key (proposed from the display name until the key
   field is touched, validated live against the key pattern, and permanent) plus an
-  optional display name. Creation lands in the new ontology's Studio, which is where a
-  bare ontology is useful first.
+  optional display name. No language is chosen: the ontology starts with the default
+  [keyword language set](capabilities/search.md#keyword-language). Creation lands in the
+  new ontology's Studio, which is where a bare ontology is useful first.
 - An empty server shows "No ontologies yet" with the create action. Fresh server to
   working graph is one unbroken path: create an ontology, model its schema, create a
   lens, enter data — all in the UI.
@@ -344,8 +345,7 @@ uses the same search hook and row; its empty input lists the first ten entities.
 Both use ranked search whenever the strategy list is nonempty, falling back to literal
 entity lists otherwise. Enter opens entity detail; Cmd/Ctrl+Enter focuses the Explorer.
 
-The ontology creation dialog offers English or German text-search language, defaulting
-to English; the ontology card shows the immutable choice. Saved-query editing offers a
+Saved-query editing offers a
 `search` step with no minimum score. Extraction review searches only properties for up to
 three existing candidates, with no score threshold or displayed number; “Create new” is
 the default and the prompt asks whether to use an existing entity instead.

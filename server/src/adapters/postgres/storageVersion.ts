@@ -46,10 +46,12 @@ const UNVERSIONED = 1;
 type Action = string | ((querier: Querier) => Promise<void>);
 
 /** One upgrade step: actions run, in order, inside every ontology
- * namespace to bring it from `to - 1` to `to`. */
+ * namespace to bring it from `to - 1` to `to`; then the server-wide
+ * statements run once, in `public`, after every namespace's actions. */
 interface Step {
   to: number;
   actions: Action[];
+  serverStatements?: string[];
 }
 
 /**
@@ -273,6 +275,9 @@ const STEPS: Step[] = [
   DROP COLUMN property_text,
   DROP COLUMN embedding`,
     ],
+    // 6.0: the keyword language set lives in each ontology's search
+    // settings, initialised above from the registry's language.
+    serverStatements: [`ALTER TABLE public.ontology DROP COLUMN text_search_language`],
   },
 ];
 
@@ -351,7 +356,10 @@ export async function bringStorageUpToDate(
         }
       }
     }
+    await querier.query(`SET LOCAL search_path TO public`);
+    for (const statement of step.serverStatements ?? []) {
+      await querier.query(statement);
+    }
   }
-  await querier.query(`SET LOCAL search_path TO public`);
   await recordVersion(querier, STORAGE_VERSION);
 }

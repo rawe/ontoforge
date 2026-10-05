@@ -47,7 +47,7 @@ key, the optional display name and timestamps. Six operations:
 
 | Operation | Obligation |
 |---|---|
-| Create | Given an internal id, a key, an optional display name, an immutable text-search language and an optional embedding width, create the registry entry **and provision the ontology's physical home atomically** — a failed create leaves no entry and no home. When a width is given, the home carries the fixed semantic indexes at that width; when none is given, it carries no vector indexes. |
+| Create | Given an internal id, a key, an optional display name and an optional embedding width, create the registry entry **and provision the ontology's physical home atomically** — a failed create leaves no entry and no home. When a width is given, the home carries the fixed semantic indexes at that width; when none is given, it carries no vector indexes. |
 | List | Every ontology, as registry rows. |
 | Read by key | One row, or an absent result. |
 | Read by display name | One row, or an absent result — display names are unique server-wide, and the pre-write conflict check needs the lookup. |
@@ -302,7 +302,8 @@ search-index store, on an adapter that stores search indices
 strategies. The service ranks through the search-index store where the adapter stores
 search indices, and through the semantic rankings of
 [own search storage](#own-search-storage) otherwise; fusion belongs above the port either
-way. The bound store carries the ontology's language; queries do not take a language.
+way. Neither a bound store nor a query carries a language: a keyword generation stems in
+its own language set.
 Semantic scores are pinned to `(1 + cosine) / 2`, higher is better; arbitrary native
 scores must not be labeled semantic similarity. A keyword score is the adapter's native
 ranking measurement, higher is better, its scale unpinned; the runtime passes it through
@@ -789,7 +790,8 @@ from before the `storage_version` table counts as version 1 — then creates the
 objects if absent. An empty database is recorded at the current version. Storage newer
 than the code, or older than the oldest upgradable version, fails the boot before
 anything is written. Older storage holds the registry table against concurrent creates,
-runs each missing upgrade step inside every `ont_*` namespace and records the new version
+runs each missing upgrade step inside every `ont_*` namespace — then the step's
+server-wide statements, if it has any, once in `public` — and records the new version
 last. The steps and both version constants live in the storage-version module beside the
 DDL. Before that transaction the adapter logs the pgvector version — the installed one,
 or the one the extension would install — and warns when it predates 0.7, which has no
@@ -806,11 +808,12 @@ the search-index tables and gives `lens_includes` its third inclusion column (bo
 writes a row for every managed index the namespace's schema implies, and includes each in
 every scoped lens exposing its root type, as the search-index store's inclusion operation
 does; the worker's first start then builds their generations from all existing entities.
-An upgraded namespace's keyword language set is its former text-search language alone.
-Last, the step drops the per-entity search storage the managed indices replace: the
-`entity` table's search columns — vector, composed text, keyword text and segments, and
-the generated tsvector — and the `document_chunk` table, each with its keyword and vector
-indexes.
+An upgraded namespace's keyword language set is the single text-search language its
+registry row carried. Last, the step drops the per-entity search storage the managed
+indices replace: the `entity` table's search columns — vector, composed text, keyword
+text and segments, and the generated tsvector — and the `document_chunk` table, each with
+its keyword and vector indexes. Once every namespace has its set, the step's server-wide
+statement drops that language column from the registry table.
 
 **Registry create** is one transaction:
 the registry row first — so a concurrent same-key create dies on the named constraint as

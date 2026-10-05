@@ -58,7 +58,7 @@ describe.skipIf(settings.DB_BACKEND !== "neo4j")("Neo4j name-property backfill a
   });
 
   it("gives every stored entity type a name property, once", async () => {
-    await getOntologyRegistry().createOntology(randomUUID(), "legacy", null, null, "english");
+    await getOntologyRegistry().createOntology(randomUUID(), "legacy", null, null);
     await seedLegacyTypes({
       article: [["summary", "string"], ["label", "string"], ["title", "string"]],
       empty: [],

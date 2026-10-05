@@ -33,7 +33,6 @@ vi.mock("../../src/core/ports.js", () => ({
 }));
 
 const ONTOLOGY_DATA = {
-  textSearchLanguage: "english",
   ontologyId: "11111111-1111-4111-8111-111111111111",
   key: "crm",
   displayName: "Customer Relations",
@@ -72,6 +71,22 @@ describe("ontology create", () => {
     expect(body.displayName).toBe("Customer Relations");
     expect(body.createdAt).toBe(NOW.toISOString());
     expect(body.updatedAt).toBe(NOW.toISOString());
+  });
+
+  it("takes no language: a legacy textSearchLanguage is ignored and no response carries one", async () => {
+    holder.registry.createOntology.mockResolvedValue(ONTOLOGY_DATA);
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/ontologies",
+      payload: { key: "crm", displayName: "Customer Relations", textSearchLanguage: "german" },
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    expect(res.json()).not.toHaveProperty("textSearchLanguage");
+    expect(holder.registry.createOntology.mock.calls[0]!.slice(1)).toEqual([
+      "crm",
+      "Customer Relations",
+      null,
+    ]);
   });
 
   it("the display name is optional and reads back as explicit null", async () => {

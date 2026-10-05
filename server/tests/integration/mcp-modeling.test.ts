@@ -16,6 +16,7 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../../src/app.js";
+import { settings } from "../../src/config.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
 import { supportsMultipleOntologies } from "./tiers.js";
@@ -86,9 +87,9 @@ beforeEach(async () => {
 });
 
 describe("tool surface", () => {
-  it("lists exactly the twenty-eight modeling tools — and NO update-inclusion tool", async () => {
+  it("lists exactly the thirty modeling tools — and NO update-inclusion tool", async () => {
     const tools = await client.listTools();
-    expect(tools.tools).toHaveLength(28);
+    expect(tools.tools).toHaveLength(30);
     expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
       "add_entity_type_to_lens",
       "add_property",
@@ -105,6 +106,7 @@ describe("tool surface", () => {
       "ensure_ontology",
       "export_schema",
       "get_schema",
+      "get_search_settings",
       "import_schema",
       "list_ai_agents",
       "list_saved_queries",
@@ -112,6 +114,7 @@ describe("tool surface", () => {
       "remove_relation_type_from_lens",
       "set_ai_agent",
       "set_saved_query",
+      "set_search_settings",
       "update_entity_type",
       "update_lens",
       "update_property",
@@ -305,6 +308,43 @@ describe("schema lifecycle over MCP (keys, never ids)", () => {
     const emptied = json(await call(client, "get_schema"));
     expect(emptied.entityTypes).toEqual([]);
     expect(emptied.relationTypes).toEqual([]);
+  });
+});
+
+describe("search settings over MCP", () => {
+  it.skipIf(settings.DB_BACKEND !== "postgres")("reads and changes the keyword language set and the switches", async () => {
+    expect(json(await call(client, "get_search_settings"))).toEqual({
+      keywordLanguages: ["german", "english"],
+      disabledIndices: [],
+    });
+    await call(client, "create_entity_type", { key: "person", display_name: "Person" });
+    const changed = json(
+      await call(client, "set_search_settings", {
+        keyword_languages: ["english"],
+        disabled_indices: ["person~default"],
+      }),
+    );
+    expect(changed).toEqual({ keywordLanguages: ["english"], disabledIndices: ["person~default"] });
+    // An omitted argument stays as it is.
+    expect(json(await call(client, "set_search_settings", { disabled_indices: [] }))).toEqual({
+      keywordLanguages: ["english"],
+      disabledIndices: [],
+    });
+    expect((json(await call(client, "export_schema")) as { keywordLanguages: string[] }).keywordLanguages).toEqual([
+      "english",
+    ]);
+    const invalid = await call(client, "set_search_settings", {
+      keyword_languages: ["french"],
+      disabled_indices: ["nope"],
+    });
+    expect(invalid.isError).toBe(true);
+    expect(text(invalid)).toContain("keywordLanguages");
+  });
+
+  it.skipIf(settings.DB_BACKEND === "postgres")("is not supported by an adapter without search indices", async () => {
+    const result = await call(client, "get_search_settings");
+    expect(result.isError).toBe(true);
+    expect(text(result)).toContain("not supported");
   });
 });
 

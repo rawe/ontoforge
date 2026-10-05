@@ -53,7 +53,7 @@
  * and its package is registered as one thunk line in `ADAPTERS`.
  */
 
-import type { KeywordLanguage, KeywordLanguageSet } from "./keywordLanguage.js";
+import type { KeywordLanguageSet } from "./keywordLanguage.js";
 
 import { settings } from "../config.js";
 import { NotFoundError } from "./exceptions.js";
@@ -172,8 +172,6 @@ export interface ReservedTypeKeyInUse {
  * no search indices (`core/ownSearch.ts`).
  */
 export interface ModelingStore {
-  readonly textSearchLanguage: KeywordLanguage;
-
   /** The search-index store of the same ontology. Present exactly when the
    * adapter stores search indices (`supportsSearchIndices()`): the
    * modeling service keeps the managed indices in step with the schema
@@ -526,14 +524,13 @@ export interface SearchedProperty {
 
 /** The keyword retrieval method: any admits a row carrying any query term, all
  * requires every query term; both match each term as a prefix. Contract:
- * `docs/storage-adapters.md`, "Search". */
+ * `docs/storage-adapters.md`, "The search-index store" (ranking entries). */
 export type KeywordMatching = "any" | "all";
 
 export interface RuntimeStore {
   /** The ontology this store is bound to. The runtime schema cache keys
    * its entries by this binding plus the lens key. */
   readonly ontologyKey: string;
-  readonly textSearchLanguage: KeywordLanguage;
 
   // ------------------------------------------------------------------
   // Declarations
@@ -1166,7 +1163,6 @@ export interface OntologyRegistry {
     key: string,
     displayName: string | null,
     embeddingDimensions: number | null,
-    textSearchLanguage: KeywordLanguage,
   ): Promise<Row>;
 
   listOntologies(): Promise<Row[]>;
@@ -1202,8 +1198,8 @@ export interface AdapterModule {
   /** Whether this adapter stores search indices. */
   supportsSearchIndices(): boolean;
   initAdapter(): Promise<void>;
-  createModelingStore(ontologyKey: string, language: KeywordLanguage): ModelingStore;
-  createRuntimeStore(ontologyKey: string, language: KeywordLanguage): RuntimeStore;
+  createModelingStore(ontologyKey: string): ModelingStore;
+  createRuntimeStore(ontologyKey: string): RuntimeStore;
   /** Present exactly when `supportsSearchIndices()` is true. */
   createSearchIndexStore?(ontologyKey: string): SearchIndexStore;
   /** Present exactly when `supportsSearchIndices()` is true: call
@@ -1281,15 +1277,15 @@ async function requireOntology(ontologyKey: string): Promise<Row> {
 /** A modeling store bound to one ontology. Unknown key -> not found. */
 export async function getModelingStore(ontologyKey: string): Promise<ModelingStore> {
   const adapter = requireAdapter();
-  const ontology = await requireOntology(ontologyKey);
-  return adapter.createModelingStore(ontologyKey, ontology.textSearchLanguage as KeywordLanguage);
+  await requireOntology(ontologyKey);
+  return adapter.createModelingStore(ontologyKey);
 }
 
 /** A runtime store bound to one ontology. Unknown key -> not found. */
 export async function getRuntimeStore(ontologyKey: string): Promise<RuntimeStore> {
   const adapter = requireAdapter();
-  const ontology = await requireOntology(ontologyKey);
-  return adapter.createRuntimeStore(ontologyKey, ontology.textSearchLanguage as KeywordLanguage);
+  await requireOntology(ontologyKey);
+  return adapter.createRuntimeStore(ontologyKey);
 }
 
 /** A search-index store bound to one ontology. Unknown key -> not found.

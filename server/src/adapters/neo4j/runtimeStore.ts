@@ -20,7 +20,6 @@
  * this adapter ignores those parameters.
  */
 
-import type { KeywordLanguage } from "../../core/keywordLanguage.js";
 
 import neo4j, { type Driver } from "neo4j-driver";
 
@@ -80,7 +79,6 @@ export class Neo4jRuntimeStore implements RuntimeStore {
   constructor(
     private readonly driver: Driver,
     public readonly ontologyKey: string = "",
-    public readonly textSearchLanguage: KeywordLanguage = "english",
   ) {}
 
   // ------------------------------------------------------------------

@@ -74,6 +74,15 @@ definitions cannot be edited.
 A managed index that comes into existence is included in every scoped lens that exposes
 its root type ([ontology-lenses.md](ontology-lenses.md#search-through-a-lens)).
 
+**A managed index can be switched off.** The ontology's search settings list the managed
+indices that are off ([../interfaces.md](../interfaces.md#search-settings)). A change
+names exactly the indices off afterwards — every other managed index is on — and a key
+that names no managed index rejects the whole change before anything is written. A
+switched-off index keeps its definition and its lens inclusions but has no entries: its
+generations retire, and it contributes nothing to search until it is switched on again,
+which builds its generations anew from all entities of its root type. When a schema
+change removes a managed index, its switch goes with it.
+
 ## Composition
 
 An entry's text is composed from the entity's current state and the **full schema**,

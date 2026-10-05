@@ -319,7 +319,9 @@ definition and the embedding model (semantic) or the keyword language set (keywo
 Search reads the ready one; a replacement is built beside it.
 
 **Keyword language set** — the languages, English, German or both, in which an
-ontology's keyword entries and queries are stemmed.
+ontology's keyword entries and queries are stemmed. A setting of the ontology's design,
+edited in modeling; a new ontology starts with both. See
+[capabilities/search.md](capabilities/search.md#keyword-language).
 
 **Relative score** — 1.0 for the best hit and each other hit's ordering number as a fraction
 of the best, comparable only within that response. See [search](capabilities/search.md#response)

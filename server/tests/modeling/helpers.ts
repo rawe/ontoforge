@@ -30,8 +30,8 @@ export const RESERVED_RELATION_TYPE_KEYS = [
 /** Every port method as a mock — completeness is compiler-enforced. The
  * store keeps its own search storage: no search indices. */
 export type MockModelingStore = {
-  [K in Exclude<keyof ModelingStore, "textSearchLanguage" | "searchIndices">]: Mock;
-} & { textSearchLanguage: "english" | "german" };
+  [K in Exclude<keyof ModelingStore, "searchIndices">]: Mock;
+};
 
 /**
  * A mock store whose reads default to "nothing stored" and whose reserved
@@ -39,7 +39,6 @@ export type MockModelingStore = {
  */
 export function createMockModelingStore(): MockModelingStore {
   return {
-    textSearchLanguage: "english",
     reservedEntityTypeKeys: vi.fn(() => new Set(RESERVED_ENTITY_TYPE_KEYS)),
     reservedRelationTypeKeys: vi.fn(() => new Set(RESERVED_RELATION_TYPE_KEYS)),
     findReservedTypeKeysInUse: vi.fn(async () => []),

@@ -42,6 +42,7 @@ import {
   RelationTypeUpdate,
   LEGACY_TRANSFER_FORMAT_VERSION,
   SavedQueryUpsert,
+  SearchSettingsUpdate,
   TRANSFER_FORMAT_VERSION,
 } from "../modeling/schemas.js";
 import * as service from "../modeling/service.js";
@@ -561,7 +562,9 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
   server.registerTool(
     "export_schema",
     {
-      description: "Export the full schema in OntoForge v2.0 transfer format (JSON).",
+      description:
+        `Export the full schema in the OntoForge v${TRANSFER_FORMAT_VERSION} transfer format ` +
+        "(JSON), including the keyword language set.",
       inputSchema: {},
     },
     wrap("export_schema", async () => {
@@ -583,6 +586,47 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     wrap("import_schema", async (args: { payload: Record<string, unknown> }) => {
       const parsed = ExportPayload.parse(args.payload);
       const result = await service.importSchema(parsed, await getModelingStore(ontologyKey));
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "get_search_settings",
+    {
+      description:
+        "Get the search settings: the keyword language set keyword search stems in " +
+        "(german, english or both) and the managed search indices switched off.",
+      inputSchema: {},
+    },
+    wrap("get_search_settings", async () => {
+      const result = await service.getSearchSettings(await getModelingStore(ontologyKey));
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "set_search_settings",
+    {
+      description:
+        "Change the search settings; an omitted argument stays as it is. " +
+        "keyword_languages: a non-empty set of 'german' and/or 'english' — changing it " +
+        "rebuilds every index's keyword entries in the background. disabled_indices: " +
+        "exactly the managed index keys (e.g. 'person~default') to switch off; every other " +
+        "managed index is on.",
+      inputSchema: {
+        keyword_languages: z.array(z.string()).optional(),
+        disabled_indices: z.array(z.string()).optional(),
+      },
+    },
+    wrap("set_search_settings", async (args: {
+      keyword_languages?: string[] | undefined;
+      disabled_indices?: string[] | undefined;
+    }) => {
+      const body = SearchSettingsUpdate.parse({
+        keywordLanguages: args.keyword_languages,
+        disabledIndices: args.disabled_indices,
+      });
+      const result = await service.updateSearchSettings(body, await getModelingStore(ontologyKey));
       return jsonResult(result);
     }),
   );

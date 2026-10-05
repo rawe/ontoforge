@@ -17,13 +17,13 @@
  * behind a passage header — is refreshed by re-queueing the entities of
  * every index that reads the changed type (`refreshTypes`).
  *
- * A managed index can be switched off (search settings): its row stays,
- * it keeps no generations and no lens can search it.
+ * A managed index can be switched off (search settings, `settings.ts`):
+ * its row stays, it keeps no generations and no lens can search it.
  */
 
 import { randomUUID } from "node:crypto";
 
-import { ConflictError, ValidationError } from "../../core/exceptions.js";
+import { ConflictError } from "../../core/exceptions.js";
 import type { SearchIndexRecord, SearchIndexStore } from "../../core/ports.js";
 import {
   definitionsEqual,
@@ -133,37 +133,4 @@ function readsType(definition: SearchIndexDefinition, types: ReadonlySet<string>
         types.has(group.relationType) || Object.keys(group.target).some((target) => types.has(target)),
     )
   );
-}
-
-/** The managed indices switched off, in key order. */
-export async function listDisabledManagedIndices(store: SearchIndexStore): Promise<string[]> {
-  return [...disabledIndexKeys(await store.getSearchSettings())].sort();
-}
-
-/**
- * Switch managed indices: exactly `keys` are off afterwards, every other
- * managed index on. A key that names no managed index fails validation
- * (`disabledIndices.<i>`). Switching off retires the index's generations;
- * switching on builds them anew. Returns the keys now off, in key order.
- */
-export async function setDisabledManagedIndices(
-  store: SearchIndexStore,
-  keys: readonly string[],
-): Promise<string[]> {
-  const managed = new Map<string, SearchIndexRecord>(
-    (await store.listIndices())
-      .filter((index) => index.kind !== "custom")
-      .map((index) => [index.key, index] as const),
-  );
-  const fields: Record<string, string> = {};
-  keys.forEach((key, i) => {
-    if (!managed.has(key)) fields[`disabledIndices.${i}`] = `'${key}' is not a managed search index`;
-  });
-  if (Object.keys(fields).length > 0) {
-    throw new ValidationError(Object.values(fields).join("; "), { fields });
-  }
-  const settings = await store.getSearchSettings();
-  await store.setSearchSettings({ ...settings, disabledDefaults: disabledDefaultsOf(keys) });
-  await reconcileSearchGenerations(store.ontologyKey);
-  return [...new Set(keys)].sort();
 }

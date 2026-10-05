@@ -36,7 +36,6 @@ import { ConflictError, NotFoundError } from "../../core/exceptions.js";
  * saved-query index alone.
  */
 
-import type { KeywordLanguage } from "../../core/keywordLanguage.js";
 
 import { toSql } from "pgvector";
 
@@ -143,7 +142,6 @@ export class PostgresModelingStore implements ModelingStore {
    * the connection's default namespace. */
   constructor(
     private readonly namespace?: string,
-    public readonly textSearchLanguage: KeywordLanguage = "english",
     private readonly ontologyKey: string = "",
   ) {}
 

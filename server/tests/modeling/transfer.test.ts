@@ -18,6 +18,12 @@ vi.mock("../../src/core/ports.js", () => ({
   getRuntimeStore: async () => ({}),
 }));
 
+// A store with search indices syncs them after an import; the sync itself
+// is the pipeline's business, covered by the PostgreSQL tier.
+vi.mock("../../src/runtime/indexing/managed.js", () => ({
+  syncManagedSearchIndices: vi.fn(async () => undefined),
+}));
+
 const FULL_SCHEMA = {
   entityTypes: [
     {
@@ -107,6 +113,18 @@ afterEach(() => {
 // Export
 // ---------------------------------------------------------------------------
 
+/** The mock store with a search-index store whose settings it records. */
+function withSearchIndices() {
+  const settings = { keywordLanguages: ["german", "english"], disabledDefaults: { "x~default": true } };
+  const indices = {
+    ontologyKey: "onto",
+    getSearchSettings: vi.fn(async () => settings),
+    setSearchSettings: vi.fn(async (next: unknown) => next),
+  };
+  (holder.store as unknown as { searchIndices: () => unknown }).searchIndices = () => indices;
+  return indices;
+}
+
 describe("export", () => {
   it("exports the whole design in the transfer format", async () => {
     holder.store.getFullSchema.mockResolvedValue(FULL_SCHEMA);
@@ -144,13 +162,24 @@ describe("export", () => {
     });
     const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
     expect(res.statusCode).toBe(200);
+    // An adapter without search indices exports the set a new ontology
+    // starts with.
     expect(res.json()).toEqual({
       formatVersion: "6.0",
-      textSearchLanguage: "english",
+      keywordLanguages: ["german", "english"],
       entityTypes: [],
       relationTypes: [],
       lenses: [],
     });
+  });
+
+  it("exports the ontology's keyword language set", async () => {
+    withSearchIndices();
+    holder.store.getFullSchema.mockResolvedValue({ entityTypes: [], relationTypes: [], lenses: [] });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().keywordLanguages).toEqual(["german", "english"]);
+    expect(res.json()).not.toHaveProperty("textSearchLanguage");
   });
 
   it("omits the includes key entirely for an unscoped lens", async () => {
@@ -316,7 +345,7 @@ function entityType(
 }
 
 async function postImport(payload: Record<string, unknown>) {
-  return app.inject({ method: "POST", url: "/api/ontologies/onto/model/import", payload: { textSearchLanguage: "english", ...payload } });
+  return app.inject({ method: "POST", url: "/api/ontologies/onto/model/import", payload: { keywordLanguages: ["german", "english"], ...payload } });
 }
 
 describe("import", () => {
@@ -412,6 +441,52 @@ describe("import", () => {
 // Import — name properties
 // ---------------------------------------------------------------------------
 
+describe("import keyword languages", () => {
+  const empty = { entityTypes: [], relationTypes: [], lenses: [] };
+
+  it("6.0: the payload's set becomes the target's, in canonical order", async () => {
+    const indices = withSearchIndices();
+    const res = await postImport({ ...empty, keywordLanguages: ["english", "german"] });
+    expect(res.statusCode, res.body).toBe(201);
+    expect(indices.setSearchSettings).toHaveBeenCalledWith({
+      keywordLanguages: ["german", "english"],
+      disabledDefaults: { "x~default": true },
+    });
+  });
+
+  it("5.0: the one text-search language becomes the whole set", async () => {
+    const indices = withSearchIndices();
+    const res = await postImport({ ...empty, formatVersion: "5.0", textSearchLanguage: "german" });
+    expect(res.statusCode, res.body).toBe(201);
+    expect(indices.setSearchSettings.mock.calls[0]![0]).toMatchObject({ keywordLanguages: ["german"] });
+  });
+
+  it("each version requires its own field; an invalid set is rejected; nothing is written", async () => {
+    const indices = withSearchIndices();
+    const missing6 = await app.inject({
+      method: "POST",
+      url: "/api/ontologies/onto/model/import",
+      payload: { ...empty, textSearchLanguage: "english", entityTypes: [entityType("paper", "Paper")] },
+    });
+    expect(missing6.statusCode).toBe(422);
+    expect(missing6.json().error.details.fields).toEqual({ keywordLanguages: "Required" });
+    const missing5 = await postImport({ ...empty, formatVersion: "5.0" });
+    expect(missing5.statusCode).toBe(422);
+    expect(missing5.json().error.details.fields).toEqual({ textSearchLanguage: "Required" });
+    for (const keywordLanguages of [[], ["french"], ["german", "german"]]) {
+      const res = await postImport({ ...empty, keywordLanguages });
+      expect(res.statusCode, JSON.stringify(keywordLanguages)).toBe(422);
+    }
+    expect(holder.store.createEntityType).not.toHaveBeenCalled();
+    expect(indices.setSearchSettings).not.toHaveBeenCalled();
+  });
+
+  it("an adapter without search indices checks the set and keeps nothing of it", async () => {
+    const res = await postImport({ ...empty, keywordLanguages: ["english"] });
+    expect(res.statusCode, res.body).toBe(201);
+  });
+});
+
 describe("import name properties", () => {
   it("6.0: rejects an entity type without a name property, or one that is not a string property of it", async () => {
     const res = await postImport({
@@ -445,6 +520,7 @@ describe("import name properties", () => {
   it("5.0: derives the name property by the fallback chain, creating one where a type has no string property", async () => {
     const res = await postImport({
       formatVersion: "5.0",
+      textSearchLanguage: "english",
       entityTypes: [
         {
           key: "article",

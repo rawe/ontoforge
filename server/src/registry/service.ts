@@ -30,7 +30,6 @@ function toIso(value: unknown): string {
 function toOntologyResponse(data: Row): OntologyResponseBody {
   return {
     ontologyId: data.ontologyId as string,
-    textSearchLanguage: data.textSearchLanguage as OntologyResponseBody["textSearchLanguage"],
     key: data.key as string,
     displayName: data.displayName === null || data.displayName === undefined
       ? null
@@ -56,7 +55,7 @@ export async function createOntology(
     }
   }
   const dimensions = getEmbeddingProvider()?.dimensions ?? null;
-  const data = await registry.createOntology(randomUUID(), body.key, displayName, dimensions, body.textSearchLanguage ?? "english");
+  const data = await registry.createOntology(randomUUID(), body.key, displayName, dimensions);
   return toOntologyResponse(data);
 }
 

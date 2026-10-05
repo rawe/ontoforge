@@ -26,7 +26,6 @@ import {
 } from "../../../src/core/ports.js";
 import { SearchIndexDefinition } from "../../../src/core/searchIndex.js";
 import { reconcileSearchGenerations } from "../../../src/runtime/indexing/generations.js";
-import { setDisabledManagedIndices } from "../../../src/runtime/indexing/managed.js";
 import { getSearchIndexStatus } from "../../../src/runtime/indexing/status.js";
 import { drainSearchWork } from "../../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache, loadSchema } from "../../../src/runtime/schemaCache.js";
@@ -224,8 +223,16 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL search query", (
     const ada = await post(`${runtimeOf("all")}/entities/person`, { name: "Ada" });
     const keyword = (q: string) => search("all", { query: q, mode: "keyword" });
     expect((await keyword("Ada")).hits.map((h) => h.entity._id)).toEqual([ada._id]);
+    // Switched through the modeling route (search settings).
+    const switchOff = (disabledIndices: string[]) =>
+      app.inject({ method: "PUT", url: `${MODEL}/search-settings`, payload: { disabledIndices } });
 
-    expect(await setDisabledManagedIndices(store, ["person~default"])).toEqual(["person~default"]);
+    const off = await switchOff(["person~default"]);
+    expect(off.statusCode, off.body).toBe(200);
+    expect(off.json().disabledIndices).toEqual(["person~default"]);
+    expect((await app.inject({ url: `${MODEL}/search-settings` })).json().disabledIndices).toEqual([
+      "person~default",
+    ]);
     expect(await getSearchIndexStatus(O, "person~default")).toMatchObject({
       state: "disabled",
       representations: [],
@@ -236,11 +243,13 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL search query", (
       details: { fields: { "indices.0": expect.any(String) } },
     });
 
-    await setDisabledManagedIndices(store, []);
+    expect((await switchOff([])).statusCode).toBe(200);
     expect((await keyword("Ada")).hits.map((h) => h.entity._id)).toEqual([ada._id]);
 
-    await expect(setDisabledManagedIndices(store, ["employment"])).rejects.toMatchObject({
-      details: { fields: { "disabledIndices.0": expect.any(String) } },
+    const unknown = await switchOff(["employment"]);
+    expect(unknown.statusCode).toBe(422);
+    expect(unknown.json().error.details.fields).toEqual({
+      "disabledIndices.0": "'employment' is not a managed search index",
     });
   });
 

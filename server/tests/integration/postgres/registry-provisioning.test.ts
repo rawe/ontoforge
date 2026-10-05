@@ -73,7 +73,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL registry provisi
   });
 
   it("create provisions ont_<key> with the ontology tables", async () => {
-    await getOntologyRegistry().createOntology(ID_A, "crm", null, null, "english");
+    await getOntologyRegistry().createOntology(ID_A, "crm", null, null);
     expect(await namespaceExists("ont_crm")).toBe(true);
     expect(await tablesIn("ont_crm")).toEqual([...ALL_TABLES].sort());
   });
@@ -82,7 +82,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL registry provisi
     // An invalid embedding width dies inside the provisioning transaction,
     // after CREATE SCHEMA and the ontology table DDL have already run.
     await expect(
-      getOntologyRegistry().createOntology(ID_A, "doomed", null, -1, "english"),
+      getOntologyRegistry().createOntology(ID_A, "doomed", null, -1),
     ).rejects.toThrow("Invalid embedding width");
     expect(await namespaceExists("ont_doomed")).toBe(false);
     expect(await registryRowCount("doomed")).toBe(0);
@@ -94,7 +94,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL registry provisi
     await runQuery(`CREATE SCHEMA ont_orphaned`);
     try {
       await expect(
-        getOntologyRegistry().createOntology(ID_A, "orphaned", null, null, "english"),
+        getOntologyRegistry().createOntology(ID_A, "orphaned", null, null),
       ).rejects.toThrow(StoreError);
       expect(await registryRowCount("orphaned")).toBe(0);
     } finally {
@@ -105,23 +105,23 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL registry provisi
   it("a display-name collision the pre-check missed translates to the conflict", async () => {
     // Straight to the port, bypassing the service pre-check: the race
     // backstop is the named constraint's translation.
-    await getOntologyRegistry().createOntology(ID_A, "crm", "Customer Relations", null, "english");
+    await getOntologyRegistry().createOntology(ID_A, "crm", "Customer Relations", null);
     await expect(
-      getOntologyRegistry().createOntology(ID_B, "other", "Customer Relations", null, "english"),
+      getOntologyRegistry().createOntology(ID_B, "other", "Customer Relations", null),
     ).rejects.toThrow(ConflictError);
     expect(await namespaceExists("ont_other")).toBe(false);
     expect(await registryRowCount("other")).toBe(0);
   });
 
   it("delete drops the namespace and the registry row together", async () => {
-    await getOntologyRegistry().createOntology(ID_A, "crm", null, null, "english");
+    await getOntologyRegistry().createOntology(ID_A, "crm", null, null);
     expect(await getOntologyRegistry().deleteOntology("crm")).toBe(true);
     expect(await namespaceExists("ont_crm")).toBe(false);
     expect(await registryRowCount("crm")).toBe(0);
   });
 
   it("the server-wide home holds only the registry — no ontology tables", async () => {
-    await getOntologyRegistry().createOntology(ID_A, "crm", null, null, "english");
+    await getOntologyRegistry().createOntology(ID_A, "crm", null, null);
     // `public` is the server-wide home: the registry and nothing
     // ontology-scoped; the ontology tables live only inside `ont_*`.
     const result = await runQuery(

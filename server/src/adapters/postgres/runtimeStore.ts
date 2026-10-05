@@ -37,7 +37,6 @@
  *   names the columns and drives the value conversion.
  */
 
-import type { KeywordLanguage } from "../../core/keywordLanguage.js";
 
 import type { ValidatedQuery } from "../../core/oql/index.js";
 import type {
@@ -121,7 +120,6 @@ export class PostgresRuntimeStore implements RuntimeStore {
   constructor(
     public readonly ontologyKey: string = "",
     private readonly namespace?: string,
-    public readonly textSearchLanguage: KeywordLanguage = "english",
   ) {}
 
   /** Door one, carrying this store's binding. */

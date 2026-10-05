@@ -1,11 +1,26 @@
-import { beforeAll, afterAll, beforeEach, expect, it } from "vitest";
+/**
+ * The keyword language set: an ontology setting edited through the search
+ * settings (PostgreSQL — an adapter without search indices answers
+ * FEATURE_DISABLED), never part of the registry; carried by transfer 6.0
+ * and mapped from a 5.0 payload's text-search language. A change of the
+ * set rebuilds the keyword entries of every index in new generations; the
+ * old ones serve until the worker finishes them.
+ */
+
+import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { createApp } from "../../src/app.js";
-import { initStores, closeStores } from "../../src/core/ports.js";
+import { initStores, closeStores, getSearchIndexStore } from "../../src/core/ports.js";
 import { settings } from "../../src/config.js";
 import { wipeDatabase } from "./reset.js";
 import { drainSearchWork } from "../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
+
+const postgres = settings.DB_BACKEND === "postgres";
+const base = "/api/ontologies/language_test";
+const model = `${base}/model`;
+const runtime = `${base}/runtime/lenses/all`;
+
 let app: FastifyInstance;
 beforeAll(async () => {
   await initStores();
@@ -26,65 +41,120 @@ async function post(url: string, payload: object) {
   expect(res.statusCode, res.body).toBe(201);
   return res.json();
 }
-it("defaults to English, returns it in reads and exports, and never changes it on rename", async () => {
-  const created = await post("/api/ontologies", { key: "language_test" });
-  expect(created.textSearchLanguage).toBe("english");
-  const base = "/api/ontologies/language_test";
-  const renamed = await app.inject({
-    method: "PATCH",
-    url: base,
-    payload: { displayName: "Language", textSearchLanguage: "german" },
+const putSettings = (payload: object) =>
+  app.inject({ method: "PUT", url: `${model}/search-settings`, payload });
+const getSettings = async () => (await app.inject({ url: `${model}/search-settings` })).json();
+
+it("the registry takes no language and answers none; export carries the keyword language set", async () => {
+  // A language a client still sends is ignored, like any unknown field.
+  const created = await post("/api/ontologies", { key: "language_test", textSearchLanguage: "german" });
+  expect(created).not.toHaveProperty("textSearchLanguage");
+  expect((await app.inject({ url: base })).json()).not.toHaveProperty("textSearchLanguage");
+  expect((await app.inject({ url: "/api/ontologies" })).json()[0]).not.toHaveProperty(
+    "textSearchLanguage",
+  );
+  const exported = (await app.inject({ url: `${model}/export` })).json();
+  expect(exported).toMatchObject({ formatVersion: "6.0", keywordLanguages: ["german", "english"] });
+  expect(exported).not.toHaveProperty("textSearchLanguage");
+});
+
+it.skipIf(postgres)("an adapter without search indices answers FEATURE_DISABLED for search settings", async () => {
+  await post("/api/ontologies", { key: "language_test" });
+  for (const res of [
+    await app.inject({ url: `${model}/search-settings` }),
+    await putSettings({ keywordLanguages: ["german"] }),
+  ]) {
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details.code).toBe("FEATURE_DISABLED");
+  }
+});
+
+describe.skipIf(!postgres)("search settings on PostgreSQL", () => {
+  it("a new ontology stems in German and English; a change is stored in canonical order", async () => {
+    await post("/api/ontologies", { key: "language_test" });
+    expect(await getSettings()).toEqual({ keywordLanguages: ["german", "english"], disabledIndices: [] });
+    const changed = await putSettings({ keywordLanguages: ["english"] });
+    expect(changed.statusCode, changed.body).toBe(200);
+    expect(changed.json()).toEqual({ keywordLanguages: ["english"], disabledIndices: [] });
+    expect((await putSettings({ keywordLanguages: ["english", "german"] })).json().keywordLanguages).toEqual([
+      "german",
+      "english",
+    ]);
+    for (const keywordLanguages of [[], ["unknown"], ["german", "german"]]) {
+      expect((await putSettings({ keywordLanguages })).statusCode).toBe(422);
+    }
+    expect((await getSettings()).keywordLanguages).toEqual(["german", "english"]);
   });
-  expect(renamed.json().textSearchLanguage).toBe("english");
-  expect((await app.inject({ url: base })).json().textSearchLanguage).toBe("english");
-  const exported = (await app.inject({ url: `${base}/model/export` })).json();
-  expect(exported).toMatchObject({ formatVersion: "6.0", textSearchLanguage: "english" });
-});
-it("imports only designs carrying the target language, before writing anything", async () => {
-  await post("/api/ontologies", { key: "language_test", textSearchLanguage: "german" });
-  const url = "/api/ontologies/language_test/model/import";
-  const payload = {
-    formatVersion: "5.0",
-    textSearchLanguage: "english",
-    entityTypes: [{ key: "paper", displayName: "Paper", properties: [] }],
-    relationTypes: [],
-    lenses: [],
-  };
-  const mismatch = await app.inject({ method: "POST", url, payload });
-  expect(mismatch.statusCode, mismatch.body).toBe(422);
-  expect(mismatch.json().error.details.fields.textSearchLanguage).toContain("german");
-  const { textSearchLanguage: _, ...missing } = payload;
-  expect((await app.inject({ method: "POST", url, payload: missing })).statusCode).toBe(422);
-  expect(
-    (await app.inject({ url: "/api/ontologies/language_test/model/entity-types" })).json(),
-  ).toEqual([]);
-  expect(
-    (
-      await app.inject({
-        method: "POST",
-        url,
-        payload: { ...payload, textSearchLanguage: "german" },
-      })
-    ).statusCode,
-  ).toBe(201);
-});
-it("rejects unsupported languages", async () => {
-  expect(
-    (
-      await app.inject({
-        method: "POST",
-        url: "/api/ontologies",
-        payload: { key: "language_test", textSearchLanguage: "unknown" },
-      })
-    ).statusCode,
-  ).toBe(422);
-});
-it.skipIf(settings.DB_BACKEND !== "postgres")(
-  "German stemming is shared by properties and documents",
-  async () => {
-    await post("/api/ontologies", { key: "language_test", textSearchLanguage: "german" });
-    const model = "/api/ontologies/language_test/model";
-    const runtime = "/api/ontologies/language_test/runtime/lenses/all";
+
+  it("transfer 6.0 carries the set into the target; 5.0 maps its text-search language", async () => {
+    await post("/api/ontologies", { key: "language_test" });
+    const design = { entityTypes: [], relationTypes: [], lenses: [] };
+    await post(`${model}/import`, { ...design, keywordLanguages: ["english"] });
+    expect((await getSettings()).keywordLanguages).toEqual(["english"]);
+    const exported = (await app.inject({ url: `${model}/export` })).json();
+    expect(exported.keywordLanguages).toEqual(["english"]);
+
+    await post(`${model}/import`, { ...design, formatVersion: "5.0", textSearchLanguage: "german" });
+    expect((await getSettings()).keywordLanguages).toEqual(["german"]);
+
+    // Each version requires its own field, checked before anything is written.
+    for (const payload of [
+      { ...design, textSearchLanguage: "english" },
+      { ...design, formatVersion: "5.0", keywordLanguages: ["english"] },
+    ]) {
+      const res = await app.inject({ method: "POST", url: `${model}/import`, payload });
+      expect(res.statusCode, res.body).toBe(422);
+    }
+    expect((await getSettings()).keywordLanguages).toEqual(["german"]);
+  });
+
+  it("a language change builds new keyword generations; the old ones serve until they are ready", async () => {
+    await post("/api/ontologies", { key: "language_test" });
+    await post(`${model}/lenses`, { key: "all", name: "All" });
+    await post(`${model}/entity-types`, { key: "listing", displayName: "Listing" });
+    // German "Häuser" stems to `haus` in German only; English "studies" to
+    // `studi` in English only — so each query below finds its text only
+    // while the set holds that text's language.
+    const german = await post(`${runtime}/entities/listing`, { name: "Die Häuser am See" });
+    const english = await post(`${runtime}/entities/listing`, { name: "Many studies of lakes" });
+    await drainSearchWork();
+    const ids = async (q: string) => {
+      const res = await app.inject({
+        url: `${runtime}/search?${new URLSearchParams({ q, in: "properties", strategy: "keyword" })}`,
+      });
+      expect(res.statusCode, res.body).toBe(200);
+      return res.json().hits.map((h: any) => h.entity._id);
+    };
+    const keywordLanguagesOfGenerations = async () =>
+      (await (await getSearchIndexStore("language_test")).listGenerations())
+        .filter((g) => g.representation === "keyword" && g.state !== "retired")
+        .map((g) => [g.state, g.languages]);
+    expect(await ids("Haus")).toEqual([german._id]);
+    expect(await ids("study")).toEqual([english._id]);
+
+    expect((await putSettings({ keywordLanguages: ["german"] })).statusCode).toBe(200);
+    expect(await keywordLanguagesOfGenerations()).toEqual(
+      expect.arrayContaining([
+        ["ready", ["german", "english"]],
+        ["building", ["german"]],
+      ]),
+    );
+    // Until the worker has built the new generation, the old one serves.
+    expect(await ids("study")).toEqual([english._id]);
+    await drainSearchWork();
+    expect(await keywordLanguagesOfGenerations()).toEqual([["ready", ["german"]]]);
+    expect(await ids("Haus")).toEqual([german._id]);
+    expect(await ids("study")).toEqual([]);
+
+    expect((await putSettings({ keywordLanguages: ["english"] })).statusCode).toBe(200);
+    await drainSearchWork();
+    expect(await ids("Haus")).toEqual([]);
+    expect(await ids("study")).toEqual([english._id]);
+  });
+
+  it("German stemming is shared by properties and documents", async () => {
+    await post("/api/ontologies", { key: "language_test" });
+    expect((await putSettings({ keywordLanguages: ["german"] })).statusCode).toBe(200);
     await post(`${model}/lenses`, { key: "all", name: "All" });
     const type = await post(`${model}/entity-types`, { key: "paper", displayName: "Paper" });
     for (const [key, dataType] of [
@@ -106,16 +176,12 @@ it.skipIf(settings.DB_BACKEND !== "postgres")(
       expect(res.statusCode, res.body).toBe(200);
       expect(res.json().hits[0].entity._id).toBe(entity._id);
     }
-  },
-);
-it.skipIf(settings.DB_BACKEND !== "postgres")(
-  "keyword search stems in German and English alike on a bilingual ontology",
-  async () => {
+  });
+
+  it("keyword search stems in German and English alike on a bilingual ontology", async () => {
     // A new ontology's keyword language set is {german, english}: each entry
     // is stemmed in both, each query parsed in both and OR-ed.
     await post("/api/ontologies", { key: "language_test" });
-    const model = "/api/ontologies/language_test/model";
-    const runtime = "/api/ontologies/language_test/runtime/lenses/all";
     await post(`${model}/lenses`, { key: "all", name: "All" });
     const type = await post(`${model}/entity-types`, { key: "listing", displayName: "Listing" });
     await post(`${model}/entity-types/${type.entityTypeId}/properties`, {
@@ -153,11 +219,11 @@ it.skipIf(settings.DB_BACKEND !== "postgres")(
     expect((await ids("Haus lake", "properties", "keyword-any")).sort()).toEqual(
       [german._id, english._id].sort(),
     );
-  },
-);
+  });
+});
+
 it("rejects the old tool and step names, and strips minScore from a search step", async () => {
   await post("/api/ontologies", { key: "language_test" });
-  const model = "/api/ontologies/language_test/model";
   await post(`${model}/lenses`, { key: "all", name: "All" });
   await post(`${model}/entity-types`, { key: "paper", displayName: "Paper" });
   const put = (path: string, payload: object) =>
@@ -179,7 +245,7 @@ it("rejects the old tool and step names, and strips minScore from a search step"
   expect(created.statusCode, created.body).toBe(201);
   expect(created.json().steps[0]).not.toHaveProperty("minScore");
   const payload = {
-    textSearchLanguage: "english",
+    keywordLanguages: ["english"],
     entityTypes: [],
     relationTypes: [],
     lenses: [{ key: "stale", name: "Stale", savedQueries: [{ ...query, key: "old" }] }],

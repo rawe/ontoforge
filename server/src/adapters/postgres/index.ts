@@ -13,7 +13,6 @@
  * only the server-wide objects.
  */
 
-import type { KeywordLanguage } from "../../core/keywordLanguage.js";
 
 import { reportEnsureFailed } from "../../core/vectorDrift.js";
 import { ensureSavedQueryVectorIndex, initSchema, reportPgvectorVersion } from "./ddl.js";
@@ -39,13 +38,13 @@ export async function initAdapter(): Promise<void> {
 
 /** A modeling store bound to one ontology's namespace. The caller (the
  * port accessor) has already verified the ontology exists. */
-export function createModelingStore(ontologyKey: string, language: KeywordLanguage): PostgresModelingStore {
-  return new PostgresModelingStore(ontologyNamespace(ontologyKey), language, ontologyKey);
+export function createModelingStore(ontologyKey: string): PostgresModelingStore {
+  return new PostgresModelingStore(ontologyNamespace(ontologyKey), ontologyKey);
 }
 
 /** A runtime store bound to one ontology's namespace. */
-export function createRuntimeStore(ontologyKey: string, language: KeywordLanguage): PostgresRuntimeStore {
-  return new PostgresRuntimeStore(ontologyKey, ontologyNamespace(ontologyKey), language);
+export function createRuntimeStore(ontologyKey: string): PostgresRuntimeStore {
+  return new PostgresRuntimeStore(ontologyKey, ontologyNamespace(ontologyKey));
 }
 
 /** A search-index store bound to one ontology's namespace. */

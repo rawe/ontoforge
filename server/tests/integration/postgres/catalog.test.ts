@@ -33,7 +33,6 @@ const ALL_TABLES = [
   "saved_query",
   "entity",
   "relation",
-  "document_chunk",
   "search_settings",
   "search_index",
   "search_generation",
@@ -52,7 +51,6 @@ const EXPECTED_CONSTRAINTS: Record<string, string> = {
   saved_query_pk: "p",
   entity_pk: "p",
   relation_pk: "p",
-  document_chunk_pk: "p",
   // no lens_includes PK — identity rides its two composite uniques
   lens_key_unique: "u",
   lens_name_unique: "u",
@@ -76,7 +74,6 @@ const EXPECTED_CONSTRAINTS: Record<string, string> = {
   saved_query_lens_fk: "f",
   relation_from_fk: "f",
   relation_to_fk: "f",
-  document_chunk_entity_fk: "f",
   search_settings_pk: "p",
   search_index_pk: "p",
   search_generation_pk: "p",
@@ -101,7 +98,6 @@ const FIXED_BTREE_INDEXES = [
   "relation_type_key_idx",
   "relation_from_id_idx",
   "relation_to_id_idx",
-  "document_chunk_entity_property_idx",
   "search_generation_building_unique",
   "search_generation_ready_unique",
 ];
@@ -186,13 +182,15 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL physical catalog
     await assertCatalogComplete();
   });
 
-  it("the pgvector extension is installed and embedding columns are dimensionless", async () => {
+  it("the pgvector extension is installed and the one plain embedding column is dimensionless", async () => {
     const ext = await runQuery(`SELECT extname FROM pg_extension WHERE extname = 'vector'`);
     expect(ext.rowCount).toBe(1);
     // atttypmod -1 = no declared width; the width lives only in the HNSW
-    // indexes, keeping init provider-independent. Ordinary tables only:
-    // an HNSW index over the cast expression carries a column of the same
-    // name, and that one is width-bearing on purpose (M4.1).
+    // index, keeping init provider-independent. Ordinary tables only: an
+    // HNSW index over the cast expression carries a column of the same
+    // name, and that one is width-bearing on purpose (M4.1); the
+    // partitioned search entries are not one. Instance search data lives
+    // in the search entries alone: no entity or chunk vectors.
     const cols = await runQuery(
       `SELECT rel.relname AS table, att.atttypmod AS typmod
        FROM pg_attribute att
@@ -202,11 +200,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL physical catalog
          AND att.attname = 'embedding' AND NOT att.attisdropped`,
       [NAMESPACE],
     );
-    expect(cols.rows.map((row) => row.table).sort()).toEqual([
-      "document_chunk",
-      "entity",
-      "saved_query",
-    ]);
+    expect(cols.rows.map((row) => row.table).sort()).toEqual(["saved_query"]);
     for (const row of cols.rows) {
       expect(row.typmod).toBe(-1);
     }
@@ -237,7 +231,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL physical catalog
     }
   });
 
-  it("no fixed object claims the vec_ prefix reserved for dynamic indexes", async () => {
+  it("no object carries the vec_ prefix of the retired per-type vector indexes", async () => {
     const fixed = [
       ...(await tableNames()),
       ...(await indexNames()),

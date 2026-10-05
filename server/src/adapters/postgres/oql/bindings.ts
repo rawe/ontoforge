@@ -96,8 +96,8 @@ export function col(binding: TableBinding, column: string): string {
  * The `CASE` guard is what makes an unmatched OPTIONAL MATCH project SQL
  * NULL instead of an all-nulls object. Relationship endpoints are
  * deliberately absent: they are structural, not properties
- * (`docs/capabilities/oql.md`). The `embedding` column is never named
- * here, so vector stripping is satisfied by construction.
+ * (`docs/capabilities/oql.md`). Only the named columns are read, so no
+ * stored column beyond the properties can leak into a result.
  */
 export function projectedObject(binding: TableBinding): string {
   const typeKeyName = binding.kind === "entity" ? "_entityTypeKey" : "_relationTypeKey";

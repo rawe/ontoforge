@@ -38,7 +38,6 @@ describe("identity comparison", () => {
     expect(store.createEntity).not.toHaveBeenCalled();
     expect(store.updateEntity).not.toHaveBeenCalled();
     expect(store.propertySearchSemantic).not.toHaveBeenCalled();
-    expect(store.propertySearchKeyword).not.toHaveBeenCalled();
   });
 
   it("rejects a disabled provider before loading context", async () => {

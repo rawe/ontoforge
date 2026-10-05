@@ -194,135 +194,67 @@ upgraded from an earlier layout starts with its text-search language alone
 
 The **text-search language** is a separate setting: chosen at creation, `english` by
 default or `german`, immutable, carried in export and checked on import
-([transfer.md](transfer.md)). It selects the language of the per-entity keyword
-representation below, not that of index entries.
+([transfer.md](transfer.md)). Ranked search does not read it; keyword entries are stemmed
+in the keyword language set alone.
 
-## Per-entity search data
+## Rebuild
 
-Besides the entries of search indices, every entity write stores search data on the
-entity itself: a composed semantic text with its vector, the entity's keyword values, and
-each document property's chunks with their vectors. Ranked search on the default
-deployment does not read it — it reads search indices; the Neo4j adapter ranks over it
-([../storage-adapters.md](../storage-adapters.md#where-the-adapters-diverge)). The rules
-below govern that data, its rebuild and its vector indexes.
+Search indices keep themselves current, a changed embedding model included
+([search-indices.md](search-indices.md#lifecycle)). The one vector store outside them is
+saved-query discovery's: the description vectors and their index
+([saved-queries.md](saved-queries.md)). The search-data rebuild regenerates those; it does
+not touch search indices.
 
-### What gets embedded
+It is one modeling operation per ontology, covering that ontology and nothing beyond it.
+There is no server-wide rebuild: after an embedding-provider switch it is run once per
+ontology. It:
 
-An entity's vector comes from one composed text: the entity type key, then each `string`
-property that has a value, written as `key=value`, in the order the schema declares them.
+1. drops the saved-query description index if its vector width no longer matches the
+   provider's, and leaves it alone otherwise;
+2. re-embeds every saved-query description;
+3. builds the index at the provider's width if it is absent — the one step 1 dropped, or
+   one that never existed.
 
-```
-person: name=Alice Chen, role=Distributed Systems Engineer
-```
-
-- **Only `string` properties contribute.** Integers, floats, booleans, dates and datetimes
-  are excluded.
-- **`document` properties are excluded.** They are chunked and embedded separately, so a
-  document's content never influences its own entity's vector, and a very long document
-  cannot drown out the entity's short identifying fields.
-- Properties with no value are skipped. An entity with no string values embeds as its type
-  key alone.
-- **The text is composed from the full schema, not from the lens.** Two lenses exposing
-  different subsets of a type still see identical vectors.
-- The composed text is capped at 30 000 characters and truncated at the cap.
-- Composition is deterministic, so re-embedding an unchanged entity reproduces the same
-  text.
-
-The keyword representation holds values only: the nonempty values of schema-declared
-`string` properties, in full-schema order, one per line, within a 30,000-codepoint budget
-including separators, the last included value truncated to it. Type keys, property keys
-and display labels never enter it.
-
-### Keeping search data current
-
-Property text and document chunks are recomputed automatically; vectors are added when a provider is configured:
-
-- on entity creation, always;
-- on entity update, whenever the update touches any `string` property — the vector is
-  recomputed from the merged post-update state, not from the submitted fragment;
-- for document properties, per changed property: its passages are discarded, the value is
-  re-chunked, and the new passages are embedded. Passages whose text is unchanged reuse
-  their existing vector — unless it is of another width, which no current index could hold
-  — so editing part of a large document re-embeds only the passages the edit touched
-  ([documents.md](documents.md)).
-
-Not recomputed, and all three are traps:
-
-- **A schema change refreshes nothing.** Adding a string property to an entity type leaves
-  every existing entity's stored text reflecting the schema as of its last write. The
-  property contributes only for entities written afterwards.
-- **Deleting a string property leaves its values behind.** Deleting the definition does not
-  delete stored values, and neither stored text records which property a word came from, so
-  an entity keeps matching on a value the schema no longer declares. This is deliberate: a
-  schema edit stays instant and writes no instance data. The leftovers are cleared on the
-  next rebuild.
-- **A failed embedding does not fail the write.** The entity or passage is stored without
-  a vector. The failure is logged, not returned.
-
-All three are repaired by the same operation. Search indices are kept current on their
-own ([search-indices.md](search-indices.md#managed-indices)).
-
-### Rebuild
-
-One modeling operation per ontology — it covers that ontology's whole schema and all its
-data, not one lens and nothing beyond the ontology. There is no server-wide rebuild:
-after an embedding-provider switch it is run once per ontology. It rebuilds the
-per-entity search data and the saved-query description vectors; it does not touch search
-indices. It:
-
-1. drops every one of the ontology's semantic indexes whose vector width no longer
-   matches the provider's, and only those;
-2. recomposes and stores each entity's semantic text and keyword values, and rewrites
-   its optional vector;
-3. discards and re-chunks every document property value, embedding every passage whose
-   stored vector is not already of the provider's width — after a model switch that is all
-   of them;
-4. re-embeds every saved-query description ([saved-queries.md](saved-queries.md));
-5. builds every semantic index the schema calls for and does not have — the ones it
-   dropped in step 1, at the provider's width, and any that never existed.
-
-**It runs without an embedding provider.** Steps 2 and 3 are then the whole operation, minus
-the vectors: keyword values are recomposed and passages re-chunked, neither of which needs
-a model. Steps 1, 4 and 5 are skipped, because without a provider there is no width to
-reconcile, no vector index to hold and saved-query discovery — which ranks descriptions by
-vector alone — has nothing to rebuild. The summary reports the omission; nothing is
-counted as failed.
+**It runs without an embedding provider**, and then has nothing to do: without a provider
+there is no width to reconcile and saved-query discovery, which ranks descriptions by
+vector alone, has nothing to rebuild. The summary reports the omission; nothing is counted
+as failed.
 
 The order is forced, not chosen: an index rejects every vector of a width other than its
 own, so while a drifted one stands the new vectors cannot be written, and it cannot be
-built over the old ones. Between step 1 and step 5 the ontology has no semantic index, and
-a rebuild that dies in between leaves them absent with vectors of mixed width — the next
-rebuild that runs to completion repairs that, since it regenerates every vector
-regardless.
+built over the old ones. Between step 1 and step 3 the ontology has no saved-query
+description index, and a rebuild that dies in between leaves it absent with vectors of
+mixed width — the next rebuild that runs to completion repairs that, since it regenerates
+every vector regardless.
 
 It streams progress while running, as newline-delimited JSON: a progress record per
-processed item carrying the entity type key it belongs to, the count so far and that
-group's total, then a final summary with per-type processed and failed counts, the overall
-totals, and whether the embeddings were skipped. An item whose embedding call fails is
-counted as failed; its refreshed keyword values remain stored without a vector. A run
-with no provider fails nothing — a missing vector is the intended result there, not a
-failure — so the skip flag is what distinguishes it from a complete run.
+processed item carrying the group it belongs to, the count so far and that group's total —
+the saved-query descriptions form one group — then a final summary with the processed and
+failed counts, the overall totals, and whether the embeddings were skipped. An item whose
+embedding call fails is counted as failed. A run with no provider fails nothing, so the
+skip flag is what distinguishes it from a complete run.
 
-So rebuild repairs: missing indexes, drifted index widths, entities and passages that were
-never embedded, stored text stale with respect to a schema change — including the values of
-a deleted string property — and chunking stale with respect to changed chunk-size
-configuration.
+So rebuild repairs a drifted width of the saved-query description index and descriptions
+that were never embedded. An adapter that stores no search indices keeps search data of
+its own, which the same operation rebuilds
+([../storage-adapters.md](../storage-adapters.md#own-search-storage)).
 
-### Vector index width drift
+## Vector index width drift
 
 A vector index fixes its vector width when it is created. Changing the embedding model, or
 its configured width, makes the provider emit vectors of a different width, which an
 existing index refuses. Nothing about the index looks wrong to the database — it stays
 healthy and online — so the failure does not appear at startup. It appears as a storage
-error on the first operation that touches the index. Search indices are not affected: a
-changed model builds new generations of their semantic entries
+error on the first operation that touches the index: a saved-query write that embeds its
+description, or a saved-query discovery. Search indices are not affected: a changed model
+builds new generations of their semantic entries
 ([search-indices.md](search-indices.md#lifecycle)).
 
 Startup detects the condition rather than the symptom: with a provider configured, the
-check walks every registered ontology, compares each semantic index's configured width
-against the provider's, and reports every mismatch as a warning identifying the index by
-what it covers — an entity type, a document property on an entity type, or saved-query descriptions
-— never by a physical index name, and naming rebuild as the remedy.
+check walks every registered ontology, compares the configured width of each vector index
+outside search indices against the provider's, and reports every mismatch as a warning
+identifying the index by what it covers — saved-query descriptions — never by a physical
+index name, and naming rebuild as the remedy.
 
 Startup warns and does not repair; the reasoning is in
 [../decisions.md](../decisions.md#behaviour). Rebuild does repair, in the three-phase

@@ -161,14 +161,10 @@ readers that ignore unknown fields do not preserve retriever definitions.
 Import is not purely additive to the target's schema — it also provisions search
 artefacts and computes embeddings, all within the target ontology.
 
-- **Index creation.** For each imported entity type, if an embedding provider is
-  configured, a vector index is created for the type — with its non-document properties
-  registered as in-index filter properties where the storage adapter supports them —
-  plus one index per document property. The
-  target ontology's index for saved-query descriptions is ensured once at the end.
-  Without an embedding provider none of this happens, and these vector indexes stay
-  missing until the rebuild operation described in [search.md](search.md#rebuild) is run
-  against a configured provider.
+- **Index creation.** If an embedding provider is configured, the target ontology's
+  index for saved-query descriptions is ensured once at the end. Without one it stays
+  missing until the server starts with a provider configured, or the rebuild operation
+  described in [search.md](search.md#rebuild) runs against one.
 - **Search indices.** The managed search indices of the imported schema come into
   existence and are included in every scoped lens that exposes their root types — the
   imported ones among them ([search-indices.md](search-indices.md#managed-indices)). Their entries are built in

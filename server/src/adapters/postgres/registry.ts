@@ -10,7 +10,7 @@
  * Create is one transaction: the registry row first — so a concurrent
  * same-key create dies on `ontology_key_unique` and translates to the
  * conflict the service pre-check would have raised — then
- * `CREATE SCHEMA`, the ontology table DDL and the fixed vector indexes inside
+ * `CREATE SCHEMA`, the ontology table DDL and the fixed vector index inside
  * the fresh namespace via `SET LOCAL search_path` (`public` stays on the
  * path for the pgvector type; the new namespace comes first, so every
  * unqualified name lands there). A failure anywhere rolls the whole
@@ -76,7 +76,7 @@ export class PostgresOntologyRegistry implements OntologyRegistry {
       );
       await querier.query(`CREATE SCHEMA ${quoteIdent(namespace)}`);
       await querier.query(`SET LOCAL search_path TO ${quoteIdent(namespace)}, public`);
-      for (const statement of ontologyDdlStatements(textSearchLanguage)) {
+      for (const statement of ontologyDdlStatements()) {
         await querier.query(statement);
       }
       if (embeddingDimensions !== null) {

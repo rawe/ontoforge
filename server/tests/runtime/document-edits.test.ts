@@ -10,6 +10,7 @@ import { settings } from "../../src/config.js";
 import { setEmbeddingProvider, type EmbeddingProvider } from "../../src/core/embedding.js";
 import { chunkDocument } from "../../src/runtime/search/document.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
+import type { OwnSearchRuntimeStore } from "../../src/core/ownSearch.js";
 import { syncDocumentChunks } from "../../src/runtime/service.js";
 import {
   asRuntimeStore,
@@ -385,7 +386,7 @@ describe("chunk re-sync + embedding reuse", () => {
     setEmbeddingProvider(provider);
     holder.store.getChunkEmbeddingsForEntityProperty.mockResolvedValue(reuseMap);
 
-    await syncDocumentChunks(asRuntimeStore(holder.store), "person", "ent-1", { bio: BIO });
+    await syncDocumentChunks(asRuntimeStore(holder.store) as OwnSearchRuntimeStore, "person", "ent-1", { bio: BIO });
 
     expect(provider.embed).toHaveBeenCalledTimes(chunks.length);
     const rows = holder.store.createDocumentChunks.mock.calls[0]![3] as Row[];
@@ -409,7 +410,7 @@ describe("chunk re-sync + embedding reuse", () => {
     setEmbeddingProvider(provider);
     holder.store.getChunkEmbeddingsForEntityProperty.mockResolvedValue(reuseMap);
 
-    await syncDocumentChunks(asRuntimeStore(holder.store), "person", "ent-1", { bio: BIO });
+    await syncDocumentChunks(asRuntimeStore(holder.store) as OwnSearchRuntimeStore, "person", "ent-1", { bio: BIO });
 
     // Exactly one embedding call — for the one chunk not in the reuse map.
     expect(provider.embed).toHaveBeenCalledTimes(1);
@@ -423,14 +424,14 @@ describe("chunk re-sync + embedding reuse", () => {
 
   it("a nulled value deletes chunks and creates none", async () => {
     setEmbeddingProvider(mockProvider());
-    await syncDocumentChunks(asRuntimeStore(holder.store), "person", "ent-1", { bio: null });
+    await syncDocumentChunks(asRuntimeStore(holder.store) as OwnSearchRuntimeStore, "person", "ent-1", { bio: null });
     expect(holder.store.deleteChunksForEntityProperty).toHaveBeenCalledTimes(1);
     expect(holder.store.createDocumentChunks).not.toHaveBeenCalled();
   });
 
   it("an emptied value deletes chunks and creates none", async () => {
     setEmbeddingProvider(mockProvider());
-    await syncDocumentChunks(asRuntimeStore(holder.store), "person", "ent-1", { bio: "" });
+    await syncDocumentChunks(asRuntimeStore(holder.store) as OwnSearchRuntimeStore, "person", "ent-1", { bio: "" });
     expect(holder.store.deleteChunksForEntityProperty).toHaveBeenCalledTimes(1);
     expect(holder.store.createDocumentChunks).not.toHaveBeenCalled();
   });

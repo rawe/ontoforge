@@ -35,7 +35,9 @@ id, and takes three things with it:
 1. the entity;
 2. **every relation attached to it, in either direction** — including relations whose type
    the current lens cannot see;
-3. every [document chunk](documents.md) belonging to it.
+3. its entries in every [search index](search-indices.md#lifecycle) — its
+   [document passages](documents.md) among them — and those of the relations deleted with
+   it.
 
 Nothing warns first and nothing is refused: the runtime cascade is silent, unlike the
 schema cascade protocol in [schema-modeling.md](schema-modeling.md). A caller that needs to

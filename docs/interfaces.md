@@ -350,13 +350,14 @@ beyond it.
 | POST | `/schema/validate` | Check the ontology's schema and every lens for consistency |
 | GET | `/export` | Export the ontology's design in the transfer format |
 | POST | `/import` | Import a transfer payload into this ontology |
-| POST | `/rebuild-search-data` | Rebuild the per-entity search data and the saved-query description vectors, and repair the ontology's vector index widths |
+| POST | `/rebuild-search-data` | Rebuild the saved-query description vectors and repair the width of their vector index |
 
 Rebuild answers with a stream of newline-delimited JSON progress records rather than one
-body, because it runs over the ontology's whole dataset. It is never refused for a missing
-embedding provider: without one it rebuilds the keyword text and the document chunks,
-skips the vector work and says so in its summary. It does not touch search indices. After an embedding-provider switch it is
-run once per ontology.
+body, because it can run over many items. It is never refused for a missing embedding
+provider: without one it skips the vector work and says so in its summary. It does not
+touch search indices. After an embedding-provider switch it is run once per ontology. See
+[capabilities/search.md](capabilities/search.md#rebuild).
+
 Transfer carries the design only — schema, lenses, agents, saved queries, retrievers; no instance
 data and no ontology identity — see
 [capabilities/transfer.md](capabilities/transfer.md) and

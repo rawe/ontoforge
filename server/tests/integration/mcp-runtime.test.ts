@@ -15,12 +15,16 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../../src/app.js";
-import { closeStores, initStores } from "../../src/core/ports.js";
+import { closeStores, initStores, supportsKeywordRanking } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
 import { supportsMultipleOntologies } from "./tiers.js";
 import { drainSearchWork } from "../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { buildFixture, defineEntityProperty } from "./fixture.js";
+
+/** The adapter's declaration: only an adapter that ranks by keyword has a
+ * keyword default strategy without an embedding provider. */
+const keywordRanking = await supportsKeywordRanking();
 
 interface ToolCallResult {
   content: { type: string; text: string }[];
@@ -503,7 +507,11 @@ describe("entity tools", () => {
     }
   });
 
-  it("search applies no similarity floor without a provider (keyword default)", async () => {
+  // Scoped, not weakened: the case asserts the keyword default strategy,
+  // which exists only on an adapter that ranks by keyword. Without one and
+  // without a provider no strategy is available, and the search is a
+  // disabled feature (`search-contract.ts` covers that side).
+  it.skipIf(!keywordRanking)("search applies no similarity floor without a provider (keyword default)", async () => {
     const client = await connectClient(`${baseUrl}/mcp/ontologies/test_ont/runtime/lenses/test_lens`);
     try {
       await call(client, "create_entity", {

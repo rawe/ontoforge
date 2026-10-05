@@ -24,6 +24,11 @@ import {
 } from "../core/exceptions.js";
 import { legacyNameProperty } from "../core/legacyNameProperty.js";
 import { parseAndValidate } from "../core/oql/index.js";
+import {
+  keepsOwnSearch,
+  type OwnSearchModelingStore,
+  type OwnSearchRuntimeStore,
+} from "../core/ownSearch.js";
 import type { ModelingStore, RuntimeStore } from "../core/ports.js";
 import {
   DATA_TYPES,
@@ -35,7 +40,7 @@ import {
   type PropertyDef,
   type TypeKind,
 } from "../core/schemas.js";
-import { buildTextRepr, buildKeywordSegments } from "../runtime/search/propertyText.js";
+import { buildTextRepr } from "../runtime/search/propertyText.js";
 import { syncManagedSearchIndices } from "../runtime/indexing/managed.js";
 import { invalidateLoadedSchemaCache, loadSchemaUncached, buildSchemaCacheFromRaw, applyScopeFiltering } from "../runtime/schemaCache.js";
 import { syncDocumentChunks } from "../runtime/service.js";
@@ -1121,15 +1126,18 @@ export async function validateAll(store: ModelingStore): Promise<ValidationResul
 const REBUILD_PAGE_SIZE = 500;
 
 /**
- * Rebuild every stored representation search reads: each entity's keyword
- * segments and semantic text, every document property's passages, and —
- * where an embedding provider is configured — the vectors of all three plus
- * the saved-query descriptions and the vector indexes.
+ * Rebuild every vector and passage the adapter stores outside search
+ * indices. On an adapter with its own search storage (`keepsOwnSearch`):
+ * every document property's passages and — where an embedding provider is
+ * configured — each entity's vector, the passages' vectors, the saved-query
+ * descriptions' vectors and the vector indexes. On an adapter that stores
+ * search indices, which maintain themselves, only the saved-query
+ * descriptions' vectors and their index: the stream then carries no
+ * entity-type progress and the summary no entity types.
  *
- * It runs without a provider. Keyword text and passages need no inference,
- * and passages are themselves the document keyword index, so the run that
- * repairs a keyword-only ontology is the same run, minus the vector work.
- * The summary reports that omission as `embeddingsSkipped`.
+ * It runs without a provider: passages need no inference, so the run
+ * re-chunks them and skips the vector work. The summary reports that
+ * omission as `embeddingsSkipped`.
  *
  * Yields NDJSON progress lines (`docs/capabilities/search.md#rebuild`):
  * one progress record per processed item carrying the group's type key,
@@ -1153,6 +1161,80 @@ export async function* rebuildSearchData(
     await store.dropMismatchedVectorIndexes(provider.dimensions);
   }
 
+  // Phase two: the entities' own search storage, where the adapter has it.
+  const entities =
+    keepsOwnSearch(store) && keepsOwnSearch(runtimeStore)
+      ? yield* rebuildOwnEntityData(store, runtimeStore, provider)
+      : { typeResults: [], processed: 0, failed: 0 };
+  const typeResults = entities.typeResults;
+  let totalProcessed = entities.processed;
+  let totalFailed = entities.failed;
+
+  // Re-embed every saved-query description. Discovery ranks descriptions by
+  // vector alone, so with no provider there is nothing here to rebuild.
+  let sqProcessed = 0;
+  let sqFailed = 0;
+
+  if (provider) {
+    const savedQueries = await store.listSavedQueryRefs();
+    const sqTotal = savedQueries.length;
+
+    for (const sq of savedQueries) {
+      const embedding = await provider.embed(sq.description as string);
+      if (embedding !== null) {
+        await store.setSavedQueryEmbedding(sq.savedQueryId as string, embedding);
+        sqProcessed += 1;
+      } else {
+        sqFailed += 1;
+      }
+
+      yield `${JSON.stringify({
+        type: "progress",
+        entityTypeKey: "saved_queries",
+        processed: sqProcessed + sqFailed,
+        total: sqTotal,
+      })}\n`;
+    }
+
+    totalProcessed += sqProcessed;
+    totalFailed += sqFailed;
+
+    // Phase three: every vector now has the provider's width, so the
+    // indexes phase one dropped — and any the schema calls for and never
+    // had — can be built. It comes before the summary: that line is what
+    // tells the caller the rebuild is done, and it is not done while the
+    // indexes it dropped are still missing.
+    await store.ensureVectorIndexes(provider.dimensions);
+  }
+
+  // Final summary. `embeddingsSkipped` is what tells a caller that a run
+  // reporting no failures nevertheless wrote no vectors.
+  yield `${JSON.stringify({
+    type: "summary",
+    entityTypes: typeResults,
+    savedQueriesProcessed: sqProcessed,
+    savedQueriesFailed: sqFailed,
+    totalProcessed,
+    totalFailed,
+    embeddingsSkipped: !provider,
+  })}\n`;
+
+  console.info(
+    `Rebuild search data complete: ${totalProcessed} processed, ${totalFailed} failed` +
+      (provider ? "" : " (embeddings skipped: no provider)"),
+  );
+}
+
+/**
+ * The entity phase of a rebuild over an adapter's own search storage:
+ * each entity's vector and its documents' chunks, type by type. Returns
+ * the per-type results and the totals.
+ */
+async function* rebuildOwnEntityData(
+  store: OwnSearchModelingStore,
+  runtimeStore: OwnSearchRuntimeStore,
+  provider: ReturnType<typeof getEmbeddingProvider>,
+): AsyncGenerator<string, { typeResults: Row[]; processed: number; failed: number }> {
   // Discover all entity types with their property definitions.
   const entityTypes: { key: string; properties: Record<string, PropertyDef> }[] = [];
   for (const raw of await store.getEntityTypesWithProperties()) {
@@ -1219,14 +1301,14 @@ export async function* rebuildSearchData(
         }
       }
 
-      const text = buildTextRepr(etKey, userProps, propertyDefs);
-      const embedding = provider ? await provider.embed(text) : null;
+      const embedding = provider
+        ? await provider.embed(buildTextRepr(etKey, userProps, propertyDefs))
+        : null;
 
-      await store.setEntitySearchText(entityId, text, embedding, buildKeywordSegments(userProps, propertyDefs));
+      await store.setEntityEmbedding(entityId, embedding);
       // A null vector counts as a failure only when a provider was there to
       // produce one. Without a provider it is the intended result: the
-      // entity's keyword segments and semantic text were rewritten, which
-      // is all this run promised.
+      // entity's passages were rewritten, which is all this run promised.
       if (provider && embedding === null) {
         failed += 1;
       } else {
@@ -1255,59 +1337,7 @@ export async function* rebuildSearchData(
     totalFailed += failed;
   }
 
-  // Re-embed every saved-query description. Discovery ranks descriptions by
-  // vector alone, so with no provider there is nothing here to rebuild.
-  let sqProcessed = 0;
-  let sqFailed = 0;
-
-  if (provider) {
-    const savedQueries = await store.listSavedQueryRefs();
-    const sqTotal = savedQueries.length;
-
-    for (const sq of savedQueries) {
-      const embedding = await provider.embed(sq.description as string);
-      if (embedding !== null) {
-        await store.setSavedQueryEmbedding(sq.savedQueryId as string, embedding);
-        sqProcessed += 1;
-      } else {
-        sqFailed += 1;
-      }
-
-      yield `${JSON.stringify({
-        type: "progress",
-        entityTypeKey: "saved_queries",
-        processed: sqProcessed + sqFailed,
-        total: sqTotal,
-      })}\n`;
-    }
-
-    totalProcessed += sqProcessed;
-    totalFailed += sqFailed;
-
-    // Phase three: every vector now has the provider's width, so the
-    // indexes phase one dropped — and any the schema calls for and never
-    // had — can be built. It comes before the summary: that line is what
-    // tells the caller the rebuild is done, and it is not done while the
-    // indexes it dropped are still missing.
-    await store.ensureVectorIndexes(provider.dimensions);
-  }
-
-  // Final summary. `embeddingsSkipped` is what tells a caller that a run
-  // reporting no failures nevertheless wrote no vectors.
-  yield `${JSON.stringify({
-    type: "summary",
-    entityTypes: typeResults,
-    savedQueriesProcessed: sqProcessed,
-    savedQueriesFailed: sqFailed,
-    totalProcessed,
-    totalFailed,
-    embeddingsSkipped: !provider,
-  })}\n`;
-
-  console.info(
-    `Rebuild search data complete: ${totalProcessed} processed, ${totalFailed} failed` +
-      (provider ? "" : " (embeddings skipped: no provider)"),
-  );
+  return { typeResults, processed: totalProcessed, failed: totalFailed };
 }
 
 // --- Whole-schema read (transfer format) ---
@@ -1764,10 +1794,11 @@ export async function importSchema(
         prop.defaultValue ?? null,
       );
     }
-    // Vector indexes for this entity type: non-document properties become
-    // in-index filter properties; each document property gets its own
-    // chunk index. Skipped entirely without a provider.
-    if (provider) {
+    // Own search storage: vector indexes for this entity type —
+    // non-document properties become in-index filter properties; each
+    // document property gets its own chunk index. Skipped entirely without
+    // a provider.
+    if (provider && keepsOwnSearch(store)) {
       const filterProps = properties
         .filter((prop) => prop.dataType !== "document")
         .map((prop) => prop.key);

@@ -1,15 +1,15 @@
-import type { KeywordMatching, Row, RuntimeStore, SearchedProperty } from "../../core/ports.js";
-import {
-  emptyEvidence, keywordRow, semanticRow, type Ranked, type RankingScore,
-} from "./fusion.js";
+import type { OwnSearchRuntimeStore } from "../../core/ownSearch.js";
+import type { Row, SearchedProperty } from "../../core/ports.js";
+import { emptyEvidence, semanticRow, type Ranked, type RankingScore } from "./fusion.js";
 import type { SearchMatch } from "./entry.js";
 export { chunkDocument } from "./chunking.js";
+/** The passage ranking of an adapter's own search storage; by vector
+ * only, as `propertyKind`. */
 export function documentKind(
-  store: RuntimeStore,
+  store: OwnSearchRuntimeStore,
   properties: SearchedProperty[],
   embedding: number[],
   limit: number,
-  query: string,
 ) {
   const key = (r: Row) => String((r.chunk as Row)._id);
   return {
@@ -19,12 +19,7 @@ export function documentKind(
             semanticRow(key(r), r.chunk as Row, r.score),
           )
         : [],
-    keyword: async (matching: KeywordMatching) =>
-      properties.length
-        ? (await store.documentSearchKeyword(properties, query, limit, matching)).map((r) =>
-            keywordRow(key(r), r.chunk as Row, r.score),
-          )
-        : [],
+    keyword: () => Promise.reject(new Error("Keyword ranking needs search indices")),
   };
 }
 /** Keeps the passage ranking's score kind: the best passage's score becomes the entity's. */

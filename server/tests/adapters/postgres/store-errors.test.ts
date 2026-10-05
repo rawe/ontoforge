@@ -67,7 +67,7 @@ afterEach(() => {
 });
 
 describe("the truth table: 23503 insert side (vanished parent)", () => {
-  it.each(["relation_from_fk", "relation_to_fk", "document_chunk_entity_fk"])(
+  it.each(["relation_from_fk", "relation_to_fk"])(
     "%s → NotFoundError naming the entity",
     async (constraint) => {
       const error = await translated(

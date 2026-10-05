@@ -97,12 +97,6 @@ describe("off-format ids short-circuit to the not-found shape, database untouche
     expect(await store.removePropertyFromIncludesLists("EntityType", "nope", "p")).toBe(0);
     expect(fakeDb.queries).toEqual([]);
   });
-
-  it("embedding writes resolve as silent no-ops", async () => {
-    await store.setEntitySearchText("nope", "person: name=Test", [0.1, 0.2]);
-    await store.setSavedQueryEmbedding("nope", [0.1, 0.2]);
-    expect(fakeDb.queries).toEqual([]);
-  });
 });
 
 describe("well-formed ids reach the database", () => {

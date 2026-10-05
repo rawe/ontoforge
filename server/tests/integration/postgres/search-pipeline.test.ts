@@ -10,7 +10,7 @@
 
 import { randomUUID } from "node:crypto";
 
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runQuery } from "../../../src/adapters/postgres/errors.js";
 import { settings } from "../../../src/config.js";
@@ -211,7 +211,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL search pipeline"
     };
     // PostgreSQL text cannot hold NUL: the insert fails inside the transaction.
     await expect(
-      runtime.createEntity("person", plan.entityParts[0]!.entityId, { name: "A\u0000B" }, {}, null, "", undefined, plan),
+      runtime.createEntity("person", plan.entityParts[0]!.entityId, { name: "A\u0000B" }, {}, null, plan),
     ).rejects.toThrow();
     await expect(
       runtime.createRelation("works_for", randomUUID(), ada, randomUUID(), {}, {}, {
@@ -378,6 +378,47 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL search pipeline"
     expect((await entries(generation)).filter((row) => row["part_kind"] === "passage")).toMatchObject([
       { part_id: "0", text: "Ada\nShort now." },
     ]);
+  });
+
+  it("a nulled document drops its passages and keeps the entity's own entry", async () => {
+    setEmbeddingProvider(null);
+    const index = await addIndex();
+    const ada = await person("Ada", { bio: "Ada wrote notes on the analytical engine." });
+    await drainSearchWork();
+    const generation = (await active(index, "keyword")).generationId;
+    expect((await entries(generation)).map((row) => row["part_kind"])).toEqual(["passage", "self"]);
+
+    await service.updateEntity(LENS, "person", ada, { bio: null }, runtime);
+    await drainSearchWork();
+    expect((await entries(generation)).map((row) => row["part_kind"])).toEqual(["self"]);
+  });
+
+  it("a write embeds nothing in the request; the worker embeds its entries later", async () => {
+    const index = await addIndex();
+    await drainSearchWork();
+    const embed = vi.spyOn(provider, "embed");
+    const batches = provider.batchCalls;
+
+    const ada = await person("Ada", { bio: "Ada wrote notes on the analytical engine." });
+    await service.updateEntity(LENS, "person", ada, { email: "ada@example.org" }, runtime);
+    await service.editDocument(
+      LENS, "person", ada, "bio",
+      { op: "str_replace", oldString: "notes", newString: "the first program" },
+      runtime,
+    );
+    expect(embed).not.toHaveBeenCalled();
+    expect(provider.batchCalls).toBe(batches);
+    expect((await queued()).length).toBeGreaterThan(0);
+
+    await drainSearchWork();
+    expect(embed).not.toHaveBeenCalled();
+    expect(provider.batchCalls).toBeGreaterThan(batches);
+    const semantic = await entries((await active(index, "semantic")).generationId);
+    expect(semantic.map((row) => [row["part_kind"], row["embedded"]])).toEqual([
+      ["passage", true],
+      ["self", true],
+    ]);
+    expect(provider.embedded.some((text) => text.includes("the first program"))).toBe(true);
   });
 
   it("pairs each relation entry with its own target only", async () => {

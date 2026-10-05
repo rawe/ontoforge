@@ -1,4 +1,3 @@
-import type { KeywordPropertySegment } from "../../core/ports.js";
 /**
  * Neo4j implementation of the runtime store (instance-data persistence).
  *
@@ -141,8 +140,6 @@ export class Neo4jRuntimeStore implements RuntimeStore {
     properties: Row,
     propertyDefs: Record<string, PropertyDef>,
     embedding: number[] | null = null,
-    _propertyText = "",
-    _keywordSegments?: KeywordPropertySegment[],
   ): Promise<Row> {
     return runSession(this.driver, (session) =>
       queries.createEntity(
@@ -209,8 +206,6 @@ export class Neo4jRuntimeStore implements RuntimeStore {
     propertyDefs: Record<string, PropertyDef>,
     embedding: number[] | null = null,
     hasEmbeddingUpdate = false,
-    _propertyText = "",
-    _keywordSegments?: KeywordPropertySegment[],
   ): Promise<Row | null> {
     return runSession(this.driver, (session) =>
       queries.updateEntity(
@@ -297,13 +292,6 @@ export class Neo4jRuntimeStore implements RuntimeStore {
   // ------------------------------------------------------------------
   // Semantic search
   // ------------------------------------------------------------------
-
-  async propertySearchKeyword(): Promise<Row[]> {
-    throw new Error("Keyword ranking is not supported");
-  }
-  async documentSearchKeyword(): Promise<Row[]> {
-    throw new Error("Keyword ranking is not supported");
-  }
 
   async propertySearchSemantic(
     types: SearchedType[],

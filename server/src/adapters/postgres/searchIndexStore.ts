@@ -4,8 +4,8 @@
  *
  * Entries live in `search_entry`, list-partitioned by generation. A
  * generation's partition is a table of its own, `se_<generation uuid
- * hex>` — the name is derived, never stored, and reversible like the
- * `vec_` index names (`ddl.ts`). Its lifecycle:
+ * hex>` — the name is derived, never stored, and reversible. Its
+ * lifecycle:
  *
  * 1. **create** — a standalone table shaped like the parent, carrying a
  *    CHECK that matches its future partition bound (so the attach needs no

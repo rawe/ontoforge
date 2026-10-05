@@ -17,8 +17,6 @@ export interface SearchEvidence {
    * comparable neither to semanticSimilarity nor across responses; never used to rank.
    * A number exactly when keywordMatch is true, null exactly when it is null. */
   keywordScore: KeywordScore | null;
-  /** Complete contributing string-property keys, when measured and lens-exposed. */
-  keywordPropertyKeys?: string[] | null;
 }
 export const emptyEvidence = (): SearchEvidence => ({
   semanticSimilarity: null,
@@ -34,9 +32,6 @@ function mergeEvidence(a?: SearchEvidence, b?: SearchEvidence): SearchEvidence |
     semanticSimilarity: a.semanticSimilarity ?? b.semanticSimilarity,
     keywordMatch: a.keywordMatch ?? b.keywordMatch,
     keywordScore: a.keywordScore ?? b.keywordScore,
-    ...(a.keywordPropertyKeys !== undefined || b.keywordPropertyKeys !== undefined
-      ? { keywordPropertyKeys: a.keywordPropertyKeys ?? b.keywordPropertyKeys ?? null }
-      : {}),
   };
 }
 /** An ordered list whose position is the rank; all fusion ever reads. */
@@ -52,44 +47,14 @@ export interface Ranked<T, Kind extends RankingScore> extends Ordered<T> {
   score: Kind;
 }
 /** Source rows take their kind here, per the port contract of the method that returned
- * them; the measurement is both the ranking score and the evidence. A keyword row lists its
- * contributing property keys only for units that attribute (entity text, not passages). */
-export function semanticRow<T>(
-  key: string,
-  value: T,
-  score: unknown,
-  keywordPropertyKeys?: null,
-): Ranked<T, SemanticSimilarity> {
+ * them; the measurement is both the ranking score and the evidence. */
+export function semanticRow<T>(key: string, value: T, score: unknown): Ranked<T, SemanticSimilarity> {
   const similarity = score as SemanticSimilarity;
   return {
     key,
     score: similarity,
     value,
-    evidence: {
-      semanticSimilarity: similarity,
-      keywordMatch: null,
-      keywordScore: null,
-      ...(keywordPropertyKeys !== undefined ? { keywordPropertyKeys } : {}),
-    },
-  };
-}
-export function keywordRow<T>(
-  key: string,
-  value: T,
-  score: unknown,
-  keywordPropertyKeys?: string[] | null,
-): Ranked<T, KeywordScore> {
-  const keywordScore = score as KeywordScore;
-  return {
-    key,
-    score: keywordScore,
-    value,
-    evidence: {
-      semanticSimilarity: null,
-      keywordMatch: true,
-      keywordScore,
-      ...(keywordPropertyKeys !== undefined ? { keywordPropertyKeys } : {}),
-    },
+    evidence: { semanticSimilarity: similarity, keywordMatch: null, keywordScore: null },
   };
 }
 /** Rank fusion operates on the same unit in every input. Stable ties retain input order. */

@@ -29,7 +29,6 @@ const ALL_TABLES = [
   "retriever_config",
   "entity",
   "relation",
-  "document_chunk",
   "search_settings",
   "search_index",
   "search_generation",

@@ -261,6 +261,17 @@ const STEPS: Step[] = [
       // 6.0: the managed indices of the existing schema, searchable in the
       // scoped lenses that show their types.
       writeManagedSearchIndices,
+      // 6.0: the per-entity search storage they replace goes — the
+      // entities' search columns with their keyword and per-type vector
+      // indexes, and the document chunks with theirs. The worker's start
+      // rebuilds everything from the managed indices.
+      `DROP TABLE document_chunk`,
+      `ALTER TABLE entity
+  DROP COLUMN search_vector,
+  DROP COLUMN keyword_segments,
+  DROP COLUMN keyword_text,
+  DROP COLUMN property_text,
+  DROP COLUMN embedding`,
     ],
   },
 ];

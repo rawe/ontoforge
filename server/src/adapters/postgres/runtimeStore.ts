@@ -19,16 +19,18 @@
  *   the port supplies property definitions. `getEntity`/`getRelation`
  *   carry none, so their datetime values stay the stored ISO text — the
  *   wire form is byte-identical (the stored text IS `toISOString()`).
- * - `embedding` is never selected and appears in no returned row.
+ * - Instance rows carry no search data: search reads the search-index
+ *   entries (`searchIndexStore.ts`), which every write queues work for in
+ *   its own transaction.
  * - Relation deletes and lookups carry the type key in the WHERE — the
  *   reference adapter's typed relationship match answers not-found for a
  *   mismatched type key, and the PK alone would not.
  * - `getFullSchemaWithLensInclusions` is one REPEATABLE READ
  *   transaction (M2.3's coherent-snapshot obligation).
  *
- * - Semantic rankings use iterative scans at each index's own cast width.
- *   Keyword rankings read stored tsvectors. Saved-query discovery alone
- *   applies a score floor after ranking.
+ * - Saved-query discovery, the one vector query here, uses an iterative
+ *   scan at its index's own cast width and applies a score floor after
+ *   ranking.
  *
  * - `executeOql` compiles the validated query to one SQL SELECT
  *   (`oql/`) and runs it through the array-mode door; the compiled plan
@@ -37,22 +39,16 @@
 
 import type { KeywordLanguage } from "../../core/keywordLanguage.js";
 
-import { fromSql, toSql } from "pgvector";
-
 import type { ValidatedQuery } from "../../core/oql/index.js";
 import type {
-  KeywordMatching,
-  KeywordPropertySegment,
   FilterCondition,
   Row,
   RuntimeStore,
-  SearchedType,
-  SearchedProperty,
   SearchIndexStore,
   SearchWritePlan,
 } from "../../core/ports.js";
 import type { PropertyDef } from "../../core/schemas.js";
-import { chunkIndexNameOf, entityIndexNameOf, indexWidth, SAVED_QUERY_INDEX } from "./ddl.js";
+import { SAVED_QUERY_INDEX } from "./ddl.js";
 import {
   runArrayQuery,
   runQuery,
@@ -78,15 +74,13 @@ type PropertyDefs = Record<string, PropertyDef>;
 
 const NO_DEFS: PropertyDefs = {};
 
-// Read column lists — `embedding` is deliberately absent from all three.
+// Read column lists.
 const ENTITY_COLS = "id, type_key, props, created_at, updated_at";
 const RELATION_COLS = "id, type_key, from_id, to_id, props, created_at, updated_at";
-const CHUNK_COLS =
-  "id, entity_id, entity_type_key, property_key, chunk_index, start_char, char_length, text";
 
-/** Only rows the search indexes can hold. The reference adapter's vector
- * indexes contain nothing without a vector, so an un-embedded row is
- * invisible to search there; here the predicate says so explicitly,
+/** Only saved queries the index can hold. The reference adapter's vector
+ * index contains nothing without a vector, so an un-embedded description
+ * is invisible to discovery there; here the predicate says so explicitly,
  * because a plan that does not use the index would otherwise see them. */
 const EMBEDDED = "embedding IS NOT NULL";
 
@@ -113,21 +107,6 @@ function relationRow(row: Row, propertyDefs: PropertyDefs): Row {
     fromEntityId: row.from_id,
     toEntityId: row.to_id,
     ...fromJson(row.props as Row, propertyDefs),
-  };
-}
-
-/** One `document_chunk` row → the port's chunk shape. Chunks carry no
- * timestamps, and their ids are internal — never addressable. */
-function chunkRow(row: Row): Row {
-  return {
-    _id: row.id,
-    _entityId: row.entity_id,
-    _entityTypeKey: row.entity_type_key,
-    _propertyKey: row.property_key,
-    _index: row.chunk_index,
-    startChar: row.start_char,
-    charLength: row.char_length,
-    text: row.text,
   };
 }
 
@@ -200,9 +179,9 @@ export class PostgresRuntimeStore implements RuntimeStore {
   // Declarations
   // ------------------------------------------------------------------
 
-  /** Path conditions filter both rankings here: the entity ranking
-   * carries them as ordinary predicates, and the passage ranking joins
-   * each passage to its parent entity inside the vector query. */
+  /** Keyword ranking and path conditions are the search indices': the
+   * entries carry stemmed text, and the index query joins each entry to
+   * its entity for every condition. */
   supportsKeywordRanking(): boolean {
     return true;
   }
@@ -288,16 +267,6 @@ export class PostgresRuntimeStore implements RuntimeStore {
   }
 
   // ------------------------------------------------------------------
-  // Vector-index metadata validation
-  // ------------------------------------------------------------------
-
-  /** The confirmed PG no-op (M4.2): pgvector's partial HNSW indexes
-   * carry no filter metadata, so no property value can be too large. */
-  validateVectorIndexedProperties(): void {
-    // No adapter-side limit exists on this backend.
-  }
-
-  // ------------------------------------------------------------------
   // Entity instances
   // ------------------------------------------------------------------
 
@@ -306,24 +275,14 @@ export class PostgresRuntimeStore implements RuntimeStore {
     entityId: string,
     properties: Row,
     propertyDefs: PropertyDefs,
-    embedding: number[] | null = null,
-    propertyText = "",
-    keywordSegments?: KeywordPropertySegment[],
+    _embedding: number[] | null = null,
     search?: SearchWritePlan | null,
   ): Promise<Row> {
     const result = await this.write(
-      `INSERT INTO entity (id, type_key, props, embedding, property_text, keyword_text, keyword_segments)
-       VALUES ($1, $2, $3::jsonb, $4::vector, $5, $6, $7::jsonb)
+      `INSERT INTO entity (id, type_key, props)
+       VALUES ($1, $2, $3::jsonb)
        RETURNING ${ENTITY_COLS}`,
-      [
-        entityId,
-        entityTypeKey,
-        propsJson(properties, propertyDefs),
-        embedding === null ? null : toSql(embedding),
-        propertyText,
-        (keywordSegments ?? []).map((segment) => segment.text).join("\n"),
-        keywordSegments === undefined ? null : JSON.stringify(keywordSegments),
-      ],
+      [entityId, entityTypeKey, propsJson(properties, propertyDefs)],
       search,
     );
     return entityRow(result.rows[0]!, propertyDefs);
@@ -398,48 +357,26 @@ export class PostgresRuntimeStore implements RuntimeStore {
     setProperties: Row,
     removeProperties: string[],
     propertyDefs: PropertyDefs,
-    embedding: number[] | null = null,
-    hasEmbeddingUpdate = false,
-    propertyText = "",
-    keywordSegments?: KeywordPropertySegment[],
+    _embedding: number[] | null = null,
+    _hasEmbeddingUpdate = false,
     search?: SearchWritePlan | null,
   ): Promise<Row | null> {
     if (!isUuid(entityId)) {
       return null;
     }
-    const params: unknown[] = [
-      entityTypeKey,
-      entityId,
-      propsJson(setProperties, propertyDefs),
-      removeProperties,
-    ];
-    let embeddingSet = "";
-    if (hasEmbeddingUpdate) {
-      params.push(embedding === null ? null : toSql(embedding));
-      embeddingSet = `, embedding = $${params.length}::vector`;
-      params.push(propertyText);
-      embeddingSet += `, property_text = $${params.length}`;
-    }
-    if (keywordSegments !== undefined) {
-      params.push(keywordSegments.map((segment) => segment.text).join("\n"));
-      embeddingSet += `, keyword_text = $${params.length}`;
-      params.push(JSON.stringify(keywordSegments));
-      embeddingSet += `, keyword_segments = $${params.length}::jsonb`;
-    }
     const result = await this.write(
       `UPDATE entity
-       SET props = (props || $3::jsonb) - $4::text[], updated_at = now()${embeddingSet}
+       SET props = (props || $3::jsonb) - $4::text[], updated_at = now()
        WHERE type_key = $1 AND id = $2
        RETURNING ${ENTITY_COLS}`,
-      params,
+      [entityTypeKey, entityId, propsJson(setProperties, propertyDefs), removeProperties],
       search,
     );
     const row = result.rows[0];
     return row === undefined ? null : entityRow(row, propertyDefs);
   }
 
-  /** One DELETE; relations (both directions) and chunks vanish by
-   * CASCADE (M2.2). */
+  /** One DELETE; relations (both directions) vanish by CASCADE (M2.2). */
   async deleteEntity(
     entityTypeKey: string,
     entityId: string,
@@ -455,104 +392,6 @@ export class PostgresRuntimeStore implements RuntimeStore {
       "before",
     );
     return result.rowCount > 0;
-  }
-
-  // ------------------------------------------------------------------
-  // Document chunks
-  // ------------------------------------------------------------------
-
-  /** The text→vector map behind chunk-embedding reuse: embedded chunks
-   * only, keyed by text (chunk texts of one property are distinct). The
-   * one port method that deliberately returns vectors. */
-  async getChunkEmbeddingsForEntityProperty(
-    entityId: string,
-    propertyKey: string,
-  ): Promise<Record<string, number[]>> {
-    if (!isUuid(entityId)) {
-      return {};
-    }
-    const result = await this.query(
-      `SELECT text, embedding::text AS embedding FROM document_chunk
-       WHERE entity_id = $1 AND property_key = $2 AND ${EMBEDDED}`,
-      [entityId, propertyKey],
-    );
-    const map: Record<string, number[]> = {};
-    for (const row of result.rows) {
-      // `WHERE embedding IS NOT NULL` over a dense `vector` column: the
-      // parse can only yield the coordinate list.
-      map[row.text as string] = fromSql(row.embedding as string) as number[];
-    }
-    return map;
-  }
-
-  async deleteChunksForEntityProperty(entityId: string, propertyKey: string): Promise<void> {
-    if (!isUuid(entityId)) {
-      return;
-    }
-    await this.query(`DELETE FROM document_chunk WHERE entity_id = $1 AND property_key = $2`, [
-      entityId,
-      propertyKey,
-    ]);
-  }
-
-  /**
-   * Write one batch of chunks — the service has already deleted what they
-   * replace, so this only inserts. The batch travels as one jsonb
-   * document expanded by `jsonb_to_recordset`, which keeps the statement
-   * single and its parameter count independent of the document's length.
-   * The three values shared by every chunk are bound once. An empty batch
-   * touches nothing.
-   */
-  async createDocumentChunks(
-    entityId: string,
-    entityTypeKey: string,
-    propertyKey: string,
-    chunks: Row[],
-  ): Promise<void> {
-    if (chunks.length === 0) {
-      return;
-    }
-    const batch = chunks.map((chunk) => {
-      // A chunk the provider could not embed arrives without the key and
-      // is stored without a vector, as the reference adapter stores it.
-      const vector = chunk._embedding as number[] | undefined;
-      return {
-        id: chunk._id,
-        chunk_index: chunk._index,
-        start_char: chunk.startChar,
-        char_length: chunk.charLength,
-        text: chunk.text,
-        embedding: vector === undefined ? null : toSql(vector),
-      };
-    });
-    await this.query(
-      `INSERT INTO document_chunk (id, entity_id, entity_type_key, property_key,
-                                   chunk_index, start_char, char_length, text, embedding)
-       SELECT c.id, $1, $2, $3, c.chunk_index, c.start_char, c.char_length, c.text,
-              c.embedding::vector
-       FROM jsonb_to_recordset($4::jsonb) AS c(id uuid, chunk_index int, start_char int,
-                                               char_length int, text text, embedding text)`,
-      [entityId, entityTypeKey, propertyKey, JSON.stringify(batch)],
-    );
-  }
-
-  /** One document property's chunks, ranked. The floor lives in the
-   * service for this path — the port method takes no `minScore`.
-   *
-   * Filters are evaluated on the parent entity inside the statement: a
-   * semi-join to the `entity` row, carrying the same predicate fragments
-   * the entity ranking carries (`filters.ts`, which anchors a path
-   * condition on `entity.id` — the joined row here). The iterative scan
-   * therefore refills the page with passages whose parent passes, and
-   * the limit counts filtered hits. The join is written as EXISTS so the
-   * outer statement's column references stay unqualified and the index
-   * expression is repeated verbatim. */
-  async documentSearchSemantic(
-    properties: SearchedProperty[],
-    embedding: number[],
-    limit: number,
-  ): Promise<Row[]> {
-    return this.rankedSemantic(properties, embedding, limit, true);
   }
 
   /** Off-format ids are dropped from the batch (they can match no row);
@@ -578,186 +417,8 @@ export class PostgresRuntimeStore implements RuntimeStore {
   }
 
   // ------------------------------------------------------------------
-  // Search rankings
+  // Saved-query discovery
   // ------------------------------------------------------------------
-
-  async propertySearchKeyword(
-    types: SearchedType[],
-    query: string,
-    limit: number,
-    matching: KeywordMatching,
-  ): Promise<Row[]> {
-    return this.rankedKeyword(types, query, limit, false, matching);
-  }
-  async documentSearchKeyword(
-    properties: SearchedProperty[],
-    query: string,
-    limit: number,
-    matching: KeywordMatching,
-  ): Promise<Row[]> {
-    return this.rankedKeyword(properties, query, limit, true, matching);
-  }
-
-  /**
-   * Plain words, stemmed in the immutable ontology language. Reads stored tsvectors.
-   *
-   * The matching selects the join operator and nothing else (`docs/decisions.md` —
-   * "Any-term keyword matching is the default keyword retrieval method; all-term
-   * keyword matching is a strategy of its own"): any ORs the terms, all ANDs
-   * them, both prefix-matched.
-   * Under all, Snowball reducing neither compounds nor derivations means one
-   * absent term empties the result; that is the documented trade of the method.
-   *
-   * The query is built from the lexemes `to_tsvector` itself produced for the
-   * search text, quoted with `quote_literal`, so no caller input reaches tsquery
-   * syntax. Only stop words yields NULL, matching nothing — as the empty query
-   * did before.
-   */
-  private async rankedKeyword(
-    searched: (SearchedType | SearchedProperty)[],
-    query: string,
-    limit: number,
-    document: boolean,
-    matching: KeywordMatching,
-  ): Promise<Row[]> {
-    if (!searched.length) return [];
-    const params: unknown[] = [query, this.textSearchLanguage];
-    const scopes = searched.map((item) => {
-      params.push(item.entityTypeKey);
-      const where = [`${document ? "entity_type_key" : "type_key"} = $${params.length}`];
-      if ("propertyKey" in item) {
-        params.push(item.propertyKey);
-        where.push(`property_key = $${params.length}`);
-      }
-      const filters = buildFilterClauses(item.conditions, params);
-      if (document && filters.length)
-        where.push(
-          `EXISTS (SELECT 1 FROM entity WHERE entity.id = document_chunk.entity_id AND ${filters.join(" AND ")})`,
-        );
-      else where.push(...filters);
-      return `(${where.join(" AND ")})`;
-    });
-    params.push(limit);
-    const operator = matching === "all" ? "&" : "|";
-    const tsquery = `(SELECT string_agg(quote_literal(lexeme) || ':*', ' ${operator} ')::tsquery AS q
-      FROM unnest(tsvector_to_array(to_tsvector($2::regconfig, $1))) AS lexeme) AS query`;
-    const ranking = `SELECT ${document ? CHUNK_COLS : `${ENTITY_COLS}, keyword_text, keyword_segments`}, ts_rank_cd(search_vector, query.q) AS score
-      FROM ${document ? "document_chunk" : "entity"}, ${tsquery}
-      WHERE search_vector @@ query.q AND (${scopes.join(" OR ")})
-      ORDER BY score DESC, id LIMIT $${params.length}`;
-    // Materialize the bounded ranking BEFORE tokenizing its retained fields. Query
-    // lexemes come from the same to_tsvector call the ranking query is built from.
-    // Attribution demands EXACT presence of every query lexeme under either matching,
-    // so a prefix-only match, or under any a row carrying only part of the terms,
-    // yields null — "complete attribution unavailable", never a wrong key.
-    // Before attributing
-    // fields, require the ordered native token stream (including duplicate tokens)
-    // to agree with parsing each segment separately. Markup can span the joining
-    // newline and hide a term from one field even when another field supplies it.
-    // Default-parser token 12 is blank: ignore only these intentional separators.
-    // Any other boundary effect yields unknown, preserving aggregate ranking.
-    const sql = document ? ranking : `WITH ranked AS MATERIALIZED (${ranking})
-      SELECT ranked.*, CASE WHEN keyword_segments IS NULL OR (
-        SELECT coalesce(jsonb_agg(jsonb_build_array(parsed.tokid, parsed.token)
-          ORDER BY parsed.token_position), '[]'::jsonb)
-        FROM ts_parse('default', keyword_text) WITH ORDINALITY AS parsed(tokid, token, token_position)
-        WHERE parsed.tokid <> 12
-      ) IS DISTINCT FROM (
-        SELECT coalesce(jsonb_agg(jsonb_build_array(parsed.tokid, parsed.token)
-          ORDER BY source.segment_position, parsed.token_position), '[]'::jsonb)
-        FROM jsonb_array_elements(keyword_segments) WITH ORDINALITY AS source(segment, segment_position)
-        CROSS JOIN LATERAL ts_parse('default', source.segment->>'text')
-          WITH ORDINALITY AS parsed(tokid, token, token_position)
-        WHERE parsed.tokid <> 12
-      ) THEN NULL ELSE (
-        SELECT CASE WHEN tsvector_to_array(to_tsvector($2::regconfig, $1))
-          <@ coalesce(array_agg(DISTINCT term.lexeme), ARRAY[]::text[])
-          THEN array_agg(DISTINCT segment->>'propertyKey' ORDER BY segment->>'propertyKey')
-          ELSE NULL END
-        FROM jsonb_array_elements(keyword_segments) AS segment
-        CROSS JOIN LATERAL unnest(tsvector_to_array(to_tsvector($2::regconfig, segment->>'text'))) AS term(lexeme)
-        WHERE term.lexeme = ANY(tsvector_to_array(to_tsvector($2::regconfig, $1)))
-      ) END AS keyword_property_keys FROM ranked ORDER BY score DESC, id`;
-    const result = await this.query(sql, params);
-    return result.rows.map((row) =>
-      document
-        ? { chunk: chunkRow(row), score: row.score }
-        : {
-            entity: entityRow(
-              row,
-              (searched.find((t) => t.entityTypeKey === row.type_key) as SearchedType).propertyDefs,
-            ),
-            score: row.score,
-            keywordPropertyKeys: row.keyword_property_keys ?? null,
-          },
-    );
-  }
-
-  async propertySearchSemantic(
-    types: SearchedType[],
-    embedding: number[],
-    limit: number,
-  ): Promise<Row[]> {
-    return this.rankedSemantic(types, embedding, limit, false);
-  }
-
-  /** One scan per per-type index, one UNION ALL ranking statement. */
-  private async rankedSemantic(
-    searched: (SearchedType | SearchedProperty)[],
-    embedding: number[],
-    limit: number,
-    document: boolean,
-  ): Promise<Row[]> {
-    if (!searched.length) return [];
-    return this.tx(async (querier) => {
-      await querier.query("SET LOCAL hnsw.iterative_scan = strict_order");
-      const params = vectorParams(embedding);
-      const scans: string[] = [];
-      for (const item of searched) {
-        const index =
-          "propertyKey" in item
-            ? await chunkIndexNameOf(querier, item.entityTypeKey, item.propertyKey)
-            : await entityIndexNameOf(querier, item.entityTypeKey);
-        const width = (index ? await indexWidth(querier, index) : null) ?? embedding.length;
-        params.push(item.entityTypeKey);
-        const where = [
-          `${document ? "entity_type_key" : "type_key"} = $${params.length}`,
-          EMBEDDED,
-        ];
-        if ("propertyKey" in item) {
-          params.push(item.propertyKey);
-          where.push(`property_key = $${params.length}`);
-        }
-        const clauses = buildFilterClauses(item.conditions, params);
-        if (document && clauses.length)
-          where.push(
-            `EXISTS (SELECT 1 FROM entity WHERE entity.id = document_chunk.entity_id AND ${clauses.join(" AND ")})`,
-          );
-        else where.push(...clauses);
-        params.push(limit);
-        scans.push(
-          `(SELECT ${document ? CHUNK_COLS : ENTITY_COLS}, ${similarity(width)} FROM ${document ? "document_chunk" : "entity"} WHERE ${where.join(" AND ")} ORDER BY ${distance(width)} LIMIT $${params.length})`,
-        );
-      }
-      params.push(limit);
-      const result = await querier.query(
-        `SELECT * FROM (${scans.join(" UNION ALL ")}) AS ranked ORDER BY score DESC LIMIT $${params.length}`,
-        params,
-      );
-      return result.rows.map((row) =>
-        document
-          ? { chunk: chunkRow(row), score: row.score }
-          : {
-              entity: entityRow(
-                row,
-                (searched.find((t) => t.entityTypeKey === row.type_key) as SearchedType)
-                  .propertyDefs,
-              ),
-              score: row.score,
-            },
-      );
-    });
-  }
 
   /** Saved-query descriptions for one lens. The lens is a plain
    * query-time predicate: the index carries no scoping of its own. */

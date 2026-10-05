@@ -94,8 +94,8 @@ entries.
 reads through the port. This keeps the schema a *value* to runtime rather than a service
 it calls, which is what makes the schema cache possible. Runtime uses core alone. The
 other three may use runtime as well as core: modeling where it needs runtime's own view —
-assembling a lens's schema, composing search text and re-chunking documents during
-rebuild, and validating agent and retriever configurations against what runtime offers;
+assembling a lens's schema, deriving the managed search indices of a changed schema, and
+validating agent and retriever configurations against what runtime offers;
 registry to clear the schema cache when an ontology is deleted; server to report which
 search strategies the deployment offers.
 
@@ -121,7 +121,7 @@ The registry — not any storage catalog — is the authoritative list of ontolo
 ontologies is a valid server state: a fresh server starts empty, nothing is auto-created
 at boot, and the last ontology is deletable. Deleting an ontology is one hard cascade
 over everything it contains — schema, lenses, saved queries, agents, retriever
-configurations, instance data, chunks and search indexes.
+configurations, instance data and search indices.
 
 ## Logical data model
 
@@ -251,7 +251,6 @@ A runtime write, which is the longest path:
     → load lens from schema cache (build on miss)
     → reject unknown properties; check required; apply defaults
     → coerce each value to its declared data type
-    → embed text if a provider is configured
     → derive the search work the write causes, from the cached search context
     → cross the persistence port (the write and its search work, one transaction)
     → adapter compiles and executes
@@ -354,9 +353,10 @@ Ordered, and failure at any step prevents serving:
 2. Walk the registry and report any stored type key that the adapter now reserves.
 3. Initialize the embedding provider, if configured.
 4. Initialize the language-model and decision-model providers, if configured.
-5. If embeddings are enabled, reconcile vector index widths against the provider for
-   every registered ontology and warn on mismatch — see
-   [capabilities/search.md](capabilities/search.md).
+5. If embeddings are enabled, compare the width of every registered ontology's
+   saved-query description index with the provider's and warn on mismatch — see
+   [capabilities/search.md](capabilities/search.md#vector-index-width-drift). Search
+   indices need no such check: a changed model starts new generations in step 6.
 6. Start the [search indexing](#search-indexing) worker, if the adapter stores search
    indices. It runs in the background: it first brings every ontology's managed indices
    in line with its schema, removes what interrupted generation removals left behind and

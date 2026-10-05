@@ -108,10 +108,10 @@ together, and the number advances only when all of them succeeded. Several serve
 starting against one database upgrade it once: the upgrade holds a database-wide lock and
 reads the version again under it. The server logs every upgrade it runs and never backs
 up storage itself. The release defines the storage layout — tables, columns, fixed
-indexes — and only a storage-version upgrade changes it; the two exceptions are the search
-indexes derived from the schema, which schema changes and the search-data rebuild create
-and drop, and the entry storage of each search-index generation, which the generation's
-lifecycle creates and drops. Within a major release line upgrade steps only add — tables, columns with a
+indexes — and only a storage-version upgrade changes it; the two exceptions are the vector
+indexes the search-data rebuild drops and builds again — and, on an adapter with its own
+search storage, those schema changes create and drop — and the entry storage of each
+search-index generation, which the generation's lifecycle creates and drops. Within a major release line upgrade steps only add — tables, columns with a
 default, indexes — so servers of the
 previous release keep working during a rolling update; renaming, removing or rewriting
 stored data waits for the next major release, which carries one step of its own. Upgrade steps are kept for one major release line: a major release
@@ -307,12 +307,10 @@ indices and ranks per kind instead; when both kinds run there over more than one
 type, it takes the best reciprocal kind rank. Deliberation:
 [adr/0020](adr/0020-search-ranking-and-evidence.md).
 
-**Property keyword content contains values, not schema labels.** Preserve ordered
-schema-string value segments separately from labeled semantic text, so keys cannot count
-as matching content. The values-only
-correction applies to keyword and hybrid property retrieval, including single-type queries;
-this is distinct from preserving single-type fusion. Search-index entries follow the same
-rule: an entry's keyword text holds values only, its semantic text is labelled.
+**Keyword content contains values, not schema labels.** An entry's keyword text holds
+values only, its semantic text is labelled, so keys and labels cannot count as matching
+content. This applies to keyword and hybrid retrieval, including single-type queries; it
+is distinct from preserving single-type fusion.
 
 **Search evidence does not establish answer sufficiency.** Keep search candidates
 available without an automatic similarity floor over REST, where a caller may set an
@@ -348,9 +346,8 @@ means every term, not no morphology; and building no all-term variant, which lea
 any-term behaviour unnamed and the extension point unexercised.
 
 **Text-search language is an immutable ontology setting.** Chosen at creation, default
-English, carried in export, and checked against the import target. It is the language of
-the per-entity keyword representation, fixed when the ontology is created, with no
-per-type keyword DDL; it does not stem search-index entries.
+English, carried in export, and checked against the import target. It does not stem
+search-index entries, and ranked search does not read it.
 
 **Keyword entries are stemmed in every language of the ontology's keyword language set.**
 The set is English, German, or both. One keyword representation per entry concatenates
@@ -362,21 +359,22 @@ languages.
 
 **A schema edit never writes instance data.** Managed search indices follow the schema
 asynchronously: a changed derived definition builds a new generation in the background,
-and the previous one serves until it is ready. The per-entity search data is not refreshed
-at all: deleting a string property leaves its values inside every entity's stored keyword
-text and semantic text until a rebuild recomposes them — in both kinds, since neither
-stored text records which property a word came from. Cleaning up at deletion time was
-rejected: it would turn a schema edit into a write over all instance data, and for the
-semantic half a bulk re-embedding that a server with no provider could not perform at
-all.
+and the previous one serves until it is ready. An adapter's own search storage
+([storage-adapters.md](storage-adapters.md#own-search-storage)) is not refreshed at all:
+deleting a string property leaves its values inside every entity's stored vector until a
+rebuild recomposes it, since a vector does not record which property a word came from.
+Cleaning up at deletion time was rejected: it would turn a schema edit into a write over
+all instance data, a bulk re-embedding that a server with no provider could not perform
+at all.
 
-**One rebuild covers every per-entity search representation and the saved-query
-description vectors, and it needs no provider.** Keyword text and document chunks are
-rebuilt by a run that calls no model, so the operation runs with an embedding provider
-absent, skips the vectors, the vector indexes and the saved-query descriptions, and reports
-that skip in its summary rather than counting it as failure. A vector-only name for it would
-be wrong: the operation is named for the search data it rebuilds, not for one half of it.
-Search indices keep themselves current and are not part of it.
+**One rebuild covers every vector and passage stored outside search indices, and it
+needs no provider.** On an adapter that stores search indices that is the saved-query
+description vectors and their index alone; search indices keep themselves current and
+are not part of it. On an adapter with its own search storage it also covers every
+entity's vector and every document's chunks. Without an embedding provider the operation
+still runs: it skips the vectors, the vector indexes and the saved-query descriptions —
+re-chunking documents where it has any, which calls no model — and reports that skip in
+its summary rather than counting it as failure.
 
 **The list filters and the search ranks.** Neither server operation falls back to the
 other. Cross-type search ranks each searched type's own indices over an exact searched
@@ -550,12 +548,13 @@ and third phase the ontology has no semantic index — a rebuild that dies in be
 leaves them absent and its vectors of mixed width, which the next completed rebuild
 repairs.
 
-**A stored embedding is reused only at the configured provider's width.** Reuse is keyed
-by content — an unchanged document passage keeps its vector — but a vector of any other
-width came from a different model and no index of the current width can be built over it,
-so it is always recomputed. Without this, a rebuild after a model switch would regenerate
-nothing for document passages: their text is unchanged, so every one of them would be
-reused.
+**A stored chunk vector is reused only at the configured provider's width.** In an
+adapter's own search storage, reuse is keyed by content — an unchanged document chunk
+keeps its vector — but a vector of any other width came from a different model and no
+index of the current width can be built over it, so it is always recomputed. Without
+this, a rebuild after a model switch would regenerate nothing for document chunks: their
+text is unchanged, so every one of them would be reused. Search-index entries need no
+such rule: an entry's text hash covers the model.
 
 **A failed index ensure never stops the boot.** Startup reports the ontology it could not
 bring into line, in API vocabulary, and carries on with the rest. The state that makes an

@@ -828,9 +828,10 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
       // The one refusal lands before any streaming starts, so it reaches
       // the client in the standard error envelope rather than mid-stream:
       // an unknown ontology key answers 404 from the binding. A missing
-      // provider is not a refusal — the run then rebuilds the keyword
-      // segments and passages, which need no inference, and says so in
-      // its summary.
+      // provider is not a refusal — the run then rebuilds the passages,
+      // which need no inference, and says so in its summary. On an adapter
+      // that stores search indices the run covers the saved-query
+      // descriptions alone.
       const store = await getModelingStore(request.params.ontologyKey);
       const runtimeStore = await getRuntimeStore(request.params.ontologyKey);
       const stream = Readable.from(service.rebuildSearchData(store, runtimeStore));

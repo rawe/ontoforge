@@ -1,5 +1,6 @@
 /**
- * The vector-query door: what all four semantic-search paths share.
+ * The vector-query door of saved-query discovery. (Instance search reads
+ * the search-index entries, `searchIndexStore.ts`.)
  *
  * **Never one statement.** `SET LOCAL hnsw.iterative_scan = strict_order`
  * precedes every vector query, so the pair runs inside one explicit
@@ -14,7 +15,7 @@
  * **The cast width.** An HNSW index over `(embedding::vector(D))` is only
  * usable by a query that repeats that expression verbatim, so the width
  * comes from the index the query will use — the one the DDL module
- * reconciles. Where no such index exists the query still has to run, and
+ * ensures. Where no such index exists the query still has to run, and
  * the query vector's own width is then the only width that can be right.
  *
  * **The score is pinned:** `1 - distance/2` over pgvector's cosine

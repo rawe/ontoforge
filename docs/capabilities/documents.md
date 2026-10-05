@@ -111,14 +111,15 @@ context together with the offset that context starts at — enough to verify the
 without re-reading the document. When every occurrence is replaced, the written region
 describes the first one only.
 
-Both persist the whole new value and then re-synchronize the property's chunks.
+Both persist the whole new value; its passages follow as after any other write
+([Chunking](#chunking)).
 
 ### Chunking
 
-The chunks stored with the entity are produced synchronously with the write that changed
-the value. Passage entries are chunked the same way in the background, from the value
-current when they are built, and replace the property's previous passage entries
-([search-indices.md](search-indices.md#lifecycle)).
+A document value is chunked in the background, when its passage entries are built, from
+the value current then; the new passages replace the property's previous passage entries
+([search-indices.md](search-indices.md#lifecycle)). The passage entries are the only place
+chunks are kept.
 
 The text is walked from the start. For each chunk a target end is set at the configured
 chunk size, and a boundary is searched **backwards** from there, taking the first that
@@ -142,7 +143,7 @@ Chunk size and overlap are deployment configuration, global to the server, not p
 Overlap must be smaller than the size.
 
 Each chunk records its ordinal, its exact character offset and length in the source
-document, its text and its vector. **Chunks are internal.** Nothing addresses them: there is
+document, and its text. **Chunks are internal.** Nothing addresses them: there is
 no chunk id, ordinal or listing anywhere in the API, they are absent from the schema, they
 are rejected by the query validator, and they are not exported. The only trace they leave is
 in a search hit, which reports the matched passage as a character offset and length — the
@@ -150,11 +151,9 @@ coordinates the document read operation takes. See [search.md](search.md).
 
 ### Embedding behaviour
 
-**Documents are excluded from the entity's own-field entry and from its own embedding** —
-the composition rules are in [search-indices.md](search-indices.md#composition) and, for
-the per-entity data, [search.md](search.md#what-gets-embedded). The consequence here:
-adding, changing or removing a document value never re-embeds the entity, only its
-passages.
+**Documents are excluded from the entity's own-field entry** — the composition rules are
+in [search-indices.md](search-indices.md#composition). The consequence here: adding,
+changing or removing a document value never re-embeds the entity, only its passages.
 
 **Passage entries are compared by position.** A passage whose text at the same ordinal is
 unchanged is not embedded again. Because chunk boundaries are found by scanning local
@@ -163,36 +162,14 @@ an edit that leaves the number of chunks ahead of it unchanged re-embeds only th
 it touched, while one that adds or removes a chunk re-embeds every passage after it too.
 Every passage starts with the entity's name, so renaming the entity re-embeds them all.
 
-**Stored chunks are reused by content, and only at the configured model's width.** The
-chunks stored with the entity carry their own vectors. On every re-write the property's
-existing chunks are read into a text-to-vector map, deleted, and the new value re-chunked;
-a new chunk whose text is byte-identical to one of the old ones keeps that vector, and
-only the rest are embedded afresh. A stored vector of any other width is never reused — it
-came from a different embedding model, and no index of the current width could be built
-over it. That check is also what makes a rebuild after a model switch re-embed at all: the
-text is unchanged there, so reuse by content alone would keep every stale vector and
-regenerate none.
-
 Synchronization is per property: rewriting one document property never disturbs another
-property's chunks or passage entries on the same entity.
+property's passage entries on the same entity.
 
-Chunks are removed with the thing they belong to:
-
-| When | What happens |
-|---|---|
-| The document value is set to null or emptied | Its chunks are deleted and none replace them |
-| The entity is deleted | All of its chunks go with it |
-| The property definition is deleted | Every chunk of that entity type and property is dropped, with its vector index |
-| The entity type is deleted | The same, for each of its document properties |
-
-Passage entries follow: an entity's go with its deletion, and a property's or type's with
-the removal of its passage index ([search-indices.md](search-indices.md#managed-indices));
-an emptied value leaves none once its entries are rebuilt.
-
-The search-data rebuild regenerates the stored chunks along with each entity's stored
-text, which is how chunks written while no provider was configured acquire vectors. It
-also re-chunks with no provider configured. It does not touch passage entries. See
-[search.md](search.md#rebuild).
+Passage entries go with the thing they belong to: an entity's with its deletion, and a
+property's or type's with the removal of its passage index
+([search-indices.md](search-indices.md#managed-indices)); an emptied value leaves none
+once its entries are rebuilt. They keep themselves current, a changed embedding model
+included; the search-data rebuild ([search.md](search.md#rebuild)) does not touch them.
 
 ### Searching document content
 

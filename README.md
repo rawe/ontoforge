@@ -267,7 +267,7 @@ Find entities by meaning rather than exact keywords — within a single entity t
 | `EMBEDDING_BATCH_SIZE` | `1` | Texts per embedding request when many texts are embedded together (positive integer; cloud endpoints typically take 16 or more) |
 | `EMBEDDING_CONCURRENCY` | `1` | Embedding requests in flight at once when many texts are embedded together (positive integer) |
 
-Semantic indexes are built for the vector width of the model that created them, so changing `EMBEDDING_MODEL` or `EMBEDDING_DIMENSIONS` on an existing database — including a reused Docker volume — leaves indexes the new model cannot be searched against. Startup names each one in a warning; `POST /api/ontologies/{ontologyKey}/model/rebuild-search-data` rebuilds one ontology's indexes at the new width and regenerates its vectors — run it once per ontology after a provider switch.
+Changing `EMBEDDING_MODEL` or `EMBEDDING_DIMENSIONS` on an existing database — including a reused Docker volume — needs no action for entity search: on PostgreSQL the search indices notice the new model and build new semantic entries in the background; until those are ready, semantic ranking finds nothing and hybrid search answers from keyword entries alone. Saved-query discovery is the exception: its description index is built for the vector width of the model that created it, and startup names each mismatched one in a warning. `POST /api/ontologies/{ontologyKey}/model/rebuild-search-data` rebuilds one ontology's saved-query description vectors and that index at the new width — run it once per ontology after a provider switch. On Neo4j, which keeps no search indices, the same operation also rebuilds every entity's and document chunk's vectors and their indexes.
 
 ### AI-Powered Runtime
 

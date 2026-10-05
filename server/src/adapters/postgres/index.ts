@@ -16,7 +16,7 @@
 import type { KeywordLanguage } from "../../core/keywordLanguage.js";
 
 import { reportEnsureFailed } from "../../core/vectorDrift.js";
-import { ensureVectorIndexes, initSchema, reportPgvectorVersion } from "./ddl.js";
+import { ensureSavedQueryVectorIndex, initSchema, reportPgvectorVersion } from "./ddl.js";
 import type { SearchWorkSubscription } from "../../core/ports.js";
 import { closePool, initPool, listen } from "./errors.js";
 import { PostgresModelingStore } from "./modelingStore.js";
@@ -71,24 +71,23 @@ export async function closeStores(): Promise<void> {
 }
 
 /**
- * Ensure every ontology's vector indexes exist for the configured
- * dimensions, walking the registry — the authoritative ontology list —
- * one namespace at a time. Zero ontologies: nothing to do.
+ * Ensure every ontology's saved-query description index exists for the
+ * configured dimensions, walking the registry — the authoritative
+ * ontology list — one namespace at a time. Zero ontologies: nothing to
+ * do. Search indices need no such step: each generation records its own
+ * model and width, and the worker builds new ones on a switch.
  *
- * The startup path: width mismatches are REPORTED and nothing is
- * repaired — only the rebuild operation drops a drifted index, and it
- * regenerates the vectors before building it again
+ * The startup path: a width mismatch is REPORTED and nothing is repaired
  * (`docs/decisions.md#behaviour`).
  *
  * One ontology cannot stop the others, and none of them can stop the
- * boot. An unfinished rebuild leaves vectors of mixed width behind, over
- * which no index can be built; failing to start would take away the
- * server the operator needs to finish that rebuild.
+ * boot: descriptions of mixed width leave an index that cannot be built,
+ * and failing to start would take away the server the operator needs.
  */
 export async function ensureSemanticIndexes(dimensions: number): Promise<void> {
   for (const binding of await listOntologyBindings()) {
     try {
-      await ensureVectorIndexes(dimensions, binding.namespace);
+      await ensureSavedQueryVectorIndex(dimensions, binding.namespace);
     } catch {
       reportEnsureFailed(binding.key);
     }

@@ -10,11 +10,9 @@
  * all constraints inline and explicitly named (PG has no
  * `ADD CONSTRAINT IF NOT EXISTS`) — except the name-property FK, which
  * closes the `entity_type` ↔ `property_def` cycle after both tables
- * exist; no fixed constraint or index name uses
- * the `vec_` prefix, which is reserved for the dynamically created vector
- * indexes.
+ * exist.
  *
- * The vector-lifecycle functions take the caller's bound `namespace` and
+ * The saved-query index functions take the caller's bound `namespace` and
  * run their transactions inside it, so index DDL and catalog reads
  * (`current_schema()`) resolve within that ontology alone.
  *
@@ -23,16 +21,16 @@
  * with no backstop CHECKs; the search tables check only their closed
  * vocabularies (index kind, representation, generation state). The
  * `entity`/`relation` `type_key` columns get no FK to the schema tables:
- * deleting a type deliberately orphans its instances. The `embedding` columns are dimensionless, so init is
- * provider-independent — the width lives only in the HNSW indexes, whose
- * lifecycle is the second half of this module.
+ * deleting a type deliberately orphans its instances. Search over
+ * instances lives in the search-index tables alone; the one vector
+ * column beside them, the saved-query description's, is dimensionless, so
+ * init is provider-independent — the width lives only in its HNSW index,
+ * whose lifecycle is the second half of this module.
  */
 
-import { DEFAULT_KEYWORD_LANGUAGES, type KeywordLanguage } from "../../core/keywordLanguage.js";
+import { DEFAULT_KEYWORD_LANGUAGES } from "../../core/keywordLanguage.js";
 
 import {
-  documentPropertyScope,
-  entityTypeScope,
   reportWidthMismatch,
   reportWidthRecreate,
   SAVED_QUERY_SCOPE,
@@ -67,6 +65,12 @@ const SERVER_DDL_STATEMENTS: string[] = [
 )`,
 ];
 
+/** A value as a SQL literal. Values reach DDL only here — DDL binds no
+ * parameters. */
+function literal(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
 /**
  * The table set one ontology lives in — schema, instances and search
  * indices — and the initial search settings. Deliberately unqualified —
@@ -74,9 +78,7 @@ const SERVER_DDL_STATEMENTS: string[] = [
  * `ont_<key>` namespace via the transaction's search path
  * (`registry.ts`).
  */
-export function ontologyDdlStatements(language: KeywordLanguage): string[] {
-  // Closed mapping; language is fixed in both generated columns at provisioning.
-  const config = language === "german" ? "german" : "english";
+export function ontologyDdlStatements(): string[] {
   return [
   // --- Schema side -------------------------------------------------------
 
@@ -221,15 +223,10 @@ export function ontologyDdlStatements(language: KeywordLanguage): string[] {
   id         uuid        CONSTRAINT entity_pk PRIMARY KEY,   -- caller-supplied (service randomUUID), no default
   type_key   text        NOT NULL,                           -- NO FK: deleting a type orphans its instances by design
   props      jsonb       NOT NULL DEFAULT '{}'::jsonb,       -- user properties; system props are columns, not keys here
-  property_text text NOT NULL DEFAULT '',
-  keyword_text text NOT NULL DEFAULT '',
-  keyword_segments jsonb,
-  search_vector tsvector GENERATED ALWAYS AS (to_tsvector('${config}'::regconfig, keyword_text)) STORED,
-  embedding  vector,                                         -- dimensionless; NULL until written; width policed by the HNSW index
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
+  -- no search columns: entities are searched through search_entry
 )`,
-  `CREATE INDEX entity_keyword_idx ON entity USING gin (search_vector)`,
   `CREATE INDEX IF NOT EXISTS entity_type_key_idx ON entity (type_key)`,
 
   `CREATE TABLE IF NOT EXISTS relation (
@@ -240,27 +237,10 @@ export function ontologyDdlStatements(language: KeywordLanguage): string[] {
   props      jsonb       NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
-  -- no embedding column: relations are never embedded
 )`,
   `CREATE INDEX IF NOT EXISTS relation_type_key_idx ON relation (type_key)`,
   `CREATE INDEX IF NOT EXISTS relation_from_id_idx  ON relation (from_id)`,
   `CREATE INDEX IF NOT EXISTS relation_to_id_idx    ON relation (to_id)`,
-
-  `CREATE TABLE IF NOT EXISTS document_chunk (
-  id              uuid    CONSTRAINT document_chunk_pk PRIMARY KEY,   -- server randomUUID; never addressable (internal)
-  entity_id       uuid    NOT NULL CONSTRAINT document_chunk_entity_fk REFERENCES entity (id) ON DELETE CASCADE,
-  entity_type_key text    NOT NULL,
-  property_key    text    NOT NULL,
-  chunk_index     integer NOT NULL,   -- Row key _index
-  start_char      integer NOT NULL,   -- code-point offset
-  char_length     integer NOT NULL,   -- code-point length
-  text            text    NOT NULL,
-  search_vector tsvector GENERATED ALWAYS AS (to_tsvector('${config}'::regconfig, text)) STORED,
-  embedding       vector              -- dimensionless; optional per chunk
-  -- no timestamps (chunks carry none)
-)`,
-  `CREATE INDEX document_keyword_idx ON document_chunk USING gin (search_vector)`,
-  `CREATE INDEX IF NOT EXISTS document_chunk_entity_property_idx ON document_chunk (entity_id, property_key)`,
 
   // --- Search indices ----------------------------------------------------
 
@@ -399,56 +379,26 @@ export async function initSchema(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Vector-index lifecycle
+// Saved-query vector index
 // ---------------------------------------------------------------------------
 
 /*
- * Every vector index is a cast-expression HNSW over the dimensionless
- * `embedding` column — `(embedding::vector(D)) vector_cosine_ops`, cosine
- * mirroring the reference adapter's similarity function. Because the
- * column carries no width, there is no ALTER and no absent-then-added
- * state: the column is always there, NULL until written, and the width
- * lives only in the index. Queries must repeat the same cast expression
- * or the planner ignores the index; the width for that cast comes from
- * the reconciliation read below.
- *
- * Names: dynamic indexes are `vec_<table>_<id>`, where `<id>` is the
- * 32-hex uuid (hyphens stripped) of the schema row that causes the index
- * to exist — the `entity_type` row, or the property-definition row for a
- * document property's chunks. The mapping is mechanically reversible in
- * both directions, which is what makes the orphan sweep possible; index
- * names are therefore never stored. The one full-table index (saved-query
- * descriptions) is a fixed object outside the `vec_` prefix.
+ * The saved-query description index is a cast-expression HNSW over the
+ * dimensionless `embedding` column — `(embedding::vector(D))
+ * vector_cosine_ops`, cosine mirroring the reference adapter's similarity
+ * function. Because the column carries no width, there is no ALTER and no
+ * absent-then-added state: the column is always there, NULL until
+ * written, and the width lives only in the index. Queries must repeat the
+ * same cast expression or the planner ignores the index; the width for
+ * that cast comes from the catalog read below.
  *
  * Build mode is plain `CREATE INDEX`, never `CONCURRENTLY`: index DDL
  * joins the surrounding transaction, and a failed or interrupted build
- * leaves nothing behind — this engine has no failed-index state to sweep.
- * Writers to the one table wait during a build; builds happen only on
- * schema changes and provider setup.
+ * leaves nothing behind.
  */
 
 /** Saved-query descriptions — full-table, fixed name. */
 export const SAVED_QUERY_INDEX = "saved_query_embedding_idx";
-
-/** The 32-hex form of a schema row's uuid: the reversible half of a name. */
-function indexUuid(rowId: string): string {
-  return rowId.replaceAll("-", "");
-}
-
-function entityIndexName(entityTypeId: string): string {
-  return `vec_entity_${indexUuid(entityTypeId)}`;
-}
-
-function chunkIndexName(propertyId: string): string {
-  return `vec_document_chunk_${indexUuid(propertyId)}`;
-}
-
-/** A key as a SQL literal. Keys reach DDL only here — DDL binds no
- * parameters — and `KEY_PATTERN` already excludes quoting hazards, so
- * this is defense in depth. */
-function literal(key: string): string {
-  return `'${key.replaceAll("'", "''")}'`;
-}
 
 /**
  * The indexed expression: the dimensionless `embedding` column cast to
@@ -467,62 +417,12 @@ export function castExpression(width: number): string {
   return `embedding::vector(${width})`;
 }
 
-/**
- * One index of the inventory, minus its width: what it is called, what
- * the API calls it, and what it covers.
- *
- * The four members are one fact each and always travel together — every
- * one of them is derivable from the schema row that causes the index to
- * exist plus the keys that row carries, so they are derived once, here,
- * and never written out at a call site.
- */
-interface IndexSpec {
-  name: string;
-  describes: string;
-  table: string;
-  predicate: string | null;
-}
-
-/** The index of one entity type. */
-function entityIndexSpec(entityTypeId: string, entityTypeKey: string): IndexSpec {
-  return {
-    name: entityIndexName(entityTypeId),
-    describes: entityTypeScope(entityTypeKey),
-    table: "entity",
-    predicate: `type_key = ${literal(entityTypeKey)}`,
-  };
-}
-
-/** The chunk index of one document property. */
-function chunkIndexSpec(
-  propertyId: string,
-  entityTypeKey: string,
-  propertyKey: string,
-): IndexSpec {
-  return {
-    name: chunkIndexName(propertyId),
-    describes: documentPropertyScope(entityTypeKey, propertyKey),
-    table: "document_chunk",
-    predicate:
-      `entity_type_key = ${literal(entityTypeKey)} ` +
-      `AND property_key = ${literal(propertyKey)}`,
-  };
-}
-
-/** Saved-query descriptions. Lens scoping is a plain query-time
- * predicate, so the index needs no scoping of its own. */
-const SAVED_QUERY_SPEC: IndexSpec = {
-  name: SAVED_QUERY_INDEX,
-  describes: SAVED_QUERY_SCOPE,
-  table: "saved_query",
-  predicate: null,
-};
-
-function createHnsw(spec: IndexSpec, dimensions: number): string {
-  const where = spec.predicate === null ? "" : ` WHERE ${spec.predicate}`;
+/** The saved-query index at one width. Lens scoping is a plain
+ * query-time predicate, so the index needs no scoping of its own. */
+function createSavedQueryIndex(dimensions: number): string {
   return (
-    `CREATE INDEX IF NOT EXISTS ${spec.name} ON ${spec.table} ` +
-    `USING hnsw ((${castExpression(dimensions)}) vector_cosine_ops)${where}`
+    `CREATE INDEX IF NOT EXISTS ${SAVED_QUERY_INDEX} ON saved_query ` +
+    `USING hnsw ((${castExpression(dimensions)}) vector_cosine_ops)`
   );
 }
 
@@ -533,16 +433,7 @@ function createHnsw(spec: IndexSpec, dimensions: number): string {
  * (`registry.ts`).
  */
 export function fixedVectorIndexStatements(dimensions: number): string[] {
-  return [createHnsw(SAVED_QUERY_SPEC, dimensions)];
-}
-
-/** Drop one index. Callers pass a plain name — derived from a schema row
- * or read from the catalog, it makes no difference here — and the quoting
- * happens once, at this seam, through the package's one quoter: a name
- * read back from the catalog may be anything, and nothing about it is
- * assumed. */
-async function dropIndex(querier: Querier, indexName: string): Promise<void> {
-  await querier.query(`DROP INDEX IF EXISTS ${quoteIdent(indexName)}`);
+  return [createSavedQueryIndex(dimensions)];
 }
 
 /**
@@ -575,285 +466,25 @@ export async function indexWidth(querier: Querier, indexName: string): Promise<n
 }
 
 /**
- * Report an existing index whose width no longer matches the model.
+ * Ensure the saved-query description index exists at `dimensions`.
  *
  * An index fixes its width when it is created and a create-if-absent is a
  * no-op against one that exists, so changing the embedding model leaves
- * an index that rejects every vector the new model produces. Every path
- * that creates only reports it: repairing means dropping, and dropping
- * is the operator's call, made through the rebuild
- * (`dropMismatchedVectorIndexes`).
- *
- * Only the detection is here. What the operator is told — the wording
- * and the API-scope vocabulary every backend shares — is
- * `core/vectorDrift.ts`.
+ * an index that rejects every vector the new model produces. A drifted
+ * width is REPORTED (`core/vectorDrift.ts` holds the words), never
+ * repaired.
  */
-async function reportIfWidthDrifted(
-  querier: Querier,
-  indexName: string,
-  describes: string,
-  dimensions: number,
-): Promise<void> {
-  const existing = await indexWidth(querier, indexName);
-  if (existing === null || existing === dimensions) {
-    return;
-  }
-  reportWidthMismatch(describes, existing, dimensions);
-}
-
-/** Report a drifted width, then create the index if it is absent. */
-async function ensureIndex(
-  querier: Querier,
-  spec: IndexSpec,
-  dimensions: number,
-): Promise<void> {
-  await reportIfWidthDrifted(querier, spec.name, spec.describes, dimensions);
-  await querier.query(createHnsw(spec, dimensions));
-}
-
-/** The uuid of the `entity_type` row a key names, or null if it is gone. */
-async function entityTypeIdOf(querier: Querier, entityTypeKey: string): Promise<string | null> {
-  const result = await querier.query(`SELECT entity_type_id FROM entity_type WHERE key = $1`, [
-    entityTypeKey,
-  ]);
-  const row = result.rows[0];
-  return row === undefined ? null : (row["entity_type_id"] as string);
-}
-
-/** The uuid of the property-definition row a (type, property) pair names
- * — 1:1 with the pair — or null if it is gone. */
-async function documentPropertyIdOf(
-  querier: Querier,
-  entityTypeKey: string,
-  propertyKey: string,
-): Promise<string | null> {
-  const result = await querier.query(
-    `SELECT p.property_id FROM property_def p
-     JOIN entity_type et ON et.entity_type_id = p.entity_type_id
-     WHERE et.key = $1 AND p.key = $2`,
-    [entityTypeKey, propertyKey],
-  );
-  const row = result.rows[0];
-  return row === undefined ? null : (row["property_id"] as string);
-}
-
-/**
- * The entity-type index a key names, or null when the type is gone (and
- * with it the name's only derivation). A vector query asks for it to
- * learn the width its cast must use — see `indexWidth`.
- */
-export async function entityIndexNameOf(
-  querier: Querier,
-  entityTypeKey: string,
-): Promise<string | null> {
-  const entityTypeId = await entityTypeIdOf(querier, entityTypeKey);
-  return entityTypeId === null ? null : entityIndexName(entityTypeId);
-}
-
-/** The chunk index a (type, property) pair names, or null if it is gone. */
-export async function chunkIndexNameOf(
-  querier: Querier,
-  entityTypeKey: string,
-  propertyKey: string,
-): Promise<string | null> {
-  const propertyId = await documentPropertyIdOf(querier, entityTypeKey, propertyKey);
-  return propertyId === null ? null : chunkIndexName(propertyId);
-}
-
-/**
- * The rows a chunk index exists for: document properties owned by an
- * entity type.
- *
- * Shared verbatim by the create loop and the orphan sweep, because the
- * two must agree on exactly one set. Read wider by the sweep, a property
- * that stopped being a document keeps its index forever — never
- * recreated, never collected; read narrower, the sweep drops indexes the
- * inventory just built.
- */
-const DOCUMENT_PROPERTY_ROWS = `FROM property_def p
-     JOIN entity_type et ON et.entity_type_id = p.entity_type_id
-     WHERE p.data_type = 'document'`;
-
-/** Every dynamically named index currently in the schema. */
-async function dynamicIndexNames(querier: Querier): Promise<string[]> {
-  const result = await querier.query(
-    `SELECT indexname FROM pg_indexes
-     WHERE schemaname = current_schema() AND indexname LIKE 'vec\\_%'`,
-  );
-  return result.rows.map((row) => row["indexname"] as string);
-}
-
-/**
- * Drop every dynamic index whose uuid matches no schema row.
- *
- * This is the reverse direction of the naming rule: name → uuid → schema
- * row. It collects the indexes of deleted types and document properties
- * (whose drop hooks run after the row is gone, leaving the name
- * underivable), import-regenerated ids, and the stale-predicate case — a
- * re-created type key gets a fresh uuid, while the old index's
- * `WHERE type_key = …` predicate would still match its rows.
- *
- * "Matches a schema row" means the inventory's row, not any row: a
- * property that is no longer a document is no longer in the inventory,
- * so its chunk index is an orphan like any other.
- */
-async function sweepOrphanIndexes(querier: Querier): Promise<void> {
-  const names = await dynamicIndexNames(querier);
-  if (names.length === 0) {
-    return;
-  }
-  const entityTypeIds = await querier.query(`SELECT entity_type_id FROM entity_type`);
-  const knownTypes = new Set(
-    entityTypeIds.rows.map((row) => indexUuid(row["entity_type_id"] as string)),
-  );
-  const propertyIds = await querier.query(`SELECT p.property_id ${DOCUMENT_PROPERTY_ROWS}`);
-  const knownProperties = new Set(
-    propertyIds.rows.map((row) => indexUuid(row["property_id"] as string)),
-  );
-
-  for (const name of names) {
-    const entity = /^vec_entity_([0-9a-f]{32})$/.exec(name);
-    if (entity !== null && knownTypes.has(entity[1]!)) {
-      continue;
-    }
-    const chunk = /^vec_document_chunk_([0-9a-f]{32})$/.exec(name);
-    if (chunk !== null && knownProperties.has(chunk[1]!)) {
-      continue;
-    }
-    await dropIndex(querier, name);
-  }
-}
-
-/**
- * Create the vector index for one entity type.
- *
- * `filterProperties` is accepted and ignored: the index covers the cast
- * expression alone, so it is vector-only either way. Semantic search
- * composes with filters on every property regardless — they are ordinary
- * predicates beside the vector scan, needing no declaration and no
- * rebuild.
- */
-export async function createVectorIndex(
-  entityTypeKey: string,
-  dimensions: number,
-  _filterProperties?: string[] | null,
-  namespace?: string,
-): Promise<void> {
-  await withTransaction(
-    async (querier) => {
-      const entityTypeId = await entityTypeIdOf(querier, entityTypeKey);
-      if (entityTypeId === null) {
-        return;
-      }
-      await ensureIndex(querier, entityIndexSpec(entityTypeId, entityTypeKey), dimensions);
-    },
-    "READ COMMITTED",
-    namespace,
-  );
-}
-
-/**
- * Drop the vector index of one entity type.
- *
- * The name is re-derived from the schema row. Callers that have already
- * deleted the row leave the index behind as an orphan — `ensureVectorIndexes`
- * sweeps it on the next startup or rebuild.
- */
-export async function dropVectorIndex(entityTypeKey: string, namespace?: string): Promise<void> {
-  await withTransaction(
-    async (querier) => {
-      const entityTypeId = await entityTypeIdOf(querier, entityTypeKey);
-      if (entityTypeId === null) {
-        return;
-      }
-      await dropIndex(querier, entityIndexName(entityTypeId));
-    },
-    "READ COMMITTED",
-    namespace,
-  );
-}
-
-/**
- * Rebuild an entity type's vector index against its current properties.
- *
- * Width-only here: properties are never part of the index, so the rebuild
- * has nothing to pick up from a property change. It still drops and
- * recreates the HNSW index on every call — including each property add or
- * delete on the type. The drop and the create share one transaction, so
- * the drop's exclusive lock on `entity` is held while the index builds:
- * reads and writes of the ontology's entities wait until it commits.
- */
-export async function rebuildVectorIndex(
-  entityTypeKey: string,
-  dimensions: number,
-  namespace?: string,
-): Promise<void> {
-  await withTransaction(
-    async (querier) => {
-      const entityTypeId = await entityTypeIdOf(querier, entityTypeKey);
-      if (entityTypeId === null) {
-        return;
-      }
-      const spec = entityIndexSpec(entityTypeId, entityTypeKey);
-      await dropIndex(querier, spec.name);
-      // Not `ensureIndex`: the index is gone, so there is nothing left to
-      // reconcile — only a catalog read that could answer nothing.
-      await querier.query(createHnsw(spec, dimensions));
-    },
-    "READ COMMITTED",
-    namespace,
-  );
-}
-
-/** Create the chunk vector index of one document property. */
-export async function createDocumentVectorIndex(
-  entityTypeKey: string,
-  propertyKey: string,
-  dimensions: number,
-  namespace?: string,
-): Promise<void> {
-  await withTransaction(
-    async (querier) => {
-      const propertyId = await documentPropertyIdOf(querier, entityTypeKey, propertyKey);
-      if (propertyId === null) {
-        return;
-      }
-      await ensureIndex(querier, chunkIndexSpec(propertyId, entityTypeKey, propertyKey), dimensions);
-    },
-    "READ COMMITTED",
-    namespace,
-  );
-}
-
-/** Drop the chunk vector index of one document property. As with
- * `dropVectorIndex`, a vanished property row leaves an orphan for the
- * sweep. */
-export async function dropDocumentVectorIndex(
-  entityTypeKey: string,
-  propertyKey: string,
-  namespace?: string,
-): Promise<void> {
-  await withTransaction(
-    async (querier) => {
-      const propertyId = await documentPropertyIdOf(querier, entityTypeKey, propertyKey);
-      if (propertyId === null) {
-        return;
-      }
-      await dropIndex(querier, chunkIndexName(propertyId));
-    },
-    "READ COMMITTED",
-    namespace,
-  );
-}
-
-/** Ensure the saved-query description index exists. */
 export async function ensureSavedQueryVectorIndex(
   dimensions: number,
   namespace?: string,
 ): Promise<void> {
   await withTransaction(
     async (querier) => {
-      await ensureIndex(querier, SAVED_QUERY_SPEC, dimensions);
+      const existing = await indexWidth(querier, SAVED_QUERY_INDEX);
+      if (existing !== null && existing !== dimensions) {
+        reportWidthMismatch(SAVED_QUERY_SCOPE, existing, dimensions);
+      }
+      await querier.query(createSavedQueryIndex(dimensions));
     },
     "READ COMMITTED",
     namespace,
@@ -861,96 +492,25 @@ export async function ensureSavedQueryVectorIndex(
 }
 
 /**
- * Every semantic index the schema calls for, handed to a visitor one at
- * a time: the per-type indexes, the chunk index of every document
- * property, and the saved-query index.
- *
- * A rebuild walks this twice — once to drop what has drifted, once to
- * build what is missing — and the two passes have to agree on the
- * inventory exactly, or an index dropped by the first would never come
- * back. So it is derived once, here.
+ * Drop the saved-query index when its width no longer matches the model —
+ * the rebuild's first phase. It has to be a phase of its own: while an
+ * index of the old width stands, a description vector of the model's
+ * width cannot be stored, so the vectors cannot be regenerated underneath
+ * it. `ensureSavedQueryVectorIndex` builds it again once they have been.
+ * An index of the right width is left alone.
  */
-async function forEachIndexSpec(
-  querier: Querier,
-  visit: (spec: IndexSpec) => Promise<void>,
-): Promise<void> {
-  const entityTypes = await querier.query(
-    `SELECT entity_type_id, key FROM entity_type ORDER BY key`,
-  );
-  for (const row of entityTypes.rows) {
-    await visit(entityIndexSpec(row["entity_type_id"] as string, row["key"] as string));
-  }
-
-  const documentProperties = await querier.query(
-    `SELECT p.property_id, p.key AS property_key, et.key AS entity_type_key
-     ${DOCUMENT_PROPERTY_ROWS}
-     ORDER BY et.key, p.key`,
-  );
-  for (const row of documentProperties.rows) {
-    await visit(
-      chunkIndexSpec(
-        row["property_id"] as string,
-        row["entity_type_key"] as string,
-        row["property_key"] as string,
-      ),
-    );
-  }
-
-  await visit(SAVED_QUERY_SPEC);
-}
-
-/**
- * Ensure the whole vector-index inventory, in one all-or-nothing
- * transaction: sweep the orphans, then create every index the schema
- * calls for and does not have. A drifted width is reported, never
- * repaired.
- *
- * An index is built over `embedding::vector(D)`, and the cast is
- * evaluated per row — so this succeeds only while every stored vector is
- * already `dimensions` wide. After a switch of embedding model that is
- * true only once the rebuild has regenerated them.
- */
-export async function ensureVectorIndexes(
+export async function dropMismatchedSavedQueryVectorIndex(
   dimensions: number,
   namespace?: string,
 ): Promise<void> {
   await withTransaction(
     async (querier) => {
-      await sweepOrphanIndexes(querier);
-      await forEachIndexSpec(querier, (spec) => ensureIndex(querier, spec, dimensions));
-    },
-    "READ COMMITTED",
-    namespace,
-  );
-}
-
-/**
- * Drop every index whose width no longer matches the model — the
- * rebuild's first phase.
- *
- * It has to be a phase of its own. The index casts each row to its own
- * width, so while a drifted index stands, writing a vector of the
- * model's width fails: the vectors cannot be regenerated underneath it,
- * and it cannot be rebuilt over the old ones. Drop first, regenerate,
- * then `ensureVectorIndexes`.
- *
- * An index that is already the right width is left alone, so a rebuild
- * without drift never loses one.
- */
-export async function dropMismatchedVectorIndexes(
-  dimensions: number,
-  namespace?: string,
-): Promise<void> {
-  await withTransaction(
-    async (querier) => {
-      await forEachIndexSpec(querier, async (spec) => {
-        const existing = await indexWidth(querier, spec.name);
-        if (existing === null || existing === dimensions) {
-          return;
-        }
-        await dropIndex(querier, spec.name);
-        reportWidthRecreate(spec.describes, existing, dimensions);
-      });
+      const existing = await indexWidth(querier, SAVED_QUERY_INDEX);
+      if (existing === null || existing === dimensions) {
+        return;
+      }
+      await querier.query(`DROP INDEX IF EXISTS ${quoteIdent(SAVED_QUERY_INDEX)}`);
+      reportWidthRecreate(SAVED_QUERY_SCOPE, existing, dimensions);
     },
     "READ COMMITTED",
     namespace,

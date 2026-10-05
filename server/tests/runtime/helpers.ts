@@ -163,9 +163,10 @@ export function makeRelation(
 }
 
 /** Every port method as a mock — completeness is compiler-enforced. The
- * one non-method member, the store's ontology binding, stays a value. */
+ * one non-method member, the store's ontology binding, stays a value. The
+ * store keeps its own search storage: no search indices. */
 export type MockRuntimeStore = {
-  [K in Exclude<keyof RuntimeStore, "ontologyKey" | "textSearchLanguage">]: Mock;
+  [K in Exclude<keyof RuntimeStore, "ontologyKey" | "textSearchLanguage" | "searchIndices">]: Mock;
 } & { ontologyKey: string; textSearchLanguage: "english" | "german" };
 
 /** A mock store whose reads default to "nothing stored". */
@@ -189,10 +190,8 @@ export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeSto
     createDocumentChunks: vi.fn(async () => undefined),
     validateVectorIndexedProperties: vi.fn(() => undefined),
     documentSearchSemantic: vi.fn(async () => []),
-    documentSearchKeyword: vi.fn(async () => []),
     getEntitiesByIds: vi.fn(async () => ({})),
     propertySearchSemantic: vi.fn(async () => []),
-    propertySearchKeyword: vi.fn(async () => []),
     searchSavedQueries: vi.fn(async () => []),
     createRelation: vi.fn(),
     listRelations: vi.fn(async () => [[], 0]),

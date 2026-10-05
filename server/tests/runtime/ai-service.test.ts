@@ -62,6 +62,18 @@ function boundToolNames(fake: FakeToolCallingModel): string[] {
 
 const fakeEmbedding = { dimensions: 4, embed: async () => [0, 0, 0, 0] };
 
+/** Keyword ranking is the search indices': give the store an index store
+ * that holds no index yet, so search answers from it with no hits. */
+function withEmptySearchIndices(target: MockRuntimeStore): void {
+  target.supportsKeywordRanking.mockReturnValue(true);
+  const indexStore = {
+    listIndices: async () => [],
+    getSearchSettings: async () => ({ keywordLanguages: ["english"], disabledDefaults: {} }),
+    listGenerations: async () => [],
+  };
+  Object.assign(target, { searchIndices: () => indexStore });
+}
+
 // ---------------------------------------------------------------------------
 // Toolset computation
 // ---------------------------------------------------------------------------
@@ -89,7 +101,7 @@ describe("toolset computation", () => {
   });
 
   it("keeps both search tools with keyword ranking and no embedding provider", async () => {
-    store.supportsKeywordRanking.mockReturnValue(true);
+    withEmptySearchIndices(store);
     const fake = installFake([
       toolCallMessage("search", { query: "engineer" }),
       new AIMessage("Found them."),
@@ -101,7 +113,6 @@ describe("toolset computation", () => {
     expect(boundToolNames(fake)).not.toContain("search_saved_queries");
     const payload = JSON.parse(String(fake.calls[1]!.find((m) => m instanceof ToolMessage)!.content));
     expect(payload).toEqual({ query: "engineer", type: null, in: ["properties", "document"], strategy: "keyword", minSimilarity: null, filter: {}, hits: [] });
-    expect(store.propertySearchKeyword.mock.calls[0]![2]).toBe(10);
     for (const tool of fake.boundTools[0]! as { name: string; description: string; schema: { shape: Record<string, unknown> } }[]) {
       if (!["search", "search_documents"].includes(tool.name)) continue;
       expect(tool.description).toContain(RELATIVE_SCORE_PROMISE);
@@ -115,7 +126,7 @@ describe("toolset computation", () => {
   });
 
   it("run_saved_query preserves a final search envelope", async () => {
-    store.supportsKeywordRanking.mockReturnValue(true);
+    withEmptySearchIndices(store);
     store.getSavedQueries.mockResolvedValue([{
       key: "find_people", name: "Find people", description: "Find people",
       steps: JSON.stringify([{ name: "people", type: "search", entityTypeKey: "person", query: "engineer" }]),
@@ -127,12 +138,21 @@ describe("toolset computation", () => {
     expect(payload).toEqual({ query: "engineer", type: "person", in: ["properties", "document"], strategy: "keyword", minSimilarity: null, filter: {}, hits: [] });
   });
 
-  it.each([
-    ["hybrid", true],
-    ["semantic", false],
-  ])("search tools apply the fixed floor under a %s default", async (strategy, keyword) => {
+  it("search tools apply the fixed floor under a hybrid default", async () => {
     setEmbeddingProvider(fakeEmbedding);
-    store.supportsKeywordRanking.mockReturnValue(keyword);
+    withEmptySearchIndices(store);
+    const fake = installFake([
+      toolCallMessage("search", { query: "engineer", entity_type_key: "person" }),
+      new AIMessage("Found."),
+    ]);
+    await aiChat("full_lens", "find an engineer", asRuntimeStore(store));
+    const payload = JSON.parse(String(fake.calls[1]!.find((m) => m instanceof ToolMessage)!.content));
+    expect(payload.strategy).toBe("hybrid");
+    expect(payload.minSimilarity).toBe(TOOL_MIN_SIMILARITY);
+  });
+
+  it("search tools apply the fixed floor under a semantic default", async () => {
+    setEmbeddingProvider(fakeEmbedding);
     store.propertySearchSemantic.mockResolvedValue([
       { entity: { _id: "a", _entityTypeKey: "person", name: "a" }, score: 0.8 },
       { entity: { _id: "b", _entityTypeKey: "person", name: "b" }, score: 0.7 },
@@ -146,7 +166,7 @@ describe("toolset computation", () => {
     ]);
     await aiChat("full_lens", "find an engineer", asRuntimeStore(store));
     const payload = JSON.parse(String(fake.calls[1]!.find((m) => m instanceof ToolMessage)!.content));
-    expect(payload.strategy).toBe(strategy);
+    expect(payload.strategy).toBe("semantic");
     expect(payload.minSimilarity).toBe(TOOL_MIN_SIMILARITY);
     expect((payload.hits as Row[]).map((h) => (h.entity as Row)._id)).toEqual(["a"]);
     for (const tool of fake.boundTools[0]! as { name: string; description: string }[]) {
@@ -157,7 +177,7 @@ describe("toolset computation", () => {
   });
 
   it("search tools pass no floor under a keyword default", async () => {
-    store.supportsKeywordRanking.mockReturnValue(true);
+    withEmptySearchIndices(store);
     const schema = makeUnscopedSchema();
     (schema.entityTypes as Row[])[0]!.properties = [
       ...((schema.entityTypes as Row[])[0]!.properties as Row[]),

@@ -1,35 +1,40 @@
 /**
- * The vector-index lifecycle against a live PostgreSQL: what the seven
- * port methods actually leave in the catalog, and the three width-drift
- * branches.
+ * The vector-index lifecycle against a live PostgreSQL. Instance search
+ * lives in the search-index partitions (`search-index-storage.test.ts`);
+ * the one vector index beside them is the saved-query description index.
+ * What its port method and the startup hook leave in the catalog, its
+ * width-drift report and its repair — the rebuild, which here re-embeds
+ * the saved-query descriptions alone — and that schema changes build no
+ * per-type vector index any more.
  *
- * Written fresh against pgvector's own mechanics — nothing here is a
- * translation of the reference adapter's drift tests. Every exercise goes
- * through the persistence port; the catalog is read only to assert what
- * the port has no vocabulary for (an index's physical name and the width
- * it was built at), and touched directly only to stage an orphan — the
- * one state no port method can produce. Requires the docker-compose
- * PostgreSQL; no embedding provider is involved, since the widths are the
- * port's own arguments.
+ * Every exercise goes through the persistence port or the modeling
+ * service; the catalog is read only to assert what the port has no
+ * vocabulary for (an index's physical name and the width it was built
+ * at). Requires the docker-compose PostgreSQL; the widths are the port's
+ * own arguments.
  */
 
 import { randomUUID } from "node:crypto";
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runQuery } from "../../../src/adapters/postgres/errors.js";
 import { settings } from "../../../src/config.js";
-import type { ModelingStore, PropertyDef, RuntimeStore } from "../../../src/core/ports.js";
+import { setEmbeddingProvider } from "../../../src/core/embedding.js";
+import type { ModelingStore } from "../../../src/core/ports.js";
 import {
   closeStores,
   ensureSemanticIndexes,
   getModelingStore,
   getOntologyRegistry,
   getRuntimeStore,
+  getSearchIndexStore,
   initStores,
 } from "../../../src/core/ports.js";
+import * as modeling from "../../../src/modeling/service.js";
+import { fakeEmbeddingProvider } from "../../fakeEmbedding.js";
 import { wipeDatabase } from "../reset.js";
-import { DRIFT_SCOPES, logsOf, POSTGRES_LEAKS } from "../../vectorDrift.js";
+import { logsOf, POSTGRES_LEAKS, SAVED_QUERY_SCOPE } from "../../vectorDrift.js";
 
 /** The configured model's width, and a width no model in play produces. */
 const MODEL_WIDTH = 768;
@@ -38,6 +43,7 @@ const DRIFTED_WIDTH = 1024;
 /** The ontology every case runs in, and its physical namespace. */
 const ONTOLOGY_KEY = "vec_ont";
 const NAMESPACE = "ont_vec_ont";
+const SAVED_QUERY_INDEX = "saved_query_embedding_idx";
 
 interface IndexFacts {
   width: number | null;
@@ -68,28 +74,20 @@ async function catalog(namespace: string = NAMESPACE): Promise<Map<string, Index
   return facts;
 }
 
-async function widthOf(indexName: string): Promise<number | null> {
-  return (await catalog()).get(indexName)?.width ?? null;
+async function widthOf(indexName: string, namespace: string = NAMESPACE): Promise<number | null> {
+  return (await catalog(namespace)).get(indexName)?.width ?? null;
 }
 
-/** The 32-hex half of a dynamic index name. */
-function nameId(rowId: string): string {
-  return rowId.replaceAll("-", "");
-}
-
-/** A vector of the given width — the values are irrelevant, only the
- * width is. */
-function vectorOf(width: number): number[] {
-  return Array.from({ length: width }, () => 0.1);
+/** The HNSW indexes over a `vector` column in one namespace. */
+async function vectorIndexes(namespace: string = NAMESPACE): Promise<string[]> {
+  return [...(await catalog(namespace))]
+    .filter(([, facts]) => facts.width !== null)
+    .map(([name]) => name)
+    .sort();
 }
 
 describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lifecycle", () => {
   let store: ModelingStore;
-  let runtime: RuntimeStore;
-  let entityTypeId: string;
-  let documentPropertyId: string;
-  let entityIndex: string;
-  let chunkIndex: string;
 
   beforeAll(async () => {
     await initStores();
@@ -100,384 +98,155 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
     await closeStores();
   });
 
-  /** One entity type with a plain and a document property. No indexes
-   * yet — every test decides how they come into existence. */
+  /** A bare provisioning (no embedding width): no vector index yet —
+   * every test decides how it comes into existence. */
   beforeEach(async () => {
     await wipeDatabase();
-    // A bare provisioning (no embedding width): no fixed vector indexes
-    // yet — every test decides how indexes come into existence.
     await getOntologyRegistry().createOntology(randomUUID(), ONTOLOGY_KEY, null, null, "english");
     store = await getModelingStore(ONTOLOGY_KEY);
-    runtime = await getRuntimeStore(ONTOLOGY_KEY);
-    entityTypeId = randomUUID();
-    await store.createEntityType(entityTypeId, "person", "Person", null, {
-      propertyId: randomUUID(),
-      key: "name",
-      displayName: "Name",
-      description: null,
-      dataType: "string",
-      required: true,
-      defaultValue: null,
-    });
-    documentPropertyId = randomUUID();
-    await store.createProperty(
-      entityTypeId,
-      "EntityType",
-      documentPropertyId,
-      "bio",
-      "Bio",
-      null,
-      "document",
-      false,
-      null,
-    );
-    entityIndex = `vec_entity_${nameId(entityTypeId)}`;
-    chunkIndex = `vec_document_chunk_${nameId(documentPropertyId)}`;
-    // The two fixed indexes survive a wipe by design; drop them so each
-    // test starts from a known width.
-    await runQuery(`DROP INDEX IF EXISTS saved_query_embedding_idx`, undefined, NAMESPACE);
   });
 
-  it("ensures the whole inventory: two partial indexes and the two fixed ones", async () => {
-    await store.ensureVectorIndexes(MODEL_WIDTH);
-
-    const indexes = await catalog();
-    for (const name of [
-      entityIndex,
-      chunkIndex,
-      "saved_query_embedding_idx",
-    ]) {
-      expect(indexes.has(name), `${name} missing`).toBe(true);
-      expect(indexes.get(name)!.width).toBe(MODEL_WIDTH);
-      expect(indexes.get(name)!.definition).toContain("USING hnsw");
-      expect(indexes.get(name)!.definition).toContain("vector_cosine_ops");
-    }
-
-    // Partial where the inventory says partial, full-table where it does not.
-    expect(indexes.get(entityIndex)!.definition).toContain("WHERE (type_key = 'person'");
-    expect(indexes.get(chunkIndex)!.definition).toContain("entity_type_key = 'person'");
-    expect(indexes.get(chunkIndex)!.definition).toContain("property_key = 'bio'");
-    expect(indexes.get("saved_query_embedding_idx")!.definition).not.toContain("WHERE");
-
-    // Relations carry no embedding column, so no relation index exists.
-    for (const [name, facts] of indexes) {
-      expect(facts.definition.includes("hnsw") && name.includes("relation")).toBe(false);
-    }
+  afterEach(() => {
+    setEmbeddingProvider(null);
   });
 
-  it("ensures the inventory from the startup hook, not only the port method", async () => {
-    await ensureSemanticIndexes(MODEL_WIDTH);
-    for (const name of [
-      entityIndex,
-      chunkIndex,
-      "saved_query_embedding_idx",
-    ]) {
-      expect(await widthOf(name), `${name} missing`).toBe(MODEL_WIDTH);
-    }
-  });
-
-  it("names every dynamic index reversibly from the row that causes it", async () => {
-    await store.ensureVectorIndexes(MODEL_WIDTH);
-    const dynamic = [...(await catalog()).keys()].filter((name) => name.startsWith("vec_")).sort();
-
-    expect(dynamic).toEqual([chunkIndex, entityIndex].sort());
-    // name → uuid → schema row, the direction the sweep walks.
-    const rows = await runQuery(
-      `SELECT entity_type_id FROM entity_type WHERE replace(entity_type_id::text, '-', '') = $1`,
-      [entityIndex.slice("vec_entity_".length)],
-      NAMESPACE,
-    );
-    expect(rows.rows[0]!.entity_type_id).toBe(entityTypeId);
-  });
-
-  it("creates and drops one type's index through the port", async () => {
-        await store.createVectorIndex("person", MODEL_WIDTH, ["name"]);
-    expect(await widthOf(entityIndex)).toBe(MODEL_WIDTH);
-
-    await store.dropVectorIndex("person");
-    expect(await widthOf(entityIndex)).toBeNull();
-  });
-
-  it("creates and drops one document property's chunk index through the port", async () => {
-        await store.createDocumentVectorIndex("person", "bio", MODEL_WIDTH);
-    expect(await widthOf(chunkIndex)).toBe(MODEL_WIDTH);
-
-    await store.dropDocumentVectorIndex("person", "bio");
-    expect(await widthOf(chunkIndex)).toBeNull();
-  });
-
-  it("rebuilds an existing index to the model's width", async () => {
-        await store.createVectorIndex("person", DRIFTED_WIDTH);
-    await store.rebuildVectorIndex("person", MODEL_WIDTH);
-    expect(await widthOf(entityIndex)).toBe(MODEL_WIDTH);
-  });
-
-  it("ensures the saved-query index on its own", async () => {
+  it("ensures the saved-query index full-table at the model's width", async () => {
     await store.ensureSavedQueryVectorIndex(MODEL_WIDTH);
-    expect(await widthOf("saved_query_embedding_idx")).toBe(MODEL_WIDTH);
+
+    const index = (await catalog()).get(SAVED_QUERY_INDEX)!;
+    expect(index.width).toBe(MODEL_WIDTH);
+    expect(index.definition).toContain("USING hnsw");
+    expect(index.definition).toContain("vector_cosine_ops");
+    expect(index.definition).not.toContain("WHERE");
+  });
+
+  it("the startup hook builds the saved-query index and nothing per type", async () => {
+    await modeling.createEntityType(
+      { key: "person", displayName: "Person", nameProperty: "name" } as never,
+      store,
+    );
+
+    await ensureSemanticIndexes(MODEL_WIDTH);
+
+    expect(await vectorIndexes()).toEqual([SAVED_QUERY_INDEX]);
+  });
+
+  it("schema changes build no per-type or per-document vector index", async () => {
+    setEmbeddingProvider(fakeEmbeddingProvider({ dimensions: MODEL_WIDTH }));
+    const person = await modeling.createEntityType(
+      { key: "person", displayName: "Person", nameProperty: "name" } as never,
+      store,
+    );
+    const bio = await modeling.createProperty(
+      person.entityTypeId,
+      "EntityType",
+      { key: "bio", displayName: "Bio", dataType: "document", required: false } as never,
+      false,
+      store,
+    );
+    expect(await vectorIndexes()).toEqual([]);
+
+    await modeling.deleteProperty(person.entityTypeId, "EntityType", bio.propertyId, false, store);
+    await modeling.deleteEntityType(person.entityTypeId, false, store);
+    expect(await vectorIndexes()).toEqual([]);
   });
 
   describe("width drift", () => {
-    /** The whole inventory built at the wrong width. */
-    async function stageDrift(): Promise<void> {
-      await store.ensureVectorIndexes(DRIFTED_WIDTH);
-      for (const name of [
-        entityIndex,
-        chunkIndex,
-        "saved_query_embedding_idx",
-      ]) {
-        expect(await widthOf(name)).toBe(DRIFTED_WIDTH);
-      }
-    }
-
-    it("the startup ensure warns per mismatched scope and changes nothing", async () => {
-      await stageDrift();
+    it("the startup ensure reports a drifted saved-query index and changes nothing", async () => {
+      await store.ensureSavedQueryVectorIndex(DRIFTED_WIDTH);
 
       // The startup hook itself — the path that must never repair.
       const reported = await logsOf(() => ensureSemanticIndexes(MODEL_WIDTH));
 
-      for (const scope of DRIFT_SCOPES) {
-        expect(reported, `scope '${scope}' not reported`).toContain(scope);
-      }
+      expect(reported).toContain(SAVED_QUERY_SCOPE);
       expect(reported).toContain(String(DRIFTED_WIDTH));
       expect(reported).toContain(String(MODEL_WIDTH));
-      expect(reported).toContain("/model/rebuild-search-data");
       // API vocabulary only: no vendor, no physical name.
       for (const leak of POSTGRES_LEAKS) {
         expect(reported, `'${leak}' leaked into the report`).not.toContain(leak);
       }
-
-      for (const name of [
-        entityIndex,
-        chunkIndex,
-        "saved_query_embedding_idx",
-      ]) {
-        expect(await widthOf(name), `${name} was touched`).toBe(DRIFTED_WIDTH);
-      }
+      expect(await widthOf(SAVED_QUERY_INDEX)).toBe(DRIFTED_WIDTH);
     });
 
-    it("the drop phase clears every mismatched scope and builds nothing", async () => {
-      await stageDrift();
-
-      const reported = await logsOf(() => store.dropMismatchedVectorIndexes(MODEL_WIDTH));
-
-      expect(reported).toContain("Recreating the semantic index for entity type 'person'");
-      expect(reported).not.toContain("/model/rebuild-search-data");
-      for (const name of [
-        entityIndex,
-        chunkIndex,
-        "saved_query_embedding_idx",
-      ]) {
-        expect(await widthOf(name), `${name} was not dropped`).toBeNull();
-      }
-    });
-
-    it("the drop phase leaves indexes of the right width alone", async () => {
-      await store.ensureVectorIndexes(MODEL_WIDTH);
-
-      await store.dropMismatchedVectorIndexes(MODEL_WIDTH);
-
-      for (const name of [
-        entityIndex,
-        chunkIndex,
-        "saved_query_embedding_idx",
-      ]) {
-        expect(await widthOf(name), `${name} was dropped`).toBe(MODEL_WIDTH);
-      }
-    });
-
-    /**
-     * The reason the drop is a phase of its own rather than a flag on the
-     * ensure. An index is built over `embedding::vector(D)` and the cast
-     * runs per row, so it can only be built once every stored vector is
-     * already D wide — which, after a model switch, is true only after
-     * the rebuild has regenerated them. Drop and create in one step
-     * cannot work while the old vectors are still there.
-     */
-    it("drop, regenerate, ensure — the order a model switch has to follow", async () => {
-      const propertyDefs: Record<string, PropertyDef> = {
-        name: {
-          key: "name",
-          displayName: "Name",
-          description: null,
-          dataType: "string",
-          required: true,
-          defaultValue: null,
-        },
-      };
-      await store.ensureVectorIndexes(DRIFTED_WIDTH);
-      const entityId = randomUUID();
-      await runtime.createEntity(
-        "person",
-        entityId,
-        { name: "Ada" },
-        propertyDefs,
-        vectorOf(DRIFTED_WIDTH),
+    it("the rebuild repairs the saved-query index alone: no entity, document or search-index work", async () => {
+      // Written under a model of the drifted width: a description vector
+      // and an index of that width, beside a typed entity with a document.
+      const old = fakeEmbeddingProvider({ dimensions: DRIFTED_WIDTH });
+      setEmbeddingProvider(old);
+      const note = await modeling.createEntityType(
+        { key: "note", displayName: "Note", nameProperty: "name" } as never,
+        store,
       );
-
-      // While the drifted index still stands the ensure is a no-op —
-      // `CREATE INDEX IF NOT EXISTS` skips it — so it only reports.
-      await store.ensureVectorIndexes(MODEL_WIDTH);
-      expect(await widthOf(entityIndex)).toBe(DRIFTED_WIDTH);
-
-      // Phase one: the drop.
-      await store.dropMismatchedVectorIndexes(MODEL_WIDTH);
-      expect(await widthOf(entityIndex)).toBeNull();
-
-      // The heart of it: with the index gone and the old vector still
-      // stored, building at the model's width is impossible. This is the
-      // step the old one-transaction repair performed straight after its
-      // drop, and it is why the two cannot share a phase.
-      await expect(store.ensureVectorIndexes(MODEL_WIDTH)).rejects.toThrow();
-
-      // Phase two regenerates, and only then can phase three build.
-      await store.setEntitySearchText(entityId, "person: name=Test", vectorOf(MODEL_WIDTH));
-      await store.ensureVectorIndexes(MODEL_WIDTH);
-
-      for (const name of [entityIndex]) {
-        expect(await widthOf(name), `${name} was not rebuilt`).toBe(MODEL_WIDTH);
-      }
-    });
-
-    it("the per-type create path reports without touching", async () => {
-            await store.createVectorIndex("person", DRIFTED_WIDTH);
-      await store.createDocumentVectorIndex("person", "bio", DRIFTED_WIDTH);
+      await modeling.createProperty(
+        note.entityTypeId,
+        "EntityType",
+        { key: "body", displayName: "Body", dataType: "document", required: false } as never,
+        false,
+        store,
+      );
+      const lensId = randomUUID();
+      await store.createLens(lensId, "all", "All", null);
+      await store.upsertSavedQuery(
+        lensId, randomUUID(), "notes", "Notes", "Find notes", "[]", "[]", "all",
+        (await old.embed("Find notes"))!,
+      );
       await store.ensureSavedQueryVectorIndex(DRIFTED_WIDTH);
+      const runtime = await getRuntimeStore(ONTOLOGY_KEY);
+      await runtime.createEntity("note", randomUUID(), { name: "N", body: "Some text." }, {}, null, null);
+      const searchIndices = await getSearchIndexStore(ONTOLOGY_KEY);
+      const generationsBefore = await searchIndices.listGenerations();
+      const queueBefore = await runQuery(`SELECT count(*)::int AS n FROM ${NAMESPACE}.search_queue`);
 
-      const reported = await logsOf(async () => {
-        await store.createVectorIndex("person", MODEL_WIDTH);
-        await store.createDocumentVectorIndex("person", "bio", MODEL_WIDTH);
-        await store.ensureSavedQueryVectorIndex(MODEL_WIDTH);
-      });
-
-      expect(reported).toContain("entity type 'person'");
-      expect(reported).toContain("document property 'bio' on entity type 'person'");
-      expect(reported).toContain("saved-query descriptions");
-      for (const name of [entityIndex, chunkIndex, "saved_query_embedding_idx"]) {
-        expect(await widthOf(name), `${name} was touched`).toBe(DRIFTED_WIDTH);
+      // The model switches; the rebuild follows.
+      const current = fakeEmbeddingProvider({ dimensions: MODEL_WIDTH });
+      setEmbeddingProvider(current);
+      const embed = vi.spyOn(current, "embed");
+      const events: Record<string, unknown>[] = [];
+      for await (const line of modeling.rebuildSearchData(store, runtime)) {
+        events.push(JSON.parse(line) as Record<string, unknown>);
       }
+
+      expect(events).toEqual([
+        { type: "progress", entityTypeKey: "saved_queries", processed: 1, total: 1 },
+        {
+          type: "summary",
+          entityTypes: [],
+          savedQueriesProcessed: 1,
+          savedQueriesFailed: 0,
+          totalProcessed: 1,
+          totalFailed: 0,
+          embeddingsSkipped: false,
+        },
+      ]);
+      expect(embed.mock.calls).toEqual([["Find notes"]]);
+      expect(current.batchCalls).toBe(0);
+      expect(await widthOf(SAVED_QUERY_INDEX)).toBe(MODEL_WIDTH);
+      const stored = await runQuery(
+        `SELECT vector_dims(embedding) AS width FROM ${NAMESPACE}.saved_query`,
+      );
+      expect(stored.rows).toEqual([{ width: MODEL_WIDTH }]);
+      expect(await searchIndices.listGenerations()).toEqual(generationsBefore);
+      expect(
+        (await runQuery(`SELECT count(*)::int AS n FROM ${NAMESPACE}.search_queue`)).rows,
+      ).toEqual(queueBefore.rows);
+      expect(await vectorIndexes()).toEqual([SAVED_QUERY_INDEX]);
     });
 
     it("says nothing when the widths agree", async () => {
-      await store.ensureVectorIndexes(MODEL_WIDTH);
-      const reported = await logsOf(() => store.ensureVectorIndexes(MODEL_WIDTH));
+      await store.ensureSavedQueryVectorIndex(MODEL_WIDTH);
+      const reported = await logsOf(() => ensureSemanticIndexes(MODEL_WIDTH));
       expect(reported).toBe("");
-    });
-  });
-
-  describe("orphan sweep", () => {
-    it("drops a dynamic index whose uuid matches no schema row", async () => {
-      // Staged directly: no port method can leave an index behind whose
-      // row never existed. The stale predicate is the point — it still
-      // matches rows a re-created type key would write.
-      const orphan = `vec_entity_${nameId(randomUUID())}`;
-      const chunkOrphan = `vec_document_chunk_${nameId(randomUUID())}`;
-      await runQuery(
-        `CREATE INDEX ${orphan} ON entity USING hnsw ((embedding::vector(${MODEL_WIDTH})) vector_cosine_ops) WHERE type_key = 'person'`,
-        undefined,
-        NAMESPACE,
-      );
-      await runQuery(
-        `CREATE INDEX ${chunkOrphan} ON document_chunk USING hnsw ((embedding::vector(${MODEL_WIDTH})) vector_cosine_ops)`,
-        undefined,
-        NAMESPACE,
-      );
-
-      await store.ensureVectorIndexes(MODEL_WIDTH);
-
-      const indexes = await catalog();
-      expect(indexes.has(orphan)).toBe(false);
-      expect(indexes.has(chunkOrphan)).toBe(false);
-      expect(indexes.has(entityIndex)).toBe(true);
-      expect(indexes.has(chunkIndex)).toBe(true);
-    });
-
-    it("collects the index a deleted entity type left behind", async () => {
-            await store.ensureVectorIndexes(MODEL_WIDTH);
-      expect(await widthOf(entityIndex)).toBe(MODEL_WIDTH);
-
-      // The delete hooks run after the schema row is gone, so the drop
-      // has no name to derive and the index survives as an orphan.
-      await store.deleteEntityType(entityTypeId);
-      await store.dropDocumentVectorIndex("person", "bio");
-      await store.dropVectorIndex("person");
-      expect(await widthOf(entityIndex)).toBe(MODEL_WIDTH);
-
-      await store.ensureVectorIndexes(MODEL_WIDTH);
-
-      const indexes = await catalog();
-      expect(indexes.has(entityIndex)).toBe(false);
-      expect(indexes.has(chunkIndex)).toBe(false);
-    });
-
-    it("collects the chunk index of a property that is no longer a document", async () => {
-            await store.ensureVectorIndexes(MODEL_WIDTH);
-      expect(await widthOf(chunkIndex)).toBe(MODEL_WIDTH);
-
-      // Staged directly: no port method converts a property's data type
-      // in place. The index is what makes the state interesting — the
-      // row survives, only its membership of the inventory does not.
-      await runQuery(
-        `UPDATE property_def SET data_type = 'string' WHERE property_id = $1`,
-        [documentPropertyId],
-        NAMESPACE,
-      );
-
-      await store.ensureVectorIndexes(MODEL_WIDTH);
-
-      const indexes = await catalog();
-      expect(indexes.has(chunkIndex)).toBe(false);
-      expect(indexes.has(entityIndex)).toBe(true);
-    });
-
-    it("leaves the fixed indexes alone", async () => {
-      await store.ensureVectorIndexes(MODEL_WIDTH);
-      await store.ensureVectorIndexes(MODEL_WIDTH);
-      const indexes = await catalog();
-      expect(indexes.has("saved_query_embedding_idx")).toBe(true);
     });
   });
 
   describe("startup maintenance across the registry", () => {
     it("one startup ensure covers every registered ontology's namespace", async () => {
-      // A second ontology with its own typed schema beside the fixture one.
       await getOntologyRegistry().createOntology(randomUUID(), "vec_other", null, null, "english");
-      const other = await getModelingStore("vec_other");
-      const otherTypeId = randomUUID();
-      await other.createEntityType(otherTypeId, "ticket", "Ticket", null, {
-        propertyId: randomUUID(),
-        key: "name",
-        displayName: "Name",
-        description: null,
-        dataType: "string",
-        required: false,
-        defaultValue: null,
-      });
-
-      // An orphan staged in the second namespace: the sweep must reach it.
-      const orphan = `vec_entity_${nameId(randomUUID())}`;
-      await runQuery(
-        `CREATE INDEX ${orphan} ON entity USING hnsw ((embedding::vector(${MODEL_WIDTH})) vector_cosine_ops)`,
-        undefined,
-        "ont_vec_other",
-      );
 
       await ensureSemanticIndexes(MODEL_WIDTH);
 
-      // The fixture ontology got its full inventory ...
-      for (const name of [entityIndex, chunkIndex]) {
-        expect((await catalog()).get(name)?.width, `${name} missing in ${NAMESPACE}`).toBe(
-          MODEL_WIDTH,
-        );
-      }
-      // ... and so did the second, per ITS schema, in ITS namespace.
-      const otherIndexes = await catalog("ont_vec_other");
-      expect(otherIndexes.get(`vec_entity_${nameId(otherTypeId)}`)?.width).toBe(MODEL_WIDTH);
-      expect(otherIndexes.get("saved_query_embedding_idx")?.width).toBe(MODEL_WIDTH);
-      // The orphan in the second namespace was swept by the same call.
-      expect(otherIndexes.has(orphan)).toBe(false);
-      // The fixture namespace never grew the other ontology's index.
-      expect((await catalog()).has(`vec_entity_${nameId(otherTypeId)}`)).toBe(false);
+      expect(await widthOf(SAVED_QUERY_INDEX)).toBe(MODEL_WIDTH);
+      expect(await widthOf(SAVED_QUERY_INDEX, "ont_vec_other")).toBe(MODEL_WIDTH);
     });
 
     it("with zero ontologies the startup ensure does nothing and succeeds", async () => {

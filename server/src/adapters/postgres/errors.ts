@@ -322,7 +322,7 @@ function translate(exc: unknown): OntoForgeError {
 }
 
 /** The insert-side FK constraints whose vanished parent is an entity. */
-const ENTITY_FKS = new Set(["relation_from_fk", "relation_to_fk", "document_chunk_entity_fk"]);
+const ENTITY_FKS = new Set(["relation_from_fk", "relation_to_fk"]);
 
 /** The relation-type endpoint FKs: NotFound on the insert side, Conflict
  * when their RESTRICT fires on an entity-type DELETE. */

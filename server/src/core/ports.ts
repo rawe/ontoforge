@@ -167,7 +167,9 @@ export interface ReservedTypeKeyInUse {
  * The modeling side of the persistence port: schema persistence.
  *
  * Capability grouping follows `docs/storage-adapters.md` ("The two store
- * surfaces"); the section comments below mirror it.
+ * surfaces"); the section comments below mirror it. The optional methods
+ * marked "own search storage" are present exactly when the adapter stores
+ * no search indices (`core/ownSearch.ts`).
  */
 export interface ModelingStore {
   readonly textSearchLanguage: KeywordLanguage;
@@ -363,12 +365,12 @@ export interface ModelingStore {
   ): Promise<number>;
 
   // ------------------------------------------------------------------
-  // Document-property cleanup
+  // Document-property cleanup (own search storage)
   // ------------------------------------------------------------------
 
   /** Delete every chunk of one (entity type, document property) pair.
    * Invoked when the property, or its owning type, is removed. */
-  deleteChunksForTypeProperty(entityTypeKey: string, propertyKey: string): Promise<void>;
+  deleteChunksForTypeProperty?(entityTypeKey: string, propertyKey: string): Promise<void>;
 
   // ------------------------------------------------------------------
   // Full schema (get_schema now; validation and export later)
@@ -428,49 +430,50 @@ export interface ModelingStore {
 
   deleteSavedQuery(lensId: string, queryKey: string): Promise<boolean>;
 
+  /** Ensure the saved-query description index at `dimensions`; a drifted
+   * width is reported, never repaired. */
+  ensureSavedQueryVectorIndex(dimensions: number): Promise<void>;
+
   // ------------------------------------------------------------------
   // Embedding maintenance (rebuild support)
   // ------------------------------------------------------------------
-
-  getEntityTypesWithProperties(): Promise<Row[]>;
-
-  setEntitySearchText(
-    entityId: string,
-    propertyText: string,
-    embedding: number[] | null,
-    keywordSegments?: KeywordPropertySegment[],
-  ): Promise<void>;
 
   listSavedQueryRefs(): Promise<Row[]>;
 
   setSavedQueryEmbedding(savedQueryId: string, embedding: number[]): Promise<void>;
 
+  /** Own search storage. */
+  getEntityTypesWithProperties?(): Promise<Row[]>;
+
+  /** Own search storage: store one entity's semantic vector (null: none). */
+  setEntityEmbedding?(entityId: string, embedding: number[] | null): Promise<void>;
+
   // ------------------------------------------------------------------
-  // Vector-index DDL
+  // Vector-index DDL (own search storage)
   // ------------------------------------------------------------------
 
-  createVectorIndex(
+  createVectorIndex?(
     entityTypeKey: string,
     dimensions: number,
     filterProperties?: string[] | null,
   ): Promise<void>;
 
-  dropVectorIndex(entityTypeKey: string): Promise<void>;
+  dropVectorIndex?(entityTypeKey: string): Promise<void>;
 
-  rebuildVectorIndex(entityTypeKey: string, dimensions: number): Promise<void>;
+  rebuildVectorIndex?(entityTypeKey: string, dimensions: number): Promise<void>;
 
-  createDocumentVectorIndex(
+  createDocumentVectorIndex?(
     entityTypeKey: string,
     propertyKey: string,
     dimensions: number,
   ): Promise<void>;
 
-  dropDocumentVectorIndex(entityTypeKey: string, propertyKey: string): Promise<void>;
-
-  ensureSavedQueryVectorIndex(dimensions: number): Promise<void>;
+  dropDocumentVectorIndex?(entityTypeKey: string, propertyKey: string): Promise<void>;
 
   /**
-   * Drop every semantic index whose width no longer matches the model.
+   * Drop every semantic index whose width no longer matches the model —
+   * on an adapter that stores search indices, the saved-query index alone
+   * (search-index generations record their own model and width).
    *
    * The rebuild's first phase, and the only place drift is repaired
    * rather than reported. It has to come first: an index fixes its width
@@ -483,7 +486,8 @@ export interface ModelingStore {
 
   /**
    * Build every semantic index the schema calls for and does not have,
-   * at `dimensions`. An index whose width has drifted is REPORTED and
+   * at `dimensions` — as above, the saved-query index alone where search
+   * indices are stored. An index whose width has drifted is REPORTED and
    * left alone — repair belongs to the rebuild, through the method above.
    */
   ensureVectorIndexes(dimensions: number): Promise<void>;
@@ -505,7 +509,9 @@ export interface ModelingStore {
  * decoding — `getEntityById`, `getEntitiesByIds`, and `getNeighbors` (an
  * adapter whose storage is self-describing may ignore them); listing
  * paths carry them for the same reason. `getEntity` and `getRelation`
- * carry none.
+ * carry none. The optional methods marked "own search storage" are
+ * present exactly when the adapter stores no search indices
+ * (`core/ownSearch.ts`).
  */
 export interface SearchedType {
   entityTypeKey: string;
@@ -523,12 +529,6 @@ export interface SearchedProperty {
  * `docs/storage-adapters.md`, "Search". */
 export type KeywordMatching = "any" | "all";
 
-/** Exact ordered value segments used by property keyword indexing, never semantic text. */
-export interface KeywordPropertySegment {
-  propertyKey: string;
-  text: string;
-}
-
 export interface RuntimeStore {
   /** The ontology this store is bound to. The runtime schema cache keys
    * its entries by this binding plus the lens key. */
@@ -545,6 +545,8 @@ export interface RuntimeStore {
    * service can reject such a filter on search without knowing why the
    * adapter cannot evaluate it. */
   supportsSearchPathConditions(): boolean;
+  /** Whether search can rank by keyword — through the search indices on
+   * an adapter that stores them. */
   supportsKeywordRanking(): boolean;
 
   // ------------------------------------------------------------------
@@ -562,13 +564,13 @@ export interface RuntimeStore {
   getSavedQueries(lensKey: string): Promise<Row[]>;
 
   // ------------------------------------------------------------------
-  // Vector-index metadata validation
+  // Vector-index metadata validation (own search storage)
   // ------------------------------------------------------------------
 
   /** Reject property values the adapter's vector-index filter metadata
    * cannot hold. Synchronous; raises the domain `ValidationError`. An
    * adapter without such limits implements it as a no-op. */
-  validateVectorIndexedProperties(
+  validateVectorIndexedProperties?(
     entityTypeKey: string,
     properties: Row,
     filterProperties: string[],
@@ -590,6 +592,9 @@ export interface RuntimeStore {
   // causes (`core/searchDependencies.ts`). An adapter that stores search
   // indices applies it in the write's own transaction, so the work is
   // queued exactly when the write commits; one that does not ignores it.
+  // The `embedding` is the entity's semantic vector on an adapter with
+  // its own search storage; an adapter that stores search indices never
+  // receives one and ignores it.
   // ------------------------------------------------------------------
 
   createEntity(
@@ -598,8 +603,6 @@ export interface RuntimeStore {
     properties: Row,
     propertyDefs: Record<string, PropertyDef>,
     embedding?: number[] | null,
-    propertyText?: string,
-    keywordSegments?: KeywordPropertySegment[],
     search?: SearchWritePlan | null,
   ): Promise<Row>;
 
@@ -630,8 +633,6 @@ export interface RuntimeStore {
     propertyDefs: Record<string, PropertyDef>,
     embedding?: number[] | null,
     hasEmbeddingUpdate?: boolean,
-    propertyText?: string,
-    keywordSegments?: KeywordPropertySegment[],
     search?: SearchWritePlan | null,
   ): Promise<Row | null>;
 
@@ -641,52 +642,37 @@ export interface RuntimeStore {
     search?: SearchWritePlan | null,
   ): Promise<boolean>;
 
-  // ------------------------------------------------------------------
-  // Document chunks
-  // ------------------------------------------------------------------
-
-  getChunkEmbeddingsForEntityProperty(
-    entityId: string,
-    propertyKey: string,
-  ): Promise<Record<string, number[]>>;
-
-  deleteChunksForEntityProperty(entityId: string, propertyKey: string): Promise<void>;
-
-  createDocumentChunks(
-    entityId: string,
-    entityTypeKey: string,
-    propertyKey: string,
-    chunks: Row[],
-  ): Promise<void>;
-
   getEntitiesByIds(
     entityIds: string[],
     propertyDefs: Record<string, PropertyDef>,
   ): Promise<Record<string, Row>>;
 
   // ------------------------------------------------------------------
+  // Document chunks (own search storage)
+  // ------------------------------------------------------------------
+
+  getChunkEmbeddingsForEntityProperty?(
+    entityId: string,
+    propertyKey: string,
+  ): Promise<Record<string, number[]>>;
+
+  deleteChunksForEntityProperty?(entityId: string, propertyKey: string): Promise<void>;
+
+  createDocumentChunks?(
+    entityId: string,
+    entityTypeKey: string,
+    propertyKey: string,
+    chunks: Row[],
+  ): Promise<void>;
+
+  // ------------------------------------------------------------------
   // Semantic search
   // ------------------------------------------------------------------
 
-  /** Keyword source rows carry a native internal score and optional
-   * keywordPropertyKeys: all retained value segments supplying query terms, or
-   * null when unsupported/unmeasured. Keys need not independently satisfy the
-   * full query. The runtime checks current lens exposure. */
-  propertySearchKeyword(
-    searchedTypes: SearchedType[],
-    queryText: string,
-    limit: number,
-    matching: KeywordMatching,
-  ): Promise<Row[]>;
-  documentSearchKeyword(
-    searchedProperties: SearchedProperty[],
-    queryText: string,
-    limit: number,
-    matching: KeywordMatching,
-  ): Promise<Row[]>;
-  /** Semantic score is the original (1 + cosine) / 2 similarity, not confidence. */
-  propertySearchSemantic(searchedTypes: SearchedType[], queryEmbedding: number[], limit: number): Promise<Row[]>;
-  documentSearchSemantic(searchedProperties: SearchedProperty[], queryEmbedding: number[], limit: number): Promise<Row[]>;
+  /** Own search storage. Semantic score is the original (1 + cosine) / 2
+   * similarity, not confidence. */
+  propertySearchSemantic?(searchedTypes: SearchedType[], queryEmbedding: number[], limit: number): Promise<Row[]>;
+  documentSearchSemantic?(searchedProperties: SearchedProperty[], queryEmbedding: number[], limit: number): Promise<Row[]>;
 
   /** Rank SavedQuery descriptions for one lens by vector similarity. */
   searchSavedQueries(

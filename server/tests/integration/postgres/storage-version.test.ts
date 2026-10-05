@@ -1,10 +1,12 @@
 /**
  * PostgreSQL storage version — reaches past the persistence port on
  * purpose: storage at version 2 (the 5.x layout, before name properties
- * and search indices) is produced by dropping what the current code adds,
- * then the boot (`initSchema`) must bring it to exactly the layout of a
- * freshly created ontology, backfilling every entity type's name property,
- * the search settings and the managed search indices, once,
+ * and search indices) is produced by dropping what the current code adds
+ * and restoring the per-entity search storage it retires, then the boot
+ * (`initSchema`) must bring it to exactly the layout of a freshly created
+ * ontology, backfilling every entity type's name property, the search
+ * settings and the managed search indices and dropping the retired
+ * storage, once,
  * however many servers start together; it must refuse storage older than
  * the previous major line and leave storage newer than the code
  * untouched. Requires the docker-compose PostgreSQL.
@@ -41,10 +43,58 @@ async function recordVersion(version: number): Promise<void> {
   });
 }
 
+/** The per-type and per-document-property vector indexes of version 2,
+ * named from schema-row uuids. */
+const VEC_ENTITY_INDEX = "vec_entity_4f2d8a31111142228333444455556666";
+const VEC_CHUNK_INDEX = "vec_document_chunk_0a1b2c3d999948888777666655554444";
+
 /** Storage of the previous major line (version 2): no name property, no
- * search-index tables, two lens inclusion kinds. */
+ * search-index tables, two lens inclusion kinds — and the per-entity
+ * search storage: search columns on `entity`, `document_chunk`, their
+ * keyword indexes and per-type vector indexes. */
 async function makeVersion2(namespace: string): Promise<void> {
   await withTransaction(async (querier) => {
+    await querier.query(
+      `ALTER TABLE ${namespace}.entity
+         ADD COLUMN property_text text NOT NULL DEFAULT '',
+         ADD COLUMN keyword_text text NOT NULL DEFAULT '',
+         ADD COLUMN keyword_segments jsonb,
+         ADD COLUMN search_vector tsvector
+           GENERATED ALWAYS AS (to_tsvector('english'::regconfig, keyword_text)) STORED,
+         ADD COLUMN embedding vector`,
+    );
+    await querier.query(`CREATE INDEX entity_keyword_idx ON ${namespace}.entity USING gin (search_vector)`);
+    await querier.query(
+      `CREATE INDEX ${VEC_ENTITY_INDEX} ON ${namespace}.entity
+         USING hnsw ((embedding::vector(3)) vector_cosine_ops) WHERE type_key = 'person'`,
+    );
+    await querier.query(
+      `CREATE TABLE ${namespace}.document_chunk (
+         id              uuid    CONSTRAINT document_chunk_pk PRIMARY KEY,
+         entity_id       uuid    NOT NULL CONSTRAINT document_chunk_entity_fk
+                                 REFERENCES ${namespace}.entity (id) ON DELETE CASCADE,
+         entity_type_key text    NOT NULL,
+         property_key    text    NOT NULL,
+         chunk_index     integer NOT NULL,
+         start_char      integer NOT NULL,
+         char_length     integer NOT NULL,
+         text            text    NOT NULL,
+         search_vector tsvector GENERATED ALWAYS AS (to_tsvector('english'::regconfig, text)) STORED,
+         embedding       vector
+       )`,
+    );
+    await querier.query(
+      `CREATE INDEX document_keyword_idx ON ${namespace}.document_chunk USING gin (search_vector)`,
+    );
+    await querier.query(
+      `CREATE INDEX document_chunk_entity_property_idx
+         ON ${namespace}.document_chunk (entity_id, property_key)`,
+    );
+    await querier.query(
+      `CREATE INDEX ${VEC_CHUNK_INDEX} ON ${namespace}.document_chunk
+         USING hnsw ((embedding::vector(3)) vector_cosine_ops)
+         WHERE entity_type_key = 'note' AND property_key = 'body'`,
+    );
     await querier.query(
       `DROP TABLE ${namespace}.search_entry, ${namespace}.search_queue,
          ${namespace}.search_generation, ${namespace}.search_settings`,
@@ -281,6 +331,51 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL storage version"
       { lens: "writing", index: "note~default" },
       { lens: "writing", index: "person~default" },
     ]);
+  });
+
+  it("drops the per-entity search storage and keeps every instance", async () => {
+    await getOntologyRegistry().createOntology(ID_A, "older", null, null, "english");
+    await makeVersion2("ont_older");
+    const ada = randomUUID();
+    const note = randomUUID();
+    await withTransaction(async (querier) => {
+      await querier.query(
+        `INSERT INTO ont_older.entity (id, type_key, props, keyword_text, property_text, embedding)
+         VALUES ($1, 'person', '{"name": "Ada"}', 'Ada', 'person: name=Ada', '[1,0,0]'),
+                ($2, 'note', '{"body": "Notes"}', '', 'note', NULL)`,
+        [ada, note],
+      );
+      await querier.query(
+        `INSERT INTO ont_older.relation (id, type_key, from_id, to_id) VALUES ($1, 'wrote', $2, $3)`,
+        [randomUUID(), ada, note],
+      );
+      await querier.query(
+        `INSERT INTO ont_older.document_chunk
+           (id, entity_id, entity_type_key, property_key, chunk_index, start_char, char_length, text, embedding)
+         VALUES ($1, $2, 'note', 'body', 0, 0, 5, 'Notes', '[0,1,0]')`,
+        [randomUUID(), note],
+      );
+    });
+
+    await initSchema();
+
+    const retired = await runQuery(
+      `SELECT to_regclass('ont_older.document_chunk') AS chunks,
+              (SELECT count(*)::int FROM pg_indexes
+                WHERE schemaname = 'ont_older' AND (indexname LIKE 'vec\\_%' OR indexname LIKE '%keyword_idx')) AS indexes,
+              (SELECT count(*)::int FROM information_schema.columns
+                WHERE table_schema = 'ont_older' AND table_name = 'entity'
+                  AND column_name IN ('property_text', 'keyword_text', 'keyword_segments',
+                                      'search_vector', 'embedding')) AS columns`,
+    );
+    expect(retired.rows).toEqual([{ chunks: null, indexes: 0, columns: 0 }]);
+    const kept = await runQuery(`SELECT id, type_key, props FROM ont_older.entity ORDER BY type_key`);
+    expect(kept.rows).toEqual([
+      { id: note, type_key: "note", props: { body: "Notes" } },
+      { id: ada, type_key: "person", props: { name: "Ada" } },
+    ]);
+    const relations = await runQuery(`SELECT count(*)::int AS n FROM ont_older.relation`);
+    expect(relations.rows[0]!["n"]).toBe(1);
   });
 
   it("refuses unversioned storage — older than the previous major line — and changes nothing", async () => {

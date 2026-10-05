@@ -62,7 +62,7 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "postgres")(
       await wipeDatabase();
     });
 
-    it("create provisions both fixed vector indexes at the provider's width", async () => {
+    it("create provisions the fixed vector index at the provider's width", async () => {
       const res = await app.inject({
         method: "POST",
         url: "/api/ontologies",

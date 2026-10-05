@@ -1,5 +1,6 @@
 import { getEmbeddingProvider } from "../../core/embedding.js";
 import { ValidationError } from "../../core/exceptions.js";
+import { keepsOwnSearch } from "../../core/ownSearch.js";
 import type {
   FilterCondition,
   KeywordMatching,
@@ -15,6 +16,7 @@ import {
 } from "../readHelpers.js";
 import {
   describeMatches,
+  indexStoreOf,
   rankThroughIndices,
   readHitEntities,
   searchableIndices,
@@ -34,9 +36,8 @@ import {
 } from "./fusion.js";
 export type { SearchRequest } from "./request.js";
 export type { SearchEvidence } from "./fusion.js";
-/** A match's evidence on the wire: the measurements, without property
- * attribution. */
-export type MatchEvidence = Pick<SearchEvidence, "semanticSimilarity" | "keywordMatch" | "keywordScore">;
+/** A match's evidence on the wire: the measurements. */
+export type MatchEvidence = SearchEvidence;
 export type SearchMatch =
   | { kind: "properties"; evidence: MatchEvidence }
   | {
@@ -64,8 +65,8 @@ export interface SearchResponse {
   filter: Record<string, string>;
   hits: SearchHit[];
 }
-/** How many candidates per requested hit a ranking fetches before it is fused or
- * collapsed and cut to the limit. */
+/** How many passages per requested hit the passage ranking fetches first, before they
+ * are collapsed to entities and cut to the limit. */
 const CANDIDATE_FACTOR = 5;
 /** The floor drops semantic candidates below it before any fusion, above the storage
  * port; keyword rankings are never touched. A semantic row's score is its measured
@@ -75,14 +76,6 @@ function floored<T>(kind: RankingKind<T>, minSimilarity: number | null): Ranking
   return {
     ...kind,
     semantic: async () => (await kind.semantic()).filter((r) => r.score >= minSimilarity),
-  };
-}
-/** The wire form of a match's evidence. */
-function wireEvidence(evidence: SearchEvidence): MatchEvidence {
-  return {
-    semanticSimilarity: evidence.semanticSimilarity,
-    keywordMatch: evidence.keywordMatch,
-    keywordScore: evidence.keywordScore,
   };
 }
 /** The engine mode and keyword matching a strategy maps to. */
@@ -96,7 +89,8 @@ const STRATEGY_MODES: Record<SearchStrategy, { mode: SearchMode; matching: Keywo
 /**
  * Ranked search. Requests are validated and a strategy chosen alike on
  * every adapter; an adapter that stores search indices then answers from
- * them (`searchThroughIndices`), any other from its own rankings.
+ * them (`searchThroughIndices`), any other from its own search storage —
+ * by vector only, the one ranking such storage has.
  */
 export async function search(
   lensKey: string,
@@ -113,27 +107,21 @@ export async function search(
       `Search strategy unavailable. Available strategies: ${available.join(", ") || "none"}`,
       { code: "FEATURE_DISABLED" },
     );
-  if (store.searchIndices !== undefined)
-    return searchThroughIndices(store.searchIndices(), store, request, validated, strategy.key);
+  if (!keepsOwnSearch(store))
+    return searchThroughIndices(indexStoreOf(store), store, request, validated, strategy.key);
   const embedding = ranksSemantically(strategy.key)
     ? await getEmbeddingProvider()!.embed(request.query)
     : [];
   if (!embedding) throw new ValidationError("Failed to generate embedding for search query");
-  type InternalMatch =
-    | { kind: "properties"; evidence: SearchEvidence }
-    | Extract<SearchMatch, { kind: "document" }>;
-  type Hit = { entity: Row; matches: InternalMatch[] };
+  type Hit = { entity: Row; matches: SearchMatch[] };
   // The strategy is chosen at runtime, so a ranking's score kind is one of the three here.
   const rankings: Ranked<Hit, RankingScore>[][] = [];
-  // Hybrid fuses two source rankings by rank. Each source fetches more candidates than the
-  // limit, so an entity's fused score does not depend on where a short source page ended.
-  const propertyCandidates = strategy.key === "hybrid" ? limit * CANDIDATE_FACTOR : limit;
   if (kinds.includes("properties"))
     rankings.push(
       (
         await strategy.rank(
           floored(
-            propertyKind(store, searchedTypes, embedding, propertyCandidates, request.query),
+            propertyKind(store, searchedTypes, embedding, limit),
             minSimilarity,
           ),
         )
@@ -159,7 +147,7 @@ export async function search(
     while (searchedProperties.length) {
       const passages = await strategy.rank(
         floored(
-          documentKind(store, searchedProperties, embedding, budget, request.query),
+          documentKind(store, searchedProperties, embedding, budget),
           minSimilarity,
         ),
       );
@@ -224,9 +212,9 @@ export async function search(
     return {
       entity: applyFieldProjection(entity, request.fields, ENTITY_NEIGHBOR_ALWAYS_FIELDS),
       relativeScore: relativeScore(r.score, ranked[0]!.score),
-      matches: r.value.matches
-        .sort((a, b) => Number(b.kind === "properties") - Number(a.kind === "properties"))
-        .map((match): SearchMatch => ({ ...match, evidence: wireEvidence(match.evidence) })),
+      matches: r.value.matches.sort(
+        (a, b) => Number(b.kind === "properties") - Number(a.kind === "properties"),
+      ),
     };
   });
   return {

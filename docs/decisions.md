@@ -108,9 +108,10 @@ together, and the number advances only when all of them succeeded. Several serve
 starting against one database upgrade it once: the upgrade holds a database-wide lock and
 reads the version again under it. The server logs every upgrade it runs and never backs
 up storage itself. The release defines the storage layout — tables, columns, fixed
-indexes — and only a storage-version upgrade changes it; the one exception is the search
+indexes — and only a storage-version upgrade changes it; the two exceptions are the search
 indexes derived from the schema, which schema changes and the search-data rebuild create
-and drop. Within a major release line upgrade steps only add — tables, columns with a
+and drop, and the entry storage of each search-index generation, which the generation's
+lifecycle creates and drops. Within a major release line upgrade steps only add — tables, columns with a
 default, indexes — so servers of the
 previous release keep working during a rolling update; renaming, removing or rewriting
 stored data waits for the next major release, which carries one step of its own. Upgrade steps are kept for one major release line: a major release
@@ -185,7 +186,9 @@ that cause them. The physical mapping is described in
 **Storage DDL enforces structure only.** Adapter DDL carries identity,
 referential integrity, exactly-one-owner and uniqueness — nothing else. Business
 rules (for example, document properties only on entity types, the data-type
-enumeration) validate in the service; the database provides no backstop for them.
+enumeration) validate in the service; the database provides no backstop for them. One
+exception: the PostgreSQL search-index tables check their closed vocabularies — index
+kind, representation, generation state.
 
 **Documentation above the port describes the behaviour of the default
 deployment.** Adapter-specific deviations are documented with that adapter in

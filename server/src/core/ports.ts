@@ -53,12 +53,17 @@
  * and its package is registered as one thunk line in `ADAPTERS`.
  */
 
-import type { KeywordLanguage } from "./keywordLanguage.js";
+import type { KeywordLanguage, KeywordLanguageSet } from "./keywordLanguage.js";
 
 import { settings } from "../config.js";
 import { NotFoundError } from "./exceptions.js";
 import type { ValidatedQuery } from "./oql/index.js";
 import type { NewPropertyDef, PropertyDef, TypeKind } from "./schemas.js";
+import type {
+  SearchIndexDefinition,
+  SearchIndexKind,
+  SearchRepresentation,
+} from "./searchIndex.js";
 
 /** A raw store row: one entity, relation, or schema object as a plain map. */
 export type Row = Record<string, unknown>;
@@ -725,6 +730,209 @@ export interface RuntimeStore {
   ): Promise<Row[]>;
 }
 
+// ---------------------------------------------------------------------------
+// Search indices
+// ---------------------------------------------------------------------------
+
+/** What one entry holds: an entity's own fields, one relation instance,
+ * or one passage of a document. */
+export type SearchPartKind = "self" | "relation" | "passage";
+
+/** A generation's lifecycle: built beside the active one, then `ready`
+ * (the one queries read, at most one per index and representation);
+ * `retired` once replaced or superseded, `failed` when its build failed.
+ * Retired and failed generations keep their row; their entries go. */
+export type SearchGenerationState = "building" | "ready" | "retired" | "failed";
+
+/** The ontology's search settings (one per ontology). */
+export interface SearchSettings {
+  keywordLanguages: KeywordLanguageSet;
+  /** The managed indices switched off; shape owned by the modeling service. */
+  disabledDefaults: Record<string, unknown>;
+}
+
+/** One stored search index. */
+export interface SearchIndexRecord {
+  searchIndexId: string;
+  key: string;
+  kind: SearchIndexKind;
+  definition: SearchIndexDefinition;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface NewSearchGeneration {
+  generationId: string;
+  searchIndexId: string;
+  representation: SearchRepresentation;
+  definitionHash: string;
+  /** Semantic only: the provider's model id and vector width. */
+  modelId: string | null;
+  dimensions: number | null;
+  /** Keyword only: the language set the entries are stemmed in. */
+  languages: KeywordLanguageSet | null;
+}
+
+export interface SearchGenerationRecord extends NewSearchGeneration {
+  state: SearchGenerationState;
+  total: number;
+  done: number;
+  failed: number;
+  createdAt: Date;
+  readyAt: Date | null;
+}
+
+/** The identity of one entry within a generation. `groupNo` numbers the
+ * relation groups of the definition; `partId` is the relation id of a
+ * relation part, the chunk ordinal of a passage. */
+export interface SearchEntryPart {
+  entityId: string;
+  partKind: SearchPartKind;
+  groupNo: number;
+  partId: string;
+}
+
+export interface SearchEntryWrite extends SearchEntryPart {
+  relationType: string | null;
+  targetType: string | null;
+  targetId: string | null;
+  /** A passage's code-point offset and length in its document. */
+  startChar: number | null;
+  charLength: number | null;
+  text: string;
+  /** `entryTextHash` (`core/searchEntry.ts`), hex. */
+  textHash: string;
+  /** The vector of a semantic generation; null for a keyword one, whose
+   * text vector the store derives from `text` in the generation's
+   * languages. */
+  embedding: number[] | null;
+}
+
+export interface SearchEntryHash extends SearchEntryPart {
+  textHash: string;
+}
+
+/**
+ * The search-index side of the persistence port: index definitions, their
+ * generations and the entries a generation holds. Only adapters that
+ * declare `supportsSearchIndices()` implement it.
+ *
+ * A generation is one build of one representation of one index. It fills
+ * beside the active one, and `finishGeneration` makes it the active one in
+ * a single step; the previous one then retires and its entries go. Entry
+ * writes go to a generation by id wherever it is in that lifecycle, and
+ * are refused (false) once it is no longer building or ready.
+ */
+export interface SearchIndexStore {
+  // ------------------------------------------------------------------
+  // Settings
+  // ------------------------------------------------------------------
+
+  getSearchSettings(): Promise<SearchSettings>;
+
+  setSearchSettings(settings: SearchSettings): Promise<SearchSettings>;
+
+  // ------------------------------------------------------------------
+  // Index definitions
+  // ------------------------------------------------------------------
+
+  /** Null when the definition's root entity type does not exist. A taken
+   * key is a `ConflictError`. */
+  createIndex(
+    searchIndexId: string,
+    kind: SearchIndexKind,
+    definition: SearchIndexDefinition,
+  ): Promise<SearchIndexRecord | null>;
+
+  /** All indices, in key order. */
+  listIndices(): Promise<SearchIndexRecord[]>;
+
+  getIndex(key: string): Promise<SearchIndexRecord | null>;
+
+  /** Replace the definition (the key stays). Null when the index or the
+   * definition's root entity type does not exist. */
+  updateIndexDefinition(
+    key: string,
+    definition: SearchIndexDefinition,
+  ): Promise<SearchIndexRecord | null>;
+
+  /** Delete the index with its generations, queued work, entries and lens
+   * inclusions. False = not found. */
+  deleteIndex(key: string): Promise<boolean>;
+
+  // ------------------------------------------------------------------
+  // Generations
+  // ------------------------------------------------------------------
+
+  /**
+   * Start a building generation. A generation still building for the same
+   * index and representation is superseded: it retires with its queued
+   * work and entries. Null when the index does not exist.
+   */
+  createGeneration(generation: NewSearchGeneration): Promise<SearchGenerationRecord | null>;
+
+  getGeneration(generationId: string): Promise<SearchGenerationRecord | null>;
+
+  /** All generations, or those of one index, oldest first. */
+  listGenerations(searchIndexId?: string): Promise<SearchGenerationRecord[]>;
+
+  /** Add to a generation's progress counters. */
+  recordGenerationProgress(
+    generationId: string,
+    delta: { total?: number; done?: number; failed?: number },
+  ): Promise<void>;
+
+  /**
+   * Make a building generation the active one of its index and
+   * representation: build its search structures, switch, then retire the
+   * previous active generation and remove its entries. False when the
+   * generation is no longer building (superseded, failed or deleted).
+   */
+  finishGeneration(generationId: string): Promise<boolean>;
+
+  /** Mark a building generation failed and drop its queued work and
+   * entries. False when it is no longer building. */
+  failGeneration(generationId: string): Promise<boolean>;
+
+  /** Remove the entries storage of every generation that is neither
+   * building nor ready — what an interrupted retirement or an entity type
+   * cascade left behind. Idempotent. */
+  sweepGenerations(): Promise<void>;
+
+  // ------------------------------------------------------------------
+  // Entries (the pipeline's surface)
+  // ------------------------------------------------------------------
+
+  /** Insert or replace entries of one generation by identity. False (and
+   * nothing written) when the generation is no longer building or ready.
+   * An identity may appear once per call. */
+  upsertEntries(generationId: string, entries: SearchEntryWrite[]): Promise<boolean>;
+
+  /** The stored text hashes of those of `parts` that exist. */
+  readEntryHashes(generationId: string, parts: SearchEntryPart[]): Promise<SearchEntryHash[]>;
+
+  /** Delete entries of one generation by identity; the count deleted. */
+  deleteEntries(generationId: string, parts: SearchEntryPart[]): Promise<number>;
+
+  /** Delete one generation's entries of one entity, part kind and group
+   * whose part id is not in `keepPartIds` — the passages past a shortened
+   * document, the relations that are gone. The count deleted. */
+  deleteEntityPartsExcept(
+    generationId: string,
+    entityId: string,
+    partKind: SearchPartKind,
+    groupNo: number,
+    keepPartIds: string[],
+  ): Promise<number>;
+
+  /** Delete an entity's entries in every generation of the ontology. */
+  deleteEntriesOfEntity(entityId: string): Promise<number>;
+
+  /** Delete a relation's entries (its `relation` parts) in every
+   * generation of the ontology. */
+  deleteEntriesOfRelation(relationId: string): Promise<number>;
+}
+
 /**
  * The ontology registry: the small third port beside the two phase
  * stores. It manages ontologies as whole units — create, list, get,
@@ -789,6 +997,8 @@ export interface AdapterModule {
   initAdapter(): Promise<void>;
   createModelingStore(ontologyKey: string, language: KeywordLanguage): ModelingStore;
   createRuntimeStore(ontologyKey: string, language: KeywordLanguage): RuntimeStore;
+  /** Present exactly when `supportsSearchIndices()` is true. */
+  createSearchIndexStore?(ontologyKey: string): SearchIndexStore;
   createRegistry(): OntologyRegistry;
   closeStores(): Promise<void>;
   ensureSemanticIndexes(dimensions: number): Promise<void>;
@@ -869,6 +1079,18 @@ export async function getRuntimeStore(ontologyKey: string): Promise<RuntimeStore
   const adapter = requireAdapter();
   const ontology = await requireOntology(ontologyKey);
   return adapter.createRuntimeStore(ontologyKey, ontology.textSearchLanguage as KeywordLanguage);
+}
+
+/** A search-index store bound to one ontology. Unknown key -> not found.
+ * Callers check `supportsSearchIndices()` first; asking an adapter that
+ * stores none is a programming error. */
+export async function getSearchIndexStore(ontologyKey: string): Promise<SearchIndexStore> {
+  const adapter = requireAdapter();
+  if (adapter.createSearchIndexStore === undefined) {
+    throw new Error("The active adapter does not store search indices");
+  }
+  await requireOntology(ontologyKey);
+  return adapter.createSearchIndexStore(ontologyKey);
 }
 
 export function getOntologyRegistry(): OntologyRegistry {

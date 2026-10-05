@@ -1,9 +1,10 @@
 /**
  * PostgreSQL storage version — reaches past the persistence port on
- * purpose: storage at version 2 (the 5.x layout, before name properties)
- * is produced by dropping what the current code adds, then the boot
- * (`initSchema`) must bring it to exactly the layout of a freshly
- * created ontology, backfilling every entity type's name property, once,
+ * purpose: storage at version 2 (the 5.x layout, before name properties
+ * and search indices) is produced by dropping what the current code adds,
+ * then the boot (`initSchema`) must bring it to exactly the layout of a
+ * freshly created ontology, backfilling every entity type's name property
+ * and the search settings, once,
  * however many servers start together; it must refuse storage older than
  * the previous major line and leave storage newer than the code
  * untouched. Requires the docker-compose PostgreSQL.
@@ -40,9 +41,24 @@ async function recordVersion(version: number): Promise<void> {
   });
 }
 
-/** Storage of the previous major line (version 2): no name property. */
+/** Storage of the previous major line (version 2): no name property, no
+ * search-index tables, two lens inclusion kinds. */
 async function makeVersion2(namespace: string): Promise<void> {
-  await runQuery(`ALTER TABLE ${namespace}.entity_type DROP COLUMN name_property`);
+  await withTransaction(async (querier) => {
+    await querier.query(
+      `DROP TABLE ${namespace}.search_entry, ${namespace}.search_queue,
+         ${namespace}.search_generation, ${namespace}.search_settings`,
+    );
+    await querier.query(
+      `ALTER TABLE ${namespace}.lens_includes
+         DROP CONSTRAINT lens_includes_one_type,
+         DROP CONSTRAINT lens_includes_search_index_unique,
+         DROP COLUMN search_index_id,
+         ADD CONSTRAINT lens_includes_one_type CHECK (num_nonnulls(entity_type_id, relation_type_id) = 1)`,
+    );
+    await querier.query(`DROP TABLE ${namespace}.search_index`);
+    await querier.query(`ALTER TABLE ${namespace}.entity_type DROP COLUMN name_property`);
+  });
   await recordVersion(2);
 }
 
@@ -135,6 +151,21 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL storage version"
     // Created after the upgrade: storage at one version holds one layout.
     await getOntologyRegistry().createOntology(ID_B, "fresh", null, null, "english");
     expect(await layout("ont_older")).toEqual(await layout("ont_fresh"));
+  });
+
+  it("keeps an upgraded ontology's keyword language; a fresh one stems in both", async () => {
+    await getOntologyRegistry().createOntology(ID_A, "older", null, null, "german");
+    await makeVersion2("ont_older");
+
+    await initSchema();
+
+    await getOntologyRegistry().createOntology(ID_B, "fresh", null, null, "english");
+    const settingsOf = async (namespace: string) =>
+      (await runQuery(`SELECT keyword_languages, disabled_defaults FROM ${namespace}.search_settings`)).rows;
+    expect(await settingsOf("ont_older")).toEqual([{ keyword_languages: ["german"], disabled_defaults: {} }]);
+    expect(await settingsOf("ont_fresh")).toEqual([
+      { keyword_languages: ["german", "english"], disabled_defaults: {} },
+    ]);
   });
 
   it("gives every entity type a name property by the fallback chain", async () => {

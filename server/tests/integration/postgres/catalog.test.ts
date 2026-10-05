@@ -34,6 +34,11 @@ const ALL_TABLES = [
   "entity",
   "relation",
   "document_chunk",
+  "search_settings",
+  "search_index",
+  "search_generation",
+  "search_queue",
+  "search_entry",
 ];
 
 // Named constraints from the init DDL, with their pg_constraint type:
@@ -72,8 +77,23 @@ const EXPECTED_CONSTRAINTS: Record<string, string> = {
   relation_from_fk: "f",
   relation_to_fk: "f",
   document_chunk_entity_fk: "f",
+  search_settings_pk: "p",
+  search_index_pk: "p",
+  search_generation_pk: "p",
+  search_queue_pk: "p",
+  search_entry_pk: "p",
+  search_index_key_unique: "u",
+  lens_includes_search_index_unique: "u",
+  search_index_entity_type_fk: "f",
+  lens_includes_search_index_fk: "f",
+  search_generation_search_index_fk: "f",
+  search_queue_generation_fk: "f",
   property_def_one_owner: "c",
   lens_includes_one_type: "c",
+  search_settings_singleton: "c",
+  search_index_kind_check: "c",
+  search_generation_representation_check: "c",
+  search_generation_state_check: "c",
 };
 
 const FIXED_BTREE_INDEXES = [
@@ -82,6 +102,8 @@ const FIXED_BTREE_INDEXES = [
   "relation_from_id_idx",
   "relation_to_id_idx",
   "document_chunk_entity_property_idx",
+  "search_generation_building_unique",
+  "search_generation_ready_unique",
 ];
 
 async function tableNames(): Promise<string[]> {
@@ -147,7 +169,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL physical catalog
     await closeStores();
   });
 
-  it("provisioning created the eleven tables, the named constraints, and the fixed indexes", async () => {
+  it("provisioning created the ontology tables, the named constraints, and the fixed indexes", async () => {
     await assertCatalogComplete();
   });
 

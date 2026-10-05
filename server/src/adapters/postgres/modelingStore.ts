@@ -806,6 +806,7 @@ export class PostgresModelingStore implements ModelingStore {
          FROM lens_includes oi
          LEFT JOIN entity_type et ON et.entity_type_id = oi.entity_type_id
          LEFT JOIN relation_type rt ON rt.relation_type_id = oi.relation_type_id
+         WHERE oi.search_index_id IS NULL
          ORDER BY et.key, rt.key`,
       );
 

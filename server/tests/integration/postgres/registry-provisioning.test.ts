@@ -1,7 +1,7 @@
 /**
  * PostgreSQL-physical registry tests — everything here reaches past the
  * persistence port on purpose: ontology creation provisions the
- * `ont_<key>` namespace with the eleven tables in one transaction, a failed
+ * `ont_<key>` namespace with the ontology tables in one transaction, a failed
  * create leaves no namespace and no registry row behind, and delete
  * drops the namespace in one cascade. Requires the docker-compose
  * PostgreSQL.
@@ -30,6 +30,11 @@ const ALL_TABLES = [
   "entity",
   "relation",
   "document_chunk",
+  "search_settings",
+  "search_index",
+  "search_generation",
+  "search_queue",
+  "search_entry",
 ];
 
 const ID_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -68,7 +73,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL registry provisi
     await wipeDatabase();
   });
 
-  it("create provisions ont_<key> with the eleven tables", async () => {
+  it("create provisions ont_<key> with the ontology tables", async () => {
     await getOntologyRegistry().createOntology(ID_A, "crm", null, null, "english");
     expect(await namespaceExists("ont_crm")).toBe(true);
     expect(await tablesIn("ont_crm")).toEqual([...ALL_TABLES].sort());
@@ -76,7 +81,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL registry provisi
 
   it("a failure after the namespace exists rolls everything back", async () => {
     // An invalid embedding width dies inside the provisioning transaction,
-    // after CREATE SCHEMA and the eleven-table DDL have already run.
+    // after CREATE SCHEMA and the ontology table DDL have already run.
     await expect(
       getOntologyRegistry().createOntology(ID_A, "doomed", null, -1, "english"),
     ).rejects.toThrow("Invalid embedding width");
@@ -119,7 +124,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL registry provisi
   it("the server-wide home holds only the registry — no ontology tables", async () => {
     await getOntologyRegistry().createOntology(ID_A, "crm", null, null, "english");
     // `public` is the server-wide home: the registry and nothing
-    // ontology-scoped; the eleven tables live only inside `ont_*`.
+    // ontology-scoped; the ontology tables live only inside `ont_*`.
     const result = await runQuery(
       `SELECT table_name FROM information_schema.tables
        WHERE table_schema = current_schema()`,

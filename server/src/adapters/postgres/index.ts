@@ -16,7 +16,7 @@
 import type { KeywordLanguage } from "../../core/keywordLanguage.js";
 
 import { reportEnsureFailed } from "../../core/vectorDrift.js";
-import { ensureVectorIndexes, initSchema } from "./ddl.js";
+import { ensureVectorIndexes, initSchema, reportPgvectorVersion } from "./ddl.js";
 import { closePool, initPool } from "./errors.js";
 import { PostgresModelingStore } from "./modelingStore.js";
 import {
@@ -25,10 +25,14 @@ import {
   PostgresOntologyRegistry,
 } from "./registry.js";
 import { PostgresRuntimeStore } from "./runtimeStore.js";
+import { PostgresSearchIndexStore } from "./searchIndexStore.js";
 
-/** Initialize the PostgreSQL adapter: the pool and the server-wide DDL. */
+/** Initialize the PostgreSQL adapter: the pool, the pgvector version
+ * report (before the upgrade, which needs `halfvec`) and the server-wide
+ * DDL. */
 export async function initAdapter(): Promise<void> {
   await initPool();
+  await reportPgvectorVersion();
   await initSchema();
 }
 
@@ -41,6 +45,11 @@ export function createModelingStore(ontologyKey: string, language: KeywordLangua
 /** A runtime store bound to one ontology's namespace. */
 export function createRuntimeStore(ontologyKey: string, language: KeywordLanguage): PostgresRuntimeStore {
   return new PostgresRuntimeStore(ontologyKey, ontologyNamespace(ontologyKey), language);
+}
+
+/** A search-index store bound to one ontology's namespace. */
+export function createSearchIndexStore(ontologyKey: string): PostgresSearchIndexStore {
+  return new PostgresSearchIndexStore(ontologyNamespace(ontologyKey));
 }
 
 /** The ontology registry over the pool `initAdapter` opened. */

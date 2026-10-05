@@ -109,7 +109,8 @@ agent ever spans two. The architecture makes that structural rather than checked
   The service layer obtains a modeling or runtime store *for* an ontology key; every
   method of that store resolves within the binding, and binding an unknown key fails as
   not found before any other rule runs. Registry operations live on a separate registry
-  port beside the two bound stores.
+  port beside the bound stores; an adapter that stores search indices binds a third
+  store, for them, the same way.
 - **The physical isolation mechanism is the adapter's private business.** Nothing above
   the port knows how an ontology's data is kept apart from its neighbours'; the contract
   and each adapter's mechanism are in [storage-adapters.md](storage-adapters.md).

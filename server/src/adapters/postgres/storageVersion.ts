@@ -91,7 +91,7 @@ async function backfillNameProperties(querier: Querier): Promise<void> {
 
 const STEPS: Step[] = [
   {
-    // 6.0: every entity type names its name property.
+    // 6.0: every entity type names its name property; search indices.
     to: 3,
     actions: [
       `ALTER TABLE entity_type ADD COLUMN name_property text`,
@@ -100,6 +100,90 @@ const STEPS: Step[] = [
       `ALTER TABLE entity_type ADD CONSTRAINT entity_type_name_property_fk
   FOREIGN KEY (entity_type_id, name_property) REFERENCES property_def (entity_type_id, key)
   DEFERRABLE INITIALLY DEFERRED`,
+
+      // 6.0: search indices — definitions, a third lens inclusion kind,
+      // settings, generations, the work queue and the partitioned entries.
+      `CREATE TABLE search_index (
+  search_index_id uuid        CONSTRAINT search_index_pk PRIMARY KEY,
+  key             text        NOT NULL CONSTRAINT search_index_key_unique UNIQUE,
+  kind            text        NOT NULL CONSTRAINT search_index_kind_check
+                              CHECK (kind IN ('default', 'passage', 'custom')),
+  entity_type_id  uuid        NOT NULL CONSTRAINT search_index_entity_type_fk
+                              REFERENCES entity_type (entity_type_id) ON DELETE CASCADE,
+  definition      jsonb       NOT NULL,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now()
+)`,
+      `ALTER TABLE lens_includes ADD COLUMN search_index_id uuid
+  CONSTRAINT lens_includes_search_index_fk
+  REFERENCES search_index (search_index_id) ON DELETE CASCADE`,
+      `ALTER TABLE lens_includes DROP CONSTRAINT lens_includes_one_type`,
+      `ALTER TABLE lens_includes ADD CONSTRAINT lens_includes_one_type
+  CHECK (num_nonnulls(entity_type_id, relation_type_id, search_index_id) = 1)`,
+      `ALTER TABLE lens_includes ADD CONSTRAINT lens_includes_search_index_unique
+  UNIQUE (lens_id, search_index_id)`,
+      `CREATE TABLE search_settings (
+  singleton          boolean NOT NULL DEFAULT true CONSTRAINT search_settings_pk PRIMARY KEY
+                             CONSTRAINT search_settings_singleton CHECK (singleton),
+  keyword_languages  text[]  NOT NULL,
+  disabled_defaults  jsonb   NOT NULL DEFAULT '{}'::jsonb
+)`,
+      // The ontology keeps stemming in the one language it had.
+      `INSERT INTO search_settings (keyword_languages)
+  SELECT ARRAY[text_search_language] FROM public.ontology WHERE namespace = current_schema()`,
+      `CREATE TABLE search_generation (
+  generation_id   uuid        CONSTRAINT search_generation_pk PRIMARY KEY,
+  search_index_id uuid        NOT NULL CONSTRAINT search_generation_search_index_fk
+                              REFERENCES search_index (search_index_id) ON DELETE CASCADE,
+  representation  text        NOT NULL CONSTRAINT search_generation_representation_check
+                              CHECK (representation IN ('semantic', 'keyword')),
+  definition_hash text        NOT NULL,
+  model_id        text,
+  dimensions      integer,
+  languages       text[],
+  state           text        NOT NULL CONSTRAINT search_generation_state_check
+                              CHECK (state IN ('building', 'ready', 'retired', 'failed')),
+  total           integer     NOT NULL DEFAULT 0,
+  done            integer     NOT NULL DEFAULT 0,
+  failed          integer     NOT NULL DEFAULT 0,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  ready_at        timestamptz
+)`,
+      `CREATE UNIQUE INDEX search_generation_building_unique
+  ON search_generation (search_index_id, representation) WHERE state = 'building'`,
+      `CREATE UNIQUE INDEX search_generation_ready_unique
+  ON search_generation (search_index_id, representation) WHERE state = 'ready'`,
+      `CREATE TABLE search_queue (
+  generation_id uuid        NOT NULL CONSTRAINT search_queue_generation_fk
+                            REFERENCES search_generation (generation_id) ON DELETE CASCADE,
+  entity_id     uuid        NOT NULL,
+  part_kind     text        NOT NULL,
+  group_no      integer     NOT NULL,
+  part_id       text        NOT NULL,
+  enqueued_at   timestamptz NOT NULL DEFAULT now(),
+  attempts      integer     NOT NULL DEFAULT 0,
+  not_before    timestamptz NOT NULL DEFAULT now(),
+  lease_until   timestamptz,
+  last_error    text,
+  CONSTRAINT search_queue_pk PRIMARY KEY (generation_id, entity_id, part_kind, group_no, part_id)
+)`,
+      `CREATE TABLE search_entry (
+  generation_id uuid     NOT NULL,
+  entity_id     uuid     NOT NULL,
+  part_kind     text     NOT NULL,
+  group_no      integer  NOT NULL,
+  part_id       text     NOT NULL,
+  relation_type text,
+  target_type   text,
+  target_id     uuid,
+  start_char    integer,
+  char_length   integer,
+  text          text     NOT NULL,
+  text_hash     bytea    NOT NULL,
+  embedding     halfvec,
+  tsv           tsvector,
+  CONSTRAINT search_entry_pk PRIMARY KEY (generation_id, entity_id, part_kind, group_no, part_id)
+) PARTITION BY LIST (generation_id)`,
     ],
   },
 ];

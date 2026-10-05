@@ -346,6 +346,10 @@ function translateConstraint(exc: pg.DatabaseError): OntoForgeError | null {
           return new ConflictError("Entity type is already included in this lens");
         case "lens_includes_relation_unique":
           return new ConflictError("Relation type is already included in this lens");
+        case "lens_includes_search_index_unique":
+          return new ConflictError("Search index is already included in this lens");
+        case "search_index_key_unique":
+          return new ConflictError(`Search index with key '${value}' already exists`);
         default:
           return null;
       }

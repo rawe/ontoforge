@@ -4,7 +4,7 @@
  * `initSchema` runs the server-wide DDL — the pgvector extension, the
  * `public.ontology` registry table and the storage version — and the
  * storage upgrade as one all-or-nothing transaction at adapter init
- * (`storageVersion.ts`). The eleven-table set is ontology-scoped and runs only at
+ * (`storageVersion.ts`). The ontology table set is ontology-scoped and runs only at
  * ontology creation, inside the fresh `ont_<key>` namespace
  * (`registry.ts`). Idempotence rides `CREATE TABLE IF NOT EXISTS` with
  * all constraints inline and explicitly named (PG has no
@@ -20,14 +20,15 @@
  *
  * The DDL carries structure only — identity, referential integrity,
  * exactly-one-owner, uniqueness. Business rules validate in the service,
- * with no backstop CHECKs. The `entity`/`relation` `type_key` columns get
- * no FK to the schema tables: deleting a type deliberately orphans its
- * instances. The `embedding` columns are dimensionless, so init is
+ * with no backstop CHECKs; the search tables check only their closed
+ * vocabularies (index kind, representation, generation state). The
+ * `entity`/`relation` `type_key` columns get no FK to the schema tables:
+ * deleting a type deliberately orphans its instances. The `embedding` columns are dimensionless, so init is
  * provider-independent — the width lives only in the HNSW indexes, whose
  * lifecycle is the second half of this module.
  */
 
-import type { KeywordLanguage } from "../../core/keywordLanguage.js";
+import { DEFAULT_KEYWORD_LANGUAGES, type KeywordLanguage } from "../../core/keywordLanguage.js";
 
 import {
   documentPropertyScope,
@@ -37,7 +38,7 @@ import {
   SAVED_QUERY_SCOPE,
 } from "../../core/vectorDrift.js";
 import type { Querier } from "./errors.js";
-import { withTransaction } from "./errors.js";
+import { runQuery, withTransaction } from "./errors.js";
 import { quoteIdent } from "./oql/bindings.js";
 import { bringStorageUpToDate } from "./storageVersion.js";
 
@@ -67,7 +68,8 @@ const SERVER_DDL_STATEMENTS: string[] = [
 ];
 
 /**
- * The eleven-table set one ontology lives in. Deliberately unqualified —
+ * The table set one ontology lives in — schema, instances and search
+ * indices — and the initial search settings. Deliberately unqualified —
  * namespace-relocatable: ontology creation runs it inside a fresh
  * `ont_<key>` namespace via the transaction's search path
  * (`registry.ts`).
@@ -136,6 +138,22 @@ export function ontologyDdlStatements(language: KeywordLanguage): string[] {
   FOREIGN KEY (entity_type_id, name_property) REFERENCES property_def (entity_type_id, key)
   DEFERRABLE INITIALLY DEFERRED`,
 
+  // A search index definition; its key is unique per ontology. Managed
+  // indices (default, passage) are derived from the schema.
+  `CREATE TABLE IF NOT EXISTS search_index (
+  search_index_id uuid        CONSTRAINT search_index_pk PRIMARY KEY,
+  key             text        NOT NULL CONSTRAINT search_index_key_unique UNIQUE,
+  kind            text        NOT NULL CONSTRAINT search_index_kind_check
+                              CHECK (kind IN ('default', 'passage', 'custom')),
+  entity_type_id  uuid        NOT NULL CONSTRAINT search_index_entity_type_fk
+                              REFERENCES entity_type (entity_type_id) ON DELETE CASCADE,
+  definition      jsonb       NOT NULL,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now()
+)`,
+
+  // Three inclusion kinds, one per row: an entity type, a relation type
+  // (each with its property allowlist), or a search index (no allowlist).
   `CREATE TABLE IF NOT EXISTS lens_includes (
   lens_id          uuid   NOT NULL CONSTRAINT lens_includes_lens_fk
                           REFERENCES lens (lens_id) ON DELETE CASCADE,
@@ -144,9 +162,13 @@ export function ontologyDdlStatements(language: KeywordLanguage): string[] {
   relation_type_id uuid   CONSTRAINT lens_includes_relation_type_fk
                           REFERENCES relation_type (relation_type_id) ON DELETE CASCADE,
   properties       text[],  -- NULL = all properties; '{}' = none. The distinction is contract.
-  CONSTRAINT lens_includes_one_type CHECK (num_nonnulls(entity_type_id, relation_type_id) = 1),
+  search_index_id  uuid   CONSTRAINT lens_includes_search_index_fk
+                          REFERENCES search_index (search_index_id) ON DELETE CASCADE,
+  CONSTRAINT lens_includes_one_type
+    CHECK (num_nonnulls(entity_type_id, relation_type_id, search_index_id) = 1),
   CONSTRAINT lens_includes_entity_unique   UNIQUE (lens_id, entity_type_id),
-  CONSTRAINT lens_includes_relation_unique UNIQUE (lens_id, relation_type_id)
+  CONSTRAINT lens_includes_relation_unique UNIQUE (lens_id, relation_type_id),
+  CONSTRAINT lens_includes_search_index_unique UNIQUE (lens_id, search_index_id)
 )`, // no timestamps, no PK
 
   `CREATE TABLE IF NOT EXISTS ai_agent_config (
@@ -239,7 +261,128 @@ export function ontologyDdlStatements(language: KeywordLanguage): string[] {
 )`,
   `CREATE INDEX document_keyword_idx ON document_chunk USING gin (search_vector)`,
   `CREATE INDEX IF NOT EXISTS document_chunk_entity_property_idx ON document_chunk (entity_id, property_key)`,
+
+  // --- Search indices ----------------------------------------------------
+
+  ...searchStorageStatements(),
+  `INSERT INTO search_settings (keyword_languages)
+  VALUES (ARRAY[${DEFAULT_KEYWORD_LANGUAGES.map(literal).join(", ")}])`,
 ];
+}
+
+/**
+ * The search-index tables beside `search_index` (which `lens_includes`
+ * references, so it comes earlier): the settings singleton, generations,
+ * the work queue and the entries. Generation lifecycle and the per-
+ * generation partitions are `searchIndexStore.ts`'s.
+ */
+function searchStorageStatements(): string[] {
+  return [
+  // One row. The keyword language set every keyword generation stems in,
+  // and the managed indices switched off.
+  `CREATE TABLE IF NOT EXISTS search_settings (
+  singleton          boolean NOT NULL DEFAULT true CONSTRAINT search_settings_pk PRIMARY KEY
+                             CONSTRAINT search_settings_singleton CHECK (singleton),
+  keyword_languages  text[]  NOT NULL,
+  disabled_defaults  jsonb   NOT NULL DEFAULT '{}'::jsonb
+)`,
+
+  // One build of one representation of one index. At most one is building
+  // and at most one is ready — the active one — per index and
+  // representation.
+  `CREATE TABLE IF NOT EXISTS search_generation (
+  generation_id   uuid        CONSTRAINT search_generation_pk PRIMARY KEY,
+  search_index_id uuid        NOT NULL CONSTRAINT search_generation_search_index_fk
+                              REFERENCES search_index (search_index_id) ON DELETE CASCADE,
+  representation  text        NOT NULL CONSTRAINT search_generation_representation_check
+                              CHECK (representation IN ('semantic', 'keyword')),
+  definition_hash text        NOT NULL,
+  model_id        text,       -- semantic only
+  dimensions      integer,    -- semantic only
+  languages       text[],     -- keyword only
+  state           text        NOT NULL CONSTRAINT search_generation_state_check
+                              CHECK (state IN ('building', 'ready', 'retired', 'failed')),
+  total           integer     NOT NULL DEFAULT 0,
+  done            integer     NOT NULL DEFAULT 0,
+  failed          integer     NOT NULL DEFAULT 0,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  ready_at        timestamptz
+)`,
+  `CREATE UNIQUE INDEX search_generation_building_unique
+  ON search_generation (search_index_id, representation) WHERE state = 'building'`,
+  `CREATE UNIQUE INDEX search_generation_ready_unique
+  ON search_generation (search_index_id, representation) WHERE state = 'ready'`,
+
+  // Parts of one generation waiting to be (re)composed.
+  `CREATE TABLE IF NOT EXISTS search_queue (
+  generation_id uuid        NOT NULL CONSTRAINT search_queue_generation_fk
+                            REFERENCES search_generation (generation_id) ON DELETE CASCADE,
+  entity_id     uuid        NOT NULL,
+  part_kind     text        NOT NULL,
+  group_no      integer     NOT NULL,
+  part_id       text        NOT NULL,
+  enqueued_at   timestamptz NOT NULL DEFAULT now(),
+  attempts      integer     NOT NULL DEFAULT 0,
+  not_before    timestamptz NOT NULL DEFAULT now(),
+  lease_until   timestamptz,
+  last_error    text,
+  CONSTRAINT search_queue_pk PRIMARY KEY (generation_id, entity_id, part_kind, group_no, part_id)
+)`,
+
+  // One partition per generation (se_<generation uuid hex>). The vector
+  // column carries no width: each semantic partition's HNSW index casts to
+  // its generation's width.
+  `CREATE TABLE IF NOT EXISTS search_entry (
+  generation_id uuid     NOT NULL,
+  entity_id     uuid     NOT NULL,
+  part_kind     text     NOT NULL,
+  group_no      integer  NOT NULL,
+  part_id       text     NOT NULL,
+  relation_type text,
+  target_type   text,
+  target_id     uuid,
+  start_char    integer,   -- passages: code-point offset in the document
+  char_length   integer,   -- passages: code-point length
+  text          text     NOT NULL,
+  text_hash     bytea    NOT NULL,
+  embedding     halfvec,   -- semantic generations
+  tsv           tsvector,  -- keyword generations
+  CONSTRAINT search_entry_pk PRIMARY KEY (generation_id, entity_id, part_kind, group_no, part_id)
+) PARTITION BY LIST (generation_id)`,
+  ];
+}
+
+/** Whether a pgvector version has the `halfvec` type search entries are
+ * stored in (0.7.0 and later). */
+export function supportsHalfvec(version: string): boolean {
+  const [major = 0, minor = 0] = version.split(".").map((part) => Number.parseInt(part, 10));
+  return major > 0 || minor >= 7;
+}
+
+/**
+ * Log the pgvector version — the installed one, or the one the boot DDL is
+ * about to install — and warn when it predates `halfvec`: search-index
+ * storage cannot be created then (no fallback).
+ */
+export async function reportPgvectorVersion(): Promise<void> {
+  const result = await runQuery(
+    `SELECT coalesce(
+       (SELECT extversion FROM pg_extension WHERE extname = 'vector'),
+       (SELECT default_version FROM pg_available_extensions WHERE name = 'vector')
+     ) AS version`,
+  );
+  const version = result.rows[0]?.["version"] as string | null | undefined;
+  if (version === null || version === undefined) {
+    console.warn("pgvector is not available: the vector extension cannot be installed.");
+    return;
+  }
+  console.log(`pgvector ${version}`);
+  if (!supportsHalfvec(version)) {
+    console.warn(
+      `pgvector ${version} has no halfvec type (0.7.0 or later required): ` +
+        "search-index storage cannot be created. Upgrade pgvector.",
+    );
+  }
 }
 
 /** Create the server-wide objects if absent and bring older storage up
@@ -380,7 +523,7 @@ function createHnsw(spec: IndexSpec, dimensions: number): string {
 
 /**
  * The fixed vector indexes as CREATE statements — one, for saved-query
- * descriptions — unqualified like the eleven-table DDL: ontology
+ * descriptions — unqualified like the ontology table DDL: ontology
  * provisioning runs them inside the fresh namespace's search path
  * (`registry.ts`).
  */

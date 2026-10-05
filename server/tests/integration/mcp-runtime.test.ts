@@ -19,7 +19,7 @@ import { closeStores, initStores } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
 import { supportsMultipleOntologies } from "./tiers.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
-import { buildFixture } from "./fixture.js";
+import { buildFixture, defineEntityProperty } from "./fixture.js";
 
 interface ToolCallResult {
   content: { type: string; text: string }[];
@@ -150,7 +150,7 @@ describe.skipIf(!supportsMultipleOntologies)("ontology isolation", () => {
       key: "person",
       displayName: "Person",
     });
-    await post(`/api/ontologies/other_ont/model/entity-types/${person.entityTypeId as string}/properties`, {
+    await defineEntityProperty(app, "other_ont", person.entityTypeId as string, {
       key: "name",
       displayName: "Name",
       dataType: "string",

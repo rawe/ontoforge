@@ -20,6 +20,7 @@ const ET_DATA = {
   key: "person",
   displayName: "Person",
   description: "A person entity",
+  nameProperty: "name",
   createdAt: NOW,
   updatedAt: NOW,
 };
@@ -122,6 +123,106 @@ describe("entity type CRUD", () => {
       url: "/api/ontologies/onto/model/entity-types/nonexistent",
     });
     expect(res.statusCode).toBe(404);
+  });
+});
+
+describe("name property", () => {
+  it("create makes a non-required string property `name` the name property by default", async () => {
+    holder.store.createEntityType.mockResolvedValue(ET_DATA);
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/ontologies/onto/model/entity-types",
+      payload: { key: "person", displayName: "Person" },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().nameProperty).toBe("name");
+    expect(holder.store.createEntityType.mock.calls[0]![4]).toEqual({
+      propertyId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      key: "name",
+      displayName: "Name",
+      description: null,
+      dataType: "string",
+      required: false,
+      defaultValue: null,
+    });
+  });
+
+  it("create takes another key, displayed as the key", async () => {
+    holder.store.createEntityType.mockResolvedValue({ ...ET_DATA, nameProperty: "title" });
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/ontologies/onto/model/entity-types",
+      payload: { key: "person", displayName: "Person", nameProperty: "title" },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().nameProperty).toBe("title");
+    expect(holder.store.createEntityType.mock.calls[0]![4]).toMatchObject({
+      key: "title",
+      displayName: "title",
+      dataType: "string",
+    });
+  });
+
+  it("create rejects a name property key off the key pattern", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/ontologies/onto/model/entity-types",
+      payload: { key: "person", displayName: "Person", nameProperty: "_id" },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(holder.store.createEntityType).not.toHaveBeenCalled();
+  });
+
+  it("update reassigns the name property to another string property", async () => {
+    holder.store.getEntityType.mockResolvedValue(ET_DATA);
+    holder.store.getPropertyByKey.mockResolvedValue({ key: "title", dataType: "string" });
+    holder.store.updateEntityType.mockResolvedValue({ ...ET_DATA, nameProperty: "title" });
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/ontologies/onto/model/entity-types/et-1",
+      payload: { nameProperty: "title" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().nameProperty).toBe("title");
+    expect(holder.store.getPropertyByKey).toHaveBeenCalledWith("et-1", "EntityType", "title");
+    expect(holder.store.updateEntityType).toHaveBeenCalledWith("et-1", null, null, "title");
+  });
+
+  it.each([
+    ["a property that is not a string", { key: "age", dataType: "integer" }],
+    ["a property the type does not have", null],
+  ])("update to %s answers 422 and changes nothing", async (_case, property) => {
+    holder.store.getEntityType.mockResolvedValue(ET_DATA);
+    holder.store.getPropertyByKey.mockResolvedValue(property);
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/ontologies/onto/model/entity-types/et-1",
+      payload: { nameProperty: "age" },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe("VALIDATION_ERROR");
+    expect(res.json().error.details.fields.nameProperty).toContain("'age'");
+    expect(holder.store.updateEntityType).not.toHaveBeenCalled();
+  });
+
+  it("update of the name property on a missing id answers 404", async () => {
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/ontologies/onto/model/entity-types/nonexistent",
+      payload: { nameProperty: "title" },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("update without a name property leaves it unchanged", async () => {
+    holder.store.updateEntityType.mockResolvedValue(ET_DATA);
+    await app.inject({
+      method: "PUT",
+      url: "/api/ontologies/onto/model/entity-types/et-1",
+      payload: { displayName: "Person" },
+    });
+    expect(holder.store.updateEntityType).toHaveBeenCalledWith("et-1", "Person", null, null);
+    expect(holder.store.getPropertyByKey).not.toHaveBeenCalled();
   });
 });
 

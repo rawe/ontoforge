@@ -17,6 +17,7 @@ import { wipeDatabase } from "../reset.js";
 import { invalidateLoadedSchemaCache } from "../../../src/runtime/schemaCache.js";
 import { TOOL_MIN_SIMILARITY } from "../../../src/runtime/search/strategies.js";
 import { checkOllamaModel, disableProvider, enableOllamaProvider } from "./support.js";
+import { defineEntityProperty } from "../fixture.js";
 
 type Row = Record<string, unknown>;
 
@@ -60,7 +61,7 @@ describe.skipIf(!ollamaUp)("MCP search (Ollama)", () => {
       { key: "role", displayName: "Role", dataType: "string", required: false },
       { key: "age", displayName: "Age", dataType: "integer", required: false },
     ]) {
-      await post(`/api/ontologies/test_ont/model/entity-types/${et.entityTypeId as string}/properties`, prop);
+      await defineEntityProperty(app, "test_ont", et.entityTypeId as string, prop);
     }
     await post("/api/ontologies/test_ont/runtime/lenses/mcp_search/entities/person", {
       name: "Alice Chen",

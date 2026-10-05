@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowRight, ChevronLeft, Loader2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
+import { useDisplayLabel } from '@/api/hooks'
 import { ApiError } from '@/api/http'
 import * as runtime from '@/api/runtime'
 import type {
@@ -23,7 +24,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { displayLabel } from '@/lib/displayLabel'
 import { connectOptions, type ConnectOption } from './workingSet'
 
 export interface ConnectPair {
@@ -63,6 +63,7 @@ function ConnectFlow({
   onClose,
   onCreated,
 }: Omit<ConnectDialogProps, 'pair'> & { pair: ConnectPair }) {
+  const displayLabel = useDisplayLabel()
   const queryClient = useQueryClient()
   const options = useMemo(
     () => connectOptions(pair.source, pair.target, relationTypes),

@@ -1,6 +1,6 @@
+import { useDisplayLabel } from '@/api/hooks'
 import type { EntityInstance, SearchMatch } from '@/api/types'
 import { TypeChip } from '@/components/TypeChip'
-import { displayLabel } from '@/lib/displayLabel'
 
 /** The rank is conveyed by list position only. */
 export function EntitySearchRow({
@@ -12,6 +12,7 @@ export function EntitySearchRow({
   matches?: SearchMatch[]
   typeName: string
 }) {
+  const displayLabel = useDisplayLabel()
   return (
     <span className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
       <TypeChip typeKey={entity._entityTypeKey} displayName={typeName} size="sm" />

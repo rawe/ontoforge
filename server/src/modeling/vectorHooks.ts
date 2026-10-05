@@ -13,14 +13,16 @@
 import { getEmbeddingProvider } from "../core/embedding.js";
 import type { ModelingStore } from "../core/ports.js";
 
-/** After an entity type is created: create its per-type vector index. */
+/** After an entity type is created: create its per-type vector index,
+ * filtering on the properties it was created with (its name property). */
 export async function onEntityTypeCreated(
   store: ModelingStore,
   entityTypeKey: string,
+  propertyKeys: string[],
 ): Promise<void> {
   const provider = getEmbeddingProvider();
   if (provider) {
-    await store.createVectorIndex(entityTypeKey, provider.dimensions);
+    await store.createVectorIndex(entityTypeKey, provider.dimensions, propertyKeys);
   }
 }
 

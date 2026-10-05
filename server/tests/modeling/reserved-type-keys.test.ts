@@ -86,6 +86,7 @@ describe("entity types", () => {
       key: "ontology_note",
       displayName: "Ontology Note",
       description: null,
+      nameProperty: "name",
       createdAt: NOW,
       updatedAt: NOW,
     });

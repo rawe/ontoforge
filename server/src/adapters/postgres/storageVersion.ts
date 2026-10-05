@@ -18,44 +18,88 @@
  * raise `STORAGE_VERSION` to its `to`. A released step is frozen — it
  * carries its own statements, never a constant shared with the DDL. A
  * major release deletes every step and raises `OLDEST_UPGRADABLE_VERSION`
- * to `STORAGE_VERSION`.
+ * to `STORAGE_VERSION`; its one major step may also rewrite data, so a
+ * step's action is a statement or a function over the namespace.
  */
 
+import { randomUUID } from "node:crypto";
+
+import { legacyNameProperty } from "../../core/legacyNameProperty.js";
+import { namePropertyDisplayName } from "../../core/schemas.js";
 import type { Querier } from "./errors.js";
 import { searchPathStatement } from "./errors.js";
 
 /** The layout this code creates and serves. */
-export const STORAGE_VERSION = 2;
+export const STORAGE_VERSION = 3;
 
 /** The version the previous major line ended on; older storage is refused. */
-export const OLDEST_UPGRADABLE_VERSION = 1;
+export const OLDEST_UPGRADABLE_VERSION = 2;
 
 /** Storage that predates the version table: the 5.x layout without retrievers. */
 const UNVERSIONED = 1;
 
-/** One upgrade step: statements run inside every ontology namespace to
- * bring it from `to - 1` to `to`. */
+/** One action of a step inside an ontology namespace: a statement, or work
+ * that needs code between statements (a backfill). */
+type Action = string | ((querier: Querier) => Promise<void>);
+
+/** One upgrade step: actions run, in order, inside every ontology
+ * namespace to bring it from `to - 1` to `to`. */
 interface Step {
   to: number;
-  statements: string[];
+  actions: Action[];
+}
+
+/**
+ * Give every entity type a name property (`legacyNameProperty`), creating
+ * a non-required string property where the type has none. Declaration
+ * order is creation order.
+ */
+async function backfillNameProperties(querier: Querier): Promise<void> {
+  const rows = (
+    await querier.query(
+      `SELECT et.entity_type_id, p.key, p.data_type
+         FROM entity_type et
+         LEFT JOIN property_def p ON p.entity_type_id = et.entity_type_id
+        ORDER BY et.key, p.created_at, p.key`,
+    )
+  ).rows;
+  const byType = new Map<string, { key: string; dataType: string }[]>();
+  for (const row of rows) {
+    const id = row["entity_type_id"] as string;
+    const properties = byType.get(id) ?? [];
+    if (row["key"] !== null) {
+      properties.push({ key: row["key"] as string, dataType: row["data_type"] as string });
+    }
+    byType.set(id, properties);
+  }
+  for (const [entityTypeId, properties] of byType) {
+    const { key, create } = legacyNameProperty(properties);
+    if (create) {
+      await querier.query(
+        `INSERT INTO property_def
+           (property_id, entity_type_id, key, display_name, data_type, required)
+         VALUES ($1, $2, $3, $4, 'string', false)`,
+        [randomUUID(), entityTypeId, key, namePropertyDisplayName(key)],
+      );
+    }
+    await querier.query(`UPDATE entity_type SET name_property = $2 WHERE entity_type_id = $1`, [
+      entityTypeId,
+      key,
+    ]);
+  }
 }
 
 const STEPS: Step[] = [
   {
-    to: 2,
-    statements: [
-      `CREATE TABLE IF NOT EXISTS retriever_config (
-  retriever_config_id uuid CONSTRAINT retriever_config_pk PRIMARY KEY,
-  lens_id uuid NOT NULL CONSTRAINT retriever_config_lens_fk REFERENCES lens(lens_id) ON DELETE CASCADE,
-  key text NOT NULL,
-  name text NOT NULL,
-  description text,
-  config_version integer NOT NULL,
-  config jsonb NOT NULL,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT retriever_config_key_unique UNIQUE(lens_id, key)
-)`,
+    // 6.0: every entity type names its name property.
+    to: 3,
+    actions: [
+      `ALTER TABLE entity_type ADD COLUMN name_property text`,
+      backfillNameProperties,
+      `ALTER TABLE entity_type ALTER COLUMN name_property SET NOT NULL`,
+      `ALTER TABLE entity_type ADD CONSTRAINT entity_type_name_property_fk
+  FOREIGN KEY (entity_type_id, name_property) REFERENCES property_def (entity_type_id, key)
+  DEFERRABLE INITIALLY DEFERRED`,
     ],
   },
 ];
@@ -127,8 +171,12 @@ export async function bringStorageUpToDate(
   for (const step of STEPS.filter((candidate) => candidate.to > recorded)) {
     for (const namespace of namespaces) {
       await querier.query(searchPathStatement(namespace));
-      for (const statement of step.statements) {
-        await querier.query(statement);
+      for (const action of step.actions) {
+        if (typeof action === "string") {
+          await querier.query(action);
+        } else {
+          await action(querier);
+        }
       }
     }
   }

@@ -15,7 +15,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../../../src/app.js";
 import { closeStores, initStores } from "../../../src/core/ports.js";
 import { invalidateLoadedSchemaCache } from "../../../src/runtime/schemaCache.js";
-import { modelPrefix, runtimePrefix } from "../fixture.js";
+import { defineEntityProperty, modelPrefix, runtimePrefix } from "../fixture.js";
 import { wipeDatabase } from "../reset.js";
 import { supportsMultipleOntologies } from "../tiers.js";
 import { checkOllamaModel, disableProvider, enableOllamaProvider } from "./support.js";
@@ -72,7 +72,7 @@ describe.skipIf(!ollamaUp || !supportsMultipleOntologies)("semantic search isola
         { key: "name", displayName: "Name", dataType: "string", required: true },
         { key: "bio", displayName: "Bio", dataType: "string", required: false },
       ]) {
-        await post(`${model}/entity-types/${etId}/properties`, prop);
+        await defineEntityProperty(app, ontologyKey, etId, prop);
       }
       await post(`${model}/lenses`, { key: "default", name: `Default (${ontologyKey})` });
     }

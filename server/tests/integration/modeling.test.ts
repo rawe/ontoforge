@@ -258,11 +258,12 @@ describe("property round trip", () => {
     expect(prop.required).toBe(true);
     expect(prop.defaultValue).toBe("30");
 
+    // Beside the name property the type was created with.
     const list = await app.inject({
       method: "GET",
       url: `/api/ontologies/test_ont/model/entity-types/${etId}/properties`,
     });
-    expect(list.json()).toHaveLength(1);
+    expect((list.json() as Record<string, unknown>[]).map((p) => p.key)).toEqual(["age", "name"]);
 
     // Sparse update: untouched fields survive.
     const renamed = await app.inject({
@@ -295,7 +296,7 @@ describe("property round trip", () => {
       method: "GET",
       url: `/api/ontologies/test_ont/model/entity-types/${etId}/properties`,
     });
-    expect(emptied.json()).toHaveLength(0);
+    expect((emptied.json() as Record<string, unknown>[]).map((p) => p.key)).toEqual(["name"]);
   });
 
   it("property CRUD works identically on a relation type, except document", async () => {
@@ -337,7 +338,7 @@ describe("property round trip", () => {
   it("duplicate property keys conflict within one owner but not across owners", async () => {
     const personId = await createEntityType("person", "Person");
     const companyId = await createEntityType("company", "Company");
-    const payload = { key: "name", displayName: "Name", dataType: "string" };
+    const payload = { key: "nickname", displayName: "Nickname", dataType: "string" };
 
     const first = await app.inject({
       method: "POST",
@@ -366,7 +367,7 @@ describe("property round trip", () => {
     await app.inject({
       method: "POST",
       url: `/api/ontologies/test_ont/model/entity-types/${etId}/properties`,
-      payload: { key: "name", displayName: "Name", dataType: "string" },
+      payload: { key: "nickname", displayName: "Nickname", dataType: "string" },
     });
     await app.inject({ method: "DELETE", url: `/api/ontologies/test_ont/model/entity-types/${etId}` });
 
@@ -416,9 +417,9 @@ describe("full-schema snapshot", () => {
 
     expect(schema.entityTypes.map((et) => et.key)).toEqual(["company", "person"]);
     const person = schema.entityTypes.find((et) => et.key === "person");
+    expect(person?.nameProperty).toBe("name");
     const personProps = person?.properties as Record<string, unknown>[];
-    expect(personProps).toHaveLength(1);
-    expect(personProps[0]?.key).toBe("full_name");
+    expect(personProps.map((p) => p.key)).toEqual(["full_name", "name"]);
     expect(personProps[0]?.required).toBe(true);
     expect(personProps[0]?.createdAt).toBeInstanceOf(Date);
 

@@ -17,7 +17,7 @@ import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ApiError } from '@/api/http'
 import { createEntity, createRelation } from '@/api/runtime'
-import { useFeatures } from '@/api/hooks'
+import { useDisplayLabel, useFeatures } from '@/api/hooks'
 import type {
   ExtractResponse,
   JsonValue,
@@ -43,7 +43,6 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { displayLabel } from '@/lib/displayLabel'
 import { cn } from '@/lib/utils'
 
 /* --------------------------------- helpers ---------------------------------- */
@@ -53,7 +52,7 @@ function liveLabel(item: ReviewEntityItem): string {
   for (const [key, value] of Object.entries(item.drafts)) {
     if (value.trim() !== '') nonEmpty[key] = value
   }
-  return proposedLabel(nonEmpty)
+  return proposedLabel(nonEmpty, item.type?.nameProperty)
 }
 
 function StatusBadge({ item }: { item: { status: string; error?: string } }) {
@@ -95,6 +94,7 @@ function EntityCard({
   comparisonEnabled: boolean
   onChange: (patch: Partial<ReviewEntityItem>) => void
 }) {
+  const displayLabel = useDisplayLabel()
   const missing = missingRequired(item)
   const locked = disabled || item.status === 'created' || item.status === 'creating'
   const usingExisting = item.useExisting !== null

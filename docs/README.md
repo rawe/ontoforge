@@ -182,6 +182,11 @@ source and target entity types are fixed at creation.
 **Property definition** — a named, typed field on one entity type or one relation type.
 Carries a data type, whether it is required, and an optional default.
 
+**Name property** — the one `string` property of an entity type whose value names its
+entities. Every entity type has exactly one; it is created with the type and can be
+reassigned, never removed. See
+[capabilities/schema-modeling.md](capabilities/schema-modeling.md#the-name-property).
+
 **Data type** — one of `string`, `integer`, `float`, `boolean`, `date`, `datetime`,
 `document`.
 

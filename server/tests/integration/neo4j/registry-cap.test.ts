@@ -17,6 +17,7 @@ import { createApp } from "../../../src/app.js";
 import { settings } from "../../../src/config.js";
 import { ConflictError, StoreError } from "../../../src/core/exceptions.js";
 import { closeStores, getOntologyRegistry, initStores } from "../../../src/core/ports.js";
+import { defineEntityProperty } from "../fixture.js";
 import { wipeDatabase } from "../reset.js";
 
 const ID_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -111,10 +112,11 @@ describe.skipIf(settings.DB_BACKEND !== "neo4j")("Neo4j one-ontology cap", () =>
       payload: { key: "person", displayName: "Person" },
     });
     expect(et.statusCode, et.body).toBe(201);
-    await app.inject({
-      method: "POST",
-      url: `/api/ontologies/crm/model/entity-types/${(et.json() as { entityTypeId: string }).entityTypeId}/properties`,
-      payload: { key: "name", displayName: "Name", dataType: "string", required: true },
+    await defineEntityProperty(app, "crm", (et.json() as { entityTypeId: string }).entityTypeId, {
+      key: "name",
+      displayName: "Name",
+      dataType: "string",
+      required: true,
     });
     const lens = await app.inject({
       method: "POST",

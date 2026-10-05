@@ -1,9 +1,13 @@
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useParams } from 'react-router-dom'
+import { displayLabel, nameProperties } from '@/lib/displayLabel'
 import * as model from './model'
 import * as registry from './registry'
 import * as server from './server'
 import * as runtime from './runtime'
 import { qk } from './queryKeys'
+import type { EntityInstance } from './types'
 
 /** Global feature flags — fetched once, never stale. */
 export function useFeatures() {
@@ -72,4 +76,18 @@ export function useRuntimeSchema(
       lensKey !== undefined &&
       lensKey !== '',
   })
+}
+
+/**
+ * Entity label function for the current workbench route's lens: the entity
+ * type's name property value, else the truncated `_id` (see `displayLabel`).
+ * Reads the ontology and lens keys from `/o/:ontologyKey/w/:lensKey`.
+ */
+export function useDisplayLabel(): (entity: EntityInstance) => string {
+  const { ontologyKey, lensKey } = useParams<{ ontologyKey: string; lensKey: string }>()
+  const schema = useRuntimeSchema(ontologyKey, lensKey).data
+  return useMemo(() => {
+    const names = nameProperties(schema)
+    return (entity: EntityInstance) => displayLabel(entity, names.get(entity._entityTypeKey))
+  }, [schema])
 }

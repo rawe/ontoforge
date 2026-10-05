@@ -57,3 +57,29 @@ export interface PropertyDef {
   required: boolean;
   defaultValue: string | null;
 }
+
+/**
+ * Every entity type has exactly one name property: a `string` property of
+ * that type, designated in modeling. Creating an entity type creates it,
+ * keyed `name` unless the request names another key.
+ */
+export const DEFAULT_NAME_PROPERTY = "name";
+
+/** The data type a name property must have. */
+export const NAME_PROPERTY_DATA_TYPE = "string";
+
+/** Display name of a created name property: "Name" for `name`, otherwise the key. */
+export function namePropertyDisplayName(key: string): string {
+  return key === DEFAULT_NAME_PROPERTY ? "Name" : key;
+}
+
+/** A property definition to create together with its entity type. */
+export interface NewPropertyDef {
+  propertyId: string;
+  key: string;
+  displayName: string;
+  description: string | null;
+  dataType: string;
+  required: boolean;
+  defaultValue: string | null;
+}

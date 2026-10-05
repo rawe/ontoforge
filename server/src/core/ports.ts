@@ -53,12 +53,12 @@
  * and its package is registered as one thunk line in `ADAPTERS`.
  */
 
-import type { TextSearchLanguage } from "../registry/schemas.js";
+import type { KeywordLanguage } from "./keywordLanguage.js";
 
 import { settings } from "../config.js";
 import { NotFoundError } from "./exceptions.js";
 import type { ValidatedQuery } from "./oql/index.js";
-import type { PropertyDef, TypeKind } from "./schemas.js";
+import type { NewPropertyDef, PropertyDef, TypeKind } from "./schemas.js";
 
 /** A raw store row: one entity, relation, or schema object as a plain map. */
 export type Row = Record<string, unknown>;
@@ -165,7 +165,7 @@ export interface ReservedTypeKeyInUse {
  * surfaces"); the section comments below mirror it.
  */
 export interface ModelingStore {
-  readonly textSearchLanguage: TextSearchLanguage;
+  readonly textSearchLanguage: KeywordLanguage;
   // ------------------------------------------------------------------
   // Reserved keys
   // ------------------------------------------------------------------
@@ -210,11 +210,15 @@ export interface ModelingStore {
   // Entity types
   // ------------------------------------------------------------------
 
+  /** Create the type together with its name property, in one operation:
+   * an entity type never exists without its name property. Entity type
+   * rows carry `nameProperty`, the name property's key. */
   createEntityType(
     entityTypeId: string,
     key: string,
     displayName: string,
     description: string | null,
+    nameProperty: NewPropertyDef,
   ): Promise<Row>;
 
   listEntityTypes(): Promise<Row[]>;
@@ -223,10 +227,13 @@ export interface ModelingStore {
 
   getEntityTypeByKey(key: string): Promise<Row | null>;
 
+  /** `nameProperty` names an existing `string` property of the type
+   * (checked by the service); null leaves it unchanged. */
   updateEntityType(
     entityTypeId: string,
     displayName: string | null,
     description: string | null,
+    nameProperty: string | null,
   ): Promise<Row | null>;
 
   deleteEntityType(entityTypeId: string): Promise<boolean>;
@@ -514,7 +521,7 @@ export interface RuntimeStore {
   /** The ontology this store is bound to. The runtime schema cache keys
    * its entries by this binding plus the lens key. */
   readonly ontologyKey: string;
-  readonly textSearchLanguage: TextSearchLanguage;
+  readonly textSearchLanguage: KeywordLanguage;
 
   // ------------------------------------------------------------------
   // Declarations
@@ -744,7 +751,7 @@ export interface OntologyRegistry {
     key: string,
     displayName: string | null,
     embeddingDimensions: number | null,
-    textSearchLanguage: TextSearchLanguage,
+    textSearchLanguage: KeywordLanguage,
   ): Promise<Row>;
 
   listOntologies(): Promise<Row[]>;
@@ -777,9 +784,11 @@ export interface OntologyRegistry {
  */
 export interface AdapterModule {
   supportsKeywordRanking(): boolean;
+  /** Whether this adapter stores search indices. */
+  supportsSearchIndices(): boolean;
   initAdapter(): Promise<void>;
-  createModelingStore(ontologyKey: string, language: TextSearchLanguage): ModelingStore;
-  createRuntimeStore(ontologyKey: string, language: TextSearchLanguage): RuntimeStore;
+  createModelingStore(ontologyKey: string, language: KeywordLanguage): ModelingStore;
+  createRuntimeStore(ontologyKey: string, language: KeywordLanguage): RuntimeStore;
   createRegistry(): OntologyRegistry;
   closeStores(): Promise<void>;
   ensureSemanticIndexes(dimensions: number): Promise<void>;
@@ -852,14 +861,14 @@ async function requireOntology(ontologyKey: string): Promise<Row> {
 export async function getModelingStore(ontologyKey: string): Promise<ModelingStore> {
   const adapter = requireAdapter();
   const ontology = await requireOntology(ontologyKey);
-  return adapter.createModelingStore(ontologyKey, ontology.textSearchLanguage as TextSearchLanguage);
+  return adapter.createModelingStore(ontologyKey, ontology.textSearchLanguage as KeywordLanguage);
 }
 
 /** A runtime store bound to one ontology. Unknown key -> not found. */
 export async function getRuntimeStore(ontologyKey: string): Promise<RuntimeStore> {
   const adapter = requireAdapter();
   const ontology = await requireOntology(ontologyKey);
-  return adapter.createRuntimeStore(ontologyKey, ontology.textSearchLanguage as TextSearchLanguage);
+  return adapter.createRuntimeStore(ontologyKey, ontology.textSearchLanguage as KeywordLanguage);
 }
 
 export function getOntologyRegistry(): OntologyRegistry {
@@ -869,8 +878,19 @@ export function getOntologyRegistry(): OntologyRegistry {
   return ontologyRegistry;
 }
 
+/** The active adapter, or the configured one's module when the stores
+ * are not initialized yet — for server-level declarations. */
+async function declaringAdapter(): Promise<AdapterModule> {
+  return activeAdapter ?? await (ADAPTERS[settings.DB_BACKEND] ?? unknownBackend())();
+}
+
 /** Server-level declaration, available even before an ontology exists. */
 export async function supportsKeywordRanking(): Promise<boolean> {
-  const adapter = activeAdapter ?? await (ADAPTERS[settings.DB_BACKEND] ?? unknownBackend())();
-  return adapter.supportsKeywordRanking();
+  return (await declaringAdapter()).supportsKeywordRanking();
+}
+
+/** Server-level declaration: whether the active adapter stores search
+ * indices. An adapter without them keeps its own search path. */
+export async function supportsSearchIndices(): Promise<boolean> {
+  return (await declaringAdapter()).supportsSearchIndices();
 }

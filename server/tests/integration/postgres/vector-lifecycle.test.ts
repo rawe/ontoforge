@@ -110,18 +110,15 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
     store = await getModelingStore(ONTOLOGY_KEY);
     runtime = await getRuntimeStore(ONTOLOGY_KEY);
     entityTypeId = randomUUID();
-    await store.createEntityType(entityTypeId, "person", "Person", null);
-    await store.createProperty(
-      entityTypeId,
-      "EntityType",
-      randomUUID(),
-      "name",
-      "Name",
-      null,
-      "string",
-      true,
-      null,
-    );
+    await store.createEntityType(entityTypeId, "person", "Person", null, {
+      propertyId: randomUUID(),
+      key: "name",
+      displayName: "Name",
+      description: null,
+      dataType: "string",
+      required: true,
+      defaultValue: null,
+    });
     documentPropertyId = randomUUID();
     await store.createProperty(
       entityTypeId,
@@ -447,7 +444,15 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
       await getOntologyRegistry().createOntology(randomUUID(), "vec_other", null, null, "english");
       const other = await getModelingStore("vec_other");
       const otherTypeId = randomUUID();
-      await other.createEntityType(otherTypeId, "ticket", "Ticket", null);
+      await other.createEntityType(otherTypeId, "ticket", "Ticket", null, {
+        propertyId: randomUUID(),
+        key: "name",
+        displayName: "Name",
+        description: null,
+        dataType: "string",
+        required: false,
+        defaultValue: null,
+      });
 
       // An orphan staged in the second namespace: the sweep must reach it.
       const orphan = `vec_entity_${nameId(randomUUID())}`;

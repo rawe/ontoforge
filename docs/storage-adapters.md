@@ -585,6 +585,13 @@ runs each missing upgrade step inside every `ont_*` namespace and records the ne
 last. The steps and both version constants live in the storage-version module beside the
 DDL.
 
+The current storage version is 3 and the oldest upgradable one is 2: version 3 is a major
+step. It adds `entity_type.name_property`, gives every existing entity type its name
+property by the derivation the `5.0` transfer import uses
+([capabilities/transfer.md](capabilities/transfer.md#the-format-version)) — creating a
+`string` property where a type has none, with property creation order as the declaration
+order — and then makes the column mandatory and adds its reference.
+
 **Registry create** is one transaction:
 the registry row first — so a concurrent same-key create dies on the named constraint as
 a conflict — then the fresh namespace, the eleven tables below and, when an embedding width
@@ -601,7 +608,7 @@ per namespace:
 | Logical | Table | Joined by |
 |---|---|---|
 | Lens | `lens` | referenced by its inclusions, agents, saved queries and retrievers |
-| Entity type | `entity_type` | referenced by its property definitions and inclusions |
+| Entity type | `entity_type` | referenced by its property definitions and inclusions; its name property's key in `name_property`, a reference to `property_def` by entity type and key, checked at commit |
 | Relation type | `relation_type` | endpoint entity type keys as deletion-restricted references to `entity_type`; referenced by its property definitions and inclusions |
 | Property definition | `property_def` | exactly one of two owner columns — entity type or relation type — enforced by a check constraint |
 | Scope inclusion | `lens_includes` | its lens plus exactly one of two type columns; the optional property allowlist is an array column, and an absent allowlist is stored as null, never as an empty array |
@@ -619,6 +626,13 @@ structure only, per the rule in [decisions.md](decisions.md#storage): identity, 
 integrity, exactly-one-owner and uniqueness, with no backstop for the business rules the
 service validates. The uniqueness constraints on type keys act per namespace, which is
 exactly the per-ontology key scoping the contract requires.
+
+The name-property reference pins an entity type's name property to one of that type's own
+property definitions — the entity type id is part of the reference. It is deferred,
+because a type and its name property are created in one transaction and each references
+the other. Deleting the name property alone violates it at commit, which the error
+translation reports as the same conflict the service raises; that the name property is a
+`string` property is the service's check, not the database's.
 
 ## Naming transformations
 
@@ -767,7 +781,7 @@ Schema objects are nodes, joined by relationships:
 | Logical | Node label | Joined by |
 |---|---|---|
 | Lens | `Ontology` — a physical name exempt from the vocabulary lock ([decisions.md](decisions.md#ontologies)) | `INCLUDES_TYPE` to a type node, carrying the optional property allowlist |
-| Entity type | `EntityType` | `HAS_PROPERTY` to its property nodes |
+| Entity type | `EntityType` | `HAS_PROPERTY` to its property nodes; its name property's key as the node property `nameProperty` |
 | Relation type | `RelationType` | `HAS_PROPERTY`, plus `RELATES_FROM` and `RELATES_TO` to its endpoint entity types |
 | Property definition | `PropertyDefinition` | — |
 | Agent configuration | `AiAgentConfig` | `HAS_AI_AGENT` from its lens |
@@ -836,7 +850,12 @@ Created at startup, unconditionally:
 | Index | `_Entity` type key | Every listing filters on it |
 
 The Neo4j adapter carries no storage version: every startup creates the objects above
-if absent, and that is its whole upgrade path.
+if absent, and gives every entity type node without `nameProperty` its name property by
+the derivation the `5.0` transfer import uses
+([capabilities/transfer.md](capabilities/transfer.md#the-format-version)) — creating a
+`string` property where a type has none, with property creation order as the declaration
+order. That is its whole upgrade path. Nothing in the graph enforces the name property;
+the service's checks are its only guard.
 
 With the registry capped at one ontology, per-database uniqueness and per-ontology
 uniqueness are the same thing.

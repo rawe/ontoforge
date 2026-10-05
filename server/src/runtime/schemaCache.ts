@@ -27,6 +27,8 @@ export interface EntityTypeDef {
   key: string;
   displayName: string;
   description: string | null;
+  /** Key of the name property; null in a scoped schema whose lens hides it. */
+  nameProperty: string | null;
   properties: Record<string, PropertyDef>;
 }
 
@@ -207,6 +209,7 @@ export function buildSchemaCacheFromRaw(
       key: et.key as string,
       displayName: et.displayName as string,
       description: (et.description as string | undefined) ?? null,
+      nameProperty: (et.nameProperty as string | undefined) ?? null,
       properties: toPropertyDefs(et.properties as Row[] | undefined),
     };
   }
@@ -276,6 +279,10 @@ export function applyScopeFiltering(
       }
       const copy = structuredClone(etDef);
       copy.properties = filterProperties(copy.properties, inclusion.properties);
+      // A lens that hides the name property shows the type without one.
+      if (copy.nameProperty !== null && !(copy.nameProperty in copy.properties)) {
+        copy.nameProperty = null;
+      }
       scoped.entityTypes[inclusion.key] = copy;
     }
   }

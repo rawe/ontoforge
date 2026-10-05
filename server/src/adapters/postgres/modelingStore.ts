@@ -11,9 +11,10 @@ import type { KeywordPropertySegment } from "../../core/ports.js";
  * Operation mapping:
  *
  * - Every method is a single statement through the `runQuery` door; the
- *   one exception is `getFullSchema`, whose coherent-snapshot obligation
+ *   exceptions are `getFullSchema`, whose coherent-snapshot obligation
  *   is honoured with one REPEATABLE READ transaction through
- *   `withTransaction`.
+ *   `withTransaction`, and `createEntityType`, which writes the type and
+ *   its name property in one transaction.
  * - Deletes are one `DELETE` each, `rowCount > 0` as the boolean —
  *   `ON DELETE CASCADE` carries what the reference adapter needed
  *   explicit fan-out for (property definitions, inclusions, agents,
@@ -34,12 +35,12 @@ import type { KeywordPropertySegment } from "../../core/ports.js";
  * naming and index DDL live there, beside the init DDL.
  */
 
-import type { TextSearchLanguage } from "../../registry/schemas.js";
+import type { KeywordLanguage } from "../../core/keywordLanguage.js";
 
 import { toSql } from "pgvector";
 
 import type { ModelingStore, ReservedTypeKeyInUse, Row } from "../../core/ports.js";
-import type { TypeKind } from "../../core/schemas.js";
+import type { NewPropertyDef, TypeKind } from "../../core/schemas.js";
 import * as vectorDdl from "./ddl.js";
 import { runQuery, withTransaction, type DbResult, type IsolationLevel, type Querier } from "./errors.js";
 import { camelizeRow, camelizeRows, isUuid } from "./rows.js";
@@ -50,7 +51,8 @@ const NO_RESERVED_KEYS: ReadonlySet<string> = new Set();
 // Read column lists — the port-visible shape of each object; owner ids,
 // denormalized keys, and embeddings stay out of returned rows.
 // (`LENS_COLS` comes from `schemaRead.ts`, shared with the runtime store.)
-const ENTITY_TYPE_COLS = "entity_type_id, key, display_name, description, created_at, updated_at";
+const ENTITY_TYPE_COLS =
+  "entity_type_id, key, display_name, description, name_property, created_at, updated_at";
 const RELATION_TYPE_COLS =
   "relation_type_id, key, display_name, description, " +
   "source_entity_type_key, target_entity_type_key, created_at, updated_at";
@@ -105,10 +107,39 @@ function toIncludeRow(row: Row): Row {
   };
 }
 
+/** The one property-definition INSERT, shared by property creation and
+ * entity type creation (its name property). */
+async function insertProperty(
+  querier: Querier,
+  ownerId: string,
+  typeKind: TypeKind,
+  property: NewPropertyDef,
+): Promise<Row> {
+  const result = await querier.query(
+    `INSERT INTO property_def
+       (property_id, entity_type_id, relation_type_id, key, display_name,
+        description, data_type, required, default_value)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     RETURNING ${PROPERTY_COLS}`,
+    [
+      property.propertyId,
+      typeKind === "EntityType" ? ownerId : null,
+      typeKind === "RelationType" ? ownerId : null,
+      property.key,
+      property.displayName,
+      property.description,
+      property.dataType,
+      property.required,
+      property.defaultValue,
+    ],
+  );
+  return camelizeRow(result.rows[0]!);
+}
+
 export class PostgresModelingStore implements ModelingStore {
   /** Bound to one ontology's namespace; unbound (tests only) runs against
    * the connection's default namespace. */
-  constructor(private readonly namespace?: string, public readonly textSearchLanguage: TextSearchLanguage = "english") {}
+  constructor(private readonly namespace?: string, public readonly textSearchLanguage: KeywordLanguage = "english") {}
 
   /** Door one, carrying this store's binding. */
   private query(text: string, params?: unknown[]): Promise<DbResult> {
@@ -281,19 +312,25 @@ export class PostgresModelingStore implements ModelingStore {
   // Entity types
   // ------------------------------------------------------------------
 
+  /** One transaction: the type, then its name property — the deferred
+   * name-property FK is checked at commit, when both exist. */
   async createEntityType(
     entityTypeId: string,
     key: string,
     displayName: string,
     description: string | null,
+    nameProperty: NewPropertyDef,
   ): Promise<Row> {
-    const result = await this.query(
-      `INSERT INTO entity_type (entity_type_id, key, display_name, description)
-       VALUES ($1, $2, $3, $4)
-       RETURNING ${ENTITY_TYPE_COLS}`,
-      [entityTypeId, key, displayName, description],
-    );
-    return camelizeRow(result.rows[0]!);
+    return this.tx(async (querier) => {
+      const result = await querier.query(
+        `INSERT INTO entity_type (entity_type_id, key, display_name, description, name_property)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING ${ENTITY_TYPE_COLS}`,
+        [entityTypeId, key, displayName, description, nameProperty.key],
+      );
+      await insertProperty(querier, entityTypeId, "EntityType", nameProperty);
+      return camelizeRow(result.rows[0]!);
+    });
   }
 
   async listEntityTypes(): Promise<Row[]> {
@@ -324,6 +361,7 @@ export class PostgresModelingStore implements ModelingStore {
     entityTypeId: string,
     displayName: string | null,
     description: string | null,
+    nameProperty: string | null,
   ): Promise<Row | null> {
     if (!isUuid(entityTypeId)) {
       return null;
@@ -332,6 +370,7 @@ export class PostgresModelingStore implements ModelingStore {
     const sets = buildUpdateSets(params, [
       ["display_name", displayName],
       ["description", description],
+      ["name_property", nameProperty],
     ]);
     const result = await this.query(
       `UPDATE entity_type SET ${sets.join(", ")}
@@ -466,25 +505,17 @@ export class PostgresModelingStore implements ModelingStore {
     required: boolean,
     defaultValue: string | null,
   ): Promise<Row> {
-    const result = await this.query(
-      `INSERT INTO property_def
-         (property_id, entity_type_id, relation_type_id, key, display_name,
-          description, data_type, required, default_value)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       RETURNING ${PROPERTY_COLS}`,
-      [
+    return this.tx((querier) =>
+      insertProperty(querier, ownerId, typeKind, {
         propertyId,
-        typeKind === "EntityType" ? ownerId : null,
-        typeKind === "RelationType" ? ownerId : null,
         key,
         displayName,
         description,
         dataType,
         required,
         defaultValue,
-      ],
+      }),
     );
-    return camelizeRow(result.rows[0]!);
   }
 
   async listProperties(ownerId: string, typeKind: TypeKind): Promise<Row[]> {

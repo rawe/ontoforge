@@ -238,8 +238,9 @@ Validation results appear inline as a pass marker or a list of path-and-message 
 Creating a type asks for a display name, a key and a description. The key is proposed from
 the display name (lower-cased, non-alphanumerics collapsed to underscores, leading digits
 dropped), validated live against the key pattern, and permanent — the form says so.
-Creating a relation type additionally asks for source and target entity types, which are
-permanent too.
+Creating an entity type additionally asks for the key of its name property, `name` by
+default and validated against the same pattern. Creating a relation type additionally asks
+for source and target entity types, which are permanent too.
 
 ### Type editor
 
@@ -250,7 +251,10 @@ and a relation type's endpoints. Deletion is offered behind a confirmation and m
 the [cascade flow](#cascade-confirmation).
 
 A properties table lists key, display name, data type, required flag, default and
-description, with add, edit and delete per row. In the property dialog the key and the data
+description, with add, edit and delete per row. On an entity type the name property's row
+carries a "Name" badge and its delete action is disabled, explaining that another name
+property must be chosen first; a "Name property" select above the table offers the type's
+`string` properties and reassigns the name property on change. In the property dialog the key and the data
 type are immutable once created; display name, description, required flag and default may
 change. The default is entered with an input matched to the data type. Document is offered
 as a data type on entity types only. Creating a required property may trigger the cascade
@@ -644,12 +648,14 @@ this entity's type — both, when the type is self-referential — summing the t
 an entity's counts form one cache entry, invalidated together with its neighbour lists
 after any relation is created or removed at either end.
 
-**Entities have no name field; the label is a fallback chain.** In order: `name`, `title`,
-`label`, `display_name`, then the first non-system property holding a non-empty string,
-then the first twelve characters of the identifier. It is applied everywhere an entity is
-named — tables, detail headers, search results, canvas nodes, relation rows, toasts — and
-the extraction review applies the same chain to a *proposed* property bag, falling back to
-an explicit "unnamed" marker.
+**An entity's label is its name property's value.** The label is the value of the entity
+type's [name property](capabilities/schema-modeling.md#the-name-property), read from the
+current lens's runtime schema, when it is a non-empty string; otherwise the first twelve
+characters of the identifier. There is no fallback to other properties, so a lens that
+hides the name property labels its entities by identifier. It is applied everywhere an
+entity is named — tables, detail headers, search results, canvas nodes, relation rows,
+toasts — and the extraction review applies it to a *proposed* property bag, falling back
+to an explicit "unnamed" marker.
 
 **Query rows omit relation endpoints.** A relation read returns its endpoint identifiers; a
 relation inside a query result does not ([capabilities/oql.md](capabilities/oql.md)).

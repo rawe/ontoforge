@@ -26,7 +26,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../../src/app.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
-import { buildFixture, modelPrefix, runtimePrefix, type FixtureIds } from "./fixture.js";
+import {
+  buildFixture,
+  defineEntityProperty,
+  modelPrefix,
+  runtimePrefix,
+  type FixtureIds,
+} from "./fixture.js";
 import { wipeDatabase } from "./reset.js";
 
 let app: FastifyInstance;
@@ -582,7 +588,7 @@ describe("rejections, collected under their filter keys", () => {
   async function widenSchema(): Promise<void> {
     const model = modelPrefix(fixture.ontologyKey);
     const product = await create(`${model}/entity-types`, { key: "product", displayName: "Product" });
-    await create(`${model}/entity-types/${product.entityTypeId as string}/properties`, {
+    await defineEntityProperty(app, fixture.ontologyKey, product.entityTypeId as string, {
       key: "name",
       displayName: "Name",
       dataType: "string",

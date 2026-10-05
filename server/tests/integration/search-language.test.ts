@@ -37,7 +37,7 @@ it("defaults to English, returns it in reads and exports, and never changes it o
   expect(renamed.json().textSearchLanguage).toBe("english");
   expect((await app.inject({ url: base })).json().textSearchLanguage).toBe("english");
   const exported = (await app.inject({ url: `${base}/model/export` })).json();
-  expect(exported).toMatchObject({ formatVersion: "5.0", textSearchLanguage: "english" });
+  expect(exported).toMatchObject({ formatVersion: "6.0", textSearchLanguage: "english" });
 });
 it("imports only designs carrying the target language, before writing anything", async () => {
   await post("/api/ontologies", { key: "language_test", textSearchLanguage: "german" });

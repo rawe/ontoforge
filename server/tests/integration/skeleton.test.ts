@@ -69,6 +69,7 @@ describe("features route on a fully booted server", () => {
         entityIdentityComparison: false,
         searchStrategies:
           settings.DB_BACKEND === "postgres" ? ["keyword", "keyword-any", "keyword-all"] : [],
+        searchIndices: settings.DB_BACKEND === "postgres",
       });
     } finally {
       await shutdownServer(app);

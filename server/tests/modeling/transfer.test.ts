@@ -25,6 +25,7 @@ const FULL_SCHEMA = {
       key: "person",
       displayName: "Person",
       description: null,
+      nameProperty: "full_name",
       properties: [
         {
           propertyId: "p-1",
@@ -41,7 +42,17 @@ const FULL_SCHEMA = {
       key: "company",
       displayName: "Company",
       description: null,
-      properties: [],
+      nameProperty: "name",
+      properties: [
+        {
+          propertyId: "p-2",
+          key: "name",
+          displayName: "Name",
+          dataType: "string",
+          required: false,
+          defaultValue: null,
+        },
+      ],
     },
   ],
   relationTypes: [
@@ -102,12 +113,13 @@ describe("export", () => {
     const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.formatVersion).toBe("5.0");
+    expect(body.formatVersion).toBe("6.0");
     expect(body.entityTypes).toHaveLength(2);
     expect(body.relationTypes).toHaveLength(1);
     expect(body.lenses).toHaveLength(1);
     const person = body.entityTypes[0];
     expect(person.key).toBe("person");
+    expect(person.nameProperty).toBe("full_name");
     expect(person.properties).toHaveLength(1);
     expect(person.properties[0].key).toBe("full_name");
     const rt = body.relationTypes[0];
@@ -133,7 +145,7 @@ describe("export", () => {
     const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({
-      formatVersion: "5.0",
+      formatVersion: "6.0",
       textSearchLanguage: "english",
       entityTypes: [],
       relationTypes: [],
@@ -252,11 +264,12 @@ const LENS_DATA = {
 
 function importPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    formatVersion: "2.0",
+    formatVersion: "6.0",
     entityTypes: [
       {
         key: "person",
         displayName: "Person",
+        nameProperty: "full_name",
         properties: [
           { key: "full_name", displayName: "Full Name", dataType: "string", required: true },
         ],
@@ -285,6 +298,23 @@ function importPayload(overrides: Record<string, unknown> = {}): Record<string, 
   };
 }
 
+/** A 6.0 entity type whose name property is a `name` string property. */
+function entityType(
+  key: string,
+  displayName: string,
+  properties: Record<string, unknown>[] = [],
+): Record<string, unknown> {
+  return {
+    key,
+    displayName,
+    nameProperty: "name",
+    properties: [
+      { key: "name", displayName: "Name", dataType: "string", required: false },
+      ...properties,
+    ],
+  };
+}
+
 async function postImport(payload: Record<string, unknown>) {
   return app.inject({ method: "POST", url: "/api/ontologies/onto/model/import", payload: { textSearchLanguage: "english", ...payload } });
 }
@@ -299,7 +329,14 @@ describe("import", () => {
     expect(body.lenses).toHaveLength(1);
     expect(body.lenses[0].key).toBe("imported");
     expect(holder.store.createEntityType).toHaveBeenCalledTimes(1);
-    expect(holder.store.createProperty).toHaveBeenCalledTimes(1);
+    // The name property is created with its type, not separately.
+    expect(holder.store.createEntityType.mock.calls[0]![4]).toMatchObject({
+      key: "full_name",
+      displayName: "Full Name",
+      dataType: "string",
+      required: true,
+    });
+    expect(holder.store.createProperty).not.toHaveBeenCalled();
     expect(holder.store.createRelationType).toHaveBeenCalledTimes(1);
     expect(holder.store.createLens).toHaveBeenCalledTimes(1);
     expect(holder.store.addIncludesType).toHaveBeenCalledTimes(2);
@@ -317,19 +354,23 @@ describe("import", () => {
     expect(etId).toMatch(/^[0-9a-f-]{36}$/);
   });
 
-  it("processes old, unknown and missing format versions identically", async () => {
-    for (const version of ["2.0", "unknown-version", undefined]) {
+  it("reads a missing format version as the current one", async () => {
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    holder.store.addIncludesType.mockResolvedValue({ key: "person", properties: null });
+    const payload = importPayload();
+    delete payload.formatVersion;
+    const res = await postImport(payload);
+    expect(res.statusCode).toBe(201);
+    expect(holder.store.createEntityType.mock.calls[0]![4]).toMatchObject({ key: "full_name" });
+  });
+
+  it("rejects a format version other than 6.0 and 5.0 and writes nothing", async () => {
+    for (const version of ["2.0", "4.0", "unknown-version"]) {
       holder.store = createMockModelingStore();
-      holder.store.createLens.mockResolvedValue(LENS_DATA);
-      holder.store.addIncludesType.mockResolvedValue({ key: "person", properties: null });
-      const payload = importPayload();
-      if (version === undefined) {
-        delete payload.formatVersion;
-      } else {
-        payload.formatVersion = version;
-      }
-      const res = await postImport(payload);
-      expect(res.statusCode, `version ${String(version)}`).toBe(201);
+      const res = await postImport(importPayload({ formatVersion: version }));
+      expect(res.statusCode, `version ${version}`).toBe(422);
+      expect(res.json().error.details.fields.formatVersion).toContain("6.0, 5.0");
+      expect(holder.store.createEntityType).not.toHaveBeenCalled();
     }
   });
 
@@ -351,7 +392,9 @@ describe("import", () => {
         {
           key: "person",
           displayName: "Person",
+          nameProperty: "name",
           properties: [
+            { key: "name", displayName: "Name", dataType: "string", required: false },
             { key: "age", displayName: "Age", dataType: "invalid_type", required: false },
           ],
         },
@@ -362,6 +405,93 @@ describe("import", () => {
     expect(res.statusCode).toBe(201);
     expect(holder.store.createProperty).toHaveBeenCalledTimes(1);
     expect(holder.store.createProperty.mock.calls[0]![6]).toBe("invalid_type");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Import — name properties
+// ---------------------------------------------------------------------------
+
+describe("import name properties", () => {
+  it("6.0: rejects an entity type without a name property, or one that is not a string property of it", async () => {
+    const res = await postImport({
+      entityTypes: [
+        {
+          key: "person",
+          displayName: "Person",
+          properties: [{ key: "name", displayName: "Name", dataType: "string", required: false }],
+        },
+        {
+          key: "company",
+          displayName: "Company",
+          nameProperty: "founded",
+          properties: [{ key: "founded", displayName: "Founded", dataType: "date", required: false }],
+        },
+        { key: "place", displayName: "Place", nameProperty: "title", properties: [] },
+      ],
+      relationTypes: [],
+      lenses: [],
+    });
+    expect(res.statusCode).toBe(422);
+    const errors = res.json().error.details.errors as string[];
+    expect(errors).toEqual([
+      "Import error: entity type 'person' has no nameProperty",
+      "Import error: name property 'founded' of entity type 'company' is not a string property of that type",
+      "Import error: name property 'title' of entity type 'place' is not a string property of that type",
+    ]);
+    expect(holder.store.createEntityType).not.toHaveBeenCalled();
+  });
+
+  it("5.0: derives the name property by the fallback chain, creating one where a type has no string property", async () => {
+    const res = await postImport({
+      formatVersion: "5.0",
+      entityTypes: [
+        {
+          key: "article",
+          displayName: "Article",
+          properties: [
+            { key: "summary", displayName: "Summary", dataType: "string", required: false },
+            { key: "label", displayName: "Label", dataType: "string", required: false },
+            { key: "title", displayName: "Title", dataType: "string", required: true },
+          ],
+        },
+        {
+          key: "note",
+          displayName: "Note",
+          properties: [
+            { key: "body", displayName: "Body", dataType: "document", required: false },
+            { key: "summary", displayName: "Summary", dataType: "string", required: false },
+          ],
+        },
+        {
+          key: "reading",
+          displayName: "Reading",
+          properties: [
+            { key: "name", displayName: "Name", dataType: "integer", required: false },
+          ],
+        },
+      ],
+      relationTypes: [],
+      lenses: [],
+    });
+    expect(res.statusCode).toBe(201);
+    const created = holder.store.createEntityType.mock.calls.map((call) => [call[1], call[4]]);
+    expect(created).toEqual([
+      ["article", expect.objectContaining({ key: "title", required: true })],
+      ["note", expect.objectContaining({ key: "summary" })],
+      [
+        "reading",
+        expect.objectContaining({
+          key: "name_2",
+          displayName: "name_2",
+          dataType: "string",
+          required: false,
+        }),
+      ],
+    ]);
+    // Every other payload property is created as before.
+    const others = holder.store.createProperty.mock.calls.map((call) => call[3]);
+    expect(others).toEqual(["summary", "label", "body", "name"]);
   });
 });
 
@@ -405,8 +535,8 @@ describe("import conflicts", () => {
     );
     const res = await postImport({
       entityTypes: [
-        { key: "person", displayName: "Person", properties: [] },
-        { key: "company", displayName: "Company", properties: [] },
+        entityType("person", "Person"),
+        entityType("company", "Company"),
       ],
       relationTypes: [],
       lenses: [],
@@ -432,8 +562,8 @@ describe("import conflicts", () => {
   it("an intra-payload duplicate key conflicts like the sequential write would have", async () => {
     const res = await postImport({
       entityTypes: [
-        { key: "person", displayName: "Person", properties: [] },
-        { key: "person", displayName: "Person Again", properties: [] },
+        entityType("person", "Person"),
+        entityType("person", "Person Again"),
       ],
       relationTypes: [],
       lenses: [],
@@ -451,7 +581,7 @@ describe("import conflicts", () => {
 describe("import validations", () => {
   it("rejects a reserved entity type key", async () => {
     const res = await postImport({
-      entityTypes: [{ key: "ontology", displayName: "Bad", properties: [] }],
+      entityTypes: [entityType("ontology", "Bad")],
       relationTypes: [],
       lenses: [],
     });
@@ -462,7 +592,7 @@ describe("import validations", () => {
 
   it("rejects a relation type endpoint missing from the payload", async () => {
     const res = await postImport({
-      entityTypes: [{ key: "person", displayName: "Person" }],
+      entityTypes: [entityType("person", "Person")],
       relationTypes: [
         {
           key: "works_for",
@@ -480,7 +610,7 @@ describe("import validations", () => {
 
   it("rejects a document property on a relation type", async () => {
     const res = await postImport({
-      entityTypes: [{ key: "person", displayName: "Person" }],
+      entityTypes: [entityType("person", "Person")],
       relationTypes: [
         {
           key: "knows",
@@ -524,7 +654,6 @@ describe("import validations", () => {
 
   it("rejects a document saved-query parameter", async () => {
     const res = await postImport({
-      formatVersion: "2.2",
       entityTypes: [],
       relationTypes: [],
       lenses: [
@@ -640,6 +769,7 @@ describe("import key patterns", () => {
         {
           key: "person",
           displayName: "Person",
+          nameProperty: "_id",
           properties: [{ key: "_id", displayName: "Id", dataType: "string", required: false }],
         },
       ],
@@ -666,7 +796,7 @@ describe("import key patterns", () => {
 
   it("collects every offending key across kinds in one response", async () => {
     const res = await postImport({
-      entityTypes: [{ key: "BadType", displayName: "Bad", properties: [] }],
+      entityTypes: [entityType("BadType", "Bad")],
       relationTypes: [
         {
           key: "BAD_REL",
@@ -713,11 +843,12 @@ describe("import key patterns", () => {
         {
           key: long("et"),
           displayName: "Long ET",
+          nameProperty: long("etp"),
           properties: [
             { key: long("etp"), displayName: "Long Prop", dataType: "string", required: false },
           ],
         },
-        { key: "anchor", displayName: "Anchor", properties: [] },
+        entityType("anchor", "Anchor"),
       ],
       relationTypes: [
         {
@@ -764,7 +895,7 @@ describe("import key patterns", () => {
     const exact = (prefix: string): string => prefix + "k".repeat(64 - prefix.length);
     holder.store.createLens.mockResolvedValue(LENS_DATA);
     const res = await postImport({
-      entityTypes: [{ key: exact("et"), displayName: "ET", properties: [] }],
+      entityTypes: [entityType(exact("et"), "ET")],
       relationTypes: [],
       lenses: [{ key: exact("lens"), name: "Lens" }],
     });
@@ -773,7 +904,7 @@ describe("import key patterns", () => {
 
   it("reports pattern violations, structural rules and reserved keys together", async () => {
     const res = await postImport({
-      entityTypes: [{ key: "_bad", displayName: "Bad", properties: [] }],
+      entityTypes: [entityType("_bad", "Bad")],
       relationTypes: [
         {
           key: "knows",
@@ -823,6 +954,7 @@ describe("import side effects with a provider", () => {
         {
           key: "person",
           displayName: "Person",
+          nameProperty: "name",
           properties: [
             { key: "name", displayName: "Name", dataType: "string", required: true },
             { key: "bio", displayName: "Bio", dataType: "document", required: false },

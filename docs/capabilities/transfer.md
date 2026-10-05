@@ -13,7 +13,7 @@ ontologies, transfer included.
 
 | Carried | Detail |
 |---|---|
-| Entity types | Key, display name, description, and every property definition |
+| Entity types | Key, display name, description, the key of its name property, and every property definition |
 | Relation types | The same, plus the keys of the source and target entity types |
 | Property definitions | Key, display name, description, data type, required flag, default |
 | Lenses | Key, name, description, and their inclusions — absent entirely for an unscoped lens |
@@ -43,15 +43,28 @@ differs from the target ontology, before writing any design objects.
 
 ## The format version
 
-The payload declares a format version, and export always writes the current one: `5.0`.
+The payload declares a format version, and export always writes the current one: `6.0`.
+The version is the format's own line, bumped only when the payload shape changes
+incompatibly.
 
-**It is informational.** Import reads no meaning from it: the version is never dispatched
-on, and a payload with an unknown version or no version at all is processed identically.
-There is no negotiation, no compatibility check, and **no conversion of older payloads**
-— a document fails on its shape, not its version. The language and lenses fields are
-required. A reimplementer should treat the version as a label for
-humans, bumped only when the payload shape changes incompatibly — never as a dispatch
-key.
+**Import dispatches on it.** It accepts two versions and refuses every other one with a
+field error on the version:
+
+| Version | Import |
+|---|---|
+| `6.0`, or no version at all | The current format, validated as described below |
+| `5.0` | The previous format, converted on the way in |
+
+A `5.0` payload differs from `6.0` only in that its entity types carry no name property
+([schema-modeling.md](schema-modeling.md#the-name-property)). Import derives one per
+entity type: the first `string` property among `name`, `title`, `label` and
+`display_name`, in that order; otherwise the type's first `string` property in payload
+order. A type without any `string` property is given a new non-required `string`
+property `name` — `name_2`, `name_3`, … when `name` is taken — and that becomes its name
+property. The same derivation brings storage written before name properties existed up to
+date ([../storage-adapters.md](../storage-adapters.md)).
+
+The language and lenses fields are required in both versions.
 
 ## Rules
 
@@ -120,6 +133,9 @@ Import is a write path, and the write-path rules apply to it:
   adapter's own objects is refused, with an error naming the reserved set and not the
   vendor. The reserved set is the adapter's to declare; see
   [../storage-adapters.md](../storage-adapters.md).
+- In a `6.0` payload every entity type names its name property, and it must be one of
+  that type's own `string` properties; a missing or unsuitable one is rejected, naming
+  the type.
 - `document` properties are permitted on entity types only. One on a relation type is
   rejected, naming the property and its type.
 - Every agent's tool allowlist is checked against the read-only agent tool set, exactly as
@@ -137,7 +153,7 @@ Retriever configurations are checked against the visible schema of their payload
 before any writes. Unsupported config versions, duplicate retriever keys and invalid
 references reject the import. Omitting `retrievers` remains valid. Export preserves raw
 stored configurations even if invalid; reimport rejects them until repaired. The outer
-format label does not validate `configVersion`; these are separate contracts. Older
+format version does not validate `configVersion`; these are separate contracts. Older
 readers that ignore unknown fields do not preserve retriever definitions.
 
 ### Side effects of import

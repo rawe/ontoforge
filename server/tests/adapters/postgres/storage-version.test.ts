@@ -1,7 +1,7 @@
 /**
  * The storage-version decision at boot, against a scripted querier: what
- * an empty, an unversioned, a current, a newer and a too-old database
- * each lead to. The real upgrade against PostgreSQL is covered by
+ * an empty, an unversioned, an upgradable, a current, a newer and a
+ * too-old database each lead to. The real upgrade against PostgreSQL is covered by
  * `tests/integration/postgres/storage-version.test.ts`.
  */
 
@@ -66,8 +66,12 @@ describe("storage version at boot", () => {
     expect(writes(queries)).toEqual([SERVER_DDL[0]]);
   });
 
-  it("upgrades unversioned storage in every ontology namespace, the number last", async () => {
-    const { querier, queries } = database({ registry: true, namespaces: ["ont_a", "ont_b"] });
+  it("upgrades storage of the previous major line in every ontology namespace, the number last", async () => {
+    const { querier, queries } = database({
+      version: OLDEST_UPGRADABLE_VERSION,
+      registry: true,
+      namespaces: ["ont_a", "ont_b"],
+    });
     await bringStorageUpToDate(querier, SERVER_DDL);
     const bound = queries.filter((q) => q.startsWith("SET LOCAL search_path"));
     expect(bound).toEqual([
@@ -75,9 +79,15 @@ describe("storage version at boot", () => {
       "SET LOCAL search_path TO ont_b, public",
       "SET LOCAL search_path TO public",
     ]);
-    expect(queries.filter((q) => q.includes("retriever_config ("))).toHaveLength(2);
+    expect(queries.filter((q) => q.includes("ADD COLUMN name_property"))).toHaveLength(2);
     expect(queries.at(-1)).toBe("INSERT INTO public.storage_version (version) VALUES ($1)");
-    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 1 to 2"));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 2 to 3"));
+  });
+
+  it("refuses unversioned storage — the 5.x layout before retrievers — and writes nothing", async () => {
+    const { querier, queries } = database({ registry: true, namespaces: ["ont_a"] });
+    await expect(bringStorageUpToDate(querier, SERVER_DDL)).rejects.toThrow("previous major line first");
+    expect(writes(queries)).toEqual([]);
   });
 
   it("refuses storage newer than the code and writes nothing", async () => {

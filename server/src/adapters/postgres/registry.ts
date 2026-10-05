@@ -21,7 +21,7 @@
  * `DROP SCHEMA … CASCADE`.
  */
 
-import type { TextSearchLanguage } from "../../registry/schemas.js";
+import type { KeywordLanguage } from "../../core/keywordLanguage.js";
 
 import type { OntologyRegistry, Row } from "../../core/ports.js";
 import { fixedVectorIndexStatements, ontologyDdlStatements } from "./ddl.js";
@@ -64,7 +64,7 @@ export class PostgresOntologyRegistry implements OntologyRegistry {
     key: string,
     displayName: string | null,
     embeddingDimensions: number | null,
-    textSearchLanguage: TextSearchLanguage,
+    textSearchLanguage: KeywordLanguage,
   ): Promise<Row> {
     const namespace = ontologyNamespace(key);
     return withTransaction(async (querier) => {

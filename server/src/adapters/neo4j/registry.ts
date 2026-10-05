@@ -18,7 +18,7 @@
  * server-wide skeleton.
  */
 
-import type { TextSearchLanguage } from "../../registry/schemas.js";
+import type { KeywordLanguage } from "../../core/keywordLanguage.js";
 
 import type { Driver } from "neo4j-driver";
 
@@ -76,7 +76,7 @@ export class Neo4jOntologyRegistry implements OntologyRegistry {
     key: string,
     displayName: string | null,
     embeddingDimensions: number | null,
-    textSearchLanguage: TextSearchLanguage,
+    textSearchLanguage: KeywordLanguage,
   ): Promise<Row> {
     // The cap first, so a rejected create touches nothing — the
     // conflict is an expected condition and must have no side effects.

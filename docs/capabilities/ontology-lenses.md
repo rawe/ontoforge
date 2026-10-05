@@ -127,7 +127,9 @@ Three places, matching the three things a caller can do with a schema.
 **Schema reads.** The runtime schema surface returns only exposed types, each
 carrying only its exposed properties. Asking for a type the lens does not expose
 answers *not found* — indistinguishable from asking for a type that does not
-exist. The lens does not advertise what it hides.
+exist. The lens does not advertise what it hides — an entity type whose
+[name property](schema-modeling.md#the-name-property) the lens hides is read without
+one (null).
 
 **Writes.** A property the lens does not expose is an unknown property: the write
 is rejected and names it, alongside every other offending field. Creating,

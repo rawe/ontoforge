@@ -144,6 +144,7 @@ export function searchContract(embedding: boolean, enabled = true) {
         ai: false,
         entityIdentityComparison: false,
         searchStrategies: defaults,
+        searchIndices: settings.DB_BACKEND === "postgres",
       });
       expect((await app.inject({ url: `${runtime}/search/semantic?q=graph` })).statusCode).toBe(
         404,

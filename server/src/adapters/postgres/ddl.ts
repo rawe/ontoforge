@@ -8,7 +8,9 @@
  * ontology creation, inside the fresh `ont_<key>` namespace
  * (`registry.ts`). Idempotence rides `CREATE TABLE IF NOT EXISTS` with
  * all constraints inline and explicitly named (PG has no
- * `ADD CONSTRAINT IF NOT EXISTS`); no fixed constraint or index name uses
+ * `ADD CONSTRAINT IF NOT EXISTS`) — except the name-property FK, which
+ * closes the `entity_type` ↔ `property_def` cycle after both tables
+ * exist; no fixed constraint or index name uses
  * the `vec_` prefix, which is reserved for the dynamically created vector
  * indexes.
  *
@@ -25,7 +27,7 @@
  * lifecycle is the second half of this module.
  */
 
-import type { TextSearchLanguage } from "../../registry/schemas.js";
+import type { KeywordLanguage } from "../../core/keywordLanguage.js";
 
 import {
   documentPropertyScope,
@@ -70,7 +72,7 @@ const SERVER_DDL_STATEMENTS: string[] = [
  * `ont_<key>` namespace via the transaction's search path
  * (`registry.ts`).
  */
-export function ontologyDdlStatements(language: TextSearchLanguage): string[] {
+export function ontologyDdlStatements(language: KeywordLanguage): string[] {
   // Closed mapping; language is fixed in both generated columns at provisioning.
   const config = language === "german" ? "german" : "english";
   return [
@@ -91,7 +93,8 @@ export function ontologyDdlStatements(language: TextSearchLanguage): string[] {
   display_name   text        NOT NULL,
   description    text,
   created_at     timestamptz NOT NULL DEFAULT now(),
-  updated_at     timestamptz NOT NULL DEFAULT now()
+  updated_at     timestamptz NOT NULL DEFAULT now(),
+  name_property  text        NOT NULL   -- key of the name property; FK added after property_def
 )`,
 
   `CREATE TABLE IF NOT EXISTS relation_type (
@@ -125,6 +128,13 @@ export function ontologyDdlStatements(language: TextSearchLanguage): string[] {
   CONSTRAINT property_def_entity_key_unique   UNIQUE (entity_type_id, key),
   CONSTRAINT property_def_relation_key_unique UNIQUE (relation_type_id, key)
 )`,
+
+  // The name property is one of the type's own properties: the composite
+  // key pins it to the owning type. Deferred, because a type and its name
+  // property are created in one transaction and each references the other.
+  `ALTER TABLE entity_type ADD CONSTRAINT entity_type_name_property_fk
+  FOREIGN KEY (entity_type_id, name_property) REFERENCES property_def (entity_type_id, key)
+  DEFERRABLE INITIALLY DEFERRED`,
 
   `CREATE TABLE IF NOT EXISTS lens_includes (
   lens_id          uuid   NOT NULL CONSTRAINT lens_includes_lens_fk

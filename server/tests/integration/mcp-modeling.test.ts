@@ -196,8 +196,14 @@ describe("schema lifecycle over MCP (keys, never ids)", () => {
     expect(person.isError).toBeUndefined();
     expect(json(person).key).toBe("person");
     expect(json(person).displayName).toBe("Person");
+    expect(json(person).nameProperty).toBe("name");
 
-    await call(client, "create_entity_type", { key: "company", display_name: "Company" });
+    const company = await call(client, "create_entity_type", {
+      key: "company",
+      display_name: "Company",
+      name_property: "title",
+    });
+    expect(json(company).nameProperty).toBe("title");
 
     const renamed = await call(client, "update_entity_type", {
       entity_type_key: "person",
@@ -249,6 +255,21 @@ describe("schema lifecycle over MCP (keys, never ids)", () => {
     });
     expect(json(updatedProp).displayName).toBe("Name");
 
+    // The name property moves to another string property; the one it
+    // names cannot be deleted.
+    const renamedTo = await call(client, "update_entity_type", {
+      entity_type_key: "person",
+      name_property: "full_name",
+    });
+    expect(json(renamedTo).nameProperty).toBe("full_name");
+    const refused = await call(client, "delete_property", {
+      type_kind: "entity_type",
+      type_key: "person",
+      property_key: "full_name",
+    });
+    expect(refused.isError).toBe(true);
+    expect(text(refused)).toContain("Choose another name property first");
+
     const deletedProp = await call(client, "delete_property", {
       type_kind: "relation_type",
       type_key: "works_for",
@@ -258,12 +279,16 @@ describe("schema lifecycle over MCP (keys, never ids)", () => {
 
     // get_schema reflects it all in the transfer shape.
     const schema = json(await call(client, "get_schema"));
-    expect(schema.formatVersion).toBe("5.0");
+    expect(schema.formatVersion).toBe("6.0");
     expect(schema.lenses).toEqual([]);
     const entityTypes = schema.entityTypes as Record<string, unknown>[];
     expect(entityTypes.map((et) => et.key)).toEqual(["company", "person"]);
     const personExport = entityTypes.find((et) => et.key === "person");
-    expect((personExport?.properties as unknown[])).toHaveLength(1);
+    expect(personExport?.nameProperty).toBe("full_name");
+    expect((personExport?.properties as Record<string, unknown>[]).map((p) => p.key)).toEqual([
+      "full_name",
+      "name",
+    ]);
     const relationTypes = schema.relationTypes as Record<string, unknown>[];
     expect(relationTypes[0]?.fromEntityTypeKey).toBe("person");
     expect(relationTypes[0]?.toEntityTypeKey).toBe("company");

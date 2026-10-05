@@ -112,8 +112,8 @@ indexes — and only a storage-version upgrade changes it; the one exception is 
 indexes derived from the schema, which schema changes and the search-data rebuild create
 and drop. Within a major release line upgrade steps only add — tables, columns with a
 default, indexes — so servers of the
-previous release keep working during a rolling update; renaming or removing waits for the
-next major release. Upgrade steps are kept for one major release line: a major release
+previous release keep working during a rolling update; renaming, removing or rewriting
+stored data waits for the next major release, which carries one step of its own. Upgrade steps are kept for one major release line: a major release
 removes them all and accepts only new storage or storage at the version the previous
 major line ended on. Older storage stops the server with the instruction to upgrade
 through the last release of the previous major line first. Storage newer than the code
@@ -442,6 +442,14 @@ invalid under a wider one.
 A change that would invalidate a lens is refused, and names the lenses it would affect.
 It proceeds only when the caller asks for it a second time, explicitly.
 
+**Every entity type has exactly one name property.**
+It is a `string` property of that type, created with the type, reassignable to another
+`string` property of the type, and never removable while it is the name property — the
+server never picks a replacement. Clients label an entity by its name property's value
+alone, so a label never depends on guessing which property names a thing. Where data
+predates name properties — older storage, a previous-version transfer payload — one fixed
+derivation assigns it, and that derivation is used nowhere else.
+
 **Exactly one env file is read, and it is always named.**
 `ENV_FILE` names it; without that it is `.env` in the working directory. Files never
 layer: a second file cannot quietly supply what the first omits, and a named file that is
@@ -506,9 +514,12 @@ creating the ontology is a registry operation. Key conflicts are checked all-or-
 against the target ontology's keys.
 
 **Transfer format version** — the format version is the format's own line,
-independent of the project version; informational only, never dispatched on, bumped
-only when the payload shape changes incompatibly. Old-format payloads are rejected
-by ordinary validation; no conversion or compatibility machinery exists.
+independent of the project version, bumped only when the payload shape changes
+incompatibly. Export writes the current version. Import dispatches on it: it accepts the
+current version, an absent version as the current one, and the previous major version,
+which it converts on the way in; every other version is refused. Supporting exactly one
+previous version lets a design exported before a format change move to a server after it
+without a conversion tool.
 
 **No authentication, authorization or multi-tenancy.**
 OntoForge assumes it is deployed behind something that provides them, or on a trusted

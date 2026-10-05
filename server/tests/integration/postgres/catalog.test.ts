@@ -61,6 +61,7 @@ const EXPECTED_CONSTRAINTS: Record<string, string> = {
   saved_query_key_unique: "u",
   relation_type_source_fk: "f",
   relation_type_target_fk: "f",
+  entity_type_name_property_fk: "f",
   property_def_entity_type_fk: "f",
   property_def_relation_type_fk: "f",
   lens_includes_lens_fk: "f",
@@ -189,9 +190,9 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL physical catalog
     }
   });
 
-  it("the delete rules back the truth table: endpoint FKs RESTRICT, the rest CASCADE", async () => {
+  it("the delete rules back the truth table: endpoint FKs RESTRICT, the name-property FK a deferred NO ACTION, the rest CASCADE", async () => {
     const result = await runQuery(
-      `SELECT con.conname AS name, con.confdeltype AS del
+      `SELECT con.conname AS name, con.confdeltype AS del, con.condeferred AS deferred
        FROM pg_constraint con
        JOIN pg_class rel ON rel.oid = con.conrelid
        JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
@@ -201,8 +202,14 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL physical catalog
     const rules = new Map(result.rows.map((row) => [row.name as string, row.del as string]));
     expect(rules.get("relation_type_source_fk")).toBe("r"); // RESTRICT
     expect(rules.get("relation_type_target_fk")).toBe("r");
+    // The service guards deleting a name property; the FK is checked at
+    // commit, so a type and its name property can be written together.
+    expect(rules.get("entity_type_name_property_fk")).toBe("a"); // NO ACTION
+    const deferred = result.rows.filter((row) => row.deferred === true).map((row) => row.name);
+    expect(deferred).toEqual(["entity_type_name_property_fk"]);
+    const special = ["relation_type_source_fk", "relation_type_target_fk", "entity_type_name_property_fk"];
     for (const [name, rule] of rules) {
-      if (name !== "relation_type_source_fk" && name !== "relation_type_target_fk") {
+      if (!special.includes(name)) {
         expect(rule, `delete rule of ${name}`).toBe("c"); // CASCADE
       }
     }

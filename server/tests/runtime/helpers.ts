@@ -41,6 +41,7 @@ export function makeFullSchema(options?: {
         key: "person",
         displayName: "Person",
         description: null,
+        nameProperty: "name",
         properties: [
           { key: "name", displayName: "Name", dataType: "string", required: true, defaultValue: null },
           { key: "age", displayName: "Age", dataType: "integer", required: false, defaultValue: null },
@@ -53,6 +54,7 @@ export function makeFullSchema(options?: {
         key: "company",
         displayName: "Company",
         description: null,
+        nameProperty: "name",
         properties: [
           { key: "name", displayName: "Name", dataType: "string", required: true, defaultValue: null },
         ],
@@ -62,6 +64,7 @@ export function makeFullSchema(options?: {
         key: "department",
         displayName: "Department",
         description: null,
+        nameProperty: "name",
         properties: [
           { key: "name", displayName: "Name", dataType: "string", required: true, defaultValue: null },
           { key: "code", displayName: "Code", dataType: "string", required: false, defaultValue: null },

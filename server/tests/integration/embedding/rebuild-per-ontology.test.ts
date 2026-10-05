@@ -25,6 +25,7 @@ import type { PropertyDef } from "../../../src/core/schemas.js";
 import { wipeDatabase } from "../reset.js";
 import { supportsMultipleOntologies } from "../tiers.js";
 import { checkOllamaModel, disableProvider, enableOllamaProvider } from "./support.js";
+import { defineEntityProperty } from "../fixture.js";
 
 type Row = Record<string, unknown>;
 
@@ -55,7 +56,7 @@ async function buildOntology(ontologyKey: string, personName: string): Promise<s
   await post("/api/ontologies", { key: ontologyKey });
   const model = `/api/ontologies/${ontologyKey}/model`;
   const person = await post(`${model}/entity-types`, { key: "person", displayName: "Person" });
-  await post(`${model}/entity-types/${person.entityTypeId as string}/properties`, {
+  await defineEntityProperty(app, ontologyKey, person.entityTypeId as string, {
     key: "name",
     displayName: "Name",
     dataType: "string",

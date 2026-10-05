@@ -216,11 +216,12 @@ exist.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/server/features` | Report `semanticSearch`, `searchStrategies`, `ai` and `entityIdentityComparison` |
+| GET | `/api/server/features` | Report `semanticSearch`, `searchStrategies`, `ai`, `entityIdentityComparison` and `searchIndices` |
 
 The one route that concerns neither the ontologies nor their content — it describes the
 deployment. Clients call it before
 offering optional capabilities. `searchStrategies` lists available strategies in preference order.
+`searchIndices` reports whether the storage adapter supports search indices.
 
 ## Modeling REST
 
@@ -244,10 +245,10 @@ schema; see the addressing note above before using it. Semantics:
 
 | Method | Path | Purpose | Parameters |
 |---|---|---|---|
-| POST | `/entity-types` | Create an entity type | — |
+| POST | `/entity-types` | Create an entity type together with its name property (`nameProperty`, default `name`) | — |
 | GET | `/entity-types` | List the ontology's entity types | — |
 | GET | `/entity-types/{entityTypeId}` | Read one entity type | — |
-| PUT | `/entity-types/{entityTypeId}` | Update display name or description | — |
+| PUT | `/entity-types/{entityTypeId}` | Update display name, description or name property (`nameProperty`) | — |
 | DELETE | `/entity-types/{entityTypeId}` | Delete an entity type and its properties | `cascade` |
 
 ### Relation types
@@ -270,7 +271,7 @@ list the owner's properties.
 | POST | `/entity-types/{entityTypeId}/properties` | Define a property on an entity type | `cascade` |
 | GET | `/entity-types/{entityTypeId}/properties` | List an entity type's properties | — |
 | PUT | `/entity-types/{entityTypeId}/properties/{propertyId}` | Update a property; key and data type are immutable | — |
-| DELETE | `/entity-types/{entityTypeId}/properties/{propertyId}` | Remove a property definition | `cascade` |
+| DELETE | `/entity-types/{entityTypeId}/properties/{propertyId}` | Remove a property definition; refused for the type's name property | `cascade` |
 | POST | `/relation-types/{relationTypeId}/properties` | Define a property on a relation type | `cascade` |
 | GET | `/relation-types/{relationTypeId}/properties` | List a relation type's properties | — |
 | PUT | `/relation-types/{relationTypeId}/properties/{propertyId}` | Update a property; key and data type are immutable | — |
@@ -589,15 +590,15 @@ exist; its tools answer not-found tool errors otherwise.
 |---|---|
 | `ensure_ontology` | Create the ontology this mount is bound to if it does not exist yet; no-op if it does. Argument-less — it acts only on the mount's own ontology — and reports the key and whether it created. A created ontology starts bare and without a display name; naming is a REST/UI operation |
 | `get_schema` | The ontology's whole design — types, relation types, properties, and every lens with its inclusions, agents, saved queries and retrievers. Identical to `export_schema`, and the only way to enumerate lenses: there is no `list_lenses` |
-| `create_entity_type` | Add an entity type |
-| `update_entity_type` | Change display name or description; the key is immutable |
+| `create_entity_type` | Add an entity type together with its name property (`name_property`, default `name`) |
+| `update_entity_type` | Change display name, description or name property (`name_property`); the key is immutable |
 | `delete_entity_type` | Remove an entity type and its properties |
 | `create_relation_type` | Add a relation type between two entity types |
 | `update_relation_type` | Change display name or description; endpoints are immutable |
 | `delete_relation_type` | Remove a relation type and its properties |
 | `add_property` | Define a property on an entity type or a relation type |
 | `update_property` | Change a property's metadata; key and data type are immutable |
-| `delete_property` | Remove a property definition |
+| `delete_property` | Remove a property definition; refused for an entity type's name property |
 | `validate_schema` | Check the ontology's schema and every lens |
 | `export_schema` | Produce a transfer payload |
 | `import_schema` | Apply a transfer payload |
@@ -627,7 +628,7 @@ Everything a client can do to instance data through one lens.
 
 | Tool | Purpose |
 |---|---|
-| `get_schema` | The scoped schema — types, properties, required flags |
+| `get_schema` | The scoped schema — types, properties, required flags, name properties |
 | `create_entity` | Create an entity |
 | `list_entities` | List entities with search, filters, sorting, paging and projection |
 | `get_entity` | Read one entity by id |

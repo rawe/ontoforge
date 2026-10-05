@@ -13,6 +13,7 @@ import {
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
+import { useDisplayLabel } from '@/api/hooks'
 import * as runtime from '@/api/runtime'
 import type {
   EntityInstance,
@@ -35,7 +36,6 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { displayLabel } from '@/lib/displayLabel'
 import { isDocumentStub } from '@/lib/documents'
 import type { EntityFlowNode } from './workingSet'
 
@@ -87,6 +87,7 @@ export function NodePanel({
   onRemove,
   onDeselect,
 }: NodePanelProps) {
+  const displayLabel = useDisplayLabel()
   const entity = node.data.entity
   const typeKey = entity._entityTypeKey
   const entityType = entityTypes.find((t) => t.key === typeKey)

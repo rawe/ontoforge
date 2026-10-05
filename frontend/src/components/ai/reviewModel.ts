@@ -15,6 +15,7 @@ import type {
   SchemaRelationType,
 } from '@/api/types'
 import { valueToDraft } from '@/components/schema/propertyDraft'
+import { nameValue } from '@/lib/displayLabel'
 
 export type ItemStatus = 'idle' | 'creating' | 'created' | 'error'
 
@@ -54,16 +55,12 @@ export interface ReviewRelationItem {
   error?: string
 }
 
-/** Display-ish label from a proposed property bag (mirrors displayLabel). */
-export function proposedLabel(properties: Record<string, JsonValue>): string {
-  for (const key of ['name', 'title', 'label', 'display_name']) {
-    const value = properties[key]
-    if (typeof value === 'string' && value.trim() !== '') return value
-  }
-  for (const value of Object.values(properties)) {
-    if (typeof value === 'string' && value.trim() !== '') return value
-  }
-  return '(unnamed)'
+/** Label from a proposed property bag: the type's name property value (as displayLabel). */
+export function proposedLabel(
+  properties: Record<string, JsonValue>,
+  nameProperty: string | null | undefined,
+): string {
+  return nameValue(properties, nameProperty) ?? '(unnamed)'
 }
 
 function splitProps(
@@ -129,6 +126,15 @@ export function buildReviewModel(
       )
     const sourceIdx = findEndpoint(r.source)
     const targetIdx = findEndpoint(r.target)
+    // A resolved endpoint carries all proposed props; `match` may lack the name.
+    const endpointLabel = (
+      endpoint: { entityTypeKey: string; match: Record<string, JsonValue> },
+      idx: number,
+    ) =>
+      proposedLabel(
+        idx >= 0 ? response.entities[idx].properties : endpoint.match,
+        schema.entityTypes.find((t) => t.key === endpoint.entityTypeKey)?.nameProperty,
+      )
     const { drafts, unknown } = splitProps(r.properties, type?.properties)
     return {
       id: `r${i}`,
@@ -136,8 +142,8 @@ export function buildReviewModel(
       type,
       sourceId: sourceIdx >= 0 ? entities[sourceIdx].id : undefined,
       targetId: targetIdx >= 0 ? entities[targetIdx].id : undefined,
-      sourceLabel: proposedLabel(r.source.match),
-      targetLabel: proposedLabel(r.target.match),
+      sourceLabel: endpointLabel(r.source, sourceIdx),
+      targetLabel: endpointLabel(r.target, targetIdx),
       checked: type !== undefined && sourceIdx >= 0 && targetIdx >= 0,
       drafts,
       unknownProps: unknown,

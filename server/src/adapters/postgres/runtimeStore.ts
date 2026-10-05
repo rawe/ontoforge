@@ -35,7 +35,7 @@
  *   names the columns and drives the value conversion.
  */
 
-import type { TextSearchLanguage } from "../../registry/schemas.js";
+import type { KeywordLanguage } from "../../core/keywordLanguage.js";
 
 import { fromSql, toSql } from "pgvector";
 
@@ -139,7 +139,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
   constructor(
     public readonly ontologyKey: string = "",
     private readonly namespace?: string,
-    public readonly textSearchLanguage: TextSearchLanguage = "english",
+    public readonly textSearchLanguage: KeywordLanguage = "english",
   ) {}
 
   /** Door one, carrying this store's binding. */

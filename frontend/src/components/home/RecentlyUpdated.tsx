@@ -1,9 +1,9 @@
 import { useQueries } from '@tanstack/react-query'
 import { History } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { useDisplayLabel } from '@/api/hooks'
 import { listEntities } from '@/api/runtime'
 import type { EntityInstance, SchemaEntityType } from '@/api/types'
-import { displayLabel } from '@/lib/displayLabel'
 import { TypeChip } from '@/components/TypeChip'
 import { Skeleton } from '@/components/ui/skeleton'
 import { relativeTime } from '@/components/table/format'
@@ -24,6 +24,7 @@ export function RecentlyUpdated({
   lensKey: string
   entityTypes: readonly SchemaEntityType[]
 }) {
+  const displayLabel = useDisplayLabel()
   const results = useQueries({
     queries: entityTypes.map((t) => ({
       queryKey: ['entities', ontologyKey, lensKey, t.key, { recent: PER_TYPE }] as const,

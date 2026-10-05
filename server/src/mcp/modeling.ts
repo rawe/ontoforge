@@ -40,6 +40,7 @@ import {
   PropertyDefinitionUpdate,
   RelationTypeCreate,
   RelationTypeUpdate,
+  LEGACY_TRANSFER_FORMAT_VERSION,
   SavedQueryUpsert,
   TRANSFER_FORMAT_VERSION,
 } from "../modeling/schemas.js";
@@ -250,22 +251,27 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     "create_entity_type",
     {
       description:
-        "Add a new entity type to the schema. Key must be snake_case, unique within the ontology.",
+        "Add a new entity type to the schema. Key must be snake_case, unique within the ontology. " +
+        "Also creates the type's name property — the string property that names its " +
+        "entities — under name_property (default 'name').",
       inputSchema: {
         key: z.string(),
         display_name: z.string(),
         description: z.string().optional(),
+        name_property: z.string().optional(),
       },
     },
     wrap("create_entity_type", async (args: {
       key: string;
       display_name: string;
       description?: string | undefined;
+      name_property?: string | undefined;
     }) => {
       const body = EntityTypeCreate.parse({
         key: args.key,
         displayName: args.display_name,
         description: args.description ?? null,
+        nameProperty: args.name_property,
       });
       const result = await service.createEntityType(body, await getModelingStore(ontologyKey));
       return jsonResult(result);
@@ -275,23 +281,28 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
   server.registerTool(
     "update_entity_type",
     {
-      description: "Update an entity type's display name or description. Key is immutable.",
+      description:
+        "Update an entity type's display name, description or name property. Key is " +
+        "immutable. name_property must be the key of an existing string property of the type.",
       inputSchema: {
         entity_type_key: z.string(),
         display_name: z.string().optional(),
         description: z.string().optional(),
+        name_property: z.string().optional(),
       },
     },
     wrap("update_entity_type", async (args: {
       entity_type_key: string;
       display_name?: string | undefined;
       description?: string | undefined;
+      name_property?: string | undefined;
     }) => {
       const store = await getModelingStore(ontologyKey);
       const et = await resolveEntityType(store, args.entity_type_key);
       const body = EntityTypeUpdate.parse({
         displayName: args.display_name ?? null,
         description: args.description ?? null,
+        nameProperty: args.name_property ?? null,
       });
       const result = await service.updateEntityType(et.entityTypeId as string, body, store);
       return jsonResult(result);
@@ -516,7 +527,8 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
       description:
         "Remove a property definition from an entity type or relation type. " +
         "type_kind must be 'entity_type' or 'relation_type'. " +
-        "Use cascade=True to auto-remove from scoped lens property lists.",
+        "Use cascade=True to auto-remove from scoped lens property lists. " +
+        "An entity type's name property cannot be removed; reassign it first.",
       inputSchema: {
         type_kind: z.string(),
         type_key: z.string(),
@@ -562,8 +574,8 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     "import_schema",
     {
       description:
-        `Import a v${TRANSFER_FORMAT_VERSION} schema payload. Creates entity types, relation types, ` +
-        "and lenses with scope configuration.",
+        `Import a v${TRANSFER_FORMAT_VERSION} schema payload (v${LEGACY_TRANSFER_FORMAT_VERSION} ` +
+        "is accepted too). Creates entity types, relation types, and lenses with scope configuration.",
       inputSchema: {
         payload: z.record(z.string(), z.unknown()),
       },

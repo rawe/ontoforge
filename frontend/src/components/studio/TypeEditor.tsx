@@ -20,6 +20,13 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
@@ -29,6 +36,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { CascadeDialog } from './CascadeDialog'
 import { useCascade } from './useCascade'
 import { PropertyDialog } from './PropertyDialog'
@@ -46,6 +54,7 @@ interface TypeEditorProps {
 /**
  * Shared editor for entity and relation types: editable display name and
  * description, immutable key, delete with cascade flow, properties table.
+ * Entity types also pick their name property among their string properties.
  */
 export function TypeEditor({ ontologyKey, kind, typeId }: TypeEditorProps) {
   const isEntity = kind === 'entity-types'
@@ -85,6 +94,20 @@ export function TypeEditor({ ontologyKey, kind, typeId }: TypeEditorProps) {
     onSuccess: () => {
       invalidateModeling(queryClient)
       toast.success('Saved')
+    },
+    onError: toastError,
+  })
+
+  const setNameProperty = useMutation({
+    mutationFn: (nameProperty: string) =>
+      model.updateEntityType(ontologyKey, typeId, {
+        displayName: type!.displayName,
+        description: type!.description,
+        nameProperty,
+      }),
+    onSuccess: (saved) => {
+      invalidateModeling(queryClient)
+      toast.success(`Name property set to "${saved.nameProperty}"`)
     },
     onError: toastError,
   })
@@ -149,6 +172,8 @@ export function TypeEditor({ ontologyKey, kind, typeId }: TypeEditorProps) {
   }
 
   const relation = isEntity ? null : (type as RelationType)
+  const nameProperty = isEntity ? (type as EntityType).nameProperty : null
+  const stringProperties = (properties ?? []).filter((p) => p.dataType === 'string')
 
   return (
     <div>
@@ -214,9 +239,32 @@ export function TypeEditor({ ontologyKey, kind, typeId }: TypeEditorProps) {
         <div className="mb-3 flex items-center gap-2">
           <h2 className="text-[13px] font-semibold">Properties</h2>
           <span className="text-[13px] text-muted-foreground">{properties?.length ?? 0}</span>
+          {nameProperty !== null && (
+            <label className="ml-auto flex items-center gap-2 text-[12px] text-muted-foreground">
+              Name property
+              <Select
+                value={nameProperty}
+                onValueChange={(v) => {
+                  if (v !== nameProperty) setNameProperty.mutate(v)
+                }}
+                disabled={setNameProperty.isPending}
+              >
+                <SelectTrigger size="sm" className="min-w-36 font-mono text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {stringProperties.map((p) => (
+                    <SelectItem key={p.propertyId} value={p.key}>
+                      <span className="font-mono text-xs">{p.key}</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+          )}
           <Button
             size="sm"
-            className="ml-auto"
+            className={nameProperty === null ? 'ml-auto' : undefined}
             onClick={() => {
               setEditingProperty(null)
               setPropertyDialogOpen(true)
@@ -251,7 +299,20 @@ export function TypeEditor({ ontologyKey, kind, typeId }: TypeEditorProps) {
               <TableBody>
                 {properties.map((p) => (
                   <TableRow key={p.propertyId}>
-                    <TableCell className="font-mono text-xs">{p.key}</TableCell>
+                    <TableCell className="font-mono text-xs">
+                      <span className="flex items-center gap-1.5">
+                        {p.key}
+                        {p.key === nameProperty && (
+                          <Badge
+                            variant="outline"
+                            className="font-sans text-[10px]"
+                            title="Name property — its value labels instances of this type"
+                          >
+                            Name
+                          </Badge>
+                        )}
+                      </span>
+                    </TableCell>
                     <TableCell className="text-[13px]">{p.displayName}</TableCell>
                     <TableCell>
                       <Badge variant="secondary" className="font-mono text-[11px]">
@@ -284,14 +345,33 @@ export function TypeEditor({ ontologyKey, kind, typeId }: TypeEditorProps) {
                         >
                           <Pencil className="size-3.5" />
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label={`Delete ${p.key}`}
-                          onClick={() => setPropertyToDelete(p)}
-                        >
-                          <Trash2 className="size-3.5 text-destructive" />
-                        </Button>
+                        {p.key === nameProperty ? (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              {/* A disabled button gets no pointer events — the span carries the tooltip. */}
+                              <span tabIndex={0}>
+                                <Button
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  aria-label={`Delete ${p.key}`}
+                                  disabled
+                                >
+                                  <Trash2 className="size-3.5 text-destructive" />
+                                </Button>
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>Choose another name property first</TooltipContent>
+                          </Tooltip>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={`Delete ${p.key}`}
+                            onClick={() => setPropertyToDelete(p)}
+                          >
+                            <Trash2 className="size-3.5 text-destructive" />
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>

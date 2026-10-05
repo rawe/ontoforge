@@ -5,11 +5,11 @@ import { StoredRetrieverExport } from "./retrievers.js";
  * explicit `null`.
  */
 
-import { TextSearchLanguage } from "../registry/schemas.js";
+import { KeywordLanguage } from "../core/keywordLanguage.js";
 
 import { z } from "zod";
 
-import { DATA_TYPES, KEY_PATTERN, MAX_KEY_LENGTH } from "../core/schemas.js";
+import { DATA_TYPES, DEFAULT_NAME_PROPERTY, KEY_PATTERN, MAX_KEY_LENGTH } from "../core/schemas.js";
 
 // --- Lens ---
 
@@ -66,15 +66,21 @@ export const ValidationResult = z.object({
 
 // --- Entity Type ---
 
+/** Creating an entity type creates its name property too: a non-required
+ * `string` property under `nameProperty` (default `name`). */
 export const EntityTypeCreate = z.object({
   key: z.string().regex(KEY_PATTERN).max(MAX_KEY_LENGTH),
   displayName: z.string(),
   description: z.string().nullable().optional(),
+  nameProperty: z.string().regex(KEY_PATTERN).max(MAX_KEY_LENGTH).default(DEFAULT_NAME_PROPERTY),
 });
 
+/** `nameProperty` reassigns the name property to another `string` property
+ * of the type. */
 export const EntityTypeUpdate = z.object({
   displayName: z.string().nullable().optional(),
   description: z.string().nullable().optional(),
+  nameProperty: z.string().nullable().optional(),
 });
 
 export const EntityTypeResponse = z.object({
@@ -82,6 +88,8 @@ export const EntityTypeResponse = z.object({
   key: z.string(),
   displayName: z.string(),
   description: z.string().nullable(),
+  /** Key of the type's name property — never null. */
+  nameProperty: z.string(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });
@@ -234,8 +242,18 @@ export const SavedQueryResponse = z.object({
 // (`docs/capabilities/transfer.md`) — the schema-validation operation is
 // what catches those later.
 
-/** Current transfer format version — informational, never dispatched on. */
-export const TRANSFER_FORMAT_VERSION = "5.0";
+/** Current transfer format version — what export writes. */
+export const TRANSFER_FORMAT_VERSION = "6.0";
+
+/** The previous format, still imported: entity types carry no
+ * `nameProperty`, so import derives it (`core/legacyNameProperty.ts`). */
+export const LEGACY_TRANSFER_FORMAT_VERSION = "5.0";
+
+/** Every format version import accepts; an absent version is the current one. */
+export const IMPORTABLE_FORMAT_VERSIONS: readonly string[] = [
+  TRANSFER_FORMAT_VERSION,
+  LEGACY_TRANSFER_FORMAT_VERSION,
+];
 
 export const ExportProperty = z.object({
   key: z.string(),
@@ -250,6 +268,9 @@ export const ExportEntityType = z.object({
   key: z.string(),
   displayName: z.string(),
   description: z.string().nullable().optional(),
+  // Required from 6.0 on — import checks it itself, so a 5.0 payload
+  // (which has none) still parses.
+  nameProperty: z.string().optional(),
   properties: z.array(ExportProperty).default([]),
 });
 
@@ -318,7 +339,7 @@ export const ExportLens = z.object({
 });
 
 export const ExportPayload = z.object({
-  textSearchLanguage: TextSearchLanguage,
+  textSearchLanguage: KeywordLanguage,
   formatVersion: z.string().optional().default(TRANSFER_FORMAT_VERSION),
   entityTypes: z.array(ExportEntityType).default([]),
   relationTypes: z.array(ExportRelationType).default([]),
@@ -352,6 +373,7 @@ export type StepResponseBody = z.infer<typeof StepResponse>;
 export type SavedQueryResponseBody = z.infer<typeof SavedQueryResponse>;
 export type ExportPayloadInput = z.infer<typeof ExportPayload>;
 export type ExportEntityTypeInput = z.infer<typeof ExportEntityType>;
+export type ExportPropertyInput = z.infer<typeof ExportProperty>;
 export type ExportRelationTypeInput = z.infer<typeof ExportRelationType>;
 export type ExportLensInput = z.infer<typeof ExportLens>;
 export type ExportSavedQueryInput = z.infer<typeof ExportSavedQuery>;

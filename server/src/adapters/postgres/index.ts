@@ -13,7 +13,7 @@
  * only the server-wide objects.
  */
 
-import type { TextSearchLanguage } from "../../registry/schemas.js";
+import type { KeywordLanguage } from "../../core/keywordLanguage.js";
 
 import { reportEnsureFailed } from "../../core/vectorDrift.js";
 import { ensureVectorIndexes, initSchema } from "./ddl.js";
@@ -34,12 +34,12 @@ export async function initAdapter(): Promise<void> {
 
 /** A modeling store bound to one ontology's namespace. The caller (the
  * port accessor) has already verified the ontology exists. */
-export function createModelingStore(ontologyKey: string, language: TextSearchLanguage): PostgresModelingStore {
+export function createModelingStore(ontologyKey: string, language: KeywordLanguage): PostgresModelingStore {
   return new PostgresModelingStore(ontologyNamespace(ontologyKey), language);
 }
 
 /** A runtime store bound to one ontology's namespace. */
-export function createRuntimeStore(ontologyKey: string, language: TextSearchLanguage): PostgresRuntimeStore {
+export function createRuntimeStore(ontologyKey: string, language: KeywordLanguage): PostgresRuntimeStore {
   return new PostgresRuntimeStore(ontologyKey, ontologyNamespace(ontologyKey), language);
 }
 
@@ -78,3 +78,6 @@ export async function ensureSemanticIndexes(dimensions: number): Promise<void> {
 }
 
 export function supportsKeywordRanking(): boolean { return PostgresRuntimeStore.prototype.supportsKeywordRanking(); }
+
+/** Search indices are stored in the ontology namespace. */
+export function supportsSearchIndices(): boolean { return true; }

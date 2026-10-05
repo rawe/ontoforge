@@ -181,6 +181,7 @@ function entityTypeDefToExport(etDef: EntityTypeDef): Row {
     key: etDef.key,
     displayName: etDef.displayName,
     description: etDef.description,
+    nameProperty: etDef.nameProperty,
     properties: Object.values(etDef.properties).map(propertyToExport),
   };
 }

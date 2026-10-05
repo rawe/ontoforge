@@ -277,6 +277,9 @@ const ENTITY_FKS = new Set(["relation_from_fk", "relation_to_fk", "document_chun
  * when their RESTRICT fires on an entity-type DELETE. */
 const ENDPOINT_FKS = new Set(["relation_type_source_fk", "relation_type_target_fk"]);
 
+/** The entity type's name-property FK (deferred). */
+const NAME_PROPERTY_FK = "entity_type_name_property_fk";
+
 /**
  * The named-constraint truth table: one lookup, keyed by the constraint
  * name PG reports plus the violation direction, mapping to the exact
@@ -303,6 +306,14 @@ function translateConstraint(exc: pg.DatabaseError): OntoForgeError | null {
       }
       if (ENDPOINT_FKS.has(constraint)) {
         return new NotFoundError(`Entity type '${value}' not found`);
+      }
+      // Deferred, so it fires at commit — on either side, the name
+      // property went missing underneath the service's pre-check.
+      if (constraint === NAME_PROPERTY_FK) {
+        return new ConflictError(
+          `Property '${value}' is the name property of its entity type. ` +
+            "Choose another name property first.",
+        );
       }
       return null;
     case "23001": // delete side: RESTRICT fired on an entity-type DELETE

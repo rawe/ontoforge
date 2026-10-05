@@ -7,19 +7,24 @@
  * imported from anywhere else in the server.
  */
 
-import type { TextSearchLanguage } from "../../registry/schemas.js";
+import type { KeywordLanguage } from "../../core/keywordLanguage.js";
 
 import { reportEnsureFailed } from "../../core/vectorDrift.js";
 import type { OntologyRegistry } from "../../core/ports.js";
 import { ensureVectorIndexes } from "./ddl.js";
 import { closeDriver, getDriver, initDriver } from "./driver.js";
+import { runSession } from "./errors.js";
+import { backfillNameProperties } from "./modelingQueries.js";
 import { Neo4jModelingStore } from "./modelingStore.js";
 import { Neo4jOntologyRegistry, registeredOntologyKey } from "./registry.js";
 import { Neo4jRuntimeStore } from "./runtimeStore.js";
 
-/** Initialize the Neo4j adapter: connect and verify the driver. */
+/** Initialize the Neo4j adapter: connect and verify the driver, then give
+ * entity types stored before name properties existed their name property
+ * (Neo4j storage carries no version to upgrade by). */
 export async function initAdapter(): Promise<void> {
   await initDriver();
+  await runSession(getDriver(), backfillNameProperties);
 }
 
 /**
@@ -29,11 +34,11 @@ export async function initAdapter(): Promise<void> {
  * valid unchanged. The port accessors have already verified the key
  * against the registry.
  */
-export function createModelingStore(_ontologyKey: string, language: TextSearchLanguage): Neo4jModelingStore {
+export function createModelingStore(_ontologyKey: string, language: KeywordLanguage): Neo4jModelingStore {
   return new Neo4jModelingStore(getDriver(), language);
 }
 
-export function createRuntimeStore(ontologyKey: string, language: TextSearchLanguage): Neo4jRuntimeStore {
+export function createRuntimeStore(ontologyKey: string, language: KeywordLanguage): Neo4jRuntimeStore {
   return new Neo4jRuntimeStore(getDriver(), ontologyKey, language);
 }
 
@@ -75,3 +80,6 @@ export async function ensureSemanticIndexes(dimensions: number): Promise<void> {
 }
 
 export function supportsKeywordRanking(): boolean { return Neo4jRuntimeStore.prototype.supportsKeywordRanking(); }
+
+/** Search indices are not supported: Neo4j keeps its own search path. */
+export function supportsSearchIndices(): boolean { return false; }

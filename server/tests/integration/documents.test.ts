@@ -20,6 +20,7 @@ import {
   getRuntimeStore,
   initStores,
 } from "../../src/core/ports.js";
+import { defineEntityProperty } from "./fixture.js";
 import { wipeDatabase } from "./reset.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 
@@ -65,9 +66,10 @@ beforeEach(async () => {
   const article = await post("/api/ontologies/test_ont/model/entity-types", {
     key: "article",
     displayName: "Article",
+    nameProperty: "title",
   });
   ids.articleId = article.entityTypeId as string;
-  await post(`/api/ontologies/test_ont/model/entity-types/${ids.articleId}/properties`, {
+  await defineEntityProperty(app, "test_ont", ids.articleId, {
     key: "title",
     displayName: "Title",
     dataType: "string",

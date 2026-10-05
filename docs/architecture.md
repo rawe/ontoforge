@@ -85,8 +85,8 @@ deployment has. It belongs to neither modeling nor runtime and is the only surfa
 is not ontology-scoped.
 
 **Core** owns what the others need and none should define twice: the persistence port,
-the exception taxonomy, the data-type enumeration, embedding and decision-model
-provider abstractions, and OQL parsing and validation.
+the exception taxonomy, the data-type and text-search language enumerations, embedding and
+decision-model provider abstractions, and OQL parsing and validation.
 
 **Runtime never depends on modeling.** Everything runtime needs about the schema, it
 reads through the port. This keeps the schema a *value* to runtime rather than a service
@@ -223,9 +223,9 @@ queries.
 
 The cache is keyed by ontology plus lens — lens keys are unique only within their
 ontology, so the lens key alone would be ambiguous. Entries are built lazily and cleared
-wholesale by any modeling mutation, in any ontology. Wholesale rather than selective,
-because a single schema change can affect many lenses and the cost of rebuilding is
-small.
+wholesale by any modeling mutation, in any ontology, and by deleting an ontology through
+the registry. Wholesale rather than selective, because a single schema change can affect
+many lenses and the cost of rebuilding is small.
 
 It is **per process**. Multiple server instances against one database will not see each
 other's schema changes until each rebuilds — a real constraint on horizontal scaling that

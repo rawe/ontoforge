@@ -6,7 +6,7 @@
  * untouched on conflict, and the modeling MCP pair (`get_schema` ≡
  * export).
  *
- * `tests/fixtures/export.json` is a stored export payload (format 4.0)
+ * `tests/fixtures/export.json` is a stored export payload (format 6.0)
  * over the same design this suite imports; the document is
  * identity-free — no ontology key or name — so it is portable into any
  * ontology. Two normalizations make the comparison meaningful:

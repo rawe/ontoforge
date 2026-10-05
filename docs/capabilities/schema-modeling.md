@@ -23,7 +23,7 @@ and no generated code.
 
 | Object | Identity | Fixed at creation | Editable afterwards |
 |---|---|---|---|
-| Entity type | key, unique within the ontology | key | display name, description |
+| Entity type | key, unique within the ontology | key | display name, description, name property |
 | Relation type | key, unique within the ontology | key, source entity type, target entity type | display name, description |
 | Property definition | key, unique within its owning type | key, data type, owning type | display name, description, required flag, default |
 
@@ -72,6 +72,29 @@ Updates are sparse: a field omitted from an update body is left unchanged. One
 consequence is that a description cannot be cleared, only replaced, because an
 explicit null is indistinguishable from omission. A property's default value is
 the single exception — sending it explicitly as null clears it.
+
+### The name property
+
+Every entity type has exactly one **name property**: one of its own `string`
+properties, whose value names the type's entities wherever an entity is shown as a
+label. The type holds the property's key. It is never absent — an entity type does
+not exist without one.
+
+- **Created with the type.** Creating an entity type also creates its name property:
+  a non-required `string` property keyed `name` with display name "Name", unless the
+  request names another key — then that key, with the key as its display name.
+- **Reassignable.** An update may name any other `string` property of the same type;
+  naming a property the type does not have, or one of another data type, is a field
+  error. Data types never change, so the name property cannot be retyped.
+- **Never removed.** Deleting the property that is the name property is refused with a
+  conflict — choose another name property first. Nothing cascades: the server never
+  picks a replacement.
+
+The name property is an ordinary property otherwise: it may be optional, so an entity
+may have no name. Relation types have none.
+
+A lens that hides the name property shows its type without one
+([ontology-lenses.md](ontology-lenses.md)).
 
 ### Data types
 
@@ -147,7 +170,8 @@ startup and never rewritten ([../architecture.md](../architecture.md)).
 ### Deletion
 
 Deleting a type deletes its property definitions with it. Nothing else cascades by
-default.
+default. An entity type's name property is the one property that cannot be deleted on its
+own ([above](#the-name-property)).
 
 **An entity type cannot be deleted while any relation type names it as a source or
 target.** This is checked first and is unconditional — the cascade flag does not

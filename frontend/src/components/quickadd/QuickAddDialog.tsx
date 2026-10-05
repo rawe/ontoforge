@@ -3,7 +3,7 @@ import { ArrowLeft, Plus } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { useRuntimeSchema } from '@/api/hooks'
+import { useDisplayLabel, useRuntimeSchema } from '@/api/hooks'
 import { ApiError } from '@/api/http'
 import { qk } from '@/api/queryKeys'
 import { createEntity } from '@/api/runtime'
@@ -39,7 +39,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
-import { displayLabel } from '@/lib/displayLabel'
 
 /** True when the keyboard event happens somewhere typing should win. */
 function isEditableTarget(e: KeyboardEvent): boolean {
@@ -58,6 +57,7 @@ function isEditableTarget(e: KeyboardEvent): boolean {
  * step 2 is the schema-driven EntityForm.
  */
 export function QuickAddDialog({ ontologyKey, lensKey }: { ontologyKey: string; lensKey: string }) {
+  const displayLabel = useDisplayLabel()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const schema = useRuntimeSchema(ontologyKey, lensKey)

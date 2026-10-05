@@ -66,6 +66,8 @@ export interface SchemaEntityType {
   key: string
   displayName: string
   description: string | null
+  /** Key of the string property that names instances; null when the lens hides it. */
+  nameProperty: string | null
   properties: SchemaProperty[]
 }
 
@@ -325,6 +327,8 @@ export interface EntityType {
   key: string
   displayName: string
   description: string | null
+  /** Key of the string property that names instances — never null in modeling. */
+  nameProperty: string
   createdAt: string
   updatedAt: string
 }
@@ -378,6 +382,11 @@ export interface EntityTypeInput {
   key?: string
   displayName: string
   description?: string | null
+  /**
+   * Create: key of the string property the server creates as the name
+   * property (default `name`). Update: reassign to another string property.
+   */
+  nameProperty?: string
 }
 
 export interface RelationTypeInput {

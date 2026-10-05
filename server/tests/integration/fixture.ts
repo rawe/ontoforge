@@ -20,6 +20,37 @@ async function post(app: FastifyInstance, url: string, payload: Row): Promise<Ro
   return res.json() as Row;
 }
 
+/**
+ * Define one property of an entity type for a test: an entity type is
+ * created with its name property (`name` by default), so a property of
+ * that key is updated to the given definition instead of created.
+ */
+export async function defineEntityProperty(
+  app: FastifyInstance,
+  ontologyKey: string,
+  entityTypeId: string,
+  prop: Row,
+): Promise<Row> {
+  const url = `${modelPrefix(ontologyKey)}/entity-types/${entityTypeId}/properties`;
+  const listed = await app.inject({ method: "GET", url });
+  expect(listed.statusCode, `GET ${url}: ${listed.body}`).toBe(200);
+  const existing = (listed.json() as Row[]).find((p) => p.key === prop.key);
+  if (existing === undefined) {
+    return post(app, url, prop);
+  }
+  const { key: _key, dataType, ...update } = prop;
+  expect(dataType ?? existing.dataType, `${String(prop.key)} keeps its data type`).toBe(
+    existing.dataType,
+  );
+  const res = await app.inject({
+    method: "PUT",
+    url: `${url}/${existing.propertyId as string}`,
+    payload: update,
+  });
+  expect(res.statusCode, `PUT ${url}: ${res.body}`).toBe(200);
+  return res.json() as Row;
+}
+
 /** The fixture ontology every integration file models in. */
 export const FIXTURE_ONTOLOGY_KEY = "test_ont";
 
@@ -64,7 +95,7 @@ export async function buildFixture(app: FastifyInstance): Promise<FixtureIds> {
     { key: "active", displayName: "Active", dataType: "boolean", required: false, defaultValue: "true" },
     { key: "hired_at", displayName: "Hired At", dataType: "datetime", required: false },
   ]) {
-    await post(app, `${model}/entity-types/${personId}/properties`, prop);
+    await defineEntityProperty(app, FIXTURE_ONTOLOGY_KEY, personId, prop);
   }
 
   const company = await post(app, `${model}/entity-types`, {
@@ -78,7 +109,7 @@ export async function buildFixture(app: FastifyInstance): Promise<FixtureIds> {
     { key: "founded", displayName: "Founded", dataType: "date", required: false },
     { key: "employee_count", displayName: "Employee Count", dataType: "integer", required: false },
   ]) {
-    await post(app, `${model}/entity-types/${companyId}/properties`, prop);
+    await defineEntityProperty(app, FIXTURE_ONTOLOGY_KEY, companyId, prop);
   }
 
   const worksFor = await post(app, `${model}/relation-types`, {

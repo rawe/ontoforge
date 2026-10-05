@@ -18,6 +18,7 @@ import {
 } from "../../../src/core/ports.js";
 import { wipeDatabase } from "../reset.js";
 import { checkOllamaModel, disableProvider, enableOllamaProvider } from "./support.js";
+import { defineEntityProperty } from "../fixture.js";
 
 type Row = Record<string, unknown>;
 
@@ -65,14 +66,14 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
       key: "person",
       displayName: "Person",
     });
-    await post(`/api/ontologies/test_ont/model/entity-types/${person.entityTypeId as string}/properties`, {
+    await defineEntityProperty(app, "test_ont", person.entityTypeId as string, {
       key: "name",
       displayName: "Name",
       dataType: "string",
       required: true,
     });
     const skill = await post("/api/ontologies/test_ont/model/entity-types", { key: "skill", displayName: "Skill" });
-    await post(`/api/ontologies/test_ont/model/entity-types/${skill.entityTypeId as string}/properties`, {
+    await defineEntityProperty(app, "test_ont", skill.entityTypeId as string, {
       key: "name",
       displayName: "Name",
       dataType: "string",

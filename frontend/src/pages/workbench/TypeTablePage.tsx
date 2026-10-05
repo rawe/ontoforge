@@ -119,6 +119,7 @@ export function TypeTablePage() {
   const queryClient = useQueryClient()
   const schema = useRuntimeSchema(ontologyKey, lensKey)
   const type = schema.data?.entityTypes.find((t) => t.key === typeKey)
+  const nameProperty = type?.nameProperty
 
   // Required properties first — this is also the column order.
   const properties = useMemo<SchemaProperty[]>(() => {
@@ -264,7 +265,7 @@ export function TypeTablePage() {
                       setDocTarget({
                         entityTypeKey: typeKey!,
                         entityId: row.original._id,
-                        entityLabel: displayLabel(row.original),
+                        entityLabel: displayLabel(row.original, nameProperty),
                         property: p,
                         length: value.length,
                       })
@@ -341,7 +342,7 @@ export function TypeTablePage() {
       },
     ]
     return defs
-  }, [properties, navigate, ontologyKey, lensKey, typeKey])
+  }, [properties, navigate, ontologyKey, lensKey, typeKey, nameProperty])
 
   const table = useReactTable({
     data: entities.data?.items ?? [],

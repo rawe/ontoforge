@@ -21,12 +21,16 @@ import {
   StoreError,
   ValidationError,
 } from "../core/exceptions.js";
+import { legacyNameProperty } from "../core/legacyNameProperty.js";
 import { parseAndValidate } from "../core/oql/index.js";
 import type { ModelingStore, RuntimeStore } from "../core/ports.js";
 import {
   DATA_TYPES,
   KEY_PATTERN,
   MAX_KEY_LENGTH,
+  NAME_PROPERTY_DATA_TYPE,
+  namePropertyDisplayName,
+  type NewPropertyDef,
   type PropertyDef,
   type TypeKind,
 } from "../core/schemas.js";
@@ -36,11 +40,15 @@ import { syncDocumentChunks } from "../runtime/service.js";
 import { VALID_AGENT_TOOLS } from "../runtime/toolNames.js";
 import {
   AGENT_KEY_PATTERN,
+  IMPORTABLE_FORMAT_VERSIONS,
+  LEGACY_TRANSFER_FORMAT_VERSION,
   StepSchema as StepZodSchema,
   TRANSFER_FORMAT_VERSION,
 } from "./schemas.js";
 import type {
+  ExportEntityTypeInput,
   ExportPayloadInput,
+  ExportPropertyInput,
   AiAgentConfigResponseBody,
   AiAgentConfigUpsertInput,
   EntityTypeCreateInput,
@@ -90,6 +98,7 @@ function toEntityTypeResponse(data: Row): EntityTypeResponseBody {
     key: data.key as string,
     displayName: data.displayName as string,
     description: optString(data.description),
+    nameProperty: data.nameProperty as string,
     createdAt: toIso(data.createdAt),
     updatedAt: toIso(data.updatedAt),
   };
@@ -242,10 +251,33 @@ export async function createEntityType(
     body.key,
     body.displayName,
     body.description ?? null,
+    newNameProperty(body.nameProperty),
   );
   invalidateLoadedSchemaCache();
-  await onEntityTypeCreated(store, body.key);
+  await onEntityTypeCreated(store, body.key, [body.nameProperty]);
   return toEntityTypeResponse(data);
+}
+
+/** The name property an entity type is created with when nothing else
+ * defines it: a non-required string property under `key`. */
+function newNameProperty(key: string): NewPropertyDef {
+  return {
+    propertyId: randomUUID(),
+    key,
+    displayName: namePropertyDisplayName(key),
+    description: null,
+    dataType: NAME_PROPERTY_DATA_TYPE,
+    required: false,
+    defaultValue: null,
+  };
+}
+
+/** The 422 for a name property that is not a `string` property of the type. */
+function notANameProperty(key: string, entityTypeKey: string): ValidationError {
+  const message =
+    `Property '${key}' is not a ${NAME_PROPERTY_DATA_TYPE} property of entity type ` +
+    `'${entityTypeKey}'; the name property must be one`;
+  return new ValidationError(message, { fields: { nameProperty: message } });
 }
 
 export async function listEntityTypes(store: ModelingStore): Promise<EntityTypeResponseBody[]> {
@@ -269,10 +301,22 @@ export async function updateEntityType(
   body: EntityTypeUpdateInput,
   store: ModelingStore,
 ): Promise<EntityTypeResponseBody> {
+  const nameProperty = body.nameProperty ?? null;
+  if (nameProperty !== null) {
+    const et = await store.getEntityType(entityTypeId);
+    if (!et) {
+      throw new NotFoundError(`Entity type '${entityTypeId}' not found`);
+    }
+    const prop = await store.getPropertyByKey(entityTypeId, "EntityType", nameProperty);
+    if (!prop || prop.dataType !== NAME_PROPERTY_DATA_TYPE) {
+      throw notANameProperty(nameProperty, et.key as string);
+    }
+  }
   const data = await store.updateEntityType(
     entityTypeId,
     body.displayName ?? null,
     body.description ?? null,
+    nameProperty,
   );
   if (!data) {
     throw new NotFoundError(`Entity type '${entityTypeId}' not found`);
@@ -412,22 +456,24 @@ export async function deleteRelationType(
 
 // --- Property Definition ---
 
+/** The owning type's row; not-found when it does not exist. */
 async function ensureOwnerExists(
   store: ModelingStore,
   ownerId: string,
   typeKind: TypeKind,
-): Promise<void> {
+): Promise<Row> {
   if (typeKind === "EntityType") {
     const data = await store.getEntityType(ownerId);
     if (!data) {
       throw new NotFoundError(`Entity type '${ownerId}' not found`);
     }
-  } else {
-    const data = await store.getRelationType(ownerId);
-    if (!data) {
-      throw new NotFoundError(`Relation type '${ownerId}' not found`);
-    }
+    return data;
   }
+  const data = await store.getRelationType(ownerId);
+  if (!data) {
+    throw new NotFoundError(`Relation type '${ownerId}' not found`);
+  }
+  return data;
 }
 
 export async function createProperty(
@@ -529,10 +575,18 @@ export async function deleteProperty(
   cascade: boolean,
   store: ModelingStore,
 ): Promise<void> {
-  await ensureOwnerExists(store, ownerId, typeKind);
+  const owner = await ensureOwnerExists(store, ownerId, typeKind);
   const prop = await store.getProperty(ownerId, typeKind, propertyId);
   if (!prop) {
     throw new NotFoundError(`Property '${propertyId}' not found on this type`);
+  }
+  // No cascade: the name property is reassigned deliberately, never
+  // picked by the server.
+  if (typeKind === "EntityType" && owner.nameProperty === prop.key) {
+    throw new ConflictError(
+      `Property '${prop.key as string}' is the name property of entity type ` +
+        `'${owner.key as string}'. Choose another name property first.`,
+    );
   }
   // Deleting a property never triggers the cascade protocol — without
   // cascade, allowlists are left holding an unresolvable key (harmless at
@@ -1260,6 +1314,7 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
     key: et.key,
     displayName: et.displayName,
     description: optString(et.description),
+    nameProperty: et.nameProperty,
     properties: ((et.properties as Row[] | undefined) ?? []).map(exportProperty),
   }));
 
@@ -1352,13 +1407,24 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
  * NOT checked against the enum — the schema-validation operation catches
  * that later (`docs/capabilities/transfer.md`).
  *
- * The payload version is informational: old, unknown and missing versions
- * process identically.
+ * The payload version selects how entity types get their name property:
+ * 6.0 (also an absent version) names it per type and import checks it is
+ * a string property of that type; 5.0 has none, so it is derived by the
+ * legacy fallback (`core/legacyNameProperty.ts`), creating a `name`
+ * property where a type has no string property. Any other version is
+ * rejected.
  */
 export async function importSchema(
   payload: ExportPayloadInput,
   store: ModelingStore,
 ): Promise<Row> {
+  if (!IMPORTABLE_FORMAT_VERSIONS.includes(payload.formatVersion)) {
+    throw new ValidationError(
+      `Unsupported transfer format version '${payload.formatVersion}'`,
+      { fields: { formatVersion: `Expected one of ${IMPORTABLE_FORMAT_VERSIONS.join(", ")}` } },
+    );
+  }
+  const legacy = payload.formatVersion === LEGACY_TRANSFER_FORMAT_VERSION;
   if (payload.textSearchLanguage !== store.textSearchLanguage) {
     throw new ValidationError("Text-search language differs from the target ontology", {
       fields: { textSearchLanguage: `Expected ${store.textSearchLanguage}` },
@@ -1386,7 +1452,41 @@ export async function importSchema(
     `Maximum length is ${MAX_KEY_LENGTH} characters`;
   const typeKeyPattern = KEY_PATTERN.source;
 
+  // Each payload entity type's name property: its key, plus the property
+  // to create for it when a 5.0 type has no string property.
+  const namePropertyOf = new Map<
+    ExportEntityTypeInput,
+    { key: string; created: ExportPropertyInput | null }
+  >();
+
   for (const et of payload.entityTypes) {
+    if (legacy) {
+      const { key, create } = legacyNameProperty(et.properties);
+      const created = create
+        ? {
+            key,
+            displayName: namePropertyDisplayName(key),
+            description: null,
+            dataType: NAME_PROPERTY_DATA_TYPE,
+            required: false,
+            defaultValue: null,
+          }
+        : null;
+      namePropertyOf.set(et, { key, created });
+    } else if (et.nameProperty === undefined) {
+      errors.push(`Import error: entity type '${et.key}' has no nameProperty`);
+    } else if (
+      !et.properties.some(
+        (prop) => prop.key === et.nameProperty && prop.dataType === NAME_PROPERTY_DATA_TYPE,
+      )
+    ) {
+      errors.push(
+        `Import error: name property '${et.nameProperty}' of entity type '${et.key}' ` +
+          `is not a ${NAME_PROPERTY_DATA_TYPE} property of that type`,
+      );
+    } else {
+      namePropertyOf.set(et, { key: et.nameProperty, created: null });
+    }
     if (!KEY_PATTERN.test(et.key)) {
       errors.push(badKey("entity type", et.key, typeKeyPattern));
     }
@@ -1600,8 +1700,25 @@ export async function importSchema(
 
   for (const et of payload.entityTypes) {
     const etId = randomUUID();
-    await store.createEntityType(etId, et.key, et.displayName, et.description ?? null);
-    for (const prop of et.properties) {
+    const nameProperty = namePropertyOf.get(et)!;
+    const properties = nameProperty.created
+      ? [...et.properties, nameProperty.created]
+      : et.properties;
+    // Validated above: the name property is among the properties.
+    const named = properties.find((prop) => prop.key === nameProperty.key)!;
+    await store.createEntityType(etId, et.key, et.displayName, et.description ?? null, {
+      propertyId: randomUUID(),
+      key: named.key,
+      displayName: named.displayName,
+      description: named.description ?? null,
+      dataType: named.dataType,
+      required: named.required,
+      defaultValue: named.defaultValue ?? null,
+    });
+    for (const prop of properties) {
+      if (prop === named) {
+        continue;
+      }
       await store.createProperty(
         etId,
         "EntityType",
@@ -1618,11 +1735,11 @@ export async function importSchema(
     // in-index filter properties; each document property gets its own
     // chunk index. Skipped entirely without a provider.
     if (provider) {
-      const filterProps = et.properties
+      const filterProps = properties
         .filter((prop) => prop.dataType !== "document")
         .map((prop) => prop.key);
       await store.createVectorIndex(et.key, provider.dimensions, filterProps);
-      for (const prop of et.properties) {
+      for (const prop of properties) {
         if (prop.dataType === "document") {
           await store.createDocumentVectorIndex(et.key, prop.key, provider.dimensions);
         }

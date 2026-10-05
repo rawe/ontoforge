@@ -21,6 +21,7 @@ const ET_DATA = {
   key: "person",
   displayName: "Person",
   description: null,
+  nameProperty: "name",
   createdAt: NOW,
   updatedAt: NOW,
 };
@@ -161,6 +162,20 @@ describe("entity type properties", () => {
       url: "/api/ontologies/onto/model/entity-types/et-1/properties/prop-1",
     });
     expect(res.statusCode).toBe(204);
+  });
+
+  it("deleting the name property answers 409 RESOURCE_CONFLICT and deletes nothing", async () => {
+    holder.store.getEntityType.mockResolvedValue({ ...ET_DATA, nameProperty: "full_name" });
+    holder.store.getProperty.mockResolvedValue(PROP_DATA);
+    const res = await app.inject({
+      method: "DELETE",
+      url: "/api/ontologies/onto/model/entity-types/et-1/properties/prop-1?cascade=true",
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.code).toBe("RESOURCE_CONFLICT");
+    expect(res.json().error.message).toContain("Choose another name property first");
+    expect(holder.store.deleteProperty).not.toHaveBeenCalled();
+    expect(holder.store.removePropertyFromIncludesLists).not.toHaveBeenCalled();
   });
 
   it("delete of a missing property answers 404", async () => {

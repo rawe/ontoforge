@@ -144,16 +144,18 @@ Per ontology. "Unique" here always means unique within the owning ontology.
 | Kind | Identity | Notable fields |
 |---|---|---|
 | Lens | id, unique `key`, unique name | name, description, timestamps |
-| Entity type | id, unique `key` | display name, description, timestamps |
+| Entity type | id, unique `key` | display name, description, name property, timestamps |
 | Relation type | id, unique `key` | display name, source and target entity type keys |
 | Property definition | id, `key` unique within its owner | data type, required, default; owned by exactly one entity type or relation type |
+| Search index | id, unique `key` | kind (default, passage or custom), root entity type, definition, timestamps |
+| Search settings | one per ontology | keyword language set, managed indices switched off |
 | Inclusion | lens + type, or lens + search index | a type inclusion's optional property allowlist; absent means all properties |
 | Agent config | lens + `key` | name, description, system prompt, tool allowlist |
 | Saved query | lens + `key` | name, description, ordered steps, parameters, bindings |
 | Retriever agent | lens + `key` | name, description, configuration version, configuration, conversion warnings |
 
 Inclusions, agent configs, saved queries and retriever agents are the four things
-that belong *to a lens*. Types and properties never do. The same type key, and the same
+that belong *to a lens*. Types, properties and search indices never do. The same type key, and the same
 lens key, can exist independently in two ontologies.
 
 ### Instance level
@@ -162,7 +164,8 @@ lens key, can exist independently in two ontologies.
 |---|---|---|
 | Entity | `_id` | its type key, plus the properties its type defines |
 | Relation | `_id` | its type key, its two endpoint ids, plus its properties |
-| Chunk | internal | fragment of one document property, with its offset and length |
+| Chunk | internal | fragment of one document property, with its offset and length, kept as a passage entry |
+| Search entry | internal | one indexed text of one entity in one generation of a search index — its own fields, one relation, or one chunk |
 
 System properties are server-managed, always readable, never writable: `_id`,
 `_createdAt`, `_updatedAt`, plus `_entityTypeKey` on entities and `_relationTypeKey` on

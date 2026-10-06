@@ -51,7 +51,7 @@ OntoForge exposes two MCP servers for AI-assisted workflows — one for schema d
 
 ### Modeling Server
 
-Design and iterate on one ontology's schema. Tools for managing entity types, relation types, properties, lenses, validation, and export/import — plus the argument-less `ensure_ontology`, which creates the mount's own ontology if it does not exist yet.
+Design and iterate on one ontology's schema. Tools for managing entity types, relation types, properties, lenses, search indices and search settings, validation, and export/import — plus the argument-less `ensure_ontology`, which creates the mount's own ontology if it does not exist yet.
 
 **Endpoint:** `http://localhost:8000/mcp/ontologies/{ontologyKey}/model`
 
@@ -158,7 +158,8 @@ npm test
 ```
 
 This runs the unit tests only — they are mocked and need no running services.
-Integration tests are opt-in and do require a running database and Ollama; see
+Integration tests are opt-in: they require a running database, and the semantic-search
+and AI suites also Ollama; see
 [docs/workflows/testing.md](docs/workflows/testing.md).
 
 ## Architecture
@@ -213,7 +214,7 @@ ontoforge/
 ├── env/                            # Committed configuration presets for ./dev.sh
 ├── frontend/
 │   ├── Dockerfile
-│   ├── package.json                # UI v3 (Workbench + Studio): React 19 + TypeScript + Vite
+│   ├── package.json                # Web client (Workbench + Studio): React 19 + TypeScript + Vite
 │   └── src/
 └── docs/
     ├── README.md                   # Concepts, glossary, documentation map

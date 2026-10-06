@@ -7,14 +7,14 @@ described in [docs/](../docs/README.md).
 ## Prerequisites
 
 - [Node.js](https://nodejs.org/) ≥ 22 LTS and npm
-- Docker (for the Neo4j dev database)
+- Docker (for the PostgreSQL dev database)
 - Optional: [Ollama](https://ollama.com/) for semantic search and AI capabilities
   (`bge-m3` and `qwen3:8b` by default)
 
 ## Quickstart
 
 ```bash
-# 1. Start Neo4j (from the repository root)
+# 1. Start PostgreSQL (from the repository root)
 docker compose up -d
 
 # 2. Install and run the server (hot reload)
@@ -51,9 +51,9 @@ local integration test. No decision-specific REST endpoint or UI is exposed.
 | Command | Suite | Needs |
 |---|---|---|
 | `npm test` | Unit | nothing |
-| `npm run test:integration` | Integration | docker-compose Neo4j |
-| `npm run test:integration:embedding` | Semantic search | Neo4j + Ollama |
-| `npm run test:integration:ai` | AI (slow, real model) | Neo4j + Ollama |
+| `npm run test:integration` | Integration | docker-compose PostgreSQL |
+| `npm run test:integration:embedding` | Semantic search | PostgreSQL + Ollama |
+| `npm run test:integration:ai` | AI (slow, real model) | PostgreSQL + Ollama |
 | `npm run test:integration:decision` | Decision HTTP contract | Local decision API; no database |
 
 `npm run typecheck` runs the TypeScript compiler without emitting.

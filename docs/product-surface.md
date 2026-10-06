@@ -415,7 +415,7 @@ empty input, no type scope, a new snapshot of recents.
 
 | Prefix | Mode | Behaviour |
 |---|---|---|
-| *(none)* | Entities | Cross-type entity search — semantic when available, otherwise a parallel substring search over every exposed type. Starts at two characters; below that it shows recents or a hint. |
+| *(none)* | Entities | Cross-type entity search — ranked under the server's default strategy when any strategy is available, otherwise a parallel substring search over every exposed type. Starts at two characters; below that it shows recents or a hint. |
 | `#` | Types | Filter the exposed entity types; choosing one *scopes* the palette to that type rather than navigating. |
 | `?` | Saved queries | Semantic search over query descriptions when available, substring filtering over the full list otherwise. An empty query lists everything. |
 | `>` | Actions | Navigation to each Workbench area, the Studio, and a theme toggle. |

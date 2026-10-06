@@ -178,8 +178,8 @@ both behaviours.
 stores all instance data in two generic tables — `entity` and `relation`, with `uuid`
 primary keys and properties as jsonb — never a table per type. A schema change stays
 pure data for instance storage: no table or column is ever created per type or property.
-The only DDL a schema change runs maintains search indexes, named after the schema rows
-that cause them. The physical mapping is described in
+The only DDL that follows a schema change is the entry table of a search-index generation
+it starts. The physical mapping is described in
 [storage-adapters.md](storage-adapters.md); deliberation:
 [adr/0015](adr/0015-generic-jsonb-instance-tables.md).
 
@@ -206,6 +206,12 @@ keeps entry vectors in an untyped `halfvec` column and indexes each generation a
 `halfvec` at its width, so every PostgreSQL deployment needs a pgvector with half-precision
 vectors. Half precision halves the heap and the vector indexes, which a large ontology
 needs kept in memory for fast search.
+
+**PostgreSQL keeps one entry table per ontology namespace, list-partitioned by
+generation.** A generation fills a table of its own, is indexed there and is attached as a
+partition when it becomes active; a retired one is detached and dropped whole. Building
+beside the serving generation and switching in one step never rewrites the entries
+search is reading.
 
 **Documentation above the port describes the behaviour of the default
 deployment.** Adapter-specific deviations are documented with that adapter in
@@ -341,9 +347,9 @@ keyword matching: every query term must be present, each still matching as a pre
 Any-term is the default because a conjunction lets one absent term empty the whole result,
 which for a compounding language is ordinary rather than exceptional: stemming reduces
 neither compounds nor derivations, so a row holding what was asked drops out over a term
-it carries in another form. Rank order reflects how
-often query terms occur, and a repeated term counts like several distinct terms; it does
-not express term coverage. Prefix matching admits unrelated words sharing a stem; ranking
+it carries in another form. Rank order follows the keyword score, so an entry holding
+more distinct query words ranks above one holding fewer, whatever their frequency.
+Prefix matching admits unrelated words sharing a stem; ranking
 carries that cost. Under either method the query is assembled from the query terms the
 adapter's own tokenizer produced for the search text, quoted, so search text never
 reaches query syntax. Strategies are the extension point for retrieval behaviour and are
@@ -363,7 +369,8 @@ the ontology, not a registry attribute: creating an ontology names no language, 
 ontology starts with both languages. It is editable; a change builds new keyword
 generations of every index in the background, without embedding calls, while the
 previous ones keep serving until they are ready. Import replaces the target's set with
-the payload's.
+the payload's. Stemming uses the database's stock configuration of each language, with no
+added compound or other dictionary, so a deployment needs no custom database image.
 
 **A schema edit never writes instance data.** Managed search indices follow the schema
 asynchronously: a changed derived definition builds a new generation in the background,
@@ -465,6 +472,16 @@ the filter vocabulary — an operator or a kind of filter subject — settles wh
 table offers it and updates that list, so every difference between the table and the
 server is a recorded choice.
 
+**The web client shows no search score.** A hit names at most what found it — a relation
+or a passage — in a short label, never a number, a bar or the entry's text. A displayed
+score would be read as relevance or confidence, which a relative score is not.
+
+**Search indices and retriever agents are designed in the Studio and used in the
+Workbench.** The Studio owns the index designer, the search settings and the
+retriever-agent editor, which carries a test panel so an agent is configured and tried in
+one place; the Workbench only chats with saved agents. Design stays with design, as
+schema and lenses do.
+
 **Validation collects every error before answering.**
 A rejected write names all offending fields at once, and a rejected read all of its
 faulty filters, so a caller can correct in one round trip rather than discovering faults
@@ -504,7 +521,10 @@ types a scoped lens hides. Deliberation:
 **Every entity type has a managed default index, and every document property a managed
 passage index; managed indices follow the schema.** The default index covers the type's
 own `string` properties; the passage index holds the document's chunks headed by the
-entity's name. The server derives both from the schema on every schema change, creates,
+entity's name, and its entries are the only place chunks are kept. Their keys are
+`<entityTypeKey>~default` and `<entityTypeKey>~<documentPropertyKey>`: `~` occurs in no
+key pattern, so a managed key never collides with a chosen one, whereas `:` already marks
+a direction in query paths. The server derives both from the schema on every schema change, creates,
 updates and deletes them without a consent step, and includes a new one in every scoped
 lens exposing its root type. They cannot be edited, only switched off, and have no
 relation groups — relations enrich an entity only through a custom index. Search works
@@ -584,6 +604,12 @@ already set in the real environment still wins, because that is what a shell var
 for. Development presets are committed under `env/` and passed to `./dev.sh`, so no
 launcher script carries configuration values of its own — a value that decides how the
 system runs must be readable in a file, not buried in a script that silently outranks one.
+
+**One embedding model per server; each semantic generation records the model it was
+built with.** Search merges indices by similarity, which is one scale only under one
+model. A changed model builds new semantic generations of every index beside the ready
+ones, which keep serving until replaced. Without configuration the model is `bge-m3` at
+1024 dimensions — multilingual, because an ontology's content may mix German and English.
 
 **Model thinking effort is one deployment setting, not a per-agent one.**
 `AI_REASONING_EFFORT` fixes how hard the model thinks for every AI call the server makes,

@@ -20,6 +20,7 @@ import {
   RETRIEVER_AGENT_CONFIG_VERSION,
   RetrieverAgentConfig,
   type FilterHop,
+  type RetrieverAgentFilter,
 } from "../../core/retrieverAgent.js";
 import type { SchemaCacheValue } from "../schemaCache.js";
 import type { SearchIndexCatalogEntry } from "../search/indexSearch.js";
@@ -56,6 +57,35 @@ export function pathTarget(
     current = to;
   }
   return current;
+}
+
+/** A filter's condition in plain words, from the lens's display names —
+ * the path's relation types, the compared type and field, and the value:
+ * "lives in City Name: Berlin"; without a path, "Email: ada@x". The
+ * answer model and the limitations get this, never filter ids or paths. */
+export function filterCondition(
+  schema: Pick<SchemaCacheValue, "entityTypes" | "relationTypes">,
+  filter: Pick<RetrieverAgentFilter, "entityType" | "path" | "field">,
+  value: string,
+): string {
+  const relations = filter.path.map((hop) => schema.relationTypes[hop.relationTypeKey]?.displayName ?? "related");
+  const target = pathTarget(schema, filter.entityType, filter.path);
+  const type = target === null ? undefined : schema.entityTypes[target];
+  const field = type?.properties[filter.field]?.displayName ?? filter.field;
+  const reached = filter.path.length > 0 && type !== undefined ? [type.displayName] : [];
+  return [...relations, ...reached, `${field}: ${value}`].join(" ");
+}
+
+/** A relation type by the name the lens shows for it in one of `indices`:
+ * its group's label there, else its display name. */
+export function relationName(lens: AgentLens, indices: readonly string[], relationType: string): string {
+  for (const key of indices) {
+    const group = lens.catalog
+      .find((entry) => entry.key === key)
+      ?.relations.find((candidate) => candidate.relationType === relationType);
+    if (group !== undefined) return group.label;
+  }
+  return lens.scoped.relationTypes[relationType]?.displayName ?? "a relation";
 }
 
 /** The relation types an index's relation groups cover in the lens. */

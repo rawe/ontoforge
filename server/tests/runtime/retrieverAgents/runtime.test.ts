@@ -142,7 +142,7 @@ describe("retriever agent pipeline", () => {
     expect(engine.rankThroughIndices.mock.calls[0]![2].targets[0].entityIds).toBeNull();
     const limitations = events.find((e) => e.type === "meta" && e.results)!.limitations as string[];
     expect(limitations).toContain(
-      "Sub-query 1: filter 'city' = \"Paris\" was not applied: the value is not stated verbatim in a user message.",
+      'The condition "lives in City Name: Paris" was not applied: the value is not stated verbatim in a user message.',
     );
     expect(fake.stream).toHaveBeenCalledTimes(1);
   });
@@ -205,7 +205,7 @@ describe("retriever agent pipeline", () => {
       expect(engine.rankThroughIndices).not.toHaveBeenCalled();
       const answerInput = JSON.parse(fake.stream.mock.calls[0]![0][1].content);
       expect(answerInput.unsupportedReason).toBe("already answered");
-      expect(answerInput.subQueries).toEqual([]);
+      expect(answerInput.searches).toEqual([]);
       expect(summary.llmCalls).toBe(3);
       expect(limitations).toContain(
         "Planning was repeated once: the first plan for this follow-up searched nothing; the repeated plan searched nothing either.",
@@ -238,7 +238,7 @@ describe("retriever agent pipeline", () => {
     const prompt = fake.stream.mock.calls[0]![0][0].content as string;
     expect(prompt).toContain("The history only tells you what the question refers to");
     expect(prompt).toContain("it is never evidence — do not confirm, dispute or add facts from it");
-    expect(prompt).toContain("A match with filters but no index entry (no \"text\") satisfies only those filters, not its sub-query's query");
+    expect(prompt).toContain("A match with filters but no index entry (no \"text\") satisfies only those filters, not its search's query");
   });
 
   it("tells the answer model to keep internals out of the answer and state facts in plain words", async () => {
@@ -249,12 +249,15 @@ describe("retriever agent pipeline", () => {
     expect(prompt).not.toContain("IDs only where needed");
   });
 
-  it("gives the answer model the filter facts each result satisfies", async () => {
+  it("gives the answer model the filter facts each result satisfies, in plain words without ids or paths", async () => {
     await run("Everyone in Berlin", false);
-    const answerInput = JSON.parse(fake.stream.mock.calls[0]![0][1].content);
-    expect(answerInput.results[0].matches).toEqual([
-      { subQuery: 0, filters: [{ filter: "city", path: "lives_in → city.name", value: "Berlin" }] },
+    const content = fake.stream.mock.calls[0]![0][1].content as string;
+    const answerInput = JSON.parse(content);
+    expect(answerInput.searches).toEqual([{ query: "", relations: [], filters: ["lives in City Name: Berlin"] }]);
+    expect(answerInput.results).toEqual([
+      { type: "Person", label: "Ada", fields: { Name: "Ada", Email: "a@x" }, matches: [{ search: "", filters: ["lives in City Name: Berlin"] }] },
     ]);
+    for (const internal of ['"ada"', '"city"', "lives_in", "→", "subQuery", '"id"']) expect(content).not.toContain(internal);
     expect(fake.stream.mock.calls[0]![0][0].content).toContain("exact filters the entity satisfies");
   });
 

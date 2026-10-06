@@ -441,7 +441,7 @@ describe.skipIf(!postgres)("retriever agents", () => {
       [ids.eve, true],
     ]);
     // The answer model learns the filter held.
-    expect(filtered.items[0]!.matches[0]!.filters).toEqual([{ filter: "city", path: "lives_in → city.name", value: "berlin" }]);
+    expect(filtered.items[0]!.matches[0]!.filters).toEqual(["Lives in City Name: berlin"]);
 
     // An exact list: everyone living in Berlin, without a search.
     const listed = await retrieve(scope, {

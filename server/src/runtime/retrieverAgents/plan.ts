@@ -16,7 +16,8 @@
  * (never assistant text), and a previous-result reference needs the
  * user's words and a complete exact previous list. A check that fails
  * never fails the turn: the filter or reference is left out and named as
- * a limitation.
+ * a limitation — in plain words from the lens's display names, never by
+ * sub-query number, key or id: the answer model receives the same text.
  */
 
 import { z } from "zod";
@@ -25,7 +26,7 @@ import { ValidationError } from "../../core/exceptions.js";
 import type { SearchIndexRecord } from "../../core/ports.js";
 import type { RetrieverAgentConfig } from "../../core/retrieverAgent.js";
 import type { SearchMode } from "../search/indexSearch.js";
-import { groupRelationTypes, pathTarget, type AgentLens } from "./config.js";
+import { filterCondition, groupRelationTypes, pathTarget, type AgentLens } from "./config.js";
 
 /** Most sub-queries of one plan. */
 export const MAX_SUB_QUERIES = 4;
@@ -322,19 +323,22 @@ export function validatePlan(
     throw new ValidationError("Search plan must contain sub-queries or an unsupported-data explanation.");
   }
   const kept: SubQuery[] = [];
-  plan.subQueries.forEach((sub, i) => {
-    const at = `Sub-query ${i + 1}`;
+  plan.subQueries.forEach((sub) => {
     const entries = [...new Set(sub.indices)].flatMap((key) => {
       const reference = config.indices.find((candidate) => candidate.index === key);
       const entry = lens.catalog.find((candidate) => candidate.key === key);
       if (reference === undefined || entry === undefined) {
-        notes.push(`${at}: index '${key}' is not one this agent searches; it was left out.`);
+        notes.push(
+          entry === undefined
+            ? "An index this agent does not search was left out of a search."
+            : `The index ${entry.name} is not one this agent searches; it was left out of a search.`,
+        );
         return [];
       }
       return [{ reference, entry }];
     });
     if (entries.length === 0) {
-      notes.push(`${at} was dropped: it named no index of this agent.`);
+      notes.push("A search was dropped: it named no index of this agent.");
       return;
     }
     sub.indices = entries.map(({ entry }) => entry.key);
@@ -345,11 +349,18 @@ export function validatePlan(
           groupRelationTypes(entry).includes(relation) &&
           (reference.relations === undefined || reference.relations.includes(relation)),
       );
-      if (!allowed) notes.push(`${at}: relation '${relation}' is not allowed for its indices; it was left out.`);
+      if (!allowed) {
+        const name = lens.scoped.relationTypes[relation]?.displayName;
+        notes.push(
+          name === undefined
+            ? "A relation the chosen indices do not hold was left out of a search."
+            : `The relation ${name} is not allowed for the chosen indices; it was left out of a search.`,
+        );
+      }
       return allowed;
     });
     if (!modes.includes(sub.mode)) {
-      notes.push(`${at}: search mode ${sub.mode} is unavailable; searched ${modes[0]} instead.`);
+      notes.push(`Search mode ${sub.mode} is unavailable; ${modes[0]} was searched instead.`);
       sub.mode = modes[0]!;
     }
     sub.query = sub.query.trim();
@@ -357,13 +368,13 @@ export function validatePlan(
     sub.filters = sub.filters.filter((filter) => {
       const configured = config.filters.find((candidate) => candidate.id === filter.id);
       if (configured === undefined || !roots.includes(configured.entityType)) {
-        notes.push(`${at}: filter '${filter.id}' is not allowed here; it was not applied.`);
+        notes.push("A filter this agent does not allow for the searched type was not applied.");
         return false;
       }
       if (!evidenced(filter.quote, sources) || !norm(filter.quote).includes(norm(filter.value))) {
         notes.push(
-          `${at}: filter '${filter.id}' = "${filter.value}" was not applied: the value is not stated verbatim ` +
-            "in a user message.",
+          `The condition "${filterCondition(lens.scoped, configured, filter.value)}" was not applied: the value ` +
+            "is not stated verbatim in a user message.",
         );
         return false;
       }
@@ -372,12 +383,12 @@ export function validatePlan(
     if (sub.previous !== null) {
       const problem = previousProblem(sub.previous, roots, config, lens, sources, previous);
       if (problem !== null) {
-        notes.push(`${at}: the reference to previous results was ignored (${problem}); it ran as a fresh search.`);
+        notes.push(`The reference to previous results was ignored (${problem}); it ran as a fresh search.`);
         sub.previous = null;
       }
     }
     if (sub.query === "" && sub.filters.length === 0 && sub.previous === null) {
-      notes.push(`${at} was dropped: without a query it needs an applied filter or previous results.`);
+      notes.push("A search was dropped: without a query it needs an applied filter or previous results.");
       return;
     }
     kept.push(sub);

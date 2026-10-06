@@ -145,7 +145,9 @@ an earlier user message, and a reference to previous results must rest on the us
 referring words. An answer's text is never evidence for a filter.
 
 Before anything is searched, the server checks the plan and leaves out what it cannot
-honour, naming each omission in the limitations the answer model receives: an index the
+honour, naming each omission in the limitations the answer model receives — in plain
+words from the lens's display names, never by sub-query number, key or id, and in the
+same text the diagnostics report: an index the
 agent does not search, a relation it does not allow for the sub-query's indices, a filter
 that is not the agent's or not for the sub-query's result types, a filter value without
 that quote, and an invalid previous-result reference — the sub-query then runs as a fresh
@@ -192,12 +194,17 @@ results may be incomplete ([search-indices.md](search-indices.md#status)).
 
 ### Evidence and the answer
 
-Each result reaches the answer model with its id, type, label — its name property's
-value — its answer fields read through the lens, and per sub-query that found it what
-matched: the index, the part — own fields, one relation with the entity at its other end,
-or one passage — the entry's text, and the sub-query's filters the entity satisfies, each
-with its id, the path to the compared field and the value. A satisfied filter is an
-established fact the answer may state. Answer fields and entry texts are cut to the
+The answer model sees the lens's display names, never ids, keys or paths. Each result
+reaches it with its type's display name, its label — its name property's value — its
+answer fields read through the lens and named by display name, and per search that found
+it: that search's query (empty for an exact list), what matched — the entity's own
+fields, one relation, named by its relation group's label or else the relation type's
+display name, with the entity at its other end by label and type, or a passage of the
+named document — the entry's text, and the search's filters the entity satisfies, each
+as a plain condition built from display names ("lives in City Name: Berlin"). A satisfied
+filter is an established fact the answer may state, in its own words. The plan reaches
+the answer model the same way: per search its query, the relation groups it was
+restricted to by label, and its conditions. Answer fields and entry texts are cut to the
 configured characters; the entry text is withheld when the index reads properties the
 lens hides ([ontology-lenses.md](ontology-lenses.md#search-through-a-lens)). Evidence is
 added best first up to 8,000 characters; results that do not fit are omitted and named

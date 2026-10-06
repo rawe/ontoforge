@@ -14,6 +14,7 @@ import type { RuntimeStore, SearchIndexRecord, SearchIndexStore } from "../../..
 import type { LoadedSchema } from "../../../src/runtime/schemaCache.js";
 import type { Plan } from "../../../src/runtime/retrieverAgents/plan.js";
 import {
+  answerSearches,
   boundContext,
   CONTEXT_CHARACTERS,
   diagnosticResults,
@@ -162,13 +163,18 @@ describe("sub-query search", () => {
     // "Berlin-Mitte" contains the value but does not equal it.
     expect(engine.rankThroughIndices.mock.calls[0]![2].targets[0].entityIds.sort()).toEqual(["ada", "eve"]);
     engine.rankThroughIndices.mockResolvedValue([hit("ada", "person_employment", "CTO at ACME")]);
-    const searched = await retrieve(scope(), {
+    const plan: Plan = {
       subQueries: [subQuery({ filters: [{ id: "city", value: "Berlin", quote: "Berlin" }] })],
       unsupportedReason: null,
-    });
-    expect(boundContext(searched).results[0]!.matches[0]).toMatchObject({
-      index: "person_employment",
-      filters: [{ filter: "city", path: "lives_in → city.name", value: "Berlin" }],
+    };
+    const searched = await retrieve(scope(), plan);
+    expect(boundContext(searched, plan, LENS).results[0]!.matches[0]).toEqual({
+      search: "CTO at ACME",
+      entry: "Employment",
+      related: "ACME",
+      relatedType: "Company",
+      text: "CTO at ACME",
+      filters: ["lives in City Name: Berlin"],
     });
   });
 
@@ -190,19 +196,20 @@ describe("sub-query search", () => {
   });
 
   it("a sub-query without query lists the filtered entities without searching", async () => {
-    const retrieval = await retrieve(scope(), {
+    const plan: Plan = {
       subQueries: [subQuery({ query: "", filters: [{ id: "city", value: "Berlin", quote: "Berlin" }] })],
       unsupportedReason: null,
-    });
+    };
+    const retrieval = await retrieve(scope(), plan);
     expect(engine.rankThroughIndices).not.toHaveBeenCalled();
     expect(retrieval.searchCalls).toBe(0);
     // Each result carries the filter it satisfies, for the answer model.
-    const fact = { filter: "city", path: "lives_in → city.name", value: "Berlin" };
+    const fact = "lives in City Name: Berlin";
     expect(retrieval.items.map((item) => [item.entityId, item.matches])).toEqual([
       ["ada", [{ subQuery: 0, matched: null, text: null, filters: [fact] }]],
       ["eve", [{ subQuery: 0, matched: null, text: null, filters: [fact] }]],
     ]);
-    expect(boundContext(retrieval).results[0]!.matches).toEqual([{ subQuery: 0, filters: [fact] }]);
+    expect(boundContext(retrieval, plan, LENS).results[0]!.matches).toEqual([{ search: "", filters: [fact] }]);
   });
 
   it("fuses two sub-queries per entity: found by both ranks first and keeps both matches", async () => {
@@ -220,7 +227,7 @@ describe("sub-query search", () => {
     ]);
     // Bob's long email is cut to the agent's characters, and that is a limitation.
     expect(String(retrieval.items[1]!.fields.email)).toHaveLength(800 + " [truncated]".length);
-    expect(retrieval.limitations).toContain("Answer fields cut to 800 characters: email.");
+    expect(retrieval.limitations).toContain("Answer fields cut to 800 characters: Email.");
     const rows = diagnosticResults(retrieval);
     expect(rows.map((row) => [row.entityId, row.subQuery])).toEqual([["ada", 0], ["ada", 1], ["bob", 0], ["eve", 1]]);
     expect(rows[0]).toEqual({
@@ -259,11 +266,38 @@ describe("fusion and context", () => {
       fields: { name: "n".repeat(400) },
       matches: [{ subQuery: 0, matched: null, text: null, filters: [] }],
     }));
-    const context = boundContext({ items, limitations: [], searchCalls: 0, searchMs: 0 });
+    const plan: Plan = { subQueries: [subQuery({})], unsupportedReason: null };
+    const context = boundContext({ items, limitations: [], searchCalls: 0, searchMs: 0 }, plan, LENS);
     expect(JSON.stringify({ results: context.results }).length).toBeLessThanOrEqual(CONTEXT_CHARACTERS);
     expect(context.results.length + context.omitted).toBe(40);
     expect(context.omitted).toBeGreaterThan(0);
     expect(context.limitations.at(-1)).toContain(`${context.omitted} technically selected candidates were omitted`);
-    expect(context.results[0]).toEqual({ id: "e0", type: "person", label: null, fields: { name: "n".repeat(400) }, matches: [{ subQuery: 0 }] });
+    expect(context.results[0]).toEqual({ type: "Person", label: null, fields: { Name: "n".repeat(400) }, matches: [{ search: "CTO at ACME" }] });
+  });
+
+  it("gives the answer model display names and plain conditions: no entity ids, keys, filter ids or paths", async () => {
+    engine.rankThroughIndices.mockResolvedValue([hit("eve", "person_employment", "Employment Role: CTO Company: ACME")]);
+    const plan: Plan = {
+      subQueries: [
+        subQuery({ relations: ["works_for"], query: "works at ACME", filters: [{ id: "city", value: "Berlin", quote: "lives in Berlin" }] }),
+        subQuery({ indices: ["person_home"], relations: ["lives_in"], query: "", filters: [{ id: "city", value: "Paris", quote: "Paris" }] }),
+      ],
+      unsupportedReason: null,
+    };
+    const retrieval = await retrieve(scope(), plan);
+    const context = boundContext(retrieval, plan, LENS);
+    const payload = JSON.stringify({ searches: answerSearches(plan, CONFIG, LENS), results: context.results, limitations: context.limitations });
+    expect(answerSearches(plan, CONFIG, LENS)).toEqual([
+      { query: "works at ACME", relations: ["Employment"], filters: ["lives in City Name: Berlin"] },
+      { query: "", relations: ["Home"], filters: ["lives in City Name: Paris"] },
+    ]);
+    expect(context.results.map((result) => [result.type, result.label, Object.keys(result.fields)])).toEqual([
+      ["Person", "Eve", ["Name", "Email"]],
+      ["Person", "Ada", ["Name", "Email"]],
+    ]);
+    // Entity ids, relation-type and index keys, filter ids, paths, sub-query numbers.
+    for (const internal of ['"eve"', '"ada"', '"c"', "works_for", "lives_in", "person_employment", "person_home", '"city"', "→", "city.name", "subQuery", '"id"', '"path"']) {
+      expect(payload).not.toContain(internal);
+    }
   });
 });

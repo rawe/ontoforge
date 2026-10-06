@@ -70,10 +70,10 @@ describe("planner output", () => {
     expect(plan.subQueries).toHaveLength(1);
     expect(plan.subQueries[0]).toMatchObject({ indices: ["person_employment"], relations: ["works_for"] });
     expect(notes).toEqual([
-      "Sub-query 1: index 'company~default' is not one this agent searches; it was left out.",
-      "Sub-query 1: relation 'lives_in' is not allowed for its indices; it was left out.",
-      "Sub-query 2: index 'ghost' is not one this agent searches; it was left out.",
-      "Sub-query 2 was dropped: it named no index of this agent.",
+      "The index company~default is not one this agent searches; it was left out of a search.",
+      "The relation lives in is not allowed for the chosen indices; it was left out of a search.",
+      "An index this agent does not search was left out of a search.",
+      "A search was dropped: it named no index of this agent.",
     ]);
   });
 
@@ -88,8 +88,8 @@ describe("planner output", () => {
     ]);
     expect(plan.subQueries[0]!.filters).toEqual([]);
     expect(notes).toEqual([
-      'Sub-query 1: filter \'city\' = "Paris" was not applied: the value is not stated verbatim in a user message.',
-      'Sub-query 1: filter \'city\' = "Berlin" was not applied: the value is not stated verbatim in a user message.',
+      'The condition "lives in City Name: Paris" was not applied: the value is not stated verbatim in a user message.',
+      'The condition "lives in City Name: Berlin" was not applied: the value is not stated verbatim in a user message.',
     ]);
     // An earlier user message is evidence; assistant text is not.
     const history = [
@@ -108,13 +108,13 @@ describe("planner output", () => {
   it("does not apply a filter the agent lacks or one on another result type", () => {
     const { plan, notes } = check([sub({ filters: [{ id: "ghost", value: "Berlin", quote: "Berlin" }] })]);
     expect(plan.subQueries[0]!.filters).toEqual([]);
-    expect(notes).toEqual(["Sub-query 1: filter 'ghost' is not allowed here; it was not applied."]);
+    expect(notes).toEqual(["A filter this agent does not allow for the searched type was not applied."]);
   });
 
   it("an empty query needs an applied filter or previous reference and drops variants", () => {
     const empty = check([sub({ query: "" })]);
     expect(empty.plan.subQueries).toEqual([]);
-    expect(empty.notes).toEqual(["Sub-query 1 was dropped: without a query it needs an applied filter or previous results."]);
+    expect(empty.notes).toEqual(["A search was dropped: without a query it needs an applied filter or previous results."]);
     const { plan } = check(
       [sub({ query: " ", variants: ["x"], filters: [{ id: "city", value: "Berlin", quote: "Berlin" }] })],
       "Everyone in Berlin",
@@ -131,7 +131,7 @@ describe("planner output", () => {
   it("replaces an unavailable mode with the first available one and says so", () => {
     const { plan, notes } = check([sub({ mode: "semantic" })]);
     expect(plan.subQueries[0]!.mode).toBe("keyword");
-    expect(notes).toEqual(["Sub-query 1: search mode semantic is unavailable; searched keyword instead."]);
+    expect(notes).toEqual(["Search mode semantic is unavailable; keyword was searched instead."]);
   });
 
   it("honours a previous reference only to an exact, complete previous result of one type; else ignores it", () => {
@@ -156,7 +156,7 @@ describe("planner output", () => {
     // BUG 2b: a follow-up on a searched turn runs as a fresh search.
     const searched = { ...previous, plan: { ...exactPlan, subQueries: [sub() as Plan["subQueries"][number]] } };
     expect(ignored("Which of these people is CTO?", searched)).toBe(
-      "Sub-query 1: the reference to previous results was ignored (previous search results are candidates, " +
+      "The reference to previous results was ignored (previous search results are candidates, " +
         "not verified results); it ran as a fresh search.",
     );
     expect(ignored("Which of these people is CTO?", previous, [sub({ query: "CTO", previous: { filterId: "ghost", quote: "these people" } })])).toContain(
@@ -226,7 +226,7 @@ describe("a reference to earlier results without verified previous results", () 
     );
     expect(plan.subQueries[0]!.previous).toBeNull();
     expect(notes).toEqual([
-      "Sub-query 1: the reference to previous results was ignored (there are no verified previous results); it ran as a fresh search.",
+      "The reference to previous results was ignored (there are no verified previous results); it ran as a fresh search.",
     ]);
   });
 });

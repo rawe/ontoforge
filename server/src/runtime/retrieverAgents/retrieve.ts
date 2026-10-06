@@ -26,7 +26,7 @@ import { readsHiddenProperties, RRF_K } from "../../core/searchQuery.js";
 import { filterEntityProperties } from "../readHelpers.js";
 import type { LoadedSchema } from "../schemaCache.js";
 import { describeMatches, rankThroughIndices, type EngineHit, type Matched } from "../search/indexSearch.js";
-import type { AgentLens } from "./config.js";
+import { filterCondition, relationName, type AgentLens } from "./config.js";
 import { sameValue, type Plan, type Previous, type SubQuery } from "./plan.js";
 
 /** Entities one search of a sub-query ranks. */
@@ -64,16 +64,9 @@ export interface SubQueryMatch {
   /** The matched entry's text, cut to the answer-field length; null when
    * listed or when the index reads properties the lens hides. */
   text: string | null;
-  /** The sub-query's exact filters the entity satisfies. */
-  filters: FilterFact[];
-}
-
-/** An exact filter an entity satisfies: its id, where the compared value
- * sits (`lives_in → city.name`), and the value. */
-export interface FilterFact {
-  filter: string;
-  path: string;
-  value: string;
+  /** The sub-query's exact filters the entity satisfies, in plain words
+   * (`filterCondition`): "lives in City Name: Berlin". */
+  filters: string[];
 }
 
 export interface RetrievedItem {
@@ -212,7 +205,7 @@ async function restrictionsOf(
   const restrictions = new Map<string, Set<string>>();
   for (const applied of sub.filters) {
     const filter = scope.config.filters.find((candidate) => candidate.id === applied.id)!;
-    const what = `Filter ${filter.id} = "${applied.value}"`;
+    const what = `The condition "${filterCondition(scope.lens.scoped, filter, applied.value)}"`;
     const types = pathTypes(scope.loaded, filter.entityType, filter.path);
     const matches = await entitiesWithValue(scope, types.at(-1)!, filter.field, applied.value, limitations, what);
     intersect(restrictions, filter.entityType, await walkBack(scope, filter.path, matches, limitations, what));
@@ -369,10 +362,10 @@ export async function retrieve(scope: RetrievalScope, plan: Plan, previous?: Pre
   const perSubQuery: Ranked[][] = [];
   for (const sub of plan.subQueries) perSubQuery.push(await runSubQuery(scope, sub, previous, retrieval));
 
-  const statusOf = new Map(scope.lens.catalog.map((entry) => [entry.key, entry.status] as const));
-  const building = [...new Set(plan.subQueries.flatMap((sub) => sub.indices))].filter(
-    (key) => statusOf.get(key) !== "ready",
-  );
+  const building = [...new Set(plan.subQueries.flatMap((sub) => sub.indices))].flatMap((key) => {
+    const entry = scope.lens.catalog.find((candidate) => candidate.key === key);
+    return entry === undefined || entry.status === "ready" ? [] : [entry.name];
+  });
   if (building.length > 0) {
     retrieval.limitations.push(
       `Search indices not fully built (${building.join(", ")}); results may be incomplete.`,
@@ -384,13 +377,11 @@ export async function retrieve(scope: RetrievalScope, plan: Plan, previous?: Pre
   const hidesText = new Map<string, boolean>();
   // The filters each sub-query applied, per result type: facts its
   // results satisfy, which the answer may state.
-  const factsOf = (subQuery: number, entityType: string): FilterFact[] =>
+  const factsOf = (subQuery: number, entityType: string): string[] =>
     plan.subQueries[subQuery]!.filters.flatMap((applied) => {
       const filter = scope.config.filters.find((candidate) => candidate.id === applied.id);
       if (filter === undefined || filter.entityType !== entityType) return [];
-      const types = pathTypes(scope.loaded, filter.entityType, filter.path);
-      const path = [...filter.path.map((hop) => hop.relationTypeKey), `${types.at(-1)}.${filter.field}`].join(" → ");
-      return [{ filter: filter.id, path, value: applied.value }];
+      return [filterCondition(scope.lens.scoped, filter, applied.value)];
     });
   for (const [subQuery, ranked] of perSubQuery.entries()) {
     const hits = ranked.flatMap((item) => (item.hit === null ? [] : [item.hit]));
@@ -424,7 +415,7 @@ export async function retrieve(scope: RetrievalScope, plan: Plan, previous?: Pre
     for (const field of scope.config.answerFields[item.entityType] ?? []) {
       const { value, cut: wasCut } = cut(entity[field], scope.config.answerFieldCharacters);
       fields[field] = value;
-      if (wasCut) truncated.add(field);
+      if (wasCut) truncated.add(scope.lens.scoped.entityTypes[item.entityType]?.properties[field]?.displayName ?? field);
     }
     const nameProperty = scope.loaded.scoped.entityTypes[item.entityType]?.nameProperty ?? null;
     const name = nameProperty === null ? null : entity[nameProperty];
@@ -448,22 +439,26 @@ export async function retrieve(scope: RetrievalScope, plan: Plan, previous?: Pre
 // The answer model's context and the diagnostics
 // ---------------------------------------------------------------------------
 
+/** One result as the answer model gets it: in the lens's display names —
+ * no ids, keys or paths, which it would otherwise repeat. */
 export interface Evidence {
-  id: string;
+  /** The entity type's display name. */
   type: string;
   label: string | null;
+  /** Answer fields by display name. */
   fields: Row;
-  /** Per sub-query that found the entity: what matched (index, relation,
-   * related entity) and the matched text. */
+  /** Per sub-query that found the entity: its query ("" for an exact
+   * list), what matched and the matched text. */
   matches: {
-    subQuery: number;
-    index?: string;
-    kind?: Matched["partKind"];
-    relation?: string | null;
+    search: string;
+    /** "own fields", a relation group's label, or "passage of <document>". */
+    entry?: string;
+    /** The entity on the other end of a relation entry. */
     related?: string | null;
+    relatedType?: string | null;
     text?: string | null;
     /** Exact filters the entity satisfies — established facts. */
-    filters?: FilterFact[];
+    filters?: string[];
   }[];
 }
 
@@ -474,31 +469,52 @@ export interface ResponseContext {
   limitations: string[];
 }
 
-/** The evidence that fits `CONTEXT_CHARACTERS`, best first; scores and
- * diagnostics stay out. */
-export function boundContext(retrieval: Retrieval): ResponseContext {
+/** What a matched index entry is, in plain words. */
+function entryName(lens: AgentLens, matched: Matched): string {
+  if (matched.partKind === "self") return "own fields";
+  if (matched.partKind === "relation") return relationName(lens, [matched.index], matched.relationType ?? "");
+  const entry = lens.catalog.find((candidate) => candidate.key === matched.index);
+  const document = entry?.documentProperty ?? null;
+  const name = document === null ? undefined : lens.scoped.entityTypes[entry!.entityType]?.properties[document]?.displayName;
+  return name === undefined ? "document passage" : `passage of ${name}`;
+}
+
+/** Answer fields keyed by their display names (a clash keeps the key). */
+function namedFields(lens: AgentLens, entityType: string, fields: Row): Row {
+  const properties = lens.scoped.entityTypes[entityType]?.properties ?? {};
+  const named: Row = {};
+  for (const [key, value] of Object.entries(fields)) {
+    const name = properties[key]?.displayName ?? key;
+    named[name in named ? key : name] = value;
+  }
+  return named;
+}
+
+/** The evidence that fits `CONTEXT_CHARACTERS`, best first, in display
+ * names; ids, keys, scores and diagnostics stay out. */
+export function boundContext(retrieval: Retrieval, plan: Plan, lens: AgentLens): ResponseContext {
   const context: ResponseContext = { results: [], omitted: 0, limitations: [...retrieval.limitations] };
   for (const item of retrieval.items) {
     context.results.push({
-      id: item.entityId,
-      type: item.entityType,
+      type: lens.scoped.entityTypes[item.entityType]?.displayName ?? item.entityType,
       label: item.label,
-      fields: item.fields,
-      matches: item.matches.map((match) =>
-        ({
-          subQuery: match.subQuery,
-          ...(match.matched === null
-            ? {}
-            : {
-                index: match.matched.index,
-                kind: match.matched.partKind,
-                relation: match.matched.relationType,
-                related: match.matched.target?.label ?? null,
-                text: match.text,
-              }),
-          ...(match.filters.length === 0 ? {} : { filters: match.filters }),
-        }),
-      ),
+      fields: namedFields(lens, item.entityType, item.fields),
+      matches: item.matches.map((match) => ({
+        search: plan.subQueries[match.subQuery]?.query ?? "",
+        ...(match.matched === null
+          ? {}
+          : {
+              entry: entryName(lens, match.matched),
+              ...(match.matched.target === null
+                ? {}
+                : {
+                    related: match.matched.target.label,
+                    relatedType: lens.scoped.entityTypes[match.matched.target.type]?.displayName ?? null,
+                  }),
+              text: match.text,
+            }),
+        ...(match.filters.length === 0 ? {} : { filters: match.filters }),
+      })),
     });
     if (JSON.stringify(context).length > CONTEXT_CHARACTERS - 400) {
       context.results.pop();
@@ -513,6 +529,20 @@ export function boundContext(retrieval: Retrieval): ResponseContext {
     );
   }
   return context;
+}
+
+/** The plan's searches as the answer model gets them: each query ("" for
+ * an exact list), the relation groups it was restricted to and its exact
+ * conditions, in display names. */
+export function answerSearches(plan: Plan, config: RetrieverAgentConfig, lens: AgentLens) {
+  return plan.subQueries.map((sub) => ({
+    query: sub.query,
+    relations: sub.relations.map((relation) => relationName(lens, sub.indices, relation)),
+    filters: sub.filters.flatMap((applied) => {
+      const filter = config.filters.find((candidate) => candidate.id === applied.id);
+      return filter === undefined ? [] : [filterCondition(lens.scoped, filter, applied.value)];
+    }),
+  }));
 }
 
 /** One diagnostics row per entity and sub-query that found it, in fused order. */

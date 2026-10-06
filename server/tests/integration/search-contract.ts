@@ -33,8 +33,8 @@ function expectEvidence(match: Record<string, any>, strategy: string) {
     expect(evidence.semanticSimilarity).toBeLessThanOrEqual(1);
   }
   expect([true, null]).toContain(evidence.keywordMatch);
-  // The native keyword score is present exactly when the unit matched; it is raw and
-  // unbounded, so only finiteness and positivity are contractual.
+  // The keyword score is present exactly when the unit matched; it has no fixed upper
+  // bound, so only finiteness and positivity are contractual.
   if (evidence.keywordMatch === true) {
     expect(Number.isFinite(evidence.keywordScore)).toBe(true);
     expect(evidence.keywordScore).toBeGreaterThan(0);

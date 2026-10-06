@@ -419,9 +419,11 @@ export function deriveManagedIndices(schema: SearchIndexSchema): ManagedSearchIn
         kind: "default",
         definition: managedDefinition(entityType.key, DEFAULT_INDEX_SUFFIX, {
           name: `${entityType.displayName} — default`,
-          description:
-            `Finds ${entityType.displayName} entities by their own text properties: ` +
-            `${strings.map((p) => p.displayName).join(", ")}.`,
+          description: managedIndexDescription(
+            "default",
+            entityType.displayName,
+            strings.map((p) => p.displayName),
+          ),
           fields: strings.map((p) => p.key),
           header: [],
         }),
@@ -433,9 +435,7 @@ export function deriveManagedIndices(schema: SearchIndexSchema): ManagedSearchIn
         kind: "passage",
         definition: managedDefinition(entityType.key, document.key, {
           name: `${entityType.displayName} — ${document.displayName} passages`,
-          description:
-            `Finds ${entityType.displayName} entities by passages of their ` +
-            `${document.displayName} document; each passage starts with the entity's name.`,
+          description: managedIndexDescription("passage", entityType.displayName, [document.displayName]),
           fields: [document.key],
           header: null,
         }),
@@ -443,6 +443,27 @@ export function deriveManagedIndices(schema: SearchIndexSchema): ManagedSearchIn
     }
   }
   return managed;
+}
+
+/**
+ * A managed index's description from the display names of the fields it
+ * reads — all of them when derived, the ones a lens shows in the lens's
+ * catalog, so it never names a property the lens hides.
+ */
+export function managedIndexDescription(
+  kind: ManagedSearchIndex["kind"],
+  entityTypeDisplayName: string,
+  fieldDisplayNames: readonly string[],
+): string {
+  if (kind === "passage") {
+    const document = fieldDisplayNames.length > 0 ? `${fieldDisplayNames[0]} document` : "document";
+    return (
+      `Finds ${entityTypeDisplayName} entities by passages of their ` +
+      `${document}; each passage starts with the entity's name.`
+    );
+  }
+  const listed = fieldDisplayNames.length > 0 ? `: ${fieldDisplayNames.join(", ")}` : "";
+  return `Finds ${entityTypeDisplayName} entities by their own text properties${listed}.`;
 }
 
 function managedDefinition(

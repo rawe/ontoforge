@@ -236,7 +236,8 @@ The lens still governs what a search returns:
   match's snippet is then withheld, and the label of a relation's target is withheld
   when the lens hides the target's name property.
 - **The search catalog is projected too.** It lists only the indices the lens can
-  search, and of each only the fields, relation groups and document the lens shows
+  search, and of each only the fields, relation groups and document the lens shows; a
+  managed index's description names only those fields
   ([search.md](search.md#the-search-catalog)).
 
 ### Validation warnings

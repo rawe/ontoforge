@@ -12,6 +12,7 @@ import {
   deriveManagedIndices,
   effectiveHeader,
   isManagedIndexKey,
+  managedIndexDescription,
   managedIndexKey,
   planSearchIndexCascade,
   SearchIndexDefinition,
@@ -461,6 +462,19 @@ describe("managed indices", () => {
     });
     expect(passage.definition.description).toContain("passages of their Bio document");
     expect(effectiveHeader(passage.definition, schema.entityTypes.person!)).toEqual(["name"]);
+  });
+
+  it("describes a managed index by the fields it is given, or by none", () => {
+    expect(managedIndexDescription("default", "Person", ["Name"])).toBe(
+      "Finds Person entities by their own text properties: Name.",
+    );
+    expect(managedIndexDescription("default", "Person", [])).toBe("Finds Person entities by their own text properties.");
+    expect(managedIndexDescription("passage", "Person", ["Bio"])).toBe(
+      "Finds Person entities by passages of their Bio document; each passage starts with the entity's name.",
+    );
+    expect(managedIndexDescription("passage", "Person", [])).toBe(
+      "Finds Person entities by passages of their document; each passage starts with the entity's name.",
+    );
   });
 
   it("creates no default index for a type without string properties (A2)", () => {

@@ -368,7 +368,7 @@ describe("catalog", () => {
         key: "person~default",
         kind: "default",
         name: "Person — default",
-        description: expect.any(String),
+        description: "Finds Person entities by their own text properties: Name, Email.",
         entityType: "person",
         fields: ["name", "email"],
         relations: [],
@@ -417,6 +417,19 @@ describe("catalog", () => {
       // email hidden; companies hidden, so the employment group is skipped.
       { key: "person~default", fields: ["name"], relations: [] },
       { key: "employment", fields: ["name"], relations: [] },
+    ]);
+  });
+
+  it("names only the properties the lens shows in a managed description, a custom one as written", async () => {
+    runtime.getFullSchemaWithLensInclusions.mockResolvedValue({
+      ...makeFullSchema({ lensKey: "all", entityInclusions: [{ key: "person", properties: ["name"] }] }),
+      searchIndexInclusions: ["person~default", "employment"],
+    });
+    // The stored description names Email, which this lens hides.
+    expect(indices[0]!.definition.description).toContain("Email");
+    expect((await catalog()).map(({ key, description }) => ({ key, description }))).toEqual([
+      { key: "person~default", description: "Finds Person entities by their own text properties: Name." },
+      { key: "employment", description: "People by employer" },
     ]);
   });
 

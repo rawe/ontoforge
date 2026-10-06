@@ -13,8 +13,9 @@ export interface SearchEvidence {
   semanticSimilarity: SemanticSimilarity | null;
   /** Missing from a limited source ranking means unknown, never a negative. */
   keywordMatch: boolean | null;
-  /** The adapter's native full-text ranking measurement, passed through raw. Unbounded,
-   * comparable neither to semanticSimilarity nor across responses; never used to rank.
+  /** The entry's keyword score — distinct query words matched plus the full-text rank as a
+   * fraction below one. Comparable neither to semanticSimilarity nor across responses; never
+   * used to rank.
    * A number exactly when keywordMatch is true, null exactly when it is null. */
   keywordScore: KeywordScore | null;
 }

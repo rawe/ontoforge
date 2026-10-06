@@ -120,6 +120,8 @@ describe("toolset computation", () => {
       // Matches carry no property attribution any more.
       expect(tool.description).not.toContain("keywordPropertyKeys");
       expect(tool.description).toContain("unknown or unmeasured");
+      expect(tool.description).toContain("distinct query words matched plus the full-text rank");
+      expect(tool.description).not.toMatch(/adapter/i);
       expect(tool.description.length).toBeLessThanOrEqual(2000);
       expect(Object.keys(tool.schema.shape).sort()).toEqual((tool.name === "search" ? ["query", "entity_type_key", "limit"] : ["query", "entity_type_key", "limit", "property"]).sort());
     }

@@ -235,7 +235,8 @@ model can choose among them. Each is projected through the lens:
 
 | Field | Meaning |
 |---|---|
-| `key`, `kind`, `name`, `description`, `entityType` | The index — `kind` is `default`, `passage` or `custom` |
+| `key`, `kind`, `name`, `entityType` | The index — `kind` is `default`, `passage` or `custom` |
+| `description` | A custom index's description as written. A managed index's is composed for the lens from the fields it shows, so it never names a property or document the lens hides — with all of them hidden it names none; the stored description, which modeling reads, is unchanged |
 | `fields` | The root fields the index reads that the lens shows |
 | `relations` | The relation groups the lens shows — a group whose relation type, or the entity type at its other end, the lens hides is not listed — each with `relationType`, `direction` and `label`: the group's label, else the relation type's display name |
 | `documentProperty` | The document the index reads passages of; null when it reads none or the lens hides it |

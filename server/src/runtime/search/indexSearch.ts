@@ -44,7 +44,7 @@ import type {
   SearchIndexStore,
 } from "../../core/ports.js";
 import { documentField } from "../../core/searchComposition.js";
-import type { SearchRepresentation } from "../../core/searchIndex.js";
+import { managedIndexDescription, type SearchRepresentation } from "../../core/searchIndex.js";
 import { disabledIndexKeys, type SearchIndexState } from "../../core/searchPipeline.js";
 import {
   availableIndices,
@@ -110,7 +110,8 @@ export interface IndexMatch {
   /** `(1 + cosine) / 2` of this entry, when the semantic ranking fetched
    * it; else null (unmeasured). */
   semanticSimilarity: number | null;
-  /** The native keyword score of this entry, when the keyword ranking
+  /** The keyword score of this entry — distinct query words matched plus
+   * the full-text rank as a fraction below one — when the keyword ranking
    * fetched it; else null. */
   keywordScore: number | null;
 }
@@ -176,6 +177,7 @@ export interface SearchIndexCatalogEntry {
   key: string;
   kind: SearchIndexRecord["kind"];
   name: string;
+  /** A managed index's names only the fields the lens shows. */
   description: string;
   entityType: string;
   /** The root's fields the lens shows. */
@@ -229,13 +231,23 @@ export async function searchIndexCatalog(
       ];
     });
     const document = documentField(definition, loaded.full);
+    const fields = definition.fields.filter((key) => key in root.properties);
     return {
       key: index.key,
       kind: index.kind,
       name: definition.name,
-      description: definition.description,
+      // A managed description names the fields it reads: regenerated from
+      // the ones the lens shows. A custom one is the designer's own text.
+      description:
+        index.kind === "custom"
+          ? definition.description
+          : managedIndexDescription(
+              index.kind,
+              root.displayName,
+              fields.map((key) => root.properties[key]!.displayName),
+            ),
       entityType: definition.entityType,
-      fields: definition.fields.filter((key) => key in root.properties),
+      fields,
       relations,
       documentProperty: document !== null && document in root.properties ? document : null,
       modes: (["semantic", "keyword"] as const).filter(

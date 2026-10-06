@@ -143,3 +143,17 @@ describe("list_search_indices", () => {
     expect(JSON.parse(result.content[0]!.text)).toEqual([{ key: "person~default" }]);
   });
 });
+
+describe("search tool descriptions", () => {
+  it("define the keyword score for the caller, without the adapter, within 2000 characters", async () => {
+    const { tools } = await client.listTools();
+    for (const name of ["search", "search_documents"]) {
+      const description = tools.find((tool) => tool.name === name)!.description!;
+      expect(description).toContain(
+        "keywordScore is then the distinct query words matched plus the full-text rank as a fraction below one",
+      );
+      expect(description).not.toMatch(/adapter/i);
+      expect(description.length).toBeLessThanOrEqual(2000);
+    }
+  });
+});

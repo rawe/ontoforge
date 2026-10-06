@@ -11,6 +11,8 @@
  *   of.chat.{ontologyKey}.{lensKey}    — AI chat history
  *   of.recents.{ontologyKey}.{lensKey} — last 10 opened entities (`lib/recents.ts`)
  *   of.queryHistory.{ontologyKey}.{lensKey} — last 10 run OQL queries
+ *   of.retrieverDiagnostics   — "true" | "false": Workbench retriever-agent chat
+ *                               requests and shows diagnostics
  */
 
 export const storageKeys = {
@@ -24,6 +26,7 @@ export const storageKeys = {
     `of.recents.${ontologyKey}.${lensKey}`,
   queryHistory: (ontologyKey: string, lensKey: string) =>
     `of.queryHistory.${ontologyKey}.${lensKey}`,
+  retrieverDiagnostics: 'of.retrieverDiagnostics',
 } as const
 
 export function readString(key: string): string | null {

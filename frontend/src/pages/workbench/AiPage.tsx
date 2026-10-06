@@ -4,7 +4,7 @@ import { useFeatures, useRuntimeSchema } from '@/api/hooks'
 import { AskTab } from '@/components/ai/AskTab'
 import { ChatTab } from '@/components/ai/ChatTab'
 import { ExtractTab } from '@/components/ai/ExtractTab'
-import { RetrievalPrototypeTab } from '@/components/ai/RetrievalPrototypeTab'
+import { RetrieverAgentTab } from '@/components/ai/RetrieverAgentTab'
 import { EmptyState } from '@/components/EmptyState'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -13,9 +13,10 @@ const TABS = ['chat', 'ask', 'extract', 'retriever'] as const
 type TabKey = (typeof TABS)[number]
 
 /**
- * `/o/:ontologyKey/w/:lensKey/ai` — AI assistant with tabs Chat | Ask | Extract.
- * The active tab lives in `?tab=` so extract/ask can be deep-linked; all
- * extraction stays mounted across tab switches; leaving chat cancels its turn.
+ * `/o/:ontologyKey/w/:lensKey/ai` — AI assistant with tabs Chat | Ask | Extract |
+ * Retriever. The active tab lives in `?tab=` so ask/extract/retriever can be
+ * deep-linked (the retriever tab also takes `&agent=<key>`); extraction stays
+ * mounted across tab switches; leaving chat or the retriever cancels its turn.
  */
 export function AiPage() {
   const { ontologyKey, lensKey } = useParams<{ ontologyKey: string; lensKey: string }>()
@@ -37,7 +38,7 @@ export function AiPage() {
         <EmptyState
           icon={Sparkles}
           title="AI is not enabled"
-          description="This server has no AI provider configured. Set one up on the backend to unlock chat, one-shot questions and text extraction."
+          description="This server has no AI provider configured. Set one up on the backend to unlock chat, one-shot questions, text extraction and retriever agents."
         />
       </div>
     )
@@ -50,6 +51,7 @@ export function AiPage() {
         const next = new URLSearchParams(searchParams)
         if (value === 'chat') next.delete('tab')
         else next.set('tab', value)
+        if (value !== 'retriever') next.delete('agent')
         setSearchParams(next, { replace: true })
       }}
       className="flex h-full min-h-0 flex-col gap-0"
@@ -87,7 +89,7 @@ export function AiPage() {
       ) : (
         <>
           <TabsContent value="retriever" className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-            {tab === 'retriever' && <RetrievalPrototypeTab key={`${ontologyKey}/${lensKey}`} ontologyKey={ontologyKey} lensKey={lensKey} />}
+            {tab === 'retriever' && <RetrieverAgentTab key={`${ontologyKey}/${lensKey}`} ontologyKey={ontologyKey} lensKey={lensKey} />}
           </TabsContent>
           <TabsContent
             value="chat"

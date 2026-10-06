@@ -20,6 +20,13 @@ import type {
   SavedQuery,
   SavedQueryInput,
   ScopeInclude,
+  SearchIndexDefinition,
+  SearchIndexDraftInput,
+  SearchIndexInclude,
+  SearchIndexPreview,
+  SearchIndexRecord,
+  SearchSettings,
+  IndexStatus,
   ValidationResult,
 } from './types'
 
@@ -224,6 +231,30 @@ export const removeScopeRelationType = (
     { method: 'DELETE' },
   )
 
+/* Search-index inclusions are addressed by index key. They never make a lens
+ * scoped; a scoped lens may include an index only with its root type (422). */
+
+export const listScopeSearchIndices = (ontologyKey: string, lensId: string) =>
+  request<SearchIndexInclude[]>(
+    `${base(ontologyKey)}/lenses/${lensId}/includes/search-indices`,
+  )
+
+export const addScopeSearchIndex = (
+  ontologyKey: string,
+  lensId: string,
+  body: SearchIndexInclude,
+) =>
+  request<SearchIndexInclude>(`${base(ontologyKey)}/lenses/${lensId}/includes/search-indices`, {
+    method: 'POST',
+    body,
+  })
+
+export const removeScopeSearchIndex = (ontologyKey: string, lensId: string, key: string) =>
+  request<undefined>(
+    `${base(ontologyKey)}/lenses/${lensId}/includes/search-indices/${encodeURIComponent(key)}`,
+    { method: 'DELETE' },
+  )
+
 /* --------------------------------- validation -------------------------------- */
 
 export const validateLens = (ontologyKey: string, lensId: string) =>
@@ -296,3 +327,50 @@ export const deleteSavedQuery = (
     `${base(ontologyKey)}/lenses/${lensKey}/saved-queries/${queryKey}`,
     { method: 'DELETE' },
   )
+
+/* ------------------------------- search indices ------------------------------ */
+/* Ontology-level: addressed by index KEY. Managed keys contain `~`. */
+
+const indexPath = (ontologyKey: string, key: string) =>
+  `${base(ontologyKey)}/search-indices/${encodeURIComponent(key)}`
+
+export const getSearchSettings = (ontologyKey: string) =>
+  request<SearchSettings>(`${base(ontologyKey)}/search-settings`)
+
+/** A language change rebuilds keyword entries; a switch turns a managed index on/off. */
+export const updateSearchSettings = (ontologyKey: string, body: Partial<SearchSettings>) =>
+  request<SearchSettings>(`${base(ontologyKey)}/search-settings`, { method: 'PUT', body })
+
+/** Managed + custom indices, in key order; disabled managed ones included. */
+export const listSearchIndices = (ontologyKey: string) =>
+  request<SearchIndexRecord[]>(`${base(ontologyKey)}/search-indices`)
+
+export const getSearchIndex = (ontologyKey: string, key: string) =>
+  request<SearchIndexRecord>(indexPath(ontologyKey, key))
+
+/** Validation issues + cost estimate of a draft; never 422 for an invalid draft. */
+export const previewSearchIndex = (ontologyKey: string, body: SearchIndexDraftInput) =>
+  request<SearchIndexPreview>(`${base(ontologyKey)}/search-indices/preview`, {
+    method: 'POST',
+    body,
+  })
+
+export const createSearchIndex = (ontologyKey: string, body: SearchIndexDefinition) =>
+  request<SearchIndexRecord>(`${base(ontologyKey)}/search-indices`, { method: 'POST', body })
+
+export const updateSearchIndex = (ontologyKey: string, body: SearchIndexDefinition) =>
+  request<SearchIndexRecord>(indexPath(ontologyKey, body.key), { method: 'PUT', body })
+
+/** Without `cascade`, an index a lens includes → 409 CASCADE_REQUIRED. */
+export const deleteSearchIndex = (ontologyKey: string, key: string, cascade = false) =>
+  request<undefined>(
+    `${indexPath(ontologyKey, key)}${buildQuery(cascade ? { cascade } : undefined)}`,
+    { method: 'DELETE' },
+  )
+
+export const getSearchIndexStatus = (ontologyKey: string, key: string) =>
+  request<IndexStatus>(`${indexPath(ontologyKey, key)}/status`)
+
+/** Starts new generations for the enabled representations (202). */
+export const rebuildSearchIndex = (ontologyKey: string, key: string) =>
+  request<IndexStatus>(`${indexPath(ontologyKey, key)}/rebuild`, { method: 'POST' })

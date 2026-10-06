@@ -23,6 +23,7 @@ import type {
   SavedQuerySearchHit,
   SchemaEntityType,
   SchemaRelationType,
+  SearchCatalogEntry,
   SearchResponse,
   SearchStrategy,
 } from './types'
@@ -217,6 +218,10 @@ export interface SearchParams {
 }
 export const search = (ontologyKey: string, lensKey: string, params: SearchParams) =>
   request<SearchResponse>(`${base(ontologyKey, lensKey)}/search${buildQuery(params)}`)
+
+/** The search indices this lens can search (servers with search indices only). */
+export const listSearchCatalog = (ontologyKey: string, lensKey: string) =>
+  request<SearchCatalogEntry[]>(`${base(ontologyKey, lensKey)}/search-indices`)
 
 /* ----------------------------------- query ----------------------------------- */
 

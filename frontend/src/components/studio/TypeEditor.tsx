@@ -8,6 +8,7 @@ import { qk } from '@/api/queryKeys'
 import type { EntityType, PropertyDefinition, RelationType } from '@/api/types'
 import { EmptyState } from '@/components/EmptyState'
 import { TypeChip, TypeDot } from '@/components/TypeChip'
+import { EntityTypeIndices } from '@/components/search/EntityTypeIndices'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,7 +41,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { CascadeDialog } from './CascadeDialog'
 import { useCascade } from './useCascade'
 import { PropertyDialog } from './PropertyDialog'
-import { invalidateModeling, toastError } from './lib'
+import { invalidateModeling, leaveAfterDelete, toastError } from './lib'
 import { InlineText } from './shared'
 
 type Kind = 'entity-types' | 'relation-types'
@@ -118,9 +119,8 @@ export function TypeEditor({ ontologyKey, kind, typeId }: TypeEditorProps) {
         ? model.deleteEntityType(ontologyKey, typeId, cascadeFlag)
         : model.deleteRelationType(ontologyKey, typeId, cascadeFlag),
     onSuccess: () => {
-      invalidateModeling(queryClient)
       toast.success(`${isEntity ? 'Entity' : 'Relation'} type deleted`)
-      void navigate(`/o/${ontologyKey}/studio`)
+      leaveAfterDelete(navigate, `/o/${ontologyKey}/studio`, queryClient)
     },
     onError: (error) => {
       if (guard(error, () => deleteType.mutate(true))) return
@@ -380,6 +380,8 @@ export function TypeEditor({ ontologyKey, kind, typeId }: TypeEditorProps) {
             </Table>
           </div>
         )}
+
+        {isEntity && <EntityTypeIndices ontologyKey={ontologyKey} entityTypeKey={type.key} />}
       </div>
 
       <PropertyDialog

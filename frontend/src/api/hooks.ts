@@ -2,12 +2,14 @@ import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
 import { displayLabel, nameProperties } from '@/lib/displayLabel'
+import { matchedViaText } from '@/lib/matchedVia'
 import * as model from './model'
 import * as registry from './registry'
 import * as server from './server'
 import * as runtime from './runtime'
+import { listRetrieverAgents } from './retrieverAgents'
 import { qk } from './queryKeys'
-import type { EntityInstance } from './types'
+import type { EntityInstance, Matched } from './types'
 
 /** Global feature flags — fetched once, never stale. */
 export function useFeatures() {
@@ -76,6 +78,71 @@ export function useRuntimeSchema(
       lensKey !== undefined &&
       lensKey !== '',
   })
+}
+
+/**
+ * Search-index inclusions of a lens (modeling API). Separate from
+ * `useLensScope`: index inclusions never make a lens scoped, and only
+ * servers with search indices answer this endpoint. The key sits below
+ * the scope key, so invalidating the scope refreshes it too.
+ */
+export function useLensIndexInclusions(
+  ontologyKey: string,
+  lensId: string,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: qk.model(ontologyKey, 'lenses', lensId, 'includes', 'search-indices'),
+    queryFn: () => model.listScopeSearchIndices(ontologyKey, lensId),
+    enabled,
+  })
+}
+
+/**
+ * Runtime search catalog of a lens — the indices it can search. Keyed below
+ * the runtime schema, so scope changes (which invalidate `['schema']`)
+ * refresh it too.
+ */
+export function useSearchCatalog(ontologyKey: string, lensKey: string, enabled: boolean) {
+  return useQuery({
+    queryKey: [...qk.schema(ontologyKey, lensKey), 'search-indices'] as const,
+    queryFn: () => runtime.listSearchCatalog(ontologyKey, lensKey),
+    enabled,
+    staleTime: 60_000,
+  })
+}
+
+/** Retriever agents of a lens (modeling API, by lens key) — Studio editor and Workbench chat share the cache. */
+export function useRetrieverAgents(ontologyKey: string, lensKey: string, enabled = true) {
+  return useQuery({
+    queryKey: qk.retrieverAgents(ontologyKey, lensKey),
+    queryFn: () => listRetrieverAgents(ontologyKey, lensKey),
+    enabled: enabled && ontologyKey !== '' && lensKey !== '',
+    retry: false,
+  })
+}
+
+/**
+ * "Matched via" text function for search hits in the current workbench
+ * route's lens (see `matchedViaText`). The catalog (group labels,
+ * document properties) is fetched only from servers with search indices.
+ */
+export function useMatchedVia(): (matched: Matched | undefined) => string | null {
+  const { ontologyKey = '', lensKey = '' } = useParams<{
+    ontologyKey: string
+    lensKey: string
+  }>()
+  const supported = useFeatures().data?.searchIndices === true
+  const schema = useRuntimeSchema(ontologyKey, lensKey).data
+  const catalog = useSearchCatalog(
+    ontologyKey,
+    lensKey,
+    supported && ontologyKey !== '' && lensKey !== '',
+  ).data
+  return useMemo(
+    () => (matched: Matched | undefined) => matchedViaText(matched, schema, catalog),
+    [schema, catalog],
+  )
 }
 
 /**

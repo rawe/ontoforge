@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react'
 import * as runtime from '@/api/runtime'
 import type {
   EntityInstance,
+  Matched,
   SavedQuery,
   SavedQuerySearchHit,
   SearchMatch,
@@ -25,6 +26,8 @@ export function useDebouncedValue<T>(value: T, delayMs: number): T {
 export interface EntitySearchResult {
   entity: EntityInstance
   matches?: SearchMatch[]
+  /** Which index entry found the hit (ranked search on servers with search indices). */
+  matched?: Matched
 }
 
 export interface EntitySearchOptions {
@@ -83,8 +86,10 @@ export function useEntitySearch({
           ...(typeKey !== undefined ? { type: typeKey } : {}),
           limit,
         })
-        return res.hits.map(({ entity, matches }) => ({
-          entity: { ...entity, _entityTypeKey: entity._entityTypeKey ?? typeKey! }, matches,
+        return res.hits.map(({ entity, matches, matched }) => ({
+          entity: { ...entity, _entityTypeKey: entity._entityTypeKey ?? typeKey! },
+          matches,
+          matched,
         }))
       }
       if (typeKey !== undefined) {

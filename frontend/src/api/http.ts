@@ -38,6 +38,12 @@ export class ApiError extends Error {
     const affected = this.details?.affectedLenses
     return Array.isArray(affected) ? (affected as string[]) : undefined
   }
+
+  /** Search indices affected by a `CASCADE_REQUIRED` conflict, if present. */
+  get affectedIndices(): string[] | undefined {
+    const affected = this.details?.affectedIndices
+    return Array.isArray(affected) ? (affected as string[]) : undefined
+  }
 }
 
 export async function parseError(res: Response): Promise<ApiError> {

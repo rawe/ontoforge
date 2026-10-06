@@ -1,9 +1,18 @@
 import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowRight, ChevronDown, ChevronRight, Globe, ShieldCheck } from 'lucide-react'
+import {
+  ArrowRight,
+  ChevronDown,
+  ChevronRight,
+  Globe,
+  ShieldCheck,
+  TriangleAlert,
+} from 'lucide-react'
+import { toast } from 'sonner'
 import * as model from '@/api/model'
-import { useLensScope, useRuntimeSchema } from '@/api/hooks'
+import { useFeatures, useLensIndexInclusions, useLensScope, useRuntimeSchema } from '@/api/hooks'
 import { qk } from '@/api/queryKeys'
+import { useSearchIndices } from '@/api/searchIndexHooks'
 import type {
   EntityType,
   Lens,
@@ -17,8 +26,10 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ScopeSearchIndices } from './ScopeSearchIndices'
 import { ValidationPanel } from './ValidationPanel'
 import { toastError } from './lib'
+import { hidesNameProperty, managedIndexKeysFor } from './scopeModel'
 
 type Kind = 'entity-types' | 'relation-types'
 
@@ -41,6 +52,8 @@ interface RowType {
   displayName: string
   source?: string
   target?: string
+  /** Entity types only. */
+  nameProperty?: string
 }
 
 /** Per-property scope editor shown when an included type row is expanded. */
@@ -150,6 +163,7 @@ function ScopeRow({
   type,
   include,
   onInvalidate,
+  onIncluded,
 }: {
   ontologyKey: string
   kind: Kind
@@ -157,15 +171,18 @@ function ScopeRow({
   type: RowType
   include: ScopeInclude | undefined
   onInvalidate: () => void
+  /** Runs after the type was included (pre-selects its search indices). */
+  onIncluded?: (typeKey: string) => Promise<void>
 }) {
   const [expanded, setExpanded] = useState(false)
   const included = include !== undefined
 
   const toggle = useMutation({
-    mutationFn: (checked: boolean) =>
-      checked
-        ? scopeApi[kind].add(ontologyKey, lensId, { key: type.key, properties: null })
-        : scopeApi[kind].remove(ontologyKey, lensId, type.typeId),
+    mutationFn: async (checked: boolean) => {
+      if (!checked) return scopeApi[kind].remove(ontologyKey, lensId, type.typeId)
+      await scopeApi[kind].add(ontologyKey, lensId, { key: type.key, properties: null })
+      await onIncluded?.(type.key)
+    },
     onSuccess: onInvalidate,
     onError: toastError,
   })
@@ -212,6 +229,15 @@ function ScopeRow({
           )}
         </button>
       </div>
+      {type.nameProperty !== undefined && hidesNameProperty(include, type.nameProperty) && (
+        <p className="mb-1 ml-7 flex items-center gap-1.5 text-[11px] text-(--tc-amber)">
+          <TriangleAlert className="size-3 shrink-0" />
+          <span>
+            Hides the name property <span className="font-mono">{type.nameProperty}</span> —
+            labels in this lens fall back to the truncated id.
+          </span>
+        </p>
+      )}
       {included && expanded && (
         <PropertyScopeEditor
           ontologyKey={ontologyKey}
@@ -324,12 +350,37 @@ export function ScopeTab({ ontologyKey, lens }: { ontologyKey: string; lens: Len
     queryFn: () => model.listRelationTypes(ontologyKey),
   })
   const scope = useLensScope(ontologyKey, lens.lensId)
+  const searchIndices = useFeatures().data?.searchIndices === true
+  const indexRecordsQuery = useSearchIndices(ontologyKey, searchIndices)
+  const indexInclusionsQuery = useLensIndexInclusions(ontologyKey, lens.lensId, searchIndices)
+  const indexRecords = indexRecordsQuery.data
+  const indexInclusions = indexInclusionsQuery.data
 
   const invalidate = () => {
     void queryClient.invalidateQueries({
       queryKey: qk.model(ontologyKey, 'lenses', lens.lensId, 'includes'),
     })
     void queryClient.invalidateQueries({ queryKey: ['schema'] })
+  }
+
+  /**
+   * Including an entity type pre-selects its default and passage indices
+   * (spec §4); the user may untick them. Failures are reported, never
+   * undo the type inclusion.
+   */
+  const preselectIndices = async (typeKey: string) => {
+    if (indexRecords === undefined) return
+    const included = new Set((indexInclusions ?? []).map((i) => i.key))
+    const keys = managedIndexKeysFor(indexRecords, typeKey).filter((k) => !included.has(k))
+    const results = await Promise.allSettled(
+      keys.map((key) => model.addScopeSearchIndex(ontologyKey, lens.lensId, { key })),
+    )
+    const failed = results.filter((r) => r.status === 'rejected').length
+    if (failed > 0) {
+      toast.error(
+        `Could not include ${failed} search ${failed === 1 ? 'index' : 'indices'} of ${typeKey}`,
+      )
+    }
   }
 
   const validate = useMutation({
@@ -354,6 +405,7 @@ export function ScopeTab({ ontologyKey, lens }: { ontologyKey: string; lens: Len
     typeId: t.entityTypeId,
     key: t.key,
     displayName: t.displayName,
+    nameProperty: t.nameProperty,
   }))
   const relationRows: RowType[] = (relationTypesQuery.data ?? []).map((t: RelationType) => ({
     typeId: t.relationTypeId,
@@ -426,6 +478,7 @@ export function ScopeTab({ ontologyKey, lens }: { ontologyKey: string; lens: Len
                 type={t}
                 include={entityIncludes.get(t.key)}
                 onInvalidate={invalidate}
+                onIncluded={searchIndices ? preselectIndices : undefined}
               />
             ))}
             {entityRows.length === 0 && (
@@ -455,6 +508,23 @@ export function ScopeTab({ ontologyKey, lens }: { ontologyKey: string; lens: Len
             A relation type is only usable at runtime when its source and target entity
             types are also in scope — run Validate to check.
           </p>
+          {searchIndices && (
+            <ScopeSearchIndices
+              ontologyKey={ontologyKey}
+              lensId={lens.lensId}
+              scoped={!unscoped}
+              records={indexRecords}
+              includedIndexKeys={
+                indexInclusions === undefined
+                  ? undefined
+                  : new Set(indexInclusions.map((i) => i.key))
+              }
+              includedEntityTypeKeys={new Set(entityIncludes.keys())}
+              entityTypeNames={new Map(entityRows.map((t) => [t.key, t.displayName]))}
+              failed={indexRecordsQuery.isError || indexInclusionsQuery.isError}
+              onInvalidate={invalidate}
+            />
+          )}
         </div>
         <LensPreview ontologyKey={ontologyKey} lensKey={lens.key} />
       </div>

@@ -216,7 +216,7 @@ Two tabs — Console and Library — which both stay live, so results survive a 
 
 ### AI
 
-Three tabs — Chat, Ask, Extract — preserve long-running extraction across a
+Four tabs — Chat, Ask, Extract, Retriever — preserve long-running extraction across a
 tab switch. See [AI panel](#ai-panel). Absent entirely when no language-model provider is
 configured.
 
@@ -225,8 +225,8 @@ configured.
 ## Studio screens
 
 The Studio is scoped wholesale to one ontology: its sidebar carries the ontology
-switcher, its navigation covers Schema, Lenses and Transfer, and everything it reads and
-writes belongs to the current ontology.
+switcher, its navigation covers Schema, Lenses, Search and Transfer, and everything it
+reads and writes belongs to the current ontology.
 
 ### Schema
 
@@ -262,20 +262,26 @@ as a data type on entity types only. Creating a required property may trigger th
 flow. Deleting a property warns that existing stored values remain in the database but
 leave the schema. See [capabilities/schema-modeling.md](capabilities/schema-modeling.md).
 
+On an entity type, a **Search indices** section below the properties lists every search
+index rooted on the type — managed and custom — with its name, key, kind and
+[status](#search), each linking to the index; "New index" opens the
+[index designer](#index-designer) with the type pre-selected. A type with no index says
+why: it has no string or document property and no custom index.
+
 ### Lenses
 
 A list of the ontology's lenses with their keys and a scope marker — either "unscoped",
-or "scoped" with
-the number of included types. Creation asks for a name, a derived-but-editable key and a
-description, and states plainly that a new lens starts unscoped and therefore exposes
-everything.
+or "scoped" with the number of included entity and relation types. Index inclusions are
+not counted, and never make a lens scoped. Creation asks for a name, a
+derived-but-editable key and a description, and states plainly that a new lens starts
+unscoped and therefore exposes everything.
 
 ### Lens detail
 
 Inline-editable name and description, an immutable key, a scope marker, an entry into the
 Workbench for this lens, and deletion behind a confirmation stating that the lens, its
-scope, its agents, saved queries and retrievers go — while the schema and all instance data
-stay. Four tabs:
+scope, its agents, retriever agents and saved queries go — while the schema and all
+instance data stay. Five tabs — Retriever agents only on a server with search indices:
 
 **Scope** — the [scope editor](#scope-editor).
 
@@ -284,11 +290,16 @@ key, description, system prompt, and either all tools or an explicit checklist o
 read-only runtime tools (at least one required). The list shows each agent's tool posture
 at a glance. See [capabilities/ai-agents.md](capabilities/ai-agents.md).
 
+**Retriever agents** — the authoring surface for the lens's
+[retriever agents](capabilities/retriever-agents.md), with a test panel beside the
+editor; see [Retriever-agent editor](#retriever-agent-editor). Chatting with a saved agent
+happens in the Workbench ([AI panel](#ai-panel)).
+
 **Saved queries** — the authoring surface for the lens's stored pipelines, and the only
 place multi-step pipelines can be built. Per query: name, derived-and-then-immutable key,
 description, an ordered list of steps, and a parameter list. A step is either a query step
-carrying query text, or a semantic-search step carrying an entity type, search text, a
-result limit and a minimum score. Steps can be reordered and removed; every step after the
+carrying query text, or a search step carrying an entity type, search text and a result
+limit — it has no minimum score. Steps can be reordered and removed; every step after the
 first can bind parameters to fields of an earlier step's results. Parameters carry a name,
 a description and a scalar data type (document is not offered). An inline runner executes
 the query with typed parameter inputs and shows the result as a table or as raw JSON. See
@@ -299,6 +310,74 @@ bound entirely by their URLs: the modeling server to this ontology, the runtime 
 this lens within it ([interfaces.md](interfaces.md#how-a-mount-is-bound)). The
 snippet is copyable and built from the address the client itself was served from, with a
 note to substitute the backend host when clients connect directly.
+
+### Search
+
+The ontology's [search indices](capabilities/search-indices.md) and its search settings,
+in two tabs: Indices and Settings. The whole area exists only on a server that supports
+search indices ([Feature gating](#feature-gating)). A "New index" action opens the
+[index designer](#index-designer).
+
+**Indices** shows two tables. *Custom indices* show name and key, root entity type, what
+they read (field count, relation-group count), their representations (semantic,
+keyword) and their status; an empty list explains what a custom index adds. *Managed
+indices* — one default index per entity type and one passage index per document property
+— show name and key, kind (default or passages), entity type, representations, status and
+an on/off switch. Every row opens its index. The status chip names the
+[state](capabilities/search-indices.md#status) — ready, building with its progress, stale
+with the pending count, failed with the failed count, disabled, or unavailable — and its
+tooltip gives each representation's state. While any listed index is building or stale,
+the list refreshes itself every few seconds; otherwise nothing polls.
+
+**Settings** — the [keyword languages](capabilities/search.md#keyword-language), German
+and English, as checkboxes; the last remaining language cannot be unticked. Below, the
+managed indices grouped by entity type — the default index and one "Passages of …" row per
+document property — each with its status and switch. Both take effect at once, without a
+save step; changing the languages says that keyword entries rebuild in the background.
+
+### Index designer
+
+One custom index as a draft that only a Save writes, with the
+[cost preview](capabilities/search-indices.md#cost-preview) in the save bar. Its sections
+follow the [definition](capabilities/search-indices.md#custom-indices):
+
+- **Name and description**, with the key proposed from the name until the key field is
+  touched, validated live against the key pattern and permanent; the description is
+  explained as the text agents choose the index by. The key `new` is refused, because the
+  designer's own address for a new index ends in it.
+- **Entity type** — every hit is an entity of it. Changing it clears fields, header and
+  relation groups.
+- **Own fields** — a checklist of the type's text and scalar properties and at most one
+  document property, with a running count against the field limit.
+- **Header** — the name property (the default), chosen text fields, or none.
+- **Relation groups** — one card per group: a relation type in one direction (each
+  combination once), its relation fields, the target type's fields, a label and an
+  optional template. The group count runs against its limit.
+- **Search modes** — semantic and keyword switches; semantic takes an optional template of
+  the entity's own entry.
+
+Fields the schema no longer has stay visible, marked, so they can be removed; a group
+whose relation no longer connects the type says so. The save bar states whether the draft
+is new, changed or saved, shows the estimate for the current draft — entries and build
+time overall, per representation, and from how many entities, marked where a default rate
+stands in for a measured one — or why there is none yet (no entity type, open issues), and
+the field and group counts against their limits. Create (for a new index) or Save, and
+Discard. Issues from the client's own checks, the server's preview and a refused save
+appear in a validation panel and next to their fields; a fresh new draft shows none
+until it is edited. Saving a new index opens it at its own address.
+Leaving with unsaved changes asks first (stay, or discard and leave).
+
+A saved index adds a status block — the status chip, each representation's state, the
+last errors when items failed — and Rebuild behind a confirmation explaining that search
+keeps the current entries until the new build is ready; Rebuild is unavailable while the
+index is switched off. Deletion is confirmed and may trigger the
+[cascade flow](#cascade-confirmation) for lenses that include the index; it then returns
+to the list.
+
+A managed index opens read-only: kind, managed key, description, entity type, its fields
+(or document), header and search modes, the on/off switch and the same status block with
+Rebuild. It explains that managed indices follow the schema and points to a custom index
+for anything else.
 
 ### Transfer
 
@@ -311,12 +390,19 @@ Three operations, each with its own explanation. See
   key conflict explains that pre-existing objects with the same keys block the import and
   that the clashes must be resolved (or a bare ontology used). A successful import
   refreshes every cached view.
-- **Rebuild search data** — for this ontology, behind a confirmation warning about
-  duration and provider cost,
-  then live progress per entity type while it runs and a summary when it finishes. The
-  action stays available with no embedding provider configured, explaining that it then
-  rebuilds keyword text and document passages only; the summary repeats that the
-  embeddings were skipped.
+- **Rebuild search data** — runs the [search-data rebuild](capabilities/search.md#rebuild)
+  for this ontology, behind a confirmation warning about duration and provider cost, then
+  live progress per group while it runs and a summary when it finishes. What it covers
+  depends on the adapter, and the card and confirmation say which:
+  - With search indices it re-embeds the saved-query descriptions and repairs their
+    vector index; search indices keep themselves current and are rebuilt one at a time
+    from the [index designer](#index-designer). With no embedding provider configured
+    there is nothing to rebuild: the action is disabled, with a note saying why.
+  - Without search indices it also rebuilds the adapter's own search data — it re-chunks
+    the document passages and, with an embedding provider, re-embeds entities and
+    passages ([storage-adapters.md](storage-adapters.md#own-search-storage)). With no
+    provider it stays available, with a note that it skips the embeddings; the summary
+    repeats that they were skipped.
 
 ---
 
@@ -338,17 +424,37 @@ Scoping to a type replaces the prefix with a persistent type chip; the search th
 within that type, an empty query lists that type's first entities, and Backspace on an
 empty input removes the scope. Prefixes are inert while a type scope is active.
 
-Entity results retain global ranking order. Each row carries a type chip, display label,
-and one `in <property>` badge per document match in match order. No number, score bar,
-percentage, numeric aria label or passage text is displayed. The relation target picker
-uses the same search hook and row; its empty input lists the first ten entities.
-Both use ranked search whenever the strategy list is nonempty, falling back to literal
-entity lists otherwise. Enter opens entity detail; Cmd/Ctrl+Enter focuses the Explorer.
+Entity results retain global ranking order. Each row carries a type chip and display
+label, and, when the hit was found through a relation or a passage, one muted
+[matched via](#matched-via) line beneath. No number, score bar, percentage, numeric aria
+label or passage text is displayed. The relation target picker uses the same search hook
+and row; its empty input lists the first ten entities. Both use ranked search whenever
+the strategy list is nonempty, falling back to literal entity lists otherwise. Enter
+opens entity detail; Cmd/Ctrl+Enter focuses the Explorer.
 
-Saved-query editing offers a
-`search` step with no minimum score. Extraction review searches only properties for up to
-three existing candidates, with no score threshold or displayed number; “Create new” is
-the default and the prompt asks whether to use an existing entity instead.
+Extraction review searches only properties for up to three existing candidates, with no
+score threshold or displayed number; each candidate carries the same matched-via text when
+there is one. “Create new” is the default and the prompt asks whether to use an existing
+entity instead.
+
+### Matched via
+
+Search results never show a score. Where the server names the entry that found a hit
+([capabilities/search.md](capabilities/search.md#response)), a hit found through a
+relation or a passage carries one short line:
+
+- a relation entry — `via <label> → <target>`: the relation group's label from the lens's
+  [search catalog](capabilities/search.md#the-search-catalog), else the relation type's
+  display name, and the target's label, else its truncated identifier;
+- a passage entry — `via passage in <property>`, the document property's display name;
+- the entity's own fields — no line.
+
+The line never shows the entry's text. The palette, the relation target picker and the
+extraction review use the [default search](capabilities/search.md#ranked-search), which
+reads only managed indices, so no relation line appears there; relation lines appear in
+a retriever agent's diagnostics, whose searches reach custom indices. A server whose hits
+name no entry — one without search indices — shows instead one `in <property>` badge per
+document match, in match order.
 
 ### Quick add
 
@@ -470,26 +576,8 @@ expands automatically, and runs immediately when it has no parameters.
 
 ### AI panel
 
-Three modes over one lens. All require a language-model provider; see
-[capabilities/ai-agents.md](capabilities/ai-agents.md).
-
-**Retriever** — a header picker selects which saved retriever of the lens answers
-questions; New creates one from a suggestion for the schema and saves it at once.
-Configure opens the editor for the selected retriever beside the conversation: Find,
-Search and Answer configure result types, search/category text, exact conditions,
-threshold and answer evidence without requiring JSON. Save stores the changes, Discard
-drops them, and Save as copy stores the current state, unsaved changes included, as a new
-retriever while the original stays as last saved. Any unsaved change blocks questions;
-switching retrievers with unsaved changes asks first. Rarer operations sit under More:
-export, import, copy or move to another lens of the ontology, the configuration as JSON
-and delete. Invalid references remain visible for repair; unsupported shapes can be
-exported or reviewed as a version 1 repair. Changes clear the conversation. Prepare and
-chat offer cancellation. A "Show diagnostics" switch, off by default, requests
-diagnostics and opens a side panel for one selected answer with Overview (step timings,
-reuse, limitations), Plan, Results (ranked candidates, scores against the threshold,
-evidence) and Model calls.
-See [capabilities/retriever-agents.md](capabilities/retriever-agents.md) for persistence and execution
-boundaries.
+Four modes over one lens: Chat, Ask, Extract and Retriever. All require a language-model
+provider; see [capabilities/ai-agents.md](capabilities/ai-agents.md).
 
 **Chat** — a conversation with the lens's default assistant or with any configured agent,
 chosen from a picker. Each agent keeps its own persisted thread; switching agents switches
@@ -544,6 +632,93 @@ place where nothing is written without an explicit second step.
    succeeded are marked and skipped. The outcome is reported as counts, and the first
    created entity can be opened in the Explorer.
 
+**Retriever** — chat with the lens's saved
+[retriever agents](capabilities/retriever-agents.md). A header picker selects the agent;
+the address names it, and without one — or with one the lens does not have — the first
+agent is shown and the address updated to name it. Agents that are invalid in the lens are
+marked in the picker, and questions to them are blocked with the reason. "Edit in Studio"
+opens the agent in the lens's [retriever-agent editor](#retriever-agent-editor), which is
+where agents are created and changed; a lens without agents says so and links there. A
+"Show diagnostics" switch, off by default and remembered, requests diagnostics with every
+answer and shows them beside the conversation. The conversation itself is the
+[retriever-agent chat](#retriever-agent-chat). On a server without search indices the tab
+explains that retriever agents are not available.
+
+### Retriever-agent editor
+
+The Studio lens detail's Retriever agents tab, absent on a server without search indices.
+Its configuration semantics are owned by
+[capabilities/retriever-agents.md](capabilities/retriever-agents.md).
+
+**List.** A card per agent: name, key, a badge for valid, invalid or unsupported, the
+number of warnings, the description, and which indices it searches with its filter count.
+A card opens the agent's editor; the address names the open agent, so it can be linked.
+"New retriever agent" asks for a name and a derived-but-editable key — permanent and
+unique in the lens — and opens the editor on a draft that exists only in the client until
+its first save. "Import" creates a new agent from an exported JSON, from a file or pasted;
+it never replaces an agent with the same key.
+
+**Editor.** A draft that only a Save writes, in four sections:
+
+- **Search indices** — the indices of the lens's
+  [search catalog](capabilities/search.md#the-search-catalog), grouped by entity type,
+  each with its name, key, kind, description and, unless ready, its build state. A chosen
+  index with relation groups offers all of them or only chosen relation types. An index
+  the lens no longer offers stays listed for removal.
+- **Filters** — the exact conditions a question may set: a result type, a path (the
+  result's own field, or up to two relation hops away) and a field. Document fields are
+  not offered.
+- **Answer fields** — per result type, up to twelve of its properties, documents
+  included, passed to the answer model; answer fields for a type no chosen index finds
+  are listed for removal.
+- **Answer** — the similarity threshold as a slider from −1 to 1, explained as a cosine
+  cut-off that never removes keyword matches or exact filters, and the maximum characters
+  per answer field.
+
+Name and description sit above. A save bar states whether the agent is new, changed or
+saved and offers Save, Discard and Save as copy — which stores the current state, unsaved
+changes included, as a new agent under a new name and key while the original stays as
+last saved. The saved agent's validation errors and warnings appear in a validation panel,
+the draft's own problems next to their section. Leaving the editor with unsaved changes —
+by the back action, another tab or another page — asks first. Rarer operations sit under
+More: export of the saved version as JSON, copy or move to another lens of the ontology
+under the same key, the configuration as editable JSON applied to the draft, and
+deletion. An agent whose configuration has an unsupported version or shape opens with
+More expanded, where it can be exported or replaced by a version 2 configuration.
+
+**Test panel.** Beside the editor, a [retriever-agent chat](#retriever-agent-chat) with
+diagnostics always on. It asks the saved version: a new, changed, invalid or unsupported
+agent blocks questions and says why. Saving starts a new conversation. Without a
+language-model provider the panel says that the agent cannot answer.
+
+### Retriever-agent chat
+
+One conversation with one saved retriever agent, shared by the editor's test panel and the
+Workbench's Retriever tab. A status line names the running step; a running question can
+be cancelled, and "New conversation" clears the thread. Answers render as Markdown.
+Follow-up questions refer to earlier completed answers: each question sends the last four
+completed question-and-answer pairs, at most 2,000 characters per message; a failed or
+cancelled turn is never used as context. The conversation lives in memory only and
+belongs to one saved version of the agent — a newer save, or another agent, starts a new
+one.
+
+With diagnostics, each answer offers a Diagnostics action, and a side panel shows the
+selected answer (the latest by default) in four tabs, filling while the question runs:
+
+- **Overview** — time spent in each of the three steps and in total, the number of model
+  and search calls, the limitations the run reported, and detailed timings.
+- **Plan** — what the planning model made of the question: per sub-query the indices
+  searched, the relation groups, the query and its mode with variants, and the exact
+  filters; the reason when the question cannot be answered from the lens; the raw plan.
+- **Results** — per sub-query, best first, each result's type, label and
+  [matched-via](#matched-via) line; expanding one shows the answer fields sent as
+  evidence and the index that found it.
+- **Model calls** — the planner and response calls with token usage, finish reason,
+  instructions, input and output, marked where the trace is truncated.
+
+No score is shown anywhere. See
+[capabilities/retriever-agents.md](capabilities/retriever-agents.md#diagnostics).
+
 ### Schema diagram
 
 A read-only picture of the ontology's schema: one node per entity type in its colour, one
@@ -562,13 +737,29 @@ not just the ones already included. Checking a type includes it with all its pro
 An included row expands into a per-property editor offering either "all properties" or an
 explicit selection; in explicit mode, properties that are required and have no default are
 checked, locked and labelled, because a lens that hid them could not create valid data.
-The pane also offers lens validation, and states the rule that a relation type is only
-usable when both of its endpoint types are also in scope.
+An entity type whose explicit selection leaves out its name property is flagged: labels in
+the lens then fall back to the truncated identifier. The pane also offers lens
+validation, and states the rule that a relation type is only usable when both of its
+endpoint types are also in scope. Validation shows errors and, apart from them and in
+amber, [warnings](capabilities/ontology-lenses.md#validation-warnings) — such as an
+included search index reading a property the lens hides; warnings never fail it.
 
 An unscoped lens is called out prominently: it exposes the whole schema, and checking any
 type begins scoping — after which *only* checked types remain visible. This is the one
 transition in the product that silently narrows what a running client can see, so it is
 stated rather than implied.
+
+On a server with search indices, a **Search indices** section follows the types. A scoped
+lens lists every index of the ontology, managed and custom, grouped by root entity type
+in schema order, each with its name, key, entity type, kind and an "off" marker when
+switched off in the search settings; its checkbox includes or removes the index at once.
+An index can be included only while its entity type is: otherwise its checkbox is
+disabled with a hint to include the type first. Including an entity type also includes
+its managed indices — switched-off ones too — which can then be unticked; a failure there
+is reported and never undoes the type inclusion. Removing an entity type keeps the index
+inclusions rooted on it, flagged as not in scope. An unscoped lens shows only a note that
+every index is available
+([capabilities/ontology-lenses.md](capabilities/ontology-lenses.md#search-through-a-lens)).
 
 The right pane is a **live lens preview** rendered from the lens's own runtime schema: the
 entity types it exposes with their exposed property keys and required markers, and the
@@ -579,13 +770,17 @@ reading the rules. See [capabilities/ontology-lenses.md](capabilities/ontology-l
 
 ### Cascade confirmation
 
-A schema change that would invalidate a lens is refused by the server and named. The client
-turns that refusal into a two-step confirmation rather than an error: it captures the
-conflict, shows the server's message together with the list of affected lenses, and offers
-to apply the change *with* the cascade — which re-runs the identical operation with
-explicit consent. Cancelling leaves nothing changed. The flow is attached wherever such a
-change can originate: deleting an entity or relation type, deleting a property, and adding
-a required property. See [capabilities/schema-modeling.md](capabilities/schema-modeling.md).
+A change that would invalidate a lens or a custom search index is refused by the server
+and named. The client turns that refusal into a two-step confirmation rather than an
+error: it captures the conflict and shows, in its own words rather than the server's
+message, what the cascade updates — the scope of the lenses, the search indices (an index
+left with nothing to read is deleted) — above a list of the affected lenses and a list of
+the affected search indices. It offers to apply the change *with* the cascade, which
+re-runs the identical operation with explicit consent. Cancelling leaves nothing changed.
+The flow is attached wherever such a change can originate: deleting an entity or relation
+type, deleting a property, adding a required property, and deleting a custom search
+index. See
+[capabilities/schema-modeling.md](capabilities/schema-modeling.md#the-cascade-protocol).
 
 ### Document viewer and editor
 
@@ -610,19 +805,21 @@ on the API for programmatic callers. See
 
 The client asks the server once per session which optional capabilities exist, and treats
 the answer as never going stale. The report contains available search strategies plus
-semantic-search, AI and entity-identity-comparison flags. None is
+semantic-search, AI, entity-identity-comparison and search-indices flags. None is
 inferred from a failed call — the client never probes.
 
 Gated areas explain themselves rather than vanishing, except in navigation, where a dead
-entry would be worse than an absent one. Navigation is gated optimistically: the AI entry
-is shown unless the report has explicitly said AI is off, so it does not flicker into
-existence while the report is loading.
+entry would be worse than an absent one. Navigation is gated optimistically: the AI entry,
+the Studio's Search entry and the lens detail's Retriever agents tab are shown unless the
+report has explicitly said their capability is off, so they do not flicker into existence
+while the report is loading.
 
 | Off | What changes |
 |---|---|
 | AI | The AI navigation entry, the AI palette action and the AI quick action are gone. The AI screen itself renders an explanation. The empty-state extraction step stays visible but dimmed, with an explanation. |
 | No search strategies | Entity search falls back to substring matching — per type in parallel when unscoped. Extraction review skips the duplicate check. |
-| Semantic search | Saved-query search falls back to client-side substring filtering over the full list. The search-data rebuild stays available and explains that it will skip the embeddings. |
+| Semantic search | Saved-query search falls back to client-side substring filtering over the full list. With search indices the search-data rebuild is disabled and explains that there is nothing to rebuild; without them it stays available and explains that it will skip the embeddings. |
+| Search indices | The Studio's Search entry and the lens detail's Retriever agents tab are gone; their addresses render an explanation, and so does the Workbench's Retriever tab. The entity type editor's Search indices section and the scope editor's Search indices section are absent. Search hits name no entry, so results show document badges instead of [matched-via](#matched-via) lines. |
 | Entity identity comparison | The extraction review's Compare identity action is absent; candidate discovery and manual selection still work. |
 
 Everything else works unchanged. See [capabilities/search.md](capabilities/search.md).
@@ -688,15 +885,17 @@ containing a quote, a comma or a newline is quoted with its quotes doubled.
 **The search-data rebuild is a stream, not a response.** The rebuild call answers with
 newline-delimited JSON objects, one per line, which must be read incrementally — a client
 that waits for a complete JSON body will hang until the whole rebuild finishes. Two event
-kinds appear: progress events carrying an entity type key, a processed count and a total
-(saved queries appear as their own pseudo-type at the end, and only when a provider is
-configured), and exactly one final summary carrying the overall processed and failed counts
-and whether the embeddings were skipped. A stream that ends without a summary is an error,
+kinds appear: progress events carrying a group key, a processed count and a total — the
+saved queries form one pseudo-group at the end, present only when a provider is
+configured, and an adapter without search indices sends one group per entity type before
+it — and exactly one final summary carrying the overall processed and failed counts and
+whether the embeddings were skipped. A stream that ends without a summary is an error,
 not a success.
 
 **Entity search shows no number.** The palette, relation target picker and extraction
-review use the server’s ranking order and ignore relative scores. Document matches
-appear as property badges in match order; no passage text is shown. Extraction review
+review use the server’s ranking order and ignore relative scores. What found a hit is
+shown only as the [matched-via](#matched-via) line, whose relation-group label the client
+resolves through the lens's search catalog; no passage text is shown. Extraction review
 searches properties only, offers up to three candidates without a floor, and defaults
 to creating a new entity. Saved-query discovery keeps its separate cosine score.
 
@@ -719,9 +918,7 @@ the address.
 | Recently opened entities | Per ontology + lens | 10 |
 | Recent query texts | Per ontology + lens | 10 |
 | Chat history | Per ontology + lens, then per agent | 50 messages per agent |
-| Retriever diagnostics switch | Global | — |
-| Retriever configuration open | Global | — |
-| Selected retriever | Per ontology + lens | — |
+| Retriever diagnostics switch (Workbench) | Global | — |
 
 Per-lens state is keyed by ontology **and** lens because lens keys are unique only
 within their ontology — two ontologies' `default` lenses must never share a canvas or a
@@ -730,7 +927,8 @@ switcher's Workbench landing; nothing at the root consumes it.
 
 The working set stores only identifiers, type keys, positions and pin flags — entities and
 relations are re-fetched on restore, so a stale canvas can never display stale property
-values. Ask history is in-memory for the session and is deliberately not persisted.
+values. Ask history and retriever-agent conversations are in-memory for the session and
+deliberately not persisted; the selected retriever agent lives in the address.
 Persistence failures are swallowed: with storage unavailable the product works exactly the
 same, minus the memory.
 
@@ -757,12 +955,19 @@ Workbench addresses live under `/o/{ontologyKey}/w/{lensKey}`, Studio addresses 
 | `/o/{ontologyKey}/w/{lensKey}/query?tab=library` | The saved-query library |
 | `/o/{ontologyKey}/w/{lensKey}/query?run={queryKey}` | The library with that query expanded, run at once when it has no parameters |
 | `/o/{ontologyKey}/w/{lensKey}/ai` | The AI panel, Chat |
-| `/o/{ontologyKey}/w/{lensKey}/ai?tab=ask` · `?tab=extract` | The other two AI modes |
+| `/o/{ontologyKey}/w/{lensKey}/ai?tab=ask` · `?tab=extract` · `?tab=retriever` | The other three AI modes |
+| `/o/{ontologyKey}/w/{lensKey}/ai?tab=retriever&agent={agentKey}` | The Retriever tab with that retriever agent; the first agent when the lens has no such agent |
 | `/o/{ontologyKey}/studio` | The ontology's schema overview |
 | `/o/{ontologyKey}/studio/entity-types/{id}` · `.../relation-types/{id}` | A type editor |
 | `/o/{ontologyKey}/studio/lenses` | The lens list |
 | `/o/{ontologyKey}/studio/lenses/{id}` | A lens, Scope tab |
-| `/o/{ontologyKey}/studio/lenses/{id}?tab=agents` · `?tab=queries` · `?tab=connect` | The other lens tabs |
+| `/o/{ontologyKey}/studio/lenses/{id}?tab=agents` · `?tab=retriever-agents` · `?tab=queries` · `?tab=connect` | The other lens tabs |
+| `/o/{ontologyKey}/studio/lenses/{id}?tab=retriever-agents&agent={agentKey}` | That retriever agent's editor and test panel |
+| `/o/{ontologyKey}/studio/search` | The search index list |
+| `/o/{ontologyKey}/studio/search?tab=settings` | The search settings |
+| `/o/{ontologyKey}/studio/search/new` | The index designer on a new custom index |
+| `/o/{ontologyKey}/studio/search/new?entityType={typeKey}` | The same, with the entity type pre-selected |
+| `/o/{ontologyKey}/studio/search/{indexKey}` | An index: the designer for a custom index, the read-only view for a managed one |
 | `/o/{ontologyKey}/studio/transfer` | Export, import, rebuild search data |
 
 Two consumed parameters are stripped from the address as soon as they are acted on, so that
@@ -797,6 +1002,8 @@ Any unrecognised address returns to the root.
 | Chat | Enter | Send |
 | Chat | Shift+Enter | Newline |
 | Ask | Enter | Submit |
+| Retriever-agent chat | Enter | Send |
+| Retriever-agent chat | Shift+Enter | Newline |
 | Forms | Enter | Submit the form |
 
 Single-letter shortcuts are suppressed inside text inputs and while a dialog or popover

@@ -357,7 +357,7 @@ function AddRelationFlow({
                   <Plus className="size-4 text-muted-foreground" />
                   New connected {targetType.displayName}…
                 </CommandItem>
-                {(targetSearch.data ?? []).map(({ entity: candidate, matches }) => {
+                {(targetSearch.data ?? []).map(({ entity: candidate, matches, matched }) => {
                   return (
                     <CommandItem
                       key={candidate._id}
@@ -365,7 +365,7 @@ function AddRelationFlow({
                       disabled={pending}
                       onSelect={() => pickTarget(candidate)}
                     >
-                      <EntitySearchRow entity={candidate} matches={matches} typeName={targetType.displayName} />
+                      <EntitySearchRow entity={candidate} matches={matches} matched={matched} typeName={targetType.displayName} />
                     </CommandItem>
                   )
                 })}

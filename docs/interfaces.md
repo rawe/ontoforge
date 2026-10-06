@@ -51,6 +51,7 @@ This is the single most common source of mistakes against the modeling surface.
 | Runtime REST, everywhere | Keys — ontology key, lens key, type key, property key; instance ids for entities and relations |
 | Modeling REST — lenses, entity types, relation types, properties, inclusions | **Internal identifiers**, not keys |
 | Modeling REST — agent configs, saved queries, retrievers | Lens key and the resource key |
+| Modeling REST — search indices | Index key — managed keys included, which carry `~` |
 | Both MCP servers | Keys only |
 
 So `PUT .../model/lenses/{lensId}` takes an identifier while
@@ -181,8 +182,8 @@ Requesting an unavailable search strategy, a capability whose provider is not co
 or one the storage adapter does not support answers `VALIDATION_ERROR` with
 `details.code` of `FEATURE_DISABLED` — on the two routes that need an embedding provider,
 semantic search and saved-query search, on AI execution and entity identity
-comparison alike, and on the search settings of an adapter without search indices. A
-client can therefore
+comparison alike, and on the search settings and search-index operations of an adapter
+without search indices. A client can therefore
 tell a switched-off capability from a rejected request. Model-free operations remain available: agent discovery, retriever schema discovery
 and stored-definition management do not require a language-model provider. Retriever
 preparation requires embeddings separately; execution requirements are listed with
@@ -279,8 +280,11 @@ list the owner's properties.
 | PUT | `/relation-types/{relationTypeId}/properties/{propertyId}` | Update a property; key and data type are immutable | — |
 | DELETE | `/relation-types/{relationTypeId}/properties/{propertyId}` | Remove a property definition | `cascade` |
 
-`cascade` is the explicit second consent for a change that would invalidate a lens. Without
-it such a change is refused with `CASCADE_REQUIRED` naming the lenses affected.
+`cascade` is the explicit second consent for a change that would invalidate a lens or
+reach a custom search index. Without it such a change is refused with `CASCADE_REQUIRED`,
+whose `details` name the lenses affected (`affectedLenses`) and the custom indices
+(`affectedIndices`), each a sorted list of keys
+([capabilities/schema-modeling.md](capabilities/schema-modeling.md#the-cascade-protocol)).
 
 ### Scope inclusions
 
@@ -356,6 +360,42 @@ A PUT is validated whole before anything is written; field errors name `keywordL
 or `disabledIndices.<i>` for a key that names no managed index. Both routes answer
 `FEATURE_DISABLED` on an adapter without search indices.
 
+### Search indices
+
+Managed and custom search indices, addressed by index key. Semantics:
+[capabilities/search-indices.md](capabilities/search-indices.md).
+
+| Method | Path | Purpose | Parameters |
+|---|---|---|---|
+| GET | `/search-indices` | List every index — managed and custom, in key order — with its status | — |
+| POST | `/search-indices/preview` | Validate a draft definition and estimate its build cost, without saving; the key may be omitted | — |
+| POST | `/search-indices` | Create a custom index; 201 | — |
+| GET | `/search-indices/{indexKey}` | Read one index with its status | — |
+| PUT | `/search-indices/{indexKey}` | Replace a custom index's definition | — |
+| DELETE | `/search-indices/{indexKey}` | Delete a custom index with its entries; 204 | `cascade` |
+| GET | `/search-indices/{indexKey}/status` | Read an index's build status | — |
+| POST | `/search-indices/{indexKey}/rebuild` | Start new generations of an index; 202 with its status | — |
+
+A request body is a definition in the index wire format. An index reads as `key`,
+`kind` (`default`, `passage` or `custom`), `enabled` (false for a switched-off managed
+index), `definition`, `documentProperty` (the document field it cuts into passages, or
+null), `status` and timestamps. A status carries `state`, `representations` — each
+enabled one with `representation`, `state`, `done`, `total`, `pending` and `failed` —
+and `lastErrors`, each with `entityId`, `partKind`, `message` and `at`.
+
+A preview answers `{valid, issues, estimate}`: `issues` as `{path, message}` by dotted
+path, `estimate` null for an invalid draft, else `entities`, `entries`, `seconds` and
+`perRepresentation` — each with `representation`, `entries`, `seconds` and `measured`.
+An invalid draft is never refused.
+
+Create and replace answer an invalid definition with `VALIDATION_ERROR`, `details.fields`
+keyed by dotted path (`relations.0.target.company`); a key with `~` is refused at `key`,
+and so is a replacement whose body names another key than the path. A taken key is a
+conflict. Replacing or deleting a managed index is a conflict — managed indices are only
+switched, in the search settings — and so is rebuilding a switched-off one. Deleting an
+index a lens includes without `cascade` answers `CASCADE_REQUIRED`. Every route answers
+`FEATURE_DISABLED` on an adapter without search indices.
+
 ### Schema-wide operations
 
 Schema-wide means ontology-wide: each of these covers the addressed ontology and nothing
@@ -374,7 +414,8 @@ provider: without one it skips the vector work and says so in its summary. It do
 touch search indices. After an embedding-provider switch it is run once per ontology. See
 [capabilities/search.md](capabilities/search.md#rebuild).
 
-Transfer carries the design only — schema, lenses, agents, saved queries, retrievers; no instance
+Transfer carries the design only — schema, lenses, agents, saved queries, retrievers, search
+indices; no instance
 data and no ontology identity — see
 [capabilities/transfer.md](capabilities/transfer.md) and
 [capabilities/search.md](capabilities/search.md).
@@ -610,7 +651,7 @@ exist; its tools answer not-found tool errors otherwise.
 | Tool | Purpose |
 |---|---|
 | `ensure_ontology` | Create the ontology this mount is bound to if it does not exist yet; no-op if it does. Argument-less — it acts only on the mount's own ontology — and reports the key and whether it created. A created ontology starts bare and without a display name; naming is a REST/UI operation |
-| `get_schema` | The ontology's whole design — types, relation types, properties, and every lens with its inclusions, agents, saved queries and retrievers. Identical to `export_schema`, and the only way to enumerate lenses: there is no `list_lenses` |
+| `get_schema` | The ontology's whole design — types, relation types, properties, the keyword language set, the custom search indices and the switched-off managed ones, and every lens with its inclusions, agents, saved queries and retrievers. Identical to `export_schema`, and the only way to enumerate lenses: there is no `list_lenses` |
 | `create_entity_type` | Add an entity type together with its name property (`name_property`, default `name`) |
 | `update_entity_type` | Change display name, description or name property (`name_property`); the key is immutable |
 | `delete_entity_type` | Remove an entity type and its properties |
@@ -625,6 +666,14 @@ exist; its tools answer not-found tool errors otherwise.
 | `import_schema` | Apply a transfer payload |
 | `get_search_settings` | Read the keyword language set and the managed indices switched off |
 | `set_search_settings` | Change `keyword_languages` and/or `disabled_indices`, as the REST route does |
+| `list_search_indices` | List every search index, managed and custom, with its status |
+| `get_search_index` | Read one search index with its status |
+| `preview_search_index` | Validate a draft definition and estimate its build cost, without saving |
+| `create_search_index` | Create a custom search index from a `definition` |
+| `update_search_index` | Replace a custom search index's `definition`; the key cannot change |
+| `delete_search_index` | Delete a custom search index |
+| `get_search_index_status` | Read a search index's build status |
+| `rebuild_search_index` | Start new generations of a search index and return its status |
 | `create_lens` | Create a lens |
 | `update_lens` | Change a lens's name or description |
 | `delete_lens` | Delete a lens |
@@ -641,9 +690,11 @@ exist; its tools answer not-found tool errors otherwise.
 | `delete_saved_query` | Delete a saved query |
 
 The per-lens tools take a `lens_key` naming a lens of the bound ontology.
-`add_property`, `delete_property`, `delete_entity_type` and
-`delete_relation_type` take a `cascade` flag with the same meaning as the REST
-parameter. There is no modeling tool for rebuilding search data.
+`add_property`, `delete_property`, `delete_entity_type`,
+`delete_relation_type` and `delete_search_index` take a `cascade` flag with the same
+meaning as the REST parameter. The search-index tools take the index key as
+`index_key` and a definition in the same wire format as REST, camelCase included.
+There is no modeling tool for the search-data rebuild (`rebuild-search-data`).
 
 ### Runtime tools
 

@@ -87,9 +87,9 @@ beforeEach(async () => {
 });
 
 describe("tool surface", () => {
-  it("lists exactly the thirty modeling tools — and NO update-inclusion tool", async () => {
+  it("lists exactly the thirty-eight modeling tools — and NO update-inclusion tool", async () => {
     const tools = await client.listTools();
-    expect(tools.tools).toHaveLength(30);
+    expect(tools.tools).toHaveLength(38);
     expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
       "add_entity_type_to_lens",
       "add_property",
@@ -97,19 +97,26 @@ describe("tool surface", () => {
       "create_entity_type",
       "create_lens",
       "create_relation_type",
+      "create_search_index",
       "delete_ai_agent",
       "delete_entity_type",
       "delete_lens",
       "delete_property",
       "delete_relation_type",
       "delete_saved_query",
+      "delete_search_index",
       "ensure_ontology",
       "export_schema",
       "get_schema",
+      "get_search_index",
+      "get_search_index_status",
       "get_search_settings",
       "import_schema",
       "list_ai_agents",
       "list_saved_queries",
+      "list_search_indices",
+      "preview_search_index",
+      "rebuild_search_index",
       "remove_entity_type_from_lens",
       "remove_relation_type_from_lens",
       "set_ai_agent",
@@ -119,6 +126,7 @@ describe("tool surface", () => {
       "update_lens",
       "update_property",
       "update_relation_type",
+      "update_search_index",
       "validate_lens",
       "validate_schema",
     ]);
@@ -343,6 +351,84 @@ describe("search settings over MCP", () => {
 
   it.skipIf(settings.DB_BACKEND === "postgres")("is not supported by an adapter without search indices", async () => {
     const result = await call(client, "get_search_settings");
+    expect(result.isError).toBe(true);
+    expect(text(result)).toContain("not supported");
+  });
+});
+
+describe("search indices over MCP", () => {
+  const PEOPLE = {
+    key: "people",
+    name: "People",
+    description: "People by name and employer",
+    entityType: "person",
+    fields: ["name"],
+    relations: [{ relationType: "works_for", direction: "outgoing", target: { company: ["name"] } }],
+  };
+
+  async function schema(): Promise<void> {
+    await call(client, "create_entity_type", { key: "person", display_name: "Person" });
+    await call(client, "create_entity_type", { key: "company", display_name: "Company" });
+    await call(client, "create_relation_type", {
+      key: "works_for",
+      display_name: "Works for",
+      source_entity_type_key: "person",
+      target_entity_type_key: "company",
+    });
+  }
+
+  it.skipIf(settings.DB_BACKEND !== "postgres")("creates, previews, reads, updates, rebuilds and deletes a custom index", async () => {
+    await schema();
+    const preview = json(await call(client, "preview_search_index", { definition: { ...PEOPLE, key: undefined } }));
+    expect(preview).toMatchObject({ valid: true, issues: [], estimate: { entities: 0, entries: 0 } });
+    const invalid = json(
+      await call(client, "preview_search_index", { definition: { ...PEOPLE, fields: ["nope"] } }),
+    );
+    expect(invalid).toMatchObject({ valid: false, estimate: null });
+
+    const created = json(await call(client, "create_search_index", { definition: PEOPLE }));
+    expect(created).toMatchObject({ key: "people", kind: "custom", enabled: true });
+    const listed = json(await call(client, "list_search_indices")) as unknown as { key: string }[];
+    expect(listed.map((i) => i.key)).toEqual(["company~default", "people", "person~default"]);
+    expect(json(await call(client, "get_search_index", { index_key: "people" }))).toMatchObject({ key: "people" });
+    expect(json(await call(client, "get_search_index_status", { index_key: "people" }))).toHaveProperty("state");
+
+    const updated = json(
+      await call(client, "update_search_index", { index_key: "people", definition: { ...PEOPLE, relations: [] } }),
+    );
+    expect((updated.definition as { relations: unknown[] }).relations).toEqual([]);
+    expect(json(await call(client, "rebuild_search_index", { index_key: "people" }))).toHaveProperty("representations");
+
+    // The schema reads carry the custom definitions and the switches.
+    const exported = json(await call(client, "get_schema")) as { searchIndices: { custom: { key: string }[] } };
+    expect(exported.searchIndices.custom.map((d) => d.key)).toEqual(["people"]);
+
+    const invalidCreate = await call(client, "create_search_index", { definition: { ...PEOPLE, key: "other", fields: ["nope"] } });
+    expect(invalidCreate.isError).toBe(true);
+    expect(text(invalidCreate)).toContain("fields.0");
+    const managed = await call(client, "update_search_index", { index_key: "person~default", definition: PEOPLE });
+    expect(managed.isError).toBe(true);
+    expect(text(managed)).toContain("managed indices can only be switched");
+
+    expect(text(await call(client, "delete_search_index", { index_key: "people" }))).toBe(
+      "Search index 'people' deleted.",
+    );
+    expect((await call(client, "get_search_index", { index_key: "people" })).isError).toBe(true);
+  });
+
+  it.skipIf(settings.DB_BACKEND !== "postgres")("delete tools' cascade flag covers custom indices", async () => {
+    await schema();
+    await call(client, "create_search_index", { definition: PEOPLE });
+    const refused = await call(client, "delete_relation_type", { relation_type_key: "works_for" });
+    expect(refused.isError).toBe(true);
+    expect(text(refused)).toContain("custom search index(es) (people)");
+    await call(client, "delete_relation_type", { relation_type_key: "works_for", cascade: true });
+    const people = json(await call(client, "get_search_index", { index_key: "people" }));
+    expect((people.definition as { relations: unknown[] }).relations).toEqual([]);
+  });
+
+  it.skipIf(settings.DB_BACKEND === "postgres")("is not supported by an adapter without search indices", async () => {
+    const result = await call(client, "list_search_indices");
     expect(result.isError).toBe(true);
     expect(text(result)).toContain("not supported");
   });

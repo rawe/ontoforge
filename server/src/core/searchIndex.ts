@@ -294,6 +294,98 @@ function checkFields(
 }
 
 // ---------------------------------------------------------------------------
+// Schema removals (the cascade)
+// ---------------------------------------------------------------------------
+
+/** A schema element about to be deleted, as the custom indices see it. */
+export type SchemaRemoval =
+  | { kind: "entityType"; key: string }
+  | { kind: "relationType"; key: string }
+  | { kind: "property"; owner: "entityType" | "relationType"; ownerKey: string; key: string };
+
+/** What a removal does to the custom indices: definitions that change,
+ * and keys of indices left with nothing to read (or rooted on a deleted
+ * type), which go. */
+export interface SearchIndexCascade {
+  updated: SearchIndexDefinition[];
+  deleted: string[];
+}
+
+/**
+ * The custom indices a schema removal reaches, and what remains of them:
+ * an index rooted on a deleted entity type goes; target entries naming
+ * it, groups on a deleted relation type and fields reading a deleted
+ * property are removed; a group left with no relation or target field is
+ * removed, and an index left with no field and no group goes. Managed
+ * indices follow the schema by themselves and are never passed here.
+ */
+export function planSearchIndexCascade(
+  definitions: readonly SearchIndexDefinition[],
+  removal: SchemaRemoval,
+): SearchIndexCascade {
+  const cascade: SearchIndexCascade = { updated: [], deleted: [] };
+  for (const definition of definitions) {
+    const pruned = pruneDefinition(definition, removal);
+    if (pruned === null) {
+      cascade.deleted.push(definition.key);
+    } else if (!definitionsEqual(pruned, definition)) {
+      cascade.updated.push(pruned);
+    }
+  }
+  return cascade;
+}
+
+/** The keys a cascade touches, sorted — `CASCADE_REQUIRED`'s `affectedIndices`. */
+export function cascadeIndexKeys(cascade: SearchIndexCascade): string[] {
+  return [...cascade.deleted, ...cascade.updated.map((d) => d.key)].sort();
+}
+
+/** One definition without what a removal takes; null when nothing is left
+ * (or its root type goes). */
+function pruneDefinition(
+  definition: SearchIndexDefinition,
+  removal: SchemaRemoval,
+): SearchIndexDefinition | null {
+  if (removal.kind === "entityType" && definition.entityType === removal.key) return null;
+
+  const without = (fields: string[], key: string) => fields.filter((f) => f !== key);
+  const ownProperty =
+    removal.kind === "property" && removal.owner === "entityType" && removal.ownerKey === definition.entityType
+      ? removal.key
+      : null;
+
+  const relations = definition.relations
+    .filter((group) => !(removal.kind === "relationType" && group.relationType === removal.key))
+    .map((group) => {
+      const fields =
+        removal.kind === "property" && removal.owner === "relationType" && removal.ownerKey === group.relationType
+          ? without(group.fields, removal.key)
+          : group.fields;
+      const target: Record<string, string[]> = {};
+      for (const [targetType, targetFields] of Object.entries(group.target)) {
+        if (removal.kind === "entityType" && targetType === removal.key) continue;
+        if (removal.kind === "property" && removal.owner === "entityType" && removal.ownerKey === targetType) {
+          const kept = without(targetFields, removal.key);
+          if (kept.length > 0 || targetFields.length === 0) target[targetType] = kept;
+          continue;
+        }
+        target[targetType] = targetFields;
+      }
+      return { ...group, fields, target };
+    })
+    .filter(
+      (group) =>
+        group.fields.length > 0 || Object.values(group.target).some((fields) => fields.length > 0),
+    );
+
+  const fields = ownProperty === null ? definition.fields : without(definition.fields, ownProperty);
+  const header =
+    ownProperty === null || definition.header === null ? definition.header : without(definition.header, ownProperty);
+  if (fields.length === 0 && relations.length === 0) return null;
+  return { ...definition, fields, header, relations };
+}
+
+// ---------------------------------------------------------------------------
 // Managed indices
 // ---------------------------------------------------------------------------
 

@@ -509,7 +509,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL search pipeline"
     const status = await getSearchIndexStatus(ONTOLOGY_KEY, "employment");
     const semantic = status.representations.find((r) => r.representation === "semantic")!;
     expect(semantic).toMatchObject({ state: "failed", failed: 2, total: 2, done: 0 });
-    expect(semantic.lastErrors[0]).toContain("provider down");
+    expect(semantic.lastErrors[0]!.message).toContain("provider down");
     expect(status.representations.find((r) => r.representation === "keyword")!.state).toBe("ready");
     expect(status.state).toBe("failed");
     expect((await live(index)).find((g) => g.representation === "semantic")!.state).toBe("building");

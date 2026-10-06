@@ -21,6 +21,7 @@ ontologies, transfer included.
 | Saved queries | Every saved query of every lens: key, name, description, steps, parameters |
 | Retrievers | Every retriever of every lens: key, name, description, configVersion, config |
 | Keyword language set | The languages keyword search stems in, at the top level of the payload |
+| Search indices | The custom index definitions and the managed indices switched off, at the top level of the payload |
 
 Agents, saved queries and retrievers are nested inside the lens they belong to, because that is where
 they belong ([ai-agents.md](ai-agents.md), [saved-queries.md](saved-queries.md), [retrievers.md](retrievers.md)).
@@ -46,6 +47,16 @@ target an import overwrites rather than adds to. An adapter without search indic
 set: its export writes the set a new ontology starts with, German and English, and its
 import validates the field and keeps nothing of it.
 
+The payload carries the ontology's [search indices](search-indices.md) as
+`searchIndices`: `custom`, every custom definition in the index wire format, in key
+order, and `disabled`, the keys of the managed indices switched off. Managed definitions
+are not carried — the imported schema derives them. The field is optional: without it a
+payload has no custom index and every managed index on. Import adds the payload's
+custom indices and switched-off keys to the target's, and every index's entries are then
+built in the background ([below](#side-effects-of-import)). An adapter
+without search indices exports both lists empty, and its import validates the field and
+keeps nothing of it.
+
 ## The format version
 
 The payload declares a format version, and export always writes the current one: `6.0`.
@@ -60,7 +71,8 @@ field error on the version:
 | `6.0`, or no version at all | The current format, validated as described below |
 | `5.0` | The previous format, converted on the way in |
 
-A `5.0` payload differs from `6.0` in two ways. It carries one `textSearchLanguage`,
+A `5.0` payload differs from `6.0` in three ways. It carries no search indices — a
+`searchIndices` field in it is ignored. It carries one `textSearchLanguage`,
 `english` or `german`, in place of `keywordLanguages`; import takes that language alone as
 the set. And its entity types carry no name property
 ([schema-modeling.md](schema-modeling.md#the-name-property)); import derives one per
@@ -91,8 +103,9 @@ clone or template operation.
 ### Conflicts: all-or-fail on an existing key
 
 Import refuses to touch anything that already exists in the target. If any entity type
-key, relation type key or lens key in the payload is already present in the target
-ontology, the import fails with a conflict naming every such key. Only the target's own
+key, relation type key, lens key or custom search index key in the payload is already
+present in the target ontology — or appears twice among the payload's custom indices —
+the import fails with a conflict naming every such key. Only the target's own
 key space is consulted — the same keys in other ontologies are invisible and irrelevant.
 There is no merge, no skip-existing and no per-object choice.
 
@@ -117,9 +130,9 @@ or deleting and recreating the whole ontology and importing into it bare.
 
 ### Identifiers are regenerated, keys are preserved
 
-Every imported object — type, property, lens, agent, saved query, retriever — receives a freshly
-generated internal identifier. Nothing in the payload carries one, and nothing from the
-source ontology's identifiers survives.
+Every imported object — type, property, lens, agent, saved query, retriever, search
+index — receives a freshly generated internal identifier. Nothing in the payload carries
+one, and nothing from the source ontology's identifiers survives.
 
 Keys, by contrast, are preserved verbatim. That is what makes the format portable: after
 an import, the same key names the same thing in both ontologies, while the identifiers
@@ -146,6 +159,10 @@ Import is a write path, and the write-path rules apply to it:
   the type.
 - `document` properties are permitted on entity types only. One on a relation type is
   rejected, naming the property and its type.
+- Every custom search index is validated against the payload's own schema, exactly as at
+  definition time ([search-indices.md](search-indices.md#validation-and-limits)), and
+  every switched-off key must name a managed index that schema derives. An invalid one
+  fails the import, naming the index and the offending path.
 - Every agent's tool allowlist is checked against the read-only agent tool set, exactly as
   at definition time. An unknown tool name fails the import.
 - Every saved query's steps are checked structurally, exactly as at definition time:
@@ -175,9 +192,11 @@ artefacts and computes embeddings, all within the target ontology.
   described in [search.md](search.md#rebuild) runs against one.
 - **Search indices.** The managed search indices of the imported schema come into
   existence and are included in every scoped lens that exposes their root types — the
-  imported ones among them ([search-indices.md](search-indices.md#managed-indices)). Their entries are built in
-  the background; with no instance data imported, there is nothing to build until data
-  is written.
+  imported ones among them ([search-indices.md](search-indices.md#managed-indices)) —
+  and the payload's custom indices are created. Import provisions no entries: each
+  index gets its generations, which the worker builds in the background
+  ([search-indices.md](search-indices.md#lifecycle)); with no instance data imported,
+  there is nothing to build until data is written.
 - **Embedding.** Each imported saved query's description is embedded as it is written, so
   the queries are semantically discoverable immediately. Nothing else is embedded — there
   is no instance data to embed.

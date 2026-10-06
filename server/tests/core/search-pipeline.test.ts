@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { SearchGenerationRecord, SearchQueueStats } from "../../src/core/ports.js";
+import type { SearchGenerationRecord, SearchQueueError, SearchQueueStats } from "../../src/core/ports.js";
 import {
   backoffDelayMs,
   BACKOFF_BASE_MS,
@@ -13,6 +13,8 @@ import {
   DEFAULT_ENTRY_RATES,
   deriveIndexStatus,
   deriveRepresentationStatus,
+  estimateBuildCost,
+  MAX_LAST_ERRORS,
   ThroughputAverage,
   type RepresentationStatusInput,
   type SearchIndexState,
@@ -56,8 +58,13 @@ function generation(
   };
 }
 
-function queue(generationId: string, pending: number, failed = 0, lastErrors: string[] = []): SearchQueueStats {
-  return { generationId, pending, failed, lastErrors };
+function queue(generationId: string, pending: number, failed = 0, messages: string[] = []): SearchQueueStats {
+  return { generationId, pending, failed, lastErrors: messages.map((message, i) => queueError(message, i)) };
+}
+
+/** A queue error `secondsAgo` seconds before a fixed instant. */
+function queueError(message: string, secondsAgo = 0, entityId = "e1"): SearchQueueError {
+  return { entityId, partKind: "entity", message, at: new Date(Date.UTC(2026, 0, 1, 12, 0, 0) - secondsAgo * 1000) };
 }
 
 function input(parts: Partial<RepresentationStatusInput>): RepresentationStatusInput {
@@ -97,7 +104,7 @@ describe("deriveRepresentationStatus", () => {
     const ready = deriveRepresentationStatus(
       input({ generations: [generation("g1", "ready")], queue: [queue("g1", 0, 2, ["HTTP 500"])] }),
     );
-    expect(ready).toMatchObject({ state: "failed", failed: 2, lastErrors: ["HTTP 500"] });
+    expect(ready).toMatchObject({ state: "failed", failed: 2, lastErrors: [{ message: "HTTP 500" }] });
     const build = deriveRepresentationStatus(
       input({ generations: [generation("g2", "building", 5)], queue: [queue("g2", 0, 1, ["timeout"])] }),
     );
@@ -141,12 +148,22 @@ describe("deriveIndexStatus", () => {
     expect(deriveIndexStatus([of("disabled"), of("unavailable")]).state).toBe("unavailable");
   });
 
-  it("collects the last errors of every representation once", () => {
+  it("collects the last errors of every representation once, newest first", () => {
     const status = deriveIndexStatus([
-      { ...of("failed"), lastErrors: ["a", "b"] },
-      { ...of("failed"), lastErrors: ["b"] },
+      { ...of("failed"), lastErrors: [queueError("a", 5), queueError("b", 3, "e2")] },
+      { ...of("failed"), lastErrors: [queueError("b", 1, "e3")] },
     ]);
-    expect(status.lastErrors).toEqual(["a", "b"]);
+    expect(status.lastErrors.map((e) => [e.message, e.entityId])).toEqual([
+      ["b", "e3"],
+      ["a", "e1"],
+    ]);
+  });
+
+  it("lists at most ten errors", () => {
+    const errors = Array.from({ length: 14 }, (_, i) => queueError(`error ${i}`, i));
+    const status = deriveIndexStatus([{ ...of("failed"), lastErrors: errors }]);
+    expect(status.lastErrors).toHaveLength(MAX_LAST_ERRORS);
+    expect(status.lastErrors[0]!.message).toBe("error 0");
   });
 });
 
@@ -176,5 +193,45 @@ describe("ThroughputAverage", () => {
 
   it("has a default rate per representation for the cost preview", () => {
     expect(DEFAULT_ENTRY_RATES).toEqual({ keyword: 500, semantic: 20 });
+  });
+});
+
+describe("estimateBuildCost", () => {
+  const size = { entities: 100, selfEntries: 100, relationEntries: 250, passageEntries: 50 };
+  const rates = {
+    keyword: { entriesPerSecond: 500, measured: false },
+    semantic: { entriesPerSecond: 16, measured: true },
+  };
+
+  it("counts self, relation and passage entries once per representation built", () => {
+    expect(estimateBuildCost(size, ["keyword", "semantic"], rates)).toEqual({
+      entities: 100,
+      entries: 400,
+      seconds: 25.8,
+      perRepresentation: [
+        { representation: "keyword", entries: 400, seconds: 0.8, measured: false },
+        { representation: "semantic", entries: 400, seconds: 25, measured: true },
+      ],
+    });
+  });
+
+  it("costs only the representations that will be built", () => {
+    const keywordOnly = estimateBuildCost(size, ["keyword"], rates);
+    expect(keywordOnly.perRepresentation.map((r) => r.representation)).toEqual(["keyword"]);
+    expect(keywordOnly.seconds).toBe(0.8);
+  });
+
+  it("rounds seconds up to a tenth and costs nothing without entries", () => {
+    expect(estimateBuildCost({ ...size, selfEntries: 1, relationEntries: 0, passageEntries: 0 }, ["keyword"], rates).seconds).toBe(0.1);
+    const empty = estimateBuildCost({ entities: 0, selfEntries: 0, relationEntries: 0, passageEntries: 0 }, ["keyword", "semantic"], rates);
+    expect(empty).toMatchObject({ entities: 0, entries: 0, seconds: 0 });
+  });
+
+  it("uses the default rates the same way", () => {
+    const defaults = {
+      keyword: { entriesPerSecond: DEFAULT_ENTRY_RATES.keyword, measured: false },
+      semantic: { entriesPerSecond: DEFAULT_ENTRY_RATES.semantic, measured: false },
+    };
+    expect(estimateBuildCost(size, ["semantic"], defaults).seconds).toBe(400 / DEFAULT_ENTRY_RATES.semantic);
   });
 });

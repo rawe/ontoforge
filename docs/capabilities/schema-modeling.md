@@ -187,22 +187,31 @@ This is the sharpest trap in the modeling surface.
 Deleting an entity type also discards the search artefacts derived from it — every
 search index rooted on it, with its entries ([search-indices.md](search-indices.md),
 [documents.md](documents.md)). Deleting a document property discards that property's
-passage index alone.
+passage index alone. Managed indices follow such a deletion silently; a custom index that
+reads what is deleted brings the deletion under the cascade protocol below.
 
 ### The cascade protocol
 
-A schema change that would leave a scoped lens invalid is refused, names the
-lenses it would break, and proceeds only if the caller repeats it with explicit
-consent. Only lenses with explicit declarations can be broken, so an unscoped lens
-never appears in any of this.
+A schema change that would leave a scoped lens invalid, or a
+[custom search index](search-indices.md#custom-indices) reading what no longer exists,
+is refused, names the lenses and indices it would affect, and proceeds only if the
+caller repeats it with explicit consent. Only lenses with explicit declarations can be
+broken, so an unscoped lens never appears in any of this; managed search indices follow
+the schema by themselves and never appear either.
 
-Exactly three changes can trigger it:
+Five changes can trigger it:
 
 | Change | Triggers when |
 |---|---|
-| Delete an entity type | any lens includes that entity type |
-| Delete a relation type | any lens includes that relation type |
+| Delete an entity type | any lens includes that entity type, or any custom index is rooted on it |
+| Delete a relation type | any lens includes that relation type, or any custom index has a relation group on it |
 | Create a required property with no default | any lens includes the owning type **with a property allowlist** that does not name the new key |
+| Delete a property | any custom index reads it — as an own, header, relation or target field |
+| Delete a custom search index | any lens includes it |
+
+A custom index may also name an entity type as a group's target, but that type is an
+endpoint of the group's relation type, and an entity type that a relation type names
+cannot be deleted at all ([above](#deletion)).
 
 The third case is the subtle one and applies to entity types and relation types
 alike. A required property with no default must be supplied on every create. A
@@ -214,26 +223,38 @@ lens and not the other, purely because of how they declared their inclusion.
 
 The refusal is the `CASCADE_REQUIRED` error described in
 [../architecture.md](../architecture.md). Its `details.affectedLenses` is the
-sorted list of the **keys** of every lens the change would break — enough to
-inspect each one and decide, without a second lookup.
+sorted list of the **keys** of every lens the change would break or change, and
+`details.affectedIndices` the sorted keys of every custom index it would change or
+delete — either may be empty — enough to inspect each one and decide, without a second
+lookup. A property deletion triggered by an index names, as lenses, those whose
+allowlist names the property.
 
 Repeating the request with cascade requested makes the change consented rather
 than forced, and the repair is mechanical:
 
 | Change | What cascade does before the change |
 |---|---|
-| Delete an entity type | removes that type's inclusion from every lens that has one |
-| Delete a relation type | removes that type's inclusion from every lens that has one |
+| Delete an entity type | removes that type's inclusion from every lens that has one; deletes every custom index rooted on it |
+| Delete a relation type | removes that type's inclusion from every lens that has one; removes every custom index's groups on it |
 | Create a required property with no default | appends the new key to every allowlist for that type |
-| Delete a property | removes the key from every allowlist for that type |
+| Delete a property | removes the key from every allowlist for that type, and from every custom index's own, header, relation and target fields |
+| Delete a custom search index | removes its inclusion from every lens that has one |
+
+What is left of a custom index stays consistent: a target type left with no field and a
+relation group left with no relation or target field are removed, and an index left with
+no field and no group is deleted, together with its lens inclusions. A template
+placeholder naming a removed field stays and has no value
+([search-indices.md](search-indices.md#templates)). The changed indices build new
+generations in the background.
 
 Two asymmetries are easy to get wrong when reimplementing:
 
-**Deleting a property never triggers the protocol.** It is not in the trigger
-table. Without cascade, the property is deleted and every allowlist naming it is
-left holding a key that no longer resolves — harmless at runtime, where an
-unresolvable key in an allowlist simply matches nothing, but reported by lens
-validation. Cascade on a property deletion is therefore a cleanup, not a consent.
+**Lens allowlists never make a property deletion trigger the protocol.** Only a custom
+index reading the property does. Without one, and without cascade, the property is
+deleted and every allowlist naming it is left holding a key that no longer resolves —
+harmless at runtime, where an unresolvable key in an allowlist simply matches nothing,
+but reported by lens validation. For lenses, cascade on a property deletion is therefore
+a cleanup, not a consent.
 
 **Changing an existing property is never checked.** Making an optional property
 required, or clearing a required property's default, produces exactly the state
@@ -272,9 +293,10 @@ Full index: [../interfaces.md](../interfaces.md). Every entrance below addresses
 one ontology — REST in the path, MCP through the mount's binding.
 
 The same service enforces every rule above regardless of entrance, including the
-cascade protocol. One detail does not survive the crossing: the structured list of
-affected lens keys reaches a REST caller in the error body, while an MCP caller
-receives only the refusal message and must ask which lenses include the type.
+cascade protocol. One detail does not survive the crossing: the structured lists of
+affected lens and index keys reach a REST caller in the error body, while an MCP caller
+receives only the refusal message — which names the affected custom indices, but not the
+lenses — and must ask which lenses include the type.
 
 | Operation group | REST | Modeling MCP | Web UI |
 |---|---|---|---|
@@ -282,7 +304,7 @@ receives only the refusal message and must ask which lenses include the type.
 | Properties | create, list, update, delete, per owning type | one add/update/delete trio taking a `type_kind` discriminator | schema studio |
 | Whole-schema read | assembled from the type operations, or the export payload | one `get_schema` tool | schema studio |
 | Validation | per-lens and whole-schema | per-lens and whole-schema | schema studio |
-| Cascade consent | a query flag on the three cascading operations | a boolean argument on the same three | prompted on the affected action |
+| Cascade consent | a query flag on the cascading operations | a boolean argument on the same operations | prompted on the affected action |
 
 Two differences between the entrances are contractual, not cosmetic:
 

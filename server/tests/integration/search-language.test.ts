@@ -58,11 +58,20 @@ it("the registry takes no language and answers none; export carries the keyword 
   expect(exported).not.toHaveProperty("textSearchLanguage");
 });
 
-it.skipIf(postgres)("an adapter without search indices answers FEATURE_DISABLED for search settings", async () => {
+it.skipIf(postgres)("an adapter without search indices answers FEATURE_DISABLED for search settings and indices", async () => {
   await post("/api/ontologies", { key: "language_test" });
+  const index = { key: "people", name: "People", description: "d", entityType: "person", fields: ["name"] };
   for (const res of [
     await app.inject({ url: `${model}/search-settings` }),
     await putSettings({ keywordLanguages: ["german"] }),
+    await app.inject({ url: `${model}/search-indices` }),
+    await app.inject({ method: "POST", url: `${model}/search-indices`, payload: index }),
+    await app.inject({ method: "POST", url: `${model}/search-indices/preview`, payload: index }),
+    await app.inject({ url: `${model}/search-indices/people` }),
+    await app.inject({ method: "PUT", url: `${model}/search-indices/people`, payload: index }),
+    await app.inject({ method: "DELETE", url: `${model}/search-indices/people` }),
+    await app.inject({ url: `${model}/search-indices/people/status` }),
+    await app.inject({ method: "POST", url: `${model}/search-indices/people/rebuild` }),
   ]) {
     expect(res.statusCode).toBe(422);
     expect(res.json().error.details.code).toBe("FEATURE_DISABLED");

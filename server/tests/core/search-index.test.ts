@@ -1,17 +1,19 @@
 /**
  * Search index definitions: wire-format parsing, validation against the
  * schema, the header default, the managed definitions and the definition
- * hash.
+ * hash, and the cascade a schema removal applies to custom indices.
  */
 
 import { describe, expect, it } from "vitest";
 
 import {
+  cascadeIndexKeys,
   definitionHash,
   deriveManagedIndices,
   effectiveHeader,
   isManagedIndexKey,
   managedIndexKey,
+  planSearchIndexCascade,
   SearchIndexDefinition,
   type SearchIndexSchema,
   validateSearchIndex,
@@ -559,5 +561,103 @@ describe("definitionHash", () => {
       expect(definitionHash(definition, "keyword")).toBe(keyword);
     }
     expect(definitionHash({ ...base, fields: ["email", "name"] }, "keyword")).not.toBe(keyword);
+  });
+});
+
+describe("planSearchIndexCascade", () => {
+  const employment = SearchIndexDefinition.parse({
+    key: "employment",
+    name: "Employment",
+    description: "People by employment",
+    entityType: "person",
+    fields: ["name", "email"],
+    header: ["name", "email"],
+    relations: [
+      { relationType: "works_for", direction: "outgoing", fields: ["role"], target: { company: ["name", "founded"] } },
+      { relationType: "lives_in", direction: "outgoing", fields: [], target: { city: ["name"] } },
+    ],
+  });
+  const companies = SearchIndexDefinition.parse({
+    key: "companies",
+    name: "Companies",
+    description: "Companies by staff",
+    entityType: "company",
+    fields: [],
+    relations: [{ relationType: "works_for", direction: "incoming", fields: ["role"], target: { person: ["email"] } }],
+  });
+  const all = [employment, companies];
+
+  it("deletes the indices rooted on a deleted entity type and removes target entries naming it", () => {
+    const cascade = planSearchIndexCascade(all, { kind: "entityType", key: "city" });
+    expect(cascade.deleted).toEqual([]);
+    expect(cascade.updated).toHaveLength(1);
+    // The group's only field was a city field: the group goes with it.
+    expect(cascade.updated[0]!.relations.map((g) => g.relationType)).toEqual(["works_for"]);
+
+    const rooted = planSearchIndexCascade(all, { kind: "entityType", key: "company" });
+    expect(rooted.deleted).toEqual(["companies"]);
+    // The works_for group keeps its relation field without the company target.
+    expect(rooted.updated[0]!.relations[0]).toMatchObject({ fields: ["role"], target: {} });
+    expect(cascadeIndexKeys(rooted)).toEqual(["companies", "employment"]);
+  });
+
+  it("removes the groups on a deleted relation type; an index left empty goes", () => {
+    const cascade = planSearchIndexCascade(all, { kind: "relationType", key: "works_for" });
+    expect(cascade.deleted).toEqual(["companies"]);
+    expect(cascade.updated[0]!.relations.map((g) => g.relationType)).toEqual(["lives_in"]);
+    expect(cascade.updated[0]!.fields).toEqual(["name", "email"]);
+  });
+
+  it("removes a deleted own property from fields and header", () => {
+    const cascade = planSearchIndexCascade(all, {
+      kind: "property",
+      owner: "entityType",
+      ownerKey: "person",
+      key: "email",
+    });
+    const updated = Object.fromEntries(cascade.updated.map((d) => [d.key, d]));
+    expect(updated.employment).toMatchObject({ fields: ["name"], header: ["name"] });
+    // The incoming group keeps its relation field; the emptied target entry goes.
+    expect(cascade.deleted).toEqual([]);
+    expect(updated.companies!.relations[0]).toMatchObject({ fields: ["role"], target: {} });
+  });
+
+  it("removes a deleted target property and a deleted relation property", () => {
+    const target = planSearchIndexCascade(all, {
+      kind: "property",
+      owner: "entityType",
+      ownerKey: "company",
+      key: "founded",
+    });
+    expect(target.updated.map((d) => d.key)).toEqual(["employment"]);
+    expect(target.updated[0]!.relations[0]!.target).toEqual({ company: ["name"] });
+
+    const relation = planSearchIndexCascade(all, {
+      kind: "property",
+      owner: "relationType",
+      ownerKey: "works_for",
+      key: "role",
+    });
+    expect(relation.updated.map((d) => d.key).sort()).toEqual(["companies", "employment"]);
+    expect(relation.deleted).toEqual([]);
+    expect(relation.updated.find((d) => d.key === "companies")!.relations[0]).toMatchObject({
+      fields: [],
+      target: { person: ["email"] },
+    });
+  });
+
+  it("leaves untouched indices alone and keeps a null header null", () => {
+    const nullHeader = { ...employment, header: null };
+    expect(
+      planSearchIndexCascade([nullHeader], { kind: "property", owner: "entityType", ownerKey: "city", key: "name" })
+        .updated[0]!.header,
+    ).toBeNull();
+    expect(planSearchIndexCascade(all, { kind: "relationType", key: "unrelated" })).toEqual({
+      updated: [],
+      deleted: [],
+    });
+    expect(
+      planSearchIndexCascade(all, { kind: "property", owner: "entityType", ownerKey: "person", key: "born" }),
+    ).toEqual({ updated: [], deleted: [] });
   });
 });

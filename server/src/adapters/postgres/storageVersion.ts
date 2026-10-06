@@ -238,6 +238,7 @@ const STEPS: Step[] = [
   not_before    timestamptz NOT NULL DEFAULT now(),
   lease_until   timestamptz,
   last_error    text,
+  last_error_at timestamptz,
   CONSTRAINT search_queue_pk PRIMARY KEY (generation_id, entity_id, part_kind, group_no, part_id)
 )`,
       `CREATE INDEX search_queue_due_idx ON search_queue (not_before)`,

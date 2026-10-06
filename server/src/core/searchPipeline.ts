@@ -5,7 +5,12 @@
  * Pure — no storage, no I/O, no clock of its own.
  */
 
-import type { SearchGenerationRecord, SearchQueueStats, SearchSettings } from "./ports.js";
+import type {
+  SearchGenerationRecord,
+  SearchQueueError,
+  SearchQueueStats,
+  SearchSettings,
+} from "./ports.js";
 import type { SearchRepresentation } from "./searchIndex.js";
 
 // ---------------------------------------------------------------------------
@@ -85,13 +90,26 @@ export interface SearchRepresentationStatus {
   activeGenerationId: string | null;
   /** The generation filling, if any. */
   buildingGenerationId: string | null;
-  lastErrors: string[];
+  lastErrors: SearchQueueError[];
 }
 
 export interface SearchIndexStatus {
   state: SearchIndexState;
   representations: SearchRepresentationStatus[];
-  lastErrors: string[];
+  lastErrors: SearchQueueError[];
+}
+
+/** The most errors a status lists. */
+export const MAX_LAST_ERRORS = 10;
+
+/** Errors of several queues as one list: newest first, the newest per
+ * distinct message, at most `MAX_LAST_ERRORS`. */
+export function mergeLastErrors(lists: readonly (readonly SearchQueueError[])[]): SearchQueueError[] {
+  const newest = new Map<string, SearchQueueError>();
+  for (const error of lists.flat().sort((a, b) => b.at.getTime() - a.at.getTime())) {
+    if (!newest.has(error.message)) newest.set(error.message, error);
+  }
+  return [...newest.values()].slice(0, MAX_LAST_ERRORS);
 }
 
 /** What the status of one representation is derived from. */
@@ -105,7 +123,7 @@ export interface RepresentationStatusInput {
   queue: SearchQueueStats[];
 }
 
-const NO_QUEUE = { pending: 0, failed: 0, lastErrors: [] as string[] };
+const NO_QUEUE = { pending: 0, failed: 0, lastErrors: [] as SearchQueueError[] };
 
 /** The status of one representation. */
 export function deriveRepresentationStatus(input: RepresentationStatusInput): SearchRepresentationStatus {
@@ -124,7 +142,7 @@ export function deriveRepresentationStatus(input: RepresentationStatusInput): Se
     failed: buildingQueue.failed + readyQueue.failed,
     activeGenerationId: ready?.generationId ?? null,
     buildingGenerationId: building?.generationId ?? null,
-    lastErrors: [...new Set([...buildingQueue.lastErrors, ...readyQueue.lastErrors])],
+    lastErrors: mergeLastErrors([buildingQueue.lastErrors, readyQueue.lastErrors]),
   };
   if (!input.enabled) return { ...status, state: "disabled" };
   if (!input.available) return { ...status, state: "unavailable" };
@@ -164,7 +182,7 @@ export function deriveIndexStatus(representations: SearchRepresentationStatus[])
   return {
     state,
     representations,
-    lastErrors: [...new Set(representations.flatMap((r) => r.lastErrors))],
+    lastErrors: mergeLastErrors(representations.map((r) => r.lastErrors)),
   };
 }
 
@@ -199,4 +217,68 @@ export class ThroughputAverage {
   get value(): number | null {
     return this.average;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Cost preview
+// ---------------------------------------------------------------------------
+
+/** What a full build of an index holds, as the store measures it: the
+ * root-type entities and the entries of each part kind. */
+export interface IndexContentSize {
+  entities: number;
+  selfEntries: number;
+  relationEntries: number;
+  passageEntries: number;
+}
+
+/** Entries per second of one representation; `measured` false while it
+ * is a default rate. */
+export interface RepresentationRate {
+  entriesPerSecond: number;
+  measured: boolean;
+}
+
+export interface CostEstimate {
+  entities: number;
+  /** Entries per representation: self + relation instances + passages. */
+  entries: number;
+  /** Every representation built one after the other. */
+  seconds: number;
+  perRepresentation: {
+    representation: SearchRepresentation;
+    entries: number;
+    seconds: number;
+    measured: boolean;
+  }[];
+}
+
+/**
+ * The cost of a full build of an index: its entries, once per
+ * representation that will be built, at the given rates. Seconds are
+ * rounded up to a tenth; a representation without a positive rate costs
+ * nothing measurable.
+ */
+export function estimateBuildCost(
+  size: IndexContentSize,
+  representations: readonly SearchRepresentation[],
+  rates: Readonly<Record<SearchRepresentation, RepresentationRate>>,
+): CostEstimate {
+  const entries = size.selfEntries + size.relationEntries + size.passageEntries;
+  const perRepresentation = representations.map((representation) => {
+    const rate = rates[representation];
+    const seconds = rate.entriesPerSecond > 0 ? tenths(entries / rate.entriesPerSecond) : 0;
+    return { representation, entries, seconds, measured: rate.measured };
+  });
+  return {
+    entities: size.entities,
+    entries,
+    seconds: tenths(perRepresentation.reduce((sum, r) => sum + r.seconds, 0)),
+    perRepresentation,
+  };
+}
+
+function tenths(seconds: number): number {
+  // The epsilon keeps float noise (0.30000000000000004) from rounding up.
+  return Math.ceil(Math.max(0, seconds * 10 - 1e-9)) / 10;
 }

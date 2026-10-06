@@ -1,8 +1,9 @@
 /**
- * The build status of search indices: per index and representation
- * `ready`, `building` (done/total), `stale` (pending), `failed` (count,
- * last errors), or `disabled` for a switched-off managed index — derived
- * from the generations and their queues (`core/searchPipeline.ts`).
+ * The build status of search indices: per index and enabled
+ * representation `ready`, `building` (done/total), `stale` (pending),
+ * `failed` (count, last errors) or `unavailable`, or `disabled` for a
+ * switched-off managed index — derived from the generations and their
+ * queues (`core/searchPipeline.ts`).
  */
 
 import { settings } from "../../config.js";
@@ -82,5 +83,8 @@ function statusOf(
       generations: live.filter((g) => g.representation === rep),
       queue,
     });
-  return deriveIndexStatus([representation("keyword"), representation("semantic")]);
+  // A representation the definition switches off is not reported.
+  return deriveIndexStatus(
+    (["keyword", "semantic"] as const).filter((rep) => index.definition[rep].enabled).map(representation),
+  );
 }

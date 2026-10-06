@@ -201,6 +201,12 @@ its own transaction, in the same database; a worker in every server process clai
 processes it. No external queue or broker. One database and one transaction keep the
 work exactly as durable as the write.
 
+**Search-index vectors are half precision, stored and indexed.** The PostgreSQL adapter
+keeps entry vectors in an untyped `halfvec` column and indexes each generation as
+`halfvec` at its width, so every PostgreSQL deployment needs a pgvector with half-precision
+vectors. Half precision halves the heap and the vector indexes, which a large ontology
+needs kept in memory for fast search.
+
 **Documentation above the port describes the behaviour of the default
 deployment.** Adapter-specific deviations are documented with that adapter in
 storage-adapters.md, never as hedges in the shared documents.
@@ -308,7 +314,8 @@ type, it takes the best reciprocal kind rank. Deliberation:
 [adr/0020](adr/0020-search-ranking-and-evidence.md).
 
 **Keyword content contains values, not schema labels.** An entry's keyword text holds
-values only, its semantic text is labelled, so keys and labels cannot count as matching
+values only, its semantic text is labelled — or rendered from a custom index's template,
+which keyword text never uses — so keys and labels cannot count as matching
 content. This applies to keyword and hybrid retrieval, including single-type queries; it
 is distinct from preserving single-type fusion.
 
@@ -468,8 +475,12 @@ default still receives that default — otherwise a narrow lens could create dat
 invalid under a wider one.
 
 **Destructive schema changes require explicit consent.**
-A change that would invalidate a lens is refused, and names the lenses it would affect.
-It proceeds only when the caller asks for it a second time, explicitly.
+A change that would invalidate a lens, or remove something a custom search index reads,
+is refused, and names the lenses and custom indices it would affect. It proceeds only
+when the caller asks for it a second time, explicitly; the consented change then prunes
+the indices — deleting those left with nothing to read — so no definition ever reads
+what no longer exists. Deleting a custom index a lens includes asks the same consent.
+Managed indices are never part of it: they follow the schema by themselves.
 
 **Every entity type has exactly one name property.**
 It is a `string` property of that type, created with the type, reassignable to another
@@ -480,7 +491,8 @@ predates name properties — older storage, a previous-version transfer payload 
 derivation assigns it, and that derivation is used nowhere else.
 
 **Search indices are ontology-level design objects; lenses include them.** An index is
-defined and stored once per ontology and serves every lens. An unscoped lens searches
+defined and stored once per ontology and serves every lens: a custom index is defined by
+a modeler in modeling, a managed one derived by the server. An unscoped lens searches
 every index; a scoped lens only the indices it includes, and only while it exposes their
 root entity type. Index inclusions never make a lens scoped. Lenses only subtract: a
 lens-owned index would duplicate entries and embedding cost across lenses and vanish with
@@ -493,8 +505,10 @@ passage index; managed indices follow the schema.** The default index covers the
 own `string` properties; the passage index holds the document's chunks headed by the
 entity's name. The server derives both from the schema on every schema change, creates,
 updates and deletes them without a consent step, and includes a new one in every scoped
-lens exposing its root type. They cannot be edited. Search works with no index
-configuration, and a schema change can never leave search reading a stale field list.
+lens exposing its root type. They cannot be edited, only switched off, and have no
+relation groups — relations enrich an entity only through a custom index. Search works
+with no index configuration, and a schema change can never leave search reading a stale
+field list.
 
 **A search entry holds at most one relation instance; entries never combine relations.**
 An entity's own fields form one entry; each relation instance, with the entity at its
@@ -506,6 +520,27 @@ containing it; kept apart, each relation's facts stay separately rankable, and a
 hides a relation type or target type skips those entries at query time, with no rebuild
 and no hidden facts inside a combined vector. Deliberation:
 [adr/0023](adr/0023-one-search-entry-per-relation-instance.md).
+
+**A relation group reaches one hop.** A custom index follows its root entity's relations
+to the entities at their other end, nothing further. Each group already multiplies a
+root type's entries by about one plus its degree, and a change of a related entity
+queues every relation pointing to it; a further hop would multiply both again.
+
+**Relation and passage entries start with a header of the entity's own fields; relation
+groups follow either direction.** The header defaults to the entity type's name property
+and is configurable per custom index, so an entry about one relation still matches
+together with whose relation it is, while each relation keeps an entry of its own. A
+group follows outgoing or incoming relations, so a type can be found by the relations
+that point to it.
+
+**A cost preview and per-index limits control indexing cost, not an index count.** A
+custom index reads at most 12 fields — own, relation and target fields together, the
+header not counted — and holds at most 4 relation groups. There is no cap on the number
+of indices. Entries, not indices, drive cost: one index with an incoming group on a hub
+type can outweigh many small ones, so modeling estimates the entries and build time of
+a definition at the measured throughput before it is saved. The field cap bounds entry
+text, which dilutes a vector as it grows, and keeps definitions readable; each relation
+group multiplies entries, and four is generous.
 
 **A lens may search an index that reads properties it hides; results are projected and
 the snippet withheld.** Entries are composed from the full schema, so a hidden value can
@@ -570,7 +605,8 @@ no default ontology exists, and it ships as a major version bump. Deliberation:
 [adr/0018](adr/0018-multi-ontology-hard-cut.md).
 
 **Transfer scope** — export and import carry one ontology's design: schema, lenses,
-and their agents, saved queries and retrievers, and the keyword language set. Never
+and their agents, saved queries and retrievers, the keyword language set, and the custom
+search indices with the managed indices switched off. Never
 instance data, never the ontology's identity. A transfer document is portable into any
 ontology.
 

@@ -3,20 +3,17 @@
  * over the managed default and passage indices, and relation entries that
  * pair one relation with its own target in the semantic representation —
  * "CTO ACME" finds the CTO of ACME through that very employment; "CTO Foo"
- * does not find her through it. PostgreSQL only; SKIPPED when Ollama or
- * the model is unavailable.
+ * does not find her through it, semantic and hybrid alike — over a custom
+ * index created through the modeling API. PostgreSQL only; SKIPPED when
+ * Ollama or the model is unavailable.
  */
-
-import { randomUUID } from "node:crypto";
 
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createApp } from "../../../src/app.js";
 import { settings } from "../../../src/config.js";
-import { closeStores, getRuntimeStore, getSearchIndexStore, initStores } from "../../../src/core/ports.js";
-import { SearchIndexDefinition } from "../../../src/core/searchIndex.js";
-import { reconcileSearchGenerations } from "../../../src/runtime/indexing/generations.js";
+import { closeStores, getRuntimeStore, initStores } from "../../../src/core/ports.js";
 import { drainSearchWork } from "../../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache } from "../../../src/runtime/schemaCache.js";
 import { searchByIndices } from "../../../src/runtime/search/indexSearch.js";
@@ -74,28 +71,23 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "postgres")("search indices
       displayName: "Role",
       dataType: "string",
     });
-    const store = await getSearchIndexStore(O);
-    await store.createIndex(
-      randomUUID(),
-      "custom",
-      SearchIndexDefinition.parse({
-        key: "employment",
-        name: "People by employment",
-        description: "People with their roles at companies",
-        entityType: "person",
-        fields: ["name"],
-        relations: [
-          {
-            relationType: "works_for",
-            direction: "outgoing",
-            fields: ["role"],
-            target: { company: ["name"] },
-            label: "Employment",
-          },
-        ],
-      }),
-    );
-    await reconcileSearchGenerations(O);
+    // The custom index is created through the modeling API.
+    await post(`${MODEL}/search-indices`, {
+      key: "employment",
+      name: "People by employment",
+      description: "People with their roles at companies",
+      entityType: "person",
+      fields: ["name"],
+      relations: [
+        {
+          relationType: "works_for",
+          direction: "outgoing",
+          fields: ["role"],
+          target: { company: ["name"] },
+          label: "Employment",
+        },
+      ],
+    });
 
     for (const [name, bio] of [
       ["Ada Lovelace", "Ada designs analytical engines and writes programs computing Bernoulli numbers."],
@@ -177,5 +169,27 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "postgres")("search indices
       expect([ids["Ada Lovelace@ACME"], ids["Ada Lovelace@Foo"]]).toContain(ada.matched.relationId);
       expect(foo.hits.indexOf(ada)).toBeGreaterThan(0);
     }
+  });
+
+  it("the custom index built through the API is ready, and hybrid search pairs the same way", async () => {
+    const status = await app.inject({ url: `${MODEL}/search-indices/employment/status` });
+    expect(status.json()).toMatchObject({
+      state: "ready",
+      representations: [
+        { representation: "keyword", state: "ready" },
+        { representation: "semantic", state: "ready" },
+      ],
+    });
+
+    const runtime = await getRuntimeStore(O);
+    const hybrid = (query: string) =>
+      searchByIndices("all", { query, indices: ["employment"], mode: "hybrid" }, runtime);
+    const acme = await hybrid("CTO ACME");
+    expect(acme.mode).toBe("hybrid");
+    expect(acme.hits[0]!.entity._id).toBe(ids["Ada Lovelace"]);
+    expect(acme.hits[0]!.matched).toMatchObject({ relationId: ids["Ada Lovelace@ACME"] });
+    const foo = await hybrid("CTO Foo");
+    expect(foo.hits[0]!.entity._id).toBe(ids["Bob Miller"]);
+    expect(foo.hits[0]!.matched).toMatchObject({ relationId: ids["Bob Miller@Foo"] });
   });
 });

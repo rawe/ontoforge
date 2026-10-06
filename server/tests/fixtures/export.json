@@ -226,5 +226,6 @@
             "retrievers": []
         }
     ],
-    "keywordLanguages": ["german", "english"]
+    "keywordLanguages": ["german", "english"],
+    "searchIndices": { "custom": [], "disabled": [] }
 }

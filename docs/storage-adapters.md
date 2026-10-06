@@ -353,6 +353,19 @@ scoped lens that exposes its root entity type — by an entity inclusion of the 
 in a lens with relation inclusions only, because every type is exposed — skipping lenses
 that include it already, and returns how many it was added to.
 
+**Modeling reads.** Two reads serve the modeling of indices. One lists the keys of the
+lenses that include an index, sorted — the lenses its deletion names in a cascade
+refusal. The other measures what a full build of an index would hold, for the cost
+preview, from aggregates over the stored instances, never reading a document into
+memory. It takes the root entity type, whether entities get an own entry, the document
+property passages are cut from with the chunk size and overlap, and per relation group
+the relation type, the end the root entity is on and the target types that count (any,
+when none are named). It answers the number of root-type entities, own entries (that
+number, or none), relation entries — the relations of each group's type whose root end
+is a root-type entity and whose other end is of a counted type — and passages,
+estimated per document as one up to the chunk size and one more per further chunk size
+less overlap.
+
 **Generations.** A generation is one build of one representation — semantic or keyword —
 of one index. It carries the definition hash it was built from, the model id and vector
 width (semantic) or the keyword language set (keyword), a state — `building`, `ready`,
@@ -429,8 +442,8 @@ its attempts start afresh, and it carries a new token. The worker's surface:
 | Queue a type | Queue every entity of a type, as one whole-entity item each, into the given generations — those neither building nor ready are skipped. Returns the count. |
 | Claim | Lease up to a limit of claimable items — due, not leased or with an expired lease, attempts below the maximum, of a building or ready generation — keyword items first, then oldest first; semantic items only of generations of the given model id. Items another claim holds are skipped, never waited for. The lease commits with the claim. Each item carries its attempts and its token. |
 | Complete | Remove claimed items — except one queued again since its claim (its token changed): that one stays, released for the next claim. A write during a lease is never lost. |
-| Fail | Record a failed attempt — attempts plus one, the error, the lease released, the item held back by its delay. An item queued again since its claim is not charged. |
-| Statistics | Per generation with queued items: pending and failed counts and a few distinct last errors. |
+| Fail | Record a failed attempt — attempts plus one, the error and its time, the lease released, the item held back by its delay. An item queued again since its claim is not charged. |
+| Statistics | Per generation with queued items: pending and failed counts, and the errors of failed or retrying items — the newest item per distinct message, newest first, at most ten, each with its entity, part kind, message and time. |
 
 An item whose attempts reached the maximum is failed for good and never claimed again; a
 new write of its entity, or a rebuild, gives it a fresh start. The delays, the maximum and
@@ -910,7 +923,7 @@ Five tables per namespace hold search indices:
 | `search_settings` | One row, pinned by a check on its boolean key: the keyword language set as an array, the switched-off indices as `jsonb` |
 | `search_index` | One row per index: key, kind, the root entity type as a reference with delete cascade, the definition as `jsonb` |
 | `search_generation` | One row per generation: index reference with delete cascade, representation, definition hash, model id and dimensions or languages, state, counters. Two partial unique indexes — one over `building` rows, one over `ready` — allow one of each per index and representation |
-| `search_queue` | A generation's parts awaiting composition, keyed like an entry, with the time it was last queued, attempts, earliest retry, lease and last error; deleted with its generation, and cleared when the generation retires or fails. B-tree indexes on the earliest retry, the entity id and the part id |
+| `search_queue` | A generation's parts awaiting composition, keyed like an entry, with the time it was last queued, attempts, earliest retry, lease, and the last error with its time (`last_error_at`); deleted with its generation, and cleared when the generation retires or fails. B-tree indexes on the earliest retry, the entity id and the part id |
 | `search_entry` | The entries, list-partitioned by generation |
 
 An entry row carries its identity — generation, entity, part kind, group number, part id,
@@ -969,9 +982,15 @@ The queue works in plain SQL on `search_queue`:
   and token. It commits on its own, so no transaction is held while the worker composes
   and calls the embedding provider.
 - **Complete** deletes the claimed rows whose `enqueued_at` still equals the token and
-  clears the lease of the rest; **fail** increments attempts, records the error and sets
-  the earliest retry on the rows whose token still matches, and clears every claimed
-  row's lease.
+  clears the lease of the rest; **fail** increments attempts, records the error and its
+  time and sets the earliest retry on the rows whose token still matches, and clears
+  every claimed row's lease.
+- **Statistics** is one statement per call: counts grouped by generation, and the
+  newest row per generation and distinct `last_error` — an error without a recorded
+  time takes `enqueued_at` as its time — ranked by time and cut at ten.
+- **Measuring** an index's content counts `entity` rows of the root type, summing a
+  passage estimate from the `char_length` of the document value, and one count over
+  `relation` joined to both end entities per group.
 - **Ranking** runs on the ready generation's table, the generation row held `FOR SHARE`
   so the table stays while it is read. Semantic: a strict-order iterative HNSW scan over
   `embedding::halfvec(D)` by cosine distance at the generation's width, the score

@@ -74,8 +74,8 @@ Five modules, with a deliberately acyclic dependency graph:
 **Registry** manages ontologies as whole units: create, list, read, rename, delete. It
 never looks inside one.
 
-**Modeling** owns one ontology's schema: types, properties, lens definitions, cascade
-rules, schema validation, transfer, search-data rebuild.
+**Modeling** owns one ontology's schema: types, properties, lens definitions, search-index
+definitions and settings, cascade rules, schema validation, transfer, search-data rebuild.
 
 **Runtime** owns one ontology's instance data: entity and relation lifecycle, traversal,
 documents, search, search indexing, query execution, saved-query pipelines, agents.
@@ -326,7 +326,7 @@ There are exactly six top-level codes:
 | Resource does not exist | 404 | `RESOURCE_NOT_FOUND` | — |
 | Uniqueness or referential conflict | 409 | `RESOURCE_CONFLICT` | — |
 | Input rejected | 422 | `VALIDATION_ERROR` | `fields` map or `errors` list |
-| Change requires explicit cascade | 409 | `CASCADE_REQUIRED` | `affectedLenses` |
+| Change requires explicit cascade | 409 | `CASCADE_REQUIRED` | `affectedLenses`, `affectedIndices` |
 | Unexpected storage failure | 500 | `STORAGE_ERROR` | `errorId` |
 | Malformed request body | 400 | `INVALID_JSON` | — |
 
@@ -335,8 +335,8 @@ Two refinements:
 **`details.code` narrows, it does not replace.** Where it appears, the top-level code
 stays one of the six. A request for an unavailable search strategy, search with no available strategy,
 saved-query discovery with no embedding provider, an AI request with no
-language-model provider configured — or a search-settings request to a storage adapter
-without search indices — answers `422 VALIDATION_ERROR` with `details.code` of `FEATURE_DISABLED`.
+language-model provider configured — or a search-settings or search-index request to a
+storage adapter without search indices — answers `422 VALIDATION_ERROR` with `details.code` of `FEATURE_DISABLED`.
 
 **`STORAGE_ERROR` carries an id, not a cause.** A driver message names the vendor and its
 physical objects, which must not reach a client. The adapter logs the original against a

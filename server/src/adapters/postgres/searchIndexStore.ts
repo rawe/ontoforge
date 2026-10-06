@@ -52,6 +52,7 @@ import {
 } from "../../core/keywordLanguage.js";
 import type {
   ClaimedSearchQueueItem,
+  IndexContentRequest,
   NewSearchGeneration,
   RankedSearchEntry,
   Row,
@@ -74,6 +75,7 @@ import type {
   SearchIndexKind,
   SearchRepresentation,
 } from "../../core/searchIndex.js";
+import { MAX_LAST_ERRORS, type IndexContentSize } from "../../core/searchPipeline.js";
 import { keywordTsquery } from "../../core/searchQuery.js";
 import { runQuery, withTransaction, type DbResult, type Querier } from "./errors.js";
 import { buildFilterClauses } from "./filters.js";
@@ -111,7 +113,7 @@ export const SEARCH_WORK_CHANNEL = "ontoforge_search_work";
  * releases it when it completes. */
 const ENQUEUE_CONFLICT =
   `ON CONFLICT (${ENTRY_KEY}) DO UPDATE SET enqueued_at = clock_timestamp(), ` +
-  `attempts = 0, not_before = now(), last_error = NULL`;
+  `attempts = 0, not_before = now(), last_error = NULL, last_error_at = NULL`;
 
 const LIVE_STATES = "('building', 'ready')";
 
@@ -817,7 +819,7 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
       // An item enqueued again since its claim already starts afresh.
       await querier.query(
         `UPDATE search_queue q
-         SET attempts = q.attempts + 1, last_error = $2, lease_until = NULL,
+         SET attempts = q.attempts + 1, last_error = $2, last_error_at = now(), lease_until = NULL,
              not_before = now() + make_interval(secs => c.delay_ms / 1000.0)
          FROM ${CLAIMED_SOURCE}
          WHERE ${CLAIMED_MATCH} AND q.enqueued_at = c.token::timestamptz`,
@@ -831,20 +833,94 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
   }
 
   async queueStats(maxAttempts: number): Promise<SearchQueueStats[]> {
+    // Per generation: the counts, and the newest item per distinct error
+    // message, newest first.
     const result = await this.query(
-      `SELECT generation_id,
-              count(*) FILTER (WHERE attempts < $1)::int AS pending,
-              count(*) FILTER (WHERE attempts >= $1)::int AS failed,
-              (array_agg(DISTINCT last_error) FILTER (WHERE last_error IS NOT NULL))[1:5] AS last_errors
-       FROM search_queue GROUP BY generation_id`,
-      [maxAttempts],
+      `WITH errors AS (
+         SELECT DISTINCT ON (generation_id, last_error)
+                generation_id, entity_id, part_kind, last_error,
+                coalesce(last_error_at, enqueued_at) AS at
+         FROM search_queue WHERE last_error IS NOT NULL
+         ORDER BY generation_id, last_error, at DESC
+       ), ranked AS (
+         SELECT *, row_number() OVER (PARTITION BY generation_id ORDER BY at DESC) AS n FROM errors
+       )
+       SELECT q.generation_id,
+              count(*) FILTER (WHERE q.attempts < $1)::int AS pending,
+              count(*) FILTER (WHERE q.attempts >= $1)::int AS failed,
+              (SELECT coalesce(jsonb_agg(jsonb_build_object(
+                         'entityId', r.entity_id, 'partKind', r.part_kind,
+                         'message', r.last_error, 'at', r.at) ORDER BY r.at DESC), '[]'::jsonb)
+               FROM ranked r WHERE r.generation_id = q.generation_id AND r.n <= $2) AS last_errors
+       FROM search_queue q GROUP BY q.generation_id`,
+      [maxAttempts, MAX_LAST_ERRORS],
     );
     return result.rows.map((row) => ({
       generationId: row["generation_id"] as string,
       pending: row["pending"] as number,
       failed: row["failed"] as number,
-      lastErrors: (row["last_errors"] as string[] | null) ?? [],
+      lastErrors: (row["last_errors"] as Row[]).map((error) => ({
+        entityId: error["entityId"] as string,
+        partKind: error["partKind"] as SearchQueuePartKind,
+        message: error["message"] as string,
+        at: new Date(error["at"] as string),
+      })),
     }));
+  }
+
+  // ------------------------------------------------------------------
+  // Modeling reads
+  // ------------------------------------------------------------------
+
+  async findLensesIncludingIndex(key: string): Promise<string[]> {
+    const result = await this.query(
+      `SELECT l.key FROM lens_includes li
+       JOIN lens l ON l.lens_id = li.lens_id
+       JOIN search_index si ON si.search_index_id = li.search_index_id
+       WHERE si.key = $1 ORDER BY l.key`,
+      [key],
+    );
+    return result.rows.map((row) => row["key"] as string);
+  }
+
+  async measureIndexContent(request: IndexContentRequest): Promise<IndexContentSize> {
+    // Passages per document, as the chunker cuts them: one up to the chunk
+    // size, then one per further (size - overlap) characters. The chunker
+    // prefers boundaries, so a real document may need a few more.
+    const passages = request.passages;
+    const entities = await this.query(
+      `SELECT count(*)::int AS entities,
+              coalesce(sum(CASE
+                WHEN $2::text IS NULL THEN 0
+                WHEN coalesce(char_length(e.props ->> $2::text), 0) = 0 THEN 0
+                WHEN char_length(e.props ->> $2::text) <= $3::int THEN 1
+                ELSE 1 + ceil((char_length(e.props ->> $2::text) - $3::int)::numeric
+                              / ($3::int - $4::int))
+              END), 0)::bigint AS passages
+       FROM entity e WHERE e.type_key = $1`,
+      [request.entityType, passages?.property ?? null, passages?.chunkSize ?? 1, passages?.chunkOverlap ?? 0],
+    );
+    const entityCount = entities.rows[0]!["entities"] as number;
+    let relationEntries = 0;
+    for (const group of request.groups) {
+      const [own, other] = group.owner === "from" ? ["from_id", "to_id"] : ["to_id", "from_id"];
+      const relations = await this.query(
+        `SELECT count(*)::bigint AS n
+         FROM relation r
+         JOIN entity o ON o.id = r.${own}
+         JOIN entity t ON t.id = r.${other}
+         WHERE r.type_key = $1 AND o.type_key = $2
+           AND ($3::text[] IS NULL OR t.type_key = ANY($3::text[]))`,
+        [group.relationType, request.entityType, group.targetTypes],
+      );
+      relationEntries += Number(relations.rows[0]!["n"]);
+    }
+    return {
+      entities: entityCount,
+      selfEntries: request.selfEntries ? entityCount : 0,
+      relationEntries,
+      passageEntries: Number(entities.rows[0]!["passages"]),
+    };
   }
 
   // ------------------------------------------------------------------

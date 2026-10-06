@@ -67,7 +67,7 @@ Each inclusion optionally carries a **property allowlist**:
 That is the difference between the two stability classes of a scoped lens, and it
 decides which lenses the cascade protocol defends: only an allowlist can be
 invalidated by a property change, so only lenses with allowlists are ever named in
-a cascade refusal ([schema-modeling.md](schema-modeling.md)).
+a cascade refusal over a property ([schema-modeling.md](schema-modeling.md#the-cascade-protocol)).
 
 Four rules bind an inclusion. They are enforced when it is added or updated, and
 re-checked by lens validation:
@@ -205,9 +205,12 @@ its root type — by an entity inclusion of the type, or, in a lens with relatio
 inclusions only, because every type is exposed. Nothing else adds one: a scoped lens
 created after an index exists, or an entity type included in a scoped lens after its
 indices exist, has no inclusion of those indices, and ranked search through that lens
-finds nothing through them. Index inclusions are removed with their index or lens and
-are not carried by [transfer](transfer.md); an imported scoped lens includes the managed
-indices the import itself brings into existence.
+finds nothing through them; no scoped lens includes a custom index. Index inclusions are
+removed with their lens, and with their index — deleting a custom index a lens includes
+follows the cascade protocol, naming the lens
+([schema-modeling.md](schema-modeling.md#the-cascade-protocol)). They are not carried by
+[transfer](transfer.md); an imported scoped lens includes the managed indices the import
+itself brings into existence.
 
 The lens still governs what a search returns:
 

@@ -114,12 +114,31 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 /** The mock store with a search-index store whose settings it records. */
+/** A custom index as stored: every default applied. */
+const PEOPLE_INDEX = {
+  key: "people",
+  name: "People",
+  description: "People by name",
+  entityType: "person",
+  fields: ["name"],
+  header: null,
+  relations: [],
+  semantic: { enabled: true, template: null },
+  keyword: { enabled: true },
+};
+
 function withSearchIndices() {
   const settings = { keywordLanguages: ["german", "english"], disabledDefaults: { "x~default": true } };
   const indices = {
     ontologyKey: "onto",
     getSearchSettings: vi.fn(async () => settings),
     setSearchSettings: vi.fn(async (next: unknown) => next),
+    listIndices: vi.fn(async () => [
+      { key: "x~default", kind: "default", definition: { key: "x~default" } },
+      { key: "people", kind: "custom", definition: PEOPLE_INDEX },
+    ]),
+    getIndex: vi.fn(async () => null),
+    createIndex: vi.fn(async () => ({})),
   };
   (holder.store as unknown as { searchIndices: () => unknown }).searchIndices = () => indices;
   return indices;
@@ -167,6 +186,7 @@ describe("export", () => {
     expect(res.json()).toEqual({
       formatVersion: "6.0",
       keywordLanguages: ["german", "english"],
+      searchIndices: { custom: [], disabled: [] },
       entityTypes: [],
       relationTypes: [],
       lenses: [],
@@ -180,6 +200,14 @@ describe("export", () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().keywordLanguages).toEqual(["german", "english"]);
     expect(res.json()).not.toHaveProperty("textSearchLanguage");
+  });
+
+  it("exports the custom index definitions and the switched-off managed indices", async () => {
+    withSearchIndices();
+    holder.store.getFullSchema.mockResolvedValue({ entityTypes: [], relationTypes: [], lenses: [] });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().searchIndices).toEqual({ custom: [PEOPLE_INDEX], disabled: ["x~default"] });
   });
 
   it("omits the includes key entirely for an unscoped lens", async () => {
@@ -484,6 +512,68 @@ describe("import keyword languages", () => {
   it("an adapter without search indices checks the set and keeps nothing of it", async () => {
     const res = await postImport({ ...empty, keywordLanguages: ["english"] });
     expect(res.statusCode, res.body).toBe(201);
+  });
+});
+
+describe("import search indices", () => {
+  const person = entityType("person", "Person", [{ key: "bio", displayName: "Bio", dataType: "document", required: false }]);
+  const payload = (searchIndices: unknown, formatVersion = "6.0") => ({
+    formatVersion,
+    entityTypes: [person],
+    relationTypes: [],
+    lenses: [],
+    searchIndices,
+    ...(formatVersion === "5.0" ? { textSearchLanguage: "german" } : {}),
+  });
+
+  it("6.0: creates the custom definitions and adds the switches to the target's", async () => {
+    const indices = withSearchIndices();
+    const res = await postImport(payload({ custom: [PEOPLE_INDEX], disabled: ["person~bio"] }));
+    expect(res.statusCode, res.body).toBe(201);
+    expect(indices.createIndex).toHaveBeenCalledWith(expect.any(String), "custom", PEOPLE_INDEX);
+    expect(indices.setSearchSettings).toHaveBeenLastCalledWith({
+      keywordLanguages: ["german", "english"],
+      disabledDefaults: { "person~bio": true, "x~default": true },
+    });
+  });
+
+  it("validates each definition against the payload's schema and each switch; writes nothing", async () => {
+    const indices = withSearchIndices();
+    const res = await postImport(
+      payload({ custom: [{ ...PEOPLE_INDEX, fields: ["nope"] }], disabled: ["person~default", "x~gone"] }),
+    );
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details.errors).toEqual([
+      "Import error: search index 'people' is invalid at fields.0: Property 'nope' does not exist on entity type 'person'",
+      "Import error: switched-off search index 'x~gone' is not a managed index of the payload",
+    ]);
+    expect(holder.store.createEntityType).not.toHaveBeenCalled();
+    expect(indices.createIndex).not.toHaveBeenCalled();
+  });
+
+  it("a custom key the target holds, or held twice by the payload, conflicts", async () => {
+    const indices = withSearchIndices();
+    indices.getIndex.mockResolvedValueOnce({ key: "people" } as never);
+    const res = await postImport(payload({ custom: [PEOPLE_INDEX, { ...PEOPLE_INDEX, key: "staff" }, { ...PEOPLE_INDEX, key: "staff" }] }));
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.message).toBe(
+      "Search index with key 'people' already exists; Search index with key 'staff' already exists",
+    );
+    expect(holder.store.createEntityType).not.toHaveBeenCalled();
+  });
+
+  it("5.0 carries no indices; an adapter without search indices validates and keeps nothing", async () => {
+    const indices = withSearchIndices();
+    const legacy = await postImport(payload({ custom: [{ ...PEOPLE_INDEX, fields: ["nope"] }] }, "5.0"));
+    expect(legacy.statusCode, legacy.body).toBe(201);
+    expect(indices.createIndex).not.toHaveBeenCalled();
+
+    delete (holder.store as unknown as { searchIndices?: unknown }).searchIndices;
+    holder.store.createEntityType.mockClear();
+    const kept = await postImport(payload({ custom: [PEOPLE_INDEX], disabled: [] }));
+    expect(kept.statusCode, kept.body).toBe(201);
+    const invalid = await postImport(payload({ custom: [{ ...PEOPLE_INDEX, entityType: "ghost" }] }));
+    expect(invalid.statusCode).toBe(422);
   });
 });
 

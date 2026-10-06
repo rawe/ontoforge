@@ -38,10 +38,15 @@ import {
   RelationTypeUpdate,
   SavedQueryResponse,
   SavedQueryUpsert,
+  IndexStatusResponse,
+  SearchIndexBody,
+  SearchIndexPreviewResponse,
+  SearchIndexResponse,
   SearchSettingsResponse,
   SearchSettingsUpdate,
   ValidationResult,
 } from "./schemas.js";
+import * as searchIndices from "./searchIndices.js";
 import * as service from "./service.js";
 
 // Every params schema carries `ontologyKey` — the mount prefix's own
@@ -65,6 +70,9 @@ const RelationTypePropertyParams = OntologyParams.extend({
 const LensKeyParams = OntologyParams.extend({ lensKey: z.string() });
 const AgentKeyParams = OntologyParams.extend({ lensKey: z.string(), agentKey: z.string() });
 const QueryKeyParams = OntologyParams.extend({ lensKey: z.string(), queryKey: z.string() });
+// Search indices are addressed by key too: managed keys are derived from
+// the schema and carry no identifier of their own.
+const IndexKeyParams = OntologyParams.extend({ indexKey: z.string() });
 
 // `cascade` arrives as a query-string token; accept the usual boolean
 // spellings clients send.
@@ -403,6 +411,148 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
         request.body,
         await getModelingStore(request.params.ontologyKey),
       ),
+  );
+
+  // --- Search indices ---
+  // Managed and custom indices with their status; custom-index CRUD, the
+  // draft preview with its cost estimate, rebuild. Definitions are parsed
+  // by the service (issues by dotted path). An adapter without search
+  // indices answers FEATURE_DISABLED.
+
+  app.get(
+    "/search-indices",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: OntologyParams,
+        response: { 200: z.array(SearchIndexResponse) },
+      },
+    },
+    async (request) =>
+      searchIndices.listSearchIndices(await getModelingStore(request.params.ontologyKey)),
+  );
+
+  app.post(
+    "/search-indices/preview",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: OntologyParams,
+        body: SearchIndexBody,
+        response: { 200: SearchIndexPreviewResponse },
+      },
+    },
+    async (request) =>
+      searchIndices.previewSearchIndex(
+        request.body,
+        await getModelingStore(request.params.ontologyKey),
+      ),
+  );
+
+  app.post(
+    "/search-indices",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: OntologyParams,
+        body: SearchIndexBody,
+        response: { 201: SearchIndexResponse },
+      },
+    },
+    async (request, reply) => {
+      const result = await searchIndices.createSearchIndex(
+        request.body,
+        await getModelingStore(request.params.ontologyKey),
+      );
+      return reply.status(201).send(result);
+    },
+  );
+
+  app.get(
+    "/search-indices/:indexKey",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: IndexKeyParams,
+        response: { 200: SearchIndexResponse },
+      },
+    },
+    async (request) =>
+      searchIndices.getSearchIndex(
+        request.params.indexKey,
+        await getModelingStore(request.params.ontologyKey),
+      ),
+  );
+
+  app.put(
+    "/search-indices/:indexKey",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: IndexKeyParams,
+        body: SearchIndexBody,
+        response: { 200: SearchIndexResponse },
+      },
+    },
+    async (request) =>
+      searchIndices.updateSearchIndex(
+        request.params.indexKey,
+        request.body,
+        await getModelingStore(request.params.ontologyKey),
+      ),
+  );
+
+  app.delete(
+    "/search-indices/:indexKey",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: IndexKeyParams,
+        querystring: CascadeQuery,
+      },
+    },
+    async (request, reply) => {
+      await searchIndices.deleteSearchIndex(
+        request.params.indexKey,
+        request.query.cascade,
+        await getModelingStore(request.params.ontologyKey),
+      );
+      return reply.status(204).send();
+    },
+  );
+
+  app.get(
+    "/search-indices/:indexKey/status",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: IndexKeyParams,
+        response: { 200: IndexStatusResponse },
+      },
+    },
+    async (request) =>
+      searchIndices.getSearchIndexStatusBody(
+        request.params.indexKey,
+        await getModelingStore(request.params.ontologyKey),
+      ),
+  );
+
+  app.post(
+    "/search-indices/:indexKey/rebuild",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: IndexKeyParams,
+        response: { 202: IndexStatusResponse },
+      },
+    },
+    async (request, reply) => {
+      const result = await searchIndices.rebuildSearchIndex(
+        request.params.indexKey,
+        await getModelingStore(request.params.ontologyKey),
+      );
+      return reply.status(202).send(result);
+    },
   );
 
   // --- Entity Types ---

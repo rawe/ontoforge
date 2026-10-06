@@ -29,14 +29,17 @@ export class ValidationError extends OntoForgeError {
   }
 }
 
-/** A schema change would break scoped lenses and cascade was not
- * requested. -> 409 CASCADE_REQUIRED */
+/** A schema change would break scoped lenses or custom search indices
+ * and cascade was not requested. -> 409 CASCADE_REQUIRED. Both lists hold
+ * sorted keys; either may be empty. */
 export class CascadeRequiredError extends OntoForgeError {
   affectedLenses: string[];
+  affectedIndices: string[];
 
-  constructor(message: string, affectedLenses: string[]) {
+  constructor(message: string, affectedLenses: string[], affectedIndices: string[] = []) {
     super(message);
     this.affectedLenses = affectedLenses;
+    this.affectedIndices = affectedIndices;
   }
 }
 

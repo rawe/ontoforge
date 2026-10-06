@@ -64,6 +64,7 @@ import type {
   SearchIndexKind,
   SearchRepresentation,
 } from "./searchIndex.js";
+import type { IndexContentSize } from "./searchPipeline.js";
 
 /** A raw store row: one entity, relation, or schema object as a plain map. */
 export type Row = Record<string, unknown>;
@@ -886,6 +887,14 @@ export interface ClaimedSearchQueueItem extends SearchQueueItem {
   token: string;
 }
 
+/** The last failed attempt of a queued item. */
+export interface SearchQueueError {
+  entityId: string;
+  partKind: SearchQueuePartKind;
+  message: string;
+  at: Date;
+}
+
 /** The queue of one generation, as status reads it. */
 export interface SearchQueueStats {
   generationId: string;
@@ -894,8 +903,23 @@ export interface SearchQueueStats {
   /** Items whose attempts are used up: they wait for a rebuild or a new
    * write of their entity. */
   failed: number;
-  /** The most recent distinct errors of failed or retrying items. */
-  lastErrors: string[];
+  /** The errors of failed or retrying items, newest first: the newest
+   * item per distinct message, at most `MAX_LAST_ERRORS`. */
+  lastErrors: SearchQueueError[];
+}
+
+/** What a full build of one custom index would read — the cost preview's
+ * measurement (`SearchIndexStore.measureIndexContent`). */
+export interface IndexContentRequest {
+  entityType: string;
+  /** Whether entities get a `self` entry (the index reads an own text field). */
+  selfEntries: boolean;
+  /** The document field passages are cut from, with the chunker's size
+   * and overlap. */
+  passages: { property: string; chunkSize: number; chunkOverlap: number } | null;
+  /** Per relation group: the relation type, the end the root entity is on,
+   * and the target types that count (null: any). */
+  groups: { relationType: string; owner: "from" | "to"; targetTypes: string[] | null }[];
 }
 
 /**
@@ -1127,6 +1151,18 @@ export interface SearchIndexStore {
 
   /** Pending and failed counts per generation that has queued items. */
   queueStats(maxAttempts: number): Promise<SearchQueueStats[]>;
+
+  // ------------------------------------------------------------------
+  // Modeling reads
+  // ------------------------------------------------------------------
+
+  /** The keys of the lenses that include an index, sorted. */
+  findLensesIncludingIndex(key: string): Promise<string[]>;
+
+  /** Count what a full build of an index would hold, from the stored
+   * instances — aggregates only, no document is read into memory.
+   * Passages are estimated from document lengths. */
+  measureIndexContent(request: IndexContentRequest): Promise<IndexContentSize>;
 }
 
 /** A subscription to search-work wake-ups (see `subscribeSearchWork`). */

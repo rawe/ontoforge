@@ -28,6 +28,11 @@ An index is stored once per ontology and serves every lens of it. An unscoped le
 searches every index; a scoped lens only the indices it includes
 ([ontology-lenses.md](ontology-lenses.md#search-through-a-lens)).
 
+There are two kinds. **Managed indices** are derived by the server from the schema and
+can only be switched off ([below](#managed-indices)); **custom indices** are defined in
+modeling, and only they have relation groups, a chosen header or templates
+([below](#custom-indices)).
+
 ### Entries
 
 An index holds **entries**: indexed texts, each owned by exactly one entity of the root
@@ -83,6 +88,163 @@ generations retire, and it contributes nothing to search until it is switched on
 which builds its generations anew from all entities of its root type. When a schema
 change removes a managed index, its switch goes with it.
 
+## Custom indices
+
+A custom index is written by a modeler: it chooses the root type, the fields, the header,
+the relation groups, the templates and the representations. Its key follows the shared
+key rules, so it never contains `~` and never collides with a managed key; a name and a
+description are required — the description is written for whoever picks an index to
+search. A definition looks like this:
+
+```json
+{
+  "key": "person_employment",
+  "name": "People by employment",
+  "description": "People with their roles at companies and since when.",
+  "entityType": "person",
+  "fields": ["name", "bio"],
+  "header": null,
+  "relations": [
+    {
+      "relationType": "works_for",
+      "direction": "outgoing",
+      "fields": ["role", "since"],
+      "target": { "company": ["name", "founded"] },
+      "label": "Employment",
+      "template": "{name}, {role} at {target.name}, since {since}."
+    }
+  ],
+  "semantic": { "enabled": true, "template": null },
+  "keyword": { "enabled": true }
+}
+```
+
+Every part but key, name, description and root type may be left out: absent fields and
+groups count as none — though an index needs one of them — an absent header is the name
+property, absent templates are none, and both representations are on.
+
+### Relation groups
+
+A relation group follows one relation type in one direction from the root: `outgoing`
+when the root type is the relation type's source, `incoming` when it is its target. It
+names the relation's own properties to include (`fields`) and those of the entity at the
+other end (`target`, keyed by that entity's type — the relation type's other endpoint,
+the one key it can hold). A group reaches the root's relations and the entities on their
+other end, nothing further: one hop
+([../decisions.md](../decisions.md#behaviour)).
+
+**Pairing is per relation instance.** Each relation of the group yields one entry of the
+entity on the root side, holding that relation's properties together with those of the
+very entity it points at — never another relation's, never a merge of several
+([entries](#entries)). An entity with three employments has three employment entries,
+and each can match on its own. A group with only relation fields still yields one entry
+per relation; one with only target fields carries the related entity's fields and none
+of the relation's.
+
+The group's `label` heads its entries' semantic text; without one, the relation type's
+display name does. Two groups may follow the same relation type only in different
+directions — a relation type from a type to itself, followed both ways.
+
+### Header
+
+The header is the short prefix of the root's own fields that starts every relation and
+passage entry, so an entry about one employment still says whose it is. It never starts
+the entity's own entry, which holds the fields anyway.
+
+| `header` | Header |
+|---|---|
+| absent or null | the root type's [name property](schema-modeling.md#the-name-property) — and follows it when it is reassigned |
+| a list of keys | those own fields, in that order |
+| an empty list | none |
+
+Header fields are own fields of the root and need not be among `fields`.
+
+### Templates
+
+Without a template, semantic text renders as labelled lines ([composition](#composition)).
+A template replaces them with prose, for the semantic representation only — keyword
+entries never use a template. `semantic.template` renders the entity's own entry; a
+group's `template` renders each of its relation entries. Passages have none.
+
+- `{x}` is the value of field `x`: in a relation template a relation field of the group,
+  else an own or header field of the root; in the own-entry template an own or header
+  field.
+- `{target.x}` is field `x` of the entity at the other end — a target field of the group.
+- A placeholder without a value — empty, or naming a field the index does not read —
+  drops its **clause**: the template text up to and including the next `,`, `;`, `.` or
+  line break. Separators left over at either end are trimmed.
+- The template replaces the whole entry text: no header or group label is added in front
+  of it.
+- When every clause is dropped, the entry falls back to the labelled lines.
+
+Placeholders are not validated: a misspelt one simply never has a value.
+
+### Validation and limits
+
+A custom index is validated against the full schema when it is created, replaced,
+previewed or imported. Every issue is reported at once, each at a dotted path into the
+definition (`relations.0.target.company`):
+
+- the root entity type exists;
+- each group's relation type exists and starts (`outgoing`) or ends (`incoming`) at the
+  root type; each `target` key is the entity type at its other end;
+- every field exists on its owner — the root for `fields` and `header`, the relation
+  type for a group's `fields`, the target type for its target fields — and appears once
+  in its list;
+- fields are `string`, `integer`, `float`, `boolean`, `date` or `datetime`, rendered as
+  text; a `document` is allowed only among the root's `fields`, at most one, and makes
+  the index cut that document into passage entries beside the own entry of the remaining
+  fields;
+- an index reads at least one field or has at least one group, and every group reads at
+  least one relation or target field;
+- two groups on one relation type differ in direction;
+- at least one representation is enabled.
+
+**Limits.** At most **12 fields** — own, relation and target fields counted together;
+the header does not count — and at most **4 relation groups**, of one hop each. There is
+no cap on the number of indices: the [cost preview](#cost-preview) shows what each one
+costs instead. The limits bind custom indices only; managed indices are derived and
+never validated against them.
+
+### Changing a custom index
+
+A replacement names the whole definition; the key never changes. A new generation is
+built only for a representation whose content the change touches — the key, name,
+description and the representation switches touch none, and group labels and templates
+touch the semantic representation alone. Switching a representation off retires its
+generations; switching it on builds one. Until a new generation is ready, the previous
+one keeps serving ([lifecycle](#lifecycle)).
+
+Deleting a custom index deletes its generations and entries. When a lens includes it,
+the deletion follows the cascade protocol
+([schema-modeling.md](schema-modeling.md#the-cascade-protocol)). The schema changes
+that reach a custom index — a deleted type it reads, a deleted property it reads — do
+so too, and the cascade prunes the index rather than leaving it reading what no longer
+exists.
+
+## Cost preview
+
+A draft definition can be checked without saving it. The preview validates it exactly as
+a save would and, for a valid draft, estimates what building it costs; an invalid draft
+returns its issues and no estimate, never a refusal. A draft needs no key.
+
+The estimate is always that of a **full build** — every entity of the root type composed
+again, as a new generation is built, whatever the change from a stored definition:
+
+- **entities** — of the root type;
+- **entries** — per representation: one own entry per entity when the index reads an own
+  text field, one per relation of each group whose root end is an entity of the root
+  type, and the passages of the document field, estimated from each document's length
+  as the chunker cuts it (a chunker that prefers boundaries may cut a few more);
+- **seconds** — per representation, the entries divided by the throughput: what the
+  worker of the answering server process has measured, as a moving average, or a default
+  before it has measured any — 500 keyword and 20 semantic entries per second. Each
+  representation says whether its rate was measured. The total assumes the
+  representations are built one after the other.
+
+A representation that will not be built is left out: one the draft switches off, and
+the semantic one when no embedding provider is configured.
+
 ## Composition
 
 An entry's text is composed from the entity's current state and the **full schema**,
@@ -102,6 +264,9 @@ representation:
 
 - **Keyword text** — the same values in the same order, one per line, with no type,
   field or group label, so a schema label never counts as matching content.
+
+A [template](#templates) replaces the semantic text of a custom index's own or
+relation entries.
 
 Empty values are omitted. `string` values render as they are; integers, floats,
 booleans, dates and datetimes render as text; a document only as passages. Fields render
@@ -140,13 +305,49 @@ generation is built and keyword search is all there is.
 
 **Failures do not fail writes.** Building an entry that fails is retried with growing
 delays; after a configured number of attempts it counts as failed and waits for a new
-write of its entity. A new generation with failed entries does not complete, and the
+write of its entity or a [rebuild](#rebuild). A new generation with failed entries does not complete, and the
 generation it would replace keeps serving.
+
+### Status
+
+Every index reports a build status per representation it keeps — one its definition
+switches off is not reported — with the entities done and the total of a generation
+building, the items pending and the items failed:
+
+| State | Meaning |
+|---|---|
+| `ready` | the active generation is current, nothing pending |
+| `building` | a new generation is filling; done of total |
+| `stale` | the active generation has work pending, or no generation exists yet |
+| `failed` | items failed for good — in the active generation with nothing else pending, or all that a building generation has left |
+| `unavailable` | the semantic representation without an embedding provider |
+
+The index's own state is the most severe of its representations' — `failed`, then
+`building`, `stale`, `ready` — and `unavailable` only when no representation can be
+built. A switched-off managed index reports `disabled` and no representation. The status
+also lists up to ten last errors, newest first, one per distinct message: the entity,
+the part kind, the message and the time of the failed attempt.
+
+### Rebuild
+
+A rebuild starts a new generation of every representation an index keeps — the semantic
+one only with an embedding provider — from all entities of its root type, whether or
+not anything changed. It gives failed items their fresh start; the active generations
+keep serving until the new ones are ready. It answers at once with the status. A
+switched-off managed index cannot be rebuilt.
 
 ## Through the interfaces
 
 Indices are reached through ranked search: `GET search`, the MCP and agent search tools
 and saved-query search steps search the managed indices of the requested types, and each
-hit names the entry that matched ([search.md](search.md#response)). The server's feature
-report says whether the storage adapter stores search indices
-([../interfaces.md](../interfaces.md#server)).
+hit names the entry that matched ([search.md](search.md#response)). No search operation
+ranks a custom index; its entries are built and kept current, and its status reported.
+
+Indices are designed through the modeling surface — REST and the modeling MCP server —
+which lists every index with its status, manages custom indices, previews
+a draft and starts a rebuild
+([../interfaces.md](../interfaces.md#search-indices)). The whole-schema read and the
+[transfer format](transfer.md) carry the custom definitions and the switched-off
+managed indices. The server's feature report says whether the storage adapter stores
+search indices ([../interfaces.md](../interfaces.md#server)); on one that stores none,
+every search-index operation is refused as a disabled feature.

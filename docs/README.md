@@ -37,7 +37,7 @@ what rules bind it, and how it is reached from every interface.
 | [instance-data](capabilities/instance-data.md) | Creating, reading and traversing entities and relations |
 | [documents](capabilities/documents.md) | Long-text properties, stubs and partial edits |
 | [search](capabilities/search.md) | Literal matching and ranked search |
-| [search-indices](capabilities/search-indices.md) | What ranked search reads: indices, entries, managed indices, generations |
+| [search-indices](capabilities/search-indices.md) | What ranked search reads: indices, entries, managed and custom indices, cost preview, generations and build status |
 | [oql](capabilities/oql.md) | The query language |
 | [saved-queries](capabilities/saved-queries.md) | Stored, parameterized query pipelines |
 | [ai-agents](capabilities/ai-agents.md) | Natural-language querying, extraction, chat, A2A |
@@ -307,12 +307,23 @@ See [capabilities/search-indices.md](capabilities/search-indices.md).
 with it: a default index per entity type over its own `string` properties, and a passage
 index per document property.
 
+**Custom index** — a search index a modeler defines: its root type, fields, header,
+relation groups, templates and representations. Only custom indices have relation
+groups. See [capabilities/search-indices.md](capabilities/search-indices.md#custom-indices).
+
 **Entry** — one indexed text of a search index, owned by one entity: its own fields, one
 relation instance with the entity at its other end, or one passage of a document.
 
 **Relation group** — the part of an index definition that follows one relation type in one
 direction and names the relation's and the target entity's properties to include; it
 yields one entry per relation instance. Managed indices have none.
+
+**Header** — the short prefix of an entity's own fields that starts each of its relation
+and passage entries, by default its name property's value.
+
+**Cost preview** — the estimate of a search index definition's full build — entities,
+entries and seconds per representation at the measured throughput — returned with its
+validation, without saving it.
 
 **Generation** — one build of one representation of one search index, identified by the
 definition and the embedding model (semantic) or the keyword language set (keyword).
@@ -357,6 +368,7 @@ compilation, index management, error translation, and the physical isolation bet
 ontologies. Exactly one is active.
 
 **Transfer format** — the versioned JSON representation of one ontology's design, used
-for export and import. Carries schema, lenses, agents, saved queries and retrievers
-only — no instance data and no ontology identity. See
+for export and import. Carries schema, lenses, agents, saved queries, retrievers, the
+keyword language set, custom search indices and managed-index switches only — no
+instance data and no ontology identity. See
 [capabilities/transfer.md](capabilities/transfer.md).

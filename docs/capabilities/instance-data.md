@@ -58,11 +58,15 @@ Endpoint errors are collected alongside property errors and reported together.
 rather than rejecting the request; properties in the same payload still apply. Repointing a
 relation means deleting it and creating another, with a new id.
 
-Deleting a relation removes only that relation; neither endpoint is touched.
+Deleting a relation removes that relation and its entries in every search index; neither
+endpoint is touched.
 
-Relations carry no document properties (the schema forbids them there) and are never
-embedded, so they are invisible to [search](search.md) — they are reachable by listing, by
-traversal and by [OQL](oql.md) only.
+Relations carry no document properties (the schema forbids them there) and are never a
+hit of [search](search.md): hits are entities. A relation is composed into search entries
+only by a custom search index with a relation group on its type — one entry per relation,
+with the entity at its other end, owned by the entity on the index's root side
+([search-indices.md](search-indices.md#relation-groups)). Relations themselves are
+reachable by listing, by traversal and by [OQL](oql.md).
 
 ## Validation
 

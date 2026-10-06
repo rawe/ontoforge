@@ -10,6 +10,7 @@ import { KeywordLanguage, KeywordLanguageSetSchema } from "../core/keywordLangua
 import { z } from "zod";
 
 import { DATA_TYPES, DEFAULT_NAME_PROPERTY, KEY_PATTERN, MAX_KEY_LENGTH } from "../core/schemas.js";
+import { SearchIndexDefinition } from "../core/searchIndex.js";
 
 // --- Lens ---
 
@@ -338,12 +339,22 @@ export const ExportLens = z.object({
   savedQueries: z.array(ExportSavedQuery).default([]),
 });
 
+/** The transfer format's search indices: the custom definitions and the
+ * managed indices switched off (managed definitions are derived from the
+ * schema, so only their switches travel). */
+export const ExportSearchIndices = z.object({
+  custom: z.array(SearchIndexDefinition).default([]),
+  disabled: z.array(z.string()).default([]),
+});
+
 export const ExportPayload = z.object({
   formatVersion: z.string().optional().default(TRANSFER_FORMAT_VERSION),
   // Each required by its own version — 6.0 the keyword language set, 5.0
   // its one text-search language — so import checks them itself.
   keywordLanguages: KeywordLanguageSetSchema.optional(),
   textSearchLanguage: KeywordLanguage.optional(),
+  // 6.0 only; absent = no custom index, every managed index on.
+  searchIndices: ExportSearchIndices.optional(),
   entityTypes: z.array(ExportEntityType).default([]),
   relationTypes: z.array(ExportRelationType).default([]),
   // Required, no default: a pre-4.0 document (`ontologies[]`) must fail
@@ -363,6 +374,92 @@ export const SearchSettingsResponse = z.object({
 export const SearchSettingsUpdate = z.object({
   keywordLanguages: KeywordLanguageSetSchema.optional(),
   disabledIndices: z.array(z.string()).optional(),
+});
+
+// --- Search indices ---
+// Definitions travel in the index wire format (`core/searchIndex.ts`).
+// Request bodies are parsed by the service, so a malformed draft reports
+// its issues by dotted path like every other definition issue; responses
+// carry managed keys (`person~default`), which no key pattern admits.
+
+/** A definition as the service parses it — any JSON object. */
+export const SearchIndexBody = z.record(z.string(), z.unknown());
+
+const RepresentationSchema = z.enum(["semantic", "keyword"]);
+
+export const SearchIndexDefinitionResponse = z.object({
+  key: z.string(),
+  name: z.string(),
+  description: z.string(),
+  entityType: z.string(),
+  fields: z.array(z.string()),
+  header: z.array(z.string()).nullable(),
+  relations: z.array(
+    z.object({
+      relationType: z.string(),
+      direction: z.enum(["outgoing", "incoming"]),
+      fields: z.array(z.string()),
+      target: z.record(z.string(), z.array(z.string())),
+      label: z.string().nullable(),
+      template: z.string().nullable(),
+    }),
+  ),
+  semantic: z.object({ enabled: z.boolean(), template: z.string().nullable() }),
+  keyword: z.object({ enabled: z.boolean() }),
+});
+
+export const IndexStatusResponse = z.object({
+  state: z.enum(["ready", "building", "stale", "failed", "disabled", "unavailable"]),
+  representations: z.array(
+    z.object({
+      representation: RepresentationSchema,
+      state: z.enum(["ready", "building", "stale", "failed", "unavailable"]),
+      done: z.number().int(),
+      total: z.number().int(),
+      pending: z.number().int(),
+      failed: z.number().int(),
+    }),
+  ),
+  lastErrors: z.array(
+    z.object({
+      entityId: z.string(),
+      partKind: z.string(),
+      message: z.string(),
+      at: z.iso.datetime(),
+    }),
+  ),
+});
+
+export const SearchIndexResponse = z.object({
+  key: z.string(),
+  kind: z.enum(["default", "passage", "custom"]),
+  /** Custom indices always; managed ones unless switched off. */
+  enabled: z.boolean(),
+  definition: SearchIndexDefinitionResponse,
+  documentProperty: z.string().nullable(),
+  status: IndexStatusResponse,
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+});
+
+export const CostEstimateResponse = z.object({
+  entities: z.number().int(),
+  entries: z.number().int(),
+  seconds: z.number(),
+  perRepresentation: z.array(
+    z.object({
+      representation: RepresentationSchema,
+      entries: z.number().int(),
+      seconds: z.number(),
+      measured: z.boolean(),
+    }),
+  ),
+});
+
+export const SearchIndexPreviewResponse = z.object({
+  valid: z.boolean(),
+  issues: z.array(SchemaValidationErrorItem),
+  estimate: CostEstimateResponse.nullable(),
 });
 
 export type LensCreateInput = z.infer<typeof LensCreate>;
@@ -391,6 +488,10 @@ export type SavedQueryResponseBody = z.infer<typeof SavedQueryResponse>;
 export type ExportPayloadInput = z.infer<typeof ExportPayload>;
 export type SearchSettingsUpdateInput = z.infer<typeof SearchSettingsUpdate>;
 export type SearchSettingsResponseBody = z.infer<typeof SearchSettingsResponse>;
+export type SearchIndexResponseBody = z.infer<typeof SearchIndexResponse>;
+export type IndexStatusResponseBody = z.infer<typeof IndexStatusResponse>;
+export type SearchIndexPreviewResponseBody = z.infer<typeof SearchIndexPreviewResponse>;
+export type ExportSearchIndicesInput = z.infer<typeof ExportSearchIndices>;
 export type ExportEntityTypeInput = z.infer<typeof ExportEntityType>;
 export type ExportPropertyInput = z.infer<typeof ExportProperty>;
 export type ExportRelationTypeInput = z.infer<typeof ExportRelationType>;

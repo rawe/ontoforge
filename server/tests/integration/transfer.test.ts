@@ -151,6 +151,7 @@ describe("round-trip against a stored export document", () => {
       "keywordLanguages",
       "lenses",
       "relationTypes",
+      "searchIndices",
     ]);
   });
 });

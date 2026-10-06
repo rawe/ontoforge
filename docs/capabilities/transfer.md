@@ -62,11 +62,13 @@ Each lens carries `indexInclusions`, the keys of the search indices it includes 
 and custom alike — in key order
 ([ontology-lenses.md](ontology-lenses.md#search-through-a-lens)). Import writes each list
 as it comes once every index exists, in place of the managed indices the import would
-include in that lens on its own; a scoped lens without the field includes the managed
-indices of the types it exposes. An adapter without search indices exports no
-`indexInclusions`, so importing its payload where indices are stored gives each scoped
-lens the managed indices of the types it exposes; its own import validates the lists and
-keeps nothing of them.
+include in that lens on its own; a scoped lens without the field keeps those: the
+managed indices of the types it exposes, a passage index only when the lens shows its
+document property too, as for any managed index that comes into existence
+([ontology-lenses.md](ontology-lenses.md#search-through-a-lens)). An adapter without
+search indices exports no `indexInclusions`, so importing its payload where indices are
+stored gives each scoped lens those managed indices; its own import validates the lists
+and keeps nothing of them.
 
 ## The format version
 
@@ -84,7 +86,8 @@ field error on the version:
 
 A `5.0` payload differs from `6.0` in four ways. It carries no search indices — a
 `searchIndices` field in it is ignored, and so is a lens's `indexInclusions`: each scoped
-lens includes the managed indices of the types it exposes. Its lenses carry retrievers of
+lens includes the managed indices the import includes on its own
+([above](#what-the-format-carries)). Its lenses carry retrievers of
 configuration version 1 under `retrievers`, in place of `retrieverAgents`; import
 converts each into a retriever agent
 ([retriever-agents.md](retriever-agents.md#converting-version-1-configurations)) —
@@ -179,7 +182,9 @@ Import is a write path, and the write-path rules apply to it:
 - Every custom search index is validated against the payload's own schema, exactly as at
   definition time ([search-indices.md](search-indices.md#validation-and-limits)), and
   every switched-off key must name a managed index that schema derives. An invalid one
-  fails the import, naming the index and the offending path.
+  fails the import, naming the index and the offending path. A definition holding a field
+  the wire format does not define is refused earlier, with the payload's shape, at its
+  position in `searchIndices.custom`.
 - Every key in a lens's `indexInclusions` must name a custom index of the payload or a
   managed index its schema derives, once per lens; an unknown or repeated key fails the
   import, naming the lens and the index. Whether the lens includes the index's root type
@@ -217,8 +222,9 @@ artefacts and computes embeddings, all within the target ontology.
   missing until the server starts with a provider configured, or the rebuild operation
   described in [search.md](search.md#rebuild) runs against one.
 - **Search indices.** The managed search indices of the imported schema come into
-  existence and are included in every scoped lens that exposes their root types — the
-  imported ones among them ([search-indices.md](search-indices.md#managed-indices)) —
+  existence and are included in every scoped lens that exposes their root types, the
+  imported ones among them — a passage index only where the lens shows its document
+  property too ([search-indices.md](search-indices.md#managed-indices)) —
   and the payload's custom indices are created. An imported lens that carries
   `indexInclusions` then includes exactly those indices. Import provisions no entries: each
   index gets its generations, which the worker builds in the background

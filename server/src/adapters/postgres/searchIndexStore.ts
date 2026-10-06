@@ -337,7 +337,9 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
        FROM search_index si, lens l
        WHERE si.key = $1 AND (
          EXISTS (SELECT 1 FROM lens_includes i
-                 WHERE i.lens_id = l.lens_id AND i.entity_type_id = si.entity_type_id)
+                 WHERE i.lens_id = l.lens_id AND i.entity_type_id = si.entity_type_id
+                   AND (si.kind <> 'passage' OR i.properties IS NULL
+                        OR si.definition->'fields'->>0 = ANY(i.properties)))
          OR (NOT EXISTS (SELECT 1 FROM lens_includes i
                          WHERE i.lens_id = l.lens_id AND i.entity_type_id IS NOT NULL)
              AND EXISTS (SELECT 1 FROM lens_includes i

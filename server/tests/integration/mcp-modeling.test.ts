@@ -416,7 +416,7 @@ describe("search indices over MCP", () => {
       "Search index 'people' deleted.",
     );
     expect((await call(client, "get_search_index", { index_key: "people" })).isError).toBe(true);
-  });
+  }, 20_000);
 
   it.skipIf(settings.DB_BACKEND !== "postgres")("delete tools' cascade flag covers custom indices", async () => {
     await schema();

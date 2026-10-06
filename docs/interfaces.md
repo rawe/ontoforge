@@ -408,8 +408,11 @@ path, `estimate` null for an invalid draft, else `entities`, `entries`, `seconds
 An invalid draft is never refused.
 
 Create and replace answer an invalid definition with `VALIDATION_ERROR`, `details.fields`
-keyed by dotted path (`relations.0.target.company`); a key with `~` is refused at `key`,
-and so is a replacement whose body names another key than the path. A taken key is a
+keyed by dotted path (`relations.0.target.company`). The wire format is closed: an unknown
+field is refused at the object that carries it — `definition` at the top level,
+`relations.<i>`, `semantic` or `keyword` below — and is a preview issue at the same path.
+A key with `~` is refused at `key`, and so is a replacement whose body names another key
+than the path. A taken key is a
 conflict. Replacing or deleting a managed index is a conflict — managed indices are only
 switched, in the search settings — and so is rebuilding a switched-off one. Deleting an
 index a lens includes without `cascade` answers `CASCADE_REQUIRED`. Every route answers
@@ -544,9 +547,9 @@ the prefix, query paths included, each with a string value; `minScore`, 0–1, n
 mode that ranks semantically; `limit` counts entities, 1–100, default 10; `fields`
 projects each entity. The response carries `query`, `mode` and `hits`, each hit
 `entity`, `relativeScore` and `matched`. An unknown index key answers not found. A body
-of the wrong shape is rejected with `details.errors`; the request's rules — an index the
-lens cannot search at `indices.<i>`, a relation type at `relations.<i>` — are collected
-under `details.fields`; a mode that needs a missing embedding provider answers
+of the wrong shape, or with a field not listed here, is rejected with `details.errors`;
+the request's rules — an index the lens cannot search at `indices.<i>`, a relation type
+at `relations.<i>` — are collected under `details.fields`; a mode that needs a missing embedding provider answers
 `FEATURE_DISABLED`. Rules:
 [capabilities/search.md](capabilities/search.md#index-search).
 

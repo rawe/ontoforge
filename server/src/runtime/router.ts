@@ -65,7 +65,7 @@ const SearchQuery = z.looseObject({
  * bounds, keys and modes are domain rules (`searchByIndices`), reported
  * by field. `filters` carries the `filter.*` keys of `GET /search`
  * without the prefix. */
-const IndexSearchPayload = z.object({
+const IndexSearchPayload = z.strictObject({
   indices: z.array(z.string()).optional(),
   query: z.string(),
   mode: z.string().optional(),

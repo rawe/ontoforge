@@ -526,9 +526,10 @@ entity's name, and its entries are the only place chunks are kept. Their keys ar
 key pattern, so a managed key never collides with a chosen one, whereas `:` already marks
 a direction in query paths. The server derives both from the schema on every schema change, creates,
 updates and deletes them without a consent step, and includes a new one in every scoped
-lens exposing its root type. They cannot be edited, only switched off, and have no
-relation groups — relations enrich an entity only through a custom index. Search works
-with no index configuration, and a schema change can never leave search reading a stale
+lens exposing its root type — a passage index only where the lens also shows its document
+property, so a scoped lens is never handed a way to find entities by text it hides. They
+cannot be edited, only switched off, and have no relation groups — relations enrich an
+entity only through a custom index. Search works with no index configuration, and a schema change can never leave search reading a stale
 field list.
 
 **A search entry holds at most one relation instance; entries never combine relations.**

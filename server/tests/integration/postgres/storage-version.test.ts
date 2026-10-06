@@ -306,7 +306,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL storage version"
     ]);
   });
 
-  it("writes the managed search indices and includes them in the scoped lenses that show their types", async () => {
+  it("writes the managed search indices and includes them in the scoped lenses that show their types and documents", async () => {
     await getOntologyRegistry().createOntology(ID_A, "older", null, null);
     await makeVersion2("ont_older");
     await seedVersion2Types("ont_older", {
@@ -339,6 +339,15 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL storage version"
          SELECT $1, relation_type_id FROM ${ns}.relation_type WHERE key = 'wrote'`,
         [writing],
       );
+      // A passage index needs its document property shown; a default index
+      // only its type.
+      for (const [key, properties] of [["brief", ["summary"]], ["reading", ["body"]]] as const) {
+        await querier.query(
+          `INSERT INTO ${ns}.lens_includes (lens_id, entity_type_id, properties)
+           SELECT $1, entity_type_id, $2::text[] FROM ${ns}.entity_type WHERE key = 'note'`,
+          [await lens(key), properties],
+        );
+      }
     });
 
     await initSchema();
@@ -355,7 +364,8 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL storage version"
       { key: "person~default", kind: "default", entity_type: "person", fields: ["name"] },
     ]);
     // An unscoped lens needs no inclusions; a lens with relation inclusions
-    // only shows every type.
+    // only shows every type and property; a lens hiding `note.body` does
+    // not get its passage index.
     const included = await runQuery(
       `SELECT l.key AS lens, si.key AS index
          FROM ont_older.lens_includes li
@@ -364,7 +374,10 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL storage version"
         ORDER BY l.key, si.key`,
     );
     expect(included.rows).toEqual([
+      { lens: "brief", index: "note~default" },
       { lens: "people", index: "person~default" },
+      { lens: "reading", index: "note~body" },
+      { lens: "reading", index: "note~default" },
       { lens: "writing", index: "note~body" },
       { lens: "writing", index: "note~default" },
       { lens: "writing", index: "person~default" },

@@ -79,7 +79,8 @@ entries of every index that renders that type, without a new generation. Managed
 definitions cannot be edited.
 
 A managed index that comes into existence is included in every scoped lens that exposes
-its root type ([ontology-lenses.md](ontology-lenses.md#search-through-a-lens)).
+its root type — a passage index only where the lens shows its document property too
+([ontology-lenses.md](ontology-lenses.md#search-through-a-lens)).
 
 **A managed index can be switched off.** The ontology's search settings list the managed
 indices that are off ([../interfaces.md](../interfaces.md#search-settings)). A change
@@ -187,6 +188,9 @@ A custom index is validated against the full schema when it is created, replaced
 previewed or imported. Every issue is reported at once, each at a dotted path into the
 definition (`relations.0.target.company`):
 
+- the definition holds only the fields of the wire format, at every level: an unknown
+  one is never dropped, but reported at the object that carries it — a group, the
+  semantic or keyword settings, or the definition itself;
 - the root entity type exists;
 - each group's relation type exists and starts (`outgoing`) or ends (`incoming`) at the
   root type; each `target` key is the entity type at its other end;

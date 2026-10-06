@@ -63,6 +63,8 @@ describe("POST /search", () => {
       { query: "x", indices: "person_employment" },
       { query: "x", filters: { since: 2020 } },
       { query: "x", limit: "10" },
+      // The body is closed: an unknown key is refused, not ignored.
+      { query: "x", bogus: 1, type: "event" },
     ]) {
       const res = await app.inject({ method: "POST", url: `${RUNTIME}/search`, payload });
       expect(res.statusCode, JSON.stringify(payload)).toBe(422);

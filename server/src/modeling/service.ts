@@ -1615,7 +1615,8 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
  * none, its managed indices derive. A 6.0 lens's `indexInclusions` name
  * indices of either kind and are written as they come once the indices
  * exist; a lens without them (every 5.0 lens) includes the managed
- * indices of the types it exposes, as the storage step's upgrade does.
+ * indices of the types it exposes — a passage index only when it exposes
+ * the document property too — as the storage step's upgrade does.
  * Import provisions no entries: the generations it reconciles are built
  * by the worker. An adapter without search indices checks all of it and
  * keeps nothing of it.
@@ -2133,9 +2134,10 @@ export async function importSchema(
   invalidateLoadedSchemaCache();
   await syncSearchIndices(store);
   // The sync included each new managed index in the scoped lenses that
-  // expose its root type — what a lens without index inclusions (5.0, or
-  // a 6.0 lens without the field) keeps. A 6.0 lens's own list replaces
-  // that, now that every index exists.
+  // expose its root type (a passage index: its document property too) —
+  // what a lens without index inclusions (5.0, or a 6.0 lens without the
+  // field) keeps. A 6.0 lens's own list replaces that, now that every
+  // index exists.
   if (!legacy) {
     for (const lens of payload.lenses) {
       if (lens.indexInclusions !== undefined) {

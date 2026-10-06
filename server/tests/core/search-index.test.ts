@@ -197,6 +197,23 @@ describe("SearchIndexDefinition (wire format)", () => {
     expect(SearchIndexDefinition.safeParse({ ...base, key: "x".repeat(64) }).success).toBe(true);
   });
 
+  it("is closed: an unknown key is rejected at every level", () => {
+    const base = { key: "people", name: "People", description: "x", entityType: "person" };
+    const group = { relationType: "works_for", direction: "outgoing" };
+    for (const [draft, path] of [
+      [{ ...base, kind: "custom" }, []],
+      [{ ...base, relations: [{ ...group, weight: 2 }] }, ["relations", 0]],
+      [{ ...base, semantic: { enabled: true, model: "x" } }, ["semantic"]],
+      [{ ...base, keyword: { enabled: true, language: "english" } }, ["keyword"]],
+    ] as const) {
+      const result = SearchIndexDefinition.safeParse(draft);
+      expect(result.success).toBe(false);
+      expect(result.error!.issues.map((issue) => [issue.code, issue.path])).toEqual([
+        ["unrecognized_keys", path],
+      ]);
+    }
+  });
+
   it("rejects an unknown direction", () => {
     const result = SearchIndexDefinition.safeParse({
       key: "people",

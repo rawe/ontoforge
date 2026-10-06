@@ -104,8 +104,10 @@ async function backfillNameProperties(querier: Querier): Promise<void> {
  * Write a row for every managed search index the schema implies
  * (`deriveManagedIndices`) and include each in every scoped lens that
  * exposes its root type — by an entity inclusion of the type, or, with
- * relation inclusions only, every type. The worker's start then
- * reconciles their generations, which queues the full backfill.
+ * relation inclusions only, every type. A passage index also needs its
+ * document property exposed (no property list, or one naming it): a
+ * scoped lens never finds an entity by text it hides. The worker's start
+ * then reconciles their generations, which queues the full backfill.
  */
 async function writeManagedSearchIndices(querier: Querier): Promise<void> {
   const { entityTypes, relationTypes } = await readTypesWithProperties(querier, false);
@@ -158,7 +160,9 @@ async function writeManagedSearchIndices(querier: Querier): Promise<void> {
        FROM search_index si, lens l
        WHERE si.search_index_id = $1 AND (
          EXISTS (SELECT 1 FROM lens_includes i
-                 WHERE i.lens_id = l.lens_id AND i.entity_type_id = si.entity_type_id)
+                 WHERE i.lens_id = l.lens_id AND i.entity_type_id = si.entity_type_id
+                   AND (si.kind <> 'passage' OR i.properties IS NULL
+                        OR si.definition->'fields'->>0 = ANY(i.properties)))
          OR (NOT EXISTS (SELECT 1 FROM lens_includes i
                          WHERE i.lens_id = l.lens_id AND i.entity_type_id IS NOT NULL)
              AND EXISTS (SELECT 1 FROM lens_includes i

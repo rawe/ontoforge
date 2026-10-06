@@ -41,7 +41,7 @@ export type RelationDirection = z.infer<typeof RelationDirection>;
 
 /** One relation type in one direction: its relation fields and the fields
  * of the entity on the other end, keyed by that entity's type. */
-export const RelationGroup = z.object({
+export const RelationGroup = z.strictObject({
   relationType: Key,
   direction: RelationDirection,
   fields: z.array(Key).default([]),
@@ -55,9 +55,10 @@ export type RelationGroup = z.infer<typeof RelationGroup>;
 /**
  * The wire format of a custom index. `key` follows the shared key rules,
  * so it can never be a managed key. `header` null means the root type's
- * name property; an empty list means no header.
+ * name property; an empty list means no header. The shape is closed:
+ * unknown keys are rejected at every level.
  */
-export const SearchIndexDefinition = z.object({
+export const SearchIndexDefinition = z.strictObject({
   key: Key,
   name: z
     .string()
@@ -72,12 +73,12 @@ export const SearchIndexDefinition = z.object({
   header: z.array(Key).nullable().default(null),
   relations: z.array(RelationGroup).default([]),
   semantic: z
-    .object({
+    .strictObject({
       enabled: z.boolean().default(true),
       template: z.string().nullable().default(null),
     })
     .default({ enabled: true, template: null }),
-  keyword: z.object({ enabled: z.boolean().default(true) }).default({ enabled: true }),
+  keyword: z.strictObject({ enabled: z.boolean().default(true) }).default({ enabled: true }),
 });
 export type SearchIndexDefinition = z.infer<typeof SearchIndexDefinition>;
 

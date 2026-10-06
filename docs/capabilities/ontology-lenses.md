@@ -212,10 +212,13 @@ lens searches at once.
 The server adds index inclusions on one occasion of its own: a managed index that comes
 into existence is included in every scoped lens that exposes its root type — by an entity
 inclusion of the type, or, in a lens with relation inclusions only, because every type
-is exposed. Nothing else adds one: a scoped lens created after an index exists, or an
-entity type included in a scoped lens after its indices exist, includes none of those
-indices until they are included explicitly, and ranked search through that lens finds
-nothing through them.
+is exposed. A passage index needs its document property shown as well — the type's
+inclusion has no allowlist, or its allowlist names the document — so a scoped lens is
+never given a way to find entities by text it hides. Including such an index explicitly
+is still allowed, and reported as a [warning](#validation-warnings). Nothing else adds
+one: a scoped lens created after an index exists, or an entity type included in a scoped
+lens after its indices exist, includes none of those indices until they are included
+explicitly, and ranked search through that lens finds nothing through them.
 
 Removing a type inclusion keeps the index inclusions rooted on that type: they stay, are
 not searchable while the lens does not expose the root type, and are reported by lens

@@ -144,7 +144,6 @@
       },
       "indexInclusions": [
         "company~default",
-        "person~bio",
         "person~default"
       ],
       "aiAgents": [

@@ -345,9 +345,10 @@ deletes its generations, their queued work and entries, and its lens inclusions;
 the root entity type deletes the index. One more operation includes an index in every
 scoped lens that exposes its root entity type — by an entity inclusion of the type, or,
 in a lens with relation inclusions only, because every type is exposed — skipping lenses
-that include it already, and returns how many it was added to. Three serve one lens's
-inclusions: list the keys of the indices it includes, in key order — none for an unknown
-lens; include one index by key, checking no scope rule — absent when the lens or the
+that include it already, and returns how many it was added to; a `passage` index also
+needs its document property exposed, by an inclusion without an allowlist or with one
+naming the document. Three serve one lens's inclusions: list the keys of the indices it
+includes, in key order — none for an unknown lens; include one index by key, checking no scope rule — absent when the lens or the
 index does not exist, a conflict when the lens includes it already; and remove one —
 absent when the lens does not include it.
 
@@ -834,10 +835,10 @@ property by the derivation the `5.0` transfer import uses
 order — and then makes the column mandatory and adds its reference. The same step creates
 the search-index tables and gives `lens_includes` its third inclusion column (both below),
 writes a row for every managed index the namespace's schema implies, and includes each in
-every scoped lens exposing its root type, as the search-index store's inclusion operation
-does; the worker's first start then builds their generations from all existing entities.
-An upgraded namespace's keyword language set is the single text-search language its
-registry row carried. The step then renames the retriever table to `retriever_agent`,
+every scoped lens exposing its root type — a passage index only with its document
+property — as the search-index store's inclusion operation does; the worker's first
+start then builds their generations from all existing entities. An upgraded namespace's
+keyword language set is the single text-search language its registry row carried. The step then renames the retriever table to `retriever_agent`,
 adds its `warnings` column, and converts every stored configuration of version 1 to
 version 2 by the conversion an import applies
 ([capabilities/retriever-agents.md](capabilities/retriever-agents.md#converting-version-1-configurations)),

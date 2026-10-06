@@ -242,6 +242,10 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("custom search indices throu
     expect(invalid.json().error.details.fields).toEqual({
       "relations.0.direction": "Relation type 'works_for' does not end at entity type 'person'",
     });
+    // The definition is closed: an unknown key is named, not dropped.
+    const unknown = await request("POST", INDICES, { ...EMPLOYMENT, key: "extra", kind: "custom" });
+    expect(unknown.statusCode).toBe(422);
+    expect(Object.keys(unknown.json().error.details.fields)).toEqual(["definition"]);
     const managed = await request("POST", INDICES, { ...EMPLOYMENT, key: "person~default" });
     expect(managed.statusCode).toBe(422);
     expect(Object.keys(managed.json().error.details.fields)).toEqual(["key"]);

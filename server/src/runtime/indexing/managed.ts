@@ -5,9 +5,10 @@
  * service syncs them after every schema change, the worker at start:
  *
  * - a derived index without a row gets one, and is included in every
- *   scoped lens that exposes its root type, so scoped lenses stay
- *   searchable as the schema grows (the storage upgrade includes the
- *   existing ones the same way);
+ *   scoped lens that exposes its root type (a passage index: its
+ *   document property too), so scoped lenses stay searchable as the
+ *   schema grows without finding entities by hidden text (the storage
+ *   upgrade includes the existing ones the same way);
  * - a row whose derived definition changed is updated — a changed hash
  *   then yields a new generation;
  * - a row nothing derives any more is deleted;

@@ -7,7 +7,8 @@
  * the inclusion is kept), the cascade of index and property
  * deletion through inclusions, and transfer: 6.0 carries each lens's
  * list exactly, 5.0 (and a 6.0 lens without one) gets the managed indices
- * of the types it exposes. A deterministic fake provider embeds; the
+ * of the types it exposes — a passage index only with its document
+ * property, as a new managed index joins the scoped lenses. A deterministic fake provider embeds; the
  * worker is drained explicitly. Requires the docker-compose PostgreSQL.
  */
 
@@ -355,19 +356,27 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("lens index inclusions", () 
     );
   });
 
-  it("5.0 import, and a 6.0 lens without a list, include the managed indices of the exposed types", async () => {
+  it("5.0 import, and a 6.0 lens without a list, include the managed indices of the exposed types and documents", async () => {
     await schema();
     await post(INDICES, EMPLOYMENT);
     const hr = await lens("hr", ["person"]);
     await post(inclusionsUrl(hr), { key: EMPLOYMENT.key });
+    // Hides `person.bio`: never finds a person by it.
+    await lens("directory", [{ key: "person", properties: ["name"] }]);
+    await lens("profile", [{ key: "person", properties: ["name", "bio"] }]);
     const exported = await ok("GET", `${MODEL}/export`);
     const withoutLists = exported.lenses.map(({ indexInclusions: _, ...rest }: Row) => rest);
-    const managedOfPerson = ["person~bio", "person~default"];
+    const expected = {
+      all: [],
+      directory: ["person~default"],
+      hr: ["person~bio", "person~default"],
+      profile: ["person~bio", "person~default"],
+    };
 
     await post("/api/ontologies", { key: COPY });
     await post(`${modelOf(COPY)}/import`, { ...exported, lenses: withoutLists });
     const lensesOf = async (o: string) => listsOf((await ok("GET", `${modelOf(o)}/export`)).lenses);
-    expect(await lensesOf(COPY)).toEqual({ all: [], hr: managedOfPerson });
+    expect(await lensesOf(COPY)).toEqual(expected);
 
     const legacy = "lens_indices_legacy";
     await post("/api/ontologies", { key: legacy });
@@ -379,6 +388,26 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("lens index inclusions", () 
       entityTypes: exported.entityTypes.map(({ nameProperty: _name, ...type }: Row) => type),
       lenses: withoutLists,
     });
-    expect(await lensesOf(legacy)).toEqual({ all: [], hr: managedOfPerson });
+    expect(await lensesOf(legacy)).toEqual(expected);
+  });
+
+  it("a new managed index joins the scoped lenses that expose its type — a passage index its document too", async () => {
+    await schema();
+    // Lenses made after the existing indices include none of them.
+    const full = await lens("full", ["person"]);
+    const hidden = await lens("hidden", [{ key: "person", properties: ["name", "bio"] }]);
+    const companies = await lens("companies", ["company"]);
+    const relational = await post(`${MODEL}/lenses`, { key: "relational", name: "relational" });
+    await post(`${MODEL}/lenses/${relational.lensId}/includes/relation-types`, { key: "works_for" });
+    await post(`${MODEL}/entity-types/${await typeId("person")}/properties`, {
+      key: "notes",
+      displayName: "Notes",
+      dataType: "document",
+    });
+
+    expect(await inclusions(full)).toEqual(["person~notes"]);
+    expect(await inclusions(hidden)).toEqual([]);
+    expect(await inclusions(companies)).toEqual([]);
+    expect(await inclusions(relational.lensId)).toEqual(["person~notes"]);
   });
 });

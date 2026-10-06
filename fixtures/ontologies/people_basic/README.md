@@ -24,11 +24,7 @@ Managed only, no custom index: `person~default`, `person~bio` (passages) and
 | Lens | Scope | Search indices | Agents | Saved queries |
 |---|---|---|---|---|
 | `test_lens` | unscoped | every index | — | — |
-| `hr_view` | `company` (all properties), `person` (`name`, `email` only), `works_for` | every index | `assistant`, `unrestricted` | `people-by-name`, `similar-then-fetch` |
-
-`hr_view` includes `person~bio` although it hides `bio`, so lens validation warns about
-it. Search there can find a person by bio text; the hit carries no bio and an empty
-snippet.
+| `hr_view` | `company` (all properties), `person` (`name`, `email` only), `works_for` | `company~default`, `person~default` (not `person~bio`: it hides `bio`) | `assistant`, `unrestricted` | `people-by-name`, `similar-then-fetch` |
 
 ## Data
 

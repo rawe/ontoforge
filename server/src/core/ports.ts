@@ -1009,7 +1009,9 @@ export interface SearchIndexStore {
 
   /** Include an index in every scoped lens that exposes its root entity
    * type — by an entity inclusion of the type, or, with relation
-   * inclusions only, every type. The count of lenses it was added to. */
+   * inclusions only, every type. A passage index also needs its document
+   * property exposed (no property list, or one naming it). The count of
+   * lenses it was added to. */
   includeIndexInScopedLenses(key: string): Promise<number>;
 
   /** The keys of the indices one lens includes, sorted. Empty for an

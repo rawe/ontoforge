@@ -309,8 +309,8 @@ index renders it from a template; its keyword text holds values only ([decisions
 
 **Managed indices follow the schema.** After every schema change the modeling side derives
 the managed indices again from the full schema — creating, updating and deleting their
-definitions, including a new one in every scoped lens that exposes its root type — and
-brings the generations in line. A changed display name or name property, which no
+definitions, including a new one in every scoped lens that exposes its root type (a
+passage index: its document property too) — and brings the generations in line. A changed display name or name property, which no
 definition captures, queues the entities of every index rendering that type again. The worker does the same for
 every ontology when it starts. Ranked search reads the ready generations
 ([capabilities/search-indices.md](capabilities/search-indices.md)).

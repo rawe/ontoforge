@@ -192,14 +192,14 @@ export function TransferPage() {
         <TransferCard
           icon={Download}
           title="Export schema"
-          description="Download this ontology's schema — entity types, relation types, properties, lenses, agents, retriever agents and saved queries — as a portable JSON file."
+          description="Download this ontology's schema — entity types, relation types, properties, search indices, keyword languages, lenses, agents, retriever agents and saved queries — as a portable JSON file."
         >
           <Button
             onClick={() => exportMutation.mutate()}
             disabled={exportMutation.isPending}
           >
             <Download className="size-4" />
-            {exportMutation.isPending ? 'Exporting…' : 'Download schema.json'}
+            {exportMutation.isPending ? 'Exporting…' : `Download ${ontologyKey}.json`}
           </Button>
         </TransferCard>
 

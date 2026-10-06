@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   agentExecution, defaultAnswerFields, draftOf, draftProblems, editableConfig, emptyConfig, filterChoices, filterLabel,
-  callCounts, importProblem, isSupportedAgent, mergeMeta, stepText, newFilter, plannedFilterText, relationName, resultTypes, resultsBySubQuery, sameDraft,
+  callCounts, importProblem, modelCallName, isSupportedAgent, mergeMeta, stepText, newFilter, plannedFilterText, relationName, resultTypes, resultsBySubQuery, sameDraft,
   toInput, withIndex, withRelations, withoutIndex, type AgentSchema,
 } from '../src/components/retrieverAgent/retrieverAgentModel.ts'
 import { chatRetrieverAgent, readRetrieverAgentStream, saveRetrieverAgent, type RetrieverAgent, type RetrieverAgentConfig } from '../src/api/retrieverAgents.ts'
@@ -200,4 +200,14 @@ test('a finished turn never looks pending: missing steps read stopped / not run,
   assert.deepEqual(callCounts(planned, 'failed'), { model: 1, search: 0 })
   assert.deepEqual(callCounts({}, 'pending'), { model: null, search: null })
   assert.deepEqual(callCounts({ llmCalls: 2, searchCalls: 3 }, 'complete'), { model: 2, search: 3 })
+})
+
+test('model calls are named; a repeated planning call is the repeated planner', () => {
+  assert.equal(modelCallName('plan'), 'Planner')
+  assert.equal(modelCallName('replan'), 'Planner (repeated)')
+  assert.equal(modelCallName('answer'), 'Response')
+  assert.equal(modelCallName('other'), 'other')
+  // A repeated plan keeps both planner traces: merged by phase, `replan` never replaces `plan`.
+  const merged = mergeMeta({ modelIO: [{ phase: 'plan', input: 'i', output: 'o' }] }, { modelIO: [{ phase: 'replan', input: 'i', output: 'o2' }] })
+  assert.deepEqual(merged.modelIO?.map((call) => call.phase), ['plan', 'replan'])
 })

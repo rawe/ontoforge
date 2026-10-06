@@ -5,7 +5,7 @@ import { TypeChip } from '@/components/TypeChip'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { matchedViaText } from '@/lib/matchedVia'
 import {
-  MODE_LABEL, STEPS, callCounts, formatMs, indexName, stepText, type TurnStatus, phaseName, plannedFilterText, relationName, resultLabel, resultsBySubQuery,
+  MODE_LABEL, STEPS, callCounts, formatMs, indexName, stepText, type TurnStatus, modelCallName, phaseName, plannedFilterText, relationName, resultLabel, resultsBySubQuery,
 } from './retrieverAgentModel'
 
 interface Context { config: RetrieverAgentConfig | null; catalog: SearchCatalogEntry[] | undefined; schema: RuntimeSchema | undefined }
@@ -111,11 +111,11 @@ function Results({ meta, catalog, schema }: { meta: RetrieverAgentMeta } & Conte
 function ModelCalls({ meta }: { meta: RetrieverAgentMeta }) {
   if (!meta.modelIO?.length) return <Intro>No model calls yet.</Intro>
   return <div className="space-y-4">
-    <Intro>The language model calls: the planner turns the question into sub-queries, the response model writes the answer from the found evidence.</Intro>
+    <Intro>The language model calls: the planner turns the question into sub-queries, the response model writes the answer from the found evidence. When a follow-up's first plan searches nothing, planning is repeated once.</Intro>
     {meta.modelIO.map((call) => {
       const usage = call.usage as { input_tokens?: number; output_tokens?: number } | undefined
       return <section key={call.phase} className="space-y-2 rounded border p-3">
-        <h4 className="flex justify-between gap-3 font-medium"><span>{call.phase === 'plan' ? 'Planner' : call.phase === 'answer' ? 'Response' : phaseName(call.phase)}</span>
+        <h4 className="flex justify-between gap-3 font-medium"><span>{modelCallName(call.phase)}</span>
           <span className="font-normal text-muted-foreground tabular-nums">{usage ? `${usage.input_tokens ?? '–'} tokens in · ${usage.output_tokens ?? '–'} out` : ''}{call.finishReason ? ` · ${call.finishReason}` : ''}</span></h4>
         {call.systemPrompt !== undefined && <Pre title="System instructions" text={call.systemPrompt} />}
         <Pre title="Input" text={call.input} note={call.inputTruncated ? 'Trace is truncated; the model received the full input.' : undefined} />

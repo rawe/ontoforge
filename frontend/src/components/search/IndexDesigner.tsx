@@ -183,12 +183,19 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
   const previewCurrent =
     !preview.isPlaceholderData && JSON.stringify(settledInput) === JSON.stringify(previewInput)
   const previewIssues = previewCurrent ? (preview.data?.issues ?? []) : []
+  // Key problems are client-only (the key field shows them too); the panel lists them with the rest.
+  const keyProblem: ValidationError[] =
+    isNew && key !== '' && !isValidKey(key)
+      ? [{ path: 'key', message: 'Lowercase letters, digits and underscores only; must start with a letter.' }]
+      : keyMessage !== undefined
+        ? [{ path: 'key', message: keyMessage }]
+        : []
   const problems = draftProblems(draft)
   // A blank new draft shows no issues yet; once edited, everything open is listed.
   const issues =
     isNew && !dirty
       ? []
-      : mergeIssues(problems, [...saveIssues, ...previewIssues])
+      : mergeIssues([...keyProblem, ...problems], [...saveIssues, ...previewIssues])
   const canSave = keyOk && problems.length === 0 && schema !== undefined
 
   /* ----------------------------- leave protection --------------------------- */

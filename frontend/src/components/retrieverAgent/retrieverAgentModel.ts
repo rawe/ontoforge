@@ -287,6 +287,10 @@ export const phaseNames: Record<string, string> = {
 }
 export const phaseName = (phase: string) => phaseNames[phase] ?? phase
 
+/** Heading of one model call in the diagnostics: the planner (possibly repeated once) or the response model. */
+export const modelCallName = (phase: string) =>
+  ({ plan: 'Planner', replan: 'Planner (repeated)', answer: 'Response' } as Record<string, string>)[phase] ?? phaseName(phase)
+
 /** The sequential steps of one question; every other timing is a part of one of them. */
 export const STEPS = ['plan', 'retrieve', 'answer'] as const
 

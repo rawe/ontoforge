@@ -133,7 +133,8 @@ export function EntityTypeCreateDialog({
         <DialogHeader>
           <DialogTitle>New entity type</DialogTitle>
           <DialogDescription>
-            Entity types are global — every lens can include them in its scope. The
+            Entity types belong to this ontology — every lens of this ontology can
+            include them in its scope. The
             name property is a string property created with the type; its value labels
             instances.
           </DialogDescription>

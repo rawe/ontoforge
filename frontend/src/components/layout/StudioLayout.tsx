@@ -1,11 +1,13 @@
-import { ArrowLeftRight, ArrowLeft, Layers, Search, Shapes } from 'lucide-react'
-import type { ComponentType } from 'react'
-import { NavLink, Outlet, useParams } from 'react-router-dom'
-import { useFeatures } from '@/api/hooks'
+import { ArrowLeftRight, ArrowLeft, Layers, Search, SearchX, Shapes } from 'lucide-react'
+import { useEffect, type ComponentType } from 'react'
+import { Link, NavLink, Outlet, useParams } from 'react-router-dom'
+import { useFeatures, useLenses } from '@/api/hooks'
+import { ApiError } from '@/api/http'
+import { EmptyState } from '@/components/EmptyState'
 import { OntologySwitcher } from '@/components/layout/OntologySwitcher'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { Button } from '@/components/ui/button'
-import { readString, storageKeys } from '@/lib/storage'
+import { readString, remove, storageKeys } from '@/lib/storage'
 import { cn } from '@/lib/utils'
 
 function StudioNavItem({
@@ -43,14 +45,40 @@ function StudioNavItem({
 export function StudioLayout() {
   const { ontologyKey } = useParams<{ ontologyKey: string }>()
   const { data: features } = useFeatures()
+  // The lens list answers 404 for an unknown ontology and validates the remembered lens.
+  const lenses = useLenses(ontologyKey)
+  const notFound = lenses.error instanceof ApiError && lenses.error.status === 404
+  const remembered = ontologyKey === undefined ? null : readString(storageKeys.lastLens(ontologyKey))
+  // A remembered lens that no longer exists (deleted, or never valid) is forgotten, not offered.
+  const stale = remembered !== null && (notFound || (lenses.data !== undefined && !lenses.data.some((l) => l.key === remembered)))
+  useEffect(() => {
+    if (ontologyKey !== undefined && stale) remove(storageKeys.lastLens(ontologyKey))
+  }, [ontologyKey, stale])
+
   if (ontologyKey === undefined) return null
+
+  if (notFound) {
+    return (
+      <div className="flex h-dvh items-center justify-center">
+        <EmptyState
+          icon={SearchX}
+          title="Ontology not found"
+          description={`No ontology with key "${ontologyKey}" exists on this server.`}
+          action={
+            <Button asChild size="sm">
+              <Link to="/">Go to ontologies</Link>
+            </Button>
+          }
+        />
+      </div>
+    )
+  }
 
   const base = `/o/${ontologyKey}/studio`
   // Back to this ontology's workbench: its remembered last-used lens, or
   // the start page when none is remembered (a lens-less ontology has no
   // workbench to return to).
-  const lastLens = readString(storageKeys.lastLens(ontologyKey))
-  const backTo = lastLens === null ? '/' : `/o/${ontologyKey}/w/${lastLens}`
+  const backTo = remembered === null || stale ? '/' : `/o/${ontologyKey}/w/${remembered}`
 
   return (
     <div className="flex h-dvh overflow-hidden bg-background">

@@ -160,10 +160,19 @@ describe("SearchIndexDefinition (wire format)", () => {
     });
   });
 
-  it("requires a description", () => {
+  it("requires a description that is not blank, saying why", () => {
     const base = { key: "people", name: "People", entityType: "person" };
     expect(SearchIndexDefinition.safeParse(base).success).toBe(false);
-    expect(SearchIndexDefinition.safeParse({ ...base, description: "" }).success).toBe(false);
+    for (const description of ["", "   \n\t"]) {
+      const parsed = SearchIndexDefinition.safeParse({ ...base, description });
+      expect(parsed.success).toBe(false);
+      expect(parsed.error!.issues).toEqual([
+        expect.objectContaining({
+          path: ["description"],
+          message: "Describe what the index finds — agents choose indices by it.",
+        }),
+      ]);
+    }
     expect(SearchIndexDefinition.safeParse({ ...base, description: "x" }).success).toBe(true);
   });
 

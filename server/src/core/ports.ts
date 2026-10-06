@@ -1017,6 +1017,18 @@ export interface SearchIndexStore {
    * inclusions only, every type. The count of lenses it was added to. */
   includeIndexInScopedLenses(key: string): Promise<number>;
 
+  /** The keys of the indices one lens includes, sorted. Empty for an
+   * unknown lens. */
+  listLensIndexInclusions(lensId: string): Promise<string[]>;
+
+  /** Include an index in one lens — no scope rule is checked here. False
+   * when the lens or the index does not exist; an index the lens already
+   * includes is a `ConflictError`. */
+  includeIndexInLens(lensId: string, key: string): Promise<boolean>;
+
+  /** Remove an index inclusion. False when the lens does not include it. */
+  excludeIndexFromLens(lensId: string, key: string): Promise<boolean>;
+
   // ------------------------------------------------------------------
   // Generations
   // ------------------------------------------------------------------

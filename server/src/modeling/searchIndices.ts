@@ -52,12 +52,14 @@ import {
   type CostEstimate,
   type SearchIndexStatus,
 } from "../core/searchPipeline.js";
+import { lensIndexFindings } from "../core/searchQuery.js";
 import { rebuildSearchIndex as rebuildGenerations, reconcileSearchGenerations } from "../runtime/indexing/generations.js";
 import { getSearchIndexStatus, listSearchIndexStatuses } from "../runtime/indexing/status.js";
 import { searchEntryRates } from "../runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache, loadSearchContextUncached } from "../runtime/schemaCache.js";
 import type {
   ExportSearchIndicesInput,
+  IncludeSearchIndexBody,
   IndexStatusResponseBody,
   SearchIndexPreviewResponseBody,
   SearchIndexResponseBody,
@@ -361,7 +363,7 @@ export async function deleteSearchIndex(
   const lenses = await indices.findLensesIncludingIndex(key);
   if (lenses.length > 0 && !cascade) {
     throw new CascadeRequiredError(
-      `Search index is included by ${lenses.length} lens(es). Use ?cascade=true to remove.`,
+      `Search index is included by ${lenses.length} lens(es).`,
       lenses,
       [],
     );
@@ -379,6 +381,113 @@ export async function rebuildSearchIndex(
   const indices = requireSearchIndices(store);
   await rebuildGenerations(indices.ontologyKey, key);
   return getSearchIndexStatusBody(key, store);
+}
+
+// ---------------------------------------------------------------------------
+// Lens inclusions
+// ---------------------------------------------------------------------------
+
+/** The lens under an id; unknown -> not found. */
+async function existingLens(store: ModelingStore, lensId: string): Promise<void> {
+  if ((await store.getLens(lensId)) === null) {
+    throw new NotFoundError(`Lens '${lensId}' not found`);
+  }
+}
+
+/** The indices a lens includes, by key in key order. */
+export async function listLensIndexInclusions(
+  lensId: string,
+  store: ModelingStore,
+): Promise<IncludeSearchIndexBody[]> {
+  const indices = requireSearchIndices(store);
+  await existingLens(store, lensId);
+  return (await indices.listLensIndexInclusions(lensId)).map((key) => ({ key }));
+}
+
+/**
+ * Include an index in a lens. A scoped lens must expose the index's root
+ * type — include it, or, with relation inclusions only, expose every
+ * type — else 422. An unscoped lens searches every index anyway; the
+ * inclusion is kept and counts once the lens is scoped. Index inclusions
+ * never make a lens scoped. Unknown index -> not found; already
+ * included -> conflict.
+ */
+export async function includeIndexInLens(
+  lensId: string,
+  body: IncludeSearchIndexBody,
+  store: ModelingStore,
+): Promise<IncludeSearchIndexBody> {
+  const indices = requireSearchIndices(store);
+  await existingLens(store, lensId);
+  const index = await indices.getIndex(body.key);
+  if (index === null) {
+    throw new NotFoundError(`Search index '${body.key}' not found`);
+  }
+  const root = index.definition.entityType;
+  const entityInclusions = await store.listIncludesTypes(lensId, "EntityType");
+  if (entityInclusions.length > 0 && !entityInclusions.some((inc) => inc.key === root)) {
+    throw new ValidationError(
+      `Root entity type '${root}' of search index '${body.key}' is not included in this lens`,
+      { fields: { key: `Include entity type '${root}' first` } },
+    );
+  }
+  if ((await indices.listLensIndexInclusions(lensId)).includes(body.key)) {
+    throw new ConflictError("Search index is already included in this lens");
+  }
+  if (!(await indices.includeIndexInLens(lensId, body.key))) {
+    throw new NotFoundError(`Search index '${body.key}' not found`);
+  }
+  invalidateLoadedSchemaCache();
+  return { key: body.key };
+}
+
+/** Remove an index inclusion; not included -> not found. */
+export async function excludeIndexFromLens(
+  lensId: string,
+  key: string,
+  store: ModelingStore,
+): Promise<void> {
+  const indices = requireSearchIndices(store);
+  await existingLens(store, lensId);
+  if (!(await indices.excludeIndexFromLens(lensId, key))) {
+    throw new NotFoundError(`Search index '${key}' is not included in this lens`);
+  }
+  invalidateLoadedSchemaCache();
+}
+
+/**
+ * The warnings lens validation reports for the indices a lens includes
+ * (D3): an index whose root type the lens does not expose (it is not
+ * searchable there — removing a type inclusion keeps the index
+ * inclusions) and properties an index reads that the lens hides
+ * (`lensIndexFindings`). Relation groups the lens skips are no warning. `full` and
+ * `scoped` are the schema before and after the lens's scope; an
+ * unscoped lens gets none. Paths: `lenses.<lens>.includes.searchIndices.
+ * <index>.<definition path>`. Nothing on an adapter without search
+ * indices.
+ */
+export async function lensIndexWarnings(
+  store: ModelingStore,
+  lens: { lensId: string; key: string },
+  full: SearchIndexSchema,
+  scoped: SearchIndexSchema,
+): Promise<SearchIndexIssue[]> {
+  const indices = store.searchIndices?.();
+  if (indices === undefined) return [];
+  const included = new Set(await indices.listLensIndexInclusions(lens.lensId));
+  if (included.size === 0) return [];
+  const warnings: SearchIndexIssue[] = [];
+  for (const index of await indices.listIndices()) {
+    if (!included.has(index.key)) continue;
+    const definition = { ...index.definition, key: index.key };
+    for (const finding of lensIndexFindings(definition, full, scoped)) {
+      warnings.push({
+        path: `lenses.${lens.key}.includes.searchIndices.${index.key}.${finding.path}`,
+        message: finding.message,
+      });
+    }
+  }
+  return warnings;
 }
 
 // ---------------------------------------------------------------------------
@@ -483,6 +592,38 @@ export function importedIndexErrors(
   return errors;
 }
 
+/**
+ * The import errors of the lenses' index inclusions (6.0): each key must
+ * name a custom index of the payload or a managed index the payload's
+ * schema derives, once per lens. The root-type rule is not checked: like
+ * type inclusions, index inclusions are written as they come — a lens
+ * may keep an index whose root type it no longer includes — and lens
+ * validation reports what limits them.
+ */
+export function importedInclusionErrors(
+  lenses: readonly { key: string; indexInclusions?: string[] | undefined }[],
+  payloadIndices: ExportSearchIndicesInput | undefined,
+  schema: SearchIndexSchema,
+): string[] {
+  const known = new Set([
+    ...(payloadIndices?.custom ?? []).map((definition) => definition.key),
+    ...deriveManagedIndices(schema).map((managed) => managed.definition.key),
+  ]);
+  const errors: string[] = [];
+  for (const lens of lenses) {
+    const seen = new Set<string>();
+    for (const key of lens.indexInclusions ?? []) {
+      if (seen.has(key)) {
+        errors.push(`Import error: lens '${lens.key}' includes search index '${key}' twice`);
+      } else if (!known.has(key)) {
+        errors.push(`Import error: lens '${lens.key}' includes unknown search index '${key}'`);
+      }
+      seen.add(key);
+    }
+  }
+  return errors;
+}
+
 /** Key conflicts of a payload's custom indices: duplicates within it and
  * keys the target already holds. */
 export async function importedIndexConflicts(
@@ -522,5 +663,26 @@ export async function importSearchIndices(
   }
   for (const definition of payloadIndices.custom) {
     await indices.createIndex(randomUUID(), "custom", definition);
+  }
+}
+
+/**
+ * Make a lens's index inclusions exactly `keys`, once the indices exist —
+ * replacing the managed indices the schema sync included on its own.
+ * Nothing on an adapter without search indices.
+ */
+export async function importLensIndexInclusions(
+  store: ModelingStore,
+  lensId: string,
+  keys: readonly string[],
+): Promise<void> {
+  const indices = store.searchIndices?.();
+  if (indices === undefined) return;
+  const current = await indices.listLensIndexInclusions(lensId);
+  for (const key of current) {
+    if (!keys.includes(key)) await indices.excludeIndexFromLens(lensId, key);
+  }
+  for (const key of keys) {
+    if (!current.includes(key)) await indices.includeIndexInLens(lensId, key);
   }
 }

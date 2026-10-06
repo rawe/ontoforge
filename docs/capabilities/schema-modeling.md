@@ -227,7 +227,7 @@ sorted list of the **keys** of every lens the change would break or change, and
 `details.affectedIndices` the sorted keys of every custom index it would change or
 delete — either may be empty — enough to inspect each one and decide, without a second
 lookup. A property deletion triggered by an index names, as lenses, those whose
-allowlist names the property.
+allowlist names the property and those that include an index the cascade deletes.
 
 Repeating the request with cascade requested makes the change consented rather
 than forced, and the repair is mechanical:
@@ -264,15 +264,18 @@ report the resulting lenses as invalid; nothing else will.
 ### Schema validation
 
 Two read-only operations. Both always answer successfully — they report, they
-never raise — returning a boolean verdict and a flat list of errors, each with a
-dotted path locating the offending object and a message.
+never raise — returning a boolean verdict, a flat list of errors and a flat list of
+warnings, each with a dotted path locating the offending object and a message.
+Warnings never affect the verdict.
 
-**Validating one lens** checks that lens's declarations against the schema. An
-unscoped lens is valid by definition. The rules are in
-[ontology-lenses.md](ontology-lenses.md).
+**Validating one lens** checks that lens's declarations against the schema and warns
+about what limits the search indices it includes. An unscoped lens is valid by
+definition and has no warnings. The rules are in
+[ontology-lenses.md](ontology-lenses.md), the warnings in
+[ontology-lenses.md](ontology-lenses.md#validation-warnings).
 
 **Validating the schema** checks the ontology's schema and then every one of its
-lenses, returning one combined error list. The schema half reports:
+lenses, returning one combined error list and one combined warning list. The schema half reports:
 
 - a duplicate entity type key, or a duplicate relation type key
 - a duplicate property key within one type

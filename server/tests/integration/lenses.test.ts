@@ -515,6 +515,6 @@ describe("schema validation", () => {
 
     const res = await app.inject({ method: "POST", url: "/api/ontologies/test_ont/model/schema/validate" });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ valid: true, errors: [] });
+    expect(res.json()).toEqual({ valid: true, errors: [], warnings: [] });
   });
 });

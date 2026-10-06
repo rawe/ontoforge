@@ -139,6 +139,10 @@ function withSearchIndices() {
     ]),
     getIndex: vi.fn(async () => null),
     createIndex: vi.fn(async () => ({})),
+    // What the schema sync included on its own, by lens id.
+    listLensIndexInclusions: vi.fn(async (_lensId: string): Promise<string[]> => []),
+    includeIndexInLens: vi.fn(async () => true),
+    excludeIndexFromLens: vi.fn(async () => true),
   };
   (holder.store as unknown as { searchIndices: () => unknown }).searchIndices = () => indices;
   return indices;
@@ -574,6 +578,85 @@ describe("import search indices", () => {
     expect(kept.statusCode, kept.body).toBe(201);
     const invalid = await postImport(payload({ custom: [{ ...PEOPLE_INDEX, entityType: "ghost" }] }));
     expect(invalid.statusCode).toBe(422);
+  });
+});
+
+describe("lens index inclusions", () => {
+  const person = entityType("person", "Person", [{ key: "bio", displayName: "Bio", dataType: "document", required: false }]);
+  const company = entityType("company", "Company");
+  const lens = (indexInclusions?: string[]) => ({
+    key: "people",
+    name: "People",
+    includes: { entityTypes: [{ key: "company" }], relationTypes: [] },
+    ...(indexInclusions === undefined ? {} : { indexInclusions }),
+  });
+  const payload = (lenses: unknown[], formatVersion = "6.0") => ({
+    formatVersion,
+    entityTypes: [person, company],
+    relationTypes: [],
+    lenses,
+    searchIndices: { custom: [PEOPLE_INDEX], disabled: [] },
+    ...(formatVersion === "5.0" ? { textSearchLanguage: "german" } : {}),
+  });
+
+  it("export lists each lens's index inclusions", async () => {
+    const indices = withSearchIndices();
+    indices.listLensIndexInclusions.mockImplementation(async (lensId: string) =>
+      lensId === "lens-1" ? ["people", "person~default"] : [],
+    );
+    holder.store.getFullSchema.mockResolvedValue({
+      entityTypes: [],
+      relationTypes: [],
+      lenses: [{ lensId: "lens-1", key: "everything", name: "Everything", entityInclusions: [], relationInclusions: [] }],
+    });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
+    expect(res.json().lenses[0].indexInclusions).toEqual(["people", "person~default"]);
+    // An adapter without search indices exports none.
+    delete (holder.store as unknown as { searchIndices?: unknown }).searchIndices;
+    const plain = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
+    expect(plain.json().lenses[0].indexInclusions).toEqual([]);
+  });
+
+  it("6.0: writes each lens's list exactly, once the indices exist — the root rule is not checked", async () => {
+    const indices = withSearchIndices();
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    // The schema sync included the managed indices of the exposed types.
+    indices.listLensIndexInclusions.mockResolvedValue(["company~default"]);
+    // `people` is rooted on person, which the lens does not include: kept.
+    const res = await postImport(payload([lens(["people", "person~bio"])]));
+    expect(res.statusCode, res.body).toBe(201);
+    const lensId = holder.store.createLens.mock.calls[0]![0] as string;
+    expect(indices.excludeIndexFromLens).toHaveBeenCalledWith(lensId, "company~default");
+    expect(indices.includeIndexInLens.mock.calls).toEqual([
+      [lensId, "people"],
+      [lensId, "person~bio"],
+    ]);
+    expect(indices.includeIndexInLens.mock.invocationCallOrder[0]).toBeGreaterThan(
+      indices.createIndex.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("6.0 without the field, and 5.0, keep what the schema sync included", async () => {
+    const indices = withSearchIndices();
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    expect((await postImport(payload([lens()]))).statusCode).toBe(201);
+    const legacy = await postImport(payload([lens(["nope"])], "5.0"));
+    expect(legacy.statusCode, legacy.body).toBe(201);
+    expect(indices.listLensIndexInclusions).not.toHaveBeenCalled();
+    expect(indices.includeIndexInLens).not.toHaveBeenCalled();
+    expect(indices.excludeIndexFromLens).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unknown or repeated index key; writes nothing", async () => {
+    const indices = withSearchIndices();
+    const res = await postImport(payload([lens(["people", "person~default", "company~bio", "people"])]));
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details.errors).toEqual([
+      "Import error: lens 'people' includes unknown search index 'company~bio'",
+      "Import error: lens 'people' includes search index 'people' twice",
+    ]);
+    expect(holder.store.createEntityType).not.toHaveBeenCalled();
+    expect(indices.includeIndexInLens).not.toHaveBeenCalled();
   });
 });
 

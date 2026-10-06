@@ -135,6 +135,7 @@
                     }
                 ]
             },
+            "indexInclusions": ["company~default", "person~bio", "person~default"],
             "aiAgents": [
                 {
                     "key": "assistant",
@@ -221,6 +222,7 @@
             "name": "Test Lens",
             "description": "Person/Company lens for testing",
             "includes": null,
+            "indexInclusions": [],
             "aiAgents": [],
             "savedQueries": [],
             "retrievers": []

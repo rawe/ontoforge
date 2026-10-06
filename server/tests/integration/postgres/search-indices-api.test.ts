@@ -93,12 +93,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("custom search indices throu
   }
 
   async function includeIndexInLens(lensId: string, key: string, o = O): Promise<void> {
-    await runQuery(
-      `INSERT INTO ont_${o}.lens_includes (lens_id, search_index_id)
-       SELECT $1, search_index_id FROM ont_${o}.search_index WHERE key = $2`,
-      [lensId, key],
-    );
-    invalidateLoadedSchemaCache();
+    await post(`${modelOf(o)}/lenses/${lensId}/includes/search-indices`, { key });
   }
 
   /** person (name, bio) —works_for (role, since)→ company (name, founded). */

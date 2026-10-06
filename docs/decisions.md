@@ -542,11 +542,13 @@ a definition at the measured throughput before it is saved. The field cap bounds
 text, which dilutes a vector as it grows, and keeps definitions readable; each relation
 group multiplies entries, and four is generous.
 
-**A lens may search an index that reads properties it hides; results are projected and
-the snippet withheld.** Entries are composed from the full schema, so a hidden value can
-still drive a ranking through that lens — accepted, as two lenses share one stored record.
-The lens still governs everything returned: hits are projected through it, and a match
-whose index reads a hidden property carries no snippet of the entry's text.
+**A lens may search an index that reads properties it hides; validation warns, results
+are projected and the snippet withheld.** Entries are composed from the full schema, so a
+hidden value can still drive a ranking through that lens — accepted, as two lenses share
+one stored record. Lens validation names every hidden property an included index reads as
+a warning, which never makes the lens invalid. The lens still governs everything
+returned: hits are projected through it, and a match whose index reads a hidden property
+carries no snippet of the entry's text.
 
 **Exactly one env file is read, and it is always named.**
 `ENV_FILE` names it; without that it is `.env` in the working directory. Files never

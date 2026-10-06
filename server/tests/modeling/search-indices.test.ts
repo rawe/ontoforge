@@ -129,8 +129,18 @@ function fakeIndexStore() {
       lastErrors: [{ entityId: "e-1", partKind: "relation", message: "boom", at: NOW }],
     },
   ];
+  // Index inclusions by lens id.
+  const inclusions = new Map<string, Set<string>>();
   return {
     ontologyKey: "onto",
+    inclusions,
+    listLensIndexInclusions: vi.fn(async (lensId: string) => [...(inclusions.get(lensId) ?? [])].sort()),
+    includeIndexInLens: vi.fn(async (lensId: string, key: string) => {
+      if (!indices.has(key)) return false;
+      inclusions.set(lensId, new Set([...(inclusions.get(lensId) ?? []), key]));
+      return true;
+    }),
+    excludeIndexFromLens: vi.fn(async (lensId: string, key: string) => inclusions.get(lensId)?.delete(key) ?? false),
     getSearchSettings: vi.fn(async () => settings),
     setSearchSettings: vi.fn(async (next: SearchSettings) => (settings = next)),
     readFullSchema: vi.fn(async () => RAW_SCHEMA),
@@ -488,5 +498,200 @@ describe("the cascade of schema removals", () => {
     holder.store.deleteProperty.mockResolvedValue(true);
     const res = await app.inject({ method: "DELETE", url: `${MODEL}/entity-types/et-c/properties/p-f` });
     expect(res.statusCode, res.body).toBe(204);
+  });
+});
+
+describe("lens index inclusions", () => {
+  const LENS = { lensId: "l-1", key: "people", name: "People", description: null, createdAt: NOW, updatedAt: NOW };
+  const LENS_INDICES = `${MODEL}/lenses/l-1/includes/search-indices`;
+
+  function withLens(entityTypes: string[] = [], relationTypes: string[] = []) {
+    holder.store.getLens.mockImplementation(async (id: string) => (id === "l-1" ? LENS : null));
+    holder.store.listIncludesTypes.mockImplementation(async (_id: string, kind: string) =>
+      (kind === "EntityType" ? entityTypes : relationTypes).map((key) => ({ key, properties: null })),
+    );
+  }
+
+  it("includes, lists and removes an index by key", async () => {
+    const indices = withSearchIndices();
+    withLens(["person"]);
+    const created = await app.inject({ method: "POST", url: LENS_INDICES, payload: { key: "employment" } });
+    expect(created.statusCode, created.body).toBe(201);
+    expect(created.json()).toEqual({ key: "employment" });
+    expect(indices.includeIndexInLens).toHaveBeenCalledWith("l-1", "employment");
+    await app.inject({ method: "POST", url: LENS_INDICES, payload: { key: "person~default" } });
+
+    expect((await app.inject({ url: LENS_INDICES })).json()).toEqual([
+      { key: "employment" },
+      { key: "person~default" },
+    ]);
+
+    const removed = await app.inject({ method: "DELETE", url: `${LENS_INDICES}/person~default` });
+    expect(removed.statusCode, removed.body).toBe(204);
+    expect((await app.inject({ url: LENS_INDICES })).json()).toEqual([{ key: "employment" }]);
+    const again = await app.inject({ method: "DELETE", url: `${LENS_INDICES}/person~default` });
+    expect(again.statusCode).toBe(404);
+  });
+
+  it("a scoped lens must include the index's root type", async () => {
+    const indices = withSearchIndices();
+    withLens(["company"]);
+    const res = await app.inject({ method: "POST", url: LENS_INDICES, payload: { key: "employment" } });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.message).toBe(
+      "Root entity type 'person' of search index 'employment' is not included in this lens",
+    );
+    expect(res.json().error.details.fields).toEqual({ key: "Include entity type 'person' first" });
+    expect(indices.includeIndexInLens).not.toHaveBeenCalled();
+  });
+
+  it("a lens scoped by relation types only, or an unscoped lens, takes any index", async () => {
+    withSearchIndices();
+    withLens([], ["works_for"]);
+    expect((await app.inject({ method: "POST", url: LENS_INDICES, payload: { key: "employment" } })).statusCode).toBe(201);
+    withSearchIndices();
+    withLens();
+    expect((await app.inject({ method: "POST", url: LENS_INDICES, payload: { key: "employment" } })).statusCode).toBe(201);
+  });
+
+  it("answers 409 for an index already included, 404 for an unknown index or lens", async () => {
+    withSearchIndices();
+    withLens(["person"]);
+    await app.inject({ method: "POST", url: LENS_INDICES, payload: { key: "employment" } });
+    const twice = await app.inject({ method: "POST", url: LENS_INDICES, payload: { key: "employment" } });
+    expect(twice.statusCode).toBe(409);
+    const unknown = await app.inject({ method: "POST", url: LENS_INDICES, payload: { key: "nope" } });
+    expect(unknown.statusCode).toBe(404);
+    const noLens = `${MODEL}/lenses/l-2/includes/search-indices`;
+    expect((await app.inject({ url: noLens })).statusCode).toBe(404);
+    expect((await app.inject({ method: "POST", url: noLens, payload: { key: "employment" } })).statusCode).toBe(404);
+  });
+
+  it("every change forgets the cached lens schemas", async () => {
+    const schemaCache = await import("../../src/runtime/schemaCache.js");
+    const invalidate = vi.spyOn(schemaCache, "invalidateLoadedSchemaCache");
+    withSearchIndices();
+    withLens(["person"]);
+    await app.inject({ method: "POST", url: LENS_INDICES, payload: { key: "employment" } });
+    expect(invalidate).toHaveBeenCalledTimes(1);
+    await app.inject({ method: "DELETE", url: `${LENS_INDICES}/employment` });
+    expect(invalidate).toHaveBeenCalledTimes(2);
+    invalidate.mockRestore();
+  });
+
+  it("answers FEATURE_DISABLED on an adapter without search indices", async () => {
+    withLens(["person"]);
+    for (const [method, url] of [
+      ["GET", LENS_INDICES],
+      ["POST", LENS_INDICES],
+      ["DELETE", `${LENS_INDICES}/employment`],
+    ] as const) {
+      const res = await app.inject({ method, url, ...(method === "POST" ? { payload: { key: "employment" } } : {}) });
+      expect(res.statusCode, `${method} ${url}`).toBe(422);
+      expect(res.json().error.details).toEqual({ code: "FEATURE_DISABLED" });
+    }
+  });
+});
+
+describe("lens validation warnings", () => {
+  const LENS = { lensId: "l-1", key: "people", name: "People", description: null, createdAt: NOW, updatedAt: NOW };
+
+  function lensSchema(entityInclusions: Row[], relationInclusions: Row[] = []) {
+    holder.store.getLens.mockResolvedValue(LENS);
+    holder.store.listLenses.mockResolvedValue([LENS]);
+    holder.store.getFullSchema.mockResolvedValue({
+      ...RAW_SCHEMA,
+      lenses: [{ ...LENS, entityInclusions, relationInclusions }],
+    });
+  }
+
+  it("warns about hidden properties, not about skipped groups; the lens stays valid", async () => {
+    const indices = withSearchIndices();
+    indices.inclusions.set("l-1", new Set(["employment", "person~default"]));
+    // Bio hidden; without company the inferred lens shows no works_for.
+    lensSchema([{ key: "person", properties: ["name"] }]);
+    const res = await app.inject({ method: "POST", url: `${MODEL}/lenses/l-1/validate` });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json()).toEqual({
+      valid: true,
+      errors: [],
+      warnings: [
+        {
+          path: "lenses.people.includes.searchIndices.employment.fields.1",
+          message: "Search index 'employment' reads property 'bio' of entity type 'person', which this lens hides",
+        },
+      ],
+    });
+  });
+
+  it("keeps an index whose root type the lens no longer includes, and warns", async () => {
+    const indices = withSearchIndices();
+    indices.inclusions.set("l-1", new Set(["employment"]));
+    lensSchema([{ key: "company", properties: null }]);
+    const res = await app.inject({ method: "POST", url: `${MODEL}/lenses/l-1/validate` });
+    expect(res.json()).toEqual({
+      valid: true,
+      errors: [],
+      warnings: [
+        {
+          path: "lenses.people.includes.searchIndices.employment.entityType",
+          message:
+            "Search index 'employment' is not searchable in this lens: its root entity type 'person' is not included",
+        },
+      ],
+    });
+    // Schema-wide validation aggregates the lens warnings.
+    const all = await app.inject({ method: "POST", url: `${MODEL}/schema/validate` });
+    expect(all.json()).toMatchObject({ valid: true, errors: [], warnings: [{ path: "lenses.people.includes.searchIndices.employment.entityType" }] });
+  });
+
+  it("an unscoped lens, or one showing everything an index reads, gets none", async () => {
+    const indices = withSearchIndices();
+    indices.inclusions.set("l-1", new Set(["employment"]));
+    lensSchema([]);
+    expect((await app.inject({ method: "POST", url: `${MODEL}/lenses/l-1/validate` })).json().warnings).toEqual([]);
+    lensSchema([{ key: "person", properties: null }, { key: "company", properties: null }]);
+    expect((await app.inject({ method: "POST", url: `${MODEL}/lenses/l-1/validate` })).json().warnings).toEqual([]);
+  });
+});
+
+describe("property deletion names the lenses of indices it deletes", () => {
+  it("affectedLenses joins the lenses listing the property and those including a deleted index", async () => {
+    const indices = withSearchIndices();
+    await indices.createIndex(
+      "id-roles",
+      "custom",
+      SearchIndexDefinition.parse({
+        key: "roles",
+        name: "Roles",
+        description: "People by role",
+        entityType: "person",
+        fields: [],
+        relations: [{ relationType: "works_for", direction: "outgoing", fields: ["role"], target: {} }],
+      }),
+    );
+    indices.findLensesIncludingIndex.mockImplementation(async (key: string) => (key === "roles" ? ["staff", "hr"] : []));
+    holder.store.getRelationType.mockResolvedValue({
+      relationTypeId: "rt-w",
+      key: "works_for",
+      displayName: "Works for",
+      description: null,
+      sourceEntityTypeKey: "person",
+      targetEntityTypeKey: "company",
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    holder.store.getProperty.mockResolvedValue({ propertyId: "p-role", key: "role", displayName: "Role", dataType: "string", required: false });
+    holder.store.findLensesIncludingType.mockResolvedValue(["hr"]);
+    holder.store.getLensByKey.mockImplementation(async (key: string) => ({ lensId: `l-${key}`, key }));
+    holder.store.listIncludesTypes.mockResolvedValue([{ key: "works_for", properties: ["role"] }]);
+    const url = `${MODEL}/relation-types/rt-w/properties/p-role`;
+    const refused = await app.inject({ method: "DELETE", url });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().error.details).toEqual({ affectedLenses: ["hr", "staff"], affectedIndices: ["employment", "roles"] });
+
+    holder.store.deleteProperty.mockResolvedValue(true);
+    expect((await app.inject({ method: "DELETE", url: `${url}?cascade=true` })).statusCode).toBe(204);
+    expect(indices.deleteIndex).toHaveBeenCalledWith("roles");
   });
 });

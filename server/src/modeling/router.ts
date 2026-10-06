@@ -24,6 +24,7 @@ import {
   EntityTypeResponse,
   EntityTypeUpdate,
   ExportPayload,
+  IncludeSearchIndex,
   IncludeTypeRequest,
   IncludeTypeResponse,
   IncludeTypeUpdate,
@@ -318,9 +319,66 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
     },
   );
 
+  // Search-index inclusions name the index by KEY, in the body and the
+  // path alike — managed keys carry no identifier of their own.
+
+  app.post(
+    "/lenses/:lensId/includes/search-indices",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: LensIdParams,
+        body: IncludeSearchIndex,
+        response: { 201: IncludeSearchIndex },
+      },
+    },
+    async (request, reply) => {
+      const result = await searchIndices.includeIndexInLens(
+        request.params.lensId,
+        request.body,
+        await getModelingStore(request.params.ontologyKey),
+      );
+      return reply.status(201).send(result);
+    },
+  );
+
+  app.get(
+    "/lenses/:lensId/includes/search-indices",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: LensIdParams,
+        response: { 200: z.array(IncludeSearchIndex) },
+      },
+    },
+    async (request) =>
+      searchIndices.listLensIndexInclusions(
+        request.params.lensId,
+        await getModelingStore(request.params.ontologyKey),
+      ),
+  );
+
+  app.delete(
+    "/lenses/:lensId/includes/search-indices/:indexKey",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: LensIdParams.extend({ indexKey: z.string() }),
+      },
+    },
+    async (request, reply) => {
+      await searchIndices.excludeIndexFromLens(
+        request.params.lensId,
+        request.params.indexKey,
+        await getModelingStore(request.params.ontologyKey),
+      );
+      return reply.status(204).send();
+    },
+  );
+
   // --- Validation ---
-  // Both operations always answer 200 with {valid, errors[]} — they
-  // report, they never raise.
+  // Both operations always answer 200 with {valid, errors[], warnings[]}
+  // — they report, they never raise.
 
   app.post(
     "/lenses/:lensId/validate",

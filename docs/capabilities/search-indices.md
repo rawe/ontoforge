@@ -25,7 +25,9 @@ name and a description, and a definition:
   stemmed full-text representation per entry), either or both.
 
 An index is stored once per ontology and serves every lens of it. An unscoped lens
-searches every index; a scoped lens only the indices it includes
+searches every index; a scoped lens only the indices it includes — managed or custom,
+each only while the lens exposes its root type — and lens validation warns when a lens
+hides properties an included index reads
 ([ontology-lenses.md](ontology-lenses.md#search-through-a-lens)).
 
 There are two kinds. **Managed indices** are derived by the server from the schema and
@@ -93,8 +95,8 @@ change removes a managed index, its switch goes with it.
 A custom index is written by a modeler: it chooses the root type, the fields, the header,
 the relation groups, the templates and the representations. Its key follows the shared
 key rules, so it never contains `~` and never collides with a managed key; a name and a
-description are required — the description is written for whoever picks an index to
-search. A definition looks like this:
+description are required, and the description may not be blank — it is written for
+whoever picks an index to search. A definition looks like this:
 
 ```json
 {
@@ -346,8 +348,9 @@ ranks a custom index; its entries are built and kept current, and its status rep
 Indices are designed through the modeling surface — REST and the modeling MCP server —
 which lists every index with its status, manages custom indices, previews
 a draft and starts a rebuild
-([../interfaces.md](../interfaces.md#search-indices)). The whole-schema read and the
-[transfer format](transfer.md) carry the custom definitions and the switched-off
-managed indices. The server's feature report says whether the storage adapter stores
+([../interfaces.md](../interfaces.md#search-indices)), and includes indices in lenses
+([../interfaces.md](../interfaces.md#scope-inclusions)). The whole-schema read and the
+[transfer format](transfer.md) carry the custom definitions, the switched-off
+managed indices and each lens's index inclusions. The server's feature report says whether the storage adapter stores
 search indices ([../interfaces.md](../interfaces.md#server)); on one that stores none,
 every search-index operation is refused as a disabled feature.

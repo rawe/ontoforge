@@ -60,7 +60,11 @@ export type RelationGroup = z.infer<typeof RelationGroup>;
 export const SearchIndexDefinition = z.object({
   key: Key,
   name: z.string().min(1),
-  description: z.string().min(1),
+  description: z
+    .string()
+    .refine((text) => text.trim().length > 0, {
+      message: "Describe what the index finds — agents choose indices by it.",
+    }),
   entityType: Key,
   fields: z.array(Key).default([]),
   header: z.array(Key).nullable().default(null),

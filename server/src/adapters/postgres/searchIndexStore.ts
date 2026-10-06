@@ -328,6 +328,42 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
     return result.rowCount;
   }
 
+  async listLensIndexInclusions(lensId: string): Promise<string[]> {
+    if (!isUuid(lensId)) return [];
+    const result = await this.query(
+      `SELECT si.key FROM lens_includes li
+       JOIN search_index si ON si.search_index_id = li.search_index_id
+       WHERE li.lens_id = $1 ORDER BY si.key`,
+      [lensId],
+    );
+    return result.rows.map((row) => row["key"] as string);
+  }
+
+  async includeIndexInLens(lensId: string, key: string): Promise<boolean> {
+    if (!isUuid(lensId)) return false;
+    // A second inclusion of the same index violates
+    // `lens_includes_search_index_unique` — a conflict.
+    const result = await this.query(
+      `INSERT INTO lens_includes (lens_id, search_index_id)
+       SELECT l.lens_id, si.search_index_id
+       FROM lens l, search_index si
+       WHERE l.lens_id = $1 AND si.key = $2`,
+      [lensId, key],
+    );
+    return result.rowCount > 0;
+  }
+
+  async excludeIndexFromLens(lensId: string, key: string): Promise<boolean> {
+    if (!isUuid(lensId)) return false;
+    const result = await this.query(
+      `DELETE FROM lens_includes li
+       USING search_index si
+       WHERE li.lens_id = $1 AND li.search_index_id = si.search_index_id AND si.key = $2`,
+      [lensId, key],
+    );
+    return result.rowCount > 0;
+  }
+
   // ------------------------------------------------------------------
   // Generations
   // ------------------------------------------------------------------

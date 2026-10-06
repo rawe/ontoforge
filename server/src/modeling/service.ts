@@ -47,10 +47,13 @@ import { syncManagedSearchIndices } from "../runtime/indexing/managed.js";
 import {
   applyIndexCascade,
   exportSearchIndices,
+  importedInclusionErrors,
   importedIndexConflicts,
   importedIndexErrors,
+  importLensIndexInclusions,
   importSearchIndices,
   indexCascadeText,
+  lensIndexWarnings,
   planIndexCascade,
   requireSearchIndices,
 } from "./searchIndices.js";
@@ -67,6 +70,7 @@ import {
 } from "./schemas.js";
 import type {
   ExportEntityTypeInput,
+  ExportLensInput,
   ExportPayloadInput,
   SearchSettingsResponseBody,
   SearchSettingsUpdateInput,
@@ -666,7 +670,10 @@ export async function deleteProperty(
   // Lens allowlists never trigger the cascade protocol — without cascade
   // they are left holding an unresolvable key (harmless at runtime,
   // reported by lens validation). A custom search index reading the
-  // property does: the cascade removes the field from it.
+  // property does: the cascade removes the field from it (deleting an
+  // index left empty, with its lens inclusions). The refusal names the
+  // lenses whose allowlist lists the property and those including an
+  // index the cascade deletes.
   const including = await store.findLensesIncludingType(typeKind, ownerId);
   const indexPlan = await planIndexCascade(store, {
     kind: "property",
@@ -677,8 +684,13 @@ export async function deleteProperty(
   if (indexPlan.affectedIndices.length > 0 && !cascade) {
     throw new CascadeRequiredError(
       `Property '${prop.key as string}' is read by ${indexPlan.affectedIndices.length} custom ` +
-        `search index(es) (${indexPlan.affectedIndices.join(", ")}). Use ?cascade=true to remove.`,
-      await lensesListingProperty(store, typeKind, owner.key as string, prop.key as string, including),
+        `search index(es) (${indexPlan.affectedIndices.join(", ")}).`,
+      [
+        ...new Set([
+          ...(await lensesListingProperty(store, typeKind, owner.key as string, prop.key as string, including)),
+          ...indexPlan.affectedLenses,
+        ]),
+      ].sort(),
       indexPlan.affectedIndices,
     );
   }
@@ -1051,13 +1063,17 @@ export async function validateSchema(store: ModelingStore): Promise<ValidationRe
     }
   }
 
-  return { valid: errors.length === 0, errors };
+  return { valid: errors.length === 0, errors, warnings: [] };
 }
 
 /**
  * Validate one lens's declarations against the schema. An unscoped lens —
- * no inclusions — is valid by definition. Always answers, never raises
- * (except for an unknown lens id).
+ * no type inclusions — is valid by definition. Always answers, never
+ * raises (except for an unknown lens id).
+ *
+ * Warnings never make the lens invalid: they name what limits the search
+ * indices it includes (`lensIndexWarnings`) — an index whose root type it
+ * no longer exposes, properties an index reads that it hides.
  */
 export async function validateLens(
   lensId: string,
@@ -1075,14 +1091,14 @@ export async function validateLens(
 
   const lensData = (schema.lenses as Row[]).find((o) => o.lensId === lensId);
   if (!lensData) {
-    return { valid: true, errors: [] };
+    return { valid: true, errors: [], warnings: [] };
   }
 
   const entityInclusions = (lensData.entityInclusions as Row[] | undefined) ?? [];
   const relationInclusions = (lensData.relationInclusions as Row[] | undefined) ?? [];
 
   if (entityInclusions.length === 0 && relationInclusions.length === 0) {
-    return { valid: true, errors: [] };
+    return { valid: true, errors: [], warnings: [] };
   }
 
   const etMap = new Map((schema.entityTypes as Row[]).map((et) => [et.key as string, et]));
@@ -1180,21 +1196,36 @@ export async function validateLens(
     }
   }
 
-  return { valid: errors.length === 0, errors };
+  const full = buildSchemaCacheFromRaw(
+    lensData,
+    schema.entityTypes as Row[],
+    schema.relationTypes as Row[],
+  );
+  const scoped = applyScopeFiltering(
+    full,
+    entityInclusions as { key: string; properties: string[] | null }[],
+    relationInclusions as { key: string; properties: string[] | null }[],
+  );
+  const warnings = await lensIndexWarnings(store, { lensId, key: lensKey }, full, scoped);
+
+  return { valid: errors.length === 0, errors, warnings };
 }
 
-/** Validate the schema and then every lens: one combined list. */
+/** Validate the schema and then every lens: one combined list each of
+ * errors and warnings. */
 export async function validateAll(store: ModelingStore): Promise<ValidationResultBody> {
   const schemaResult = await validateSchema(store);
   const errors = [...schemaResult.errors];
+  const warnings = [...schemaResult.warnings];
 
   const lenses = await store.listLenses();
   for (const lens of lenses) {
     const lensResult = await validateLens(lens.lensId as string, store);
     errors.push(...lensResult.errors);
+    warnings.push(...lensResult.warnings);
   }
 
-  return { valid: errors.length === 0, errors };
+  return { valid: errors.length === 0, errors, warnings };
 }
 
 // --- Rebuild search data ---
@@ -1469,6 +1500,7 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
     properties: ((rt.properties as Row[] | undefined) ?? []).map(exportProperty),
   }));
 
+  const indices = store.searchIndices?.();
   const lenses: Row[] = [];
   for (const lens of schema.lenses as Row[]) {
     const entityInclusions = (lens.entityInclusions as Row[] | undefined) ?? [];
@@ -1489,6 +1521,8 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
         relationTypes: relationInclusions.map(exportInclusion),
       };
     }
+    exported.indexInclusions =
+      indices === undefined ? [] : await indices.listLensIndexInclusions(lens.lensId as string);
 
     const agentRows = await store.listAiAgentsForExport(lens.lensId as string);
     exported.aiAgents = agentRows.map((ag) => ({
@@ -1521,7 +1555,6 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
 
   // An adapter without search indices stems in no language set; its
   // design moves on with the set a new ontology starts with.
-  const indices = store.searchIndices?.();
   const keywordLanguages = indices === undefined
     ? [...DEFAULT_KEYWORD_LANGUAGES]
     : [...(await indices.getSearchSettings()).keywordLanguages];
@@ -1569,9 +1602,13 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
  * a set of that language alone). A 6.0 payload's `searchIndices` — custom
  * definitions, each validated against the payload's own schema, and the
  * switched-off managed indices — join the target's; a 5.0 payload has
- * none, its managed indices derive. Import provisions no entries: the
- * generations it reconciles are built by the worker. An adapter without
- * search indices checks both and keeps nothing of them.
+ * none, its managed indices derive. A 6.0 lens's `indexInclusions` name
+ * indices of either kind and are written as they come once the indices
+ * exist; a lens without them (every 5.0 lens) includes the managed
+ * indices of the types it exposes, as the storage step's upgrade does.
+ * Import provisions no entries: the generations it reconciles are built
+ * by the worker. An adapter without search indices checks all of it and
+ * keeps nothing of it.
  */
 export async function importSchema(
   payload: ExportPayloadInput,
@@ -1825,10 +1862,12 @@ export async function importSchema(
   }
 
   // Search indices (6.0): each custom definition valid against the
-  // payload's own schema, each switch naming a managed index it derives.
-  // A 5.0 payload carries none — its managed indices derive on import.
+  // payload's own schema, each switch naming a managed index it derives,
+  // each lens's index inclusion naming an index of either kind. A 5.0
+  // payload carries none — its managed indices derive on import, and its
+  // lenses include those of the types they expose.
   const payloadIndices = legacy ? undefined : payload.searchIndices;
-  if (payloadIndices !== undefined) {
+  if (!legacy) {
     const indexSchema = buildSchemaCacheFromRaw(
       { lensId: "import", key: "import", name: "import" },
       payload.entityTypes as unknown as Row[],
@@ -1838,7 +1877,10 @@ export async function importSchema(
         targetKey: rt.toEntityTypeKey,
       })) as unknown as Row[],
     );
-    errors.push(...importedIndexErrors(payloadIndices, indexSchema));
+    if (payloadIndices !== undefined) {
+      errors.push(...importedIndexErrors(payloadIndices, indexSchema));
+    }
+    errors.push(...importedInclusionErrors(payload.lenses, payloadIndices, indexSchema));
   }
 
   if (errors.length > 0) {
@@ -1959,8 +2001,10 @@ export async function importSchema(
   }
 
   const createdLenses: LensResponseBody[] = [];
+  const lensIds = new Map<ExportLensInput, string>();
   for (const lens of payload.lenses) {
     const lensId = randomUUID();
+    lensIds.set(lens, lensId);
     const lensData = await store.createLens(lensId, lens.key, lens.name, lens.description ?? null);
 
     // Inclusions are written WITHOUT the four inclusion rules — lens
@@ -2047,6 +2091,18 @@ export async function importSchema(
   }
   invalidateLoadedSchemaCache();
   await syncSearchIndices(store);
+  // The sync included each new managed index in the scoped lenses that
+  // expose its root type — what a lens without index inclusions (5.0, or
+  // a 6.0 lens without the field) keeps. A 6.0 lens's own list replaces
+  // that, now that every index exists.
+  if (!legacy) {
+    for (const lens of payload.lenses) {
+      if (lens.indexInclusions !== undefined) {
+        await importLensIndexInclusions(store, lensIds.get(lens)!, lens.indexInclusions);
+      }
+    }
+    invalidateLoadedSchemaCache();
+  }
   return { lenses: createdLenses };
 }
 

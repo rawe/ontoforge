@@ -61,7 +61,8 @@ from a list call. A key is never accepted where an identifier is expected.
 
 The same asymmetry appears inside the inclusion routes: adding an inclusion names the type
 by **key in the request body**, while updating or removing one names it by **identifier in
-the path**.
+the path**. A search-index inclusion names the index by key in both places, as every
+search-index route does.
 
 MCP has no such split — every tool takes keys and resolves them internally.
 
@@ -288,7 +289,8 @@ whose `details` name the lenses affected (`affectedLenses`) and the custom indic
 
 ### Scope inclusions
 
-The routes that make a lens scoped. A lens with no type inclusions exposes the whole schema.
+The routes that make a lens scoped — its type inclusions — and those that choose the search
+indices it searches. A lens with no type inclusions exposes the whole schema.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -300,9 +302,19 @@ The routes that make a lens scoped. A lens with no type inclusions exposes the w
 | GET | `/lenses/{lensId}/includes/relation-types` | List the lens's relation type inclusions |
 | PUT | `/lenses/{lensId}/includes/relation-types/{relationTypeId}` | Replace an inclusion's property list |
 | DELETE | `/lenses/{lensId}/includes/relation-types/{relationTypeId}` | Drop a relation type from the lens |
+| POST | `/lenses/{lensId}/includes/search-indices` | Include a search index, named by `key`; 201 |
+| GET | `/lenses/{lensId}/includes/search-indices` | List the lens's search-index inclusions, each as `{key}`, in key order |
+| DELETE | `/lenses/{lensId}/includes/search-indices/{indexKey}` | Drop a search index from the lens; 204 |
 
 An omitted property list means *all properties*; an explicit list must contain every
 required property that has no default.
+
+Search-index inclusions never make a lens scoped, and take effect for search at once. An
+unknown lens or index, or removing an index the lens does not include, is not found;
+including an index twice is a conflict. A lens with entity type inclusions that does not
+include the index's root entity type answers `VALIDATION_ERROR` at `details.fields.key`.
+The three routes answer `FEATURE_DISABLED` on an adapter without search indices. Rules:
+[capabilities/ontology-lenses.md](capabilities/ontology-lenses.md#search-through-a-lens).
 
 ### Agent configurations
 
@@ -407,6 +419,12 @@ beyond it.
 | GET | `/export` | Export the ontology's design in the transfer format |
 | POST | `/import` | Import a transfer payload into this ontology |
 | POST | `/rebuild-search-data` | Rebuild the saved-query description vectors and repair the width of their vector index |
+
+Both validation operations — this one and `POST /lenses/{lensId}/validate` — always answer
+`{valid, errors, warnings}`, each error and warning a `{path, message}` with a dotted
+path. Warnings never make the result invalid; they name what limits the search indices a
+lens includes
+([capabilities/ontology-lenses.md](capabilities/ontology-lenses.md#validation-warnings)).
 
 Rebuild answers with a stream of newline-delimited JSON progress records rather than one
 body, because it can run over many items. It is never refused for a missing embedding
@@ -651,7 +669,7 @@ exist; its tools answer not-found tool errors otherwise.
 | Tool | Purpose |
 |---|---|
 | `ensure_ontology` | Create the ontology this mount is bound to if it does not exist yet; no-op if it does. Argument-less — it acts only on the mount's own ontology — and reports the key and whether it created. A created ontology starts bare and without a display name; naming is a REST/UI operation |
-| `get_schema` | The ontology's whole design — types, relation types, properties, the keyword language set, the custom search indices and the switched-off managed ones, and every lens with its inclusions, agents, saved queries and retrievers. Identical to `export_schema`, and the only way to enumerate lenses: there is no `list_lenses` |
+| `get_schema` | The ontology's whole design — types, relation types, properties, the keyword language set, the custom search indices and the switched-off managed ones, and every lens with its type inclusions, its search-index inclusions (`indexInclusions`), agents, saved queries and retrievers. Identical to `export_schema`, and the only way to enumerate lenses: there is no `list_lenses` |
 | `create_entity_type` | Add an entity type together with its name property (`name_property`, default `name`) |
 | `update_entity_type` | Change display name, description or name property (`name_property`); the key is immutable |
 | `delete_entity_type` | Remove an entity type and its properties |
@@ -681,7 +699,9 @@ exist; its tools answer not-found tool errors otherwise.
 | `remove_entity_type_from_lens` | Drop an entity type from a lens |
 | `add_relation_type_to_lens` | Include a relation type in a lens, optionally narrowed to a property list |
 | `remove_relation_type_from_lens` | Drop a relation type from a lens |
-| `validate_lens` | Check one lens's inclusions against the schema |
+| `add_search_index_to_lens` | Include a search index in a lens, by `index_key` |
+| `remove_search_index_from_lens` | Drop a search index from a lens, by `index_key` |
+| `validate_lens` | Check one lens's inclusions against the schema; warnings name what limits its search indices |
 | `list_ai_agents` | List a lens's agent configurations |
 | `set_ai_agent` | Create or replace an agent configuration |
 | `delete_ai_agent` | Delete an agent configuration |

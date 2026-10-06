@@ -146,7 +146,7 @@ Per ontology. "Unique" here always means unique within the owning ontology.
 | Entity type | id, unique `key` | display name, description, timestamps |
 | Relation type | id, unique `key` | display name, source and target entity type keys |
 | Property definition | id, `key` unique within its owner | data type, required, default; owned by exactly one entity type or relation type |
-| Inclusion | lens + type | optional property allowlist; absent means all properties |
+| Inclusion | lens + type, or lens + search index | a type inclusion's optional property allowlist; absent means all properties |
 | Agent config | lens + `key` | name, description, system prompt, tool allowlist |
 | Saved query | lens + `key` | name, description, ordered steps, parameters, bindings |
 | Retriever configuration | lens + `key` | name, description, configuration version, configuration |

@@ -240,8 +240,9 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     {
       description:
         "Get the current state of the ontology's schema. Returns all entity types, " +
-        "relation types, and their properties, the keyword language set and the search " +
-        "indices (custom definitions and switched-off managed indices).",
+        "relation types, and their properties, the keyword language set, the search " +
+        "indices (custom definitions and switched-off managed indices) and the lenses with " +
+        "their type and search-index inclusions.",
       inputSchema: {},
     },
     wrap("get_schema", async () => {
@@ -984,10 +985,53 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
   );
 
   server.registerTool(
+    "add_search_index_to_lens",
+    {
+      description:
+        "Include a search index in a lens, by index key. A scoped lens must include the " +
+        "index's root entity type. Index inclusions never make a lens scoped; an unscoped " +
+        "lens searches every index. get_schema lists each lens's index inclusions.",
+      inputSchema: {
+        lens_key: z.string(),
+        index_key: z.string(),
+      },
+    },
+    wrap("add_search_index_to_lens", async (args: { lens_key: string; index_key: string }) => {
+      const store = await getModelingStore(ontologyKey);
+      const lens = await resolveLensByKey(store, args.lens_key);
+      const result = await searchIndices.includeIndexInLens(
+        lens.lensId as string,
+        { key: args.index_key },
+        store,
+      );
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "remove_search_index_from_lens",
+    {
+      description: "Remove a search index from a lens, by index key.",
+      inputSchema: {
+        lens_key: z.string(),
+        index_key: z.string(),
+      },
+    },
+    wrap("remove_search_index_from_lens", async (args: { lens_key: string; index_key: string }) => {
+      const store = await getModelingStore(ontologyKey);
+      const lens = await resolveLensByKey(store, args.lens_key);
+      await searchIndices.excludeIndexFromLens(lens.lensId as string, args.index_key, store);
+      return textResult(`Search index '${args.index_key}' removed from lens '${args.lens_key}'.`);
+    }),
+  );
+
+  server.registerTool(
     "validate_lens",
     {
       description:
-        "Validate a single lens's INCLUDES_TYPE configuration against the schema.",
+        "Validate a single lens's INCLUDES_TYPE configuration against the schema. " +
+        "Warnings name what limits the search indices it includes: a root type it does not " +
+        "include, properties an index reads that it hides.",
       inputSchema: {
         lens_key: z.string(),
       },

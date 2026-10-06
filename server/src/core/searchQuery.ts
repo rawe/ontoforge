@@ -49,32 +49,102 @@ export function availableIndices<T extends { key: string; definition: { entityTy
   );
 }
 
+/** One way a lens limits an index it includes. */
+export interface LensIndexFinding {
+  /** `rootHidden`: the lens does not expose the root type — the index is
+   * not searchable in it. `hiddenProperty`: the index reads a property
+   * the lens hides (D3) — its entry texts carry hidden values. */
+  kind: "rootHidden" | "hiddenProperty";
+  /** Dotted path into the definition. */
+  path: string;
+  message: string;
+}
+
+/**
+ * How a lens limits an index: its root type hidden (nothing else is
+ * reported then), or every property it reads that the lens hides — own
+ * and header fields of the root, relation and target fields of the
+ * groups the lens shows. A group whose relation type, or the entity type
+ * on its other end, the lens hides is not reported: its entries are
+ * skipped at query time, no rebuild, no warning (spec §4). `full` and
+ * `scoped` are the schema before and after the lens's scope; an unscoped
+ * lens limits nothing. Lens validation reports these as warnings; the
+ * search withholds snippets of indices with any.
+ */
+export function lensIndexFindings(
+  definition: SearchIndexDefinition,
+  full: SearchIndexSchema,
+  scoped: SearchIndexSchema,
+): LensIndexFinding[] {
+  const index = `Search index '${definition.key}'`;
+  const root = full.entityTypes[definition.entityType];
+  const visibleRoot = scoped.entityTypes[definition.entityType];
+  if (root === undefined || visibleRoot === undefined) {
+    return [
+      {
+        kind: "rootHidden",
+        path: "entityType",
+        message:
+          `${index} is not searchable in this lens: its root entity type ` +
+          `'${definition.entityType}' is not included`,
+      },
+    ];
+  }
+  const findings: LensIndexFinding[] = [];
+  const hidden = (
+    owner: { properties: Record<string, unknown> },
+    ownerText: string,
+    keys: readonly string[],
+    path: (i: number) => string,
+  ) => {
+    keys.forEach((key, i) => {
+      if (!(key in owner.properties)) {
+        findings.push({
+          kind: "hiddenProperty",
+          path: path(i),
+          message: `${index} reads property '${key}' of ${ownerText}, which this lens hides`,
+        });
+      }
+    });
+  };
+  const rootText = `entity type '${definition.entityType}'`;
+  hidden(visibleRoot, rootText, definition.fields, (i) => `fields.${i}`);
+  // Header fields already reported as own fields are not reported twice.
+  const header = effectiveHeader(definition, root);
+  const headerOnly = header.filter((key) => !definition.fields.includes(key));
+  hidden(visibleRoot, rootText, headerOnly, (i) =>
+    definition.header === null ? "header" : `header.${definition.header.indexOf(headerOnly[i]!)}`,
+  );
+
+  definition.relations.forEach((group, g) => {
+    const relationType = scoped.relationTypes[group.relationType];
+    if (relationType === undefined) return;
+    const otherEnd =
+      group.direction === "outgoing" ? relationType.toEntityTypeKey : relationType.fromEntityTypeKey;
+    if (scoped.entityTypes[otherEnd] === undefined) return;
+    hidden(relationType, `relation type '${group.relationType}'`, group.fields, (i) => `relations.${g}.fields.${i}`);
+    for (const [targetType, fields] of Object.entries(group.target)) {
+      const target = scoped.entityTypes[targetType];
+      if (target === undefined) continue;
+      hidden(target, `entity type '${targetType}'`, fields, (i) => `relations.${g}.target.${targetType}.${i}`);
+    }
+  });
+  return findings;
+}
+
 /**
  * Whether an index reads a property the lens hides: an own field or
  * header field of the root, or a relation or target field of a group the
- * lens shows (entries of hidden groups are skipped anyway). An included
- * index may (D3); its entry texts then carry hidden values.
+ * lens shows (entries of hidden groups are skipped anyway) — or its root
+ * type is hidden (`lensIndexFindings`). An included index may (D3); its
+ * entry texts then carry hidden values.
  */
 export function readsHiddenProperties(
   definition: SearchIndexDefinition,
   full: SearchIndexSchema,
   scoped: SearchIndexSchema,
 ): boolean {
-  const root = full.entityTypes[definition.entityType];
-  const visibleRoot = scoped.entityTypes[definition.entityType];
-  if (root === undefined || visibleRoot === undefined) return true;
-  const hidden = (owner: { properties: Record<string, unknown> } | undefined, keys: string[]) =>
-    keys.some((key) => owner === undefined || !(key in owner.properties));
-  if (hidden(visibleRoot, [...definition.fields, ...effectiveHeader(definition, root)])) return true;
-  return definition.relations.some((group) => {
-    const relationType = scoped.relationTypes[group.relationType];
-    if (relationType === undefined) return false;
-    if (hidden(relationType, group.fields)) return true;
-    return Object.entries(group.target).some(
-      ([targetType, fields]) =>
-        scoped.entityTypes[targetType] !== undefined && hidden(scoped.entityTypes[targetType], fields),
-    );
-  });
+  return lensIndexFindings(definition, full, scoped).length > 0;
 }
 
 // ---------------------------------------------------------------------------

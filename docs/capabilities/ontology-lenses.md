@@ -70,7 +70,8 @@ invalidated by a property change, so only lenses with allowlists are ever named 
 a cascade refusal over a property ([schema-modeling.md](schema-modeling.md#the-cascade-protocol)).
 
 Four rules bind an inclusion. They are enforced when it is added or updated, and
-re-checked by lens validation:
+re-checked by lens validation (which also warns about the search indices the lens
+includes, [below](#validation-warnings)):
 
 - the type it names must exist
 - every key in the allowlist must be a property of that type
@@ -199,18 +200,30 @@ decides which of them it searches. An unscoped lens searches every index. A scop
 searches the indices it **includes** — a third kind of inclusion, beside entity and
 relation types — and each only while it exposes the index's root entity type.
 
-Index inclusions are written by the server, not declared through an interface: a
-managed index that comes into existence is included in every scoped lens that exposes
-its root type — by an entity inclusion of the type, or, in a lens with relation
-inclusions only, because every type is exposed. Nothing else adds one: a scoped lens
-created after an index exists, or an entity type included in a scoped lens after its
-indices exist, has no inclusion of those indices, and ranked search through that lens
-finds nothing through them; no scoped lens includes a custom index. Index inclusions are
-removed with their lens, and with their index — deleting a custom index a lens includes
-follows the cascade protocol, naming the lens
-([schema-modeling.md](schema-modeling.md#the-cascade-protocol)). They are not carried by
-[transfer](transfer.md); an imported scoped lens includes the managed indices the import
-itself brings into existence.
+An index inclusion names the index by key and carries nothing else — no allowlist, and
+no update. At most one exists per lens and index; including an index twice is a
+conflict, not an upsert. One rule binds it when it is added: a lens with entity
+inclusions may include an index only if it includes the index's root entity type. A lens
+with relation inclusions only exposes every type and accepts any index, and so does an
+unscoped lens — it searches every index anyway, keeps the inclusion, and the inclusion
+counts once the lens is scoped. Adding or removing an index inclusion changes what the
+lens searches at once.
+
+The server adds index inclusions on one occasion of its own: a managed index that comes
+into existence is included in every scoped lens that exposes its root type — by an entity
+inclusion of the type, or, in a lens with relation inclusions only, because every type
+is exposed. Nothing else adds one: a scoped lens created after an index exists, or an
+entity type included in a scoped lens after its indices exist, includes none of those
+indices until they are included explicitly, and ranked search through that lens finds
+nothing through them.
+
+Removing a type inclusion keeps the index inclusions rooted on that type: they stay, are
+not searchable while the lens does not expose the root type, and are reported by lens
+validation ([below](#validation-warnings)). Index inclusions are removed with their lens,
+and with their index — deleting a custom index a lens includes follows the cascade
+protocol, naming the lens, and so does a property deletion whose cascade deletes an
+index a lens includes ([schema-modeling.md](schema-modeling.md#the-cascade-protocol)).
+[Transfer](transfer.md) carries each lens's index inclusions.
 
 The lens still governs what a search returns:
 
@@ -222,6 +235,22 @@ The lens still governs what a search returns:
   hides; its entries still carry the value, so it can still drive the ranking. The
   match's snippet is then withheld, and the label of a relation's target is withheld
   when the lens hides the target's name property.
+
+### Validation warnings
+
+Lens validation reports what limits the indices a scoped lens includes as **warnings**,
+beside its errors. A warning never makes a lens invalid. It is reported for:
+
+- an included index whose root type the lens does not expose — it is not searchable
+  there, and nothing else is reported for it;
+- every property an included index reads that the lens hides: an own or header field of
+  the root — the name property too, when it is the index's default header — and a
+  relation or target field of a group the lens shows.
+
+A group whose relation type, or the entity type at its other end, the lens hides is no
+warning: its entries are skipped at query time. Each warning's path is
+`lenses.<lens>.includes.searchIndices.<index>.` followed by the dotted path into the
+definition (`relations.0.target.company.1`). An unscoped lens has no warnings.
 
 ## Instance data is shared
 
@@ -260,7 +289,7 @@ lens without handing it the schema.
 | | REST | MCP | Web UI |
 |---|---|---|---|
 | Lens create, read, update, delete | modeling routes | modeling server, by key | schema studio |
-| Inclusions | separate operations per dimension: add, list, update, remove | add and remove per dimension | schema studio |
+| Inclusions | separate operations per dimension: add, list, update, remove — for search indices add, list, remove | add and remove per dimension | schema studio |
 | Lens validation | per-lens operation | per-lens tool | schema studio |
 | Using a lens | ontology key and lens key are path segments on every runtime route | bound once, by the mount URL | data workbench |
 

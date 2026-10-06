@@ -16,7 +16,7 @@ ontologies, transfer included.
 | Entity types | Key, display name, description, the key of its name property, and every property definition |
 | Relation types | The same, plus the keys of the source and target entity types |
 | Property definitions | Key, display name, description, data type, required flag, default |
-| Lenses | Key, name, description, and their inclusions — absent entirely for an unscoped lens |
+| Lenses | Key, name, description, their type inclusions — absent entirely for an unscoped lens — and the keys of the search indices they include |
 | Agents | Every agent of every lens: key, name, description, system prompt, tool allowlist |
 | Saved queries | Every saved query of every lens: key, name, description, steps, parameters |
 | Retrievers | Every retriever of every lens: key, name, description, configVersion, config |
@@ -57,6 +57,14 @@ built in the background ([below](#side-effects-of-import)). An adapter
 without search indices exports both lists empty, and its import validates the field and
 keeps nothing of it.
 
+Each lens carries `indexInclusions`, the keys of the search indices it includes — managed
+and custom alike — in key order
+([ontology-lenses.md](ontology-lenses.md#search-through-a-lens)). Import writes each list
+as it comes once every index exists, in place of the managed indices the import would
+include in that lens on its own; a scoped lens without the field includes the managed
+indices of the types it exposes. An adapter without search indices exports every list
+empty, and its import validates them and keeps nothing of them.
+
 ## The format version
 
 The payload declares a format version, and export always writes the current one: `6.0`.
@@ -72,9 +80,10 @@ field error on the version:
 | `5.0` | The previous format, converted on the way in |
 
 A `5.0` payload differs from `6.0` in three ways. It carries no search indices — a
-`searchIndices` field in it is ignored. It carries one `textSearchLanguage`,
-`english` or `german`, in place of `keywordLanguages`; import takes that language alone as
-the set. And its entity types carry no name property
+`searchIndices` field in it is ignored, and so is a lens's `indexInclusions`: each scoped
+lens includes the managed indices of the types it exposes. It carries one
+`textSearchLanguage`, `english` or `german`, in place of `keywordLanguages`; import takes
+that language alone as the set. And its entity types carry no name property
 ([schema-modeling.md](schema-modeling.md#the-name-property)); import derives one per
 entity type: the first `string` property among `name`, `title`, `label` and
 `display_name`, in that order; otherwise the type's first `string` property in payload
@@ -163,6 +172,12 @@ Import is a write path, and the write-path rules apply to it:
   definition time ([search-indices.md](search-indices.md#validation-and-limits)), and
   every switched-off key must name a managed index that schema derives. An invalid one
   fails the import, naming the index and the offending path.
+- Every key in a lens's `indexInclusions` must name a custom index of the payload or a
+  managed index its schema derives, once per lens; an unknown or repeated key fails the
+  import, naming the lens and the index. Whether the lens includes the index's root type
+  is not checked: like type inclusions, index inclusions are written as they come, and
+  lens validation warns about an index the lens cannot search
+  ([ontology-lenses.md](ontology-lenses.md#validation-warnings)).
 - Every agent's tool allowlist is checked against the read-only agent tool set, exactly as
   at definition time. An unknown tool name fails the import.
 - Every saved query's steps are checked structurally, exactly as at definition time:
@@ -193,7 +208,8 @@ artefacts and computes embeddings, all within the target ontology.
 - **Search indices.** The managed search indices of the imported schema come into
   existence and are included in every scoped lens that exposes their root types — the
   imported ones among them ([search-indices.md](search-indices.md#managed-indices)) —
-  and the payload's custom indices are created. Import provisions no entries: each
+  and the payload's custom indices are created. An imported lens that carries
+  `indexInclusions` then includes exactly those indices. Import provisions no entries: each
   index gets its generations, which the worker builds in the background
   ([search-indices.md](search-indices.md#lifecycle)); with no instance data imported,
   there is nothing to build until data is written.

@@ -351,7 +351,11 @@ deletes its generations, their queued work and entries, and its lens inclusions;
 the root entity type deletes the index. One more operation includes an index in every
 scoped lens that exposes its root entity type — by an entity inclusion of the type, or,
 in a lens with relation inclusions only, because every type is exposed — skipping lenses
-that include it already, and returns how many it was added to.
+that include it already, and returns how many it was added to. Three serve one lens's
+inclusions: list the keys of the indices it includes, in key order — none for an unknown
+lens; include one index by key, checking no scope rule — absent when the lens or the
+index does not exist, a conflict when the lens includes it already; and remove one —
+absent when the lens does not include it.
 
 **Modeling reads.** Two reads serve the modeling of indices. One lists the keys of the
 lenses that include an index, sorted — the lenses its deletion names in a cascade

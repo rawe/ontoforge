@@ -19,6 +19,7 @@ import {
   fuseModes,
   groupByEntity,
   keywordTsquery,
+  lensIndexFindings,
   mergeByScore,
   readsHiddenProperties,
   RRF_K,
@@ -122,6 +123,98 @@ describe("readsHiddenProperties", () => {
     expect(
       readsHiddenProperties(employment, schema, hiding({ company: ["name"] }, ["works_for"])),
     ).toBe(false);
+  });
+});
+
+describe("lensIndexFindings", () => {
+  const employment = SearchIndexDefinition.parse({
+    key: "employment",
+    name: "Employment",
+    description: "People by employer",
+    entityType: "person",
+    fields: ["email", "age"],
+    relations: [
+      {
+        relationType: "works_for",
+        direction: "outgoing",
+        fields: ["role", "since"],
+        target: { company: ["name", "founded"] },
+        label: "Employment",
+      },
+      { relationType: "lives_in", direction: "outgoing", target: { city: ["name"] } },
+    ],
+  });
+  function hiding(hidden: Record<string, string[]>, hiddenTypes: string[] = []): SearchIndexSchema {
+    const copy = structuredClone(schema);
+    for (const [type, keys] of Object.entries(hidden)) {
+      const owner = copy.entityTypes[type] ?? copy.relationTypes[type]!;
+      for (const key of keys) delete owner.properties[key];
+    }
+    for (const type of hiddenTypes) {
+      delete copy.entityTypes[type];
+      delete copy.relationTypes[type];
+    }
+    return copy;
+  }
+  const paths = (scoped: SearchIndexSchema, definition = employment) =>
+    lensIndexFindings(definition, schema, scoped).map((f) => `${f.kind} ${f.path}`);
+
+  it("finds nothing when the lens shows everything the index reads", () => {
+    expect(lensIndexFindings(employment, schema, schema)).toEqual([]);
+  });
+
+  it("reports only the root type when the lens does not expose it", () => {
+    const findings = lensIndexFindings(employment, schema, hiding({ company: ["name"] }, ["person"]));
+    expect(findings).toEqual([
+      {
+        kind: "rootHidden",
+        path: "entityType",
+        message:
+          "Search index 'employment' is not searchable in this lens: its root entity type 'person' is not included",
+      },
+    ]);
+  });
+
+  it("reports every hidden own, header, relation and target field by its path", () => {
+    expect(paths(hiding({ person: ["age", "name"], works_for: ["since"], company: ["founded"] }))).toEqual([
+      "hiddenProperty fields.1",
+      // The header follows the name property (header: null).
+      "hiddenProperty header",
+      "hiddenProperty relations.0.fields.1",
+      "hiddenProperty relations.0.target.company.1",
+    ]);
+    const [own] = lensIndexFindings(employment, schema, hiding({ person: ["age"] }));
+    expect(own!.message).toBe(
+      "Search index 'employment' reads property 'age' of entity type 'person', which this lens hides",
+    );
+  });
+
+  it("names an explicit header field by its position, and an own field only once", () => {
+    const headed = { ...employment, header: ["email", "name"] };
+    expect(paths(hiding({ person: ["email", "name"] }), headed)).toEqual([
+      "hiddenProperty fields.0",
+      "hiddenProperty header.1",
+    ]);
+  });
+
+  it("reports no group the lens skips — a hidden relation type or other end — nor its fields", () => {
+    // Entries of such groups are skipped at query time: no rebuild, no warning.
+    expect(lensIndexFindings(employment, schema, hiding({ company: ["name"] }, ["works_for"]))).toEqual([]);
+    expect(lensIndexFindings(employment, schema, hiding({ city: ["name"] }, ["city"]))).toEqual([]);
+    expect(readsHiddenProperties(employment, schema, hiding({}, ["city", "works_for"]))).toBe(false);
+  });
+
+  it("follows the direction of an incoming group to its other end", () => {
+    const employers = SearchIndexDefinition.parse({
+      key: "employers",
+      name: "Employers",
+      description: "Companies by staff",
+      entityType: "company",
+      fields: ["name"],
+      relations: [{ relationType: "works_for", direction: "incoming", target: { person: ["email"] } }],
+    });
+    expect(paths(hiding({ person: ["email"] }), employers)).toEqual(["hiddenProperty relations.0.target.person.0"]);
+    expect(paths(hiding({}, ["person"]), employers)).toEqual([]);
   });
 });
 

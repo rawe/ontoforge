@@ -53,6 +53,12 @@ export const IncludeTypeResponse = z.object({
   properties: z.array(z.string()).nullable(),
 });
 
+/** A search-index inclusion names the index by key — request and
+ * response alike. */
+export const IncludeSearchIndex = z.object({
+  key: z.string(),
+});
+
 // --- Validation ---
 
 export const SchemaValidationErrorItem = z.object({
@@ -60,9 +66,11 @@ export const SchemaValidationErrorItem = z.object({
   message: z.string(),
 });
 
+// Warnings never make a result invalid (lens validation: D3).
 export const ValidationResult = z.object({
   valid: z.boolean(),
   errors: z.array(SchemaValidationErrorItem),
+  warnings: z.array(SchemaValidationErrorItem),
 });
 
 // --- Entity Type ---
@@ -334,6 +342,10 @@ export const ExportLens = z.object({
   name: z.string(),
   description: z.string().nullable().optional(),
   includes: ExportLensInclusions.nullable().optional(),
+  // 6.0: the keys of the search indices the lens includes. Absent (and
+  // in 5.0): the lens includes the managed indices of the types it
+  // exposes, as a lens upgraded by the storage step does.
+  indexInclusions: z.array(z.string()).optional(),
   retrievers: z.array(StoredRetrieverExport).optional(),
   aiAgents: z.array(ExportAiAgent).default([]),
   savedQueries: z.array(ExportSavedQuery).default([]),
@@ -468,6 +480,7 @@ export type LensResponseBody = z.infer<typeof LensResponse>;
 export type IncludeTypeRequestInput = z.infer<typeof IncludeTypeRequest>;
 export type IncludeTypeUpdateInput = z.infer<typeof IncludeTypeUpdate>;
 export type IncludeTypeResponseBody = z.infer<typeof IncludeTypeResponse>;
+export type IncludeSearchIndexBody = z.infer<typeof IncludeSearchIndex>;
 export type ValidationResultBody = z.infer<typeof ValidationResult>;
 export type EntityTypeCreateInput = z.infer<typeof EntityTypeCreate>;
 export type EntityTypeUpdateInput = z.infer<typeof EntityTypeUpdate>;

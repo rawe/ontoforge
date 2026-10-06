@@ -16,6 +16,9 @@
  *   real, but not deterministic.
  * - The fixture spells an unscoped lens as `"includes": null`; this
  *   export omits the key entirely, per the docs' "absent entirely".
+ * - Index inclusions are sorted; an adapter without search indices keeps
+ *   none (they import as nothing and export as `[]`), so its comparison
+ *   leaves them out.
  */
 
 import { readFileSync } from "node:fs";
@@ -28,7 +31,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../../src/app.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
-import { supportsMultipleOntologies } from "./tiers.js";
+import { keepsOwnSearchStorage, supportsMultipleOntologies } from "./tiers.js";
 
 type Row = Record<string, unknown>;
 
@@ -37,7 +40,8 @@ const EXPORT_FIXTURE = JSON.parse(
 ) as Row;
 
 /** Order-normalize a payload and drop `includes: null` (the fixture's
- * spelling of "absent" — this export omits the key). */
+ * spelling of "absent" — this export omits the key). Index inclusions
+ * come in the database's collation order. */
 function normalize(payload: Row): Row {
   const clone = JSON.parse(JSON.stringify(payload)) as Row;
   const byKey = (a: Row, b: Row) => String(a.key).localeCompare(String(b.key));
@@ -48,6 +52,11 @@ function normalize(payload: Row): Row {
     (rt.properties as Row[]).sort(byKey);
   }
   for (const lens of (clone.lenses as Row[]) ?? []) {
+    if (keepsOwnSearchStorage) {
+      delete lens.indexInclusions;
+    } else {
+      (lens.indexInclusions as string[] | undefined)?.sort();
+    }
     if (lens.includes === null) {
       delete lens.includes;
     } else if (lens.includes) {

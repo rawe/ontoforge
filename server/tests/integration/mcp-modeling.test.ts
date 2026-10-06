@@ -87,13 +87,14 @@ beforeEach(async () => {
 });
 
 describe("tool surface", () => {
-  it("lists exactly the thirty-eight modeling tools — and NO update-inclusion tool", async () => {
+  it("lists exactly the forty modeling tools — and NO update-inclusion tool", async () => {
     const tools = await client.listTools();
-    expect(tools.tools).toHaveLength(38);
+    expect(tools.tools).toHaveLength(40);
     expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
       "add_entity_type_to_lens",
       "add_property",
       "add_relation_type_to_lens",
+      "add_search_index_to_lens",
       "create_entity_type",
       "create_lens",
       "create_relation_type",
@@ -119,6 +120,7 @@ describe("tool surface", () => {
       "rebuild_search_index",
       "remove_entity_type_from_lens",
       "remove_relation_type_from_lens",
+      "remove_search_index_from_lens",
       "set_ai_agent",
       "set_saved_query",
       "set_search_settings",
@@ -427,10 +429,43 @@ describe("search indices over MCP", () => {
     expect((people.definition as { relations: unknown[] }).relations).toEqual([]);
   });
 
+  it.skipIf(settings.DB_BACKEND !== "postgres")("includes indices in a lens by key; schema reads and validation show them", async () => {
+    await schema();
+    await call(client, "create_search_index", { definition: PEOPLE });
+    await call(client, "create_lens", { key: "hr", name: "HR" });
+    await call(client, "add_entity_type_to_lens", { lens_key: "hr", entity_type_key: "person" });
+    // Company with no property: the group's target field is hidden.
+    await call(client, "add_entity_type_to_lens", { lens_key: "hr", entity_type_key: "company", properties: [] });
+
+    const added = await call(client, "add_search_index_to_lens", { lens_key: "hr", index_key: "people" });
+    expect(json(added)).toEqual({ key: "people" });
+    const twice = await call(client, "add_search_index_to_lens", { lens_key: "hr", index_key: "people" });
+    expect(twice.isError).toBe(true);
+    await call(client, "create_lens", { key: "desk", name: "Desk" });
+    await call(client, "add_entity_type_to_lens", { lens_key: "desk", entity_type_key: "company" });
+    const foreign = await call(client, "add_search_index_to_lens", { lens_key: "desk", index_key: "people" });
+    expect(foreign.isError).toBe(true);
+    expect(text(foreign)).toContain("Root entity type 'person'");
+
+    const exported = json(await call(client, "get_schema")) as { lenses: { key: string; indexInclusions: string[] }[] };
+    expect(exported.lenses.find((l) => l.key === "hr")!.indexInclusions).toEqual(["people"]);
+    const validated = json(await call(client, "validate_lens", { lens_key: "hr" })) as { warnings: { path: string }[] };
+    expect(validated.warnings.map((w) => w.path)).toEqual(["lenses.hr.includes.searchIndices.people.relations.0.target.company.0"]);
+
+    expect(text(await call(client, "remove_search_index_from_lens", { lens_key: "hr", index_key: "people" }))).toBe(
+      "Search index 'people' removed from lens 'hr'.",
+    );
+    expect((await call(client, "remove_search_index_from_lens", { lens_key: "hr", index_key: "people" })).isError).toBe(true);
+  });
+
   it.skipIf(settings.DB_BACKEND === "postgres")("is not supported by an adapter without search indices", async () => {
     const result = await call(client, "list_search_indices");
     expect(result.isError).toBe(true);
     expect(text(result)).toContain("not supported");
+    await call(client, "create_lens", { key: "hr", name: "HR" });
+    const included = await call(client, "add_search_index_to_lens", { lens_key: "hr", index_key: "x" });
+    expect(included.isError).toBe(true);
+    expect(text(included)).toContain("not supported");
   });
 });
 
@@ -657,7 +692,7 @@ describe("lenses over MCP", () => {
 
   it("validate_schema combines the global half with every lens", async () => {
     const clean = json(await call(client, "validate_schema"));
-    expect(clean).toEqual({ valid: true, errors: [] });
+    expect(clean).toEqual({ valid: true, errors: [], warnings: [] });
 
     await call(client, "create_entity_type", { key: "person", display_name: "Person" });
     await call(client, "add_property", {

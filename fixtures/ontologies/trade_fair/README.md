@@ -22,7 +22,7 @@ companies, events and texts are invented.
 
 Every type and property carries a description. Stands are an exhibitor property, halls
 their own entity ([decision](../../../docs/decisions.md#retrieval-evaluation-dataset)).
-Text-search language: english.
+Keyword languages: english.
 
 ## Lenses
 

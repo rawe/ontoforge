@@ -26,7 +26,7 @@ provider. All people, teams and texts are invented.
 | `supersedes` | relation `policy_document` → `policy_document` | — (newer version → the version it replaces) |
 
 Every type and property carries a description. `person.level` (integer) and `skill.level`
-(string) share a key on purpose. Text-search language: english.
+(string) share a key on purpose. Keyword languages: english.
 
 ## Lenses
 

@@ -129,6 +129,9 @@ These are the **only** environment variables recognized by the `ontoforge-server
 | `EMBEDDING_DIMENSIONS` | no | `1024` | Vector dimensions — must match what the model returns |
 | `EMBEDDING_BATCH_SIZE` | no | `1` | Texts per embedding request when many texts are embedded together (positive integer) |
 | `EMBEDDING_CONCURRENCY` | no | `1` | Embedding requests in flight at once when many texts are embedded together (positive integer) |
+| `SEARCH_MAX_ATTEMPTS` | no | `5` | Failed attempts before a queued search-indexing item counts as failed (positive integer; PostgreSQL only) |
+| `SEARCH_WORKER_BATCH` | no | `64` | Queued search-indexing items the background worker claims per batch (positive integer; PostgreSQL only) |
+| `SEARCH_POLL_MS` | no | `5000` | Milliseconds the background search worker waits between queue checks when no wake-up arrives (positive integer; PostgreSQL only) |
 | `AI_PROVIDER` | no | *(disabled)* | `ollama` or `openai` — omit to disable AI features |
 | `AI_MODEL` | no | `qwen3:8b` | AI model name (must support tool calling) |
 | `AI_BASE_URL` | no | `http://localhost:11434` | AI provider API base URL |

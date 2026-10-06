@@ -127,7 +127,10 @@ try {
 
   console.error(`Done: ${entityCount} entities, ${relationCount} relations imported.`);
   if (skipped) console.error(`  ${skipped} relations skipped (missing entity references).`);
-  console.error('Hint: run rebuild-search-data.mjs to build the imported entities\' search data.');
+  console.error(
+    'Search indices build the imported entities\' search entries in the background; ' +
+      'GET /model/search-indices shows their progress.',
+  );
 } catch (err) {
   die(err.message);
 }

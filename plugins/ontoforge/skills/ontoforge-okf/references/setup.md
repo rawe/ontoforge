@@ -83,6 +83,14 @@ For each value from step 4 without a matching entity type, create one with
 `add_property` (REST: `POST /entity-types/{entityTypeId}/properties`, where the
 identifier is the one the create call returned).
 
+**Creating a type also creates its name property** — the non-required `string`
+property that names its entities in lists, search and the web UI. Its key is `name`
+unless the create call names another: pass `name_property: "title"` (REST:
+`"nameProperty": "title"`) so the frontmatter `title` fills it, and do not add
+`title` again. Without a `title` in the bundle, name the property after another
+frontmatter key that names the concept. Left at `name` with no `name` key in the
+frontmatter, the property stays empty and entities show only their ID.
+
 **An entity type holding OKF concepts needs exactly two things:**
 
 | Property | Data type | Required | Holds |

@@ -12,7 +12,7 @@ addresses are fictional.
 | `company` | entity | `name` (string, required), `founded` (date), `employee_count` (integer) |
 | `works_for` | relation `person` → `company` | `role` (string), `since` (date) |
 
-Text-search language: english.
+Keyword languages: english.
 
 ## Lenses
 

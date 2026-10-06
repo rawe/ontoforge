@@ -13,6 +13,11 @@ const MAX_ONTOLOGY_KEY_LENGTH = 59;
 const PAGE_SIZE = 200;
 const ENTITY_SYSTEM_FIELDS = ['_id', '_entityTypeKey', '_createdAt', '_updatedAt'];
 const RELATION_SYSTEM_FIELDS = ['_id', '_relationTypeKey', '_createdAt', '_updatedAt'];
+const INDEX_POLL_MS = 2000;
+const INDEX_WAIT_TIMEOUT_MS = 15 * 60 * 1000;
+// Index states with nothing left to build: `unavailable` is a semantic-only
+// index without an embedding provider, `disabled` a switched-off managed one.
+const INDEX_DONE_STATES = ['ready', 'unavailable', 'disabled'];
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -102,6 +107,8 @@ function without(record, fields) {
   return out;
 }
 
+// Adapters without search indices (Neo4j) keep search data of their own;
+// the rebuild brings it up to date for the loaded data.
 async function rebuildSearchData(baseUrl, key) {
   const res = await request(baseUrl, 'POST', `/api/ontologies/${key}/model/rebuild-search-data`, undefined, { raw: true });
   const text = await res.text();
@@ -115,16 +122,46 @@ async function rebuildSearchData(baseUrl, key) {
   }
 }
 
+// Search indices build their entries in the background after every write;
+// wait until no index has anything left to build. A timeout or failed
+// items only warn: the data is loaded and the worker keeps going.
+async function waitForSearchIndices(baseUrl, key) {
+  const deadline = Date.now() + INDEX_WAIT_TIMEOUT_MS;
+  let last = '';
+  for (;;) {
+    const indices = await request(baseUrl, 'GET', `/api/ontologies/${key}/model/search-indices`);
+    const open = indices.filter((i) => !INDEX_DONE_STATES.includes(i.status.state) && i.status.state !== 'failed');
+    const failed = indices.filter((i) => i.status.state === 'failed');
+    const pending = open.reduce(
+      (n, i) => n + i.status.representations.reduce((m, r) => m + r.pending, 0),
+      0,
+    );
+    const line = `  search indices: ${indices.length - open.length - failed.length}/${indices.length} done` +
+      (open.length ? `, ${pending} items pending in ${open.map((i) => i.key).join(', ')}` : '');
+    if (line !== last) console.log(line);
+    last = line;
+    if (open.length === 0) {
+      for (const index of failed) {
+        const errors = index.status.lastErrors.map((e) => e.message).join('; ');
+        console.warn(`  Warning: search index ${index.key} has failed items${errors ? `: ${errors}` : ''} — rebuild it once the cause is fixed`);
+      }
+      return;
+    }
+    if (Date.now() > deadline) {
+      console.warn(`  Warning: search indices still building after ${INDEX_WAIT_TIMEOUT_MS / 60000} minutes — the data is loaded; they keep building in the background`);
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, INDEX_POLL_MS));
+  }
+}
+
 async function load({ name, key, baseUrl, dir }) {
   if (!existsSync(dir)) fail(`no fixture folder ${dir}`);
   const schema = readJson(join(dir, 'schema.json'));
   const data = readJson(join(dir, 'data.json'));
 
   try {
-    await request(baseUrl, 'POST', '/api/ontologies', {
-      key,
-      textSearchLanguage: schema.textSearchLanguage,
-    });
+    await request(baseUrl, 'POST', '/api/ontologies', { key });
   } catch (err) {
     if (err.status === 409) fail(`fixture "${name}" is already loaded as ontology "${key}" — run unload first`);
     fail(err.message);
@@ -160,7 +197,9 @@ async function load({ name, key, baseUrl, dir }) {
     }
     console.log(`  data imported: ${entityCount} entities, ${relationCount} relations`);
 
-    await rebuildSearchData(baseUrl, key);
+    const features = await request(baseUrl, 'GET', '/api/server/features');
+    if (features.searchIndices) await waitForSearchIndices(baseUrl, key);
+    else await rebuildSearchData(baseUrl, key);
   } catch (err) {
     fail(`${err.message}\nOntology "${key}" is partially loaded — run: node fixtures/fixture.mjs unload ${name}`);
   }

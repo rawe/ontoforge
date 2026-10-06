@@ -1,0 +1,245 @@
+{
+  "formatVersion": "6.0",
+  "keywordLanguages": [
+    "german",
+    "english"
+  ],
+  "searchIndices": {
+    "custom": [
+      {
+        "key": "person_employment",
+        "name": "People by employment",
+        "description": "People with each of their roles at a company — role, start year, company name and industry, one entry per employment. Use for questions like \"who is CTO at ACME\".",
+        "entityType": "person",
+        "fields": [
+          "name",
+          "bio"
+        ],
+        "header": null,
+        "relations": [
+          {
+            "relationType": "works_for",
+            "direction": "outgoing",
+            "fields": [
+              "role",
+              "since"
+            ],
+            "target": {
+              "company": [
+                "name",
+                "industry"
+              ]
+            },
+            "label": "Employment",
+            "template": null
+          }
+        ],
+        "semantic": {
+          "enabled": true,
+          "template": null
+        },
+        "keyword": {
+          "enabled": true
+        }
+      },
+      {
+        "key": "person_residence",
+        "name": "People by residence",
+        "description": "People with the city and country they live in, one entry per residence. Use for questions like \"who lives in Germany\".",
+        "entityType": "person",
+        "fields": [],
+        "header": null,
+        "relations": [
+          {
+            "relationType": "lives_in",
+            "direction": "outgoing",
+            "fields": [],
+            "target": {
+              "city": [
+                "name",
+                "country"
+              ]
+            },
+            "label": "Residence",
+            "template": null
+          }
+        ],
+        "semantic": {
+          "enabled": true,
+          "template": null
+        },
+        "keyword": {
+          "enabled": true
+        }
+      }
+    ],
+    "disabled": []
+  },
+  "entityTypes": [
+    {
+      "key": "city",
+      "displayName": "City",
+      "description": "A city people live in.",
+      "nameProperty": "name",
+      "properties": [
+        {
+          "key": "country",
+          "displayName": "Country",
+          "description": null,
+          "dataType": "string",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "name",
+          "displayName": "Name",
+          "description": null,
+          "dataType": "string",
+          "required": true,
+          "defaultValue": null
+        }
+      ]
+    },
+    {
+      "key": "company",
+      "displayName": "Company",
+      "description": "A company people work for.",
+      "nameProperty": "name",
+      "properties": [
+        {
+          "key": "description",
+          "displayName": "Description",
+          "description": null,
+          "dataType": "string",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "industry",
+          "displayName": "Industry",
+          "description": null,
+          "dataType": "string",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "name",
+          "displayName": "Name",
+          "description": null,
+          "dataType": "string",
+          "required": true,
+          "defaultValue": null
+        }
+      ]
+    },
+    {
+      "key": "person",
+      "displayName": "Person",
+      "description": "A person with a short bio and a CV; works for companies and lives in a city.",
+      "nameProperty": "name",
+      "properties": [
+        {
+          "key": "bio",
+          "displayName": "Bio",
+          "description": "Short bio, German or English or mixed",
+          "dataType": "string",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "cv",
+          "displayName": "CV",
+          "description": "Curriculum vitae, German or English",
+          "dataType": "document",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "name",
+          "displayName": "Name",
+          "description": null,
+          "dataType": "string",
+          "required": true,
+          "defaultValue": null
+        }
+      ]
+    }
+  ],
+  "relationTypes": [
+    {
+      "key": "lives_in",
+      "displayName": "Lives in",
+      "description": "The city a person lives in",
+      "fromEntityTypeKey": "person",
+      "toEntityTypeKey": "city",
+      "properties": []
+    },
+    {
+      "key": "works_for",
+      "displayName": "Works for",
+      "description": "An employment or advisory role of a person at a company",
+      "fromEntityTypeKey": "person",
+      "toEntityTypeKey": "company",
+      "properties": [
+        {
+          "key": "role",
+          "displayName": "Role",
+          "description": null,
+          "dataType": "string",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "since",
+          "displayName": "Since",
+          "description": "Year the role started",
+          "dataType": "integer",
+          "required": false,
+          "defaultValue": null
+        }
+      ]
+    }
+  ],
+  "lenses": [
+    {
+      "key": "all",
+      "name": "All",
+      "description": "Unscoped: the whole schema and every search index.",
+      "indexInclusions": [],
+      "aiAgents": [],
+      "savedQueries": []
+    },
+    {
+      "key": "no_company",
+      "name": "Without companies",
+      "description": "Scoped: people and cities, no companies and no employments. Employment entries of person_employment are skipped here.",
+      "includes": {
+        "entityTypes": [
+          {
+            "key": "city",
+            "properties": null
+          },
+          {
+            "key": "person",
+            "properties": null
+          }
+        ],
+        "relationTypes": [
+          {
+            "key": "lives_in",
+            "properties": null
+          }
+        ]
+      },
+      "indexInclusions": [
+        "city~default",
+        "person~cv",
+        "person~default",
+        "person_employment",
+        "person_residence"
+      ],
+      "aiAgents": [],
+      "savedQueries": []
+    }
+  ]
+}

@@ -1,11 +1,18 @@
 {
-  "formatVersion": "5.0",
-  "textSearchLanguage": "english",
+  "formatVersion": "6.0",
+  "keywordLanguages": [
+    "english"
+  ],
+  "searchIndices": {
+    "custom": [],
+    "disabled": []
+  },
   "entityTypes": [
     {
       "key": "person",
       "displayName": "Person",
       "description": "An employee of Corvane Engineering, a fictional mid-sized engineering company. One record per employee; the same real person should not appear twice.",
+      "nameProperty": "name",
       "properties": [
         {
           "key": "birth_date",
@@ -77,6 +84,7 @@
       "key": "policy_document",
       "displayName": "Policy Document",
       "description": "One published version of an internal company policy. A newer version supersedes the previous one; the current version is the one no other version supersedes.",
+      "nameProperty": "title",
       "properties": [
         {
           "key": "body",
@@ -116,6 +124,7 @@
       "key": "project",
       "displayName": "Project",
       "description": "An internal engineering or business project, owned by one team and staffed by people from any team.",
+      "nameProperty": "name",
       "properties": [
         {
           "key": "budget",
@@ -171,6 +180,7 @@
       "key": "skill",
       "displayName": "Skill",
       "description": "A professional skill or technology that people have and projects require.",
+      "nameProperty": "name",
       "properties": [
         {
           "key": "category",
@@ -202,6 +212,7 @@
       "key": "team",
       "displayName": "Team",
       "description": "An organisational unit of Corvane Engineering with its own cost center. People are members of teams; teams own projects.",
+      "nameProperty": "name",
       "properties": [
         {
           "key": "budget",
@@ -337,6 +348,7 @@
       "key": "all",
       "name": "All",
       "description": "Unscoped lens over the whole organisation graph: people, teams, projects, skills and policy documents with every relation.",
+      "indexInclusions": [],
       "aiAgents": [
         {
           "key": "org_analyst",
@@ -519,7 +531,7 @@
           ]
         }
       ],
-      "retrievers": []
+      "retrieverAgents": []
     },
     {
       "key": "directory",
@@ -545,9 +557,13 @@
         ],
         "relationTypes": []
       },
+      "indexInclusions": [
+        "person~default",
+        "team~default"
+      ],
       "aiAgents": [],
       "savedQueries": [],
-      "retrievers": []
+      "retrieverAgents": []
     },
     {
       "key": "management",
@@ -577,9 +593,13 @@
           }
         ]
       },
+      "indexInclusions": [
+        "person~default",
+        "team~default"
+      ],
       "aiAgents": [],
       "savedQueries": [],
-      "retrievers": []
+      "retrieverAgents": []
     },
     {
       "key": "staffing",
@@ -602,9 +622,17 @@
           }
         ]
       },
+      "indexInclusions": [
+        "person~default",
+        "policy_document~body",
+        "policy_document~default",
+        "project~default",
+        "skill~default",
+        "team~default"
+      ],
       "aiAgents": [],
       "savedQueries": [],
-      "retrievers": []
+      "retrieverAgents": []
     }
   ]
 }

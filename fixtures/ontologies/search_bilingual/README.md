@@ -79,8 +79,8 @@ bge-m3; ties and lower ranks may shift with another model.
 | `all` | `{"query":"shopping studies","mode":"keyword"}` | Grace Turner ("studies"), Karen Lee ("study") |
 | `all` | `{"query":"who builds houses in Bavaria","mode":"semantic"}` | Müller GmbH and Dieter Müller — English query, German text |
 | `all` | `{"query":"offshore wind farm engineer","mode":"semantic"}` | Hans Becker's CV passage ("Offshore-Windparks", German) |
-| `no_company` | `{"query":"CTO ACME","indices":["person_employment"]}` | no `works_for` entry ever matches; only own-field entries mentioning ACME in the bio (Ines Wagner, Bob Martin); Ada Lovelace does not appear |
-| `no_company` | `{"query":"lives in Germany","indices":["person_residence"]}` | people living in Hamburg or München, via Residence entries |
+| `no_company` | `{"query":"CTO ACME","indices":["person_employment"],"mode":"keyword"}` | no `works_for` entry ever matches; only own-field entries mentioning ACME in the bio (Ines Wagner, Bob Martin); Ada Lovelace does not appear (in `hybrid` she ranks low through her own-field entry, never through an employment) |
+| `no_company` | `{"query":"lives in Germany","indices":["person_residence"]}` | people living in Berlin, Hamburg or München, via Residence entries |
 | `no_company` | `{"query":"x","indices":["company~default"]}` | 422 at `indices.0`: not searchable in this lens |
 
 Keyword search stems every entry and query in both languages, so a word can also match a

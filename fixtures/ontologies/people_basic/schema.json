@@ -1,11 +1,18 @@
 {
-  "formatVersion": "5.0",
-  "textSearchLanguage": "english",
+  "formatVersion": "6.0",
+  "keywordLanguages": [
+    "english"
+  ],
+  "searchIndices": {
+    "custom": [],
+    "disabled": []
+  },
   "entityTypes": [
     {
       "key": "company",
       "displayName": "Company",
       "description": "A business organization",
+      "nameProperty": "name",
       "properties": [
         {
           "key": "employee_count",
@@ -37,6 +44,7 @@
       "key": "person",
       "displayName": "Person",
       "description": "A human being",
+      "nameProperty": "name",
       "properties": [
         {
           "key": "active",
@@ -134,6 +142,11 @@
           }
         ]
       },
+      "indexInclusions": [
+        "company~default",
+        "person~bio",
+        "person~default"
+      ],
       "aiAgents": [
         {
           "key": "assistant",
@@ -213,15 +226,16 @@
           ]
         }
       ],
-      "retrievers": []
+      "retrieverAgents": []
     },
     {
       "key": "test_lens",
       "name": "Test Lens",
       "description": "Person/Company lens for testing",
+      "indexInclusions": [],
       "aiAgents": [],
       "savedQueries": [],
-      "retrievers": []
+      "retrieverAgents": []
     }
   ]
 }

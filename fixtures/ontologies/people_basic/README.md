@@ -12,14 +12,23 @@ addresses are fictional.
 | `company` | entity | `name` (string, required), `founded` (date), `employee_count` (integer) |
 | `works_for` | relation `person` → `company` | `role` (string), `since` (date) |
 
-Keyword languages: english.
+`name` is the name property of both entity types. Keyword languages: english.
+
+## Search indices
+
+Managed only, no custom index: `person~default`, `person~bio` (passages) and
+`company~default`.
 
 ## Lenses
 
-| Lens | Scope | Agents | Saved queries |
-|---|---|---|---|
-| `test_lens` | unscoped | — | — |
-| `hr_view` | `company` (all properties), `person` (`name`, `email` only), `works_for` | `assistant`, `unrestricted` | `people-by-name`, `similar-then-fetch` |
+| Lens | Scope | Search indices | Agents | Saved queries |
+|---|---|---|---|---|
+| `test_lens` | unscoped | every index | — | — |
+| `hr_view` | `company` (all properties), `person` (`name`, `email` only), `works_for` | every index | `assistant`, `unrestricted` | `people-by-name`, `similar-then-fetch` |
+
+`hr_view` includes `person~bio` although it hides `bio`, so lens validation warns about
+it. Search there can find a person by bio text; the hit carries no bio and an empty
+snippet.
 
 ## Data
 

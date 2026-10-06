@@ -395,6 +395,20 @@ An agent may be granted exactly ten runtime tools: `get_schema`, `list_entities`
 `list_saved_queries`, `run_saved_query`, `search_saved_queries`. Every write tool is
 outside that set, and so are the read-only `get_document` and `get_relation`.
 
+### Retriever agents
+
+A retriever agent is a stored configuration on the lens (managed on the modeling surface)
+that answers questions over chosen search indices.
+
+- `POST /retriever-agents/{agentKey}/chat`
+  Streams the answer to one question as newline-delimited events (`phase`, `delta`,
+  `meta`, then one terminal `final` or `error`).
+  Request body: `message` (1–2,000 characters), optional `history` (up to 30
+  `{role, content}` turns), optional `turnToken` (from the previous answer's `meta`
+  event), optional `diagnostics` (default `false`). Unknown fields are rejected; the
+  request cannot change the agent's configuration. Without an embedding provider the
+  agent searches by keyword only.
+
 ### Agent-to-agent
 
 Each named agent gets a card and a task endpoint; the default agent gets one pair at the

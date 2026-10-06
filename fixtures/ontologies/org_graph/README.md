@@ -26,7 +26,11 @@ provider. All people, teams and texts are invented.
 | `supersedes` | relation `policy_document` → `policy_document` | — (newer version → the version it replaces) |
 
 Every type and property carries a description. `person.level` (integer) and `skill.level`
-(string) share a key on purpose. Keyword languages: english.
+(string) share a key on purpose. Every type's name property is `name`, except
+`policy_document`'s, which is `title`. Keyword languages: english.
+
+Search indices: managed only, no custom index — the default index of every entity type
+and the passage index `policy_document~body`.
 
 ## Lenses
 
@@ -37,7 +41,9 @@ Every type and property carries a description. `person.level` (integer) and `ski
 | `staffing` | relation inclusions only: `works_on`, `has_skill`, `requires_skill` | all, with all properties (including `salary`) | `works_on`, `has_skill`, `requires_skill` |
 | `management` | entity `person`, `team`; relation `manages`, `member_of` (allowlist `role`) | `person` (all properties), `team` | `manages`, `member_of` without `allocation` |
 
-All four lenses pass lens validation and schema validation.
+`directory` and `management` include the search indices `person~default` and
+`team~default`; `staffing` includes every index. All four lenses pass lens validation and
+schema validation.
 
 ## Agent and saved queries
 

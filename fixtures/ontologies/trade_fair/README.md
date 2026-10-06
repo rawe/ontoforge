@@ -1,9 +1,9 @@
 # trade_fair
 
 Retrieval and search fixture: exhibitors, halls and events of the fictional Meridian
-Industrial Technology Fair 2027. Use it for saved retrievers, semantic, keyword and hybrid
-search over properties and documents, multi-passage documents, and an agent. All
-companies, events and texts are invented.
+Industrial Technology Fair 2027. Use it for retriever agents, semantic, keyword and hybrid
+search over the managed search indices (properties and document passages), multi-passage
+documents, and an agent. All companies, events and texts are invented.
 
 ## Schema
 
@@ -22,22 +22,34 @@ companies, events and texts are invented.
 
 Every type and property carries a description. Stands are an exhibitor property, halls
 their own entity ([decision](../../../docs/decisions.md#retrieval-evaluation-dataset)).
-Keyword languages: english.
+Every type's name property is `name`, except `event`'s, which is `title`. Keyword
+languages: english.
+
+## Search indices
+
+Managed only, no custom index: the default index of every entity type (`exhibitor~default`
+holds `name`, `stand_number`, `website`; `event~default` holds `title`, `event_type`) and
+the passage indices `exhibitor~description` and `event~description`.
 
 ## Lenses
 
-| Lens | Scope | Retrievers | Agents | Saved queries |
+| Lens | Scope | Search indices | Retriever agents | Agents | Saved queries |
+|---|---|---|---|---|---|
+| `all` | unscoped | every index | `event_finder`, `fair_guide` | — | — |
+| `visitor_guide` | `exhibitor` (without `founded`), `hall`, `industry`, `product_group`, `located_in`, `belongs_to_industry`, `offers` — no events | every index except the two `event` ones | `exhibitor_finder` | `visitor_assistant` | `exhibitors-in-hall`, `find-exhibitor-stands` |
+
+## Retriever agents
+
+| Agent | Lens | Searches | Filters | Answer fields |
 |---|---|---|---|---|
-| `all` | unscoped | `event_finder`, `fair_guide` | — | — |
-| `visitor_guide` | `exhibitor` (without `founded`), `hall`, `industry`, `product_group`, `located_in`, `belongs_to_industry`, `offers` — no events | `exhibitor_finder` | `visitor_assistant` | `exhibitors-in-hall`, `find-exhibitor-stands` |
+| `exhibitor_finder` | `visitor_guide` | `exhibitor~default`, `exhibitor~description` | `hall` (`located_in` → `hall_number`) | `name`, `stand_number`, `website`, `description` (800 characters) |
+| `event_finder` | `all` | `event~default`, `event~description` | `hall` (`takes_place_in` → `hall_number`); `event_type` (own field) | `title`, `event_type`, `starts_at`, `description` (800 characters) |
+| `fair_guide` | `all` | `exhibitor~default`, `exhibitor~description`, `event~default`, `event~description` | `hall` on exhibitors (`located_in`), `event_hall` on events (`takes_place_in`), both → `hall_number` | exhibitor `name`, `stand_number`, `founded`, `description`; event `title`, `event_type`, `starts_at` (600 characters) |
 
-## Retrievers
-
-| Retriever | Buckets | Conditions |
-|---|---|---|
-| `exhibitor_finder` | `exhibitor` — search `name`, `description` | hall (hard, `located_in` → `hall_number`); industry (soft, `belongs_to_industry`); product group (soft, `offers`) |
-| `event_finder` | `event` — search `title`, `description` | hall (hard, `takes_place_in` → `hall_number`); event type (hard, own field); host industry (soft, two hops: `hosts` incoming → `belongs_to_industry`) |
-| `fair_guide` | `exhibitor` and `event` | hall (hard) on both; industry (soft) on exhibitors |
+Every agent uses threshold 0.35. No index has a relation group, so an exhibitor's
+industries and product groups, and an event's hosts, are found only where a description
+names them; a custom index on `exhibitor` with relation groups on `belongs_to_industry`
+and `offers` would make the first two searchable.
 
 ## Agent and saved queries
 
@@ -105,8 +117,9 @@ misses. A near miss shares words or topic with the question but does not answer 
 Deliberate features of the data:
 
 - Negation: Ferrum Reclaim's description mentions plastics only to say it does not process them.
-- Name match: Cellforge Battery Recycling has "Recycling" in its name. Exhibitor property
-  text is mostly name, stand and website, because `description` is a document property.
+- Name match: Cellforge Battery Recycling has "Recycling" in its name. `exhibitor~default`
+  holds only name, stand and website; the description is searched as passages of
+  `exhibitor~description`.
 - Late relevance: Verdant Polymers' description first mentions recycling after character
   1,000; `exhibitor_finder` cuts answer text at 800 characters (`answerFieldCharacters`).
 - Search limit: `find-exhibitor-stands` searches with limit 5, fewer than the four correct
@@ -116,6 +129,7 @@ Deliberate features of the data:
 
 ## Needs an embedding provider
 
-Semantic and hybrid search, retriever preparation and retriever chat. Without one, keyword
-search over properties and passages, saved queries and all model-free management work.
-Retriever chat and the agent also need a language-model provider.
+Semantic and hybrid search. Without one, keyword search over every index, saved queries
+and all model-free management work, and the semantic representations report
+`unavailable`. Retriever-agent chat and the agent need a language-model provider;
+without an embedding provider, retriever-agent chat searches by keyword only.

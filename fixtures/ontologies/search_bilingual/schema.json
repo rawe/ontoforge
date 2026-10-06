@@ -9,17 +9,21 @@
       {
         "key": "person_employment",
         "name": "People by employment",
-        "description": "People with each of their roles at a company — role, start year, company name and industry, one entry per employment. Use for questions like \"who is CTO at ACME\".",
-        "entityType": "person",
         "fields": [
           "name",
           "bio"
         ],
         "header": null,
+        "keyword": {
+          "enabled": true
+        },
+        "semantic": {
+          "enabled": true,
+          "template": null
+        },
         "relations": [
           {
-            "relationType": "works_for",
-            "direction": "outgoing",
+            "label": "Employment",
             "fields": [
               "role",
               "since"
@@ -30,29 +34,29 @@
                 "industry"
               ]
             },
-            "label": "Employment",
-            "template": null
+            "template": null,
+            "direction": "outgoing",
+            "relationType": "works_for"
           }
         ],
-        "semantic": {
-          "enabled": true,
-          "template": null
-        },
-        "keyword": {
-          "enabled": true
-        }
+        "entityType": "person",
+        "description": "People with each of their roles at a company — role, start year, company name and industry, one entry per employment. Use for questions like \"who is CTO at ACME\"."
       },
       {
         "key": "person_residence",
         "name": "People by residence",
-        "description": "People with the city and country they live in, one entry per residence. Use for questions like \"who lives in Germany\".",
-        "entityType": "person",
         "fields": [],
         "header": null,
+        "keyword": {
+          "enabled": true
+        },
+        "semantic": {
+          "enabled": true,
+          "template": null
+        },
         "relations": [
           {
-            "relationType": "lives_in",
-            "direction": "outgoing",
+            "label": "Residence",
             "fields": [],
             "target": {
               "city": [
@@ -60,17 +64,13 @@
                 "country"
               ]
             },
-            "label": "Residence",
-            "template": null
+            "template": null,
+            "direction": "outgoing",
+            "relationType": "lives_in"
           }
         ],
-        "semantic": {
-          "enabled": true,
-          "template": null
-        },
-        "keyword": {
-          "enabled": true
-        }
+        "entityType": "person",
+        "description": "People with the city and country they live in, one entry per residence. Use for questions like \"who lives in Germany\"."
       }
     ],
     "disabled": []
@@ -207,7 +207,8 @@
       "description": "Unscoped: the whole schema and every search index.",
       "indexInclusions": [],
       "aiAgents": [],
-      "savedQueries": []
+      "savedQueries": [],
+      "retrieverAgents": []
     },
     {
       "key": "no_company",
@@ -239,7 +240,8 @@
         "person_residence"
       ],
       "aiAgents": [],
-      "savedQueries": []
+      "savedQueries": [],
+      "retrieverAgents": []
     }
   ]
 }

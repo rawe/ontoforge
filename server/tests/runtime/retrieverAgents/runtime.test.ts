@@ -129,11 +129,51 @@ describe("retriever agent pipeline", () => {
     expect(fake.stream).not.toHaveBeenCalled();
   });
 
-  it("rejects an invented query before any search or answer", async () => {
-    fake.invoke.mockResolvedValue(planned([sub({ query: "revenue in millions", filters: [] })]));
-    await expect(run("Who works in Berlin?", false)).rejects.toThrow("user evidence");
-    expect(engine.rankThroughIndices).not.toHaveBeenCalled();
-    expect(fake.stream).not.toHaveBeenCalled();
+  it("runs the planner's own query words; a filter without a user quote is dropped with a limitation", async () => {
+    engine.rankThroughIndices.mockResolvedValue([]);
+    fake.invoke.mockResolvedValue(planned([
+      sub({ query: "events about artificial intelligence", filters: [{ id: "city", value: "Paris", quote: "Paris" }] }),
+    ]));
+    const { events } = await run("Which events are about artificial intelligence?");
+    expect(events.at(-1)).toEqual({ type: "meta", turnToken: expect.any(String) });
+    expect(engine.rankThroughIndices.mock.calls[0]![2].query).toBe("events about artificial intelligence");
+    // No filter applied: no restriction.
+    expect(engine.rankThroughIndices.mock.calls[0]![2].targets[0].entityIds).toBeNull();
+    const limitations = events.find((e) => e.type === "meta" && e.results)!.limitations as string[];
+    expect(limitations).toContain(
+      "Sub-query 1: filter 'city' = \"Paris\" was not applied: the value is not stated verbatim in a user message.",
+    );
+    expect(fake.stream).toHaveBeenCalledTimes(1);
+  });
+
+  it("a follow-up on searched results runs as a fresh search with the history, never failing the turn", async () => {
+    engine.rankThroughIndices.mockResolvedValue([]);
+    fake.invoke.mockResolvedValue(planned([sub({ query: "CTO at ACME", filters: [] })]));
+    const first = await run("Who is CTO at ACME?", false);
+    const token = (first.events.at(-1) as { turnToken: string }).turnToken;
+    // The planner points at the previous (searched) results with assistant words.
+    fake.invoke.mockResolvedValue(planned([sub({ query: "CTO at ACME since", filters: [], previous: { filterId: null, quote: "that person" } })]));
+    const events: Record<string, unknown>[] = [];
+    const history = [{ role: "user" as const, content: "Who is CTO at ACME?" }, { role: "assistant" as const, content: "Ada is CTO at ACME — that person joined in 2020." }];
+    await chat("all", agent, "Since when?", history, { signal: new AbortController().signal, onToolEvent: async (e) => { events.push(e); } }, token, true);
+    const plannerInput = JSON.parse(fake.invoke.mock.calls.at(-1)![0][1].content);
+    expect(plannerInput.history).toEqual(history);
+    expect(plannerInput.previousVerifiedResults).toBeNull();
+    const second = engine.rankThroughIndices.mock.calls.at(-1)![2];
+    expect(second.query).toBe("CTO at ACME since");
+    expect(second.targets[0].entityIds).toBeNull();
+    const limitations = events.find((e) => e.type === "meta" && e.results)!.limitations as string[];
+    expect(limitations.some((text) => text.includes("reference to previous results was ignored"))).toBe(true);
+    expect(events.at(-1)).toEqual({ type: "meta", turnToken: expect.any(String) });
+  });
+
+  it("gives the answer model the filter facts each result satisfies", async () => {
+    await run("Everyone in Berlin", false);
+    const answerInput = JSON.parse(fake.stream.mock.calls[0]![0][1].content);
+    expect(answerInput.results[0].matches).toEqual([
+      { subQuery: 0, filters: [{ filter: "city", path: "lives_in → city.name", value: "Berlin" }] },
+    ]);
+    expect(fake.stream.mock.calls[0]![0][0].content).toContain("exact filters the entity satisfies");
   });
 
   it("propagates cancellation before planning", async () => {

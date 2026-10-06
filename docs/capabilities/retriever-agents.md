@@ -118,8 +118,9 @@ The planning model receives the question, the recent conversation, the search mo
 server can run and, from the lens's catalog, each of the agent's indices: its name,
 description and root type, what its own entry holds, the relation groups the agent may
 use with what one relation entry holds, the document it reads passages of, and its
-modes. It also receives the agent's filters, with what each compares, and the results a
-follow-up may refer to. A planning input over 24,000 characters refuses the question;
+modes. It also receives the agent's filters, with what each compares, and — only when
+they may be referred to ([below](#follow-up-questions)) — the previous turn's results.
+A planning input over 24,000 characters refuses the question;
 fewer indices or filters fix it.
 
 It returns up to four **sub-queries** and an optional `unsupportedReason`. A sub-query
@@ -131,12 +132,20 @@ two sub-queries, or one sub-query and a filter
 ([../decisions.md](../decisions.md#behaviour)). A question no index can answer returns
 no sub-query and a reason.
 
-**The plan may choose, never invent.** Before anything is searched, the server checks it:
-every index, relation type and filter must be the agent's and fit the sub-query's
-indices; a query must be a verbatim phrase of the question or of an earlier user message;
-a filter value must occur in a verbatim user quote; a sub-query without a query needs a
-filter or a previous reference. A plan that fails any check refuses the question. A mode
-the server cannot run is replaced by its first available one, and the answer is told so.
+**Queries are the planner's words; exact restrictions are the user's.** A query and its
+variants may be phrased freely — a follow-up restates its topic from the conversation.
+What restricts results exactly must come from the user: a filter value must occur in a
+verbatim quote of the current question or an earlier user message, never of an answer.
+
+Before anything is searched, the server checks the plan and leaves out what it cannot
+honour, naming each omission in the limitations the answer model receives: an index the
+agent does not search, a relation it does not allow for the sub-query's indices, a filter
+that is not the agent's or not for the sub-query's result types, a filter value without
+that quote, and an invalid previous-result reference — the sub-query then runs as a fresh
+search. A mode the server cannot run is replaced by its first available one. A sub-query
+left with no index, or without a query and with neither an applied filter nor a previous
+reference, is dropped. The question goes on with what remains; only a malformed plan, or
+one with neither sub-queries nor an `unsupportedReason`, refuses it.
 
 ### Retrieval
 
@@ -167,7 +176,9 @@ results may be incomplete ([search-indices.md](search-indices.md#status)).
 Each result reaches the answer model with its id, type, label — its name property's
 value — its answer fields read through the lens, and per sub-query that found it what
 matched: the index, the part — own fields, one relation with the entity at its other end,
-or one passage — and the entry's text. Answer fields and entry texts are cut to the
+or one passage — the entry's text, and the sub-query's filters the entity satisfies, each
+with its id, the path to the compared field and the value. A satisfied filter is an
+established fact the answer may state. Answer fields and entry texts are cut to the
 configured characters; the entry text is withheld when the index reads properties the
 lens hides ([ontology-lenses.md](ontology-lenses.md#search-through-a-lens)). Evidence is
 added best first up to 8,000 characters; results that do not fit are omitted and named
@@ -184,11 +195,14 @@ limitation. Search evidence does not prove that a result fits
 
 Each answered turn returns a `turnToken`. Passed with the next question, it lets the plan
 restrict a sub-query to the previous turn's results — "these", "their stands" — directly
-or through a filter whose path leads to them. Only results the server verified count: the
-previous turn must have searched by filters and references alone, with every result
-reaching the answer model; its results are checked against the current data again; and a
-singular reference needs exactly one. A turn that searched by text yields candidates, not
-verified results, so a follow-up must repeat its topic and constraints.
+or through a filter whose path leads to them. Only results the server verified can be
+referred to: the previous turn must have listed by filters and references alone, with
+every result reaching the answer model; only then does the planner see them, after they
+are checked against the current data again. The reference must rest on the user's own
+referring words, and a singular one needs exactly one result. A turn that searched by
+text yields candidates, not verified results: a reference to them is ignored with a
+limitation, and the planner restates the topic from the conversation in a fresh search
+instead.
 
 A token is bound to the ontology, lens, agent and configuration, lives ten minutes, and
 is kept for at most the last hundred turns of one server process. An expired token, or

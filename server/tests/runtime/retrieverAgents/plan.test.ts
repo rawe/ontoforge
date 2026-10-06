@@ -61,31 +61,59 @@ describe("planner output", () => {
     expect(() => validatePlan({ steps: [] }, CONFIG, LENS, ["keyword"], QUESTION, [], undefined)).toThrow("invalid format");
   });
 
-  it("refuses an index or a relation the agent does not allow", () => {
-    expect(() => check([sub({ indices: ["company~default"] })])).toThrow("does not search");
-    // The agent restricts person_employment to works_for; person~default has no groups.
-    expect(() => check([sub({ indices: ["person~default"], relations: ["works_for"] })])).toThrow("none of its indices allows");
-    expect(() => check([sub({ relations: ["lives_in"] })])).toThrow("none of its indices allows");
+  it("leaves out an index or relation the agent does not allow, and drops a sub-query left without index", () => {
+    const { plan, notes } = check([
+      sub({ indices: ["person_employment", "company~default"], relations: ["works_for", "lives_in"] }),
+      sub({ indices: ["ghost"] }),
+    ]);
+    expect(plan.subQueries).toHaveLength(1);
+    expect(plan.subQueries[0]).toMatchObject({ indices: ["person_employment"], relations: ["works_for"] });
+    expect(notes).toEqual([
+      "Sub-query 1: index 'company~default' is not one this agent searches; it was left out.",
+      "Sub-query 1: relation 'lives_in' is not allowed for its indices; it was left out.",
+      "Sub-query 2: index 'ghost' is not one this agent searches; it was left out.",
+      "Sub-query 2 was dropped: it named no index of this agent.",
+    ]);
   });
 
-  it("needs verbatim user evidence for queries and filter values", () => {
-    expect(() => check([sub({ query: "chief technology officer" })])).toThrow("verbatim user evidence");
-    expect(() => check([sub({ filters: [{ id: "city", value: "Paris", quote: "lives in Berlin" }] })])).toThrow(
-      "Exact filter value has no verbatim user evidence",
+  it("takes the planner's own query words; only filter values need a verbatim user quote", () => {
+    // BUG 2a: a paraphrased query never fails the turn.
+    const paraphrase = check([sub({ query: "events about artificial intelligence" })], "Which events are about artificial intelligence?");
+    expect(paraphrase.plan.subQueries[0]!.query).toBe("events about artificial intelligence");
+    expect(paraphrase.notes).toEqual([]);
+    // A filter whose quote is not a user's is not applied, and that is a limitation.
+    const { plan, notes } = check([
+      sub({ filters: [{ id: "city", value: "Paris", quote: "lives in Berlin" }, { id: "city", value: "Berlin", quote: "in Berlin, Germany" }] }),
+    ]);
+    expect(plan.subQueries[0]!.filters).toEqual([]);
+    expect(notes).toEqual([
+      'Sub-query 1: filter \'city\' = "Paris" was not applied: the value is not stated verbatim in a user message.',
+      'Sub-query 1: filter \'city\' = "Berlin" was not applied: the value is not stated verbatim in a user message.',
+    ]);
+    // An earlier user message is evidence; assistant text is not.
+    const history = [
+      { role: "user" as const, content: "People in Hamburg?" },
+      { role: "assistant" as const, content: "Try Berlin." },
+    ];
+    const earlier = validatePlan(
+      { subQueries: [sub({ filters: [{ id: "city", value: "Hamburg", quote: "Hamburg" }, { id: "city", value: "Berlin", quote: "Berlin" }] })] },
+      CONFIG, LENS, ["keyword"], "And their roles?", history, undefined,
     );
-    expect(() => check([sub({ filters: [{ id: "city", value: "Berlin", quote: "in Berlin, Germany" }] })])).toThrow(
-      "Exact filter value has no verbatim user evidence",
-    );
-    // Case and spacing do not matter.
-    expect(check([sub({ query: "cto  AT acme" })]).plan.subQueries[0]!.query).toBe("cto  AT acme");
+    expect(earlier.plan.subQueries[0]!.filters.map((f) => f.value)).toEqual(["Hamburg"]);
+    // Case and spacing do not matter for the quote.
+    expect(check([sub({ filters: [{ id: "city", value: "berlin", quote: "LIVES  in berlin" }] })]).plan.subQueries[0]!.filters).toHaveLength(1);
   });
 
-  it("refuses a filter the agent lacks or one on another result type", () => {
-    expect(() => check([sub({ filters: [{ id: "ghost", value: "Berlin", quote: "Berlin" }] })])).toThrow("not allowed");
+  it("does not apply a filter the agent lacks or one on another result type", () => {
+    const { plan, notes } = check([sub({ filters: [{ id: "ghost", value: "Berlin", quote: "Berlin" }] })]);
+    expect(plan.subQueries[0]!.filters).toEqual([]);
+    expect(notes).toEqual(["Sub-query 1: filter 'ghost' is not allowed here; it was not applied."]);
   });
 
-  it("an empty query needs a filter or a previous reference and drops variants", () => {
-    expect(() => check([sub({ query: "" })])).toThrow("neither a query nor a filter");
+  it("an empty query needs an applied filter or previous reference and drops variants", () => {
+    const empty = check([sub({ query: "" })]);
+    expect(empty.plan.subQueries).toEqual([]);
+    expect(empty.notes).toEqual(["Sub-query 1 was dropped: without a query it needs an applied filter or previous results."]);
     const { plan } = check(
       [sub({ query: " ", variants: ["x"], filters: [{ id: "city", value: "Berlin", quote: "Berlin" }] })],
       "Everyone in Berlin",
@@ -99,28 +127,39 @@ describe("planner output", () => {
     expect(notes).toEqual(["Sub-query 1: search mode semantic is unavailable; searched keyword instead."]);
   });
 
-  it("allows a previous reference only to an exact, complete previous result of one type", () => {
+  it("honours a previous reference only to an exact, complete previous result of one type; else ignores it", () => {
     const exactPlan: Plan = {
       subQueries: [{ ...sub({ query: "", filters: [{ id: "city", value: "Berlin", quote: "Berlin" }] }), mode: "keyword" } as Plan["subQueries"][number]],
       unsupportedReason: null,
     };
     const previous: Previous = { complete: true, plan: exactPlan, results: [{ entityType: "person", ids: ["p1", "p2"] }] };
     const followUp = [sub({ query: "CTO", previous: { filterId: null, quote: "these people" } })];
-    expect(check(followUp, "Which of these people is CTO?", previous).plan.subQueries[0]!.previous).toEqual({
-      filterId: null,
-      quote: "these people",
-    });
-    // A singular reference needs exactly one previous entity.
-    expect(() => check([sub({ query: "CTO", previous: { filterId: null, quote: "this person" } })], "Is this person CTO?", previous)).toThrow(
-      "ambiguous",
-    );
-    expect(() => check(followUp, "Which of these people is CTO?", undefined)).toThrow("no user evidence");
-    expect(() => check(followUp, "Which of these people is CTO?", { ...previous, complete: false })).toThrow("incomplete");
+    const honoured = check(followUp, "Which of these people is CTO?", previous);
+    expect(honoured.plan.subQueries[0]!.previous).toEqual({ filterId: null, quote: "these people" });
+    expect(honoured.notes).toEqual([]);
+    const ignored = (message: string, prior: Previous | undefined, subs = followUp) => {
+      const { plan, notes } = check(subs, message, prior);
+      expect(plan.subQueries[0]!.previous).toBeNull();
+      expect(plan.subQueries[0]!.query).toBe("CTO");
+      return notes[0];
+    };
+    expect(ignored("Is this person CTO?", previous, [sub({ query: "CTO", previous: { filterId: null, quote: "this person" } })])).toContain("ambiguous");
+    expect(ignored("Which of these people is CTO?", undefined)).toContain("no verified previous results");
+    expect(ignored("Which of these people is CTO?", { ...previous, complete: false })).toContain("incomplete");
+    // BUG 2b: a follow-up on a searched turn runs as a fresh search.
     const searched = { ...previous, plan: { ...exactPlan, subQueries: [sub() as Plan["subQueries"][number]] } };
-    expect(() => check(followUp, "Which of these people is CTO?", searched)).toThrow("candidates, not verified");
-    expect(() => check([sub({ query: "CTO", previous: { filterId: "ghost", quote: "these people" } })], "Which of these people is CTO?", previous)).toThrow(
+    expect(ignored("Which of these people is CTO?", searched)).toBe(
+      "Sub-query 1: the reference to previous results was ignored (previous search results are candidates, " +
+        "not verified results); it ran as a fresh search.",
+    );
+    expect(ignored("Which of these people is CTO?", previous, [sub({ query: "CTO", previous: { filterId: "ghost", quote: "these people" } })])).toContain(
       "no allowed relation path",
     );
+    // Assistant words are no reference.
+    expect(ignored("CTO?", previous, [sub({ query: "CTO", previous: { filterId: null, quote: "these people" } })])).toContain("no user words");
+    // A query-less sub-query whose reference is ignored has nothing left: dropped.
+    const dropped = check([sub({ query: "", previous: { filterId: null, quote: "these" } })], "And these?", searched);
+    expect(dropped.plan.subQueries).toEqual([]);
   });
 });
 
@@ -146,6 +185,19 @@ describe("planner input", () => {
       { id: "city", resultType: "person", path: ["lives_in (outgoing)"], comparesType: "city", comparesField: "Name" },
     ]);
     expect(input.previousVerifiedResults).toBeNull();
+    expect(input.history).toEqual([]);
+  });
+
+  it("passes the history, and previous results only when a follow-up may refer to them", () => {
+    const history = [{ role: "user" as const, content: "Who is CTO at ACME?" }, { role: "assistant" as const, content: "Ada." }];
+    const exact = { subQueries: [sub({ query: "" })], unsupportedReason: null } as unknown as Plan;
+    const searched = { subQueries: [sub()], unsupportedReason: null } as unknown as Plan;
+    const results = [{ entityType: "person", ids: ["ada"] }];
+    const input = (previous: Previous) => JSON.parse(plannerInput(CONFIG, LENS, [], ["keyword"], "Since when?", history, previous));
+    expect(input({ complete: true, plan: searched, results }).history).toEqual(history);
+    expect(input({ complete: true, plan: searched, results }).previousVerifiedResults).toBeNull();
+    expect(input({ complete: false, plan: exact, results }).previousVerifiedResults).toBeNull();
+    expect(input({ complete: true, plan: exact, results }).previousVerifiedResults).toEqual(results);
   });
 
   it("the provider-enforced schema closes every object and requires every property", () => {

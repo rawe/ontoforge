@@ -140,7 +140,7 @@ describe("sub-query search", () => {
         entityType: "person",
         label: "Ada",
         fields: { name: "Ada", email: "ada@acme.test" },
-        matches: [{ subQuery: 0, matched: expect.objectContaining({ index: "person_employment" }), text: "Employment Role: CTO Company: ACME" }],
+        matches: [{ subQuery: 0, matched: expect.objectContaining({ index: "person_employment" }), text: "Employment Role: CTO Company: ACME", filters: [] }],
       },
     ]);
   });
@@ -161,6 +161,15 @@ describe("sub-query search", () => {
     });
     // "Berlin-Mitte" contains the value but does not equal it.
     expect(engine.rankThroughIndices.mock.calls[0]![2].targets[0].entityIds.sort()).toEqual(["ada", "eve"]);
+    engine.rankThroughIndices.mockResolvedValue([hit("ada", "person_employment", "CTO at ACME")]);
+    const searched = await retrieve(scope(), {
+      subQueries: [subQuery({ filters: [{ id: "city", value: "Berlin", quote: "Berlin" }] })],
+      unsupportedReason: null,
+    });
+    expect(boundContext(searched).results[0]!.matches[0]).toMatchObject({
+      index: "person_employment",
+      filters: [{ filter: "city", path: "lives_in → city.name", value: "Berlin" }],
+    });
   });
 
   it("a sub-query without query lists the filtered entities without searching", async () => {
@@ -170,10 +179,13 @@ describe("sub-query search", () => {
     });
     expect(engine.rankThroughIndices).not.toHaveBeenCalled();
     expect(retrieval.searchCalls).toBe(0);
+    // Each result carries the filter it satisfies, for the answer model.
+    const fact = { filter: "city", path: "lives_in → city.name", value: "Berlin" };
     expect(retrieval.items.map((item) => [item.entityId, item.matches])).toEqual([
-      ["ada", [{ subQuery: 0, matched: null, text: null }]],
-      ["eve", [{ subQuery: 0, matched: null, text: null }]],
+      ["ada", [{ subQuery: 0, matched: null, text: null, filters: [fact] }]],
+      ["eve", [{ subQuery: 0, matched: null, text: null, filters: [fact] }]],
     ]);
+    expect(boundContext(retrieval).results[0]!.matches).toEqual([{ subQuery: 0, filters: [fact] }]);
   });
 
   it("fuses two sub-queries per entity: found by both ranks first and keeps both matches", async () => {
@@ -228,7 +240,7 @@ describe("fusion and context", () => {
       entityType: "person",
       label: null,
       fields: { name: "n".repeat(400) },
-      matches: [{ subQuery: 0, matched: null, text: null }],
+      matches: [{ subQuery: 0, matched: null, text: null, filters: [] }],
     }));
     const context = boundContext({ items, limitations: [], searchCalls: 0, searchMs: 0 });
     expect(JSON.stringify({ results: context.results }).length).toBeLessThanOrEqual(CONTEXT_CHARACTERS);

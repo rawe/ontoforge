@@ -64,6 +64,16 @@ export interface SubQueryMatch {
   /** The matched entry's text, cut to the answer-field length; null when
    * listed or when the index reads properties the lens hides. */
   text: string | null;
+  /** The sub-query's exact filters the entity satisfies. */
+  filters: FilterFact[];
+}
+
+/** An exact filter an entity satisfies: its id, where the compared value
+ * sits (`lives_in → city.name`), and the value. */
+export interface FilterFact {
+  filter: string;
+  path: string;
+  value: string;
 }
 
 export interface RetrievedItem {
@@ -360,6 +370,16 @@ export async function retrieve(scope: RetrievalScope, plan: Plan, previous?: Pre
   // Per sub-query, what matched each entity.
   const matchesOf = new Map<string, SubQueryMatch[]>();
   const hidesText = new Map<string, boolean>();
+  // The filters each sub-query applied, per result type: facts its
+  // results satisfy, which the answer may state.
+  const factsOf = (subQuery: number, entityType: string): FilterFact[] =>
+    plan.subQueries[subQuery]!.filters.flatMap((applied) => {
+      const filter = scope.config.filters.find((candidate) => candidate.id === applied.id);
+      if (filter === undefined || filter.entityType !== entityType) return [];
+      const types = pathTypes(scope.loaded, filter.entityType, filter.path);
+      const path = [...filter.path.map((hop) => hop.relationTypeKey), `${types.at(-1)}.${filter.field}`].join(" → ");
+      return [{ filter: filter.id, path, value: applied.value }];
+    });
   for (const [subQuery, ranked] of perSubQuery.entries()) {
     const hits = ranked.flatMap((item) => (item.hit === null ? [] : [item.hit]));
     const described = await describeMatches(scope.loaded, scope.store, hits);
@@ -372,7 +392,12 @@ export async function retrieve(scope: RetrievalScope, plan: Plan, previous?: Pre
         }
         text = hidesText.get(index.key) ? null : (cut(entry.text, scope.config.answerFieldCharacters).value as string);
       }
-      const match: SubQueryMatch = { subQuery, matched: item.hit === null ? null : described.get(item.entityId) ?? null, text };
+      const match: SubQueryMatch = {
+        subQuery,
+        matched: item.hit === null ? null : described.get(item.entityId) ?? null,
+        text,
+        filters: factsOf(subQuery, item.entityType),
+      };
       matchesOf.set(item.entityId, [...(matchesOf.get(item.entityId) ?? []), match]);
     }
   }
@@ -425,6 +450,8 @@ export interface Evidence {
     relation?: string | null;
     related?: string | null;
     text?: string | null;
+    /** Exact filters the entity satisfies — established facts. */
+    filters?: FilterFact[];
   }[];
 }
 
@@ -446,16 +473,19 @@ export function boundContext(retrieval: Retrieval): ResponseContext {
       label: item.label,
       fields: item.fields,
       matches: item.matches.map((match) =>
-        match.matched === null
-          ? { subQuery: match.subQuery }
-          : {
-              subQuery: match.subQuery,
-              index: match.matched.index,
-              kind: match.matched.partKind,
-              relation: match.matched.relationType,
-              related: match.matched.target?.label ?? null,
-              text: match.text,
-            },
+        ({
+          subQuery: match.subQuery,
+          ...(match.matched === null
+            ? {}
+            : {
+                index: match.matched.index,
+                kind: match.matched.partKind,
+                relation: match.matched.relationType,
+                related: match.matched.target?.label ?? null,
+                text: match.text,
+              }),
+          ...(match.filters.length === 0 ? {} : { filters: match.filters }),
+        }),
       ),
     });
     if (JSON.stringify(context).length > CONTEXT_CHARACTERS - 400) {

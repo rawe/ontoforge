@@ -570,9 +570,11 @@ structural condition is a filter of up to two hops. Answer fields, answer-field 
 the similarity threshold are the agent's own settings. Retrieval runs the index search in
 process — no per-agent vectors, no in-memory vector cache, no preparation step and no
 snapshot of the data. A question makes two model calls, planning and answering; retrieval
-between them is deterministic, the planner may only choose what the user's words and the
-configuration support, no model call is retried automatically, and cancellation stops
-further work.
+between them is deterministic, no model call is retried automatically, and cancellation
+stops further work. The planner phrases queries freely but chooses only what the
+configuration allows, and every exact restriction — a filter value, a reference to
+previous results — needs the user's own words; the server leaves out what fails these
+checks, names it as a limitation and answers with the rest.
 
 **Exactly one env file is read, and it is always named.**
 `ENV_FILE` names it; without that it is `.env` in the working directory. Files never

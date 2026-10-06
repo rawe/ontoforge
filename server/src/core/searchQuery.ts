@@ -178,7 +178,8 @@ export function keywordTsquery(
 
 /** One token of the keyword query as one language of the set reads it:
  * the token's position in the query, and the lexemes that language's
- * dictionaries make of it (null or empty: none, e.g. a stop word). Every
+ * dictionaries make of it — null for a token no dictionary reads (a
+ * space, punctuation), empty for a stop word of that language. Every
  * language parses with the same parser, so positions align. */
 export interface KeywordQueryToken {
   language: number;
@@ -197,15 +198,20 @@ export interface KeywordQuery {
 /**
  * The keyword query from the query's tokens per language. A word stemmed
  * differently in German and English is still one word; a word repeated in
- * the query counts once. Null when no token yields a lexeme.
+ * the query counts once. A word that any language of the set treats as a
+ * stop word is left out in every language — otherwise another language
+ * stems it ("für" in English) and it matches every entry that contains
+ * it. Null when no token yields a lexeme.
  */
 export function keywordQuery(
   tokens: readonly KeywordQueryToken[],
   matching: KeywordMatching,
 ): KeywordQuery | null {
+  const stopWords = new Set(tokens.filter(({ lexemes }) => lexemes?.length === 0).map(({ token }) => token));
   const perLanguage = new Map<number, string[]>();
   const perWord = new Map<number, Set<string>>();
   for (const { language, token, lexemes } of tokens) {
+    if (stopWords.has(token)) continue;
     for (const lexeme of lexemes ?? []) {
       const own = perLanguage.get(language) ?? [];
       if (!own.includes(lexeme)) own.push(lexeme);

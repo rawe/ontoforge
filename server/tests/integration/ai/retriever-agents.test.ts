@@ -36,11 +36,11 @@ async function post(url: string, payload: object, expected = 201): Promise<Row> 
 }
 
 /** Ask the agent; the stream's events, checked for one terminal `final`. */
-async function ask(message: string): Promise<{ reply: string; meta: Row }> {
+async function ask(message: string, history: Row[] = []): Promise<{ reply: string; meta: Row }> {
   const res = await app!.inject({
     method: "POST",
     url: `${RUNTIME}/retriever-agents/people/chat`,
-    payload: { message, diagnostics: true },
+    payload: { message, history, diagnostics: true },
   });
   expect(res.statusCode, res.body).toBe(200);
   const events = res.body.trim().split("\n").map((line) => JSON.parse(line) as Row);
@@ -176,5 +176,30 @@ describe("retriever agent with a real model", () => {
     // Found by both relations, Ada ranks first.
     expect(meta.results[0].label).toBe("Ada Lovelace");
     expect(reply).toContain("Ada");
+  });
+
+  ifAvailable("resolves a follow-up's pronoun to the person asked about last", async () => {
+    const { meta } = await ask("And where does he work?", [
+      { role: "user", content: "Where does Ada Lovelace live?" },
+      { role: "assistant", content: "Ada Lovelace lives in Berlin." },
+      { role: "user", content: "Where does Bob Builder live?" },
+      { role: "assistant", content: "Bob Builder lives in Berlin." },
+    ]);
+    const queries = JSON.stringify((meta.plan.subQueries as Row[]).map((sub) => [sub.query, ...sub.variants]));
+    expect(queries).toMatch(/bob/i);
+    expect(queries).not.toMatch(/ada/i);
+    expect(meta.results[0].label).toBe("Bob Builder");
+  });
+
+  ifAvailable("restates a reference to earlier results it cannot use as a fresh search", async () => {
+    // A searched turn is no verified exact list: previousVerifiedResults is null.
+    const { meta } = await ask("Which of these work at ACME?", [
+      { role: "user", content: "Who lives in Berlin?" },
+      { role: "assistant", content: "Ada Lovelace and Bob Builder live in Berlin." },
+    ]);
+    expect(meta.plan.unsupportedReason ?? null, JSON.stringify(meta.plan)).toBeNull();
+    expect((meta.plan.subQueries as Row[]).length, JSON.stringify(meta.plan)).toBeGreaterThan(0);
+    // Ada works at ACME and lives in Berlin; Eve works at ACME but lives in Hamburg.
+    expect(meta.results[0].label).toBe("Ada Lovelace");
   });
 });

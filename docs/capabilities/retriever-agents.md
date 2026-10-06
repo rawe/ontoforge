@@ -209,8 +209,14 @@ every result reaching the answer model; only then does the planner see them, aft
 are checked against the current data again. The reference must rest on the user's own
 referring words, and a singular one needs exactly one result. A turn that searched by
 text yields candidates, not verified results: a reference to them is ignored with a
-limitation, and the planner restates the topic from the conversation in a fresh search
-instead.
+limitation.
+
+A reference the planner cannot restrict by — to such candidates, or with no verified
+results at all — is never answered as unsupported: the planner restates the earlier
+question's topic and constraints from the conversation, together with the new condition,
+as a fresh search. Any follow-up restates its topic in its search phrases, and a pronoun
+or a left-out subject stands for the entity the user asked about last — that of the
+latest turn that names one.
 
 A token is bound to the ontology, lens, agent and configuration, lives ten minutes, and
 is kept for at most the last hundred turns of one server process. An expired token, or

@@ -31,7 +31,12 @@ import {
   type OwnSearchModelingStore,
   type OwnSearchRuntimeStore,
 } from "../core/ownSearch.js";
-import { DEFAULT_KEYWORD_LANGUAGES } from "../core/keywordLanguage.js";
+import {
+  DEFAULT_KEYWORD_LANGUAGES,
+  KeywordLanguage,
+  KeywordLanguageSetSchema,
+  type KeywordLanguageSet,
+} from "../core/keywordLanguage.js";
 import type { ModelingStore, RuntimeStore } from "../core/ports.js";
 import {
   DATA_TYPES,
@@ -65,6 +70,9 @@ import { syncDocumentChunks } from "../runtime/service.js";
 import { VALID_AGENT_TOOLS } from "../runtime/toolNames.js";
 import {
   AGENT_KEY_PATTERN,
+  ExportIndexInclusions,
+  ExportRetrieverAgents,
+  ExportSearchIndices,
   IMPORTABLE_FORMAT_VERSIONS,
   LEGACY_TRANSFER_FORMAT_VERSION,
   StepSchema as StepZodSchema,
@@ -74,6 +82,8 @@ import type {
   ExportEntityTypeInput,
   ExportLensInput,
   ExportPayloadInput,
+  ExportRetrieverAgentInput,
+  ExportSearchIndicesInput,
   SearchSettingsResponseBody,
   SearchSettingsUpdateInput,
   ExportPropertyInput,
@@ -1612,7 +1622,7 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
  * a set of that language alone). A 6.0 payload's `searchIndices` — custom
  * definitions, each validated against the payload's own schema, and the
  * switched-off managed indices — join the target's; a 5.0 payload has
- * none, its managed indices derive. A 6.0 lens's `indexInclusions` name
+ * none (any it carries are ignored), its managed indices derive. A 6.0 lens's `indexInclusions` name
  * indices of either kind and are written as they come once the indices
  * exist; a lens without them (every 5.0 lens) includes the managed
  * indices of the types it exposes — a passage index only when it exposes
@@ -1630,6 +1640,68 @@ function legacyDataTypes(
     entityTypes.find((et) => et.key === entityType)?.properties.find((p) => p.key === field)?.dataType;
 }
 
+/** What import reads of a payload's version-specific fields. */
+interface VersionFields {
+  keywordLanguages: KeywordLanguageSet;
+  searchIndices: ExportSearchIndicesInput | undefined;
+  lensFields: Map<
+    ExportLensInput,
+    { indexInclusions: string[] | undefined; agents: ExportRetrieverAgentInput[] }
+  >;
+}
+
+/**
+ * Read the payload's version-specific fields, each with its own schema
+ * and only in the version that carries it — the other version's fields
+ * are ignored unchecked (`docs/capabilities/transfer.md#the-format-version`).
+ * 6.0 reads `keywordLanguages`, `searchIndices` and each lens's
+ * `indexInclusions` and `retrieverAgents`; 5.0 reads `textSearchLanguage`
+ * (the one language becomes the whole set) and each lens's `retrievers`.
+ * A missing language field is a field error; a malformed field fails like
+ * the request shape does, naming every offending path.
+ */
+function readVersionFields(payload: ExportPayloadInput, legacy: boolean): VersionFields {
+  const issues: { path: string; message: string }[] = [];
+  function read<T>(schema: z.ZodType<T>, value: unknown, path: (string | number)[]): T | undefined {
+    if (value === undefined) return undefined;
+    const parsed = schema.safeParse(value);
+    if (parsed.success) return parsed.data;
+    for (const issue of parsed.error.issues) {
+      issues.push({ path: "/" + [...path, ...issue.path.map(String)].join("/"), message: issue.message });
+    }
+    return undefined;
+  }
+
+  const languageField = legacy ? "textSearchLanguage" : "keywordLanguages";
+  if (payload[languageField] === undefined) {
+    throw new ValidationError(`The payload carries no ${languageField}`, {
+      fields: { [languageField]: "Required" },
+    });
+  }
+  const keywordLanguages = legacy
+    ? read(KeywordLanguage, payload.textSearchLanguage, ["textSearchLanguage"])
+    : read(KeywordLanguageSetSchema, payload.keywordLanguages, ["keywordLanguages"]);
+  const searchIndices = legacy ? undefined : read(ExportSearchIndices, payload.searchIndices, ["searchIndices"]);
+  const lensFields: VersionFields["lensFields"] = new Map();
+  payload.lenses.forEach((lens, i) => {
+    const agentsField = legacy ? "retrievers" : "retrieverAgents";
+    lensFields.set(lens, {
+      indexInclusions: legacy
+        ? undefined
+        : read(ExportIndexInclusions, lens.indexInclusions, ["lenses", i, "indexInclusions"]),
+      agents: read(ExportRetrieverAgents, lens[agentsField], ["lenses", i, agentsField]) ?? [],
+    });
+  });
+  if (issues.length > 0 || keywordLanguages === undefined) {
+    throw new ValidationError("Request validation failed", { errors: issues });
+  }
+  return {
+    keywordLanguages: typeof keywordLanguages === "string" ? [keywordLanguages] : keywordLanguages,
+    searchIndices,
+    lensFields,
+  };
+}
+
 export async function importSchema(
   payload: ExportPayloadInput,
   store: ModelingStore,
@@ -1641,16 +1713,7 @@ export async function importSchema(
     );
   }
   const legacy = payload.formatVersion === LEGACY_TRANSFER_FORMAT_VERSION;
-  // 5.0 conversion: the one text-search language is the whole set.
-  const keywordLanguages = legacy
-    ? payload.textSearchLanguage === undefined ? undefined : [payload.textSearchLanguage]
-    : payload.keywordLanguages;
-  if (keywordLanguages === undefined) {
-    const field = legacy ? "textSearchLanguage" : "keywordLanguages";
-    throw new ValidationError(`The payload carries no ${field}`, {
-      fields: { [field]: "Required" },
-    });
-  }
+  const { keywordLanguages, searchIndices: payloadIndices, lensFields } = readVersionFields(payload, legacy);
 
   // ---- Phase 1: payload-intrinsic validation (collect everything) ----
   const errors: string[] = [];
@@ -1785,7 +1848,7 @@ export async function importSchema(
   const legacyDataType = legacyDataTypes(payload.entityTypes);
   const agentKeys = new Map<object, { key: string; warning: string | null }>();
   for (const lens of payload.lenses) {
-    const agents = (legacy ? lens.retrievers : lens.retrieverAgents) ?? [];
+    const agents = lensFields.get(lens)!.agents;
     const taken = new Set(agents.map((agent) => agent.key));
     for (const agent of agents) {
       const renamed = legacy ? legacyRetrieverKey(agent.key, taken) : { key: agent.key, warning: null };
@@ -1795,7 +1858,7 @@ export async function importSchema(
   }
   for (const lens of payload.lenses) {
     const seen = new Set<string>();
-    for (const agent of (legacy ? lens.retrievers : lens.retrieverAgents) ?? []) {
+    for (const agent of lensFields.get(lens)!.agents) {
       const key = agentKeys.get(agent)!.key;
       if (seen.has(key)) errors.push(`Import error: duplicate retriever agent '${key}' in lens '${lens.key}'`);
       seen.add(key);
@@ -1911,7 +1974,6 @@ export async function importSchema(
   // each lens's index inclusion naming an index of either kind. A 5.0
   // payload carries none — its managed indices derive on import, and its
   // lenses include those of the types they expose.
-  const payloadIndices = legacy ? undefined : payload.searchIndices;
   if (!legacy) {
     const indexSchema = buildSchemaCacheFromRaw(
       { lensId: "import", key: "import", name: "import" },
@@ -1925,7 +1987,13 @@ export async function importSchema(
     if (payloadIndices !== undefined) {
       errors.push(...importedIndexErrors(payloadIndices, indexSchema));
     }
-    errors.push(...importedInclusionErrors(payload.lenses, payloadIndices, indexSchema));
+    errors.push(
+      ...importedInclusionErrors(
+        payload.lenses.map((lens) => ({ key: lens.key, indexInclusions: lensFields.get(lens)!.indexInclusions })),
+        payloadIndices,
+        indexSchema,
+      ),
+    );
   }
 
   if (errors.length > 0) {
@@ -2140,8 +2208,9 @@ export async function importSchema(
   // index exists.
   if (!legacy) {
     for (const lens of payload.lenses) {
-      if (lens.indexInclusions !== undefined) {
-        await importLensIndexInclusions(store, lensIds.get(lens)!, lens.indexInclusions);
+      const { indexInclusions } = lensFields.get(lens)!;
+      if (indexInclusions !== undefined) {
+        await importLensIndexInclusions(store, lensIds.get(lens)!, indexInclusions);
       }
     }
     invalidateLoadedSchemaCache();
@@ -2150,7 +2219,7 @@ export async function importSchema(
   // search indices keeps none.
   if (indices !== undefined) {
     for (const lens of payload.lenses) {
-      for (const agent of (legacy ? lens.retrievers : lens.retrieverAgents) ?? []) {
+      for (const agent of lensFields.get(lens)!.agents) {
         const converted = legacy
           ? convertLegacyRetrieverConfig(agent.config, legacyDataType)!
           : { config: RetrieverAgentConfig.parse(agent.config), warnings: [] };

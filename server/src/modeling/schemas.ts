@@ -352,14 +352,18 @@ export const ExportLens = z.object({
   name: z.string(),
   description: z.string().nullable().optional(),
   includes: ExportLensInclusions.nullable().optional(),
-  // 6.0: the keys of the search indices the lens includes. Absent (and
-  // in 5.0): the lens includes the managed indices of the types it
-  // exposes, as a lens upgraded by the storage step does.
-  indexInclusions: z.array(z.string()).optional(),
-  // 6.0: the lens's retriever agents (configuration version 2).
-  retrieverAgents: z.array(ExportRetrieverAgent).optional(),
-  // 5.0 only: retrievers (configuration version 1), converted on import.
-  retrievers: z.array(ExportRetrieverAgent).optional(),
+  // Version-specific fields are unchecked here: import reads each only in
+  // the version that carries it, with the schema below, and ignores it in
+  // the other (`docs/capabilities/transfer.md#the-format-version`).
+  // 6.0: `ExportIndexInclusions`. Absent (and in 5.0): the lens includes
+  // the managed indices of the types it exposes, as a lens upgraded by
+  // the storage step does.
+  indexInclusions: z.unknown().optional(),
+  // 6.0: `ExportRetrieverAgents` (configuration version 2).
+  retrieverAgents: z.unknown().optional(),
+  // 5.0 only: `ExportRetrieverAgents` (configuration version 1),
+  // converted on import.
+  retrievers: z.unknown().optional(),
   aiAgents: z.array(ExportAiAgent).default([]),
   savedQueries: z.array(ExportSavedQuery).default([]),
 });
@@ -372,14 +376,23 @@ export const ExportSearchIndices = z.object({
   disabled: z.array(z.string()).default([]),
 });
 
+/** A 6.0 lens's index inclusions: the keys of the indices it includes. */
+export const ExportIndexInclusions = z.array(z.string());
+
+/** A lens's retriever agents — 6.0 `retrieverAgents`, 5.0 `retrievers`. */
+export const ExportRetrieverAgents = z.array(ExportRetrieverAgent);
+
 export const ExportPayload = z.object({
   formatVersion: z.string().optional().default(TRANSFER_FORMAT_VERSION),
-  // Each required by its own version — 6.0 the keyword language set, 5.0
-  // its one text-search language — so import checks them itself.
-  keywordLanguages: KeywordLanguageSetSchema.optional(),
-  textSearchLanguage: KeywordLanguage.optional(),
-  // 6.0 only; absent = no custom index, every managed index on.
-  searchIndices: ExportSearchIndices.optional(),
+  // Version-specific, so unchecked here like a lens's: each required by
+  // its own version and read with its schema by import only — 6.0 the
+  // keyword language set (`KeywordLanguageSetSchema`), 5.0 its one
+  // text-search language (`KeywordLanguage`).
+  keywordLanguages: z.unknown().optional(),
+  textSearchLanguage: z.unknown().optional(),
+  // 6.0 only: `ExportSearchIndices`; absent = no custom index, every
+  // managed index on.
+  searchIndices: z.unknown().optional(),
   entityTypes: z.array(ExportEntityType).default([]),
   relationTypes: z.array(ExportRelationType).default([]),
   // Required, no default: a pre-4.0 document (`ontologies[]`) must fail

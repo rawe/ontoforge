@@ -91,8 +91,7 @@ lens includes the managed indices the import includes on its own
 configuration version 1 under `retrievers`, in place of `retrieverAgents`; import
 converts each into a retriever agent
 ([retriever-agents.md](retriever-agents.md#converting-version-1-configurations)) —
-renaming a key with `-`, which version 1 allowed, unique among its lens's agents — and
-each version reads only its own field. It carries one
+renaming a key with `-`, which version 1 allowed, unique among its lens's agents. It carries one
 `textSearchLanguage`, `english` or `german`, in place of `keywordLanguages`; import takes
 that language alone as the set. And its entity types carry no name property
 ([schema-modeling.md](schema-modeling.md#the-name-property)); import derives one per
@@ -103,8 +102,13 @@ property `name` — `name_2`, `name_3`, … when `name` is taken — and that be
 property. The same derivation brings storage written before name properties existed up to
 date ([../storage-adapters.md](../storage-adapters.md)).
 
-Each version requires its own language field — `keywordLanguages` in `6.0`,
-`textSearchLanguage` in `5.0` — and both require the lenses field.
+**Each version reads only its own fields.** `6.0` reads `keywordLanguages`,
+`searchIndices` and each lens's `indexInclusions` and `retrieverAgents`; `5.0` reads
+`textSearchLanguage` and each lens's `retrievers`. The other version's fields are ignored
+unchecked, however they look. Each version requires its own language field —
+`keywordLanguages` in `6.0`, `textSearchLanguage` in `5.0` — and its absence is a field
+error on it; both require the lenses field. A malformed field of the payload's own
+version fails like a payload of the wrong shape, every offending path named together.
 
 ## Rules
 
@@ -135,8 +139,14 @@ Two consequences:
   present in the same payload; referring to an entity type that exists only in the target
   is rejected. In practice this is not a restriction, because such a type would have
   triggered a conflict anyway.
-- **Import validates before it writes.** The entire payload is checked first — every key
-  conflict and rule violation is reported together, and a rejected payload writes
+- **Import validates before it writes.** The entire payload is checked first, in order:
+  its shape, then its format version, then the fields of that version
+  ([above](#the-format-version)), then every [rule](#what-import-validates), then key
+  conflicts. Each step rejects on its own, and a later one runs only when the earlier ones
+  pass — so rule violations and key conflicts are separate rejections: every rule
+  violation is reported together in one validation error, and only a payload without
+  violations is checked for conflicts, every conflicting key then reported together in
+  one conflict. A rejected payload writes
   nothing. Only a clean payload starts writing. The residual risk is a crash mid-write,
   which can leave a partial schema; a retry after cleanup then behaves like a fresh
   import.
@@ -183,8 +193,8 @@ Import is a write path, and the write-path rules apply to it:
   definition time ([search-indices.md](search-indices.md#validation-and-limits)), and
   every switched-off key must name a managed index that schema derives. An invalid one
   fails the import, naming the index and the offending path. A definition holding a field
-  the wire format does not define is refused earlier, with the payload's shape, at its
-  position in `searchIndices.custom`.
+  the wire format does not define is refused earlier, with the fields of the payload's
+  version ([above](#the-format-version)), at its position in `searchIndices.custom`.
 - Every key in a lens's `indexInclusions` must name a custom index of the payload or a
   managed index its schema derives, once per lens; an unknown or repeated key fails the
   import, naming the lens and the index. Whether the lens includes the index's root type

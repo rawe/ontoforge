@@ -857,7 +857,8 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
         where.push("s.embedding IS NOT NULL");
       } else {
         // Each language's lexemes per query token (`ts_debug` parses like
-        // `to_tsvector`), so one word stemmed two ways counts once.
+        // `to_tsvector`), so one word stemmed two ways counts once and a
+        // stop word of one language (empty lexemes) is dropped in all.
         const tokens = await querier.query(
           `SELECT l.n AS language, d.n AS token, d.lexemes
            FROM unnest($2::text[]) WITH ORDINALITY AS l(language, n),

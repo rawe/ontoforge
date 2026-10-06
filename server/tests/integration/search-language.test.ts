@@ -229,6 +229,30 @@ describe.skipIf(!postgres)("search settings on PostgreSQL", () => {
       [german._id, english._id].sort(),
     );
   });
+
+  it("a stop word of any language of the set is no query word in the other", async () => {
+    await post("/api/ontologies", { key: "language_test" });
+    await post(`${model}/lenses`, { key: "all", name: "All" });
+    await post(`${model}/entity-types`, { key: "service", displayName: "Service" });
+    const research = await post(`${runtime}/entities/service`, { name: "Marktforschung für Einzelhändler" });
+    await post(`${runtime}/entities/service`, { name: "Software für Banken" });
+    await post(`${runtime}/entities/service`, { name: "Analyse eines Marktes" });
+    await post(`${runtime}/entities/service`, { name: "The retail toolbox" });
+    await drainSearchWork();
+    const ids = async (q: string) => {
+      const res = await app.inject({
+        url: `${runtime}/search?${new URLSearchParams({ q, in: "properties", strategy: "keyword-any" })}`,
+      });
+      expect(res.statusCode, res.body).toBe(200);
+      return res.json().hits.map((h: any) => h.entity._id);
+    };
+    // English would stem "für" and "eines" ("ein", a prefix of
+    // "Einzelhändler"), German "the": each is a stop word of the set.
+    expect(await ids("Marktforschung für Einzelhändler")).toEqual([research._id]);
+    expect(await ids("für")).toEqual([]);
+    expect(await ids("eines")).toEqual([]);
+    expect(await ids("the")).toEqual([]);
+  });
 });
 
 it("rejects the old tool and step names, and strips minScore from a search step", async () => {

@@ -86,7 +86,8 @@ entity in that tied group has one; otherwise, and among equal similarities, they
 ordered by entity id. What matched the entity is its best entry under the method in which
 it ranks best, semantic on equal ranks.
 
-An entry's **keyword score** is the number of distinct query words it contains plus, as
+An entry's **keyword score** is the number of distinct query words it contains — those
+left after stop words are dropped ([below](#keyword-language)) — plus, as
 a fraction below one, the adapter's native full-text ranking of the entry. A word counts
 once however differently the keyword languages stem it, and a word repeated in the query
 counts once. An entry holding more of the query's words therefore always ranks above one
@@ -249,8 +250,10 @@ Keyword entries are stemmed in every language of the ontology's **keyword langua
 — English, German, or both — into one representation, and the query is stemmed in each of
 them. Within one language the query terms combine by the strategy's keyword matching,
 each also matching as a prefix; the languages are alternatives, so a query matches in
-whichever language stems it the way the entry was stemmed. Matches across languages come
-from semantic ranking. No request names a language.
+whichever language stems it the way the entry was stemmed. A query word that any
+language of the set treats as a stop word is left out in every language — "für" is not
+searched as an English word — and a query of only such words finds nothing by keyword.
+Matches across languages come from semantic ranking. No request names a language.
 
 The set belongs to the ontology's design, not to the registry: creating an ontology names
 no language, and a new one starts with German and English. One whose storage was upgraded

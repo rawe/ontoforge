@@ -783,6 +783,70 @@ describe("retriever agents", () => {
   });
 });
 
+describe("version-specific fields", () => {
+  const person = entityType("person", "Person");
+  const malformed = {
+    searchIndices: { custom: [{ key: 5 }], disabled: "all" },
+    lenses: [{ key: "all", name: "All", indexInclusions: "people", retrieverAgents: [{ key: "x" }], retrievers: [{ key: "y" }] }],
+  };
+
+  it("5.0 ignores the 6.0 fields unchecked, however malformed", async () => {
+    const indices = withSearchIndices();
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    const res = await postImport({
+      ...malformed,
+      lenses: [{ ...malformed.lenses[0], retrievers: [] }],
+      formatVersion: "5.0",
+      textSearchLanguage: "german",
+      keywordLanguages: ["french"],
+      entityTypes: [person],
+      relationTypes: [],
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    expect(indices.setSearchSettings.mock.calls[0]![0]).toMatchObject({ keywordLanguages: ["german"] });
+    expect(indices.createIndex).not.toHaveBeenCalled();
+    expect(indices.includeIndexInLens).not.toHaveBeenCalled();
+    expect(indices.saveRetrieverAgent).not.toHaveBeenCalled();
+  });
+
+  it("6.0 ignores the 5.0 fields unchecked", async () => {
+    withSearchIndices();
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    const res = await postImport({
+      textSearchLanguage: "french",
+      entityTypes: [person],
+      relationTypes: [],
+      lenses: [{ key: "all", name: "All", retrievers: "nope" }],
+    });
+    expect(res.statusCode, res.body).toBe(201);
+  });
+
+  it("each version checks its own fields like the request shape, naming every path; writes nothing", async () => {
+    const indices = withSearchIndices();
+    const current = await postImport({ ...malformed, entityTypes: [person], relationTypes: [] });
+    expect(current.statusCode).toBe(422);
+    expect(current.json().error.message).toBe("Request validation failed");
+    const paths = (current.json().error.details.errors as { path: string }[]).map((issue) => issue.path);
+    expect(paths).toEqual(
+      expect.arrayContaining(["/searchIndices/custom/0/key", "/searchIndices/disabled", "/lenses/0/indexInclusions", "/lenses/0/retrieverAgents/0/name"]),
+    );
+    expect(paths.some((path) => path.startsWith("/lenses/0/retrievers"))).toBe(false);
+
+    const legacy = await postImport({
+      formatVersion: "5.0",
+      textSearchLanguage: "french",
+      entityTypes: [person],
+      relationTypes: [],
+      lenses: [{ key: "all", name: "All", retrievers: [{ key: "y" }] }],
+    });
+    expect(legacy.statusCode).toBe(422);
+    const legacyPaths = (legacy.json().error.details.errors as { path: string }[]).map((issue) => issue.path);
+    expect(legacyPaths).toEqual(expect.arrayContaining(["/textSearchLanguage", "/lenses/0/retrievers/0/name"]));
+    expect(holder.store.createEntityType).not.toHaveBeenCalled();
+    expect(indices.setSearchSettings).not.toHaveBeenCalled();
+  });
+});
+
 describe("import name properties", () => {
   it("6.0: rejects an entity type without a name property, or one that is not a string property of it", async () => {
     const res = await postImport({

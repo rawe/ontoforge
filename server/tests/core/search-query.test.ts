@@ -264,9 +264,27 @@ describe("keywordQuery", () => {
 
   it("matches as keywordTsquery and counts each query word once across its stems", () => {
     expect(keywordQuery(tokens, "any")).toEqual({
-      tsquery: "('haus':* | 'kauf':* | 'cto':*) | ('hauser':* | 'kaufen':* | 'und':* | 'cto':*)",
-      words: ["'haus':* | 'hauser':*", "'kauf':* | 'kaufen':*", "'und':*", "'cto':*"],
+      tsquery: "('haus':* | 'kauf':* | 'cto':*) | ('hauser':* | 'kaufen':* | 'cto':*)",
+      words: ["'haus':* | 'hauser':*", "'kauf':* | 'kaufen':*", "'cto':*"],
     });
+  });
+
+  it("leaves out a word any language of the set treats as a stop word, in every language", () => {
+    // "Marktforschung für the": "für" is a German stop word, "the" an English one.
+    const mixed = [
+      { language: 1, token: 1, lexemes: ["marktforsch"] },
+      { language: 1, token: 3, lexemes: [] },
+      { language: 1, token: 5, lexemes: ["the"] },
+      { language: 2, token: 1, lexemes: ["marktforschung"] },
+      { language: 2, token: 3, lexemes: ["für"] },
+      { language: 2, token: 5, lexemes: [] },
+    ];
+    expect(keywordQuery(mixed, "all")).toEqual({
+      tsquery: "('marktforsch':*) | ('marktforschung':*)",
+      words: ["'marktforsch':* | 'marktforschung':*"],
+    });
+    // Stop words alone match nothing.
+    expect(keywordQuery(mixed.filter(({ token }) => token !== 1), "any")).toBeNull();
   });
 
   it("counts a repeated word once and is null without any lexeme", () => {

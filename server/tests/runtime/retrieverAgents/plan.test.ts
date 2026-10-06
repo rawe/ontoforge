@@ -175,6 +175,52 @@ describe("planner prompt", () => {
     expect(PLANNER).toContain("Prefer filters over splitting");
     expect(PLANNER).toContain('"filters":[{"id":"city","value":"Berlin","quote":"lives in Berlin"}]');
   });
+
+  it("resolves a follow-up's pronoun to the latest entity asked about, with an example outside any fixture's domain", () => {
+    expect(PLANNER).toContain("to the most recent person or entity the user asked about");
+    expect(PLANNER).toContain("never one of an earlier turn");
+    expect(PLANNER).toContain('"When was it published?" after "Which novel did Jane Austen write first?"');
+    expect(PLANNER).not.toContain("Since when?");
+  });
+
+  it("restates an unresolvable reference to earlier results as a fresh search, never as unsupported", () => {
+    expect(PLANNER).toContain(
+      "A reference to earlier results while previousVerifiedResults is null is still answerable: " +
+        "never answer it with unsupportedReason or subQueries:[]",
+    );
+    expect(PLANNER).toContain("a follow-up or a reference to earlier results is never such a case");
+  });
+});
+
+describe("a reference to earlier results without verified previous results", () => {
+  const history = [
+    { role: "user" as const, content: "Who lives in Berlin?" },
+    { role: "assistant" as const, content: "Ada and Bob." },
+  ];
+  const message = "Which of these work at ACME?";
+
+  it("runs the restated search the prompt asks for: the earlier filter, quoted from the earlier user message", () => {
+    const { plan, notes } = validatePlan(
+      {
+        subQueries: [sub({ query: "works at ACME", filters: [{ id: "city", value: "Berlin", quote: "lives in Berlin" }] })],
+        unsupportedReason: null,
+      },
+      CONFIG, LENS, ["keyword"], message, history, undefined,
+    );
+    expect(notes).toEqual([]);
+    expect(plan.subQueries[0]).toMatchObject({ query: "works at ACME", filters: [{ id: "city", value: "Berlin" }] });
+  });
+
+  it("still ignores a previous-result reference there, running the sub-query as a fresh search", () => {
+    const { plan, notes } = validatePlan(
+      { subQueries: [sub({ query: "works at ACME", previous: { filterId: null, quote: "these" } })], unsupportedReason: null },
+      CONFIG, LENS, ["keyword"], message, history, undefined,
+    );
+    expect(plan.subQueries[0]!.previous).toBeNull();
+    expect(notes).toEqual([
+      "Sub-query 1: the reference to previous results was ignored (there are no verified previous results); it ran as a fresh search.",
+    ]);
+  });
 });
 
 describe("planner input", () => {

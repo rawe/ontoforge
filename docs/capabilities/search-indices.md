@@ -185,12 +185,19 @@ Placeholders are not validated: a misspelt one simply never has a value.
 ### Validation and limits
 
 A custom index is validated against the full schema when it is created, replaced,
-previewed or imported. Every issue is reported at once, each at a dotted path into the
-definition (`relations.0.target.company`):
+previewed or imported, in two steps. Each issue is reported at a dotted path into the
+definition (`relations.0.target.company`).
 
-- the definition holds only the fields of the wire format, at every level: an unknown
-  one is never dropped, but reported at the object that carries it — a group, the
-  semantic or keyword settings, or the definition itself;
+First the **shape**: the definition holds only the fields of the wire format, at every
+level, each with a value of the right type — keys following the key rules, a name and a
+description that are not blank. An unknown field is never dropped, but reported at the
+object that carries it — a group, the semantic or keyword settings, or the definition
+itself. A definition of the wrong shape is answered with its shape issues alone, all of
+them at once; it is not checked against the schema.
+
+Only a well-shaped definition is checked against the **schema rules**, and then every
+rule issue is reported at once:
+
 - the root entity type exists;
 - each group's relation type exists and starts (`outgoing`) or ends (`incoming`) at the
   root type; each `target` key is the entity type at its other end;

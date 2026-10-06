@@ -17,9 +17,16 @@
  * one step that only adds (tables, columns with a default, indexes) and
  * raise `STORAGE_VERSION` to its `to`. A released step is frozen — it
  * carries its own statements, never a constant shared with the DDL. A
- * major release deletes every step and raises `OLDEST_UPGRADABLE_VERSION`
- * to `STORAGE_VERSION`; its one major step may also rewrite data, so a
- * step's action is a statement or a function over the namespace.
+ * major release deletes every step and sets `OLDEST_UPGRADABLE_VERSION`
+ * to the version the previous major line ended on; its one major step
+ * may also rewrite data, so a step's action is a statement or a function
+ * over the namespace.
+ *
+ * 6.0 is the first major release with a storage version. The 5.x line
+ * ended unversioned — version 1 — so its major step starts there. Version
+ * 2 was never released: development storage recorded at it differs from
+ * version 1 only by the retriever table, which the same step takes over
+ * (`createRetrieverAgents`).
  */
 
 import { randomUUID } from "node:crypto";
@@ -36,15 +43,17 @@ import { namePropertyDisplayName } from "../../core/schemas.js";
 import { deriveManagedIndices, type SearchIndexSchema } from "../../core/searchIndex.js";
 import type { Querier } from "./errors.js";
 import { searchPathStatement } from "./errors.js";
+import { quoteIdent } from "./oql/bindings.js";
 import { readTypesWithProperties } from "./schemaRead.js";
 
 /** The layout this code creates and serves. */
 export const STORAGE_VERSION = 3;
 
 /** The version the previous major line ended on; older storage is refused. */
-export const OLDEST_UPGRADABLE_VERSION = 2;
+export const OLDEST_UPGRADABLE_VERSION = 1;
 
-/** Storage that predates the version table: the 5.x layout without retrievers. */
+/** Storage that predates the version table: the layout of the 5.x line,
+ * which ended on 5.1.0. */
 const UNVERSIONED = 1;
 
 /** One action of a step inside an ontology namespace: a statement, or work
@@ -173,6 +182,60 @@ async function writeManagedSearchIndices(querier: Querier): Promise<void> {
 }
 
 /**
+ * Give the namespace its retriever-agent table. 5.x storage has no
+ * retrievers, so the table starts empty. Storage recorded at the
+ * unreleased version 2 keeps them in `retriever_config`: that table is
+ * renamed instead and its configurations converted. The table's presence
+ * decides, not the recorded version.
+ */
+async function createRetrieverAgents(querier: Querier): Promise<void> {
+  const found = await querier.query(
+    `SELECT to_regclass(format('%I.retriever_config', current_schema())) IS NOT NULL AS present`,
+  );
+  if (found.rows[0]!["present"] !== true) {
+    await querier.query(`CREATE TABLE retriever_agent (
+  retriever_agent_id uuid        CONSTRAINT retriever_agent_pk PRIMARY KEY,
+  lens_id            uuid        NOT NULL CONSTRAINT retriever_agent_lens_fk
+                                 REFERENCES lens (lens_id) ON DELETE CASCADE,
+  key                text        NOT NULL,
+  name               text        NOT NULL,
+  description        text,
+  config_version     integer     NOT NULL,
+  config             jsonb       NOT NULL,
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  updated_at         timestamptz NOT NULL DEFAULT now(),
+  warnings           jsonb       NOT NULL DEFAULT '[]'::jsonb,
+  CONSTRAINT retriever_agent_key_unique UNIQUE (lens_id, key)
+)`);
+    return;
+  }
+  for (const statement of [
+    `ALTER TABLE retriever_config RENAME TO retriever_agent`,
+    `ALTER TABLE retriever_agent RENAME COLUMN retriever_config_id TO retriever_agent_id`,
+    `ALTER TABLE retriever_agent RENAME CONSTRAINT retriever_config_pk TO retriever_agent_pk`,
+    `ALTER TABLE retriever_agent RENAME CONSTRAINT retriever_config_lens_fk TO retriever_agent_lens_fk`,
+    `ALTER TABLE retriever_agent RENAME CONSTRAINT retriever_config_key_unique TO retriever_agent_key_unique`,
+    `ALTER TABLE retriever_agent ADD COLUMN warnings jsonb NOT NULL DEFAULT '[]'::jsonb`,
+  ]) {
+    await querier.query(statement);
+  }
+  // PostgreSQL 18 names NOT NULL constraints after their table and column,
+  // and a rename keeps them.
+  const notNull = await querier.query(
+    `SELECT conname FROM pg_constraint
+      WHERE conrelid = 'retriever_agent'::regclass AND contype = 'n' AND conname LIKE 'retriever\\_config%'`,
+  );
+  for (const row of notNull.rows) {
+    const name = row["conname"] as string;
+    await querier.query(
+      `ALTER TABLE retriever_agent RENAME CONSTRAINT ${quoteIdent(name)} TO ` +
+        quoteIdent(name.replaceAll("retriever_config", "retriever_agent")),
+    );
+  }
+  await convertRetrieverAgents(querier);
+}
+
+/**
  * Convert every stored version-1 retriever configuration into a
  * retriever-agent configuration of version 2
  * (`core/legacyRetrieverConfig.ts`), keeping the conversion's warnings
@@ -225,7 +288,8 @@ async function convertRetrieverAgents(querier: Querier): Promise<void> {
 
 const STEPS: Step[] = [
   {
-    // 6.0: every entity type names its name property; search indices.
+    // 6.0, from 5.x storage (version 1) or the unreleased version 2:
+    // every entity type names its name property; search indices.
     to: 3,
     actions: [
       `ALTER TABLE entity_type ADD COLUMN name_property text`,
@@ -325,15 +389,9 @@ const STEPS: Step[] = [
       // 6.0: the managed indices of the existing schema, searchable in the
       // scoped lenses that show their types.
       writeManagedSearchIndices,
-      // 6.0: retrievers become retriever agents, which search the
-      // indices; their configurations convert to version 2.
-      `ALTER TABLE retriever_config RENAME TO retriever_agent`,
-      `ALTER TABLE retriever_agent RENAME COLUMN retriever_config_id TO retriever_agent_id`,
-      `ALTER TABLE retriever_agent RENAME CONSTRAINT retriever_config_pk TO retriever_agent_pk`,
-      `ALTER TABLE retriever_agent RENAME CONSTRAINT retriever_config_lens_fk TO retriever_agent_lens_fk`,
-      `ALTER TABLE retriever_agent RENAME CONSTRAINT retriever_config_key_unique TO retriever_agent_key_unique`,
-      `ALTER TABLE retriever_agent ADD COLUMN warnings jsonb NOT NULL DEFAULT '[]'::jsonb`,
-      convertRetrieverAgents,
+      // 6.0: retriever agents, which search the indices; retrievers of
+      // the unreleased version 2 become agents of configuration version 2.
+      createRetrieverAgents,
       // 6.0: the per-entity search storage they replace goes — the
       // entities' search columns with their keyword and per-type vector
       // indexes, and the document chunks with theirs. The worker's start

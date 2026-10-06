@@ -1,22 +1,25 @@
 /**
  * PostgreSQL storage version — reaches past the persistence port on
- * purpose: storage at version 2 (the 5.x layout, before name properties
- * and search indices) is produced by dropping what the current code adds
- * and restoring the per-entity search storage it retires, then the boot
- * (`initSchema`) must bring it to exactly the layout of a freshly created
- * ontology, backfilling every entity type's name property, the search
- * settings and the managed search indices and dropping the retired
- * storage, once,
- * however many servers start together; it must refuse storage older than
- * the previous major line and leave storage newer than the code
- * untouched. Requires the docker-compose PostgreSQL.
+ * purpose. Real 5.1.0 storage (unversioned, version 1), frozen in
+ * `tests/fixtures/storage-5.1.0.sql`, must be brought by the boot
+ * (`initSchema`) to exactly the layout of a freshly created ontology,
+ * every instance kept, every entity type given its name property, the
+ * keyword language, the managed search indices and an empty retriever
+ * agent table set up, and the retired search storage dropped. Storage at
+ * the unreleased version 2 (development storage with retrievers) is
+ * produced by dropping what the current code adds and restoring the
+ * per-entity search storage it retires; the same step upgrades it,
+ * converting its retrievers. The upgrade runs once however many servers
+ * start together; storage newer than the code stays untouched. Requires
+ * the docker-compose PostgreSQL.
  */
 
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { initSchema } from "../../../src/adapters/postgres/ddl.js";
+import { initSchema, SAVED_QUERY_INDEX } from "../../../src/adapters/postgres/ddl.js";
 import { runQuery, withTransaction } from "../../../src/adapters/postgres/errors.js";
 import { STORAGE_VERSION } from "../../../src/adapters/postgres/storageVersion.js";
 import { settings } from "../../../src/config.js";
@@ -41,6 +44,27 @@ async function recordVersion(version: number): Promise<void> {
     await querier.query(`DELETE FROM public.storage_version`);
     await querier.query(`INSERT INTO public.storage_version (version) VALUES ($1)`, [version]);
   });
+}
+
+/** Storage made by the 5.1.0 server: its registry table, still holding
+ * each ontology's text-search language, and the namespaces of `legacy`
+ * (English) and `legacy_de` (German) — and no version table. */
+async function loadRelease510(): Promise<void> {
+  await runQuery(`DROP TABLE public.storage_version`);
+  await runQuery(`DROP TABLE public.ontology`);
+  await runQuery(readFileSync(new URL("../../fixtures/storage-5.1.0.sql", import.meta.url), "utf8"));
+}
+
+/** Every entity and relation of a namespace, as stored. */
+async function instances(namespace: string): Promise<unknown> {
+  const entities = await runQuery(
+    `SELECT id, type_key, props, created_at, updated_at FROM ${namespace}.entity ORDER BY id`,
+  );
+  const relations = await runQuery(
+    `SELECT id, type_key, from_id, to_id, props, created_at, updated_at
+       FROM ${namespace}.relation ORDER BY id`,
+  );
+  return { entities: entities.rows, relations: relations.rows };
 }
 
 /** The per-type and per-document-property vector indexes of version 2,
@@ -129,6 +153,19 @@ async function makeVersion2(namespace: string, language = "english"): Promise<vo
     await querier.query(
       `ALTER TABLE ${namespace}.retriever_agent RENAME COLUMN retriever_agent_id TO retriever_config_id`,
     );
+    // Version 2 created the table as `retriever_config`: its NOT NULL
+    // constraints carry that name.
+    const notNull = await querier.query(
+      `SELECT conname FROM pg_constraint
+        WHERE conrelid = '${namespace}.retriever_agent'::regclass AND contype = 'n'`,
+    );
+    for (const row of notNull.rows) {
+      const name = row["conname"] as string;
+      await querier.query(
+        `ALTER TABLE ${namespace}.retriever_agent RENAME CONSTRAINT ${name}
+           TO ${name.replaceAll("retriever_agent", "retriever_config")}`,
+      );
+    }
     await querier.query(`ALTER TABLE ${namespace}.retriever_agent RENAME TO retriever_config`);
   });
   await recordVersion(2);
@@ -160,8 +197,14 @@ async function seedVersion2Types(
   });
 }
 
+interface Layout {
+  columns: unknown[];
+  constraints: unknown[];
+  indexes: { indexname: string; indexdef: string }[];
+}
+
 /** Every column, constraint and index of one namespace, namespace-free. */
-async function layout(namespace: string): Promise<unknown> {
+async function layout(namespace: string): Promise<Layout> {
   const strip = (value: unknown) => String(value).replaceAll(`${namespace}.`, "");
   // Column order, not raw positions: a dropped column keeps its slot, and
   // `makeVersion2` drops one.
@@ -186,8 +229,18 @@ async function layout(namespace: string): Promise<unknown> {
   return {
     columns: columns.rows,
     constraints: constraints.rows.map((row) => ({ ...row, definition: strip(row["definition"]) })),
-    indexes: indexes.rows.map((row) => ({ ...row, indexdef: strip(row["indexdef"]) })),
+    indexes: indexes.rows.map((row) => ({
+      indexname: row["indexname"] as string,
+      indexdef: strip(row["indexdef"]),
+    })),
   };
+}
+
+/** A layout without the saved-query vector index, which exists once an
+ * embedding provider set its width: the 5.1.0 storage was made with one,
+ * this test server runs without. */
+function withoutProviderIndex(of: Layout): Layout {
+  return { ...of, indexes: of.indexes.filter((index) => index.indexname !== SAVED_QUERY_INDEX) };
 }
 
 describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL storage version", () => {
@@ -212,6 +265,109 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL storage version"
 
   it("a fresh database is recorded at the current version", async () => {
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
+  });
+
+  it("upgrades real 5.1.0 storage to exactly the layout of a fresh ontology, keeping every instance", async () => {
+    await loadRelease510();
+    const before = [await instances("ont_legacy"), await instances("ont_legacy_de")];
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await initSchema();
+
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 1 to 3 (2 ontologies).");
+    expect(await recordedVersion()).toBe(STORAGE_VERSION);
+    expect([await instances("ont_legacy"), await instances("ont_legacy_de")]).toEqual(before);
+    await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
+    const fresh = await layout("ont_fresh");
+    expect(withoutProviderIndex(await layout("ont_legacy"))).toEqual(fresh);
+    expect(withoutProviderIndex(await layout("ont_legacy_de"))).toEqual(fresh);
+    // The retired search storage went with its keyword and vector indexes.
+    const retired = await runQuery(
+      `SELECT count(*)::int AS n FROM pg_indexes
+        WHERE schemaname LIKE 'ont\\_legacy%' AND (indexname LIKE 'vec\\_%' OR indexname LIKE '%keyword_idx')`,
+    );
+    expect(retired.rows[0]!["n"]).toBe(0);
+    // A second start finds the storage current and changes nothing.
+    log.mockClear();
+    await initSchema();
+    expect(log).not.toHaveBeenCalled();
+    expect(withoutProviderIndex(await layout("ont_legacy"))).toEqual(fresh);
+  });
+
+  it("gives real 5.1.0 storage its name properties, keyword languages, managed indices and retriever agents", async () => {
+    await loadRelease510();
+
+    await initSchema();
+
+    const registry = getOntologyRegistry();
+    expect((await registry.listOntologies()).map((ontology) => ontology.key).sort()).toEqual([
+      "legacy",
+      "legacy_de",
+    ]);
+    // By the fallback chain, in property creation order: `ticket` was built
+    // property by property, `zeta` before `alpha`.
+    const named = async (key: string) =>
+      (await (await getModelingStore(key)).listEntityTypes()).map((et) => [et.key, et.nameProperty]);
+    expect(await named("legacy")).toEqual([
+      ["article", "title"],
+      ["empty", "name"],
+      ["gauge", "name"],
+      ["memo", "code"],
+      ["reading", "name_2"],
+      ["tag", "label"],
+      ["ticket", "zeta"],
+    ]);
+    expect(await named("legacy_de")).toEqual([
+      ["dokument", "titel"],
+      ["ort", "bezeichnung"],
+    ]);
+    const languages = async (namespace: string) =>
+      (await runQuery(`SELECT keyword_languages FROM ${namespace}.search_settings`)).rows;
+    expect(await languages("ont_legacy")).toEqual([{ keyword_languages: ["english"] }]);
+    expect(await languages("ont_legacy_de")).toEqual([{ keyword_languages: ["german"] }]);
+
+    const included = async (namespace: string) =>
+      (
+        await runQuery(
+          `SELECT coalesce(l.key || ':' || si.key, si.key) AS inclusion
+             FROM ${namespace}.search_index si
+             LEFT JOIN ${namespace}.lens_includes li ON li.search_index_id = si.search_index_id
+             LEFT JOIN ${namespace}.lens l ON l.lens_id = li.lens_id
+            ORDER BY 1`,
+        )
+      ).rows.map((row) => row["inclusion"]);
+    // Unscoped lenses need no inclusion; `brief` hides `article.body`,
+    // `full` shows only `memo.body`, `gauges` shows no property of its
+    // type, `links` has relation inclusions only and so shows every type;
+    // `kurz` hides `dokument.inhalt`.
+    expect(await included("ont_legacy")).toEqual([
+      "brief:article~default",
+      "brief:tag~default",
+      "full:article~body",
+      "full:article~default",
+      "full:memo~body",
+      "full:memo~default",
+      "gauges:gauge~default",
+      "links:article~body",
+      "links:article~default",
+      "links:empty~default",
+      "links:gauge~default",
+      "links:memo~body",
+      "links:memo~default",
+      "links:reading~default",
+      "links:tag~default",
+      "links:ticket~default",
+      "links:ticket~notes",
+    ]);
+    expect(await included("ont_legacy_de")).toEqual([
+      "dokument~inhalt",
+      "kurz:dokument~default",
+      "kurz:ort~default",
+    ]);
+    // 5.1.0 has no retrievers: an empty agent table.
+    expect((await runQuery(`SELECT count(*)::int AS n FROM ont_legacy.retriever_agent`)).rows).toEqual([
+      { n: 0 },
+    ]);
   });
 
   it("upgrades version-2 storage to exactly the layout of a fresh ontology", async () => {
@@ -503,16 +659,6 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL storage version"
     ]);
     const relations = await runQuery(`SELECT count(*)::int AS n FROM ont_older.relation`);
     expect(relations.rows[0]!["n"]).toBe(1);
-  });
-
-  it("refuses unversioned storage — older than the previous major line — and changes nothing", async () => {
-    await getOntologyRegistry().createOntology(ID_A, "older", null, null);
-    await runQuery(`DROP TABLE public.storage_version`);
-    const before = await layout("ont_older");
-
-    await expect(initSchema()).rejects.toThrow("previous major line first");
-
-    expect(await layout("ont_older")).toEqual(before);
   });
 
   it("several servers starting together upgrade once", async () => {

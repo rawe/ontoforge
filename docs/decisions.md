@@ -116,7 +116,8 @@ default, indexes — so servers of the
 previous release keep working during a rolling update; renaming, removing or rewriting
 stored data waits for the next major release, which carries one step of its own. Upgrade steps are kept for one major release line: a major release
 removes them all and accepts only new storage or storage at the version the previous
-major line ended on. Older storage stops the server with the instruction to upgrade
+major line ended on. Storage from before the storage version existed counts as version 1;
+the 5.x line ended there, so 6.0 upgrades it. Older storage stops the server with the instruction to upgrade
 through the last release of the previous major line first. Storage newer than the code
 also stops the server, untouched.
 

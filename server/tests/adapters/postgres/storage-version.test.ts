@@ -1,7 +1,7 @@
 /**
  * The storage-version decision at boot, against a scripted querier: what
- * an empty, an unversioned, an upgradable, a current, a newer and a
- * too-old database each lead to. The real upgrade against PostgreSQL is covered by
+ * an empty, an unversioned (5.x), an unreleased version-2, a current, a
+ * newer and a too-old database each lead to. The real upgrade against PostgreSQL is covered by
  * `tests/integration/postgres/storage-version.test.ts`.
  */
 
@@ -17,12 +17,21 @@ import {
 const SERVER_DDL = ["CREATE TABLE IF NOT EXISTS public.storage_version (version integer NOT NULL)"];
 
 /** A database as the boot sees it: the version row (absent = unversioned),
- * whether the registry exists, and its ontology namespaces. */
-function database(state: { version?: number; registry: boolean; namespaces?: string[] }) {
+ * whether the registry exists, its ontology namespaces, and whether they
+ * keep retrievers in `retriever_config` (the unreleased version 2). */
+function database(state: {
+  version?: number;
+  registry: boolean;
+  namespaces?: string[];
+  retrieverConfig?: boolean;
+}) {
   const queries: string[] = [];
   const querier: Querier = {
     async query(text: string): Promise<DbResult> {
       queries.push(text);
+      if (text.includes("to_regclass") && text.includes("retriever_config")) {
+        return { rows: [{ present: state.retrieverConfig ?? false }], rowCount: 1 };
+      }
       if (text.includes("to_regclass")) {
         return { rows: [{ versioned: state.version !== undefined, registry: state.registry }], rowCount: 1 };
       }
@@ -66,13 +75,12 @@ describe("storage version at boot", () => {
     expect(writes(queries)).toEqual([SERVER_DDL[0]]);
   });
 
-  it("upgrades storage of the previous major line in every ontology namespace, the number last", async () => {
-    const { querier, queries } = database({
-      version: OLDEST_UPGRADABLE_VERSION,
-      registry: true,
-      namespaces: ["ont_a", "ont_b"],
-    });
+  it("upgrades unversioned storage — the 5.x line — in every ontology namespace, the number last", async () => {
+    expect(OLDEST_UPGRADABLE_VERSION).toBe(1);
+    const { querier, queries } = database({ registry: true, namespaces: ["ont_a", "ont_b"] });
     await bringStorageUpToDate(querier, SERVER_DDL);
+    // The version table comes first: 5.x storage has none.
+    expect(queries.indexOf(SERVER_DDL[0]!)).toBeLessThan(queries.indexOf("SET LOCAL search_path TO ont_a, public"));
     const bound = queries.filter((q) => q.startsWith("SET LOCAL search_path"));
     expect(bound).toEqual([
       "SET LOCAL search_path TO ont_a, public",
@@ -84,14 +92,26 @@ describe("storage version at boot", () => {
     const dropped = queries.indexOf("ALTER TABLE public.ontology DROP COLUMN text_search_language");
     expect(dropped).toBeGreaterThan(queries.lastIndexOf("SET LOCAL search_path TO ont_b, public"));
     expect(queries.filter((q) => q.includes("text_search_language"))).toHaveLength(3);
+    // 5.x has no retrievers: each namespace gets an empty agent table.
+    expect(queries.filter((q) => q.startsWith("CREATE TABLE retriever_agent"))).toHaveLength(2);
+    expect(queries.filter((q) => q.includes("RENAME TO retriever_agent"))).toEqual([]);
     expect(queries.at(-1)).toBe("INSERT INTO public.storage_version (version) VALUES ($1)");
-    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 2 to 3"));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 1 to 3"));
   });
 
-  it("refuses unversioned storage — the 5.x layout before retrievers — and writes nothing", async () => {
-    const { querier, queries } = database({ registry: true, namespaces: ["ont_a"] });
-    await expect(bringStorageUpToDate(querier, SERVER_DDL)).rejects.toThrow("previous major line first");
-    expect(writes(queries)).toEqual([]);
+  it("upgrades storage at the unreleased version 2 by the same step, taking its retrievers over", async () => {
+    const { querier, queries } = database({
+      version: 2,
+      registry: true,
+      namespaces: ["ont_a"],
+      retrieverConfig: true,
+    });
+    await bringStorageUpToDate(querier, SERVER_DDL);
+    expect(queries.filter((q) => q.includes("ADD COLUMN name_property"))).toHaveLength(1);
+    expect(queries).toContain("ALTER TABLE retriever_config RENAME TO retriever_agent");
+    expect(queries.filter((q) => q.startsWith("CREATE TABLE retriever_agent"))).toEqual([]);
+    expect(queries.at(-1)).toBe("INSERT INTO public.storage_version (version) VALUES ($1)");
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 2 to 3"));
   });
 
   it("refuses storage newer than the code and writes nothing", async () => {

@@ -50,7 +50,12 @@ The storage version is its own number, not the release version — the rule is i
 1. Delete every upgrade step and set `OLDEST_UPGRADABLE_VERSION` to the version the
    previous major line ended on.
 2. Renaming or removing storage happens only here, as the major release's own step.
-3. Adapt the upgrade test to start from the oldest upgradable layout.
+3. Adapt the upgrade test to start from the oldest upgradable layout, frozen as SQL
+   produced by the last release of the previous major line
+   (`server/tests/fixtures/storage-5.1.0.sql` for 6.0).
+4. What operators must do before booting the major release against existing storage is
+   in [storage-adapters.md](../storage-adapters.md#how-ontologies-are-isolated)
+   ("Running the major step") — keep it current with the major step.
 
 ## Local Build
 

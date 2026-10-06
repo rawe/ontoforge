@@ -827,8 +827,9 @@ or the one the extension would install — and warns when it predates 0.7, which
 `halfvec`: the search entry table cannot then be created, so an upgrade of an existing
 namespace and every ontology creation fail.
 
-The current storage version is 3 and the oldest upgradable one is 2: version 3 is a major
-step. It adds `entity_type.name_property`, gives every existing entity type its name
+The current storage version is 3 and the oldest upgradable one is 1 — the unversioned
+storage of the 5.x line, which ended on 5.1.0: version 3 is a major step. Version 2 was
+never released; development storage recorded at it is upgraded by the same step. It adds `entity_type.name_property`, gives every existing entity type its name
 property by the derivation the `5.0` transfer import uses
 ([capabilities/transfer.md](capabilities/transfer.md#the-format-version)) — creating a
 `string` property where a type has none, with property creation order as the declaration
@@ -838,9 +839,12 @@ writes a row for every managed index the namespace's schema implies, and include
 every scoped lens exposing its root type — a passage index only with its document
 property — as the search-index store's inclusion operation does; the worker's first
 start then builds their generations from all existing entities. An upgraded namespace's
-keyword language set is the single text-search language its registry row carried. The step then renames the retriever table to `retriever_agent`,
-adds its `warnings` column, and converts every stored configuration of version 1 to
-version 2 by the conversion an import applies
+keyword language set is the single text-search language its registry row carried. The step then gives the namespace its
+`retriever_agent` table. 5.x storage stores no retrievers, so there the table is created
+empty. Storage recorded at version 2 keeps them in `retriever_config`, so there that
+table is renamed to `retriever_agent` with its constraints, gains its `warnings` column,
+and has every stored configuration of version 1 converted to version 2 by the conversion
+an import applies
 ([capabilities/retriever-agents.md](capabilities/retriever-agents.md#converting-version-1-configurations)),
 storing its warnings; a configuration that is no readable version-1 shape stays as it
 is. Every agent key with `-` is renamed by the same conversion's key rule, unique within
@@ -849,6 +853,22 @@ search storage the managed indices replace: the `entity` table's search columns 
 text and segments, and the generated tsvector — and the `document_chunk` table, each with
 its keyword and vector indexes. Once every namespace has its set, the step's server-wide
 statement drops that language column from the registry table.
+
+**Running the major step** asks the operator for a few things. Stop every 5.x server
+first: the step drops a registry column they read, so no rolling update spans it. The
+installed pgvector must be 0.7 or newer — `SELECT extversion FROM pg_extension WHERE
+extname = 'vector'` shows it, `ALTER EXTENSION vector UPDATE` raises it, and the boot's
+`CREATE EXTENSION IF NOT EXISTS` never updates an installed extension. The whole upgrade
+is the boot's one transaction and holds roughly 150 locks per ontology, so beyond about
+100 ontologies the PostgreSQL default `max_locks_per_transaction` may be too low; raising
+it needs a restart, and running out rolls the upgrade back cleanly. After the boot the
+worker rebuilds every search entry in the background: search answers partially until
+the new generations are ready
+([capabilities/search-indices.md](capabilities/search-indices.md#lifecycle)), and the
+whole corpus is embedded again — with a cloud provider, every entity's text goes to it
+once more. Dropped columns keep their bytes until their rows are rewritten; a
+`VACUUM FULL` reclaims them at once and is optional. The strongest check before
+upgrading production is to boot the new release against a restored dump of it.
 
 **Registry create** is one transaction:
 the registry row first — so a concurrent same-key create dies on the named constraint as

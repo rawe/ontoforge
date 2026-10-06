@@ -35,7 +35,9 @@ id, and takes three things with it:
 1. the entity;
 2. **every relation attached to it, in either direction** — including relations whose type
    the current lens cannot see;
-3. every [document chunk](documents.md) belonging to it.
+3. its entries in every [search index](search-indices.md#lifecycle) — its
+   [document passages](documents.md) among them — and those of the relations deleted with
+   it.
 
 Nothing warns first and nothing is refused: the runtime cascade is silent, unlike the
 schema cascade protocol in [schema-modeling.md](schema-modeling.md). A caller that needs to
@@ -56,11 +58,19 @@ Endpoint errors are collected alongside property errors and reported together.
 rather than rejecting the request; properties in the same payload still apply. Repointing a
 relation means deleting it and creating another, with a new id.
 
-Deleting a relation removes only that relation; neither endpoint is touched.
+Deleting a relation removes that relation and its entries in every search index; neither
+endpoint is touched.
 
-Relations carry no document properties (the schema forbids them there) and are never
-embedded, so they are invisible to [search](search.md) — they are reachable by listing, by
-traversal and by [OQL](oql.md) only.
+Relations carry no document properties (the schema forbids them there) and are never a
+hit of [search](search.md): hits are entities. A relation is composed into search entries
+only by a custom search index with a relation group on its type — one entry per relation,
+with the entity at its other end, owned by the entity on the index's root side
+([search-indices.md](search-indices.md#relation-groups)). The index search through such
+an index — `POST search`, or the MCP `search_by_index` tool — makes relations
+searchable: an entity ranks by its relation entries too, and the
+hit names the relation that matched and the entity at its other end
+([search.md](search.md#index-search)). Relations themselves are reachable by listing, by
+traversal and by [OQL](oql.md).
 
 ## Validation
 
@@ -235,7 +245,7 @@ derivable direction; text after the colon that is neither marker makes the first
 unknown. Paths are a filter feature only: `sort` rejects them, `fields` treats
 them as any unknown name, no response ever carries a path value, and the relation list
 rejects them with a message saying so. Semantic search takes them under its own rules
-([search.md](search.md#property-filters-on-search)).
+([search.md](search.md#scope-and-filters)).
 
 ### Relation existence
 

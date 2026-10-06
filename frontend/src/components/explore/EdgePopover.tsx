@@ -3,6 +3,7 @@ import { ArrowRight, ExternalLink, Loader2, Trash2, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
+import { useDisplayLabel } from '@/api/hooks'
 import * as runtime from '@/api/runtime'
 import type { EntityInstance, SchemaRelationType } from '@/api/types'
 import { invalidateNeighborhood } from '@/components/entity/useNeighborCounts'
@@ -18,7 +19,6 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
-import { displayLabel } from '@/lib/displayLabel'
 import type { RelationFlowEdge } from './workingSet'
 
 const POPOVER_WIDTH = 300
@@ -52,6 +52,7 @@ export function EdgePopover({
   onClose,
   onDeleted,
 }: EdgePopoverProps) {
+  const displayLabel = useDisplayLabel()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const ref = useRef<HTMLDivElement>(null)

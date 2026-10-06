@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-// Rebuild one ontology's search data: keyword text, document passages and,
-// where an embedding provider is configured, vectors and vector indexes.
+// Rebuild one ontology's search data outside its search indices: the
+// saved-query description vectors and their vector index — on Neo4j, which
+// has no search indices, also its own entity vectors and document chunks.
+// Search indices rebuild themselves.
 
 import { die, getBaseUrl, getOntologyKey, modelPath, parseCliArgs } from './lib.mjs';
 

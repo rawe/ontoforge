@@ -23,6 +23,7 @@ import {
   getOntologyRegistry,
   initStores,
 } from "./core/ports.js";
+import { startSearchWorker, stopSearchWorker } from "./runtime/indexing/worker.js";
 
 /**
  * Name any stored type whose key is now reserved, walking the registry
@@ -61,7 +62,10 @@ export async function warnAboutReservedTypeKeysInUse(): Promise<void> {
  * 5. If embeddings are enabled, reconcile vector index widths against the
  *    provider — every mismatch is WARNED about and nothing is repaired
  *    (`docs/decisions.md#behaviour`); rebuild is where repair happens.
- * 6. Start both MCP servers (mounted inside `createApp`).
+ * 6. Start the search worker, if the adapter stores search indices — it
+ *    reconciles every ontology's index generations, then builds entries
+ *    from the queue in the background.
+ * 7. Start both MCP servers (mounted inside `createApp`).
  */
 export async function startServer(): Promise<FastifyInstance> {
   await initStores();
@@ -73,12 +77,14 @@ export async function startServer(): Promise<FastifyInstance> {
   if (embeddingProvider) {
     await ensureSemanticIndexes(embeddingProvider.dimensions);
   }
-  // Step 6: the MCP mounts are part of createApp.
+  await startSearchWorker();
+  // Step 7: the MCP mounts are part of createApp.
   return createApp();
 }
 
 export async function shutdownServer(app: FastifyInstance): Promise<void> {
   await app.close();
+  await stopSearchWorker();
   closeEmbeddingProvider();
   closeAiModel();
   await closeStores();

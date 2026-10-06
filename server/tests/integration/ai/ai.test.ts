@@ -19,6 +19,7 @@ import { closeAiModel, initAiModel } from "../../../src/core/ai.js";
 import { closeStores, initStores } from "../../../src/core/ports.js";
 import { wipeDatabase } from "../reset.js";
 import { aiSuiteSkipReason } from "./support.js";
+import { defineEntityProperty } from "../fixture.js";
 
 type Row = Record<string, unknown>;
 
@@ -110,14 +111,14 @@ beforeAll(async () => {
     { key: "age", displayName: "Age", dataType: "integer", required: false },
     { key: "location", displayName: "Location", dataType: "string", required: false },
   ]) {
-    await post(`/api/ontologies/test_ont/model/entity-types/${person.entityTypeId as string}/properties`, prop);
+    await defineEntityProperty(app!, "test_ont", person.entityTypeId as string, prop);
   }
 
   const company = await post("/api/ontologies/test_ont/model/entity-types", {
     key: "company",
     displayName: "Company",
   });
-  await post(`/api/ontologies/test_ont/model/entity-types/${company.entityTypeId as string}/properties`, {
+  await defineEntityProperty(app!, "test_ont", company.entityTypeId as string, {
     key: "name",
     displayName: "Name",
     dataType: "string",

@@ -88,15 +88,25 @@ interface CreateDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
-/** "New entity type" dialog — key, display name, description. */
+/**
+ * "New entity type" dialog — key, display name, description and the key of
+ * the name property the server creates with the type (default `name`).
+ */
 export function EntityTypeCreateDialog({
   ontologyKey,
   open,
   onOpenChange,
 }: CreateDialogProps) {
   const form = useTypeForm(open)
+  const [nameProperty, setNameProperty] = useState('name')
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+
+  const [wasOpen, setWasOpen] = useState(open)
+  if (open !== wasOpen) {
+    setWasOpen(open)
+    if (open) setNameProperty('name')
+  }
 
   const create = useMutation({
     mutationFn: () =>
@@ -104,6 +114,7 @@ export function EntityTypeCreateDialog({
         key: form.key,
         displayName: form.displayName.trim(),
         description: form.description.trim() === '' ? null : form.description.trim(),
+        nameProperty,
       }),
     onSuccess: (created) => {
       invalidateModeling(queryClient)
@@ -114,20 +125,25 @@ export function EntityTypeCreateDialog({
     onError: (error) => applyApiError(error, form.setFieldErrors),
   })
 
+  const valid = form.valid && isValidKey(nameProperty)
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>New entity type</DialogTitle>
           <DialogDescription>
-            Entity types are global — every lens can include them in its scope.
+            Entity types belong to this ontology — every lens of this ontology can
+            include them in its scope. The
+            name property is a string property created with the type; its value labels
+            instances.
           </DialogDescription>
         </DialogHeader>
         <form
           className="grid gap-4"
           onSubmit={(e) => {
             e.preventDefault()
-            if (form.valid && !create.isPending) create.mutate()
+            if (valid && !create.isPending) create.mutate()
           }}
         >
           <div className="grid gap-1.5">
@@ -149,6 +165,13 @@ export function EntityTypeCreateDialog({
             onChange={form.onKeyChange}
             error={form.fieldErrors.key}
           />
+          <KeyField
+            id="et-name-property"
+            label="Name property key"
+            value={nameProperty}
+            onChange={setNameProperty}
+            error={form.fieldErrors.nameProperty}
+          />
           <div className="grid gap-1.5">
             <Label htmlFor="et-desc">Description</Label>
             <Textarea
@@ -163,7 +186,7 @@ export function EntityTypeCreateDialog({
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={!form.valid || create.isPending}>
+            <Button type="submit" disabled={!valid || create.isPending}>
               Create entity type
             </Button>
           </DialogFooter>

@@ -15,11 +15,17 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../../src/app.js";
-import { closeStores, initStores } from "../../src/core/ports.js";
+import { settings } from "../../src/config.js";
+import { closeStores, initStores, supportsKeywordRanking } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
 import { supportsMultipleOntologies } from "./tiers.js";
+import { drainSearchWork } from "../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
-import { buildFixture } from "./fixture.js";
+import { buildFixture, defineEntityProperty } from "./fixture.js";
+
+/** The adapter's declaration: only an adapter that ranks by keyword has a
+ * keyword default strategy without an embedding provider. */
+const keywordRanking = await supportsKeywordRanking();
 
 interface ToolCallResult {
   content: { type: string; text: string }[];
@@ -150,7 +156,7 @@ describe.skipIf(!supportsMultipleOntologies)("ontology isolation", () => {
       key: "person",
       displayName: "Person",
     });
-    await post(`/api/ontologies/other_ont/model/entity-types/${person.entityTypeId as string}/properties`, {
+    await defineEntityProperty(app, "other_ont", person.entityTypeId as string, {
       key: "name",
       displayName: "Name",
       dataType: "string",
@@ -203,7 +209,7 @@ describe.skipIf(!supportsMultipleOntologies)("ontology isolation", () => {
 });
 
 describe("tool surface", () => {
-  it("lists exactly the twenty-one runtime tools", async () => {
+  it("lists exactly the twenty-two runtime tools", async () => {
     const client = await connectClient(`${baseUrl}/mcp/ontologies/test_ont/runtime/lenses/test_lens`);
     try {
       const tools = await client.listTools();
@@ -222,8 +228,10 @@ describe("tool surface", () => {
         "list_entities",
         "list_relations",
         "list_saved_queries",
+        "list_search_indices",
         "run_saved_query",
         "search",
+        "search_by_index",
         "search_documents",
         "search_saved_queries",
         "update_entity",
@@ -502,13 +510,19 @@ describe("entity tools", () => {
     }
   });
 
-  it("search applies no similarity floor without a provider (keyword default)", async () => {
+  // Scoped, not weakened: the case asserts the keyword default strategy,
+  // which exists only on an adapter that ranks by keyword. Without one and
+  // without a provider no strategy is available, and the search is a
+  // disabled feature (`search-contract.ts` covers that side).
+  it.skipIf(!keywordRanking)("search applies no similarity floor without a provider (keyword default)", async () => {
     const client = await connectClient(`${baseUrl}/mcp/ontologies/test_ont/runtime/lenses/test_lens`);
     try {
       await call(client, "create_entity", {
         entity_type_key: "person",
         properties: { name: "Ada Lovelace" },
       });
+      // Search entries are built in the background (none on Neo4j).
+      await drainSearchWork();
       const found = json(await call(client, "search", { query: "Lovelace" }));
       expect(found.strategy).toBe("keyword");
       expect(found.minSimilarity).toBeNull();
@@ -798,6 +812,88 @@ describe("query paths", () => {
       expect(faulty.isError).toBe(true);
       expect(text(faulty)).toContain("Unknown filter property or relation type: 'ghost'");
       expect(text(faulty)).toContain("Relation types touching 'person': manages, works_for");
+    } finally {
+      await client.close();
+    }
+  });
+});
+
+describe("search indices", () => {
+  const postgres = settings.DB_BACKEND === "postgres";
+
+  it.skipIf(!postgres)("list_search_indices lists the lens's catalog; search_by_index pairs a relation with its target", async () => {
+    const model = "/api/ontologies/test_ont/model";
+    const created = await app.inject({
+      method: "POST",
+      url: `${model}/search-indices`,
+      payload: {
+        key: "employment",
+        name: "People by employment",
+        description: "People with their roles at companies.",
+        entityType: "person",
+        fields: ["name"],
+        relations: [
+          { relationType: "works_for", direction: "outgoing", fields: ["role"], target: { company: ["name"] }, label: "Job" },
+        ],
+      },
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    const client = await connectClient(`${baseUrl}/mcp/ontologies/test_ont/runtime/lenses/test_lens`);
+    try {
+      const ada = json(await call(client, "create_entity", { entity_type_key: "person", properties: { name: "Ada" } }));
+      const bob = json(await call(client, "create_entity", { entity_type_key: "person", properties: { name: "Bob" } }));
+      const acme = json(await call(client, "create_entity", { entity_type_key: "company", properties: { name: "ACME" } }));
+      const foo = json(await call(client, "create_entity", { entity_type_key: "company", properties: { name: "Foo" } }));
+      for (const [from, to, role] of [[ada, acme, "CTO"], [bob, foo, "CTO"]] as const) {
+        await call(client, "create_relation", {
+          relation_type_key: "works_for",
+          from_entity_id: from._id,
+          to_entity_id: to._id,
+          properties: { role },
+        });
+      }
+      await drainSearchWork({ ontologyKey: "test_ont" });
+
+      const catalog = JSON.parse(text(await call(client, "list_search_indices"))) as Record<string, unknown>[];
+      expect(catalog.find((index) => index.key === "employment")).toMatchObject({
+        kind: "custom",
+        relations: [{ relationType: "works_for", direction: "outgoing", label: "Job" }],
+      });
+
+      const found = json(await call(client, "search_by_index", { query: "CTO ACME", index: "employment", relations: ["works_for"] }));
+      // No provider in this suite: keyword, and no floor.
+      expect(found).toMatchObject({ query: "CTO ACME", mode: "keyword", minSimilarity: null });
+      const top = (found.hits as Record<string, any>[])[0]!;
+      expect(top.entity._id).toBe(ada._id);
+      expect(top.matched).toMatchObject({ partKind: "relation", target: { id: acme._id, label: "ACME" } });
+
+      // Without index every index of the lens is searched, the custom one included.
+      const everywhere = json(await call(client, "search_by_index", { query: "CTO ACME" }));
+      expect((everywhere.hits as Record<string, any>[])[0]!.matched).toMatchObject({ index: "employment" });
+
+      // The default search never ranks a relation entry, and keeps its own envelope.
+      const fallback = json(await call(client, "search", { query: "CTO ACME" }));
+      expect(fallback).toHaveProperty("strategy");
+      expect(fallback).not.toHaveProperty("mode");
+
+      const unknown = await call(client, "search_by_index", { query: "x", index: "nope" });
+      expect(unknown.isError).toBe(true);
+      expect(text(unknown)).toContain("nope");
+    } finally {
+      await client.close();
+    }
+  });
+
+  it.skipIf(postgres)("is not supported by an adapter without search indices", async () => {
+    const client = await connectClient(`${baseUrl}/mcp/ontologies/test_ont/runtime/lenses/test_lens`);
+    try {
+      for (const result of [
+        await call(client, "list_search_indices"),
+        await call(client, "search_by_index", { query: "x", index: "person~default" }),
+      ]) {
+        expect(result.isError).toBe(true);
+        expect(text(result)).toContain("not supported");
+      }
     } finally {
       await client.close();
     }

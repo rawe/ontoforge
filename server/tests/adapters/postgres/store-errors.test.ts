@@ -67,7 +67,7 @@ afterEach(() => {
 });
 
 describe("the truth table: 23503 insert side (vanished parent)", () => {
-  it.each(["relation_from_fk", "relation_to_fk", "document_chunk_entity_fk"])(
+  it.each(["relation_from_fk", "relation_to_fk"])(
     "%s → NotFoundError naming the entity",
     async (constraint) => {
       const error = await translated(
@@ -324,5 +324,15 @@ describe("bypass prevention", () => {
       .filter((name) => name !== "errors.ts")
       .filter((name) => readFileSync(join(adapterDir, name), "utf8").includes('from "pg"'));
     expect(offenders).toEqual([]);
+  });
+});
+
+
+describe("retriever agent constraints preserve domain errors", () => {
+  it("maps concurrent target-key collisions to ConflictError", async () => {
+    expect(await translated(dbError("23505", "retriever_agent_key_unique"))).toBeInstanceOf(ConflictError);
+  });
+  it("maps a vanished owner to NotFoundError", async () => {
+    expect(await translated(dbError("23503", "retriever_agent_lens_fk"))).toBeInstanceOf(NotFoundError);
   });
 });

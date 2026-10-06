@@ -13,10 +13,12 @@ describe("config defaults", () => {
     expect(settings.PORT).toBe(8000);
 
     expect(settings.EMBEDDING_PROVIDER).toBeNull();
-    expect(settings.EMBEDDING_MODEL).toBe("nomic-embed-text");
+    expect(settings.EMBEDDING_MODEL).toBe("bge-m3");
     expect(settings.EMBEDDING_BASE_URL).toBe("http://localhost:11434");
     expect(settings.EMBEDDING_API_KEY).toBeNull();
-    expect(settings.EMBEDDING_DIMENSIONS).toBeNull();
+    expect(settings.EMBEDDING_DIMENSIONS).toBe(1024);
+    expect(settings.EMBEDDING_BATCH_SIZE).toBe(1);
+    expect(settings.EMBEDDING_CONCURRENCY).toBe(1);
 
     expect(settings.DOCUMENT_CHUNK_SIZE).toBe(1500);
     expect(settings.DOCUMENT_CHUNK_OVERLAP).toBe(200);
@@ -44,6 +46,8 @@ describe("config env overrides", () => {
       EMBEDDING_BASE_URL: "http://embed:1234",
       EMBEDDING_API_KEY: "ekey",
       EMBEDDING_DIMENSIONS: "768",
+      EMBEDDING_BATCH_SIZE: "16",
+      EMBEDDING_CONCURRENCY: "4",
       DOCUMENT_CHUNK_SIZE: "500",
       DOCUMENT_CHUNK_OVERLAP: "50",
       AI_PROVIDER: "openai",
@@ -64,6 +68,8 @@ describe("config env overrides", () => {
     expect(settings.EMBEDDING_BASE_URL).toBe("http://embed:1234");
     expect(settings.EMBEDDING_API_KEY).toBe("ekey");
     expect(settings.EMBEDDING_DIMENSIONS).toBe(768);
+    expect(settings.EMBEDDING_BATCH_SIZE).toBe(16);
+    expect(settings.EMBEDDING_CONCURRENCY).toBe(4);
     expect(settings.DOCUMENT_CHUNK_SIZE).toBe(500);
     expect(settings.DOCUMENT_CHUNK_OVERLAP).toBe(50);
     expect(settings.AI_PROVIDER).toBe("openai");
@@ -79,6 +85,18 @@ describe("config env overrides", () => {
     expect(() => loadSettings({ EMBEDDING_DIMENSIONS: "wide" })).toThrow(
       /EMBEDDING_DIMENSIONS/,
     );
+    expect(() => loadSettings({ EMBEDDING_BATCH_SIZE: "many" })).toThrow(
+      /EMBEDDING_BATCH_SIZE/,
+    );
+  });
+
+  it("rejects zero or a negative value for a positive integer variable", () => {
+    for (const name of ["EMBEDDING_DIMENSIONS", "EMBEDDING_BATCH_SIZE", "EMBEDDING_CONCURRENCY"]) {
+      expect(() => loadSettings({ [name]: "0" })).toThrow(
+        new RegExp(`${name} must be a positive integer`),
+      );
+      expect(() => loadSettings({ [name]: "-2" })).toThrow(new RegExp(name));
+    }
   });
 
   it("accepts every reasoning effort level and rejects anything else", () => {

@@ -27,6 +27,7 @@ import { wipeDatabase } from "../../reset.js";
 import { invalidateLoadedSchemaCache } from "../../../../src/runtime/schemaCache.js";
 import { checkOllamaModel, disableProvider, enableOllamaProvider } from "../support.js";
 import { indexDimensions, rebuildIndexAt, waitForIndexOnline } from "./support.js";
+import { defineEntityProperty } from "../../fixture.js";
 
 type Row = Record<string, unknown>;
 
@@ -69,7 +70,7 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")("rebuild and width
     await post("/api/ontologies", { key: "test_ont" });
     await post("/api/ontologies/test_ont/model/lenses", { key: "index_drift_test", name: "Index Drift Test" });
     const et = await post("/api/ontologies/test_ont/model/entity-types", { key: "person", displayName: "Person" });
-    await post(`/api/ontologies/test_ont/model/entity-types/${et.entityTypeId as string}/properties`, {
+    await defineEntityProperty(app, "test_ont", et.entityTypeId as string, {
       key: "name",
       displayName: "Name",
       dataType: "string",

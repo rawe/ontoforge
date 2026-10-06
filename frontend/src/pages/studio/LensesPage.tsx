@@ -43,9 +43,10 @@ export function ScopeBadge({
       </Badge>
     )
   }
+  const types = scope.entityTypes.length + scope.relationTypes.length
   return (
     <Badge variant="secondary" className="text-[11px]">
-      Scoped · {scope.entityTypes.length + scope.relationTypes.length} types
+      Scoped · {types} {types === 1 ? 'type' : 'types'}
     </Badge>
   )
 }

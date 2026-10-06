@@ -1,4 +1,3 @@
-import type { KeywordPropertySegment } from "../../core/ports.js";
 /**
  * `ModelingStore` on PostgreSQL.
  *
@@ -10,9 +9,10 @@ import type { KeywordPropertySegment } from "../../core/ports.js";
  * Operation mapping:
  *
  * - Every method is a single statement through the `runQuery` door; the
- *   one exception is `getFullSchema`, whose coherent-snapshot obligation
+ *   exceptions are `getFullSchema`, whose coherent-snapshot obligation
  *   is honoured with one REPEATABLE READ transaction through
- *   `withTransaction`.
+ *   `withTransaction`, and `createEntityType`, which writes the type and
+ *   its name property in one transaction.
  * - Deletes are one `DELETE` each, `rowCount > 0` as the boolean —
  *   `ON DELETE CASCADE` carries what the reference adapter needed
  *   explicit fan-out for (property definitions, inclusions, agents,
@@ -23,33 +23,36 @@ import type { KeywordPropertySegment } from "../../core/ports.js";
  *   `RETURNING (id = $freshId) AS created` as the created-detection.
  * - Every UPDATE sets `updated_at = now()` explicitly where the
  *   reference adapter stamps `updatedAt` (no triggers; advances on no-op
- *   updates). The two embedding setters deliberately do not — the
- *   reference adapter leaves `updatedAt` untouched there.
+ *   updates).
  * - Ids from the wire pass the strict `isUuid()` guard (`rows.ts`)
  *   before any statement; off-format input short-circuits to the
  *   method's not-found shape.
  *
- * The seven vector-index lifecycle methods are `ddl.ts`'s — physical
- * naming and index DDL live there, beside the init DDL.
+ * The saved-query index methods are `ddl.ts`'s — physical naming and
+ * index DDL live there, beside the init DDL. The adapter stores search
+ * indices, so it implements none of the port's own-search-storage
+ * methods (`core/ownSearch.ts`); its vector-index inventory is the
+ * saved-query index alone.
  */
 
-import type { TextSearchLanguage } from "../../registry/schemas.js";
 
 import { toSql } from "pgvector";
 
-import type { ModelingStore, ReservedTypeKeyInUse, Row } from "../../core/ports.js";
-import type { TypeKind } from "../../core/schemas.js";
+import type { ModelingStore, ReservedTypeKeyInUse, Row, SearchIndexStore } from "../../core/ports.js";
+import type { NewPropertyDef, TypeKind } from "../../core/schemas.js";
 import * as vectorDdl from "./ddl.js";
 import { runQuery, withTransaction, type DbResult, type IsolationLevel, type Querier } from "./errors.js";
 import { camelizeRow, camelizeRows, isUuid } from "./rows.js";
 import { LENS_COLS, readTypesWithProperties, splitInclusions } from "./schemaRead.js";
+import { PostgresSearchIndexStore } from "./searchIndexStore.js";
 
 const NO_RESERVED_KEYS: ReadonlySet<string> = new Set();
 
 // Read column lists — the port-visible shape of each object; owner ids,
 // denormalized keys, and embeddings stay out of returned rows.
 // (`LENS_COLS` comes from `schemaRead.ts`, shared with the runtime store.)
-const ENTITY_TYPE_COLS = "entity_type_id, key, display_name, description, created_at, updated_at";
+const ENTITY_TYPE_COLS =
+  "entity_type_id, key, display_name, description, name_property, created_at, updated_at";
 const RELATION_TYPE_COLS =
   "relation_type_id, key, display_name, description, " +
   "source_entity_type_key, target_entity_type_key, created_at, updated_at";
@@ -104,10 +107,50 @@ function toIncludeRow(row: Row): Row {
   };
 }
 
+/** The one property-definition INSERT, shared by property creation and
+ * entity type creation (its name property). */
+async function insertProperty(
+  querier: Querier,
+  ownerId: string,
+  typeKind: TypeKind,
+  property: NewPropertyDef,
+): Promise<Row> {
+  const result = await querier.query(
+    `INSERT INTO property_def
+       (property_id, entity_type_id, relation_type_id, key, display_name,
+        description, data_type, required, default_value)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     RETURNING ${PROPERTY_COLS}`,
+    [
+      property.propertyId,
+      typeKind === "EntityType" ? ownerId : null,
+      typeKind === "RelationType" ? ownerId : null,
+      property.key,
+      property.displayName,
+      property.description,
+      property.dataType,
+      property.required,
+      property.defaultValue,
+    ],
+  );
+  return camelizeRow(result.rows[0]!);
+}
+
 export class PostgresModelingStore implements ModelingStore {
   /** Bound to one ontology's namespace; unbound (tests only) runs against
    * the connection's default namespace. */
-  constructor(private readonly namespace?: string, public readonly textSearchLanguage: TextSearchLanguage = "english") {}
+  constructor(
+    private readonly namespace?: string,
+    private readonly ontologyKey: string = "",
+  ) {}
+
+  /** The search-index store of the same ontology. */
+  searchIndices(): SearchIndexStore {
+    if (this.namespace === undefined) {
+      throw new Error("An unbound modeling store has no search indices");
+    }
+    return new PostgresSearchIndexStore(this.namespace, this.ontologyKey);
+  }
 
   /** Door one, carrying this store's binding. */
   private query(text: string, params?: unknown[]): Promise<DbResult> {
@@ -218,19 +261,25 @@ export class PostgresModelingStore implements ModelingStore {
   // Entity types
   // ------------------------------------------------------------------
 
+  /** One transaction: the type, then its name property — the deferred
+   * name-property FK is checked at commit, when both exist. */
   async createEntityType(
     entityTypeId: string,
     key: string,
     displayName: string,
     description: string | null,
+    nameProperty: NewPropertyDef,
   ): Promise<Row> {
-    const result = await this.query(
-      `INSERT INTO entity_type (entity_type_id, key, display_name, description)
-       VALUES ($1, $2, $3, $4)
-       RETURNING ${ENTITY_TYPE_COLS}`,
-      [entityTypeId, key, displayName, description],
-    );
-    return camelizeRow(result.rows[0]!);
+    return this.tx(async (querier) => {
+      const result = await querier.query(
+        `INSERT INTO entity_type (entity_type_id, key, display_name, description, name_property)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING ${ENTITY_TYPE_COLS}`,
+        [entityTypeId, key, displayName, description, nameProperty.key],
+      );
+      await insertProperty(querier, entityTypeId, "EntityType", nameProperty);
+      return camelizeRow(result.rows[0]!);
+    });
   }
 
   async listEntityTypes(): Promise<Row[]> {
@@ -261,6 +310,7 @@ export class PostgresModelingStore implements ModelingStore {
     entityTypeId: string,
     displayName: string | null,
     description: string | null,
+    nameProperty: string | null,
   ): Promise<Row | null> {
     if (!isUuid(entityTypeId)) {
       return null;
@@ -269,6 +319,7 @@ export class PostgresModelingStore implements ModelingStore {
     const sets = buildUpdateSets(params, [
       ["display_name", displayName],
       ["description", description],
+      ["name_property", nameProperty],
     ]);
     const result = await this.query(
       `UPDATE entity_type SET ${sets.join(", ")}
@@ -403,25 +454,17 @@ export class PostgresModelingStore implements ModelingStore {
     required: boolean,
     defaultValue: string | null,
   ): Promise<Row> {
-    const result = await this.query(
-      `INSERT INTO property_def
-         (property_id, entity_type_id, relation_type_id, key, display_name,
-          description, data_type, required, default_value)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       RETURNING ${PROPERTY_COLS}`,
-      [
+    return this.tx((querier) =>
+      insertProperty(querier, ownerId, typeKind, {
         propertyId,
-        typeKind === "EntityType" ? ownerId : null,
-        typeKind === "RelationType" ? ownerId : null,
         key,
         displayName,
         description,
         dataType,
         required,
         defaultValue,
-      ],
+      }),
     );
-    return camelizeRow(result.rows[0]!);
   }
 
   async listProperties(ownerId: string, typeKind: TypeKind): Promise<Row[]> {
@@ -682,20 +725,6 @@ export class PostgresModelingStore implements ModelingStore {
   }
 
   // ------------------------------------------------------------------
-  // Document-property cleanup
-  // ------------------------------------------------------------------
-
-  /** The chunk schema-cascade: called by the service's vector hook after
-   * `deleteProperty`; type keys carry no FK by design, so this is the
-   * one statement that removes a dropped document property's chunks. */
-  async deleteChunksForTypeProperty(entityTypeKey: string, propertyKey: string): Promise<void> {
-    await this.query(
-      `DELETE FROM document_chunk WHERE entity_type_key = $1 AND property_key = $2`,
-      [entityTypeKey, propertyKey],
-    );
-  }
-
-  // ------------------------------------------------------------------
   // Full schema
   // ------------------------------------------------------------------
 
@@ -712,6 +741,7 @@ export class PostgresModelingStore implements ModelingStore {
          FROM lens_includes oi
          LEFT JOIN entity_type et ON et.entity_type_id = oi.entity_type_id
          LEFT JOIN relation_type rt ON rt.relation_type_id = oi.relation_type_id
+         WHERE oi.search_index_id IS NULL
          ORDER BY et.key, rt.key`,
       );
 
@@ -893,54 +923,13 @@ export class PostgresModelingStore implements ModelingStore {
   // Embedding maintenance (rebuild support)
   // ------------------------------------------------------------------
 
-  /** Every entity type key with its property definitions, aggregated in
-   * one statement (jsonb) so the read stays on door one. */
-  async getEntityTypesWithProperties(): Promise<Row[]> {
-    const result = await this.query(
-      `SELECT et.key,
-              coalesce(
-                jsonb_agg(
-                  jsonb_build_object(
-                    'propertyId', p.property_id,
-                    'key', p.key,
-                    'displayName', p.display_name,
-                    'description', p.description,
-                    'dataType', p.data_type,
-                    'required', p.required,
-                    'defaultValue', p.default_value
-                  ) ORDER BY p.key
-                ) FILTER (WHERE p.property_id IS NOT NULL),
-                '[]'::jsonb
-              ) AS properties
-       FROM entity_type et
-       LEFT JOIN property_def p ON p.entity_type_id = et.entity_type_id
-       GROUP BY et.key
-       ORDER BY et.key`,
-    );
-    return result.rows;
-  }
-
-  /** No `updated_at` stamp: re-embedding is not a content change, and the
-   * reference adapter leaves the timestamp untouched here too. */
-  async setEntitySearchText(entityId: string, propertyText: string, embedding: number[] | null, keywordSegments?: KeywordPropertySegment[]): Promise<void> {
-    if (!isUuid(entityId)) {
-      return;
-    }
-    const params: unknown[] = [entityId, embedding === null ? null : toSql(embedding), propertyText];
-    let keywordSet = "";
-    if (keywordSegments !== undefined) {
-      keywordSet = ", keyword_text = $4, keyword_segments = $5::jsonb";
-      params.push(keywordSegments.map((segment) => segment.text).join("\n"), JSON.stringify(keywordSegments));
-    }
-    await this.query(`UPDATE entity SET embedding = $2::vector, property_text = $3${keywordSet} WHERE id = $1`, params);
-  }
-
   async listSavedQueryRefs(): Promise<Row[]> {
     const result = await this.query(`SELECT saved_query_id, description FROM saved_query`);
     return camelizeRows(result.rows);
   }
 
-  /** No `updated_at` stamp — as `setEntityEmbedding`. */
+  /** No `updated_at` stamp: re-embedding is not a content change, and the
+   * reference adapter leaves the timestamp untouched here too. */
   async setSavedQueryEmbedding(savedQueryId: string, embedding: number[]): Promise<void> {
     if (!isUuid(savedQueryId)) {
       return;
@@ -952,46 +941,18 @@ export class PostgresModelingStore implements ModelingStore {
   }
 
   // ------------------------------------------------------------------
-  // Vector-index DDL — every method is `ddl.ts`'s, unchanged
+  // Saved-query vector index — `ddl.ts`'s, the whole inventory here
   // ------------------------------------------------------------------
-
-  createVectorIndex(
-    entityTypeKey: string,
-    dimensions: number,
-    filterProperties?: string[] | null,
-  ): Promise<void> {
-    return vectorDdl.createVectorIndex(entityTypeKey, dimensions, filterProperties, this.namespace);
-  }
-
-  dropVectorIndex(entityTypeKey: string): Promise<void> {
-    return vectorDdl.dropVectorIndex(entityTypeKey, this.namespace);
-  }
-
-  rebuildVectorIndex(entityTypeKey: string, dimensions: number): Promise<void> {
-    return vectorDdl.rebuildVectorIndex(entityTypeKey, dimensions, this.namespace);
-  }
-
-  createDocumentVectorIndex(
-    entityTypeKey: string,
-    propertyKey: string,
-    dimensions: number,
-  ): Promise<void> {
-    return vectorDdl.createDocumentVectorIndex(entityTypeKey, propertyKey, dimensions, this.namespace);
-  }
-
-  dropDocumentVectorIndex(entityTypeKey: string, propertyKey: string): Promise<void> {
-    return vectorDdl.dropDocumentVectorIndex(entityTypeKey, propertyKey, this.namespace);
-  }
 
   ensureSavedQueryVectorIndex(dimensions: number): Promise<void> {
     return vectorDdl.ensureSavedQueryVectorIndex(dimensions, this.namespace);
   }
 
   dropMismatchedVectorIndexes(dimensions: number): Promise<void> {
-    return vectorDdl.dropMismatchedVectorIndexes(dimensions, this.namespace);
+    return vectorDdl.dropMismatchedSavedQueryVectorIndex(dimensions, this.namespace);
   }
 
   ensureVectorIndexes(dimensions: number): Promise<void> {
-    return vectorDdl.ensureVectorIndexes(dimensions, this.namespace);
+    return vectorDdl.ensureSavedQueryVectorIndex(dimensions, this.namespace);
   }
 }

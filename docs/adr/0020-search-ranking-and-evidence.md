@@ -1,6 +1,9 @@
 # 0020. Best-kind search ranking with separate measured evidence
 
-- **Status:** Accepted
+- **Status:** Accepted. Where search indices are stored, the no-bonus outcome is kept by
+  merging indices by score within a retrieval method rather than by the best kind rank
+  ([decisions.md](../decisions.md#interfaces)). Property keyword attribution is no longer
+  returned.
 - **Date:** 2026-09-08
 
 ## Context

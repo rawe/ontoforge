@@ -108,14 +108,13 @@ export async function paginate(baseUrl, path, pageSize = 200) {
 }
 
 /**
- * Pick the lens that grants the widest data access from an export payload.
- * Prefers an unscoped lens (includes === null), which sees the whole schema.
+ * Pick an unscoped lens (no includes) from an export payload — the only lens that
+ * sees the whole schema. Returns null when the ontology has none; a scoped lens is
+ * used only when the caller names it explicitly.
  */
 export function pickLensKey(exportPayload) {
-  const lenses = exportPayload.lenses || [];
-  if (!lenses.length) return null;
-  const unscoped = lenses.find((lens) => !lens.includes);
-  return unscoped ? unscoped.key : lenses[0].key;
+  const unscoped = (exportPayload.lenses || []).find((lens) => !lens.includes);
+  return unscoped ? unscoped.key : null;
 }
 
 export function die(message) {

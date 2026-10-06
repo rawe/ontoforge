@@ -14,9 +14,11 @@ import { createApp } from "../../../src/app.js";
 import { settings } from "../../../src/config.js";
 import { closeStores, initStores } from "../../../src/core/ports.js";
 import { wipeDatabase } from "../reset.js";
+import { drainSearchWork } from "../../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache } from "../../../src/runtime/schemaCache.js";
 import { TOOL_MIN_SIMILARITY } from "../../../src/runtime/search/strategies.js";
 import { checkOllamaModel, disableProvider, enableOllamaProvider } from "./support.js";
+import { defineEntityProperty } from "../fixture.js";
 
 type Row = Record<string, unknown>;
 
@@ -60,7 +62,7 @@ describe.skipIf(!ollamaUp)("MCP search (Ollama)", () => {
       { key: "role", displayName: "Role", dataType: "string", required: false },
       { key: "age", displayName: "Age", dataType: "integer", required: false },
     ]) {
-      await post(`/api/ontologies/test_ont/model/entity-types/${et.entityTypeId as string}/properties`, prop);
+      await defineEntityProperty(app, "test_ont", et.entityTypeId as string, prop);
     }
     await post("/api/ontologies/test_ont/runtime/lenses/mcp_search/entities/person", {
       name: "Alice Chen",
@@ -74,6 +76,8 @@ describe.skipIf(!ollamaUp)("MCP search (Ollama)", () => {
       bio: "Leads brand strategy and market research",
       age: 51,
     });
+    // Search entries are built in the background (none on Neo4j).
+    await drainSearchWork();
 
     client = new Client({ name: "semantic-search-mcp-tests", version: "0.0.1" });
     await client.connect(
@@ -117,9 +121,12 @@ describe.skipIf(!ollamaUp)("MCP search (Ollama)", () => {
         semanticSimilarity: expect.any(Number),
         keywordMatch: settings.DB_BACKEND === "postgres" ? true : null,
         keywordScore: settings.DB_BACKEND === "postgres" ? expect.any(Number) : null,
-        keywordPropertyKeys: settings.DB_BACKEND === "postgres" ? ["role"] : null,
       },
     });
+    // On PostgreSQL the best entry of the type's default index matched.
+    if (settings.DB_BACKEND === "postgres") {
+      expect(results[0]!.matched).toMatchObject({ index: "person~default", partKind: "self" });
+    }
   });
 
   it("supports filters and field projection", async () => {
@@ -152,22 +159,44 @@ describe.skipIf(!ollamaUp)("MCP search (Ollama)", () => {
     expect(documents.hits).toEqual([]);
   });
 
+  it.skipIf(settings.DB_BACKEND !== "postgres")("search_by_index searches that index under the same fixed floor", async () => {
+    const found = json(await call("search_by_index", { query: "distributed systems engineer", index: "person~default" }));
+    expect(found).toMatchObject({ mode: "hybrid", minSimilarity: TOOL_MIN_SIMILARITY });
+    const top = (found.hits as Row[])[0]!;
+    expect((top.entity as Row).name).toBe("Alice Chen");
+    expect(top.matched).toMatchObject({ index: "person~default", partKind: "self" });
+    const nonsense = json(await call("search_by_index", { query: "xqzv plork wumble", index: ["person~default", "person~bio"] }));
+    expect(nonsense.hits).toEqual([]);
+  });
+
   it("exposes no min_score input (documented interface difference)", async () => {
     const tools = await client.listTools();
-    const tool = tools.tools.find((t) => t.name === "search");
-    expect(tool).toBeDefined();
-    const properties = (tool!.inputSchema as { properties: Row }).properties;
-    expect(Object.keys(properties).sort()).toEqual([
+    const propertiesOf = (name: string) => {
+      const tool = tools.tools.find((t) => t.name === name);
+      expect(tool).toBeDefined();
+      return (tool!.inputSchema as { properties: Row }).properties;
+    };
+    expect(Object.keys(propertiesOf("search")).sort()).toEqual([
       "entity_type_key",
       "fields",
       "filters",
       "limit",
       "query",
     ]);
-    expect(properties).not.toHaveProperty("min_score");
+    expect(Object.keys(propertiesOf("search_by_index")).sort()).toEqual([
+      "fields",
+      "filters",
+      "index",
+      "limit",
+      "query",
+      "relations",
+    ]);
+    for (const name of ["search", "search_documents", "search_by_index"]) {
+      expect(propertiesOf(name)).not.toHaveProperty("min_score");
+    }
     for (const searchTool of tools.tools.filter((item) => ["search", "search_documents"].includes(item.name))) {
       expect(searchTool.description).toContain("semanticSimilarity");
-      expect(searchTool.description).toContain("keywordPropertyKeys");
+      expect(searchTool.description).not.toContain("keywordPropertyKeys");
       expect(searchTool.description!.length).toBeLessThanOrEqual(2000);
       expect(searchTool.outputSchema).toBeUndefined();
     }

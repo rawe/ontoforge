@@ -23,12 +23,13 @@ to it begins when its first lens is created.
 data. It cannot define a type, override a property, or rename anything. Its entire
 content is a set of declarations about types that exist independently of it.
 
-Two things do belong to a lens, keyed within it, exported with it and deleted with
+Three things do belong to a lens, keyed within it, exported with it and deleted with
 it: **agent configurations** ([ai-agents.md](ai-agents.md)) and **saved queries**
-([saved-queries.md](saved-queries.md)). Both are lens-local because both are
+([saved-queries.md](saved-queries.md)) and **retriever agents**
+([retriever-agents.md](retriever-agents.md)). They are lens-local because they are
 written in terms of what that lens exposes.
 
-Deleting a lens deletes those two and nothing else. Types, property definitions
+Deleting a lens deletes those configurations and nothing else. Types, property definitions
 and every entity and relation survive untouched, and other lenses are unaffected.
 There is no consent step and no protection: lens deletion is always permitted,
 because nothing outside the lens depends on it. (Deleting the whole *ontology* is
@@ -37,9 +38,10 @@ the schema and all instance data with it.)
 
 ## Unscoped and scoped
 
-A lens is scoped **if and only if it has at least one inclusion.** There is no
-flag, no mode and no third state — declaring nothing is what makes a lens
-unscoped.
+A lens is scoped **if and only if it has at least one type inclusion.** There is no
+flag, no mode and no third state — declaring no type is what makes a lens
+unscoped. Search-index inclusions ([below](#search-through-a-lens)) never make a lens
+scoped.
 
 An unscoped lens exposes its ontology's entire schema, and keeps doing so as the
 schema changes: a type created tomorrow is visible through it immediately, with no
@@ -65,10 +67,11 @@ Each inclusion optionally carries a **property allowlist**:
 That is the difference between the two stability classes of a scoped lens, and it
 decides which lenses the cascade protocol defends: only an allowlist can be
 invalidated by a property change, so only lenses with allowlists are ever named in
-a cascade refusal ([schema-modeling.md](schema-modeling.md)).
+a cascade refusal over a property ([schema-modeling.md](schema-modeling.md#the-cascade-protocol)).
 
 Four rules bind an inclusion. They are enforced when it is added or updated, and
-re-checked by lens validation:
+re-checked by lens validation (which also warns about the search indices the lens
+includes, [below](#validation-warnings)):
 
 - the type it names must exist
 - every key in the allowlist must be a property of that type
@@ -126,7 +129,9 @@ Three places, matching the three things a caller can do with a schema.
 **Schema reads.** The runtime schema surface returns only exposed types, each
 carrying only its exposed properties. Asking for a type the lens does not expose
 answers *not found* — indistinguishable from asking for a type that does not
-exist. The lens does not advertise what it hides.
+exist. The lens does not advertise what it hides — an entity type whose
+[name property](schema-modeling.md#the-name-property) the lens hides is read without
+one (null).
 
 **Writes.** A property the lens does not expose is an unknown property: the write
 is rejected and names it, alongside every other offending field. Creating,
@@ -149,8 +154,9 @@ tends to leak:
   through a relation type the lens does not expose is omitted from the
   neighbourhood entirely, not returned with an empty relation.
 - **Search is restricted to exposed types**, and passage search only to exposed
-  document properties. The searched set reaches the per-type rankings directly, so
-  outside types do not consume a narrow lens's candidate budget ([search.md](search.md)).
+  document properties, through the search indices the lens may search
+  ([below](#search-through-a-lens)). Each index is ranked on its own, so outside types
+  do not consume a narrow lens's candidate budget ([search.md](search.md)).
 
 Filtering is applied per type, not per response, and that has one visible
 consequence during traversal: a neighbour whose own entity type is out of scope
@@ -173,11 +179,12 @@ broken under another:
 - **Relation endpoint checks use the full schema.** The source and target entity
   types a new relation is validated against are the type's real endpoints, not
   whatever the lens exposes.
-- **Embedding text is built from the full schema's properties.** A scoped lens's
-  semantic ranking can therefore be driven by text it cannot see — a result may be
+- **Search entries are composed from the full schema's properties.** A scoped
+  lens's ranking can therefore be driven by text it cannot see — a result may be
   highly ranked for reasons invisible through that lens. This is inherent to
   sharing one stored record between lenses, and is documented rather than
-  prevented.
+  prevented; the match's snippet is withheld instead
+  ([below](#search-through-a-lens)).
 
 "Full schema" always means the owning ontology's schema, never anything wider —
 no operation anywhere consults another ontology.
@@ -185,6 +192,72 @@ no operation anywhere consults another ontology.
 Defaults apply on creation only. A lens that hides a property never causes that
 property to be re-defaulted on update, so widening or narrowing a lens does not
 rewrite anything already stored.
+
+## Search through a lens
+
+[Search indices](search-indices.md) belong to the ontology, not to a lens; a lens only
+decides which of them it searches. An unscoped lens searches every index. A scoped lens
+searches the indices it **includes** — a third kind of inclusion, beside entity and
+relation types — and each only while it exposes the index's root entity type.
+
+An index inclusion names the index by key and carries nothing else — no allowlist, and
+no update. At most one exists per lens and index; including an index twice is a
+conflict, not an upsert. One rule binds it when it is added: a lens with entity
+inclusions may include an index only if it includes the index's root entity type. A lens
+with relation inclusions only exposes every type and accepts any index, and so does an
+unscoped lens — it searches every index anyway, keeps the inclusion, and the inclusion
+counts once the lens is scoped. Adding or removing an index inclusion changes what the
+lens searches at once.
+
+The server adds index inclusions on one occasion of its own: a managed index that comes
+into existence is included in every scoped lens that exposes its root type — by an entity
+inclusion of the type, or, in a lens with relation inclusions only, because every type
+is exposed. A passage index needs its document property shown as well — the type's
+inclusion has no allowlist, or its allowlist names the document — so a scoped lens is
+never given a way to find entities by text it hides. Including such an index explicitly
+is still allowed, and reported as a [warning](#validation-warnings). Nothing else adds
+one: a scoped lens created after an index exists, or an entity type included in a scoped
+lens after its indices exist, includes none of those indices until they are included
+explicitly, and ranked search through that lens finds nothing through them.
+
+Removing a type inclusion keeps the index inclusions rooted on that type: they stay, are
+not searchable while the lens does not expose the root type, and are reported by lens
+validation ([below](#validation-warnings)). Index inclusions are removed with their lens,
+and with their index — deleting a custom index a lens includes follows the cascade
+protocol, naming the lens, and so does a property deletion whose cascade deletes an
+index a lens includes ([schema-modeling.md](schema-modeling.md#the-cascade-protocol)).
+[Transfer](transfer.md) carries each lens's index inclusions.
+
+The lens still governs what a search returns:
+
+- **Hits are projected** through the lens like every read result.
+- **Relation entries the lens cannot see are skipped.** An entry of a relation whose
+  relation type or target entity type the lens hides does not rank — at query time,
+  with nothing rebuilt.
+- **Hidden properties stay inside entry text.** An index may read a property the lens
+  hides; its entries still carry the value, so it can still drive the ranking. The
+  match's snippet is then withheld, and the label of a relation's target is withheld
+  when the lens hides the target's name property.
+- **The search catalog is projected too.** It lists only the indices the lens can
+  search, and of each only the fields, relation groups and document the lens shows; a
+  managed index's description names only those fields
+  ([search.md](search.md#the-search-catalog)).
+
+### Validation warnings
+
+Lens validation reports what limits the indices a scoped lens includes as **warnings**,
+beside its errors. A warning never makes a lens invalid. It is reported for:
+
+- an included index whose root type the lens does not expose — it is not searchable
+  there, and nothing else is reported for it;
+- every property an included index reads that the lens hides: an own or header field of
+  the root — the name property too, when it is the index's default header — and a
+  relation or target field of a group the lens shows.
+
+A group whose relation type, or the entity type at its other end, the lens hides is no
+warning: its entries are skipped at query time. Each warning's path is
+`lenses.<lens>.includes.searchIndices.<index>.` followed by the dotted path into the
+definition (`relations.0.target.company.1`). An unscoped lens has no warnings.
 
 ## Instance data is shared
 
@@ -223,7 +296,7 @@ lens without handing it the schema.
 | | REST | MCP | Web UI |
 |---|---|---|---|
 | Lens create, read, update, delete | modeling routes | modeling server, by key | schema studio |
-| Inclusions | separate operations per dimension: add, list, update, remove | add and remove per dimension | schema studio |
+| Inclusions | separate operations per dimension: add, list, update, remove — for search indices add, list, remove | add and remove per dimension | schema studio |
 | Lens validation | per-lens operation | per-lens tool | schema studio |
 | Using a lens | ontology key and lens key are path segments on every runtime route | bound once, by the mount URL | data workbench |
 

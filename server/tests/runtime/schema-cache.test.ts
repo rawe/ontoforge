@@ -196,6 +196,22 @@ describe("the scoping matrix", () => {
     expect(Object.keys(loaded.scoped.entityTypes.company!.properties)).toEqual(["name"]);
   });
 
+  it("the name property shows through a lens that exposes it, and is null where the lens hides it", async () => {
+    const mock = storeWith(
+      makeFullSchema({
+        lensKey: "lens",
+        entityInclusions: [
+          { key: "person", properties: ["email"] },
+          { key: "company", properties: null },
+        ],
+      }),
+    );
+    const loaded = await loadSchema("lens", asRuntimeStore(mock));
+    expect(loaded.scoped.entityTypes.person!.nameProperty).toBeNull();
+    expect(loaded.scoped.entityTypes.company!.nameProperty).toBe("name");
+    expect(loaded.full.entityTypes.person!.nameProperty).toBe("name");
+  });
+
   it("an allowlist key that no longer resolves simply matches nothing", async () => {
     const mock = storeWith(
       makeFullSchema({

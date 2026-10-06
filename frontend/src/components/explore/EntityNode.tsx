@@ -1,7 +1,7 @@
 import { FileText, Pin } from 'lucide-react'
 import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { displayLabel } from '@/lib/displayLabel'
+import { useDisplayLabel } from '@/api/hooks'
 import { isDocumentStub } from '@/lib/documents'
 import { getTypeColor } from '@/lib/typeColors'
 import { cn } from '@/lib/utils'
@@ -17,6 +17,7 @@ const handleClass =
  * a one-shot ring flash ("already on canvas").
  */
 function EntityNodeInner({ data, selected }: NodeProps<EntityFlowNode>) {
+  const displayLabel = useDisplayLabel()
   const color = getTypeColor(data.entity._entityTypeKey)
   const hasDocuments = Object.values(data.entity).some(isDocumentStub)
 

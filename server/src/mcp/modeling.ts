@@ -40,9 +40,12 @@ import {
   PropertyDefinitionUpdate,
   RelationTypeCreate,
   RelationTypeUpdate,
+  LEGACY_TRANSFER_FORMAT_VERSION,
   SavedQueryUpsert,
+  SearchSettingsUpdate,
   TRANSFER_FORMAT_VERSION,
 } from "../modeling/schemas.js";
+import * as searchIndices from "../modeling/searchIndices.js";
 import * as service from "../modeling/service.js";
 import { VALID_AGENT_TOOLS_CSV } from "../runtime/toolNames.js";
 
@@ -237,7 +240,9 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     {
       description:
         "Get the current state of the ontology's schema. Returns all entity types, " +
-        "relation types, and their properties.",
+        "relation types, and their properties, the keyword language set, the search " +
+        "indices (custom definitions and switched-off managed indices) and the lenses with " +
+        "their type and search-index inclusions and retriever agents.",
       inputSchema: {},
     },
     wrap("get_schema", async () => {
@@ -250,22 +255,27 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     "create_entity_type",
     {
       description:
-        "Add a new entity type to the schema. Key must be snake_case, unique within the ontology.",
+        "Add a new entity type to the schema. Key must be snake_case, unique within the ontology. " +
+        "Also creates the type's name property — the string property that names its " +
+        "entities — under name_property (default 'name').",
       inputSchema: {
         key: z.string(),
         display_name: z.string(),
         description: z.string().optional(),
+        name_property: z.string().optional(),
       },
     },
     wrap("create_entity_type", async (args: {
       key: string;
       display_name: string;
       description?: string | undefined;
+      name_property?: string | undefined;
     }) => {
       const body = EntityTypeCreate.parse({
         key: args.key,
         displayName: args.display_name,
         description: args.description ?? null,
+        nameProperty: args.name_property,
       });
       const result = await service.createEntityType(body, await getModelingStore(ontologyKey));
       return jsonResult(result);
@@ -275,23 +285,28 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
   server.registerTool(
     "update_entity_type",
     {
-      description: "Update an entity type's display name or description. Key is immutable.",
+      description:
+        "Update an entity type's display name, description or name property. Key is " +
+        "immutable. name_property must be the key of an existing string property of the type.",
       inputSchema: {
         entity_type_key: z.string(),
         display_name: z.string().optional(),
         description: z.string().optional(),
+        name_property: z.string().optional(),
       },
     },
     wrap("update_entity_type", async (args: {
       entity_type_key: string;
       display_name?: string | undefined;
       description?: string | undefined;
+      name_property?: string | undefined;
     }) => {
       const store = await getModelingStore(ontologyKey);
       const et = await resolveEntityType(store, args.entity_type_key);
       const body = EntityTypeUpdate.parse({
         displayName: args.display_name ?? null,
         description: args.description ?? null,
+        nameProperty: args.name_property ?? null,
       });
       const result = await service.updateEntityType(et.entityTypeId as string, body, store);
       return jsonResult(result);
@@ -303,7 +318,8 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     {
       description:
         "Remove an entity type and its properties. Use cascade=True to auto-remove " +
-        "from any scoped lenses. Fails if any relation type references it.",
+        "from any scoped lenses and custom search indices (indices rooted on it are " +
+        "deleted). Fails if any relation type references it.",
       inputSchema: {
         entity_type_key: z.string(),
         cascade: z.boolean().optional(),
@@ -386,7 +402,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     {
       description:
         "Remove a relation type and its properties. Use cascade=True to auto-remove " +
-        "from any scoped lenses.",
+        "from any scoped lenses and the relation groups of custom search indices.",
       inputSchema: {
         relation_type_key: z.string(),
         cascade: z.boolean().optional(),
@@ -516,7 +532,9 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
       description:
         "Remove a property definition from an entity type or relation type. " +
         "type_kind must be 'entity_type' or 'relation_type'. " +
-        "Use cascade=True to auto-remove from scoped lens property lists.",
+        "Use cascade=True to auto-remove from scoped lens property lists and from the " +
+        "custom search indices that read it (required when an index reads it). " +
+        "An entity type's name property cannot be removed; reassign it first.",
       inputSchema: {
         type_kind: z.string(),
         type_key: z.string(),
@@ -549,7 +567,10 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
   server.registerTool(
     "export_schema",
     {
-      description: "Export the full schema in OntoForge v2.0 transfer format (JSON).",
+      description:
+        `Export the full schema in the OntoForge v${TRANSFER_FORMAT_VERSION} transfer format ` +
+        "(JSON), including the keyword language set, the search indices and the lenses' " +
+        "retriever agents.",
       inputSchema: {},
     },
     wrap("export_schema", async () => {
@@ -562,8 +583,8 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     "import_schema",
     {
       description:
-        `Import a v${TRANSFER_FORMAT_VERSION} schema payload. Creates entity types, relation types, ` +
-        "and lenses with scope configuration.",
+        `Import a v${TRANSFER_FORMAT_VERSION} schema payload (v${LEGACY_TRANSFER_FORMAT_VERSION} ` +
+        "is accepted too). Creates entity types, relation types, and lenses with scope configuration.",
       inputSchema: {
         payload: z.record(z.string(), z.unknown()),
       },
@@ -571,6 +592,192 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     wrap("import_schema", async (args: { payload: Record<string, unknown> }) => {
       const parsed = ExportPayload.parse(args.payload);
       const result = await service.importSchema(parsed, await getModelingStore(ontologyKey));
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "get_search_settings",
+    {
+      description:
+        "Get the search settings: the keyword language set keyword search stems in " +
+        "(german, english or both) and the managed search indices switched off.",
+      inputSchema: {},
+    },
+    wrap("get_search_settings", async () => {
+      const result = await service.getSearchSettings(await getModelingStore(ontologyKey));
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "set_search_settings",
+    {
+      description:
+        "Change the search settings; an omitted argument stays as it is. " +
+        "keyword_languages: a non-empty set of 'german' and/or 'english' — changing it " +
+        "rebuilds every index's keyword entries in the background. disabled_indices: " +
+        "exactly the managed index keys (e.g. 'person~default') to switch off; every other " +
+        "managed index is on.",
+      inputSchema: {
+        keyword_languages: z.array(z.string()).optional(),
+        disabled_indices: z.array(z.string()).optional(),
+      },
+    },
+    wrap("set_search_settings", async (args: {
+      keyword_languages?: string[] | undefined;
+      disabled_indices?: string[] | undefined;
+    }) => {
+      const body = SearchSettingsUpdate.parse({
+        keywordLanguages: args.keyword_languages,
+        disabledIndices: args.disabled_indices,
+      });
+      const result = await service.updateSearchSettings(body, await getModelingStore(ontologyKey));
+      return jsonResult(result);
+    }),
+  );
+
+  // --- Search indices ---
+  // A definition travels in the index wire format (camelCase, as in REST
+  // and the transfer format), like `import_schema`'s payload.
+
+  server.registerTool(
+    "list_search_indices",
+    {
+      description:
+        "List the ontology's search index definitions — managed (default and passage, " +
+        "keys with '~', switched in search settings) and custom — with their build status.",
+      inputSchema: {},
+    },
+    wrap("list_search_indices", async () => {
+      const result = await searchIndices.listSearchIndices(await getModelingStore(ontologyKey));
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "get_search_index",
+    {
+      description: "Get one search index definition with its build status.",
+      inputSchema: { index_key: z.string() },
+    },
+    wrap("get_search_index", async (args: { index_key: string }) => {
+      const result = await searchIndices.getSearchIndex(
+        args.index_key,
+        await getModelingStore(ontologyKey),
+      );
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "preview_search_index",
+    {
+      description:
+        "Validate a draft search index definition without saving it and estimate the cost of " +
+        "building it (entities, entries, seconds per representation). Returns " +
+        "{valid, issues, estimate}; the key may be omitted.",
+      inputSchema: { definition: z.record(z.string(), z.unknown()) },
+    },
+    wrap("preview_search_index", async (args: { definition: Record<string, unknown> }) => {
+      const result = await searchIndices.previewSearchIndex(
+        args.definition,
+        await getModelingStore(ontologyKey),
+      );
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "create_search_index",
+    {
+      description:
+        "Create a custom search index. definition: {key, name, description, entityType, " +
+        "fields, header?, relations?: [{relationType, direction: 'outgoing'|'incoming', " +
+        "fields, target: {<entityTypeKey>: [fields]}, label?, template?}], semantic?: " +
+        "{enabled, template?}, keyword?: {enabled}}. At most 12 fields and 4 relation " +
+        "groups; one entry per relation instance. Building starts in the background.",
+      inputSchema: { definition: z.record(z.string(), z.unknown()) },
+    },
+    wrap("create_search_index", async (args: { definition: Record<string, unknown> }) => {
+      const result = await searchIndices.createSearchIndex(
+        args.definition,
+        await getModelingStore(ontologyKey),
+      );
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "update_search_index",
+    {
+      description:
+        "Replace a custom search index's definition (same shape as create_search_index; the " +
+        "key cannot change). A changed definition is rebuilt in the background; the current " +
+        "entries serve until then. Managed indices can only be switched (set_search_settings).",
+      inputSchema: { index_key: z.string(), definition: z.record(z.string(), z.unknown()) },
+    },
+    wrap("update_search_index", async (args: {
+      index_key: string;
+      definition: Record<string, unknown>;
+    }) => {
+      const result = await searchIndices.updateSearchIndex(
+        args.index_key,
+        args.definition,
+        await getModelingStore(ontologyKey),
+      );
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "delete_search_index",
+    {
+      description:
+        "Delete a custom search index with its entries. Use cascade=True to also remove it " +
+        "from the scoped lenses that include it.",
+      inputSchema: { index_key: z.string(), cascade: z.boolean().optional() },
+    },
+    wrap("delete_search_index", async (args: { index_key: string; cascade?: boolean | undefined }) => {
+      await searchIndices.deleteSearchIndex(
+        args.index_key,
+        args.cascade ?? false,
+        await getModelingStore(ontologyKey),
+      );
+      return textResult(`Search index '${args.index_key}' deleted.`);
+    }),
+  );
+
+  server.registerTool(
+    "get_search_index_status",
+    {
+      description:
+        "Get a search index's build status: ready, building (done/total), stale (pending), " +
+        "failed (with the last errors), disabled or unavailable, per representation.",
+      inputSchema: { index_key: z.string() },
+    },
+    wrap("get_search_index_status", async (args: { index_key: string }) => {
+      const result = await searchIndices.getSearchIndexStatusBody(
+        args.index_key,
+        await getModelingStore(ontologyKey),
+      );
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "rebuild_search_index",
+    {
+      description:
+        "Rebuild a search index from scratch in the background (retries failed items) and " +
+        "return its status.",
+      inputSchema: { index_key: z.string() },
+    },
+    wrap("rebuild_search_index", async (args: { index_key: string }) => {
+      const result = await searchIndices.rebuildSearchIndex(
+        args.index_key,
+        await getModelingStore(ontologyKey),
+      );
       return jsonResult(result);
     }),
   );
@@ -779,10 +986,53 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
   );
 
   server.registerTool(
+    "add_search_index_to_lens",
+    {
+      description:
+        "Include a search index in a lens, by index key. A scoped lens must include the " +
+        "index's root entity type. Index inclusions never make a lens scoped; an unscoped " +
+        "lens searches every index. get_schema lists each lens's index inclusions.",
+      inputSchema: {
+        lens_key: z.string(),
+        index_key: z.string(),
+      },
+    },
+    wrap("add_search_index_to_lens", async (args: { lens_key: string; index_key: string }) => {
+      const store = await getModelingStore(ontologyKey);
+      const lens = await resolveLensByKey(store, args.lens_key);
+      const result = await searchIndices.includeIndexInLens(
+        lens.lensId as string,
+        { key: args.index_key },
+        store,
+      );
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "remove_search_index_from_lens",
+    {
+      description: "Remove a search index from a lens, by index key.",
+      inputSchema: {
+        lens_key: z.string(),
+        index_key: z.string(),
+      },
+    },
+    wrap("remove_search_index_from_lens", async (args: { lens_key: string; index_key: string }) => {
+      const store = await getModelingStore(ontologyKey);
+      const lens = await resolveLensByKey(store, args.lens_key);
+      await searchIndices.excludeIndexFromLens(lens.lensId as string, args.index_key, store);
+      return textResult(`Search index '${args.index_key}' removed from lens '${args.lens_key}'.`);
+    }),
+  );
+
+  server.registerTool(
     "validate_lens",
     {
       description:
-        "Validate a single lens's INCLUDES_TYPE configuration against the schema.",
+        "Validate a single lens's INCLUDES_TYPE configuration against the schema. " +
+        "Warnings name what limits the search indices it includes: a root type it does not " +
+        "include, properties an index reads that it hides.",
       inputSchema: {
         lens_key: z.string(),
       },

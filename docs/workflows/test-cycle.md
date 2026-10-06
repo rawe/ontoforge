@@ -127,7 +127,7 @@ routes live at `/api/ontologies`; every modeling route below is under
 `/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}` (see
 [../interfaces.md](../interfaces.md)).
 
-1. **Registry CRUD** — create ontology (key + optional display name), duplicate key (409), duplicate display name (409), invalid/over-long key (422), list, get, get-missing (404), rename display name, rename-missing (404)
+1. **Registry CRUD** — create ontology (key + optional display name; no `textSearchLanguage` in the response), duplicate key (409), duplicate display name (409), invalid/over-long key (422), list, get, get-missing (404), rename display name, rename-missing (404)
 2. **Ontology scoping** — unknown ontology key on any modeling route (404); create a second ontology and give both the same entity type key (no conflict)
 3. **Entity Type CRUD** — create, duplicate key within the ontology (409), create second, list, get, update
 4. **Relation Type CRUD** — create with source/target, duplicate key (409), invalid refs (422), list, get, update
@@ -136,7 +136,7 @@ routes live at `/api/ontologies`; every modeling route below is under
 7. **Referential Integrity** — delete entity type referenced by relation type (409)
 8. **Lens CRUD** — create lens, duplicate lens key within the ontology (409), same lens key in the other ontology (no conflict), validate, update, delete
 9. **Schema Validation** — validate endpoint, expect valid
-10. **Export** — export JSON, verify structure: `formatVersion` "5.0", `textSearchLanguage`, `lenses[]`, no ontology identity in the payload
+10. **Export** — export JSON, verify structure: `formatVersion` "6.0", `nameProperty` on every entity type, `keywordLanguages` (`["german","english"]` for a new ontology), no `textSearchLanguage`, `lenses[]`, no ontology identity in the payload
 11. **Import** — import into a bare second ontology (201, keys preserved), key conflict against a populated target (409, all-or-fail, target unchanged), unknown target ontology (404 — import never creates its target), 3.0-shaped payload with `ontologies[]` (422 by shape)
 12. **Runtime isolation** — same type key in both ontologies: create entities in each, verify list/OQL through each lens returns only its own ontology's data
 13. **Cascade Delete** — delete relation type, delete entity type, then `DELETE /api/ontologies/{key}` and verify the whole ontology is gone (404) while the other ontology is untouched; recreate under the same key works

@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowLeftRight, ArrowRight, Plus, Unlink } from 'lucide-reac
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
+import { useDisplayLabel } from '@/api/hooks'
 import { qk } from '@/api/queryKeys'
 import * as runtime from '@/api/runtime'
 import type {
@@ -28,7 +29,6 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { displayLabel } from '@/lib/displayLabel'
 
 const PAGE_SIZE = 10
 const MAX_LIMIT = 200
@@ -75,6 +75,7 @@ export function RelationSection({
   count,
   onAdd,
 }: RelationSectionProps) {
+  const displayLabel = useDisplayLabel()
   const queryClient = useQueryClient()
   const [limit, setLimit] = useState(PAGE_SIZE)
   const [unlinkTarget, setUnlinkTarget] = useState<Neighbor | null>(null)

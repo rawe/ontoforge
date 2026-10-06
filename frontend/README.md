@@ -1,9 +1,9 @@
 # OntoForge UI
 
-The OntoForge frontend (v3) — a single-page app with two surfaces:
+The OntoForge frontend — a single-page app. The start page (`/`) lists the server's ontologies; each ontology has two surfaces:
 
-- **Workbench** (`/w/:ontologyKey`) — work with instance data through one ontology lens: overview dashboard, schema-driven type tables, entity detail, Explorer canvas, OQL query workbench, AI assistant.
-- **Studio** (`/studio`) — design the global schema: entity/relation type editors, ontology scope configuration, agents, saved queries, export/import.
+- **Workbench** (`/o/:ontologyKey/w/:lensKey`) — work with instance data through one lens: overview dashboard, schema-driven type tables, entity detail, Explorer canvas, OQL query workbench, AI assistant (chat, ask, extract, retriever-agent chat).
+- **Studio** (`/o/:ontologyKey/studio`) — design one ontology: entity/relation type editors, lenses (scope, agents, retriever agents with a test panel, saved queries, connect), search indices and search settings, export/import.
 
 What the surfaces offer: [../docs/product-surface.md](../docs/product-surface.md).
 System architecture: [../docs/architecture.md](../docs/architecture.md).
@@ -47,10 +47,12 @@ src/
 │   ├── table/   # type table building blocks
 │   ├── entity/  # entity detail building blocks
 │   ├── query/   # query console (OQL) + saved-query library
-│   ├── ai/      # chat / ask / extract
-│   ├── studio/  # Studio editors (types, scope, agents, saved queries, transfer)
+│   ├── ai/      # chat / ask / extract / retriever tab
+│   ├── retrieverAgent/ # retriever-agent editor parts, chat + diagnostics (Studio test panel and Workbench)
+│   ├── search/  # Studio Search area: index list parts, index designer, managed index view
+│   ├── studio/  # Studio editors (types, scope, agents, retriever agents, saved queries, transfer)
 │   └── home/    # Workbench Home cards
-├── lib/         # displayLabel, typeColors, storage (of.* localStorage keys), recents
-├── pages/       # route components (workbench/, studio/, welcome)
+├── lib/         # displayLabel, matchedVia, typeColors, storage (of.* localStorage keys), recents
+├── pages/       # route components (StartPage, workbench/, studio/)
 └── router.tsx   # route table
 ```

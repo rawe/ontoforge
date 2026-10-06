@@ -1,10 +1,16 @@
-/** The same HTTP search contract runs with and without local embeddings, on either adapter. */
+/**
+ * The same HTTP search contract runs with and without local embeddings, on either adapter.
+ * On PostgreSQL search answers from search indices, whose entries the worker builds
+ * asynchronously: every search first drains the queued work (a no-op on Neo4j).
+ */
 import type { FastifyInstance } from "fastify";
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../../src/app.js";
 import { settings } from "../../src/config.js";
 import { initStores, closeStores } from "../../src/core/ports.js";
 import { getEmbeddingProvider, setEmbeddingProvider } from "../../src/core/embedding.js";
+import { runQuery } from "../../src/adapters/postgres/errors.js";
+import { drainSearchWork } from "../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { wipeDatabase } from "./reset.js";
 import { enableOllamaProvider, disableProvider } from "./embedding/support.js";
@@ -19,19 +25,16 @@ function expectEvidence(match: Record<string, any>, strategy: string) {
       : ["charLength", "charOffset", "evidence", "kind", "propertyKey"],
   );
   const evidence = match.evidence;
-  expect(Object.keys(evidence).sort()).toEqual(
-    match.kind === "properties"
-      ? ["keywordMatch", "keywordPropertyKeys", "keywordScore", "semanticSimilarity"]
-      : ["keywordMatch", "keywordScore", "semanticSimilarity"],
-  );
+  // No property attribution: a match carries measurements only.
+  expect(Object.keys(evidence).sort()).toEqual(["keywordMatch", "keywordScore", "semanticSimilarity"]);
   if (evidence.semanticSimilarity !== null) {
     expect(Number.isFinite(evidence.semanticSimilarity)).toBe(true);
     expect(evidence.semanticSimilarity).toBeGreaterThanOrEqual(0);
     expect(evidence.semanticSimilarity).toBeLessThanOrEqual(1);
   }
   expect([true, null]).toContain(evidence.keywordMatch);
-  // The native keyword score is present exactly when the unit matched; it is raw and
-  // unbounded, so only finiteness and positivity are contractual.
+  // The keyword score is present exactly when the unit matched; it has no fixed upper
+  // bound, so only finiteness and positivity are contractual.
   if (evidence.keywordMatch === true) {
     expect(Number.isFinite(evidence.keywordScore)).toBe(true);
     expect(evidence.keywordScore).toBeGreaterThan(0);
@@ -46,9 +49,31 @@ function expectEvidence(match: Record<string, any>, strategy: string) {
     // A hybrid unit can be absent from either limited source ranking, but not both.
     expect(evidence.semanticSimilarity !== null || evidence.keywordMatch === true).toBe(true);
   }
-  if (match.kind === "properties") {
-    // These freshly created fixtures have exactly one declared string property.
-    expect(evidence.keywordPropertyKeys).toEqual(evidence.keywordMatch === true ? ["title"] : null);
+}
+
+/** What matched a hit on PostgreSQL: the best entry of one of the searched
+ * default or passage indices. */
+function expectMatched(hit: Record<string, any>) {
+  const matched = hit.matched;
+  expect(Object.keys(matched).sort()).toEqual(
+    ["charLength", "charOffset", "index", "partKind", "relationId", "relationType", "snippet", "target"].sort(),
+  );
+  const type = hit.entity._entityTypeKey;
+  expect(matched).toMatchObject({ relationType: null, relationId: null, target: null });
+  expect(matched.snippet.length).toBeGreaterThan(0);
+  expect(Array.from(matched.snippet as string).length).toBeLessThanOrEqual(200);
+  if (matched.partKind === "self") {
+    expect(matched.index).toBe(`${type}~default`);
+    expect(matched).toMatchObject({ charOffset: null, charLength: null });
+    expect(hit.matches.some((m: any) => m.kind === "properties")).toBe(true);
+  } else {
+    expect(matched.partKind).toBe("passage");
+    const property = matched.index.slice(`${type}~`.length);
+    expect(
+      hit.matches.some(
+        (m: any) => m.kind === "document" && m.propertyKey === property && m.charOffset === matched.charOffset,
+      ),
+    ).toBe(true);
   }
 }
 
@@ -82,6 +107,7 @@ export function searchContract(embedding: boolean, enabled = true) {
     return res.json();
   }
   async function find(query: string, params: Record<string, string> = {}, lens = "all") {
+    await drainSearchWork();
     return app.inject({
       method: "GET",
       url: `${base}/runtime/lenses/${lens}/search?${new URLSearchParams({ q: query, ...params })}`,
@@ -144,6 +170,7 @@ export function searchContract(embedding: boolean, enabled = true) {
         ai: false,
         entityIdentityComparison: false,
         searchStrategies: defaults,
+        searchIndices: settings.DB_BACKEND === "postgres",
       });
       expect((await app.inject({ url: `${runtime}/search/semantic?q=graph` })).statusCode).toBe(
         404,
@@ -169,7 +196,10 @@ export function searchContract(embedding: boolean, enabled = true) {
           expect(body.hits).toHaveLength(2);
           expect(body.hits[0].relativeScore).toBe(1);
           for (const hit of body.hits) {
-            expect(Object.keys(hit).sort()).toEqual(["entity", "matches", "relativeScore"]);
+            expect(Object.keys(hit).sort()).toEqual(
+              keyword ? ["entity", "matched", "matches", "relativeScore"] : ["entity", "matches", "relativeScore"],
+            );
+            if (keyword) expectMatched(hit);
             expect(hit.relativeScore).toBeGreaterThanOrEqual(0);
             expect(hit.relativeScore).toBeLessThanOrEqual(1);
             expect(hit.entity._entityTypeKey).toBeDefined();
@@ -247,6 +277,19 @@ export function searchContract(embedding: boolean, enabled = true) {
         });
         for (let i = 0; i < 12; i++)
           await post(`${runtime}/entities/company`, { title: `Graph database ${i}` });
+        if (keyword) {
+          // A scoped lens searches the indices it includes; including a type
+          // afterwards does not include its indices.
+          const before = await find("graph database", { strategy, in: "properties" }, "narrow");
+          expect(before.json().hits).toEqual([]);
+          await runQuery(
+            `INSERT INTO ont_search_test.lens_includes (lens_id, search_index_id)
+             SELECT $1, search_index_id FROM ont_search_test.search_index
+             WHERE key IN ('paper~default', 'report~default')`,
+            [lens.lensId],
+          );
+          invalidateLoadedSchemaCache();
+        }
         const result = await find(
           "graph database",
           { strategy, in: "properties", limit: "3" },
@@ -336,13 +379,11 @@ export function searchContract(embedding: boolean, enabled = true) {
       },
     );
     it.skipIf(!keyword)(
-      "a deleted string property keeps matching until the rebuild recomposes the text",
+      "a deleted string property stops matching once the default index is rebuilt",
       async () => {
-        // The stored keyword text is one blob per entity, written when the
-        // entity was written. Deleting the property definition does not delete
-        // the stored value, and the blob does not record which property a word
-        // came from — so the value keeps matching. This is the documented
-        // trade: a schema edit stays instant and writes no instance data.
+        // The default index follows the schema: deleting a string property
+        // changes its definition, and the new generation, built in the
+        // background, no longer holds the value. The entity itself keeps it.
         const property = await post(`${model}/entity-types/${paperId}/properties`, {
           key: "notes",
           displayName: "notes",
@@ -360,33 +401,15 @@ export function searchContract(embedding: boolean, enabled = true) {
 
         const indexed = await hits();
         expect(indexed.map((h: any) => h.entity._id)).toEqual([entity._id]);
-        expect(indexed[0].matches[0].evidence.keywordPropertyKeys).toEqual(["notes"]);
+        expect(indexed[0].matched).toMatchObject({ index: "paper~default", partKind: "self" });
 
         const deleted = await app.inject({
           method: "DELETE",
           url: `${model}/entity-types/${paperId}/properties/${property.propertyId}?cascade=true`,
         });
         expect(deleted.statusCode, deleted.body).toBe(204);
-        invalidateLoadedSchemaCache();
-
-        // Still matching, and now unable to say why: the supporting key is no
-        // longer an exposed string property, so attribution is withheld rather
-        // than naming a property the schema no longer declares.
-        const stale = await hits();
-        expect(stale.map((h: any) => h.entity._id)).toEqual([entity._id]);
-        expect(stale[0].entity).not.toHaveProperty("notes");
-        expect(stale[0].matches[0].evidence.keywordPropertyKeys).toBeNull();
-
-        const rebuild = await app.inject({ method: "POST", url: `${model}/rebuild-search-data` });
-        expect(rebuild.statusCode, rebuild.body).toBe(200);
-        const summary = JSON.parse(rebuild.body.trim().split("\n").at(-1)!);
-        expect(summary).toMatchObject({ type: "summary", totalFailed: 0 });
-        // The run is refused for no provider on neither surface; it reports the
-        // vector work it skipped instead.
-        expect(summary.embeddingsSkipped).toBe(!embedding);
 
         expect(await hits()).toEqual([]);
-        // The entity itself is untouched — only its derived search text changed.
         expect(
           (await find("field", { type: "paper", strategy: "keyword", in: "properties" }))
             .json()
@@ -410,13 +433,19 @@ export function searchContract(embedding: boolean, enabled = true) {
           setEmbeddingProvider(provider);
         }
         const before = await find("astronomy", { type: "paper", strategy: "semantic" });
-        expect(before.json().hits.map((h: any) => h.entity._id)).not.toContain(entity!._id);
-        const rebuild = await app.inject({ method: "POST", url: `${model}/rebuild-search-data` });
-        expect(rebuild.statusCode, rebuild.body).toBe(200);
-        expect(JSON.parse(rebuild.body.trim().split("\n").at(-1)!)).toMatchObject({
-          type: "summary",
-          totalFailed: 0,
-        });
+        if (keyword) {
+          // Entries are built by the worker, not by the write: an entity written
+          // while no provider answered is embedded once one does.
+          expect(before.json().hits.map((h: any) => h.entity._id)).toContain(entity!._id);
+        } else {
+          expect(before.json().hits.map((h: any) => h.entity._id)).not.toContain(entity!._id);
+          const rebuild = await app.inject({ method: "POST", url: `${model}/rebuild-search-data` });
+          expect(rebuild.statusCode, rebuild.body).toBe(200);
+          expect(JSON.parse(rebuild.body.trim().split("\n").at(-1)!)).toMatchObject({
+            type: "summary",
+            totalFailed: 0,
+          });
+        }
         const after = await find("astronomy", { type: "paper", strategy: "semantic" });
         const hit = after.json().hits.find((h: any) => h.entity._id === entity!._id);
         expect(hit.matches).toEqual(
@@ -427,7 +456,6 @@ export function searchContract(embedding: boolean, enabled = true) {
                 semanticSimilarity: expect.any(Number),
                 keywordMatch: null,
                 keywordScore: null,
-                keywordPropertyKeys: null,
               },
             },
             expect.objectContaining({ kind: "document", propertyKey: "body" }),
@@ -465,6 +493,7 @@ export function searchContract(embedding: boolean, enabled = true) {
           },
         });
         expect(definition.statusCode, definition.body).toBe(201);
+        await drainSearchWork();
         const run = await app.inject({
           method: "POST",
           url: `${runtime}/saved-queries/find_papers/run`,
@@ -475,7 +504,8 @@ export function searchContract(embedding: boolean, enabled = true) {
           (await find("graph database", { type: "paper", limit: "2" })).json(),
         );
         expect(run.json().hits[0].entity).not.toHaveProperty("_score");
-        expect(run.json().hits[0].entity).not.toHaveProperty("_entityTypeKey");
+        // Hits always name their entity type, a single searched type included.
+        expect(run.json().hits[0].entity._entityTypeKey).toBe("paper");
       },
     );
     it.skipIf(!embedding)("a similarity floor removes semantic candidates only", async () => {
@@ -611,11 +641,9 @@ export function searchContract(embedding: boolean, enabled = true) {
       for (const match of prefixed.json().hits[0].matches) {
         expect(match.evidence.keywordMatch).toBe(true);
         expect(match.evidence.keywordScore).toBeGreaterThan(0);
-        expect(match.evidence.keywordPropertyKeys).toBeNull();
       }
       const exact = await find("survey graph", { strategy: "keyword-all", in: "properties" });
       expect(exact.json().hits.map((h: any) => h.entity._id)).toEqual([second._id]);
-      expect(exact.json().hits[0].matches[0].evidence.keywordPropertyKeys).toEqual(["title"]);
     });
     it.skipIf(!keyword)("all-term keyword matching never exposes query syntax", async () => {
       const operators = await find(`graph & database | ! ' words`, { strategy: "keyword-all" });

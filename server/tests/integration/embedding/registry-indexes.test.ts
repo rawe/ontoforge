@@ -2,7 +2,7 @@
  * Ontology provisioning under a live embedding provider — with a
  * configured provider, creating an ontology carries the two fixed vector
  * indexes into the fresh namespace at the provider's width, in the same
- * transaction as the ten tables. PostgreSQL-physical (catalog reads), so
+ * transaction as the ontology tables. PostgreSQL-physical (catalog reads), so
  * gated to that backend; SKIPPED when Ollama or the model is unavailable.
  */
 
@@ -62,7 +62,7 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "postgres")(
       await wipeDatabase();
     });
 
-    it("create provisions both fixed vector indexes at the provider's width", async () => {
+    it("create provisions the fixed vector index at the provider's width", async () => {
       const res = await app.inject({
         method: "POST",
         url: "/api/ontologies",

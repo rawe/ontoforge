@@ -15,6 +15,8 @@ export interface Features {
   semanticSearch: boolean
   ai: boolean
   entityIdentityComparison: boolean
+  /** The storage adapter supports search indices (the Studio Search area). */
+  searchIndices: boolean
 }
 
 export interface EntityIdentityComparison {
@@ -66,6 +68,8 @@ export interface SchemaEntityType {
   key: string
   displayName: string
   description: string | null
+  /** Key of the string property that names instances; null when the lens hides it. */
+  nameProperty: string | null
   properties: SchemaProperty[]
 }
 
@@ -188,12 +192,13 @@ export interface SearchEvidence {
   semanticSimilarity: number | null
   /** True for a native keyword match; null is unknown, including limited-list absence. */
   keywordMatch: boolean | null
-  /** The adapter's native full-text ranking measurement, raw and unbounded; a number
-   * exactly when keywordMatch is true. Not comparable to semanticSimilarity. */
+  /** The entry's keyword score: distinct query words matched plus, as a fraction below
+   * one, the native full-text rank (docs/capabilities/search.md#ranking). A number exactly
+   * when keywordMatch is true; no fixed upper bound; not comparable to semanticSimilarity. */
   keywordScore: number | null
 }
 export type SearchMatch = {
-  kind: 'properties'; evidence: SearchEvidence & { keywordPropertyKeys: string[] | null }
+  kind: 'properties'; evidence: SearchEvidence
 } | {
   kind: 'document'; propertyKey: string; charOffset: number; charLength: number; evidence: SearchEvidence
 }
@@ -209,6 +214,24 @@ export interface SearchHit {
    */
   relativeScore: number
   matches: SearchMatch[]
+  /** The entry the hit was found by. Absent from servers without search indices. */
+  matched?: Matched
+}
+
+/** Which entry of which search index a hit was found by. */
+export interface Matched {
+  index: string
+  partKind: 'self' | 'relation' | 'passage'
+  /** Relation parts only. */
+  relationType: string | null
+  relationId: string | null
+  /** The entity on the other end of a relation part. */
+  target: { id: string; type: string; label: string | null } | null
+  /** At most 200 characters of the matched entry text. */
+  snippet: string
+  /** Passages only. */
+  charOffset: number | null
+  charLength: number | null
 }
 export interface SearchResponse {
   query: string
@@ -287,7 +310,6 @@ export interface ToolCall {
 /* --------------------------------- registry --------------------------------- */
 
 export interface Ontology {
-  textSearchLanguage: 'english' | 'german'
   ontologyId: string
   key: string
   /** Mutable server-wide-unique display name; `null` when never named. */
@@ -297,7 +319,6 @@ export interface Ontology {
 }
 
 export interface OntologyCreateInput {
-  textSearchLanguage?: 'english' | 'german'
   /** Immutable, server-wide unique; snake_case, max 59 chars. */
   key: string
   /** Optional — an ontology starts nameless unless one is chosen here. */
@@ -325,6 +346,8 @@ export interface EntityType {
   key: string
   displayName: string
   description: string | null
+  /** Key of the string property that names instances — never null in modeling. */
+  nameProperty: string
   createdAt: string
   updatedAt: string
 }
@@ -364,7 +387,127 @@ export interface ValidationError {
 export interface ValidationResult {
   valid: boolean
   errors: ValidationError[]
+  /** Findings that do not make the result invalid (lens validation). */
+  warnings?: ValidationError[]
 }
+
+/* ------------------------------ search indices ------------------------------ */
+
+export type Representation = 'semantic' | 'keyword'
+export type IndexKind = 'default' | 'passage' | 'custom'
+export type RelationDirection = 'outgoing' | 'incoming'
+export type KeywordLanguage = 'german' | 'english'
+
+/** One relation type in one direction: relation fields plus the fields of
+ * the entity on the other end, keyed by that entity's type. */
+export interface SearchIndexRelationGroup {
+  relationType: string
+  direction: RelationDirection
+  fields: string[]
+  target: Record<string, string[]>
+  /** Null: the relation type's display name. */
+  label: string | null
+  template: string | null
+}
+
+/**
+ * A search index definition. `header` null = the root type's name
+ * property; `[]` = no header. Managed indices (`<type>~default`,
+ * `<type>~<documentProperty>`) are derived by the server and only switched.
+ */
+export interface SearchIndexDefinition {
+  key: string
+  name: string
+  description: string
+  entityType: string
+  fields: string[]
+  header: string[] | null
+  relations: SearchIndexRelationGroup[]
+  semantic: { enabled: boolean; template: string | null }
+  keyword: { enabled: boolean }
+}
+
+export type IndexState = 'ready' | 'building' | 'stale' | 'failed' | 'disabled' | 'unavailable'
+
+export interface RepresentationStatus {
+  representation: Representation
+  /** `unavailable` = semantic without an embedding provider. */
+  state: Exclude<IndexState, 'disabled'>
+  /** Progress of a building generation (0/0 when ready). */
+  done: number
+  total: number
+  /** Queued items on the active generation (stale when > 0). */
+  pending: number
+  /** Items that exhausted their retries. */
+  failed: number
+}
+
+export interface IndexStatus {
+  /** Worst of the representations; `disabled` = managed index switched off. */
+  state: IndexState
+  representations: RepresentationStatus[]
+  lastErrors: { entityId: string; partKind: string; message: string; at: string }[]
+}
+
+export interface SearchIndexRecord {
+  key: string
+  kind: IndexKind
+  /** Custom indices are always enabled. */
+  enabled: boolean
+  definition: SearchIndexDefinition
+  documentProperty: string | null
+  status: IndexStatus
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CostEstimate {
+  entities: number
+  entries: number
+  seconds: number
+  perRepresentation: {
+    representation: Representation
+    entries: number
+    seconds: number
+    /** False: a default rate, the throughput was not measured yet. */
+    measured: boolean
+  }[]
+}
+
+export interface SearchIndexPreview {
+  valid: boolean
+  issues: ValidationError[]
+  /** Null when the draft is invalid. */
+  estimate: CostEstimate | null
+}
+
+export interface SearchSettings {
+  keywordLanguages: KeywordLanguage[]
+  /** Managed index keys switched off. */
+  disabledIndices: string[]
+}
+
+/** A search index included in a scoped lens. */
+export interface SearchIndexInclude {
+  key: string
+}
+
+/** One index of a lens's runtime search catalog (the indices the lens can search). */
+export interface SearchCatalogEntry {
+  key: string
+  kind: IndexKind
+  name: string
+  description: string
+  entityType: string
+  fields: string[]
+  relations: { relationType: string; direction: RelationDirection; label: string | null }[]
+  documentProperty: string | null
+  modes: Representation[]
+  status: IndexState
+}
+
+/** A definition sent to preview: `key` may be absent for a new index. */
+export type SearchIndexDraftInput = Omit<SearchIndexDefinition, 'key'> & { key?: string }
 
 /* ------------------------------ modeling inputs ------------------------------ */
 
@@ -378,6 +521,11 @@ export interface EntityTypeInput {
   key?: string
   displayName: string
   description?: string | null
+  /**
+   * Create: key of the string property the server creates as the name
+   * property (default `name`). Update: reassign to another string property.
+   */
+  nameProperty?: string
 }
 
 export interface RelationTypeInput {

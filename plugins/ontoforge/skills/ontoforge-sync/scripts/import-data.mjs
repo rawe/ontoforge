@@ -11,6 +11,7 @@ import {
   getOntologyKey,
   modelPath,
   parseCliArgs,
+  pickLensKey,
   runtimePath,
 } from './lib.mjs';
 
@@ -39,14 +40,22 @@ if (!data.formatVersion) {
   die('Invalid data file: missing formatVersion field.');
 }
 
-// Resolve the lens the runtime API writes through
+// Resolve the lens the runtime API writes through: an unscoped one unless named.
 let lensKey = flags.lens;
 if (!lensKey) {
-  const lenses = await api(baseUrl, `${modelPath(ontologyKey)}/lenses`).catch(() => []);
-  if (!lenses.length) {
-    die(`ontology "${ontologyKey}" has no lens. Import the schema first.`);
+  let design;
+  try {
+    design = await api(baseUrl, `${modelPath(ontologyKey)}/export`);
+  } catch (err) {
+    die(`Cannot read the design of ontology "${ontologyKey}": ${err.message}`);
   }
-  lensKey = lenses[0].key;
+  lensKey = pickLensKey(design);
+  if (!lensKey) {
+    die(
+      `ontology "${ontologyKey}" has no unscoped lens. Import the schema first, or pass ` +
+        '--lens to write through a scoped lens (it rejects what it hides).',
+    );
+  }
   console.error(`Using lens: ${lensKey}`);
 }
 
@@ -118,7 +127,10 @@ try {
 
   console.error(`Done: ${entityCount} entities, ${relationCount} relations imported.`);
   if (skipped) console.error(`  ${skipped} relations skipped (missing entity references).`);
-  console.error('Hint: run rebuild-search-data.mjs to build the imported entities\' search data.');
+  console.error(
+    'Search indices build the imported entities\' search entries in the background; ' +
+      'GET /model/search-indices shows their progress.',
+  );
 } catch (err) {
   die(err.message);
 }

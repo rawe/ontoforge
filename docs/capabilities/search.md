@@ -1,7 +1,9 @@
 # Search
 
-The entity list filters by a literal term. The search operation ranks entities for a query.
-Neither server operation falls back to the other.
+The entity list filters by a literal term. Ranked search ranks entities for a query, in
+two forms: the **default search** over the managed indices of the types it searches, and
+the **index search** through [search indices](search-indices.md) named by key. No server
+operation falls back to another.
 
 ## Literal matching
 
@@ -13,20 +15,27 @@ See [instance-data.md](instance-data.md#query-paths) for property and query-path
 
 ## Ranked search
 
-Three independent dimensions select a ranking: scope (one entity type or every type the
+This section describes the default search; the [index search](#index-search) shares its
+ranking, floor and `matched`. Three independent dimensions select a default search's
+ranking: scope (one entity type or every type the
 lens exposes), search kind (properties, document, or both), and strategy. The query is
 plain words, not an engine query language. The limit counts entities, from 1 to 100,
 default 10; search has no paging or offset.
 
-| Search kind | Ranked unit | Match |
+Ranked search reads [search indices](search-indices.md). Each search kind searches the
+managed indices of the searched types:
+
+| Search kind | Indices searched | Match |
 |---|---|---|
-| Property search | one entity, using its string properties | entity-level semantic evidence and, when known, contributing keyword property keys |
-| Document search | a passage of a document property | property key and the best passage's character coordinates |
+| Property search | the default index of each searched type | the entity's own-field entry |
+| Document search | the passage index of each searched document property | property key and the best passage's character coordinates |
 
 Both kinds run by default. A kind with nothing to search contributes nothing by default;
 requesting it explicitly is a validation error. A named document property restricts only
 document search: on one type it must be an exposed document property; across types it
-selects the types declaring that document property. No matching property is an error.
+selects the types declaring that document property. No matching property is an error. An
+index the lens does not search, or one whose entries are not yet built, contributes
+nothing, and that is no error ([search-indices.md](search-indices.md#lifecycle)).
 
 Long text belongs in a `document` property, which is chunked, ranked passage by passage,
 and whose match names the property and the passage.
@@ -35,7 +44,7 @@ and whose match names the property and the passage.
 
 Each strategy is a composition of retrieval methods; the methods are defined in the
 [glossary](../README.md#glossary). Keyword ranking is stemmed full-text ranking in the
-ontology language.
+ontology's [keyword languages](#keyword-language).
 
 | Strategy | Requirement | Retrieval methods |
 |---|---|---|
@@ -57,29 +66,37 @@ with the disabled-feature refinement and a message naming the available strategi
 no available strategy the operation is disabled. The semantic-search feature boolean is
 kept for saved-query discovery, which ranks by vector alone.
 
-Without a provider, property keyword values and document chunks are still stored. Keyword
-search works on a supporting adapter. Configuring a provider later does not retroactively
-embed data: the rebuild below supplies missing vectors.
+Without a provider no semantic entries are built, and keyword search works on its own.
+Configuring a provider later builds the semantic entries in the background.
 
-### Fusion and matches
+### Ranking
 
-Hybrid first fuses rankings of the same units within each kind; the fusion score is the
-sum of `1 / (60 + rank)` with ranks starting at one. Document search then collapses
-passages to entities: the best passage determines entity order, while each matching
-document property contributes its best passage. The service grows the passage budget until
-the ranking is exhausted, so a long document cannot hide another entity or another
-matching document property. An entity appears once, and its matches survive fusion.
+Each searched index is ranked once per retrieval method the strategy uses — semantic,
+keyword, or both under `hybrid` — over the entries of its ready generation. Within one
+method the rankings of every searched index — all types, own fields and passages alike —
+are merged into one ranking by their own scores, which share one scale there: semantic
+similarity under one embedding model, the keyword score of one query. That ranking
+is grouped by entity: an entity counts once, scored by its best entry, whichever index
+holds it. A single method keeps those scores. Under `hybrid` the semantic and keyword
+entity rankings are fused by reciprocal rank: an entity's score is the sum of
+`1 / (60 + rank)` over the two, ranks starting at one, so only being found by both
+methods adds up — being found by several indices never does. Equal scores prefer the
+greater semantic similarity of each entity's best semantic entry, but only when every
+entity in that tied group has one; otherwise, and among equal similarities, they are
+ordered by entity id. What matched the entity is its best entry under the method in which
+it ranks best, semantic on equal ranks.
 
-When both kinds run over more than one searched type, the entity's fusion score is the
-maximum of its reciprocal kind-rank contributions, using the same constant and one-based
-ranks. Having a document therefore supplies no additive cross-kind bonus. Equal fusion
-scores prefer the greater semantic similarity found in each entity's returned matches, but
-only when every entity in that tied group has a measured similarity. Otherwise the whole
-group retains encounter order, with properties encountered before document-only entities.
-Equal similarities also retain encounter order. Discarded passages supply no tie evidence.
+An entry's **keyword score** is the number of distinct query words it contains — those
+left after stop words are dropped ([below](#keyword-language)) — plus, as
+a fraction below one, the adapter's native full-text ranking of the entry. A word counts
+once however differently the keyword languages stem it, and a word repeated in the query
+counts once. An entry holding more of the query's words therefore always ranks above one
+holding fewer; among equal counts the native ranking decides.
 
-With at most one searched type, including a lens or filter narrowed to one type, both
-kinds still use summed reciprocal ranks. A single kind keeps its strategy ranking.
+Each index's ranking first fetches four times the limit in entries. When the result holds
+fewer entities than the limit, every ranking not yet exhausted fetches once more, up to
+1,000 entries, and the merge runs again; nothing further is fetched, so a search over
+entities with many matching entries each can return fewer hits than the limit.
 
 ### Similarity floor
 
@@ -89,12 +106,12 @@ what counts as related depends on the embedding model — so REST never chooses 
 MCP and agent search tools take none from the caller and instead apply the fixed floor
 pinned by the rule *Search evidence does not establish answer sufficiency* in
 [../decisions.md](../decisions.md) whenever the default strategy ranks semantically. A
-floor applies to semantic candidates only: each semantic ranking, entity text and
-document passages alike, drops every candidate measured below the floor before any
-fusion, above the storage adapter.
+floor applies to semantic entries only: each semantic ranking drops every entry measured
+below the floor before it is grouped by entity, so the floor applies to an entity's best
+semantic entry.
 Under `semantic` the filtered ranking is the result, and zero hits is a valid outcome.
-Under `hybrid` only the semantic branch is filtered; keyword-only hits are untouched and
-keep an unmeasured similarity, which is not a negative. Under `keyword`, `keyword-any`
+Under `hybrid` only the semantic rankings are filtered; keyword-only hits are untouched
+and keep an unmeasured similarity, which is not a negative. Under `keyword`, `keyword-any`
 or `keyword-all`, requested or reached as the default, the floor has nothing to apply
 to and is a validation error naming the parameter rather than silently ignored.
 
@@ -102,36 +119,48 @@ to and is a validation error naming the parameter rather than silently ignored.
 
 The envelope carries `query`, `type` (null across types), `in` (defaults filled), `strategy`,
 `minSimilarity` (null when absent), `filter` (empty when absent), and `hits`. Each hit
-carries `entity`, `relativeScore`, and `matches`. There is no aggregate confidence, snippet
-or total.
+carries `entity`, `relativeScore`, `matches` and `matched`. There is no aggregate
+confidence or total.
 
 The relative score is 1.0 for the best hit and each other hit's ordering number as a
-fraction of the best, comparable only within that response. For one kind under semantic
-or keyword search it is a ratio of source scores; under hybrid or cross-kind fusion it
-is a ratio of rank-derived fusion scores. Cross-type best-kind scoring can produce
-multiple 1.0 hits whose tie order is resolved separately. Neither a 1.0 score nor a smooth
-tail says that the query has a relevant answer. Search returns candidates even for an
-unrelated query.
+fraction of the best, comparable only within that response. Under one retrieval method it
+is a ratio of that method's scores; under `hybrid` a ratio of fusion scores, and fusion
+can produce multiple 1.0 hits whose tie order is resolved separately. Neither a 1.0 score nor
+a smooth tail says that the query has a relevant answer. Search returns candidates even
+for an unrelated query.
 
-An entity match carries `kind: "properties"`. A passage match carries
-`kind: "document"`, `propertyKey`, `charOffset` and `charLength`, directly usable with a
-[document read](documents.md). The entity match comes first, then passage matches in
-document-ranking order, with one per document property.
+**Matches.** Each index that found the entity contributes one match, its best entry
+there — under the method in which the entity ranks best, else under the other. The default index contributes an entity match, `kind: "properties"`. A passage
+index contributes a passage match, `kind: "document"`, with `propertyKey`, `charOffset`
+and `charLength`, directly usable with a [document read](documents.md). The entity match
+comes first, then passage matches in ranking order, one per document property.
 
-Every match also carries `evidence`:
+Every match also carries `evidence`, measured on the match's own entry wherever a ranking
+fetched that very entry:
 
 | Field | Meaning |
 |---|---|
 | `semanticSimilarity` | Original measured similarity, `(1 + cosine) / 2`, or null when unavailable or unmeasured. It is not a probability or calibrated confidence. |
-| `keywordMatch` | True when the query terms matched this stored search unit; null when unavailable or unmeasured. False requires an explicit negative evaluation; source rankings alone emit only true/null. |
-| `keywordScore` | The adapter's native full-text ranking measurement for this unit, passed through raw, or null when unavailable or unmeasured. A number exactly when `keywordMatch` is true. Higher is better within one ranking; it has no fixed upper bound and no meaning across responses, ontologies or languages, and is not comparable to `semanticSimilarity`. It exists for inspection and retrieval evaluation and never enters any ranking step. |
-| `keywordPropertyKeys` (property matches only) | Keys whose indexed values supplied keyword query terms, or null when complete, lens-safe attribution is unavailable. A listed property need not satisfy the whole query on its own. |
+| `keywordMatch` | True when the query terms matched this entry; null when unavailable or unmeasured. False requires an explicit negative evaluation; rankings alone emit only true/null. |
+| `keywordScore` | The entry's [keyword score](#ranking) — query words contained plus native full-text ranking below one — or null when unavailable or unmeasured. A number exactly when `keywordMatch` is true. Higher is better within one ranking; it has no fixed upper bound and no meaning across responses, ontologies or languages, and is not comparable to `semanticSimilarity`. It exists for inspection and retrieval evaluation and never enters any ranking step. |
 
-Evidence belongs to the composed entity representation or to the precise returned
-passage. Missing from a limited ranking does not prove a non-match. Keywords can span
-several properties; semantic matching over composed text does not identify an individual
-property. Property-key attribution is withheld if any supporting key is hidden by the
-lens or no longer an exposed string property. Null must not be read as false.
+A method whose ranking did not fetch the match's entry — it ranked other passages of the
+document, say — leaves that measurement null. Missing from a limited ranking does
+not prove a non-match. Keywords can span several properties; semantic matching over
+composed text does not identify an individual property. Null must not be read as false.
+
+**What matched.** `matched` names the entity's best entry:
+
+| Field | Meaning |
+|---|---|
+| `index` | The key of the index the entry belongs to |
+| `partKind` | `self` (own fields), `relation` or `passage` |
+| `relationType`, `relationId` | The relation of a relation entry; null otherwise |
+| `target` | For a relation entry, the entity at the relation's other end: `id`, `type` and `label`, the value of its name property — null when empty or hidden by the lens. Null otherwise |
+| `snippet` | The start of the entry's text, whitespace collapsed, at most 200 code points, an ellipsis marking a cut. Empty when the index reads a property the lens hides |
+| `charOffset`, `charLength` | A passage's coordinates in its document; null otherwise |
+
+It names the entry, never which retrieval method found it.
 
 Callers should inspect entity values and read passages before making claims from them.
 Related content can provide a useful starting entity for graph traversal without
@@ -141,18 +170,19 @@ caller sets one. The MCP and agent search tools apply the fixed floor described 
 
 Entities carry every lens-exposed property by default, with document values stubbed.
 Projection works as on the entity list, including raw document text when explicitly
-named. It never projects matches; the entity id always survives and the type key survives
-across types. Technical text and vectors never appear in entities or design exports.
+named. It never projects matches; the entity id and type key always survive. Vectors
+never appear in entities or design exports.
 
 ### Scope and filters
 
-Cross-type search ranks the exact exposed set through per-type indexes in one statement,
-with one globally ordered page and no per-type quota. No shared cross-type index exists.
+Cross-type search ranks the exact exposed set: one ranking per searched index, merged by
+score into one globally ordered page with no per-type quota. No shared cross-type index exists.
 Property filters narrow this set to types declaring every key. A key declared nowhere,
 or with conflicting data types across its declaring types, is a validation error. A query
 path similarly drops types its relation does not touch. This set feeds both kinds.
 
-Filters run inside every ranking. They follow entity-list resolution, coercion and
+Filters run inside every ranking, on the entity owning each entry, so a ranking's page
+counts entries that pass them. They follow entity-list resolution, coercion and
 collected-error rules — negation and existence included — but substring operators are
 rejected. An existence key naming a bare relation type narrows the set to the types the
 relation touches, as a query path does. Path conditions and relation existence conditions
@@ -160,151 +190,143 @@ are accepted only where the adapter declares support; rejection names the entity
 the alternative. Adapter limitations are recorded in
 [../storage-adapters.md](../storage-adapters.md).
 
-### Text-search language
+## Index search
 
-An ontology's `textSearchLanguage` is chosen at creation, defaults to `english`, and is
-immutable. `english` and `german` are supported. The bound store carries it; requests and
-environment variables cannot override it. Export includes the language as a required
-field, and import rejects a language differing from the existing target ontology.
+The index search ranks entities through chosen search indices — managed or custom —
+named by key; naming none searches every index the lens can search
+([ontology-lenses.md](ontology-lenses.md#search-through-a-lens)). A key no index has is
+not found; an index the lens cannot search, a switched-off managed one included, is a
+validation error naming it. Hits are entities of the indices' root types, ranked and
+grouped exactly as under [Ranking](#ranking): within one retrieval method the chosen
+indices merge by score, an entity counts once, scored by its best entry, and `hybrid`
+fuses the methods by reciprocal rank.
 
-### Property keyword text
+**Relation entries count.** A custom index with relation groups holds one entry per
+relation instance ([search-indices.md](search-indices.md#relation-groups)), and an entity
+can rank by any of them; `matched` then names the relation and the entity at its other
+end. The request may name relation types: only their relation entries rank, own-field
+and passage entries always do, and an empty list ranks no relation entry. A relation type
+the lens does not expose is a validation error. Relation entries the lens cannot see are
+skipped whatever is named.
 
-Keyword search uses a separate values-only representation. Only nonempty values of
-schema-declared `string` properties contribute, in full-schema order, separated by one
-newline. Type keys, property keys and display labels are not searchable keyword content.
-Documents, numbers, dates, datetimes and booleans do not enter this representation.
-An entity without contributing values has no property keyword match.
+**Mode, not strategy.** The index search takes a mode — `semantic`, `keyword` or
+`hybrid`, the keyword legs using the default keyword matching — and defaults to the first
+available: `hybrid` with an embedding provider, `keyword` without one. A mode that needs
+a provider without one is rejected as a disabled feature.
 
-The combined value text has a 30,000-codepoint budget including separators. The last
-included value is truncated to that budget, and the exact indexed property segments
-are retained for attribution. Query terms are matched by the strategy's keyword
-retrieval method. Under any-term keyword matching a hit carries at least one query term,
-each term also matching as a prefix, potentially across multiple properties; rank order
-reflects how often query terms occur, and a repeated term counts like several distinct
-terms, so rank order does not express term coverage. Under all-term keyword matching a hit
-carries every query term, each term still matching as a prefix. Property attribution
-requires every query term to be present exactly, so a hit matched on part of the query,
-or by prefix alone, reports unavailable attribution rather than a partial list. Short
-content terms are often more useful than a full question for keyword search.
+The other parameters follow the default search: exact [filters](#scope-and-filters),
+which narrow the chosen indices to those whose root type declares every key; a minimum
+score, a [similarity floor](#similarity-floor) under the same rules, a validation error
+under `keyword`; a limit counting entities, 1 to 100, default 10; and a projection of
+each entity. Every validation failure is collected and reported by field.
 
-Creation, string-value updates and the rebuild below maintain the keyword representation.
-Non-string updates leave it intact. Schema edits do not refresh stored representations.
-Until refreshed, membership can reflect stale stored values and unavailable property
-attribution remains null. Document keywords continue to use passage text.
+The response carries `query`, `mode` and `hits`; each hit carries `entity`,
+`relativeScore` and `matched` as defined under [Response](#response), and no `matches`.
 
-## What gets embedded
+The default search is the index search's counterpart for callers who name types rather
+than indices: it searches only default and passage indices, so it never ranks a relation
+entry, and it offers search kinds, keyword strategies and per-index match evidence that
+the index search does not. On an adapter without search indices only the default search
+exists; the index search and the catalog are refused as a disabled feature.
 
-An entity's vector comes from one composed text: the entity type key, then each `string`
-property that has a value, written as `key=value`, in the order the schema declares them.
+### The search catalog
 
-```
-person: name=Alice Chen, role=Distributed Systems Engineer
-```
+The catalog lists the indices a lens can search, in key order, so that a client or a
+model can choose among them. Each is projected through the lens:
 
-The rules behind that line are what a reimplementation has to match:
+| Field | Meaning |
+|---|---|
+| `key`, `kind`, `name`, `entityType` | The index — `kind` is `default`, `passage` or `custom` |
+| `description` | A custom index's description as written. A managed index's is composed for the lens from the fields it shows, so it never names a property or document the lens hides — with all of them hidden it names none; the stored description, which modeling reads, is unchanged |
+| `fields` | The root fields the index reads that the lens shows |
+| `relations` | The relation groups the lens shows — a group whose relation type, or the entity type at its other end, the lens hides is not listed — each with `relationType`, `direction` and `label`: the group's label, else the relation type's display name |
+| `documentProperty` | The document the index reads passages of; null when it reads none or the lens hides it |
+| `modes` | The representations the index keeps that can rank now — `semantic` only with an embedding provider — in the order `semantic`, `keyword` |
+| `status` | The index's own build state ([search-indices.md](search-indices.md#status)) |
 
-- **Only `string` properties contribute.** Integers, floats, booleans, dates and datetimes
-  are excluded — an entity is not findable by meaning through its numeric fields. Filter
-  on those instead.
-- **`document` properties are excluded.** They are chunked and embedded separately, and
-  that is what the document ranking searches. A document's content therefore never
-  influences its own entity's vector, and a very long document cannot drown out the
-  entity's short identifying fields.
-- Properties with no value are skipped. An entity with no string values embeds as its type
-  key alone.
-- **The text is composed from the full schema, not from the lens.** Two lenses exposing
-  different subsets of a type still see identical vectors. Whether a property contributes
-  to retrieval is a schema fact, never a lens fact.
-- The composed text is capped at 30 000 characters and truncated at the cap.
-- Composition is deterministic, so re-embedding an unchanged entity reproduces the same
-  text.
+### Keyword language
 
-## Keeping search data current
+Keyword entries are stemmed in every language of the ontology's **keyword language set**
+— English, German, or both — into one representation, and the query is stemmed in each of
+them. Within one language the query terms combine by the strategy's keyword matching,
+each also matching as a prefix; the languages are alternatives, so a query matches in
+whichever language stems it the way the entry was stemmed. A query word that any
+language of the set treats as a stop word is left out in every language — "für" is not
+searched as an English word — and a query of only such words finds nothing by keyword.
+Matches across languages come from semantic ranking. No request names a language.
 
-Property text and document chunks are recomputed automatically; vectors are added when a provider is configured:
+The set belongs to the ontology's design, not to the registry: creating an ontology names
+no language, and a new one starts with German and English. One whose storage was upgraded
+from an earlier layout starts with the single language it was created with
+([../storage-adapters.md](../storage-adapters.md#how-ontologies-are-isolated)). The set
+is read and changed through the ontology's search settings in modeling
+([../interfaces.md](../interfaces.md#search-settings)); a change is validated whole
+before anything is written and accepts the languages in any order, kept in the order
+German, English. Changing it builds a new keyword generation of every index in the background —
+keyword entries need no embedding calls — and the previous generations keep answering
+until their successors are ready ([search-indices.md](search-indices.md#lifecycle)).
+Transfer carries the set, and import replaces the target's with it
+([transfer.md](transfer.md)). On an adapter without search indices there is no set to
+read or change: the search settings answer `FEATURE_DISABLED`.
 
-- on entity creation, always;
-- on entity update, whenever the update touches any `string` property — the vector is
-  recomputed from the merged post-update state, not from the submitted fragment;
-- for document properties, per changed property: its passages are discarded, the value is
-  re-chunked, and the new passages are embedded. Passages whose text is unchanged reuse
-  their existing vector — unless it is of another width, which no current index could hold
-  — so editing part of a large document re-embeds only the passages the edit touched
-  ([documents.md](documents.md)).
+## Rebuild
 
-Not recomputed, and all three are traps:
+Search indices keep themselves current, a changed embedding model included
+([search-indices.md](search-indices.md#lifecycle)). The one vector store outside them is
+saved-query discovery's: the description vectors and their index
+([saved-queries.md](saved-queries.md)). The search-data rebuild regenerates those; it does
+not touch search indices.
 
-- **A schema change refreshes nothing.** Adding a string property to an entity type leaves
-  every existing entity's stored text reflecting the schema as of its last write. The
-  property contributes to retrieval only for entities written afterwards.
-- **Deleting a string property leaves its values behind.** Deleting the definition does not
-  delete stored values, and neither stored text records which property a word came from, so
-  an entity keeps matching on a value the schema no longer declares — in keyword search and
-  semantic search alike. The match cannot say which property it came from, because the
-  property is gone. This is deliberate: a schema edit stays instant and writes no instance
-  data. The leftovers are cleared on the next rebuild.
-- **A failed embedding does not fail the write.** The entity or passage is stored without
-  a vector and is simply absent from semantic results. The failure is logged, not returned.
+It is one modeling operation per ontology, covering that ontology and nothing beyond it.
+There is no server-wide rebuild: after an embedding-provider switch it is run once per
+ontology. It:
 
-All three are repaired by the same operation.
+1. drops the saved-query description index if its vector width no longer matches the
+   provider's, and leaves it alone otherwise;
+2. re-embeds every saved-query description;
+3. builds the index at the provider's width if it is absent — the one step 1 dropped, or
+   one that never existed.
 
-### Rebuild
-
-One modeling operation per ontology — it covers that ontology's whole schema and all its
-data, not one lens and nothing beyond the ontology. There is no server-wide rebuild:
-after an embedding-provider switch it is run once per ontology. It:
-
-1. drops every one of the ontology's semantic indexes whose vector width no longer
-   matches the provider's, and only those;
-2. recomposes and stores each entity's semantic text and keyword value segments, and
-   rewrites its optional vector;
-3. discards and re-chunks every document property value, embedding every passage whose
-   stored vector is not already of the provider's width — after a model switch that is all
-   of them;
-4. re-embeds every saved-query description ([saved-queries.md](saved-queries.md));
-5. builds every semantic index the schema calls for and does not have — the ones it
-   dropped in step 1, at the provider's width, and any that never existed.
-
-**It runs without an embedding provider.** Steps 2 and 3 are then the whole operation, minus
-the vectors: keyword segments are recomposed and passages re-chunked, neither of which needs
-a model, and passages are themselves the document keyword index. Steps 1, 4 and 5 are
-skipped, because without a provider there is no width to reconcile, no vector index to hold
-and saved-query discovery — which ranks descriptions by vector alone — has nothing to
-rebuild. The summary reports the omission; nothing is counted as failed.
+**It runs without an embedding provider**, and then has nothing to do: without a provider
+there is no width to reconcile and saved-query discovery, which ranks descriptions by
+vector alone, has nothing to rebuild. The summary reports the omission; nothing is counted
+as failed.
 
 The order is forced, not chosen: an index rejects every vector of a width other than its
 own, so while a drifted one stands the new vectors cannot be written, and it cannot be
-built over the old ones. Between step 1 and step 5 the ontology has no semantic index, and
-a rebuild that dies in between leaves them absent with vectors of mixed width — the next
-rebuild that runs to completion repairs that, since it regenerates every vector
-regardless.
+built over the old ones. Between step 1 and step 3 the ontology has no saved-query
+description index, and a rebuild that dies in between leaves it absent with vectors of
+mixed width — the next rebuild that runs to completion repairs that, since it regenerates
+every vector regardless.
 
 It streams progress while running, as newline-delimited JSON: a progress record per
-processed item carrying the entity type key it belongs to, the count so far and that
-group's total, then a final summary with per-type processed and failed counts, the overall
-totals, and whether the embeddings were skipped. An item whose embedding call fails is
-counted as failed; its refreshed keyword values remain searchable without a vector. A run
-with no provider fails nothing — a missing vector is the intended result there, not a
-failure — so the skip flag is what distinguishes it from a complete run.
+processed item carrying the group it belongs to, the count so far and that group's total —
+the saved-query descriptions form one group — then a final summary with the processed and
+failed counts, the overall totals, and whether the embeddings were skipped. An item whose
+embedding call fails is counted as failed. A run with no provider fails nothing, so the
+skip flag is what distinguishes it from a complete run.
 
-So rebuild repairs: missing indexes, drifted index widths, entities and passages that were
-never embedded, stored text stale with respect to a schema change — including the values of
-a deleted string property — and chunking stale with respect to changed chunk-size
-configuration.
+So rebuild repairs a drifted width of the saved-query description index and descriptions
+that were never embedded. An adapter that stores no search indices keeps search data of
+its own, which the same operation rebuilds
+([../storage-adapters.md](../storage-adapters.md#own-search-storage)).
 
-### Vector index width drift
+## Vector index width drift
 
 A vector index fixes its vector width when it is created. Changing the embedding model, or
 its configured width, makes the provider emit vectors of a different width, which an
 existing index refuses. Nothing about the index looks wrong to the database — it stays
 healthy and online — so the failure does not appear at startup. It appears as a storage
-error on the first operation that touches the index.
+error on the first operation that touches the index: a saved-query write that embeds its
+description, or a saved-query discovery. Search indices are not affected: a changed model
+builds new generations of their semantic entries
+([search-indices.md](search-indices.md#lifecycle)).
 
 Startup detects the condition rather than the symptom: with a provider configured, the
-check walks every registered ontology, compares each semantic index's configured width
-against the provider's, and reports every mismatch as a warning identifying the index by
-what it covers — an entity type, a document property on an entity type, or saved-query descriptions
-— never by a physical index name, and naming rebuild as the remedy.
+check walks every registered ontology, compares the configured width of each vector index
+outside search indices against the provider's, and reports every mismatch as a warning
+identifying the index by what it covers — saved-query descriptions — never by a physical
+index name, and naming rebuild as the remedy.
 
 Startup warns and does not repair; the reasoning is in
 [../decisions.md](../decisions.md#behaviour). Rebuild does repair, in the three-phase
@@ -315,12 +337,18 @@ does not stop the server from starting.
 ## Through the interfaces
 
 The full contract is in [../interfaces.md](../interfaces.md). REST `GET /search`, MCP,
-agent tools and saved-query search steps use one search entry and the same envelope.
+agent tools and saved-query search steps use the default search and the same envelope.
 MCP and agents expose `search` (both kinds) and `search_documents` (documents only, every
 hit carrying a passage); neither tool takes a strategy or a floor — both apply the fixed
 floor whenever the default strategy ranks semantically and echo it as `minSimilarity`,
 null under a keyword default. Both allow an omitted entity type.
-MCP additionally accepts filters and fields. Agent limits are 10 by default for search,
+MCP additionally accepts filters and fields.
+
+REST `POST /search` is the index search, and `GET /search-indices` the catalog. On MCP,
+`list_search_indices` answers the catalog, and `search_by_index` runs the index search
+over one index key, a list, or every index the lens can search, under the default mode,
+with the same fixed floor echoed as `minSimilarity`, optionally narrowed to named
+relation types. The agent tools have no index search. Agent limits are 10 by default for search,
 5 for document search, and 20 maximum. A saved-query search step requires one type and
 uses the default kinds and strategy; see [saved-queries.md](saved-queries.md).
 
@@ -328,6 +356,7 @@ Saved-query discovery is separate: it retains its absolute cosine score and mini
 score, description-only embedding, and embedding-provider requirement.
 
 The palette and relation picker use ranked search whenever the strategy list is nonempty,
-falling back to literal entity lists otherwise. They show labels, type chips and one badge
-per document match, with no score or passage text. Extraction review searches properties
-for up to three existing candidates with no score threshold or displayed number.
+falling back to literal entity lists otherwise. Extraction review searches properties
+for up to three existing candidates with no score threshold. None of them displays a
+score or passage text; what they show of a hit is in
+[../product-surface.md](../product-surface.md#matched-via).

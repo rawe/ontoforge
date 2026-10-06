@@ -16,6 +16,7 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../../src/app.js";
+import { settings } from "../../src/config.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
 import { supportsMultipleOntologies } from "./tiers.js";
@@ -86,36 +87,48 @@ beforeEach(async () => {
 });
 
 describe("tool surface", () => {
-  it("lists exactly the twenty-eight modeling tools — and NO update-inclusion tool", async () => {
+  it("lists exactly the forty modeling tools — and NO update-inclusion tool", async () => {
     const tools = await client.listTools();
-    expect(tools.tools).toHaveLength(28);
+    expect(tools.tools).toHaveLength(40);
     expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
       "add_entity_type_to_lens",
       "add_property",
       "add_relation_type_to_lens",
+      "add_search_index_to_lens",
       "create_entity_type",
       "create_lens",
       "create_relation_type",
+      "create_search_index",
       "delete_ai_agent",
       "delete_entity_type",
       "delete_lens",
       "delete_property",
       "delete_relation_type",
       "delete_saved_query",
+      "delete_search_index",
       "ensure_ontology",
       "export_schema",
       "get_schema",
+      "get_search_index",
+      "get_search_index_status",
+      "get_search_settings",
       "import_schema",
       "list_ai_agents",
       "list_saved_queries",
+      "list_search_indices",
+      "preview_search_index",
+      "rebuild_search_index",
       "remove_entity_type_from_lens",
       "remove_relation_type_from_lens",
+      "remove_search_index_from_lens",
       "set_ai_agent",
       "set_saved_query",
+      "set_search_settings",
       "update_entity_type",
       "update_lens",
       "update_property",
       "update_relation_type",
+      "update_search_index",
       "validate_lens",
       "validate_schema",
     ]);
@@ -196,8 +209,14 @@ describe("schema lifecycle over MCP (keys, never ids)", () => {
     expect(person.isError).toBeUndefined();
     expect(json(person).key).toBe("person");
     expect(json(person).displayName).toBe("Person");
+    expect(json(person).nameProperty).toBe("name");
 
-    await call(client, "create_entity_type", { key: "company", display_name: "Company" });
+    const company = await call(client, "create_entity_type", {
+      key: "company",
+      display_name: "Company",
+      name_property: "title",
+    });
+    expect(json(company).nameProperty).toBe("title");
 
     const renamed = await call(client, "update_entity_type", {
       entity_type_key: "person",
@@ -249,6 +268,21 @@ describe("schema lifecycle over MCP (keys, never ids)", () => {
     });
     expect(json(updatedProp).displayName).toBe("Name");
 
+    // The name property moves to another string property; the one it
+    // names cannot be deleted.
+    const renamedTo = await call(client, "update_entity_type", {
+      entity_type_key: "person",
+      name_property: "full_name",
+    });
+    expect(json(renamedTo).nameProperty).toBe("full_name");
+    const refused = await call(client, "delete_property", {
+      type_kind: "entity_type",
+      type_key: "person",
+      property_key: "full_name",
+    });
+    expect(refused.isError).toBe(true);
+    expect(text(refused)).toContain("Choose another name property first");
+
     const deletedProp = await call(client, "delete_property", {
       type_kind: "relation_type",
       type_key: "works_for",
@@ -258,12 +292,16 @@ describe("schema lifecycle over MCP (keys, never ids)", () => {
 
     // get_schema reflects it all in the transfer shape.
     const schema = json(await call(client, "get_schema"));
-    expect(schema.formatVersion).toBe("5.0");
+    expect(schema.formatVersion).toBe("6.0");
     expect(schema.lenses).toEqual([]);
     const entityTypes = schema.entityTypes as Record<string, unknown>[];
     expect(entityTypes.map((et) => et.key)).toEqual(["company", "person"]);
     const personExport = entityTypes.find((et) => et.key === "person");
-    expect((personExport?.properties as unknown[])).toHaveLength(1);
+    expect(personExport?.nameProperty).toBe("full_name");
+    expect((personExport?.properties as Record<string, unknown>[]).map((p) => p.key)).toEqual([
+      "full_name",
+      "name",
+    ]);
     const relationTypes = schema.relationTypes as Record<string, unknown>[];
     expect(relationTypes[0]?.fromEntityTypeKey).toBe("person");
     expect(relationTypes[0]?.toEntityTypeKey).toBe("company");
@@ -280,6 +318,154 @@ describe("schema lifecycle over MCP (keys, never ids)", () => {
     const emptied = json(await call(client, "get_schema"));
     expect(emptied.entityTypes).toEqual([]);
     expect(emptied.relationTypes).toEqual([]);
+  });
+});
+
+describe("search settings over MCP", () => {
+  it.skipIf(settings.DB_BACKEND !== "postgres")("reads and changes the keyword language set and the switches", async () => {
+    expect(json(await call(client, "get_search_settings"))).toEqual({
+      keywordLanguages: ["german", "english"],
+      disabledIndices: [],
+    });
+    await call(client, "create_entity_type", { key: "person", display_name: "Person" });
+    const changed = json(
+      await call(client, "set_search_settings", {
+        keyword_languages: ["english"],
+        disabled_indices: ["person~default"],
+      }),
+    );
+    expect(changed).toEqual({ keywordLanguages: ["english"], disabledIndices: ["person~default"] });
+    // An omitted argument stays as it is.
+    expect(json(await call(client, "set_search_settings", { disabled_indices: [] }))).toEqual({
+      keywordLanguages: ["english"],
+      disabledIndices: [],
+    });
+    expect((json(await call(client, "export_schema")) as { keywordLanguages: string[] }).keywordLanguages).toEqual([
+      "english",
+    ]);
+    const invalid = await call(client, "set_search_settings", {
+      keyword_languages: ["french"],
+      disabled_indices: ["nope"],
+    });
+    expect(invalid.isError).toBe(true);
+    expect(text(invalid)).toContain("keywordLanguages");
+  });
+
+  it.skipIf(settings.DB_BACKEND === "postgres")("is not supported by an adapter without search indices", async () => {
+    const result = await call(client, "get_search_settings");
+    expect(result.isError).toBe(true);
+    expect(text(result)).toContain("not supported");
+  });
+});
+
+describe("search indices over MCP", () => {
+  const PEOPLE = {
+    key: "people",
+    name: "People",
+    description: "People by name and employer",
+    entityType: "person",
+    fields: ["name"],
+    relations: [{ relationType: "works_for", direction: "outgoing", target: { company: ["name"] } }],
+  };
+
+  async function schema(): Promise<void> {
+    await call(client, "create_entity_type", { key: "person", display_name: "Person" });
+    await call(client, "create_entity_type", { key: "company", display_name: "Company" });
+    await call(client, "create_relation_type", {
+      key: "works_for",
+      display_name: "Works for",
+      source_entity_type_key: "person",
+      target_entity_type_key: "company",
+    });
+  }
+
+  it.skipIf(settings.DB_BACKEND !== "postgres")("creates, previews, reads, updates, rebuilds and deletes a custom index", async () => {
+    await schema();
+    const preview = json(await call(client, "preview_search_index", { definition: { ...PEOPLE, key: undefined } }));
+    expect(preview).toMatchObject({ valid: true, issues: [], estimate: { entities: 0, entries: 0 } });
+    const invalid = json(
+      await call(client, "preview_search_index", { definition: { ...PEOPLE, fields: ["nope"] } }),
+    );
+    expect(invalid).toMatchObject({ valid: false, estimate: null });
+
+    const created = json(await call(client, "create_search_index", { definition: PEOPLE }));
+    expect(created).toMatchObject({ key: "people", kind: "custom", enabled: true });
+    const listed = json(await call(client, "list_search_indices")) as unknown as { key: string }[];
+    expect(listed.map((i) => i.key)).toEqual(["company~default", "people", "person~default"]);
+    expect(json(await call(client, "get_search_index", { index_key: "people" }))).toMatchObject({ key: "people" });
+    expect(json(await call(client, "get_search_index_status", { index_key: "people" }))).toHaveProperty("state");
+
+    const updated = json(
+      await call(client, "update_search_index", { index_key: "people", definition: { ...PEOPLE, relations: [] } }),
+    );
+    expect((updated.definition as { relations: unknown[] }).relations).toEqual([]);
+    expect(json(await call(client, "rebuild_search_index", { index_key: "people" }))).toHaveProperty("representations");
+
+    // The schema reads carry the custom definitions and the switches.
+    const exported = json(await call(client, "get_schema")) as { searchIndices: { custom: { key: string }[] } };
+    expect(exported.searchIndices.custom.map((d) => d.key)).toEqual(["people"]);
+
+    const invalidCreate = await call(client, "create_search_index", { definition: { ...PEOPLE, key: "other", fields: ["nope"] } });
+    expect(invalidCreate.isError).toBe(true);
+    expect(text(invalidCreate)).toContain("fields.0");
+    const managed = await call(client, "update_search_index", { index_key: "person~default", definition: PEOPLE });
+    expect(managed.isError).toBe(true);
+    expect(text(managed)).toContain("managed indices can only be switched");
+
+    expect(text(await call(client, "delete_search_index", { index_key: "people" }))).toBe(
+      "Search index 'people' deleted.",
+    );
+    expect((await call(client, "get_search_index", { index_key: "people" })).isError).toBe(true);
+  }, 20_000);
+
+  it.skipIf(settings.DB_BACKEND !== "postgres")("delete tools' cascade flag covers custom indices", async () => {
+    await schema();
+    await call(client, "create_search_index", { definition: PEOPLE });
+    const refused = await call(client, "delete_relation_type", { relation_type_key: "works_for" });
+    expect(refused.isError).toBe(true);
+    expect(text(refused)).toContain("custom search index(es) (people)");
+    await call(client, "delete_relation_type", { relation_type_key: "works_for", cascade: true });
+    const people = json(await call(client, "get_search_index", { index_key: "people" }));
+    expect((people.definition as { relations: unknown[] }).relations).toEqual([]);
+  });
+
+  it.skipIf(settings.DB_BACKEND !== "postgres")("includes indices in a lens by key; schema reads and validation show them", async () => {
+    await schema();
+    await call(client, "create_search_index", { definition: PEOPLE });
+    await call(client, "create_lens", { key: "hr", name: "HR" });
+    await call(client, "add_entity_type_to_lens", { lens_key: "hr", entity_type_key: "person" });
+    // Company with no property: the group's target field is hidden.
+    await call(client, "add_entity_type_to_lens", { lens_key: "hr", entity_type_key: "company", properties: [] });
+
+    const added = await call(client, "add_search_index_to_lens", { lens_key: "hr", index_key: "people" });
+    expect(json(added)).toEqual({ key: "people" });
+    const twice = await call(client, "add_search_index_to_lens", { lens_key: "hr", index_key: "people" });
+    expect(twice.isError).toBe(true);
+    await call(client, "create_lens", { key: "desk", name: "Desk" });
+    await call(client, "add_entity_type_to_lens", { lens_key: "desk", entity_type_key: "company" });
+    const foreign = await call(client, "add_search_index_to_lens", { lens_key: "desk", index_key: "people" });
+    expect(foreign.isError).toBe(true);
+    expect(text(foreign)).toContain("Root entity type 'person'");
+
+    const exported = json(await call(client, "get_schema")) as { lenses: { key: string; indexInclusions: string[] }[] };
+    expect(exported.lenses.find((l) => l.key === "hr")!.indexInclusions).toEqual(["people"]);
+    const validated = json(await call(client, "validate_lens", { lens_key: "hr" })) as { warnings: { path: string }[] };
+    expect(validated.warnings.map((w) => w.path)).toEqual(["lenses.hr.includes.searchIndices.people.relations.0.target.company.0"]);
+
+    expect(text(await call(client, "remove_search_index_from_lens", { lens_key: "hr", index_key: "people" }))).toBe(
+      "Search index 'people' removed from lens 'hr'.",
+    );
+    expect((await call(client, "remove_search_index_from_lens", { lens_key: "hr", index_key: "people" })).isError).toBe(true);
+  });
+
+  it.skipIf(settings.DB_BACKEND === "postgres")("is not supported by an adapter without search indices", async () => {
+    const result = await call(client, "list_search_indices");
+    expect(result.isError).toBe(true);
+    expect(text(result)).toContain("not supported");
+    await call(client, "create_lens", { key: "hr", name: "HR" });
+    const included = await call(client, "add_search_index_to_lens", { lens_key: "hr", index_key: "x" });
+    expect(included.isError).toBe(true);
+    expect(text(included)).toContain("not supported");
   });
 });
 
@@ -506,7 +692,7 @@ describe("lenses over MCP", () => {
 
   it("validate_schema combines the global half with every lens", async () => {
     const clean = json(await call(client, "validate_schema"));
-    expect(clean).toEqual({ valid: true, errors: [] });
+    expect(clean).toEqual({ valid: true, errors: [], warnings: [] });
 
     await call(client, "create_entity_type", { key: "person", display_name: "Person" });
     await call(client, "add_property", {

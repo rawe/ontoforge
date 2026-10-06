@@ -20,7 +20,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../../src/app.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
-import { createOntology, modelPrefix, runtimePrefix } from "./fixture.js";
+import { createOntology, defineEntityProperty, modelPrefix, runtimePrefix } from "./fixture.js";
 import { wipeDatabase } from "./reset.js";
 import { supportsMultipleOntologies } from "./tiers.js";
 
@@ -69,7 +69,7 @@ async function buildTwinOntologies(): Promise<void> {
       displayName: "Person",
     });
     const personId = person.entityTypeId as string;
-    await post(`${model}/entity-types/${personId}/properties`, {
+    await defineEntityProperty(app, ontologyKey, personId, {
       key: "name",
       displayName: "Name",
       dataType: "string",
@@ -332,6 +332,7 @@ describe("the runtime surface itself", () => {
       entityIdentityComparison: false,
       searchStrategies:
         settings.DB_BACKEND === "postgres" ? ["keyword", "keyword-any", "keyword-all"] : [],
+      searchIndices: settings.DB_BACKEND === "postgres",
     });
   });
 });

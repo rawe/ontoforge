@@ -17,7 +17,7 @@ import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ApiError } from '@/api/http'
 import { createEntity, createRelation } from '@/api/runtime'
-import { useFeatures } from '@/api/hooks'
+import { useDisplayLabel, useFeatures, useMatchedVia } from '@/api/hooks'
 import type {
   ExtractResponse,
   JsonValue,
@@ -43,7 +43,6 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { displayLabel } from '@/lib/displayLabel'
 import { cn } from '@/lib/utils'
 
 /* --------------------------------- helpers ---------------------------------- */
@@ -53,7 +52,7 @@ function liveLabel(item: ReviewEntityItem): string {
   for (const [key, value] of Object.entries(item.drafts)) {
     if (value.trim() !== '') nonEmpty[key] = value
   }
-  return proposedLabel(nonEmpty)
+  return proposedLabel(nonEmpty, item.type?.nameProperty)
 }
 
 function StatusBadge({ item }: { item: { status: string; error?: string } }) {
@@ -95,6 +94,8 @@ function EntityCard({
   comparisonEnabled: boolean
   onChange: (patch: Partial<ReviewEntityItem>) => void
 }) {
+  const displayLabel = useDisplayLabel()
+  const matchedVia = useMatchedVia()
   const missing = missingRequired(item)
   const locked = disabled || item.status === 'created' || item.status === 'creating'
   const usingExisting = item.useExisting !== null
@@ -195,18 +196,23 @@ function EntityCard({
                   <RadioGroupItem value="__new__" />
                   Create new
                 </Label>
-                {similar.map(({ entity }) => (
-                  <Label
-                    key={entity._id}
-                    className="flex cursor-pointer items-center gap-2 text-xs font-normal"
-                  >
-                    <RadioGroupItem value={entity._id} />
-                    <span className="min-w-0 truncate">
-                      Use existing <span className="font-medium">{displayLabel(entity)}</span>
-                    </span>
-
-                  </Label>
-                ))}
+                {similar.map(({ entity, matched }) => {
+                  const via = matchedVia(matched)
+                  return (
+                    <Label
+                      key={entity._id}
+                      className="flex cursor-pointer items-center gap-2 text-xs font-normal"
+                    >
+                      <RadioGroupItem value={entity._id} />
+                      <span className="min-w-0 truncate">
+                        Use existing <span className="font-medium">{displayLabel(entity)}</span>
+                        {via !== null && (
+                          <span className="text-[11px] text-muted-foreground"> · {via}</span>
+                        )}
+                      </span>
+                    </Label>
+                  )
+                })}
               </RadioGroup>
               {comparisonEnabled && (
                 <IdentityComparison

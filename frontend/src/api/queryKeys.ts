@@ -5,6 +5,7 @@
  *   ['ontologies']                                   registry ontology list
  *   ['lenses', ontologyKey]                          modeling lens list
  *   ['schema', ontologyKey, lensKey]                 runtime schema
+ *   ['schema', ontologyKey, lensKey, 'search-indices']  runtime search catalog
  *   ['entities', ontologyKey, lensKey, typeKey, params]
  *   ['entity', ontologyKey, lensKey, typeKey, id]
  *   ['document', ontologyKey, lensKey, typeKey, id, propertyKey]
@@ -13,6 +14,7 @@
  *   ['savedQueries', ontologyKey, lensKey]
  *   ['agents', ontologyKey, lensKey]
  *   ['model', ontologyKey, ...]                      modeling sub-keys
+ *   ['model', ontologyKey, 'retriever-agents', lensKey]  retriever agents of a lens
  *
  * Every ontology-scoped key carries the ontology key, so the same lens
  * key in two ontologies never shares a cache entry. Mutations invalidate
@@ -63,4 +65,7 @@ export const qk = {
 
   model: (ontologyKey: string, ...parts: readonly unknown[]) =>
     ['model', ontologyKey, ...parts] as const,
+  /** Under `model`: every modeling mutation (scope, schema) refreshes their validation. */
+  retrieverAgents: (ontologyKey: string, lensKey: string) =>
+    ['model', ontologyKey, 'retriever-agents', lensKey] as const,
 } as const

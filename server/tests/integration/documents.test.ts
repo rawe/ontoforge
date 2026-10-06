@@ -6,8 +6,12 @@
  * returns a fixed vector, so every chunk row carries one and the port's
  * text→vector map sees it).
  *
- * The physical chunk-row assertions (virtual label, raw coordinates) live
- * in `tests/integration/neo4j/documents.test.ts`.
+ * The chunk lifecycle is the own search storage of an adapter without
+ * search indices (`keepsOwnSearchStorage`); on one that stores them the
+ * worker chunks the current document into passage entries
+ * (`tests/integration/postgres/search-pipeline.test.ts`). The physical
+ * chunk-row assertions (virtual label, raw coordinates) live in
+ * `tests/integration/neo4j/documents.test.ts`.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -20,7 +24,9 @@ import {
   getRuntimeStore,
   initStores,
 } from "../../src/core/ports.js";
+import { defineEntityProperty } from "./fixture.js";
 import { wipeDatabase } from "./reset.js";
+import { keepsOwnSearchStorage } from "./tiers.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 
 type Row = Record<string, unknown>;
@@ -65,9 +71,10 @@ beforeEach(async () => {
   const article = await post("/api/ontologies/test_ont/model/entity-types", {
     key: "article",
     displayName: "Article",
+    nameProperty: "title",
   });
   ids.articleId = article.entityTypeId as string;
-  await post(`/api/ontologies/test_ont/model/entity-types/${ids.articleId}/properties`, {
+  await defineEntityProperty(app, "test_ont", ids.articleId, {
     key: "title",
     displayName: "Title",
     dataType: "string",
@@ -116,7 +123,7 @@ async function readDocument(entityId: string, propertyKey: string, query = ""): 
  * exactly the stored chunks (fixtures keep chunk texts distinct). */
 async function chunkTexts(entityId: string, propertyKey: string): Promise<string[]> {
   const store = await getRuntimeStore("test_ont");
-  const map = await store.getChunkEmbeddingsForEntityProperty(entityId, propertyKey);
+  const map = await store.getChunkEmbeddingsForEntityProperty!(entityId, propertyKey);
   return Object.keys(map);
 }
 
@@ -347,7 +354,7 @@ describe("partial writes", () => {
   });
 });
 
-describe("chunk lifecycle (fake provider, fixed vector)", () => {
+describe.skipIf(!keepsOwnSearchStorage)("chunk lifecycle (fake provider, fixed vector)", () => {
   const VECTOR = [0.5, 0.25, 0.125, 0.0625];
 
   beforeEach(() => {
@@ -456,7 +463,7 @@ describe("chunk lifecycle (fake provider, fixed vector)", () => {
     const entityId = entity._id as string;
 
     const store = await getRuntimeStore("test_ont");
-    const map = await store.getChunkEmbeddingsForEntityProperty(entityId, "body");
+    const map = await store.getChunkEmbeddingsForEntityProperty!(entityId, "body");
     expect(Object.keys(map).length).toBeGreaterThan(1);
     for (const vector of Object.values(map)) {
       expect(vector).toEqual(VECTOR);

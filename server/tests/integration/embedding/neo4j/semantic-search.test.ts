@@ -18,6 +18,7 @@ import { closeStores, initStores } from "../../../../src/core/ports.js";
 import { wipeDatabase } from "../../reset.js";
 import { invalidateLoadedSchemaCache } from "../../../../src/runtime/schemaCache.js";
 import { checkOllamaModel, disableProvider, enableOllamaProvider } from "../support.js";
+import { defineEntityProperty } from "../../fixture.js";
 
 type Row = Record<string, unknown>;
 
@@ -64,7 +65,7 @@ describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "neo4j")(
         { key: "name", displayName: "Name", dataType: "string", required: true },
         { key: "bio", displayName: "Bio", dataType: "string", required: false },
       ]) {
-        await post(`/api/ontologies/test_ont/model/entity-types/${etId}/properties`, prop);
+        await defineEntityProperty(app, "test_ont", etId, prop);
       }
       return { etId };
     }

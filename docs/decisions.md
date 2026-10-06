@@ -39,8 +39,8 @@ key, unique server-wide, with a mutable display name, also unique server-wide.
 Interfaces speak the key.
 
 **Key scoping** — every key is unique within its owner: property keys per type,
-saved-query and agent keys per lens, type and lens keys per ontology, ontology keys
-per server.
+saved-query, agent and retriever-agent keys per lens, type and lens keys per ontology,
+ontology keys per server.
 
 **Ontology lifecycle** — created bare (no types, no lenses, no data); rename changes
 the display name only; delete is a hard full cascade over everything the ontology
@@ -55,17 +55,17 @@ product names for its surfaces, and does.
 
 **Keys, never identifiers, on the runtime and MCP surfaces.**
 Everything an agent or a data client touches is addressed by human-readable key:
-ontologies, lenses, types, properties, saved queries and agents. Internal identifiers are
-resolved behind the interface. A language model should never have to carry an opaque
-identifier to name a type.
+ontologies, lenses, types, properties, saved queries, agents and retriever agents. Internal
+identifiers are resolved behind the interface. A language model should never have to
+carry an opaque identifier to name a type.
 
 The modeling REST surface is the exception: it addresses lenses, types and properties
-by internal identifier, and only agent configurations and saved queries by key. It is a
-schema-design surface used by a client that has just listed the resource it is about to
-address, so the identifier is always at hand.
+by internal identifier, and only agent configurations, saved queries and retriever
+agents by key. It is a schema-design surface used by a client that has just
+listed the resource it is about to address, so the identifier is always at hand.
 
 **Key length cap.** Every key — entity type, relation type, lens, property,
-agent, saved query — is at most 64 characters (`MAX_KEY_LENGTH`), enforced at
+agent, saved query, retriever agent — is at most 64 characters (`MAX_KEY_LENGTH`), enforced at
 validation alongside the key pattern. Keys are human-typed identifiers; the cap
 keeps adapter-derived physical names legible and rejects absurd input at the
 boundary rather than deep inside an adapter. Ontology keys carry a tighter cap of
@@ -97,6 +97,29 @@ with the ontology registry (table `ontology`). Ontology-scoped DDL runs at ontol
 creation; ontology delete drops the namespace in one cascade. Physical lens names
 follow the locked vocabulary (`lens`, `lens_includes`, `lens_id`, `lens_key`).
 Deliberation: [adr/0017](adr/0017-postgres-namespace-per-ontology.md).
+
+**Storage carries its own version number.** The storage records a storage version — a
+whole number, independent of the release version and of the transfer format version, that
+changes only when a release changes the storage layout. One number covers the whole
+server. New storage is created directly at the current layout and version. At startup the
+server compares the recorded version with the one the code expects and brings older
+storage up to date automatically before it serves requests: every ontology is upgraded
+together, and the number advances only when all of them succeeded. Several servers
+starting against one database upgrade it once: the upgrade holds a database-wide lock and
+reads the version again under it. The server logs every upgrade it runs and never backs
+up storage itself. The release defines the storage layout — tables, columns, fixed
+indexes — and only a storage-version upgrade changes it; the two exceptions are the vector
+indexes the search-data rebuild drops and builds again — and, on an adapter with its own
+search storage, those schema changes create and drop — and the entry storage of each
+search-index generation, which the generation's lifecycle creates and drops. Within a major release line upgrade steps only add — tables, columns with a
+default, indexes — so servers of the
+previous release keep working during a rolling update; renaming, removing or rewriting
+stored data waits for the next major release, which carries one step of its own. Upgrade steps are kept for one major release line: a major release
+removes them all and accepts only new storage or storage at the version the previous
+major line ended on. Storage from before the storage version existed counts as version 1;
+the 5.x line ended there, so 6.0 upgrades it. Older storage stops the server with the instruction to upgrade
+through the last release of the previous major line first. Storage newer than the code
+also stops the server, untouched.
 
 **Neo4j ontology cap** — the Neo4j adapter supports at most one ontology; a second
 create is rejected as a domain condition. Multi-ontology conformance is a separate
@@ -155,14 +178,41 @@ both behaviours.
 **PostgreSQL instance mapping: two generic jsonb tables.** The PostgreSQL adapter
 stores all instance data in two generic tables — `entity` and `relation`, with `uuid`
 primary keys and properties as jsonb — never a table per type. A schema change stays
-pure data; no DDL runs against a live database. The physical mapping is described in
+pure data for instance storage: no table or column is ever created per type or property.
+The only DDL that follows a schema change is the entry table of a search-index generation
+it starts. The physical mapping is described in
 [storage-adapters.md](storage-adapters.md); deliberation:
 [adr/0015](adr/0015-generic-jsonb-instance-tables.md).
 
 **Storage DDL enforces structure only.** Adapter DDL carries identity,
 referential integrity, exactly-one-owner and uniqueness — nothing else. Business
 rules (for example, document properties only on entity types, the data-type
-enumeration) validate in the service; the database provides no backstop for them.
+enumeration) validate in the service; the database provides no backstop for them. One
+exception: the PostgreSQL search-index tables check their closed vocabularies — index
+kind, representation, generation state.
+
+**Search-index entries are built asynchronously; search over them is eventually
+consistent.** A write commits without its semantic or keyword entries; they follow in the
+background, so building entries — embedding included — never delays or fails the write
+that caused them.
+
+**Search indexing is a transactional outbox drained by an in-process worker, behind the
+persistence port.** Every entity and relation write queues the search work it causes in
+its own transaction, in the same database; a worker in every server process claims and
+processes it. No external queue or broker. One database and one transaction keep the
+work exactly as durable as the write.
+
+**Search-index vectors are half precision, stored and indexed.** The PostgreSQL adapter
+keeps entry vectors in an untyped `halfvec` column and indexes each generation as
+`halfvec` at its width, so every PostgreSQL deployment needs a pgvector with half-precision
+vectors. Half precision halves the heap and the vector indexes, which a large ontology
+needs kept in memory for fast search.
+
+**PostgreSQL keeps one entry table per ontology namespace, list-partitioned by
+generation.** A generation fills a table of its own, is indexed there and is attached as a
+partition when it becomes active; a retired one is detached and dropped whole. Building
+beside the serving generation and switching in one step never rewrites the entries
+search is reading.
 
 **Documentation above the port describes the behaviour of the default
 deployment.** Adapter-specific deviations are documented with that adapter in
@@ -221,22 +271,25 @@ set; no write tool is grantable.
 
 **Search strategies have implementations and availability requirements.** Defaults choose
 the first available of hybrid, keyword, semantic; every response names the applied one.
+The index search's mode follows the same order: hybrid with an embedding provider,
+keyword without one.
 
 **Search ranking scores are relative; match evidence is separate.** A hit's
 `relativeScore` is comparable only within one response and is never absolute similarity
 or confidence. Each match's `evidence` carries `semanticSimilarity` (the supported
 similarity on the `(1 + cosine) / 2` scale, or null), `keywordMatch` (a supported
-boolean result, or null) and `keywordScore` (the adapter's native full-text ranking
-measurement, raw and unbounded, a number exactly when `keywordMatch` is true and null
-exactly when it is null). Null means unknown or unmeasured, including unavailable
+boolean result, or null) and `keywordScore` (the entry's keyword score — the distinct
+query words it contains plus the adapter's native full-text ranking below one — unbounded,
+a number exactly when `keywordMatch` is true and null exactly when it is null). Null means unknown or unmeasured, including unavailable
 signals; false requires an explicit negative evaluation, never absence from a limited
 ranking. The keyword score is not comparable to semantic similarity, not across
-responses, and never enters fusion or tie refinement. Evidence describes the composed entity text or the particular returned document
-passage, not which signals contributed to ranking. Do not add a `via` or source-membership
-field to this contract. Retaining evidence itself preserves ranking and passage selection.
-Property matches also expose nullable `keywordPropertyKeys`, naming exposed string values
-that supplied query terms; withhold incomplete or unsupported attribution rather than
-invent it. They do not attribute semantic matches to individual properties.
+responses, and never enters fusion or tie refinement. Evidence describes the match's own
+entry — the entity's own-field text or the particular returned document passage — not
+which signals contributed to ranking. A hit's `matched` names the entry that matched best
+— its index, part and, for a relation entry, the relation and its target — never which
+retrieval method found it; do not add a `via` or source-membership field naming the
+contributing signals. Retaining evidence itself preserves ranking and passage selection.
+Matches do not attribute keyword or semantic matches to individual properties.
 Saved-query discovery retains its separate cosine scores.
 
 **Search ranking and evidence have distinct meanings.** Relative rank, semantic
@@ -253,19 +306,26 @@ not, by itself, establish which individual property caused the match.
 Changing single-type behaviour requires separate explicit approval, because a fix for
 unequal eligibility across types must not silently change callers searching one type.
 
-**Cross-type kind fusion uses the best reciprocal kind rank.** When both kinds run
-over more than one searched type, take the maximum contribution; keep summed fusion
-within each kind and for at-most-one-type requests. Resolve equal cross-kind fusion
-scores by the best semantic similarity in returned matches only if every tied entity has
-one; otherwise retain the group's encounter order. This removes additive schema
-participation credit without treating missing measurements as negative evidence. Deliberation:
+**Search merges indices by score within a retrieval method and fuses only the methods,
+by reciprocal rank.** Within one method, the rankings of every searched index — every
+type, own fields and passages alike — merge into one ranking by their own scores, which
+share one scale there (one embedding model's similarity, one query's keyword score). Grouped by entity, an entity counts once, scored by its best entry, whichever
+index holds it. A single method keeps those scores; `hybrid` fuses the two entity rankings
+as the sum of `1 / (60 + rank)`. What matched is the best entry under the method in which
+the entity ranks best, semantic on equal ranks. Resolve equal scores by the best semantic
+similarity only if every tied entity has one; otherwise, and among equal similarities, by
+entity id. Being found by several indices — own fields and a document, say — never adds
+up, so an entity is not favoured because its type has a document property, and no
+missing measurement is treated as negative evidence. The Neo4j adapter stores no search
+indices and ranks per kind instead; when both kinds run there over more than one searched
+type, it takes the best reciprocal kind rank. Deliberation:
 [adr/0020](adr/0020-search-ranking-and-evidence.md).
 
-**Property keyword content contains values, not schema labels.** Preserve ordered
-schema-string value segments separately from labeled semantic text, so keys cannot count
-as matching content and keyword attribution can name contributing values. The values-only
-correction applies to keyword and hybrid property retrieval, including single-type queries;
-this is distinct from preserving single-type fusion.
+**Keyword content contains values, not schema labels.** An entry's keyword text holds
+values only, its semantic text is labelled — or rendered from a custom index's template,
+which keyword text never uses — so keys and labels cannot count as matching
+content. This applies to keyword and hybrid retrieval, including single-type queries; it
+is distinct from preserving single-type fusion.
 
 **Search evidence does not establish answer sufficiency.** Keep search candidates
 available without an automatic similarity floor over REST, where a caller may set an
@@ -288,9 +348,9 @@ keyword matching: every query term must be present, each still matching as a pre
 Any-term is the default because a conjunction lets one absent term empty the whole result,
 which for a compounding language is ordinary rather than exceptional: stemming reduces
 neither compounds nor derivations, so a row holding what was asked drops out over a term
-it carries in another form. Rank order reflects how
-often query terms occur, and a repeated term counts like several distinct terms; it does
-not express term coverage. Prefix matching admits unrelated words sharing a stem; ranking
+it carries in another form. Rank order follows the keyword score, so an entry holding
+more distinct query words ranks above one holding fewer, whatever their frequency.
+Prefix matching admits unrelated words sharing a stem; ranking
 carries that cost. Under either method the query is assembled from the query terms the
 adapter's own tokenizer produced for the search text, quoted, so search text never
 reaches query syntax. Strategies are the extension point for retrieval behaviour and are
@@ -300,33 +360,41 @@ two axes; a conjunction over exact query terms without prefix matching, since al
 means every term, not no morphology; and building no all-term variant, which leaves the
 any-term behaviour unnamed and the extension point unexercised.
 
-**Text-search language is an immutable ontology setting.** Chosen at creation, default
-English, carried in export, and checked against the import target.
+**Keyword entries are stemmed in every language of the ontology's keyword language set.**
+The set is English, German, or both. One keyword representation per entry concatenates
+the stemming of each language; a query is stemmed in each, its terms combined within a
+language by the keyword matching and the languages OR-ed. No request names a language:
+which language a query is written in is unknown, and an ontology's content may mix both.
+Matches across languages are left to semantic ranking. The set is a modeling setting of
+the ontology, not a registry attribute: creating an ontology names no language, and a new
+ontology starts with both languages. It is editable; a change builds new keyword
+generations of every index in the background, without embedding calls, while the
+previous ones keep serving until they are ready. Import replaces the target's set with
+the payload's. Stemming uses the database's stock configuration of each language, with no
+added compound or other dictionary, so a deployment needs no custom database image.
 
-**Keyword index families are fixed at ontology creation.** Their language is the ontology's
-language; no per-type keyword DDL exists. Property keyword values and document chunks are
-stored even without embeddings. Schema changes do not silently refresh stored entity
-representations.
+**A schema edit never writes instance data.** Managed search indices follow the schema
+asynchronously: a changed derived definition builds a new generation in the background,
+and the previous one serves until it is ready. An adapter's own search storage
+([storage-adapters.md](storage-adapters.md#own-search-storage)) is not refreshed at all:
+deleting a string property leaves its values inside every entity's stored vector until a
+rebuild recomposes it, since a vector does not record which property a word came from.
+Cleaning up at deletion time was rejected: it would turn a schema edit into a write over
+all instance data, a bulk re-embedding that a server with no provider could not perform
+at all.
 
-**A schema edit never writes instance data; the rebuild repairs what it leaves behind.**
-Deleting a string property leaves its values inside every entity's stored keyword text and
-semantic text, where they keep matching until a rebuild recomposes them — in both kinds,
-since neither stored text records which property a word came from. Cleaning up at deletion
-time was rejected: it would turn a schema edit into a write over all instance data, and for
-the semantic half a bulk re-embedding that a server with no provider could not perform at
-all. The staleness is bounded, visible in the documented behaviour, and repaired by one
-explicit call.
-
-**One rebuild covers every stored representation search reads, and it needs no provider.**
-Keyword text and document passages are rebuilt by a run that calls no model — passages are
-themselves the document keyword index — so the operation runs with an embedding provider
-absent, skips the vectors, the vector indexes and the saved-query descriptions, and reports
-that skip in its summary rather than counting it as failure. A vector-only name for it would
-be wrong: the operation is named for the search data it rebuilds, not for one half of it.
+**One rebuild covers every vector and passage stored outside search indices, and it
+needs no provider.** On an adapter that stores search indices that is the saved-query
+description vectors and their index alone; search indices keep themselves current and
+are not part of it. On an adapter with its own search storage it also covers every
+entity's vector and every document's chunks. Without an embedding provider the operation
+still runs: it skips the vectors, the vector indexes and the saved-query descriptions —
+re-chunking documents where it has any, which calls no model — and reports that skip in
+its summary rather than counting it as failure.
 
 **The list filters and the search ranks.** Neither server operation falls back to the
-other. Cross-type search uses per-type indexes and an exact searched set, with no shared
-cross-type vector index.
+other. Cross-type search ranks each searched type's own indices over an exact searched
+set, with no shared cross-type index.
 
 **MCP transport is stateless HTTP with plain JSON responses.**
 MCP has no event stream. Statelessness allows the same mount to serve many clients
@@ -405,6 +473,16 @@ the filter vocabulary — an operator or a kind of filter subject — settles wh
 table offers it and updates that list, so every difference between the table and the
 server is a recorded choice.
 
+**The web client shows no search score.** A hit names at most what found it — a relation
+or a passage — in a short label, never a number, a bar or the entry's text. A displayed
+score would be read as relevance or confidence, which a relative score is not.
+
+**Search indices and retriever agents are designed in the Studio and used in the
+Workbench.** The Studio owns the index designer, the search settings and the
+retriever-agent editor, which carries a test panel so an agent is configured and tried in
+one place; the Workbench only chats with saved agents. Design stays with design, as
+schema and lenses do.
+
 **Validation collects every error before answering.**
 A rejected write names all offending fields at once, and a rejected read all of its
 faulty filters, so a caller can correct in one round trip rather than discovering faults
@@ -416,8 +494,112 @@ default still receives that default — otherwise a narrow lens could create dat
 invalid under a wider one.
 
 **Destructive schema changes require explicit consent.**
-A change that would invalidate a lens is refused, and names the lenses it would affect.
-It proceeds only when the caller asks for it a second time, explicitly.
+A change that would invalidate a lens, or remove something a custom search index reads,
+is refused, and names the lenses and custom indices it would affect. It proceeds only
+when the caller asks for it a second time, explicitly; the consented change then prunes
+the indices — deleting those left with nothing to read — so no definition ever reads
+what no longer exists. Deleting a custom index a lens includes asks the same consent.
+Managed indices are never part of it: they follow the schema by themselves.
+
+**Every entity type has exactly one name property.**
+It is a `string` property of that type, created with the type, reassignable to another
+`string` property of the type, and never removable while it is the name property — the
+server never picks a replacement. Clients label an entity by its name property's value
+alone, so a label never depends on guessing which property names a thing. Where data
+predates name properties — older storage, a previous-version transfer payload — one fixed
+derivation assigns it, and that derivation is used nowhere else.
+
+**Search indices are ontology-level design objects; lenses include them.** An index is
+defined and stored once per ontology and serves every lens: a custom index is defined by
+a modeler in modeling, a managed one derived by the server. An unscoped lens searches
+every index; a scoped lens only the indices it includes, and only while it exposes their
+root entity type. Index inclusions never make a lens scoped. Lenses only subtract: a
+lens-owned index would duplicate entries and embedding cost across lenses and vanish with
+its lens without consent, while an index visible to every lens would expose content over
+types a scoped lens hides. Deliberation:
+[adr/0022](adr/0022-search-indices-ontology-level-included-per-lens.md).
+
+**Every entity type has a managed default index, and every document property a managed
+passage index; managed indices follow the schema.** The default index covers the type's
+own `string` properties; the passage index holds the document's chunks headed by the
+entity's name, and its entries are the only place chunks are kept. Their keys are
+`<entityTypeKey>~default` and `<entityTypeKey>~<documentPropertyKey>`: `~` occurs in no
+key pattern, so a managed key never collides with a chosen one, whereas `:` already marks
+a direction in query paths. The server derives both from the schema on every schema change, creates,
+updates and deletes them without a consent step, and includes a new one in every scoped
+lens exposing its root type — a passage index only where the lens also shows its document
+property, so a scoped lens is never handed a way to find entities by text it hides. They
+cannot be edited, only switched off, and have no relation groups — relations enrich an
+entity only through a custom index. Search works with no index configuration, and a schema change can never leave search reading a stale
+field list.
+
+**A search entry holds at most one relation instance; entries never combine relations.**
+An entity's own fields form one entry; each relation instance, with the entity at its
+other end, forms one entry of its own, headed by the entity's own header fields. The best
+entry decides the entity's score. A fact spread over two relations is answered by an
+exact filter or by fusing rankings at entity level, never by one entry. Combinations would
+multiply, nobody can say which make sense, and one change would re-embed every combination
+containing it; kept apart, each relation's facts stay separately rankable, and a lens that
+hides a relation type or target type skips those entries at query time, with no rebuild
+and no hidden facts inside a combined vector. Deliberation:
+[adr/0023](adr/0023-one-search-entry-per-relation-instance.md).
+
+**A relation group reaches one hop.** A custom index follows its root entity's relations
+to the entities at their other end, nothing further. Each group already multiplies a
+root type's entries by about one plus its degree, and a change of a related entity
+queues every relation pointing to it; a further hop would multiply both again.
+
+**Relation and passage entries start with a header of the entity's own fields; relation
+groups follow either direction.** The header defaults to the entity type's name property
+and is configurable per custom index, so an entry about one relation still matches
+together with whose relation it is, while each relation keeps an entry of its own. A
+group follows outgoing or incoming relations, so a type can be found by the relations
+that point to it.
+
+**A cost preview and per-index limits control indexing cost, not an index count.** A
+custom index reads at most 12 fields — own, relation and target fields together, the
+header not counted — and holds at most 4 relation groups. There is no cap on the number
+of indices. Entries, not indices, drive cost: one index with an incoming group on a hub
+type can outweigh many small ones, so modeling estimates the entries and build time of
+a definition at the measured throughput before it is saved. The field cap bounds entry
+text, which dilutes a vector as it grows, and keeps definitions readable; each relation
+group multiplies entries, and four is generous.
+
+**A lens may search an index that reads properties it hides; validation warns, results
+are projected and the snippet withheld.** Entries are composed from the full schema, so a
+hidden value can still drive a ranking through that lens — accepted, as two lenses share
+one stored record. Lens validation names every hidden property an included index reads as
+a warning, which never makes the lens invalid. The lens still governs everything
+returned: hits are projected through it, and a match whose index reads a hidden property
+carries no snippet of the entry's text.
+
+**Retriever agents are a lens-local resource that searches search indices.** Each has a
+key, name, description, configuration version and configuration; keys follow the shared
+key rules and are unique within the lens. A save is validated against the lens and
+refused when invalid; a stored agent that later becomes invalid stays readable and
+exportable, nothing cascades to it, and a question to it is refused. Copying creates an
+independent identity; moving within the same ontology keeps it and is atomic. Neither
+overwrites a target key, and both validate the target lens. Cross-ontology portability is
+an explicit JSON copy validated in the target, never a shared live definition. Agents
+travel with their lens in design transfer and are deleted with it. Storage carries no
+vectors, snapshots, credentials or conversation state. Only an adapter that stores search
+indices keeps agents.
+
+**A retriever agent finds through search indices and embeds nothing of its own.** Its
+configuration references indices, optionally narrowed to their relation groups; a fact of
+a relation is found by the planner choosing a relation group per question, and an exact
+structural condition is a filter of up to two hops. Answer fields, answer-field length and
+the similarity threshold are the agent's own settings. Retrieval runs the index search in
+process — no per-agent vectors, no in-memory vector cache, no preparation step and no
+snapshot of the data. A question makes two model calls, planning and answering;
+retrieval between them is deterministic, and cancellation stops further work. No model
+call is retried automatically, with one exception: a follow-up whose plan searches
+nothing and only names an unsupported reason is planned once more, the second plan is
+used, and a limitation says so — at most three model calls. The planner phrases queries
+freely, may name an entity taken from an answer, but chooses only what the configuration
+allows, and every exact restriction — a filter value, a reference to previous results —
+needs the user's own words, never an answer's; the server leaves out what fails these
+checks, names it as a limitation and answers with the rest.
 
 **Exactly one env file is read, and it is always named.**
 `ENV_FILE` names it; without that it is `.env` in the working directory. Files never
@@ -427,6 +609,12 @@ already set in the real environment still wins, because that is what a shell var
 for. Development presets are committed under `env/` and passed to `./dev.sh`, so no
 launcher script carries configuration values of its own — a value that decides how the
 system runs must be readable in a file, not buried in a script that silently outranks one.
+
+**One embedding model per server; each semantic generation records the model it was
+built with.** Search merges indices by similarity, which is one scale only under one
+model. A changed model builds new semantic generations of every index beside the ready
+ones, which keep serving until replaced. Without configuration the model is `bge-m3` at
+1024 dimensions — multilingual, because an ontology's content may mix German and English.
 
 **Model thinking effort is one deployment setting, not a per-agent one.**
 `AI_REASONING_EFFORT` fixes how hard the model thinks for every AI call the server makes,
@@ -454,12 +642,13 @@ and third phase the ontology has no semantic index — a rebuild that dies in be
 leaves them absent and its vectors of mixed width, which the next completed rebuild
 repairs.
 
-**A stored embedding is reused only at the configured provider's width.** Reuse is keyed
-by content — an unchanged document passage keeps its vector — but a vector of any other
-width came from a different model and no index of the current width can be built over it,
-so it is always recomputed. Without this, a rebuild after a model switch would regenerate
-nothing for document passages: their text is unchanged, so every one of them would be
-reused.
+**A stored chunk vector is reused only at the configured provider's width.** In an
+adapter's own search storage, reuse is keyed by content — an unchanged document chunk
+keeps its vector — but a vector of any other width came from a different model and no
+index of the current width can be built over it, so it is always recomputed. Without
+this, a rebuild after a model switch would regenerate nothing for document chunks: their
+text is unchanged, so every one of them would be reused. Search-index entries need no
+such rule: an entry's text hash covers the model.
 
 **A failed index ensure never stops the boot.** Startup reports the ontology it could not
 bring into line, in API vocabulary, and carries on with the rest. The state that makes an
@@ -475,20 +664,33 @@ no default ontology exists, and it ships as a major version bump. Deliberation:
 [adr/0018](adr/0018-multi-ontology-hard-cut.md).
 
 **Transfer scope** — export and import carry one ontology's design: schema, lenses,
-and their agents and saved queries. Never instance data, never the ontology's
-identity. A transfer document is portable into any ontology.
+and their agents, saved queries and retriever agents, the keyword language set, and the custom
+search indices with the managed indices switched off. Never
+instance data, never the ontology's identity. A transfer document is portable into any
+ontology.
 
 **Transfer target** — import writes into an existing ontology named by the request;
 creating the ontology is a registry operation. Key conflicts are checked all-or-fail
 against the target ontology's keys.
 
 **Transfer format version** — the format version is the format's own line,
-independent of the project version; informational only, never dispatched on, bumped
-only when the payload shape changes incompatibly. Old-format payloads are rejected
-by ordinary validation; no conversion or compatibility machinery exists.
+independent of the project version, bumped only when the payload shape changes
+incompatibly. Export writes the current version. Import dispatches on it: it accepts the
+current version, an absent version as the current one, and the previous major version,
+which it converts on the way in; every other version is refused. Supporting exactly one
+previous version lets a design exported before a format change move to a server after it
+without a conversion tool.
 
 **No authentication, authorization or multi-tenancy.**
 OntoForge assumes it is deployed behind something that provides them, or on a trusted
 network. Ontologies are isolation units, not tenants: no ontology has an owner, an ACL
 or a quota. Building a permission model before a deployment requires one would be
 guessing at its shape.
+
+## Retrieval evaluation dataset
+
+**The fair evaluation ontology stores stand numbers on exhibitors.**
+A hall is its own entity, linked to the exhibitor; the stand number is an exhibitor
+property. This keeps exact hall filtering explicit without introducing a separate
+stand entity into the evaluation dataset.
+

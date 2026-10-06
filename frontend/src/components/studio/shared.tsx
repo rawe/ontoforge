@@ -12,6 +12,8 @@ import { isValidKey } from './lib'
 
 interface KeyFieldProps {
   id: string
+  /** Field label; defaults to "Key". */
+  label?: string
   value: string
   onChange: (value: string) => void
   /** Edit mode — the key is immutable, render it disabled. */
@@ -24,11 +26,19 @@ interface KeyFieldProps {
  * Key input with live pattern validation and the "immutable" note. Keys are
  * snake_case (`^[a-z][a-z0-9_]*$`) and permanent once created.
  */
-export function KeyField({ id, value, onChange, disabled, error, autoFocus }: KeyFieldProps) {
+export function KeyField({
+  id,
+  label = 'Key',
+  value,
+  onChange,
+  disabled,
+  error,
+  autoFocus,
+}: KeyFieldProps) {
   const invalid = !disabled && value !== '' && !isValidKey(value)
   return (
     <div className="grid gap-1.5">
-      <Label htmlFor={id}>Key</Label>
+      <Label htmlFor={id}>{label}</Label>
       <Input
         id={id}
         value={value}

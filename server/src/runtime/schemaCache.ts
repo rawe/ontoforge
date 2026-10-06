@@ -12,6 +12,11 @@
  * (wired in sessions 02/03). Wholesale rather than selective, because one
  * schema change can affect many lenses and rebuilding is cheap.
  *
+ * Beside the lenses it caches, per ontology, the search context: the
+ * index definitions with the dependency map derived from them
+ * (`core/searchDependencies.ts`), cleared with the rest — and by every
+ * change of the index definitions (`invalidateSearchContext`).
+ *
  * Scope filtering implements the four-row scoping matrix of
  * `docs/capabilities/ontology-lenses.md#the-scoping-matrix`, including the
  * inferred-relations row and the silent skipping of inclusion keys that no
@@ -20,13 +25,19 @@
 
 import type { AgentConfig, SavedQueryConfig, SavedQueryParameter, StepConfig } from "../core/ai.js";
 import { NotFoundError } from "../core/exceptions.js";
-import type { RuntimeStore } from "../core/ports.js";
+import type { RuntimeStore, SearchIndexRecord, SearchIndexStore } from "../core/ports.js";
 import type { PropertyDef } from "../core/schemas.js";
+import {
+  deriveSearchDependencies,
+  type SearchDependencies,
+} from "../core/searchDependencies.js";
 
 export interface EntityTypeDef {
   key: string;
   displayName: string;
   description: string | null;
+  /** Key of the name property; null in a scoped schema whose lens hides it. */
+  nameProperty: string | null;
   properties: Record<string, PropertyDef>;
 }
 
@@ -57,6 +68,9 @@ export interface LoadedSchema {
   agentConfigs: Record<string, AgentConfig>;
   /** Saved-query pipelines keyed by query key. */
   savedQueries: Record<string, SavedQueryConfig>;
+  /** Whether the lens has type inclusions, and the search indices it
+   * includes by key (`core/searchQuery.ts` decides availability). */
+  searchIndexScope: { scoped: boolean; includedIndices: string[] };
 }
 
 type Row = Record<string, unknown>;
@@ -66,11 +80,61 @@ interface InclusionRow {
   properties: string[] | null;
 }
 
-const loadedSchemaCache = new Map<string, LoadedSchema>();
+/** One ontology's search indices against its full schema. */
+export interface SearchContext {
+  /** Every type and property, unscoped. */
+  schema: Pick<SchemaCacheValue, "entityTypes" | "relationTypes">;
+  indices: SearchIndexRecord[];
+  dependencies: SearchDependencies;
+}
 
-/** Clear the whole loaded-schema cache. Called by every modeling mutation. */
+const loadedSchemaCache = new Map<string, LoadedSchema>();
+const searchContextCache = new Map<string, SearchContext>();
+
+/** Clear the whole loaded-schema cache, search contexts included. Called
+ * by every modeling mutation. */
 export function invalidateLoadedSchemaCache(): void {
   loadedSchemaCache.clear();
+  searchContextCache.clear();
+}
+
+/** Forget the search context of one ontology (or of all) — after a
+ * change of its index definitions. */
+export function invalidateSearchContext(ontologyKey?: string): void {
+  if (ontologyKey === undefined) {
+    searchContextCache.clear();
+  } else {
+    searchContextCache.delete(ontologyKey);
+  }
+}
+
+/** The search context of an ontology: from the cache, or read from its
+ * search-index store on a miss. */
+export async function loadSearchContext(
+  ontologyKey: string,
+  store: SearchIndexStore,
+): Promise<SearchContext> {
+  const cached = searchContextCache.get(ontologyKey);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const context = await loadSearchContextUncached(store);
+  searchContextCache.set(ontologyKey, context);
+  return context;
+}
+
+/** The cache-free read: index definitions and the full schema, now. */
+export async function loadSearchContextUncached(store: SearchIndexStore): Promise<SearchContext> {
+  const [indices, raw] = await Promise.all([store.listIndices(), store.readFullSchema()]);
+  const schema = buildTypesFromRaw(raw.entityTypes as Row[], raw.relationTypes as Row[]);
+  return {
+    schema,
+    indices,
+    dependencies: deriveSearchDependencies(
+      indices.map(({ searchIndexId, definition }) => ({ searchIndexId, definition })),
+      schema,
+    ),
+  };
 }
 
 /**
@@ -137,7 +201,14 @@ export async function loadSchemaUncached(
     savedQueries[row.key as string] = toSavedQueryConfig(row);
   }
 
-  return { scoped, full, agentConfigs, savedQueries };
+  const entityInclusions = schema.entityInclusions as InclusionRow[];
+  const relationInclusions = schema.relationInclusions as InclusionRow[];
+  const searchIndexScope = {
+    scoped: entityInclusions.length > 0 || relationInclusions.length > 0,
+    includedIndices: (schema.searchIndexInclusions as string[] | undefined) ?? [],
+  };
+
+  return { scoped, full, agentConfigs, savedQueries, searchIndexScope };
 }
 
 /** Deserialize one stored saved-query row: `steps` and `parameters` are
@@ -189,16 +260,26 @@ function toPropertyDefs(rows: Row[] | undefined): Record<string, PropertyDef> {
   return defs;
 }
 
-function buildSchemaCacheFromRaw(
+export function buildSchemaCacheFromRaw(
   lens: Row,
   entityTypesRaw: Row[],
   relationTypesRaw: Row[],
 ): SchemaCacheValue {
-  const cache: SchemaCacheValue = {
+  return {
     lensId: lens.lensId as string,
     lensKey: lens.key as string,
     lensName: lens.name as string,
     lensDescription: (lens.description as string | undefined) ?? null,
+    ...buildTypesFromRaw(entityTypesRaw, relationTypesRaw),
+  };
+}
+
+/** The types of a schema read, keyed by type key. */
+function buildTypesFromRaw(
+  entityTypesRaw: Row[],
+  relationTypesRaw: Row[],
+): Pick<SchemaCacheValue, "entityTypes" | "relationTypes"> {
+  const cache: Pick<SchemaCacheValue, "entityTypes" | "relationTypes"> = {
     entityTypes: {},
     relationTypes: {},
   };
@@ -207,6 +288,7 @@ function buildSchemaCacheFromRaw(
       key: et.key as string,
       displayName: et.displayName as string,
       description: (et.description as string | undefined) ?? null,
+      nameProperty: (et.nameProperty as string | undefined) ?? null,
       properties: toPropertyDefs(et.properties as Row[] | undefined),
     };
   }
@@ -246,7 +328,7 @@ function filterProperties(
  * target entity types are both exposed. Inclusion keys that no longer
  * resolve are skipped silently.
  */
-function applyScopeFiltering(
+export function applyScopeFiltering(
   full: SchemaCacheValue,
   entityInclusions: InclusionRow[],
   relationInclusions: InclusionRow[],
@@ -276,6 +358,10 @@ function applyScopeFiltering(
       }
       const copy = structuredClone(etDef);
       copy.properties = filterProperties(copy.properties, inclusion.properties);
+      // A lens that hides the name property shows the type without one.
+      if (copy.nameProperty !== null && !(copy.nameProperty in copy.properties)) {
+        copy.nameProperty = null;
+      }
       scoped.entityTypes[inclusion.key] = copy;
     }
   }

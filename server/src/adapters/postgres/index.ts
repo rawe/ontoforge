@@ -13,11 +13,11 @@
  * only the server-wide objects.
  */
 
-import type { TextSearchLanguage } from "../../registry/schemas.js";
 
 import { reportEnsureFailed } from "../../core/vectorDrift.js";
-import { ensureVectorIndexes, initSchema } from "./ddl.js";
-import { closePool, initPool } from "./errors.js";
+import { ensureSavedQueryVectorIndex, initSchema, reportPgvectorVersion } from "./ddl.js";
+import type { SearchWorkSubscription } from "../../core/ports.js";
+import { closePool, initPool, listen } from "./errors.js";
 import { PostgresModelingStore } from "./modelingStore.js";
 import {
   listOntologyBindings,
@@ -25,22 +25,39 @@ import {
   PostgresOntologyRegistry,
 } from "./registry.js";
 import { PostgresRuntimeStore } from "./runtimeStore.js";
+import { PostgresSearchIndexStore, SEARCH_WORK_CHANNEL } from "./searchIndexStore.js";
 
-/** Initialize the PostgreSQL adapter: the pool and the server-wide DDL. */
+/** Initialize the PostgreSQL adapter: the pool, the pgvector version
+ * report (before the upgrade, which needs `halfvec`) and the server-wide
+ * DDL. */
 export async function initAdapter(): Promise<void> {
   await initPool();
+  await reportPgvectorVersion();
   await initSchema();
 }
 
 /** A modeling store bound to one ontology's namespace. The caller (the
  * port accessor) has already verified the ontology exists. */
-export function createModelingStore(ontologyKey: string, language: TextSearchLanguage): PostgresModelingStore {
-  return new PostgresModelingStore(ontologyNamespace(ontologyKey), language);
+export function createModelingStore(ontologyKey: string): PostgresModelingStore {
+  return new PostgresModelingStore(ontologyNamespace(ontologyKey), ontologyKey);
 }
 
 /** A runtime store bound to one ontology's namespace. */
-export function createRuntimeStore(ontologyKey: string, language: TextSearchLanguage): PostgresRuntimeStore {
-  return new PostgresRuntimeStore(ontologyKey, ontologyNamespace(ontologyKey), language);
+export function createRuntimeStore(ontologyKey: string): PostgresRuntimeStore {
+  return new PostgresRuntimeStore(ontologyKey, ontologyNamespace(ontologyKey));
+}
+
+/** A search-index store bound to one ontology's namespace. */
+export function createSearchIndexStore(ontologyKey: string): PostgresSearchIndexStore {
+  return new PostgresSearchIndexStore(ontologyNamespace(ontologyKey), ontologyKey);
+}
+
+/** Wake-ups for queued search work: `LISTEN` on the channel every
+ * enqueue notifies, on a connection of its own. */
+export function subscribeSearchWork(
+  onWake: (ontologyKey: string) => void,
+): Promise<SearchWorkSubscription> {
+  return listen(SEARCH_WORK_CHANNEL, onWake);
 }
 
 /** The ontology registry over the pool `initAdapter` opened. */
@@ -53,24 +70,23 @@ export async function closeStores(): Promise<void> {
 }
 
 /**
- * Ensure every ontology's vector indexes exist for the configured
- * dimensions, walking the registry — the authoritative ontology list —
- * one namespace at a time. Zero ontologies: nothing to do.
+ * Ensure every ontology's saved-query description index exists for the
+ * configured dimensions, walking the registry — the authoritative
+ * ontology list — one namespace at a time. Zero ontologies: nothing to
+ * do. Search indices need no such step: each generation records its own
+ * model and width, and the worker builds new ones on a switch.
  *
- * The startup path: width mismatches are REPORTED and nothing is
- * repaired — only the rebuild operation drops a drifted index, and it
- * regenerates the vectors before building it again
+ * The startup path: a width mismatch is REPORTED and nothing is repaired
  * (`docs/decisions.md#behaviour`).
  *
  * One ontology cannot stop the others, and none of them can stop the
- * boot. An unfinished rebuild leaves vectors of mixed width behind, over
- * which no index can be built; failing to start would take away the
- * server the operator needs to finish that rebuild.
+ * boot: descriptions of mixed width leave an index that cannot be built,
+ * and failing to start would take away the server the operator needs.
  */
 export async function ensureSemanticIndexes(dimensions: number): Promise<void> {
   for (const binding of await listOntologyBindings()) {
     try {
-      await ensureVectorIndexes(dimensions, binding.namespace);
+      await ensureSavedQueryVectorIndex(dimensions, binding.namespace);
     } catch {
       reportEnsureFailed(binding.key);
     }
@@ -78,3 +94,6 @@ export async function ensureSemanticIndexes(dimensions: number): Promise<void> {
 }
 
 export function supportsKeywordRanking(): boolean { return PostgresRuntimeStore.prototype.supportsKeywordRanking(); }
+
+/** Search indices are stored in the ontology namespace. */
+export function supportsSearchIndices(): boolean { return true; }

@@ -14,6 +14,7 @@ vi.mock("../../src/core/ports.js", () => ({
     return holder.store;
   },
   supportsKeywordRanking: async () => false,
+  supportsSearchIndices: async () => false,
 }));
 const decide = vi.fn(async () => ({ identity: { type: "choice" as const, choice: "same",
   probabilities: { same: 0.8, different: 0.1, insufficient: 0.1 }, confidence: 0.8 } }));

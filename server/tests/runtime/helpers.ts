@@ -41,6 +41,7 @@ export function makeFullSchema(options?: {
         key: "person",
         displayName: "Person",
         description: null,
+        nameProperty: "name",
         properties: [
           { key: "name", displayName: "Name", dataType: "string", required: true, defaultValue: null },
           { key: "age", displayName: "Age", dataType: "integer", required: false, defaultValue: null },
@@ -53,6 +54,7 @@ export function makeFullSchema(options?: {
         key: "company",
         displayName: "Company",
         description: null,
+        nameProperty: "name",
         properties: [
           { key: "name", displayName: "Name", dataType: "string", required: true, defaultValue: null },
         ],
@@ -62,6 +64,7 @@ export function makeFullSchema(options?: {
         key: "department",
         displayName: "Department",
         description: null,
+        nameProperty: "name",
         properties: [
           { key: "name", displayName: "Name", dataType: "string", required: true, defaultValue: null },
           { key: "code", displayName: "Code", dataType: "string", required: false, defaultValue: null },
@@ -160,16 +163,16 @@ export function makeRelation(
 }
 
 /** Every port method as a mock — completeness is compiler-enforced. The
- * one non-method member, the store's ontology binding, stays a value. */
+ * one non-method member, the store's ontology binding, stays a value. The
+ * store keeps its own search storage: no search indices. */
 export type MockRuntimeStore = {
-  [K in Exclude<keyof RuntimeStore, "ontologyKey" | "textSearchLanguage">]: Mock;
-} & { ontologyKey: string; textSearchLanguage: "english" | "german" };
+  [K in Exclude<keyof RuntimeStore, "ontologyKey" | "searchIndices">]: Mock;
+} & { ontologyKey: string };
 
 /** A mock store whose reads default to "nothing stored". */
 export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeStore {
   return {
     ontologyKey,
-    textSearchLanguage: "english",
     supportsKeywordRanking: vi.fn(() => false),
     supportsSearchPathConditions: vi.fn(() => false),
     getFullSchemaWithLensInclusions: vi.fn(async () => null),
@@ -186,10 +189,8 @@ export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeSto
     createDocumentChunks: vi.fn(async () => undefined),
     validateVectorIndexedProperties: vi.fn(() => undefined),
     documentSearchSemantic: vi.fn(async () => []),
-    documentSearchKeyword: vi.fn(async () => []),
     getEntitiesByIds: vi.fn(async () => ({})),
     propertySearchSemantic: vi.fn(async () => []),
-    propertySearchKeyword: vi.fn(async () => []),
     searchSavedQueries: vi.fn(async () => []),
     createRelation: vi.fn(),
     listRelations: vi.fn(async () => [[], 0]),

@@ -5,7 +5,9 @@
  *
  * Two seams are called on every mutating path: schema-cache invalidation
  * (`runtime/schemaCache.ts`) and the vector-index lifecycle hooks
- * (`vectorHooks.ts`).
+ * (`vectorHooks.ts`). Schema changes also keep the managed search indices
+ * in step (`syncSearchIndices`); a schema removal that reaches a custom
+ * search index follows the cascade protocol (`searchIndices.ts`).
  */
 
 import { randomUUID } from "node:crypto";
@@ -20,26 +22,71 @@ import {
   StoreError,
   ValidationError,
 } from "../core/exceptions.js";
+import { legacyNameProperty } from "../core/legacyNameProperty.js";
+import { convertLegacyRetrieverConfig, legacyRetrieverKey } from "../core/legacyRetrieverConfig.js";
+import { RETRIEVER_AGENT_CONFIG_VERSION, RetrieverAgentConfig } from "../core/retrieverAgent.js";
 import { parseAndValidate } from "../core/oql/index.js";
+import {
+  keepsOwnSearch,
+  type OwnSearchModelingStore,
+  type OwnSearchRuntimeStore,
+} from "../core/ownSearch.js";
+import {
+  DEFAULT_KEYWORD_LANGUAGES,
+  KeywordLanguage,
+  KeywordLanguageSetSchema,
+  type KeywordLanguageSet,
+} from "../core/keywordLanguage.js";
 import type { ModelingStore, RuntimeStore } from "../core/ports.js";
 import {
   DATA_TYPES,
   KEY_PATTERN,
   MAX_KEY_LENGTH,
+  NAME_PROPERTY_DATA_TYPE,
+  namePropertyDisplayName,
+  type NewPropertyDef,
   type PropertyDef,
   type TypeKind,
 } from "../core/schemas.js";
-import { buildTextRepr, buildKeywordSegments } from "../runtime/search/propertyText.js";
-import { invalidateLoadedSchemaCache, loadSchemaUncached } from "../runtime/schemaCache.js";
+import { buildTextRepr } from "../runtime/search/propertyText.js";
+import { syncManagedSearchIndices } from "../runtime/indexing/managed.js";
+import {
+  applyIndexCascade,
+  exportSearchIndices,
+  importedInclusionErrors,
+  importedIndexConflicts,
+  importedIndexErrors,
+  importLensIndexInclusions,
+  importSearchIndices,
+  indexCascadeText,
+  lensIndexWarnings,
+  planIndexCascade,
+  requireSearchIndices,
+} from "./searchIndices.js";
+import { portable as portableRetrieverAgent } from "./retrieverAgents.js";
+import { readSearchSettings, updateSearchSettings as changeSearchSettings } from "../runtime/indexing/settings.js";
+import { invalidateLoadedSchemaCache, loadSchemaUncached, buildSchemaCacheFromRaw, applyScopeFiltering } from "../runtime/schemaCache.js";
 import { syncDocumentChunks } from "../runtime/service.js";
 import { VALID_AGENT_TOOLS } from "../runtime/toolNames.js";
 import {
   AGENT_KEY_PATTERN,
+  ExportIndexInclusions,
+  ExportRetrieverAgents,
+  ExportSearchIndices,
+  IMPORTABLE_FORMAT_VERSIONS,
+  LEGACY_TRANSFER_FORMAT_VERSION,
   StepSchema as StepZodSchema,
   TRANSFER_FORMAT_VERSION,
 } from "./schemas.js";
 import type {
+  ExportEntityTypeInput,
+  ExportLensInput,
   ExportPayloadInput,
+  ExportRetrieverAgentInput,
+  ExportSearchIndicesInput,
+  SearchSettingsResponseBody,
+  SearchSettingsUpdateInput,
+  ExportPropertyInput,
   AiAgentConfigResponseBody,
   AiAgentConfigUpsertInput,
   EntityTypeCreateInput,
@@ -89,6 +136,7 @@ function toEntityTypeResponse(data: Row): EntityTypeResponseBody {
     key: data.key as string,
     displayName: data.displayName as string,
     description: optString(data.description),
+    nameProperty: data.nameProperty as string,
     createdAt: toIso(data.createdAt),
     updatedAt: toIso(data.updatedAt),
   };
@@ -154,6 +202,19 @@ function toLensResponse(data: Row): LensResponseBody {
     createdAt: toIso(data.createdAt),
     updatedAt: toIso(data.updatedAt),
   };
+}
+
+/**
+ * After a schema change: bring the managed search indices in step and
+ * reconcile their generations; refresh the indices that read a type in
+ * `refreshTypes` (a display name or the name property changed). Nothing
+ * on an adapter without search indices.
+ */
+async function syncSearchIndices(store: ModelingStore, refreshTypes: string[] = []): Promise<void> {
+  const indices = store.searchIndices?.();
+  if (indices !== undefined) {
+    await syncManagedSearchIndices(indices, { refreshTypes });
+  }
 }
 
 // --- Lens ---
@@ -241,10 +302,34 @@ export async function createEntityType(
     body.key,
     body.displayName,
     body.description ?? null,
+    newNameProperty(body.nameProperty),
   );
   invalidateLoadedSchemaCache();
-  await onEntityTypeCreated(store, body.key);
+  await onEntityTypeCreated(store, body.key, [body.nameProperty]);
+  await syncSearchIndices(store);
   return toEntityTypeResponse(data);
+}
+
+/** The name property an entity type is created with when nothing else
+ * defines it: a non-required string property under `key`. */
+function newNameProperty(key: string): NewPropertyDef {
+  return {
+    propertyId: randomUUID(),
+    key,
+    displayName: namePropertyDisplayName(key),
+    description: null,
+    dataType: NAME_PROPERTY_DATA_TYPE,
+    required: false,
+    defaultValue: null,
+  };
+}
+
+/** The 422 for a name property that is not a `string` property of the type. */
+function notANameProperty(key: string, entityTypeKey: string): ValidationError {
+  const message =
+    `Property '${key}' is not a ${NAME_PROPERTY_DATA_TYPE} property of entity type ` +
+    `'${entityTypeKey}'; the name property must be one`;
+  return new ValidationError(message, { fields: { nameProperty: message } });
 }
 
 export async function listEntityTypes(store: ModelingStore): Promise<EntityTypeResponseBody[]> {
@@ -268,15 +353,32 @@ export async function updateEntityType(
   body: EntityTypeUpdateInput,
   store: ModelingStore,
 ): Promise<EntityTypeResponseBody> {
+  const nameProperty = body.nameProperty ?? null;
+  const before = await store.getEntityType(entityTypeId);
+  if (nameProperty !== null) {
+    const et = before;
+    if (!et) {
+      throw new NotFoundError(`Entity type '${entityTypeId}' not found`);
+    }
+    const prop = await store.getPropertyByKey(entityTypeId, "EntityType", nameProperty);
+    if (!prop || prop.dataType !== NAME_PROPERTY_DATA_TYPE) {
+      throw notANameProperty(nameProperty, et.key as string);
+    }
+  }
   const data = await store.updateEntityType(
     entityTypeId,
     body.displayName ?? null,
     body.description ?? null,
+    nameProperty,
   );
   if (!data) {
     throw new NotFoundError(`Entity type '${entityTypeId}' not found`);
   }
   invalidateLoadedSchemaCache();
+  const rendered =
+    before !== null &&
+    (before.displayName !== data.displayName || before.nameProperty !== data.nameProperty);
+  await syncSearchIndices(store, rendered ? [data.key as string] : []);
   return toEntityTypeResponse(data);
 }
 
@@ -293,22 +395,32 @@ export async function deleteEntityType(
       `Entity type '${entityTypeId}' is referenced by one or more relation types`,
     );
   }
-  // Included by scoped lenses: the cascade protocol.
+  // Key and properties are needed by the vector-index hook after the
+  // delete has removed them.
+  const etData = await store.getEntityType(entityTypeId);
+  const etProps = etData ? await store.listProperties(entityTypeId, "EntityType") : [];
+
+  // Included by scoped lenses or read by custom search indices: the
+  // cascade protocol. Indices rooted on the type go (and with them their
+  // lens inclusions); groups and target entries naming it are removed.
   const affected = await store.findLensesIncludingType("EntityType", entityTypeId);
-  if (affected.length > 0 && !cascade) {
+  const indexPlan = await planIndexCascade(store, {
+    kind: "entityType",
+    key: (etData?.key as string | undefined) ?? "",
+  });
+  if ((affected.length > 0 || indexPlan.affectedIndices.length > 0) && !cascade) {
     throw new CascadeRequiredError(
-      `Entity type is included by ${affected.length} lens(es). Use ?cascade=true to remove.`,
-      affected,
+      `Entity type is included by ${affected.length} lens(es)${indexCascadeText(indexPlan)}. ` +
+        "Use ?cascade=true to remove.",
+      [...new Set([...affected, ...indexPlan.affectedLenses])].sort(),
+      indexPlan.affectedIndices,
     );
   }
   if (affected.length > 0) {
     await store.removeAllIncludesForType("EntityType", entityTypeId);
   }
+  await applyIndexCascade(store, indexPlan);
 
-  // Key and properties are needed by the vector-index hook after the
-  // delete has removed them.
-  const etData = await store.getEntityType(entityTypeId);
-  const etProps = etData ? await store.listProperties(entityTypeId, "EntityType") : [];
   const deleted = await store.deleteEntityType(entityTypeId);
   if (!deleted) {
     throw new NotFoundError(`Entity type '${entityTypeId}' not found`);
@@ -317,6 +429,7 @@ export async function deleteEntityType(
   if (etData) {
     await onEntityTypeDeleted(store, etData.key as string, etProps);
   }
+  await syncSearchIndices(store);
 }
 
 // --- Relation Type (Global) ---
@@ -375,6 +488,7 @@ export async function updateRelationType(
   body: RelationTypeUpdateInput,
   store: ModelingStore,
 ): Promise<RelationTypeResponseBody> {
+  const before = await store.getRelationType(relationTypeId);
   const data = await store.updateRelationType(
     relationTypeId,
     body.displayName ?? null,
@@ -384,6 +498,9 @@ export async function updateRelationType(
     throw new NotFoundError(`Relation type '${relationTypeId}' not found`);
   }
   invalidateLoadedSchemaCache();
+  if (before !== null && before.displayName !== data.displayName) {
+    await syncSearchIndices(store, [data.key as string]);
+  }
   return toRelationTypeResponse(data);
 }
 
@@ -392,41 +509,56 @@ export async function deleteRelationType(
   cascade: boolean,
   store: ModelingStore,
 ): Promise<void> {
+  // Included by scoped lenses or grouped by custom search indices: the
+  // cascade protocol. The groups on it are removed.
+  const rtData = await store.getRelationType(relationTypeId);
   const affected = await store.findLensesIncludingType("RelationType", relationTypeId);
-  if (affected.length > 0 && !cascade) {
+  const indexPlan = await planIndexCascade(store, {
+    kind: "relationType",
+    key: (rtData?.key as string | undefined) ?? "",
+  });
+  if ((affected.length > 0 || indexPlan.affectedIndices.length > 0) && !cascade) {
     throw new CascadeRequiredError(
-      `Relation type is included by ${affected.length} lens(es). Use ?cascade=true to remove.`,
-      affected,
+      `Relation type is included by ${affected.length} lens(es)${indexCascadeText(indexPlan)}. ` +
+        "Use ?cascade=true to remove.",
+      [...new Set([...affected, ...indexPlan.affectedLenses])].sort(),
+      indexPlan.affectedIndices,
     );
   }
   if (affected.length > 0) {
     await store.removeAllIncludesForType("RelationType", relationTypeId);
   }
+  await applyIndexCascade(store, indexPlan);
   const deleted = await store.deleteRelationType(relationTypeId);
   if (!deleted) {
     throw new NotFoundError(`Relation type '${relationTypeId}' not found`);
   }
   invalidateLoadedSchemaCache();
+  if (indexPlan.affectedIndices.length > 0) {
+    await syncSearchIndices(store);
+  }
 }
 
 // --- Property Definition ---
 
+/** The owning type's row; not-found when it does not exist. */
 async function ensureOwnerExists(
   store: ModelingStore,
   ownerId: string,
   typeKind: TypeKind,
-): Promise<void> {
+): Promise<Row> {
   if (typeKind === "EntityType") {
     const data = await store.getEntityType(ownerId);
     if (!data) {
       throw new NotFoundError(`Entity type '${ownerId}' not found`);
     }
-  } else {
-    const data = await store.getRelationType(ownerId);
-    if (!data) {
-      throw new NotFoundError(`Relation type '${ownerId}' not found`);
-    }
+    return data;
   }
+  const data = await store.getRelationType(ownerId);
+  if (!data) {
+    throw new NotFoundError(`Relation type '${ownerId}' not found`);
+  }
+  return data;
 }
 
 export async function createProperty(
@@ -479,6 +611,7 @@ export async function createProperty(
   invalidateLoadedSchemaCache();
   if (typeKind === "EntityType") {
     await onEntityTypePropertyCreated(store, ownerId, data);
+    await syncSearchIndices(store);
   }
   return toPropertyResponse(data);
 }
@@ -500,7 +633,8 @@ export async function updateProperty(
   body: PropertyDefinitionUpdateInput,
   store: ModelingStore,
 ): Promise<PropertyDefinitionResponseBody> {
-  await ensureOwnerExists(store, ownerId, typeKind);
+  const owner = await ensureOwnerExists(store, ownerId, typeKind);
+  const before = await store.getProperty(ownerId, typeKind, propertyId);
   // An explicitly null defaultValue clears the default — the one exception
   // to sparse-update semantics. Omitted (`undefined`) means unchanged.
   const clearDefault = body.defaultValue === null;
@@ -518,6 +652,10 @@ export async function updateProperty(
     throw new NotFoundError(`Property '${propertyId}' not found on this type`);
   }
   invalidateLoadedSchemaCache();
+  const renamed = before !== null && before.displayName !== data.displayName;
+  if (typeKind === "EntityType" || renamed) {
+    await syncSearchIndices(store, renamed ? [owner.key as string] : []);
+  }
   return toPropertyResponse(data);
 }
 
@@ -528,19 +666,50 @@ export async function deleteProperty(
   cascade: boolean,
   store: ModelingStore,
 ): Promise<void> {
-  await ensureOwnerExists(store, ownerId, typeKind);
+  const owner = await ensureOwnerExists(store, ownerId, typeKind);
   const prop = await store.getProperty(ownerId, typeKind, propertyId);
   if (!prop) {
     throw new NotFoundError(`Property '${propertyId}' not found on this type`);
   }
-  // Deleting a property never triggers the cascade protocol — without
-  // cascade, allowlists are left holding an unresolvable key (harmless at
-  // runtime, reported by lens validation). The lookup runs anyway so the
-  // call fails here if the owner has vanished; its result is not acted on.
-  await store.findLensesIncludingType(typeKind, ownerId);
+  // No cascade: the name property is reassigned deliberately, never
+  // picked by the server.
+  if (typeKind === "EntityType" && owner.nameProperty === prop.key) {
+    throw new ConflictError(
+      `Property '${prop.key as string}' is the name property of entity type ` +
+        `'${owner.key as string}'. Choose another name property first.`,
+    );
+  }
+  // Lens allowlists never trigger the cascade protocol — without cascade
+  // they are left holding an unresolvable key (harmless at runtime,
+  // reported by lens validation). A custom search index reading the
+  // property does: the cascade removes the field from it (deleting an
+  // index left empty, with its lens inclusions). The refusal names the
+  // lenses whose allowlist lists the property and those including an
+  // index the cascade deletes.
+  const including = await store.findLensesIncludingType(typeKind, ownerId);
+  const indexPlan = await planIndexCascade(store, {
+    kind: "property",
+    owner: typeKind === "EntityType" ? "entityType" : "relationType",
+    ownerKey: owner.key as string,
+    key: prop.key as string,
+  });
+  if (indexPlan.affectedIndices.length > 0 && !cascade) {
+    throw new CascadeRequiredError(
+      `Property '${prop.key as string}' is read by ${indexPlan.affectedIndices.length} custom ` +
+        `search index(es) (${indexPlan.affectedIndices.join(", ")}).`,
+      [
+        ...new Set([
+          ...(await lensesListingProperty(store, typeKind, owner.key as string, prop.key as string, including)),
+          ...indexPlan.affectedLenses,
+        ]),
+      ].sort(),
+      indexPlan.affectedIndices,
+    );
+  }
   if (cascade) {
     await store.removePropertyFromIncludesLists(typeKind, ownerId, prop.key as string);
   }
+  await applyIndexCascade(store, indexPlan);
   const deleted = await store.deleteProperty(ownerId, typeKind, propertyId);
   if (!deleted) {
     throw new NotFoundError(`Property '${propertyId}' not found on this type`);
@@ -549,6 +718,31 @@ export async function deleteProperty(
   if (typeKind === "EntityType") {
     await onEntityTypePropertyDeleted(store, ownerId, prop);
   }
+  if (typeKind === "EntityType" || indexPlan.affectedIndices.length > 0) {
+    await syncSearchIndices(store);
+  }
+}
+
+/** The lenses (of `including`, sorted keys) whose explicit allowlist for
+ * the type names the property — those the cascade changes. */
+async function lensesListingProperty(
+  store: ModelingStore,
+  typeKind: TypeKind,
+  typeKey: string,
+  propertyKey: string,
+  including: string[],
+): Promise<string[]> {
+  const listing: string[] = [];
+  for (const lensKey of including) {
+    const lens = await store.getLensByKey(lensKey);
+    if (lens === null) continue;
+    const inclusions = await store.listIncludesTypes(lens.lensId as string, typeKind);
+    const inclusion = inclusions.find((inc) => inc.key === typeKey);
+    if ((inclusion?.properties as string[] | null | undefined)?.includes(propertyKey)) {
+      listing.push(lensKey);
+    }
+  }
+  return listing;
 }
 
 // --- Scope Management (inclusions) ---
@@ -881,13 +1075,17 @@ export async function validateSchema(store: ModelingStore): Promise<ValidationRe
     }
   }
 
-  return { valid: errors.length === 0, errors };
+  return { valid: errors.length === 0, errors, warnings: [] };
 }
 
 /**
  * Validate one lens's declarations against the schema. An unscoped lens —
- * no inclusions — is valid by definition. Always answers, never raises
- * (except for an unknown lens id).
+ * no type inclusions — is valid by definition. Always answers, never
+ * raises (except for an unknown lens id).
+ *
+ * Warnings never make the lens invalid: they name what limits the search
+ * indices it includes (`lensIndexWarnings`) — an index whose root type it
+ * no longer exposes, properties an index reads that it hides.
  */
 export async function validateLens(
   lensId: string,
@@ -905,14 +1103,14 @@ export async function validateLens(
 
   const lensData = (schema.lenses as Row[]).find((o) => o.lensId === lensId);
   if (!lensData) {
-    return { valid: true, errors: [] };
+    return { valid: true, errors: [], warnings: [] };
   }
 
   const entityInclusions = (lensData.entityInclusions as Row[] | undefined) ?? [];
   const relationInclusions = (lensData.relationInclusions as Row[] | undefined) ?? [];
 
   if (entityInclusions.length === 0 && relationInclusions.length === 0) {
-    return { valid: true, errors: [] };
+    return { valid: true, errors: [], warnings: [] };
   }
 
   const etMap = new Map((schema.entityTypes as Row[]).map((et) => [et.key as string, et]));
@@ -1010,21 +1208,36 @@ export async function validateLens(
     }
   }
 
-  return { valid: errors.length === 0, errors };
+  const full = buildSchemaCacheFromRaw(
+    lensData,
+    schema.entityTypes as Row[],
+    schema.relationTypes as Row[],
+  );
+  const scoped = applyScopeFiltering(
+    full,
+    entityInclusions as { key: string; properties: string[] | null }[],
+    relationInclusions as { key: string; properties: string[] | null }[],
+  );
+  const warnings = await lensIndexWarnings(store, { lensId, key: lensKey }, full, scoped);
+
+  return { valid: errors.length === 0, errors, warnings };
 }
 
-/** Validate the schema and then every lens: one combined list. */
+/** Validate the schema and then every lens: one combined list each of
+ * errors and warnings. */
 export async function validateAll(store: ModelingStore): Promise<ValidationResultBody> {
   const schemaResult = await validateSchema(store);
   const errors = [...schemaResult.errors];
+  const warnings = [...schemaResult.warnings];
 
   const lenses = await store.listLenses();
   for (const lens of lenses) {
     const lensResult = await validateLens(lens.lensId as string, store);
     errors.push(...lensResult.errors);
+    warnings.push(...lensResult.warnings);
   }
 
-  return { valid: errors.length === 0, errors };
+  return { valid: errors.length === 0, errors, warnings };
 }
 
 // --- Rebuild search data ---
@@ -1033,15 +1246,18 @@ export async function validateAll(store: ModelingStore): Promise<ValidationResul
 const REBUILD_PAGE_SIZE = 500;
 
 /**
- * Rebuild every stored representation search reads: each entity's keyword
- * segments and semantic text, every document property's passages, and —
- * where an embedding provider is configured — the vectors of all three plus
- * the saved-query descriptions and the vector indexes.
+ * Rebuild every vector and passage the adapter stores outside search
+ * indices. On an adapter with its own search storage (`keepsOwnSearch`):
+ * every document property's passages and — where an embedding provider is
+ * configured — each entity's vector, the passages' vectors, the saved-query
+ * descriptions' vectors and the vector indexes. On an adapter that stores
+ * search indices, which maintain themselves, only the saved-query
+ * descriptions' vectors and their index: the stream then carries no
+ * entity-type progress and the summary no entity types.
  *
- * It runs without a provider. Keyword text and passages need no inference,
- * and passages are themselves the document keyword index, so the run that
- * repairs a keyword-only ontology is the same run, minus the vector work.
- * The summary reports that omission as `embeddingsSkipped`.
+ * It runs without a provider: passages need no inference, so the run
+ * re-chunks them and skips the vector work. The summary reports that
+ * omission as `embeddingsSkipped`.
  *
  * Yields NDJSON progress lines (`docs/capabilities/search.md#rebuild`):
  * one progress record per processed item carrying the group's type key,
@@ -1065,6 +1281,80 @@ export async function* rebuildSearchData(
     await store.dropMismatchedVectorIndexes(provider.dimensions);
   }
 
+  // Phase two: the entities' own search storage, where the adapter has it.
+  const entities =
+    keepsOwnSearch(store) && keepsOwnSearch(runtimeStore)
+      ? yield* rebuildOwnEntityData(store, runtimeStore, provider)
+      : { typeResults: [], processed: 0, failed: 0 };
+  const typeResults = entities.typeResults;
+  let totalProcessed = entities.processed;
+  let totalFailed = entities.failed;
+
+  // Re-embed every saved-query description. Discovery ranks descriptions by
+  // vector alone, so with no provider there is nothing here to rebuild.
+  let sqProcessed = 0;
+  let sqFailed = 0;
+
+  if (provider) {
+    const savedQueries = await store.listSavedQueryRefs();
+    const sqTotal = savedQueries.length;
+
+    for (const sq of savedQueries) {
+      const embedding = await provider.embed(sq.description as string);
+      if (embedding !== null) {
+        await store.setSavedQueryEmbedding(sq.savedQueryId as string, embedding);
+        sqProcessed += 1;
+      } else {
+        sqFailed += 1;
+      }
+
+      yield `${JSON.stringify({
+        type: "progress",
+        entityTypeKey: "saved_queries",
+        processed: sqProcessed + sqFailed,
+        total: sqTotal,
+      })}\n`;
+    }
+
+    totalProcessed += sqProcessed;
+    totalFailed += sqFailed;
+
+    // Phase three: every vector now has the provider's width, so the
+    // indexes phase one dropped — and any the schema calls for and never
+    // had — can be built. It comes before the summary: that line is what
+    // tells the caller the rebuild is done, and it is not done while the
+    // indexes it dropped are still missing.
+    await store.ensureVectorIndexes(provider.dimensions);
+  }
+
+  // Final summary. `embeddingsSkipped` is what tells a caller that a run
+  // reporting no failures nevertheless wrote no vectors.
+  yield `${JSON.stringify({
+    type: "summary",
+    entityTypes: typeResults,
+    savedQueriesProcessed: sqProcessed,
+    savedQueriesFailed: sqFailed,
+    totalProcessed,
+    totalFailed,
+    embeddingsSkipped: !provider,
+  })}\n`;
+
+  console.info(
+    `Rebuild search data complete: ${totalProcessed} processed, ${totalFailed} failed` +
+      (provider ? "" : " (embeddings skipped: no provider)"),
+  );
+}
+
+/**
+ * The entity phase of a rebuild over an adapter's own search storage:
+ * each entity's vector and its documents' chunks, type by type. Returns
+ * the per-type results and the totals.
+ */
+async function* rebuildOwnEntityData(
+  store: OwnSearchModelingStore,
+  runtimeStore: OwnSearchRuntimeStore,
+  provider: ReturnType<typeof getEmbeddingProvider>,
+): AsyncGenerator<string, { typeResults: Row[]; processed: number; failed: number }> {
   // Discover all entity types with their property definitions.
   const entityTypes: { key: string; properties: Record<string, PropertyDef> }[] = [];
   for (const raw of await store.getEntityTypesWithProperties()) {
@@ -1131,14 +1421,14 @@ export async function* rebuildSearchData(
         }
       }
 
-      const text = buildTextRepr(etKey, userProps, propertyDefs);
-      const embedding = provider ? await provider.embed(text) : null;
+      const embedding = provider
+        ? await provider.embed(buildTextRepr(etKey, userProps, propertyDefs))
+        : null;
 
-      await store.setEntitySearchText(entityId, text, embedding, buildKeywordSegments(userProps, propertyDefs));
+      await store.setEntityEmbedding(entityId, embedding);
       // A null vector counts as a failure only when a provider was there to
       // produce one. Without a provider it is the intended result: the
-      // entity's keyword segments and semantic text were rewritten, which
-      // is all this run promised.
+      // entity's passages were rewritten, which is all this run promised.
       if (provider && embedding === null) {
         failed += 1;
       } else {
@@ -1167,59 +1457,7 @@ export async function* rebuildSearchData(
     totalFailed += failed;
   }
 
-  // Re-embed every saved-query description. Discovery ranks descriptions by
-  // vector alone, so with no provider there is nothing here to rebuild.
-  let sqProcessed = 0;
-  let sqFailed = 0;
-
-  if (provider) {
-    const savedQueries = await store.listSavedQueryRefs();
-    const sqTotal = savedQueries.length;
-
-    for (const sq of savedQueries) {
-      const embedding = await provider.embed(sq.description as string);
-      if (embedding !== null) {
-        await store.setSavedQueryEmbedding(sq.savedQueryId as string, embedding);
-        sqProcessed += 1;
-      } else {
-        sqFailed += 1;
-      }
-
-      yield `${JSON.stringify({
-        type: "progress",
-        entityTypeKey: "saved_queries",
-        processed: sqProcessed + sqFailed,
-        total: sqTotal,
-      })}\n`;
-    }
-
-    totalProcessed += sqProcessed;
-    totalFailed += sqFailed;
-
-    // Phase three: every vector now has the provider's width, so the
-    // indexes phase one dropped — and any the schema calls for and never
-    // had — can be built. It comes before the summary: that line is what
-    // tells the caller the rebuild is done, and it is not done while the
-    // indexes it dropped are still missing.
-    await store.ensureVectorIndexes(provider.dimensions);
-  }
-
-  // Final summary. `embeddingsSkipped` is what tells a caller that a run
-  // reporting no failures nevertheless wrote no vectors.
-  yield `${JSON.stringify({
-    type: "summary",
-    entityTypes: typeResults,
-    savedQueriesProcessed: sqProcessed,
-    savedQueriesFailed: sqFailed,
-    totalProcessed,
-    totalFailed,
-    embeddingsSkipped: !provider,
-  })}\n`;
-
-  console.info(
-    `Rebuild search data complete: ${totalProcessed} processed, ${totalFailed} failed` +
-      (provider ? "" : " (embeddings skipped: no provider)"),
-  );
+  return { typeResults, processed: totalProcessed, failed: totalFailed };
 }
 
 // --- Whole-schema read (transfer format) ---
@@ -1234,9 +1472,11 @@ function parseStoredJsonList(raw: unknown): Row[] {
 
 /**
  * The ontology's whole schema in the transfer format
- * (`docs/capabilities/transfer.md`): entity types, relation types,
- * lenses with their inclusions, and each lens's agents and saved
- * queries — no timestamps, no internal ids, no instance data. This is both
+ * (`docs/capabilities/transfer.md`): the keyword language set, the search
+ * indices (custom definitions and switched-off managed indices), entity
+ * types, relation types, lenses with their inclusions, and each lens's
+ * agents and saved queries — no timestamps, no internal ids, no instance
+ * data. This is both
  * the REST export payload and what the modeling MCP `get_schema` and
  * `export_schema` tools return.
  *
@@ -1259,6 +1499,7 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
     key: et.key,
     displayName: et.displayName,
     description: optString(et.description),
+    nameProperty: et.nameProperty,
     properties: ((et.properties as Row[] | undefined) ?? []).map(exportProperty),
   }));
 
@@ -1271,6 +1512,7 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
     properties: ((rt.properties as Row[] | undefined) ?? []).map(exportProperty),
   }));
 
+  const indices = store.searchIndices?.();
   const lenses: Row[] = [];
   for (const lens of schema.lenses as Row[]) {
     const entityInclusions = (lens.entityInclusions as Row[] | undefined) ?? [];
@@ -1290,6 +1532,12 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
         entityTypes: entityInclusions.map(exportInclusion),
         relationTypes: relationInclusions.map(exportInclusion),
       };
+    }
+    // An adapter without search indices writes none: an import into one
+    // that has them then applies the migration rule (`ExportLens`) rather
+    // than an empty list.
+    if (indices !== undefined) {
+      exported.indexInclusions = await indices.listLensIndexInclusions(lens.lensId as string);
     }
 
     const agentRows = await store.listAiAgentsForExport(lens.lensId as string);
@@ -1316,12 +1564,25 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
       })),
     }));
 
+    // Retriever agents search indices: an adapter without them has none.
+    if (indices !== undefined) {
+      exported.retrieverAgents = (await indices.listRetrieverAgents(lens.lensId as string)).map(
+        portableRetrieverAgent,
+      );
+    }
     lenses.push(exported);
   }
 
+  // An adapter without search indices stems in no language set; its
+  // design moves on with the set a new ontology starts with.
+  const keywordLanguages = indices === undefined
+    ? [...DEFAULT_KEYWORD_LANGUAGES]
+    : [...(await indices.getSearchSettings()).keywordLanguages];
+
   return {
     formatVersion: TRANSFER_FORMAT_VERSION,
-    textSearchLanguage: store.textSearchLanguage,
+    keywordLanguages,
+    ...(indices === undefined ? {} : { searchIndices: await exportSearchIndices(indices) }),
     entityTypes,
     relationTypes,
     lenses,
@@ -1349,18 +1610,110 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
  * NOT checked against the enum — the schema-validation operation catches
  * that later (`docs/capabilities/transfer.md`).
  *
- * The payload version is informational: old, unknown and missing versions
- * process identically.
+ * The payload version selects how entity types get their name property:
+ * 6.0 (also an absent version) names it per type and import checks it is
+ * a string property of that type; 5.0 has none, so it is derived by the
+ * legacy fallback (`core/legacyNameProperty.ts`), creating a `name`
+ * property where a type has no string property. Any other version is
+ * rejected.
+ *
+ * The payload's keyword language set becomes the target's (6.0
+ * `keywordLanguages`; 5.0 carries one `textSearchLanguage`, which becomes
+ * a set of that language alone). A 6.0 payload's `searchIndices` — custom
+ * definitions, each validated against the payload's own schema, and the
+ * switched-off managed indices — join the target's; a 5.0 payload has
+ * none (any it carries are ignored), its managed indices derive. A 6.0 lens's `indexInclusions` name
+ * indices of either kind and are written as they come once the indices
+ * exist; a lens without them (every 5.0 lens) includes the managed
+ * indices of the types it exposes — a passage index only when it exposes
+ * the document property too — as the storage step's upgrade does.
+ * Import provisions no entries: the generations it reconciles are built
+ * by the worker. An adapter without search indices checks all of it and
+ * keeps nothing of it.
  */
+/** The data type of a payload property, by entity type and key — what
+ * the version-1 retriever conversion tells document fields by. */
+function legacyDataTypes(
+  entityTypes: readonly ExportEntityTypeInput[],
+): (entityType: string, field: string) => string | undefined {
+  return (entityType, field) =>
+    entityTypes.find((et) => et.key === entityType)?.properties.find((p) => p.key === field)?.dataType;
+}
+
+/** What import reads of a payload's version-specific fields. */
+interface VersionFields {
+  keywordLanguages: KeywordLanguageSet;
+  searchIndices: ExportSearchIndicesInput | undefined;
+  lensFields: Map<
+    ExportLensInput,
+    { indexInclusions: string[] | undefined; agents: ExportRetrieverAgentInput[] }
+  >;
+}
+
+/**
+ * Read the payload's version-specific fields, each with its own schema
+ * and only in the version that carries it — the other version's fields
+ * are ignored unchecked (`docs/capabilities/transfer.md#the-format-version`).
+ * 6.0 reads `keywordLanguages`, `searchIndices` and each lens's
+ * `indexInclusions` and `retrieverAgents`; 5.0 reads `textSearchLanguage`
+ * (the one language becomes the whole set) and each lens's `retrievers`.
+ * A missing language field is a field error; a malformed field fails like
+ * the request shape does, naming every offending path.
+ */
+function readVersionFields(payload: ExportPayloadInput, legacy: boolean): VersionFields {
+  const issues: { path: string; message: string }[] = [];
+  function read<T>(schema: z.ZodType<T>, value: unknown, path: (string | number)[]): T | undefined {
+    if (value === undefined) return undefined;
+    const parsed = schema.safeParse(value);
+    if (parsed.success) return parsed.data;
+    for (const issue of parsed.error.issues) {
+      issues.push({ path: "/" + [...path, ...issue.path.map(String)].join("/"), message: issue.message });
+    }
+    return undefined;
+  }
+
+  const languageField = legacy ? "textSearchLanguage" : "keywordLanguages";
+  if (payload[languageField] === undefined) {
+    throw new ValidationError(`The payload carries no ${languageField}`, {
+      fields: { [languageField]: "Required" },
+    });
+  }
+  const keywordLanguages = legacy
+    ? read(KeywordLanguage, payload.textSearchLanguage, ["textSearchLanguage"])
+    : read(KeywordLanguageSetSchema, payload.keywordLanguages, ["keywordLanguages"]);
+  const searchIndices = legacy ? undefined : read(ExportSearchIndices, payload.searchIndices, ["searchIndices"]);
+  const lensFields: VersionFields["lensFields"] = new Map();
+  payload.lenses.forEach((lens, i) => {
+    const agentsField = legacy ? "retrievers" : "retrieverAgents";
+    lensFields.set(lens, {
+      indexInclusions: legacy
+        ? undefined
+        : read(ExportIndexInclusions, lens.indexInclusions, ["lenses", i, "indexInclusions"]),
+      agents: read(ExportRetrieverAgents, lens[agentsField], ["lenses", i, agentsField]) ?? [],
+    });
+  });
+  if (issues.length > 0 || keywordLanguages === undefined) {
+    throw new ValidationError("Request validation failed", { errors: issues });
+  }
+  return {
+    keywordLanguages: typeof keywordLanguages === "string" ? [keywordLanguages] : keywordLanguages,
+    searchIndices,
+    lensFields,
+  };
+}
+
 export async function importSchema(
   payload: ExportPayloadInput,
   store: ModelingStore,
 ): Promise<Row> {
-  if (payload.textSearchLanguage !== store.textSearchLanguage) {
-    throw new ValidationError("Text-search language differs from the target ontology", {
-      fields: { textSearchLanguage: `Expected ${store.textSearchLanguage}` },
-    });
+  if (!IMPORTABLE_FORMAT_VERSIONS.includes(payload.formatVersion)) {
+    throw new ValidationError(
+      `Unsupported transfer format version '${payload.formatVersion}'`,
+      { fields: { formatVersion: `Expected one of ${IMPORTABLE_FORMAT_VERSIONS.join(", ")}` } },
+    );
   }
+  const legacy = payload.formatVersion === LEGACY_TRANSFER_FORMAT_VERSION;
+  const { keywordLanguages, searchIndices: payloadIndices, lensFields } = readVersionFields(payload, legacy);
 
   // ---- Phase 1: payload-intrinsic validation (collect everything) ----
   const errors: string[] = [];
@@ -1383,7 +1736,41 @@ export async function importSchema(
     `Maximum length is ${MAX_KEY_LENGTH} characters`;
   const typeKeyPattern = KEY_PATTERN.source;
 
+  // Each payload entity type's name property: its key, plus the property
+  // to create for it when a 5.0 type has no string property.
+  const namePropertyOf = new Map<
+    ExportEntityTypeInput,
+    { key: string; created: ExportPropertyInput | null }
+  >();
+
   for (const et of payload.entityTypes) {
+    if (legacy) {
+      const { key, create } = legacyNameProperty(et.properties);
+      const created = create
+        ? {
+            key,
+            displayName: namePropertyDisplayName(key),
+            description: null,
+            dataType: NAME_PROPERTY_DATA_TYPE,
+            required: false,
+            defaultValue: null,
+          }
+        : null;
+      namePropertyOf.set(et, { key, created });
+    } else if (et.nameProperty === undefined) {
+      errors.push(`Import error: entity type '${et.key}' has no nameProperty`);
+    } else if (
+      !et.properties.some(
+        (prop) => prop.key === et.nameProperty && prop.dataType === NAME_PROPERTY_DATA_TYPE,
+      )
+    ) {
+      errors.push(
+        `Import error: name property '${et.nameProperty}' of entity type '${et.key}' ` +
+          `is not a ${NAME_PROPERTY_DATA_TYPE} property of that type`,
+      );
+    } else {
+      namePropertyOf.set(et, { key: et.nameProperty, created: null });
+    }
     if (!KEY_PATTERN.test(et.key)) {
       errors.push(badKey("entity type", et.key, typeKeyPattern));
     }
@@ -1446,6 +1833,51 @@ export async function importSchema(
           `Import error: property '${prop.key}' on relation type '${rt.key}' ` +
             "has data type 'document'; document properties are only supported " +
             "on entity types",
+        );
+      }
+    }
+  }
+
+  // Retriever agents: 6.0 lenses carry `retrieverAgents` (version 2),
+  // 5.0 lenses `retrievers` (version 1, converted); each version reads
+  // only its own field, like every version-specific field. Only the shape
+  // is checked here — what an agent references is reported invalid on
+  // read, so an export of an agent that became invalid still imports.
+  // A 5.0 key with `-` is renamed under the shared key rules, unique in
+  // its lens (`legacyRetrieverKey`); the rename becomes a warning.
+  const legacyDataType = legacyDataTypes(payload.entityTypes);
+  const agentKeys = new Map<object, { key: string; warning: string | null }>();
+  for (const lens of payload.lenses) {
+    const agents = lensFields.get(lens)!.agents;
+    const taken = new Set(agents.map((agent) => agent.key));
+    for (const agent of agents) {
+      const renamed = legacy ? legacyRetrieverKey(agent.key, taken) : { key: agent.key, warning: null };
+      taken.add(renamed.key);
+      agentKeys.set(agent, renamed);
+    }
+  }
+  for (const lens of payload.lenses) {
+    const seen = new Set<string>();
+    for (const agent of lensFields.get(lens)!.agents) {
+      const key = agentKeys.get(agent)!.key;
+      if (seen.has(key)) errors.push(`Import error: duplicate retriever agent '${key}' in lens '${lens.key}'`);
+      seen.add(key);
+      if (!KEY_PATTERN.test(key)) errors.push(badKey("retriever agent", key, typeKeyPattern));
+      if (key.length > MAX_KEY_LENGTH) errors.push(longKey("retriever agent", key));
+      if (agent.name.length === 0 || agent.name.length > 200) {
+        errors.push(`Import error: retriever agent '${agent.key}' needs a name of 1 to 200 characters`);
+      }
+      const config = legacy
+        ? agent.configVersion === 1
+          ? convertLegacyRetrieverConfig(agent.config, legacyDataType)?.config
+          : undefined
+        : agent.configVersion === RETRIEVER_AGENT_CONFIG_VERSION
+          ? agent.config
+          : undefined;
+      if (config === undefined || !RetrieverAgentConfig.safeParse(config).success) {
+        errors.push(
+          `Import error: retriever agent '${agent.key}' has no valid configuration of version ` +
+            `${legacy ? 1 : RETRIEVER_AGENT_CONFIG_VERSION}`,
         );
       }
     }
@@ -1537,6 +1969,33 @@ export async function importSchema(
     }
   }
 
+  // Search indices (6.0): each custom definition valid against the
+  // payload's own schema, each switch naming a managed index it derives,
+  // each lens's index inclusion naming an index of either kind. A 5.0
+  // payload carries none — its managed indices derive on import, and its
+  // lenses include those of the types they expose.
+  if (!legacy) {
+    const indexSchema = buildSchemaCacheFromRaw(
+      { lensId: "import", key: "import", name: "import" },
+      payload.entityTypes as unknown as Row[],
+      payload.relationTypes.map((rt) => ({
+        ...rt,
+        sourceKey: rt.fromEntityTypeKey,
+        targetKey: rt.toEntityTypeKey,
+      })) as unknown as Row[],
+    );
+    if (payloadIndices !== undefined) {
+      errors.push(...importedIndexErrors(payloadIndices, indexSchema));
+    }
+    errors.push(
+      ...importedInclusionErrors(
+        payload.lenses.map((lens) => ({ key: lens.key, indexInclusions: lensFields.get(lens)!.indexInclusions })),
+        payloadIndices,
+        indexSchema,
+      ),
+    );
+  }
+
   if (errors.length > 0) {
     throw new ValidationError(errors.join("; "), { errors });
   }
@@ -1568,6 +2027,10 @@ export async function importSchema(
     seenLensKeys.add(lens.key);
   }
 
+  if (payloadIndices !== undefined) {
+    conflicts.push(...(await importedIndexConflicts(store, payloadIndices)));
+  }
+
   if (conflicts.length > 0) {
     throw new ConflictError(conflicts.join("; "));
   }
@@ -1577,8 +2040,25 @@ export async function importSchema(
 
   for (const et of payload.entityTypes) {
     const etId = randomUUID();
-    await store.createEntityType(etId, et.key, et.displayName, et.description ?? null);
-    for (const prop of et.properties) {
+    const nameProperty = namePropertyOf.get(et)!;
+    const properties = nameProperty.created
+      ? [...et.properties, nameProperty.created]
+      : et.properties;
+    // Validated above: the name property is among the properties.
+    const named = properties.find((prop) => prop.key === nameProperty.key)!;
+    await store.createEntityType(etId, et.key, et.displayName, et.description ?? null, {
+      propertyId: randomUUID(),
+      key: named.key,
+      displayName: named.displayName,
+      description: named.description ?? null,
+      dataType: named.dataType,
+      required: named.required,
+      defaultValue: named.defaultValue ?? null,
+    });
+    for (const prop of properties) {
+      if (prop === named) {
+        continue;
+      }
       await store.createProperty(
         etId,
         "EntityType",
@@ -1591,15 +2071,16 @@ export async function importSchema(
         prop.defaultValue ?? null,
       );
     }
-    // Vector indexes for this entity type: non-document properties become
-    // in-index filter properties; each document property gets its own
-    // chunk index. Skipped entirely without a provider.
-    if (provider) {
-      const filterProps = et.properties
+    // Own search storage: vector indexes for this entity type —
+    // non-document properties become in-index filter properties; each
+    // document property gets its own chunk index. Skipped entirely without
+    // a provider.
+    if (provider && keepsOwnSearch(store)) {
+      const filterProps = properties
         .filter((prop) => prop.dataType !== "document")
         .map((prop) => prop.key);
       await store.createVectorIndex(et.key, provider.dimensions, filterProps);
-      for (const prop of et.properties) {
+      for (const prop of properties) {
         if (prop.dataType === "document") {
           await store.createDocumentVectorIndex(et.key, prop.key, provider.dimensions);
         }
@@ -1633,8 +2114,10 @@ export async function importSchema(
   }
 
   const createdLenses: LensResponseBody[] = [];
+  const lensIds = new Map<ExportLensInput, string>();
   for (const lens of payload.lenses) {
     const lensId = randomUUID();
+    lensIds.set(lens, lensId);
     const lensData = await store.createLens(lensId, lens.key, lens.name, lens.description ?? null);
 
     // Inclusions are written WITHOUT the four inclusion rules — lens
@@ -1706,8 +2189,79 @@ export async function importSchema(
     await store.ensureSavedQueryVectorIndex(provider.dimensions);
   }
 
+  const indices = store.searchIndices?.();
+  if (indices !== undefined) {
+    const settings = await indices.getSearchSettings();
+    await indices.setSearchSettings({ ...settings, keywordLanguages });
+  }
+  // The managed indices derive in the sync below, which reconciles every
+  // index's generations: import provisions no entries, the worker builds.
+  if (payloadIndices !== undefined) {
+    await importSearchIndices(store, payloadIndices);
+  }
   invalidateLoadedSchemaCache();
+  await syncSearchIndices(store);
+  // The sync included each new managed index in the scoped lenses that
+  // expose its root type (a passage index: its document property too) —
+  // what a lens without index inclusions (5.0, or a 6.0 lens without the
+  // field) keeps. A 6.0 lens's own list replaces that, now that every
+  // index exists.
+  if (!legacy) {
+    for (const lens of payload.lenses) {
+      const { indexInclusions } = lensFields.get(lens)!;
+      if (indexInclusions !== undefined) {
+        await importLensIndexInclusions(store, lensIds.get(lens)!, indexInclusions);
+      }
+    }
+    invalidateLoadedSchemaCache();
+  }
+  // Retriever agents last, once their indices exist; an adapter without
+  // search indices keeps none.
+  if (indices !== undefined) {
+    for (const lens of payload.lenses) {
+      for (const agent of lensFields.get(lens)!.agents) {
+        const converted = legacy
+          ? convertLegacyRetrieverConfig(agent.config, legacyDataType)!
+          : { config: RetrieverAgentConfig.parse(agent.config), warnings: [] };
+        const { key, warning } = agentKeys.get(agent)!;
+        await indices.saveRetrieverAgent(
+          lensIds.get(lens)!,
+          {
+            retrieverAgentId: randomUUID(),
+            key,
+            name: agent.name,
+            description: agent.description,
+            configVersion: RETRIEVER_AGENT_CONFIG_VERSION,
+            config: converted.config,
+            warnings: warning === null ? converted.warnings : [...converted.warnings, warning],
+          },
+          true,
+        );
+      }
+    }
+  }
   return { lenses: createdLenses };
+}
+
+// --- Search settings ---
+
+export async function getSearchSettings(store: ModelingStore): Promise<SearchSettingsResponseBody> {
+  return readSearchSettings(requireSearchIndices(store));
+}
+
+/**
+ * Change the keyword language set and/or which managed indices are off;
+ * an absent field stays as it is. Every change reconciles the
+ * generations — a new language set yields new keyword generations for
+ * every index (`runtime/indexing/settings.ts`).
+ */
+export async function updateSearchSettings(
+  body: SearchSettingsUpdateInput,
+  store: ModelingStore,
+): Promise<SearchSettingsResponseBody> {
+  const result = await changeSearchSettings(requireSearchIndices(store), body);
+  invalidateLoadedSchemaCache();
+  return result;
 }
 
 // --- AI Agent Config ---
@@ -2004,8 +2558,8 @@ export async function upsertSavedQuery(
 
   // Validate each oql step against the lens's schema — skipped ONLY when
   // that schema cannot be loaded (the run-time check still applies then).
-  // Cache-free on purpose: the runtime cache is keyed by bare lens key,
-  // and this path runs against any ontology's bound store.
+  // Cache-free on purpose: validate against the currently persisted schema.
+  // The runtime cache is scoped by ontology and lens.
   try {
     const loaded = await loadSchemaUncached(lensKey, runtimeStore);
     for (const step of body.steps) {

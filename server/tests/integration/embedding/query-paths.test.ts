@@ -21,9 +21,11 @@ import { afterAll, beforeAll, describe, expect, it, type TestContext } from "vit
 
 import { createApp } from "../../../src/app.js";
 import { closeStores, getRuntimeStore, initStores } from "../../../src/core/ports.js";
+import { drainSearchWork } from "../../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache } from "../../../src/runtime/schemaCache.js";
 import { wipeDatabase } from "../reset.js";
 import { checkOllamaModel, disableProvider, enableOllamaProvider } from "./support.js";
+import { defineEntityProperty } from "../fixture.js";
 
 type Row = Record<string, unknown>;
 
@@ -78,14 +80,14 @@ describe.skipIf(!ollamaUp)("query paths on semantic search (Ollama)", () => {
       { key: "age", displayName: "Age", dataType: "integer" },
       { key: "bio", displayName: "Bio", dataType: "document" },
     ]) {
-      await post(`${model}/entity-types/${person.entityTypeId as string}/properties`, prop);
+      await defineEntityProperty(app, "test_ont", person.entityTypeId as string, prop);
     }
     const company = await post(`${model}/entity-types`, { key: "company", displayName: "Company" });
     for (const prop of [
       { key: "name", displayName: "Name", dataType: "string", required: true },
       { key: "profile", displayName: "Profile", dataType: "document" },
     ]) {
-      await post(`${model}/entity-types/${company.entityTypeId as string}/properties`, prop);
+      await defineEntityProperty(app, "test_ont", company.entityTypeId as string, prop);
     }
     const worksFor = await post(`${model}/relation-types`, {
       key: "works_for",
@@ -129,6 +131,8 @@ describe.skipIf(!ollamaUp)("query paths on semantic search (Ollama)", () => {
         role,
       });
     }
+    // Search entries are built in the background (none on Neo4j).
+    await drainSearchWork();
   }
 
   /** The hits of one search, as the entity names in rank order. */

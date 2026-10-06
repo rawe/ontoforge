@@ -1,7 +1,7 @@
 /**
  * PostgreSQL-physical registry tests — everything here reaches past the
  * persistence port on purpose: ontology creation provisions the
- * `ont_<key>` namespace with the ten tables in one transaction, a failed
+ * `ont_<key>` namespace with the ontology tables in one transaction, a failed
  * create leaves no namespace and no registry row behind, and delete
  * drops the namespace in one cascade. Requires the docker-compose
  * PostgreSQL.
@@ -26,9 +26,14 @@ const ALL_TABLES = [
   "lens_includes",
   "ai_agent_config",
   "saved_query",
+  "retriever_agent",
   "entity",
   "relation",
-  "document_chunk",
+  "search_settings",
+  "search_index",
+  "search_generation",
+  "search_queue",
+  "search_entry",
 ];
 
 const ID_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -67,17 +72,17 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL registry provisi
     await wipeDatabase();
   });
 
-  it("create provisions ont_<key> with the ten tables", async () => {
-    await getOntologyRegistry().createOntology(ID_A, "crm", null, null, "english");
+  it("create provisions ont_<key> with the ontology tables", async () => {
+    await getOntologyRegistry().createOntology(ID_A, "crm", null, null);
     expect(await namespaceExists("ont_crm")).toBe(true);
     expect(await tablesIn("ont_crm")).toEqual([...ALL_TABLES].sort());
   });
 
   it("a failure after the namespace exists rolls everything back", async () => {
     // An invalid embedding width dies inside the provisioning transaction,
-    // after CREATE SCHEMA and the ten-table DDL have already run.
+    // after CREATE SCHEMA and the ontology table DDL have already run.
     await expect(
-      getOntologyRegistry().createOntology(ID_A, "doomed", null, -1, "english"),
+      getOntologyRegistry().createOntology(ID_A, "doomed", null, -1),
     ).rejects.toThrow("Invalid embedding width");
     expect(await namespaceExists("ont_doomed")).toBe(false);
     expect(await registryRowCount("doomed")).toBe(0);
@@ -89,7 +94,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL registry provisi
     await runQuery(`CREATE SCHEMA ont_orphaned`);
     try {
       await expect(
-        getOntologyRegistry().createOntology(ID_A, "orphaned", null, null, "english"),
+        getOntologyRegistry().createOntology(ID_A, "orphaned", null, null),
       ).rejects.toThrow(StoreError);
       expect(await registryRowCount("orphaned")).toBe(0);
     } finally {
@@ -100,25 +105,25 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL registry provisi
   it("a display-name collision the pre-check missed translates to the conflict", async () => {
     // Straight to the port, bypassing the service pre-check: the race
     // backstop is the named constraint's translation.
-    await getOntologyRegistry().createOntology(ID_A, "crm", "Customer Relations", null, "english");
+    await getOntologyRegistry().createOntology(ID_A, "crm", "Customer Relations", null);
     await expect(
-      getOntologyRegistry().createOntology(ID_B, "other", "Customer Relations", null, "english"),
+      getOntologyRegistry().createOntology(ID_B, "other", "Customer Relations", null),
     ).rejects.toThrow(ConflictError);
     expect(await namespaceExists("ont_other")).toBe(false);
     expect(await registryRowCount("other")).toBe(0);
   });
 
   it("delete drops the namespace and the registry row together", async () => {
-    await getOntologyRegistry().createOntology(ID_A, "crm", null, null, "english");
+    await getOntologyRegistry().createOntology(ID_A, "crm", null, null);
     expect(await getOntologyRegistry().deleteOntology("crm")).toBe(true);
     expect(await namespaceExists("ont_crm")).toBe(false);
     expect(await registryRowCount("crm")).toBe(0);
   });
 
   it("the server-wide home holds only the registry — no ontology tables", async () => {
-    await getOntologyRegistry().createOntology(ID_A, "crm", null, null, "english");
+    await getOntologyRegistry().createOntology(ID_A, "crm", null, null);
     // `public` is the server-wide home: the registry and nothing
-    // ontology-scoped; the ten tables live only inside `ont_*`.
+    // ontology-scoped; the ontology tables live only inside `ont_*`.
     const result = await runQuery(
       `SELECT table_name FROM information_schema.tables
        WHERE table_schema = current_schema()`,

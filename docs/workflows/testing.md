@@ -27,7 +27,11 @@ every adapter runs, and a multi-ontology tier — cases that need several ontolo
 once — that skips on adapters capped at one ontology (Neo4j). The embedding suite (`tests/integration/embedding/`) and the AI suite
 (`tests/integration/ai/`) are separate because they configure live providers, while the
 plain integration suite's feature-disabled assertions depend on running with *no*
-provider configured.
+provider configured. Where the plain suite needs semantic entries — search-index storage,
+the indexing pipeline, index search — it installs the deterministic fake embedding provider
+of `tests/fakeEmbedding.ts` for the test and removes it afterwards, so it still needs no
+Ollama. The AI suite's retriever-agent tests run with no embedding provider: their indices
+search by keyword.
 
 The embedding and AI suites auto-skip when their provider is unavailable, naming the
 cause. The integration suite does not: it requires a running database and fails loudly by
@@ -91,7 +95,7 @@ Run the embedding suite on both adapters whenever search behaviour is touched.
 Required by the embedding suite:
 
 ```bash
-ollama pull nomic-embed-text
+ollama pull bge-m3
 ```
 
 ### Testing a paid AI provider
@@ -132,7 +136,7 @@ before investigating.
 docker compose up -d
 
 # 2. Ensure Ollama models are available
-ollama pull nomic-embed-text
+ollama pull bge-m3
 ollama pull qwen3:8b
 
 # 3. Run the suites

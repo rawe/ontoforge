@@ -4,11 +4,12 @@
  * explicit `null`.
  */
 
-import { TextSearchLanguage } from "../registry/schemas.js";
+import { KeywordLanguage, KeywordLanguageSetSchema } from "../core/keywordLanguage.js";
 
 import { z } from "zod";
 
-import { DATA_TYPES, KEY_PATTERN, MAX_KEY_LENGTH } from "../core/schemas.js";
+import { DATA_TYPES, DEFAULT_NAME_PROPERTY, KEY_PATTERN, MAX_KEY_LENGTH } from "../core/schemas.js";
+import { SearchIndexDefinition } from "../core/searchIndex.js";
 
 // --- Lens ---
 
@@ -51,6 +52,12 @@ export const IncludeTypeResponse = z.object({
   properties: z.array(z.string()).nullable(),
 });
 
+/** A search-index inclusion names the index by key — request and
+ * response alike. */
+export const IncludeSearchIndex = z.object({
+  key: z.string(),
+});
+
 // --- Validation ---
 
 export const SchemaValidationErrorItem = z.object({
@@ -58,22 +65,30 @@ export const SchemaValidationErrorItem = z.object({
   message: z.string(),
 });
 
+// Warnings never make a result invalid (lens validation: D3).
 export const ValidationResult = z.object({
   valid: z.boolean(),
   errors: z.array(SchemaValidationErrorItem),
+  warnings: z.array(SchemaValidationErrorItem),
 });
 
 // --- Entity Type ---
 
+/** Creating an entity type creates its name property too: a non-required
+ * `string` property under `nameProperty` (default `name`). */
 export const EntityTypeCreate = z.object({
   key: z.string().regex(KEY_PATTERN).max(MAX_KEY_LENGTH),
   displayName: z.string(),
   description: z.string().nullable().optional(),
+  nameProperty: z.string().regex(KEY_PATTERN).max(MAX_KEY_LENGTH).default(DEFAULT_NAME_PROPERTY),
 });
 
+/** `nameProperty` reassigns the name property to another `string` property
+ * of the type. */
 export const EntityTypeUpdate = z.object({
   displayName: z.string().nullable().optional(),
   description: z.string().nullable().optional(),
+  nameProperty: z.string().nullable().optional(),
 });
 
 export const EntityTypeResponse = z.object({
@@ -81,6 +96,8 @@ export const EntityTypeResponse = z.object({
   key: z.string(),
   displayName: z.string(),
   description: z.string().nullable(),
+  /** Key of the type's name property — never null. */
+  nameProperty: z.string(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });
@@ -233,8 +250,18 @@ export const SavedQueryResponse = z.object({
 // (`docs/capabilities/transfer.md`) — the schema-validation operation is
 // what catches those later.
 
-/** Current transfer format version — informational, never dispatched on. */
-export const TRANSFER_FORMAT_VERSION = "5.0";
+/** Current transfer format version — what export writes. */
+export const TRANSFER_FORMAT_VERSION = "6.0";
+
+/** The previous format, still imported: entity types carry no
+ * `nameProperty`, so import derives it (`core/legacyNameProperty.ts`). */
+export const LEGACY_TRANSFER_FORMAT_VERSION = "5.0";
+
+/** Every format version import accepts; an absent version is the current one. */
+export const IMPORTABLE_FORMAT_VERSIONS: readonly string[] = [
+  TRANSFER_FORMAT_VERSION,
+  LEGACY_TRANSFER_FORMAT_VERSION,
+];
 
 export const ExportProperty = z.object({
   key: z.string(),
@@ -249,6 +276,9 @@ export const ExportEntityType = z.object({
   key: z.string(),
   displayName: z.string(),
   description: z.string().nullable().optional(),
+  // Required from 6.0 on — import checks it itself, so a 5.0 payload
+  // (which has none) still parses.
+  nameProperty: z.string().optional(),
   properties: z.array(ExportProperty).default([]),
 });
 
@@ -306,23 +336,168 @@ export const ExportSavedQuery = z.object({
   parameters: z.array(ExportSavedQueryParameter).default([]),
 });
 
+/** One retriever agent in its portable form — also the single-agent
+ * export. Kept as stored: a version this release cannot run travels too. */
+export const ExportRetrieverAgent = z.object({
+  key: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  configVersion: z.number(),
+  config: z.unknown(),
+});
+export type ExportRetrieverAgentInput = z.infer<typeof ExportRetrieverAgent>;
+
 export const ExportLens = z.object({
   key: z.string(),
   name: z.string(),
   description: z.string().nullable().optional(),
   includes: ExportLensInclusions.nullable().optional(),
+  // Version-specific fields are unchecked here: import reads each only in
+  // the version that carries it, with the schema below, and ignores it in
+  // the other (`docs/capabilities/transfer.md#the-format-version`).
+  // 6.0: `ExportIndexInclusions`. Absent (and in 5.0): the lens includes
+  // the managed indices of the types it exposes, as a lens upgraded by
+  // the storage step does.
+  indexInclusions: z.unknown().optional(),
+  // 6.0: `ExportRetrieverAgents` (configuration version 2).
+  retrieverAgents: z.unknown().optional(),
+  // 5.0 only: `ExportRetrieverAgents` (configuration version 1),
+  // converted on import.
+  retrievers: z.unknown().optional(),
   aiAgents: z.array(ExportAiAgent).default([]),
   savedQueries: z.array(ExportSavedQuery).default([]),
 });
 
+/** The transfer format's search indices: the custom definitions and the
+ * managed indices switched off (managed definitions are derived from the
+ * schema, so only their switches travel). */
+export const ExportSearchIndices = z.object({
+  custom: z.array(SearchIndexDefinition).default([]),
+  disabled: z.array(z.string()).default([]),
+});
+
+/** A 6.0 lens's index inclusions: the keys of the indices it includes. */
+export const ExportIndexInclusions = z.array(z.string());
+
+/** A lens's retriever agents — 6.0 `retrieverAgents`, 5.0 `retrievers`. */
+export const ExportRetrieverAgents = z.array(ExportRetrieverAgent);
+
 export const ExportPayload = z.object({
-  textSearchLanguage: TextSearchLanguage,
   formatVersion: z.string().optional().default(TRANSFER_FORMAT_VERSION),
+  // Version-specific, so unchecked here like a lens's: each required by
+  // its own version and read with its schema by import only — 6.0 the
+  // keyword language set (`KeywordLanguageSetSchema`), 5.0 its one
+  // text-search language (`KeywordLanguage`).
+  keywordLanguages: z.unknown().optional(),
+  textSearchLanguage: z.unknown().optional(),
+  // 6.0 only: `ExportSearchIndices`; absent = no custom index, every
+  // managed index on.
+  searchIndices: z.unknown().optional(),
   entityTypes: z.array(ExportEntityType).default([]),
   relationTypes: z.array(ExportRelationType).default([]),
   // Required, no default: a pre-4.0 document (`ontologies[]`) must fail
   // plain shape validation — the intended, final rejection of old payloads.
   lenses: z.array(ExportLens),
+});
+
+// --- Search settings ---
+
+export const SearchSettingsResponse = z.object({
+  keywordLanguages: z.array(KeywordLanguage),
+  /** The managed indices switched off, in key order. */
+  disabledIndices: z.array(z.string()),
+});
+
+/** Either field may be absent; an absent one stays as it is. */
+export const SearchSettingsUpdate = z.object({
+  keywordLanguages: KeywordLanguageSetSchema.optional(),
+  disabledIndices: z.array(z.string()).optional(),
+});
+
+// --- Search indices ---
+// Definitions travel in the index wire format (`core/searchIndex.ts`).
+// Request bodies are parsed by the service, so a malformed draft reports
+// its issues by dotted path like every other definition issue; responses
+// carry managed keys (`person~default`), which no key pattern admits.
+
+/** A definition as the service parses it — any JSON object. */
+export const SearchIndexBody = z.record(z.string(), z.unknown());
+
+const RepresentationSchema = z.enum(["semantic", "keyword"]);
+
+export const SearchIndexDefinitionResponse = z.object({
+  key: z.string(),
+  name: z.string(),
+  description: z.string(),
+  entityType: z.string(),
+  fields: z.array(z.string()),
+  header: z.array(z.string()).nullable(),
+  relations: z.array(
+    z.object({
+      relationType: z.string(),
+      direction: z.enum(["outgoing", "incoming"]),
+      fields: z.array(z.string()),
+      target: z.record(z.string(), z.array(z.string())),
+      label: z.string().nullable(),
+      template: z.string().nullable(),
+    }),
+  ),
+  semantic: z.object({ enabled: z.boolean(), template: z.string().nullable() }),
+  keyword: z.object({ enabled: z.boolean() }),
+});
+
+export const IndexStatusResponse = z.object({
+  state: z.enum(["ready", "building", "stale", "failed", "disabled", "unavailable"]),
+  representations: z.array(
+    z.object({
+      representation: RepresentationSchema,
+      state: z.enum(["ready", "building", "stale", "failed", "unavailable"]),
+      done: z.number().int(),
+      total: z.number().int(),
+      pending: z.number().int(),
+      failed: z.number().int(),
+    }),
+  ),
+  lastErrors: z.array(
+    z.object({
+      entityId: z.string(),
+      partKind: z.string(),
+      message: z.string(),
+      at: z.iso.datetime(),
+    }),
+  ),
+});
+
+export const SearchIndexResponse = z.object({
+  key: z.string(),
+  kind: z.enum(["default", "passage", "custom"]),
+  /** Custom indices always; managed ones unless switched off. */
+  enabled: z.boolean(),
+  definition: SearchIndexDefinitionResponse,
+  documentProperty: z.string().nullable(),
+  status: IndexStatusResponse,
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+});
+
+export const CostEstimateResponse = z.object({
+  entities: z.number().int(),
+  entries: z.number().int(),
+  seconds: z.number(),
+  perRepresentation: z.array(
+    z.object({
+      representation: RepresentationSchema,
+      entries: z.number().int(),
+      seconds: z.number(),
+      measured: z.boolean(),
+    }),
+  ),
+});
+
+export const SearchIndexPreviewResponse = z.object({
+  valid: z.boolean(),
+  issues: z.array(SchemaValidationErrorItem),
+  estimate: CostEstimateResponse.nullable(),
 });
 
 export type LensCreateInput = z.infer<typeof LensCreate>;
@@ -331,6 +506,7 @@ export type LensResponseBody = z.infer<typeof LensResponse>;
 export type IncludeTypeRequestInput = z.infer<typeof IncludeTypeRequest>;
 export type IncludeTypeUpdateInput = z.infer<typeof IncludeTypeUpdate>;
 export type IncludeTypeResponseBody = z.infer<typeof IncludeTypeResponse>;
+export type IncludeSearchIndexBody = z.infer<typeof IncludeSearchIndex>;
 export type ValidationResultBody = z.infer<typeof ValidationResult>;
 export type EntityTypeCreateInput = z.infer<typeof EntityTypeCreate>;
 export type EntityTypeUpdateInput = z.infer<typeof EntityTypeUpdate>;
@@ -349,7 +525,14 @@ export type SavedQueryUpsertInput = z.infer<typeof SavedQueryUpsert>;
 export type StepResponseBody = z.infer<typeof StepResponse>;
 export type SavedQueryResponseBody = z.infer<typeof SavedQueryResponse>;
 export type ExportPayloadInput = z.infer<typeof ExportPayload>;
+export type SearchSettingsUpdateInput = z.infer<typeof SearchSettingsUpdate>;
+export type SearchSettingsResponseBody = z.infer<typeof SearchSettingsResponse>;
+export type SearchIndexResponseBody = z.infer<typeof SearchIndexResponse>;
+export type IndexStatusResponseBody = z.infer<typeof IndexStatusResponse>;
+export type SearchIndexPreviewResponseBody = z.infer<typeof SearchIndexPreviewResponse>;
+export type ExportSearchIndicesInput = z.infer<typeof ExportSearchIndices>;
 export type ExportEntityTypeInput = z.infer<typeof ExportEntityType>;
+export type ExportPropertyInput = z.infer<typeof ExportProperty>;
 export type ExportRelationTypeInput = z.infer<typeof ExportRelationType>;
 export type ExportLensInput = z.infer<typeof ExportLens>;
 export type ExportSavedQueryInput = z.infer<typeof ExportSavedQuery>;

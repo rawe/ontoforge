@@ -52,8 +52,9 @@ All paths below are relative to this skill directory (`scripts/`).
 
 ### Export Schema
 
-Export one ontology's design — entity types, relation types, properties, lenses with
-their inclusions, AI agents and saved queries — to a single JSON file.
+Export one ontology's design — entity types, relation types, properties, the keyword
+language set, custom search indices, lenses with their inclusions, AI agents, retriever
+agents and saved queries — to a single JSON file.
 
 ```bash
 node scripts/export-schema.mjs [-o <output>] [--ontology <key>] [--base-url <url>]
@@ -67,7 +68,7 @@ node scripts/export-schema.mjs [-o <output>] [--ontology <key>] [--base-url <url
 
 **API used**: `GET /api/ontologies/{ontologyKey}/model/export`
 
-The output file is the OntoForge transfer format (v5.0) and can be committed to version
+The output file is the OntoForge transfer format (v6.0) and can be committed to version
 control. It carries the design only — no entities, no relations, no document content,
 and not the ontology's own key or display name. It is not a backup.
 
@@ -90,8 +91,9 @@ node scripts/import-schema.mjs <file> [--ontology <key>] [--base-url <url>]
 Import never creates its target. When the named ontology does not exist the script stops
 and prints the registry call that creates it. Prints the imported lens keys on success.
 
-The target may be bare or populated, but any entity type, relation type or lens key that
-already exists there blocks the whole import with a conflict naming every clash. There is
+The target may be bare or populated, but any entity type, relation type, lens or custom
+search index key that already exists there blocks the whole import with a conflict naming
+every clash. There is
 no merge and no overwrite: resolve the clashes, or import into a bare ontology.
 
 Because the payload carries no ontology identity, the same file imports into any
@@ -113,8 +115,9 @@ node scripts/export-data.mjs [-o <output>] [--ontology <key>] [--lens <key>] [--
 | `--lens` | auto-detected | Lens key the data is read through |
 | `--base-url` | see Environment | OntoForge server URL |
 
-If `--lens` is omitted, the script picks an unscoped lens of that ontology when there is
-one, and reports which lens it used. A scoped lens exports only the subset it exposes.
+If `--lens` is omitted, the script uses an unscoped lens of that ontology and reports
+which one; without an unscoped lens it stops. A scoped lens, named with `--lens`, exports
+only the subset it exposes.
 
 **API used**: `GET /api/ontologies/{ontologyKey}/model/export` (for type discovery),
 then `GET /api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/entities/{type}` and
@@ -140,20 +143,27 @@ node scripts/import-data.mjs <file> [--ontology <key>] [--lens <key>] [--base-ur
 
 The import creates all entities first (building a map from old IDs to new IDs), then
 creates all relations using the remapped IDs. Relations referencing unknown entities are
-skipped with a warning. The lens must expose every type and property the file carries —
-a scoped lens rejects what it hides.
+skipped with a warning. If `--lens` is omitted, the script uses an unscoped lens and stops
+when the ontology has none. The lens must expose every type and property the file
+carries — a scoped lens rejects what it hides.
 
 **API used**: `POST /api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/entities/{type}`,
 `POST /api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/relations/{type}`
 
 ### Rebuild Search Data
 
-Rebuild one ontology's search data: every entity's keyword text, every document
-passage and, where an embedding provider is configured, the vectors, the saved-query
-descriptions and the vector index widths. Run this after a schema edit that removed a
-string property, after data import, after changing the embedding model, or to repair
-missing indexes. It covers the whole ontology, so no lens is involved; after an
-embedding-provider switch, run it once per ontology.
+Search indices keep themselves current: every write enqueues the entries it changes, and a
+background worker builds them, so nothing needs rebuilding after a data import or an
+embedding-model change. Their progress is `GET /api/ontologies/{ontologyKey}/model/search-indices`
+(each index's `status.state`: `ready`, `building`, `stale`, `failed`, `unavailable` without
+an embedding provider, `disabled` when switched off); one index is rebuilt from scratch
+with `POST /api/ontologies/{ontologyKey}/model/search-indices/{indexKey}/rebuild`.
+
+This script rebuilds what lies outside the search indices: the saved-query description
+vectors and the width of their vector index. On Neo4j, which has no search indices and
+computes its own search data with each write, it also rebuilds every entity's vector and
+every document's chunks. Run it after changing the embedding model, once per ontology. It
+covers the whole ontology, so no lens is involved.
 
 ```bash
 node scripts/rebuild-search-data.mjs [--ontology <key>] [--base-url <url>]
@@ -166,9 +176,8 @@ node scripts/rebuild-search-data.mjs [--ontology <key>] [--base-url <url>]
 
 **API used**: `POST /api/ontologies/{ontologyKey}/model/rebuild-search-data`
 
-Streams progress to stderr. On completion, prints a per-type summary. It runs without an
-embedding provider, rebuilding keyword text and passages and reporting the vectors as
-skipped.
+Streams progress to stderr. On completion, prints a per-group summary. It runs without an
+embedding provider and reports the vectors as skipped.
 
 ## Ordering Rules
 
@@ -177,11 +186,12 @@ skipped.
 2. **Schema before data.** The schema defines entity types and relation types. Data
    cannot be imported until the schema exists.
 3. **Entities before relations.** The data import script handles this automatically.
-4. **Rebuild search data after data import.** Imported entities carry no derived search
-   data; the rebuild supplies the keyword text, the document passages and — with a provider
-   configured — the vectors.
+4. **Search follows the data import on its own.** On PostgreSQL the search indices build
+   the imported entities' entries in the background, and search answers from them as they
+   become ready; on Neo4j each write computes its entity's search data. No rebuild is
+   needed.
 5. **A clear key space for a schema import.** The import API does not overwrite or merge.
-   If the target ontology already holds a type or lens with the same key, the import
+   If the target ontology already holds a type, lens or custom search index with the same key, the import
    fails with a 409 Conflict naming every clash. Import into a bare ontology, or delete
    the clashing objects first.
 
@@ -203,11 +213,8 @@ curl -X POST http://localhost:8000/api/ontologies \
 # 4. Import the design
 node scripts/import-schema.mjs ./ontoforge/schema.json --ontology my_ontology
 
-# 5. Optionally import seed data
+# 5. Optionally import seed data — search indices then build in the background
 node scripts/import-data.mjs ./ontoforge/data.json --ontology my_ontology
-
-# 6. Rebuild search data
-node scripts/rebuild-search-data.mjs --ontology my_ontology
 ```
 
 Set `ONTOFORGE_ONTOLOGY=my_ontology` once instead of repeating `--ontology`.
@@ -235,18 +242,44 @@ node scripts/import-schema.mjs /tmp/design.json --ontology clone
 
 ## File Formats
 
-### Schema file (transfer format v5.0)
+### Schema file (transfer format v6.0)
 
 Produced by `GET /api/ontologies/{ontologyKey}/model/export`:
 
 ```json
 {
-  "formatVersion": "5.0",
-  "textSearchLanguage": "english",
+  "formatVersion": "6.0",
+  "keywordLanguages": ["german", "english"],
+  "searchIndices": {
+    "custom": [
+      {
+        "key": "person_employment",
+        "name": "People by employment",
+        "description": "People with their roles at companies.",
+        "entityType": "person",
+        "fields": ["name"],
+        "header": null,
+        "relations": [
+          {
+            "relationType": "works_for",
+            "direction": "outgoing",
+            "fields": ["role"],
+            "target": { "company": ["name"] },
+            "label": "Employment",
+            "template": null
+          }
+        ],
+        "semantic": { "enabled": true, "template": null },
+        "keyword": { "enabled": true }
+      }
+    ],
+    "disabled": []
+  },
   "entityTypes": [
     {
       "key": "person",
       "displayName": "Person",
+      "nameProperty": "name",
       "properties": [
         { "key": "name", "displayName": "Name", "dataType": "string", "required": true }
       ]
@@ -254,31 +287,49 @@ Produced by `GET /api/ontologies/{ontologyKey}/model/export`:
   ],
   "relationTypes": [
     {
-      "key": "knows",
-      "displayName": "Knows",
+      "key": "works_for",
+      "displayName": "Works for",
       "fromEntityTypeKey": "person",
-      "toEntityTypeKey": "person",
-      "properties": []
+      "toEntityTypeKey": "company",
+      "properties": [
+        { "key": "role", "displayName": "Role", "dataType": "string", "required": false }
+      ]
     }
   ],
   "lenses": [
     {
       "key": "my_lens",
       "name": "My Lens",
-      "includes": null,
+      "indexInclusions": [],
       "aiAgents": [],
-      "savedQueries": []
+      "savedQueries": [],
+      "retrieverAgents": []
     }
   ]
 }
 ```
 
-A lens with `"includes": null` is **unscoped** and sees the whole schema. A scoped lens
-lists the type keys it exposes and optionally restricts the visible properties.
+(The `company` entity type is left out of the example for brevity.)
 
-The text-search language is required and must match the existing target ontology.
-The format version is informational — import never dispatches on it. Required fields
-are validated directly; no converter exists.
+- `keywordLanguages` — the languages keyword search stems in: `["english"]`,
+  `["german"]` or `["german", "english"]`. Import replaces the target's set with it.
+- `searchIndices` — `custom`, the custom search-index definitions, and `disabled`, the
+  keys of the managed indices switched off (`<type>~default`, `<type>~<documentProperty>`).
+  Managed indices are not carried; the imported schema derives them. Optional.
+- `nameProperty` — each entity type's name property, one of its own `string` properties.
+- A lens without `includes` is **unscoped** and sees the whole schema. A scoped lens lists
+  the type keys it exposes and optionally restricts the visible properties.
+  `indexInclusions` lists the search indices a scoped lens searches, by key; an unscoped
+  lens searches every index and lists none.
+- `retrieverAgents` — the lens's retriever agents, each with `key`, `name`,
+  `description`, `configVersion` (2) and `config`. Optional.
+
+The format version decides how import reads the file: `6.0` (or none) is the current
+format; `5.0` — one `textSearchLanguage` instead of `keywordLanguages`, no search indices,
+no name properties, lens `retrievers` of configuration version 1 instead of
+`retrieverAgents` — is converted on the way in, each retriever into a retriever agent
+that lists what the conversion dropped as warnings; any other version is refused. Import
+provisions no search entries: each index is built in the background once data exists.
 
 ### Data file (v1.0)
 

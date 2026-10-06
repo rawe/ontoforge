@@ -131,7 +131,7 @@ describe("validate one lens", () => {
       url: "/api/ontologies/onto/model/lenses/lens-1/validate",
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ valid: true, errors: [] });
+    expect(res.json()).toEqual({ valid: true, errors: [], warnings: [] });
   });
 
   it("an unknown lens id answers 404", async () => {

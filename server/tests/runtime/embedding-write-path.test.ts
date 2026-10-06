@@ -1,9 +1,11 @@
 /**
- * Write-path embedding decisions (`docs/capabilities/search.md#keeping-embeddings-current`):
- * create always embeds, update embeds only when a string property is
- * touched (from the merged post-update state), a failed embedding never
- * fails the write, and the indexed-string size validation runs only with a
- * provider. Plus the route-level FEATURE_DISABLED refusal.
+ * Write-path embedding decisions (`docs/capabilities/search.md#keeping-search-data-current`).
+ * On an adapter with its own search storage: create always embeds, update
+ * embeds only when a string property is touched (from the merged
+ * post-update state), a failed embedding never fails the write, and the
+ * indexed-string size validation runs only with a provider. On an adapter
+ * that stores search indices no write embeds anything: the worker builds
+ * the entries later.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -11,7 +13,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 import { setEmbeddingProvider, type EmbeddingProvider } from "../../src/core/embedding.js";
 import { ValidationError } from "../../src/core/exceptions.js";
-import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
+import type { SearchIndexStore } from "../../src/core/ports.js";
+import { invalidateLoadedSchemaCache, invalidateSearchContext } from "../../src/runtime/schemaCache.js";
 import * as service from "../../src/runtime/service.js";
 import {
   asRuntimeStore,
@@ -75,7 +78,6 @@ describe("entity create", () => {
     expect(provider.embed).toHaveBeenCalledWith("person: name=Alice, email=a@b.c");
     const call = holder.store.createEntity.mock.calls[0]!;
     expect(call[4]).toEqual([0.1, 0.2]); // embedding argument
-    expect(call[6]).toEqual([{ propertyKey: "name", text: "Alice" }, { propertyKey: "email", text: "a@b.c" }]);
     expect(holder.store.validateVectorIndexedProperties).toHaveBeenCalledTimes(1);
   });
 
@@ -92,7 +94,6 @@ describe("entity create", () => {
 
     expect(result.name).toBe("Alice");
     expect(holder.store.createEntity.mock.calls[0]![4]).toBeNull();
-    expect(holder.store.createEntity.mock.calls[0]![5]).toContain("name=Alice");
   });
 
   it("without a provider, neither embed nor size validation runs", async () => {
@@ -107,7 +108,6 @@ describe("entity create", () => {
 
     expect(holder.store.validateVectorIndexedProperties).not.toHaveBeenCalled();
     expect(holder.store.createEntity.mock.calls[0]![4]).toBeNull();
-    expect(holder.store.createEntity.mock.calls[0]![5]).toContain("name=Alice");
   });
 
   it("an oversized indexed string is rejected before the write", async () => {
@@ -151,7 +151,6 @@ describe("entity update", () => {
     const call = holder.store.updateEntity.mock.calls[0]!;
     expect(call[5]).toEqual([0.1, 0.2]); // embedding
     expect(call[6]).toBe(true); // hasEmbeddingUpdate
-    expect(call[8]).toEqual([{ propertyKey: "name", text: "Alice" }, { propertyKey: "email", text: "new@b.c" }]);
   });
 
   it("removing a string property (null) re-embeds without it", async () => {
@@ -169,7 +168,6 @@ describe("entity update", () => {
     );
 
     expect(provider.embed).toHaveBeenCalledWith("person: name=Alice");
-    expect(holder.store.updateEntity.mock.calls[0]![8]).toEqual([{ propertyKey: "name", text: "Alice" }]);
   });
 
   it("does not re-embed when only a non-string property changes", async () => {
@@ -189,10 +187,9 @@ describe("entity update", () => {
     const call = holder.store.updateEntity.mock.calls[0]!;
     expect(call[5]).toBeNull(); // no embedding
     expect(call[6]).toBe(false); // no embedding update
-    expect(call[8]).toBeUndefined(); // preserve stored keyword data
   });
 
-  it("without a provider, updates recompose the stored property text", async () => {
+  it("without a provider, a string change clears the stored vector", async () => {
     holder.store.getEntity.mockResolvedValue(makeEntity({ name: "Alice" }));
     holder.store.updateEntity.mockResolvedValue(makeEntity({ name: "Bob" }));
 
@@ -205,8 +202,42 @@ describe("entity update", () => {
     );
 
     expect(holder.store.getEntity).toHaveBeenCalled();
+    expect(holder.store.updateEntity.mock.calls[0]![5]).toBeNull();
     expect(holder.store.updateEntity.mock.calls[0]![6]).toBe(true);
-    expect(holder.store.updateEntity.mock.calls[0]![7]).toContain("name=Bob");
-    expect(holder.store.updateEntity.mock.calls[0]![8]).toEqual([{ propertyKey: "name", text: "Bob" }]);
+  });
+});
+
+describe("on an adapter that stores search indices", () => {
+  beforeEach(() => {
+    invalidateSearchContext();
+    const indexStore = {
+      listIndices: async () => [],
+      readFullSchema: async () => ({ entityTypes: [], relationTypes: [] }),
+    } as unknown as SearchIndexStore;
+    Object.assign(holder.store, { searchIndices: () => indexStore });
+  });
+
+  afterEach(() => {
+    invalidateSearchContext();
+  });
+
+  it("no write embeds, validates for vector indexes or chunks", async () => {
+    const provider = mockProvider();
+    setEmbeddingProvider(provider);
+    holder.store.createEntity.mockResolvedValue(makeEntity({ name: "Alice" }));
+    holder.store.getEntity.mockResolvedValue(makeEntity({ name: "Alice" }));
+    holder.store.updateEntity.mockResolvedValue(makeEntity({ name: "Bob" }));
+    const store = asRuntimeStore(holder.store);
+
+    await service.createEntity("full_lens", "person", { name: "Alice" }, store);
+    await service.updateEntity("full_lens", "person", "ent-1", { name: "Bob" }, store);
+
+    expect(provider.embed).not.toHaveBeenCalled();
+    expect(holder.store.validateVectorIndexedProperties).not.toHaveBeenCalled();
+    expect(holder.store.createEntity.mock.calls[0]![4]).toBeNull();
+    const update = holder.store.updateEntity.mock.calls[0]!;
+    expect([update[5], update[6]]).toEqual([null, false]);
+    expect(holder.store.createDocumentChunks).not.toHaveBeenCalled();
+    expect(holder.store.deleteChunksForEntityProperty).not.toHaveBeenCalled();
   });
 });

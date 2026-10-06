@@ -32,19 +32,15 @@ try {
   // Read the ontology's design to discover every type key.
   const design = await api(baseUrl, `${modelPath(ontologyKey)}/export`);
 
-  // Resolve the lens the runtime API reads through (prefers unscoped).
+  // Resolve the lens the runtime API reads through: an unscoped one unless named.
   const lensKey = flags.lens || pickLensKey(design);
   if (!lensKey) {
-    die(`ontology "${ontologyKey}" has no lens. Create one before exporting data.`);
-  }
-  if (!flags.lens) {
-    const isUnscoped = (design.lenses || []).some(
-      (lens) => lens.key === lensKey && !lens.includes,
-    );
-    console.error(
-      `Using lens: ${lensKey}${isUnscoped ? '' : ' (scoped — export may be partial)'}`,
+    die(
+      `ontology "${ontologyKey}" has no unscoped lens. Create one, or pass --lens to ` +
+        'export only what a scoped lens exposes.',
     );
   }
+  if (!flags.lens) console.error(`Using lens: ${lensKey}`);
 
   const prefix = runtimePath(ontologyKey, lensKey);
 

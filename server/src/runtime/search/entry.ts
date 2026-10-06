@@ -1,12 +1,29 @@
 import { getEmbeddingProvider } from "../../core/embedding.js";
 import { ValidationError } from "../../core/exceptions.js";
-import type { Row, RuntimeStore } from "../../core/ports.js";
+import { keepsOwnSearch } from "../../core/ownSearch.js";
+import type {
+  FilterCondition,
+  KeywordMatching,
+  Row,
+  RuntimeStore,
+  SearchIndexStore,
+} from "../../core/ports.js";
+import { DEFAULT_INDEX_SUFFIX, managedIndexKey } from "../../core/searchIndex.js";
 import {
   applyFieldProjection,
   filterEntityProperties,
-  ENTITY_ALWAYS_FIELDS,
   ENTITY_NEIGHBOR_ALWAYS_FIELDS,
 } from "../readHelpers.js";
+import {
+  describeMatches,
+  indexStoreOf,
+  rankThroughIndices,
+  readHitEntities,
+  searchableIndices,
+  type IndexTarget,
+  type Matched,
+  type SearchMode,
+} from "./indexSearch.js";
 import { validateRequest, type SearchRequest, type SearchKind } from "./request.js";
 import {
   strategies, availableStrategies, ranksSemantically, type RankingKind, type SearchStrategy,
@@ -15,24 +32,28 @@ import { propertyKind } from "./property.js";
 import { documentKind, collapsePassages } from "./document.js";
 import {
   emptyEvidence, fuse, refineTies, relativeScore,
-  type Ranked, type RankingScore, type SearchEvidence, type SemanticSimilarity,
+  type KeywordScore, type Ranked, type RankingScore, type SearchEvidence, type SemanticSimilarity,
 } from "./fusion.js";
 export type { SearchRequest } from "./request.js";
 export type { SearchEvidence } from "./fusion.js";
+/** A match's evidence on the wire: the measurements. */
+export type MatchEvidence = SearchEvidence;
 export type SearchMatch =
-  | { kind: "properties"; evidence: SearchEvidence & { keywordPropertyKeys: string[] | null } }
+  | { kind: "properties"; evidence: MatchEvidence }
   | {
       kind: "document";
       propertyKey: string;
       charOffset: number;
       charLength: number;
-      evidence: SearchEvidence;
+      evidence: MatchEvidence;
     };
 export interface SearchHit {
   entity: Row;
   /** Ratio to the best score in this response; see RELATIVE_SCORE_PROMISE. Never confidence. */
   relativeScore: number;
   matches: SearchMatch[];
+  /** What matched the entity best — on adapters that store search indices. */
+  matched?: Matched;
 }
 export interface SearchResponse {
   query: string;
@@ -44,6 +65,9 @@ export interface SearchResponse {
   filter: Record<string, string>;
   hits: SearchHit[];
 }
+/** How many passages per requested hit the passage ranking fetches first, before they
+ * are collapsed to entities and cut to the limit. */
+const CANDIDATE_FACTOR = 5;
 /** The floor drops semantic candidates below it before any fusion, above the storage
  * port; keyword rankings are never touched. A semantic row's score is its measured
  * similarity, so a floored page is short exactly when the ranking is exhausted. */
@@ -54,13 +78,28 @@ function floored<T>(kind: RankingKind<T>, minSimilarity: number | null): Ranking
     semantic: async () => (await kind.semantic()).filter((r) => r.score >= minSimilarity),
   };
 }
+/** The engine mode and keyword matching a strategy maps to. */
+const STRATEGY_MODES: Record<SearchStrategy, { mode: SearchMode; matching: KeywordMatching }> = {
+  semantic: { mode: "semantic", matching: "any" },
+  keyword: { mode: "keyword", matching: "any" },
+  "keyword-any": { mode: "keyword", matching: "any" },
+  "keyword-all": { mode: "keyword", matching: "all" },
+  hybrid: { mode: "hybrid", matching: "any" },
+};
+/**
+ * Ranked search. Requests are validated and a strategy chosen alike on
+ * every adapter; an adapter that stores search indices then answers from
+ * them (`searchThroughIndices`), any other from its own search storage —
+ * by vector only, the one ranking such storage has.
+ */
 export async function search(
   lensKey: string,
   request: SearchRequest,
   store: RuntimeStore,
 ): Promise<SearchResponse> {
+  const validated = await validateRequest(lensKey, request, store);
   const { loaded, kinds, type, limit, minSimilarity, filter, searchedTypes, searchedProperties } =
-    await validateRequest(lensKey, request, store);
+    validated;
   const available = availableStrategies(store);
   const strategy = strategies.find((s) => s.key === (request.strategy ?? available[0]));
   if (!strategy || !available.includes(strategy.key))
@@ -68,6 +107,8 @@ export async function search(
       `Search strategy unavailable. Available strategies: ${available.join(", ") || "none"}`,
       { code: "FEATURE_DISABLED" },
     );
+  if (!keepsOwnSearch(store))
+    return searchThroughIndices(indexStoreOf(store), store, request, validated, strategy.key);
   const embedding = ranksSemantically(strategy.key)
     ? await getEmbeddingProvider()!.embed(request.query)
     : [];
@@ -79,9 +120,12 @@ export async function search(
     rankings.push(
       (
         await strategy.rank(
-          floored(propertyKind(store, searchedTypes, embedding, limit, request.query), minSimilarity),
+          floored(
+            propertyKind(store, searchedTypes, embedding, limit),
+            minSimilarity,
+          ),
         )
-      ).map((r) => ({
+      ).slice(0, limit).map((r) => ({
         key: r.key,
         score: r.score,
         value: {
@@ -89,11 +133,7 @@ export async function search(
           matches: [
             {
               kind: "properties",
-              evidence: {
-                ...emptyEvidence(),
-                ...r.evidence,
-                keywordPropertyKeys: r.evidence?.keywordPropertyKeys ?? null,
-              },
+              evidence: { ...emptyEvidence(), ...r.evidence },
             },
           ],
         },
@@ -102,12 +142,12 @@ export async function search(
   if (kinds.includes("document")) {
     // Exhaust the passage ranking so a second document property cannot be hidden
     // behind many passages of the first. Collapse and the entity limit live here.
-    let budget = limit * 5;
+    let budget = limit * CANDIDATE_FACTOR;
     let collapsed: ReturnType<typeof collapsePassages> = [];
     while (searchedProperties.length) {
       const passages = await strategy.rank(
         floored(
-          documentKind(store, searchedProperties, embedding, budget, request.query),
+          documentKind(store, searchedProperties, embedding, budget),
           minSimilarity,
         ),
       );
@@ -164,29 +204,13 @@ export async function search(
   });
   const hits = ranked.map((r) => {
     const typeKey = String(r.value.entity._entityTypeKey ?? type);
-    const exposedProperties = loaded.scoped.entityTypes[typeKey]!.properties;
-    // A partial list would claim complete attribution. Projection is not lens permission.
-    for (const match of r.value.matches) {
-      if (
-        match.kind === "properties" &&
-        match.evidence.keywordPropertyKeys?.some(
-          (key) => exposedProperties[key]?.dataType !== "string",
-        )
-      )
-        match.evidence.keywordPropertyKeys = null;
-    }
     const entity = filterEntityProperties(
-      r.value.entity,
+      { ...r.value.entity, _entityTypeKey: typeKey },
       loaded.scoped.entityTypes[typeKey]!,
       request.fields,
     );
-    if (type !== null) delete entity._entityTypeKey;
     return {
-      entity: applyFieldProjection(
-        entity,
-        request.fields,
-        type === null ? ENTITY_NEIGHBOR_ALWAYS_FIELDS : ENTITY_ALWAYS_FIELDS,
-      ),
+      entity: applyFieldProjection(entity, request.fields, ENTITY_NEIGHBOR_ALWAYS_FIELDS),
       relativeScore: relativeScore(r.score, ranked[0]!.score),
       matches: r.value.matches.sort(
         (a, b) => Number(b.kind === "properties") - Number(a.kind === "properties"),
@@ -196,4 +220,76 @@ export async function search(
   return {
     query: request.query, type, in: kinds, strategy: strategy.key, minSimilarity, filter, hits,
   };
+}
+
+/**
+ * Default search through search indices: properties search the default
+ * index of each searched type, documents the passage index of each
+ * searched document property — those the lens may search. The engine
+ * (`indexSearch.ts`) ranks; every index that found an entity contributes
+ * one match (its best entry: the entity's own text, or one passage), and
+ * the best of them is the hit's `matched`.
+ */
+async function searchThroughIndices(
+  indexStore: SearchIndexStore,
+  store: RuntimeStore,
+  request: SearchRequest,
+  validated: Awaited<ReturnType<typeof validateRequest>>,
+  strategy: SearchStrategy,
+): Promise<SearchResponse> {
+  const { loaded, kinds, type, limit, minSimilarity, filter, searchedTypes, searchedProperties } =
+    validated;
+  const searchable = new Map(
+    (await searchableIndices(loaded, indexStore)).map((index) => [index.key, index] as const),
+  );
+  const targets: IndexTarget[] = [];
+  const target = (key: string, conditions: FilterCondition[]) => {
+    const index = searchable.get(key);
+    if (index !== undefined) targets.push({ index, conditions });
+  };
+  if (kinds.includes("properties"))
+    for (const t of searchedTypes)
+      target(managedIndexKey(t.entityTypeKey, DEFAULT_INDEX_SUFFIX), t.conditions);
+  if (kinds.includes("document"))
+    for (const p of searchedProperties)
+      target(managedIndexKey(p.entityTypeKey, p.propertyKey), p.conditions);
+
+  const ranked = await rankThroughIndices(loaded, indexStore, {
+    targets,
+    query: request.query,
+    ...STRATEGY_MODES[strategy],
+    relations: null,
+    minScore: minSimilarity,
+    limit,
+  });
+  const entities = await readHitEntities(loaded, store, ranked, request.fields);
+  const present = ranked.filter((hit) => entities.has(hit.entityId));
+  const matched = await describeMatches(loaded, store, present);
+  const hits = present.map((hit): SearchHit => {
+    const matches: SearchMatch[] = [];
+    for (const { index, entry, semanticSimilarity, keywordScore } of hit.indices) {
+      const evidence: MatchEvidence = {
+        semanticSimilarity: semanticSimilarity as SemanticSimilarity | null,
+        keywordMatch: keywordScore === null ? null : true,
+        keywordScore: keywordScore as KeywordScore | null,
+      };
+      if (index.kind === "default") matches.push({ kind: "properties", evidence });
+      else if (entry.partKind === "passage")
+        matches.push({
+          kind: "document",
+          propertyKey: index.definition.fields[0]!,
+          charOffset: entry.startChar ?? 0,
+          charLength: entry.charLength ?? 0,
+          evidence,
+        });
+    }
+    matches.sort((a, b) => Number(b.kind === "properties") - Number(a.kind === "properties"));
+    return {
+      entity: entities.get(hit.entityId)!,
+      relativeScore: relativeScore(hit.score, present[0]!.score),
+      matches,
+      matched: matched.get(hit.entityId)!,
+    };
+  });
+  return { query: request.query, type, in: kinds, strategy, minSimilarity, filter, hits };
 }

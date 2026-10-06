@@ -16,6 +16,7 @@
  */
 
 import {
+  INDEX_SEARCH_GUIDANCE,
   RELATIVE_SCORE_PROMISE,
   SEARCH_EVIDENCE_GUIDANCE,
   TOOL_MIN_SIMILARITY_GUIDANCE,
@@ -60,6 +61,31 @@ function wrap<Args>(
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(value, max));
+}
+
+interface SearchToolArgs {
+  query: string;
+  entity_type_key?: string;
+  limit?: number;
+  filters?: Record<string, unknown>;
+  fields?: string[];
+  property?: string;
+}
+
+interface IndexSearchToolArgs {
+  query: string;
+  index?: string | string[];
+  relations?: string[];
+  limit?: number;
+  filters?: Record<string, unknown>;
+  fields?: string[];
+}
+
+/** Tool filter values as the text the services coerce, like a query string. */
+function filterText(filters: Record<string, unknown> | undefined): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(filters ?? {}).map(([key, value]) => [key, valueToText(value)]),
+  );
 }
 
 /** Build the runtime MCP server bound to one ontology and one lens. */
@@ -229,7 +255,7 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
         '— they appear as {"document": true, "length": N} stubs. ' +
         "'offset' and 'limit' are character-based; omit both to read the full " +
         "document. Use the charOffset/charLength from a search hit's " +
-        "matches to read exactly the matching passage.",
+        "matches, or from a search_by_index passage's matched, to read exactly the matching passage.",
       inputSchema: {
         entity_type_key: z.string(),
         entity_id: z.string(),
@@ -654,6 +680,24 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
     }),
   );
 
+  server.registerTool(
+    "list_search_indices",
+    {
+      description:
+        "List the search indices this lens can search, to choose indices for search_by_index's index argument. " +
+        "Each has key, kind (default: an entity type's own text; passage: one document's passages; " +
+        "custom: designed fields and relation groups), name, description (what it finds — choose by it), " +
+        "entityType (hits are always entities of this type), fields, relations (the relation groups: " +
+        "relationType — the key search_by_index's relations argument takes — direction and label), " +
+        "documentProperty (the property_key for get_document after a passage match), modes and " +
+        "status (ready, building, stale, failed, unavailable; an index not yet built finds nothing).",
+      inputSchema: {},
+    },
+    wrap("list_search_indices", async () =>
+      jsonResult(await service.searchIndexCatalog(lensKey, await getRuntimeStore(ontologyKey))),
+    ),
+  );
+
   for (const document of [false, true]) {
     const name = document ? "search_documents" : "search";
     server.registerTool(
@@ -661,10 +705,12 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
       {
         description:
           (document
-            ? "Find entities whose document text matches. Every hit carries passage matches with propertyKey, charOffset and charLength for get_document. "
-            : "Find entities for a text across properties and documents. ") +
-          "Omit entity_type_key to search all exposed types. Filters take the list_entities keys and operators except '__contains' and apply before ranking, narrowing the searched types; fields projects each entity. Returns the search envelope. " +
-          TOOL_MIN_SIMILARITY_GUIDANCE + " relativeScore is comparable only within this response: " +
+            ? "Find entities whose document text matches. property restricts the search to one document property key. Every hit carries passage matches with propertyKey, charOffset and charLength for get_document. "
+            : "Find entities for a text across properties and documents. " +
+              "To find entities through what they are related to, or through chosen search indices, use search_by_index. ") +
+          "Omit entity_type_key to search all exposed types. Filters take the list_entities keys and operators except '__contains' and apply before ranking, narrowing the searched types; fields projects each entity; limit is an integer 1–100, default 10. " +
+          "Returns query, type, in, strategy, minSimilarity, filter and hits; each hit has entity, relativeScore and matches (kind properties, or document with propertyKey, charOffset, charLength). " +
+          TOOL_MIN_SIMILARITY_GUIDANCE + " relativeScore: " +
           RELATIVE_SCORE_PROMISE + " " + SEARCH_EVIDENCE_GUIDANCE,
         inputSchema: {
           query: z.string(),
@@ -675,43 +721,74 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
           ...(document ? { property: z.string().optional() } : {}),
         },
       },
-      wrap(
-        name,
-        async (args: {
-          query: string;
-          entity_type_key?: string;
-          limit?: number;
-          filters?: Record<string, unknown>;
-          fields?: string[];
-          property?: string;
-        }) => {
-          const store = await getRuntimeStore(ontologyKey);
-          return jsonResult(
-            await service.search(
-              lensKey,
-              {
-                query: args.query,
-                type: args.entity_type_key ?? null,
-                limit: clamp(args.limit ?? 10, 1, 100),
-                minSimilarity: toolMinSimilarity(store),
-                filter: Object.fromEntries(
-                  Object.entries(args.filters ?? {}).map(([key, value]) => [
-                    key,
-                    valueToText(value),
-                  ]),
-                ),
-                fields: args.fields ?? null,
-                ...(document
-                  ? { in: ["document" as const], document: { property: args.property } }
-                  : {}),
-              },
-              store,
-            ),
-          );
-        },
-      ),
+      wrap(name, async (args: SearchToolArgs) => {
+        const store = await getRuntimeStore(ontologyKey);
+        return jsonResult(
+          await service.search(
+            lensKey,
+            {
+              query: args.query,
+              type: args.entity_type_key ?? null,
+              limit: clamp(args.limit ?? 10, 1, 100),
+              minSimilarity: toolMinSimilarity(store),
+              filter: filterText(args.filters),
+              fields: args.fields ?? null,
+              ...(document
+                ? { in: ["document" as const], document: { property: args.property } }
+                : {}),
+            },
+            store,
+          ),
+        );
+      }),
     );
   }
+
+  server.registerTool(
+    "search_by_index",
+    {
+      description:
+        "Find entities for a text through chosen search indices, keys from list_search_indices. " +
+        "Unlike search, it can find an entity through its relations when the catalog shows a custom index with that " +
+        "relation group: a person by the company they work for, or by their role there. index takes one key or a " +
+        "non-empty list; omit it to search every index of this lens. relations keeps only the relation entries of the " +
+        "named relation type keys ([] keeps none); an entity's own fields and document passages always count. " +
+        "Filters take the list_entities keys and operators except '__contains' and apply before ranking, keeping only " +
+        "the indices whose entity type declares every key; fields projects each entity; limit is an integer 1–100, default 10. " +
+        "Returns query, mode, minSimilarity and hits; each hit has entity, relativeScore and matched — the entry that " +
+        "matched best: index, partKind (self/relation/passage), relationType and relationId of a relation, target " +
+        "(id, type, label of the entity at its other end), snippet (start of the entry's text), and a passage's " +
+        "charOffset and charLength — for get_document use the index's documentProperty as property_key. " +
+        TOOL_MIN_SIMILARITY_GUIDANCE + " relativeScore: " +
+        RELATIVE_SCORE_PROMISE + " " + INDEX_SEARCH_GUIDANCE,
+      inputSchema: {
+        query: z.string(),
+        index: z.union([z.string(), z.array(z.string())]).optional(),
+        relations: z.array(z.string()).optional(),
+        limit: z.number().optional(),
+        filters: z.record(z.string(), z.unknown()).optional(),
+        fields: z.array(z.string()).optional(),
+      },
+    },
+    wrap("search_by_index", async (args: IndexSearchToolArgs) => {
+      const store = await getRuntimeStore(ontologyKey);
+      const minSimilarity = toolMinSimilarity(store);
+      const response = await service.searchByIndices(
+        lensKey,
+        {
+          indices: args.index === undefined ? null : [args.index].flat(),
+          relations: args.relations ?? null,
+          query: args.query,
+          filters: filterText(args.filters),
+          minScore: minSimilarity,
+          limit: clamp(args.limit ?? 10, 1, 100),
+          fields: args.fields ?? null,
+        },
+        store,
+      );
+      return jsonResult({ query: response.query, mode: response.mode, minSimilarity, hits: response.hits });
+    }),
+  );
 
   server.registerTool(
     "list_saved_queries",

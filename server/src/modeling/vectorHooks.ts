@@ -1,6 +1,9 @@
 /**
  * Schema-mutation lifecycle hooks: document-chunk cleanup and
  * vector-index DDL, called by the modeling service on every mutating path.
+ * They maintain an adapter's own search storage (`keepsOwnSearch`) and do
+ * nothing on one that stores search indices — those follow the schema
+ * through the managed indices (`syncSearchIndices`).
  *
  * Chunk cleanup is UNCONDITIONAL — the stored chunks of a dropped document
  * property (or entity type) are deleted whether or not an embedding
@@ -11,22 +14,25 @@
  */
 
 import { getEmbeddingProvider } from "../core/embedding.js";
+import { keepsOwnSearch, type OwnSearchModelingStore } from "../core/ownSearch.js";
 import type { ModelingStore } from "../core/ports.js";
 
-/** After an entity type is created: create its per-type vector index. */
+/** After an entity type is created: create its per-type vector index,
+ * filtering on the properties it was created with (its name property). */
 export async function onEntityTypeCreated(
   store: ModelingStore,
   entityTypeKey: string,
+  propertyKeys: string[],
 ): Promise<void> {
   const provider = getEmbeddingProvider();
-  if (provider) {
-    await store.createVectorIndex(entityTypeKey, provider.dimensions);
+  if (provider && keepsOwnSearch(store)) {
+    await store.createVectorIndex(entityTypeKey, provider.dimensions, propertyKeys);
   }
 }
 
 /** Remove all chunk nodes and the vector index of a document property. */
 async function dropDocumentPropertyArtifacts(
-  store: ModelingStore,
+  store: OwnSearchModelingStore,
   entityTypeKey: string,
   propertyKey: string,
 ): Promise<void> {
@@ -35,9 +41,10 @@ async function dropDocumentPropertyArtifacts(
 }
 
 /** Rebuild the vector index for an entity type after property changes, so
- * its in-index filter properties stay in step with the schema. */
+ * that on an adapter with in-index filter properties they stay in step with
+ * the schema. */
 async function rebuildEntityTypeVectorIndex(
-  store: ModelingStore,
+  store: OwnSearchModelingStore,
   entityTypeId: string,
 ): Promise<void> {
   const provider = getEmbeddingProvider();
@@ -60,6 +67,9 @@ export async function onEntityTypeDeleted(
   entityTypeKey: string,
   properties: Record<string, unknown>[],
 ): Promise<void> {
+  if (!keepsOwnSearch(store)) {
+    return;
+  }
   for (const prop of properties) {
     if (prop.dataType === "document") {
       await dropDocumentPropertyArtifacts(store, entityTypeKey, prop.key as string);
@@ -79,6 +89,9 @@ export async function onEntityTypePropertyCreated(
   entityTypeId: string,
   property: Record<string, unknown>,
 ): Promise<void> {
+  if (!keepsOwnSearch(store)) {
+    return;
+  }
   await rebuildEntityTypeVectorIndex(store, entityTypeId);
   if (property.dataType === "document") {
     const provider = getEmbeddingProvider();
@@ -104,6 +117,9 @@ export async function onEntityTypePropertyDeleted(
   entityTypeId: string,
   property: Record<string, unknown>,
 ): Promise<void> {
+  if (!keepsOwnSearch(store)) {
+    return;
+  }
   await rebuildEntityTypeVectorIndex(store, entityTypeId);
   if (property.dataType === "document") {
     const et = await store.getEntityType(entityTypeId);

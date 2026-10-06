@@ -36,6 +36,12 @@ const LensDetailPage = lazy(() =>
     default: m.LensDetailPage,
   })),
 )
+const SearchPage = lazy(() =>
+  import('@/pages/studio/SearchPage').then((m) => ({ default: m.SearchPage })),
+)
+const SearchIndexPage = lazy(() =>
+  import('@/pages/studio/SearchIndexPage').then((m) => ({ default: m.SearchIndexPage })),
+)
 const TransferPage = lazy(() =>
   import('@/pages/studio/TransferPage').then((m) => ({ default: m.TransferPage })),
 )
@@ -70,6 +76,9 @@ export const router = createBrowserRouter([
       { path: 'relation-types/:id', element: suspended(<RelationTypePage />) },
       { path: 'lenses', element: suspended(<LensesPage />) },
       { path: 'lenses/:id', element: suspended(<LensDetailPage />) },
+      { path: 'search', element: suspended(<SearchPage />) },
+      { path: 'search/new', element: suspended(<SearchIndexPage />) },
+      { path: 'search/:key', element: suspended(<SearchIndexPage />) },
       { path: 'transfer', element: suspended(<TransferPage />) },
     ],
   },

@@ -41,7 +41,7 @@ describe("adapter lifecycle", () => {
     await closeStores();
     await closeStores(); // the port contract's "Close. Idempotent."
     await initStores(); // boot again against the same store
-    await getOntologyRegistry().createOntology(randomUUID(), "lifecycle_probe", null, null, "english");
+    await getOntologyRegistry().createOntology(randomUUID(), "lifecycle_probe", null, null);
     const store = await getModelingStore("lifecycle_probe");
     expect(await store.listLenses()).toEqual([]);
   });
@@ -69,6 +69,7 @@ describe("features route on a fully booted server", () => {
         entityIdentityComparison: false,
         searchStrategies:
           settings.DB_BACKEND === "postgres" ? ["keyword", "keyword-any", "keyword-all"] : [],
+        searchIndices: settings.DB_BACKEND === "postgres",
       });
     } finally {
       await shutdownServer(app);

@@ -4,6 +4,7 @@
  */
 
 import type { QueryClient } from '@tanstack/react-query'
+import type { NavigateFunction } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ApiError } from '@/api/http'
 import type { DataType, JsonPrimitive } from '@/api/types'
@@ -77,12 +78,25 @@ export function coerceTypedValue(dataType: DataType, raw: string): JsonPrimitive
  * Invalidate everything the modeling surface can affect: modeling caches,
  * lens list and all runtime schemas (the lenses re-render downstream).
  */
-export function invalidateModeling(queryClient: QueryClient) {
-  void queryClient.invalidateQueries({ queryKey: ['model'] })
-  void queryClient.invalidateQueries({ queryKey: ['lenses'] })
-  void queryClient.invalidateQueries({ queryKey: ['schema'] })
-  void queryClient.invalidateQueries({ queryKey: ['agents'] })
-  void queryClient.invalidateQueries({ queryKey: ['savedQueries'] })
+export function invalidateModeling(
+  queryClient: QueryClient,
+  /** `'none'`: only mark stale — mounted queries refetch on their next mount. */
+  refetchType: 'active' | 'none' = 'active',
+) {
+  for (const key of ['model', 'lenses', 'schema', 'agents', 'savedQueries']) {
+    void queryClient.invalidateQueries({ queryKey: [key], refetchType })
+  }
+}
+
+/**
+ * After deleting the object a page shows: mark the modeling caches stale
+ * without refetching, then leave. The page being left can stay mounted for
+ * a moment (a lazy route loads) and must not re-read what was deleted;
+ * whatever mounts next refetches its stale data.
+ */
+export function leaveAfterDelete(navigate: NavigateFunction, to: string, queryClient: QueryClient) {
+  invalidateModeling(queryClient, 'none')
+  void navigate(to, { replace: true })
 }
 
 /* --------------------------------- errors ----------------------------------- */

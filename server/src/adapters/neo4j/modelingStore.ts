@@ -1,4 +1,3 @@
-import type { KeywordPropertySegment } from "../../core/ports.js";
 /**
  * Neo4j implementation of the modeling store (schema persistence).
  *
@@ -8,19 +7,17 @@ import type { KeywordPropertySegment } from "../../core/ports.js";
  * delegates to the query functions in `modelingQueries.ts`.
  */
 
-import type { TextSearchLanguage } from "../../registry/schemas.js";
-
 import type { Driver } from "neo4j-driver";
 
 import type { ModelingStore, ReservedTypeKeyInUse, Row } from "../../core/ports.js";
-import type { TypeKind } from "../../core/schemas.js";
+import type { NewPropertyDef, TypeKind } from "../../core/schemas.js";
 import * as ddl from "./ddl.js";
 import { reservedEntityTypeKeys, reservedRelationTypeKeys } from "./ddl.js";
 import { runSession } from "./errors.js";
 import * as queries from "./modelingQueries.js";
 
 export class Neo4jModelingStore implements ModelingStore {
-  constructor(private readonly driver: Driver, public readonly textSearchLanguage: TextSearchLanguage = "english") {}
+  constructor(private readonly driver: Driver) {}
 
   // ------------------------------------------------------------------
   // Reserved keys
@@ -101,9 +98,10 @@ export class Neo4jModelingStore implements ModelingStore {
     key: string,
     displayName: string,
     description: string | null,
+    nameProperty: NewPropertyDef,
   ): Promise<Row> {
     return runSession(this.driver, (session) =>
-      queries.createEntityType(session, entityTypeId, key, displayName, description),
+      queries.createEntityType(session, entityTypeId, key, displayName, description, nameProperty),
     );
   }
 
@@ -123,9 +121,10 @@ export class Neo4jModelingStore implements ModelingStore {
     entityTypeId: string,
     displayName: string | null,
     description: string | null,
+    nameProperty: string | null,
   ): Promise<Row | null> {
     return runSession(this.driver, (session) =>
-      queries.updateEntityType(session, entityTypeId, displayName, description),
+      queries.updateEntityType(session, entityTypeId, displayName, description, nameProperty),
     );
   }
 
@@ -497,7 +496,7 @@ export class Neo4jModelingStore implements ModelingStore {
     return runSession(this.driver, (session) => queries.getEntityTypesWithProperties(session));
   }
 
-  async setEntitySearchText(entityId: string, propertyText: string, embedding: number[] | null, _keywordSegments?: KeywordPropertySegment[]): Promise<void> {
+  async setEntityEmbedding(entityId: string, embedding: number[] | null): Promise<void> {
     return runSession(this.driver, (session) =>
       queries.setEntityEmbedding(session, entityId, embedding),
     );

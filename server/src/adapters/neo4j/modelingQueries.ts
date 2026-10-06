@@ -10,7 +10,8 @@
 import type { Session } from "neo4j-driver";
 
 import type { ReservedTypeKeyInUse, Row } from "../../core/ports.js";
-import type { TypeKind } from "../../core/schemas.js";
+import { legacyNameProperty } from "../../core/legacyNameProperty.js";
+import { namePropertyDisplayName, type NewPropertyDef, type TypeKind } from "../../core/schemas.js";
 import { convertNeo4jProperties } from "./temporal.js";
 
 // The port's `TypeKind` values coincide with this adapter's schema node
@@ -140,14 +141,17 @@ export async function updateLens(
   return record ? convertNeo4jProperties(record.get("lens") as Row) : null;
 }
 
-/** Delete lens and cascade to agent configs and saved queries. */
+/** Delete lens and cascade to agent configs and saved queries — and to
+ * retriever configurations a 5.x server stored (retriever agents need
+ * search indices, which this adapter does not store). */
 export async function deleteLens(session: Session, lensId: string): Promise<boolean> {
   const result = await session.run(
     `
     MATCH (o:Ontology {lensId: $lensId})
     OPTIONAL MATCH (o)-[:HAS_AI_AGENT]->(ac:AiAgentConfig)
     OPTIONAL MATCH (o)-[:HAS_SAVED_QUERY]->(sq:SavedQuery)
-    DETACH DELETE o, ac, sq
+    OPTIONAL MATCH (o)-[:_HAS_RETRIEVER]->(rc:_RetrieverConfig)
+    DETACH DELETE o, ac, sq, rc
     RETURN count(o) AS deleted
     `,
     { lensId },
@@ -157,12 +161,15 @@ export async function deleteLens(session: Session, lensId: string): Promise<bool
 
 // --- Entity Type (Global) ---
 
+/** The type and its name property in one statement; the type node holds
+ * the name property's key as `nameProperty`. */
 export async function createEntityType(
   session: Session,
   entityTypeId: string,
   key: string,
   displayName: string,
   description: string | null,
+  nameProperty: NewPropertyDef,
 ): Promise<Row> {
   const result = await session.run(
     `
@@ -171,12 +178,24 @@ export async function createEntityType(
         key: $key,
         displayName: $displayName,
         description: $description,
+        nameProperty: $property.key,
+        createdAt: datetime(),
+        updatedAt: datetime()
+    })
+    CREATE (et)-[:HAS_PROPERTY]->(:PropertyDefinition {
+        propertyId: $property.propertyId,
+        key: $property.key,
+        displayName: $property.displayName,
+        description: $property.description,
+        dataType: $property.dataType,
+        required: $property.required,
+        defaultValue: $property.defaultValue,
         createdAt: datetime(),
         updatedAt: datetime()
     })
     RETURN et {.*} AS entityType
     `,
-    { entityTypeId, key, displayName, description },
+    { entityTypeId, key, displayName, description, property: { ...nameProperty } },
   );
   return convertNeo4jProperties(result.records[0]?.get("entityType") as Row);
 }
@@ -216,6 +235,7 @@ export async function updateEntityType(
   entityTypeId: string,
   displayName: string | null,
   description: string | null,
+  nameProperty: string | null,
 ): Promise<Row | null> {
   const setClauses = ["et.updatedAt = datetime()"];
   const params: Row = { entityTypeId };
@@ -226,6 +246,10 @@ export async function updateEntityType(
   if (description !== null) {
     setClauses.push("et.description = $description");
     params.description = description;
+  }
+  if (nameProperty !== null) {
+    setClauses.push("et.nameProperty = $nameProperty");
+    params.nameProperty = nameProperty;
   }
 
   const result = await session.run(
@@ -269,6 +293,55 @@ export async function isEntityTypeReferenced(
     { entityTypeId },
   );
   return result.records[0]?.get("referenced") as boolean;
+}
+
+/**
+ * Give every entity type stored before name properties existed its name
+ * property (`legacyNameProperty`), creating a non-required string property
+ * where the type has none. Declaration order is creation order. Neo4j
+ * storage has no version, so this runs at every boot and finds nothing
+ * once done.
+ */
+export async function backfillNameProperties(session: Session): Promise<void> {
+  const result = await session.run(
+    `
+    MATCH (et:EntityType)
+    WHERE et.entityTypeId IS NOT NULL AND et.nameProperty IS NULL
+    OPTIONAL MATCH (et)-[:HAS_PROPERTY]->(p:PropertyDefinition)
+    WITH et, p ORDER BY p.createdAt, p.key
+    WITH et, collect(p) AS declared
+    RETURN et.entityTypeId AS entityTypeId,
+           [q IN declared | {key: q.key, dataType: q.dataType}] AS properties
+    `,
+  );
+  for (const record of result.records) {
+    const properties = record.get("properties") as { key: string; dataType: string }[];
+    const { key, create } = legacyNameProperty(properties);
+    await session.run(
+      `
+      MATCH (et:EntityType {entityTypeId: $entityTypeId})
+      FOREACH (_ IN CASE WHEN $create THEN [1] ELSE [] END |
+        CREATE (et)-[:HAS_PROPERTY]->(:PropertyDefinition {
+            propertyId: randomUUID(),
+            key: $key,
+            displayName: $displayName,
+            description: null,
+            dataType: 'string',
+            required: false,
+            defaultValue: null,
+            createdAt: datetime(),
+            updatedAt: datetime()
+        }))
+      SET et.nameProperty = $key
+      `,
+      {
+        entityTypeId: record.get("entityTypeId") as string,
+        key,
+        create,
+        displayName: namePropertyDisplayName(key),
+      },
+    );
+  }
 }
 
 // --- Relation Type (Global) ---

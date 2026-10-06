@@ -18,7 +18,6 @@
  * server-wide skeleton.
  */
 
-import type { TextSearchLanguage } from "../../registry/schemas.js";
 
 import type { Driver } from "neo4j-driver";
 
@@ -76,21 +75,20 @@ export class Neo4jOntologyRegistry implements OntologyRegistry {
     key: string,
     displayName: string | null,
     embeddingDimensions: number | null,
-    textSearchLanguage: TextSearchLanguage,
   ): Promise<Row> {
     // The cap first, so a rejected create touches nothing — the
     // conflict is an expected condition and must have no side effects.
     if (await registryHoldsOntology(this.driver)) {
       throw capConflict();
     }
-    // Then the fixed semantic indexes, then the node: index DDL cannot
+    // Then the fixed semantic index, then the node: index DDL cannot
     // share a transaction with the node write, and this order keeps the
     // port's atomicity promise — a create that dies mid-way has changed
     // nothing observable through the port (no registry entry, no
     // ontology; a retry provisions identically), because an empty fixed
     // index is an adapter-private physical object the next create
     // re-ensures idempotently. The reverse order could register an
-    // ontology whose home lacks its indexes.
+    // ontology whose home lacks its index.
     if (embeddingDimensions !== null) {
       await ensureSavedQueryVectorIndex(this.driver, embeddingDimensions);
     }
@@ -107,13 +105,12 @@ export class Neo4jOntologyRegistry implements OntologyRegistry {
             ontologyId: $ontologyId,
             key: $key,
             displayName: $displayName,
-            textSearchLanguage: $textSearchLanguage,
             createdAt: datetime(),
             updatedAt: datetime()
         })
         RETURN r {.*} AS ontology
         `,
-        { ontologyId, key, displayName, textSearchLanguage },
+        { ontologyId, key, displayName },
       );
       const record = result.records[0];
       return record === undefined ? null : (record.get("ontology") as Row);

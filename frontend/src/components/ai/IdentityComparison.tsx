@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { compareEntities } from '@/api/decisions'
+import { useDisplayLabel } from '@/api/hooks'
 import type { EntityIdentityComparison, JsonValue, SearchHit } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { coerceDraft } from '@/components/schema/propertyDraft'
-import { displayLabel } from '@/lib/displayLabel'
 import type { ReviewEntityItem } from './reviewModel'
 import { compareSequentially, identitySnapshot } from './identityComparisonModel'
 
@@ -22,6 +22,7 @@ export function IdentityComparison({ ontologyKey, lensKey, item, candidates, dis
   candidates: SearchHit[]
   disabled: boolean
 }) {
+  const displayLabel = useDisplayLabel()
   const active = useRef<AbortController | null>(null)
   const [pending, setPending] = useState(false)
   const [results, setResults] = useState<Record<string, EntityIdentityComparison>>({})

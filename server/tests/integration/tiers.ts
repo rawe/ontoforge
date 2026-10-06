@@ -20,3 +20,10 @@ import { settings } from "../../src/config.js";
 /** True on the backends whose registry holds several ontologies at
  * once — PostgreSQL today. */
 export const supportsMultipleOntologies = settings.DB_BACKEND === "postgres";
+
+/** True on the backends without search indices, which keep their own
+ * search storage — per-entity vectors and document chunks written with
+ * every write (`src/core/ownSearch.ts`) — Neo4j today. Tests of that
+ * storage gate on it; the search-index tier is PostgreSQL's
+ * (`tests/integration/postgres/search-*.test.ts`). */
+export const keepsOwnSearchStorage = settings.DB_BACKEND !== "postgres";

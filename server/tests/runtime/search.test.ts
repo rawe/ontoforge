@@ -22,8 +22,8 @@ const passage = (id: string, parent: string, property: string, offset: number, s
 beforeEach(() => {
   invalidateLoadedSchemaCache();
   setEmbeddingProvider({ dimensions: 2, embed: async () => [1, 0] });
+  // Own search storage ranks by vector only: no keyword ranking.
   store = createMockRuntimeStore();
-  store.supportsKeywordRanking.mockReturnValue(true);
   const schema = makeUnscopedSchema();
   (schema.entityTypes as any[])[0].properties.push(
     ...["body", "appendix"].map((key) => ({ key, displayName: key, dataType: "document" })),
@@ -44,25 +44,21 @@ describe("search entry ordering", () => {
     );
     expect(response.hits.map((h) => h.relativeScore)).toEqual([1, 0.5, 1 / 3]);
   });
-  it("hybrid fuses identical entity units and scales rank-made scores", async () => {
-    store.propertySearchSemantic.mockResolvedValue(entities(["a", "b"]));
-    store.propertySearchKeyword.mockResolvedValue(entities(["b", "c"]));
-    const response = await search("full_lens", { query: "x", in: ["properties"] }, store);
-    expect(response.hits.map((h) => h.entity._id)).toEqual(["b", "a", "c"]);
-    expect(response.hits[0]!.relativeScore).toBe(1);
-    expect(response.hits[1]!.relativeScore).toBeCloseTo(1 / 61 / (1 / 61 + 1 / 62));
+  it("a semantic ranking fetches exactly the limit", async () => {
+    store.propertySearchSemantic.mockResolvedValue(entities(["a"]));
+    await search("full_lens", { query: "x", in: ["properties"], strategy: "semantic", limit: 4 }, store);
+    expect(store.propertySearchSemantic.mock.calls[0]![2]).toBe(4);
   });
-  it("fuses passages before collapsing and keeps the best passage of every property", async () => {
+  it("collapses passages and keeps the best passage of every property", async () => {
     const a = passage("a", "one", "body", 0, 0.9),
       b = passage("b", "one", "body", 80, 0.8),
       c = passage("c", "one", "appendix", 20, 0.7);
     store.documentSearchSemantic.mockResolvedValue([a, b, c]);
-    store.documentSearchKeyword.mockResolvedValue([b, c]);
     const response = await search("full_lens", { query: "x", in: ["document"] }, store);
     expect(response.hits).toHaveLength(1);
     expect(response.hits[0]!.matches).toEqual([
-      { kind: "document", propertyKey: "body", charOffset: 80, charLength: 50, evidence: { semanticSimilarity: 0.8, keywordMatch: true, keywordScore: 0.8 } },
-      { kind: "document", propertyKey: "appendix", charOffset: 20, charLength: 50, evidence: { semanticSimilarity: 0.7, keywordMatch: true, keywordScore: 0.7 } },
+      { kind: "document", propertyKey: "body", charOffset: 0, charLength: 50, evidence: { semanticSimilarity: 0.9, keywordMatch: null, keywordScore: null } },
+      { kind: "document", propertyKey: "appendix", charOffset: 20, charLength: 50, evidence: { semanticSimilarity: 0.7, keywordMatch: null, keywordScore: null } },
     ]);
   });
   it("fuses kinds by entity, preserving the entity match first and document order", async () => {
@@ -78,7 +74,7 @@ describe("search entry ordering", () => {
     );
     expect(response.hits.map((h) => h.entity._id)).toEqual(["b", "a"]);
     expect(response.hits[0]!.matches).toEqual([
-      { kind: "properties", evidence: { semanticSimilarity: 0.5, keywordMatch: null, keywordScore: null, keywordPropertyKeys: null } },
+      { kind: "properties", evidence: { semanticSimilarity: 0.5, keywordMatch: null, keywordScore: null } },
       { kind: "document", propertyKey: "appendix", charOffset: 70, charLength: 50, evidence: { semanticSimilarity: 0.9, keywordMatch: null, keywordScore: null } },
       { kind: "document", propertyKey: "body", charOffset: 0, charLength: 50, evidence: { semanticSimilarity: 0.8, keywordMatch: null, keywordScore: null } },
     ]);
@@ -90,7 +86,6 @@ describe("search entry ordering", () => {
     expect(types[0].conditions).toEqual([
       { kind: "property", propertyKey: "age", dataType: "integer", op: "gte", value: 20 },
     ]);
-    expect(store.propertySearchKeyword.mock.calls[0]![0]).toEqual(types);
     expect(store.documentSearchSemantic.mock.calls[0]![0].map((p: any) => p.conditions)).toEqual([
       types[0].conditions,
       types[0].conditions,
@@ -141,7 +136,7 @@ describe("search entry ordering", () => {
       );
       expect(response.hits[0]!.entity.name).toBe("a");
       expect(response.hits[0]!.matches).toEqual([
-        { kind: "properties", evidence: { semanticSimilarity: 1, keywordMatch: null, keywordScore: null, keywordPropertyKeys: null } },
+        { kind: "properties", evidence: { semanticSimilarity: 1, keywordMatch: null, keywordScore: null } },
         { kind: "document", propertyKey: "body", charOffset: 50, charLength: 50, evidence: { semanticSimilarity: 0.8, keywordMatch: null, keywordScore: null } },
       ]);
     }
@@ -150,65 +145,18 @@ describe("search entry ordering", () => {
 
 
 describe("search evidence and scoped fusion", () => {
-  it("preserves source similarity across both fusions and keeps limited absence unknown", async () => {
-    store.propertySearchSemantic.mockResolvedValue([
-      { entity: entity("a"), score: 0.9123456789 },
-      { entity: entity("b"), score: 0.6 },
-    ]);
-    store.propertySearchKeyword.mockResolvedValue([
-      { entity: entity("b"), score: 42, keywordPropertyKeys: ["name"] },
-      { entity: entity("c"), score: 12 },
-    ]);
-    store.documentSearchSemantic.mockResolvedValue([passage("b-body", "b", "body", 0, 0.7)]);
-    const result = await search("full_lens", { query: "x" }, store);
-    const matches = Object.fromEntries(result.hits.map((h) => [h.entity._id, h.matches[0]!.evidence]));
-    expect(matches.a).toEqual({ semanticSimilarity: 0.9123456789, keywordMatch: null, keywordScore: null, keywordPropertyKeys: null });
-    expect(matches.b).toEqual({ semanticSimilarity: 0.6, keywordMatch: true, keywordScore: 42, keywordPropertyKeys: ["name"] });
-    expect(matches.c).toEqual({ semanticSimilarity: null, keywordMatch: true, keywordScore: 12, keywordPropertyKeys: null });
-  });
-
-  it("never borrows evidence from another passage of the same document", async () => {
-    store.documentSearchSemantic.mockResolvedValue([passage("semantic", "a", "body", 0, 0.83)]);
-    store.documentSearchKeyword.mockResolvedValue([passage("keyword", "a", "body", 90, 12)]);
-    const result = await search("full_lens", { query: "x", in: ["document"] }, store);
-    expect(result.hits[0]!.matches).toEqual([{
-      kind: "document", propertyKey: "body", charOffset: 0, charLength: 50,
-      evidence: { semanticSimilarity: 0.83, keywordMatch: null, keywordScore: null },
-    }]);
-  });
-
-  it("keyword-only retrieval needs no embedding and never substitutes keyword rank for similarity", async () => {
-    setEmbeddingProvider(null);
-    store.propertySearchKeyword.mockResolvedValue([{ entity: entity("a"), score: 42, keywordPropertyKeys: ["name"] }]);
-    const result = await search("full_lens", { query: "a", strategy: "keyword", in: ["properties"] }, store);
-    expect(result.hits[0]!.matches[0]!.evidence).toEqual({ semanticSimilarity: null, keywordMatch: true, keywordScore: 42, keywordPropertyKeys: ["name"] });
-    expect(store.propertySearchSemantic).not.toHaveBeenCalled();
-    expect(result.hits[0]!.relativeScore).toBe(1);
-  });
-
   it("unsupported keyword retrieval remains unknown", async () => {
-    store.supportsKeywordRanking.mockReturnValue(false);
     store.propertySearchSemantic.mockResolvedValue(entities(["a"]));
     const result = await search("full_lens", { query: "x", in: ["properties"] }, store);
     expect(result.strategy).toBe("semantic");
     expect(result.hits[0]!.matches[0]!.evidence.keywordMatch).toBeNull();
-    expect(store.propertySearchKeyword).not.toHaveBeenCalled();
   });
 
-  it.each([["name", "email"], ["name", "missing"], ["name", "age"]])(
-    "redacts complete attribution when a supporting key is hidden or not string: %j", async (...keys) => {
-      store.getFullSchemaWithLensInclusions.mockResolvedValue(makeFullSchema({ entityInclusions: [{ key: "person", properties: ["name", "age"] }] }));
-      store.propertySearchKeyword.mockResolvedValue([{ entity: entity("a"), score: 1, keywordPropertyKeys: keys }]);
-      const result = await search("full_lens", { query: "x", strategy: "keyword", in: ["properties"] }, store);
-      expect(result.hits[0]!.matches[0]!.evidence).toEqual({ semanticSimilarity: null, keywordMatch: true, keywordScore: 1, keywordPropertyKeys: null });
-    },
-  );
-
-  it("keeps exposed property attribution even when request fields omit those values", async () => {
-    store.propertySearchKeyword.mockResolvedValue([{ entity: entity("a"), score: 1, keywordPropertyKeys: ["name", "email"] }]);
-    const result = await search("full_lens", { query: "x", fields: [], strategy: "keyword", in: ["properties"] }, store);
+  it("projects the entity without touching the match evidence", async () => {
+    store.propertySearchSemantic.mockResolvedValue([{ entity: entity("a"), score: 0.8 }]);
+    const result = await search("full_lens", { query: "x", fields: [], strategy: "semantic", in: ["properties"] }, store);
     expect(result.hits[0]!.entity).toEqual({ _id: "a", _entityTypeKey: "person" });
-    expect(result.hits[0]!.matches[0]!.evidence).toEqual({ semanticSimilarity: null, keywordMatch: true, keywordScore: 1, keywordPropertyKeys: ["name", "email"] });
+    expect(result.hits[0]!.matches[0]!.evidence).toEqual({ semanticSimilarity: 0.8, keywordMatch: null, keywordScore: null });
   });
 
   it("uses best-kind rank across multiple types with stable property-first ties and all matches", async () => {
@@ -257,35 +205,6 @@ describe("measured cross-type rank ties", () => {
     expect(limited.hits[0]!.entity._id).toBe("b");
   });
 
-  it("leaves a mixed measured/unknown tie stable", async () => {
-    store.propertySearchSemantic.mockResolvedValue([{ entity: entity("a"), score: 0.7 }]);
-    store.documentSearchKeyword.mockResolvedValue([passage("b", "b", "body", 90, 42)]);
-    const result = await search("full_lens", { query: "x" }, store);
-    expect(result.hits.map((hit) => hit.entity._id)).toEqual(["a", "b"]);
-    expect(result.hits[1]!.matches[0]!.evidence.semanticSimilarity).toBeNull();
-  });
-
-  it("does not use a discarded passage's higher similarity to break an entity tie", async () => {
-    store.propertySearchSemantic.mockResolvedValue([
-      { entity: entity("a"), score: 0.8 }, { entity: entity("b"), score: 0.7 },
-    ]);
-    store.documentSearchSemantic.mockResolvedValue([
-      passage("discarded", "b", "body", 0, 0.99),
-      passage("selected", "b", "body", 90, 0.6),
-    ]);
-    store.documentSearchKeyword.mockResolvedValue([passage("selected", "b", "body", 90, 42)]);
-    const result = await search("full_lens", { query: "x" }, store);
-    expect(result.hits.map((hit) => hit.entity._id)).toEqual(["a", "b"]);
-    expect(result.hits[1]!.matches[1]).toMatchObject({ charOffset: 90, evidence: { semanticSimilarity: 0.6, keywordMatch: true, keywordScore: 42 } });
-  });
-
-  it("leaves keyword-only cross-type rank ties in property-first order", async () => {
-    setEmbeddingProvider(null);
-    store.propertySearchKeyword.mockResolvedValue(entities(["a", "b"]));
-    store.documentSearchKeyword.mockResolvedValue([passage("b", "b", "body", 90, 42)]);
-    const result = await search("full_lens", { query: "x", strategy: "keyword" }, store);
-    expect(result.hits.map((hit) => hit.entity._id)).toEqual(["a", "b"]);
-  });
 });
 
 
@@ -311,24 +230,6 @@ describe("caller-supplied similarity floor", () => {
     expect(empty.minSimilarity).toBe(0.9);
   });
 
-  it("hybrid floors the semantic branch only and keeps keyword-only hits with unknown similarity", async () => {
-    store.propertySearchSemantic.mockResolvedValue([
-      { entity: entity("a"), score: 0.9 }, { entity: entity("b"), score: 0.5 },
-    ]);
-    store.propertySearchKeyword.mockResolvedValue([
-      { entity: entity("b"), score: 42, keywordPropertyKeys: ["name"] },
-      { entity: entity("c"), score: 12, keywordPropertyKeys: ["name"] },
-    ]);
-    const result = await search("full_lens", { query: "x", in: ["properties"], strategy: "hybrid", minSimilarity: 0.8 }, store);
-    expect(result.hits.map((h) => h.entity._id)).toEqual(["a", "b", "c"]);
-    const evidence = Object.fromEntries(result.hits.map((h) => [h.entity._id, h.matches[0]!.evidence]));
-    expect(evidence.a).toEqual({ semanticSimilarity: 0.9, keywordMatch: null, keywordScore: null, keywordPropertyKeys: null });
-    expect(evidence.b).toEqual({ semanticSimilarity: null, keywordMatch: true, keywordScore: 42, keywordPropertyKeys: ["name"] });
-    expect(evidence.c).toEqual({ semanticSimilarity: null, keywordMatch: true, keywordScore: 12, keywordPropertyKeys: ["name"] });
-    // The floor never reaches the storage port: the semantic page is requested unchanged.
-    expect(store.propertySearchSemantic.mock.calls[0]![2]).toBe(10);
-  });
-
   it("drops document passages below the floor before collapsing", async () => {
     store.documentSearchSemantic.mockResolvedValue([
       passage("a1", "a", "body", 0, 0.9),
@@ -343,6 +244,7 @@ describe("caller-supplied similarity floor", () => {
   });
 
   it("rejects the floor under keyword ranking, explicit or resolved by default", async () => {
+    store.supportsKeywordRanking.mockReturnValue(true);
     const explicit = search("full_lens", { query: "x", strategy: "keyword", minSimilarity: 0.5 }, store);
     await expect(explicit).rejects.toMatchObject({
       message: "min_similarity requires a strategy that ranks semantically",
@@ -351,7 +253,6 @@ describe("caller-supplied similarity floor", () => {
     setEmbeddingProvider(null);
     const resolved = search("full_lens", { query: "x", minSimilarity: 0.5 }, store);
     await expect(resolved).rejects.toMatchObject({ details: { fields: { min_similarity: expect.any(String) } } });
-    expect(store.propertySearchKeyword).not.toHaveBeenCalled();
   });
 
   it("echoes the floor in the envelope, null when absent", async () => {

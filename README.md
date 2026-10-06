@@ -51,7 +51,7 @@ OntoForge exposes two MCP servers for AI-assisted workflows — one for schema d
 
 ### Modeling Server
 
-Design and iterate on one ontology's schema. Tools for managing entity types, relation types, properties, lenses, validation, and export/import — plus the argument-less `ensure_ontology`, which creates the mount's own ontology if it does not exist yet.
+Design and iterate on one ontology's schema. Tools for managing entity types, relation types, properties, lenses, search indices and search settings, validation, and export/import — plus the argument-less `ensure_ontology`, which creates the mount's own ontology if it does not exist yet.
 
 **Endpoint:** `http://localhost:8000/mcp/ontologies/{ontologyKey}/model`
 
@@ -158,7 +158,8 @@ npm test
 ```
 
 This runs the unit tests only — they are mocked and need no running services.
-Integration tests are opt-in and do require a running database and Ollama; see
+Integration tests are opt-in: they require a running database, and the semantic-search
+and AI suites also Ollama; see
 [docs/workflows/testing.md](docs/workflows/testing.md).
 
 ## Architecture
@@ -213,7 +214,7 @@ ontoforge/
 ├── env/                            # Committed configuration presets for ./dev.sh
 ├── frontend/
 │   ├── Dockerfile
-│   ├── package.json                # UI v3 (Workbench + Studio): React 19 + TypeScript + Vite
+│   ├── package.json                # Web client (Workbench + Studio): React 19 + TypeScript + Vite
 │   └── src/
 └── docs/
     ├── README.md                   # Concepts, glossary, documentation map
@@ -238,6 +239,9 @@ The backend reads settings from environment variables (or a `.env` file in `serv
 | `DB_USER` | `postgres` | Database username |
 | `DB_PASSWORD` | `ontoforge_dev` | Database password |
 | `PORT` | `8000` | HTTP listen port |
+| `SEARCH_MAX_ATTEMPTS` | `5` | Failed attempts before a queued search-indexing item counts as failed — a rebuild or a new write of its entity retries it (positive integer; PostgreSQL only) |
+| `SEARCH_WORKER_BATCH` | `64` | Queued search-indexing items the background worker claims per batch (positive integer; PostgreSQL only) |
+| `SEARCH_POLL_MS` | `5000` | Milliseconds the background worker waits between queue checks when no wake-up notification arrives (positive integer; PostgreSQL only) |
 
 In Docker, `DB_URI` is set to `postgresql://postgres:5432/ontoforge` automatically via `docker-compose.yml`.
 
@@ -257,12 +261,14 @@ Find entities by meaning rather than exact keywords — within a single entity t
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `EMBEDDING_PROVIDER` | *(unset — disabled)* | `ollama` or `openai` |
-| `EMBEDDING_MODEL` | `nomic-embed-text` | Embedding model name |
+| `EMBEDDING_MODEL` | `bge-m3` | Embedding model name |
 | `EMBEDDING_BASE_URL` | `http://localhost:11434` | Embedding API endpoint |
 | `EMBEDDING_API_KEY` | *(unset)* | API key (required for `openai` provider) |
-| `EMBEDDING_DIMENSIONS` | *(auto)* | Vector dimensions (defaults: ollama=768, openai=1536) |
+| `EMBEDDING_DIMENSIONS` | `1024` | Vector dimensions — must match what the model returns |
+| `EMBEDDING_BATCH_SIZE` | `1` | Texts per embedding request when many texts are embedded together (positive integer; cloud endpoints typically take 16 or more) |
+| `EMBEDDING_CONCURRENCY` | `1` | Embedding requests in flight at once when many texts are embedded together (positive integer) |
 
-Semantic indexes are built for the vector width of the model that created them, so changing `EMBEDDING_MODEL` or `EMBEDDING_DIMENSIONS` on an existing database — including a reused Docker volume — leaves indexes the new model cannot be searched against. Startup names each one in a warning; `POST /api/ontologies/{ontologyKey}/model/rebuild-search-data` rebuilds one ontology's indexes at the new width and regenerates its vectors — run it once per ontology after a provider switch.
+Changing `EMBEDDING_MODEL` or `EMBEDDING_DIMENSIONS` on an existing database — including a reused Docker volume — needs no action for entity search: on PostgreSQL the search indices notice the new model and build new semantic entries in the background; until those are ready, semantic ranking finds nothing and hybrid search answers from keyword entries alone. Saved-query discovery is the exception: its description index is built for the vector width of the model that created it, and startup names each mismatched one in a warning. `POST /api/ontologies/{ontologyKey}/model/rebuild-search-data` rebuilds one ontology's saved-query description vectors and that index at the new width — run it once per ontology after a provider switch. On Neo4j, which keeps no search indices, the same operation also rebuilds every entity's and document chunk's vectors and their indexes.
 
 ### AI-Powered Runtime
 

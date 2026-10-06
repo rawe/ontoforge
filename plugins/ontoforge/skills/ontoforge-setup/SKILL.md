@@ -36,7 +36,7 @@ Ask the user:
 
 1. **Ontology key and lens key** — the ontology the project binds to (e.g. `my_ontology`) and the lens for runtime data operations (e.g. `my_lens`). Both are path segments of the MCP mount URLs — the URL is the only binding channel.
 2. **Embedding provider** — whether they want semantic search enabled, and if so which provider:
-   - `ollama` — local Ollama instance (default model: `nomic-embed-text`)
+   - `ollama` — local Ollama instance (default model: `bge-m3`)
    - `openai` — OpenAI-compatible API (requires API key)
    - None — skip embedding configuration
 3. **AI provider** — whether they want AI-powered runtime (NL query, entity extraction, chat), and if so which provider:
@@ -84,10 +84,12 @@ DB_PASSWORD=changeme
 
 # Semantic search (optional — omit EMBEDDING_PROVIDER to disable)
 # EMBEDDING_PROVIDER=ollama
-# EMBEDDING_MODEL=nomic-embed-text
+# EMBEDDING_MODEL=bge-m3
 # EMBEDDING_BASE_URL=http://localhost:11434
 # EMBEDDING_API_KEY=
-# EMBEDDING_DIMENSIONS=
+# EMBEDDING_DIMENSIONS=1024
+# EMBEDDING_BATCH_SIZE=1
+# EMBEDDING_CONCURRENCY=1
 
 # AI-powered runtime (optional — omit AI_PROVIDER to disable)
 # AI_PROVIDER=ollama
@@ -121,10 +123,15 @@ These are the **only** environment variables recognized by the `ontoforge-server
 | `DB_PASSWORD` | yes | `ontoforge_dev` | Database password |
 | `PORT` | no | `8000` | HTTP server port |
 | `EMBEDDING_PROVIDER` | no | *(disabled)* | `ollama` or `openai` — omit to disable semantic search |
-| `EMBEDDING_MODEL` | no | `nomic-embed-text` | Embedding model name |
+| `EMBEDDING_MODEL` | no | `bge-m3` | Embedding model name |
 | `EMBEDDING_BASE_URL` | no | `http://localhost:11434` | Embedding provider API base URL |
 | `EMBEDDING_API_KEY` | no | *(none)* | API key — **required** when `EMBEDDING_PROVIDER=openai` |
-| `EMBEDDING_DIMENSIONS` | no | *(auto)* | Vector dimensions (defaults: ollama=768, openai=1536) |
+| `EMBEDDING_DIMENSIONS` | no | `1024` | Vector dimensions — must match what the model returns |
+| `EMBEDDING_BATCH_SIZE` | no | `1` | Texts per embedding request when many texts are embedded together (positive integer) |
+| `EMBEDDING_CONCURRENCY` | no | `1` | Embedding requests in flight at once when many texts are embedded together (positive integer) |
+| `SEARCH_MAX_ATTEMPTS` | no | `5` | Failed attempts before a queued search-indexing item counts as failed (positive integer; PostgreSQL only) |
+| `SEARCH_WORKER_BATCH` | no | `64` | Queued search-indexing items the background worker claims per batch (positive integer; PostgreSQL only) |
+| `SEARCH_POLL_MS` | no | `5000` | Milliseconds the background search worker waits between queue checks when no wake-up arrives (positive integer; PostgreSQL only) |
 | `AI_PROVIDER` | no | *(disabled)* | `ollama` or `openai` — omit to disable AI features |
 | `AI_MODEL` | no | `qwen3:8b` | AI model name (must support tool calling) |
 | `AI_BASE_URL` | no | `http://localhost:11434` | AI provider API base URL |
@@ -158,6 +165,6 @@ After generating the files, remind the user:
 3. Access the OntoForge UI at `http://localhost:3000`.
 4. Access the API at `http://localhost:8000`.
 5. If using Ollama in Docker, pull the required models:
-   - For semantic search: `docker exec <container> ollama pull nomic-embed-text`
+   - For semantic search: `docker exec <container> ollama pull bge-m3`
    - For AI features: `docker exec <container> ollama pull qwen3:8b` (or whichever model was configured)
 6. Use the **ontoforge-sync** skill (also part of this plugin) for schema and data import/export.

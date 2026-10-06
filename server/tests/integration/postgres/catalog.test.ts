@@ -33,7 +33,11 @@ const ALL_TABLES = [
   "saved_query",
   "entity",
   "relation",
-  "document_chunk",
+  "search_settings",
+  "search_index",
+  "search_generation",
+  "search_queue",
+  "search_entry",
 ];
 
 // Named constraints from the init DDL, with their pg_constraint type:
@@ -47,7 +51,6 @@ const EXPECTED_CONSTRAINTS: Record<string, string> = {
   saved_query_pk: "p",
   entity_pk: "p",
   relation_pk: "p",
-  document_chunk_pk: "p",
   // no lens_includes PK — identity rides its two composite uniques
   lens_key_unique: "u",
   lens_name_unique: "u",
@@ -61,6 +64,7 @@ const EXPECTED_CONSTRAINTS: Record<string, string> = {
   saved_query_key_unique: "u",
   relation_type_source_fk: "f",
   relation_type_target_fk: "f",
+  entity_type_name_property_fk: "f",
   property_def_entity_type_fk: "f",
   property_def_relation_type_fk: "f",
   lens_includes_lens_fk: "f",
@@ -70,9 +74,23 @@ const EXPECTED_CONSTRAINTS: Record<string, string> = {
   saved_query_lens_fk: "f",
   relation_from_fk: "f",
   relation_to_fk: "f",
-  document_chunk_entity_fk: "f",
+  search_settings_pk: "p",
+  search_index_pk: "p",
+  search_generation_pk: "p",
+  search_queue_pk: "p",
+  search_entry_pk: "p",
+  search_index_key_unique: "u",
+  lens_includes_search_index_unique: "u",
+  search_index_entity_type_fk: "f",
+  lens_includes_search_index_fk: "f",
+  search_generation_search_index_fk: "f",
+  search_queue_generation_fk: "f",
   property_def_one_owner: "c",
   lens_includes_one_type: "c",
+  search_settings_singleton: "c",
+  search_index_kind_check: "c",
+  search_generation_representation_check: "c",
+  search_generation_state_check: "c",
 };
 
 const FIXED_BTREE_INDEXES = [
@@ -80,7 +98,8 @@ const FIXED_BTREE_INDEXES = [
   "relation_type_key_idx",
   "relation_from_id_idx",
   "relation_to_id_idx",
-  "document_chunk_entity_property_idx",
+  "search_generation_building_unique",
+  "search_generation_ready_unique",
 ];
 
 async function tableNames(): Promise<string[]> {
@@ -116,7 +135,7 @@ async function indexNames(): Promise<string[]> {
 }
 
 async function provisionOntology(): Promise<void> {
-  await getOntologyRegistry().createOntology(randomUUID(), ONTOLOGY_KEY, null, null, "english");
+  await getOntologyRegistry().createOntology(randomUUID(), ONTOLOGY_KEY, null, null);
 }
 
 async function assertCatalogComplete(): Promise<void> {
@@ -146,15 +165,15 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL physical catalog
     await closeStores();
   });
 
-  it("provisioning created the ten tables, the named constraints, and the fixed indexes", async () => {
+  it("provisioning created the ontology tables, the named constraints, and the fixed indexes", async () => {
     await assertCatalogComplete();
   });
 
-  it("boot only creates the server-wide home: public holds the registry, no ontology tables", async () => {
+  it("boot only creates the server-wide home: public holds the registry and the storage version, no ontology tables", async () => {
     const result = await runQuery(
-      `SELECT tablename FROM pg_tables WHERE schemaname = 'public'`,
+      `SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename`,
     );
-    expect(result.rows.map((row) => row.tablename)).toEqual(["ontology"]);
+    expect(result.rows.map((row) => row.tablename)).toEqual(["ontology", "storage_version"]);
   });
 
   it("boot is idempotent across a close→boot cycle and leaves provisioned namespaces alone", async () => {
@@ -163,13 +182,15 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL physical catalog
     await assertCatalogComplete();
   });
 
-  it("the pgvector extension is installed and embedding columns are dimensionless", async () => {
+  it("the pgvector extension is installed and the one plain embedding column is dimensionless", async () => {
     const ext = await runQuery(`SELECT extname FROM pg_extension WHERE extname = 'vector'`);
     expect(ext.rowCount).toBe(1);
     // atttypmod -1 = no declared width; the width lives only in the HNSW
-    // indexes, keeping init provider-independent. Ordinary tables only:
-    // an HNSW index over the cast expression carries a column of the same
-    // name, and that one is width-bearing on purpose (M4.1).
+    // index, keeping init provider-independent. Ordinary tables only: an
+    // HNSW index over the cast expression carries a column of the same
+    // name, and that one is width-bearing on purpose (M4.1); the
+    // partitioned search entries are not one. Instance search data lives
+    // in the search entries alone: no entity or chunk vectors.
     const cols = await runQuery(
       `SELECT rel.relname AS table, att.atttypmod AS typmod
        FROM pg_attribute att
@@ -179,19 +200,15 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL physical catalog
          AND att.attname = 'embedding' AND NOT att.attisdropped`,
       [NAMESPACE],
     );
-    expect(cols.rows.map((row) => row.table).sort()).toEqual([
-      "document_chunk",
-      "entity",
-      "saved_query",
-    ]);
+    expect(cols.rows.map((row) => row.table).sort()).toEqual(["saved_query"]);
     for (const row of cols.rows) {
       expect(row.typmod).toBe(-1);
     }
   });
 
-  it("the delete rules back the truth table: endpoint FKs RESTRICT, the rest CASCADE", async () => {
+  it("the delete rules back the truth table: endpoint FKs RESTRICT, the name-property FK a deferred NO ACTION, the rest CASCADE", async () => {
     const result = await runQuery(
-      `SELECT con.conname AS name, con.confdeltype AS del
+      `SELECT con.conname AS name, con.confdeltype AS del, con.condeferred AS deferred
        FROM pg_constraint con
        JOIN pg_class rel ON rel.oid = con.conrelid
        JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
@@ -201,14 +218,20 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL physical catalog
     const rules = new Map(result.rows.map((row) => [row.name as string, row.del as string]));
     expect(rules.get("relation_type_source_fk")).toBe("r"); // RESTRICT
     expect(rules.get("relation_type_target_fk")).toBe("r");
+    // The service guards deleting a name property; the FK is checked at
+    // commit, so a type and its name property can be written together.
+    expect(rules.get("entity_type_name_property_fk")).toBe("a"); // NO ACTION
+    const deferred = result.rows.filter((row) => row.deferred === true).map((row) => row.name);
+    expect(deferred).toEqual(["entity_type_name_property_fk"]);
+    const special = ["relation_type_source_fk", "relation_type_target_fk", "entity_type_name_property_fk"];
     for (const [name, rule] of rules) {
-      if (name !== "relation_type_source_fk" && name !== "relation_type_target_fk") {
+      if (!special.includes(name)) {
         expect(rule, `delete rule of ${name}`).toBe("c"); // CASCADE
       }
     }
   });
 
-  it("no fixed object claims the vec_ prefix reserved for dynamic indexes", async () => {
+  it("no object carries the vec_ prefix of the retired per-type vector indexes", async () => {
     const fixed = [
       ...(await tableNames()),
       ...(await indexNames()),

@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowRight, ChevronLeft, Loader2, Plus } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { useFeatures } from '@/api/hooks'
+import { useDisplayLabel, useFeatures } from '@/api/hooks'
 import { ApiError } from '@/api/http'
 import { qk } from '@/api/queryKeys'
 import * as runtime from '@/api/runtime'
@@ -30,7 +30,6 @@ import {
 import {
   invalidateNeighborhood,
 } from '@/components/entity/useNeighborCounts'
-import { displayLabel } from '@/lib/displayLabel'
 import {
   useDebouncedValue,
   useEntitySearch,
@@ -92,6 +91,7 @@ function AddRelationFlow({
   initial,
   onCreated,
 }: Omit<AddRelationDialogProps, 'open'>) {
+  const displayLabel = useDisplayLabel()
   const queryClient = useQueryClient()
   const { data: features } = useFeatures()
   const myTypeKey = entity._entityTypeKey
@@ -357,7 +357,7 @@ function AddRelationFlow({
                   <Plus className="size-4 text-muted-foreground" />
                   New connected {targetType.displayName}…
                 </CommandItem>
-                {(targetSearch.data ?? []).map(({ entity: candidate, matches }) => {
+                {(targetSearch.data ?? []).map(({ entity: candidate, matches, matched }) => {
                   return (
                     <CommandItem
                       key={candidate._id}
@@ -365,7 +365,7 @@ function AddRelationFlow({
                       disabled={pending}
                       onSelect={() => pickTarget(candidate)}
                     >
-                      <EntitySearchRow entity={candidate} matches={matches} typeName={targetType.displayName} />
+                      <EntitySearchRow entity={candidate} matches={matches} matched={matched} typeName={targetType.displayName} />
                     </CommandItem>
                   )
                 })}

@@ -4,7 +4,7 @@ OntoForge is a graph-native ontology studio. You design a graph schema, then use
 through generic, schema-driven APIs — no per-schema code is written or generated.
 
 One server holds many **ontologies** — totally isolated units, each with its own schema,
-lenses, saved queries, agents and instance data. Within an ontology the system has two
+lenses, saved queries, agents, retriever agents and instance data. Within an ontology the system has two
 halves. **Modeling** designs that ontology's schema. **Runtime** reads and writes its
 instance data through one lens. Both run in one server, over one database, and are
 reachable over REST, over MCP, and through a web UI.
@@ -37,9 +37,11 @@ what rules bind it, and how it is reached from every interface.
 | [instance-data](capabilities/instance-data.md) | Creating, reading and traversing entities and relations |
 | [documents](capabilities/documents.md) | Long-text properties, stubs and partial edits |
 | [search](capabilities/search.md) | Literal matching and ranked search |
+| [search-indices](capabilities/search-indices.md) | What ranked search reads: indices, entries, managed and custom indices, cost preview, generations and build status |
 | [oql](capabilities/oql.md) | The query language |
 | [saved-queries](capabilities/saved-queries.md) | Stored, parameterized query pipelines |
 | [ai-agents](capabilities/ai-agents.md) | Natural-language querying, extraction, chat, A2A |
+| [retriever-agents](capabilities/retriever-agents.md) | Lens-local question answering over search indices: configuration, validation, planning, retrieval, portable JSON |
 | [entity-identity-comparison](capabilities/entity-identity-comparison.md) | Optional judgments about two partial entity snapshots |
 | [transfer](capabilities/transfer.md) | Schema export and import |
 
@@ -162,7 +164,7 @@ Terms are used in exactly this sense throughout the documentation and the API.
 ### Schema and design
 
 **Ontology** — the independent, isolated unit: one domain's schema, its lenses, saved
-queries, agents, and all instance data. A server holds many; nothing spans two.
+queries, agents, retriever agents, and all instance data. A server holds many; nothing spans two.
 Addressed by an immutable key, unique server-wide, with a mutable display name.
 
 **Registry** — the server's flat, listable set of ontologies, addressed by key. The
@@ -181,6 +183,11 @@ source and target entity types are fixed at creation.
 **Property definition** — a named, typed field on one entity type or one relation type.
 Carries a data type, whether it is required, and an optional default.
 
+**Name property** — the one `string` property of an entity type whose value names its
+entities. Every entity type has exactly one; it is created with the type and can be
+reassigned, never removed. See
+[capabilities/schema-modeling.md](capabilities/schema-modeling.md#the-name-property).
+
 **Data type** — one of `string`, `integer`, `float`, `boolean`, `date`, `datetime`,
 `document`.
 
@@ -189,7 +196,7 @@ only. Reads return a size stub rather than the content, so that listing entities
 cheap. See [capabilities/documents.md](capabilities/documents.md).
 
 **Key** — the stable, human-readable identifier of an ontology, type, property, lens,
-saved query or agent. Keys are what every interface speaks. They are never database
+saved query, agent or retriever agent. Keys are what every interface speaks. They are never database
 identifiers, and they are never exposed as UUIDs. Every key is unique within its owner;
 only ontology keys are unique server-wide.
 
@@ -206,7 +213,8 @@ properties, it exposes. Everything else is invisible through it: absent from sch
 reads, rejected on write, and stripped from query results.
 
 **Inclusion** — one declaration that a lens exposes a given type, optionally narrowed to
-a subset of that type's properties.
+a subset of that type's properties. A scoped lens also includes the search indices it
+searches; those inclusions never make a lens scoped.
 
 ### Data
 
@@ -220,8 +228,8 @@ are fixed once created; its properties are not.
 (`_id`, `_createdAt`, …). Always readable, never writable. Type and property keys cannot
 begin with an underscore, so the two namespaces cannot collide.
 
-**Chunk** — an internal fragment of a document property, held separately so that search
-can match and return a passage rather than a whole document. Not addressable directly.
+**Chunk** — an internal fragment of a document property, so that search can match and
+return a passage rather than a whole document. Not addressable directly.
 
 ### Using the graph
 
@@ -249,19 +257,30 @@ in the schema, whereas a neighbour is an instance in a traversal result.
 
 **Query** — the plain text submitted to ranked search.
 
+**Default search** — ranked search over the managed indices of the searched types,
+selected by search kind and search strategy.
+
+**Index search** — ranked search through search indices named by key, or every index the
+lens can search, selected by a mode: `semantic`, `keyword` or `hybrid`. It alone ranks
+custom indices and relation entries.
+
+**Search catalog** — the list of search indices a lens can search, each projected
+through the lens, from which an index search chooses.
+
 **Literal term** — the entity list's case-insensitive substring filter over string values.
 
 **Single-type search** — ranking over one named entity type.
 
 **Cross-type search** — ranking across every type the lens exposes, narrowed by filters.
 
-**Searched types** — the one-or-many type set passed to storage for one ranking.
+**Searched types** — the one-or-many type set one search ranks.
 
 **Search kind** — the ranked unit and match: property search or document search.
 
-**Property search** — ranking by one composed text of an entity's string properties.
+**Property search** — ranking entities by the entries of their types' default indices.
 
-**Document search** — ranking passages and collapsing them to parent entities.
+**Document search** — ranking passages through passage indices and grouping them by
+parent entity.
 
 **Search strategy** — what a caller selects: it uses one retrieval method directly or
 fuses several by rank. The strategies are `semantic`, `keyword`, `keyword-any`,
@@ -278,21 +297,58 @@ matching as a prefix; rank order carries the rest.
 **All-term keyword matching** — a row matches only when it carries every query term, each
 term also matching as a prefix.
 
-**Query term** — one word of the query after stop-word removal and stemming in the
-ontology's text-search language.
+**Query term** — one word of the query after stop-word removal and stemming in a language
+of the ontology's keyword language set.
 
-**Source ranking** — the ordered list one retrieval method returns for one search kind.
+**Source ranking** — the ordered list one retrieval method returns for one search index.
 
-**Hit** — one entity in a search result with its matches and relative score.
+**Hit** — one entity in a search result with its matches, relative score and the entry
+that matched it best.
 
 **Match** — a place the query met the entity: an entity match names the entity as a whole;
 a passage match names a document property and its best passage's coordinates.
+
+**Search index** — an ontology-level design object deciding what ranked search finds
+entities by: a root entity type, the text composed for each of its entities, and its
+representations — semantic, keyword or both. Hits are always entities of the root type.
+See [capabilities/search-indices.md](capabilities/search-indices.md).
+
+**Managed index** — a search index the server derives from the schema and keeps in step
+with it: a default index per entity type over its own `string` properties, and a passage
+index per document property.
+
+**Custom index** — a search index a modeler defines: its root type, fields, header,
+relation groups, templates and representations. Only custom indices have relation
+groups. See [capabilities/search-indices.md](capabilities/search-indices.md#custom-indices).
+
+**Entry** — one indexed text of a search index, owned by one entity: its own fields, one
+relation instance with the entity at its other end, or one passage of a document.
+
+**Relation group** — the part of an index definition that follows one relation type in one
+direction and names the relation's and the target entity's properties to include; it
+yields one entry per relation instance. Managed indices have none.
+
+**Header** — the short prefix of an entity's own fields that starts each of its relation
+and passage entries, by default its name property's value.
+
+**Cost preview** — the estimate of a search index definition's full build — entities,
+entries and seconds per representation at the measured throughput — returned with its
+validation, without saving it.
+
+**Generation** — one build of one representation of one search index, identified by the
+definition and the embedding model (semantic) or the keyword language set (keyword).
+Search reads the ready one; a replacement is built beside it.
+
+**Keyword language set** — the languages, English, German or both, in which an
+ontology's keyword entries and queries are stemmed. A setting of the ontology's design,
+edited in modeling; a new ontology starts with both. See
+[capabilities/search.md](capabilities/search.md#keyword-language).
 
 **Relative score** — 1.0 for the best hit and each other hit's ordering number as a fraction
 of the best, comparable only within that response. See [search](capabilities/search.md#response)
 for the promise about its shape.
 
-**Search request / entry** — the common request object and service operation used by every
+**Search request / operation** — the common request object and service operation used by every
 search caller.
 
 **Search tool / document search tool** — `search` / `search_documents`, choosing both kinds
@@ -310,6 +366,12 @@ plus the set of read-only tools it may use.
 **A2A** — the agent-to-agent protocol. Each agent publishes a machine-readable card and
 accepts tasks, so external systems can call it without knowing OntoForge's own API.
 
+**Retriever agent** — a stored configuration bound to one lens that answers questions over
+search indices: a planning model turns a question into searches of the agent's indices,
+optionally narrowed to relation groups and exact filters, and an answer model replies from
+what they found. Separate from agents; not reachable over A2A. See
+[capabilities/retriever-agents.md](capabilities/retriever-agents.md).
+
 ### Internals
 
 **Persistence port** — the boundary every storage operation crosses. Above it, only
@@ -322,6 +384,7 @@ compilation, index management, error translation, and the physical isolation bet
 ontologies. Exactly one is active.
 
 **Transfer format** — the versioned JSON representation of one ontology's design, used
-for export and import. Carries schema, lenses, agents and saved queries only — no
+for export and import. Carries schema, lenses, agents, saved queries, retriever agents, the
+keyword language set, custom search indices and managed-index switches only — no
 instance data and no ontology identity. See
 [capabilities/transfer.md](capabilities/transfer.md).

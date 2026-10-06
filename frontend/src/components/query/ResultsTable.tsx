@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import type { JsonValue, QueryResult } from '@/api/types'
+import { useDisplayLabel } from '@/api/hooks'
+import type { EntityInstance, JsonValue, QueryResult } from '@/api/types'
 import { DocumentBadge } from '@/components/DocumentBadge'
 import { TypeChip } from '@/components/TypeChip'
 import { Badge } from '@/components/ui/badge'
@@ -12,7 +13,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { displayLabel } from '@/lib/displayLabel'
 import { isDocumentStub } from '@/lib/documents'
 import { isEntityObject, isRelationObject, relationUserProps } from './resultUtils'
 
@@ -50,10 +50,12 @@ function ResultCell({
   ontologyKey,
   lensKey,
   value,
+  displayLabel,
 }: {
   ontologyKey: string
   lensKey: string
   value: JsonValue | undefined
+  displayLabel: (entity: EntityInstance) => string
 }) {
   if (value === undefined || value === null) {
     return <span className="text-muted-foreground/50">—</span>
@@ -121,6 +123,7 @@ interface ResultsTableProps {
  * plain scalars as-is, other objects as expandable JSON.
  */
 export function ResultsTable({ ontologyKey, lensKey, result }: ResultsTableProps) {
+  const displayLabel = useDisplayLabel()
   if (result.results.length === 0) {
     return (
       <p className="rounded-xl border bg-card p-6 text-center text-[13px] text-muted-foreground">
@@ -145,7 +148,12 @@ export function ResultsTable({ ontologyKey, lensKey, result }: ResultsTableProps
             <TableRow key={i}>
               {result.columns.map((c) => (
                 <TableCell key={c} className="align-top">
-                  <ResultCell ontologyKey={ontologyKey} lensKey={lensKey} value={row[c]} />
+                  <ResultCell
+                    ontologyKey={ontologyKey}
+                    lensKey={lensKey}
+                    value={row[c]}
+                    displayLabel={displayLabel}
+                  />
                 </TableCell>
               ))}
             </TableRow>

@@ -65,6 +65,7 @@ export function EntityDetailPage() {
   const entity = entityQuery.data
 
   const entityType = schema.data?.entityTypes.find((t) => t.key === typeKey)
+  const nameProperty = entityType?.nameProperty
   const relationTypes = useMemo(
     () =>
       (schema.data?.relationTypes ?? []).filter(
@@ -81,10 +82,10 @@ export function EntityDetailPage() {
       recordRecent(ontologyKey, lensKey, {
         id: entity._id,
         typeKey: entity._entityTypeKey,
-        label: displayLabel(entity),
+        label: displayLabel(entity, nameProperty),
       })
     }
-  }, [ontologyKey, lensKey, entity])
+  }, [ontologyKey, lensKey, entity, nameProperty])
 
   const [addRelation, setAddRelation] = useState<{
     open: boolean
@@ -165,7 +166,7 @@ export function EntityDetailPage() {
     )
   }
 
-  const label = displayLabel(entity)
+  const label = displayLabel(entity, nameProperty)
   const explorePath = `/o/${ontologyKey}/w/${lensKey}/explore?focus=${typeKey}:${entity._id}`
 
   return (

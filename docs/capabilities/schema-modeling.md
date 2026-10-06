@@ -23,7 +23,7 @@ and no generated code.
 
 | Object | Identity | Fixed at creation | Editable afterwards |
 |---|---|---|---|
-| Entity type | key, unique within the ontology | key | display name, description |
+| Entity type | key, unique within the ontology | key | display name, description, name property |
 | Relation type | key, unique within the ontology | key, source entity type, target entity type | display name, description |
 | Property definition | key, unique within its owning type | key, data type, owning type | display name, description, required flag, default |
 
@@ -72,6 +72,29 @@ Updates are sparse: a field omitted from an update body is left unchanged. One
 consequence is that a description cannot be cleared, only replaced, because an
 explicit null is indistinguishable from omission. A property's default value is
 the single exception — sending it explicitly as null clears it.
+
+### The name property
+
+Every entity type has exactly one **name property**: one of its own `string`
+properties, whose value names the type's entities wherever an entity is shown as a
+label. The type holds the property's key. It is never absent — an entity type does
+not exist without one.
+
+- **Created with the type.** Creating an entity type also creates its name property:
+  a non-required `string` property keyed `name` with display name "Name", unless the
+  request names another key — then that key, with the key as its display name.
+- **Reassignable.** An update may name any other `string` property of the same type;
+  naming a property the type does not have, or one of another data type, is a field
+  error. Data types never change, so the name property cannot be retyped.
+- **Never removed.** Deleting the property that is the name property is refused with a
+  conflict — choose another name property first. Nothing cascades: the server never
+  picks a replacement.
+
+The name property is an ordinary property otherwise: it may be optional, so an entity
+may have no name. Relation types have none.
+
+A lens that hides the name property shows its type without one
+([ontology-lenses.md](ontology-lenses.md)).
 
 ### Data types
 
@@ -147,7 +170,8 @@ startup and never rewritten ([../architecture.md](../architecture.md)).
 ### Deletion
 
 Deleting a type deletes its property definitions with it. Nothing else cascades by
-default.
+default. An entity type's name property is the one property that cannot be deleted on its
+own ([above](#the-name-property)).
 
 **An entity type cannot be deleted while any relation type names it as a source or
 target.** This is checked first and is unconditional — the cascade flag does not
@@ -160,25 +184,34 @@ type, so every read, write and query naming it fails as not found. There is no
 operation that reports or removes them — short of deleting the whole ontology.
 This is the sharpest trap in the modeling surface.
 
-Deleting an entity type also discards the search artefacts derived from it — its
-vector index, and the stored passages and index of each of its document properties
-([search.md](search.md), [documents.md](documents.md)). Deleting a document
-property discards that property's passages and index alone.
+Deleting an entity type also discards the search artefacts derived from it — every
+search index rooted on it, with its entries ([search-indices.md](search-indices.md),
+[documents.md](documents.md)). Deleting a document property discards that property's
+passage index alone. Managed indices follow such a deletion silently; a custom index that
+reads what is deleted brings the deletion under the cascade protocol below.
 
 ### The cascade protocol
 
-A schema change that would leave a scoped lens invalid is refused, names the
-lenses it would break, and proceeds only if the caller repeats it with explicit
-consent. Only lenses with explicit declarations can be broken, so an unscoped lens
-never appears in any of this.
+A schema change that would leave a scoped lens invalid, or a
+[custom search index](search-indices.md#custom-indices) reading what no longer exists,
+is refused, names the lenses and indices it would affect, and proceeds only if the
+caller repeats it with explicit consent. Only lenses with explicit declarations can be
+broken, so an unscoped lens never appears in any of this; managed search indices follow
+the schema by themselves and never appear either.
 
-Exactly three changes can trigger it:
+Five changes can trigger it:
 
 | Change | Triggers when |
 |---|---|
-| Delete an entity type | any lens includes that entity type |
-| Delete a relation type | any lens includes that relation type |
+| Delete an entity type | any lens includes that entity type, or any custom index is rooted on it |
+| Delete a relation type | any lens includes that relation type, or any custom index has a relation group on it |
 | Create a required property with no default | any lens includes the owning type **with a property allowlist** that does not name the new key |
+| Delete a property | any custom index reads it — as an own, header, relation or target field |
+| Delete a custom search index | any lens includes it |
+
+A custom index may also name an entity type as a group's target, but that type is an
+endpoint of the group's relation type, and an entity type that a relation type names
+cannot be deleted at all ([above](#deletion)).
 
 The third case is the subtle one and applies to entity types and relation types
 alike. A required property with no default must be supplied on every create. A
@@ -190,26 +223,38 @@ lens and not the other, purely because of how they declared their inclusion.
 
 The refusal is the `CASCADE_REQUIRED` error described in
 [../architecture.md](../architecture.md). Its `details.affectedLenses` is the
-sorted list of the **keys** of every lens the change would break — enough to
-inspect each one and decide, without a second lookup.
+sorted list of the **keys** of every lens the change would break or change, and
+`details.affectedIndices` the sorted keys of every custom index it would change or
+delete — either may be empty — enough to inspect each one and decide, without a second
+lookup. A property deletion triggered by an index names, as lenses, those whose
+allowlist names the property and those that include an index the cascade deletes.
 
 Repeating the request with cascade requested makes the change consented rather
 than forced, and the repair is mechanical:
 
 | Change | What cascade does before the change |
 |---|---|
-| Delete an entity type | removes that type's inclusion from every lens that has one |
-| Delete a relation type | removes that type's inclusion from every lens that has one |
+| Delete an entity type | removes that type's inclusion from every lens that has one; deletes every custom index rooted on it |
+| Delete a relation type | removes that type's inclusion from every lens that has one; removes every custom index's groups on it |
 | Create a required property with no default | appends the new key to every allowlist for that type |
-| Delete a property | removes the key from every allowlist for that type |
+| Delete a property | removes the key from every allowlist for that type, and from every custom index's own, header, relation and target fields |
+| Delete a custom search index | removes its inclusion from every lens that has one |
+
+What is left of a custom index stays consistent: a target type left with no field and a
+relation group left with no relation or target field are removed, and an index left with
+no field and no group is deleted, together with its lens inclusions. A template
+placeholder naming a removed field stays and has no value
+([search-indices.md](search-indices.md#templates)). The changed indices build new
+generations in the background.
 
 Two asymmetries are easy to get wrong when reimplementing:
 
-**Deleting a property never triggers the protocol.** It is not in the trigger
-table. Without cascade, the property is deleted and every allowlist naming it is
-left holding a key that no longer resolves — harmless at runtime, where an
-unresolvable key in an allowlist simply matches nothing, but reported by lens
-validation. Cascade on a property deletion is therefore a cleanup, not a consent.
+**Lens allowlists never make a property deletion trigger the protocol.** Only a custom
+index reading the property does. Without one, and without cascade, the property is
+deleted and every allowlist naming it is left holding a key that no longer resolves —
+harmless at runtime, where an unresolvable key in an allowlist simply matches nothing,
+but reported by lens validation. For lenses, cascade on a property deletion is therefore
+a cleanup, not a consent.
 
 **Changing an existing property is never checked.** Making an optional property
 required, or clearing a required property's default, produces exactly the state
@@ -219,15 +264,18 @@ report the resulting lenses as invalid; nothing else will.
 ### Schema validation
 
 Two read-only operations. Both always answer successfully — they report, they
-never raise — returning a boolean verdict and a flat list of errors, each with a
-dotted path locating the offending object and a message.
+never raise — returning a boolean verdict, a flat list of errors and a flat list of
+warnings, each with a dotted path locating the offending object and a message.
+Warnings never affect the verdict.
 
-**Validating one lens** checks that lens's declarations against the schema. An
-unscoped lens is valid by definition. The rules are in
-[ontology-lenses.md](ontology-lenses.md).
+**Validating one lens** checks that lens's declarations against the schema and warns
+about what limits the search indices it includes. An unscoped lens is valid by
+definition and has no warnings. The rules are in
+[ontology-lenses.md](ontology-lenses.md), the warnings in
+[ontology-lenses.md](ontology-lenses.md#validation-warnings).
 
 **Validating the schema** checks the ontology's schema and then every one of its
-lenses, returning one combined error list. The schema half reports:
+lenses, returning one combined error list and one combined warning list. The schema half reports:
 
 - a duplicate entity type key, or a duplicate relation type key
 - a duplicate property key within one type
@@ -248,9 +296,10 @@ Full index: [../interfaces.md](../interfaces.md). Every entrance below addresses
 one ontology — REST in the path, MCP through the mount's binding.
 
 The same service enforces every rule above regardless of entrance, including the
-cascade protocol. One detail does not survive the crossing: the structured list of
-affected lens keys reaches a REST caller in the error body, while an MCP caller
-receives only the refusal message and must ask which lenses include the type.
+cascade protocol. One detail does not survive the crossing: the structured lists of
+affected lens and index keys reach a REST caller in the error body, while an MCP caller
+receives only the refusal message — which names the affected custom indices, but not the
+lenses — and must ask which lenses include the type.
 
 | Operation group | REST | Modeling MCP | Web UI |
 |---|---|---|---|
@@ -258,7 +307,7 @@ receives only the refusal message and must ask which lenses include the type.
 | Properties | create, list, update, delete, per owning type | one add/update/delete trio taking a `type_kind` discriminator | schema studio |
 | Whole-schema read | assembled from the type operations, or the export payload | one `get_schema` tool | schema studio |
 | Validation | per-lens and whole-schema | per-lens and whole-schema | schema studio |
-| Cascade consent | a query flag on the three cascading operations | a boolean argument on the same three | prompted on the affected action |
+| Cascade consent | a query flag on the cascading operations | a boolean argument on the same operations | prompted on the affected action |
 
 Two differences between the entrances are contractual, not cosmetic:
 

@@ -1,8 +1,7 @@
 import { useQueries } from '@tanstack/react-query'
 import { search } from '@/api/runtime'
 import type { SearchHit } from '@/api/types'
-import { proposedLabel, type ReviewEntityItem } from '@/components/ai/reviewModel'
-import { coerceDraft } from '@/components/schema/propertyDraft'
+import type { ReviewEntityItem } from '@/components/ai/reviewModel'
 
 export interface SimilarLookup {
   /** Per review-entity id: dedupe hits (empty array = none / not applicable). */
@@ -11,17 +10,11 @@ export interface SimilarLookup {
   pending: boolean
 }
 
-/** Query string for one proposed entity — its display-ish props. */
+/** Query string for one proposed entity — its name property draft. */
 function dedupeQuery(item: ReviewEntityItem): string {
-  if (item.type === undefined) return ''
-  const props: Record<string, string> = {}
-  for (const p of item.type.properties) {
-    const draft = item.drafts[p.key]
-    if (draft === undefined || draft.trim() === '') continue
-    const coerced = coerceDraft(p.dataType, draft)
-    if (coerced.ok && coerced.value !== null) props[p.key] = String(coerced.value)
-  }
-  return proposedLabel(props) === '(unnamed)' ? '' : proposedLabel(props)
+  const nameProperty = item.type?.nameProperty
+  if (nameProperty === null || nameProperty === undefined) return ''
+  return (item.drafts[nameProperty] ?? '').trim()
 }
 
 /**

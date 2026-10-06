@@ -2,10 +2,10 @@ import { useState } from 'react'
 import { isCascadeError } from './lib'
 
 export interface CascadeState {
-  /** Backend message for the conflict. */
-  message: string
   /** Lenses whose scope will be updated by the cascade. */
   affectedLenses: string[]
+  /** Search indices the cascade updates or deletes. */
+  affectedIndices: string[]
   /** Re-runs the operation with `cascade=true`. */
   retry: () => void
 }
@@ -20,8 +20,8 @@ export function useCascade() {
   const guard = (error: unknown, retry: () => void): boolean => {
     if (isCascadeError(error)) {
       setCascade({
-        message: error.message,
         affectedLenses: error.affectedLenses ?? [],
+        affectedIndices: error.affectedIndices ?? [],
         retry,
       })
       return true

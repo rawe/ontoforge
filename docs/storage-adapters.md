@@ -25,6 +25,8 @@ and the adapter parts.
 
 The port has three surfaces: a modeling store and a runtime store, each obtained **bound
 to one ontology**, and an **ontology registry** that manages ontologies as whole units.
+An adapter that stores search indices adds a fourth: a search-index store, bound the same
+way ([below](#the-search-index-store)).
 
 **Stores are bound.** A store is requested for an ontology key and every operation on it
 resolves within that binding. The binding check happens above the adapter — the port
@@ -45,12 +47,12 @@ key, the optional display name and timestamps. Six operations:
 
 | Operation | Obligation |
 |---|---|
-| Create | Given an internal id, a key, an optional display name, an immutable text-search language and an optional embedding width, create the registry entry **and provision the ontology's physical home atomically** — a failed create leaves no entry and no home. When a width is given, the home carries the fixed semantic indexes at that width; when none is given, it carries no vector indexes. Keyword index families are provisioned at creation in the ontology language. |
+| Create | Given an internal id, a key, an optional display name and an optional embedding width, create the registry entry **and provision the ontology's physical home atomically** — a failed create leaves no entry and no home. When a width is given, the home carries the fixed semantic indexes at that width; when none is given, it carries no vector indexes. |
 | List | Every ontology, as registry rows. |
 | Read by key | One row, or an absent result. |
 | Read by display name | One row, or an absent result — display names are unique server-wide, and the pre-write conflict check needs the lookup. |
 | Rename | Set the display name; the key never changes. Absent result when not found. |
-| Delete | Hard cascade: the ontology's physical home and its registry entry go together — schema, lenses, agents, saved queries, instances, chunks, and every search index. False when not found. |
+| Delete | Hard cascade: the ontology's physical home and its registry entry go together — schema, lenses, agents, saved queries, retriever agents, instances, chunks, and every search index. False when not found. |
 
 The registry — not the database's own catalog — is the authoritative list of ontologies.
 The store must enforce server-wide uniqueness of the ontology key and the display name;
@@ -138,7 +140,7 @@ physical objects that way; a new adapter accepts them and maps them to whatever 
 
 | Operation | Obligation |
 |---|---|
-| Initialize | Open connections, verify the database is reachable, create every **server-wide** constraint and index the adapter needs, and hand out the registry and the two bound-store factories. Per-ontology storage is provisioned by registry create, never at initialization. Failure prevents the server from serving. |
+| Initialize | Open connections, verify the database is reachable, create every **server-wide** constraint and index the adapter needs, bring storage of an older storage version up to date ([decisions.md](decisions.md#storage)), and hand out the registry and the bound-store factories. Per-ontology storage is provisioned by registry create; at initialization only an upgrade reaches into it. Failure prevents the server from serving. |
 | Close | Release connections. Idempotent. |
 | Ensure semantic indexes | Given a vector width, create every vector index the current schemas imply, for **every ontology the registry lists** — doing nothing when there are none. Called at startup only when an embedding provider is configured. |
 
@@ -152,6 +154,13 @@ shape of the data and the rules the adapter must honour, not per-operation signa
 Internal identifiers appear in this section because they are the store's own currency.
 They never reach a caller — see the keys-not-identifiers rule in
 [decisions.md](decisions.md).
+
+**Own search storage is optional.** An adapter that stores no search indices keeps search
+data of its own instead — per-entity vectors, document chunks and the vector indexes over
+them — and the operations marked *own search storage* below serve it. Exactly such an
+adapter provides them; one that stores search indices provides none, and nothing above
+the port calls them on it. What that storage holds and when it changes is in
+[Own search storage](#own-search-storage).
 
 ### Schema side
 
@@ -205,18 +214,18 @@ does not interpret them. A saved query also accepts an embedding of its descript
 the key of its owning lens alongside it, so that a search over descriptions can be
 narrowed to one lens without a join.
 
-**Search-data maintenance.** Backing the rebuild operation: list every entity type with its
-property keys; set one entity's composed search text, its keyword segments and its optional
-vector by id; list every saved query with enough identity to re-embed it; set the embedding
-on one saved query. Plus the vector index operations under obligations, below. The setter
-takes a vector that may be absent, because the rebuild runs without an embedding provider.
+**Search-data maintenance.** Backing the rebuild operation: list every saved query with
+enough identity to re-embed it; set the embedding on one saved query. Own search storage
+adds: list every entity type with its property keys; set one entity's vector by id — a
+vector that may be absent, because the rebuild runs without an embedding provider. Plus
+the vector index operations under obligations, below.
 
 **Reserved-key reporting.** Alongside the two declared sets, one operation scans stored
 types and returns those whose key is now reserved, as kind-and-key pairs. Startup reports
 them; nothing rewrites them.
 
-**Document-property cleanup.** Delete every chunk belonging to a given entity type and
-document property. Invoked when the property, or its owning type, is removed.
+**Document-property cleanup** (own search storage). Delete every chunk belonging to a
+given entity type and document property. Invoked when the property, or its owning type, is removed.
 
 ### Data side
 
@@ -224,13 +233,15 @@ document property. Invoked when the property, or its owning type, is removed.
 modeling side. The runtime store exposes three operations, each keyed by lens key within
 its binding. One returns the full schema together with the lens and its inclusion rows,
 one returns the lens's agent configurations, and one returns the lens's saved queries. The
-caller uses the inclusion rows to compute the scoped schema.
-The first returns nothing at all when no lens has that key, which is how an unknown lens
+caller uses the inclusion rows to compute the scoped schema. An adapter that stores
+search indices adds to the first the keys of the search indices the lens includes, in key
+order. The first returns nothing at all when no lens has that key, which is how an unknown lens
 is detected. The runtime store also exposes the ontology key it is bound to, because the
 schema cache keys its entries by ontology plus lens.
 
 **Entity lifecycle.** Create with the type key, a caller-supplied instance id, the
-validated property map and an optional embedding vector. Read by type key and id; read by
+validated property map and — own search storage only — an optional embedding vector; an
+adapter that stores search indices never receives one. Read by type key and id; read by
 id alone, when the type is not known; read a batch by ids, returned as a map keyed by id.
 The by-id reads carry property definitions alongside — the adapter's guide for converting
 stored values back to their port forms on the way out, mirroring the definitions every
@@ -239,7 +250,7 @@ those forms natively may ignore them. Update takes the properties to set and the
 plus an optional embedding and an explicit flag saying whether the embedding is part of
 this update — again because "no new vector" and "clear the vector" must be
 distinguishable. Delete by type key and id, returning whether anything was deleted, and
-removing the entity's document chunks with it.
+removing the entity's own search data with it, where the adapter keeps any.
 
 Listing is the one read with real machinery. It takes the type key, the scoped property
 definitions, the parsed filter conditions, an optional text-search string with the string
@@ -250,7 +261,7 @@ The adapter must set and maintain the system properties on every write: the inst
 the type key, the creation timestamp on create, and the update timestamp on create and on
 every update. Stored embedding vectors must never appear in a returned row.
 
-**Write-value constraints.** Before a write whose property values will become
+**Write-value constraints** (own search storage). Before a write whose property values will become
 vector-index filter metadata, one operation lets the adapter reject a value it cannot
 store, as a domain validation error naming the property. An adapter whose storage imposes
 no such limit treats the operation as a no-op — the same pattern as reserved keys: the
@@ -272,62 +283,28 @@ incoming edges receive only what remains, so the two are not independently limit
 that costs a caller is in
 [capabilities/instance-data.md](capabilities/instance-data.md#traversal).
 
-**Document chunk management.** Chunks are always stored, independently of embedding
+**Document chunk management** (own search storage). Chunks are always stored, independently of embedding
 availability. They carry id, entity id, type key, property key, ordinal, character offset
 and length, text and an optional vector. Maintenance reads reusable vectors, deletes a
 property's chunks and writes its replacement batch; ordinary results omit vectors.
 
-**Search.** Four rankings take the complete searched set in one call and return rows in
-exact score order. Hybrid fusion belongs above the port.
+**Search.** The runtime store declares whether search can rank by keyword — through its
+search-index store, on an adapter that stores search indices
+([below](#the-search-index-store)) — and declares path-condition support for all search
+strategies. The service ranks through the search-index store where the adapter stores
+search indices, and through the semantic rankings of
+[own search storage](#own-search-storage) otherwise; fusion belongs above the port either
+way. Neither a bound store nor a query carries a language: a keyword generation stems in
+its own language set.
+Semantic scores are pinned to `(1 + cosine) / 2`, higher is better; arbitrary native
+scores must not be labeled semantic similarity. A keyword score is the number of distinct
+query words the entry contains plus, as a fraction below one, the adapter's native
+ranking measurement, higher is better
+([capabilities/search.md](capabilities/search.md#ranking)); the runtime passes it through
+as evidence unchanged. A keyword-ranked entry establishes a positive match, while
+non-membership in a limited ranking establishes no negative evidence.
 
-| Ranking | Input | Returns |
-|---|---|---|
-| Property semantic | searched types, query vector, limit | entities and scores |
-| Property keyword | searched types, query text, limit, keyword matching | entities, native keyword scores, and nullable contributing keyword property keys |
-| Document semantic | searched document properties, query vector, limit | passages and scores |
-| Document keyword | searched document properties, query text, limit, keyword matching | passages and native keyword scores |
-
-A searched type carries its key, property definitions and parsed filter conditions. A
-searched document property carries its type key, property key and parsed conditions on
-its parent. Filters apply within ranking, so the limit counts filtered units. The
-service computes lens scope and filter narrowing once. Cross-type vector search scans
-the per-type indexes in one statement and merges globally; no shared index exists.
-
-The keyword matching argument names the retrieval method, `any` or `all`. Any admits a
-row carrying any query term; all requires every query term; both match each
-term as a prefix, and both build the query from the adapter's own tokenizer output so
-search text never reaches query syntax. The runtime passes the matching of the selected
-strategy; an adapter without keyword ranking never receives the call.
-
-The runtime store declares keyword-ranking support for both kinds together, and declares
-path-condition support for all search strategies. The bound store carries the ontology's
-language; queries do not take a language. Semantic scores are pinned to `(1 + cosine) / 2`,
-higher is better; arbitrary native scores must not be labeled semantic similarity. A
-keyword score is the adapter's native ranking measurement, higher is better, its scale
-unpinned; the runtime passes it through as evidence unchanged. A keyword source row
-establishes a positive match, while non-membership in a limited ranking establishes no
-negative evidence.
-
-Entity creation carries labeled semantic text alongside the optional vector and separate
-ordered keyword segments, each with a property key and its exact indexed value text.
-Only segment values enter the keyword index. String changes recompose both from merged
-values; the rebuild setter accepts both representations. An omitted segment update must
-not erase existing keyword data. A creation without segments has no keyword content or
-known attribution. These are technical values, absent from entity properties, schemas,
-lenses and transfer payloads.
-
-Property keyword attribution names segments containing contributing query terms; independently matching the whole query against each segment is insufficient for
-cross-field matches. Use the same language and tokenizer as aggregate retrieval, returning
-null when faithful coverage is unavailable. Character-span attribution is not required.
-The service suppresses keys that are no longer exposed string properties. An adapter
-without keyword support does not fabricate a negative result or property attribution.
-
-PostgreSQL stores keyword text and retained segments separately from semantic text. Its
-generated keyword vector uses values-only text; attribution tokenizes the already limited
-keyword ranking in the same statement. Ontology provisioning installs the representation
-directly, at creation and only there.
-
-Saved-query discovery remains a separate vector ranking over descriptions, scoped to one
+Saved-query discovery is a separate vector ranking over descriptions, scoped to one
 lens, with its own absolute score, limit and optional minimum score.
 
 Literal text matching is not a separate operation — it is the search string on the listing
@@ -342,6 +319,266 @@ property maps; temporals are converted; vectors are stripped; conversion recurse
 lists of one element type, and nothing driver-shaped survives at any depth. What a map
 literal or a mixed list carries back is each adapter's own shape — recorded with the
 divergences below.
+
+## The search-index store
+
+**An adapter declares whether it stores search indices** — one plain flag on the adapter,
+in the same spirit as the declarations above; the server's feature report carries it
+([interfaces.md](interfaces.md)). Only an adapter declaring support provides the store,
+and asking one that declares none for it is a programming error, not a domain condition.
+The runtime store of such an adapter also hands out the search-index store of its own
+ontology, so a write can plan its search work without a second binding, and so does its
+modeling store, so a schema change can keep the managed indices in step. Registry delete
+removes everything the store holds. The pipeline that uses this store is described in
+[architecture.md](architecture.md#search-indexing).
+
+**Settings.** One per ontology, read and replaced whole: the keyword language set every
+keyword generation stems in, and a map of switched-off indices the store keeps without
+interpreting. A new ontology starts with German and English.
+
+**Index definitions.** Each carries an id, a key unique within the ontology, a kind —
+`default`, `passage` or `custom` — and the definition as an opaque structured value that
+names its root entity type. Create, list in key order, read by key, replace the
+definition with the key unchanged, delete. Create and replace return an absent result
+when the root entity type does not exist; a taken key is a conflict. Deleting an index
+deletes its generations, their queued work and entries, and its lens inclusions; deleting
+the root entity type deletes the index. One more operation includes an index in every
+scoped lens that exposes its root entity type — by an entity inclusion of the type, or,
+in a lens with relation inclusions only, because every type is exposed — skipping lenses
+that include it already, and returns how many it was added to; a `passage` index also
+needs its document property exposed, by an inclusion without an allowlist or with one
+naming the document. Three serve one lens's inclusions: list the keys of the indices it
+includes, in key order — none for an unknown lens; include one index by key, checking no scope rule — absent when the lens or the
+index does not exist, a conflict when the lens includes it already; and remove one —
+absent when the lens does not include it.
+
+**Retriever agents.** [Retriever agents](capabilities/retriever-agents.md) search the
+indices, so this store keeps them. Each belongs to a lens, is addressed by key within it
+and is deleted with it. It carries an id, the key, a name, an optional description, a
+configuration version, the configuration as an opaque structured value kept exactly as
+given — a version or shape the service cannot run included — the warnings of a
+conversion as a list of strings, and timestamps. List a lens's agents by name, then key;
+read one by key. Save creates an agent or replaces its name, description, version,
+configuration and warnings, its id and creation time unchanged, and reports whether it
+created; in create-only mode an existing key is a conflict, and a missing lens is not
+found. Writes to one lens's agents are serialized, so lens and key stay unique. Delete
+answers false when the key is absent. Transfer copies an agent under a new id, or moves
+it with its id, to another lens and key in one step, warnings included: a taken target
+key is a conflict, never overwritten, and so is a source that no longer holds the
+version and configuration the caller validated. No vector or conversation state is
+stored.
+
+**Modeling reads.** Two reads serve the modeling of indices. One lists the keys of the
+lenses that include an index, sorted — the lenses its deletion names in a cascade
+refusal. The other measures what a full build of an index would hold, for the cost
+preview, from aggregates over the stored instances, never reading a document into
+memory. It takes the root entity type, whether entities get an own entry, the document
+property passages are cut from with the chunk size and overlap, and per relation group
+the relation type, the end the root entity is on and the target types that count (any,
+when none are named). It answers the number of root-type entities, own entries (that
+number, or none), relation entries — the relations of each group's type whose root end
+is a root-type entity and whose other end is of a counted type — and passages,
+estimated per document as one up to the chunk size and one more per further chunk size
+less overlap.
+
+**Generations.** A generation is one build of one representation — semantic or keyword —
+of one index. It carries the definition hash it was built from, the model id and vector
+width (semantic) or the keyword language set (keyword), a state — `building`, `ready`,
+`retired` or `failed` — and progress counters for total, done and failed parts. At most
+one generation per index and representation is building, and at most one is ready: the
+active one. Retired and failed generations keep their record; their queued work and
+entries go.
+
+| Operation | Obligation |
+|---|---|
+| Create | Start a building generation. One still building for the same index and representation is superseded: it retires. Given a root entity type to backfill, queue every entity of that type — one whole-entity item each — in the same transaction and set the total to their count, so a generation never appears with a queue not yet filled. Absent result when the index does not exist. |
+| Read, list | One by id; all, or those of one index, oldest first. |
+| Record progress | Add to the counters. |
+| Finish | Make a building generation the active one in a single step: the previous active one retires. False when the generation is no longer building. |
+| Fail | Mark a building generation failed. False when it is no longer building. |
+| Retire | Retire a building or active generation no definition wants any more. False when it is neither. |
+| Sweep | Remove the entry storage of every generation neither building nor ready — what an interrupted removal left behind. Idempotent. |
+
+**Entries.** An entry is identified within its generation by entity id, part kind — the
+entity's own fields, one relation, or one passage of a document — a group number, and a
+part id: the relation id of a relation part, the chunk ordinal of a passage. It carries
+the relation type and target of a relation part, the code-point offset and length of a
+passage, its text, the text's hash and, in a semantic generation, its vector. The text
+arrives capped at 8,000 code points and the hash — SHA-256 over text, representation
+and the generation's model id (semantic) or keyword language set (keyword), as hex — is
+computed above the port; the store keeps both as given. A
+keyword generation receives no vector: the store derives the keyword representation from
+the text in the generation's language set.
+
+Entry writes address a generation by id wherever it is in its lifecycle. Upsert by
+identity, refused — false, nothing written — once the generation is neither building
+nor ready; a vector whose width differs from the generation's is a programming error.
+Read the stored hashes of given parts. Delete given parts; delete an entity's parts of
+one kind and group except a list to keep. Delete an entity's entries, or a relation's,
+in every generation of the ontology. The worker composes against the ontology's full
+schema, which the store reads for it — every type and property, unscoped.
+
+**Ranking entries.** One operation ranks the entries of one generation, best first, and
+returns nothing unless the generation is ready. A semantic generation takes a query vector
+of its width and ranks by nearest vector, the score pinned to `(1 + cosine) / 2`; a
+keyword generation takes the query text and the keyword matching and ranks by the
+keyword score: the distinct query words an entry contains, then the adapter's native
+keyword measurement as a fraction below one. The keyword query is built from the
+adapter's own tokenizer output for the text in each language of the generation's set — the terms of
+one language joined as any or all, each matching as a prefix, the languages as
+alternatives — so search text never reaches query syntax, and a text yielding no term
+matches nothing. Filter conditions apply to the entity owning each entry, inside the
+ranking, so the limit counts entries that pass them. Two optional type lists restrict
+relation entries only: one ranks only when its relation type is in the first and its
+target type in the second. Each ranked entry carries its identity, the relation type and
+target of a relation part, a passage's offset and length, its text and its score.
+
+**Search work of a write.** Every entity and relation write of the runtime store — create,
+update, delete — takes an optional search write plan, derived above the port from the
+index definitions. It names, by index, the parts to compose again: parts of one entity;
+the part of one relation, owned by its source end or its target end; and the parts of
+every relation of a type that has a given entity at its other end — the fan-out of a
+changed target, resolved by the adapter in one step. It also names an entity or relation
+whose deletion removes its entries. An adapter that stores search indices applies the plan
+**in the write's own transaction**: an index stands for every building or ready generation
+of it, and the work is queued exactly when the write commits — only when a create or
+update touched a row. A deletion removes the entity's or relation's entries and queued
+work in every generation, together with those of the relations that cascade with a
+deleted entity, so it is applied before the rows go. An adapter that stores no search
+indices receives no plan.
+
+**The queue.** A queued item names a generation, an entity and a part — one part, or
+the whole entity (an entity created, a field every part renders changed, a backfill); a
+passage item with an empty part id stands for all of the entity's passages, re-chunked.
+Queueing an item already queued refreshes it instead of duplicating it: it is due at once,
+its attempts start afresh, and it carries a new token. The worker's surface:
+
+| Operation | Obligation |
+|---|---|
+| Queue a type | Queue every entity of a type, as one whole-entity item each, into the given generations — those neither building nor ready are skipped. Returns the count. |
+| Claim | Lease up to a limit of claimable items — due, not leased or with an expired lease, attempts below the maximum, of a building or ready generation — keyword items first, then oldest first; semantic items only of generations of the given model id. Items another claim holds are skipped, never waited for. The lease commits with the claim. Each item carries its attempts and its token. |
+| Complete | Remove claimed items — except one queued again since its claim (its token changed): that one stays, released for the next claim. A write during a lease is never lost. |
+| Fail | Record a failed attempt — attempts plus one, the error and its time, the lease released, the item held back by its delay. An item queued again since its claim is not charged. |
+| Statistics | Per generation with queued items: pending and failed counts, and the errors of failed or retrying items — the newest item per distinct message, newest first, at most ten, each with its entity, part kind, message and time. |
+
+An item whose attempts reached the maximum is failed for good and never claimed again; a
+new write of its entity, or a rebuild, gives it a fresh start. The delays, the maximum and
+the lease length are the caller's.
+
+**Wake-ups.** The adapter offers a subscription that calls back, with the ontology key,
+whenever search work was queued in any server process on the same database — after the
+queueing transaction commits, never before. A subscription may end on its own, a lost
+connection for instance; it then says so and the subscriber subscribes again. Polling
+above the port covers the time without one.
+
+## Own search storage
+
+An adapter that stores no search indices keeps search data of its own, written with the
+instance data, and ranks over it. It holds, per ontology:
+
+- per entity, one vector over a composed text ([below](#what-gets-embedded)), present
+  only when an embedding provider is configured;
+- per document property value, its chunks — cut by the chunking rules in
+  [capabilities/documents.md](capabilities/documents.md#chunking) — each with its
+  ordinal, character offset and length, text and optional vector;
+- with an embedding provider, the vector indexes over those vectors — at least one per
+  entity type and one per document property's chunks, kept through the lifecycle hooks
+  under [obligations](#obligations-beyond-storage).
+
+No keyword representation belongs to it: keyword ranking exists only through search
+indices, so such an adapter offers semantic ranking alone.
+
+**Rankings.** Two rankings take the complete searched set in one call and return rows in
+exact score order:
+
+| Ranking | Input | Returns |
+|---|---|---|
+| Property semantic | searched types, query vector, limit | entities and scores |
+| Document semantic | searched document properties, query vector, limit | passages and scores |
+
+A searched type carries its key, property definitions and parsed filter conditions. A
+searched document property carries its type key, property key and parsed conditions on
+its parent. Filters apply within ranking, so the limit counts filtered units. The
+service computes lens scope and filter narrowing once, and fuses above the port; how
+ranked search composes the two is recorded with the adapters that diverge
+([below](#where-the-adapters-diverge)).
+
+### What gets embedded
+
+An entity's vector comes from one composed text: the entity type key, then each `string`
+property that has a value, written as `key=value`, in the order the schema declares them.
+
+```
+person: name=Alice Chen, role=Distributed Systems Engineer
+```
+
+- **Only `string` properties contribute.** Integers, floats, booleans, dates and datetimes
+  are excluded.
+- **`document` properties are excluded.** They are chunked and embedded separately, so a
+  document's content never influences its own entity's vector, and a very long document
+  cannot drown out the entity's short identifying fields.
+- Properties with no value are skipped. An entity with no string values embeds as its type
+  key alone.
+- **The text is composed from the full schema, not from the lens.** Two lenses exposing
+  different subsets of a type still see identical vectors.
+- The composed text is capped at 30 000 characters and truncated at the cap.
+- Composition is deterministic, so re-embedding an unchanged entity reproduces the same
+  text.
+
+### Keeping search data current
+
+Document chunks are recomputed with every write that changes the value; vectors are added
+when a provider is configured:
+
+- on entity creation, always;
+- on entity update, whenever the update touches any `string` property — the vector is
+  recomputed from the merged post-update state, not from the submitted fragment;
+- for document properties, per changed property: its chunks are discarded, the value is
+  re-chunked, and the new chunks are embedded. A new chunk whose text is byte-identical to
+  one of the old ones keeps that vector, and only the rest are embedded afresh — so
+  editing part of a large document re-embeds only the chunks the edit touched. A vector
+  of any other width is never reused: it came from a different embedding model, and no
+  index of the current width could be built over it. That check is also what makes a
+  rebuild after a model switch re-embed at all, since the text is unchanged there.
+
+Chunks go with what they belong to: an emptied value leaves none, a deleted entity takes
+its chunks along, and deleting a document property — or its entity type — drops every
+chunk of that property with its vector index. Rewriting one document property never
+disturbs another property's chunks.
+
+Not recomputed, and all three are traps:
+
+- **A schema change refreshes nothing.** Adding a string property to an entity type leaves
+  every existing entity's vector reflecting the schema as of its last write. The property
+  contributes only for entities written afterwards.
+- **Deleting a string property leaves its values behind.** Deleting the definition does not
+  delete stored values, and a vector does not record which property a word came from, so
+  an entity keeps matching on a value the schema no longer declares — until the next
+  rebuild ([decisions.md](decisions.md#interfaces)).
+- **A failed embedding does not fail the write.** The entity or chunk is stored without
+  a vector. The failure is logged, not returned.
+
+All three are repaired by the rebuild.
+
+### Rebuilding it
+
+On such an adapter the search-data rebuild
+([capabilities/search.md](capabilities/search.md#rebuild)) covers this storage too, in the
+same three phases. Its first phase drops every vector index whose width no longer
+matches — per type and per document property as well as the saved-query one. Before the
+saved-query descriptions, it then recomposes and rewrites each entity's optional vector
+and discards and re-chunks every document property value, embedding every chunk whose
+stored vector is not already of the provider's width — after a model switch that is all
+of them. Its last phase builds every vector index the schema calls for and does not have.
+The progress records carry each entity type's key as their group, and the summary adds
+per-type processed and failed counts; an entity whose embedding call fails is counted as
+failed.
+
+Without a provider the run still re-chunks every document, which needs no model, and
+stores the entities without vectors. Rebuild therefore also repairs here: missing indexes,
+entities and chunks that were never embedded, vectors stale with respect to a schema
+change — including the values of a deleted string property — and chunking stale with
+respect to changed chunk-size configuration.
 
 ## Obligations beyond storage
 
@@ -362,21 +599,22 @@ one.
 conflicts, but the store must itself enforce, within each ontology, uniqueness of: each
 lens's internal id, key and name; each entity type's internal id and key; each relation
 type's internal id and key; each property definition's internal id; each agent
-configuration's internal id; each saved query's internal id; and each entity instance's
-id — and, server-wide, each ontology's key and display name. A concurrent pair of writes
+configuration's internal id; each saved query's internal id; each search index's key; and
+each entity instance's id — and, server-wide, each ontology's key and display name. A concurrent pair of writes
 must produce a conflict, not a duplicate. Lookup of instances by type key must be
 indexed — every listing depends on it.
 
 **Vector index lifecycle.** The adapter owns index creation and removal, and the port
-exposes exactly the hooks the schema lifecycle needs: create the index for an entity type
-at a given width, optionally naming the properties to be filterable inside it; drop it;
-rebuild it against the type's current properties; create and drop the index for a document
-property's chunks; ensure the saved-query index; and ensure all of them at once. All are
-called at the points where the schema changes shape — adding a type, deleting a type,
-adding or removing a property, adding or removing a document property — and are no-ops
-when no embedding provider is configured. Indexes are per ontology like everything else:
-created through a bound store, they serve that ontology alone, and registry delete
-removes them with the rest.
+exposes exactly the hooks the lifecycle needs: ensure the saved-query index; drop every
+index whose width no longer matches; and ensure all of them at once. Own search storage
+adds the hooks of the schema lifecycle: create the index for an entity type at a given
+width, optionally naming the properties to be filterable inside it; drop it; rebuild it
+against the type's current properties; create and drop the index for a document
+property's chunks. Those are called at the points where the schema changes shape —
+adding a type, deleting a type, adding or removing a property, adding or removing a
+document property — and are no-ops when no embedding provider is configured.
+Indexes are per ontology like everything else: created through a bound store, they serve
+that ontology alone, and registry delete removes them with the rest.
 
 **Vector index width reconciliation.** An index fixes its vector width when it is created,
 and a create-if-absent is a no-op against an index that already exists — the failure mode
@@ -385,10 +623,11 @@ this produces, and why startup reports it instead of repairing it, are in
 [capabilities/search.md](capabilities/search.md#vector-index-width-drift). The adapter's
 obligation is threefold: before every create, read the existing index's configured width
 and compare it; on the startup path — which walks every registered ontology — report a
-mismatch and change nothing; on the rebuild path, which passes an explicit recreate flag,
-drop and recreate at the new width. The
-report must describe the index the way the API does — by entity type, by document property,
-or by search scope — and never by its physical name.
+mismatch and change nothing; on the rebuild path, drop every index whose width no longer
+matches before any vector is regenerated, then — once every vector has the new width —
+create every missing index at that width. The report must describe the index the way the
+API does — by entity type, by document property, or by search scope — and never by its
+physical name.
 
 **Building predicates from structured filters.** Filters arrive as parsed conditions, and
 the adapter, dispatching on each condition's kind, must turn every condition into a
@@ -497,25 +736,33 @@ multi-ontology conformance tier runs on PostgreSQL only.
   dictionary-style, as the documented behaviour states; Neo4j sorts by Unicode code
   points, capitals before lowercase.
 - **Keyword ranking on Neo4j.** The adapter declares no keyword support, so it offers
-  only semantic search with a provider and no ranked search without one. It accepts
-  composed property text and the language without indexing them and stores chunks without
-  vectors. The 32766-byte indexed-value ceiling does not apply to the composed text,
-  which is not indexed; individual vector filter metadata values retain their ceiling.
+  only semantic search with a provider and no ranked search without one; without a
+  provider it stores chunks without vectors.
+- **Search indices on Neo4j.** The adapter declares no support: it provides no
+  search-index store and no wake-ups, its writes carry no search work, and no worker
+  runs. It keeps [own search storage](#own-search-storage) instead, embedding and
+  chunking inside each write, and ranked search there ranks it through its two semantic
+  rankings — the only ones it offers — with these differences from the search over index entries the
+  search capability describes: a hit carries no `matched`; a lens's index inclusions
+  play no part; property search ranks one composed text per entity across all searched
+  types in one ranking; document search ranks passages, its budget doubling until the
+  ranking is exhausted, and collapses them to entities, each document property keeping
+  its best passage; and when both kinds run their rankings are summed by reciprocal rank,
+  or, over more than one searched type, combined by the best reciprocal kind rank
+  ([decisions.md](decisions.md#interfaces)). A floor drops semantic candidates — entities
+  or passages — before fusion. Without the store there are no retriever agents either.
 - **Path and relation existence conditions on search.** PostgreSQL declares support and
   evaluates them in both rankings; Neo4j declares none, so a query path or a relation
   existence test on search is rejected above the port with a validation error naming the
   entity list — where both work on both adapters.
-- **Filtered passage pages.** PostgreSQL applies filter conditions inside the passage
-  search, on the parent entity under the iterative scan, so a page holds the requested
-  number of matching passages; Neo4j applies them after its index lookup, so a filtered
-  passage page may come back short.
-- **Vector-index removal on drop.** On PostgreSQL, a dropped entity type's or document
-  property's vector index survives as an orphan until the next ensure-all pass sweeps it;
-  on Neo4j the drop removes it immediately.
-- **Width drift blocks writes, not just search.** While a vector index of a stale width
-  stands, PostgreSQL rejects every write that carries a vector — entity or chunk, of any
-  type — until the widths are reconciled; on Neo4j the mismatched vector is left
-  unindexed and the write succeeds.
+- **Filtered passage pages.** PostgreSQL applies filter conditions inside the ranking of
+  passage entries, on the owning entity under the iterative scan, so a page holds the
+  requested number of matching passages; Neo4j applies them after its index lookup, so a
+  filtered passage page may come back short.
+- **Width drift blocks writes, not just search.** While the saved-query description index
+  of a stale width stands, PostgreSQL rejects every saved-query write that carries a
+  description vector until the widths are reconciled; on Neo4j the mismatched vector — of
+  a saved query, an entity or a chunk — is left unindexed and the write succeeds.
 - **Faults only execution can see.** A query fault the compiler itself detects — an
   un-aliased `WITH` item that is not a plain variable, a missing parameter, a variable
   used as a node or relationship when it is bound to neither — is a domain validation
@@ -556,21 +803,78 @@ inexpressible on both adapters alike. `1.5` is unaffected.
 One PostgreSQL namespace (schema, in the engine's own vocabulary) per ontology, named
 `ont_` plus the ontology key — the reason ontology keys are capped at 59 characters: the
 engine truncates identifiers at 63, and the key is immutable, so a namespace never
-renames. Isolation is structural: an ontology's tables and vector indexes live in its
-own namespace, all DDL and queries run unqualified against the transaction's search
+renames. Isolation is structural: an ontology's tables and indexes live in its own
+namespace, all DDL and queries run unqualified against the transaction's search
 path, and no statement can name another ontology's namespace.
 
 `public` is the server-wide home. It holds the registry table `ontology` — one row per
-ontology, carrying the id, key, display name, timestamps and the namespace name — and
-nothing ontology-scoped; `ont_*` namespaces hold only ontology-scoped data. The registry
+ontology, carrying the id, key, display name, timestamps and the namespace name — the
+one-row table `storage_version`, and nothing ontology-scoped; `ont_*` namespaces hold only ontology-scoped data. The registry
 table, not the engine's catalog, is the authoritative ontology list; the catalog is
 consulted only to sweep orphaned namespaces.
 
-Boot DDL creates only the `public` objects. **Registry create** is one transaction:
+**Boot** is one transaction under a database-wide advisory lock, so servers starting
+together against one database serialize on it. It reads the storage version — storage
+from before the `storage_version` table counts as version 1 — then creates the `public`
+objects if absent. An empty database is recorded at the current version. Storage newer
+than the code, or older than the oldest upgradable version, fails the boot before
+anything is written. Older storage holds the registry table against concurrent creates,
+runs each missing upgrade step inside every `ont_*` namespace — then the step's
+server-wide statements, if it has any, once in `public` — and records the new version
+last. The steps and both version constants live in the storage-version module beside the
+DDL. Before that transaction the adapter logs the pgvector version — the installed one,
+or the one the extension would install — and warns when it predates 0.7, which has no
+`halfvec`: the search entry table cannot then be created, so an upgrade of an existing
+namespace and every ontology creation fail.
+
+The current storage version is 3 and the oldest upgradable one is 1 — the unversioned
+storage of the 5.x line, which ended on 5.1.0: version 3 is a major step. Version 2 was
+never released; development storage recorded at it is upgraded by the same step. It adds `entity_type.name_property`, gives every existing entity type its name
+property by the derivation the `5.0` transfer import uses
+([capabilities/transfer.md](capabilities/transfer.md#the-format-version)) — creating a
+`string` property where a type has none, with property creation order as the declaration
+order — and then makes the column mandatory and adds its reference. The same step creates
+the search-index tables and gives `lens_includes` its third inclusion column (both below),
+writes a row for every managed index the namespace's schema implies, and includes each in
+every scoped lens exposing its root type — a passage index only with its document
+property — as the search-index store's inclusion operation does; the worker's first
+start then builds their generations from all existing entities. An upgraded namespace's
+keyword language set is the single text-search language its registry row carried. The step then gives the namespace its
+`retriever_agent` table. 5.x storage stores no retrievers, so there the table is created
+empty. Storage recorded at version 2 keeps them in `retriever_config`, so there that
+table is renamed to `retriever_agent` with its constraints, gains its `warnings` column,
+and has every stored configuration of version 1 converted to version 2 by the conversion
+an import applies
+([capabilities/retriever-agents.md](capabilities/retriever-agents.md#converting-version-1-configurations)),
+storing its warnings; a configuration that is no readable version-1 shape stays as it
+is. Every agent key with `-` is renamed by the same conversion's key rule, unique within
+its lens, and the rename joins the agent's warnings. Last, the step drops the per-entity
+search storage the managed indices replace: the `entity` table's search columns — vector, composed text, keyword
+text and segments, and the generated tsvector — and the `document_chunk` table, each with
+its keyword and vector indexes. Once every namespace has its set, the step's server-wide
+statement drops that language column from the registry table.
+
+**Running the major step** asks the operator for a few things. Stop every 5.x server
+first: the step drops a registry column they read, so no rolling update spans it. The
+installed pgvector must be 0.7 or newer — `SELECT extversion FROM pg_extension WHERE
+extname = 'vector'` shows it, `ALTER EXTENSION vector UPDATE` raises it, and the boot's
+`CREATE EXTENSION IF NOT EXISTS` never updates an installed extension. The whole upgrade
+is the boot's one transaction and holds roughly 150 locks per ontology, so beyond about
+100 ontologies the PostgreSQL default `max_locks_per_transaction` may be too low; raising
+it needs a restart, and running out rolls the upgrade back cleanly. After the boot the
+worker rebuilds every search entry in the background: search answers partially until
+the new generations are ready
+([capabilities/search-indices.md](capabilities/search-indices.md#lifecycle)), and the
+whole corpus is embedded again — with a cloud provider, every entity's text goes to it
+once more. Dropped columns keep their bytes until their rows are rewritten; a
+`VACUUM FULL` reclaims them at once and is optional. The strongest check before
+upgrading production is to boot the new release against a restored dump of it.
+
+**Registry create** is one transaction:
 the registry row first — so a concurrent same-key create dies on the named constraint as
-a conflict — then the fresh namespace, the ten tables below and, when an embedding width
-is given, the fixed vector indexes inside it. **Registry delete** is one transaction:
-the registry row out, the namespace dropped in one cascade. A bound store applies its
+a conflict — then the fresh namespace, the fifteen tables below with the search settings
+row and, when an embedding width is given, the fixed saved-query vector index inside it. **Registry delete** is one
+transaction: the registry row out, the namespace dropped in one cascade. A bound store applies its
 ontology's namespace to the search path per statement, inside the shared transaction
 machinery.
 
@@ -581,65 +885,66 @@ per namespace:
 
 | Logical | Table | Joined by |
 |---|---|---|
-| Lens | `lens` | referenced by its inclusions, agents and saved queries |
-| Entity type | `entity_type` | referenced by its property definitions and inclusions |
+| Lens | `lens` | referenced by its inclusions, agents, saved queries and retriever agents |
+| Entity type | `entity_type` | referenced by its property definitions and inclusions; its name property's key in `name_property`, a reference to `property_def` by entity type and key, checked at commit |
 | Relation type | `relation_type` | endpoint entity type keys as deletion-restricted references to `entity_type`; referenced by its property definitions and inclusions |
 | Property definition | `property_def` | exactly one of two owner columns — entity type or relation type — enforced by a check constraint |
-| Scope inclusion | `lens_includes` | its lens plus exactly one of two type columns; the optional property allowlist is an array column, and an absent allowlist is stored as null, never as an empty array |
+| Scope inclusion | `lens_includes` | its lens plus exactly one of three columns — entity type, relation type or search index; the optional property allowlist is an array column, and an absent allowlist is stored as null, never as an empty array. Search-index rows reach the runtime schema read as index keys; the type-inclusion reads skip them |
 | Agent configuration | `ai_agent_config` | its lens |
 | Saved query | `saved_query` | its lens, with the denormalized lens key alongside |
+| Retriever agent | `retriever_agent` | its lens, with delete cascade; unique per lens and key; configuration and warnings as `jsonb` |
 
-Every schema row carries a `uuid` primary key. That is load-bearing beyond identity: the
-name of a dynamically created vector index embeds the uuid of the schema row that causes
-it to exist (naming, below).
+Every schema row carries a `uuid` primary key.
 
 Deleting a schema object cascades through the foreign keys — property definitions,
-inclusions, agents and saved queries die with their owner. The DDL carries structure
-only, per the rule in [decisions.md](decisions.md#storage): identity, referential
+inclusions, agents, saved queries and retriever agents die with their owner. The DDL carries
+structure only, per the rule in [decisions.md](decisions.md#storage): identity, referential
 integrity, exactly-one-owner and uniqueness, with no backstop for the business rules the
-service validates. The uniqueness constraints on type keys act per namespace, which is
+service validates. The search-index tables are the one exception: they check their closed
+vocabularies — index kind, representation, generation state. The uniqueness constraints on type keys act per namespace, which is
 exactly the per-ontology key scoping the contract requires.
+
+The name-property reference pins an entity type's name property to one of that type's own
+property definitions — the entity type id is part of the reference. It is deferred,
+because a type and its name property are created in one transaction and each references
+the other. Deleting the name property alone violates it at commit, which the error
+translation reports as the same conflict the service raises; that the name property is a
+`string` property is the service's check, not the database's.
 
 ## Naming transformations
 
 There is no naming transformation. A type key never becomes a table, column or index
-name — it is a value in a `type_key` column, appearing at most as a quoted literal
-inside a partial-index predicate. Both reserved key sets are therefore empty: no key can
-collide with an adapter object.
+name — it is a value in a `type_key` column. Both reserved key sets are therefore empty:
+no key can collide with an adapter object.
 
-The one mechanical naming rule covers the dynamically created vector indexes:
-`vec_<table>_<id>`, where `<id>` is the 32-hex-character uuid, hyphens stripped, of the
-schema row that causes the index to exist — the entity type row for a per-type index,
-the property-definition row for a document property's chunk index. The name is
-reversible in both directions with no registry: name to uuid to schema row to type key,
-and type to uuid to name, so index names are never stored. The `vec_` prefix is barred
-to every fixed adapter object, keeping the dynamic and static namespaces disjoint by
-construction — the two fixed vector indexes live outside it.
+The one mechanical naming rule covers the dynamically created tables: a search
+generation's entry table is `se_<id>`, where `<id>` is the generation's 32-hex-character
+uuid, hyphens stripped, and its indexes and constraints are named after the table. The
+name is derived, never stored. No fixed object starts with `se_`, so the sweep finds the
+tables by name.
 
 ## How instance data is stored
 
 Two generic tables per namespace hold all of an ontology's instance data, however many
 types its schema declares: `entity` and `relation`. Each row carries its `uuid` id, its
-type key, its user properties as one `jsonb` document, and its timestamps; an entity row
-additionally carries its embedding vector in a dedicated dimensionless column, never
-inside the properties document. A schema change — a new type, a new property — is
-therefore pure data: no DDL ever runs against a live database. The deliberation behind
-this mapping is [adr/0015](adr/0015-generic-jsonb-instance-tables.md); the binding rule
-is in [decisions.md](decisions.md#storage).
-
-Chunks live in a third table, `document_chunk` — one row per passage with its owning
-entity, type and property keys, ordinal, offsets, text and optional vector.
+type key, its user properties as one `jsonb` document, and its timestamps — nothing
+else: an entity carries no search data, which lives in the search-index tables alone
+(below). A schema change — a new type, a new property — is therefore pure data for
+instance storage: no table or column is ever created per type or property. The only DDL
+that follows a schema change is the entry table, with its indexes, of a search generation
+it starts (below). The deliberation behind this mapping is
+[adr/0015](adr/0015-generic-jsonb-instance-tables.md); the binding rule is in
+[decisions.md](decisions.md#storage).
 
 The silent-cascade contract on entity deletion is translated into foreign keys:
-relations reference their two endpoint entities, and chunks their owning entity, all
-with cascading deletes. Deleting an entity removes its relations in either direction and
-its chunks in the same statement, and a dangling endpoint is unrepresentable. The
+relations reference their two endpoint entities with cascading deletes. Deleting an
+entity removes its relations in either direction in the same statement, and a dangling
+endpoint is unrepresentable. The
 instance tables' type-key columns carry no foreign key to the schema tables — deleting a
 type deliberately orphans its instances, matching the documented deletion behaviour.
 
-Five B-tree indexes back the hot paths: entity rows by type key; relation rows by type
-key, by source entity and by target entity; chunk rows by owning entity and property
-key. Filters, sorts and text search evaluate jsonb expressions that cast a property to
+Four B-tree indexes back the hot paths: entity rows by type key; relation rows by type
+key, by source entity and by target entity. Filters, sorts and text search evaluate jsonb expressions that cast a property to
 its declared data type; property keys and values are both bound parameters, never SQL
 text. Property existence is jsonb key presence, the key bound. A path condition is an
 existential subquery over the relation table — anchored on
@@ -651,50 +956,121 @@ relation itself the subquery joins no entity row: the predicate is evaluated on 
 relation row's own properties. A relation existence condition is the same subquery
 without a join and without a predicate, under `EXISTS` or `NOT EXISTS`.
 
+## How search indices are stored
+
+Five tables per namespace hold search indices:
+
+| Table | Holds |
+|---|---|
+| `search_settings` | One row, pinned by a check on its boolean key: the keyword language set as an array, the switched-off indices as `jsonb` |
+| `search_index` | One row per index: key, kind, the root entity type as a reference with delete cascade, the definition as `jsonb` |
+| `search_generation` | One row per generation: index reference with delete cascade, representation, definition hash, model id and dimensions or languages, state, counters. Two partial unique indexes — one over `building` rows, one over `ready` — allow one of each per index and representation |
+| `search_queue` | A generation's parts awaiting composition, keyed like an entry, with the time it was last queued, attempts, earliest retry, lease, and the last error with its time (`last_error_at`); deleted with its generation, and cleared when the generation retires or fails. B-tree indexes on the earliest retry, the entity id and the part id |
+| `search_entry` | The entries, list-partitioned by generation |
+
+An entry row carries its identity — generation, entity, part kind, group number, part id,
+together the primary key — the relation type and target of a relation part, a passage's
+offset and length, the text, its hash as bytes, and either an untyped `halfvec`
+(semantic) or a `tsvector` (keyword). As on `saved_query`, the vector column has no
+width: it lives only in the partition's index. A keyword entry's `tsvector` is built in
+the insert statement — `to_tsvector` of the text in every language of the generation's
+set, concatenated; languages reach SQL only from the closed list.
+
+Each generation's entries live in a table of its own (naming, above), which joins
+`search_entry` as a partition when the generation becomes active:
+
+- **Create** inserts the `building` row and creates the standalone table in one
+  transaction, holding the index row locked so generation changes of one index
+  serialize; a generation still building for the same index and representation retires
+  in that transaction. The table carries B-tree indexes on entity id and part id, for the
+  deletes that reach it while it fills, and a CHECK matching its future partition bound,
+  so the attach needs no validation scan.
+- **Writes** go to the generation's table by name, attached or not. Each takes the
+  generation row `FOR SHARE` and checks its state, so a state change waits for writers
+  in flight and no table is touched after the change that leads to its drop. Deleting an
+  entity's or relation's entries in every generation goes through the parent for attached
+  partitions and to each building generation's table directly.
+- **Finish** first builds the search index in a transaction of its own — HNSW over
+  `embedding::halfvec(D)`, cosine, at the generation's width; or GIN over the
+  `tsvector` — then, in one transaction, retires the previous `ready` generation,
+  attaches the table, drops the bound CHECK and marks the generation `ready`. The
+  previous generation serves until that commit.
+- **Removal** of a retired or failed generation's table follows the committed state
+  change and is best-effort: an attached table is detached `CONCURRENTLY` — or a pending
+  detach finalized — then dropped, each statement alone and namespace-qualified, since a
+  concurrent detach cannot run in a transaction. What an interruption leaves, and what a
+  cascade leaves — deleting an index or its root entity type removes rows, not tables —
+  the sweep collects: every `se_` table whose generation is neither building nor ready.
+  Deleting an index runs it. **Retire** sets the state and deletes the queued work in one
+  transaction; the table goes the same best-effort way.
+
+The queue works in plain SQL on `search_queue`:
+
+- **Enqueue** is `INSERT … ON CONFLICT DO UPDATE` on the item's key: a conflicting row
+  gets a new `enqueued_at` from `clock_timestamp()`, zero attempts, an earliest retry of
+  now and no error, and keeps its lease. `enqueued_at`, read back as text, is the claim
+  token. Each part of a write plan is one `INSERT … SELECT` joined to the index's
+  `building` and `ready` generations — relation parts and the fan-out also to `relation`,
+  which yields the owning end. A create's backfill is one `INSERT … SELECT` over `entity`
+  by type key, in the creating transaction.
+- **A write plan runs on the write's transaction.** The runtime store opens one
+  transaction for the instance statement and its plan: after the statement, and only when
+  it touched a row, for creates and updates; before it for deletes, while the relations
+  that cascade with a deleted entity still exist — their entries and queued items are
+  found through them.
+- **Claim** is one statement: a CTE selects the claimable rows joined to their
+  generation, ordered keyword first and then by `enqueued_at`, with the limit and
+  `FOR UPDATE SKIP LOCKED` on the queue rows; the `UPDATE` sets `lease_until` and returns each row's attempts
+  and token. It commits on its own, so no transaction is held while the worker composes
+  and calls the embedding provider.
+- **Complete** deletes the claimed rows whose `enqueued_at` still equals the token and
+  clears the lease of the rest; **fail** increments attempts, records the error and its
+  time and sets the earliest retry on the rows whose token still matches, and clears
+  every claimed row's lease.
+- **Statistics** is one statement per call: counts grouped by generation, and the
+  newest row per generation and distinct `last_error` — an error without a recorded
+  time takes `enqueued_at` as its time — ranked by time and cut at ten.
+- **Measuring** an index's content counts `entity` rows of the root type, summing a
+  passage estimate from the `char_length` of the document value, and one count over
+  `relation` joined to both end entities per group.
+- **Ranking** runs on the ready generation's table, the generation row held `FOR SHARE`
+  so the table stays while it is read. Semantic: a strict-order iterative HNSW scan over
+  `embedding::halfvec(D)` by cosine distance at the generation's width, the score
+  `1 − distance / 2`. Keyword: the query's lexemes per token from `ts_debug` — which
+  parses like `to_tsvector` — in each language of the generation's set, quoted with a
+  prefix marker, joined by `|` or `&` per language and the languages by `|`, matched
+  against `tsv`. One token's lexemes in every language, joined by `|`, form one word
+  query, and equal word queries count once. The score is the number of word queries `tsv`
+  matches plus `ts_rank_cd / (1 + ts_rank_cd)`; ties are broken by the entry key. Filter conditions run as an `EXISTS` on the owning `entity` row, the same
+  predicate fragments the instance listings use; the relation and target type lists as
+  `relation_type` and `target_type` predicates that let other parts pass.
+- **Wake-ups** are `pg_notify('ontoforge_search_work', <ontology key>)`, issued in every
+  transaction that queued something; PostgreSQL delivers the notification only at commit.
+  One channel serves the whole database. Each process `LISTEN`s on a dedicated connection
+  outside the pool — a pooled connection would go back to the pool with the subscription
+  on it; a lost connection is logged and ends the subscription.
+
 ## Index inventory
 
-Created only when an embedding provider is configured — all HNSW over the embedding
-column cast to the provider's width, all cosine, all per namespace:
+Beyond the uniqueness constraints and the B-tree indexes above, and the search-index
+tables' own indexes, one vector index exists per namespace: an HNSW index, cosine, over
+`saved_query`'s dimensionless `embedding` column cast to the provider's width — a fixed
+name, full-table, for description search within the ontology. Registry create builds it
+when an embedding width is given, and the startup ensure when a provider is configured.
+Lens scoping is a plain query-time predicate, so the index needs no scoping of its own.
 
-| Vector index | Form | Scope |
-|---|---|---|
-| One per entity type | partial index on `entity`, predicated on the type key | that type's rows |
-| One per document property | partial index on `document_chunk`, predicated on the entity type key and property key | that property's passages |
-| One for saved queries | full-table on `saved_query`, fixed name | description search within the ontology |
-
-The saved-query vector index is fixed per namespace. Cross-type entity ranking unions
-per-type scans in one statement, with a limit per scan and a global score order and limit.
-
-Two GIN indexes are fixed at ontology creation: one on a stored generated tsvector of
-composed property text, one on a stored generated tsvector of chunk text. Their
-`to_tsvector` configuration is the ontology's English or German language. Queries are assembled
-from the lexemes `to_tsvector` produced for the search text, quoted, each with a prefix
-marker, and joined with the OR operator under any-term matching or the AND operator under
-all-term matching — the matching selects that operator and nothing else. They rank the
-stored vectors with `ts_rank_cd`; no engine query syntax is accepted from callers, and
-search text never reaches tsquery syntax. The filters restrict candidates before ordering and limiting.
-There are no keyword lifecycle hooks or per-type keyword DDL. A common term may rank many
-candidates before the limit, the inherent cost of full-text ranking.
-
-An index's width is read back from its own indexed column type in the catalog — the
-`vector(D)` of the cast expression — and that is what width reconciliation compares,
-namespace by namespace across the registry. Builds are plain, transactional index
+Its width is read back from its own indexed column type in the catalog — the `vector(D)`
+of the cast expression — and that is what width reconciliation compares, namespace by
+namespace across the registry. A query repeats the same cast expression, its width read
+from the index, or the planner ignores the index. Builds are plain, transactional index
 creation; a failed or interrupted build leaves nothing behind, so no failed-index defence
-exists or is needed. The filterable-property
-list a caller may pass on index creation is accepted and ignored: property values are
-never index metadata here, so every property filters semantic search, always, with no
-declaration and no rebuild.
+exists or is needed.
 
 Search behaviour: the similarity returned is `1 − cosine_distance / 2` — algebraically
 identical to the Neo4j adapter's cosine index score, the same 0-to-1 scale, pinned by a
 fixed-vector conformance case. Every vector query runs as a strict-order iterative scan,
 so a result limit counts rows that passed the filters, delivered in exact distance
-order. The passage search evaluates its filter conditions on the parent entity inside the
-statement — a semi-join from the chunk row to its `entity` row, carrying the same
-predicate fragments the entity ranking carries, path conditions included — so the
-iterative scan refills a filtered page with passages whose parent passes. A page may
-still shrink if the iterative scan reaches its tuple cap. Only saved-query discovery
-applies a minimum score after the limit.
+order. Saved-query discovery applies its minimum score after the limit.
 
 ## Engine constraints worth knowing
 
@@ -730,9 +1106,9 @@ against it.
 
 The registry entry lives on a single internal node labelled `_OntologyRegistry` —
 underscore-internal, like every physical name no key can produce. Registry create
-pre-checks the cap, creates the fixed vector indexes when an embedding width is given
-(index DDL cannot share a transaction with data writes in this engine; a mid-way failure
-leaves nothing observable through the port), then writes the registry node with a
+pre-checks the cap, creates the fixed saved-query vector index when an embedding width is
+given (index DDL cannot share a transaction with data writes in this engine; a mid-way
+failure leaves nothing observable through the port), then writes the registry node with a
 single-statement conditional create as the in-transaction backstop. Registry delete
 wipes the whole graph — schema nodes, instance nodes, chunks, and the registry node —
 and drops every vector index, so no width or filter-property imprint of the deleted
@@ -745,11 +1121,14 @@ Schema objects are nodes, joined by relationships:
 | Logical | Node label | Joined by |
 |---|---|---|
 | Lens | `Ontology` — a physical name exempt from the vocabulary lock ([decisions.md](decisions.md#ontologies)) | `INCLUDES_TYPE` to a type node, carrying the optional property allowlist |
-| Entity type | `EntityType` | `HAS_PROPERTY` to its property nodes |
+| Entity type | `EntityType` | `HAS_PROPERTY` to its property nodes; its name property's key as the node property `nameProperty` |
 | Relation type | `RelationType` | `HAS_PROPERTY`, plus `RELATES_FROM` and `RELATES_TO` to its endpoint entity types |
 | Property definition | `PropertyDefinition` | — |
 | Agent configuration | `AiAgentConfig` | `HAS_AI_AGENT` from its lens |
 | Saved query | `SavedQuery` | `HAS_SAVED_QUERY` from its lens |
+
+The adapter stores no retriever agents. Deleting a lens also removes any
+`_RetrieverConfig` node its `_HAS_RETRIEVER` relationship reaches.
 
 Instance data lives in the same database, distinguished by underscore-prefixed internal
 names:
@@ -773,7 +1152,7 @@ key is reserved when its PascalCase form is one of the six schema node labels, g
 `saved_query` — the first of those derives from the kept `Ontology` lens label. A
 relation type key is reserved when its upper-snake form is one of the six schema
 relationship types, giving `includes_type`, `has_property`, `relates_from`,
-`relates_to`, `has_ai_agent` and `has_saved_query`. The internal names `_Entity`,
+`relates_to`, `has_ai_agent` and `has_saved_query`. The internal names `_RetrieverConfig`, `_HAS_RETRIEVER`, `_Entity`,
 `_Chunk`, `_HAS_CHUNK` and `_OntologyRegistry` need no reservation, since no valid key
 can produce a leading underscore.
 
@@ -810,6 +1189,14 @@ Created at startup, unconditionally:
 | Uniqueness constraint | `SavedQuery` internal id | Saved-query identity |
 | Uniqueness constraint | `_Entity` instance id | Instance identity |
 | Index | `_Entity` type key | Every listing filters on it |
+
+The Neo4j adapter carries no storage version: every startup creates the objects above
+if absent, and gives every entity type node without `nameProperty` its name property by
+the derivation the `5.0` transfer import uses
+([capabilities/transfer.md](capabilities/transfer.md#the-format-version)) — creating a
+`string` property where a type has none, with property creation order as the declaration
+order. That is its whole upgrade path. Nothing in the graph enforces the name property;
+the service's checks are its only guard.
 
 With the registry capped at one ontology, per-database uniqueness and per-ontology
 uniqueness are the same thing.
@@ -876,10 +1263,13 @@ Provide, in this order:
 5. **The schema side.** Lenses, types, properties, inclusions, full-schema retrieval,
    agents and saved queries. Nothing on the data side is useful until the schema can be
    read back.
-6. **The data side.** Entities, relations, traversal, chunks.
+6. **The data side.** Entities, relations, traversal.
 7. **Filters, sorts and text search.** The predicate builder, shared by listing and by
    filtered vector search.
-8. **Vector indexes and search**, including width reconciliation.
+8. **Search** — either the search-index store with its queue, wake-ups and retriever
+   agents, or own search
+   storage with its chunks, vectors and vector indexes — and the saved-query vector
+   index, including width reconciliation.
 9. **Query compilation.** Last, because it needs the naming transformation from step 1 and
    nothing else.
 

@@ -15,8 +15,8 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { Waypoints } from 'lucide-react'
+import { useDisplayLabel } from '@/api/hooks'
 import type { EntityInstance } from '@/api/types'
-import { displayLabel } from '@/lib/displayLabel'
 import { getTypeColor } from '@/lib/typeColors'
 import type { DerivedEdge } from './resultUtils'
 
@@ -27,6 +27,7 @@ type ResultNodeData = { entity: EntityInstance; ontologyKey: string; lensKey: st
 type ResultNode = Node<ResultNodeData, 'resultEntity'>
 
 function ResultEntityNode({ data }: NodeProps<ResultNode>) {
+  const displayLabel = useDisplayLabel()
   const navigate = useNavigate()
   const { entity, ontologyKey, lensKey } = data
   const color = getTypeColor(entity._entityTypeKey)

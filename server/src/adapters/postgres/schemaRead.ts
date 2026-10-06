@@ -30,7 +30,7 @@ export async function readTypesWithProperties(
   includePropertyTimestamps: boolean,
 ): Promise<{ entityTypes: Row[]; relationTypes: Row[] }> {
   const ets = await querier.query(
-    `SELECT entity_type_id, key, display_name, description, created_at, updated_at
+    `SELECT entity_type_id, key, display_name, description, name_property, created_at, updated_at
      FROM entity_type ORDER BY key`,
   );
   const rts = await querier.query(

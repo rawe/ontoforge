@@ -18,11 +18,13 @@ export function WorkbenchLayout() {
 
   const notFound = schema.error instanceof ApiError && schema.error.status === 404
 
+  // Remember the lens only once its schema loaded; the not-found state forgets the remembered lens.
+  const loaded = schema.data !== undefined
   useEffect(() => {
-    if (ontologyKey !== undefined && lensKey !== undefined && !notFound) {
-      writeString(storageKeys.lastLens(ontologyKey), lensKey)
-    }
-  }, [ontologyKey, lensKey, notFound])
+    if (ontologyKey === undefined || lensKey === undefined) return
+    if (loaded) writeString(storageKeys.lastLens(ontologyKey), lensKey)
+    else if (notFound) remove(storageKeys.lastLens(ontologyKey))
+  }, [ontologyKey, lensKey, loaded, notFound])
 
   // Global Cmd/Ctrl+K toggles the search palette from anywhere.
   useEffect(() => {

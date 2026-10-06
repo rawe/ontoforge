@@ -251,20 +251,69 @@ all. Each query word also matches as a prefix under every keyword strategy.
 
 The envelope is `{query, type, in, strategy, minSimilarity, filter, hits}`; `minSimilarity`
 echoes the applied floor, null when none was set. Each hit carries `entity`,
-`relativeScore` and `matches`. An entity match is `{kind: "properties"}`; each matching
-document property contributes `{kind: "document", propertyKey, charOffset, charLength}`.
-The entity match comes first. Use document coordinates as `offset` and `limit` on a read.
-No snippet or absolute score is returned. The best relative score is 1.0; all scores are
-comparable only within this response, never confidence or absolute similarity.
+`relativeScore`, `matches` and `matched`. An entity match is `{kind: "properties"}`; each
+matching document property contributes `{kind: "document", propertyKey, charOffset,
+charLength}`. The entity match comes first. Every match carries `evidence`
+(`semanticSimilarity`, `keywordMatch`, `keywordScore`, each nullable — null is not false).
+Use document coordinates as `offset` and `limit` on a read. The best relative score is
+1.0; all scores are comparable only within this response, never confidence or absolute
+similarity.
+
+`matched` names the entity's best entry: `index` (the search index key), `partKind`
+(`self` for own fields, `relation`, `passage`), `relationType` and `relationId` (relation
+entries only), `target` (`{id, type, label}` of the entity at the relation's other end),
+`snippet` (the entry's first ≤ 200 characters; empty when the index reads a property the
+lens hides) and `charOffset`/`charLength` (passages only).
 
 The relative-score promise: under `semantic` or a keyword strategy alone the shape is real, a ratio of similarities or of engine scores; under `hybrid`, or with two kinds fused, it is rank-made: a hit found by both rankings sits clearly above one found by one, then the numbers trail smoothly whatever the closeness. It shows where the ranking degrades and how steeply, never whether the best hit is good.
+
+### Search indices
+
+Ranked search reads **search indices**: per entity type a managed default index
+(`<type>~default`, its own string properties), per document property a passage index
+(`<type>~<documentProperty>`), and custom indices defined in modeling — which may hold one
+entry per relation instance (e.g. a person's role at one company) so an entity can match
+through its relations. Entries are built in the background after each write: a new entity
+is searchable once its entries are built. Keyword search stems in the ontology's keyword
+languages (English, German or both); no request names a language. `GET /search` searches
+only the default and passage indices of the requested types; `POST /search` searches any
+indices by key.
+
+- `GET /search-indices`
+  The lens's search catalog, in key order: per index `key`, `kind` (`default`, `passage`,
+  `custom`), `name`, `description`, `entityType`, `fields`, `relations` (each
+  `{relationType, direction, label}`), `documentProperty`, `modes` and `status`.
+
+- `POST /search`
+  Ranks entities through chosen indices. JSON body:
+  ```json
+  { "query": "CTO at ACME", "indices": ["person_employment"], "mode": "hybrid",
+    "relations": ["works_for"], "filters": {"works_for.name": "ACME"},
+    "minScore": 0.6, "limit": 10, "fields": ["name"] }
+  ```
+  Only `query` is required. `indices` defaults to every index the lens can search;
+  `mode` is `semantic`, `keyword` or `hybrid` (default hybrid with an embedding provider,
+  else keyword); `relations` restricts relation entries to those types (`[]` = none;
+  own-field and passage entries always count); `filters` takes the `filter.*` keys of
+  `GET /search` without the prefix, values as strings; `minScore` (0–1, semantic only;
+  rejected under `keyword`); `limit` 1–100, default 10. The response is
+  `{query, mode, hits}`, each hit `entity`, `relativeScore` and `matched` — no `matches`.
+  An unknown index key answers 404; an index the lens cannot search is a 422 at
+  `indices.<i>`.
+
+Both answer `FEATURE_DISABLED` on a server whose `searchIndices` feature is false
+(Neo4j); `GET /search` works everywhere.
 
 MCP `search` runs both kinds, `search_documents` runs only documents and accepts optional
 `property`. Both accept `query`, optional `entity_type_key`, `limit`, `filters`, `fields`;
 neither takes a strategy or `min_similarity` — both apply a fixed floor of 0.75 whenever
 the default strategy ranks semantically (echoed as `minSimilarity`, null under a keyword
-default). They return the same envelope. The keyword strategies need adapter support;
-semantic needs embeddings; hybrid needs both. Defaults prefer hybrid, keyword, semantic.
+default). They return the same envelope. MCP `search_by_index` runs the index search of
+`POST /search`: `query`, `index` (one key or a list; absent for every index of the lens),
+`relations`, `limit`, `filters`, `fields`, under the default mode and the same fixed floor;
+it answers `{query, mode, minSimilarity, hits}`. `list_search_indices` returns the catalog. The keyword strategies need
+adapter support; semantic needs embeddings; hybrid needs both. Defaults prefer hybrid,
+keyword, semantic.
 
 ## Read-Only OQL Query
 
@@ -347,6 +396,20 @@ An agent may be granted exactly ten runtime tools: `get_schema`, `list_entities`
 `list_saved_queries`, `run_saved_query`, `search_saved_queries`. Every write tool is
 outside that set, and so are the read-only `get_document` and `get_relation`.
 
+### Retriever agents
+
+A retriever agent is a stored configuration on the lens (managed on the modeling surface)
+that answers questions over chosen search indices.
+
+- `POST /retriever-agents/{agentKey}/chat`
+  Streams the answer to one question as newline-delimited events (`phase`, `delta`,
+  `meta`, then one terminal `final` or `error`).
+  Request body: `message` (1–2,000 characters), optional `history` (up to 30
+  `{role, content}` turns), optional `turnToken` (from the previous answer's `meta`
+  event), optional `diagnostics` (default `false`). Unknown fields are rejected; the
+  request cannot change the agent's configuration. Without an embedding provider the
+  agent searches by keyword only.
+
 ### Agent-to-agent
 
 Each named agent gets a card and a task endpoint; the default agent gets one pair at the
@@ -363,7 +426,8 @@ A card advertises absolute URLs whose host is derived from the request rather th
 
 - `GET /api/server/features`
   Describes the deployment, not any ontology — it takes no ontology and no lens.
-  Response fields: `semanticSearch`, `searchStrategies`, `ai`
+  Response fields: `semanticSearch`, `searchStrategies`, `ai`, `searchIndices` (whether
+  the index search and catalog exist)
 
 Semantic search and the AI routes depend on external providers and are unavailable unless
 one is configured. Call this **before** offering either, rather than relying on the

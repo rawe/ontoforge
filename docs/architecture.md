@@ -65,31 +65,40 @@ REST — a second path would be a second contract.
 Five modules, with a deliberately acyclic dependency graph:
 
 ```
-   registry ──▶
-   modeling ──▶  core  ◀── runtime
-   server   ──▶
+   registry ─┐
+   server   ─┼─┬──▶ runtime ──▶ core
+   modeling ─┘ │                  ▲
+               └──────────────────┘
 ```
 
 **Registry** manages ontologies as whole units: create, list, read, rename, delete. It
 never looks inside one.
 
-**Modeling** owns one ontology's schema: types, properties, lens definitions, cascade
-rules, schema validation, transfer, search-data rebuild.
+**Modeling** owns one ontology's schema: types, properties, lens definitions, search-index
+definitions and settings, cascade rules, schema validation, transfer, search-data rebuild.
 
 **Runtime** owns one ontology's instance data: entity and relation lifecycle, traversal,
-documents, search, query execution, saved-query pipelines, agents.
+documents, search, search indexing, query execution, saved-query pipelines, agents and
+retriever agents.
 
 **Server** carries the deployment's capability report — which optional providers this
 deployment has. It belongs to neither modeling nor runtime and is the only surface that
 is not ontology-scoped.
 
 **Core** owns what the others need and none should define twice: the persistence port,
-the exception taxonomy, the data-type enumeration, embedding and decision-model
-provider abstractions, and OQL parsing and validation.
+the exception taxonomy, the data-type and keyword language enumerations, embedding and
+decision-model provider abstractions, OQL parsing and validation, and the storage-free
+parts of search indexing — entry composition and the map of which writes affect which
+entries.
 
 **Runtime never depends on modeling.** Everything runtime needs about the schema, it
 reads through the port. This keeps the schema a *value* to runtime rather than a service
-it calls, which is what makes the schema cache possible.
+it calls, which is what makes the schema cache possible. Runtime uses core alone. The
+other three may use runtime as well as core: modeling where it needs runtime's own view —
+assembling a lens's schema, deriving the managed search indices of a changed schema, and
+validating agent configurations and retriever agents against what runtime offers;
+registry to clear the schema cache when an ontology is deleted; server to report which
+search strategies the deployment offers.
 
 ## Ontology isolation
 
@@ -103,7 +112,8 @@ agent ever spans two. The architecture makes that structural rather than checked
   The service layer obtains a modeling or runtime store *for* an ontology key; every
   method of that store resolves within the binding, and binding an unknown key fails as
   not found before any other rule runs. Registry operations live on a separate registry
-  port beside the two bound stores.
+  port beside the bound stores; an adapter that stores search indices binds a third
+  store, for them, the same way.
 - **The physical isolation mechanism is the adapter's private business.** Nothing above
   the port knows how an ontology's data is kept apart from its neighbours'; the contract
   and each adapter's mechanism are in [storage-adapters.md](storage-adapters.md).
@@ -111,8 +121,8 @@ agent ever spans two. The architecture makes that structural rather than checked
 The registry — not any storage catalog — is the authoritative list of ontologies. Zero
 ontologies is a valid server state: a fresh server starts empty, nothing is auto-created
 at boot, and the last ontology is deletable. Deleting an ontology is one hard cascade
-over everything it contains — schema, lenses, saved queries, agents, instance data,
-chunks and search indexes.
+over everything it contains — schema, lenses, saved queries, agents, retriever
+agents, instance data and search indices.
 
 ## Logical data model
 
@@ -134,16 +144,19 @@ Per ontology. "Unique" here always means unique within the owning ontology.
 | Kind | Identity | Notable fields |
 |---|---|---|
 | Lens | id, unique `key`, unique name | name, description, timestamps |
-| Entity type | id, unique `key` | display name, description, timestamps |
+| Entity type | id, unique `key` | display name, description, name property, timestamps |
 | Relation type | id, unique `key` | display name, source and target entity type keys |
 | Property definition | id, `key` unique within its owner | data type, required, default; owned by exactly one entity type or relation type |
-| Inclusion | lens + type | optional property allowlist; absent means all properties |
+| Search index | id, unique `key` | kind (default, passage or custom), root entity type, definition, timestamps |
+| Search settings | one per ontology | keyword language set, managed indices switched off |
+| Inclusion | lens + type, or lens + search index | a type inclusion's optional property allowlist; absent means all properties |
 | Agent config | lens + `key` | name, description, system prompt, tool allowlist |
 | Saved query | lens + `key` | name, description, ordered steps, parameters, bindings |
+| Retriever agent | lens + `key` | name, description, configuration version, configuration, conversion warnings |
 
-Inclusions, agent configs and saved queries are the three things that belong *to a
-lens*. Types and properties never do. The same type key, and the same lens key, can
-exist independently in two ontologies.
+Inclusions, agent configs, saved queries and retriever agents are the four things
+that belong *to a lens*. Types, properties and search indices never do. The same type key, and the same
+lens key, can exist independently in two ontologies.
 
 ### Instance level
 
@@ -151,7 +164,8 @@ exist independently in two ontologies.
 |---|---|---|
 | Entity | `_id` | its type key, plus the properties its type defines |
 | Relation | `_id` | its type key, its two endpoint ids, plus its properties |
-| Chunk | internal | fragment of one document property, with its offset and length |
+| Chunk | internal | fragment of one document property, with its offset and length, kept as a passage entry |
+| Search entry | internal | one indexed text of one entity in one generation of a search index — its own fields, one relation, or one chunk |
 
 System properties are server-managed, always readable, never writable: `_id`,
 `_createdAt`, `_updatedAt`, plus `_entityTypeKey` on entities and `_relationTypeKey` on
@@ -190,7 +204,7 @@ is the summary; each one is stated with its consequences in
 
 ## Lens scoping
 
-A lens with no inclusions exposes its ontology's whole schema. A lens with inclusions
+A lens with no type inclusions exposes its ontology's whole schema. A lens with them
 exposes exactly what it declares, with one inference: naming entity types alone also
 admits the relation types whose *both* endpoints are in scope, because a relation with an
 invisible endpoint would be unusable. The full rules are in
@@ -216,9 +230,14 @@ queries.
 
 The cache is keyed by ontology plus lens — lens keys are unique only within their
 ontology, so the lens key alone would be ambiguous. Entries are built lazily and cleared
-wholesale by any modeling mutation, in any ontology. Wholesale rather than selective,
-because a single schema change can affect many lenses and the cost of rebuilding is
-small.
+wholesale by any modeling mutation, in any ontology, and by deleting an ontology through
+the registry. Wholesale rather than selective, because a single schema change can affect
+many lenses and the cost of rebuilding is small.
+
+Beside the lenses, the cache holds one entry per ontology for
+[search indexing](#search-indexing): its index definitions and the map, derived from them
+and the schema, of which writes affect which entries. It is cleared with the rest, and by
+any change of the ontology's index definitions.
 
 It is **per process**. Multiple server instances against one database will not see each
 other's schema changes until each rebuilds — a real constraint on horizontal scaling that
@@ -236,8 +255,8 @@ A runtime write, which is the longest path:
     → load lens from schema cache (build on miss)
     → reject unknown properties; check required; apply defaults
     → coerce each value to its declared data type
-    → embed text if a provider is configured
-    → cross the persistence port
+    → derive the search work the write causes, from the cached search context
+    → cross the persistence port (the write and its search work, one transaction)
     → adapter compiles and executes
     → filter response to the scoped properties
     → stub documents, apply field projection
@@ -252,6 +271,49 @@ rules rather than implementation choices:
 **Coercion is strict.** Values are converted, never guessed. What each data type converts
 and what it refuses is in
 [capabilities/schema-modeling.md](capabilities/schema-modeling.md#data-types).
+
+## Search indexing
+
+An adapter that stores search indices keeps, per index, entries composed from the
+current state of entities — their own fields, their relations together with the entities
+at the other end, and the passages of their documents. Entries are built in the
+background, never on the request path, so search over them is eventually consistent
+([decisions.md](decisions.md#storage)). On an adapter that stores no search indices,
+writes carry no search work and no worker runs.
+
+**Every write queues its work in its own transaction.** Entity and relation writes —
+create, update, delete, document edits — hand the store, with the write, the search work
+they cause: which parts of which entities to compose again. The store queues it in the
+write's transaction, so the work exists exactly when the write commits; the queue lives in
+the same database, behind the persistence port. A deletion removes the affected entries
+with the write instead of queueing anything. A change no index reads queues nothing.
+
+**A worker in every server process drains the queue.** It claims a batch under a
+time-limited lease — items another process holds are skipped, so any number of processes
+share one queue — and composes each claimed part's text from current state, outside any
+transaction. It skips parts whose text is unchanged, embeds the rest in provider batches,
+writes the entries and completes the claim. A write that queues an item again while it is
+claimed is never lost: completing the older claim leaves it queued. A failed batch is
+retried with exponentially growing delays; after the configured number of attempts its
+items count as failed and wait for a rebuild or a new write of their entity. The worker
+sleeps until the database notifies it that work was queued in any process, and polls at a
+configured interval in case a notification is missed.
+
+**Entries belong to generations.** Each index is built once per representation —
+semantic and keyword — as a generation identified by the definition it was built from
+and, for semantic entries, the embedding model, for keyword entries the keyword language
+set. When no generation matches, a new one is built from a full backfill beside the
+active one, which keeps serving until the new one is complete and takes its place in one
+step. An entry's semantic text is labelled with the schema's display names, unless the
+index renders it from a template; its keyword text holds values only ([decisions.md](decisions.md#interfaces)).
+
+**Managed indices follow the schema.** After every schema change the modeling side derives
+the managed indices again from the full schema — creating, updating and deleting their
+definitions, including a new one in every scoped lens that exposes its root type (a
+passage index: its document property too) — and brings the generations in line. A changed display name or name property, which no
+definition captures, queues the entities of every index rendering that type again. The worker does the same for
+every ontology when it starts. Ranked search reads the ready generations
+([capabilities/search-indices.md](capabilities/search-indices.md)).
 
 ## Error model
 
@@ -268,7 +330,7 @@ There are exactly six top-level codes:
 | Resource does not exist | 404 | `RESOURCE_NOT_FOUND` | — |
 | Uniqueness or referential conflict | 409 | `RESOURCE_CONFLICT` | — |
 | Input rejected | 422 | `VALIDATION_ERROR` | `fields` map or `errors` list |
-| Change requires explicit cascade | 409 | `CASCADE_REQUIRED` | `affectedLenses` |
+| Change requires explicit cascade | 409 | `CASCADE_REQUIRED` | `affectedLenses`, `affectedIndices` |
 | Unexpected storage failure | 500 | `STORAGE_ERROR` | `errorId` |
 | Malformed request body | 400 | `INVALID_JSON` | — |
 
@@ -276,8 +338,9 @@ Two refinements:
 
 **`details.code` narrows, it does not replace.** Where it appears, the top-level code
 stays one of the six. A request for an unavailable search strategy, search with no available strategy,
-saved-query discovery with no embedding provider — or an AI request with no
-language-model provider configured — answers `422 VALIDATION_ERROR` with `details.code` of `FEATURE_DISABLED`.
+saved-query discovery with no embedding provider, an AI request with no
+language-model provider configured — or a search-settings, search-index or retriever-agent
+request to a storage adapter without search indices — answers `422 VALIDATION_ERROR` with `details.code` of `FEATURE_DISABLED`.
 
 **`STORAGE_ERROR` carries an id, not a cause.** A driver message names the vendor and its
 physical objects, which must not reach a client. The adapter logs the original against a
@@ -289,16 +352,26 @@ its server-side record.
 Ordered, and failure at any step prevents serving:
 
 1. Connect storage, verify reachability, ensure the server-wide constraints and indexes
-   exist. Per-ontology storage is provisioned when an ontology is created, not at boot.
+   exist, and bring storage of an older storage version up to date
+   ([decisions.md](decisions.md#storage)). Per-ontology storage is provisioned when an
+   ontology is created; at boot only an upgrade reaches into it.
 2. Walk the registry and report any stored type key that the adapter now reserves.
 3. Initialize the embedding provider, if configured.
 4. Initialize the language-model and decision-model providers, if configured.
-5. If embeddings are enabled, reconcile vector index widths against the provider for
-   every registered ontology and warn on mismatch — see
-   [capabilities/search.md](capabilities/search.md).
-6. Start both MCP servers.
+5. If embeddings are enabled, compare the width of every registered ontology's
+   saved-query description index with the provider's and warn on mismatch — see
+   [capabilities/search.md](capabilities/search.md#vector-index-width-drift). Search
+   indices need no such check: a changed model starts new generations in step 6.
+6. Start the [search indexing](#search-indexing) worker, if the adapter stores search
+   indices. It runs in the background: it first brings every ontology's managed indices
+   in line with its schema, removes what interrupted generation removals left behind and
+   brings every ontology's generations in line with the current definitions, embedding
+   model and keyword language sets — a changed model or language set starts its new
+   generations here — then drains the queue. Its failures are logged
+   and never prevent serving; at shutdown it stops after the pass it is in.
+7. Start both MCP servers.
 
-The registry walks in steps 2 and 5 do nothing when no ontology exists — a zero-ontology
+The registry walks in steps 2, 5 and 6 do nothing when no ontology exists — a zero-ontology
 server boots clean. Note step 5 warns and does not repair — deliberately, for the reason
 given in [decisions.md](decisions.md#behaviour). Rebuild is where repair happens, one
 ontology at a time.
@@ -306,13 +379,14 @@ ontology at a time.
 ## Configuration
 
 Environment supplies all configuration. There is no configuration file and no
-per-ontology configuration.
+per-ontology deployment configuration.
 
 | Group | Purpose | Absent means |
 |---|---|---|
 | Storage | Which adapter, and how to reach the database | Server cannot start |
-| Embedding | Provider, model, endpoint, credential, vector width | Semantic search unavailable |
+| Embedding | Provider, model, endpoint, credential, vector width, request batching | Semantic search unavailable |
 | Documents | Chunk size and overlap | Defaults apply |
+| Search indexing | Attempts before a queued item counts as failed, worker batch size, polling interval | Defaults apply |
 | Language model | Provider, model, endpoint, credential | AI capabilities unavailable |
 | Decision model | Endpoint, model, credential | Entity identity comparison unavailable |
 | Public URL | Base address advertised in agent cards | Cards advertise a local address |

@@ -80,8 +80,11 @@ export function createAiModel(
   provider: string,
   modelName: string,
   baseUrl: string,
+  options: { maxRetries?: number; maxTokens?: number } = {},
 ): BaseChatModel {
   const base = baseUrl.replace(/\/+$/, "");
+  const retries = options.maxRetries === undefined ? {} : { maxRetries: options.maxRetries };
+  const tokenLimit = options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens };
   // `reasoning_effort` rides in `modelKwargs`, which is spread verbatim into
   // the request body. This is the only path that reaches every endpoint:
   // LangChain gates its typed `reasoning` field behind a model-name test
@@ -100,7 +103,9 @@ export function createAiModel(
     return new ChatOpenAI({
       model: modelName,
       apiKey: "ollama",
-      configuration: { baseURL: `${base}/v1` },
+      configuration: { baseURL: `${base}/v1`, ...retries },
+      ...retries,
+      ...tokenLimit,
       ...reasoning,
     });
   }
@@ -112,7 +117,9 @@ export function createAiModel(
     return new ChatOpenAI({
       model: modelName,
       apiKey,
-      configuration: { baseURL: `${base}/v1` },
+      configuration: { baseURL: `${base}/v1`, ...retries },
+      ...retries,
+      ...tokenLimit,
       ...reasoning,
     });
   }

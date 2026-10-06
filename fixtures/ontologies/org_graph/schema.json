@@ -1,0 +1,638 @@
+{
+  "formatVersion": "6.0",
+  "keywordLanguages": [
+    "english"
+  ],
+  "searchIndices": {
+    "custom": [],
+    "disabled": []
+  },
+  "entityTypes": [
+    {
+      "key": "person",
+      "displayName": "Person",
+      "description": "An employee of Corvane Engineering, a fictional mid-sized engineering company. One record per employee; the same real person should not appear twice.",
+      "nameProperty": "name",
+      "properties": [
+        {
+          "key": "birth_date",
+          "displayName": "Birth Date",
+          "description": "Date of birth of the employee.",
+          "dataType": "date",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "email",
+          "displayName": "Email",
+          "description": "Company email address; unique per employee.",
+          "dataType": "string",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "employee_number",
+          "displayName": "Employee Number",
+          "description": "Personnel number assigned by HR at hiring, in the form E-1234; unique per employee and never reused.",
+          "dataType": "string",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "hired_at",
+          "displayName": "Hired At",
+          "description": "Date and time (UTC) at which the employment started.",
+          "dataType": "datetime",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "level",
+          "displayName": "Level",
+          "description": "Career grade from 1 (entry) to 8 (executive board), as an integer.",
+          "dataType": "integer",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "name",
+          "displayName": "Name",
+          "description": "Full name of the employee as used in the company directory.",
+          "dataType": "string",
+          "required": true,
+          "defaultValue": null
+        },
+        {
+          "key": "salary",
+          "displayName": "Salary",
+          "description": "Gross annual salary in euros.",
+          "dataType": "float",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "status",
+          "displayName": "Status",
+          "description": "Employment status: \"active\", \"on_leave\" or \"left\".",
+          "dataType": "string",
+          "required": true,
+          "defaultValue": "active"
+        }
+      ]
+    },
+    {
+      "key": "policy_document",
+      "displayName": "Policy Document",
+      "description": "One published version of an internal company policy. A newer version supersedes the previous one; the current version is the one no other version supersedes.",
+      "nameProperty": "title",
+      "properties": [
+        {
+          "key": "body",
+          "displayName": "Body",
+          "description": "Full text of this policy version.",
+          "dataType": "document",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "published_on",
+          "displayName": "Published On",
+          "description": "Date on which this version was published.",
+          "dataType": "date",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "title",
+          "displayName": "Title",
+          "description": "Title of the policy, the same for all versions of one policy.",
+          "dataType": "string",
+          "required": true,
+          "defaultValue": null
+        },
+        {
+          "key": "version",
+          "displayName": "Version",
+          "description": "Version number of the policy, counting from 1.",
+          "dataType": "integer",
+          "required": false,
+          "defaultValue": null
+        }
+      ]
+    },
+    {
+      "key": "project",
+      "displayName": "Project",
+      "description": "An internal engineering or business project, owned by one team and staffed by people from any team.",
+      "nameProperty": "name",
+      "properties": [
+        {
+          "key": "budget",
+          "displayName": "Budget",
+          "description": "Total approved project budget in euros.",
+          "dataType": "float",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "code",
+          "displayName": "Code",
+          "description": "Short project code used in time tracking, in the form PRJ-ABC.",
+          "dataType": "string",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "name",
+          "displayName": "Name",
+          "description": "Name of the project.",
+          "dataType": "string",
+          "required": true,
+          "defaultValue": null
+        },
+        {
+          "key": "priority",
+          "displayName": "Priority",
+          "description": "Portfolio priority from 1 (lowest) to 5 (highest), as an integer.",
+          "dataType": "integer",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "started_on",
+          "displayName": "Started On",
+          "description": "Date on which the project started.",
+          "dataType": "date",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "status",
+          "displayName": "Status",
+          "description": "Project status: \"planned\", \"active\", \"on_hold\" or \"completed\".",
+          "dataType": "string",
+          "required": false,
+          "defaultValue": null
+        }
+      ]
+    },
+    {
+      "key": "skill",
+      "displayName": "Skill",
+      "description": "A professional skill or technology that people have and projects require.",
+      "nameProperty": "name",
+      "properties": [
+        {
+          "key": "category",
+          "displayName": "Category",
+          "description": "Skill area, for example engineering, software, automation, operations, finance or communication.",
+          "dataType": "string",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "level",
+          "displayName": "Level",
+          "description": "Seniority band at which the skill is typically expected: \"junior\", \"mid\" or \"senior\". A text value, unlike the integer level of a person.",
+          "dataType": "string",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "name",
+          "displayName": "Name",
+          "description": "Name of the skill.",
+          "dataType": "string",
+          "required": true,
+          "defaultValue": null
+        }
+      ]
+    },
+    {
+      "key": "team",
+      "displayName": "Team",
+      "description": "An organisational unit of Corvane Engineering with its own cost center. People are members of teams; teams own projects.",
+      "nameProperty": "name",
+      "properties": [
+        {
+          "key": "budget",
+          "displayName": "Budget",
+          "description": "Annual operating budget of the team in euros.",
+          "dataType": "float",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "cost_center",
+          "displayName": "Cost Center",
+          "description": "Accounting cost center code of the team, in the form CC-123.",
+          "dataType": "string",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "name",
+          "displayName": "Name",
+          "description": "Name of the team.",
+          "dataType": "string",
+          "required": true,
+          "defaultValue": null
+        }
+      ]
+    }
+  ],
+  "relationTypes": [
+    {
+      "key": "has_skill",
+      "displayName": "Has Skill",
+      "description": "The person has the skill.",
+      "fromEntityTypeKey": "person",
+      "toEntityTypeKey": "skill",
+      "properties": [
+        {
+          "key": "proficiency",
+          "displayName": "Proficiency",
+          "description": "Self-assessed proficiency from 1 (basic) to 5 (expert), as an integer.",
+          "dataType": "integer",
+          "required": false,
+          "defaultValue": null
+        }
+      ]
+    },
+    {
+      "key": "manages",
+      "displayName": "Manages",
+      "description": "The source person is the direct line manager of the target person.",
+      "fromEntityTypeKey": "person",
+      "toEntityTypeKey": "person",
+      "properties": [
+        {
+          "key": "since",
+          "displayName": "Since",
+          "description": "Date from which the reporting line exists.",
+          "dataType": "date",
+          "required": false,
+          "defaultValue": null
+        }
+      ]
+    },
+    {
+      "key": "member_of",
+      "displayName": "Member Of",
+      "description": "The person belongs to the team, with a role and a share of working time.",
+      "fromEntityTypeKey": "person",
+      "toEntityTypeKey": "team",
+      "properties": [
+        {
+          "key": "allocation",
+          "displayName": "Allocation",
+          "description": "Share of the person's working time spent in this team, from 0.0 to 1.0.",
+          "dataType": "float",
+          "required": false,
+          "defaultValue": null
+        },
+        {
+          "key": "role",
+          "displayName": "Role",
+          "description": "Job role of the person within the team.",
+          "dataType": "string",
+          "required": true,
+          "defaultValue": null
+        }
+      ]
+    },
+    {
+      "key": "owned_by",
+      "displayName": "Owned By",
+      "description": "The team responsible for the project.",
+      "fromEntityTypeKey": "project",
+      "toEntityTypeKey": "team",
+      "properties": []
+    },
+    {
+      "key": "requires_skill",
+      "displayName": "Requires Skill",
+      "description": "The project needs people with the skill.",
+      "fromEntityTypeKey": "project",
+      "toEntityTypeKey": "skill",
+      "properties": []
+    },
+    {
+      "key": "supersedes",
+      "displayName": "Supersedes",
+      "description": "The source policy version replaces the target policy version, which is the version immediately before it.",
+      "fromEntityTypeKey": "policy_document",
+      "toEntityTypeKey": "policy_document",
+      "properties": []
+    },
+    {
+      "key": "works_on",
+      "displayName": "Works On",
+      "description": "The person is staffed on the project.",
+      "fromEntityTypeKey": "person",
+      "toEntityTypeKey": "project",
+      "properties": [
+        {
+          "key": "hours_per_week",
+          "displayName": "Hours Per Week",
+          "description": "Planned working hours per week on the project.",
+          "dataType": "float",
+          "required": false,
+          "defaultValue": null
+        }
+      ]
+    }
+  ],
+  "lenses": [
+    {
+      "key": "all",
+      "name": "All",
+      "description": "Unscoped lens over the whole organisation graph: people, teams, projects, skills and policy documents with every relation.",
+      "indexInclusions": [],
+      "aiAgents": [
+        {
+          "key": "org_analyst",
+          "name": "Org Analyst",
+          "description": "Answers questions about people, teams, projects and skills of Corvane Engineering using saved queries and read-only OQL.",
+          "systemPrompt": "You answer questions about the organisation of Corvane Engineering: reporting lines, team membership, project staffing, skills and policy versions. Prefer a saved query: find it with search_saved_queries or list_saved_queries and run it with run_saved_query. When no saved query fits, read the schema with get_schema and write one read-only OQL query with execute_query, using type keys and labelled node patterns. Name the people, teams and projects your answer is based on.",
+          "tools": [
+            "list_saved_queries",
+            "run_saved_query",
+            "search_saved_queries",
+            "execute_query",
+            "get_schema"
+          ]
+        }
+      ],
+      "savedQueries": [
+        {
+          "key": "average-salary-per-team",
+          "name": "Average Salary Per Team",
+          "description": "Average annual salary and member count of every team. A person in two teams counts in both; people without a salary count as members but not in the average.",
+          "steps": [
+            {
+              "name": "main",
+              "type": "oql",
+              "oql": "MATCH (p:person)-[:member_of]->(t:team) RETURN t.name AS team, avg(p.salary) AS average_salary, count(p) AS members ORDER BY team",
+              "entityTypeKey": null,
+              "query": null,
+              "limit": null,
+              "bindings": null
+            }
+          ],
+          "parameters": []
+        },
+        {
+          "key": "direct-reports-per-manager",
+          "name": "Direct Reports Per Manager",
+          "description": "Counts the direct reports of every manager (people with at least one outgoing manages relation), largest span of control first.",
+          "steps": [
+            {
+              "name": "main",
+              "type": "oql",
+              "oql": "MATCH (m:person)-[:manages]->(r:person) RETURN m.name AS manager, count(r) AS direct_reports ORDER BY direct_reports DESC, manager",
+              "entityTypeKey": null,
+              "query": null,
+              "limit": null,
+              "bindings": null
+            }
+          ],
+          "parameters": []
+        },
+        {
+          "key": "persons-hired-after",
+          "name": "Persons Hired After",
+          "description": "People whose employment started after a given date, most recent hire first.",
+          "steps": [
+            {
+              "name": "main",
+              "type": "oql",
+              "oql": "MATCH (p:person) WHERE p.hired_at > $since RETURN p.name AS person, p.hired_at AS hired_at, p.level AS level ORDER BY hired_at DESC",
+              "entityTypeKey": null,
+              "query": null,
+              "limit": null,
+              "bindings": null
+            }
+          ],
+          "parameters": [
+            {
+              "name": "since",
+              "description": "Cut-off date (YYYY-MM-DD); people hired after it are returned.",
+              "dataType": "date"
+            }
+          ]
+        },
+        {
+          "key": "persons-with-projects",
+          "name": "Persons With Projects",
+          "description": "Every person with the projects they work on and their weekly hours, including people who work on no project (project and hours are then empty).",
+          "steps": [
+            {
+              "name": "main",
+              "type": "oql",
+              "oql": "MATCH (p:person) OPTIONAL MATCH (p)-[w:works_on]->(j:project) RETURN p.name AS person, p.employee_number AS employee_number, j.name AS project, w.hours_per_week AS hours ORDER BY person, employee_number, project",
+              "entityTypeKey": null,
+              "query": null,
+              "limit": null,
+              "bindings": null
+            }
+          ],
+          "parameters": []
+        },
+        {
+          "key": "projects-min-priority",
+          "name": "Projects With Minimum Priority",
+          "description": "Projects whose priority is at least the given value (1 lowest to 5 highest), highest priority first.",
+          "steps": [
+            {
+              "name": "main",
+              "type": "oql",
+              "oql": "MATCH (p:project) WHERE p.priority >= $min_priority RETURN p.name AS project, p.code AS code, p.priority AS priority, p.status AS status ORDER BY priority DESC, project",
+              "entityTypeKey": null,
+              "query": null,
+              "limit": null,
+              "bindings": null
+            }
+          ],
+          "parameters": [
+            {
+              "name": "min_priority",
+              "description": "Minimum priority, an integer from 1 to 5.",
+              "dataType": "integer"
+            }
+          ]
+        },
+        {
+          "key": "skill-holders-by-team",
+          "name": "Skill Holders By Team",
+          "description": "Finds skills matching a search text, then the people who have them, then groups those people by team. Three steps: search over skills, people with those skills, their teams.",
+          "steps": [
+            {
+              "name": "skills",
+              "type": "search",
+              "oql": null,
+              "entityTypeKey": "skill",
+              "query": "$q",
+              "limit": 3,
+              "bindings": null
+            },
+            {
+              "name": "holders",
+              "type": "oql",
+              "oql": "MATCH (p:person)-[h:has_skill]->(s:skill) WHERE s._id IN $skill_ids RETURN p._id AS person_id, p.name AS person, s.name AS skill, h.proficiency AS proficiency ORDER BY person",
+              "entityTypeKey": null,
+              "query": null,
+              "limit": null,
+              "bindings": {
+                "skill_ids": "{{skills._id}}"
+              }
+            },
+            {
+              "name": "teams",
+              "type": "oql",
+              "oql": "MATCH (p:person)-[:member_of]->(t:team) WHERE p._id IN $person_ids RETURN t.name AS team, count(p) AS holders, collect(p.name) AS people ORDER BY holders DESC, team",
+              "entityTypeKey": null,
+              "query": null,
+              "limit": null,
+              "bindings": {
+                "person_ids": "{{holders.person_id}}"
+              }
+            }
+          ],
+          "parameters": [
+            {
+              "name": "q",
+              "description": "Search text naming a skill, for example \"Rust\" or \"PLC\".",
+              "dataType": "string"
+            }
+          ]
+        },
+        {
+          "key": "skills-for-team-projects",
+          "name": "Skills For Team Projects",
+          "description": "Lists the skills required by the projects a given team owns, each skill with the projects that need it. Two hops: team <- owned_by - project - requires_skill -> skill.",
+          "steps": [
+            {
+              "name": "main",
+              "type": "oql",
+              "oql": "MATCH (t:team)<-[:owned_by]-(p:project)-[:requires_skill]->(s:skill) WHERE t.name = $team RETURN s.name AS skill, collect(p.name) AS projects ORDER BY skill",
+              "entityTypeKey": null,
+              "query": null,
+              "limit": null,
+              "bindings": null
+            }
+          ],
+          "parameters": [
+            {
+              "name": "team",
+              "description": "Exact team name, for example \"Hardware Engineering\".",
+              "dataType": "string"
+            }
+          ]
+        }
+      ],
+      "retrieverAgents": []
+    },
+    {
+      "key": "directory",
+      "name": "Directory",
+      "description": "Company directory: people and teams only. Relations are inferred (manages, member_of). Salary and birth date are hidden.",
+      "includes": {
+        "entityTypes": [
+          {
+            "key": "person",
+            "properties": [
+              "name",
+              "email",
+              "employee_number",
+              "hired_at",
+              "level",
+              "status"
+            ]
+          },
+          {
+            "key": "team",
+            "properties": null
+          }
+        ],
+        "relationTypes": []
+      },
+      "indexInclusions": [
+        "person~default",
+        "team~default"
+      ],
+      "aiAgents": [],
+      "savedQueries": [],
+      "retrieverAgents": []
+    },
+    {
+      "key": "management",
+      "name": "Management",
+      "description": "Reporting lines and team membership: people and teams with the manages and member_of relations; the allocation of a membership is hidden.",
+      "includes": {
+        "entityTypes": [
+          {
+            "key": "person",
+            "properties": null
+          },
+          {
+            "key": "team",
+            "properties": null
+          }
+        ],
+        "relationTypes": [
+          {
+            "key": "manages",
+            "properties": null
+          },
+          {
+            "key": "member_of",
+            "properties": [
+              "role"
+            ]
+          }
+        ]
+      },
+      "indexInclusions": [
+        "person~default",
+        "team~default"
+      ],
+      "aiAgents": [],
+      "savedQueries": [],
+      "retrieverAgents": []
+    },
+    {
+      "key": "staffing",
+      "name": "Staffing",
+      "description": "Staffing view: every entity type, but only the works_on, has_skill and requires_skill relations.",
+      "includes": {
+        "entityTypes": [],
+        "relationTypes": [
+          {
+            "key": "has_skill",
+            "properties": null
+          },
+          {
+            "key": "requires_skill",
+            "properties": null
+          },
+          {
+            "key": "works_on",
+            "properties": null
+          }
+        ]
+      },
+      "indexInclusions": [
+        "person~default",
+        "policy_document~body",
+        "policy_document~default",
+        "project~default",
+        "skill~default",
+        "team~default"
+      ],
+      "aiAgents": [],
+      "savedQueries": [],
+      "retrieverAgents": []
+    }
+  ]
+}

@@ -14,6 +14,9 @@
  *   statements uses it, reads included; there is deliberately no bare
  *   `withClient`.
  *
+ * Besides them, `listen` holds a dedicated connection for `LISTEN` — the
+ * search worker's wake-up — and issues no other statement.
+ *
  * Every door takes an optional `namespace` — the ontology binding. A
  * bound call runs inside a transaction whose first statement is
  * `SET LOCAL search_path TO <namespace>, public`, so every unqualified
@@ -77,14 +80,7 @@ let pool: pg.Pool | null = null;
  * Pool knobs stay at `pg` defaults.
  */
 export async function initPool(): Promise<void> {
-  const url = new URL(settings.DB_URI);
-  pool = new pg.Pool({
-    host: url.hostname,
-    port: url.port === "" ? 5432 : Number(url.port),
-    database: url.pathname.replace(/^\//, ""),
-    user: settings.DB_USER,
-    password: settings.DB_PASSWORD,
-  });
+  pool = new pg.Pool(connectionConfig());
   try {
     await pool.query("SELECT 1");
   } catch (exc) {
@@ -93,6 +89,61 @@ export async function initPool(): Promise<void> {
     await failed.end().catch(() => undefined);
     throw toStoreError(exc);
   }
+}
+
+/** The discrete connection settings parsed from the config surface. */
+function connectionConfig(): pg.ClientConfig {
+  const url = new URL(settings.DB_URI);
+  return {
+    host: url.hostname,
+    port: url.port === "" ? 5432 : Number(url.port),
+    database: url.pathname.replace(/^\//, ""),
+    user: settings.DB_USER,
+    password: settings.DB_PASSWORD,
+  };
+}
+
+/** A `LISTEN` subscription on a connection of its own. */
+export interface Listener {
+  /** True once closed or once the connection was lost. */
+  readonly closed: boolean;
+  close(): Promise<void>;
+}
+
+/**
+ * Door three: `LISTEN` on one channel over a dedicated connection — a
+ * pooled one would be handed back with the subscription on it. Each
+ * notification's payload goes to `onNotify`. A lost connection is logged
+ * and ends the subscription (`closed`); the caller subscribes again.
+ */
+export async function listen(channel: string, onNotify: (payload: string) => void): Promise<Listener> {
+  const client = new pg.Client(connectionConfig());
+  let closed = false;
+  client.on("notification", (message) => {
+    if (message.channel === channel) onNotify(message.payload ?? "");
+  });
+  client.on("error", (exc) => {
+    if (!closed) console.warn(`LISTEN ${channel} connection lost: ${exc.message}`);
+    closed = true;
+    void client.end().catch(() => undefined);
+  });
+  try {
+    await client.connect();
+    await client.query(`LISTEN ${quoteIdent(channel)}`);
+  } catch (exc) {
+    await client.end().catch(() => undefined);
+    throw translate(exc);
+  }
+  return {
+    get closed() {
+      return closed;
+    },
+    async close() {
+      if (closed) return;
+      closed = true;
+      await client.end().catch(() => undefined);
+    },
+  };
 }
 
 export async function closePool(): Promise<void> {
@@ -112,7 +163,7 @@ function getPool(): pg.Pool {
 /** The `SET LOCAL` that binds a transaction to one ontology's namespace.
  * `public` stays on the path for the pgvector type; the namespace comes
  * first, so every unqualified name resolves there. */
-function searchPathStatement(namespace: string): string {
+export function searchPathStatement(namespace: string): string {
   return `SET LOCAL search_path TO ${quoteIdent(namespace)}, public`;
 }
 
@@ -271,11 +322,14 @@ function translate(exc: unknown): OntoForgeError {
 }
 
 /** The insert-side FK constraints whose vanished parent is an entity. */
-const ENTITY_FKS = new Set(["relation_from_fk", "relation_to_fk", "document_chunk_entity_fk"]);
+const ENTITY_FKS = new Set(["relation_from_fk", "relation_to_fk"]);
 
 /** The relation-type endpoint FKs: NotFound on the insert side, Conflict
  * when their RESTRICT fires on an entity-type DELETE. */
 const ENDPOINT_FKS = new Set(["relation_type_source_fk", "relation_type_target_fk"]);
+
+/** The entity type's name-property FK (deferred). */
+const NAME_PROPERTY_FK = "entity_type_name_property_fk";
 
 /**
  * The named-constraint truth table: one lookup, keyed by the constraint
@@ -297,11 +351,20 @@ function translateConstraint(exc: pg.DatabaseError): OntoForgeError | null {
   const value = detailKeyValue(exc.detail) ?? "unknown";
   switch (exc.code) {
     case "23503": // insert side: the parent vanished between pre-check and INSERT
+      if (constraint === "retriever_agent_lens_fk") return new NotFoundError("Lens not found");
       if (ENTITY_FKS.has(constraint)) {
         return new NotFoundError(`Entity '${value}' not found`);
       }
       if (ENDPOINT_FKS.has(constraint)) {
         return new NotFoundError(`Entity type '${value}' not found`);
+      }
+      // Deferred, so it fires at commit — on either side, the name
+      // property went missing underneath the service's pre-check.
+      if (constraint === NAME_PROPERTY_FK) {
+        return new ConflictError(
+          `Property '${value}' is the name property of its entity type. ` +
+            "Choose another name property first.",
+        );
       }
       return null;
     case "23001": // delete side: RESTRICT fired on an entity-type DELETE
@@ -313,6 +376,8 @@ function translateConstraint(exc: pg.DatabaseError): OntoForgeError | null {
       return null;
     case "23505":
       switch (constraint) {
+        case "retriever_agent_key_unique":
+          return new ConflictError("Retriever agent key already exists in the target lens");
         case "ontology_key_unique":
           return new ConflictError(`Ontology with key '${value}' already exists`);
         case "ontology_display_name_unique":
@@ -332,6 +397,10 @@ function translateConstraint(exc: pg.DatabaseError): OntoForgeError | null {
           return new ConflictError("Entity type is already included in this lens");
         case "lens_includes_relation_unique":
           return new ConflictError("Relation type is already included in this lens");
+        case "lens_includes_search_index_unique":
+          return new ConflictError("Search index is already included in this lens");
+        case "search_index_key_unique":
+          return new ConflictError(`Search index with key '${value}' already exists`);
         default:
           return null;
       }

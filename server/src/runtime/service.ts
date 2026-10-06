@@ -21,14 +21,17 @@ import { CoercionError, assertNoNulCharacter, coerceValue, valueToText } from ".
 import { getEmbeddingProvider } from "../core/embedding.js";
 import { ConflictError, NotFoundError, ValidationError } from "../core/exceptions.js";
 import { SYSTEM_PROPERTIES, getReturnVariables, parseAndValidate } from "../core/oql/index.js";
-import type { RuntimeStore } from "../core/ports.js";
+import { keepsOwnSearch, type OwnSearchRuntimeStore } from "../core/ownSearch.js";
+import type { RuntimeStore, SearchWritePlan } from "../core/ports.js";
 import type { PropertyDef } from "../core/schemas.js";
+import { planSearchWrite, type SearchChange } from "../core/searchDependencies.js";
 import { chunkDocument } from "./search/document.js";
 import { cpIndexOf, cpLength, cpSlice, countOccurrences } from "./codePoints.js";
-import { buildTextRepr, buildKeywordSegments } from "./search/propertyText.js";
+import { buildTextRepr } from "./search/propertyText.js";
 import { isQueryPath } from "./queryPaths.js";
 import {
   loadSchema,
+  loadSearchContext,
   type EntityTypeDef,
   type LoadedSchema,
   type RelationTypeDef,
@@ -51,8 +54,55 @@ import { search } from "./search/entry.js";
 
 export { parseFilters, parseFilterConditions, docLengthKey } from "./readHelpers.js";
 export { search } from "./search/entry.js";
+export { searchByIndices, searchIndexCatalog } from "./search/indexSearch.js";
 
 type Row = Record<string, unknown>;
+
+// ---------------------------------------------------------------------------
+// Search work of a write
+// ---------------------------------------------------------------------------
+
+/**
+ * The search work a write causes, handed to the store with the write so
+ * both commit together; the search worker (`runtime/indexing/`) builds
+ * the entries from it later. Null when the adapter stores no search
+ * indices or no index reads what the write changes.
+ */
+async function searchPlan(store: RuntimeStore, change: SearchChange): Promise<SearchWritePlan | null> {
+  if (store.searchIndices === undefined) {
+    return null;
+  }
+  const context = await loadSearchContext(store.ontologyKey, store.searchIndices());
+  return planSearchWrite(context.dependencies, change);
+}
+
+/**
+ * The semantic vector of one entity on an adapter with its own search
+ * storage (`keepsOwnSearch`), composed from the FULL schema, never the
+ * lens. Null when no provider is configured or the call fails — the write
+ * then proceeds without one. An adapter that stores search indices
+ * embeds nothing inside a write: its worker builds the entries later.
+ */
+async function ownEntityEmbedding(
+  store: OwnSearchRuntimeStore,
+  entityTypeKey: string,
+  properties: Row,
+  fullProperties: Record<string, PropertyDef>,
+  entityId: string | null = null,
+): Promise<number[] | null> {
+  const provider = getEmbeddingProvider();
+  if (!provider) {
+    return null;
+  }
+  const docKeys = documentPropertyKeys(fullProperties);
+  store.validateVectorIndexedProperties(
+    entityTypeKey,
+    properties,
+    Object.keys(fullProperties).filter((k) => !docKeys.has(k)),
+    entityId,
+  );
+  return provider.embed(buildTextRepr(entityTypeKey, properties, fullProperties));
+}
 
 // ---------------------------------------------------------------------------
 // Property validation
@@ -181,6 +231,7 @@ function entityTypeDefToExport(etDef: EntityTypeDef): Row {
     key: etDef.key,
     displayName: etDef.displayName,
     description: etDef.description,
+    nameProperty: etDef.nameProperty,
     properties: Object.values(etDef.properties).map(propertyToExport),
   };
 }
@@ -321,19 +372,10 @@ export async function createEntity(
     }
   }
 
-  // Embed the composed entity text (FULL schema, never the lens). A failed
-  // embedding call yields null and the write proceeds without a vector.
-  const propertyText = buildTextRepr(entityTypeKey, coerced, fullEt?.properties ?? scopedEt.properties);
-  let embedding: number[] | null = null;
-  const provider = getEmbeddingProvider();
-  if (provider && fullEt !== undefined) {
-    store.validateVectorIndexedProperties(
-      entityTypeKey,
-      coerced,
-      Object.keys(fullEt.properties).filter((k) => !docKeys.has(k)),
-    );
-    embedding = await provider.embed(propertyText);
-  }
+  const embedding =
+    keepsOwnSearch(store) && fullEt !== undefined
+      ? await ownEntityEmbedding(store, entityTypeKey, coerced, fullEt.properties)
+      : null;
 
   const entity = await store.createEntity(
     entityTypeKey,
@@ -341,12 +383,13 @@ export async function createEntity(
     coerced,
     fullEt?.properties ?? {},
     embedding,
-    propertyText,
-    buildKeywordSegments(coerced, fullEt?.properties ?? scopedEt.properties),
+    await searchPlan(store, { kind: "entityCreated", entityType: entityTypeKey, entityId }),
   );
 
-  // Chunk + embed document properties.
-  await syncDocumentChunks(store, entityTypeKey, entityId, docValues);
+  // Own search storage: chunk + embed document properties.
+  if (keepsOwnSearch(store)) {
+    await syncDocumentChunks(store, entityTypeKey, entityId, docValues);
+  }
 
   return filterEntityProperties(entity, scopedEt);
 }
@@ -488,15 +531,13 @@ export async function updateEntity(
     }
   }
 
-  // Re-embed only when the update touches a string property — from the
-  // merged post-update state, not the submitted fragment. `hasEmbedding`
-  // distinguishes "no new vector" from "store null".
+  // Own search storage: re-embed only when the update touches a string
+  // property — from the merged post-update state, not the submitted
+  // fragment. `hasEmbeddingUpdate` distinguishes "no new vector" from
+  // "store null".
   let embedding: number[] | null = null;
   let hasEmbeddingUpdate = false;
-  let propertyText = "";
-  let keywordSegments: import("../core/ports.js").KeywordPropertySegment[] | undefined;
-  const provider = getEmbeddingProvider();
-  if (fullEt !== undefined) {
+  if (keepsOwnSearch(store) && fullEt !== undefined) {
     const hasStringChanges = Object.keys(coerced).some(
       (k) => k in fullEt.properties && fullEt.properties[k]!.dataType === "string",
     );
@@ -513,15 +554,7 @@ export async function updateEntity(
         for (const k of removeProps) {
           delete merged[k];
         }
-        if (provider) store.validateVectorIndexedProperties(
-          entityTypeKey,
-          merged,
-          Object.keys(fullEt.properties).filter((k) => !docKeys.has(k)),
-          entityId,
-        );
-        propertyText = buildTextRepr(entityTypeKey, merged, fullEt.properties);
-        keywordSegments = buildKeywordSegments(merged, fullEt.properties);
-        embedding = provider ? await provider.embed(propertyText) : null;
+        embedding = await ownEntityEmbedding(store, entityTypeKey, merged, fullEt.properties, entityId);
         hasEmbeddingUpdate = true;
       }
     }
@@ -535,23 +568,29 @@ export async function updateEntity(
     fullEt?.properties ?? {},
     embedding,
     hasEmbeddingUpdate,
-    propertyText,
-    keywordSegments,
+    await searchPlan(store, {
+      kind: "entityUpdated",
+      entityType: entityTypeKey,
+      entityId,
+      changedKeys: Object.keys(coerced),
+    }),
   );
   if (entity === null) {
     throw new NotFoundError(`Entity '${entityId}' not found`);
   }
 
-  // Re-chunk changed document properties only.
-  await syncDocumentChunks(store, entityTypeKey, entityId, docChanges);
+  // Own search storage: re-chunk changed document properties only.
+  if (keepsOwnSearch(store)) {
+    await syncDocumentChunks(store, entityTypeKey, entityId, docChanges);
+  }
 
   return filterEntityProperties(entity, scopedEt);
 }
 
 /**
  * Delete an entity, every relation attached to it in either direction —
- * including relations whose type the lens cannot see — and its document
- * chunks. The runtime cascade is silent: nothing warns, nothing refuses.
+ * including relations whose type the lens cannot see — and its search
+ * data. The runtime cascade is silent: nothing warns, nothing refuses.
  */
 export async function deleteEntity(
   lensKey: string,
@@ -564,7 +603,11 @@ export async function deleteEntity(
     throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
   }
 
-  const deleted = await store.deleteEntity(entityTypeKey, entityId);
+  const deleted = await store.deleteEntity(
+    entityTypeKey,
+    entityId,
+    await searchPlan(store, { kind: "entityDeleted", entityType: entityTypeKey, entityId }),
+  );
   if (!deleted) {
     throw new NotFoundError(`Entity '${entityId}' not found`);
   }
@@ -575,14 +618,16 @@ export async function deleteEntity(
 // ---------------------------------------------------------------------------
 
 /**
- * Replace the chunk nodes for the given document property values.
+ * Replace the chunk nodes for the given document property values — on an
+ * adapter with its own search storage (`keepsOwnSearch`); search indices
+ * chunk the current document themselves, in the worker.
  *
  * For each property: delete its existing chunks, then (for non-null values)
- * re-chunk, embed, and write new chunk nodes. No-op when no embedding
- * provider is configured.
+ * re-chunk and write new chunk nodes. Chunks are always written; they carry
+ * an embedding only when an embedding provider is configured.
  */
 export async function syncDocumentChunks(
-  store: RuntimeStore,
+  store: OwnSearchRuntimeStore,
   entityTypeKey: string,
   entityId: string,
   docValues: Row,
@@ -815,8 +860,9 @@ function applyReplaceRange(
  * `replaceAll`); `replace_range` overwrites the character range
  * `[offset, offset+length)` with `content` (insert with length 0, append
  * at `offset == totalLength`). The changed value is persisted whole and the
- * property's chunks are re-synced — unchanged chunk texts keep their
- * embeddings, so only chunks overlapping the edit are re-embedded.
+ * property's search data follows: with own search storage its chunks are
+ * re-synced — unchanged chunk texts keep their embeddings, so only chunks
+ * overlapping the edit are re-embedded; search indices queue its passages.
  */
 export async function editDocument(
   lensKey: string,
@@ -848,12 +894,22 @@ export async function editDocument(
     setProps,
     [],
     fullEt?.properties ?? {},
+    null,
+    false,
+    await searchPlan(store, {
+      kind: "entityUpdated",
+      entityType: entityTypeKey,
+      entityId,
+      changedKeys: [propertyKey],
+    }),
   );
   if (entity === null) {
     throw new NotFoundError(`Entity '${entityId}' not found`);
   }
 
-  await syncDocumentChunks(store, entityTypeKey, entityId, { [propertyKey]: newValue });
+  if (keepsOwnSearch(store)) {
+    await syncDocumentChunks(store, entityTypeKey, entityId, { [propertyKey]: newValue });
+  }
 
   const contextStart = Math.max(0, offset - EDIT_CONTEXT_CHARS);
   const contextEnd = Math.min(cpLength(newValue), offset + length + EDIT_CONTEXT_CHARS);
@@ -951,6 +1007,7 @@ export async function createRelation(
     toEntityId,
     coerced,
     fullRtForValidation.properties,
+    await searchPlan(store, { kind: "relationCreated", relationType: relationTypeKey, relationId }),
   );
 
   return filterRelationProperties(relation, scopedRt);
@@ -1067,6 +1124,12 @@ export async function updateRelation(
     setProps,
     removeProps,
     fullRt?.properties ?? scopedRt.properties,
+    await searchPlan(store, {
+      kind: "relationUpdated",
+      relationType: relationTypeKey,
+      relationId,
+      changedKeys: Object.keys(coerced),
+    }),
   );
   if (relation === null) {
     throw new NotFoundError(`Relation '${relationId}' not found`);
@@ -1086,7 +1149,11 @@ export async function deleteRelation(
     throw new NotFoundError(`Relation type '${relationTypeKey}' not found`);
   }
 
-  const deleted = await store.deleteRelation(relationTypeKey, relationId);
+  const deleted = await store.deleteRelation(
+    relationTypeKey,
+    relationId,
+    await searchPlan(store, { kind: "relationDeleted", relationType: relationTypeKey, relationId }),
+  );
   if (!deleted) {
     throw new NotFoundError(`Relation '${relationId}' not found`);
   }

@@ -18,6 +18,12 @@ vi.mock("../../src/core/ports.js", () => ({
   getRuntimeStore: async () => ({}),
 }));
 
+// A store with search indices syncs them after an import; the sync itself
+// is the pipeline's business, covered by the PostgreSQL tier.
+vi.mock("../../src/runtime/indexing/managed.js", () => ({
+  syncManagedSearchIndices: vi.fn(async () => undefined),
+}));
+
 const FULL_SCHEMA = {
   entityTypes: [
     {
@@ -25,6 +31,7 @@ const FULL_SCHEMA = {
       key: "person",
       displayName: "Person",
       description: null,
+      nameProperty: "full_name",
       properties: [
         {
           propertyId: "p-1",
@@ -41,7 +48,17 @@ const FULL_SCHEMA = {
       key: "company",
       displayName: "Company",
       description: null,
-      properties: [],
+      nameProperty: "name",
+      properties: [
+        {
+          propertyId: "p-2",
+          key: "name",
+          displayName: "Name",
+          dataType: "string",
+          required: false,
+          defaultValue: null,
+        },
+      ],
     },
   ],
   relationTypes: [
@@ -96,18 +113,56 @@ afterEach(() => {
 // Export
 // ---------------------------------------------------------------------------
 
+/** The mock store with a search-index store whose settings it records. */
+/** A custom index as stored: every default applied. */
+const PEOPLE_INDEX = {
+  key: "people",
+  name: "People",
+  description: "People by name",
+  entityType: "person",
+  fields: ["name"],
+  header: null,
+  relations: [],
+  semantic: { enabled: true, template: null },
+  keyword: { enabled: true },
+};
+
+function withSearchIndices() {
+  const settings = { keywordLanguages: ["german", "english"], disabledDefaults: { "x~default": true } };
+  const indices = {
+    ontologyKey: "onto",
+    getSearchSettings: vi.fn(async () => settings),
+    setSearchSettings: vi.fn(async (next: unknown) => next),
+    listIndices: vi.fn(async () => [
+      { key: "x~default", kind: "default", definition: { key: "x~default" } },
+      { key: "people", kind: "custom", definition: PEOPLE_INDEX },
+    ]),
+    getIndex: vi.fn(async () => null),
+    createIndex: vi.fn(async () => ({})),
+    // What the schema sync included on its own, by lens id.
+    listLensIndexInclusions: vi.fn(async (_lensId: string): Promise<string[]> => []),
+    includeIndexInLens: vi.fn(async () => true),
+    excludeIndexFromLens: vi.fn(async () => true),
+    listRetrieverAgents: vi.fn(async (_lensId: string): Promise<unknown[]> => []),
+    saveRetrieverAgent: vi.fn(async () => [{}, true]),
+  };
+  (holder.store as unknown as { searchIndices: () => unknown }).searchIndices = () => indices;
+  return indices;
+}
+
 describe("export", () => {
   it("exports the whole design in the transfer format", async () => {
     holder.store.getFullSchema.mockResolvedValue(FULL_SCHEMA);
     const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.formatVersion).toBe("5.0");
+    expect(body.formatVersion).toBe("6.0");
     expect(body.entityTypes).toHaveLength(2);
     expect(body.relationTypes).toHaveLength(1);
     expect(body.lenses).toHaveLength(1);
     const person = body.entityTypes[0];
     expect(person.key).toBe("person");
+    expect(person.nameProperty).toBe("full_name");
     expect(person.properties).toHaveLength(1);
     expect(person.properties[0].key).toBe("full_name");
     const rt = body.relationTypes[0];
@@ -132,13 +187,32 @@ describe("export", () => {
     });
     const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
     expect(res.statusCode).toBe(200);
+    // An adapter without search indices exports the set a new ontology
+    // starts with, and no search-index part.
     expect(res.json()).toEqual({
-      formatVersion: "5.0",
-      textSearchLanguage: "english",
+      formatVersion: "6.0",
+      keywordLanguages: ["german", "english"],
       entityTypes: [],
       relationTypes: [],
       lenses: [],
     });
+  });
+
+  it("exports the ontology's keyword language set", async () => {
+    withSearchIndices();
+    holder.store.getFullSchema.mockResolvedValue({ entityTypes: [], relationTypes: [], lenses: [] });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().keywordLanguages).toEqual(["german", "english"]);
+    expect(res.json()).not.toHaveProperty("textSearchLanguage");
+  });
+
+  it("exports the custom index definitions and the switched-off managed indices", async () => {
+    withSearchIndices();
+    holder.store.getFullSchema.mockResolvedValue({ entityTypes: [], relationTypes: [], lenses: [] });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().searchIndices).toEqual({ custom: [PEOPLE_INDEX], disabled: ["x~default"] });
   });
 
   it("omits the includes key entirely for an unscoped lens", async () => {
@@ -252,11 +326,12 @@ const LENS_DATA = {
 
 function importPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    formatVersion: "2.0",
+    formatVersion: "6.0",
     entityTypes: [
       {
         key: "person",
         displayName: "Person",
+        nameProperty: "full_name",
         properties: [
           { key: "full_name", displayName: "Full Name", dataType: "string", required: true },
         ],
@@ -285,8 +360,25 @@ function importPayload(overrides: Record<string, unknown> = {}): Record<string, 
   };
 }
 
+/** A 6.0 entity type whose name property is a `name` string property. */
+function entityType(
+  key: string,
+  displayName: string,
+  properties: Record<string, unknown>[] = [],
+): Record<string, unknown> {
+  return {
+    key,
+    displayName,
+    nameProperty: "name",
+    properties: [
+      { key: "name", displayName: "Name", dataType: "string", required: false },
+      ...properties,
+    ],
+  };
+}
+
 async function postImport(payload: Record<string, unknown>) {
-  return app.inject({ method: "POST", url: "/api/ontologies/onto/model/import", payload: { textSearchLanguage: "english", ...payload } });
+  return app.inject({ method: "POST", url: "/api/ontologies/onto/model/import", payload: { keywordLanguages: ["german", "english"], ...payload } });
 }
 
 describe("import", () => {
@@ -299,7 +391,14 @@ describe("import", () => {
     expect(body.lenses).toHaveLength(1);
     expect(body.lenses[0].key).toBe("imported");
     expect(holder.store.createEntityType).toHaveBeenCalledTimes(1);
-    expect(holder.store.createProperty).toHaveBeenCalledTimes(1);
+    // The name property is created with its type, not separately.
+    expect(holder.store.createEntityType.mock.calls[0]![4]).toMatchObject({
+      key: "full_name",
+      displayName: "Full Name",
+      dataType: "string",
+      required: true,
+    });
+    expect(holder.store.createProperty).not.toHaveBeenCalled();
     expect(holder.store.createRelationType).toHaveBeenCalledTimes(1);
     expect(holder.store.createLens).toHaveBeenCalledTimes(1);
     expect(holder.store.addIncludesType).toHaveBeenCalledTimes(2);
@@ -317,19 +416,23 @@ describe("import", () => {
     expect(etId).toMatch(/^[0-9a-f-]{36}$/);
   });
 
-  it("processes old, unknown and missing format versions identically", async () => {
-    for (const version of ["2.0", "unknown-version", undefined]) {
+  it("reads a missing format version as the current one", async () => {
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    holder.store.addIncludesType.mockResolvedValue({ key: "person", properties: null });
+    const payload = importPayload();
+    delete payload.formatVersion;
+    const res = await postImport(payload);
+    expect(res.statusCode).toBe(201);
+    expect(holder.store.createEntityType.mock.calls[0]![4]).toMatchObject({ key: "full_name" });
+  });
+
+  it("rejects a format version other than 6.0 and 5.0 and writes nothing", async () => {
+    for (const version of ["2.0", "4.0", "unknown-version"]) {
       holder.store = createMockModelingStore();
-      holder.store.createLens.mockResolvedValue(LENS_DATA);
-      holder.store.addIncludesType.mockResolvedValue({ key: "person", properties: null });
-      const payload = importPayload();
-      if (version === undefined) {
-        delete payload.formatVersion;
-      } else {
-        payload.formatVersion = version;
-      }
-      const res = await postImport(payload);
-      expect(res.statusCode, `version ${String(version)}`).toBe(201);
+      const res = await postImport(importPayload({ formatVersion: version }));
+      expect(res.statusCode, `version ${version}`).toBe(422);
+      expect(res.json().error.details.fields.formatVersion).toContain("6.0, 5.0");
+      expect(holder.store.createEntityType).not.toHaveBeenCalled();
     }
   });
 
@@ -351,7 +454,9 @@ describe("import", () => {
         {
           key: "person",
           displayName: "Person",
+          nameProperty: "name",
           properties: [
+            { key: "name", displayName: "Name", dataType: "string", required: false },
             { key: "age", displayName: "Age", dataType: "invalid_type", required: false },
           ],
         },
@@ -362,6 +467,467 @@ describe("import", () => {
     expect(res.statusCode).toBe(201);
     expect(holder.store.createProperty).toHaveBeenCalledTimes(1);
     expect(holder.store.createProperty.mock.calls[0]![6]).toBe("invalid_type");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Import — name properties
+// ---------------------------------------------------------------------------
+
+describe("import keyword languages", () => {
+  const empty = { entityTypes: [], relationTypes: [], lenses: [] };
+
+  it("6.0: the payload's set becomes the target's, in canonical order", async () => {
+    const indices = withSearchIndices();
+    const res = await postImport({ ...empty, keywordLanguages: ["english", "german"] });
+    expect(res.statusCode, res.body).toBe(201);
+    expect(indices.setSearchSettings).toHaveBeenCalledWith({
+      keywordLanguages: ["german", "english"],
+      disabledDefaults: { "x~default": true },
+    });
+  });
+
+  it("5.0: the one text-search language becomes the whole set", async () => {
+    const indices = withSearchIndices();
+    const res = await postImport({ ...empty, formatVersion: "5.0", textSearchLanguage: "german" });
+    expect(res.statusCode, res.body).toBe(201);
+    expect(indices.setSearchSettings.mock.calls[0]![0]).toMatchObject({ keywordLanguages: ["german"] });
+  });
+
+  it("each version requires its own field; an invalid set is rejected; nothing is written", async () => {
+    const indices = withSearchIndices();
+    const missing6 = await app.inject({
+      method: "POST",
+      url: "/api/ontologies/onto/model/import",
+      payload: { ...empty, textSearchLanguage: "english", entityTypes: [entityType("paper", "Paper")] },
+    });
+    expect(missing6.statusCode).toBe(422);
+    expect(missing6.json().error.details.fields).toEqual({ keywordLanguages: "Required" });
+    const missing5 = await postImport({ ...empty, formatVersion: "5.0" });
+    expect(missing5.statusCode).toBe(422);
+    expect(missing5.json().error.details.fields).toEqual({ textSearchLanguage: "Required" });
+    for (const keywordLanguages of [[], ["french"], ["german", "german"]]) {
+      const res = await postImport({ ...empty, keywordLanguages });
+      expect(res.statusCode, JSON.stringify(keywordLanguages)).toBe(422);
+    }
+    expect(holder.store.createEntityType).not.toHaveBeenCalled();
+    expect(indices.setSearchSettings).not.toHaveBeenCalled();
+  });
+
+  it("an adapter without search indices checks the set and keeps nothing of it", async () => {
+    const res = await postImport({ ...empty, keywordLanguages: ["english"] });
+    expect(res.statusCode, res.body).toBe(201);
+  });
+});
+
+describe("import search indices", () => {
+  const person = entityType("person", "Person", [{ key: "bio", displayName: "Bio", dataType: "document", required: false }]);
+  const payload = (searchIndices: unknown, formatVersion = "6.0") => ({
+    formatVersion,
+    entityTypes: [person],
+    relationTypes: [],
+    lenses: [],
+    searchIndices,
+    ...(formatVersion === "5.0" ? { textSearchLanguage: "german" } : {}),
+  });
+
+  it("6.0: creates the custom definitions and adds the switches to the target's", async () => {
+    const indices = withSearchIndices();
+    const res = await postImport(payload({ custom: [PEOPLE_INDEX], disabled: ["person~bio"] }));
+    expect(res.statusCode, res.body).toBe(201);
+    expect(indices.createIndex).toHaveBeenCalledWith(expect.any(String), "custom", PEOPLE_INDEX);
+    expect(indices.setSearchSettings).toHaveBeenLastCalledWith({
+      keywordLanguages: ["german", "english"],
+      disabledDefaults: { "person~bio": true, "x~default": true },
+    });
+  });
+
+  it("validates each definition against the payload's schema and each switch; writes nothing", async () => {
+    const indices = withSearchIndices();
+    const res = await postImport(
+      payload({ custom: [{ ...PEOPLE_INDEX, fields: ["nope"] }], disabled: ["person~default", "x~gone"] }),
+    );
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details.errors).toEqual([
+      "Import error: search index 'people' is invalid at fields.0: Property 'nope' does not exist on entity type 'person'",
+      "Import error: switched-off search index 'x~gone' is not a managed index of the payload",
+    ]);
+    expect(holder.store.createEntityType).not.toHaveBeenCalled();
+    expect(indices.createIndex).not.toHaveBeenCalled();
+  });
+
+  it("a custom key the target holds, or held twice by the payload, conflicts", async () => {
+    const indices = withSearchIndices();
+    indices.getIndex.mockResolvedValueOnce({ key: "people" } as never);
+    const res = await postImport(payload({ custom: [PEOPLE_INDEX, { ...PEOPLE_INDEX, key: "staff" }, { ...PEOPLE_INDEX, key: "staff" }] }));
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.message).toBe(
+      "Search index with key 'people' already exists; Search index with key 'staff' already exists",
+    );
+    expect(holder.store.createEntityType).not.toHaveBeenCalled();
+  });
+
+  it("5.0 carries no indices; an adapter without search indices validates and keeps nothing", async () => {
+    const indices = withSearchIndices();
+    const legacy = await postImport(payload({ custom: [{ ...PEOPLE_INDEX, fields: ["nope"] }] }, "5.0"));
+    expect(legacy.statusCode, legacy.body).toBe(201);
+    expect(indices.createIndex).not.toHaveBeenCalled();
+
+    delete (holder.store as unknown as { searchIndices?: unknown }).searchIndices;
+    holder.store.createEntityType.mockClear();
+    const kept = await postImport(payload({ custom: [PEOPLE_INDEX], disabled: [] }));
+    expect(kept.statusCode, kept.body).toBe(201);
+    const invalid = await postImport(payload({ custom: [{ ...PEOPLE_INDEX, entityType: "ghost" }] }));
+    expect(invalid.statusCode).toBe(422);
+  });
+});
+
+describe("lens index inclusions", () => {
+  const person = entityType("person", "Person", [{ key: "bio", displayName: "Bio", dataType: "document", required: false }]);
+  const company = entityType("company", "Company");
+  const lens = (indexInclusions?: string[]) => ({
+    key: "people",
+    name: "People",
+    includes: { entityTypes: [{ key: "company" }], relationTypes: [] },
+    ...(indexInclusions === undefined ? {} : { indexInclusions }),
+  });
+  const payload = (lenses: unknown[], formatVersion = "6.0") => ({
+    formatVersion,
+    entityTypes: [person, company],
+    relationTypes: [],
+    lenses,
+    searchIndices: { custom: [PEOPLE_INDEX], disabled: [] },
+    ...(formatVersion === "5.0" ? { textSearchLanguage: "german" } : {}),
+  });
+
+  it("export lists each lens's index inclusions", async () => {
+    const indices = withSearchIndices();
+    indices.listLensIndexInclusions.mockImplementation(async (lensId: string) =>
+      lensId === "lens-1" ? ["people", "person~default"] : [],
+    );
+    holder.store.getFullSchema.mockResolvedValue({
+      entityTypes: [],
+      relationTypes: [],
+      lenses: [{ lensId: "lens-1", key: "everything", name: "Everything", entityInclusions: [], relationInclusions: [] }],
+    });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
+    expect(res.json().lenses[0].indexInclusions).toEqual(["people", "person~default"]);
+    // An adapter without search indices omits the list, so an import into
+    // one that has them applies the migration rule.
+    delete (holder.store as unknown as { searchIndices?: unknown }).searchIndices;
+    const plain = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
+    expect(plain.json().lenses[0]).not.toHaveProperty("indexInclusions");
+  });
+
+  it("6.0: writes each lens's list exactly, once the indices exist — the root rule is not checked", async () => {
+    const indices = withSearchIndices();
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    // The schema sync included the managed indices of the exposed types.
+    indices.listLensIndexInclusions.mockResolvedValue(["company~default"]);
+    // `people` is rooted on person, which the lens does not include: kept.
+    const res = await postImport(payload([lens(["people", "person~bio"])]));
+    expect(res.statusCode, res.body).toBe(201);
+    const lensId = holder.store.createLens.mock.calls[0]![0] as string;
+    expect(indices.excludeIndexFromLens).toHaveBeenCalledWith(lensId, "company~default");
+    expect(indices.includeIndexInLens.mock.calls).toEqual([
+      [lensId, "people"],
+      [lensId, "person~bio"],
+    ]);
+    expect(indices.includeIndexInLens.mock.invocationCallOrder[0]).toBeGreaterThan(
+      indices.createIndex.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("6.0 without the field, and 5.0, keep what the schema sync included", async () => {
+    const indices = withSearchIndices();
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    expect((await postImport(payload([lens()]))).statusCode).toBe(201);
+    const legacy = await postImport(payload([lens(["nope"])], "5.0"));
+    expect(legacy.statusCode, legacy.body).toBe(201);
+    expect(indices.listLensIndexInclusions).not.toHaveBeenCalled();
+    expect(indices.includeIndexInLens).not.toHaveBeenCalled();
+    expect(indices.excludeIndexFromLens).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unknown or repeated index key; writes nothing", async () => {
+    const indices = withSearchIndices();
+    const res = await postImport(payload([lens(["people", "person~default", "company~bio", "people"])]));
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details.errors).toEqual([
+      "Import error: lens 'people' includes unknown search index 'company~bio'",
+      "Import error: lens 'people' includes search index 'people' twice",
+    ]);
+    expect(holder.store.createEntityType).not.toHaveBeenCalled();
+    expect(indices.includeIndexInLens).not.toHaveBeenCalled();
+  });
+});
+
+describe("retriever agents", () => {
+  const person = entityType("person", "Person", [{ key: "bio", displayName: "Bio", dataType: "document", required: false }]);
+  const CONFIG = {
+    indices: [{ index: "person~default" }],
+    filters: [],
+    answerFields: { person: ["name"] },
+    threshold: 0.35,
+    answerFieldCharacters: 800,
+  };
+  const agent = (configVersion: number, config: unknown, key = "finder") =>
+    ({ key, name: "Finder", description: null, configVersion, config });
+  const LEGACY = {
+    buckets: [
+      {
+        entityTypeKey: "person",
+        searchFields: ["name", "bio"],
+        answerFields: ["name"],
+        conditions: [{ id: "c", mode: "soft", path: [{ relationTypeKey: "lives_in", direction: "outgoing" }], targetField: "name", textFields: ["name"] }],
+      },
+    ],
+  };
+  const payload = (lens: Record<string, unknown>, formatVersion = "6.0") => ({
+    formatVersion,
+    entityTypes: [person],
+    relationTypes: [],
+    lenses: [{ key: "all", name: "All", ...lens }],
+    ...(formatVersion === "5.0" ? { textSearchLanguage: "german" } : { keywordLanguages: ["german"] }),
+  });
+
+  it("export carries each lens's agents in their portable form; an adapter without search indices none", async () => {
+    const indices = withSearchIndices();
+    const now = new Date("2026-10-06T00:00:00Z");
+    indices.listRetrieverAgents.mockResolvedValue([
+      { retrieverAgentId: "id", ...agent(2, CONFIG), warnings: ["note"], createdAt: now, updatedAt: now },
+    ]);
+    holder.store.getFullSchema.mockResolvedValue({
+      entityTypes: [],
+      relationTypes: [],
+      lenses: [{ lensId: "lens-1", key: "all", name: "All", entityInclusions: [], relationInclusions: [] }],
+    });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
+    expect(res.json().lenses[0].retrieverAgents).toEqual([agent(2, CONFIG)]);
+    delete (holder.store as unknown as { searchIndices?: unknown }).searchIndices;
+    const plain = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
+    expect(plain.json().lenses[0]).not.toHaveProperty("retrieverAgents");
+  });
+
+  it("6.0: stores each agent create-only after the indices; references are not checked", async () => {
+    const indices = withSearchIndices();
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    const unknownIndex = { ...CONFIG, indices: [{ index: "ghost" }] };
+    const res = await postImport(payload({ retrieverAgents: [agent(2, CONFIG), agent(2, unknownIndex, "ghostly")] }));
+    expect(res.statusCode, res.body).toBe(201);
+    const lensId = holder.store.createLens.mock.calls[0]![0] as string;
+    expect(indices.saveRetrieverAgent.mock.calls.map((call) => [call[0], (call[1] as { key: string }).key, call[2]])).toEqual([
+      [lensId, "finder", true],
+      [lensId, "ghostly", true],
+    ]);
+    expect((indices.saveRetrieverAgent.mock.calls[0]![1] as { configVersion: number }).configVersion).toBe(2);
+  });
+
+  it("5.0: converts each retriever, keeping the conversion's warnings", async () => {
+    const indices = withSearchIndices();
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    const res = await postImport(payload({ retrievers: [agent(1, LEGACY)] }, "5.0"));
+    expect(res.statusCode, res.body).toBe(201);
+    const saved = indices.saveRetrieverAgent.mock.calls[0]![1] as Record<string, unknown>;
+    expect(saved.configVersion).toBe(2);
+    expect(saved.config).toMatchObject({ indices: [{ index: "person~default" }, { index: "person~bio" }] });
+    expect(saved.warnings).toEqual([
+      "Soft condition 'c' of person was dropped: it needs a custom index with relation group lives_in (outgoing).",
+    ]);
+  });
+
+  it("5.0: renames a key with '-' under the key rules, unique in the lens, with a warning", async () => {
+    const indices = withSearchIndices();
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    const res = await postImport(
+      payload({ retrievers: [agent(1, LEGACY, "fair-search"), agent(1, LEGACY, "fair_search")] }, "5.0"),
+    );
+    expect(res.statusCode, res.body).toBe(201);
+    const saved = indices.saveRetrieverAgent.mock.calls.map((call) => call[1] as { key: string; warnings: string[] });
+    expect(saved.map((agent) => agent.key)).toEqual(["fair_search_2", "fair_search"]);
+    expect(saved[0]!.warnings.at(-1)).toBe("Key renamed from 'fair-search' to 'fair_search_2'.");
+    expect(saved[1]!.warnings).toHaveLength(1);
+  });
+
+  it("each version reads only its own field", async () => {
+    const indices = withSearchIndices();
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    expect((await postImport(payload({ retrievers: [agent(1, LEGACY)] }))).statusCode).toBe(201);
+    expect((await postImport(payload({ retrieverAgents: [agent(2, CONFIG)] }, "5.0"))).statusCode).toBe(201);
+    expect(indices.saveRetrieverAgent).not.toHaveBeenCalled();
+  });
+
+  it("rejects a wrong version, a bad shape and a bad key; writes nothing", async () => {
+    const indices = withSearchIndices();
+    const res = await postImport(
+      payload({
+        retrieverAgents: [agent(1, LEGACY), agent(2, { indices: [] }, "empty"), agent(2, CONFIG, "Bad-Key")],
+      }),
+    );
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details.errors).toEqual([
+      "Import error: retriever agent 'finder' has no valid configuration of version 2",
+      "Import error: retriever agent 'empty' has no valid configuration of version 2",
+      "Import error: invalid retriever agent key 'Bad-Key'. Must match pattern: ^[a-z][a-z0-9_]*$",
+    ]);
+    expect(holder.store.createEntityType).not.toHaveBeenCalled();
+    expect(indices.saveRetrieverAgent).not.toHaveBeenCalled();
+  });
+
+  it("an adapter without search indices checks the agents and keeps none", async () => {
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    const res = await postImport(payload({ retrieverAgents: [agent(2, CONFIG)] }));
+    expect(res.statusCode, res.body).toBe(201);
+    const invalid = await postImport(payload({ retrieverAgents: [agent(2, { indices: [] })] }));
+    expect(invalid.statusCode).toBe(422);
+  });
+});
+
+describe("version-specific fields", () => {
+  const person = entityType("person", "Person");
+  const malformed = {
+    searchIndices: { custom: [{ key: 5 }], disabled: "all" },
+    lenses: [{ key: "all", name: "All", indexInclusions: "people", retrieverAgents: [{ key: "x" }], retrievers: [{ key: "y" }] }],
+  };
+
+  it("5.0 ignores the 6.0 fields unchecked, however malformed", async () => {
+    const indices = withSearchIndices();
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    const res = await postImport({
+      ...malformed,
+      lenses: [{ ...malformed.lenses[0], retrievers: [] }],
+      formatVersion: "5.0",
+      textSearchLanguage: "german",
+      keywordLanguages: ["french"],
+      entityTypes: [person],
+      relationTypes: [],
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    expect(indices.setSearchSettings.mock.calls[0]![0]).toMatchObject({ keywordLanguages: ["german"] });
+    expect(indices.createIndex).not.toHaveBeenCalled();
+    expect(indices.includeIndexInLens).not.toHaveBeenCalled();
+    expect(indices.saveRetrieverAgent).not.toHaveBeenCalled();
+  });
+
+  it("6.0 ignores the 5.0 fields unchecked", async () => {
+    withSearchIndices();
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    const res = await postImport({
+      textSearchLanguage: "french",
+      entityTypes: [person],
+      relationTypes: [],
+      lenses: [{ key: "all", name: "All", retrievers: "nope" }],
+    });
+    expect(res.statusCode, res.body).toBe(201);
+  });
+
+  it("each version checks its own fields like the request shape, naming every path; writes nothing", async () => {
+    const indices = withSearchIndices();
+    const current = await postImport({ ...malformed, entityTypes: [person], relationTypes: [] });
+    expect(current.statusCode).toBe(422);
+    expect(current.json().error.message).toBe("Request validation failed");
+    const paths = (current.json().error.details.errors as { path: string }[]).map((issue) => issue.path);
+    expect(paths).toEqual(
+      expect.arrayContaining(["/searchIndices/custom/0/key", "/searchIndices/disabled", "/lenses/0/indexInclusions", "/lenses/0/retrieverAgents/0/name"]),
+    );
+    expect(paths.some((path) => path.startsWith("/lenses/0/retrievers"))).toBe(false);
+
+    const legacy = await postImport({
+      formatVersion: "5.0",
+      textSearchLanguage: "french",
+      entityTypes: [person],
+      relationTypes: [],
+      lenses: [{ key: "all", name: "All", retrievers: [{ key: "y" }] }],
+    });
+    expect(legacy.statusCode).toBe(422);
+    const legacyPaths = (legacy.json().error.details.errors as { path: string }[]).map((issue) => issue.path);
+    expect(legacyPaths).toEqual(expect.arrayContaining(["/textSearchLanguage", "/lenses/0/retrievers/0/name"]));
+    expect(holder.store.createEntityType).not.toHaveBeenCalled();
+    expect(indices.setSearchSettings).not.toHaveBeenCalled();
+  });
+});
+
+describe("import name properties", () => {
+  it("6.0: rejects an entity type without a name property, or one that is not a string property of it", async () => {
+    const res = await postImport({
+      entityTypes: [
+        {
+          key: "person",
+          displayName: "Person",
+          properties: [{ key: "name", displayName: "Name", dataType: "string", required: false }],
+        },
+        {
+          key: "company",
+          displayName: "Company",
+          nameProperty: "founded",
+          properties: [{ key: "founded", displayName: "Founded", dataType: "date", required: false }],
+        },
+        { key: "place", displayName: "Place", nameProperty: "title", properties: [] },
+      ],
+      relationTypes: [],
+      lenses: [],
+    });
+    expect(res.statusCode).toBe(422);
+    const errors = res.json().error.details.errors as string[];
+    expect(errors).toEqual([
+      "Import error: entity type 'person' has no nameProperty",
+      "Import error: name property 'founded' of entity type 'company' is not a string property of that type",
+      "Import error: name property 'title' of entity type 'place' is not a string property of that type",
+    ]);
+    expect(holder.store.createEntityType).not.toHaveBeenCalled();
+  });
+
+  it("5.0: derives the name property by the fallback chain, creating one where a type has no string property", async () => {
+    const res = await postImport({
+      formatVersion: "5.0",
+      textSearchLanguage: "english",
+      entityTypes: [
+        {
+          key: "article",
+          displayName: "Article",
+          properties: [
+            { key: "summary", displayName: "Summary", dataType: "string", required: false },
+            { key: "label", displayName: "Label", dataType: "string", required: false },
+            { key: "title", displayName: "Title", dataType: "string", required: true },
+          ],
+        },
+        {
+          key: "note",
+          displayName: "Note",
+          properties: [
+            { key: "body", displayName: "Body", dataType: "document", required: false },
+            { key: "summary", displayName: "Summary", dataType: "string", required: false },
+          ],
+        },
+        {
+          key: "reading",
+          displayName: "Reading",
+          properties: [
+            { key: "name", displayName: "Name", dataType: "integer", required: false },
+          ],
+        },
+      ],
+      relationTypes: [],
+      lenses: [],
+    });
+    expect(res.statusCode).toBe(201);
+    const created = holder.store.createEntityType.mock.calls.map((call) => [call[1], call[4]]);
+    expect(created).toEqual([
+      ["article", expect.objectContaining({ key: "title", required: true })],
+      ["note", expect.objectContaining({ key: "summary" })],
+      [
+        "reading",
+        expect.objectContaining({
+          key: "name_2",
+          displayName: "name_2",
+          dataType: "string",
+          required: false,
+        }),
+      ],
+    ]);
+    // Every other payload property is created as before.
+    const others = holder.store.createProperty.mock.calls.map((call) => call[3]);
+    expect(others).toEqual(["summary", "label", "body", "name"]);
   });
 });
 
@@ -405,8 +971,8 @@ describe("import conflicts", () => {
     );
     const res = await postImport({
       entityTypes: [
-        { key: "person", displayName: "Person", properties: [] },
-        { key: "company", displayName: "Company", properties: [] },
+        entityType("person", "Person"),
+        entityType("company", "Company"),
       ],
       relationTypes: [],
       lenses: [],
@@ -432,8 +998,8 @@ describe("import conflicts", () => {
   it("an intra-payload duplicate key conflicts like the sequential write would have", async () => {
     const res = await postImport({
       entityTypes: [
-        { key: "person", displayName: "Person", properties: [] },
-        { key: "person", displayName: "Person Again", properties: [] },
+        entityType("person", "Person"),
+        entityType("person", "Person Again"),
       ],
       relationTypes: [],
       lenses: [],
@@ -451,7 +1017,7 @@ describe("import conflicts", () => {
 describe("import validations", () => {
   it("rejects a reserved entity type key", async () => {
     const res = await postImport({
-      entityTypes: [{ key: "ontology", displayName: "Bad", properties: [] }],
+      entityTypes: [entityType("ontology", "Bad")],
       relationTypes: [],
       lenses: [],
     });
@@ -462,7 +1028,7 @@ describe("import validations", () => {
 
   it("rejects a relation type endpoint missing from the payload", async () => {
     const res = await postImport({
-      entityTypes: [{ key: "person", displayName: "Person" }],
+      entityTypes: [entityType("person", "Person")],
       relationTypes: [
         {
           key: "works_for",
@@ -480,7 +1046,7 @@ describe("import validations", () => {
 
   it("rejects a document property on a relation type", async () => {
     const res = await postImport({
-      entityTypes: [{ key: "person", displayName: "Person" }],
+      entityTypes: [entityType("person", "Person")],
       relationTypes: [
         {
           key: "knows",
@@ -524,7 +1090,6 @@ describe("import validations", () => {
 
   it("rejects a document saved-query parameter", async () => {
     const res = await postImport({
-      formatVersion: "2.2",
       entityTypes: [],
       relationTypes: [],
       lenses: [
@@ -640,6 +1205,7 @@ describe("import key patterns", () => {
         {
           key: "person",
           displayName: "Person",
+          nameProperty: "_id",
           properties: [{ key: "_id", displayName: "Id", dataType: "string", required: false }],
         },
       ],
@@ -666,7 +1232,7 @@ describe("import key patterns", () => {
 
   it("collects every offending key across kinds in one response", async () => {
     const res = await postImport({
-      entityTypes: [{ key: "BadType", displayName: "Bad", properties: [] }],
+      entityTypes: [entityType("BadType", "Bad")],
       relationTypes: [
         {
           key: "BAD_REL",
@@ -713,11 +1279,12 @@ describe("import key patterns", () => {
         {
           key: long("et"),
           displayName: "Long ET",
+          nameProperty: long("etp"),
           properties: [
             { key: long("etp"), displayName: "Long Prop", dataType: "string", required: false },
           ],
         },
-        { key: "anchor", displayName: "Anchor", properties: [] },
+        entityType("anchor", "Anchor"),
       ],
       relationTypes: [
         {
@@ -764,7 +1331,7 @@ describe("import key patterns", () => {
     const exact = (prefix: string): string => prefix + "k".repeat(64 - prefix.length);
     holder.store.createLens.mockResolvedValue(LENS_DATA);
     const res = await postImport({
-      entityTypes: [{ key: exact("et"), displayName: "ET", properties: [] }],
+      entityTypes: [entityType(exact("et"), "ET")],
       relationTypes: [],
       lenses: [{ key: exact("lens"), name: "Lens" }],
     });
@@ -773,7 +1340,7 @@ describe("import key patterns", () => {
 
   it("reports pattern violations, structural rules and reserved keys together", async () => {
     const res = await postImport({
-      entityTypes: [{ key: "_bad", displayName: "Bad", properties: [] }],
+      entityTypes: [entityType("_bad", "Bad")],
       relationTypes: [
         {
           key: "knows",
@@ -823,6 +1390,7 @@ describe("import side effects with a provider", () => {
         {
           key: "person",
           displayName: "Person",
+          nameProperty: "name",
           properties: [
             { key: "name", displayName: "Name", dataType: "string", required: true },
             { key: "bio", displayName: "Bio", dataType: "document", required: false },

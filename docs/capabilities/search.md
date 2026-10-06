@@ -75,7 +75,7 @@ Each searched index is ranked once per retrieval method the strategy uses — se
 keyword, or both under `hybrid` — over the entries of its ready generation. Within one
 method the rankings of every searched index — all types, own fields and passages alike —
 are merged into one ranking by their own scores, which share one scale there: semantic
-similarity under one embedding model, the native keyword score of one query. That ranking
+similarity under one embedding model, the keyword score of one query. That ranking
 is grouped by entity: an entity counts once, scored by its best entry, whichever index
 holds it. A single method keeps those scores. Under `hybrid` the semantic and keyword
 entity rankings are fused by reciprocal rank: an entity's score is the sum of
@@ -85,6 +85,12 @@ greater semantic similarity of each entity's best semantic entry, but only when 
 entity in that tied group has one; otherwise, and among equal similarities, they are
 ordered by entity id. What matched the entity is its best entry under the method in which
 it ranks best, semantic on equal ranks.
+
+An entry's **keyword score** is the number of distinct query words it contains plus, as
+a fraction below one, the adapter's native full-text ranking of the entry. A word counts
+once however differently the keyword languages stem it, and a word repeated in the query
+counts once. An entry holding more of the query's words therefore always ranks above one
+holding fewer; among equal counts the native ranking decides.
 
 Each index's ranking first fetches four times the limit in entries. When the result holds
 fewer entities than the limit, every ranking not yet exhausted fetches once more, up to
@@ -135,7 +141,7 @@ fetched that very entry:
 |---|---|
 | `semanticSimilarity` | Original measured similarity, `(1 + cosine) / 2`, or null when unavailable or unmeasured. It is not a probability or calibrated confidence. |
 | `keywordMatch` | True when the query terms matched this entry; null when unavailable or unmeasured. False requires an explicit negative evaluation; rankings alone emit only true/null. |
-| `keywordScore` | The adapter's native full-text ranking measurement for this entry, passed through raw, or null when unavailable or unmeasured. A number exactly when `keywordMatch` is true. Higher is better within one ranking; it has no fixed upper bound and no meaning across responses, ontologies or languages, and is not comparable to `semanticSimilarity`. It exists for inspection and retrieval evaluation and never enters any ranking step. |
+| `keywordScore` | The entry's [keyword score](#ranking) — query words contained plus native full-text ranking below one — or null when unavailable or unmeasured. A number exactly when `keywordMatch` is true. Higher is better within one ranking; it has no fixed upper bound and no meaning across responses, ontologies or languages, and is not comparable to `semanticSimilarity`. It exists for inspection and retrieval evaluation and never enters any ranking step. |
 
 A method whose ranking did not fetch the match's entry — it ranked other passages of the
 document, say — leaves that measurement null. Missing from a limited ranking does

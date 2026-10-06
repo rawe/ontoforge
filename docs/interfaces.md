@@ -525,7 +525,7 @@ and needs a strategy that ranks semantically. `limit` counts entities, 1–100, 
 Filters also work across types, narrowing the searched set. The response carries `query`,
 `type`, `in`, `strategy`, `minSimilarity`, `filter`, `hits`; each hit has an entity, a
 within-response relative score, matches and `matched`. Matches — one per index that found
-the entity — carry nullable semantic/keyword evidence including the native keyword score.
+the entity — carry nullable semantic/keyword evidence including the keyword score.
 `matched` names the entry that matched best: `index`, `partKind`, `relationType`,
 `relationId`, `target`, `snippet`, `charOffset`, `charLength`. Scores are not confidence.
 Evidence scope, `matched` and null semantics are defined in
@@ -602,9 +602,10 @@ Semantics: [capabilities/retriever-agents.md](capabilities/retriever-agents.md#a
 
 The body carries `message` (1 to 2,000 characters) and optionally `history` (up to 30
 user/assistant turns), the previous answer's `turnToken` and `diagnostics`; unknown
-fields are rejected. An unknown agent answers not found, an agent its lens can no longer
-run `VALIDATION_ERROR` with the errors under `details.errors`, an adapter without search
-indices `FEATURE_DISABLED` — each before the stream opens.
+fields are rejected. Without a language-model provider the route answers
+`FEATURE_DISABLED`, as the AI routes do. An unknown agent answers not found, an agent its
+lens can no longer run `VALIDATION_ERROR` with the errors under `details.errors`, an
+adapter without search indices `FEATURE_DISABLED` — each before the stream opens.
 
 The response streams newline-delimited events: `phase` (`plan`, `retrieve` and `answer`,
 each with `status` `start` or `end`, an end with `durationMs`), `delta` (answer text),

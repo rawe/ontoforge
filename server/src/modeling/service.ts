@@ -23,7 +23,7 @@ import {
   ValidationError,
 } from "../core/exceptions.js";
 import { legacyNameProperty } from "../core/legacyNameProperty.js";
-import { convertLegacyRetrieverConfig } from "../core/legacyRetrieverConfig.js";
+import { convertLegacyRetrieverConfig, legacyRetrieverKey } from "../core/legacyRetrieverConfig.js";
 import { RETRIEVER_AGENT_CONFIG_VERSION, RetrieverAgentConfig } from "../core/retrieverAgent.js";
 import { parseAndValidate } from "../core/oql/index.js";
 import {
@@ -1779,14 +1779,27 @@ export async function importSchema(
   // only its own field, like every version-specific field. Only the shape
   // is checked here — what an agent references is reported invalid on
   // read, so an export of an agent that became invalid still imports.
+  // A 5.0 key with `-` is renamed under the shared key rules, unique in
+  // its lens (`legacyRetrieverKey`); the rename becomes a warning.
   const legacyDataType = legacyDataTypes(payload.entityTypes);
+  const agentKeys = new Map<object, { key: string; warning: string | null }>();
+  for (const lens of payload.lenses) {
+    const agents = (legacy ? lens.retrievers : lens.retrieverAgents) ?? [];
+    const taken = new Set(agents.map((agent) => agent.key));
+    for (const agent of agents) {
+      const renamed = legacy ? legacyRetrieverKey(agent.key, taken) : { key: agent.key, warning: null };
+      taken.add(renamed.key);
+      agentKeys.set(agent, renamed);
+    }
+  }
   for (const lens of payload.lenses) {
     const seen = new Set<string>();
     for (const agent of (legacy ? lens.retrievers : lens.retrieverAgents) ?? []) {
-      if (seen.has(agent.key)) errors.push(`Import error: duplicate retriever agent '${agent.key}' in lens '${lens.key}'`);
-      seen.add(agent.key);
-      if (!KEY_PATTERN.test(agent.key)) errors.push(badKey("retriever agent", agent.key, typeKeyPattern));
-      if (agent.key.length > MAX_KEY_LENGTH) errors.push(longKey("retriever agent", agent.key));
+      const key = agentKeys.get(agent)!.key;
+      if (seen.has(key)) errors.push(`Import error: duplicate retriever agent '${key}' in lens '${lens.key}'`);
+      seen.add(key);
+      if (!KEY_PATTERN.test(key)) errors.push(badKey("retriever agent", key, typeKeyPattern));
+      if (key.length > MAX_KEY_LENGTH) errors.push(longKey("retriever agent", key));
       if (agent.name.length === 0 || agent.name.length > 200) {
         errors.push(`Import error: retriever agent '${agent.key}' needs a name of 1 to 200 characters`);
       }
@@ -2139,16 +2152,17 @@ export async function importSchema(
         const converted = legacy
           ? convertLegacyRetrieverConfig(agent.config, legacyDataType)!
           : { config: RetrieverAgentConfig.parse(agent.config), warnings: [] };
+        const { key, warning } = agentKeys.get(agent)!;
         await indices.saveRetrieverAgent(
           lensIds.get(lens)!,
           {
             retrieverAgentId: randomUUID(),
-            key: agent.key,
+            key,
             name: agent.name,
             description: agent.description,
             configVersion: RETRIEVER_AGENT_CONFIG_VERSION,
             config: converted.config,
-            warnings: converted.warnings,
+            warnings: warning === null ? converted.warnings : [...converted.warnings, warning],
           },
           true,
         );

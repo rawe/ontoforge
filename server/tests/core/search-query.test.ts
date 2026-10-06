@@ -18,6 +18,8 @@ import {
   availableIndices,
   fuseModes,
   groupByEntity,
+  keywordQuery,
+  keywordScore,
   keywordTsquery,
   lensIndexFindings,
   mergeByScore,
@@ -243,6 +245,46 @@ describe("keywordTsquery", () => {
 
   it("quotes lexemes so no input reaches tsquery syntax", () => {
     expect(keywordTsquery([["o'neil", "a\\b"]], "any")).toBe("('o''neil':* | 'a\\\\b':*)");
+  });
+});
+
+describe("keywordQuery", () => {
+  // "Häuser kaufen und CTO" as German (1) and English (2) read it.
+  const tokens = [
+    { language: 1, token: 1, lexemes: ["haus"] },
+    { language: 1, token: 2, lexemes: null },
+    { language: 1, token: 3, lexemes: ["kauf"] },
+    { language: 1, token: 5, lexemes: [] },
+    { language: 1, token: 7, lexemes: ["cto"] },
+    { language: 2, token: 1, lexemes: ["hauser"] },
+    { language: 2, token: 3, lexemes: ["kaufen"] },
+    { language: 2, token: 5, lexemes: ["und"] },
+    { language: 2, token: 7, lexemes: ["cto"] },
+  ];
+
+  it("matches as keywordTsquery and counts each query word once across its stems", () => {
+    expect(keywordQuery(tokens, "any")).toEqual({
+      tsquery: "('haus':* | 'kauf':* | 'cto':*) | ('hauser':* | 'kaufen':* | 'und':* | 'cto':*)",
+      words: ["'haus':* | 'hauser':*", "'kauf':* | 'kaufen':*", "'und':*", "'cto':*"],
+    });
+  });
+
+  it("counts a repeated word once and is null without any lexeme", () => {
+    const repeated = [
+      { language: 1, token: 1, lexemes: ["acm"] },
+      { language: 1, token: 3, lexemes: ["acm"] },
+    ];
+    expect(keywordQuery(repeated, "all")!.words).toEqual(["'acm':*"]);
+    expect(keywordQuery([{ language: 1, token: 1, lexemes: [] }], "any")).toBeNull();
+  });
+});
+
+describe("keywordScore", () => {
+  it("ranks more query words first, then cover density, monotonically", () => {
+    expect(keywordScore(2, 0.01)).toBeGreaterThan(keywordScore(1, 100));
+    expect(keywordScore(1, 0.5)).toBeGreaterThan(keywordScore(1, 0.2));
+    expect(keywordScore(1, 1e9)).toBeLessThan(2);
+    expect(keywordScore(0, 0)).toBe(0);
   });
 });
 

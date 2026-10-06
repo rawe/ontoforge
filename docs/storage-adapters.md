@@ -297,8 +297,10 @@ search indices, and through the semantic rankings of
 way. Neither a bound store nor a query carries a language: a keyword generation stems in
 its own language set.
 Semantic scores are pinned to `(1 + cosine) / 2`, higher is better; arbitrary native
-scores must not be labeled semantic similarity. A keyword score is the adapter's native
-ranking measurement, higher is better, its scale unpinned; the runtime passes it through
+scores must not be labeled semantic similarity. A keyword score is the number of distinct
+query words the entry contains plus, as a fraction below one, the adapter's native
+ranking measurement, higher is better
+([capabilities/search.md](capabilities/search.md#ranking)); the runtime passes it through
 as evidence unchanged. A keyword-ranked entry establishes a positive match, while
 non-membership in a limited ranking establishes no negative evidence.
 
@@ -419,8 +421,9 @@ schema, which the store reads for it — every type and property, unscoped.
 returns nothing unless the generation is ready. A semantic generation takes a query vector
 of its width and ranks by nearest vector, the score pinned to `(1 + cosine) / 2`; a
 keyword generation takes the query text and the keyword matching and ranks by the
-adapter's native keyword measurement. The keyword query is built from the adapter's own
-tokenizer output for the text in each language of the generation's set — the terms of
+keyword score: the distinct query words an entry contains, then the adapter's native
+keyword measurement as a fraction below one. The keyword query is built from the
+adapter's own tokenizer output for the text in each language of the generation's set — the terms of
 one language joined as any or all, each matching as a prefix, the languages as
 alternatives — so search text never reaches query syntax, and a text yielding no term
 matches nothing. Filter conditions apply to the entity owning each entry, inside the
@@ -839,8 +842,9 @@ adds its `warnings` column, and converts every stored configuration of version 1
 version 2 by the conversion an import applies
 ([capabilities/retriever-agents.md](capabilities/retriever-agents.md#converting-version-1-configurations)),
 storing its warnings; a configuration that is no readable version-1 shape stays as it
-is. Last, the step drops the per-entity search storage the managed
-indices replace: the `entity` table's search columns — vector, composed text, keyword
+is. Every agent key with `-` is renamed by the same conversion's key rule, unique within
+its lens, and the rename joins the agent's warnings. Last, the step drops the per-entity
+search storage the managed indices replace: the `entity` table's search columns — vector, composed text, keyword
 text and segments, and the generated tsvector — and the `document_chunk` table, each with
 its keyword and vector indexes. Once every namespace has its set, the step's server-wide
 statement drops that language column from the registry table.
@@ -1011,10 +1015,12 @@ The queue works in plain SQL on `search_queue`:
 - **Ranking** runs on the ready generation's table, the generation row held `FOR SHARE`
   so the table stays while it is read. Semantic: a strict-order iterative HNSW scan over
   `embedding::halfvec(D)` by cosine distance at the generation's width, the score
-  `1 − distance / 2`. Keyword: the query's lexemes from `to_tsvector` in each language of
-  the generation's set, quoted with a prefix marker, joined by `|` or `&` per language and
-  the languages by `|`, matched against `tsv` and ranked by `ts_rank_cd`, ties broken by
-  the entry key. Filter conditions run as an `EXISTS` on the owning `entity` row, the same
+  `1 − distance / 2`. Keyword: the query's lexemes per token from `ts_debug` — which
+  parses like `to_tsvector` — in each language of the generation's set, quoted with a
+  prefix marker, joined by `|` or `&` per language and the languages by `|`, matched
+  against `tsv`. One token's lexemes in every language, joined by `|`, form one word
+  query, and equal word queries count once. The score is the number of word queries `tsv`
+  matches plus `ts_rank_cd / (1 + ts_rank_cd)`; ties are broken by the entry key. Filter conditions run as an `EXISTS` on the owning `entity` row, the same
   predicate fragments the instance listings use; the relation and target type lists as
   `relation_type` and `target_type` predicates that let other parts pass.
 - **Wake-ups** are `pg_notify('ontoforge_search_work', <ontology key>)`, issued in every

@@ -404,8 +404,9 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL storage version"
       await querier.query(`INSERT INTO ont_older.lens (lens_id, key, name) VALUES ($1, 'all', 'All')`, [lensId]);
       await querier.query(
         `INSERT INTO ont_older.retriever_config (retriever_config_id, lens_id, key, name, config_version, config)
-         VALUES ($1, $3, 'notes', 'Notes', 1, $4::jsonb), ($2, $3, 'broken', 'Broken', 1, '{"buckets": 7}'::jsonb)`,
-        [randomUUID(), randomUUID(), lensId, JSON.stringify(legacy)],
+         VALUES ($1, $3, 'notes', 'Notes', 1, $4::jsonb), ($2, $3, 'broken', 'Broken', 1, '{"buckets": 7}'::jsonb),
+                ($5, $3, 'fair-search', 'Fair', 1, $4::jsonb), ($6, $3, 'fair_search', 'Fair too', 1, $4::jsonb)`,
+        [randomUUID(), randomUUID(), lensId, JSON.stringify(legacy), randomUUID(), randomUUID()],
       );
     });
 
@@ -414,7 +415,14 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL storage version"
     const agents = await runQuery(
       `SELECT key, config_version, config, warnings FROM ont_older.retriever_agent ORDER BY key`,
     );
-    expect(agents.rows).toEqual([
+    const soft =
+      "Soft condition 'rule-2' of note was dropped: it needs a custom index with relation group about (outgoing).";
+    // Keys with '-' follow the key rules, unique in the lens.
+    expect(agents.rows.filter((row) => String(row["key"]).startsWith("fair")).map((row) => [row["key"], row["warnings"]])).toEqual([
+      ["fair_search", [soft]],
+      ["fair_search_2", [soft, "Key renamed from 'fair-search' to 'fair_search_2'."]],
+    ]);
+    expect(agents.rows.filter((row) => !String(row["key"]).startsWith("fair"))).toEqual([
       // Not a readable version-1 shape: kept as it was; reads report it invalid.
       { key: "broken", config_version: 1, config: { buckets: 7 }, warnings: [] },
       {

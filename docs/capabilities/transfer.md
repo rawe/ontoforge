@@ -87,7 +87,8 @@ A `5.0` payload differs from `6.0` in four ways. It carries no search indices �
 lens includes the managed indices of the types it exposes. Its lenses carry retrievers of
 configuration version 1 under `retrievers`, in place of `retrieverAgents`; import
 converts each into a retriever agent
-([retriever-agents.md](retriever-agents.md#converting-version-1-configurations)), and
+([retriever-agents.md](retriever-agents.md#converting-version-1-configurations)) —
+renaming a key with `-`, which version 1 allowed, unique among its lens's agents — and
 each version reads only its own field. It carries one
 `textSearchLanguage`, `english` or `german`, in place of `keywordLanguages`; import takes
 that language alone as the set. And its entity types carry no name property
@@ -197,7 +198,7 @@ is **not** parsed and checked against the lens. A pipeline that is structurally 
 names a type the lens does not expose imports successfully and fails when it is first run.
 
 Retriever agents are checked for shape only: a key following the key rules and unique in
-its lens, a name of 1 to 200 characters, and a configuration of the payload's version —
+its lens — a `5.0` key once renamed — a name of 1 to 200 characters, and a configuration of the payload's version —
 2 in `6.0`, 1 in `5.0` — that has the shape and limits of version 2, a `5.0` one once
 converted. A violation fails the import. What
 an agent references is not checked: export carries every agent as stored, including one
@@ -228,7 +229,7 @@ artefacts and computes embeddings, all within the target ontology.
   is no instance data to embed.
 - **Cache invalidation.** Import clears the schema cache, as any modeling change does.
 - **Retriever agents** are written last, once the indices exist. They embed nothing; a
-  `5.0` payload's converted agents keep their conversion warnings.
+  `5.0` payload's converted agents keep their conversion warnings, key renames among them.
 
 Import answers with the lenses it created.
 

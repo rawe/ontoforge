@@ -24,10 +24,6 @@ and creation time stay, and its conversion warnings are cleared. Deleting an age
 it alone; deleting its lens deletes its agents. Retriever agents are separate from the
 tool-using [agents](ai-agents.md) and are not reachable over A2A.
 
-An agent stored under a key the shared key rules do not allow — one with `-` — stays
-readable, runnable, exportable and deletable, and can be copied or moved to an allowed
-key; it cannot be saved under its own key, and no copy, move or import can create one.
-
 ## The configuration
 
 | Field | Meaning |
@@ -77,9 +73,9 @@ and a question to it is refused until it is valid again. A stored configuration 
 another version or shape stays as stored: it is reported invalid, never converted or
 replaced with defaults on read.
 
-**Warnings** are notes a conversion left — soft conditions it dropped. They never make an
-agent invalid or block a save; they stay with the agent, through copy and move, until its
-next save.
+**Warnings** are notes a conversion left — soft conditions it dropped, a key it renamed.
+They never make an agent invalid or block a save; they stay with the agent, through copy
+and move, until its next save.
 
 ## Converting version-1 configurations
 
@@ -98,6 +94,10 @@ single-agent import, and in a `5.0` [transfer](transfer.md) payload.
   relation group — and are dropped, each with a warning naming the relation path the
   group would need.
 - Threshold and answer-field characters carry over.
+- Version 1 allowed `-` in keys. A key with `-` follows the shared key rules with each `-`
+  replaced by `_`; when that key is already taken in the lens, it gets the first free
+  suffix of `_2`, `_3`, … A key without `-` stays as it is. Each rename leaves the
+  warning `Key renamed from '<old>' to '<new>'.`
 
 The converted configuration is then validated like any other: a single-agent import
 refuses it if the lens cannot run it, while storage and transfer keep it and reads report
@@ -219,7 +219,7 @@ next read reports.
 The portable form of one agent is `{key, name, description, configVersion, config}` — no
 lens, identity, timestamps, warnings, vectors or conversation. Import creates the agent in
 the addressed lens, validates it there, and refuses an existing key. A version-1 export
-is converted first. This is the way to take an agent to another ontology.
+is converted first, its key renamed if needed among the keys the lens already holds. This is the way to take an agent to another ontology.
 
 ## Transfer
 
@@ -240,6 +240,7 @@ export carries no `retrieverAgents`, and import checks them and keeps none.
 Retriever agents are managed through modeling REST, addressed by lens key and agent key; a question
 runs through runtime REST by agent key and streams its progress, answer and follow-up
 token ([../interfaces.md](../interfaces.md)). Management, copy, move, export and import
-call no model. A question needs a language-model provider; without an embedding provider
-it searches by keyword only. No MCP tool manages or runs an agent; the modeling MCP
+call no model. A question needs a language-model provider — without one it is refused as
+a disabled feature before anything is read or streamed; without an embedding provider it
+searches by keyword only. No MCP tool manages or runs an agent; the modeling MCP
 server's whole-schema read and export carry them like REST.

@@ -736,6 +736,19 @@ describe("retriever agents", () => {
     ]);
   });
 
+  it("5.0: renames a key with '-' under the key rules, unique in the lens, with a warning", async () => {
+    const indices = withSearchIndices();
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    const res = await postImport(
+      payload({ retrievers: [agent(1, LEGACY, "fair-search"), agent(1, LEGACY, "fair_search")] }, "5.0"),
+    );
+    expect(res.statusCode, res.body).toBe(201);
+    const saved = indices.saveRetrieverAgent.mock.calls.map((call) => call[1] as { key: string; warnings: string[] });
+    expect(saved.map((agent) => agent.key)).toEqual(["fair_search_2", "fair_search"]);
+    expect(saved[0]!.warnings.at(-1)).toBe("Key renamed from 'fair-search' to 'fair_search_2'.");
+    expect(saved[1]!.warnings).toHaveLength(1);
+  });
+
   it("each version reads only its own field", async () => {
     const indices = withSearchIndices();
     holder.store.createLens.mockResolvedValue(LENS_DATA);

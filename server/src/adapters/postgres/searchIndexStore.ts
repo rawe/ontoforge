@@ -79,7 +79,7 @@ import type {
   SearchRepresentation,
 } from "../../core/searchIndex.js";
 import { MAX_LAST_ERRORS, type IndexContentSize } from "../../core/searchPipeline.js";
-import { keywordTsquery } from "../../core/searchQuery.js";
+import { keywordQuery } from "../../core/searchQuery.js";
 import { runQuery, withTransaction, type DbResult, type Querier } from "./errors.js";
 import { buildFilterClauses } from "./filters.js";
 import { quoteIdent } from "./oql/bindings.js";
@@ -825,8 +825,9 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
    * so the table stays while it is read. Semantic: an iterative HNSW scan
    * (`strict_order`) at the generation's width, so the limit counts the
    * entries that pass the filters. Keyword: the query's lexemes in each
-   * language of the generation's set (`keywordTsquery`), ranked by
-   * `ts_rank_cd`. Entity filters run as an `EXISTS` on the owning entity.
+   * language of the generation's set (`keywordQuery`), ranked by the
+   * number of query words an entry holds, then by `ts_rank_cd`
+   * (`keywordScore`). Entity filters run as an `EXISTS` on the owning entity.
    */
   async rankEntries(query: SearchEntryQuery): Promise<RankedSearchEntry[]> {
     if (!isUuid(query.generationId) || query.limit < 1) return [];
@@ -853,18 +854,31 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
         order = distance;
         where.push("s.embedding IS NOT NULL");
       } else {
-        const lexemes = await querier.query(
-          `SELECT tsvector_to_array(to_tsvector(language::regconfig, $1)) AS lexemes
-           FROM unnest($2::text[]) WITH ORDINALITY AS l(language, n) ORDER BY n`,
+        // Each language's lexemes per query token (`ts_debug` parses like
+        // `to_tsvector`), so one word stemmed two ways counts once.
+        const tokens = await querier.query(
+          `SELECT l.n AS language, d.n AS token, d.lexemes
+           FROM unnest($2::text[]) WITH ORDINALITY AS l(language, n),
+                LATERAL ts_debug(l.language::regconfig, $1)
+                  WITH ORDINALITY AS d(alias, description, token, dictionaries, dictionary, lexemes, n)
+           ORDER BY l.n, d.n`,
           [query.text ?? "", generation.languages ?? []],
         );
-        const tsquery = keywordTsquery(
-          lexemes.rows.map((row) => row["lexemes"] as string[]),
+        const keyword = keywordQuery(
+          tokens.rows.map((row) => ({
+            language: Number(row["language"]),
+            token: Number(row["token"]),
+            lexemes: (row["lexemes"] as string[] | null) ?? null,
+          })),
           query.matching ?? "any",
         );
-        if (tsquery === null) return [];
-        params.push(tsquery);
-        rank = "ts_rank_cd(s.tsv, $1::tsquery)";
+        if (keyword === null) return [];
+        params.push(keyword.tsquery, keyword.words);
+        // `keywordScore`: the query words the entry holds, then its cover density.
+        const density = "ts_rank_cd(s.tsv, $1::tsquery)";
+        rank =
+          `(SELECT count(*) FROM unnest($2::tsquery[]) AS w(q) WHERE s.tsv @@ w.q)` +
+          ` + ${density} / (1 + ${density})`;
         order = "score DESC, s.entity_id, s.part_kind, s.group_no, s.part_id";
         where.push("s.tsv @@ $1::tsquery");
       }

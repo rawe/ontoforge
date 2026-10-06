@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { getRuntimeStore } from "../../core/ports.js";
 import { sendChatStream } from "../chatStream.js";
-import { chat, loadRunnableAgent } from "./runtime.js";
+import { chat, loadRunnableAgent, requireLanguageModel } from "./runtime.js";
 
 const Params = z.object({ ontologyKey: z.string(), lensKey: z.string(), agentKey: z.string() });
 const Chat = z
@@ -24,6 +24,7 @@ export const retrieverAgentRuntimeRouter: FastifyPluginAsyncZod = async (app) =>
     "/retriever-agents/:agentKey/chat",
     { schema: { tags: ["ai"], params: Params, body: Chat } },
     async (request, reply) => {
+      requireLanguageModel();
       const store = await getRuntimeStore(request.params.ontologyKey);
       // Resolved before the stream opens: unknown and invalid agents answer
       // with a plain error response.

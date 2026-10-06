@@ -271,9 +271,9 @@ keyword without one.
 `relativeScore` is comparable only within one response and is never absolute similarity
 or confidence. Each match's `evidence` carries `semanticSimilarity` (the supported
 similarity on the `(1 + cosine) / 2` scale, or null), `keywordMatch` (a supported
-boolean result, or null) and `keywordScore` (the adapter's native full-text ranking
-measurement, raw and unbounded, a number exactly when `keywordMatch` is true and null
-exactly when it is null). Null means unknown or unmeasured, including unavailable
+boolean result, or null) and `keywordScore` (the entry's keyword score — the distinct
+query words it contains plus the adapter's native full-text ranking below one — unbounded,
+a number exactly when `keywordMatch` is true and null exactly when it is null). Null means unknown or unmeasured, including unavailable
 signals; false requires an explicit negative evaluation, never absence from a limited
 ranking. The keyword score is not comparable to semantic similarity, not across
 responses, and never enters fusion or tie refinement. Evidence describes the match's own
@@ -302,8 +302,7 @@ unequal eligibility across types must not silently change callers searching one 
 **Search merges indices by score within a retrieval method and fuses only the methods,
 by reciprocal rank.** Within one method, the rankings of every searched index — every
 type, own fields and passages alike — merge into one ranking by their own scores, which
-share one scale there (one embedding model's similarity, one query's native keyword
-score). Grouped by entity, an entity counts once, scored by its best entry, whichever
+share one scale there (one embedding model's similarity, one query's keyword score). Grouped by entity, an entity counts once, scored by its best entry, whichever
 index holds it. A single method keeps those scores; `hybrid` fuses the two entity rankings
 as the sum of `1 / (60 + rank)`. What matched is the best entry under the method in which
 the entity ranks best, semantic on equal ranks. Resolve equal scores by the best semantic

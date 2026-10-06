@@ -10,7 +10,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { ValidationError } from "../../../src/core/exceptions.js";
 
 const runtime = { ontologyKey: "one" };
-const pipeline = vi.hoisted(() => ({ loadRunnableAgent: vi.fn(), chat: vi.fn() }));
+const pipeline = vi.hoisted(() => ({ loadRunnableAgent: vi.fn(), chat: vi.fn(), requireLanguageModel: vi.fn() }));
 vi.mock("../../../src/core/ports.js", async (original) => ({
   ...(await original<Record<string, unknown>>()),
   getRuntimeStore: async () => runtime,
@@ -62,6 +62,18 @@ describe("retriever agent chat route", () => {
     const response = await app.inject({ method: "POST", url: `${BASE}/retriever-agents/find/chat`, payload: { message: "Who?" } });
     expect(response.statusCode).toBe(422);
     expect(response.json().error.message).toContain("invalid in this lens");
+    expect(pipeline.chat).not.toHaveBeenCalled();
+  });
+
+  it("without a language model answers FEATURE_DISABLED before reading the agent or streaming", async () => {
+    pipeline.requireLanguageModel.mockImplementationOnce(() => {
+      throw new ValidationError("AI feature is disabled (AI_PROVIDER not configured)", { code: "FEATURE_DISABLED" });
+    });
+    const response = await app.inject({ method: "POST", url: `${BASE}/retriever-agents/find/chat`, payload: { message: "Who?" } });
+    expect(response.statusCode).toBe(422);
+    expect(response.headers["content-type"]).toContain("application/json");
+    expect(response.json().error.details.code).toBe("FEATURE_DISABLED");
+    expect(pipeline.loadRunnableAgent).not.toHaveBeenCalled();
     expect(pipeline.chat).not.toHaveBeenCalled();
   });
 

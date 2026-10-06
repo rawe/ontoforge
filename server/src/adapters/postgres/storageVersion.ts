@@ -28,6 +28,7 @@ import { legacyNameProperty } from "../../core/legacyNameProperty.js";
 import {
   convertLegacyRetrieverConfig,
   LEGACY_RETRIEVER_CONFIG_VERSION,
+  legacyRetrieverKey,
 } from "../../core/legacyRetrieverConfig.js";
 import type { Row } from "../../core/ports.js";
 import { RETRIEVER_AGENT_CONFIG_VERSION } from "../../core/retrieverAgent.js";
@@ -172,13 +173,13 @@ async function writeManagedSearchIndices(querier: Querier): Promise<void> {
  * retriever-agent configuration of version 2
  * (`core/legacyRetrieverConfig.ts`), keeping the conversion's warnings
  * with it. One that is no readable version-1 shape stays as it is — reads
- * report it invalid.
+ * report it invalid. A key with `-` is renamed under the shared key rules
+ * (`legacyRetrieverKey`), unique within its lens, with a warning.
  */
 async function convertRetrieverAgents(querier: Querier): Promise<void> {
   const agents = (
     await querier.query(
-      `SELECT retriever_agent_id, config FROM retriever_agent WHERE config_version = $1`,
-      [LEGACY_RETRIEVER_CONFIG_VERSION],
+      `SELECT retriever_agent_id, lens_id, key, config_version, config FROM retriever_agent ORDER BY lens_id, key`,
     )
   ).rows;
   if (agents.length === 0) return;
@@ -189,19 +190,30 @@ async function convertRetrieverAgents(querier: Querier): Promise<void> {
       dataTypes.set(`${et["key"] as string}.${property["key"] as string}`, property["dataType"] as string);
     }
   }
+  const takenPerLens = new Map<string, Set<string>>();
   for (const agent of agents) {
-    const converted = convertLegacyRetrieverConfig(agent["config"], (type, field) =>
-      dataTypes.get(`${type}.${field}`),
-    );
-    if (converted === null) continue;
+    const lensId = agent["lens_id"] as string;
+    takenPerLens.set(lensId, (takenPerLens.get(lensId) ?? new Set()).add(agent["key"] as string));
+  }
+  for (const agent of agents) {
+    const taken = takenPerLens.get(agent["lens_id"] as string)!;
+    const renamed = legacyRetrieverKey(agent["key"] as string, taken);
+    taken.add(renamed.key);
+    const converted =
+      agent["config_version"] === LEGACY_RETRIEVER_CONFIG_VERSION
+        ? convertLegacyRetrieverConfig(agent["config"], (type, field) => dataTypes.get(`${type}.${field}`))
+        : null;
+    if (converted === null && renamed.warning === null) continue;
+    const warnings = [...(converted?.warnings ?? []), ...(renamed.warning === null ? [] : [renamed.warning])];
     await querier.query(
-      `UPDATE retriever_agent SET config_version = $2, config = $3::jsonb, warnings = $4::jsonb
+      `UPDATE retriever_agent SET key = $2, config_version = $3, config = $4::jsonb, warnings = $5::jsonb
        WHERE retriever_agent_id = $1`,
       [
         agent["retriever_agent_id"],
-        RETRIEVER_AGENT_CONFIG_VERSION,
-        JSON.stringify(converted.config),
-        JSON.stringify(converted.warnings),
+        renamed.key,
+        converted === null ? agent["config_version"] : RETRIEVER_AGENT_CONFIG_VERSION,
+        JSON.stringify(converted === null ? agent["config"] : converted.config),
+        JSON.stringify(warnings),
       ],
     );
   }

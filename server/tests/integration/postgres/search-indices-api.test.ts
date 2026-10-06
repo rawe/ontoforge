@@ -361,6 +361,33 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("custom search indices throu
   // The cascade
   // -------------------------------------------------------------------
 
+  it("keyword ranking puts entries holding more query words first, whatever the term density", async () => {
+    await schema();
+    const { ada, bob } = await people();
+    // One query word, many times: a high cover density for "ACME" alone.
+    const fan = await post(`${RUNTIME}/entities/person`, { name: "ACME ACME ACME ACME" });
+    await post(INDICES, EMPLOYMENT);
+    await drainSearchWork({ ontologyKey: O });
+    const runtime = await getRuntimeStore(O);
+    const store = await getSearchIndexStore(O);
+    const rank = async (query: string) => {
+      const targets = await Promise.all(
+        ["person~default", EMPLOYMENT.key].map(async (key) => ({ index: (await store.getIndex(key))!, conditions: [] })),
+      );
+      const hits = await rankThroughIndices(await loadSchema("all", runtime), runtime.searchIndices!(), {
+        targets, query, mode: "keyword", matching: "any", relations: null, minScore: null, limit: 10,
+      });
+      return hits.map((hit) => [hit.entityId, hit.matched.entry.partKind, hit.score] as const);
+    };
+    const acme = await rank("CTO ACME");
+    expect(acme[0]!.slice(0, 2)).toEqual([ada._id, "relation"]);
+    expect(acme[0]![2]).toBeGreaterThanOrEqual(2);
+    expect(acme.map(([id]) => id)).toContain(fan._id);
+    expect(acme.find(([id]) => id === fan._id)![2]).toBeLessThan(2);
+    const foo = await rank("CTO Foo");
+    expect(foo[0]!.slice(0, 2)).toEqual([bob._id, "relation"]);
+  });
+
   it("deleting a property a custom index reads needs cascade, then removes the field everywhere", async () => {
     const { companyId, worksForId } = await schema();
     await post(INDICES, EMPLOYMENT);

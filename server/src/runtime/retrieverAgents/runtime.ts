@@ -16,7 +16,7 @@ import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 
 import { settings } from "../../config.js";
-import { createAiModel } from "../../core/ai.js";
+import { createAiModel, getAiModel } from "../../core/ai.js";
 import { NotFoundError, ValidationError } from "../../core/exceptions.js";
 import type { RuntimeStore } from "../../core/ports.js";
 import type { RetrieverAgentConfig } from "../../core/retrieverAgent.js";
@@ -77,6 +77,16 @@ export async function loadRunnableAgent(lensKey: string, key: string, store: Run
     throw new ValidationError(`Retriever agent '${key}' is invalid in this lens: ${errors.join("; ")}`, { errors });
   }
   return { key, config, scope: { config, lens, loaded, store, indexStore, records } };
+}
+
+/** A configured language model, else the FEATURE_DISABLED refusal — as on
+ * the other AI routes, before anything is read or streamed. */
+export function requireLanguageModel(): void {
+  if (getAiModel() === null) {
+    throw new ValidationError("AI feature is disabled (AI_PROVIDER not configured)", {
+      code: "FEATURE_DISABLED",
+    });
+  }
 }
 
 /** The last 8 turns, each at most 2,000 characters. */
@@ -147,8 +157,11 @@ export async function chat(
   const turnScope = `${scope.store.ontologyKey}/${lensKey}/${agent.key}`;
   const modes = availableModes();
   let firstDelta = false;
-  if (!settings.AI_PROVIDER) throw new ValidationError("Language model is unavailable for retriever agents.");
-  const model = createAiModel(settings.AI_PROVIDER, settings.AI_MODEL, settings.AI_BASE_URL, { maxRetries: 0 });
+  const provider = settings.AI_PROVIDER;
+  if (!provider) {
+    throw new ValidationError("AI feature is disabled (AI_PROVIDER not configured)", { code: "FEATURE_DISABLED" });
+  }
+  const model = createAiModel(provider, settings.AI_MODEL, settings.AI_BASE_URL, { maxRetries: 0 });
   // JSON mode applies only to planning; the answer model streams plain text.
   const plannerModel = (model as ChatOpenAI).withConfig({ response_format: PLANNER_RESPONSE_FORMAT });
 

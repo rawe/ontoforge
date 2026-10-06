@@ -844,7 +844,8 @@ export interface SearchEntryQuery {
 }
 
 /** One ranked entry. `score` is `(1 + cosine) / 2` for a semantic
- * generation and the native keyword ranking for a keyword one. */
+ * generation and, for a keyword one, the query words the entry holds plus
+ * its cover density below 1 (`keywordScore` in `core/searchQuery.ts`). */
 export interface RankedSearchEntry extends SearchEntryPart {
   relationType: string | null;
   targetType: string | null;

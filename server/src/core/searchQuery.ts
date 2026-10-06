@@ -176,6 +176,64 @@ export function keywordTsquery(
   return unique.length === 0 ? null : unique.join(" | ");
 }
 
+/** One token of the keyword query as one language of the set reads it:
+ * the token's position in the query, and the lexemes that language's
+ * dictionaries make of it (null or empty: none, e.g. a stop word). Every
+ * language parses with the same parser, so positions align. */
+export interface KeywordQueryToken {
+  language: number;
+  token: number;
+  lexemes: readonly string[] | null;
+}
+
+/** The keyword query of one search: what matches (`tsquery`, as
+ * `keywordTsquery`), and one query per query word — its lexemes in every
+ * language, OR-ed — to count the words an entry contains. */
+export interface KeywordQuery {
+  tsquery: string;
+  words: string[];
+}
+
+/**
+ * The keyword query from the query's tokens per language. A word stemmed
+ * differently in German and English is still one word; a word repeated in
+ * the query counts once. Null when no token yields a lexeme.
+ */
+export function keywordQuery(
+  tokens: readonly KeywordQueryToken[],
+  matching: KeywordMatching,
+): KeywordQuery | null {
+  const perLanguage = new Map<number, string[]>();
+  const perWord = new Map<number, Set<string>>();
+  for (const { language, token, lexemes } of tokens) {
+    for (const lexeme of lexemes ?? []) {
+      const own = perLanguage.get(language) ?? [];
+      if (!own.includes(lexeme)) own.push(lexeme);
+      perLanguage.set(language, own);
+      perWord.set(token, (perWord.get(token) ?? new Set()).add(lexeme));
+    }
+  }
+  const tsquery = keywordTsquery(
+    [...perLanguage].sort(([a], [b]) => a - b).map(([, lexemes]) => lexemes),
+    matching,
+  );
+  if (tsquery === null) return null;
+  const words = [...perWord]
+    .sort(([a], [b]) => a - b)
+    .map(([, lexemes]) => [...lexemes].map(prefixTerm).join(" | "));
+  return { tsquery, words: [...new Set(words)] };
+}
+
+/**
+ * The keyword score of an entry: the number of query words it contains,
+ * then — as a fraction below 1 — its `ts_rank_cd` cover density. An entry
+ * with more of the query's words always ranks above one with fewer; the
+ * score stays monotonic in both, as fusion needs.
+ */
+export function keywordScore(wordsMatched: number, coverDensity: number): number {
+  return wordsMatched + coverDensity / (1 + coverDensity);
+}
+
 // ---------------------------------------------------------------------------
 // Grouping and fusion
 // ---------------------------------------------------------------------------

@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { convertLegacyRetrieverConfig } from "../../src/core/legacyRetrieverConfig.js";
+import { convertLegacyRetrieverConfig, legacyRetrieverKey } from "../../src/core/legacyRetrieverConfig.js";
 import { RetrieverAgentConfig, similarityFloor } from "../../src/core/retrieverAgent.js";
 
 const DATA_TYPES: Record<string, string> = {
@@ -106,6 +106,27 @@ describe("version-1 retriever conversion", () => {
   it("an unreadable configuration is not converted", () => {
     expect(convertLegacyRetrieverConfig({ buckets: 7 }, dataTypeOf)).toBeNull();
     expect(convertLegacyRetrieverConfig(null, dataTypeOf)).toBeNull();
+  });
+});
+
+describe("version-1 retriever keys", () => {
+  it("keeps a key the shared rules allow", () => {
+    expect(legacyRetrieverKey("finder", new Set(["finder"]))).toEqual({ key: "finder", warning: null });
+  });
+
+  it("turns '-' into '_' and names the rename", () => {
+    expect(legacyRetrieverKey("fair-search", new Set(["fair-search"]))).toEqual({
+      key: "fair_search",
+      warning: "Key renamed from 'fair-search' to 'fair_search'.",
+    });
+  });
+
+  it("resolves a clash in the lens with a numeric suffix, within the length limit", () => {
+    expect(legacyRetrieverKey("a-b", new Set(["a_b", "a_b_2"])).key).toBe("a_b_3");
+    const long = `${"x".repeat(63)}-`;
+    const renamed = legacyRetrieverKey(long, new Set([`${"x".repeat(63)}_`]));
+    expect(renamed.key).toBe(`${"x".repeat(62)}_2`);
+    expect(renamed.key).toHaveLength(64);
   });
 });
 

@@ -11,12 +11,15 @@
  * it searched (`<type>~<document>`). Hard conditions become filters. Soft
  * conditions have no counterpart — their content belongs in a custom
  * index with a relation group — so they are dropped and named in a
- * warning. Answer fields, threshold and characters stay.
+ * warning. Answer fields, threshold and characters stay. Version-1 keys
+ * could contain `-`, which the shared key rules do not allow: such a key
+ * is renamed (`legacyRetrieverKey`), with a warning.
  */
 
 import { z } from "zod";
 
 import type { RetrieverAgentConfig } from "./retrieverAgent.js";
+import { MAX_KEY_LENGTH } from "./schemas.js";
 import { DEFAULT_INDEX_SUFFIX, MANAGED_KEY_SEPARATOR } from "./searchIndex.js";
 
 /** The version this module converts from. */
@@ -114,4 +117,23 @@ export function convertLegacyRetrieverConfig(
     },
     warnings,
   };
+}
+
+/**
+ * A version-1 key under the shared key rules: each `-` becomes `_`; a
+ * renamed key that is `taken` in its lens gets a numeric suffix (`_2`,
+ * `_3`, …). A key without `-` stays as it is. The warning names a rename.
+ */
+export function legacyRetrieverKey(
+  key: string,
+  taken: ReadonlySet<string>,
+): { key: string; warning: string | null } {
+  if (!key.includes("-")) return { key, warning: null };
+  const stem = key.replaceAll("-", "_");
+  let renamed = stem.slice(0, MAX_KEY_LENGTH);
+  for (let n = 2; taken.has(renamed); n++) {
+    const suffix = `_${n}`;
+    renamed = `${stem.slice(0, MAX_KEY_LENGTH - suffix.length)}${suffix}`;
+  }
+  return { key: renamed, warning: `Key renamed from '${key}' to '${renamed}'.` };
 }

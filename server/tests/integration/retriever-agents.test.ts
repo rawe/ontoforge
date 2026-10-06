@@ -16,6 +16,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../../src/app.js";
 import { settings } from "../../src/config.js";
+import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+
+import { setAiModel } from "../../src/core/ai.js";
 import { setEmbeddingProvider } from "../../src/core/embedding.js";
 import { closeStores, getRuntimeStore, initStores } from "../../src/core/ports.js";
 import { drainSearchWork } from "../../src/runtime/indexing/worker.js";
@@ -272,6 +275,12 @@ describe.skipIf(!postgres)("retriever agents", () => {
         ],
       },
     });
+    // A version-1 key with '-' is renamed, unique in the lens.
+    const hyphenated = await request("POST", `${AGENTS}/import`, { ...legacy, key: "people-v1" });
+    expect(hyphenated.statusCode, hyphenated.body).toBe(201);
+    expect(hyphenated.json().key).toBe("people_v1");
+    expect(hyphenated.json().validation.warnings.at(-1)).toBe("Key renamed from 'people-v1' to 'people_v1'.");
+    expect((await request("POST", `${AGENTS}/import`, { ...legacy, key: "people-v1" })).json().key).toBe("people_v1_2");
     // A save is a new configuration: the conversion's notes go.
     const saved = await ok("PUT", `${AGENTS}/legacy`, { name: "Legacy", configVersion: 2, config: converted.json().config });
     expect(saved.validation.warnings).toEqual([]);
@@ -281,12 +290,21 @@ describe.skipIf(!postgres)("retriever agents", () => {
     await schema();
     await ok("PUT", `${AGENTS}/people`, BODY);
     const chat = (key = "people") => request("POST", `${RUNTIME}/retriever-agents/${key}/chat`, { message: "Who is CTO at ACME?" });
-    // Valid, but no language model in this suite: the stream reports it.
-    const streamed = await chat();
-    expect(streamed.statusCode).toBe(200);
-    const events = streamed.body.trim().split("\n").map((line) => JSON.parse(line));
-    expect(events.at(-1)).toMatchObject({ type: "error", error: { code: "VALIDATION_ERROR" } });
-    expect((await chat("nobody")).statusCode).toBe(404);
+    // No language model in this suite: refused like the other AI routes,
+    // before any stream opens.
+    const unavailable = await chat();
+    expect(unavailable.statusCode).toBe(422);
+    expect(unavailable.json().error.details.code).toBe("FEATURE_DISABLED");
+    // With a model (never called here), the agent itself is checked first.
+    const withModel = async (key?: string) => {
+      setAiModel({} as BaseChatModel);
+      try {
+        return await chat(key);
+      } finally {
+        setAiModel(null);
+      }
+    };
+    expect((await withModel("nobody")).statusCode).toBe(404);
 
     await ok("DELETE", `${MODEL}/search-indices/person_home`);
     const read = await ok("GET", `${AGENTS}/people`);
@@ -295,7 +313,7 @@ describe.skipIf(!postgres)("retriever agents", () => {
       errors: ["Search index 'person_home' is not available in this lens"],
       warnings: [],
     });
-    const refused = await chat();
+    const refused = await withModel();
     expect(refused.statusCode).toBe(422);
     expect(refused.json().error.message).toContain("is invalid in this lens");
     // Still exportable as stored.

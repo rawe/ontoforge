@@ -8,8 +8,8 @@
  * (`runtime/retrieverAgents/config.ts`) and refuses an invalid one; a
  * stored agent can still become invalid later, which every read reports.
  * An import also takes a version-1 export of a 5.x retriever and converts
- * it (`core/legacyRetrieverConfig.ts`); the conversion's warnings stay
- * with the agent until its next save.
+ * it (`core/legacyRetrieverConfig.ts`), renaming a key with `-`; the
+ * conversion's warnings stay with the agent until its next save.
  */
 
 import { randomUUID } from "node:crypto";
@@ -20,6 +20,7 @@ import { ConflictError, NotFoundError, ValidationError } from "../core/exception
 import {
   convertLegacyRetrieverConfig,
   LEGACY_RETRIEVER_CONFIG_VERSION,
+  legacyRetrieverKey,
 } from "../core/legacyRetrieverConfig.js";
 import type { ModelingStore, RuntimeStore, SearchIndexStore } from "../core/ports.js";
 import {
@@ -212,11 +213,16 @@ export async function importRetrieverAgent(
 ): Promise<RetrieverAgentResponse> {
   const indices = requireSearchIndices(store);
   const parsed = RetrieverAgentImportBody.parse(body);
-  checkKey(parsed.key);
   const { lensId, lens } = await lensOf(lensKey, store, runtime);
+  let key = parsed.key;
   let config: unknown = parsed.config;
   let warnings: string[] = [];
   if (parsed.configVersion === LEGACY_RETRIEVER_CONFIG_VERSION) {
+    // A version-1 key with `-` is renamed, unique in the lens.
+    const taken = new Set((await indices.listRetrieverAgents(lensId)).map((agent) => agent.key));
+    const renamed = legacyRetrieverKey(key, taken);
+    key = renamed.key;
+    if (renamed.warning !== null) warnings.push(renamed.warning);
     const converted = convertLegacyRetrieverConfig(
       parsed.config,
       (type, field) => lens.scoped.entityTypes[type]?.properties[field]?.dataType,
@@ -225,14 +231,15 @@ export async function importRetrieverAgent(
       throw new ValidationError("Invalid retriever agent configuration: not a readable version-1 configuration");
     }
     config = converted.config;
-    warnings = converted.warnings;
+    warnings = [...converted.warnings, ...warnings];
   }
+  checkKey(key);
   const valid = requireValid(RETRIEVER_AGENT_CONFIG_VERSION, config, lens);
   const [agent] = await indices.saveRetrieverAgent(
     lensId,
     {
       retrieverAgentId: randomUUID(),
-      key: parsed.key,
+      key,
       name: parsed.name,
       description: parsed.description,
       configVersion: RETRIEVER_AGENT_CONFIG_VERSION,

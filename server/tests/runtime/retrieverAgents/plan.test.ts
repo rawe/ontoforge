@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  PLANNER,
   PLANNER_RESPONSE_FORMAT,
   plannerInput,
   validatePlan,
@@ -121,6 +122,12 @@ describe("planner output", () => {
     expect(plan.subQueries[0]).toMatchObject({ query: "", variants: [] });
   });
 
+  it("keeps at most three variants and drops empty ones instead of failing the plan", () => {
+    const { plan } = check([sub({ variants: ["a", " ", "b", "c", "d", "x".repeat(300)] })]);
+    expect(plan.subQueries[0]!.variants).toEqual(["a", "b", "c"]);
+    expect(check([sub({ variants: ["x".repeat(300)] })]).plan.subQueries[0]!.variants[0]).toHaveLength(200);
+  });
+
   it("replaces an unavailable mode with the first available one and says so", () => {
     const { plan, notes } = check([sub({ mode: "semantic" })]);
     expect(plan.subQueries[0]!.mode).toBe("keyword");
@@ -160,6 +167,13 @@ describe("planner output", () => {
     // A query-less sub-query whose reference is ignored has nothing left: dropped.
     const dropped = check([sub({ query: "", previous: { filterId: null, quote: "these" } })], "And these?", searched);
     expect(dropped.plan.subQueries).toEqual([]);
+  });
+});
+
+describe("planner prompt", () => {
+  it("prefers a filter over splitting an AND-question into sub-queries", () => {
+    expect(PLANNER).toContain("Prefer filters over splitting");
+    expect(PLANNER).toContain('"filters":[{"id":"city","value":"Berlin","quote":"lives in Berlin"}]');
   });
 });
 
@@ -211,5 +225,7 @@ describe("planner input", () => {
       for (const child of Object.values(node)) (Array.isArray(child) ? child : [child]).forEach(inspect);
     };
     inspect(PLANNER_RESPONSE_FORMAT.json_schema.schema);
+    const subQuery = PLANNER_RESPONSE_FORMAT.json_schema.schema.properties.subQueries.items.properties;
+    expect(subQuery.variants).toEqual({ type: "array", items: { type: "string" }, maxItems: 3 });
   });
 });

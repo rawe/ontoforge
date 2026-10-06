@@ -269,6 +269,14 @@ function relationsFor(config: RetrieverAgentConfig, index: string, sub: SubQuery
   return allowed === null ? sub.relations : sub.relations.filter((relation) => allowed.includes(relation));
 }
 
+/**
+ * One sub-query's ranking. Without restrictions: the search, cut by the
+ * agent's similarity threshold. With restrictions (filters, previous
+ * results) the candidates are exact: the search only orders them — no
+ * threshold — and the restricted entities it did not rank follow, so none
+ * is lost to a query that does not describe it. Without a query the
+ * restricted entities are listed.
+ */
 async function runSubQuery(
   scope: RetrievalScope,
   sub: SubQuery,
@@ -278,20 +286,8 @@ async function runSubQuery(
   const records = sub.indices.map((key) => scope.records.find((record) => record.key === key)!);
   const roots = [...new Set(records.map((record) => record.definition.entityType))];
   const restrictions = await restrictionsOf(scope, sub, roots, previous, retrieval.limitations);
-  if (sub.query === "") {
-    const listed: Ranked[] = [];
-    for (const [entityType, ids] of restrictions) {
-      for (const entityId of [...ids].sort()) listed.push({ entityId, entityType, hit: null });
-    }
-    if (listed.length > LIST_LIMIT) {
-      retrieval.limitations.push(
-        `${listed.length} entities match the exact constraints; only ${LIST_LIMIT} were listed. The list is incomplete.`,
-      );
-    }
-    return listed.slice(0, LIST_LIMIT);
-  }
   const rankings: Ranked[][] = [];
-  for (const text of [sub.query, ...sub.variants]) {
+  for (const text of sub.query === "" ? [] : [sub.query, ...sub.variants]) {
     scope.signal.throwIfAborted();
     const started = performance.now();
     const hits = await rankThroughIndices(scope.loaded, scope.indexStore, {
@@ -308,14 +304,30 @@ async function runSubQuery(
       mode: sub.mode,
       matching: "any",
       relations: null,
-      minScore: sub.mode === "keyword" ? null : similarityFloor(scope.config.threshold),
+      minScore:
+        sub.mode === "keyword" || restrictions.size > 0 ? null : similarityFloor(scope.config.threshold),
       limit: SUB_QUERY_LIMIT,
     });
     retrieval.searchCalls += 1;
     retrieval.searchMs += performance.now() - started;
     rankings.push(hits.map((hit) => ({ entityId: hit.entityId, entityType: hit.entityType, hit })));
   }
-  return fuseRankings(rankings);
+  const ranked = rankings.length === 0 ? [] : fuseRankings(rankings);
+  const found = new Set(ranked.map((item) => item.entityId));
+  const rest: Ranked[] = [];
+  for (const [entityType, ids] of restrictions) {
+    for (const entityId of [...ids].sort()) {
+      if (!found.has(entityId)) rest.push({ entityId, entityType, hit: null });
+    }
+  }
+  const room = Math.max(0, LIST_LIMIT - ranked.length);
+  if (rest.length > room) {
+    retrieval.limitations.push(
+      `${ranked.length + rest.length} entities match the exact constraints; only ` +
+        `${ranked.length + room} were listed. The list is incomplete.`,
+    );
+  }
+  return [...ranked, ...rest.slice(0, room)];
 }
 
 // ---------------------------------------------------------------------------

@@ -30,6 +30,9 @@ import { groupRelationTypes, pathTarget, type AgentLens } from "./config.js";
 /** Most sub-queries of one plan. */
 export const MAX_SUB_QUERIES = 4;
 
+/** Most variants of one sub-query's query. */
+export const MAX_VARIANTS = 3;
+
 /** Most characters of the planner's input. */
 export const PLANNER_INPUT_CHARACTERS = 24_000;
 
@@ -44,7 +47,17 @@ const SubQuerySchema = z.object({
   indices: z.array(z.string()).min(1).max(12),
   relations: z.array(z.string()).max(12).default([]),
   query: z.string().max(500),
-  variants: z.array(z.string().min(1).max(200)).max(3).default([]),
+  // Lenient: a model that writes more, empty or long variants still plans.
+  variants: z.preprocess(
+    (value) =>
+      Array.isArray(value)
+        ? value
+            .filter((variant): variant is string => typeof variant === "string" && variant.trim() !== "")
+            .map((variant) => variant.trim().slice(0, 200))
+            .slice(0, MAX_VARIANTS)
+        : value,
+    z.array(z.string()).default([]),
+  ),
   mode: z.enum(["semantic", "keyword", "hybrid"]),
   filters: z
     .array(
@@ -90,7 +103,7 @@ export const PLANNER_RESPONSE_FORMAT = {
               indices: stringArray,
               relations: stringArray,
               query: { type: "string" },
-              variants: stringArray,
+              variants: { ...stringArray, maxItems: MAX_VARIANTS },
               mode: { type: "string", enum: ["semantic", "keyword", "hybrid"] },
               filters: {
                 type: "array",
@@ -125,9 +138,11 @@ export const PLANNER = `Return only a JSON search plan for the user's question o
 {"subQueries":[{"indices":["index key"],"relations":[],"query":"verbatim phrase","variants":[],"mode":"first available mode","filters":[{"id":"allowed filter id","value":"exact value","quote":"verbatim user evidence"}],"previous":null}],"unsupportedReason":null}
 Searching is how facts are found: plan a search whenever an index holds the kind of fact asked for. Exact filters are optional extras, never required: a name, role, place or other value without a matching filter goes into the query, and the search finds the entries that contain it. Do not judge whether the data contains a value — search for it.
 First identify the requested result object. Choose indices whose entity type and description match that object, not a related organization, location, owner or other context mentioned in the question; use relations and filters to express such context.
-An index finds entities of its entity type by searching the text of its entries. Its own entries hold the entity's fields (ownEntryHolds); each relation group (relation type, label) adds one entry per relation of the entity, holding that one relation's fields with the entity on its other end (entryHolds) — for example one employment: role CTO, company ACME. So a query finds entities by the values of their relations too: "CTO at ACME" finds the people whose employment entry says role CTO and company ACME. To find entities by facts of one relation, choose an index with that relation group and list its relation type in "relations"; [] means every relation group of the chosen indices. Facts of two different relations (for example the employer and the home city) are never in one entry: use two sub-queries, one per relation, whose results are fused per entity — or one sub-query plus an exact filter that covers the other fact. Never put facts of two relations into one query.
+An index finds entities of its entity type by searching the text of its entries. Its own entries hold the entity's fields (ownEntryHolds); each relation group (relation type, label) adds one entry per relation of the entity, holding that one relation's fields with the entity on its other end (entryHolds) — for example one employment: role CTO, company ACME. So a query finds entities by the values of their relations too: "CTO at ACME" finds the people whose employment entry says role CTO and company ACME. To find entities by facts of one relation, choose an index with that relation group and list its relation type in "relations"; [] means every relation group of the chosen indices. Facts of two different relations (for example the employer and the home city) are never in one entry: use one sub-query plus an exact filter that covers the other fact — or, without such a filter, two sub-queries, one per relation, whose results are fused per entity. Never put facts of two relations into one query.
 Example: "Who is CTO at ACME?" with an employment index → one sub-query on that index and relation with query "CTO at ACME".
-Example: "Who works at ACME and lives in Berlin?" with an employment index and a home index → {"subQueries":[{"indices":["<employment index>"],"relations":["<employment relation>"],"query":"works at ACME","variants":[],"mode":"<first mode>","filters":[],"previous":null},{"indices":["<home index>"],"relations":["<home relation>"],"query":"lives in Berlin","variants":[],"mode":"<first mode>","filters":[],"previous":null}],"unsupportedReason":null}.
+Prefer filters over splitting: when the user states the value of a condition that an allowed filter of the result type covers, attach that filter to the sub-query searching that type instead of adding a sub-query; a filtered sub-query keeps exactly the entities the filter allows, and its query only orders them.
+Example: "Who works at ACME and lives in Berlin?" with an employment index and a filter "city" on people (lives_in → city name) → {"subQueries":[{"indices":["<employment index>"],"relations":["<employment relation>"],"query":"works at ACME","variants":[],"mode":"<first mode>","filters":[{"id":"city","value":"Berlin","quote":"lives in Berlin"}],"previous":null}],"unsupportedReason":null}.
+Split only when a condition needs another relation group and no filter covers it. Example: the same question with an employment index and a home index but no city filter → {"subQueries":[{"indices":["<employment index>"],"relations":["<employment relation>"],"query":"works at ACME","variants":[],"mode":"<first mode>","filters":[],"previous":null},{"indices":["<home index>"],"relations":["<home relation>"],"query":"lives in Berlin","variants":[],"mode":"<first mode>","filters":[],"previous":null}],"unsupportedReason":null}.
 query: a short search phrase for this sub-query, in the user's words where possible; leave out question introductions, filter values, and formatting or output instructions. A follow-up question (for example "Since when?" after "Who is CTO at ACME?") continues the conversation: restate the topic from the history in the query (for example "CTO at ACME since"). Use "" only for a pure exact list that relies on filters or previous results alone. Up to three short variants with the same meaning; do not add requirements; [] is allowed. mode: one of availableModes, normally the first.
 Filters are exact and optional: use one only when the user states its exact value. value must occur in quote; quote must be a verbatim substring of the current question or an earlier USER message. Never use ASSISTANT text as evidence. Keep a stated value even if you doubt it exists, so it yields no matches rather than silently dropping a constraint. Do not invent filters.
 For an explicit reference to previous results (this/these/those/their or equivalent in the user's language), set previous:{filterId:null,quote:"verbatim user reference"} for the same result type, or the id of an allowed filter whose path leads to the type of previousVerifiedResults. A singular reference requires exactly one previous entity; otherwise explain the ambiguity as unsupportedReason. Use previous:null for independent questions and whenever previousVerifiedResults is null — then restate the topic in the query instead. ASSISTANT text never authorizes an exact entity restriction.

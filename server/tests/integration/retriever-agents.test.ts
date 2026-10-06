@@ -26,6 +26,7 @@ import { loadRunnableAgent } from "../../src/runtime/retrieverAgents/runtime.js"
 import { retrieve } from "../../src/runtime/retrieverAgents/retrieve.js";
 import type { Plan } from "../../src/runtime/retrieverAgents/plan.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
+import { fakeEmbeddingProvider } from "../fakeEmbedding.js";
 import { wipeDatabase } from "./reset.js";
 
 type Row = Record<string, any>;
@@ -374,6 +375,33 @@ describe.skipIf(!postgres)("retriever agents", () => {
     });
   });
 
+  it("a filtered sub-query keeps every entity the filter allows: the similarity threshold does not cut it", async () => {
+    // Semantic, with fake vectors far below the threshold for any query.
+    setEmbeddingProvider(fakeEmbeddingProvider());
+    await schema();
+    const ids = await data();
+    await ok("PUT", `${AGENTS}/people`, BODY);
+    const agent = await loadRunnableAgent("all", "people", await getRuntimeStore(O));
+    const scope = { ...agent.scope, signal: new AbortController().signal };
+    const sub = (overrides: Partial<Plan["subQueries"][number]>): Plan["subQueries"][number] => ({
+      indices: ["person_employment"], relations: ["works_for"], query: "works at ACME", variants: [], mode: "semantic",
+      filters: [], previous: null, ...overrides,
+    });
+    const unfiltered = await retrieve(scope, { subQueries: [sub({})], unsupportedReason: null });
+    expect(unfiltered.items).toEqual([]);
+    // "Who works at ACME and lives in Berlin?" as one sub-query plus the city filter.
+    const berlin = [{ id: "city", value: "Berlin", quote: "lives in Berlin" }];
+    const filtered = await retrieve(scope, { subQueries: [sub({ filters: berlin })], unsupportedReason: null });
+    expect(filtered.items.map((item) => item.entityId).sort()).toEqual([ids.ada, ids.eve].sort());
+    // A query that does not describe them still keeps them (person~default holds only names).
+    const home = await retrieve(scope, {
+      subQueries: [sub({ indices: ["person~default"], relations: [], query: "lives in Berlin", filters: berlin })],
+      unsupportedReason: null,
+    });
+    expect(home.items.map((item) => item.entityId).sort()).toEqual([ids.ada, ids.eve].sort());
+    expect(home.items.every((item) => item.matches[0]!.filters.length === 1)).toBe(true);
+  });
+
   it("retrieves a two-relation question by fusing two sub-queries, or one sub-query and a filter", async () => {
     await schema();
     const ids = await data();
@@ -406,7 +434,12 @@ describe.skipIf(!postgres)("retriever agents", () => {
       subQueries: [sub({ query: "CTO", filters: [{ id: "city", value: "berlin", quote: "Berlin" }] })],
       unsupportedReason: null,
     });
-    expect(filtered.items.map((item) => item.entityId)).toEqual([ids.ada]);
+    // The filter decides who is in; the query orders: Ada (CTO) first, Eve
+    // (also in Berlin, not found by "CTO") after her, unmatched.
+    expect(filtered.items.map((item) => [item.entityId, item.matches[0]!.matched === null])).toEqual([
+      [ids.ada, false],
+      [ids.eve, true],
+    ]);
     // The answer model learns the filter held.
     expect(filtered.items[0]!.matches[0]!.filters).toEqual([{ filter: "city", path: "lives_in → city.name", value: "berlin" }]);
 

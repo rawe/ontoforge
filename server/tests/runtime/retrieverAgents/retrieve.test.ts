@@ -172,6 +172,23 @@ describe("sub-query search", () => {
     });
   });
 
+  it("a filtered sub-query is not cut by the threshold and keeps the filtered entities the search did not rank", async () => {
+    // "Who works at ACME and lives in Berlin?": one sub-query plus the city filter.
+    engine.rankThroughIndices.mockResolvedValue([hit("eve", "person_employment", "Employment ACME")]);
+    const retrieval = await retrieve(scope(), {
+      subQueries: [subQuery({ query: "works at ACME", mode: "semantic", filters: [{ id: "city", value: "Berlin", quote: "lives in Berlin" }] })],
+      unsupportedReason: null,
+    });
+    const request = engine.rankThroughIndices.mock.calls[0]![2];
+    expect(request.minScore).toBeNull();
+    expect(request.targets[0].entityIds.sort()).toEqual(["ada", "eve"]);
+    // Eve ranked by the search, Ada kept after her.
+    expect(retrieval.items.map((item) => [item.entityId, item.matches[0]!.matched === null])).toEqual([
+      ["eve", false],
+      ["ada", true],
+    ]);
+  });
+
   it("a sub-query without query lists the filtered entities without searching", async () => {
     const retrieval = await retrieve(scope(), {
       subQueries: [subQuery({ query: "", filters: [{ id: "city", value: "Berlin", quote: "Berlin" }] })],

@@ -616,7 +616,7 @@ true, earlier `meta` events carry:
 | Field | Content |
 |---|---|
 | `plan` | `subQueries` — each `indices`, `relations`, `query`, `variants`, `mode`, `filters` (`id`, `value`, `quote`) and `previous` — and `unsupportedReason` |
-| `results` | One row per entity and sub-query that found it, in fused order: `entityId`, `entityType`, `label`, `subQuery`, `matched` when the entity was searched rather than listed, `answerFields` |
+| `results` | One row per entity and sub-query that found it, in fused order: `entityId`, `entityType`, `label`, `subQuery`, `matched` when the search ranked the entity, `answerFields` |
 | `limitations` | What the answer model was told limits the results |
 | `searchCalls` | The number of index searches run |
 | `timings` | Milliseconds: `plan`, `retrieve`, `answer`, `planModel`, `validation`, `search`, `context`, `firstDelta`, `answerModel`, `total` |

@@ -167,6 +167,11 @@ describe("retriever agent pipeline", () => {
     expect(events.at(-1)).toEqual({ type: "meta", turnToken: expect.any(String) });
   });
 
+  it("asks the answer model to answer in the language of the current question", async () => {
+    await run("Everyone in Berlin", false);
+    expect(fake.stream.mock.calls[0]![0][0].content).toContain("in the language of the user's current question");
+  });
+
   it("gives the answer model the filter facts each result satisfies", async () => {
     await run("Everyone in Berlin", false);
     const answerInput = JSON.parse(fake.stream.mock.calls[0]![0][1].content);

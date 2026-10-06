@@ -44,7 +44,8 @@ than a relation group's one.
 The threshold is the cosine of the embedding model; the index search measures similarity
 as `(1 + cosine) / 2`, so the agent searches with that floor
 ([search.md](search.md#similarity-floor)). It removes semantic matches below it, never a
-keyword match. It is a model-specific cut-off, not a confidence.
+keyword match, and only in a search that no filter or previous reference restricts
+([below](#retrieval)). It is a model-specific cut-off, not a confidence.
 
 ## Validation and warnings
 
@@ -125,12 +126,15 @@ fewer indices or filters fix it.
 
 It returns up to four **sub-queries** and an optional `unsupportedReason`. A sub-query
 names some of the agent's indices, optionally relation types among those the agent
-allows for them, a `query` with up to three `variants`, a `mode` — `semantic`, `keyword`
-or `hybrid` — exact `filters` with values, and an optional reference to previous results.
-One entry never holds two relations, so a question about facts of two relations becomes
-two sub-queries, or one sub-query and a filter
-([../decisions.md](../decisions.md#behaviour)). A question no index can answer returns
-no sub-query and a reason.
+allows for them, a `query` with up to three `variants` — further ones and empty ones are
+dropped and long ones cut to 200 characters, never failing the plan — a `mode` —
+`semantic`, `keyword` or `hybrid` — exact `filters` with values, and an optional
+reference to previous results. One entry never holds two relations
+([../decisions.md](../decisions.md#behaviour)), so a condition the user states a value
+for is attached as an allowed filter of the result type to the sub-query searching that
+type; the planner splits into a further sub-query, fused per entity, only when the
+condition needs another relation group and no filter covers it. A question no index can
+answer returns no sub-query and a reason.
 
 **Queries are the planner's words; exact restrictions are the user's.** A query and its
 variants may be phrased freely — a follow-up restates its topic from the conversation.
@@ -152,10 +156,10 @@ one with neither sub-queries nor an `unsupportedReason`, refuses it.
 Each sub-query runs its query and each variant as one index search over its indices, in
 the server, at most 30 entities each. Own-field and passage entries always count; of the
 relation entries only those of the chosen relation types — the agent's subset when the
-plan names none. Semantic matches below the threshold do not count. The rankings of the
-query and its variants, and then of all sub-queries, are fused per entity by reciprocal
-rank (`1 / (60 + rank)`); an entity found by several sub-queries keeps what matched in
-each.
+plan names none. In a sub-query without filters or a previous reference, semantic
+matches below the threshold do not count. The rankings of the query and its variants,
+and then of all sub-queries, are fused per entity by reciprocal rank
+(`1 / (60 + rank)`); an entity found by several sub-queries keeps what matched in each.
 
 **Filters restrict a sub-query to entities.** A filter finds the entities at the end of
 its path whose field equals the value — compared after Unicode normalisation, lower-casing
@@ -165,8 +169,11 @@ indices of the filter's result type; other result types of the sub-query stay
 unrestricted. Each step keeps at most 1,000 entities, and the answer is told when one was
 cut.
 
-**A sub-query without a query lists** the entities its filters and reference allow, at
-most 100, and says so when the list is incomplete.
+**A restricted sub-query is an exact candidate set.** When filters or a previous
+reference restrict a sub-query, its query only orders the entities they allow: no
+threshold applies, and the allowed entities the search did not rank follow the ranked
+ones, without a match. A sub-query without a query lists them only. Either way at most
+100 entities are kept, and the answer is told when more match.
 
 An index whose build state is not `ready` still answers, and the answer is told that
 results may be incomplete ([search-indices.md](search-indices.md#status)).
@@ -185,7 +192,8 @@ added best first up to 8,000 characters; results that do not fit are omitted and
 as an unassessed remainder, never as further matches. Scores never reach the answer
 model.
 
-The answer model replies in the user's language from this evidence alone, names an
+The answer model replies in the language of the user's current question, from this
+evidence alone, names an
 entity only when the evidence supports every fact asked for, lists every supplied record
 for a pure exact list, explains an `unsupportedReason` as a data gap and respects every
 limitation. Search evidence does not prove that a result fits

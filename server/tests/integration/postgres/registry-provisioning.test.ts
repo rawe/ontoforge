@@ -26,7 +26,7 @@ const ALL_TABLES = [
   "lens_includes",
   "ai_agent_config",
   "saved_query",
-  "retriever_config",
+  "retriever_agent",
   "entity",
   "relation",
   "search_settings",

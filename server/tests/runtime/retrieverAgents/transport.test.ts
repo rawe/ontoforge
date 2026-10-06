@@ -1,8 +1,8 @@
-import { PLANNER_RESPONSE_FORMAT } from '../../../src/runtime/retrievalPrototype/plannerFormat.js';
+import { PLANNER_RESPONSE_FORMAT } from '../../../src/runtime/retrieverAgents/plan.js';
 import { describe, it, expect, vi } from 'vitest';
 import type { ChatOpenAI } from '@langchain/openai';
 import { createAiModel } from '../../../src/core/ai.js';
-import { parsePlannerOutput } from '../../../src/runtime/retrievalPrototype/plannerOutput.js';
+import { parsePlannerOutput } from '../../../src/runtime/retrieverAgents/plannerOutput.js';
 
 function transport(model: unknown, fetchFn: typeof fetch) {
   (model as unknown as { completions: { clientConfig: { fetch?: typeof fetch } } }).completions.clientConfig.fetch = fetchFn;
@@ -23,11 +23,11 @@ describe('planner JSON mode at the real SDK transport boundary', () => {
     const planner = model.withConfig({ response_format: PLANNER_RESPONSE_FORMAT });
     const fetchFn = vi.fn(async (_url: unknown, init?: RequestInit) => {
       requests.push(JSON.parse(String(init!.body)));
-      return completion('{"buckets":[],"unsupportedReason":"No records."}');
+      return completion('{"subQueries":[],"unsupportedReason":"No records."}');
     });
     transport(planner, fetchFn as typeof fetch);
     const output = await planner.invoke('Return a retrieval plan.');
-    expect(output.content).toBe('{"buckets":[],"unsupportedReason":"No records."}');
+    expect(output.content).toBe('{"subQueries":[],"unsupportedReason":"No records."}');
     expect(requests[0]).toHaveProperty('response_format', PLANNER_RESPONSE_FORMAT);
     const inspect = (value: unknown) => {
       if (!value || typeof value !== 'object') return;
@@ -51,7 +51,7 @@ describe('planner JSON mode at the real SDK transport boundary', () => {
     const fetchFn = vi.fn(async (_url: unknown, init?: RequestInit) => {
       const body = JSON.parse(String(init!.body));
       requests.push(body);
-      if (!body.stream) return completion('{"buckets":[]}');
+      if (!body.stream) return completion('{"subQueries":[]}');
       const chunk = { id: 'fake-chunk', object: 'chat.completion.chunk', created: 0, model: 'fake', choices: [{ index: 0, delta: { role: 'assistant', content: 'Hello' }, finish_reason: null }] };
       const end = { ...chunk, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] };
       return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: ${JSON.stringify(end)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } });
@@ -60,7 +60,7 @@ describe('planner JSON mode at the real SDK transport boundary', () => {
     const planner = model.withConfig({ response_format: { type: 'json_object' } });
     transport(planner, fetchFn as typeof fetch);
     const output = await planner.invoke('Return one JSON object.');
-    expect(output.content).toBe('{"buckets":[]}');
+    expect(output.content).toBe('{"subQueries":[]}');
     const stream = await model.stream('Answer in plain text.');
     let response = '';
     for await (const chunk of stream) response += chunk.content;
@@ -76,7 +76,7 @@ describe('planner JSON mode at the real SDK transport boundary', () => {
 
   it('does not conceal provider noncompliance or repair malformed visible content', async () => {
     const model = createAiModel('ollama', 'fake', 'http://fake.invalid', { maxRetries: 0 }) as ChatOpenAI;
-    const content = '{"buckets":[]} (actually final only JSON) {"buckets":[]}';
+    const content = '{"subQueries":[]} (actually final only JSON) {"subQueries":[]}';
     const fetchFn = vi.fn(async (_url: unknown, init?: RequestInit) => {
       expect(JSON.parse(String(init!.body))).toHaveProperty('response_format', { type: 'json_object' });
       return completion(content);

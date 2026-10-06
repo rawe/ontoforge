@@ -49,7 +49,8 @@ const VEC_ENTITY_INDEX = "vec_entity_4f2d8a31111142228333444455556666";
 const VEC_CHUNK_INDEX = "vec_document_chunk_0a1b2c3d999948888777666655554444";
 
 /** Storage of the previous major line (version 2): no name property, no
- * search-index tables, two lens inclusion kinds — and the per-entity
+ * search-index tables, two lens inclusion kinds, retrievers in
+ * `retriever_config` — and the per-entity
  * search storage: search columns on `entity`, `document_chunk`, their
  * keyword indexes and per-type vector indexes — and the registry holding
  * each ontology's text-search language. */
@@ -117,6 +118,18 @@ async function makeVersion2(namespace: string, language = "english"): Promise<vo
     );
     await querier.query(`DROP TABLE ${namespace}.search_index`);
     await querier.query(`ALTER TABLE ${namespace}.entity_type DROP COLUMN name_property`);
+    await querier.query(`ALTER TABLE ${namespace}.retriever_agent DROP COLUMN warnings`);
+    for (const [now, then] of [
+      ["retriever_agent_pk", "retriever_config_pk"],
+      ["retriever_agent_lens_fk", "retriever_config_lens_fk"],
+      ["retriever_agent_key_unique", "retriever_config_key_unique"],
+    ]) {
+      await querier.query(`ALTER TABLE ${namespace}.retriever_agent RENAME CONSTRAINT ${now} TO ${then}`);
+    }
+    await querier.query(
+      `ALTER TABLE ${namespace}.retriever_agent RENAME COLUMN retriever_agent_id TO retriever_config_id`,
+    );
+    await querier.query(`ALTER TABLE ${namespace}.retriever_agent RENAME TO retriever_config`);
   });
   await recordVersion(2);
 }
@@ -356,6 +369,74 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL storage version"
       { lens: "writing", index: "note~default" },
       { lens: "writing", index: "person~default" },
     ]);
+  });
+
+  it("renames retrievers to retriever agents and converts their configurations to version 2", async () => {
+    await getOntologyRegistry().createOntology(ID_A, "older", null, null);
+    await makeVersion2("ont_older");
+    await seedVersion2Types("ont_older", {
+      note: [["body", "document"], ["title", "string"]],
+      place: [["name", "string"]],
+    });
+    const lensId = randomUUID();
+    const legacy = {
+      buckets: [
+        {
+          entityTypeKey: "note",
+          searchFields: ["title", "body"],
+          answerFields: ["title"],
+          conditions: [
+            { id: "rule-1", mode: "hard", path: [{ relationTypeKey: "about", direction: "outgoing" }], targetField: "name", textFields: [] },
+            { id: "rule-2", mode: "soft", path: [{ relationTypeKey: "about", direction: "outgoing" }], targetField: "name", textFields: ["name"] },
+          ],
+        },
+      ],
+      threshold: 0.4,
+      answerFieldCharacters: 500,
+    };
+    await withTransaction(async (querier) => {
+      await querier.query(
+        `INSERT INTO ont_older.relation_type
+           (relation_type_id, key, display_name, source_entity_type_key, target_entity_type_key)
+         VALUES ($1, 'about', 'About', 'note', 'place')`,
+        [randomUUID()],
+      );
+      await querier.query(`INSERT INTO ont_older.lens (lens_id, key, name) VALUES ($1, 'all', 'All')`, [lensId]);
+      await querier.query(
+        `INSERT INTO ont_older.retriever_config (retriever_config_id, lens_id, key, name, config_version, config)
+         VALUES ($1, $3, 'notes', 'Notes', 1, $4::jsonb), ($2, $3, 'broken', 'Broken', 1, '{"buckets": 7}'::jsonb)`,
+        [randomUUID(), randomUUID(), lensId, JSON.stringify(legacy)],
+      );
+    });
+
+    await initSchema();
+
+    const agents = await runQuery(
+      `SELECT key, config_version, config, warnings FROM ont_older.retriever_agent ORDER BY key`,
+    );
+    expect(agents.rows).toEqual([
+      // Not a readable version-1 shape: kept as it was; reads report it invalid.
+      { key: "broken", config_version: 1, config: { buckets: 7 }, warnings: [] },
+      {
+        key: "notes",
+        config_version: 2,
+        config: {
+          indices: [{ index: "note~default" }, { index: "note~body" }],
+          filters: [
+            { id: "rule-1", entityType: "note", path: [{ relationTypeKey: "about", direction: "outgoing" }], field: "name" },
+          ],
+          answerFields: { note: ["title"] },
+          threshold: 0.4,
+          answerFieldCharacters: 500,
+        },
+        warnings: [
+          "Soft condition 'rule-2' of note was dropped: it needs a custom index with relation group about (outgoing).",
+        ],
+      },
+    ]);
+    // The agent reads through the port with its conversion notes.
+    const indices = (await getModelingStore("older")).searchIndices!();
+    expect((await indices.getRetrieverAgent(lensId, "notes"))!.warnings).toHaveLength(1);
   });
 
   it("drops the per-entity search storage and keeps every instance", async () => {

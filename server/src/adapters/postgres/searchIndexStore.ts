@@ -45,6 +45,8 @@
 
 import { toSql } from "pgvector";
 
+import { ConflictError, NotFoundError } from "../../core/exceptions.js";
+
 import {
   canonicalKeywordLanguages,
   KEYWORD_LANGUAGES,
@@ -70,6 +72,7 @@ import type {
   SearchSettings,
   SearchWritePlan,
 } from "../../core/ports.js";
+import type { RetrieverAgentRecord, RetrieverAgentWrite } from "../../core/retrieverAgent.js";
 import type {
   SearchIndexDefinition,
   SearchIndexKind,
@@ -84,6 +87,9 @@ import { isUuid } from "./rows.js";
 import { readTypesWithProperties } from "./schemaRead.js";
 
 const INDEX_COLS = "search_index_id, key, kind, definition, created_at, updated_at";
+
+const AGENT_COLS =
+  "retriever_agent_id, key, name, description, config_version, config, warnings, created_at, updated_at";
 
 const GENERATION_COLS =
   "generation_id, search_index_id, representation, definition_hash, model_id, dimensions, " +
@@ -178,6 +184,20 @@ function toIndex(row: Row): SearchIndexRecord {
     key: row["key"] as string,
     kind: row["kind"] as SearchIndexKind,
     definition: row["definition"] as SearchIndexDefinition,
+    createdAt: row["created_at"] as Date,
+    updatedAt: row["updated_at"] as Date,
+  };
+}
+
+function toAgent(row: Row): RetrieverAgentRecord {
+  return {
+    retrieverAgentId: row["retriever_agent_id"] as string,
+    key: row["key"] as string,
+    name: row["name"] as string,
+    description: (row["description"] as string | null) ?? null,
+    configVersion: row["config_version"] as number,
+    config: row["config"],
+    warnings: (row["warnings"] as string[] | null) ?? [],
     createdAt: row["created_at"] as Date,
     updatedAt: row["updated_at"] as Date,
   };
@@ -362,6 +382,127 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
       [lensId, key],
     );
     return result.rowCount > 0;
+  }
+
+  // ------------------------------------------------------------------
+  // Retriever agents
+  // ------------------------------------------------------------------
+
+  async listRetrieverAgents(lensId: string): Promise<RetrieverAgentRecord[]> {
+    if (!isUuid(lensId)) return [];
+    const result = await this.query(
+      `SELECT ${AGENT_COLS} FROM retriever_agent WHERE lens_id = $1 ORDER BY name, key`,
+      [lensId],
+    );
+    return result.rows.map(toAgent);
+  }
+
+  async getRetrieverAgent(lensId: string, key: string): Promise<RetrieverAgentRecord | null> {
+    if (!isUuid(lensId)) return null;
+    const result = await this.query(
+      `SELECT ${AGENT_COLS} FROM retriever_agent WHERE lens_id = $1 AND key = $2`,
+      [lensId, key],
+    );
+    const row = result.rows[0];
+    return row ? toAgent(row) : null;
+  }
+
+  async saveRetrieverAgent(
+    lensId: string,
+    agent: RetrieverAgentWrite,
+    createOnly: boolean,
+  ): Promise<[RetrieverAgentRecord, boolean]> {
+    return this.tx(async (querier) => {
+      // The lens row lock serializes writes to one lens's agents.
+      if (!isUuid(lensId) || (await querier.query(
+        `SELECT lens_id FROM lens WHERE lens_id = $1 FOR UPDATE`, [lensId],
+      )).rows.length === 0) {
+        throw new NotFoundError("Lens not found");
+      }
+      const conflict = createOnly
+        ? "ON CONFLICT (lens_id, key) DO NOTHING"
+        : `ON CONFLICT (lens_id, key) DO UPDATE SET name = EXCLUDED.name,
+             description = EXCLUDED.description, config_version = EXCLUDED.config_version,
+             config = EXCLUDED.config, warnings = EXCLUDED.warnings, updated_at = now()`;
+      const result = await querier.query(
+        `INSERT INTO retriever_agent
+           (retriever_agent_id, lens_id, key, name, description, config_version, config, warnings)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)
+         ${conflict}
+         RETURNING ${AGENT_COLS}, retriever_agent_id = $1 AS created`,
+        [
+          agent.retrieverAgentId, lensId, agent.key, agent.name, agent.description,
+          agent.configVersion, JSON.stringify(agent.config), JSON.stringify(agent.warnings),
+        ],
+      );
+      const row = result.rows[0];
+      if (row === undefined) {
+        throw new ConflictError(`Retriever agent '${agent.key}' already exists in the target lens`);
+      }
+      return [toAgent(row), row["created"] === true];
+    });
+  }
+
+  async deleteRetrieverAgent(lensId: string, key: string): Promise<boolean> {
+    if (!isUuid(lensId)) return false;
+    const result = await this.query(
+      `DELETE FROM retriever_agent WHERE lens_id = $1 AND key = $2`,
+      [lensId, key],
+    );
+    return result.rowCount > 0;
+  }
+
+  async transferRetrieverAgent(
+    sourceLensId: string,
+    sourceKey: string,
+    targetLensId: string,
+    targetKey: string,
+    copyId: string | null,
+    expectedConfig: string,
+  ): Promise<RetrieverAgentRecord> {
+    return this.tx(async (querier) => {
+      const ids = [...new Set([sourceLensId, targetLensId])];
+      // Both owners locked in a fixed order, so two transfers never deadlock.
+      const lenses = ids.every(isUuid)
+        ? await querier.query(
+            `SELECT lens_id FROM lens WHERE lens_id = ANY($1::uuid[]) ORDER BY lens_id FOR UPDATE`,
+            [ids],
+          )
+        : { rows: [] };
+      if (lenses.rows.length !== ids.length) throw new NotFoundError("Source or target lens not found");
+      const source = (
+        await querier.query(
+          `SELECT ${AGENT_COLS} FROM retriever_agent WHERE lens_id = $1 AND key = $2 FOR UPDATE`,
+          [sourceLensId, sourceKey],
+        )
+      ).rows[0];
+      if (source === undefined) throw new NotFoundError(`Retriever agent '${sourceKey}' not found`);
+      if (JSON.stringify([source["config_version"], source["config"]]) !== expectedConfig) {
+        throw new ConflictError("Source retriever agent changed; reload before transfer");
+      }
+      const taken = await querier.query(
+        `SELECT key FROM retriever_agent WHERE lens_id = $1 AND key = $2`,
+        [targetLensId, targetKey],
+      );
+      if (taken.rows.length > 0) {
+        throw new ConflictError(`Retriever agent '${targetKey}' already exists in the target lens`);
+      }
+      const result = copyId !== null
+        ? await querier.query(
+            `INSERT INTO retriever_agent
+               (retriever_agent_id, lens_id, key, name, description, config_version, config, warnings)
+             SELECT $1, $2, $3, name, description, config_version, config, warnings
+               FROM retriever_agent WHERE lens_id = $4 AND key = $5
+             RETURNING ${AGENT_COLS}`,
+            [copyId, targetLensId, targetKey, sourceLensId, sourceKey],
+          )
+        : await querier.query(
+            `UPDATE retriever_agent SET lens_id = $1, key = $2, updated_at = now()
+             WHERE lens_id = $3 AND key = $4 RETURNING ${AGENT_COLS}`,
+            [targetLensId, targetKey, sourceLensId, sourceKey],
+          );
+      return toAgent(result.rows[0]!);
+    });
   }
 
   // ------------------------------------------------------------------
@@ -726,6 +867,11 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
         rank = "ts_rank_cd(s.tsv, $1::tsquery)";
         order = "score DESC, s.entity_id, s.part_kind, s.group_no, s.part_id";
         where.push("s.tsv @@ $1::tsquery");
+      }
+      if (query.entityIds !== undefined && query.entityIds !== null) {
+        if (query.entityIds.length === 0) return [];
+        params.push(query.entityIds.filter(isUuid));
+        where.push(`s.entity_id = ANY($${params.length}::uuid[])`);
       }
       if (query.relationTypes !== null) {
         params.push(query.relationTypes);

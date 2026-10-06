@@ -1,4 +1,3 @@
-import { StoredRetrieverExport } from "./retrievers.js";
 /**
  * Zod schemas for the modeling REST surface: camelCase field names,
  * internal identifiers exposed by design, nullable optionals serialized as
@@ -337,6 +336,17 @@ export const ExportSavedQuery = z.object({
   parameters: z.array(ExportSavedQueryParameter).default([]),
 });
 
+/** One retriever agent in its portable form — also the single-agent
+ * export. Kept as stored: a version this release cannot run travels too. */
+export const ExportRetrieverAgent = z.object({
+  key: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  configVersion: z.number(),
+  config: z.unknown(),
+});
+export type ExportRetrieverAgentInput = z.infer<typeof ExportRetrieverAgent>;
+
 export const ExportLens = z.object({
   key: z.string(),
   name: z.string(),
@@ -346,7 +356,10 @@ export const ExportLens = z.object({
   // in 5.0): the lens includes the managed indices of the types it
   // exposes, as a lens upgraded by the storage step does.
   indexInclusions: z.array(z.string()).optional(),
-  retrievers: z.array(StoredRetrieverExport).optional(),
+  // 6.0: the lens's retriever agents (configuration version 2).
+  retrieverAgents: z.array(ExportRetrieverAgent).optional(),
+  // 5.0 only: retrievers (configuration version 1), converted on import.
+  retrievers: z.array(ExportRetrieverAgent).optional(),
   aiAgents: z.array(ExportAiAgent).default([]),
   savedQueries: z.array(ExportSavedQuery).default([]),
 });

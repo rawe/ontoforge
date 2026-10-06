@@ -38,7 +38,7 @@ data through one lens — never both.
 
 Modeling REST does **not** nest types under a lens. Entity types, relation types and
 their properties are resources of the ontology, at the top level of its modeling
-surface. Scope inclusions, agent configurations, saved queries and retriever configurations
+surface. Scope inclusions, agent configurations, saved queries and retriever agents
 are addressed per lens.
 
 ### What a path segment identifies
@@ -50,7 +50,7 @@ This is the single most common source of mistakes against the modeling surface.
 | Registry | Ontology key |
 | Runtime REST, everywhere | Keys — ontology key, lens key, type key, property key; instance ids for entities and relations |
 | Modeling REST — lenses, entity types, relation types, properties, inclusions | **Internal identifiers**, not keys |
-| Modeling REST — agent configs, saved queries, retrievers | Lens key and the resource key |
+| Modeling REST — agent configs, saved queries, retriever agents | Lens key and the resource key |
 | Modeling REST — search indices | Index key — managed keys included, which carry `~` |
 | Both MCP servers | Keys only |
 
@@ -183,12 +183,12 @@ Requesting an unavailable search strategy, a capability whose provider is not co
 or one the storage adapter does not support answers `VALIDATION_ERROR` with
 `details.code` of `FEATURE_DISABLED` — on the two routes that need an embedding provider,
 semantic search and saved-query search, on AI execution and entity identity
-comparison alike, and on the search settings and search-index operations of an adapter
-without search indices. A client can therefore
-tell a switched-off capability from a rejected request. Model-free operations remain available: agent discovery, retriever schema discovery
-and stored-definition management do not require a language-model provider. Retriever
-preparation requires embeddings separately; execution requirements are listed with
-the routes below. Agent task execution requires a language-model provider
+comparison alike, and on the search settings, search-index and retriever-agent operations
+of an adapter without search indices. A client can therefore
+tell a switched-off capability from a rejected request. Model-free operations remain
+available: agent discovery and retriever-agent management do not require a
+language-model provider; execution requirements are listed with the routes below. Agent
+task execution requires a language-model provider
 ([capabilities/ai-agents.md](capabilities/ai-agents.md)).
 
 Call `GET /api/server/features` first all the same. Probing lets a client hide what is
@@ -338,24 +338,31 @@ Per-lens, addressed by lens key. Semantics:
 | PUT | `/lenses/{lensKey}/saved-queries/{queryKey}` | Create or replace one; answers 201 on create, 200 on replace |
 | DELETE | `/lenses/{lensKey}/saved-queries/{queryKey}` | Delete a saved query |
 
-### Retriever configurations
+### Retriever agents
 
-Lens-local ownership and execution semantics: [capabilities/retrievers.md](capabilities/retrievers.md).
+Per-lens, addressed by lens key and agent key. Semantics, configuration and validation:
+[capabilities/retriever-agents.md](capabilities/retriever-agents.md).
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/lenses/{lensKey}/retrievers` | List stored definitions with current validation results |
-| GET | `/lenses/{lensKey}/retrievers/{retrieverKey}` | Read one definition without converting invalid configurations |
-| PUT | `/lenses/{lensKey}/retrievers/{retrieverKey}` | Create or replace; 201 on create, 200 on replace |
-| DELETE | `/lenses/{lensKey}/retrievers/{retrieverKey}` | Delete the definition; 204 |
-| POST | `/lenses/{lensKey}/retrievers/{retrieverKey}/copy` | Independent copy to targetLensKey/targetKey in this ontology; 201 |
-| POST | `/lenses/{lensKey}/retrievers/{retrieverKey}/move` | Atomic ownership/key change to targetLensKey/targetKey; 200 |
-| GET | `/lenses/{lensKey}/retrievers/{retrieverKey}/export` | Portable single-definition JSON |
-| POST | `/lenses/{lensKey}/retrievers/import` | Validated create-only import; 201, never replaces a key |
+| GET | `/lenses/{lensKey}/retriever-agents` | List the lens's agents, by name, each with its current validation |
+| GET | `/lenses/{lensKey}/retriever-agents/{agentKey}` | Read one agent as stored, with its current validation |
+| PUT | `/lenses/{lensKey}/retriever-agents/{agentKey}` | Create or replace; 201 on create, 200 on replace |
+| DELETE | `/lenses/{lensKey}/retriever-agents/{agentKey}` | Delete the agent; 204 |
+| POST | `/lenses/{lensKey}/retriever-agents/{agentKey}/copy` | Independent copy to `targetLensKey`/`targetKey` in this ontology; 201 |
+| POST | `/lenses/{lensKey}/retriever-agents/{agentKey}/move` | Move to `targetLensKey`/`targetKey` in this ontology, identity kept; 200 |
+| GET | `/lenses/{lensKey}/retriever-agents/{agentKey}/export` | The agent's portable JSON |
+| POST | `/lenses/{lensKey}/retriever-agents/import` | Create from portable JSON; 201, never replaces a key |
 
-Writes carry `name`, optional `description`, `configVersion: 1` and `config`. Reads
-include identity, timestamps and `validation: {valid,errors}`. Portable JSON omits
-identity/timestamps. Config management has no model calls.
+A write carries `name`, optional `description`, `configVersion: 2` and `config`; unknown
+fields are rejected. A read carries `key`, `lensKey`, `name`, `description`,
+`configVersion`, `config`, `validation: {valid, errors, warnings}`, `createdAt` and
+`updatedAt`. The portable JSON is `{key, name, description, configVersion, config}`;
+import also accepts `configVersion: 1`, converted first. A configuration the lens cannot
+run — on write, import, or copy or move into the target lens — is refused with
+`VALIDATION_ERROR` and the errors under `details.errors`; a taken target key, or a source
+changed since it was read, is a conflict. Management calls no model. Every route answers
+`FEATURE_DISABLED` on an adapter without search indices.
 
 ### Search settings
 
@@ -432,8 +439,8 @@ provider: without one it skips the vector work and says so in its summary. It do
 touch search indices. After an embedding-provider switch it is run once per ontology. See
 [capabilities/search.md](capabilities/search.md#rebuild).
 
-Transfer carries the design only — schema, lenses, agents, saved queries, retrievers, search
-indices; no instance
+Transfer carries the design only — schema, lenses, agents, saved queries, retriever agents,
+search indices; no instance
 data and no ontology identity — see
 [capabilities/transfer.md](capabilities/transfer.md) and
 [capabilities/search.md](capabilities/search.md).
@@ -584,26 +591,40 @@ Requires a Decision provider, independently of AI and search.
 |---|---|---|
 | POST | `/decisions/compare-entities` | Judge the identity of two supplied partial snapshots of one scoped entity type |
 
-### Retriever execution
+### Retriever-agent chat
 
-Saved routes load configuration from the server; request bodies cannot override it.
-Contract: [capabilities/retrievers.md](capabilities/retrievers.md).
+The stored agent runs; a request can never supply or override its configuration.
+Semantics: [capabilities/retriever-agents.md](capabilities/retriever-agents.md#answering-a-question).
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/retrievers/{retrieverKey}/prepare` | Prepare selected texts; optional empty body |
-| POST | `/retrievers/{retrieverKey}/chat` | Stream a question using the stored definition |
-| GET | `/ai/retriever/catalog` | Visible schema and editor defaults for the retriever editor |
+| POST | `/retriever-agents/{agentKey}/chat` | Stream the answer to one question |
 
-Saved chat accepts `message`, optional `history`, `turnToken` and `diagnostics`; unknown
-body fields are rejected. Chat streams newline-delimited `phase`, `delta`, `meta`, `final` and `error` events. `diagnostics`
-defaults to `false`: then the only `meta` event carries the `turnToken` for follow-up
-questions. With `diagnostics: true`, further `meta` events carry the validated plan,
-scored candidates with their answer fields, response-context omissions, phase timings,
-embedding counts and bounded system/user/output traces of both model calls. Preparation
-requires embeddings, chat requires the language-model provider, semantic retrieval
-requires embeddings.
-These routes have no dedicated MCP or A2A equivalent.
+The body carries `message` (1 to 2,000 characters) and optionally `history` (up to 30
+user/assistant turns), the previous answer's `turnToken` and `diagnostics`; unknown
+fields are rejected. An unknown agent answers not found, an agent its lens can no longer
+run `VALIDATION_ERROR` with the errors under `details.errors`, an adapter without search
+indices `FEATURE_DISABLED` — each before the stream opens.
+
+The response streams newline-delimited events: `phase` (`plan`, `retrieve` and `answer`,
+each with `status` `start` or `end`, an end with `durationMs`), `delta` (answer text),
+`meta`, then one terminal `final` or `error`. With `diagnostics` false, the default, the
+only `meta` event carries the `turnToken` for a follow-up question. With `diagnostics`
+true, earlier `meta` events carry:
+
+| Field | Content |
+|---|---|
+| `plan` | `subQueries` — each `indices`, `relations`, `query`, `variants`, `mode`, `filters` (`id`, `value`, `quote`) and `previous` — and `unsupportedReason` |
+| `results` | One row per entity and sub-query that found it, in fused order: `entityId`, `entityType`, `label`, `subQuery`, `matched` when the entity was searched rather than listed, `answerFields` |
+| `limitations` | What the answer model was told limits the results |
+| `searchCalls` | The number of index searches run |
+| `timings` | Milliseconds: `plan`, `retrieve`, `answer`, `planModel`, `validation`, `search`, `context`, `firstDelta`, `answerModel`, `total` |
+| `modelIO` | Bounded system prompt, input and output traces of both model calls, with usage and finish reason where the provider reports them |
+| `llmCalls` | 2 |
+
+`matched` has the form of a search hit's ([capabilities/search.md](capabilities/search.md#response)).
+A question needs a language-model provider; without an embedding provider it searches by
+keyword only. The route has no MCP or A2A equivalent.
 
 ### AI
 
@@ -693,7 +714,7 @@ exist; its tools answer not-found tool errors otherwise.
 | Tool | Purpose |
 |---|---|
 | `ensure_ontology` | Create the ontology this mount is bound to if it does not exist yet; no-op if it does. Argument-less — it acts only on the mount's own ontology — and reports the key and whether it created. A created ontology starts bare and without a display name; naming is a REST/UI operation |
-| `get_schema` | The ontology's whole design — types, relation types, properties, the keyword language set, the custom search indices and the switched-off managed ones, and every lens with its type inclusions, its search-index inclusions (`indexInclusions`), agents, saved queries and retrievers. Identical to `export_schema`, and the only way to enumerate lenses: there is no `list_lenses` |
+| `get_schema` | The ontology's whole design — types, relation types, properties, the keyword language set, the custom search indices and the switched-off managed ones, and every lens with its type inclusions, its search-index inclusions (`indexInclusions`), agents, saved queries and retriever agents. Identical to `export_schema`, and the only way to enumerate lenses: there is no `list_lenses` |
 | `create_entity_type` | Add an entity type together with its name property (`name_property`, default `name`) |
 | `update_entity_type` | Change display name, description or name property (`name_property`); the key is immutable |
 | `delete_entity_type` | Remove an entity type and its properties |

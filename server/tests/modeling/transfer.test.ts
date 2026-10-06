@@ -143,6 +143,8 @@ function withSearchIndices() {
     listLensIndexInclusions: vi.fn(async (_lensId: string): Promise<string[]> => []),
     includeIndexInLens: vi.fn(async () => true),
     excludeIndexFromLens: vi.fn(async () => true),
+    listRetrieverAgents: vi.fn(async (_lensId: string): Promise<unknown[]> => []),
+    saveRetrieverAgent: vi.fn(async () => [{}, true]),
   };
   (holder.store as unknown as { searchIndices: () => unknown }).searchIndices = () => indices;
   return indices;
@@ -657,6 +659,114 @@ describe("lens index inclusions", () => {
     ]);
     expect(holder.store.createEntityType).not.toHaveBeenCalled();
     expect(indices.includeIndexInLens).not.toHaveBeenCalled();
+  });
+});
+
+describe("retriever agents", () => {
+  const person = entityType("person", "Person", [{ key: "bio", displayName: "Bio", dataType: "document", required: false }]);
+  const CONFIG = {
+    indices: [{ index: "person~default" }],
+    filters: [],
+    answerFields: { person: ["name"] },
+    threshold: 0.35,
+    answerFieldCharacters: 800,
+  };
+  const agent = (configVersion: number, config: unknown, key = "finder") =>
+    ({ key, name: "Finder", description: null, configVersion, config });
+  const LEGACY = {
+    buckets: [
+      {
+        entityTypeKey: "person",
+        searchFields: ["name", "bio"],
+        answerFields: ["name"],
+        conditions: [{ id: "c", mode: "soft", path: [{ relationTypeKey: "lives_in", direction: "outgoing" }], targetField: "name", textFields: ["name"] }],
+      },
+    ],
+  };
+  const payload = (lens: Record<string, unknown>, formatVersion = "6.0") => ({
+    formatVersion,
+    entityTypes: [person],
+    relationTypes: [],
+    lenses: [{ key: "all", name: "All", ...lens }],
+    ...(formatVersion === "5.0" ? { textSearchLanguage: "german" } : { keywordLanguages: ["german"] }),
+  });
+
+  it("export carries each lens's agents in their portable form; an adapter without search indices none", async () => {
+    const indices = withSearchIndices();
+    const now = new Date("2026-10-06T00:00:00Z");
+    indices.listRetrieverAgents.mockResolvedValue([
+      { retrieverAgentId: "id", ...agent(2, CONFIG), warnings: ["note"], createdAt: now, updatedAt: now },
+    ]);
+    holder.store.getFullSchema.mockResolvedValue({
+      entityTypes: [],
+      relationTypes: [],
+      lenses: [{ lensId: "lens-1", key: "all", name: "All", entityInclusions: [], relationInclusions: [] }],
+    });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
+    expect(res.json().lenses[0].retrieverAgents).toEqual([agent(2, CONFIG)]);
+    delete (holder.store as unknown as { searchIndices?: unknown }).searchIndices;
+    const plain = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
+    expect(plain.json().lenses[0]).not.toHaveProperty("retrieverAgents");
+  });
+
+  it("6.0: stores each agent create-only after the indices; references are not checked", async () => {
+    const indices = withSearchIndices();
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    const unknownIndex = { ...CONFIG, indices: [{ index: "ghost" }] };
+    const res = await postImport(payload({ retrieverAgents: [agent(2, CONFIG), agent(2, unknownIndex, "ghostly")] }));
+    expect(res.statusCode, res.body).toBe(201);
+    const lensId = holder.store.createLens.mock.calls[0]![0] as string;
+    expect(indices.saveRetrieverAgent.mock.calls.map((call) => [call[0], (call[1] as { key: string }).key, call[2]])).toEqual([
+      [lensId, "finder", true],
+      [lensId, "ghostly", true],
+    ]);
+    expect((indices.saveRetrieverAgent.mock.calls[0]![1] as { configVersion: number }).configVersion).toBe(2);
+  });
+
+  it("5.0: converts each retriever, keeping the conversion's warnings", async () => {
+    const indices = withSearchIndices();
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    const res = await postImport(payload({ retrievers: [agent(1, LEGACY)] }, "5.0"));
+    expect(res.statusCode, res.body).toBe(201);
+    const saved = indices.saveRetrieverAgent.mock.calls[0]![1] as Record<string, unknown>;
+    expect(saved.configVersion).toBe(2);
+    expect(saved.config).toMatchObject({ indices: [{ index: "person~default" }, { index: "person~bio" }] });
+    expect(saved.warnings).toEqual([
+      "Soft condition 'c' of person was dropped: it needs a custom index with relation group lives_in (outgoing).",
+    ]);
+  });
+
+  it("each version reads only its own field", async () => {
+    const indices = withSearchIndices();
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    expect((await postImport(payload({ retrievers: [agent(1, LEGACY)] }))).statusCode).toBe(201);
+    expect((await postImport(payload({ retrieverAgents: [agent(2, CONFIG)] }, "5.0"))).statusCode).toBe(201);
+    expect(indices.saveRetrieverAgent).not.toHaveBeenCalled();
+  });
+
+  it("rejects a wrong version, a bad shape and a bad key; writes nothing", async () => {
+    const indices = withSearchIndices();
+    const res = await postImport(
+      payload({
+        retrieverAgents: [agent(1, LEGACY), agent(2, { indices: [] }, "empty"), agent(2, CONFIG, "Bad-Key")],
+      }),
+    );
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details.errors).toEqual([
+      "Import error: retriever agent 'finder' has no valid configuration of version 2",
+      "Import error: retriever agent 'empty' has no valid configuration of version 2",
+      "Import error: invalid retriever agent key 'Bad-Key'. Must match pattern: ^[a-z][a-z0-9_]*$",
+    ]);
+    expect(holder.store.createEntityType).not.toHaveBeenCalled();
+    expect(indices.saveRetrieverAgent).not.toHaveBeenCalled();
+  });
+
+  it("an adapter without search indices checks the agents and keeps none", async () => {
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    const res = await postImport(payload({ retrieverAgents: [agent(2, CONFIG)] }));
+    expect(res.statusCode, res.body).toBe(201);
+    const invalid = await postImport(payload({ retrieverAgents: [agent(2, { indices: [] })] }));
+    expect(invalid.statusCode).toBe(422);
   });
 });
 

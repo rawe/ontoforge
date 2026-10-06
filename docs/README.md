@@ -4,7 +4,7 @@ OntoForge is a graph-native ontology studio. You design a graph schema, then use
 through generic, schema-driven APIs — no per-schema code is written or generated.
 
 One server holds many **ontologies** — totally isolated units, each with its own schema,
-lenses, saved queries, agents, retrievers and instance data. Within an ontology the system has two
+lenses, saved queries, agents, retriever agents and instance data. Within an ontology the system has two
 halves. **Modeling** designs that ontology's schema. **Runtime** reads and writes its
 instance data through one lens. Both run in one server, over one database, and are
 reachable over REST, over MCP, and through a web UI.
@@ -41,7 +41,7 @@ what rules bind it, and how it is reached from every interface.
 | [oql](capabilities/oql.md) | The query language |
 | [saved-queries](capabilities/saved-queries.md) | Stored, parameterized query pipelines |
 | [ai-agents](capabilities/ai-agents.md) | Natural-language querying, extraction, chat, A2A |
-| [retrievers](capabilities/retrievers.md) | Lens-local search configurations, saved execution and portable profiles |
+| [retriever-agents](capabilities/retriever-agents.md) | Lens-local question answering over search indices: configuration, validation, planning, retrieval, portable JSON |
 | [entity-identity-comparison](capabilities/entity-identity-comparison.md) | Optional judgments about two partial entity snapshots |
 | [transfer](capabilities/transfer.md) | Schema export and import |
 
@@ -164,7 +164,7 @@ Terms are used in exactly this sense throughout the documentation and the API.
 ### Schema and design
 
 **Ontology** — the independent, isolated unit: one domain's schema, its lenses, saved
-queries, agents, retrievers, and all instance data. A server holds many; nothing spans two.
+queries, agents, retriever agents, and all instance data. A server holds many; nothing spans two.
 Addressed by an immutable key, unique server-wide, with a mutable display name.
 
 **Registry** — the server's flat, listable set of ontologies, addressed by key. The
@@ -196,7 +196,7 @@ only. Reads return a size stub rather than the content, so that listing entities
 cheap. See [capabilities/documents.md](capabilities/documents.md).
 
 **Key** — the stable, human-readable identifier of an ontology, type, property, lens,
-saved query, agent or retriever. Keys are what every interface speaks. They are never database
+saved query, agent or retriever agent. Keys are what every interface speaks. They are never database
 identifiers, and they are never exposed as UUIDs. Every key is unique within its owner;
 only ontology keys are unique server-wide.
 
@@ -366,6 +366,12 @@ plus the set of read-only tools it may use.
 **A2A** — the agent-to-agent protocol. Each agent publishes a machine-readable card and
 accepts tasks, so external systems can call it without knowing OntoForge's own API.
 
+**Retriever agent** — a stored configuration bound to one lens that answers questions over
+search indices: a planning model turns a question into searches of the agent's indices,
+optionally narrowed to relation groups and exact filters, and an answer model replies from
+what they found. Separate from agents; not reachable over A2A. See
+[capabilities/retriever-agents.md](capabilities/retriever-agents.md).
+
 ### Internals
 
 **Persistence port** — the boundary every storage operation crosses. Above it, only
@@ -378,7 +384,7 @@ compilation, index management, error translation, and the physical isolation bet
 ontologies. Exactly one is active.
 
 **Transfer format** — the versioned JSON representation of one ontology's design, used
-for export and import. Carries schema, lenses, agents, saved queries, retrievers, the
+for export and import. Carries schema, lenses, agents, saved queries, retriever agents, the
 keyword language set, custom search indices and managed-index switches only — no
 instance data and no ontology identity. See
 [capabilities/transfer.md](capabilities/transfer.md).

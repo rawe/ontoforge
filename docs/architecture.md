@@ -78,7 +78,8 @@ never looks inside one.
 definitions and settings, cascade rules, schema validation, transfer, search-data rebuild.
 
 **Runtime** owns one ontology's instance data: entity and relation lifecycle, traversal,
-documents, search, search indexing, query execution, saved-query pipelines, agents.
+documents, search, search indexing, query execution, saved-query pipelines, agents and
+retriever agents.
 
 **Server** carries the deployment's capability report — which optional providers this
 deployment has. It belongs to neither modeling nor runtime and is the only surface that
@@ -95,7 +96,7 @@ reads through the port. This keeps the schema a *value* to runtime rather than a
 it calls, which is what makes the schema cache possible. Runtime uses core alone. The
 other three may use runtime as well as core: modeling where it needs runtime's own view —
 assembling a lens's schema, deriving the managed search indices of a changed schema, and
-validating agent and retriever configurations against what runtime offers;
+validating agent configurations and retriever agents against what runtime offers;
 registry to clear the schema cache when an ontology is deleted; server to report which
 search strategies the deployment offers.
 
@@ -121,7 +122,7 @@ The registry — not any storage catalog — is the authoritative list of ontolo
 ontologies is a valid server state: a fresh server starts empty, nothing is auto-created
 at boot, and the last ontology is deletable. Deleting an ontology is one hard cascade
 over everything it contains — schema, lenses, saved queries, agents, retriever
-configurations, instance data and search indices.
+agents, instance data and search indices.
 
 ## Logical data model
 
@@ -149,9 +150,9 @@ Per ontology. "Unique" here always means unique within the owning ontology.
 | Inclusion | lens + type, or lens + search index | a type inclusion's optional property allowlist; absent means all properties |
 | Agent config | lens + `key` | name, description, system prompt, tool allowlist |
 | Saved query | lens + `key` | name, description, ordered steps, parameters, bindings |
-| Retriever configuration | lens + `key` | name, description, configuration version, configuration |
+| Retriever agent | lens + `key` | name, description, configuration version, configuration, conversion warnings |
 
-Inclusions, agent configs, saved queries and retriever configurations are the four things
+Inclusions, agent configs, saved queries and retriever agents are the four things
 that belong *to a lens*. Types and properties never do. The same type key, and the same
 lens key, can exist independently in two ontologies.
 
@@ -335,8 +336,8 @@ Two refinements:
 **`details.code` narrows, it does not replace.** Where it appears, the top-level code
 stays one of the six. A request for an unavailable search strategy, search with no available strategy,
 saved-query discovery with no embedding provider, an AI request with no
-language-model provider configured — or a search-settings or search-index request to a
-storage adapter without search indices — answers `422 VALIDATION_ERROR` with `details.code` of `FEATURE_DISABLED`.
+language-model provider configured — or a search-settings, search-index or retriever-agent
+request to a storage adapter without search indices — answers `422 VALIDATION_ERROR` with `details.code` of `FEATURE_DISABLED`.
 
 **`STORAGE_ERROR` carries an id, not a cause.** A driver message names the vendor and its
 physical objects, which must not reach a client. The adapter logs the original against a

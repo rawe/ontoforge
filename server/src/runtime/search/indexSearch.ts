@@ -95,6 +95,11 @@ export interface Matched {
 export interface IndexTarget {
   index: SearchIndexRecord;
   conditions: FilterCondition[];
+  /** Relation types whose relation entries of this index count, on top of
+   * the request's `relations`; absent or null: no further restriction. */
+  relations?: readonly string[] | null;
+  /** Rank only these entities; absent or null: every entity. */
+  entityIds?: readonly string[] | null;
 }
 
 /** One index's part in an entity's hit: the entry that represents it and
@@ -302,11 +307,14 @@ export async function rankThroughIndices(
 
   const fetchLeg = async (spec: LegSpec, limit: number): Promise<FetchedLeg> => {
     const semantic = spec.representation === "semantic";
+    const own = spec.target.relations ?? null;
     const raw = await indexStore.rankEntries({
       generationId: spec.generation.generationId,
       ...(semantic ? { vector } : { text: request.query, matching: request.matching }),
       conditions: spec.target.conditions,
-      relationTypes,
+      entityIds: spec.target.entityIds ?? null,
+      relationTypes:
+        own === null ? relationTypes : own.filter((key) => relationTypes === null || relationTypes.includes(key)),
       targetTypes,
       limit,
     });

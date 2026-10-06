@@ -141,7 +141,9 @@ export async function updateLens(
   return record ? convertNeo4jProperties(record.get("lens") as Row) : null;
 }
 
-/** Delete lens and cascade to agent configs and saved queries. */
+/** Delete lens and cascade to agent configs and saved queries — and to
+ * retriever configurations a 5.x server stored (retriever agents need
+ * search indices, which this adapter does not store). */
 export async function deleteLens(session: Session, lensId: string): Promise<boolean> {
   const result = await session.run(
     `

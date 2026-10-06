@@ -215,7 +215,7 @@
                     ]
                 }
             ],
-            "retrievers": []
+            "retrieverAgents": []
         },
         {
             "key": "test_lens",
@@ -225,7 +225,7 @@
             "indexInclusions": [],
             "aiAgents": [],
             "savedQueries": [],
-            "retrievers": []
+            "retrieverAgents": []
         }
     ],
     "keywordLanguages": ["german", "english"],

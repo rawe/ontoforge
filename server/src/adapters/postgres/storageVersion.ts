@@ -25,7 +25,12 @@
 import { randomUUID } from "node:crypto";
 
 import { legacyNameProperty } from "../../core/legacyNameProperty.js";
+import {
+  convertLegacyRetrieverConfig,
+  LEGACY_RETRIEVER_CONFIG_VERSION,
+} from "../../core/legacyRetrieverConfig.js";
 import type { Row } from "../../core/ports.js";
+import { RETRIEVER_AGENT_CONFIG_VERSION } from "../../core/retrieverAgent.js";
 import { namePropertyDisplayName } from "../../core/schemas.js";
 import { deriveManagedIndices, type SearchIndexSchema } from "../../core/searchIndex.js";
 import type { Querier } from "./errors.js";
@@ -162,6 +167,46 @@ async function writeManagedSearchIndices(querier: Querier): Promise<void> {
   }
 }
 
+/**
+ * Convert every stored version-1 retriever configuration into a
+ * retriever-agent configuration of version 2
+ * (`core/legacyRetrieverConfig.ts`), keeping the conversion's warnings
+ * with it. One that is no readable version-1 shape stays as it is — reads
+ * report it invalid.
+ */
+async function convertRetrieverAgents(querier: Querier): Promise<void> {
+  const agents = (
+    await querier.query(
+      `SELECT retriever_agent_id, config FROM retriever_agent WHERE config_version = $1`,
+      [LEGACY_RETRIEVER_CONFIG_VERSION],
+    )
+  ).rows;
+  if (agents.length === 0) return;
+  const { entityTypes } = await readTypesWithProperties(querier, false);
+  const dataTypes = new Map<string, string>();
+  for (const et of entityTypes) {
+    for (const property of et["properties"] as Row[]) {
+      dataTypes.set(`${et["key"] as string}.${property["key"] as string}`, property["dataType"] as string);
+    }
+  }
+  for (const agent of agents) {
+    const converted = convertLegacyRetrieverConfig(agent["config"], (type, field) =>
+      dataTypes.get(`${type}.${field}`),
+    );
+    if (converted === null) continue;
+    await querier.query(
+      `UPDATE retriever_agent SET config_version = $2, config = $3::jsonb, warnings = $4::jsonb
+       WHERE retriever_agent_id = $1`,
+      [
+        agent["retriever_agent_id"],
+        RETRIEVER_AGENT_CONFIG_VERSION,
+        JSON.stringify(converted.config),
+        JSON.stringify(converted.warnings),
+      ],
+    );
+  }
+}
+
 const STEPS: Step[] = [
   {
     // 6.0: every entity type names its name property; search indices.
@@ -264,6 +309,15 @@ const STEPS: Step[] = [
       // 6.0: the managed indices of the existing schema, searchable in the
       // scoped lenses that show their types.
       writeManagedSearchIndices,
+      // 6.0: retrievers become retriever agents, which search the
+      // indices; their configurations convert to version 2.
+      `ALTER TABLE retriever_config RENAME TO retriever_agent`,
+      `ALTER TABLE retriever_agent RENAME COLUMN retriever_config_id TO retriever_agent_id`,
+      `ALTER TABLE retriever_agent RENAME CONSTRAINT retriever_config_pk TO retriever_agent_pk`,
+      `ALTER TABLE retriever_agent RENAME CONSTRAINT retriever_config_lens_fk TO retriever_agent_lens_fk`,
+      `ALTER TABLE retriever_agent RENAME CONSTRAINT retriever_config_key_unique TO retriever_agent_key_unique`,
+      `ALTER TABLE retriever_agent ADD COLUMN warnings jsonb NOT NULL DEFAULT '[]'::jsonb`,
+      convertRetrieverAgents,
       // 6.0: the per-entity search storage they replace goes — the
       // entities' search columns with their keyword and per-type vector
       // indexes, and the document chunks with theirs. The worker's start

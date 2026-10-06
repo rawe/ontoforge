@@ -54,8 +54,11 @@ function normalize(payload: Row): Row {
     (rt.properties as Row[]).sort(byKey);
   }
   for (const lens of (clone.lenses as Row[]) ?? []) {
+    // An adapter without search indices exports neither inclusions nor
+    // retriever agents.
     if (keepsOwnSearchStorage) {
       delete lens.indexInclusions;
+      delete lens.retrieverAgents;
     } else {
       (lens.indexInclusions as string[] | undefined)?.sort();
     }

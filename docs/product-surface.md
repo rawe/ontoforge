@@ -488,7 +488,7 @@ chat offer cancellation. A "Show diagnostics" switch, off by default, requests
 diagnostics and opens a side panel for one selected answer with Overview (step timings,
 reuse, limitations), Plan, Results (ranked candidates, scores against the threshold,
 evidence) and Model calls.
-See [capabilities/retrievers.md](capabilities/retrievers.md) for persistence and execution
+See [capabilities/retriever-agents.md](capabilities/retriever-agents.md) for persistence and execution
 boundaries.
 
 **Chat** — a conversation with the lens's default assistant or with any configured agent,

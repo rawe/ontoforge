@@ -1,4 +1,3 @@
-import * as retrievers from "./retrievers.js";
 /**
  * Modeling service: every domain rule for one ontology's schema — entity
  * types, relation types, property definitions. REST and MCP are two
@@ -24,6 +23,8 @@ import {
   ValidationError,
 } from "../core/exceptions.js";
 import { legacyNameProperty } from "../core/legacyNameProperty.js";
+import { convertLegacyRetrieverConfig } from "../core/legacyRetrieverConfig.js";
+import { RETRIEVER_AGENT_CONFIG_VERSION, RetrieverAgentConfig } from "../core/retrieverAgent.js";
 import { parseAndValidate } from "../core/oql/index.js";
 import {
   keepsOwnSearch,
@@ -57,6 +58,7 @@ import {
   planIndexCascade,
   requireSearchIndices,
 } from "./searchIndices.js";
+import { portable as portableRetrieverAgent } from "./retrieverAgents.js";
 import { readSearchSettings, updateSearchSettings as changeSearchSettings } from "../runtime/indexing/settings.js";
 import { invalidateLoadedSchemaCache, loadSchemaUncached, buildSchemaCacheFromRaw, applyScopeFiltering } from "../runtime/schemaCache.js";
 import { syncDocumentChunks } from "../runtime/service.js";
@@ -1552,8 +1554,12 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
       })),
     }));
 
-    const retrieverRows = await store.listRetrievers(lens.lensId as string);
-    exported.retrievers = retrieverRows.map(retrievers.portable);
+    // Retriever agents search indices: an adapter without them has none.
+    if (indices !== undefined) {
+      exported.retrieverAgents = (await indices.listRetrieverAgents(lens.lensId as string)).map(
+        portableRetrieverAgent,
+      );
+    }
     lenses.push(exported);
   }
 
@@ -1614,6 +1620,15 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
  * by the worker. An adapter without search indices checks all of it and
  * keeps nothing of it.
  */
+/** The data type of a payload property, by entity type and key — what
+ * the version-1 retriever conversion tells document fields by. */
+function legacyDataTypes(
+  entityTypes: readonly ExportEntityTypeInput[],
+): (entityType: string, field: string) => string | undefined {
+  return (entityType, field) =>
+    entityTypes.find((et) => et.key === entityType)?.properties.find((p) => p.key === field)?.dataType;
+}
+
 export async function importSchema(
   payload: ExportPayloadInput,
   store: ModelingStore,
@@ -1759,27 +1774,39 @@ export async function importSchema(
     }
   }
 
+  // Retriever agents: 6.0 lenses carry `retrieverAgents` (version 2),
+  // 5.0 lenses `retrievers` (version 1, converted); each version reads
+  // only its own field, like every version-specific field. Only the shape
+  // is checked here — what an agent references is reported invalid on
+  // read, so an export of an agent that became invalid still imports.
+  const legacyDataType = legacyDataTypes(payload.entityTypes);
   for (const lens of payload.lenses) {
-    const full = buildSchemaCacheFromRaw({ lensId: "import", key: lens.key, name: lens.name }, payload.entityTypes as unknown as Row[], payload.relationTypes.map(rt => ({ ...rt, sourceKey: rt.fromEntityTypeKey, targetKey: rt.toEntityTypeKey })) as unknown as Row[]);
-    const scope = applyScopeFiltering(full, (lens.includes?.entityTypes ?? []).map(inc => ({ key: inc.key, properties: inc.properties ?? null })), (lens.includes?.relationTypes ?? []).map(inc => ({ key: inc.key, properties: inc.properties ?? null })));
     const seen = new Set<string>();
-    for (const retriever of lens.retrievers ?? []) {
-        if (seen.has(retriever.key))
-            errors.push(`Import error: duplicate retriever '${retriever.key}'`);
-        seen.add(retriever.key);
-        if (!/^[a-z][a-z0-9_-]*$/.test(retriever.key) || retriever.key.length > 64)
-            errors.push(`Import error: invalid retriever key '${retriever.key}'`);
-        try {
-            retrievers.RetrieverWrite.parse({ name: retriever.name, description: retriever.description, configVersion: retriever.configVersion, config: retriever.config });
-            retrievers.validateDefinition(retriever.configVersion, retriever.config, scope);
-        }
-        catch (error) {
-            if (error instanceof ValidationError || error instanceof z.ZodError)
-                errors.push(`Import error: retriever '${retriever.key}' has invalid configuration: ${error instanceof ValidationError ? error.message : "Invalid configuration format"}`);
-            else
-                throw error;
-        }
+    for (const agent of (legacy ? lens.retrievers : lens.retrieverAgents) ?? []) {
+      if (seen.has(agent.key)) errors.push(`Import error: duplicate retriever agent '${agent.key}' in lens '${lens.key}'`);
+      seen.add(agent.key);
+      if (!KEY_PATTERN.test(agent.key)) errors.push(badKey("retriever agent", agent.key, typeKeyPattern));
+      if (agent.key.length > MAX_KEY_LENGTH) errors.push(longKey("retriever agent", agent.key));
+      if (agent.name.length === 0 || agent.name.length > 200) {
+        errors.push(`Import error: retriever agent '${agent.key}' needs a name of 1 to 200 characters`);
+      }
+      const config = legacy
+        ? agent.configVersion === 1
+          ? convertLegacyRetrieverConfig(agent.config, legacyDataType)?.config
+          : undefined
+        : agent.configVersion === RETRIEVER_AGENT_CONFIG_VERSION
+          ? agent.config
+          : undefined;
+      if (config === undefined || !RetrieverAgentConfig.safeParse(config).success) {
+        errors.push(
+          `Import error: retriever agent '${agent.key}' has no valid configuration of version ` +
+            `${legacy ? 1 : RETRIEVER_AGENT_CONFIG_VERSION}`,
+        );
+      }
     }
+  }
+
+  for (const lens of payload.lenses) {
     if (!KEY_PATTERN.test(lens.key)) {
       errors.push(badKey("lens", lens.key, typeKeyPattern));
     }
@@ -2072,9 +2099,6 @@ export async function importSchema(
       );
     }
 
-    for (const retriever of lens.retrievers??[]) {
-      await store.upsertRetriever(lensId,randomUUID(),retriever.key,retriever.name,retriever.description,1,retriever.config,true);
-    }
     createdLenses.push(toLensResponse(lensData));
   }
 
@@ -2106,6 +2130,30 @@ export async function importSchema(
       }
     }
     invalidateLoadedSchemaCache();
+  }
+  // Retriever agents last, once their indices exist; an adapter without
+  // search indices keeps none.
+  if (indices !== undefined) {
+    for (const lens of payload.lenses) {
+      for (const agent of (legacy ? lens.retrievers : lens.retrieverAgents) ?? []) {
+        const converted = legacy
+          ? convertLegacyRetrieverConfig(agent.config, legacyDataType)!
+          : { config: RetrieverAgentConfig.parse(agent.config), warnings: [] };
+        await indices.saveRetrieverAgent(
+          lensIds.get(lens)!,
+          {
+            retrieverAgentId: randomUUID(),
+            key: agent.key,
+            name: agent.name,
+            description: agent.description,
+            configVersion: RETRIEVER_AGENT_CONFIG_VERSION,
+            config: converted.config,
+            warnings: converted.warnings,
+          },
+          true,
+        );
+      }
+    }
   }
   return { lenses: createdLenses };
 }

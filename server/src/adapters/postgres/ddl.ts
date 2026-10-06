@@ -202,18 +202,19 @@ export function ontologyDdlStatements(): string[] {
   CONSTRAINT saved_query_key_unique UNIQUE (lens_id, key)        -- upsert arbiter
 )`,
 
-  `CREATE TABLE IF NOT EXISTS retriever_config (
-  retriever_config_id uuid        CONSTRAINT retriever_config_pk PRIMARY KEY,
-  lens_id             uuid        NOT NULL CONSTRAINT retriever_config_lens_fk
-                                  REFERENCES lens (lens_id) ON DELETE CASCADE,
-  key                 text        NOT NULL,
-  name                text        NOT NULL,
-  description         text,
-  config_version      integer     NOT NULL,
-  config              jsonb       NOT NULL,
-  created_at          timestamptz NOT NULL DEFAULT now(),
-  updated_at          timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT retriever_config_key_unique UNIQUE (lens_id, key)
+  `CREATE TABLE IF NOT EXISTS retriever_agent (
+  retriever_agent_id uuid        CONSTRAINT retriever_agent_pk PRIMARY KEY,
+  lens_id            uuid        NOT NULL CONSTRAINT retriever_agent_lens_fk
+                                 REFERENCES lens (lens_id) ON DELETE CASCADE,
+  key                text        NOT NULL,
+  name               text        NOT NULL,
+  description        text,
+  config_version     integer     NOT NULL,
+  config             jsonb       NOT NULL,
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  updated_at         timestamptz NOT NULL DEFAULT now(),
+  warnings           jsonb       NOT NULL DEFAULT '[]'::jsonb,  -- notes of a version-1 conversion
+  CONSTRAINT retriever_agent_key_unique UNIQUE (lens_id, key)
 )`,
 
   // --- Instance side -----------------------------------------------------

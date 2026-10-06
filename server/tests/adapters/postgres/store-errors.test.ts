@@ -328,11 +328,11 @@ describe("bypass prevention", () => {
 });
 
 
-describe("retriever constraints preserve domain errors", () => {
+describe("retriever agent constraints preserve domain errors", () => {
   it("maps concurrent target-key collisions to ConflictError", async () => {
-    expect(await translated(dbError("23505", "retriever_config_key_unique"))).toBeInstanceOf(ConflictError);
+    expect(await translated(dbError("23505", "retriever_agent_key_unique"))).toBeInstanceOf(ConflictError);
   });
   it("maps a vanished owner to NotFoundError", async () => {
-    expect(await translated(dbError("23503", "retriever_config_lens_fk"))).toBeInstanceOf(NotFoundError);
+    expect(await translated(dbError("23503", "retriever_agent_lens_fk"))).toBeInstanceOf(NotFoundError);
   });
 });

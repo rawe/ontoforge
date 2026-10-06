@@ -1,4 +1,3 @@
-import * as retrievers from "./retrieverQueries.js";
 /**
  * Neo4j implementation of the modeling store (schema persistence).
  *
@@ -7,7 +6,6 @@ import * as retrievers from "./retrieverQueries.js";
  * `runSession`, so driver failures surface as `StoreError` (rule 4) — and
  * delegates to the query functions in `modelingQueries.ts`.
  */
-
 
 import type { Driver } from "neo4j-driver";
 
@@ -20,29 +18,6 @@ import * as queries from "./modelingQueries.js";
 
 export class Neo4jModelingStore implements ModelingStore {
   constructor(private readonly driver: Driver) {}
-
-  async listRetrievers(lensId: string): Promise<Row[]> {
-    return runSession(this.driver, session => retrievers.list(session, lensId));
-  }
-
-  async getRetriever(lensId: string, key: string): Promise<Row | null> {
-    return (await this.listRetrievers(lensId)).find(row => row.key === key) ?? null;
-  }
-
-  async upsertRetriever(lensId: string, id: string, key: string, name: string, description: string | null, configVersion: number, config: unknown, createOnly = false): Promise<[
-    Row,
-    boolean
-  ]> {
-    return runSession(this.driver, session => retrievers.upsert(session, lensId, id, key, name, description, configVersion, config, createOnly));
-  }
-
-  async deleteRetriever(lensId: string, key: string): Promise<boolean> {
-    return runSession(this.driver, session => retrievers.remove(session, lensId, key));
-  }
-
-  async transferRetriever(sourceLensId: string, sourceKey: string, targetLensId: string, targetKey: string, copyId: string | null, expectedConfig: string): Promise<Row> {
-    return runSession(this.driver, session => retrievers.transfer(session, sourceLensId, sourceKey, targetLensId, targetKey, copyId, expectedConfig));
-  }
 
   // ------------------------------------------------------------------
   // Reserved keys

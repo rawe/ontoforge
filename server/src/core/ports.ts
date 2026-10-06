@@ -54,6 +54,7 @@
  */
 
 import type { KeywordLanguageSet } from "./keywordLanguage.js";
+import type { RetrieverAgentRecord, RetrieverAgentWrite } from "./retrieverAgent.js";
 
 import { settings } from "../config.js";
 import { NotFoundError } from "./exceptions.js";
@@ -376,16 +377,6 @@ export interface ModelingStore {
   // ------------------------------------------------------------------
 
   getFullSchema(): Promise<Row>;
-
-  // Lens-local saved retrievers. Atomic transfer never overwrites a target.
-  listRetrievers(lensId: string): Promise<Row[]>;
-  getRetriever(lensId: string, key: string): Promise<Row | null>;
-  upsertRetriever(lensId: string, id: string, key: string, name: string,
-    description: string | null, configVersion: number, config: unknown,
-    createOnly?: boolean): Promise<[Row, boolean]>;
-  deleteRetriever(lensId: string, key: string): Promise<boolean>;
-  transferRetriever(sourceLensId: string, sourceKey: string, targetLensId: string,
-    targetKey: string, copyId: string | null, expectedConfig: string): Promise<Row>;
 
   // ------------------------------------------------------------------
   // AI agent configs
@@ -842,6 +833,9 @@ export interface SearchEntryQuery {
   /** Exact filters on the owning entity — candidate restrictions applied
    * inside the ranking, so the limit counts entries that pass them. */
   conditions: FilterCondition[];
+  /** Rank only the entries of these entities; absent or null: of every
+   * entity. */
+  entityIds?: readonly string[] | null;
   /** A relation entry ranks only when its relation type is listed and its
    * target type too; null lists every type. Other entries always rank. */
   relationTypes: string[] | null;
@@ -1028,6 +1022,44 @@ export interface SearchIndexStore {
 
   /** Remove an index inclusion. False when the lens does not include it. */
   excludeIndexFromLens(lensId: string, key: string): Promise<boolean>;
+
+  // ------------------------------------------------------------------
+  // Retriever agents (lens-local; they search this store's indices)
+  //
+  // Keyed by lens and agent key; deleted with their lens. A transfer
+  // never overwrites a target.
+  // ------------------------------------------------------------------
+
+  /** The lens's agents, by name then key. */
+  listRetrieverAgents(lensId: string): Promise<RetrieverAgentRecord[]>;
+
+  getRetrieverAgent(lensId: string, key: string): Promise<RetrieverAgentRecord | null>;
+
+  /** Create, or replace name, description, configuration and warnings of
+   * the agent with this key (its id and creation time stay). `createOnly`:
+   * an existing key is a `ConflictError`. The lens missing is a
+   * `NotFoundError`. True in the pair when the agent was created. */
+  saveRetrieverAgent(
+    lensId: string,
+    agent: RetrieverAgentWrite,
+    createOnly: boolean,
+  ): Promise<[RetrieverAgentRecord, boolean]>;
+
+  /** False when the lens has no agent with this key. */
+  deleteRetrieverAgent(lensId: string, key: string): Promise<boolean>;
+
+  /** Copy (`copyId`: the copy's id) or move (`copyId` null: identity kept)
+   * an agent to another lens and key, atomically. The source must still
+   * hold `expectedConfig` (JSON of `[configVersion, config]`) — else a
+   * `ConflictError`; a taken target key is a `ConflictError`. */
+  transferRetrieverAgent(
+    sourceLensId: string,
+    sourceKey: string,
+    targetLensId: string,
+    targetKey: string,
+    copyId: string | null,
+    expectedConfig: string,
+  ): Promise<RetrieverAgentRecord>;
 
   // ------------------------------------------------------------------
   // Generations

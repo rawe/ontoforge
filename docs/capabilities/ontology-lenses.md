@@ -25,8 +25,8 @@ content is a set of declarations about types that exist independently of it.
 
 Three things do belong to a lens, keyed within it, exported with it and deleted with
 it: **agent configurations** ([ai-agents.md](ai-agents.md)) and **saved queries**
-([saved-queries.md](saved-queries.md)) and **retriever configurations**
-([retrievers.md](retrievers.md)). They are lens-local because they are
+([saved-queries.md](saved-queries.md)) and **retriever agents**
+([retriever-agents.md](retriever-agents.md)). They are lens-local because they are
 written in terms of what that lens exposes.
 
 Deleting a lens deletes those configurations and nothing else. Types, property definitions

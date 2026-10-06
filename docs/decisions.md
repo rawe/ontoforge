@@ -39,7 +39,7 @@ key, unique server-wide, with a mutable display name, also unique server-wide.
 Interfaces speak the key.
 
 **Key scoping** — every key is unique within its owner: property keys per type,
-saved-query, agent and retriever keys per lens, type and lens keys per ontology,
+saved-query, agent and retriever-agent keys per lens, type and lens keys per ontology,
 ontology keys per server.
 
 **Ontology lifecycle** — created bare (no types, no lenses, no data); rename changes
@@ -55,17 +55,17 @@ product names for its surfaces, and does.
 
 **Keys, never identifiers, on the runtime and MCP surfaces.**
 Everything an agent or a data client touches is addressed by human-readable key:
-ontologies, lenses, types, properties, saved queries, agents and retrievers. Internal
+ontologies, lenses, types, properties, saved queries, agents and retriever agents. Internal
 identifiers are resolved behind the interface. A language model should never have to
 carry an opaque identifier to name a type.
 
 The modeling REST surface is the exception: it addresses lenses, types and properties
 by internal identifier, and only agent configurations, saved queries and retriever
-configurations by key. It is a schema-design surface used by a client that has just
+agents by key. It is a schema-design surface used by a client that has just
 listed the resource it is about to address, so the identifier is always at hand.
 
 **Key length cap.** Every key — entity type, relation type, lens, property,
-agent, saved query — is at most 64 characters (`MAX_KEY_LENGTH`), enforced at
+agent, saved query, retriever agent — is at most 64 characters (`MAX_KEY_LENGTH`), enforced at
 validation alongside the key pattern. Keys are human-typed identifiers; the cap
 keeps adapter-derived physical names legible and rejects absurd input at the
 boundary rather than deep inside an adapter. Ontology keys carry a tighter cap of
@@ -552,6 +552,29 @@ a warning, which never makes the lens invalid. The lens still governs everything
 returned: hits are projected through it, and a match whose index reads a hidden property
 carries no snippet of the entry's text.
 
+**Retriever agents are a lens-local resource that searches search indices.** Each has a
+key, name, description, configuration version and configuration; keys follow the shared
+key rules and are unique within the lens. A save is validated against the lens and
+refused when invalid; a stored agent that later becomes invalid stays readable and
+exportable, nothing cascades to it, and a question to it is refused. Copying creates an
+independent identity; moving within the same ontology keeps it and is atomic. Neither
+overwrites a target key, and both validate the target lens. Cross-ontology portability is
+an explicit JSON copy validated in the target, never a shared live definition. Agents
+travel with their lens in design transfer and are deleted with it. Storage carries no
+vectors, snapshots, credentials or conversation state. Only an adapter that stores search
+indices keeps agents.
+
+**A retriever agent finds through search indices and embeds nothing of its own.** Its
+configuration references indices, optionally narrowed to their relation groups; a fact of
+a relation is found by the planner choosing a relation group per question, and an exact
+structural condition is a filter of up to two hops. Answer fields, answer-field length and
+the similarity threshold are the agent's own settings. Retrieval runs the index search in
+process — no per-agent vectors, no in-memory vector cache, no preparation step and no
+snapshot of the data. A question makes two model calls, planning and answering; retrieval
+between them is deterministic, the planner may only choose what the user's words and the
+configuration support, no model call is retried automatically, and cancellation stops
+further work.
+
 **Exactly one env file is read, and it is always named.**
 `ENV_FILE` names it; without that it is `.env` in the working directory. Files never
 layer: a second file cannot quietly supply what the first omits, and a named file that is
@@ -609,7 +632,7 @@ no default ontology exists, and it ships as a major version bump. Deliberation:
 [adr/0018](adr/0018-multi-ontology-hard-cut.md).
 
 **Transfer scope** — export and import carry one ontology's design: schema, lenses,
-and their agents, saved queries and retrievers, the keyword language set, and the custom
+and their agents, saved queries and retriever agents, the keyword language set, and the custom
 search indices with the managed indices switched off. Never
 instance data, never the ontology's identity. A transfer document is portable into any
 ontology.
@@ -639,20 +662,3 @@ A hall is its own entity, linked to the exhibitor; the stand number is an exhibi
 property. This keeps exact hall filtering explicit without introducing a separate
 stand entity into the evaluation dataset.
 
-**Saved retrievers are a separate lens-local resource.** Each definition has a key,
-name, description, configuration version and structured configuration. Keys are unique
-within the lens. Copying creates an independent identity; moving within the same
-ontology preserves identity and is atomic. Neither operation overwrites a target key,
-and both validate the current target lens. Cross-ontology portability is an explicit
-JSON configuration copy with target validation, never a shared live definition.
-Retriever definitions travel with their lens in design transfer and are deleted with
-it. Invalidated definitions remain readable and exportable, while execution checks the
-current lens and rejects invalid configurations. Configuration storage carries no
-vectors, prepared snapshots, credentials or conversation state.
-
-**Retriever execution keeps its vectors in memory.**
-Selected text fields use a separate in-memory embedding cache; existing persisted embeddings
-and their storage format are unchanged. Planning and answering are the two model calls;
-retrieval and reranking are deterministic and embedding-based. The prototype emits
-answer deltas and phase metadata, disables automatic model retries and propagates
-caller cancellation to embedding requests.

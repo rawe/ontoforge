@@ -110,8 +110,9 @@ is in storage, where reads report it invalid.
 
 The agent is loaded from storage by lens and key and checked against the lens again; a
 request can never supply or override a configuration, so changes run once saved. A
-question makes exactly two model calls — plan and answer — with retrieval between them,
-and neither call is retried automatically. Cancelling the request stops further work.
+question makes two model calls — plan and answer — with retrieval between them, or three
+when a follow-up's planning is repeated once ([below](#planning)); no other model call is
+repeated, and a failed call is never retried. Cancelling the request stops further work.
 
 ### Planning
 
@@ -137,9 +138,11 @@ condition needs another relation group and no filter covers it. A question no in
 answer returns no sub-query and a reason.
 
 **Queries are the planner's words; exact restrictions are the user's.** A query and its
-variants may be phrased freely — a follow-up restates its topic from the conversation.
-What restricts results exactly must come from the user: a filter value must occur in a
-verbatim quote of the current question or an earlier user message, never of an answer.
+variants may be phrased freely and may name an entity taken from an answer — a follow-up
+restates its topic from the conversation. Only what restricts results exactly must come
+from the user: a filter value must occur in a verbatim quote of the current question or
+an earlier user message, and a reference to previous results must rest on the user's own
+referring words. An answer's text is never evidence for a filter.
 
 Before anything is searched, the server checks the plan and leaves out what it cannot
 honour, naming each omission in the limitations the answer model receives: an index the
@@ -150,6 +153,15 @@ search. A mode the server cannot run is replaced by its first available one. A s
 left with no index, or without a query and with neither an applied filter nor a previous
 reference, is dropped. The question goes on with what remains; only a malformed plan, or
 one with neither sub-queries nor an `unsupportedReason`, refuses it.
+
+**A follow-up whose plan searches nothing is planned once more.** When the question has a
+conversation before it and its checked plan has no sub-query, only an `unsupportedReason`,
+the planning model is called a second time with the same input and an added instruction
+to restate the topic and all constraints from the conversation as sub-queries. The second
+plan is used; when it searches nothing either, the question is answered as unsupported.
+When the repeated call fails or returns a malformed plan, the first plan stands. Either
+way a limitation names the repetition. A question without a conversation is never
+planned twice.
 
 ### Retrieval
 
@@ -193,11 +205,14 @@ as an unassessed remainder, never as further matches. Scores never reach the ans
 model.
 
 The answer model replies in the language of the user's current question, from this
-evidence alone, names an
-entity only when the evidence supports every fact asked for, lists every supplied record
-for a pure exact list, explains an `unsupportedReason` as a data gap and respects every
-limitation. Search evidence does not prove that a result fits
-([../decisions.md](../decisions.md#interfaces)).
+evidence alone: the conversation only tells it what the question refers to and is never
+evidence. It names an entity only when the evidence supports every fact asked for; a
+result a filtered sub-query returned without a matched entry satisfies that sub-query's
+filters, not its query. It lists every supplied record for a pure exact list, explains an
+`unsupportedReason` as a data gap and respects every limitation. It states facts in plain
+words — never sub-queries, filter ids or paths, index keys or entity ids — and tells
+results with the same name apart by their fields. Search evidence does not prove that a
+result fits ([../decisions.md](../decisions.md#interfaces)).
 
 ### Follow-up questions
 
@@ -213,10 +228,12 @@ limitation.
 
 A reference the planner cannot restrict by — to such candidates, or with no verified
 results at all — is never answered as unsupported: the planner restates the earlier
-question's topic and constraints from the conversation, together with the new condition,
-as a fresh search. Any follow-up restates its topic in its search phrases, and a pronoun
-or a left-out subject stands for the entity the user asked about last — that of the
-latest turn that names one.
+question as a fresh search that carries all of its constraints, dropping none, together
+with the new condition. Any follow-up restates its topic in its search phrases. A pronoun
+or a left-out subject is resolved from the last exchange alone — the entity the last user
+message named, or, when that message named none, the one the answer to it named — never
+from an earlier exchange; the query names that entity. A follow-up the planner still
+answers as unsupported is planned once more ([above](#planning)).
 
 A token is bound to the ontology, lens, agent and configuration, lives ten minutes, and
 is kept for at most the last hundred turns of one server process. An expired token, or
@@ -228,8 +245,8 @@ the server uses the last eight turns.
 
 On request, the stream also reports what the agent did: the validated plan, one result
 row per entity and sub-query with what matched and its answer fields, the limitations,
-the number of index searches, phase timings and bounded traces of both model calls. The
-event format is in [../interfaces.md](../interfaces.md#retriever-agent-chat).
+the number of index searches, phase timings and bounded traces of every model call —
+the plan, a repeated plan, the answer. The event format is in [../interfaces.md](../interfaces.md#retriever-agent-chat).
 
 ## Copy, move and portable JSON
 

@@ -622,9 +622,9 @@ true, earlier `meta` events carry:
 | `results` | One row per entity and sub-query that found it, in fused order: `entityId`, `entityType`, `label`, `subQuery`, `matched` when the search ranked the entity, `answerFields` |
 | `limitations` | What the answer model was told limits the results |
 | `searchCalls` | The number of index searches run |
-| `timings` | Milliseconds: `plan`, `retrieve`, `answer`, `planModel`, `validation`, `search`, `context`, `firstDelta`, `answerModel`, `total` |
-| `modelIO` | Bounded system prompt, input and output traces of both model calls, with usage and finish reason where the provider reports them |
-| `llmCalls` | 2 |
+| `timings` | Milliseconds: `plan`, `retrieve`, `answer`, `planModel`, `validation`, `search`, `context`, `firstDelta`, `answerModel`, `total`; `planModel` and `validation` add up both planning calls when planning was repeated |
+| `modelIO` | Bounded system prompt, input and output traces of every model call, each with its `phase` — `plan`, `replan` for a follow-up's repeated planning, `answer` — and with usage and finish reason where the provider reports them |
+| `llmCalls` | The number of model calls: 2, or 3 when planning was repeated |
 
 `matched` has the form of a search hit's ([capabilities/search.md](capabilities/search.md#response)).
 A question needs a language-model provider; without an embedding provider it searches by

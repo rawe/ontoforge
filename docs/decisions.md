@@ -590,11 +590,14 @@ a relation is found by the planner choosing a relation group per question, and a
 structural condition is a filter of up to two hops. Answer fields, answer-field length and
 the similarity threshold are the agent's own settings. Retrieval runs the index search in
 process — no per-agent vectors, no in-memory vector cache, no preparation step and no
-snapshot of the data. A question makes two model calls, planning and answering; retrieval
-between them is deterministic, no model call is retried automatically, and cancellation
-stops further work. The planner phrases queries freely but chooses only what the
-configuration allows, and every exact restriction — a filter value, a reference to
-previous results — needs the user's own words; the server leaves out what fails these
+snapshot of the data. A question makes two model calls, planning and answering;
+retrieval between them is deterministic, and cancellation stops further work. No model
+call is retried automatically, with one exception: a follow-up whose plan searches
+nothing and only names an unsupported reason is planned once more, the second plan is
+used, and a limitation says so — at most three model calls. The planner phrases queries
+freely, may name an entity taken from an answer, but chooses only what the configuration
+allows, and every exact restriction — a filter value, a reference to previous results —
+needs the user's own words, never an answer's; the server leaves out what fails these
 checks, names it as a limitation and answers with the rest.
 
 **Exactly one env file is read, and it is always named.**

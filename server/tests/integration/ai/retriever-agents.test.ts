@@ -2,7 +2,10 @@
  * Retriever agents with a real planner and answer model (spec §15, AI
  * row): the planner picks the index whose relation group holds the asked
  * fact, and a question about two relations is answered by fusing two
- * sub-queries or by a sub-query plus a filter. The suite's env has no
+ * sub-queries or by a sub-query plus a filter. A second ontology replays
+ * the follow-up sequences of the end-to-end run (person~default plus an
+ * employment index, a city filter): a pronoun after a question that named
+ * no person, and a reference to searched results. The suite's env has no
  * embedding provider, so the indices search by keywords.
  *
  * Configuration comes from the suite's own env file (`env/test-ai.env`);
@@ -25,6 +28,9 @@ type Row = Record<string, any>;
 const O = "agent_ai";
 const MODEL = `/api/ontologies/${O}/model`;
 const RUNTIME = `/api/ontologies/${O}/runtime/lenses/all`;
+const F = "agent_ai_follow";
+const F_MODEL = `/api/ontologies/${F}/model`;
+const F_RUNTIME = `/api/ontologies/${F}/runtime/lenses/all`;
 
 let app: FastifyInstance | null = null;
 let skipReason: string | null = null;
@@ -36,10 +42,14 @@ async function post(url: string, payload: object, expected = 201): Promise<Row> 
 }
 
 /** Ask the agent; the stream's events, checked for one terminal `final`. */
-async function ask(message: string, history: Row[] = []): Promise<{ reply: string; meta: Row }> {
+async function ask(
+  message: string,
+  history: Row[] = [],
+  runtime = RUNTIME,
+): Promise<{ reply: string; meta: Row }> {
   const res = await app!.inject({
     method: "POST",
-    url: `${RUNTIME}/retriever-agents/people/chat`,
+    url: `${runtime}/retriever-agents/people/chat`,
     payload: { message, history, diagnostics: true },
   });
   expect(res.statusCode, res.body).toBe(200);
@@ -134,6 +144,76 @@ beforeAll(async () => {
     },
   });
   expect(saved.statusCode, saved.body).toBe(201);
+
+  // The end-to-end run's pairing traps: Ada is CTO at ACME and lives in
+  // London; Bob works at ACME (and is CTO elsewhere) and lives in Berlin.
+  await post("/api/ontologies", { key: F });
+  await post(`${F_MODEL}/lenses`, { key: "all", name: "All" });
+  await post(`${F_MODEL}/entity-types`, { key: "person", displayName: "Person", description: "A person." });
+  await post(`${F_MODEL}/entity-types`, { key: "company", displayName: "Company", description: "A company." });
+  await post(`${F_MODEL}/entity-types`, { key: "city", displayName: "City", description: "A city." });
+  const employs = await post(`${F_MODEL}/relation-types`, {
+    key: "works_for", displayName: "Works for", sourceEntityTypeKey: "person", targetEntityTypeKey: "company",
+  });
+  await post(`${F_MODEL}/relation-types/${employs.relationTypeId}/properties`, { key: "role", displayName: "Role", dataType: "string" });
+  await post(`${F_MODEL}/relation-types`, {
+    key: "lives_in", displayName: "Lives in", sourceEntityTypeKey: "person", targetEntityTypeKey: "city",
+  });
+  await post(`${F_MODEL}/search-indices`, {
+    key: "person_employment",
+    name: "People by employment",
+    description: "People with each of their roles at a company, one entry per employment. Use for questions like \"who is CTO at ACME\".",
+    entityType: "person",
+    fields: ["name"],
+    relations: [{ relationType: "works_for", direction: "outgoing", fields: ["role"], target: { company: ["name"] }, label: "Employment" }],
+  });
+  const f: Record<string, string> = {};
+  for (const [key, type, name] of [
+    ["ada", "person", "Ada Lovelace"],
+    ["bob", "person", "Bob Martin"],
+    ["clara", "person", "Clara Schmidt"],
+    ["ines", "person", "Ines Wagner"],
+    ["frank", "person", "Frank Weber"],
+    ["acme", "company", "ACME"],
+    ["foo", "company", "Foo Labs"],
+    ["schneider", "company", "Schneider & Partner"],
+    ["berlin", "city", "Berlin"],
+    ["london", "city", "London"],
+    ["hamburg", "city", "Hamburg"],
+    ["zurich", "city", "Zürich"],
+  ] as const) {
+    f[key] = (await post(`${F_RUNTIME}/entities/${type}`, { name }))._id;
+  }
+  const link = (type: string, from: string, to: string, props = {}) =>
+    post(`${F_RUNTIME}/relations/${type}`, { fromEntityId: f[from], toEntityId: f[to], ...props });
+  await link("works_for", "ada", "acme", { role: "CTO" });
+  await link("works_for", "ada", "foo", { role: "Advisor" });
+  await link("works_for", "bob", "foo", { role: "CTO" });
+  await link("works_for", "bob", "acme", { role: "Software Engineer" });
+  await link("works_for", "clara", "acme", { role: "Advisor" });
+  await link("works_for", "ines", "acme", { role: "CFO" });
+  await link("works_for", "frank", "schneider", { role: "Steuerberater" });
+  await link("lives_in", "ada", "london");
+  await link("lives_in", "bob", "berlin");
+  await link("lives_in", "clara", "hamburg");
+  await link("lives_in", "ines", "zurich");
+  await link("lives_in", "frank", "berlin");
+  await drainSearchWork({ ontologyKey: F });
+  const followAgent = await app.inject({
+    method: "PUT",
+    url: `${F_MODEL}/lenses/all/retriever-agents/people`,
+    payload: {
+      name: "People",
+      description: "Finds people by their jobs and homes.",
+      configVersion: 2,
+      config: {
+        indices: [{ index: "person~default" }, { index: "person_employment" }],
+        filters: [{ id: "city", entityType: "person", path: [{ relationTypeKey: "lives_in", direction: "outgoing" }], field: "name" }],
+        answerFields: { person: ["name"] },
+      },
+    },
+  });
+  expect(followAgent.statusCode, followAgent.body).toBe(201);
 }, 120_000);
 
 afterAll(async () => {
@@ -201,5 +281,53 @@ describe("retriever agent with a real model", () => {
     expect((meta.plan.subQueries as Row[]).length, JSON.stringify(meta.plan)).toBeGreaterThan(0);
     // Ada works at ACME and lives in Berlin; Eve works at ACME but lives in Hamburg.
     expect(meta.results[0].label).toBe("Ada Lovelace");
+  });
+});
+
+describe("follow-up sequences of the end-to-end run", () => {
+  const queriesOf = (plan: Row) => JSON.stringify((plan.subQueries as Row[]).map((sub) => [sub.query, ...sub.variants]));
+
+  ifAvailable("resolves 'his' to the person the latest answer named when the question named none", async () => {
+    // q2 names no person; Bob exists only in its answer. Ada, of the earlier
+    // exchange, fits "role there" (CTO at ACME) better — the trap.
+    const { reply, meta } = await ask("And what is his role there?", [
+      { role: "user", content: "Who is CTO at ACME?" },
+      {
+        role: "assistant",
+        content:
+          "Ada Lovelace is the CTO at ACME. Others at ACME are Clara Schmidt (Advisor), Ines Wagner (CFO) and " +
+          "Bob Martin (Software Engineer); Bob Martin is CTO at Foo Labs, not at ACME.",
+      },
+      { role: "user", content: "Who works at ACME and lives in Berlin?" },
+      { role: "assistant", content: "Bob Martin works at ACME and lives in Berlin." },
+    ], F_RUNTIME);
+    const queries = queriesOf(meta.plan);
+    expect(meta.plan.subQueries.length, JSON.stringify(meta.plan)).toBeGreaterThan(0);
+    expect(queries).toMatch(/bob/i);
+    expect(queries).not.toMatch(/ada/i);
+    expect(meta.results[0].label).toBe("Bob Martin");
+    expect(reply).toMatch(/software engineer/i);
+  });
+
+  ifAvailable("restates a reference to searched results with the earlier constraint and the new one", async () => {
+    // As in the end-to-end run, q5 searched by query and filter: its results
+    // are candidates, not a verified list, so nothing is referable.
+    const { reply, meta } = await ask("Which of these work at ACME?", [
+      { role: "user", content: "List everyone who lives in Berlin." },
+      { role: "assistant", content: "Bob Martin and Frank Weber live in Berlin." },
+    ], F_RUNTIME);
+    const subQueries = meta.plan.subQueries as Row[];
+    expect(meta.plan.unsupportedReason ?? null, JSON.stringify(meta.plan)).toBeNull();
+    expect(subQueries.length, JSON.stringify(meta.plan)).toBeGreaterThan(0);
+    // Both constraints: Berlin as the city filter or its own sub-query, and ACME.
+    const berlin = subQueries.some(
+      (sub) =>
+        sub.filters.some((filter: Row) => filter.id === "city" && /berlin/i.test(filter.value)) ||
+        /berlin/i.test(JSON.stringify([sub.query, ...sub.variants])),
+    );
+    expect(berlin, JSON.stringify(meta.plan)).toBe(true);
+    expect(queriesOf(meta.plan), JSON.stringify(meta.plan)).toMatch(/acme/i);
+    expect((meta.results as Row[]).map((result) => result.label)).toContain("Bob Martin");
+    expect(reply).toContain("Bob");
   });
 });

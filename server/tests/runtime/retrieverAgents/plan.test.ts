@@ -176,18 +176,26 @@ describe("planner prompt", () => {
     expect(PLANNER).toContain('"filters":[{"id":"city","value":"Berlin","quote":"lives in Berlin"}]');
   });
 
-  it("resolves a follow-up's pronoun to the latest entity asked about, with an example outside any fixture's domain", () => {
-    expect(PLANNER).toContain("to the most recent person or entity the user asked about");
-    expect(PLANNER).toContain("never one of an earlier turn");
+  it("resolves a follow-up's pronoun to the latest exchange — the latest answer's entity when the question named none", () => {
+    expect(PLANNER).toContain("from the last exchange of the history alone");
+    expect(PLANNER).toContain("when it asked for one without naming it, the one that answer named; never one of an earlier exchange");
+    expect(PLANNER).toContain('"Where was he born?" → query "Vincent van Gogh birthplace"');
     expect(PLANNER).toContain('"When was it published?" after "Which novel did Jane Austen write first?"');
     expect(PLANNER).not.toContain("Since when?");
   });
 
-  it("restates an unresolvable reference to earlier results as a fresh search, never as unsupported", () => {
+  it("lets queries use assistant text; only filter quotes need the user's words", () => {
+    expect(PLANNER).toContain("queries may use ASSISTANT text; only filter values need user quotes");
+    expect(PLANNER).toContain("Never use ASSISTANT text as filter evidence — this concerns filter quotes only, never the query.");
+  });
+
+  it("restates an unresolvable reference to earlier results as a fresh search with all constraints, never as unsupported", () => {
     expect(PLANNER).toContain(
       "A reference to earlier results while previousVerifiedResults is null is still answerable: " +
         "never answer it with unsupportedReason or subQueries:[]",
     );
+    expect(PLANNER).toContain("carries all of its constraints and the new condition — drop none");
+    expect(PLANNER).toContain('"query":"speaks Spanish","variants":[],"mode":"<first mode>","filters":[{"id":"city","value":"Lisbon","quote":"lives in Lisbon"}]');
     expect(PLANNER).toContain("a follow-up or a reference to earlier results is never such a case");
   });
 });

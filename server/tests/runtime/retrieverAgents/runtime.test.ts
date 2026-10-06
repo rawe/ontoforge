@@ -2,7 +2,8 @@
  * The retriever-agent pipeline with a fake model and a mocked search
  * engine: exactly planner + answer model, the stream's events and
  * diagnostics `meta` shapes (contract), the follow-up token, planner
- * failures before any answer, cancellation, and follow-up references.
+ * failures before any answer, cancellation, follow-up references, and the
+ * one repeated plan for a follow-up whose first plan searched nothing.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -25,7 +26,7 @@ vi.mock("../../../src/runtime/search/indexSearch.js", () => engine);
 import { createAiModel } from "../../../src/core/ai.js";
 import type { RuntimeStore, SearchIndexRecord, SearchIndexStore } from "../../../src/core/ports.js";
 import type { LoadedSchema } from "../../../src/runtime/schemaCache.js";
-import { PLANNER_RESPONSE_FORMAT } from "../../../src/runtime/retrieverAgents/plan.js";
+import { PLANNER, PLANNER_RESPONSE_FORMAT, REPLAN } from "../../../src/runtime/retrieverAgents/plan.js";
 import { chat, type RunnableAgent } from "../../../src/runtime/retrieverAgents/runtime.js";
 import { CONFIG, LENS, SCHEMA } from "./fixture.js";
 
@@ -167,9 +168,85 @@ describe("retriever agent pipeline", () => {
     expect(events.at(-1)).toEqual({ type: "meta", turnToken: expect.any(String) });
   });
 
+  describe("a follow-up whose first plan searched nothing", () => {
+    const unsupported = { content: JSON.stringify({ subQueries: [], unsupportedReason: "already answered" }) };
+    const history = [
+      { role: "user" as const, content: "Who works at ACME and lives in Berlin?" },
+      { role: "assistant" as const, content: "Bob works at ACME and lives in Berlin." },
+    ];
+    async function followUp() {
+      const events: Record<string, unknown>[] = [];
+      await chat("all", agent, "And what is his role there?", history, { signal: new AbortController().signal, onToolEvent: async (e) => { events.push(e); } }, undefined, true);
+      const summary = events.find((e) => e.type === "meta" && e.llmCalls !== undefined)!;
+      const limitations = events.find((e) => e.type === "meta" && e.results)!.limitations as string[];
+      return { events, summary, limitations };
+    }
+
+    it("is planned once more with the appended instruction, and the second plan is used", async () => {
+      engine.rankThroughIndices.mockResolvedValue([]);
+      fake.invoke.mockResolvedValueOnce(unsupported).mockResolvedValueOnce(planned([sub({ query: "Bob role at ACME", filters: [] })]));
+      const { summary, limitations } = await followUp();
+      expect(fake.invoke).toHaveBeenCalledTimes(2);
+      expect(fake.invoke.mock.calls[0]![0][0].content).toBe(PLANNER);
+      expect(fake.invoke.mock.calls[1]![0][0].content).toBe(`${PLANNER}\n${REPLAN}`);
+      // Same planner input both times.
+      expect(fake.invoke.mock.calls[1]![0][1].content).toBe(fake.invoke.mock.calls[0]![0][1].content);
+      expect(engine.rankThroughIndices.mock.calls[0]![2].query).toBe("Bob role at ACME");
+      expect(fake.stream).toHaveBeenCalledTimes(1);
+      expect(summary.llmCalls).toBe(3);
+      expect((summary.modelIO as { phase: string }[]).map((c) => c.phase)).toEqual(["plan", "replan", "answer"]);
+      expect(limitations).toContain("Planning was repeated once: the first plan for this follow-up searched nothing.");
+    });
+
+    it("still empty, answers as unsupported", async () => {
+      fake.invoke.mockResolvedValue(unsupported);
+      const { summary, limitations } = await followUp();
+      expect(fake.invoke).toHaveBeenCalledTimes(2);
+      expect(engine.rankThroughIndices).not.toHaveBeenCalled();
+      const answerInput = JSON.parse(fake.stream.mock.calls[0]![0][1].content);
+      expect(answerInput.unsupportedReason).toBe("already answered");
+      expect(answerInput.subQueries).toEqual([]);
+      expect(summary.llmCalls).toBe(3);
+      expect(limitations).toContain(
+        "Planning was repeated once: the first plan for this follow-up searched nothing; the repeated plan searched nothing either.",
+      );
+    });
+
+    it("a failing repeated plan leaves the first one standing", async () => {
+      fake.invoke.mockResolvedValueOnce(unsupported).mockResolvedValueOnce({ content: "not json" });
+      const { limitations } = await followUp();
+      const answerInput = JSON.parse(fake.stream.mock.calls[0]![0][1].content);
+      expect(answerInput.unsupportedReason).toBe("already answered");
+      expect(limitations).toContain("Planning was repeated once: the first plan for this follow-up searched nothing; the repeated plan failed.");
+    });
+
+    it("a first question answered as unsupported is not planned again", async () => {
+      fake.invoke.mockResolvedValue(unsupported);
+      const { events } = await run("What is Ada's salary?");
+      expect(fake.invoke).toHaveBeenCalledTimes(1);
+      expect(events.find((e) => e.type === "meta" && e.llmCalls !== undefined)!.llmCalls).toBe(2);
+    });
+  });
+
   it("asks the answer model to answer in the language of the current question", async () => {
     await run("Everyone in Berlin", false);
     expect(fake.stream.mock.calls[0]![0][0].content).toContain("in the language of the user's current question");
+  });
+
+  it("tells the answer model that history is no evidence and an unmatched filtered result satisfies only the filter", async () => {
+    await run("Everyone in Berlin", false);
+    const prompt = fake.stream.mock.calls[0]![0][0].content as string;
+    expect(prompt).toContain("The history only tells you what the question refers to");
+    expect(prompt).toContain("it is never evidence — do not confirm, dispute or add facts from it");
+    expect(prompt).toContain("A match with filters but no index entry (no \"text\") satisfies only those filters, not its sub-query's query");
+  });
+
+  it("tells the answer model to keep internals out of the answer and state facts in plain words", async () => {
+    await run("Everyone in Berlin", false);
+    const prompt = fake.stream.mock.calls[0]![0][0].content as string;
+    expect(prompt).toContain("Never mention sub-queries, filter ids or paths, index keys or entity ids");
+    expect(prompt).toContain('state facts in plain words (for example "lives in Berlin")');
+    expect(prompt).not.toContain("IDs only where needed");
   });
 
   it("gives the answer model the filter facts each result satisfies", async () => {

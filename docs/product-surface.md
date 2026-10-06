@@ -67,10 +67,15 @@ Two stacked dropdowns in the sidebar, one per containment level — never a comb
   and to its Studio when no remembered lens survives that check.
 - The **lens switcher** sits below it in the Workbench only, listing only the current
   ontology's lenses. Choosing one records it as that ontology's last-used lens.
+
+A lens becomes the last-used one only once the Workbench has loaded its schema. A
+remembered lens that answers not found, or is no longer among the ontology's lenses, is
+forgotten; the Studio's way back then leads to the start page.
 - Both dropdowns end in a "Manage…" entry leading to the start page.
 
-Navigating to an unknown ontology or lens shows a dedicated not-found state which
-forgets the remembered lens and offers the start page; it never silently redirects.
+Navigating to an unknown ontology — in the Workbench or the Studio — or to an unknown
+lens shows a dedicated not-found state which forgets the remembered lens and offers the
+start page; it never silently redirects.
 Per-lens client state (see [Local state](#local-state)) is keyed by ontology plus lens,
 so switching either never leaks a working set, a chat or a query history across a
 boundary — not even between same-keyed lenses of two ontologies.
@@ -240,7 +245,9 @@ Creating a type asks for a display name, a key and a description. The key is pro
 the display name (lower-cased, non-alphanumerics collapsed to underscores, leading digits
 dropped), validated live against the key pattern, and permanent — the form says so.
 Creating an entity type additionally asks for the key of its name property, `name` by
-default and validated against the same pattern. Creating a relation type additionally asks
+default and validated against the same pattern; its dialog explains that the type belongs
+to this ontology, where every lens can include it, and that the name property's value
+labels instances. Creating a relation type additionally asks
 for source and target entity types, which are permanent too.
 
 ### Type editor
@@ -362,8 +369,8 @@ is new, changed or saved, shows the estimate for the current draft — entries a
 time overall, per representation, and from how many entities, marked where a default rate
 stands in for a measured one — or why there is none yet (no entity type, open issues), and
 the field and group counts against their limits. Create (for a new index) or Save, and
-Discard. Issues from the client's own checks, the server's preview and a refused save
-appear in a validation panel and next to their fields; a fresh new draft shows none
+Discard. Issues from the client's own checks — the key's among them — the server's
+preview and a refused save appear in a validation panel and next to their fields; a fresh new draft shows none
 until it is edited. Saving a new index opens it at its own address.
 Leaving with unsaved changes asks first (stay, or discard and leave).
 
@@ -384,7 +391,9 @@ for anything else.
 Three operations, each with its own explanation. See
 [capabilities/transfer.md](capabilities/transfer.md).
 
-- **Export** — downloads the ontology's whole design as a JSON file.
+- **Export** — downloads the ontology's whole design — entity types, relation types,
+  properties, search indices, keyword languages, lenses, agents, retriever agents and saved
+  queries — as a JSON file named after the ontology key ("Download `<ontologyKey>`.json").
 - **Import** — takes a JSON file and writes it into the current ontology. It reports
   malformed JSON before sending anything, and on a
   key conflict explains that pre-existing objects with the same keys block the import and
@@ -713,7 +722,8 @@ selected answer (the latest by default) in four tabs, filling while the question
 - **Results** — per sub-query, best first, each result's type, label and
   [matched-via](#matched-via) line; expanding one shows the answer fields sent as
   evidence and the index that found it.
-- **Model calls** — the planner and response calls with token usage, finish reason,
+- **Model calls** — each model call under its name — Planner, Planner (repeated) when a
+  follow-up's planning was repeated, Response — with token usage, finish reason,
   instructions, input and output, marked where the trace is truncated.
 
 No score is shown anywhere. See
@@ -923,7 +933,7 @@ the address.
 Per-lens state is keyed by ontology **and** lens because lens keys are unique only
 within their ontology — two ontologies' `default` lenses must never share a canvas or a
 chat. The remembered last-used lens exists per ontology, and only to feed the ontology
-switcher's Workbench landing; nothing at the root consumes it.
+switcher's Workbench landing and the Studio's way back; nothing at the root consumes it.
 
 The working set stores only identifiers, type keys, positions and pin flags — entities and
 relations are re-fetched on restore, so a stale canvas can never display stale property

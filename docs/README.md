@@ -257,6 +257,16 @@ in the schema, whereas a neighbour is an instance in a traversal result.
 
 **Query** — the plain text submitted to ranked search.
 
+**Default search** — ranked search over the managed indices of the searched types,
+selected by search kind and search strategy.
+
+**Index search** — ranked search through search indices named by key, or every index the
+lens can search, selected by a mode: `semantic`, `keyword` or `hybrid`. It alone ranks
+custom indices and relation entries.
+
+**Search catalog** — the list of search indices a lens can search, each projected
+through the lens, from which an index search chooses.
+
 **Literal term** — the entity list's case-insensitive substring filter over string values.
 
 **Single-type search** — ranking over one named entity type.

@@ -159,6 +159,16 @@ describe.skipIf(!ollamaUp)("MCP search (Ollama)", () => {
     expect(documents.hits).toEqual([]);
   });
 
+  it.skipIf(settings.DB_BACKEND !== "postgres")("with index searches that index under the same fixed floor", async () => {
+    const found = json(await call("search", { query: "distributed systems engineer", index: "person~default" }));
+    expect(found).toMatchObject({ mode: "hybrid", minSimilarity: TOOL_MIN_SIMILARITY });
+    const top = (found.hits as Row[])[0]!;
+    expect((top.entity as Row).name).toBe("Alice Chen");
+    expect(top.matched).toMatchObject({ index: "person~default", partKind: "self" });
+    const nonsense = json(await call("search", { query: "xqzv plork wumble", index: ["person~default", "person~bio"] }));
+    expect(nonsense.hits).toEqual([]);
+  });
+
   it("exposes no min_score input (documented interface difference)", async () => {
     const tools = await client.listTools();
     const tool = tools.tools.find((t) => t.name === "search");
@@ -168,8 +178,10 @@ describe.skipIf(!ollamaUp)("MCP search (Ollama)", () => {
       "entity_type_key",
       "fields",
       "filters",
+      "index",
       "limit",
       "query",
+      "relations",
     ]);
     expect(properties).not.toHaveProperty("min_score");
     for (const searchTool of tools.tools.filter((item) => ["search", "search_documents"].includes(item.name))) {

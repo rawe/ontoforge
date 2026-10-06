@@ -176,6 +176,18 @@ describe("SearchIndexDefinition (wire format)", () => {
     expect(SearchIndexDefinition.safeParse({ ...base, description: "x" }).success).toBe(true);
   });
 
+  it("requires a name that is not blank", () => {
+    const base = { key: "people", description: "People by name", entityType: "person" };
+    for (const name of ["", "  \t"]) {
+      const parsed = SearchIndexDefinition.safeParse({ ...base, name });
+      expect(parsed.success).toBe(false);
+      expect(parsed.error!.issues).toEqual([
+        expect.objectContaining({ path: ["name"], message: "Name the index." }),
+      ]);
+    }
+    expect(SearchIndexDefinition.safeParse({ ...base, name: "P" }).success).toBe(true);
+  });
+
   it("rejects keys outside the shared key rules, managed keys included", () => {
     const base = { name: "People", description: "x", entityType: "person" };
     for (const key of ["person~default", "Person", "1st", "a-b", "x".repeat(65)]) {

@@ -41,9 +41,11 @@ const EXPORT_FIXTURE = JSON.parse(
 
 /** Order-normalize a payload and drop `includes: null` (the fixture's
  * spelling of "absent" — this export omits the key). Index inclusions
- * come in the database's collation order. */
+ * come in the database's collation order; an adapter without search
+ * indices exports neither them nor the search-index part. */
 function normalize(payload: Row): Row {
   const clone = JSON.parse(JSON.stringify(payload)) as Row;
+  if (keepsOwnSearchStorage) delete clone.searchIndices;
   const byKey = (a: Row, b: Row) => String(a.key).localeCompare(String(b.key));
   for (const et of (clone.entityTypes as Row[]) ?? []) {
     (et.properties as Row[]).sort(byKey);
@@ -154,13 +156,14 @@ describe("round-trip against a stored export document", () => {
   it("the export document carries no ontology identity", async () => {
     await importInto("test_ont", EXPORT_FIXTURE);
     const exported = await exportFrom("test_ont");
+    // An adapter without search indices writes no search-index part.
     expect(Object.keys(exported).sort()).toEqual([
       "entityTypes",
       "formatVersion",
       "keywordLanguages",
       "lenses",
       "relationTypes",
-      "searchIndices",
+      ...(keepsOwnSearchStorage ? [] : ["searchIndices"]),
     ]);
   });
 });

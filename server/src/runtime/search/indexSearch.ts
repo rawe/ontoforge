@@ -26,6 +26,9 @@
  * `minScore` drops semantic entries below it — on the `(1 + cosine) / 2`
  * scale — before grouping, so it applies to an entity's best semantic
  * entry; keyword entries are never touched.
+ *
+ * The lens's catalog (`searchIndexCatalog`) lists the indices it may
+ * search, projected through it, for clients and agents to choose from.
  */
 
 import { getEmbeddingProvider } from "../../core/embedding.js";
@@ -40,8 +43,9 @@ import type {
   SearchIndexRecord,
   SearchIndexStore,
 } from "../../core/ports.js";
+import { documentField } from "../../core/searchComposition.js";
 import type { SearchRepresentation } from "../../core/searchIndex.js";
-import { disabledIndexKeys } from "../../core/searchPipeline.js";
+import { disabledIndexKeys, type SearchIndexState } from "../../core/searchPipeline.js";
 import {
   availableIndices,
   fuseModes,
@@ -56,6 +60,7 @@ import {
   ENTITY_NEIGHBOR_ALWAYS_FIELDS,
   filterEntityProperties,
 } from "../readHelpers.js";
+import { listSearchIndexStatuses } from "../indexing/status.js";
 import { loadSchema, type LoadedSchema } from "../schemaCache.js";
 import { relativeScore } from "./fusion.js";
 import { resolveSearchFilters } from "./request.js";
@@ -155,6 +160,85 @@ export async function searchableIndices(
  * is the default. */
 export function availableModes(): SearchMode[] {
   return getEmbeddingProvider() === null ? ["keyword"] : ["hybrid", "keyword", "semantic"];
+}
+
+// ---------------------------------------------------------------------------
+// Catalog
+// ---------------------------------------------------------------------------
+
+/** One index of a lens's search catalog. */
+export interface SearchIndexCatalogEntry {
+  key: string;
+  kind: SearchIndexRecord["kind"];
+  name: string;
+  description: string;
+  entityType: string;
+  /** The root's fields the lens shows. */
+  fields: string[];
+  /** The relation groups the lens shows — a group whose relation type, or
+   * the entity type on its other end, the lens hides is skipped at query
+   * time and not listed. `label`: the group's, else the relation type's
+   * display name. */
+  relations: { relationType: string; direction: "outgoing" | "incoming"; label: string }[];
+  /** The document an index reads passages of — null when it reads none,
+   * or the lens hides it. */
+  documentProperty: string | null;
+  /** The representations the index has enabled that can rank now:
+   * semantic only with an embedding provider. */
+  modes: SearchRepresentation[];
+  status: SearchIndexState;
+}
+
+/**
+ * The indices the lens may search (`searchableIndices`: switched-off
+ * managed ones never), each projected through the lens, with its build
+ * state. Adapter without search indices -> disabled feature.
+ */
+export async function searchIndexCatalog(
+  lensKey: string,
+  store: RuntimeStore,
+): Promise<SearchIndexCatalogEntry[]> {
+  const indexStore = indexStoreOf(store);
+  const loaded = await loadSchema(lensKey, store);
+  const [indices, statuses] = await Promise.all([
+    searchableIndices(loaded, indexStore),
+    listSearchIndexStatuses(indexStore.ontologyKey),
+  ]);
+  const stateOf = new Map(statuses.map((status) => [status.key, status.state] as const));
+  const semantic = getEmbeddingProvider() !== null;
+  return indices.map((index) => {
+    const { definition } = index;
+    const root = loaded.scoped.entityTypes[definition.entityType]!;
+    const relations = definition.relations.flatMap((group) => {
+      const relationType = loaded.scoped.relationTypes[group.relationType];
+      if (relationType === undefined) return [];
+      const otherEnd =
+        group.direction === "outgoing" ? relationType.toEntityTypeKey : relationType.fromEntityTypeKey;
+      if (loaded.scoped.entityTypes[otherEnd] === undefined) return [];
+      return [
+        {
+          relationType: group.relationType,
+          direction: group.direction,
+          label: group.label ?? relationType.displayName,
+        },
+      ];
+    });
+    const document = documentField(definition, loaded.full);
+    return {
+      key: index.key,
+      kind: index.kind,
+      name: definition.name,
+      description: definition.description,
+      entityType: definition.entityType,
+      fields: definition.fields.filter((key) => key in root.properties),
+      relations,
+      documentProperty: document !== null && document in root.properties ? document : null,
+      modes: (["semantic", "keyword"] as const).filter(
+        (representation) => definition[representation].enabled && (representation === "keyword" || semantic),
+      ),
+      status: stateOf.get(index.key) ?? "stale",
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -437,6 +521,9 @@ export interface IndexSearchRequest {
   minScore?: number | null;
   /** Entities, 1..100; default 10. */
   limit?: number;
+  /** Project each entity to these properties (`_id`, `_entityTypeKey`
+   * always kept); absent: every property the lens shows. */
+  fields?: string[] | null;
 }
 
 export interface IndexSearchHit {
@@ -545,7 +632,7 @@ export async function searchByIndices(
     minScore,
     limit,
   });
-  const entities = await readHitEntities(loaded, store, hits, null);
+  const entities = await readHitEntities(loaded, store, hits, request.fields);
   const present = hits.filter((hit) => entities.has(hit.entityId));
   const matched = await describeMatches(loaded, store, present);
   return {

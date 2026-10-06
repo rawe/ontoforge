@@ -54,6 +54,7 @@ import { search } from "./search/entry.js";
 
 export { parseFilters, parseFilterConditions, docLengthKey } from "./readHelpers.js";
 export { search } from "./search/entry.js";
+export { searchByIndices, searchIndexCatalog } from "./search/indexSearch.js";
 
 type Row = Record<string, unknown>;
 

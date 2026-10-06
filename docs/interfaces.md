@@ -506,6 +506,8 @@ Semantics: [capabilities/search.md](capabilities/search.md).
 | Method | Path | Purpose | Parameters |
 |---|---|---|---|
 | GET | `/search` | Rank entities by properties, document passages, or both | `q`, `type`, repeatable `in`, `strategy`, `min_similarity`, `document.property`, `limit`, `fields`, `filter.*` |
+| GET | `/search-indices` | The lens's search catalog: the indices it can search, projected through it | — |
+| POST | `/search` | Rank entities through chosen search indices | body: `indices`, `query`, `mode`, `relations`, `filters`, `minScore`, `limit`, `fields` |
 
 `q` is required. Omit `type` for cross-type search; `in` accepts `properties` and
 `document`, defaulting to both. `strategy` accepts `semantic`, `keyword`, `keyword-any`,
@@ -521,6 +523,28 @@ the entity — carry nullable semantic/keyword evidence including the native key
 `relationId`, `target`, `snippet`, `charOffset`, `charLength`. Scores are not confidence.
 Evidence scope, `matched` and null semantics are defined in
 [the search response contract](capabilities/search.md#response).
+
+The catalog lists, in key order, each index as `key`, `kind` (`default`, `passage` or
+`custom`), `name`, `description`, `entityType`, `fields`, `relations` — each
+`{relationType, direction, label}` — `documentProperty` (null when none), `modes` and
+`status`. Rules: [capabilities/search.md](capabilities/search.md#the-search-catalog).
+
+`POST /search` takes a JSON body. `query` is required; `indices` names index keys and
+defaults to every index the lens can search; `mode` accepts `semantic`, `keyword` or
+`hybrid` and defaults to the first available; `relations` lists relation types whose
+relation entries count; `filters` carries the `filter.*` keys of `GET /search` without
+the prefix, query paths included, each with a string value; `minScore`, 0–1, needs a
+mode that ranks semantically; `limit` counts entities, 1–100, default 10; `fields`
+projects each entity. The response carries `query`, `mode` and `hits`, each hit
+`entity`, `relativeScore` and `matched`. An unknown index key answers not found. A body
+of the wrong shape is rejected with `details.errors`; the request's rules — an index the
+lens cannot search at `indices.<i>`, a relation type at `relations.<i>` — are collected
+under `details.fields`; a mode that needs a missing embedding provider answers
+`FEATURE_DISABLED`. Rules:
+[capabilities/search.md](capabilities/search.md#index-search).
+
+Both routes answer `FEATURE_DISABLED` on an adapter without search indices; `GET /search`
+works on every adapter.
 
 ### Query
 
@@ -643,7 +667,7 @@ connection carries state.
 |---|---|---|
 | Mount | `/mcp/ontologies/{ontologyKey}/model` | `/mcp/ontologies/{ontologyKey}/runtime/lenses/{lensKey}` |
 | Bound to | One ontology | One ontology and one lens |
-| Tools | 28 | 20 |
+| Tools | 40 | 22 |
 
 ### How a mount is bound
 
@@ -738,7 +762,8 @@ Everything a client can do to instance data through one lens.
 | `delete_relation` | Delete a relation |
 | `get_neighbors` | An entity's local neighbourhood, with projection on both entities and relations |
 | `execute_query` | Run a read-only OQL query |
-| `search` | Rank entities by properties and documents, using the default strategy and the fixed similarity floor |
+| `list_search_indices` | The lens's search catalog, to choose indices for `search` |
+| `search` | Rank entities by properties and documents, using the default strategy and the fixed similarity floor; with `index`, through the named search indices |
 | `search_documents` | Rank entities by document passages under the same defaults; optionally restrict to one property |
 | `list_saved_queries` | Discover saved queries and their parameters |
 | `run_saved_query` | Execute a saved query with parameter values |
@@ -753,6 +778,14 @@ return the REST envelope and take no strategy and no `min_similarity`; they appl
 fixed floor of [capabilities/search.md](capabilities/search.md#similarity-floor) whenever
 the default strategy ranks semantically, echoed as `minSimilarity`. MCP also accepts
 filters and fields. See [capabilities/ai-agents.md](capabilities/ai-agents.md).
+
+On MCP, `search` also takes `index` — one index key or a list — and `relations`. With
+`index` it runs the index search of `POST /search` over those indices under its default
+mode and the same fixed floor, and answers `query`, `mode`, `minSimilarity` and `hits`;
+`relations` narrows their relation entries. `relations` without `index`, and
+`entity_type_key` with it, are refused. `list_search_indices` answers the catalog of
+`GET /search-indices`. On an adapter without search indices, `list_search_indices` and
+`search` with `index` answer a not-supported tool error. The agent search tools take neither argument.
 
 `write_document` has no REST counterpart of its own: over REST both document edit forms
 share one route, selected by the operation in the body.

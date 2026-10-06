@@ -54,7 +54,7 @@ are not carried — the imported schema derives them. The field is optional: wit
 payload has no custom index and every managed index on. Import adds the payload's
 custom indices and switched-off keys to the target's, and every index's entries are then
 built in the background ([below](#side-effects-of-import)). An adapter
-without search indices exports both lists empty, and its import validates the field and
+without search indices exports no `searchIndices`, and its import validates the field and
 keeps nothing of it.
 
 Each lens carries `indexInclusions`, the keys of the search indices it includes — managed
@@ -62,8 +62,10 @@ and custom alike — in key order
 ([ontology-lenses.md](ontology-lenses.md#search-through-a-lens)). Import writes each list
 as it comes once every index exists, in place of the managed indices the import would
 include in that lens on its own; a scoped lens without the field includes the managed
-indices of the types it exposes. An adapter without search indices exports every list
-empty, and its import validates them and keeps nothing of them.
+indices of the types it exposes. An adapter without search indices exports no
+`indexInclusions`, so importing its payload where indices are stored gives each scoped
+lens the managed indices of the types it exposes; its own import validates the lists and
+keeps nothing of them.
 
 ## The format version
 

@@ -61,6 +61,21 @@ const SearchQuery = z.looseObject({
   "document.property": z.union([z.string(), z.array(z.string())]).optional(),
 });
 
+/** `POST /search` — the index search. Only the shape is checked here;
+ * bounds, keys and modes are domain rules (`searchByIndices`), reported
+ * by field. `filters` carries the `filter.*` keys of `GET /search`
+ * without the prefix. */
+const IndexSearchPayload = z.object({
+  indices: z.array(z.string()).optional(),
+  query: z.string(),
+  mode: z.string().optional(),
+  relations: z.array(z.string()).optional(),
+  filters: z.record(z.string(), z.string()).optional(),
+  minScore: z.number().optional(),
+  limit: z.number().optional(),
+  fields: z.array(z.string()).optional(),
+});
+
 /** Arbitrary property payloads: shape is decided by the schema at runtime,
  * so the only static rule is "a JSON object". */
 const PropertyPayload = z.record(z.string(), z.unknown());
@@ -208,6 +223,29 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
           filter: parseFilters(q),
           document: { property: q["document.property"] as string | undefined },
         },
+        await getRuntimeStore(request.params.ontologyKey),
+      );
+    },
+  );
+
+  app.get(
+    "/search-indices",
+    { schema: { tags: ["runtime"], params: LensParams } },
+    async (request) =>
+      service.searchIndexCatalog(
+        request.params.lensKey,
+        await getRuntimeStore(request.params.ontologyKey),
+      ),
+  );
+
+  app.post(
+    "/search",
+    { schema: { tags: ["runtime"], params: LensParams, body: IndexSearchPayload } },
+    async (request) => {
+      const body = request.body;
+      return service.searchByIndices(
+        request.params.lensKey,
+        { ...body, mode: body.mode as import("./search/indexSearch.js").SearchMode | undefined },
         await getRuntimeStore(request.params.ontologyKey),
       );
     },

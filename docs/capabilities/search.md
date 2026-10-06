@@ -1,7 +1,9 @@
 # Search
 
-The entity list filters by a literal term. The search operation ranks entities for a query.
-Neither server operation falls back to the other.
+The entity list filters by a literal term. Ranked search ranks entities for a query, in
+two forms: the **default search** over the managed indices of the types it searches, and
+the **index search** through [search indices](search-indices.md) named by key. No server
+operation falls back to another.
 
 ## Literal matching
 
@@ -13,7 +15,9 @@ See [instance-data.md](instance-data.md#query-paths) for property and query-path
 
 ## Ranked search
 
-Three independent dimensions select a ranking: scope (one entity type or every type the
+This section describes the default search; the [index search](#index-search) shares its
+ranking, floor and `matched`. Three independent dimensions select a default search's
+ranking: scope (one entity type or every type the
 lens exposes), search kind (properties, document, or both), and strategy. The query is
 plain words, not an engine query language. The limit counts entities, from 1 to 100,
 default 10; search has no paging or offset.
@@ -179,6 +183,59 @@ are accepted only where the adapter declares support; rejection names the entity
 the alternative. Adapter limitations are recorded in
 [../storage-adapters.md](../storage-adapters.md).
 
+## Index search
+
+The index search ranks entities through chosen search indices — managed or custom —
+named by key; naming none searches every index the lens can search
+([ontology-lenses.md](ontology-lenses.md#search-through-a-lens)). A key no index has is
+not found; an index the lens cannot search, a switched-off managed one included, is a
+validation error naming it. Hits are entities of the indices' root types, ranked and
+grouped exactly as under [Ranking](#ranking): within one retrieval method the chosen
+indices merge by score, an entity counts once, scored by its best entry, and `hybrid`
+fuses the methods by reciprocal rank.
+
+**Relation entries count.** A custom index with relation groups holds one entry per
+relation instance ([search-indices.md](search-indices.md#relation-groups)), and an entity
+can rank by any of them; `matched` then names the relation and the entity at its other
+end. The request may name relation types: only their relation entries rank, own-field
+and passage entries always do, and an empty list ranks no relation entry. A relation type
+the lens does not expose is a validation error. Relation entries the lens cannot see are
+skipped whatever is named.
+
+**Mode, not strategy.** The index search takes a mode — `semantic`, `keyword` or
+`hybrid`, the keyword legs using the default keyword matching — and defaults to the first
+available: `hybrid` with an embedding provider, `keyword` without one. A mode that needs
+a provider without one is rejected as a disabled feature.
+
+The other parameters follow the default search: exact [filters](#scope-and-filters),
+which narrow the chosen indices to those whose root type declares every key; a minimum
+score, a [similarity floor](#similarity-floor) under the same rules, a validation error
+under `keyword`; a limit counting entities, 1 to 100, default 10; and a projection of
+each entity. Every validation failure is collected and reported by field.
+
+The response carries `query`, `mode` and `hits`; each hit carries `entity`,
+`relativeScore` and `matched` as defined under [Response](#response), and no `matches`.
+
+The default search is the index search's counterpart for callers who name types rather
+than indices: it searches only default and passage indices, so it never ranks a relation
+entry, and it offers search kinds, keyword strategies and per-index match evidence that
+the index search does not. On an adapter without search indices only the default search
+exists; the index search and the catalog are refused as a disabled feature.
+
+### The search catalog
+
+The catalog lists the indices a lens can search, in key order, so that a client or a
+model can choose among them. Each is projected through the lens:
+
+| Field | Meaning |
+|---|---|
+| `key`, `kind`, `name`, `description`, `entityType` | The index — `kind` is `default`, `passage` or `custom` |
+| `fields` | The root fields the index reads that the lens shows |
+| `relations` | The relation groups the lens shows — a group whose relation type, or the entity type at its other end, the lens hides is not listed — each with `relationType`, `direction` and `label`: the group's label, else the relation type's display name |
+| `documentProperty` | The document the index reads passages of; null when it reads none or the lens hides it |
+| `modes` | The representations the index keeps that can rank now — `semantic` only with an embedding provider — in the order `semantic`, `keyword` |
+| `status` | The index's own build state ([search-indices.md](search-indices.md#status)) |
+
 ### Keyword language
 
 Keyword entries are stemmed in every language of the ontology's **keyword language set**
@@ -270,12 +327,19 @@ does not stop the server from starting.
 ## Through the interfaces
 
 The full contract is in [../interfaces.md](../interfaces.md). REST `GET /search`, MCP,
-agent tools and saved-query search steps use one search operation and the same envelope.
+agent tools and saved-query search steps use the default search and the same envelope.
 MCP and agents expose `search` (both kinds) and `search_documents` (documents only, every
 hit carrying a passage); neither tool takes a strategy or a floor — both apply the fixed
 floor whenever the default strategy ranks semantically and echo it as `minSimilarity`,
 null under a keyword default. Both allow an omitted entity type.
-MCP additionally accepts filters and fields. Agent limits are 10 by default for search,
+MCP additionally accepts filters and fields.
+
+REST `POST /search` is the index search, and `GET /search-indices` the catalog. On MCP,
+`list_search_indices` answers the catalog, and `search` given one index key or a list
+runs the index search over them under the default mode, with the same fixed floor echoed
+as `minSimilarity`, optionally narrowed to named relation types; it then takes no entity
+type, and relation types without an index are refused. The agent search tools have no
+index search. Agent limits are 10 by default for search,
 5 for document search, and 20 maximum. A saved-query search step requires one type and
 uses the default kinds and strategy; see [saved-queries.md](saved-queries.md).
 

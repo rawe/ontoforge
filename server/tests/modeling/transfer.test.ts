@@ -186,11 +186,10 @@ describe("export", () => {
     const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
     expect(res.statusCode).toBe(200);
     // An adapter without search indices exports the set a new ontology
-    // starts with.
+    // starts with, and no search-index part.
     expect(res.json()).toEqual({
       formatVersion: "6.0",
       keywordLanguages: ["german", "english"],
-      searchIndices: { custom: [], disabled: [] },
       entityTypes: [],
       relationTypes: [],
       lenses: [],
@@ -611,10 +610,11 @@ describe("lens index inclusions", () => {
     });
     const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
     expect(res.json().lenses[0].indexInclusions).toEqual(["people", "person~default"]);
-    // An adapter without search indices exports none.
+    // An adapter without search indices omits the list, so an import into
+    // one that has them applies the migration rule.
     delete (holder.store as unknown as { searchIndices?: unknown }).searchIndices;
     const plain = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
-    expect(plain.json().lenses[0].indexInclusions).toEqual([]);
+    expect(plain.json().lenses[0]).not.toHaveProperty("indexInclusions");
   });
 
   it("6.0: writes each lens's list exactly, once the indices exist — the root rule is not checked", async () => {

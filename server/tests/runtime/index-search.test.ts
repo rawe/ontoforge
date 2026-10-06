@@ -2,7 +2,8 @@
  * The search-index engine against a fake search-index store: index
  * resolution and validation, which generations rank, the lens's hidden
  * relation and target types as ranking restrictions, the similarity
- * floor, the bounded over-fetch, and what `matched` describes.
+ * floor, the bounded over-fetch, what `matched` describes, the field
+ * projection, and the lens's catalog.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,8 +19,15 @@ import type {
 } from "../../src/core/ports.js";
 import { deriveManagedIndices, SearchIndexDefinition } from "../../src/core/searchIndex.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
-import { searchByIndices } from "../../src/runtime/search/indexSearch.js";
+import { searchByIndices, searchIndexCatalog } from "../../src/runtime/search/indexSearch.js";
 import { createMockRuntimeStore, makeFullSchema } from "./helpers.js";
+
+// The catalog reads build states from the status module, which reads the
+// adapter's store directly.
+const statuses = vi.hoisted(() => ({ list: [] as { key: string; state: string }[] }));
+vi.mock("../../src/runtime/indexing/status.js", () => ({
+  listSearchIndexStatuses: async () => statuses.list,
+}));
 
 const MODEL = "fake:hash:2";
 
@@ -331,5 +339,89 @@ describe("matched", () => {
     expect(response.hits[0]!.matched.snippet).toBe("");
     // Projected through the lens.
     expect(response.hits[0]!.entity).toEqual({ _id: "a", _entityTypeKey: "person", name: "N-a" });
+  });
+});
+
+describe("fields", () => {
+  it("projects each entity to the named fields, keeping id and type", async () => {
+    rank.mockImplementation(async () => [entry("a", 3)]);
+    const response = await search({ query: "x", indices: ["person~default"], mode: "keyword", fields: ["age"] });
+    expect(response.hits[0]!.entity).toEqual({ _id: "a", _entityTypeKey: "person", age: 3 });
+  });
+});
+
+describe("catalog", () => {
+  const catalog = () => searchIndexCatalog("all", runtime);
+
+  beforeEach(() => {
+    statuses.list = [
+      { key: "person~default", state: "ready" },
+      { key: "company~default", state: "building" },
+      { key: "employment", state: "stale" },
+    ];
+  });
+
+  it("lists the searchable indices with fields, relation groups, modes and state", async () => {
+    disabled = { "company~default": true };
+    expect(await catalog()).toEqual([
+      {
+        key: "person~default",
+        kind: "default",
+        name: "Person — default",
+        description: expect.any(String),
+        entityType: "person",
+        fields: ["name", "email"],
+        relations: [],
+        documentProperty: null,
+        modes: ["semantic", "keyword"],
+        status: "ready",
+      },
+      {
+        key: "employment",
+        kind: "custom",
+        name: "Employment",
+        description: "People by employer",
+        entityType: "person",
+        fields: ["name"],
+        // No group label: the relation type's display name.
+        relations: [{ relationType: "works_for", direction: "outgoing", label: "Works For" }],
+        documentProperty: null,
+        modes: ["semantic", "keyword"],
+        status: "stale",
+      },
+    ]);
+  });
+
+  it("offers semantic only with a provider and only where the index enables it", async () => {
+    indices = indices.map((index) =>
+      index.key === "employment"
+        ? record("custom", { ...index.definition, keyword: { enabled: false }, relations: [{ ...index.definition.relations[0]!, label: "Job" }] })
+        : index,
+    );
+    const employment = (await catalog()).find((entry) => entry.key === "employment")!;
+    expect(employment).toMatchObject({ modes: ["semantic"], relations: [{ label: "Job" }] });
+    setEmbeddingProvider(null);
+    expect((await catalog()).map((entry) => [entry.key, entry.modes])).toEqual([
+      ["person~default", ["keyword"]],
+      ["company~default", ["keyword"]],
+      ["employment", []],
+    ]);
+  });
+
+  it("projects through a scoped lens: its inclusions, its fields, its relation groups", async () => {
+    runtime.getFullSchemaWithLensInclusions.mockResolvedValue({
+      ...makeFullSchema({ lensKey: "all", entityInclusions: [{ key: "person", properties: ["name"] }] }),
+      searchIndexInclusions: ["person~default", "employment"],
+    });
+    expect((await catalog()).map(({ key, fields, relations }) => ({ key, fields, relations }))).toEqual([
+      // email hidden; companies hidden, so the employment group is skipped.
+      { key: "person~default", fields: ["name"], relations: [] },
+      { key: "employment", fields: ["name"], relations: [] },
+    ]);
+  });
+
+  it("answers the disabled feature on an adapter without search indices", async () => {
+    delete (runtime as unknown as { searchIndices?: unknown }).searchIndices;
+    await expect(catalog()).rejects.toMatchObject({ details: { code: "FEATURE_DISABLED" } });
   });
 });

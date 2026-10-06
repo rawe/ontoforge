@@ -95,7 +95,7 @@ change removes a managed index, its switch goes with it.
 A custom index is written by a modeler: it chooses the root type, the fields, the header,
 the relation groups, the templates and the representations. Its key follows the shared
 key rules, so it never contains `~` and never collides with a managed key; a name and a
-description are required, and the description may not be blank — it is written for
+description are required, and neither may be blank — the description is written for
 whoever picks an index to search. A definition looks like this:
 
 ```json
@@ -340,10 +340,14 @@ switched-off managed index cannot be rebuilt.
 
 ## Through the interfaces
 
-Indices are reached through ranked search: `GET search`, the MCP and agent search tools
-and saved-query search steps search the managed indices of the requested types, and each
-hit names the entry that matched ([search.md](search.md#response)). No search operation
-ranks a custom index; its entries are built and kept current, and its status reported.
+Indices are reached through ranked search ([search.md](search.md)). The default search —
+`GET search`, the MCP and agent search tools and saved-query search steps — searches the
+managed indices of the requested types. The index search — `POST search`, and the MCP
+`search` tool given index keys — searches any indices the lens can search, custom ones
+and their relation entries included ([search.md](search.md#index-search)); the lens's
+search catalog, over REST and the runtime MCP server, lists them with their status
+([search.md](search.md#the-search-catalog)). Each hit names the entry that matched
+([search.md](search.md#response)).
 
 Indices are designed through the modeling surface — REST and the modeling MCP server —
 which lists every index with its status, manages custom indices, previews

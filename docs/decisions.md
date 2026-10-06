@@ -264,6 +264,8 @@ set; no write tool is grantable.
 
 **Search strategies have implementations and availability requirements.** Defaults choose
 the first available of hybrid, keyword, semantic; every response names the applied one.
+The index search's mode follows the same order: hybrid with an embedding provider,
+keyword without one.
 
 **Search ranking scores are relative; match evidence is separate.** A hit's
 `relativeScore` is comparable only within one response and is never absolute similarity

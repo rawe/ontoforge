@@ -59,7 +59,9 @@ export type RelationGroup = z.infer<typeof RelationGroup>;
  */
 export const SearchIndexDefinition = z.object({
   key: Key,
-  name: z.string().min(1),
+  name: z
+    .string()
+    .refine((text) => text.trim().length > 0, { message: "Name the index." }),
   description: z
     .string()
     .refine((text) => text.trim().length > 0, {

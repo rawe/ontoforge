@@ -1521,8 +1521,12 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
         relationTypes: relationInclusions.map(exportInclusion),
       };
     }
-    exported.indexInclusions =
-      indices === undefined ? [] : await indices.listLensIndexInclusions(lens.lensId as string);
+    // An adapter without search indices writes none: an import into one
+    // that has them then applies the migration rule (`ExportLens`) rather
+    // than an empty list.
+    if (indices !== undefined) {
+      exported.indexInclusions = await indices.listLensIndexInclusions(lens.lensId as string);
+    }
 
     const agentRows = await store.listAiAgentsForExport(lens.lensId as string);
     exported.aiAgents = agentRows.map((ag) => ({
@@ -1562,7 +1566,7 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
   return {
     formatVersion: TRANSFER_FORMAT_VERSION,
     keywordLanguages,
-    searchIndices: await exportSearchIndices(store),
+    ...(indices === undefined ? {} : { searchIndices: await exportSearchIndices(indices) }),
     entityTypes,
     relationTypes,
     lenses,

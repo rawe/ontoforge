@@ -548,11 +548,9 @@ export function indexCascadeText(plan: IndexCascadePlan): string {
 // ---------------------------------------------------------------------------
 
 /** The indices' part of an export: the custom definitions in key order
- * and the managed indices switched off. Empty on an adapter without
- * search indices. */
-export async function exportSearchIndices(store: ModelingStore): Promise<ExportSearchIndicesInput> {
-  const indices = store.searchIndices?.();
-  if (indices === undefined) return { custom: [], disabled: [] };
+ * and the managed indices switched off. (An adapter without search
+ * indices exports no such part.) */
+export async function exportSearchIndices(indices: SearchIndexStore): Promise<ExportSearchIndicesInput> {
   const [records, searchSettings] = await Promise.all([
     indices.listIndices(),
     indices.getSearchSettings(),

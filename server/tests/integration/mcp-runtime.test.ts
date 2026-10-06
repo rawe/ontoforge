@@ -231,6 +231,7 @@ describe("tool surface", () => {
         "list_search_indices",
         "run_saved_query",
         "search",
+        "search_by_index",
         "search_documents",
         "search_saved_queries",
         "update_entity",
@@ -820,7 +821,7 @@ describe("query paths", () => {
 describe("search indices", () => {
   const postgres = settings.DB_BACKEND === "postgres";
 
-  it.skipIf(!postgres)("list_search_indices lists the lens's catalog; search with index pairs a relation with its target", async () => {
+  it.skipIf(!postgres)("list_search_indices lists the lens's catalog; search_by_index pairs a relation with its target", async () => {
     const model = "/api/ontologies/test_ont/model";
     const created = await app.inject({
       method: "POST",
@@ -859,16 +860,25 @@ describe("search indices", () => {
         relations: [{ relationType: "works_for", direction: "outgoing", label: "Job" }],
       });
 
-      const found = json(await call(client, "search", { query: "CTO ACME", index: "employment", relations: ["works_for"] }));
+      const found = json(await call(client, "search_by_index", { query: "CTO ACME", index: "employment", relations: ["works_for"] }));
       // No provider in this suite: keyword, and no floor.
       expect(found).toMatchObject({ query: "CTO ACME", mode: "keyword", minSimilarity: null });
       const top = (found.hits as Record<string, any>[])[0]!;
       expect(top.entity._id).toBe(ada._id);
       expect(top.matched).toMatchObject({ partKind: "relation", target: { id: acme._id, label: "ACME" } });
 
-      const refused = await call(client, "search", { query: "x", index: "employment", entity_type_key: "person" });
-      expect(refused.isError).toBe(true);
-      expect(text(refused)).toContain("entity_type_key does not apply with index");
+      // Without index every index of the lens is searched, the custom one included.
+      const everywhere = json(await call(client, "search_by_index", { query: "CTO ACME" }));
+      expect((everywhere.hits as Record<string, any>[])[0]!.matched).toMatchObject({ index: "employment" });
+
+      // The default search never ranks a relation entry, and keeps its own envelope.
+      const fallback = json(await call(client, "search", { query: "CTO ACME" }));
+      expect(fallback).toHaveProperty("strategy");
+      expect(fallback).not.toHaveProperty("mode");
+
+      const unknown = await call(client, "search_by_index", { query: "x", index: "nope" });
+      expect(unknown.isError).toBe(true);
+      expect(text(unknown)).toContain("nope");
     } finally {
       await client.close();
     }
@@ -879,7 +889,7 @@ describe("search indices", () => {
     try {
       for (const result of [
         await call(client, "list_search_indices"),
-        await call(client, "search", { query: "x", index: "person~default" }),
+        await call(client, "search_by_index", { query: "x", index: "person~default" }),
       ]) {
         expect(result.isError).toBe(true);
         expect(text(result)).toContain("not supported");

@@ -354,7 +354,7 @@ switched-off managed index cannot be rebuilt.
 Indices are reached through ranked search ([search.md](search.md)). The default search —
 `GET search`, the MCP and agent search tools and saved-query search steps — searches the
 managed indices of the requested types. The index search — `POST search`, and the MCP
-`search` tool given index keys — searches any indices the lens can search, custom ones
+`search_by_index` tool — searches any indices the lens can search, custom ones
 and their relation entries included ([search.md](search.md#index-search)); the lens's
 search catalog, over REST and the runtime MCP server, lists them with their status
 ([search.md](search.md#the-search-catalog)). Each hit names the entry that matched

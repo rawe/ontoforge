@@ -1,10 +1,10 @@
 /**
- * The runtime MCP `search` tool's index arguments: `index` (one key or a
- * list) switches to the index search with `relations`, the filters, the
- * clamped limit, the projection and the tools' fixed similarity floor;
- * without `index` the default search runs as before. `list_search_indices`
- * returns the lens's catalog. The services are stubbed; an in-memory
- * client calls the tools.
+ * The runtime MCP search tools: `search_by_index` runs the index search —
+ * `index` (one key or a list, absent for all), `relations`, the filters, the
+ * clamped limit, the projection and the tools' fixed similarity floor —
+ * while `search` and `search_documents` run only the default search.
+ * `list_search_indices` returns the lens's catalog. The services are
+ * stubbed; an in-memory client calls the tools.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -12,7 +12,6 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setEmbeddingProvider } from "../../src/core/embedding.js";
-import { ValidationError } from "../../src/core/exceptions.js";
 
 const stubs = vi.hoisted(() => ({
   searchByIndices: vi.fn(),
@@ -25,7 +24,7 @@ vi.mock("../../src/core/ports.js", async (original) => ({
   getRuntimeStore: async () => ({ supportsKeywordRanking: () => true }),
 }));
 
-const { createRuntimeMcpServer, indexSearchOf } = await import("../../src/mcp/runtime.js");
+const { createRuntimeMcpServer } = await import("../../src/mcp/runtime.js");
 
 interface ToolCallResult {
   content: { type: string; text: string }[];
@@ -59,27 +58,9 @@ afterEach(async () => {
   setEmbeddingProvider(null);
 });
 
-describe("indexSearchOf", () => {
-  it("maps one key or a list to indices, relations alongside", () => {
-    expect(indexSearchOf({})).toBeNull();
-    expect(indexSearchOf({ index: "people" })).toEqual({ indices: ["people"], relations: null });
-    expect(indexSearchOf({ index: ["a", "b"], relations: ["works_for"] })).toEqual({
-      indices: ["a", "b"],
-      relations: ["works_for"],
-    });
-  });
-
-  it("refuses relations without index and an entity type with it", () => {
-    expect(() => indexSearchOf({ relations: ["works_for"] })).toThrow(ValidationError);
-    expect(() => indexSearchOf({ index: "people", entity_type_key: "person" })).toThrow(
-      "entity_type_key does not apply with index",
-    );
-  });
-});
-
-describe("search with index", () => {
+describe("search_by_index", () => {
   it("runs the index search with the mapped arguments and the fixed floor", async () => {
-    const result = await call("search", {
+    const result = await call("search_by_index", {
       query: "CTO ACME",
       index: "employment",
       relations: ["works_for"],
@@ -110,29 +91,46 @@ describe("search with index", () => {
     });
   });
 
+  it("takes a list of keys, and without index searches every index of the lens", async () => {
+    await call("search_by_index", { query: "x", index: ["a", "b"] });
+    await call("search_by_index", { query: "x" });
+    expect(stubs.searchByIndices.mock.calls[0]![1]).toMatchObject({ indices: ["a", "b"], relations: null, limit: 10 });
+    expect(stubs.searchByIndices.mock.calls[1]![1]).toMatchObject({ indices: null, relations: null });
+  });
+
   it("applies no floor when the server ranks by keyword only", async () => {
     setEmbeddingProvider(null);
-    await call("search", { query: "x", index: ["a", "b"] });
-    expect(stubs.searchByIndices.mock.calls[0]![1]).toMatchObject({ indices: ["a", "b"], minScore: null });
+    const result = await call("search_by_index", { query: "x", index: "a" });
+    expect(stubs.searchByIndices.mock.calls[0]![1]).toMatchObject({ minScore: null });
+    expect(JSON.parse(result.content[0]!.text)).toMatchObject({ minSimilarity: null });
   });
 
-  it("without index the default search runs; relations alone is a tool error", async () => {
-    await call("search", { query: "x", entity_type_key: "person" });
-    expect(stubs.search).toHaveBeenCalledWith("all", expect.objectContaining({ type: "person" }), expect.anything());
-    expect(stubs.searchByIndices).not.toHaveBeenCalled();
-    const refused = await call("search", { query: "x", relations: ["works_for"] });
-    expect(refused.isError).toBe(true);
-    expect(refused.content[0]!.text).toContain("relations: Applies only with index");
+  it("reports a refused request as a tool error", async () => {
+    stubs.searchByIndices.mockRejectedValueOnce(new Error("Search index 'nope' not found"));
+    const result = await call("search_by_index", { query: "x", index: "nope" });
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("Error executing tool search_by_index");
   });
+});
 
-  it("search_documents takes no index", async () => {
-    const tools = await client.listTools();
-    const documents = tools.tools.find((tool) => tool.name === "search_documents")!;
-    expect(Object.keys(documents.inputSchema.properties ?? {})).not.toContain("index");
-    const search = tools.tools.find((tool) => tool.name === "search")!;
-    expect(Object.keys(search.inputSchema.properties ?? {})).toEqual(
-      expect.arrayContaining(["index", "relations"]),
+describe("search", () => {
+  it("runs only the default search", async () => {
+    await call("search", { query: "x", entity_type_key: "person", filters: { age__gte: 30 } });
+    expect(stubs.search).toHaveBeenCalledWith(
+      "all",
+      expect.objectContaining({ query: "x", type: "person", filter: { age__gte: "30" }, minSimilarity: 0.75 }),
+      expect.anything(),
     );
+    expect(stubs.searchByIndices).not.toHaveBeenCalled();
+  });
+
+  it("each search tool has its own arguments: no index on search, no entity type on search_by_index", async () => {
+    const { tools } = await client.listTools();
+    const argumentsOf = (name: string) =>
+      Object.keys(tools.find((tool) => tool.name === name)!.inputSchema.properties ?? {}).sort();
+    expect(argumentsOf("search")).toEqual(["entity_type_key", "fields", "filters", "limit", "query"]);
+    expect(argumentsOf("search_documents")).toEqual(["entity_type_key", "fields", "filters", "limit", "property", "query"]);
+    expect(argumentsOf("search_by_index")).toEqual(["fields", "filters", "index", "limit", "query", "relations"]);
   });
 });
 
@@ -145,15 +143,40 @@ describe("list_search_indices", () => {
 });
 
 describe("search tool descriptions", () => {
-  it("define the keyword score for the caller, without the adapter, within 2000 characters", async () => {
+  async function descriptionOf(name: string): Promise<string> {
     const { tools } = await client.listTools();
+    return tools.find((tool) => tool.name === name)!.description!;
+  }
+
+  it("define the keyword score for the caller, without the adapter, within 2000 characters", async () => {
     for (const name of ["search", "search_documents"]) {
-      const description = tools.find((tool) => tool.name === name)!.description!;
+      const description = await descriptionOf(name);
       expect(description).toContain(
         "keywordScore is then the distinct query words matched plus the full-text rank as a fraction below one",
       );
       expect(description).not.toMatch(/adapter/i);
       expect(description.length).toBeLessThanOrEqual(2000);
     }
+  });
+
+  it("describe search_by_index's own response — matched, no evidence — within 2000 characters", async () => {
+    const description = await descriptionOf("search_by_index");
+    expect(description).toContain("Returns query, mode, minSimilarity and hits");
+    expect(description).toContain("matched");
+    expect(description).not.toMatch(/\bmatches\b|semanticSimilarity|keywordScore|entity_type_key|adapter/i);
+    expect(description.length).toBeLessThanOrEqual(2000);
+  });
+
+  it("name each envelope's fields, so the two shapes cannot be confused", async () => {
+    expect(await descriptionOf("search")).toContain("Returns query, type, in, strategy, minSimilarity, filter and hits");
+    expect(await descriptionOf("search_by_index")).toContain("for get_document use the index's documentProperty");
+    expect(await descriptionOf("get_document")).toContain("search_by_index passage's matched");
+  });
+
+  it("point each search tool at the other, and the catalog at search_by_index", async () => {
+    expect(await descriptionOf("search")).toContain("use search_by_index");
+    expect(await descriptionOf("search")).not.toMatch(/\bindex argument|\brelations\b/);
+    expect(await descriptionOf("search_by_index")).toContain("list_search_indices");
+    expect(await descriptionOf("list_search_indices")).toContain("search_by_index's index argument");
   });
 });

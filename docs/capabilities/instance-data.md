@@ -66,7 +66,7 @@ hit of [search](search.md): hits are entities. A relation is composed into searc
 only by a custom search index with a relation group on its type — one entry per relation,
 with the entity at its other end, owned by the entity on the index's root side
 ([search-indices.md](search-indices.md#relation-groups)). The index search through such
-an index — `POST search`, or the MCP `search` tool given index keys — makes relations
+an index — `POST search`, or the MCP `search_by_index` tool — makes relations
 searchable: an entity ranks by its relation entries too, and the
 hit names the relation that matched and the entity at its other end
 ([search.md](search.md#index-search)). Relations themselves are reachable by listing, by

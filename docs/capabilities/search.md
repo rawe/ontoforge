@@ -345,11 +345,10 @@ null under a keyword default. Both allow an omitted entity type.
 MCP additionally accepts filters and fields.
 
 REST `POST /search` is the index search, and `GET /search-indices` the catalog. On MCP,
-`list_search_indices` answers the catalog, and `search` given one index key or a list
-runs the index search over them under the default mode, with the same fixed floor echoed
-as `minSimilarity`, optionally narrowed to named relation types; it then takes no entity
-type, and relation types without an index are refused. The agent search tools have no
-index search. Agent limits are 10 by default for search,
+`list_search_indices` answers the catalog, and `search_by_index` runs the index search
+over one index key, a list, or every index the lens can search, under the default mode,
+with the same fixed floor echoed as `minSimilarity`, optionally narrowed to named
+relation types. The agent tools have no index search. Agent limits are 10 by default for search,
 5 for document search, and 20 maximum. A saved-query search step requires one type and
 uses the default kinds and strategy; see [saved-queries.md](saved-queries.md).
 

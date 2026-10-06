@@ -159,23 +159,31 @@ describe.skipIf(!ollamaUp)("MCP search (Ollama)", () => {
     expect(documents.hits).toEqual([]);
   });
 
-  it.skipIf(settings.DB_BACKEND !== "postgres")("with index searches that index under the same fixed floor", async () => {
-    const found = json(await call("search", { query: "distributed systems engineer", index: "person~default" }));
+  it.skipIf(settings.DB_BACKEND !== "postgres")("search_by_index searches that index under the same fixed floor", async () => {
+    const found = json(await call("search_by_index", { query: "distributed systems engineer", index: "person~default" }));
     expect(found).toMatchObject({ mode: "hybrid", minSimilarity: TOOL_MIN_SIMILARITY });
     const top = (found.hits as Row[])[0]!;
     expect((top.entity as Row).name).toBe("Alice Chen");
     expect(top.matched).toMatchObject({ index: "person~default", partKind: "self" });
-    const nonsense = json(await call("search", { query: "xqzv plork wumble", index: ["person~default", "person~bio"] }));
+    const nonsense = json(await call("search_by_index", { query: "xqzv plork wumble", index: ["person~default", "person~bio"] }));
     expect(nonsense.hits).toEqual([]);
   });
 
   it("exposes no min_score input (documented interface difference)", async () => {
     const tools = await client.listTools();
-    const tool = tools.tools.find((t) => t.name === "search");
-    expect(tool).toBeDefined();
-    const properties = (tool!.inputSchema as { properties: Row }).properties;
-    expect(Object.keys(properties).sort()).toEqual([
+    const propertiesOf = (name: string) => {
+      const tool = tools.tools.find((t) => t.name === name);
+      expect(tool).toBeDefined();
+      return (tool!.inputSchema as { properties: Row }).properties;
+    };
+    expect(Object.keys(propertiesOf("search")).sort()).toEqual([
       "entity_type_key",
+      "fields",
+      "filters",
+      "limit",
+      "query",
+    ]);
+    expect(Object.keys(propertiesOf("search_by_index")).sort()).toEqual([
       "fields",
       "filters",
       "index",
@@ -183,7 +191,9 @@ describe.skipIf(!ollamaUp)("MCP search (Ollama)", () => {
       "query",
       "relations",
     ]);
-    expect(properties).not.toHaveProperty("min_score");
+    for (const name of ["search", "search_documents", "search_by_index"]) {
+      expect(propertiesOf(name)).not.toHaveProperty("min_score");
+    }
     for (const searchTool of tools.tools.filter((item) => ["search", "search_documents"].includes(item.name))) {
       expect(searchTool.description).toContain("semanticSimilarity");
       expect(searchTool.description).not.toContain("keywordPropertyKeys");

@@ -787,9 +787,10 @@ Everything a client can do to instance data through one lens.
 | `delete_relation` | Delete a relation |
 | `get_neighbors` | An entity's local neighbourhood, with projection on both entities and relations |
 | `execute_query` | Run a read-only OQL query |
-| `list_search_indices` | The lens's search catalog, to choose indices for `search` |
-| `search` | Rank entities by properties and documents, using the default strategy and the fixed similarity floor; with `index`, through the named search indices |
+| `list_search_indices` | The lens's search catalog, to choose indices for `search_by_index` |
+| `search` | Rank entities by properties and documents, using the default strategy and the fixed similarity floor |
 | `search_documents` | Rank entities by document passages under the same defaults; optionally restrict to one property |
+| `search_by_index` | Rank entities through the named search indices, or every index of the lens, under the default mode and the same fixed floor |
 | `list_saved_queries` | Discover saved queries and their parameters |
 | `run_saved_query` | Execute a saved query with parameter values |
 | `search_saved_queries` | Find a saved query by describing what it should do |
@@ -804,13 +805,13 @@ fixed floor of [capabilities/search.md](capabilities/search.md#similarity-floor)
 the default strategy ranks semantically, echoed as `minSimilarity`. MCP also accepts
 filters and fields. See [capabilities/ai-agents.md](capabilities/ai-agents.md).
 
-On MCP, `search` also takes `index` — one index key or a list — and `relations`. With
-`index` it runs the index search of `POST /search` over those indices under its default
-mode and the same fixed floor, and answers `query`, `mode`, `minSimilarity` and `hits`;
-`relations` narrows their relation entries. `relations` without `index`, and
-`entity_type_key` with it, are refused. `list_search_indices` answers the catalog of
-`GET /search-indices`. On an adapter without search indices, `list_search_indices` and
-`search` with `index` answer a not-supported tool error. The agent search tools take neither argument.
+`search_by_index` is the index search of `POST /search`, on MCP only. It takes `query`,
+`index` — one index key or a list, absent for every index the lens can search —
+`relations`, `limit`, `filters` and `fields`, but no mode and no `minScore`: it runs the
+default mode under the same fixed floor and answers `query`, `mode`, `minSimilarity` and
+`hits`. `list_search_indices` answers the catalog of `GET /search-indices`. On an
+adapter without search indices both answer a not-supported tool error. Agents have
+neither.
 
 `write_document` has no REST counterpart of its own: over REST both document edit forms
 share one route, selected by the operation in the body.

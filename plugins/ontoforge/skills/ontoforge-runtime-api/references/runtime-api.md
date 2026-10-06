@@ -308,9 +308,10 @@ MCP `search` runs both kinds, `search_documents` runs only documents and accepts
 `property`. Both accept `query`, optional `entity_type_key`, `limit`, `filters`, `fields`;
 neither takes a strategy or `min_similarity` — both apply a fixed floor of 0.75 whenever
 the default strategy ranks semantically (echoed as `minSimilarity`, null under a keyword
-default). They return the same envelope. MCP `search` also takes `index` (one key or a
-list) and `relations`, and then runs the index search of `POST /search`, without
-`entity_type_key`; `list_search_indices` returns the catalog. The keyword strategies need
+default). They return the same envelope. MCP `search_by_index` runs the index search of
+`POST /search`: `query`, `index` (one key or a list; absent for every index of the lens),
+`relations`, `limit`, `filters`, `fields`, under the default mode and the same fixed floor;
+it answers `{query, mode, minSimilarity, hits}`. `list_search_indices` returns the catalog. The keyword strategies need
 adapter support; semantic needs embeddings; hybrid needs both. Defaults prefer hybrid,
 keyword, semantic.
 

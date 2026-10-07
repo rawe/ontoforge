@@ -1,7 +1,8 @@
 /**
- * The retriever-agent chat route: the saved agent is resolved on the
- * server before the stream opens, a request cannot carry a configuration,
- * and the stream keeps its contract. The removed prototype routes are gone.
+ * The retriever-agent chat and retrieve routes: the saved agent is
+ * resolved on the server before the stream opens, a request cannot carry
+ * a configuration, the stream keeps its contract, and retrieve answers
+ * one plain JSON body. The removed prototype routes are gone.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -10,7 +11,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { ValidationError } from "../../../src/core/exceptions.js";
 
 const runtime = { ontologyKey: "one" };
-const pipeline = vi.hoisted(() => ({ loadRunnableAgent: vi.fn(), chat: vi.fn(), requireLanguageModel: vi.fn() }));
+const pipeline = vi.hoisted(() => ({
+  loadRunnableAgent: vi.fn(),
+  chat: vi.fn(),
+  retrieveQuestion: vi.fn(),
+  requireLanguageModel: vi.fn(),
+}));
 vi.mock("../../../src/core/ports.js", async (original) => ({
   ...(await original<Record<string, unknown>>()),
   getRuntimeStore: async () => runtime,
@@ -89,5 +95,56 @@ describe("retriever agent chat route", () => {
       // The router's own 404, not an unknown ontology or lens.
       expect(response.json().error.message).toBe("Not Found");
     }
+  });
+});
+
+describe("retriever agent retrieve route", () => {
+  const url = `${BASE}/retriever-agents/find/retrieve`;
+
+  it("runs the saved agent once and answers its results as JSON", async () => {
+    const body = { results: [], limitations: [], unsupportedReason: "No salaries." };
+    pipeline.retrieveQuestion.mockResolvedValueOnce(body);
+    const response = await app.inject({ method: "POST", url, payload: { question: "Salaries?" } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual(body);
+    expect(pipeline.loadRunnableAgent).toHaveBeenCalledWith("main", "find", runtime);
+    expect(pipeline.retrieveQuestion.mock.calls[0]!.slice(0, 3)).toEqual([agent, "Salaries?", false]);
+    expect(pipeline.retrieveQuestion.mock.calls[0]![3]).toBeInstanceOf(AbortSignal);
+  });
+
+  it("serves the default agent's key", async () => {
+    pipeline.retrieveQuestion.mockResolvedValueOnce({ results: [], limitations: [] });
+    const response = await app.inject({ method: "POST", url: `${BASE}/retriever-agents/_default/retrieve`, payload: { question: "Who?", diagnostics: true } });
+    expect(response.statusCode).toBe(200);
+    expect(pipeline.loadRunnableAgent).toHaveBeenCalledWith("main", "_default", runtime);
+    expect(pipeline.retrieveQuestion.mock.calls[0]![2]).toBe(true);
+  });
+
+  it("rejects unknown fields, history and an empty or long question", async () => {
+    for (const payload of [
+      { question: "Who?", config: { indices: [] } },
+      { question: "Who?", history: [] },
+      { question: "Who?", turnToken: "t" },
+      { question: "" },
+      { question: "x".repeat(2001) },
+      {},
+    ]) {
+      const response = await app.inject({ method: "POST", url, payload });
+      expect(response.statusCode, JSON.stringify(payload)).toBe(422);
+    }
+    expect(pipeline.retrieveQuestion).not.toHaveBeenCalled();
+  });
+
+  it("answers errors as chat does: invalid agent, no language model", async () => {
+    pipeline.loadRunnableAgent.mockRejectedValueOnce(new ValidationError("Retriever agent 'find' is invalid in this lens", { errors: ["x"] }));
+    const invalid = await app.inject({ method: "POST", url, payload: { question: "Who?" } });
+    expect(invalid.statusCode).toBe(422);
+    expect(invalid.json().error.details.errors).toEqual(["x"]);
+    pipeline.requireLanguageModel.mockImplementationOnce(() => {
+      throw new ValidationError("AI feature is disabled (AI_PROVIDER not configured)", { code: "FEATURE_DISABLED" });
+    });
+    const disabled = await app.inject({ method: "POST", url, payload: { question: "Who?" } });
+    expect(disabled.json().error.details.code).toBe("FEATURE_DISABLED");
+    expect(pipeline.retrieveQuestion).not.toHaveBeenCalled();
   });
 });

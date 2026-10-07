@@ -7,9 +7,13 @@
  * alone, streamed. A follow-up whose plan searches nothing is planned once
  * more (a third model call).
  *
- * Stream events: `phase` (start/end of plan, retrieve, answer), `delta`
- * (answer text), `meta` (diagnostics on request; the follow-up
+ * Chat stream events: `phase` (start/end of plan, retrieve, answer),
+ * `delta` (answer text), `meta` (diagnostics on request; the follow-up
  * `turnToken` always), then the transport's `final` or `error`.
+ *
+ * Retrieve runs the first two phases only (`retrieveQuestion`): one
+ * planning call without a conversation, then retrieval; it returns the
+ * found entities and calls no answer model.
  */
 
 import type { ChatOpenAI } from "@langchain/openai";
@@ -23,8 +27,15 @@ import type { RuntimeStore } from "../../core/ports.js";
 import type { RetrieverAgentConfig } from "../../core/retrieverAgent.js";
 import type { StreamExecution } from "../chatStream.js";
 import { loadSchema } from "../schemaCache.js";
-import { availableModes, indexStoreOf, searchableIndices, searchIndexCatalog } from "../search/indexSearch.js";
+import {
+  availableModes,
+  indexStoreOf,
+  searchableIndices,
+  searchIndexCatalog,
+  type SearchMode,
+} from "../search/indexSearch.js";
 import { checkAgentConfig } from "./config.js";
+import { DEFAULT_RETRIEVER_AGENT_KEY, defaultAgentConfig } from "./defaultAgent.js";
 import { modelInputTrace } from "./modelTrace.js";
 import {
   PLANNER,
@@ -45,6 +56,8 @@ import {
   diagnosticResults,
   resultIds,
   retrieve,
+  retrievedResults,
+  type RetrievedResult,
   type ResponseContext,
   type Retrieval,
   type RetrievalScope,
@@ -61,7 +74,9 @@ export interface RunnableAgent {
 }
 
 /**
- * Load a stored agent and check it against its lens. Unknown agent → not
+ * Load a stored agent and check it against its lens, or derive the
+ * default agent (`defaultAgent.ts`) — refused when it has nothing to
+ * search. Unknown agent → not
  * found; an agent the lens can no longer run → validation error; an
  * adapter without search indices → disabled feature.
  */
@@ -69,12 +84,22 @@ export async function loadRunnableAgent(lensKey: string, key: string, store: Run
   const indexStore = indexStoreOf(store);
   const loaded = await loadSchema(lensKey, store);
   const [stored, catalog, records] = await Promise.all([
-    indexStore.getRetrieverAgent(loaded.scoped.lensId, key),
+    key === DEFAULT_RETRIEVER_AGENT_KEY ? null : indexStore.getRetrieverAgent(loaded.scoped.lensId, key),
     searchIndexCatalog(lensKey, store),
     searchableIndices(loaded, indexStore),
   ]);
-  if (stored === null) throw new NotFoundError(`Retriever agent '${key}' not found`);
   const lens = { scoped: loaded.scoped, catalog };
+  if (key === DEFAULT_RETRIEVER_AGENT_KEY) {
+    const config = defaultAgentConfig(lens);
+    if (config.indices.length === 0) {
+      throw new ValidationError(
+        "The default retriever agent has nothing to search in this lens: no managed search index is switched on " +
+          "for a type the lens shows.",
+      );
+    }
+    return { key, config, scope: { config, lens, loaded, store, indexStore, records } };
+  }
+  if (stored === null) throw new NotFoundError(`Retriever agent '${key}' not found`);
   const { config, errors } = checkAgentConfig(stored.configVersion, stored.config, lens);
   if (config === null) {
     throw new ValidationError(`Retriever agent '${key}' is invalid in this lens: ${errors.join("; ")}`, { errors });
@@ -138,6 +163,171 @@ const State = Annotation.Root({
   context: Annotation<ResponseContext>(),
 });
 
+/** The configured model, never retried, and its JSON-mode planning view:
+ * JSON mode applies only to planning; the answer model streams plain text. */
+function models() {
+  const provider = settings.AI_PROVIDER;
+  if (!provider) {
+    throw new ValidationError("AI feature is disabled (AI_PROVIDER not configured)", { code: "FEATURE_DISABLED" });
+  }
+  const model = createAiModel(provider, settings.AI_MODEL, settings.AI_BASE_URL, { maxRetries: 0 });
+  const plannerModel = (model as ChatOpenAI).withConfig({ response_format: PLANNER_RESPONSE_FORMAT });
+  return { model, plannerModel };
+}
+
+type PlannerModel = ReturnType<typeof models>["plannerModel"];
+
+interface Planning {
+  agent: RunnableAgent;
+  scope: RetrievalScope;
+  modes: SearchMode[];
+  message: string;
+  history: History[];
+  previous: Previous | undefined;
+  plannerModel: PlannerModel;
+  /** Accumulates `planModel` and `validation`. */
+  timings: Record<string, number>;
+  /** Receives every planning call's trace. */
+  io: ModelCall[];
+  /** Diagnostics as planning proceeds: the call's output first, so a
+   * failed plan stays diagnosable, then the checked plan. */
+  report: (payload: Record<string, unknown>) => Promise<void>;
+}
+
+/**
+ * Plan a question: one planning model call and the plan's checks. A
+ * follow-up (a question with history) whose plan searches nothing is
+ * planned once more; a question without history never is. Throws for a
+ * planner input over the cap, a failed call and a malformed plan.
+ */
+export async function planQuestion(planning: Planning): Promise<{ plan: Plan; notes: string[] }> {
+  const { agent, scope, modes, message, history, previous, plannerModel, timings, io, report } = planning;
+  const { signal } = scope;
+  const input = plannerInput(agent.config, scope.lens, scope.records, modes, message, history, previous);
+  if (input.length > PLANNER_INPUT_CHARACTERS) {
+    throw new ValidationError(
+      agent.key === DEFAULT_RETRIEVER_AGENT_KEY
+        ? "This lens is too large for the default retriever agent: its planning context exceeds the limit. " +
+            "Configure a retriever agent with fewer indices or filters."
+        : "Planning context exceeds the limit; choose fewer indices or filters.",
+    );
+  }
+  const planWith = async (systemPrompt: string, callPhase: string) => {
+    const modelStart = performance.now();
+    let response;
+    try {
+      response = await plannerModel.invoke([new SystemMessage(systemPrompt), new HumanMessage(input)], { signal });
+    } catch {
+      signal.throwIfAborted();
+      throw new ValidationError("Planning model failed; no automatic retry.");
+    }
+    const output = text(response.content);
+    timings.planModel = (timings.planModel ?? 0) + performance.now() - modelStart;
+    const rawFinishReason = response.response_metadata?.finish_reason;
+    const finishReason = typeof rawFinishReason === "string" ? rawFinishReason : undefined;
+    const call: ModelCall = {
+      phase: callPhase,
+      ...modelInputTrace(systemPrompt, input),
+      output: output.slice(0, OUTPUT_TRACE_CHARACTERS),
+      usage: response.usage_metadata,
+      finishReason,
+      outputTruncated: output.length > OUTPUT_TRACE_CHARACTERS,
+    };
+    io.push(call);
+    // Visible model output first, so a failed plan stays diagnosable.
+    await report({ modelIO: [call], timings: { planModel: timings.planModel } });
+    const validation = performance.now();
+    const checked = validatePlan(
+      parsePlannerOutput(output, finishReason),
+      agent.config,
+      scope.lens,
+      modes,
+      message,
+      history,
+      previous,
+    );
+    timings.validation = (timings.validation ?? 0) + performance.now() - validation;
+    await report({ plan: checked.plan, modelIO: [call] });
+    return checked;
+  };
+  const first = await planWith(PLANNER, "plan");
+  // A follow-up is never unsupported (planner rules). A model that still
+  // answers one so is asked once more; the second plan is used, and if
+  // that one fails, the first stands.
+  if (history.length === 0 || first.plan.subQueries.length > 0 || !first.plan.unsupportedReason) return first;
+  const repeated = "Planning was repeated once: the first plan for this follow-up searched nothing";
+  try {
+    const second = await planWith(`${PLANNER}\n${REPLAN}`, "replan");
+    const outcome = second.plan.subQueries.length > 0 ? "." : "; the repeated plan searched nothing either.";
+    return { plan: second.plan, notes: [...second.notes, `${repeated}${outcome}`] };
+  } catch {
+    signal.throwIfAborted();
+    return { plan: first.plan, notes: [...first.notes, `${repeated}; the repeated plan failed.`] };
+  }
+}
+
+/** What a retrieve returns. */
+export interface RetrieveResponse {
+  results: RetrievedResult[];
+  limitations: string[];
+  unsupportedReason?: string;
+  diagnostics?: {
+    plan: Plan;
+    searchCalls: number;
+    timings: Record<string, number>;
+    modelIO: ModelCall[];
+  };
+}
+
+/**
+ * Retrieve: chat's planning and retrieval for one question without a
+ * conversation — exactly one model call, no answer model — returning the
+ * found entities in fused order with their proven conditions and text
+ * match.
+ */
+export async function retrieveQuestion(
+  agent: RunnableAgent,
+  question: string,
+  diagnostics: boolean,
+  signal: AbortSignal,
+): Promise<RetrieveResponse> {
+  signal.throwIfAborted();
+  const started = performance.now();
+  const timings: Record<string, number> = {};
+  const io: ModelCall[] = [];
+  const scope: RetrievalScope = { ...agent.scope, signal };
+  const { plannerModel } = models();
+  const planStart = performance.now();
+  const { plan, notes } = await planQuestion({
+    agent,
+    scope,
+    modes: availableModes(),
+    message: question,
+    history: [],
+    previous: undefined,
+    plannerModel,
+    timings,
+    io,
+    report: async () => {},
+  });
+  timings.plan = performance.now() - planStart;
+  signal.throwIfAborted();
+  const retrieveStart = performance.now();
+  const retrieval = await retrieve(scope, plan);
+  timings.retrieve = performance.now() - retrieveStart;
+  timings.search = retrieval.searchMs;
+  timings.total = performance.now() - started;
+  // Retrieval lists the unsupported reason first among its limitations,
+  // for the answer model; here it has a field of its own.
+  const limitations = [...retrieval.limitations.slice(plan.unsupportedReason ? 1 : 0), ...notes];
+  return {
+    results: retrievedResults(retrieval),
+    limitations,
+    ...(plan.unsupportedReason ? { unsupportedReason: plan.unsupportedReason } : {}),
+    ...(diagnostics ? { diagnostics: { plan, searchCalls: retrieval.searchCalls, timings, modelIO: io } } : {}),
+  };
+}
+
 export async function chat(
   lensKey: string,
   agent: RunnableAgent,
@@ -160,13 +350,7 @@ export async function chat(
   const turnScope = `${scope.store.ontologyKey}/${lensKey}/${agent.key}`;
   const modes = availableModes();
   let firstDelta = false;
-  const provider = settings.AI_PROVIDER;
-  if (!provider) {
-    throw new ValidationError("AI feature is disabled (AI_PROVIDER not configured)", { code: "FEATURE_DISABLED" });
-  }
-  const model = createAiModel(provider, settings.AI_MODEL, settings.AI_BASE_URL, { maxRetries: 0 });
-  // JSON mode applies only to planning; the answer model streams plain text.
-  const plannerModel = (model as ChatOpenAI).withConfig({ response_format: PLANNER_RESPONSE_FORMAT });
+  const { model, plannerModel } = models();
 
   async function phase<T>(name: string, run: () => Promise<T>): Promise<T> {
     signal.throwIfAborted();
@@ -203,64 +387,9 @@ export async function chat(
     })
     .addNode("planning", async (state) => {
       const { previous } = state;
-      const { plan, notes } = await phase("plan", async () => {
-        const input = plannerInput(agent.config, scope.lens, scope.records, modes, message, history, previous);
-        if (input.length > PLANNER_INPUT_CHARACTERS) {
-          throw new ValidationError("Planning context exceeds the limit; choose fewer indices or filters.");
-        }
-        const planWith = async (systemPrompt: string, callPhase: string) => {
-          const modelStart = performance.now();
-          let response;
-          try {
-            response = await plannerModel.invoke([new SystemMessage(systemPrompt), new HumanMessage(input)], { signal });
-          } catch {
-            signal.throwIfAborted();
-            throw new ValidationError("Planning model failed; no automatic retry.");
-          }
-          const output = text(response.content);
-          timings.planModel = (timings.planModel ?? 0) + performance.now() - modelStart;
-          const rawFinishReason = response.response_metadata?.finish_reason;
-          const finishReason = typeof rawFinishReason === "string" ? rawFinishReason : undefined;
-          const call: ModelCall = {
-            phase: callPhase,
-            ...modelInputTrace(systemPrompt, input),
-            output: output.slice(0, OUTPUT_TRACE_CHARACTERS),
-            usage: response.usage_metadata,
-            finishReason,
-            outputTruncated: output.length > OUTPUT_TRACE_CHARACTERS,
-          };
-          io.push(call);
-          // Visible model output first, so a failed plan stays diagnosable.
-          await meta({ modelIO: [call], timings: { planModel: timings.planModel } });
-          const validation = performance.now();
-          const checked = validatePlan(
-            parsePlannerOutput(output, finishReason),
-            agent.config,
-            scope.lens,
-            modes,
-            message,
-            history,
-            previous,
-          );
-          timings.validation = (timings.validation ?? 0) + performance.now() - validation;
-          await meta({ plan: checked.plan, modelIO: [call] });
-          return checked;
-        };
-        const first = await planWith(PLANNER, "plan");
-        // A follow-up is never unsupported (planner rules). A model that
-        // still answers one so is asked once more; the second plan is used,
-        // and if that one fails, the first stands.
-        if (history.length === 0 || first.plan.subQueries.length > 0 || !first.plan.unsupportedReason) return first;
-        const repeated = "Planning was repeated once: the first plan for this follow-up searched nothing";
-        try {
-          const second = await planWith(`${PLANNER}\n${REPLAN}`, "replan");
-          const outcome = second.plan.subQueries.length > 0 ? "." : "; the repeated plan searched nothing either.";
-          return { plan: second.plan, notes: [...second.notes, `${repeated}${outcome}`] };
-        } catch {
-          signal.throwIfAborted();
-          return { plan: first.plan, notes: [...first.notes, `${repeated}; the repeated plan failed.`] };
-        }
-      });
+      const { plan, notes } = await phase("plan", () =>
+        planQuestion({ agent, scope, modes, message, history, previous, plannerModel, timings, io, report: meta }),
+      );
       return { plan, notes };
     })
     .addNode("retrieve", async (state) => {
@@ -268,7 +397,7 @@ export async function chat(
       const retrieval = await phase("retrieve", () => retrieve(scope, plan, previous));
       retrieval.limitations.push(...notes);
       const t = performance.now();
-      const context = boundContext(retrieval, plan, scope.lens);
+      const context = boundContext(retrieval, plan, scope.lens, agent.config);
       timings.context = performance.now() - t;
       timings.search = retrieval.searchMs;
       await meta({

@@ -46,10 +46,11 @@ async function ask(
   message: string,
   history: Row[] = [],
   runtime = RUNTIME,
+  agent = "people",
 ): Promise<{ reply: string; meta: Row }> {
   const res = await app!.inject({
     method: "POST",
-    url: `${runtime}/retriever-agents/people/chat`,
+    url: `${runtime}/retriever-agents/${agent}/chat`,
     payload: { message, history, diagnostics: true },
   });
   expect(res.statusCode, res.body).toBe(200);
@@ -57,6 +58,17 @@ async function ask(
   expect(events.at(-1)?.type, JSON.stringify(events.at(-1))).toBe("final");
   const meta = Object.assign({}, ...events.filter((event) => event.type === "meta"));
   return { reply: events.at(-1)!.reply as string, meta };
+}
+
+/** Retrieve with diagnostics; the plain JSON response. */
+async function retrieveFrom(agent: string, question: string): Promise<Row> {
+  const res = await app!.inject({
+    method: "POST",
+    url: `${RUNTIME}/retriever-agents/${agent}/retrieve`,
+    payload: { question, diagnostics: true },
+  });
+  expect(res.statusCode, res.body).toBe(200);
+  return res.json() as Row;
 }
 
 beforeAll(async () => {
@@ -329,5 +341,36 @@ describe("follow-up sequences of the end-to-end run", () => {
     expect(queriesOf(meta.plan), JSON.stringify(meta.plan)).toMatch(/acme/i);
     expect((meta.results as Row[]).map((result) => result.label)).toContain("Bob Martin");
     expect(reply).toContain("Bob");
+  });
+});
+
+describe("retrieve and the default agent with a real model", () => {
+  ifAvailable("retrieve plans once and returns the found people in order, without an answer", async () => {
+    const response = await retrieveFrom("people", "Who is CTO at ACME?");
+    expect(response.diagnostics.modelIO.map((call: Row) => call.phase)).toEqual(["plan"]);
+    expect(response.results[0]).toMatchObject({ label: "Ada Lovelace", entityType: "person" });
+    expect(response.results[0].matched).toMatchObject({ index: "person_employment" });
+    expect(Object.keys(response).sort()).toEqual(["diagnostics", "limitations", "results"]);
+  });
+
+  ifAvailable("the default agent finds people by a derived relation filter, proven", async () => {
+    const response = await retrieveFrom("_default", "Which people live in Berlin?");
+    const plan = JSON.stringify(response.diagnostics.plan);
+    expect(plan).toContain("person.lives_in.outgoing");
+    const people = (response.results as Row[]).filter((result) => result.entityType === "person");
+    expect(people.map((result) => result.label).sort()).toEqual(["Ada Lovelace", "Bob Builder"]);
+    for (const person of people) {
+      expect(person.conditions).toContainEqual({
+        filter: "person.lives_in.outgoing",
+        value: expect.stringMatching(/^berlin$/i),
+        text: expect.stringMatching(/^Lives in City Name: berlin$/i),
+      });
+    }
+  });
+
+  ifAvailable("the default agent answers in chat", async () => {
+    const { reply, meta } = await ask("Which people live in Berlin?", [], RUNTIME, "_default");
+    expect((meta.results as Row[]).map((result) => result.label)).toContain("Ada Lovelace");
+    expect(reply).toMatch(/Ada/);
   });
 });

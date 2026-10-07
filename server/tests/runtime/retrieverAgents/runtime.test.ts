@@ -27,7 +27,7 @@ import { createAiModel } from "../../../src/core/ai.js";
 import type { RuntimeStore, SearchIndexRecord, SearchIndexStore } from "../../../src/core/ports.js";
 import type { LoadedSchema } from "../../../src/runtime/schemaCache.js";
 import { PLANNER, PLANNER_RESPONSE_FORMAT, REPLAN } from "../../../src/runtime/retrieverAgents/plan.js";
-import { chat, type RunnableAgent } from "../../../src/runtime/retrieverAgents/runtime.js";
+import { chat, retrieveQuestion, type RunnableAgent } from "../../../src/runtime/retrieverAgents/runtime.js";
 import { CONFIG, LENS, SCHEMA } from "./fixture.js";
 
 const store = {
@@ -277,5 +277,89 @@ describe("retriever agent pipeline", () => {
     // The search is restricted to the previous result.
     expect(engine.rankThroughIndices.mock.calls[0]![2].targets[0].entityIds).toEqual(["ada"]);
     await expect(run("Which of these people is CTO?", false, "unknown-token")).rejects.toThrow("expired");
+  });
+});
+
+describe("retrieve", () => {
+  const signal = () => new AbortController().signal;
+
+  it("makes exactly one planning call, no answer call, and returns chat's results in chat's order", async () => {
+    engine.rankThroughIndices.mockResolvedValue([]);
+    const { events } = await run("Everyone in Berlin");
+    const chatRows = events.find((e) => e.type === "meta" && e.results)!.results as { entityId: string }[];
+    vi.clearAllMocks();
+    fake.withConfig.mockReturnValue({ invoke: fake.invoke });
+    fake.invoke.mockResolvedValue(planned([sub()]));
+
+    const response = await retrieveQuestion(agent, "Everyone in Berlin", false, signal());
+    expect(fake.invoke).toHaveBeenCalledTimes(1);
+    expect(fake.stream).not.toHaveBeenCalled();
+    expect(response.results.map((r) => r.entityId)).toEqual([...new Set(chatRows.map((r) => r.entityId))]);
+    expect(response).toEqual({
+      results: [
+        {
+          entityId: "ada",
+          entityType: "person",
+          label: "Ada",
+          conditions: [{ filter: "city", value: "Berlin", text: "lives in City Name: Berlin" }],
+          matched: null,
+        },
+      ],
+      limitations: [],
+    });
+    // Single-shot: no conversation, nothing to refer to.
+    const input = JSON.parse(fake.invoke.mock.calls[0]![0][1].content);
+    expect(input.history).toEqual([]);
+    expect(input.previousVerifiedResults).toBeNull();
+  });
+
+  it("reports diagnostics only on request: the plan, search calls, timings and the one planning call", async () => {
+    const response = await retrieveQuestion(agent, "Everyone in Berlin", true, signal());
+    const diagnostics = response.diagnostics!;
+    expect(diagnostics.plan.subQueries).toHaveLength(1);
+    expect(diagnostics.searchCalls).toBe(0);
+    expect(Object.keys(diagnostics.timings).sort()).toEqual(["plan", "planModel", "retrieve", "search", "total", "validation"]);
+    expect(diagnostics.modelIO.map((call) => call.phase)).toEqual(["plan"]);
+    expect(diagnostics.modelIO[0]!.input).toBe(fake.invoke.mock.calls[0]![0][1].content);
+  });
+
+  it("answers an unsupported question with no results and its reason, not as an error", async () => {
+    fake.invoke.mockResolvedValue({ content: JSON.stringify({ subQueries: [], unsupportedReason: "No salaries are stored." }) });
+    const response = await retrieveQuestion(agent, "What is Ada's salary?", false, signal());
+    expect(response).toEqual({ results: [], limitations: [], unsupportedReason: "No salaries are stored." });
+    expect(fake.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("names plan omissions as limitations", async () => {
+    fake.invoke.mockResolvedValue(planned([sub({ filters: [{ id: "city", value: "Paris", quote: "Paris" }] })]));
+    const response = await retrieveQuestion(agent, "Everyone in Berlin", false, signal());
+    expect(response.limitations).toContain(
+      'The condition "lives in City Name: Paris" was not applied: the value is not stated verbatim in a user message.',
+    );
+  });
+
+  it("refuses as chat does: a failed or malformed plan, no retry", async () => {
+    fake.invoke.mockRejectedValueOnce(new Error("boom"));
+    await expect(retrieveQuestion(agent, "Who?", false, signal())).rejects.toThrow("Planning model failed; no automatic retry.");
+    fake.invoke.mockResolvedValueOnce({ content: "not json" });
+    await expect(retrieveQuestion(agent, "Who?", false, signal())).rejects.toThrow();
+    expect(fake.invoke).toHaveBeenCalledTimes(2);
+  });
+
+  it("refuses a planner input over the cap; the default agent's refusal says a configured agent is needed", async () => {
+    const big = "x".repeat(25_000);
+    await expect(retrieveQuestion(agent, big, false, signal())).rejects.toThrow("Planning context exceeds the limit");
+    const fallback = { ...agent, key: "_default" };
+    await expect(retrieveQuestion(fallback, big, false, signal())).rejects.toThrow(
+      "This lens is too large for the default retriever agent",
+    );
+    expect(fake.invoke).not.toHaveBeenCalled();
+  });
+
+  it("stops on cancellation", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(retrieveQuestion(agent, "Who?", false, controller.signal)).rejects.toBeDefined();
+    expect(fake.invoke).not.toHaveBeenCalled();
   });
 });

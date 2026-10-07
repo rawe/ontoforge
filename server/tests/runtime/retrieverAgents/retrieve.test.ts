@@ -20,6 +20,7 @@ import {
   diagnosticResults,
   fuseRankings,
   retrieve,
+  retrievedResults,
   type RetrievalScope,
 } from "../../../src/runtime/retrieverAgents/retrieve.js";
 import { CATALOG, CONFIG, LENS, SCHEMA } from "./fixture.js";
@@ -141,7 +142,7 @@ describe("sub-query search", () => {
         entityType: "person",
         label: "Ada",
         fields: { name: "Ada", email: "ada@acme.test" },
-        matches: [{ subQuery: 0, matched: expect.objectContaining({ index: "person_employment" }), text: "Employment Role: CTO Company: ACME", filters: [] }],
+        matches: [{ subQuery: 0, matched: expect.objectContaining({ index: "person_employment" }), text: "Employment Role: CTO Company: ACME", conditions: [] }],
       },
     ]);
   });
@@ -168,7 +169,7 @@ describe("sub-query search", () => {
       unsupportedReason: null,
     };
     const searched = await retrieve(scope(), plan);
-    expect(boundContext(searched, plan, LENS).results[0]!.matches[0]).toEqual({
+    expect(boundContext(searched, plan, LENS, CONFIG).results[0]!.matches[0]).toEqual({
       search: "CTO at ACME",
       entry: "Employment",
       related: "ACME",
@@ -205,11 +206,12 @@ describe("sub-query search", () => {
     expect(retrieval.searchCalls).toBe(0);
     // Each result carries the filter it satisfies, for the answer model.
     const fact = "lives in City Name: Berlin";
+    const condition = { filter: "city", value: "Berlin", text: fact };
     expect(retrieval.items.map((item) => [item.entityId, item.matches])).toEqual([
-      ["ada", [{ subQuery: 0, matched: null, text: null, filters: [fact] }]],
-      ["eve", [{ subQuery: 0, matched: null, text: null, filters: [fact] }]],
+      ["ada", [{ subQuery: 0, matched: null, text: null, conditions: [condition] }]],
+      ["eve", [{ subQuery: 0, matched: null, text: null, conditions: [condition] }]],
     ]);
-    expect(boundContext(retrieval, plan, LENS).results[0]!.matches).toEqual([{ search: "", filters: [fact] }]);
+    expect(boundContext(retrieval, plan, LENS, CONFIG).results[0]!.matches).toEqual([{ search: "", filters: [fact] }]);
   });
 
   it("fuses two sub-queries per entity: found by both ranks first and keeps both matches", async () => {
@@ -225,9 +227,13 @@ describe("sub-query search", () => {
       [0, "CTO at ACME"],
       [1, "Home Berlin"],
     ]);
-    // Bob's long email is cut to the agent's characters, and that is a limitation.
+    // Bob's long email is cut to the agent's characters, and the answer model is told.
     expect(String(retrieval.items[1]!.fields.email)).toHaveLength(800 + " [truncated]".length);
-    expect(retrieval.limitations).toContain("Answer fields cut to 800 characters: Email.");
+    expect(retrieval.cutFields).toEqual(["Email"]);
+    expect(retrieval.limitations).toEqual([]);
+    expect(boundContext(retrieval, { subQueries: [], unsupportedReason: null }, LENS, CONFIG).limitations).toContain(
+      "Answer fields cut to 800 characters: Email.",
+    );
     const rows = diagnosticResults(retrieval);
     expect(rows.map((row) => [row.entityId, row.subQuery])).toEqual([["ada", 0], ["ada", 1], ["bob", 0], ["eve", 1]]);
     expect(rows[0]).toEqual({
@@ -251,6 +257,42 @@ describe("sub-query search", () => {
   });
 });
 
+describe("retrieved results", () => {
+  it("carry each entity's proven conditions, unioned over sub-queries, and the first sub-query's text match", async () => {
+    engine.rankThroughIndices
+      .mockResolvedValueOnce([hit("bob", "person_employment", "CTO at ACME"), hit("eve", "person_employment", "CTO at ACME")])
+      .mockResolvedValueOnce([hit("eve", "person_home", "Home Berlin")]);
+    const retrieval = await retrieve(scope(), {
+      subQueries: [
+        // Unfiltered and ranked.
+        subQuery({}),
+        // Filtered, listed only.
+        subQuery({ indices: ["person_home"], query: "", filters: [{ id: "city", value: "Berlin", quote: "Berlin" }] }),
+        // Filtered and ranked; the same condition, written differently.
+        subQuery({ indices: ["person_home"], query: "lives in Berlin", filters: [{ id: "city", value: "berlin", quote: "Berlin" }] }),
+      ],
+      unsupportedReason: null,
+    });
+    const results = retrievedResults(retrieval);
+    expect(results.map((result) => result.entityId)).toEqual(retrieval.items.map((item) => item.entityId));
+    const byId = Object.fromEntries(results.map((result) => [result.entityId, result]));
+    const berlin = { filter: "city", value: "Berlin", text: "lives in City Name: Berlin" };
+    // Similarity candidate: no condition, a text match.
+    expect(byId.bob).toEqual({
+      entityId: "bob",
+      entityType: "person",
+      label: "Bob",
+      conditions: [],
+      matched: expect.objectContaining({ index: "person_employment", snippet: "CTO at ACME" }),
+    });
+    // Proven condition, listed only: no text match.
+    expect(byId.ada).toMatchObject({ conditions: [berlin], matched: null });
+    // Found by all three: the condition once, the first sub-query's match.
+    expect(byId.eve).toMatchObject({ conditions: [berlin], matched: expect.objectContaining({ index: "person_employment" }) });
+    expect(Object.keys(byId.eve!)).not.toContain("fields");
+  });
+});
+
 describe("fusion and context", () => {
   it("fuses rankings by reciprocal rank; one ranking keeps its order", () => {
     const a = [{ entityId: "x" }, { entityId: "y" }];
@@ -264,10 +306,10 @@ describe("fusion and context", () => {
       entityType: "person",
       label: null,
       fields: { name: "n".repeat(400) },
-      matches: [{ subQuery: 0, matched: null, text: null, filters: [] }],
+      matches: [{ subQuery: 0, matched: null, text: null, conditions: [] }],
     }));
     const plan: Plan = { subQueries: [subQuery({})], unsupportedReason: null };
-    const context = boundContext({ items, limitations: [], searchCalls: 0, searchMs: 0 }, plan, LENS);
+    const context = boundContext({ items, limitations: [], searchCalls: 0, searchMs: 0, cutFields: [] }, plan, LENS, CONFIG);
     expect(JSON.stringify({ results: context.results }).length).toBeLessThanOrEqual(CONTEXT_CHARACTERS);
     expect(context.results.length + context.omitted).toBe(40);
     expect(context.omitted).toBeGreaterThan(0);
@@ -285,7 +327,7 @@ describe("fusion and context", () => {
       unsupportedReason: null,
     };
     const retrieval = await retrieve(scope(), plan);
-    const context = boundContext(retrieval, plan, LENS);
+    const context = boundContext(retrieval, plan, LENS, CONFIG);
     const payload = JSON.stringify({ searches: answerSearches(plan, CONFIG, LENS), results: context.results, limitations: context.limitations });
     expect(answerSearches(plan, CONFIG, LENS)).toEqual([
       { query: "works at ACME", relations: ["Employment"], filters: ["lives in City Name: Berlin"] },

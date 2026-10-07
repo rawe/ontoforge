@@ -18,6 +18,7 @@ import {
   boundContext,
   CONTEXT_CHARACTERS,
   diagnosticResults,
+  filterValues,
   fuseRankings,
   retrieve,
   retrievedResults,
@@ -254,6 +255,33 @@ describe("sub-query search", () => {
       "No salaries.",
       "Search indices not fully built (person_employment); results may be incomplete.",
     ]);
+  });
+});
+
+describe("filter values", () => {
+  const twoFilters = {
+    ...CONFIG,
+    filters: [...CONFIG.filters, { id: "home", entityType: "person", path: [{ relationTypeKey: "lives_in", direction: "outgoing" as const }], field: "name" }],
+  };
+  const listing = (stored: string[]) => ({
+    config: twoFilters,
+    loaded: scope().loaded,
+    store: { distinctEntityValues: vi.fn(async () => stored) } as unknown as RuntimeStore,
+  });
+
+  it("lists a field's distinct stored values, normalized once, reading each compared field once", async () => {
+    const lookup = listing(["Berlin", "berlin", "Hamburg"]);
+    const values = await filterValues(lookup);
+    expect(values.get("city")).toEqual(["Berlin", "Hamburg"]);
+    expect(values.get("home")).toEqual(["Berlin", "Hamburg"]);
+    expect(lookup.store.distinctEntityValues).toHaveBeenCalledTimes(1);
+    expect(lookup.store.distinctEntityValues).toHaveBeenCalledWith("city", "name", 51);
+  });
+
+  it("lists nothing for a field with more than 50 values", async () => {
+    const values = await filterValues(listing(Array.from({ length: 51 }, (_, i) => `City ${i}`)));
+    expect(values.size).toBe(0);
+    expect((await filterValues(listing(Array.from({ length: 50 }, (_, i) => `City ${i}`)))).get("city")).toHaveLength(50);
   });
 });
 

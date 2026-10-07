@@ -126,8 +126,10 @@ The planning model receives the question, the recent conversation, the search mo
 server can run and, from the lens's catalog, each of the agent's indices: its name,
 description and root type, what its own entry holds, the relation groups the agent may
 use with what one relation entry holds, the document it reads passages of, and its
-modes. It also receives the agent's filters, with what each compares, and — only when
-they may be referred to ([below](#follow-up-questions)) — the previous turn's results.
+modes. It also receives the agent's filters, with what each compares — and, where the
+compared field holds at most 50 distinct stored values, those values, listed once per
+compared type and field — and — only when they may be referred to
+([below](#follow-up-questions)) — the previous turn's results.
 A planning input over 24,000 characters refuses the question;
 fewer indices or filters fix it.
 
@@ -150,13 +152,23 @@ from the user: a filter value must occur in a verbatim quote of the current ques
 an earlier user message, and a reference to previous results must rest on the user's own
 referring words. An answer's text is never evidence for a filter.
 
+**A listed value is chosen, not invented.** Users rarely name a value as it is stored —
+"hall 3" for "Hall 3 - Energy Technology", "the platform team" for "Software Platform".
+Where a filter's values are listed, the planner sets the listed value the user's quoted
+words name, in its stored spelling, or leaves the filter out and keeps the words in the
+query when none is named. The quote must still be the user's verbatim words; a value that
+is neither listed nor in the quote is left out. The comparison stays exact, so the
+condition is still proven, and a limitation names how the words were read ("hall 3" read
+as the condition "located in Hall Name: Hall 3 - Energy Technology"). A value the user
+states that is not listed is kept as stated and matches nothing.
+
 Before anything is searched, the server checks the plan and leaves out what it cannot
 honour, naming each omission in the limitations the answer model receives — in plain
 words from the lens's display names, never by sub-query number, key or id, and in the
 same text the diagnostics report: an index the
 agent does not search, a relation it does not allow for the sub-query's indices, a filter
 that is not the agent's or not for the sub-query's result types, a filter value without
-that quote, and an invalid previous-result reference — the sub-query then runs as a fresh
+that quote and not a listed value it names, and an invalid previous-result reference — the sub-query then runs as a fresh
 search. A mode the server cannot run is replaced by its first available one. A sub-query
 left with no index, or without a query and with neither an applied filter nor a previous
 reference, is dropped. The question goes on with what remains; only a malformed plan, or

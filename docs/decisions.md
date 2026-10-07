@@ -602,8 +602,10 @@ nothing and only names an unsupported reason is planned once more, the second pl
 used, and a limitation says so — at most three model calls. The planner phrases queries
 freely, may name an entity taken from an answer, but chooses only what the configuration
 allows, and every exact restriction — a filter value, a reference to previous results —
-needs the user's own words, never an answer's; the server leaves out what fails these
-checks, names it as a limitation and answers with the rest.
+needs the user's own words, never an answer's. A filter value is those words, or — where
+the planner is shown the few stored values of the compared field — the stored value they
+name; it is still compared exactly, and the reading is named as a limitation. The server
+leaves out what fails these checks, names it as a limitation and answers with the rest.
 
 **Every lens has an implicit default retriever agent, derived and never stored.** Keyed
 `_default`, which no stored key can shadow, it is derived from the lens per question:

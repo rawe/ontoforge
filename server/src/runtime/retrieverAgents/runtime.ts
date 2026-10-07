@@ -54,6 +54,7 @@ import {
   answerSearches,
   boundContext,
   diagnosticResults,
+  filterValues,
   resultIds,
   retrieve,
   retrievedResults,
@@ -203,7 +204,9 @@ interface Planning {
 export async function planQuestion(planning: Planning): Promise<{ plan: Plan; notes: string[] }> {
   const { agent, scope, modes, message, history, previous, plannerModel, timings, io, report } = planning;
   const { signal } = scope;
-  const input = plannerInput(agent.config, scope.lens, scope.records, modes, message, history, previous);
+  const values = await filterValues(scope);
+  signal.throwIfAborted();
+  const input = plannerInput(agent.config, scope.lens, scope.records, modes, message, history, previous, values);
   if (input.length > PLANNER_INPUT_CHARACTERS) {
     throw new ValidationError(
       agent.key === DEFAULT_RETRIEVER_AGENT_KEY
@@ -245,6 +248,7 @@ export async function planQuestion(planning: Planning): Promise<{ plan: Plan; no
       message,
       history,
       previous,
+      values,
     );
     timings.validation = (timings.validation ?? 0) + performance.now() - validation;
     await report({ plan: checked.plan, modelIO: [call] });

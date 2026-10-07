@@ -27,7 +27,7 @@ import { filterEntityProperties } from "../readHelpers.js";
 import type { LoadedSchema } from "../schemaCache.js";
 import { describeMatches, rankThroughIndices, type EngineHit, type Matched } from "../search/indexSearch.js";
 import { filterCondition, relationName, type AgentLens } from "./config.js";
-import { sameValue, type Plan, type Previous, type SubQuery } from "./plan.js";
+import { MAX_LISTED_VALUES, sameValue, type FilterValues, type Plan, type Previous, type SubQuery } from "./plan.js";
 
 /** Entities one search of a sub-query ranks. */
 export const SUB_QUERY_LIMIT = 30;
@@ -196,6 +196,30 @@ async function walkBack(
     frontier = capped(next, what, limitations);
   }
   return frontier;
+}
+
+/** The stored values of each filter's field, for the filters whose field
+ * holds at most `MAX_LISTED_VALUES` distinct values (after normalization)
+ * — the planner chooses a filter value among them. One read per compared
+ * type and field. */
+export async function filterValues(
+  scope: Pick<RetrievalScope, "config" | "loaded" | "store">,
+): Promise<FilterValues> {
+  const byField = new Map<string, string[] | null>();
+  const values = new Map<string, string[]>();
+  for (const filter of scope.config.filters) {
+    const type = pathTypes(scope.loaded, filter.entityType, filter.path).at(-1)!;
+    const key = `${type}\u0000${filter.field}`;
+    if (!byField.has(key)) {
+      const stored = await scope.store.distinctEntityValues(type, filter.field, MAX_LISTED_VALUES + 1);
+      const distinct: string[] = [];
+      for (const value of stored) if (!distinct.some((seen) => sameValue(seen, value))) distinct.push(value);
+      byField.set(key, stored.length <= MAX_LISTED_VALUES ? distinct : null);
+    }
+    const listed = byField.get(key);
+    if (listed) values.set(filter.id, listed);
+  }
+  return values;
 }
 
 function intersect(into: Map<string, Set<string>>, type: string, ids: Set<string>): void {

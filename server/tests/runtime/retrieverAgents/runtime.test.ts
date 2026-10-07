@@ -35,6 +35,7 @@ const store = {
   listEntities: vi.fn(async () => [[{ _id: "ada", name: "Berlin" }], 1]),
   listRelations: vi.fn(async () => [[{ fromEntityId: "ada", toEntityId: "ada" }], 1]),
   getEntitiesByIds: vi.fn(async (ids: string[]) => Object.fromEntries(ids.map((id) => [id, { _id: id, name: "Ada", email: "a@x" }]))),
+  distinctEntityValues: vi.fn(async (): Promise<string[]> => []),
 } as unknown as RuntimeStore;
 
 const agent: RunnableAgent = {
@@ -354,6 +355,20 @@ describe("retrieve", () => {
       "This lens is too large for the default retriever agent",
     );
     expect(fake.invoke).not.toHaveBeenCalled();
+  });
+
+  it("shows the planner a filter's few stored values and reports how the user's words were read", async () => {
+    (store.distinctEntityValues as ReturnType<typeof vi.fn>).mockResolvedValueOnce(["Berlin-Mitte", "Hamburg"]);
+    (store.listEntities as ReturnType<typeof vi.fn>).mockResolvedValueOnce([[{ _id: "ada", name: "Berlin-Mitte" }], 1]);
+    fake.invoke.mockResolvedValue(planned([sub({ filters: [{ id: "city", value: "Berlin-Mitte", quote: "Mitte" }] })]));
+    const response = await retrieveQuestion(agent, "Everyone in Mitte", false, signal());
+    const input = JSON.parse(fake.invoke.mock.calls[0]![0][1].content);
+    expect(input.filters[0].valuesIn).toBe("city.name");
+    expect(input.storedValues["city.name"]).toEqual(["Berlin-Mitte", "Hamburg"]);
+    expect(response.limitations).toEqual(['The words "Mitte" were read as the condition "lives in City Name: Berlin-Mitte".']);
+    expect(response.results[0]!.conditions).toEqual([
+      { filter: "city", value: "Berlin-Mitte", text: "lives in City Name: Berlin-Mitte" },
+    ]);
   });
 
   it("stops on cancellation", async () => {

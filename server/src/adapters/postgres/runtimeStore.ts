@@ -323,6 +323,16 @@ export class PostgresRuntimeStore implements RuntimeStore {
     });
   }
 
+  async distinctEntityValues(entityTypeKey: string, propertyKey: string, limit: number): Promise<string[]> {
+    const result = await this.query(
+      `SELECT DISTINCT props->>$2 AS value FROM entity
+       WHERE type_key = $1 AND props->>$2 IS NOT NULL AND props->>$2 <> ''
+       ORDER BY value LIMIT $3`,
+      [entityTypeKey, propertyKey, limit],
+    );
+    return result.rows.map((row) => String(row["value"]));
+  }
+
   /** No property definitions cross this read (approved M3.1 scope):
    * datetime values stay the stored ISO text — byte-identical on the
    * wire, and no in-process consumer inspects them. */

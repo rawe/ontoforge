@@ -183,6 +183,12 @@ export class Neo4jRuntimeStore implements RuntimeStore {
     );
   }
 
+  async distinctEntityValues(entityTypeKey: string, propertyKey: string, limit: number): Promise<string[]> {
+    return runSession(this.driver, (session) =>
+      queries.distinctEntityValues(session, toPascalCase(entityTypeKey), entityTypeKey, propertyKey, limit),
+    );
+  }
+
   async getEntity(entityTypeKey: string, entityId: string): Promise<Row | null> {
     return runSession(this.driver, (session) =>
       queries.getEntity(session, toPascalCase(entityTypeKey), entityId),

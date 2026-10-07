@@ -13,8 +13,10 @@
  *
  * Queries are the planner's words. What restricts results exactly must
  * be the user's: a filter value needs a verbatim quote of a user message
- * (never assistant text), and a previous-result reference needs the
- * user's words and a complete exact previous list. A check that fails
+ * (never assistant text) — the value itself, or, for a filter whose field
+ * holds few values, the listed stored value those words name — and a
+ * previous-result reference needs the user's words and a complete exact
+ * previous list. A check that fails
  * never fails the turn: the filter or reference is left out and named as
  * a limitation — in plain words from the lens's display names, never by
  * sub-query number, key or id: the answer model receives the same text.
@@ -36,6 +38,14 @@ export const MAX_VARIANTS = 3;
 
 /** Most characters of the planner's input. */
 export const PLANNER_INPUT_CHARACTERS = 24_000;
+
+/** Most distinct stored values of a filter's field listed to the planner;
+ * a field with more is not listed. */
+export const MAX_LISTED_VALUES = 50;
+
+/** Per filter id, the stored values of its field, for filters whose field
+ * holds at most `MAX_LISTED_VALUES` distinct values. */
+export type FilterValues = ReadonlyMap<string, readonly string[]>;
 
 export interface History {
   role: "user" | "assistant";
@@ -145,7 +155,7 @@ Prefer filters over splitting: when the user states the value of a condition tha
 Example: "Who works at ACME and lives in Berlin?" with an employment index and a filter "city" on people (lives_in → city name) → {"subQueries":[{"indices":["<employment index>"],"relations":["<employment relation>"],"query":"works at ACME","variants":[],"mode":"<first mode>","filters":[{"id":"city","value":"Berlin","quote":"lives in Berlin"}],"previous":null}],"unsupportedReason":null}.
 Split only when a condition needs another relation group and no filter covers it. Example: the same question with an employment index and a home index but no city filter → {"subQueries":[{"indices":["<employment index>"],"relations":["<employment relation>"],"query":"works at ACME","variants":[],"mode":"<first mode>","filters":[],"previous":null},{"indices":["<home index>"],"relations":["<home relation>"],"query":"lives in Berlin","variants":[],"mode":"<first mode>","filters":[],"previous":null}],"unsupportedReason":null}.
 query: a short search phrase for this sub-query, in the user's words where possible; leave out question introductions, filter values, and formatting or output instructions. A follow-up question continues the conversation: restate its topic from the history in the query (for example "When was it published?" after "Which novel did Jane Austen write first?" → "Jane Austen first novel published"). Resolve a pronoun or a left-out subject (he, she, it, they, there, his, her) from the last exchange of the history alone — its last USER message and the ASSISTANT answer to it: the person or entity that USER message named, or, when it asked for one without naming it, the one that answer named; never one of an earlier exchange, even one that fits the question better. Example: after "Who painted the Mona Lisa?" → "Leonardo da Vinci." and "Who painted The Starry Night?" → "Vincent van Gogh.", "Where was he born?" → query "Vincent van Gogh birthplace". Name that entity in the query, by the user's words or the answer's name for it: queries may use ASSISTANT text; only filter values need user quotes. Use "" only for a pure exact list that relies on filters or previous results alone. Up to three short variants with the same meaning; do not add requirements; [] is allowed. mode: one of availableModes, normally the first.
-Filters are exact and optional: use one only when the user states its exact value. value must occur in quote; quote must be a verbatim substring of the current question or an earlier USER message. Never use ASSISTANT text as filter evidence — this concerns filter quotes only, never the query. Keep a stated value even if you doubt it exists, so it yields no matches rather than silently dropping a constraint. Do not invent filters.
+Filters are exact and optional: use one only when the user states its value. quote must be a verbatim substring of the current question or an earlier USER message. When a filter names a list of stored values (valuesIn, a key of storedValues), value must be one of them, spelled as listed: the listed value the user's quoted words name (for example quote "hall 3" → value "Hall 3 - Energy Technology", quote "the platform team" → value "Software Platform"); when no listed value is named, leave that filter out and keep the words in the query. Otherwise value must occur in quote. Never use ASSISTANT text as filter evidence — this concerns filter quotes only, never the query. Keep a stated value even if you doubt it exists, so it yields no matches rather than silently dropping a constraint. Do not invent filters.
 For an explicit reference to previous results (this/these/those/their or equivalent in the user's language), set previous:{filterId:null,quote:"verbatim user reference"} for the same result type, or the id of an allowed filter whose path leads to the type of previousVerifiedResults. A singular reference requires exactly one previous entity; otherwise explain the ambiguity as unsupportedReason. Use previous:null for independent questions and whenever previousVerifiedResults is null. A reference to earlier results while previousVerifiedResults is null is still answerable: never answer it with unsupportedReason or subQueries:[]; restate the earlier USER question as a fresh search that carries all of its constraints and the new condition — drop none. Example: "Which of these speak Spanish?" after "Who lives in Lisbon?" with a filter "city" (lives_in → city name) → {"subQueries":[{"indices":["<index>"],"relations":[],"query":"speaks Spanish","variants":[],"mode":"<first mode>","filters":[{"id":"city","value":"Lisbon","quote":"lives in Lisbon"}],"previous":null}],"unsupportedReason":null}: the earlier constraint as a filter quoted from the earlier USER message, the new one as the query; without such a filter, one sub-query per constraint ("lives in Lisbon", "speaks Spanish"). ASSISTANT text never authorizes an exact entity restriction.
 Search whenever an index holds the kind of fact asked for, even without an exact filter: searching is how facts are found. Only if no index holds it at all (a requested field or entity class is absent), return subQueries:[] with a short unsupportedReason in the user's language; a follow-up or a reference to earlier results is never such a case. Do not substitute vaguely similar result types. No Markdown.`;
 
@@ -176,7 +186,8 @@ export interface Previous {
 }
 
 /** The planner's input: question, history, the agent's indices and
- * filters as the lens shows them, the modes the server can run. */
+ * filters as the lens shows them — with the stored values of a filter's
+ * field when it holds few — and the modes the server can run. */
 export function plannerInput(
   config: RetrieverAgentConfig,
   lens: AgentLens,
@@ -185,6 +196,7 @@ export function plannerInput(
   message: string,
   history: History[],
   previous: Previous | undefined,
+  values: FilterValues = new Map(),
 ): string {
   const { scoped, catalog } = lens;
   const indices = config.indices.flatMap((reference) => {
@@ -231,21 +243,28 @@ export function plannerInput(
       },
     ];
   });
+  // Listed once per compared type and field; several filters may share one list.
+  const storedValues: Record<string, readonly string[]> = {};
   const filters = config.filters.map((filter) => {
     const target = pathTarget(scoped, filter.entityType, filter.path);
     const targetType = target === null ? undefined : scoped.entityTypes[target];
+    const listed = values.get(filter.id);
+    const list = `${target}.${filter.field}`;
+    if (listed !== undefined) storedValues[list] = listed;
     return {
       id: filter.id,
       resultType: filter.entityType,
       path: filter.path.map((hop) => `${hop.relationTypeKey} (${hop.direction})`),
       comparesType: target,
       comparesField: targetType?.properties[filter.field]?.displayName ?? filter.field,
+      ...(listed !== undefined ? { valuesIn: list } : {}),
     };
   });
   return JSON.stringify({
     availableModes: modes,
     indices,
     filters,
+    storedValues,
     // Only a complete exact list may be referred to (`previousProblem`).
     previousVerifiedResults:
       previous !== undefined && previous.complete && previous.plan.subQueries.every((sub) => sub.query === "")
@@ -301,7 +320,9 @@ function previousProblem(
  * an index or relation the agent does not allow, an unavailable mode
  * (the first available one runs), a filter without a verbatim user quote,
  * an invalid previous reference (the sub-query runs as a fresh search),
- * and a query-less sub-query left without restriction. Throws only for a
+ * and a query-less sub-query left without restriction. A listed value the
+ * user's quoted words name, rather than state, is kept and named as how
+ * those words were read. Throws only for a
  * plan that is no plan: a malformed one, or neither sub-queries nor an
  * unsupported-data explanation.
  */
@@ -313,6 +334,7 @@ export function validatePlan(
   message: string,
   history: History[],
   previous: Previous | undefined,
+  values: FilterValues = new Map(),
 ): { plan: Plan; notes: string[] } {
   const parsed = PlanSchema.safeParse(raw);
   if (!parsed.success) throw new ValidationError("Search plan has an invalid format.");
@@ -371,12 +393,21 @@ export function validatePlan(
         notes.push("A filter this agent does not allow for the searched type was not applied.");
         return false;
       }
-      if (!evidenced(filter.quote, sources) || !norm(filter.quote).includes(norm(filter.value))) {
+      const stated = norm(filter.quote).includes(norm(filter.value));
+      const listed = values.get(configured.id)?.find((value) => sameValue(value, filter.value));
+      if (!evidenced(filter.quote, sources) || (!stated && listed === undefined)) {
         notes.push(
           `The condition "${filterCondition(lens.scoped, configured, filter.value)}" was not applied: the value ` +
             "is not stated verbatim in a user message.",
         );
         return false;
+      }
+      if (listed !== undefined) filter.value = listed;
+      if (!stated) {
+        notes.push(
+          `The words "${filter.quote.trim()}" were read as the condition ` +
+            `"${filterCondition(lens.scoped, configured, filter.value)}".`,
+        );
       }
       return true;
     });

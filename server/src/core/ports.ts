@@ -607,6 +607,11 @@ export interface RuntimeStore {
     offset: number,
   ): Promise<[Row[], number]>;
 
+  /** Up to `limit` distinct values of one property among the entities of
+   * a type, as text, in ascending order; an entity without a value, or
+   * with an empty one, contributes none. */
+  distinctEntityValues(entityTypeKey: string, propertyKey: string, limit: number): Promise<string[]>;
+
   getEntity(entityTypeKey: string, entityId: string): Promise<Row | null>;
 
   getEntityById(

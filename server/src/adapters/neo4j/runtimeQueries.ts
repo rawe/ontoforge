@@ -168,6 +168,22 @@ export async function createEntity(
 }
 
 /** List entities with filtering, sorting, and pagination. */
+export async function distinctEntityValues(
+  session: Session,
+  pascalLabel: string,
+  entityTypeKey: string,
+  propertyKey: string,
+  limit: number,
+): Promise<string[]> {
+  const result = await session.run(
+    `MATCH (n:_Entity:${pascalLabel}) WHERE n._entityTypeKey = $entity_type_key AND n[$key] IS NOT NULL
+     WITH DISTINCT toString(n[$key]) AS value WHERE value <> ''
+     RETURN value ORDER BY value LIMIT $limit`,
+    { entity_type_key: entityTypeKey, key: propertyKey, limit: neo4j.int(limit) },
+  );
+  return result.records.map((record) => record.get("value") as string);
+}
+
 export async function listEntities(
   session: Session,
   pascalLabel: string,

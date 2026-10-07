@@ -1,10 +1,11 @@
-/** Retriever-agent chat. The saved agent runs; a request can never supply a configuration. */
+/** Retriever-agent chat and retrieve. The saved agent (or the lens's
+ * derived default agent) runs; a request can never supply a configuration. */
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 
 import { getRuntimeStore } from "../../core/ports.js";
 import { sendChatStream } from "../chatStream.js";
-import { chat, loadRunnableAgent, requireLanguageModel } from "./runtime.js";
+import { chat, loadRunnableAgent, requireLanguageModel, retrieveQuestion } from "./runtime.js";
 
 const Params = z.object({ ontologyKey: z.string(), lensKey: z.string(), agentKey: z.string() });
 const Chat = z
@@ -16,6 +17,12 @@ const Chat = z
       .array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(12000) }))
       .max(30)
       .default([]),
+  })
+  .strict();
+const Retrieve = z
+  .object({
+    question: z.string().min(1).max(2000),
+    diagnostics: z.boolean().default(false),
   })
   .strict();
 
@@ -40,6 +47,29 @@ export const retrieverAgentRuntimeRouter: FastifyPluginAsyncZod = async (app) =>
           request.body.diagnostics,
         ),
       );
+    },
+  );
+
+  app.post(
+    "/retriever-agents/:agentKey/retrieve",
+    { schema: { tags: ["ai"], params: Params, body: Retrieve } },
+    async (request, reply) => {
+      requireLanguageModel();
+      const controller = new AbortController();
+      const disconnect = () => {
+        if (!reply.raw.writableEnded) controller.abort();
+      };
+      request.raw.once("aborted", disconnect);
+      reply.raw.once("close", disconnect);
+      if (request.raw.aborted || reply.raw.destroyed) controller.abort();
+      try {
+        const store = await getRuntimeStore(request.params.ontologyKey);
+        const agent = await loadRunnableAgent(request.params.lensKey, request.params.agentKey, store);
+        return await retrieveQuestion(agent, request.body.question, request.body.diagnostics, controller.signal);
+      } finally {
+        request.raw.removeListener("aborted", disconnect);
+        reply.raw.removeListener("close", disconnect);
+      }
     },
   );
 };

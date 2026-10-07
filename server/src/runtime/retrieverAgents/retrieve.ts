@@ -27,7 +27,7 @@ import { filterEntityProperties } from "../readHelpers.js";
 import type { LoadedSchema } from "../schemaCache.js";
 import { describeMatches, rankThroughIndices, type EngineHit, type Matched } from "../search/indexSearch.js";
 import { filterCondition, relationName, type AgentLens } from "./config.js";
-import { sameValue, type Plan, type Previous, type SubQuery } from "./plan.js";
+import { MAX_LISTED_VALUES, sameValue, type FilterValues, type Plan, type Previous, type SubQuery } from "./plan.js";
 
 /** Entities one search of a sub-query ranks. */
 export const SUB_QUERY_LIMIT = 30;
@@ -56,6 +56,15 @@ export interface RetrievalScope {
   signal: AbortSignal;
 }
 
+/** An exact filter a sub-query applied, which its results satisfy: the
+ * agent's filter id, the compared value and the condition in plain words
+ * (`filterCondition`): "lives in City Name: Berlin". */
+export interface Condition {
+  filter: string;
+  value: string;
+  text: string;
+}
+
 /** What one sub-query found of an entity. */
 export interface SubQueryMatch {
   subQuery: number;
@@ -64,9 +73,8 @@ export interface SubQueryMatch {
   /** The matched entry's text, cut to the answer-field length; null when
    * listed or when the index reads properties the lens hides. */
   text: string | null;
-  /** The sub-query's exact filters the entity satisfies, in plain words
-   * (`filterCondition`): "lives in City Name: Berlin". */
-  filters: string[];
+  /** The sub-query's exact filters the entity satisfies. */
+  conditions: Condition[];
 }
 
 export interface RetrievedItem {
@@ -85,6 +93,8 @@ export interface Retrieval {
   searchCalls: number;
   /** Milliseconds spent in search calls. */
   searchMs: number;
+  /** Display names of answer fields cut to the configured characters. */
+  cutFields: string[];
 }
 
 /** One sub-query's ranking before the entities are read. */
@@ -186,6 +196,30 @@ async function walkBack(
     frontier = capped(next, what, limitations);
   }
   return frontier;
+}
+
+/** The stored values of each filter's field, for the filters whose field
+ * holds at most `MAX_LISTED_VALUES` distinct values (after normalization)
+ * — the planner chooses a filter value among them. One read per compared
+ * type and field. */
+export async function filterValues(
+  scope: Pick<RetrievalScope, "config" | "loaded" | "store">,
+): Promise<FilterValues> {
+  const byField = new Map<string, string[] | null>();
+  const values = new Map<string, string[]>();
+  for (const filter of scope.config.filters) {
+    const type = pathTypes(scope.loaded, filter.entityType, filter.path).at(-1)!;
+    const key = `${type}\u0000${filter.field}`;
+    if (!byField.has(key)) {
+      const stored = await scope.store.distinctEntityValues(type, filter.field, MAX_LISTED_VALUES + 1);
+      const distinct: string[] = [];
+      for (const value of stored) if (!distinct.some((seen) => sameValue(seen, value))) distinct.push(value);
+      byField.set(key, stored.length <= MAX_LISTED_VALUES ? distinct : null);
+    }
+    const listed = byField.get(key);
+    if (listed) values.set(filter.id, listed);
+  }
+  return values;
 }
 
 function intersect(into: Map<string, Set<string>>, type: string, ids: Set<string>): void {
@@ -358,6 +392,7 @@ export async function retrieve(scope: RetrievalScope, plan: Plan, previous?: Pre
     limitations: plan.unsupportedReason ? [plan.unsupportedReason] : [],
     searchCalls: 0,
     searchMs: 0,
+    cutFields: [],
   };
   const perSubQuery: Ranked[][] = [];
   for (const sub of plan.subQueries) perSubQuery.push(await runSubQuery(scope, sub, previous, retrieval));
@@ -377,11 +412,11 @@ export async function retrieve(scope: RetrievalScope, plan: Plan, previous?: Pre
   const hidesText = new Map<string, boolean>();
   // The filters each sub-query applied, per result type: facts its
   // results satisfy, which the answer may state.
-  const factsOf = (subQuery: number, entityType: string): string[] =>
+  const factsOf = (subQuery: number, entityType: string): Condition[] =>
     plan.subQueries[subQuery]!.filters.flatMap((applied) => {
       const filter = scope.config.filters.find((candidate) => candidate.id === applied.id);
       if (filter === undefined || filter.entityType !== entityType) return [];
-      return [filterCondition(scope.lens.scoped, filter, applied.value)];
+      return [{ filter: filter.id, value: applied.value, text: filterCondition(scope.lens.scoped, filter, applied.value) }];
     });
   for (const [subQuery, ranked] of perSubQuery.entries()) {
     const hits = ranked.flatMap((item) => (item.hit === null ? [] : [item.hit]));
@@ -399,7 +434,7 @@ export async function retrieve(scope: RetrievalScope, plan: Plan, previous?: Pre
         subQuery,
         matched: item.hit === null ? null : described.get(item.entityId) ?? null,
         text,
-        filters: factsOf(subQuery, item.entityType),
+        conditions: factsOf(subQuery, item.entityType),
       };
       matchesOf.set(item.entityId, [...(matchesOf.get(item.entityId) ?? []), match]);
     }
@@ -427,11 +462,7 @@ export async function retrieve(scope: RetrievalScope, plan: Plan, previous?: Pre
       matches: matchesOf.get(item.entityId) ?? [],
     });
   }
-  if (truncated.size > 0) {
-    retrieval.limitations.push(
-      `Answer fields cut to ${scope.config.answerFieldCharacters} characters: ${[...truncated].sort().join(", ")}.`,
-    );
-  }
+  retrieval.cutFields = [...truncated].sort();
   return retrieval;
 }
 
@@ -492,8 +523,18 @@ function namedFields(lens: AgentLens, entityType: string, fields: Row): Row {
 
 /** The evidence that fits `CONTEXT_CHARACTERS`, best first, in display
  * names; ids, keys, scores and diagnostics stay out. */
-export function boundContext(retrieval: Retrieval, plan: Plan, lens: AgentLens): ResponseContext {
+export function boundContext(
+  retrieval: Retrieval,
+  plan: Plan,
+  lens: AgentLens,
+  config: Pick<RetrieverAgentConfig, "answerFieldCharacters">,
+): ResponseContext {
   const context: ResponseContext = { results: [], omitted: 0, limitations: [...retrieval.limitations] };
+  if (retrieval.cutFields.length > 0) {
+    context.limitations.push(
+      `Answer fields cut to ${config.answerFieldCharacters} characters: ${retrieval.cutFields.join(", ")}.`,
+    );
+  }
   for (const item of retrieval.items) {
     context.results.push({
       type: lens.scoped.entityTypes[item.entityType]?.displayName ?? item.entityType,
@@ -513,7 +554,7 @@ export function boundContext(retrieval: Retrieval, plan: Plan, lens: AgentLens):
                   }),
               text: match.text,
             }),
-        ...(match.filters.length === 0 ? {} : { filters: match.filters }),
+        ...(match.conditions.length === 0 ? {} : { filters: match.conditions.map((condition) => condition.text) }),
       })),
     });
     if (JSON.stringify(context).length > CONTEXT_CHARACTERS - 400) {
@@ -557,6 +598,38 @@ export function diagnosticResults(retrieval: Retrieval) {
       answerFields: item.fields,
     })),
   );
+}
+
+/** One found entity as the retrieve route returns it. */
+export interface RetrievedResult {
+  entityId: string;
+  entityType: string;
+  label: string | null;
+  /** Every condition a sub-query that found the entity applied to it,
+   * each once (same filter, same value). */
+  conditions: Condition[];
+  /** The text match of the first sub-query (plan order) that ranked the
+   * entity; null when every sub-query only listed it. */
+  matched: Matched | null;
+}
+
+/** The fused results, best first, with their proven conditions and text
+ * match — no answer fields, no score. */
+export function retrievedResults(retrieval: Retrieval): RetrievedResult[] {
+  return retrieval.items.map((item) => {
+    const conditions: Condition[] = [];
+    for (const match of item.matches) {
+      for (const condition of match.conditions) {
+        const seen = conditions.some(
+          (prior) => prior.filter === condition.filter && sameValue(prior.value, condition.value),
+        );
+        if (!seen) conditions.push(condition);
+      }
+    }
+    // Matches are recorded per sub-query in plan order.
+    const matched = item.matches.find((match) => match.matched !== null)?.matched ?? null;
+    return { entityId: item.entityId, entityType: item.entityType, label: item.label, conditions, matched };
+  });
 }
 
 /** The result ids per entity type, for a follow-up's reference. */

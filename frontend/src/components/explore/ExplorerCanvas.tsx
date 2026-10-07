@@ -19,7 +19,7 @@ import {
   useRef,
   useState,
 } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import * as runtime from '@/api/runtime'
 import type {
@@ -94,6 +94,7 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
   const { resolvedTheme } = useTheme()
   const reactFlow = useReactFlow()
   const [searchParams, setSearchParams] = useSearchParams()
+  const location = useLocation()
 
   const [ws, dispatch] = useReducer(workingSetReducer, emptyWorkingSet)
   // Latest-value refs so imperative helpers (fetch callbacks, RF handlers)
@@ -323,6 +324,30 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
       }
     })()
   }, [hydrated, searchParams, setSearchParams, ontologyKey, lensKey, focusEntity])
+
+  /* --------------------------- added entities (state) ------------------------- */
+
+  // "Show all in Explorer": entities handed over in the navigation state
+  // join the working set together — unanchored, duplicates flashed, the
+  // hard cap refusing the addition as a whole.
+  useEffect(() => {
+    if (!hydrated) return
+    const handed = (location.state as { addEntities?: { typeKey: string; id: string }[] } | null)?.addEntities
+    if (!Array.isArray(handed)) return
+    // Clear the state first so a refresh or back navigation doesn't re-add them.
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: null })
+    void (async () => {
+      const results = await Promise.allSettled(
+        handed.map((ref) => runtime.getEntity(ontologyKey, lensKey, ref.typeKey, ref.id)),
+      )
+      const entities = results.flatMap((res) => (res.status === 'fulfilled' ? [res.value] : []))
+      if (entities.length > 0 && addEntities(entities)) {
+        window.setTimeout(() => {
+          void reactFlow.fitView({ ...fitOptions(), duration: 300 })
+        }, 60)
+      }
+    })()
+  }, [hydrated, location, navigate, ontologyKey, lensKey, addEntities, reactFlow, fitOptions])
 
   /* ------------------------------ interactions ------------------------------- */
 

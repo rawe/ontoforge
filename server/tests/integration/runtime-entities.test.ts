@@ -8,7 +8,7 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../../src/app.js";
-import { closeStores, initStores } from "../../src/core/ports.js";
+import { closeStores, getRuntimeStore, initStores } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { buildFixture } from "./fixture.js";
@@ -598,5 +598,23 @@ describe("cache invalidation across a modeling change", () => {
     const schema = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/hr_view/schema" });
     const person = schema.json().entityTypes.find((et: Row) => et.key === "person");
     expect(person.properties.map((p: Row) => p.key).sort()).toEqual(["age", "email", "name"]);
+  });
+});
+
+describe("distinct values of a property (store port)", () => {
+  it("lists each stored value once, sorted, without missing or empty values, up to the limit", async () => {
+    for (const payload of [
+      { name: "Ada", email: "b@x.test" },
+      { name: "Bob", email: "a@x.test" },
+      { name: "Cid", email: "b@x.test" },
+      { name: "Dee" },
+      { name: "Eve", email: "" },
+    ]) {
+      await createPerson("test_lens", payload);
+    }
+    const store = await getRuntimeStore("test_ont");
+    expect(await store.distinctEntityValues("person", "email", 10)).toEqual(["a@x.test", "b@x.test"]);
+    expect(await store.distinctEntityValues("person", "email", 1)).toEqual(["a@x.test"]);
+    expect(await store.distinctEntityValues("company", "name", 10)).toEqual([]);
   });
 });

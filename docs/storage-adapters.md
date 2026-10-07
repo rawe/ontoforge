@@ -257,6 +257,11 @@ definitions, the parsed filter conditions, an optional text-search string with t
 property keys to match, a validated sort property and direction, and a limit and offset.
 It returns the page together with the total matching count — both, from one call.
 
+A second read lists, for a type key and one property key, up to a given number of that
+property's distinct stored values as text, in ascending order; an entity without the
+property, or with an empty value, contributes none. A retriever agent's planner sees them
+when they are few.
+
 The adapter must set and maintain the system properties on every write: the instance id,
 the type key, the creation timestamp on create, and the update timestamp on create and on
 every update. Stored embedding vectors must never appear in a returned row.

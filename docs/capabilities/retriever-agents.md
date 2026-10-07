@@ -4,8 +4,12 @@ A retriever agent answers questions over one lens's [search indices](search-indi
 It is a stored configuration: which indices it searches, which exact filters a question
 may set, which fields the answer may cite and how strict semantic matching is. A question
 runs a fixed pipeline — a planning model turns it into searches, the index search runs
-them, an answer model writes the reply from what they found. Saving an agent stores the
-configuration only: no vectors, no graph data, no conversation.
+them, an answer model writes the reply from what they found. A question can also be
+[retrieved](#retrieve) instead: planned and searched, returning the found entities
+without an answer. Saving an agent stores the configuration only: no vectors, no graph
+data, no conversation. Every lens also has a
+[default retriever agent](#the-default-retriever-agent), derived from its managed indices
+and never stored.
 
 Vocabulary: [../README.md](../README.md#glossary). The rules these follow:
 [../decisions.md](../decisions.md). Every route: [../interfaces.md](../interfaces.md).
@@ -108,11 +112,13 @@ is in storage, where reads report it invalid.
 
 ## Answering a question
 
-The agent is loaded from storage by lens and key and checked against the lens again; a
+The agent is loaded from storage by lens and key — or derived, for the
+[default agent](#the-default-retriever-agent) — and checked against the lens again; a
 request can never supply or override a configuration, so changes run once saved. A
 question makes two model calls — plan and answer — with retrieval between them, or three
 when a follow-up's planning is repeated once ([below](#planning)); no other model call is
-repeated, and a failed call is never retried. Cancelling the request stops further work.
+repeated, and a failed call is never retried. A [retrieve](#retrieve) makes one.
+Cancelling the request stops further work.
 
 ### Planning
 
@@ -120,8 +126,10 @@ The planning model receives the question, the recent conversation, the search mo
 server can run and, from the lens's catalog, each of the agent's indices: its name,
 description and root type, what its own entry holds, the relation groups the agent may
 use with what one relation entry holds, the document it reads passages of, and its
-modes. It also receives the agent's filters, with what each compares, and — only when
-they may be referred to ([below](#follow-up-questions)) — the previous turn's results.
+modes. It also receives the agent's filters, with what each compares — and, where the
+compared field holds at most 50 distinct stored values, those values, listed once per
+compared type and field — and — only when they may be referred to
+([below](#follow-up-questions)) — the previous turn's results.
 A planning input over 24,000 characters refuses the question;
 fewer indices or filters fix it.
 
@@ -144,13 +152,23 @@ from the user: a filter value must occur in a verbatim quote of the current ques
 an earlier user message, and a reference to previous results must rest on the user's own
 referring words. An answer's text is never evidence for a filter.
 
+**A listed value is chosen, not invented.** Users rarely name a value as it is stored —
+"hall 3" for "Hall 3 - Energy Technology", "the platform team" for "Software Platform".
+Where a filter's values are listed, the planner sets the listed value the user's quoted
+words name, in its stored spelling, or leaves the filter out and keeps the words in the
+query when none is named. The quote must still be the user's verbatim words; a value that
+is neither listed nor in the quote is left out. The comparison stays exact, so the
+condition is still proven, and a limitation names how the words were read ("hall 3" read
+as the condition "located in Hall Name: Hall 3 - Energy Technology"). A value the user
+states that is not listed is kept as stated and matches nothing.
+
 Before anything is searched, the server checks the plan and leaves out what it cannot
 honour, naming each omission in the limitations the answer model receives — in plain
 words from the lens's display names, never by sub-query number, key or id, and in the
 same text the diagnostics report: an index the
 agent does not search, a relation it does not allow for the sub-query's indices, a filter
 that is not the agent's or not for the sub-query's result types, a filter value without
-that quote, and an invalid previous-result reference — the sub-query then runs as a fresh
+that quote and not a listed value it names, and an invalid previous-result reference — the sub-query then runs as a fresh
 search. A mode the server cannot run is replaced by its first available one. A sub-query
 left with no index, or without a query and with neither an applied filter nor a previous
 reference, is dropped. The question goes on with what remains; only a malformed plan, or
@@ -253,7 +271,75 @@ the server uses the last eight turns.
 On request, the stream also reports what the agent did: the validated plan, one result
 row per entity and sub-query with what matched and its answer fields, the limitations,
 the number of index searches, phase timings and bounded traces of every model call —
-the plan, a repeated plan, the answer. The event format is in [../interfaces.md](../interfaces.md#retriever-agent-chat).
+the plan, a repeated plan, the answer. The event format is in [../interfaces.md](../interfaces.md#retriever-agent-chat-and-retrieve).
+
+## Retrieve
+
+Retrieve answers one question with the entities the agent finds — no answer text. It runs
+exactly the first two phases of [answering a question](#answering-a-question), unchanged:
+[planning](#planning) and [retrieval](#retrieval). There is no conversation: no history,
+no follow-up token, no reference to earlier results, so planning is never repeated and a
+retrieve makes exactly **one model call**. No answer model runs, and answer fields are
+not read into the response; the caller reads the entities it needs through the runtime
+interfaces. The agent is loaded and checked as for a question, a request can never supply
+a configuration, the planner input cap and the plan checks apply, and every refusal is
+the question's. Cancelling the request stops further work.
+
+The response is the fused result list, best first. The order is the match grade: there is
+**no score**. Each result carries its identity, entity type and label — its name
+property's value, or none — and two independent facts:
+
+- **Conditions** — the exact conditions it is proven to satisfy: the union, over every
+  sub-query that returned it, of the agent's filters that sub-query applied for its type,
+  each once. A condition names the filter, the compared value and the condition in plain
+  words from the lens's display names, as the answer model receives it ("reported by
+  Customer Name: Acme"). The server compared the stored value.
+- **Matched** — the text match of the first sub-query, in plan order, that ranked the
+  entity, in the form of a search hit's ([search.md](search.md#response)); none when every
+  sub-query only listed it. The entry text is withheld where the index reads properties
+  the lens hides.
+
+| Conditions | Matched | Meaning |
+|---|---|---|
+| some | set | Proven condition, and on topic |
+| some | none | Proven condition; listed only, topic not established |
+| none | set | Similarity candidate |
+
+Beside the results come the limitations, in the plain words the answer model would
+receive, and the planner's unsupported reason when no index can answer. No result — no
+match, or an unsupported question — is not an error. On request the response also
+carries diagnostics: the validated plan, the number of index searches, phase timings and
+the trace of the one planning call.
+
+## The default retriever agent
+
+Every lens has an implicit retriever agent, keyed `_default`. It is not stored and cannot
+be created, replaced, deleted, copied, moved, exported or imported; no stored key can
+begin with an underscore, so it can never be shadowed. It is not listed with the stored
+agents. It exists wherever the adapter stores search indices, and both
+[answering a question](#answering-a-question) and [retrieve](#retrieve) serve it.
+
+Its configuration is derived from the lens for every question, deterministically — the
+same lens and schema give the same configuration, so a follow-up token stays bound to it
+and expires when the schema changes:
+
+| Field | Derived as |
+|---|---|
+| `indices` | Every managed index in the lens's [search catalog](search.md#the-search-catalog) — each exposed type's default index and each visible document property's passage index — that is switched on. No relation narrowing; custom indices are not included |
+| `filters` | Per result type whose name property the lens shows: one on that name, and one per relation type the lens shows with the type at one end, in each direction in which it is that end — both for a self-relation — comparing the name of the other end's type, when the lens exposes that type and shows its name property |
+| `answerFields` | Per result type: its name property, then its further visible `string` properties in schema order, up to 12 |
+| `threshold`, `answerFieldCharacters` | The defaults |
+
+The derived filter ids are the result type's key alone for a name, and the result type's
+key, the relation type's key and the direction, joined by dots, for a relation — the ids
+a retrieve's conditions name.
+
+The stored limits of twelve indices and twelve filters do not apply; the derived
+configuration is valid by construction. The planner input cap applies unchanged: a lens
+whose derived configuration exceeds it refuses the question, saying the lens is too
+large for the default agent and a configured agent is needed. Nothing is trimmed. A lens
+with no managed index switched on for a type it shows has nothing to search, and a
+question to its default agent is refused.
 
 ## Copy, move and portable JSON
 
@@ -291,8 +377,10 @@ export carries no `retrieverAgents`, and import checks them and keeps none.
 
 Retriever agents are managed through modeling REST, addressed by lens key and agent key; a question
 runs through runtime REST by agent key and streams its progress, answer and follow-up
-token ([../interfaces.md](../interfaces.md)). Management, copy, move, export and import
-call no model. A question needs a language-model provider — without one it is refused as
-a disabled feature before anything is read or streamed; without an embedding provider it
-searches by keyword only. No MCP tool manages or runs an agent; the modeling MCP
-server's whole-schema read and export carry them like REST.
+token, and a retrieve answers it with one plain response
+([../interfaces.md](../interfaces.md)). Both address the default agent by its key.
+Management, copy, move, export and import call no model. A question or a retrieve needs a
+language-model provider — without one it is refused as a disabled feature before anything
+is read or streamed; without an embedding provider it searches by keyword only. No MCP
+tool manages or runs an agent; the modeling MCP server's whole-schema read and export
+carry them like REST.

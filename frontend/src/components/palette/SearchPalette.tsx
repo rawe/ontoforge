@@ -1,8 +1,11 @@
 import { Command as CommandPrimitive } from 'cmdk'
 import {
+  Check,
+  ChevronDown,
   Clock,
   LayoutDashboard,
   Loader2,
+  MessageCircleQuestion,
   Moon,
   Search,
   Shapes,
@@ -12,15 +15,29 @@ import {
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import {
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type ComponentType,
   type KeyboardEvent,
+  type MutableRefObject,
   type ReactNode,
 } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useFeatures, useRuntimeSchema } from '@/api/hooks'
+import { useFeatures, useRetrieverAgents, useRuntimeSchema, useSearchCatalog } from '@/api/hooks'
+import { RetrievalResults } from '@/components/retrieverAgent/RetrievalResults'
+import {
+  QUESTION_PREFIX,
+  questionToSend,
+  resolveRetriever,
+  resultEntities,
+  retrieverChoices,
+} from '@/components/retrieverAgent/retrieveModel'
+import { useRetrieve } from '@/components/retrieverAgent/useRetrieve'
 import { TypeChip, TypeDot } from '@/components/TypeChip'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { readString, storageKeys, writeString } from '@/lib/storage'
 import {
   Command,
   CommandDialog,
@@ -61,7 +78,7 @@ function StatusRow({ children }: { children: ReactNode }) {
   )
 }
 
-type Mode = 'entities' | 'types' | 'queries' | 'actions'
+type Mode = 'entities' | 'types' | 'queries' | 'actions' | 'question'
 
 interface PaletteAction {
   id: string
@@ -85,22 +102,36 @@ interface SearchPaletteProps {
 
 /**
  * Cmd+K palette: cross-type (semantic) entity search by default, `#` to scope
- * to one entity type, `?` for saved queries, `>` for navigation/actions.
+ * to one entity type, `?` for saved queries, `>` for navigation/actions, `!`
+ * to ask a retriever agent a question (sent on Enter, never as you type).
  * Enter opens an entity's detail page; Cmd+Enter focuses it in the Explorer.
  *
  * The stateful content only mounts while the dialog is open, so every open
- * starts with a fresh input, scope and recents snapshot.
+ * starts with a fresh input, scope and recents snapshot — only the chosen
+ * retriever is remembered, per ontology and lens.
  */
 export function SearchPalette({ ontologyKey, lensKey, open, onOpenChange }: SearchPaletteProps) {
+  // Escape cancels a running question before it closes the palette.
+  const cancelRef = useRef<() => boolean>(() => false)
   return (
     <CommandDialog
       open={open}
       onOpenChange={onOpenChange}
       title="Search"
-      description="Search entities, saved queries and actions"
+      description="Search entities, saved queries and actions, or ask a question"
       className="top-[18%] sm:max-w-xl"
+      onEscapeKeyDown={(event) => {
+        if (cancelRef.current()) event.preventDefault()
+      }}
     >
-      {open && <PaletteContent ontologyKey={ontologyKey} lensKey={lensKey} onOpenChange={onOpenChange} />}
+      {open && (
+        <PaletteContent
+          ontologyKey={ontologyKey}
+          lensKey={lensKey}
+          onOpenChange={onOpenChange}
+          cancelRef={cancelRef}
+        />
+      )}
     </CommandDialog>
   )
 }
@@ -109,7 +140,8 @@ function PaletteContent({
   ontologyKey,
   lensKey,
   onOpenChange,
-}: Omit<SearchPaletteProps, 'open'>) {
+  cancelRef,
+}: Omit<SearchPaletteProps, 'open'> & { cancelRef: MutableRefObject<() => boolean> }) {
   const navigate = useNavigate()
   const { resolvedTheme, setTheme } = useTheme()
   const { data: features } = useFeatures()
@@ -122,6 +154,8 @@ function PaletteContent({
 
   const base = `/o/${ontologyKey}/w/${lensKey}`
   const semantic = features?.semanticSearch === true
+  // Questions need search indices and a language model.
+  const questions = features?.searchIndices === true && features?.ai === true
   const entityTypes = useMemo(() => schema.data?.entityTypes ?? [], [schema.data])
   const typeName = (key: string) =>
     entityTypes.find((t) => t.key === key)?.displayName ?? key
@@ -139,6 +173,37 @@ function PaletteContent({
   } else if (scopedType === null && input.startsWith('#')) {
     mode = 'types'
     q = input.slice(1).trim()
+  } else if (scopedType === null && questions && input.startsWith(QUESTION_PREFIX)) {
+    mode = 'question'
+    q = input.slice(1).trim()
+  }
+
+  /* -------------------------------- questions -------------------------------- */
+
+  const agents = useRetrieverAgents(ontologyKey, lensKey, questions)
+  const catalog = useSearchCatalog(ontologyKey, lensKey, questions).data
+  const choices = useMemo(() => retrieverChoices(agents.data), [agents.data])
+  const [remembered, setRemembered] = useState(() => readString(storageKeys.retriever(ontologyKey, lensKey)))
+  const retriever = resolveRetriever(remembered, choices)
+  const retrieverName = choices.find((choice) => choice.key === retriever)?.name ?? 'Default'
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const retrieve = useRetrieve(ontologyKey, lensKey, retriever, false)
+  const question = mode === 'question' ? q : null
+  const { asked, cancel } = retrieve
+  useEffect(() => {
+    cancelRef.current = cancel
+  }, [cancel, cancelRef])
+  // Editing the question (or leaving question mode) cancels it.
+  useEffect(() => {
+    if (asked?.status === 'running' && question !== asked.question) cancel()
+  }, [question, asked, cancel])
+  const chooseRetriever = (key: string) => {
+    cancel()
+    setRemembered(key)
+    writeString(storageKeys.retriever(ontologyKey, lensKey), key)
+    setPickerOpen(false)
+    inputRef.current?.focus()
   }
 
   const debouncedQ = useDebouncedValue(q, 250)
@@ -245,6 +310,13 @@ function PaletteContent({
   /* -------------------------------- keyboard -------------------------------- */
 
   const handleCommandKeyDown = (e: KeyboardEvent) => {
+    // A new question is sent on Enter; an unchanged one is not resent, so
+    // Enter then opens the selected result.
+    if (mode === 'question' && e.key === 'Enter' && !e.metaKey && !e.ctrlKey && retrieve.send(q)) {
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       const match = ENTITY_VALUE_RE.exec(selected)
       if (match !== null) {
@@ -280,8 +352,14 @@ function PaletteContent({
   // cmdk only auto-selects on input changes, so results that arrive later
   // (debounce + fetch) can leave nothing highlighted. Selection is therefore
   // controlled, adjusted during render to the first item when stale.
+  const answers = retrieve.response?.results ?? []
   const itemValues: string[] =
-    mode === 'actions'
+    mode === 'question'
+      ? [
+          ...answers.map((r) => `entity:${r.entityType}:${r.entityId}`),
+          ...(answers.length > 0 ? ['retrieve:explore'] : []),
+        ]
+      : mode === 'actions'
       ? filteredActions.map((a) => `action:${a.id}`)
       : mode === 'types'
         ? filteredTypes.map((t) => `type:${t.key}`)
@@ -301,7 +379,51 @@ function PaletteContent({
   }
 
   let listContent: ReactNode
-  if (mode === 'actions') {
+  if (mode === 'question') {
+    const response = retrieve.response
+    listContent =
+      response === null && !retrieve.running && retrieve.error === null ? (
+        <StatusRow>
+          {q === '' ? `Ask ${retrieverName} a question about this lens.` : 'Press Enter to ask.'}
+        </StatusRow>
+      ) : (
+        <RetrievalResults
+          response={response}
+          error={retrieve.error}
+          running={retrieve.running}
+          stale={retrieve.staleFor(q)}
+          schema={schema.data}
+          catalog={catalog}
+          status={(children) => <StatusRow>{children}</StatusRow>}
+          list={(items) => <CommandGroup heading="Results">{items}</CommandGroup>}
+          item={(result, row) => (
+            <CommandItem
+              key={`${result.entityType}:${result.entityId}`}
+              value={`entity:${result.entityType}:${result.entityId}`}
+              onSelect={() => go(`${base}/e/${result.entityType}/${result.entityId}`)}
+            >
+              {row}
+            </CommandItem>
+          )}
+          footer={
+            response !== null && (
+              <CommandGroup>
+                <CommandItem
+                  value="retrieve:explore"
+                  onSelect={() => {
+                    close()
+                    navigate(`${base}/explore`, { state: { addEntities: resultEntities(response) } })
+                  }}
+                >
+                  <Waypoints className="size-4 text-muted-foreground" />
+                  Show all in Explorer
+                </CommandItem>
+              </CommandGroup>
+            )
+          }
+        />
+      )
+  } else if (mode === 'actions') {
     listContent =
       filteredActions.length === 0 ? (
         <StatusRow>No matching action.</StatusRow>
@@ -428,10 +550,42 @@ function PaletteContent({
       onKeyDown={handleCommandKeyDown}
     >
         <div className="flex items-center gap-2 border-b px-3">
-          {searching && entitySearchEnabled ? (
+          {(searching && entitySearchEnabled) || (mode === 'question' && retrieve.running) ? (
             <Loader2 className="size-4 shrink-0 animate-spin opacity-50" />
+          ) : mode === 'question' ? (
+            <MessageCircleQuestion className="size-4 shrink-0 opacity-50" />
           ) : (
             <Search className="size-4 shrink-0 opacity-50" />
+          )}
+          {mode === 'question' && (
+            <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={`Retriever: ${retrieverName}`}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-md border bg-muted/40 px-1.5 py-px text-[11px] font-medium hover:bg-muted"
+                >
+                  {retrieverName}
+                  <ChevronDown className="size-3 opacity-60" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-64 gap-0 p-1" onOpenAutoFocus={(e) => e.preventDefault()}>
+                <p className="px-2 py-1 text-[11px] text-muted-foreground">Ask with</p>
+                {choices.map((choice) => (
+                  <button
+                    key={choice.key}
+                    type="button"
+                    disabled={!choice.selectable}
+                    onClick={() => chooseRetriever(choice.key)}
+                    className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[13px] hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
+                  >
+                    <Check className={cn('size-3.5', choice.key === retriever ? 'opacity-100' : 'opacity-0')} />
+                    <span className="min-w-0 flex-1 truncate">{choice.name}</span>
+                    {!choice.selectable && <span className="text-[11px] text-muted-foreground">invalid</span>}
+                  </button>
+                ))}
+              </PopoverContent>
+            </Popover>
           )}
           {scopedType !== null && (
             <TypeChip
@@ -441,6 +595,7 @@ function PaletteContent({
             />
           )}
           <CommandPrimitive.Input
+            ref={inputRef}
             data-slot="command-input"
             autoFocus
             value={input}
@@ -449,6 +604,9 @@ function PaletteContent({
             placeholder={placeholder}
             className="h-10 w-full bg-transparent text-sm outline-hidden placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
           />
+          {mode === 'question' && questionToSend(q, retrieve.asked) !== null && (
+            <span className="shrink-0 text-[11px] text-muted-foreground">Press Enter to ask</span>
+          )}
           <Kbd>esc</Kbd>
         </div>
         <CommandList className="max-h-80">{listContent}</CommandList>
@@ -477,6 +635,11 @@ function PaletteContent({
               <span className="flex items-center gap-1">
                 <Kbd>&gt;</Kbd> actions
               </span>
+              {questions && (
+                <span className="flex items-center gap-1">
+                  <Kbd>!</Kbd> ask
+                </span>
+              )}
             </span>
           )}
         </div>

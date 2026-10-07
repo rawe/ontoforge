@@ -283,3 +283,48 @@ describe("planner input", () => {
     expect(subQuery.variants).toEqual({ type: "array", items: { type: "string" }, maxItems: 3 });
   });
 });
+
+describe("listed filter values", () => {
+  // The city filter's field holds few values: the planner sees and picks among them.
+  const values = new Map([["city", ["Berlin-Mitte", "Hamburg-Altona"]]]);
+  const message = "Who is CTO at ACME in Mitte?";
+  const checkListed = (filters: unknown[], question = message) =>
+    validatePlan({ subQueries: [sub({ filters })], unsupportedReason: null }, CONFIG, LENS, ["keyword"], question, [], undefined, values);
+
+  it("are part of the planner input, only for the filters that have them", () => {
+    const input = JSON.parse(plannerInput(CONFIG, LENS, [], ["keyword"], message, [], undefined, values));
+    expect(input.filters[0]).toMatchObject({ id: "city", valuesIn: "city.name" });
+    expect(input.storedValues).toEqual({ "city.name": ["Berlin-Mitte", "Hamburg-Altona"] });
+    const unlisted = JSON.parse(plannerInput(CONFIG, LENS, [], ["keyword"], message, [], undefined));
+    expect(unlisted.filters[0]).not.toHaveProperty("valuesIn");
+    expect(unlisted.storedValues).toEqual({});
+    expect(PLANNER).toContain("When a filter names a list of stored values (valuesIn, a key of storedValues), value must be one of them");
+  });
+
+  it("accept the listed value the user's quoted words name, in its stored spelling, and say how they were read", () => {
+    const { plan, notes } = checkListed([{ id: "city", value: "berlin-mitte", quote: "in Mitte" }]);
+    expect(plan.subQueries[0]!.filters).toEqual([{ id: "city", value: "Berlin-Mitte", quote: "in Mitte" }]);
+    expect(notes).toEqual(['The words "in Mitte" were read as the condition "lives in City Name: Berlin-Mitte".']);
+  });
+
+  it("need no note when the user stated the listed value", () => {
+    const { plan, notes } = checkListed([{ id: "city", value: "berlin-mitte", quote: "Berlin-Mitte" }], "Who lives in Berlin-Mitte?");
+    expect(plan.subQueries[0]!.filters[0]!.value).toBe("Berlin-Mitte");
+    expect(notes).toEqual([]);
+  });
+
+  it("still need the user's verbatim words, and a value that is neither listed nor stated is dropped", () => {
+    expect(checkListed([{ id: "city", value: "Berlin-Mitte", quote: "in the centre" }]).plan.subQueries[0]!.filters).toEqual([]);
+    const invented = checkListed([{ id: "city", value: "Munich", quote: "in Mitte" }]);
+    expect(invented.plan.subQueries[0]!.filters).toEqual([]);
+    expect(invented.notes).toEqual([
+      'The condition "lives in City Name: Munich" was not applied: the value is not stated verbatim in a user message.',
+    ]);
+  });
+
+  it("leave a stated unlisted value as it is: exact, matching nothing rather than dropped", () => {
+    const { plan, notes } = checkListed([{ id: "city", value: "Mitte", quote: "in Mitte" }]);
+    expect(plan.subQueries[0]!.filters).toEqual([{ id: "city", value: "Mitte", quote: "in Mitte" }]);
+    expect(notes).toEqual([]);
+  });
+});

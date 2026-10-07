@@ -23,7 +23,7 @@ import { setEmbeddingProvider } from "../../src/core/embedding.js";
 import { closeStores, getRuntimeStore, initStores } from "../../src/core/ports.js";
 import { drainSearchWork } from "../../src/runtime/indexing/worker.js";
 import { loadRunnableAgent } from "../../src/runtime/retrieverAgents/runtime.js";
-import { retrieve } from "../../src/runtime/retrieverAgents/retrieve.js";
+import { retrieve, retrievedResults } from "../../src/runtime/retrieverAgents/retrieve.js";
 import type { Plan } from "../../src/runtime/retrieverAgents/plan.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { fakeEmbeddingProvider } from "../fakeEmbedding.js";
@@ -102,6 +102,7 @@ it.skipIf(postgres)("an adapter without search indices answers FEATURE_DISABLED 
     await request("PUT", `${AGENTS}/people`, BODY),
     await request("POST", `${AGENTS}/import`, { key: "people", ...BODY }),
     await request("POST", `${RUNTIME}/retriever-agents/people/chat`, { message: "Who?" }),
+    await request("POST", `${RUNTIME}/retriever-agents/_default/retrieve`, { question: "Who?" }),
   ]) {
     expect(res.statusCode, res.body).toBe(422);
     expect(res.json().error.details.code).toBe("FEATURE_DISABLED");
@@ -399,7 +400,7 @@ describe.skipIf(!postgres)("retriever agents", () => {
       unsupportedReason: null,
     });
     expect(home.items.map((item) => item.entityId).sort()).toEqual([ids.ada, ids.eve].sort());
-    expect(home.items.every((item) => item.matches[0]!.filters.length === 1)).toBe(true);
+    expect(home.items.every((item) => item.matches[0]!.conditions.length === 1)).toBe(true);
   });
 
   it("retrieves a two-relation question by fusing two sub-queries, or one sub-query and a filter", async () => {
@@ -441,7 +442,9 @@ describe.skipIf(!postgres)("retriever agents", () => {
       [ids.eve, true],
     ]);
     // The answer model learns the filter held.
-    expect(filtered.items[0]!.matches[0]!.filters).toEqual(["Lives in City Name: berlin"]);
+    expect(filtered.items[0]!.matches[0]!.conditions).toEqual([
+      { filter: "city", value: "berlin", text: "Lives in City Name: berlin" },
+    ]);
 
     // An exact list: everyone living in Berlin, without a search.
     const listed = await retrieve(scope, {
@@ -450,5 +453,72 @@ describe.skipIf(!postgres)("retriever agents", () => {
     });
     expect(listed.searchCalls).toBe(0);
     expect(listed.items.map((item) => item.label).sort()).toEqual(["Ada", "Eve"]);
+  });
+
+  it("the default agent derives its configuration from the lens and runs without being stored", async () => {
+    await schema();
+    const ids = await data();
+    const store = await getRuntimeStore(O);
+    const fallback = await loadRunnableAgent("all", "_default", store);
+    expect(fallback.config.indices.map((reference) => reference.index)).toEqual([
+      "city~default", "company~default", "person~bio", "person~default",
+    ]);
+    expect(fallback.config.filters.map((filter) => filter.id)).toEqual([
+      "city", "city.lives_in.incoming",
+      "company", "company.works_for.incoming",
+      "person", "person.lives_in.outgoing", "person.works_for.outgoing",
+    ]);
+    expect(fallback.config.answerFields.person).toEqual(["name", "email"]);
+    // Not stored, never listed.
+    expect(await ok("GET", AGENTS)).toEqual([]);
+
+    // A derived filter restricts like a configured one, and retrieve names it.
+    const scope = { ...fallback.scope, signal: new AbortController().signal };
+    const listed = await retrieve(scope, {
+      subQueries: [{
+        indices: ["person~default"], relations: [], query: "", variants: [], mode: "keyword",
+        filters: [{ id: "person.lives_in.outgoing", value: "Berlin", quote: "Berlin" }], previous: null,
+      }],
+      unsupportedReason: null,
+    });
+    const results = retrievedResults(listed);
+    expect(results.map((result) => result.entityId).sort()).toEqual([ids.ada, ids.eve].sort());
+    expect(results[0]!.conditions).toEqual([
+      { filter: "person.lives_in.outgoing", value: "Berlin", text: "Lives in City Name: Berlin" },
+    ]);
+
+    // It follows switch-off and the lens scope.
+    await ok("PUT", `${MODEL}/search-settings`, { disabledIndices: ["person~bio"] });
+    invalidateLoadedSchemaCache();
+    expect((await loadRunnableAgent("all", "_default", store)).config.indices.map((r) => r.index)).not.toContain("person~bio");
+    const solo = await post(`${MODEL}/lenses`, { key: "solo", name: "Solo" });
+    await post(`${MODEL}/lenses/${solo.lensId}/includes/entity-types`, { key: "person" });
+    // A scoped lens searches the indices it includes.
+    for (const key of ["person~default", "person~bio"]) {
+      await post(`${MODEL}/lenses/${solo.lensId}/includes/search-indices`, { key });
+    }
+    invalidateLoadedSchemaCache();
+    const scoped = await loadRunnableAgent("solo", "_default", store);
+    expect(scoped.config.indices.map((r) => r.index)).toEqual(["person~default"]);
+    expect(scoped.config.filters.map((filter) => filter.id)).toEqual(["person"]);
+  });
+
+  it("the default agent with nothing to search refuses a question before any model call", async () => {
+    await schema();
+    // A lens that shows only cities, whose one managed index is switched off.
+    const bare = await post(`${MODEL}/lenses`, { key: "bare", name: "Bare" });
+    await post(`${MODEL}/lenses/${bare.lensId}/includes/entity-types`, { key: "city" });
+    await ok("PUT", `${MODEL}/search-settings`, { disabledIndices: ["city~default"] });
+    setAiModel({} as BaseChatModel);
+    try {
+      for (const [route, payload] of [["retrieve", { question: "Who?" }], ["chat", { message: "Who?" }]] as const) {
+        const res = await request("POST", `/api/ontologies/${O}/runtime/lenses/bare/retriever-agents/_default/${route}`, payload);
+        expect(res.statusCode, res.body).toBe(422);
+        expect(res.json().error.code).toBe("VALIDATION_ERROR");
+        expect(res.json().error.message).toContain("nothing to search");
+      }
+    } finally {
+      setAiModel(null);
+    }
   });
 });

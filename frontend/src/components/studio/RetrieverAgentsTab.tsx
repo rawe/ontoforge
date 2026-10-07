@@ -11,6 +11,7 @@ import type { Lens, RuntimeSchema, SearchCatalogEntry, ValidationError } from '@
 import { EmptyState } from '@/components/EmptyState'
 import { RetrieverAgentChat } from '@/components/retrieverAgent/RetrieverAgentChat'
 import { RetrieverAgentConfigEditor } from '@/components/retrieverAgent/RetrieverAgentConfigEditor'
+import { RetrieverAgentRetrieve } from '@/components/retrieverAgent/RetrieverAgentRetrieve'
 import { ImportDialog, NameKeyDialog, RetrieverAgentMore, RetrieverAgentSaveBar } from '@/components/retrieverAgent/RetrieverAgentManagement'
 import { errorText } from '@/components/retrieverAgent/errorText'
 import {
@@ -25,6 +26,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
+import { readString, storageKeys, writeString } from '@/lib/storage'
+import { cn } from '@/lib/utils'
 import { ValidationPanel } from './ValidationPanel'
 
 const TAB = 'retriever-agents'
@@ -153,6 +156,9 @@ function AgentEditor({ ontologyKey, lensKey, existingKeys, catalog, schema, aiEn
   const issues = [...saveIssues, ...problems.filter((p) => !saveIssues.some((s) => s.path === p.path))]
   const canSave = showEditor && problems.length === 0 && draft.name.trim() !== ''
   const execution = agentExecution(agent, dirty)
+  // The test panel's mode, remembered beside the diagnostics preference.
+  const [testMode, setTestMode] = useState<'chat' | 'retrieve'>(() => (readString(storageKeys.retrieverTestMode) === 'retrieve' ? 'retrieve' : 'chat'))
+  const chooseTestMode = (mode: 'chat' | 'retrieve') => { setTestMode(mode); writeString(storageKeys.retrieverTestMode, mode) }
 
   /* --------------------------- leave protection --------------------------- */
   // Tabs, the agent list and other pages are navigations; unsaved drafts ask first.
@@ -225,9 +231,18 @@ function AgentEditor({ ontologyKey, lensKey, existingKeys, catalog, schema, aiEn
       </div>
 
       <section aria-label="Test" className="flex h-[85dvh] min-h-[640px] min-w-0 flex-col overflow-hidden rounded-xl border bg-card xl:sticky xl:top-4">
-        <div className="border-b px-4 py-3"><h3 className="text-[13px] font-semibold">Test</h3>
-          <p className="mt-0.5 text-xs text-muted-foreground">Ask the saved version and inspect how each answer was found. Saving starts a new conversation.</p></div>
+        <div className="border-b px-4 py-3"><div className="flex items-center justify-between gap-3"><h3 className="text-[13px] font-semibold">Test</h3>
+          <div role="radiogroup" aria-label="Test mode" className="inline-flex rounded-md border p-0.5 text-xs">
+            {(['chat', 'retrieve'] as const).map((mode) => <button key={mode} type="button" role="radio" aria-checked={testMode === mode} onClick={() => chooseTestMode(mode)}
+              className={cn('rounded px-2 py-0.5', testMode === mode ? 'bg-muted font-medium' : 'text-muted-foreground hover:text-foreground')}>{mode === 'chat' ? 'Chat' : 'Retrieve'}</button>)}
+          </div></div>
+          <p className="mt-0.5 text-xs text-muted-foreground">{testMode === 'chat'
+            ? 'Ask the saved version and inspect how each answer was found. Saving starts a new conversation.'
+            : 'Ask the saved version for the entities it finds, without an answer. Saving clears the result.'}</p></div>
         {!aiEnabled ? <p className="p-4 text-xs text-muted-foreground">This server has no AI provider configured; retriever agents cannot answer here.</p>
+          : testMode === 'retrieve' ? <RetrieverAgentRetrieve key={agent ? `${agent.key}:${agent.updatedAt}` : 'new'} ontologyKey={ontologyKey} lensKey={lensKey}
+            agentKey={agent?.key ?? null} blockedReason={execution.mode === 'blocked' ? execution.reason : null}
+            config={agent && isSupportedAgent(agent) ? agent.config : null} catalog={catalog} schema={schema} />
           : <RetrieverAgentChat key={agent ? `${agent.key}:${agent.updatedAt}` : 'new'} ontologyKey={ontologyKey} lensKey={lensKey}
             agentKey={agent?.key ?? null} blockedReason={execution.mode === 'blocked' ? execution.reason : null} diagnostics
             config={agent && isSupportedAgent(agent) ? agent.config : null} catalog={catalog} schema={schema}

@@ -594,21 +594,26 @@ Requires a Decision provider, independently of AI and search.
 |---|---|---|
 | POST | `/decisions/compare-entities` | Judge the identity of two supplied partial snapshots of one scoped entity type |
 
-### Retriever-agent chat
+### Retriever-agent chat and retrieve
 
-The stored agent runs; a request can never supply or override its configuration.
-Semantics: [capabilities/retriever-agents.md](capabilities/retriever-agents.md#answering-a-question).
+The stored agent runs — or, under the key `_default`, the lens's
+[default retriever agent](capabilities/retriever-agents.md#the-default-retriever-agent);
+a request can never supply or override its configuration. Semantics:
+[capabilities/retriever-agents.md](capabilities/retriever-agents.md#answering-a-question)
+and [retrieve](capabilities/retriever-agents.md#retrieve).
 
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/retriever-agents/{agentKey}/chat` | Stream the answer to one question |
+| POST | `/retriever-agents/{agentKey}/retrieve` | The entities one question finds, without an answer |
 
-The body carries `message` (1 to 2,000 characters) and optionally `history` (up to 30
+**Chat.** The body carries `message` (1 to 2,000 characters) and optionally `history` (up to 30
 user/assistant turns), the previous answer's `turnToken` and `diagnostics`; unknown
 fields are rejected. Without a language-model provider the route answers
 `FEATURE_DISABLED`, as the AI routes do. An unknown agent answers not found, an agent its
-lens can no longer run `VALIDATION_ERROR` with the errors under `details.errors`, an
-adapter without search indices `FEATURE_DISABLED` — each before the stream opens.
+lens can no longer run `VALIDATION_ERROR` with the errors under `details.errors`, a
+default agent with nothing to search `VALIDATION_ERROR`, an adapter without search
+indices `FEATURE_DISABLED` — each before the stream opens.
 
 The response streams newline-delimited events: `phase` (`plan`, `retrieve` and `answer`,
 each with `status` `start` or `end`, an end with `durationMs`), `delta` (answer text),
@@ -627,8 +632,24 @@ true, earlier `meta` events carry:
 | `llmCalls` | The number of model calls: 2, or 3 when planning was repeated |
 
 `matched` has the form of a search hit's ([capabilities/search.md](capabilities/search.md#response)).
-A question needs a language-model provider; without an embedding provider it searches by
-keyword only. The route has no MCP or A2A equivalent.
+
+**Retrieve.** The body carries `question` (1 to 2,000 characters) and optionally
+`diagnostics`; unknown fields — a history or follow-up token among them — are rejected.
+It is refused exactly as chat is, with plain error responses: `FEATURE_DISABLED` without
+a language-model provider or on an adapter without search indices, not found for an
+unknown agent, `VALIDATION_ERROR` for an agent its lens can no longer run (errors under
+`details.errors`), a default agent with nothing to search, a planner input over the cap,
+a failed planning call or a malformed plan. A closed connection cancels the work.
+
+The response is `200` with `results` — best first, each `entityId`, `entityType`,
+`label`, `conditions` (`filter`, `value`, `text`) and `matched` (a search hit's form, or
+null) — `limitations`, `unsupportedReason` when no index can answer, and with
+`diagnostics` true a `diagnostics` object: `plan`, `searchCalls`, `timings` in
+milliseconds (`plan`, `planModel`, `validation`, `retrieve`, `search`, `total`) and
+`modelIO`, the one planning call's trace. No results is not an error.
+
+A question or a retrieve needs a language-model provider; without an embedding provider it
+searches by keyword only. Neither route has an MCP or A2A equivalent.
 
 ### AI
 

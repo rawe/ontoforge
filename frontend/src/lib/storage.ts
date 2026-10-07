@@ -13,6 +13,10 @@
  *   of.queryHistory.{ontologyKey}.{lensKey} — last 10 run OQL queries
  *   of.retrieverDiagnostics   — "true" | "false": Workbench retriever-agent chat
  *                               requests and shows diagnostics
+ *   of.retrieverTestMode      — "chat" | "retrieve": the retriever-agent
+ *                               editor's test panel mode
+ *   of.retriever.{ontologyKey}.{lensKey} — key of the palette question mode's
+ *                               retriever agent
  */
 
 export const storageKeys = {
@@ -27,6 +31,9 @@ export const storageKeys = {
   queryHistory: (ontologyKey: string, lensKey: string) =>
     `of.queryHistory.${ontologyKey}.${lensKey}`,
   retrieverDiagnostics: 'of.retrieverDiagnostics',
+  retrieverTestMode: 'of.retrieverTestMode',
+  retriever: (ontologyKey: string, lensKey: string) =>
+    `of.retriever.${ontologyKey}.${lensKey}`,
 } as const
 
 export function readString(key: string): string | null {

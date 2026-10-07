@@ -30,14 +30,20 @@ function Pre({ title, text, note }: { title: string; text: string; note?: string
   </details>
 }
 
-function Overview({ meta, status }: { meta: RetrieverAgentMeta; status: TurnStatus }) {
+type Mode = 'chat' | 'retrieve'
+
+/** Retrieve stops before the answer. */
+const stepsOf = (mode: Mode) => (mode === 'retrieve' ? STEPS.filter((step) => step !== 'answer') : STEPS)
+
+function Overview({ meta, status, mode }: { meta: RetrieverAgentMeta; status: TurnStatus; mode: Mode }) {
+  const steps = stepsOf(mode)
   const timings = meta.timings ?? {}
   const calls = callCounts(meta, status)
-  const total = timings.total ?? STEPS.reduce((sum, key) => sum + (timings[key] ?? 0), 0)
-  const details = Object.entries(timings).filter(([key]) => !(STEPS as readonly string[]).includes(key) && key !== 'total')
+  const total = timings.total ?? steps.reduce((sum, key) => sum + (timings[key] ?? 0), 0)
+  const details = Object.entries(timings).filter(([key]) => !(steps as readonly string[]).includes(key) && key !== 'total')
   return <div className="space-y-4">
-    <Intro>Where the time went. The three steps run one after another.</Intro>
-    <div className="space-y-2">{STEPS.map((key) => {
+    <Intro>{`Where the time went. The ${steps.length === 2 ? 'two' : 'three'} steps run one after another.`}</Intro>
+    <div className="space-y-2">{steps.map((key) => {
       const ms = timings[key]
       return <div key={key} className="grid grid-cols-[8.5rem_1fr_4.5rem] items-center gap-2">
         <span>{phaseName(key)}</span>
@@ -125,18 +131,24 @@ function ModelCalls({ meta }: { meta: RetrieverAgentMeta }) {
   </div>
 }
 
-/** Diagnostics of one answer, split along the pipeline so each tab answers one question. No scores. */
-export function RetrieverAgentDiagnostics({ meta, question, status, config, catalog, schema }: { meta: RetrieverAgentMeta; question: string; status: TurnStatus } & Context) {
+/**
+ * Diagnostics of one answer, split along the pipeline so each tab answers
+ * one question. No scores. A retrieve has no answer and no per-sub-query
+ * results: only the overview, the plan and its one planning call.
+ */
+export function RetrieverAgentDiagnostics({ meta, question, status, config, catalog, schema, mode = 'chat' }: { meta: RetrieverAgentMeta; question: string; status: TurnStatus; mode?: Mode } & Context) {
   const [tab, setTab] = useState('overview')
+  const tabs = [['overview', 'Overview'], ['plan', 'Plan'], ['results', `Results${meta.results ? ` (${meta.results.length})` : ''}`], ['models', 'Model calls']]
+    .filter(([value]) => mode === 'chat' || value !== 'results')
   return <div className="flex min-h-0 flex-1 flex-col text-xs">
     <p className="truncate px-4 pt-3 text-muted-foreground" title={question}>For: <span className="text-foreground">{question}</span>{status === 'failed' && <span className="text-destructive"> · failed or cancelled</span>}</p>
     <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-0">
       <TabsList variant="line" className="mx-2 mt-2 h-8 w-auto justify-start border-b">
-        {[['overview', 'Overview'], ['plan', 'Plan'], ['results', `Results${meta.results ? ` (${meta.results.length})` : ''}`], ['models', 'Model calls']].map(([value, name]) =>
+        {tabs.map(([value, name]) =>
           <TabsTrigger key={value} value={value} className="px-2 text-xs">{name}</TabsTrigger>)}
       </TabsList>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        <TabsContent value="overview"><Overview meta={meta} status={status} /></TabsContent>
+        <TabsContent value="overview"><Overview meta={meta} status={status} mode={mode} /></TabsContent>
         <TabsContent value="plan"><Plan meta={meta} config={config} catalog={catalog} schema={schema} /></TabsContent>
         <TabsContent value="results"><Results meta={meta} config={config} catalog={catalog} schema={schema} /></TabsContent>
         <TabsContent value="models"><ModelCalls meta={meta} /></TabsContent>

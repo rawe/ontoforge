@@ -2,7 +2,9 @@
  * Retriever agents: lens-local saved configurations (config v2) that answer
  * questions over the lens's search indices with a planner and an answer
  * model. Modeling CRUD by lens key + agent key, the runtime chat stream and
- * its reader. The editor reads the runtime index catalog and lens schema
+ * its reader, and retrieve — the found entities without an answer. Every
+ * lens also has the implicit default agent `_default`, derived from its
+ * managed indices, never stored or listed. The editor reads the runtime index catalog and lens schema
  * (`runtime.ts`), not a catalog of its own.
  */
 import { readNdjsonStream } from './chatStream.ts'
@@ -99,6 +101,35 @@ export interface RetrieverAgentMeta {
   modelIO?: ModelCall[]
   limitations?: string[]
 }
+/** One exact condition a result is proven to satisfy. */
+export interface RetrieveCondition {
+  /** The filter id of the agent's configuration. */
+  filter: string
+  value: string
+  /** The condition in plain words: "reported by Customer Name: Acme". */
+  text: string
+}
+/** One found entity; its place in the list is its grade — no score. */
+export interface RetrieveResult {
+  entityId: string
+  entityType: string
+  label: string | null
+  conditions: RetrieveCondition[]
+  /** The text match, or null when the entity was only listed by its conditions. */
+  matched: Matched | null
+}
+export interface RetrieveResponse {
+  results: RetrieveResult[]
+  limitations: string[]
+  unsupportedReason?: string
+  diagnostics?: {
+    plan: { subQueries?: PlanSubQuery[] } & Record<string, unknown>
+    searchCalls: number
+    timings: Record<string, number>
+    modelIO: ModelCall[]
+  }
+}
+
 export type RetrieverAgentEvent =
   | { type: 'phase'; phase: string; status: 'start' | 'end'; durationMs?: number }
   | { type: 'delta'; text: string }
@@ -144,6 +175,12 @@ export async function chatRetrieverAgent(
   })
   await readRetrieverAgentStream(response, onEvent, signal)
 }
+
+/** One question to the saved (or default) agent: its planning and retrieval, no answer. */
+export const retrieveWithAgent = (
+  ontologyKey: string, lensKey: string, key: string,
+  body: { question: string; diagnostics?: boolean }, signal?: AbortSignal,
+) => request<RetrieveResponse>(`${runtimeAgent(ontologyKey, lensKey, key)}/retrieve`, { method: 'POST', body, signal })
 
 /* ------------------------------- stream reader ------------------------------ */
 

@@ -480,8 +480,9 @@ score would be read as relevance or confidence, which a relative score is not.
 **Search indices and retriever agents are designed in the Studio and used in the
 Workbench.** The Studio owns the index designer, the search settings and the
 retriever-agent editor, which carries a test panel so an agent is configured and tried in
-one place; the Workbench only chats with saved agents. Design stays with design, as
-schema and lenses do.
+one place; the Workbench only uses agents — it chats with them and asks them questions
+from the command palette, never edits them. Design stays with design, as schema and
+lenses do.
 
 **Validation collects every error before answering.**
 A rejected write names all offending fields at once, and a rejected read all of its
@@ -592,7 +593,10 @@ structural condition is a filter of up to two hops. Answer fields, answer-field 
 the similarity threshold are the agent's own settings. Retrieval runs the index search in
 process — no per-agent vectors, no in-memory vector cache, no preparation step and no
 snapshot of the data. A question makes two model calls, planning and answering;
-retrieval between them is deterministic, and cancellation stops further work. No model
+retrieval between them is deterministic, and cancellation stops further work. A retrieve
+— the same question without an answer — makes one: planning, then retrieval, returning
+the found entities in order with the conditions each is proven to satisfy and its text
+match, never a score. No model
 call is retried automatically, with one exception: a follow-up whose plan searches
 nothing and only names an unsupported reason is planned once more, the second plan is
 used, and a limitation says so — at most three model calls. The planner phrases queries
@@ -600,6 +604,14 @@ freely, may name an entity taken from an answer, but chooses only what the confi
 allows, and every exact restriction — a filter value, a reference to previous results —
 needs the user's own words, never an answer's; the server leaves out what fails these
 checks, names it as a limitation and answers with the rest.
+
+**Every lens has an implicit default retriever agent, derived and never stored.** Keyed
+`_default`, which no stored key can shadow, it is derived from the lens per question:
+its switched-on managed indices and exact filters on the names of result types and of
+their direct neighbours. The derivation is deterministic, so a follow-up stays bound to
+it until the schema changes. It is exempt from the stored limits on indices and filters
+but not from the planner input cap: a lens too large for it refuses the question and
+needs a configured agent — nothing is trimmed.
 
 **Exactly one env file is read, and it is always named.**
 `ENV_FILE` names it; without that it is `.env` in the working directory. Files never

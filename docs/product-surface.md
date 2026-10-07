@@ -419,8 +419,9 @@ Three operations, each with its own explanation. See
 
 ### Command palette
 
-One overlay, four modes, opened from anywhere in the Workbench. Each open starts fresh —
-empty input, no type scope, a new snapshot of recents.
+One overlay, five modes, opened from anywhere in the Workbench. Each open starts fresh —
+empty input, no type scope, a new snapshot of recents — except for the retriever chosen
+for questions, which is remembered.
 
 | Prefix | Mode | Behaviour |
 |---|---|---|
@@ -428,6 +429,7 @@ empty input, no type scope, a new snapshot of recents.
 | `#` | Types | Filter the exposed entity types; choosing one *scopes* the palette to that type rather than navigating. |
 | `?` | Saved queries | Semantic search over query descriptions when available, substring filtering over the full list otherwise. An empty query lists everything. |
 | `>` | Actions | Navigation to each Workbench area, the Studio, and a theme toggle. |
+| `!` | Question | A question to a [retriever agent](capabilities/retriever-agents.md#retrieve), answered with the entities it finds. Sent on purpose, never as you type — see [Question mode](#question-mode). Only on a server with search indices and a language-model provider. |
 
 Scoping to a type replaces the prefix with a persistent type chip; the search then runs
 within that type, an empty query lists that type's first entities, and Backspace on an
@@ -440,6 +442,30 @@ label or passage text is displayed. The relation target picker uses the same sea
 and row; its empty input lists the first ten entities. Both use ranked search whenever
 the strategy list is nonempty, falling back to literal entity lists otherwise. Enter
 opens entity detail; Cmd/Ctrl+Enter focuses the Explorer.
+
+#### Question mode
+
+Typing runs nothing; the input says "Press Enter to ask", and Enter sends the question
+(1 to 2,000 characters). While it runs, a status line shows, and Escape — or editing the
+question — cancels it without closing the palette. A changed question needs Enter again;
+until then the previous results stay, dimmed and marked as answering an earlier question.
+Once results arrive, the arrow keys move through them, Enter opens the entity's detail and
+Cmd/Ctrl+Enter focuses it in the Explorer, as in entities mode; Enter on the unchanged
+question does not resend it.
+
+A chip beside the prefix names the retriever; clicking it lists `Default` — the lens's
+[default retriever agent](capabilities/retriever-agents.md#the-default-retriever-agent) —
+first, then the lens's stored retriever agents by name, with those the lens cannot run
+marked and not selectable. The choice is remembered per ontology and lens and falls back
+to `Default` when the remembered agent is gone or invalid.
+
+Results come in the server's order, with no number or score. A row is the entity row —
+type chip, label, the [matched via](#matched-via) line when a relation or passage
+matched — plus one muted chip per proven condition in its plain words; a result only
+listed by its conditions has no via line. Limitations, when any, sit above the list in one
+collapsible note; an unsupported reason is the empty state's message; errors show inline
+with the server's message. "Show all in Explorer", below the results, adds every result to
+the [working set](#working-set) and opens the Explorer.
 
 Extraction review searches only properties for up to three existing candidates, with no
 score threshold or displayed number; each candidate carries the same matched-via text when
@@ -461,7 +487,8 @@ relation or a passage carries one short line:
 The line never shows the entry's text. The palette, the relation target picker and the
 extraction review use the [default search](capabilities/search.md#ranked-search), which
 reads only managed indices, so no relation line appears there; relation lines appear in
-a retriever agent's diagnostics, whose searches reach custom indices. A server whose hits
+a retriever agent's diagnostics and in the palette's question results, whose searches
+reach custom indices. A server whose hits
 name no entry — one without search indices — shows instead one `in <property>` badge per
 document match, in match order.
 
@@ -489,7 +516,9 @@ central idea of the screen and everything else follows from it.
 
 **Growth is incremental and explicit.** Entities arrive from the palette, from a table
 row, from an entity detail page, from a query result, from a recents chip on the empty
-canvas, or by expanding a node's relations. Expansion is per relation type and per
+canvas, all at once from a palette question's results, or by expanding a node's
+relations. A batch of results joins unanchored; entities already on the canvas flash, and
+the hard node cap refuses a batch that would exceed it as a whole. Expansion is per relation type and per
 direction: the node panel lists every applicable relation type with its exact neighbour
 count, and clicking one pulls in the first ten neighbours; repeated clicks pull ten more,
 up to two hundred, and stop offering more once the count is exhausted.
@@ -641,13 +670,17 @@ place where nothing is written without an explicit second step.
    succeeded are marked and skipped. The outcome is reported as counts, and the first
    created entity can be opened in the Explorer.
 
-**Retriever** — chat with the lens's saved
-[retriever agents](capabilities/retriever-agents.md). A header picker selects the agent;
-the address names it, and without one — or with one the lens does not have — the first
-agent is shown and the address updated to name it. Agents that are invalid in the lens are
-marked in the picker, and questions to them are blocked with the reason. "Edit in Studio"
-opens the agent in the lens's [retriever-agent editor](#retriever-agent-editor), which is
-where agents are created and changed; a lens without agents says so and links there. A
+**Retriever** — chat with the lens's
+[retriever agents](capabilities/retriever-agents.md). A header picker selects the agent:
+`Default` — the lens's
+[default retriever agent](capabilities/retriever-agents.md#the-default-retriever-agent) —
+first, then the saved ones. The address names it, and without one — or with one the lens
+does not have — `Default` is shown and the address updated to name it. Agents that are
+invalid in the lens are marked in the picker, and questions to them are blocked with the
+reason. "Edit in Studio" opens a saved agent in the lens's
+[retriever-agent editor](#retriever-agent-editor), which is where agents are created and
+changed; the default agent has no editor, and with no saved agents the tab links there to
+create one. A
 "Show diagnostics" switch, off by default and remembered, requests diagnostics with every
 answer and shows them beside the conversation. The conversation itself is the
 [retriever-agent chat](#retriever-agent-chat). On a server without search indices the tab
@@ -695,10 +728,15 @@ under the same key, the configuration as editable JSON applied to the draft, and
 deletion. An agent whose configuration has an unsupported version or shape opens with
 More expanded, where it can be exported or replaced by a version 2 configuration.
 
-**Test panel.** Beside the editor, a [retriever-agent chat](#retriever-agent-chat) with
-diagnostics always on. It asks the saved version: a new, changed, invalid or unsupported
-agent blocks questions and says why. Saving starts a new conversation. Without a
-language-model provider the panel says that the agent cannot answer.
+**Test panel.** Beside the editor, with a Chat / Retrieve switch whose position is
+remembered. Chat is a [retriever-agent chat](#retriever-agent-chat) with diagnostics
+always on; saving starts a new conversation. Retrieve asks one question, sent on Enter or
+with Ask, and shows the found entities as the palette's
+[question mode](#question-mode) does, without "Show all in Explorer", beside the
+diagnostics that apply — Overview with its two steps, Plan and Model calls; saving clears
+the result. Both ask the saved version: a new, changed, invalid or unsupported agent
+blocks questions and says why. Without a language-model provider the panel says that the
+agent cannot answer.
 
 ### Retriever-agent chat
 
@@ -826,10 +864,10 @@ while the report is loading.
 
 | Off | What changes |
 |---|---|
-| AI | The AI navigation entry, the AI palette action and the AI quick action are gone. The AI screen itself renders an explanation. The empty-state extraction step stays visible but dimmed, with an explanation. |
+| AI | The AI navigation entry, the AI palette action, the palette's question mode and the AI quick action are gone. The AI screen itself renders an explanation. The empty-state extraction step stays visible but dimmed, with an explanation. |
 | No search strategies | Entity search falls back to substring matching — per type in parallel when unscoped. Extraction review skips the duplicate check. |
 | Semantic search | Saved-query search falls back to client-side substring filtering over the full list. With search indices the search-data rebuild is disabled and explains that there is nothing to rebuild; without them it stays available and explains that it will skip the embeddings. |
-| Search indices | The Studio's Search entry and the lens detail's Retriever agents tab are gone; their addresses render an explanation, and so does the Workbench's Retriever tab. The entity type editor's Search indices section and the scope editor's Search indices section are absent. Search hits name no entry, so results show document badges instead of [matched-via](#matched-via) lines. |
+| Search indices | The Studio's Search entry, the lens detail's Retriever agents tab and the palette's question mode are gone; their addresses render an explanation, and so does the Workbench's Retriever tab. The entity type editor's Search indices section and the scope editor's Search indices section are absent. Search hits name no entry, so results show document badges instead of [matched-via](#matched-via) lines. |
 | Entity identity comparison | The extraction review's Compare identity action is absent; candidate discovery and manual selection still work. |
 
 Everything else works unchanged. See [capabilities/search.md](capabilities/search.md).
@@ -929,6 +967,8 @@ the address.
 | Recent query texts | Per ontology + lens | 10 |
 | Chat history | Per ontology + lens, then per agent | 50 messages per agent |
 | Retriever diagnostics switch (Workbench) | Global | — |
+| Retriever-agent test panel mode (Chat or Retrieve) | Global | — |
+| Retriever for palette questions | Per ontology + lens | — |
 
 Per-lens state is keyed by ontology **and** lens because lens keys are unique only
 within their ontology — two ontologies' `default` lenses must never share a canvas or a
@@ -937,8 +977,9 @@ switcher's Workbench landing and the Studio's way back; nothing at the root cons
 
 The working set stores only identifiers, type keys, positions and pin flags — entities and
 relations are re-fetched on restore, so a stale canvas can never display stale property
-values. Ask history and retriever-agent conversations are in-memory for the session and
-deliberately not persisted; the selected retriever agent lives in the address.
+values. Ask history, retriever-agent conversations and question results are in-memory for
+the session and deliberately not persisted; the Workbench's selected retriever agent lives
+in the address.
 Persistence failures are swallowed: with storage unavailable the product works exactly the
 same, minus the memory.
 
@@ -966,7 +1007,7 @@ Workbench addresses live under `/o/{ontologyKey}/w/{lensKey}`, Studio addresses 
 | `/o/{ontologyKey}/w/{lensKey}/query?run={queryKey}` | The library with that query expanded, run at once when it has no parameters |
 | `/o/{ontologyKey}/w/{lensKey}/ai` | The AI panel, Chat |
 | `/o/{ontologyKey}/w/{lensKey}/ai?tab=ask` · `?tab=extract` · `?tab=retriever` | The other three AI modes |
-| `/o/{ontologyKey}/w/{lensKey}/ai?tab=retriever&agent={agentKey}` | The Retriever tab with that retriever agent; the first agent when the lens has no such agent |
+| `/o/{ontologyKey}/w/{lensKey}/ai?tab=retriever&agent={agentKey}` | The Retriever tab with that retriever agent — `_default` for the default one; the default agent when the lens has no such agent |
 | `/o/{ontologyKey}/studio` | The ontology's schema overview |
 | `/o/{ontologyKey}/studio/entity-types/{id}` · `.../relation-types/{id}` | A type editor |
 | `/o/{ontologyKey}/studio/lenses` | The lens list |
@@ -994,7 +1035,9 @@ Any unrecognised address returns to the root.
 | Palette | Enter | Open the selection |
 | Palette | Cmd/Ctrl+Enter | Open the selected entity in the Explorer |
 | Palette | Backspace on empty input | Leave the type scope |
-| Palette | `#` `?` `>` as first character | Switch mode |
+| Palette | `#` `?` `>` `!` as first character | Switch mode |
+| Palette, question mode | Enter on a new question | Ask it |
+| Palette, question mode | Escape while a question runs | Cancel it |
 | Palette | Escape | Close |
 | Table | Enter on a focused row | Open the entity |
 | Table | ↑ / ↓ on a focused row | Move focus between rows |
@@ -1014,6 +1057,7 @@ Any unrecognised address returns to the root.
 | Ask | Enter | Submit |
 | Retriever-agent chat | Enter | Send |
 | Retriever-agent chat | Shift+Enter | Newline |
+| Retriever-agent test panel, Retrieve | Enter | Ask |
 | Forms | Enter | Submit the form |
 
 Single-letter shortcuts are suppressed inside text inputs and while a dialog or popover

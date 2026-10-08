@@ -355,15 +355,22 @@ follow the [definition](capabilities/search-indices.md#custom-indices):
 - **Entity type** — every hit is an entity of it. Changing it clears fields, header and
   relation groups.
 - **Own fields** — a checklist of the type's text and scalar properties and at most one
-  document property, with a running count against the field limit, followed by the
-  entry previews of the own entry and, with a document, of its passages.
+  document property, with a running count against the field limit; the choice of how the
+  own entry's semantic text is written; and the entry previews of the own entry and, with
+  a document, of its passages.
 - **Header** — the name property (the default), chosen text fields, or none.
 - **Relation groups** — one card per group: a relation type in one direction (each
-  combination once), its relation fields, the target type's fields, a label and an
-  optional template, followed by the entry preview of the group's entries. The group
-  count runs against its limit.
-- **Search modes** — semantic and keyword switches; semantic takes an optional template of
-  the entity's own entry.
+  combination once) and the group's name beside it — its label, the relation's display
+  name when empty — then its relation fields, the target type's fields, the choice of how
+  its entries' semantic text is written, and the entry preview of the group's entries.
+  The group count runs against its limit.
+- **Search modes** — semantic and keyword switches.
+
+The **semantic text** of an own entry or a group's entries is either labelled lines or a
+template, chosen by a two-way switch shown while semantic search is on — for the own entry
+only while an own text field is chosen. Only the template choice shows the template field.
+A template set aside by choosing labelled lines comes back on choosing the template again,
+until the designer is left or saved; an empty template saves as none.
 
 An **entry preview** renders the [entry outline](capabilities/search-indices.md#entry-outline)
 of one entry kind, saying how many such entries an entity gets: the semantic text beside

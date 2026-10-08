@@ -277,6 +277,8 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
   const selfPart = outlinePart(outline, 'self')
   const passagePart = outlinePart(outline, 'passage')
   const documentKey = root === undefined ? null : selectedDocument(draft.fields, root)
+  const hasOwnText =
+    root?.properties.some((p) => isTextProperty(p) && draft.fields.includes(p.key)) === true
   const documentName = root?.properties.find((p) => p.key === documentKey)?.displayName
   const ownLeftOut: LeftOut[] =
     root === undefined
@@ -424,6 +426,16 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
                   onToggle={(k, on) => edit({ fields: toggleKey(draft.fields, k, on) })}
                 />
                 <IssueList issues={issuesAt(issues, 'fields')} />
+                {draft.semantic.enabled && hasOwnText && (
+                  <SemanticTextChoice
+                    id="semantic-template"
+                    template={draft.semantic.template}
+                    labelledHint={`The type's name, then each field as “Label: value”.`}
+                    placeholder="{name} — {bio}"
+                    placeholders={selfPlaceholders(draft, root)}
+                    onChange={(template) => edit({ semantic: { ...draft.semantic, template } })}
+                  />
+                )}
                 {outline !== null && (
                   <EntryPreview
                     part={selfPart}
@@ -509,7 +521,7 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
                     {draft.relations.length}/{MAX_RELATION_GROUPS}
                   </span>
                 }
-                description="One entry per relation instance: the header, the group label, the relation's fields and the fields of the entity on the other end. Relations are never combined into one entry."
+                description="One entry per relation instance: the header, the group's name, the relation's fields and the fields of the entity on the other end. Relations are never combined into one entry. A group's name — the relation's by default — tells agents what the group holds."
               >
                 {draft.relations.map((g, i) => (
                   <RelationGroupCard
@@ -550,7 +562,7 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
 
               <Section
                 title="Search modes"
-                description="Semantic search finds by meaning (needs an embedding provider); keyword search finds by words, stemmed in the ontology's keyword languages."
+                description="Semantic search finds by meaning (needs an embedding provider); keyword search finds by words, stemmed in the ontology's keyword languages. How an entry's semantic text is written is chosen beside its preview."
               >
                 <label className="flex items-center gap-3 text-[13px]">
                   <Switch
@@ -559,27 +571,6 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
                   />
                   Semantic
                 </label>
-                {draft.semantic.enabled && (
-                  <div className="ml-12 grid gap-1.5">
-                    <Label htmlFor="semantic-template" className="text-xs">
-                      Template of the entity's own entry (optional)
-                    </Label>
-                    <TemplateField
-                      id="semantic-template"
-                      rows={2}
-                      value={draft.semantic.template ?? ''}
-                      placeholder="{name} — {bio}"
-                      placeholders={selfPlaceholders(draft, root)}
-                      onChange={(template) => edit({ semantic: { ...draft.semantic, template } })}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Placeholders are field keys in braces; a placeholder without a value drops
-                      its clause — the text up to the next <code>,</code> <code>;</code>{' '}
-                      <code>.</code> or line break. Without a template the entry is labelled
-                      lines. The own entry's preview above shows the result.
-                    </p>
-                  </div>
-                )}
                 <label className="flex items-center gap-3 text-[13px]">
                   <Switch
                     checked={draft.keyword.enabled}
@@ -868,7 +859,7 @@ function RelationGroupCard({
         issues.length > 0 && 'border-destructive/40',
       )}
     >
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <span className="text-[12px] font-medium text-muted-foreground">Group {index + 1}</span>
         <Select
           value={option === undefined ? undefined : value}
@@ -892,6 +883,19 @@ function RelationGroupCard({
             })}
           </SelectContent>
         </Select>
+        {option !== undefined && (
+          <label className="flex items-center gap-2 text-[12px] text-muted-foreground">
+            Name
+            <Input
+              id={`g${index}-label`}
+              className="h-8 w-56"
+              value={group.label ?? ''}
+              placeholder={relationType?.displayName ?? 'Name'}
+              title="Names the group for agents choosing what to search, and heads its labelled lines. Empty: the relation's name."
+              onChange={(e) => onChange({ ...group, label: e.target.value })}
+            />
+          </label>
+        )}
         <Button
           variant="ghost"
           size="icon-sm"
@@ -948,32 +952,16 @@ function RelationGroupCard({
               }
             />
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="grid gap-1.5">
-              <Label htmlFor={`g${index}-label`} className="text-xs">
-                Label
-              </Label>
-              <Input
-                id={`g${index}-label`}
-                value={group.label ?? ''}
-                placeholder={relationType?.displayName ?? 'Label'}
-                onChange={(e) => onChange({ ...group, label: e.target.value })}
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor={`g${index}-template`} className="text-xs">
-                Template (optional)
-              </Label>
-              <TemplateField
-                id={`g${index}-template`}
-                rows={1}
-                value={group.template ?? ''}
-                placeholder="Prose with {field} and {target.field} placeholders"
-                placeholders={groupPlaceholders(draft, root, group)}
-                onChange={(template) => onChange({ ...group, template })}
-              />
-            </div>
-          </div>
+          {draft.semantic.enabled && (
+            <SemanticTextChoice
+              id={`g${index}-template`}
+              template={group.template}
+              labelledHint={`The header, the group's name, then each field as “Label: value”.`}
+              placeholder="{name} is {role} at {target.name}, since {since}."
+              placeholders={groupPlaceholders(draft, root, group)}
+              onChange={(template) => onChange({ ...group, template })}
+            />
+          )}
           {showPreview && (
             <EntryPreview
               part={part}
@@ -994,6 +982,87 @@ function RelationGroupCard({
         </>
       )}
       <IssueList issues={issues} />
+    </div>
+  )
+}
+
+/**
+ * How an entry's semantic text is written: labelled lines from the schema,
+ * or a template of the modeler's own. A template set aside by switching
+ * to labelled lines comes back when switching again, until the designer
+ * is left or saved.
+ */
+function SemanticTextChoice({
+  id,
+  template,
+  labelledHint,
+  placeholder,
+  placeholders,
+  onChange,
+}: {
+  id: string
+  /** Null: labelled lines; a string, even empty: template mode. */
+  template: string | null
+  labelledHint: string
+  placeholder: string
+  placeholders: string[]
+  onChange: (template: string | null) => void
+}) {
+  const [setAside, setSetAside] = useState(template ?? '')
+  const mode = template === null ? 'labelled' : 'template'
+  const choose = (next: 'labelled' | 'template') => {
+    if (next === mode) return
+    if (next === 'labelled') {
+      setSetAside(template ?? '')
+      onChange(null)
+    } else {
+      onChange(setAside)
+    }
+  }
+  return (
+    <div className="grid gap-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="text-xs font-medium">Semantic text</span>
+        <div role="radiogroup" aria-label="How the semantic text is written" className="inline-flex rounded-md border p-0.5 text-xs">
+          {(['labelled', 'template'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              role="radio"
+              aria-checked={mode === m}
+              onClick={() => choose(m)}
+              className={cn(
+                'rounded px-2 py-0.5 transition-colors',
+                mode === m ? 'bg-muted font-medium' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {m === 'labelled' ? 'Labelled lines' : 'Template'}
+            </button>
+          ))}
+        </div>
+        <span className="text-xs text-muted-foreground">
+          {mode === 'labelled'
+            ? labelledHint
+            : 'Your text replaces the labelled lines — no header or name is added in front.'}
+        </span>
+      </div>
+      {mode === 'template' && (
+        <div className="grid gap-1">
+          <TemplateField
+            id={id}
+            rows={2}
+            value={template ?? ''}
+            placeholder={placeholder}
+            placeholders={placeholders}
+            onChange={onChange}
+          />
+          <p className="text-xs text-muted-foreground">
+            A placeholder without a value drops its clause — the text up to the next{' '}
+            <code>,</code> <code>;</code> <code>.</code> or line break. Until the template is
+            written, the labelled lines are embedded.
+          </p>
+        </div>
+      )}
     </div>
   )
 }

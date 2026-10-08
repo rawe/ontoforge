@@ -224,7 +224,7 @@ function AgentEditor({ ontologyKey, lensKey, existingKeys, catalog, schema, aiEn
             <p className="text-xs text-muted-foreground">What this agent answers. Stores configuration only — no conversations or vectors.</p></div>
         </section>
 
-        {showEditor && <RetrieverAgentConfigEditor config={draft.config} onChange={(config) => edit({ config })} catalog={catalog} schema={schema} disabled={busy} issues={issues} />}
+        {showEditor && <RetrieverAgentConfigEditor ontologyKey={ontologyKey} config={draft.config} onChange={(config) => edit({ config })} catalog={catalog} schema={schema} disabled={busy} issues={issues} />}
 
         {agent && <RetrieverAgentMore ontologyKey={ontologyKey} lensKey={lensKey} agent={agent} config={draft.config} unsupported={unsupported && !repairApplied} disabled={busy} onBusy={setBusy}
           onDeleted={() => leave(() => onDeleted?.())} onConfig={(config) => { edit({ config }); if (unsupported) setRepairApplied(true) }} />}

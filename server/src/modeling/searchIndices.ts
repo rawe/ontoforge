@@ -31,7 +31,7 @@ import type {
   SearchIndexStore,
   SearchQueueError,
 } from "../core/ports.js";
-import { documentField, ownTextFields } from "../core/searchComposition.js";
+import { documentField, outlineEntries, ownTextFields } from "../core/searchComposition.js";
 import {
   cascadeIndexKeys,
   deriveManagedIndices,
@@ -226,8 +226,10 @@ async function validDefinition(
 // ---------------------------------------------------------------------------
 
 /**
- * Validate a draft and estimate a full build of it — never a 422 for an
- * invalid draft: its issues come back with no estimate. A draft may come
+ * Validate a draft, estimate a full build of it and outline its entries —
+ * never a 422 for an invalid draft: its issues come back with no estimate,
+ * and with the outline as far as it composes whenever the parts it reads
+ * are well-shaped. A draft may come
  * without a key (a new index). The estimate is always the cost of a full
  * build: a changed definition gets a new generation that rebuilds
  * everything.
@@ -238,11 +240,21 @@ export async function previewSearchIndex(
 ): Promise<SearchIndexPreviewResponseBody> {
   const indices = requireSearchIndices(store);
   const parsed = parseDefinition(body.key === undefined ? { ...body, key: DRAFT_KEY } : body);
-  if (!parsed.ok) return { valid: false, issues: parsed.issues, estimate: null };
+  // The outline reads no key, name or description: a draft still missing
+  // them is outlined all the same.
+  const composable = parseDefinition({ ...body, key: DRAFT_KEY, name: DRAFT_KEY, description: DRAFT_KEY });
+  if (!composable.ok) return { valid: false, issues: parsed.ok ? [] : parsed.issues, estimate: null, outline: null };
   const { schema } = await loadSearchContextUncached(indices);
+  const outline = outlineEntries(composable.definition, schema);
+  if (!parsed.ok) return { valid: false, issues: parsed.issues, estimate: null, outline };
   const issues = validateSearchIndex(parsed.definition, schema);
-  if (issues.length > 0) return { valid: false, issues, estimate: null };
-  return { valid: true, issues: [], estimate: await estimateCost(indices, parsed.definition, schema) };
+  if (issues.length > 0) return { valid: false, issues, estimate: null, outline };
+  return {
+    valid: true,
+    issues: [],
+    estimate: await estimateCost(indices, parsed.definition, schema),
+    outline,
+  };
 }
 
 /** The cost of a full build of a valid definition, at the worker's

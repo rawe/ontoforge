@@ -12,6 +12,7 @@ import {
   useSearchIndices,
 } from '@/api/searchIndexHooks'
 import type {
+  OutlinePart,
   SearchIndexDefinition,
   SearchIndexRecord,
   SearchIndexRelationGroup,
@@ -56,6 +57,16 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
+import { EntryPreview, type LeftOut } from './EntryPreview'
+import {
+  groupPlaceholders,
+  insertAt,
+  notSelected,
+  outlinePart,
+  ownerLineCounts,
+  partTypes,
+  selfPlaceholders,
+} from './entryOutline'
 import { IndexSaveBar, IndexStatusBlock } from './IndexPanels'
 import {
   MAX_INDEX_FIELDS,
@@ -78,6 +89,7 @@ import {
   withEntityType,
   type HeaderMode,
   type IndexSchema,
+  type IndexSchemaEntityType,
   type IndexSchemaProperty,
   type RelationGroupOption,
 } from './searchIndexModel'
@@ -183,6 +195,9 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
   const previewCurrent =
     !preview.isPlaceholderData && JSON.stringify(settledInput) === JSON.stringify(previewInput)
   const previewIssues = previewCurrent ? (preview.data?.issues ?? []) : []
+  // The outline keeps showing while a newer draft is composed, dimmed.
+  const outline = previewInput === null ? null : (preview.data?.outline ?? null)
+  const outlineStale = !previewCurrent || preview.isFetching
   // Key problems are client-only (the key field shows them too); the panel lists them with the rest.
   const keyProblem: ValidationError[] =
     isNew && key !== '' && !isValidKey(key)
@@ -259,6 +274,24 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
 
   const setGroup = (i: number, group: SearchIndexRelationGroup) =>
     edit({ relations: draft.relations.map((g, j) => (j === i ? group : g)) })
+
+  const selfPart = outlinePart(outline, 'self')
+  const passagePart = outlinePart(outline, 'passage')
+  const documentKey = root === undefined ? null : selectedDocument(draft.fields, root)
+  const headerApplies = draft.relations.length > 0 || documentKey !== null
+  const ownerLines = root === undefined ? undefined : ownerLineCounts(draft.header, root)
+  const hasOwnText =
+    root?.properties.some((p) => isTextProperty(p) && draft.fields.includes(p.key)) === true
+  const documentName = root?.properties.find((p) => p.key === documentKey)?.displayName
+  const ownLeftOut: LeftOut[] =
+    root === undefined
+      ? []
+      : notSelected(root.properties, draft.fields).map((p) => ({
+          key: p.key,
+          label: p.displayName,
+          disabledReason: atLimit ? `At most ${MAX_INDEX_FIELDS} fields` : undefined,
+          onAdd: () => edit({ fields: toggleKey(draft.fields, p.key, true) }),
+        }))
 
   const title = draft.name.trim() !== '' ? draft.name.trim() : isNew ? 'New index' : saved.key
 
@@ -396,12 +429,73 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
                   onToggle={(k, on) => edit({ fields: toggleKey(draft.fields, k, on) })}
                 />
                 <IssueList issues={issuesAt(issues, 'fields')} />
+                {draft.semantic.enabled && hasOwnText && (
+                  <SemanticTextChoice
+                    id="semantic-template"
+                    template={draft.semantic.template}
+                    labelledHint={`The type's name, then each field as “Label: value”.`}
+                    placeholder="{name} — {bio}"
+                    placeholders={selfPlaceholders(draft, root)}
+                    onChange={(template) => edit({ semantic: { ...draft.semantic, template } })}
+                  />
+                )}
+                {outline !== null && (
+                  <EntryPreview
+                    part={selfPart}
+                    types={selfPart && partTypes(schema, root.key, selfPart)}
+                    caption={<>One own entry per {root.displayName}</>}
+                    semantic={draft.semantic.enabled}
+                    keyword={draft.keyword.enabled}
+                    stale={outlineStale}
+                    emptyText={ownEntryAbsence(root.displayName, draft.relations.length > 0, documentKey !== null)}
+                    leftOut={[{ title: root.displayName, fields: ownLeftOut }]}
+                  />
+                )}
+                {outline !== null && documentKey !== null && (
+                  <EntryPreview
+                    part={passagePart}
+                    types={passagePart && partTypes(schema, root.key, passagePart)}
+                    caption={
+                      <>
+                        One passage entry per chunk of {documentName ?? documentKey} — the owner
+                        line, then the chunk
+                      </>
+                    }
+                    semantic={draft.semantic.enabled}
+                    keyword={draft.keyword.enabled}
+                    stale={outlineStale}
+                    ownerLines={ownerLines}
+                  />
+                )}
               </Section>
 
               <Section
-                title="Header"
-                description="Starts every relation and passage entry, so each one says whose it is. Header fields do not count toward the limit."
+                title="Owner line (header)"
+                marker
+                dimmed={!headerApplies}
+                description="Says whose an entry is: it starts every entry that is not the entity's own — each relation entry and each passage. Its fields do not count toward the limit."
               >
+                <div className="flex flex-wrap items-center gap-1.5 text-[12px]">
+                  <span className="text-muted-foreground">Applies to</span>
+                  {draft.relations.length > 0 && (
+                    <Badge variant="outline" className="text-[11px] font-normal">
+                      {draft.relations.length === 1 ? '1 relation group' : `${draft.relations.length} relation groups`}
+                    </Badge>
+                  )}
+                  {documentKey !== null && (
+                    <Badge variant="outline" className="text-[11px] font-normal">
+                      passages of {documentName ?? documentKey}
+                    </Badge>
+                  )}
+                  {!headerApplies && (
+                    <span className="text-muted-foreground">
+                      nothing yet — add a relation group or a document field
+                    </span>
+                  )}
+                  <Badge variant="outline" className="text-[11px] font-normal text-muted-foreground line-through decoration-muted-foreground/60">
+                    the own entry
+                  </Badge>
+                </div>
                 <RadioGroup
                   value={headerChoice}
                   onValueChange={(v) => {
@@ -454,13 +548,19 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
                     {draft.relations.length}/{MAX_RELATION_GROUPS}
                   </span>
                 }
-                description="One entry per relation instance: the header, the group label, the relation's fields and the fields of the entity on the other end. Relations are never combined into one entry."
+                description="One entry per relation instance: the owner line, the group's name, the relation's fields and the fields of the entity on the other end. Relations are never combined into one entry. A group's name — the relation's by default — tells agents what the group holds."
               >
                 {draft.relations.map((g, i) => (
                   <RelationGroupCard
                     key={i}
                     index={i}
                     group={g}
+                    draft={draft}
+                    root={root}
+                    part={outlinePart(outline, 'relation', i)}
+                    showPreview={outline !== null}
+                    stale={outlineStale}
+                    ownerLines={ownerLines}
                     schema={schema}
                     options={options}
                     used={usedGroups}
@@ -490,7 +590,7 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
 
               <Section
                 title="Search modes"
-                description="Semantic search finds by meaning (needs an embedding provider); keyword search finds by words, stemmed in the ontology's keyword languages."
+                description="Semantic search finds by meaning (needs an embedding provider); keyword search finds by words, stemmed in the ontology's keyword languages. How an entry's semantic text is written is chosen beside its preview."
               >
                 <label className="flex items-center gap-3 text-[13px]">
                   <Switch
@@ -499,25 +599,6 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
                   />
                   Semantic
                 </label>
-                {draft.semantic.enabled && (
-                  <div className="ml-12 grid gap-1.5">
-                    <Label htmlFor="semantic-template" className="text-xs">
-                      Template of the entity's own entry (optional)
-                    </Label>
-                    <Textarea
-                      id="semantic-template"
-                      rows={2}
-                      className="font-mono text-xs"
-                      value={draft.semantic.template ?? ''}
-                      placeholder="{name} — {bio}"
-                      onChange={(e) => edit({ semantic: { ...draft.semantic, template: e.target.value } })}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Placeholders are field keys in braces; a placeholder without a value drops
-                      its clause. Without a template the entry is labelled lines.
-                    </p>
-                  </div>
-                )}
                 <label className="flex items-center gap-3 text-[13px]">
                   <Switch
                     checked={draft.keyword.enabled}
@@ -595,21 +676,36 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
 
 /* ------------------------------- building blocks ------------------------------ */
 
+/** Why a draft has no own entry, and what still finds the entity. */
+function ownEntryAbsence(typeName: string, groups: boolean, passages: boolean): string {
+  const kinds = [groups && 'relation', passages && 'passage'].filter(Boolean).join(' and ')
+  return kinds === ''
+    ? 'No own entry: no own text field is selected.'
+    : `No own entry: no own text field is selected, so a ${typeName} is found only through its ${kinds} entries.`
+}
+
 function Section({
   title,
   description,
   meta,
+  marker = false,
+  dimmed = false,
   children,
 }: {
   title: string
   description?: string
   meta?: ReactNode
+  /** The owner line's mark — the rule that marks its lines in the previews. */
+  marker?: boolean
+  /** Shown faded: the section applies to nothing yet. */
+  dimmed?: boolean
   children: ReactNode
 }) {
   return (
-    <section className="grid gap-3 rounded-xl border bg-card p-4">
+    <section className={cn('grid gap-3 rounded-xl border bg-card p-4 transition-opacity', dimmed && 'opacity-60')}>
       <div>
         <div className="flex items-center gap-2">
+          {marker && <span className="h-3.5 w-0.5 rounded-full bg-primary/35" aria-hidden />}
           <h2 className="text-[13px] font-semibold">{title}</h2>
           {meta !== undefined && <span className="ml-auto">{meta}</span>}
         </div>
@@ -707,6 +803,12 @@ function optionLabel(option: RelationGroupOption, schema: IndexSchema) {
 function RelationGroupCard({
   index,
   group,
+  draft,
+  root,
+  part,
+  showPreview,
+  stale,
+  ownerLines,
   schema,
   options,
   used,
@@ -717,6 +819,12 @@ function RelationGroupCard({
 }: {
   index: number
   group: SearchIndexRelationGroup
+  draft: SearchIndexDefinition
+  root: IndexSchemaEntityType
+  part: OutlinePart | undefined
+  showPreview: boolean
+  stale: boolean
+  ownerLines: { semantic: number; keyword: number } | undefined
   schema: IndexSchema
   options: RelationGroupOption[]
   used: Set<string>
@@ -734,6 +842,53 @@ function RelationGroupCard({
   const limitReason = (_: IndexSchemaProperty, checked: boolean) =>
     !checked && atLimit ? `At most ${MAX_INDEX_FIELDS} fields` : undefined
 
+  const relationName = relationType?.displayName ?? group.relationType
+  const relationProps = (relationType?.properties ?? []).filter(isTextProperty)
+  const targetProps = (target?.properties ?? []).filter(isTextProperty)
+  const limit = atLimit ? `At most ${MAX_INDEX_FIELDS} fields` : undefined
+  const warnings: ReactNode[] = []
+  if (group.fields.length === 0 && relationProps.length > 0) {
+    warnings.push(
+      <>
+        None of the relation's own properties ({relationProps.map((p) => p.displayName).join(', ')})
+        is in these entries — a search cannot match on them.
+      </>,
+    )
+  }
+  if (target !== undefined && targetFields.length === 0 && targetProps.length > 0) {
+    warnings.push(
+      <>
+        The {target.displayName} at the other end is not mentioned, not even by name — a search
+        cannot match on it.
+      </>,
+    )
+  }
+  const leftOut = [
+    {
+      title: relationName,
+      fields: notSelected(relationProps, group.fields).map((p) => ({
+        key: p.key,
+        label: p.displayName,
+        disabledReason: limit,
+        onAdd: () => onChange({ ...group, fields: toggleKey(group.fields, p.key, true) }),
+      })),
+    },
+    ...(target === undefined
+      ? []
+      : [
+          {
+            title: target.displayName,
+            fields: notSelected(targetProps, targetFields).map((p) => ({
+              key: p.key,
+              label: p.displayName,
+              disabledReason: limit,
+              onAdd: () =>
+                onChange({ ...group, target: { [target.key]: toggleKey(targetFields, p.key, true) } }),
+            })),
+          },
+        ]),
+  ]
+
   return (
     <div
       className={cn(
@@ -741,7 +896,7 @@ function RelationGroupCard({
         issues.length > 0 && 'border-destructive/40',
       )}
     >
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <span className="text-[12px] font-medium text-muted-foreground">Group {index + 1}</span>
         <Select
           value={option === undefined ? undefined : value}
@@ -765,6 +920,19 @@ function RelationGroupCard({
             })}
           </SelectContent>
         </Select>
+        {option !== undefined && (
+          <label className="flex items-center gap-2 text-[12px] text-muted-foreground">
+            Name
+            <Input
+              id={`g${index}-label`}
+              className="h-8 w-56"
+              value={group.label ?? ''}
+              placeholder={relationType?.displayName ?? 'Name'}
+              title="Names the group for agents choosing what to search, and heads its labelled lines. Empty: the relation's name."
+              onChange={(e) => onChange({ ...group, label: e.target.value })}
+            />
+          </label>
+        )}
         <Button
           variant="ghost"
           size="icon-sm"
@@ -821,35 +989,175 @@ function RelationGroupCard({
               }
             />
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="grid gap-1.5">
-              <Label htmlFor={`g${index}-label`} className="text-xs">
-                Label
-              </Label>
-              <Input
-                id={`g${index}-label`}
-                value={group.label ?? ''}
-                placeholder={relationType?.displayName ?? 'Label'}
-                onChange={(e) => onChange({ ...group, label: e.target.value })}
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor={`g${index}-template`} className="text-xs">
-                Template (optional)
-              </Label>
-              <Textarea
-                id={`g${index}-template`}
-                rows={1}
-                className="min-h-8 font-mono text-xs"
-                value={group.template ?? ''}
-                placeholder="{role} at {target.name}"
-                onChange={(e) => onChange({ ...group, template: e.target.value })}
-              />
-            </div>
-          </div>
+          {draft.semantic.enabled && (
+            <SemanticTextChoice
+              id={`g${index}-template`}
+              template={group.template}
+              labelledHint={`The owner line, the group's name, then each field as “Label: value”.`}
+              placeholder="{name} is {role} at {target.name}, since {since}."
+              placeholders={groupPlaceholders(draft, root, group)}
+              onChange={(template) => onChange({ ...group, template })}
+            />
+          )}
+          {showPreview && (
+            <EntryPreview
+              part={part}
+              types={part && partTypes(schema, root.key, part)}
+              caption={
+                <>
+                  One entry per {relationName} relation of a {root.displayName} — never two
+                  relations in one entry
+                </>
+              }
+              semantic={draft.semantic.enabled}
+              keyword={draft.keyword.enabled}
+              stale={stale}
+              warnings={warnings}
+              leftOut={leftOut}
+              ownerLines={ownerLines}
+            />
+          )}
         </>
       )}
       <IssueList issues={issues} />
+    </div>
+  )
+}
+
+/**
+ * How an entry's semantic text is written: labelled lines from the schema,
+ * or a template of the modeler's own. A template set aside by switching
+ * to labelled lines comes back when switching again, until the designer
+ * is left or saved.
+ */
+function SemanticTextChoice({
+  id,
+  template,
+  labelledHint,
+  placeholder,
+  placeholders,
+  onChange,
+}: {
+  id: string
+  /** Null: labelled lines; a string, even empty: template mode. */
+  template: string | null
+  labelledHint: string
+  placeholder: string
+  placeholders: string[]
+  onChange: (template: string | null) => void
+}) {
+  const [setAside, setSetAside] = useState(template ?? '')
+  const mode = template === null ? 'labelled' : 'template'
+  const choose = (next: 'labelled' | 'template') => {
+    if (next === mode) return
+    if (next === 'labelled') {
+      setSetAside(template ?? '')
+      onChange(null)
+    } else {
+      onChange(setAside)
+    }
+  }
+  return (
+    <div className="grid gap-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="text-xs font-medium">Semantic text</span>
+        <div role="radiogroup" aria-label="How the semantic text is written" className="inline-flex rounded-md border p-0.5 text-xs">
+          {(['labelled', 'template'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              role="radio"
+              aria-checked={mode === m}
+              onClick={() => choose(m)}
+              className={cn(
+                'rounded px-2 py-0.5 transition-colors',
+                mode === m ? 'bg-muted font-medium' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {m === 'labelled' ? 'Labelled lines' : 'Template'}
+            </button>
+          ))}
+        </div>
+        <span className="text-xs text-muted-foreground">
+          {mode === 'labelled'
+            ? labelledHint
+            : 'Your text replaces the labelled lines — no owner line or name is added in front.'}
+        </span>
+      </div>
+      {mode === 'template' && (
+        <div className="grid gap-1">
+          <TemplateField
+            id={id}
+            rows={2}
+            value={template ?? ''}
+            placeholder={placeholder}
+            placeholders={placeholders}
+            onChange={onChange}
+          />
+          <p className="text-xs text-muted-foreground">
+            A placeholder without a value drops its clause — the text up to the next{' '}
+            <code>,</code> <code>;</code> <code>.</code> or line break. Until the template is
+            written, the labelled lines are embedded.
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** A template textarea with the placeholders it can resolve, inserted at the cursor on click. */
+function TemplateField({
+  id,
+  rows,
+  value,
+  placeholder,
+  placeholders,
+  onChange,
+}: {
+  id: string
+  rows: number
+  value: string
+  placeholder: string
+  placeholders: string[]
+  onChange: (value: string) => void
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  const insert = (token: string) => {
+    const area = ref.current
+    const start = area?.selectionStart ?? value.length
+    const end = area?.selectionEnd ?? value.length
+    onChange(insertAt(value, token, start, end))
+    requestAnimationFrame(() => {
+      area?.focus()
+      area?.setSelectionRange(start + token.length, start + token.length)
+    })
+  }
+  return (
+    <div className="grid gap-1">
+      <Textarea
+        ref={ref}
+        id={id}
+        rows={rows}
+        className="min-h-8 font-mono text-xs"
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      {placeholders.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="text-[11px] text-muted-foreground">Insert</span>
+          {placeholders.map((token) => (
+            <button
+              key={token}
+              type="button"
+              onClick={() => insert(token)}
+              className="rounded border px-1 font-mono text-[10.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              {token}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

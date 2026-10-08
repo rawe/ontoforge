@@ -474,11 +474,33 @@ export interface CostEstimate {
   }[]
 }
 
+/**
+ * One kind of entry an index holds per entity, composed from the schema:
+ * `⟦root.x⟧`, `⟦relation.x⟧`, `⟦target.x⟧` and `⟦passage⟧` stand in for
+ * the values.
+ */
+export interface OutlinePart {
+  partKind: 'self' | 'relation' | 'passage'
+  /** The relation group's position; null for self and passages. */
+  groupNo: number | null
+  relationType: string | null
+  direction: RelationDirection | null
+  targetType: string | null
+  keywordText: string
+  semanticText: string
+  /** `fallback`: every clause of the template dropped — labelled lines stand. */
+  template: 'none' | 'rendered' | 'fallback'
+  /** Template placeholders, as written in the braces, that never have a value. */
+  unresolved: string[]
+}
+
 export interface SearchIndexPreview {
   valid: boolean
   issues: ValidationError[]
   /** Null when the draft is invalid. */
   estimate: CostEstimate | null
+  /** Null when the parts it reads — all but key, name and description — are not well-shaped. */
+  outline: OutlinePart[] | null
 }
 
 export interface SearchSettings {

@@ -566,6 +566,11 @@ a definition at the measured throughput before it is saved. The field cap bounds
 text, which dilutes a vector as it grows, and keeps definitions readable; each relation
 group multiplies entries, and four is generous.
 
+**The entry outline is the server's composition, run on stand-in values.** What an
+index holds is shown by composing a draft with the very rules that compose real entries,
+each field's value replaced by a token naming it. No client re-implements composition, so
+what a modeler sees cannot drift from what is embedded and matched.
+
 **A lens may search an index that reads properties it hides; validation warns, results
 are projected and the snippet withheld.** Entries are composed from the full schema, so a
 hidden value can still drive a ranking through that lens — accepted, as two lenses share

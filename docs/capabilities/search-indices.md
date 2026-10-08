@@ -258,6 +258,27 @@ again, as a new generation is built, whatever the change from a stored definitio
 A representation that will not be built is left out: one the draft switches off, and
 the semantic one when no embedding provider is configured.
 
+### Entry outline
+
+The preview also outlines the draft's entries: one per entry kind an entity of the root
+type gets — its own entry, one per relation group, its passages — each with its semantic
+and its keyword text, [composed](#composition) exactly as the index composes real
+entries, but from the schema alone. Every field the draft reads stands in as a token
+naming its owner and key — `⟦root.bio⟧`, `⟦relation.role⟧`, `⟦target.name⟧` — and a
+passage's chunk as `⟦passage⟧`, so the text shows which field lands where, under which
+label, in which order. A kind the draft composes no entry of is absent: no own entry
+without an own text field, no group whose types no longer exist.
+
+Each relation part names its group, relation type, direction and target type. Each part
+says how its semantic text came about — labelled lines without a template, the
+template's text, or the labelled lines because every clause of the template dropped —
+and lists the placeholders of its template that never have a value, since they name no
+field the template can read.
+
+The outline does not wait for a valid draft: it is composed as far as the draft composes
+whenever the parts it reads are well-shaped — key, name and description play no part in
+it — so a draft that breaks a schema rule still shows what it would hold.
+
 ## Composition
 
 An entry's text is composed from the entity's current state and the **full schema**,

@@ -182,11 +182,7 @@ export function composeSelf(
     return null;
   }
   const labelled = cap(block(root, fields, entity.properties).join("\n"));
-  const header = headerFields(definition, schema);
-  const resolve = (field: string, target: boolean): string | null =>
-    !target && (fields.includes(field) || header.includes(field))
-      ? renderValue(entity.properties[field])
-      : null;
+  const resolve = selfResolver(definition, schema, entity);
   return {
     partKind: "self",
     groupNo: 0,
@@ -237,14 +233,7 @@ export function composeRelation(
     ...blockValues(target, targetFields, relation.target.properties),
   ];
 
-  const own = new Set([...header, ...ownTextFields(definition, schema)]);
-  const resolve = (field: string, isTarget: boolean): string | null => {
-    if (isTarget) {
-      return targetFields.includes(field) ? renderValue(relation.target.properties[field]) : null;
-    }
-    if (relationFields.includes(field)) return renderValue(relation.properties[field]);
-    return own.has(field) ? renderValue(entity.properties[field]) : null;
-  };
+  const resolve = relationResolver(definition, schema, entity, groupNo, relation);
   return {
     partKind: "relation",
     groupNo,
@@ -285,6 +274,48 @@ export function composePassages(
       semanticText: cap([...labelled, chunk.text].join("\n")),
     };
   });
+}
+
+/** A placeholder's value: `{field}` when `target` is false, else
+ * `{target.field}`; null when the index reads no such field or it is empty. */
+type Resolve = (field: string, target: boolean) => string | null;
+
+/** The self template's placeholders: an own or header field of the root. */
+function selfResolver(
+  definition: SearchIndexDefinition,
+  schema: SearchIndexSchema,
+  entity: ComposeEntity,
+): Resolve {
+  const fields = ownTextFields(definition, schema);
+  const header = headerFields(definition, schema);
+  return (field, target) =>
+    !target && (fields.includes(field) || header.includes(field))
+      ? renderValue(entity.properties[field])
+      : null;
+}
+
+/** A relation template's placeholders: `{target.x}` a target field of the
+ * group; `{x}` a relation field of the group, else an own or header field
+ * of the root. */
+function relationResolver(
+  definition: SearchIndexDefinition,
+  schema: SearchIndexSchema,
+  entity: ComposeEntity,
+  groupNo: number,
+  relation: ComposeRelation,
+): Resolve {
+  const group = definition.relations[groupNo]!;
+  const relationType = schema.relationTypes[group.relationType];
+  const relationFields = group.fields.filter((key) => isTextField(relationType, key));
+  const targetFields = groupTargetFields(definition, groupNo, schema);
+  const own = new Set([...headerFields(definition, schema), ...ownTextFields(definition, schema)]);
+  return (field, isTarget) => {
+    if (isTarget) {
+      return targetFields.includes(field) ? renderValue(relation.target.properties[field]) : null;
+    }
+    if (relationFields.includes(field)) return renderValue(relation.properties[field]);
+    return own.has(field) ? renderValue(entity.properties[field]) : null;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -362,10 +393,7 @@ const CLAUSE = /(?:\{[^{}]*\}|\{|[^,;.\n{])*(?:[,;.\n]|$)/g;
  * punctuation never splits anything. Leftover separators at the start or
  * end are trimmed. Null when nothing is left.
  */
-export function renderTemplate(
-  template: string,
-  resolve: (field: string, target: boolean) => string | null,
-): string | null {
+export function renderTemplate(template: string, resolve: Resolve): string | null {
   const kept: string[] = [];
   for (const clause of template.match(CLAUSE) ?? []) {
     let missing = false;
@@ -384,12 +412,130 @@ export function renderTemplate(
   return text === "" ? null : text;
 }
 
-function semanticText(
-  template: string | null,
-  resolve: (field: string, target: boolean) => string | null,
-  fallback: string,
-): string {
+function semanticText(template: string | null, resolve: Resolve, fallback: string): string {
   if (template === null) return fallback;
   const rendered = renderTemplate(template, resolve);
   return rendered === null ? fallback : cap(rendered);
+}
+
+// ---------------------------------------------------------------------------
+// Outline
+// ---------------------------------------------------------------------------
+
+/** How an outline entry's semantic text came about. */
+export type OutlineTemplateUse = "none" | "rendered" | "fallback";
+
+/** One kind of entry an index holds per entity, composed from the schema
+ * alone. */
+export interface OutlinePart {
+  partKind: SearchPartKind;
+  /** The relation group's position in the definition; null for self and
+   * passages. */
+  groupNo: number | null;
+  relationType: string | null;
+  direction: "outgoing" | "incoming" | null;
+  targetType: string | null;
+  keywordText: string;
+  semanticText: string;
+  /** `none` — no template, labelled lines; `rendered` — the template's
+   * text; `fallback` — a template every clause of which dropped, so the
+   * labelled lines stand. */
+  template: OutlineTemplateUse;
+  /** The template's placeholders, as written inside the braces, that never
+   * have a value: they name no field the template can read. */
+  unresolved: string[];
+}
+
+/** The placeholder a field's value is replaced by in an outline:
+ * `⟦root.x⟧`, `⟦relation.x⟧`, `⟦target.x⟧`, and `⟦passage⟧` for a chunk. */
+export function outlineToken(owner: "root" | "relation" | "target" | "passage", key?: string): string {
+  return key === undefined ? `⟦${owner}⟧` : `⟦${owner}.${key}⟧`;
+}
+
+/**
+ * The entries an index holds per entity of its root type, composed from
+ * the schema alone: every field the definition reads stands in as its
+ * outline token, so each text shows exactly which field lands where — in
+ * the same order, labels and template rendering as real entries. One part
+ * per kind: the self part when the index reads an own text field, one per
+ * relation group whose types exist, one passage part when it reads a
+ * document. Robust against definitions that break schema rules — what
+ * cannot be composed is left out.
+ */
+export function outlineEntries(
+  definition: SearchIndexDefinition,
+  schema: SearchIndexSchema,
+): OutlinePart[] {
+  const root = schema.entityTypes[definition.entityType];
+  if (root === undefined) return [];
+  const entity: ComposeEntity = { id: "", properties: tokens(root, "root") };
+  const parts: OutlinePart[] = [];
+
+  const self = composeSelf(definition, schema, entity);
+  if (self !== null) {
+    parts.push(
+      outlinePart(self, null, null, definition.semantic.template, selfResolver(definition, schema, entity)),
+    );
+  }
+  definition.relations.forEach((group, groupNo) => {
+    const relationType = schema.relationTypes[group.relationType];
+    const targetType = groupTargetType(definition, groupNo, schema);
+    const target = targetType === null ? undefined : schema.entityTypes[targetType];
+    if (relationType === undefined || target === undefined) return;
+    const relation: ComposeRelation = {
+      id: "",
+      properties: tokens(relationType, "relation"),
+      target: { id: "", typeKey: target.key, properties: tokens(target, "target") },
+    };
+    const part = composeRelation(definition, schema, entity, groupNo, relation);
+    if (part === null) return;
+    parts.push(
+      outlinePart(
+        part,
+        groupNo,
+        group.direction,
+        group.template,
+        relationResolver(definition, schema, entity, groupNo, relation),
+      ),
+    );
+  });
+  if (documentField(definition, schema) !== null) {
+    const text = outlineToken("passage");
+    const [passage] = composePassages(definition, schema, entity, [
+      { startChar: 0, charLength: text.length, text },
+    ]);
+    parts.push(outlinePart(passage!, null, null, null, () => null));
+  }
+  return parts;
+}
+
+function tokens(
+  type: IndexEntityType | IndexRelationType,
+  owner: "root" | "relation" | "target",
+): Values {
+  return Object.fromEntries(Object.keys(type.properties).map((key) => [key, outlineToken(owner, key)]));
+}
+
+function outlinePart(
+  part: ComposedPart,
+  groupNo: number | null,
+  direction: "outgoing" | "incoming" | null,
+  template: string | null,
+  resolve: Resolve,
+): OutlinePart {
+  const unresolved = templatePlaceholders(template)
+    .filter(({ field, target }) => resolve(field, target) === null)
+    .map(({ field, target }) => (target ? `target.${field}` : field));
+  const rendered = template === null ? null : renderTemplate(template, resolve);
+  return {
+    partKind: part.partKind,
+    groupNo,
+    relationType: part.relationType,
+    direction,
+    targetType: part.targetType,
+    keywordText: part.keywordText,
+    semanticText: part.semanticText,
+    template: template === null ? "none" : rendered === null ? "fallback" : "rendered",
+    unresolved: [...new Set(unresolved)],
+  };
 }

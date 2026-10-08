@@ -675,8 +675,10 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     {
       description:
         "Validate a draft search index definition without saving it and estimate the cost of " +
-        "building it (entities, entries, seconds per representation). Returns " +
-        "{valid, issues, estimate}; the key may be omitted.",
+        "building it (entities, entries, seconds per representation), and outline the entries " +
+        "it holds per entity — their semantic and keyword text with ⟦root.x⟧, ⟦relation.x⟧, " +
+        "⟦target.x⟧ and ⟦passage⟧ standing in for the values. Returns " +
+        "{valid, issues, estimate, outline}; the key may be omitted.",
       inputSchema: { definition: z.record(z.string(), z.unknown()) },
     },
     wrap("preview_search_index", async (args: { definition: Record<string, unknown> }) => {

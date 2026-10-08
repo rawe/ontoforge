@@ -37,7 +37,7 @@ what rules bind it, and how it is reached from every interface.
 | [instance-data](capabilities/instance-data.md) | Creating, reading and traversing entities and relations |
 | [documents](capabilities/documents.md) | Long-text properties, stubs and partial edits |
 | [search](capabilities/search.md) | Literal matching and ranked search |
-| [search-indices](capabilities/search-indices.md) | What ranked search reads: indices, entries, managed and custom indices, cost preview, generations and build status |
+| [search-indices](capabilities/search-indices.md) | What ranked search reads: indices, entries, managed and custom indices, cost preview and entry outline, generations and build status |
 | [oql](capabilities/oql.md) | The query language |
 | [saved-queries](capabilities/saved-queries.md) | Stored, parameterized query pipelines |
 | [ai-agents](capabilities/ai-agents.md) | Natural-language querying, extraction, chat, A2A |
@@ -334,6 +334,9 @@ and passage entries, by default its name property's value.
 **Cost preview** — the estimate of a search index definition's full build — entities,
 entries and seconds per representation at the measured throughput — returned with its
 validation, without saving it.
+
+**Entry outline** — the texts a search index definition composes per entry kind, from the
+schema alone, with tokens standing in for field values; returned with the cost preview.
 
 **Generation** — one build of one representation of one search index, identified by the
 definition and the embedding model (semantic) or the keyword language set (keyword).

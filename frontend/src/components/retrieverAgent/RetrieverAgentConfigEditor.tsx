@@ -1,5 +1,5 @@
-import { Plus, Trash2 } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { ChevronRight, Plus, Trash2 } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
 import type { RetrieverAgentConfig, RetrieverAgentFilter } from '@/api/retrieverAgents'
 import type { RuntimeSchema, SearchCatalogEntry, ValidationError } from '@/api/types'
 import { TypeChip } from '@/components/TypeChip'
@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
+import { IndexAnatomy } from './IndexAnatomy'
+import { RetrievalPipeline, SECTION_IDS } from './RetrievalPipeline'
 import {
   MAX_ANSWER_FIELDS, MAX_ANSWER_FIELD_CHARACTERS, MIN_ANSWER_FIELD_CHARACTERS,
   answerFieldOptions, filterChoices, filterFieldOptions, filterLabel, groupRelationTypes, newFilter, pathKey, resultTypes,
@@ -18,6 +20,7 @@ const selectClass = 'h-8 rounded-md border bg-background px-2 text-sm disabled:o
 const KIND_LABEL: Record<SearchCatalogEntry['kind'], string> = { default: 'default', passage: 'passages', custom: 'custom' }
 
 interface ConfigEditorProps {
+  ontologyKey: string
   config: RetrieverAgentConfig
   onChange: (config: RetrieverAgentConfig) => void
   catalog: SearchCatalogEntry[]
@@ -27,8 +30,8 @@ interface ConfigEditorProps {
   issues: ValidationError[]
 }
 
-function Section({ title, description, issues, children }: { title: string; description: string; issues: ValidationError[]; children: ReactNode }) {
-  return <section className="space-y-3 rounded-xl border bg-card p-4">
+function Section({ id, title, description, issues, children }: { id: string; title: string; description: string; issues: ValidationError[]; children: ReactNode }) {
+  return <section id={id} className="scroll-mt-4 space-y-3 rounded-xl border bg-card p-4">
     <div><h3 className="text-[13px] font-semibold">{title}</h3><p className="mt-0.5 text-xs text-muted-foreground">{description}</p></div>
     {children}
     {issues.length > 0 && <ul className="space-y-0.5 text-xs text-destructive">{issues.map((issue, i) => <li key={i}>{issue.message}</li>)}</ul>}
@@ -42,7 +45,7 @@ const at = (issues: ValidationError[], prefix: string) => issues.filter((i) => i
  * hard filters, answer fields per result type, threshold and answer size.
  * Controlled; the caller owns the draft and the Save.
  */
-export function RetrieverAgentConfigEditor({ config, onChange, catalog, schema, disabled, issues }: ConfigEditorProps) {
+export function RetrieverAgentConfigEditor({ ontologyKey, config, onChange, catalog, schema, disabled, issues }: ConfigEditorProps) {
   const types = resultTypes(config, catalog)
   const typeName = (key: string) => schema.entityTypes.find((t) => t.key === key)?.displayName ?? key
   const relationLabel = (entry: SearchCatalogEntry, relationType: string) =>
@@ -52,7 +55,8 @@ export function RetrieverAgentConfigEditor({ config, onChange, catalog, schema, 
   const setFilter = (i: number, filter: RetrieverAgentFilter) => onChange({ ...config, filters: config.filters.map((f, j) => (j === i ? filter : f)) })
 
   return <div className="grid gap-4">
-    <Section title="Search indices" description="What a question can search. Hits are always entities of an index's type; the planner picks indices and relation groups per question." issues={at(issues, 'indices')}>
+    <RetrievalPipeline />
+    <Section id={SECTION_IDS.indices} title="Search indices" description="What a question can search. Hits are always entities of an index's type; the planner picks indices and relation groups per question by their names and descriptions — and only what an index's entries hold can match." issues={at(issues, 'indices')}>
       {catalog.length === 0 && <p className="text-xs text-muted-foreground">This lens offers no search index. Include indices in the Scope tab, or create them under Search.</p>}
       {unavailable.map((ref) => <div key={ref.index} className="flex items-center gap-2 rounded-lg border border-destructive/30 p-2 text-xs">
         <span className="min-w-0 flex-1 text-destructive">Index <code>{ref.index}</code> is not available in this lens. It is kept for repair.</span>
@@ -87,12 +91,13 @@ export function RetrieverAgentConfigEditor({ config, onChange, catalog, schema, 
                 {ref.relations.filter((r) => !groups.includes(r)).map((r) => <span key={r} className="text-destructive">{r} (no such group)</span>)}
               </div>}
             </div>}
+            {ref !== undefined && <AnatomyToggle ontologyKey={ontologyKey} indexKey={entry.key} relations={ref.relations} />}
           </li>
         })}</ul>
       </div>)}
     </Section>
 
-    <Section title="Filters" description="Hard conditions: a value the question names must match exactly — on the result's own field or on an entity up to two relations away. A filter alone filters nothing; a question that names a value activates it." issues={at(issues, 'filters')}>
+    <Section id={SECTION_IDS.filters} title="Filters" description="Hard conditions: a value the question names must match exactly — on the result's own field or on an entity up to two relations away. A filter alone filters nothing; a question that names a value activates it." issues={at(issues, 'filters')}>
       {config.filters.map((filter, i) => {
         const choices = filterChoices(schema, filter.entityType)
         const choice = choices.find((c) => c.key === pathKey(filter.path))
@@ -138,7 +143,7 @@ export function RetrieverAgentConfigEditor({ config, onChange, catalog, schema, 
           </select></label>}
     </Section>
 
-    <Section title="Answer fields" description={`Per result type, the values passed to the response model as evidence (at most ${MAX_ANSWER_FIELDS}); long values, documents included, are truncated. What is searched comes from the indices.`} issues={at(issues, 'answerFields')}>
+    <Section id={SECTION_IDS.answerFields} title="Answer fields" description={`Per result type, the values passed to the response model as evidence (at most ${MAX_ANSWER_FIELDS}); long values, documents included, are truncated. What is searched comes from the indices.`} issues={at(issues, 'answerFields')}>
       {types.length === 0 && <p className="text-xs text-muted-foreground">Choose an index first; its entity type gets answer fields.</p>}
       {types.map((type) => {
         const visible = schema.entityTypes.find((t) => t.key === type)
@@ -159,14 +164,29 @@ export function RetrieverAgentConfigEditor({ config, onChange, catalog, schema, 
       </div>)}
     </Section>
 
-    <Section title="Answer" description="How strict the search is and how much of each value the answer may read." issues={[...at(issues, 'threshold'), ...at(issues, 'answerFieldCharacters')]}>
+    <Section id={SECTION_IDS.answer} title="Answer" description="How strict the search is and how much of each value the answer may read." issues={[...at(issues, 'threshold'), ...at(issues, 'answerFieldCharacters')]}>
       <label className="block space-y-2 text-sm"><span className="font-medium">Similarity threshold: {config.threshold.toFixed(2)}</span>
         <input className="w-full accent-primary" type="range" min="-1" max="1" step="0.05" disabled={disabled} value={config.threshold} onChange={(e) => onChange({ ...config, threshold: Number(e.target.value) })} />
-        <span className="block text-xs text-muted-foreground">Scale −1 to 1. Higher = fewer results found by meaning. It does not prove correctness; keyword matches and exact filters are not cut by it.</span></label>
+        <span className="block space-y-1 text-xs text-muted-foreground">
+          <span className="block">Cosine similarity, −1 to 1. A match by meaning must reach it — a similarity of <span className="font-mono text-foreground">{((1 + config.threshold) / 2).toFixed(3)}</span> on the 0–1 scale index search reports. Higher = fewer, closer results by meaning.</span>
+          <span className="block">It cuts only semantic matches of sub-queries without a filter (or, in chat, a reference to earlier results): keyword matches and filtered results always pass. It proves nothing about correctness, and its useful range depends on the embedding model — retune it after changing the model.</span>
+        </span></label>
       <label className="block space-y-1 text-sm"><span>Maximum characters per answer field</span>
         <Input type="number" min={MIN_ANSWER_FIELD_CHARACTERS} max={MAX_ANSWER_FIELD_CHARACTERS} step={100} disabled={disabled} value={config.answerFieldCharacters}
           onChange={(e) => onChange({ ...config, answerFieldCharacters: Math.round(Number(e.target.value) || 0) })} className="w-32" />
         <span className="block text-xs text-muted-foreground">Longer values are truncated; truncation is disclosed with the evidence.</span></label>
     </Section>
+  </div>
+}
+
+/** Opens what a chosen index's entries hold; composed only once opened. */
+function AnatomyToggle({ ontologyKey, indexKey, relations }: { ontologyKey: string; indexKey: string; relations: string[] | undefined }) {
+  const [open, setOpen] = useState(false)
+  return <div className="mt-2 ml-6">
+    <button type="button" aria-expanded={open} onClick={() => setOpen((o) => !o)}
+      className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground">
+      <ChevronRight className={cn('size-3.5 transition-transform', open && 'rotate-90')} />What its entries hold
+    </button>
+    {open && <div className="mt-2"><IndexAnatomy ontologyKey={ontologyKey} indexKey={indexKey} relations={relations} /></div>}
   </div>
 }

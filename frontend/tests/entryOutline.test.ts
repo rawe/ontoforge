@@ -5,6 +5,7 @@ import {
   groupPlaceholders,
   insertAt,
   notSelected,
+  ownerLineCounts,
   outlineLines,
   outlinePart,
   selfPlaceholders,
@@ -73,4 +74,10 @@ test('fieldNames names the far end of a relation to the same type the other one'
     field: 'Name', owner: 'other Person',
   })
   assert.deepEqual(fieldNames({ root: person, relation: undefined, target: person }, 'root', 'bio').owner, 'Person')
+})
+
+test('ownerLineCounts counts the header lines of relation and passage entries', () => {
+  assert.deepEqual(ownerLineCounts(null, person), { semantic: 1, keyword: 1 })
+  assert.deepEqual(ownerLineCounts([], person), { semantic: 1, keyword: 0 })
+  assert.deepEqual(ownerLineCounts(['bio', 'name', 'cv'], person), { semantic: 2, keyword: 2 })
 })

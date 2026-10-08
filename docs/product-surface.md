@@ -358,7 +358,9 @@ follow the [definition](capabilities/search-indices.md#custom-indices):
   document property, with a running count against the field limit; the choice of how the
   own entry's semantic text is written; and the entry previews of the own entry and, with
   a document, of its passages.
-- **Header** — the name property (the default), chosen text fields, or none.
+- **Owner line (header)** — the name property (the default), chosen text fields, or none;
+  it says where it applies — the relation groups, the passages of the chosen document —
+  and that the own entry never has one, and it is faded while it applies to nothing.
 - **Relation groups** — one card per group: a relation type in one direction (each
   combination once) and the group's name beside it — its label, the relation's display
   name when empty — then its relation fields, the target type's fields, the choice of how
@@ -377,7 +379,8 @@ of one entry kind, saying how many such entries an entity gets: the semantic tex
 the keyword text — only those the draft switches on — with each field as a chip coloured
 by the type that owns it, named with its owner where no label tells (keyword text,
 template prose, and the far end of a relation from a type to itself as the "other" one).
-It marks semantic text that comes from the template, says when the template renders
+Its owner line is marked by a thin rule and a small tag, the field chips keeping their
+colours; text from a template has none. It marks semantic text that comes from the template, says when the template renders
 nothing and which of its placeholders never have a value, and which fields a template
 leaves to keyword matching alone. A relation group's preview warns when none of the
 relation's own properties, or nothing of the entity at the other end, is in its entries.

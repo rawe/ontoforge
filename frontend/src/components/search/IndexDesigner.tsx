@@ -63,6 +63,7 @@ import {
   insertAt,
   notSelected,
   outlinePart,
+  ownerLineCounts,
   partTypes,
   selfPlaceholders,
 } from './entryOutline'
@@ -277,6 +278,8 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
   const selfPart = outlinePart(outline, 'self')
   const passagePart = outlinePart(outline, 'passage')
   const documentKey = root === undefined ? null : selectedDocument(draft.fields, root)
+  const headerApplies = draft.relations.length > 0 || documentKey !== null
+  const ownerLines = root === undefined ? undefined : ownerLineCounts(draft.header, root)
   const hasOwnText =
     root?.properties.some((p) => isTextProperty(p) && draft.fields.includes(p.key)) === true
   const documentName = root?.properties.find((p) => p.key === documentKey)?.displayName
@@ -454,21 +457,45 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
                     types={passagePart && partTypes(schema, root.key, passagePart)}
                     caption={
                       <>
-                        One passage entry per chunk of {documentName ?? documentKey} — the header,
-                        then the chunk
+                        One passage entry per chunk of {documentName ?? documentKey} — the owner
+                        line, then the chunk
                       </>
                     }
                     semantic={draft.semantic.enabled}
                     keyword={draft.keyword.enabled}
                     stale={outlineStale}
+                    ownerLines={ownerLines}
                   />
                 )}
               </Section>
 
               <Section
-                title="Header"
-                description="Starts every relation and passage entry, so each one says whose it is. Header fields do not count toward the limit."
+                title="Owner line (header)"
+                marker
+                dimmed={!headerApplies}
+                description="Says whose an entry is: it starts every entry that is not the entity's own — each relation entry and each passage. Its fields do not count toward the limit."
               >
+                <div className="flex flex-wrap items-center gap-1.5 text-[12px]">
+                  <span className="text-muted-foreground">Applies to</span>
+                  {draft.relations.length > 0 && (
+                    <Badge variant="outline" className="text-[11px] font-normal">
+                      {draft.relations.length === 1 ? '1 relation group' : `${draft.relations.length} relation groups`}
+                    </Badge>
+                  )}
+                  {documentKey !== null && (
+                    <Badge variant="outline" className="text-[11px] font-normal">
+                      passages of {documentName ?? documentKey}
+                    </Badge>
+                  )}
+                  {!headerApplies && (
+                    <span className="text-muted-foreground">
+                      nothing yet — add a relation group or a document field
+                    </span>
+                  )}
+                  <Badge variant="outline" className="text-[11px] font-normal text-muted-foreground line-through decoration-muted-foreground/60">
+                    the own entry
+                  </Badge>
+                </div>
                 <RadioGroup
                   value={headerChoice}
                   onValueChange={(v) => {
@@ -521,7 +548,7 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
                     {draft.relations.length}/{MAX_RELATION_GROUPS}
                   </span>
                 }
-                description="One entry per relation instance: the header, the group's name, the relation's fields and the fields of the entity on the other end. Relations are never combined into one entry. A group's name — the relation's by default — tells agents what the group holds."
+                description="One entry per relation instance: the owner line, the group's name, the relation's fields and the fields of the entity on the other end. Relations are never combined into one entry. A group's name — the relation's by default — tells agents what the group holds."
               >
                 {draft.relations.map((g, i) => (
                   <RelationGroupCard
@@ -533,6 +560,7 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
                     part={outlinePart(outline, 'relation', i)}
                     showPreview={outline !== null}
                     stale={outlineStale}
+                    ownerLines={ownerLines}
                     schema={schema}
                     options={options}
                     used={usedGroups}
@@ -660,17 +688,24 @@ function Section({
   title,
   description,
   meta,
+  marker = false,
+  dimmed = false,
   children,
 }: {
   title: string
   description?: string
   meta?: ReactNode
+  /** The owner line's mark — the rule that marks its lines in the previews. */
+  marker?: boolean
+  /** Shown faded: the section applies to nothing yet. */
+  dimmed?: boolean
   children: ReactNode
 }) {
   return (
-    <section className="grid gap-3 rounded-xl border bg-card p-4">
+    <section className={cn('grid gap-3 rounded-xl border bg-card p-4 transition-opacity', dimmed && 'opacity-60')}>
       <div>
         <div className="flex items-center gap-2">
+          {marker && <span className="h-3.5 w-0.5 rounded-full bg-primary/35" aria-hidden />}
           <h2 className="text-[13px] font-semibold">{title}</h2>
           {meta !== undefined && <span className="ml-auto">{meta}</span>}
         </div>
@@ -773,6 +808,7 @@ function RelationGroupCard({
   part,
   showPreview,
   stale,
+  ownerLines,
   schema,
   options,
   used,
@@ -788,6 +824,7 @@ function RelationGroupCard({
   part: OutlinePart | undefined
   showPreview: boolean
   stale: boolean
+  ownerLines: { semantic: number; keyword: number } | undefined
   schema: IndexSchema
   options: RelationGroupOption[]
   used: Set<string>
@@ -956,7 +993,7 @@ function RelationGroupCard({
             <SemanticTextChoice
               id={`g${index}-template`}
               template={group.template}
-              labelledHint={`The header, the group's name, then each field as “Label: value”.`}
+              labelledHint={`The owner line, the group's name, then each field as “Label: value”.`}
               placeholder="{name} is {role} at {target.name}, since {since}."
               placeholders={groupPlaceholders(draft, root, group)}
               onChange={(template) => onChange({ ...group, template })}
@@ -977,6 +1014,7 @@ function RelationGroupCard({
               stale={stale}
               warnings={warnings}
               leftOut={leftOut}
+              ownerLines={ownerLines}
             />
           )}
         </>
@@ -1043,7 +1081,7 @@ function SemanticTextChoice({
         <span className="text-xs text-muted-foreground">
           {mode === 'labelled'
             ? labelledHint
-            : 'Your text replaces the labelled lines — no header or name is added in front.'}
+            : 'Your text replaces the labelled lines — no owner line or name is added in front.'}
         </span>
       </div>
       {mode === 'template' && (

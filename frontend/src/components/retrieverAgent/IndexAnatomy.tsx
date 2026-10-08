@@ -1,6 +1,6 @@
 import { useIndexSchema, useSearchIndex, useSearchIndexPreview } from '@/api/searchIndexHooks'
 import { EntryPreview } from '@/components/search/EntryPreview'
-import { partTypes } from '@/components/search/entryOutline'
+import { ownerLineCounts, partTypes } from '@/components/search/entryOutline'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 
@@ -41,7 +41,8 @@ export function IndexAnatomy({ ontologyKey, indexKey, relations }: {
         : <>One “{label}” entry per {relationName} relation{searched ? '' : ' — not searched by this agent'}</>
       return <div key={`${part.partKind}-${part.groupNo}`} className={cn(!searched && 'opacity-50')}>
         <EntryPreview part={part} types={root && partTypes(schema, root.key, part)} caption={caption}
-          semantic={definition.semantic.enabled} keyword={definition.keyword.enabled} stale={false} />
+          semantic={definition.semantic.enabled} keyword={definition.keyword.enabled} stale={false}
+          ownerLines={part.partKind === 'self' || root === undefined ? undefined : ownerLineCounts(definition.header, root)} />
       </div>
     })}
   </div>

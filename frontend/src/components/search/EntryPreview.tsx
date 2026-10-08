@@ -35,6 +35,8 @@ interface EntryPreviewProps {
   /** Warnings about what the entry misses. */
   warnings?: ReactNode[]
   leftOut?: { title: string; fields: LeftOut[] }[]
+  /** The leading lines that are the owner line (header), marked; a template's text has none. */
+  ownerLines?: { semantic: number; keyword: number }
 }
 
 /**
@@ -52,6 +54,7 @@ export function EntryPreview({
   emptyText,
   warnings = [],
   leftOut = [],
+  ownerLines,
 }: EntryPreviewProps) {
   const templateNotes: ReactNode[] = []
   if (part !== undefined && semantic) {
@@ -123,6 +126,7 @@ export function EntryPreview({
               text={part.semanticText}
               types={types}
               qualified={part.template === 'rendered'}
+              ownerLines={part.template === 'rendered' ? 0 : (ownerLines?.semantic ?? 0)}
             />
           )}
           {keyword && (
@@ -132,6 +136,7 @@ export function EntryPreview({
               text={part.keywordText}
               types={types}
               qualified
+              ownerLines={ownerLines?.keyword ?? 0}
             />
           )}
         </div>
@@ -191,6 +196,7 @@ function TextColumn({
   text,
   types,
   qualified = false,
+  ownerLines = 0,
 }: {
   title: string
   hint: string
@@ -198,7 +204,22 @@ function TextColumn({
   types: PartTypes | undefined
   /** Name the owning type on each field — keyword and template text have no labels to tell. */
   qualified?: boolean
+  /** How many leading lines are the owner line (header). */
+  ownerLines?: number
 }) {
+  const lines = outlineLines(text)
+  const renderLine = (line: OutlineSegment[], i: number, tagged = false) => (
+    <div key={i} className="flex min-h-5 flex-wrap items-center gap-y-0.5">
+      {line.map((segment, j) => (
+        <Segment key={j} segment={segment} types={types} qualified={qualified} />
+      ))}
+      {tagged && (
+        <span className="ml-auto pl-2 font-sans text-[10px] text-muted-foreground" title="Set under “Owner line (header)”">
+          owner line
+        </span>
+      )}
+    </div>
+  )
   return (
     <div className="min-w-0 rounded-md border bg-card">
       <div className="flex items-baseline gap-1.5 border-b px-2.5 py-1">
@@ -206,13 +227,12 @@ function TextColumn({
         <span className="truncate text-[11px] text-muted-foreground">{hint}</span>
       </div>
       <div className="grid gap-1 px-2.5 py-2 font-mono text-[12px] leading-5">
-        {outlineLines(text).map((line, i) => (
-          <div key={i} className="flex min-h-5 flex-wrap items-center gap-y-0.5">
-            {line.map((segment, j) => (
-              <Segment key={j} segment={segment} types={types} qualified={qualified} />
-            ))}
+        {ownerLines > 0 && (
+          <div className="-ml-2.5 grid gap-1 border-l-2 border-primary/35 pl-2">
+            {lines.slice(0, ownerLines).map((line, i) => renderLine(line, i, i === 0))}
           </div>
-        ))}
+        )}
+        {lines.slice(ownerLines).map((line, i) => renderLine(line, i + ownerLines))}
       </div>
     </div>
   )

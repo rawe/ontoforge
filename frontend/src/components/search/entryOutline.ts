@@ -122,3 +122,19 @@ export function groupPlaceholders(
 export function insertAt(text: string, insert: string, start: number, end: number): string {
   return text.slice(0, start) + insert + text.slice(end)
 }
+
+/**
+ * How many leading lines of a relation or passage entry are its owner line
+ * (the header): in the labelled lines the root type's line — carrying the
+ * name property when the header holds it — and one line per other header
+ * field; in the keyword text one value per header field. A template's text
+ * carries none.
+ */
+export function ownerLineCounts(
+  header: readonly string[] | null,
+  root: IndexSchemaEntityType,
+): { semantic: number; keyword: number } {
+  const text = new Set(root.properties.filter(isTextProperty).map((p) => p.key))
+  const fields = (header ?? [root.nameProperty]).filter((k) => text.has(k))
+  return { semantic: 1 + fields.filter((k) => k !== root.nameProperty).length, keyword: fields.length }
+}

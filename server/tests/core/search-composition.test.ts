@@ -11,6 +11,7 @@ import {
   composePassages,
   composeRelation,
   composeSelf,
+  outlineEntries,
   renderTemplate,
   type ComposeRelation,
 } from "../../src/core/searchComposition.js";
@@ -219,5 +220,61 @@ describe("templates", () => {
 
   it("is null when every clause is dropped", () => {
     expect(renderTemplate("{missing} and {gone}", lookup)).toBeNull();
+  });
+});
+
+describe("outline", () => {
+  it("composes one part per entry kind with tokens standing in for the values", () => {
+    const parts = outlineEntries(
+      definition({ fields: ["email", "name", "bio"], relations: [employment] }),
+      schema,
+    );
+    expect(parts.map((p) => [p.partKind, p.groupNo, p.semanticText, p.keywordText])).toEqual([
+      ["self", null, "Person: ⟦root.name⟧\nE-mail: ⟦root.email⟧", "⟦root.name⟧\n⟦root.email⟧"],
+      [
+        "relation",
+        0,
+        "Person: ⟦root.name⟧\nEmployment\nRole: ⟦relation.role⟧\nSince: ⟦relation.since⟧\n" +
+          "Company: ⟦target.name⟧\nFounded: ⟦target.founded⟧",
+        "⟦root.name⟧\n⟦relation.role⟧\n⟦relation.since⟧\n⟦target.name⟧\n⟦target.founded⟧",
+      ],
+      ["passage", null, "Person: ⟦root.name⟧\n⟦passage⟧", "⟦root.name⟧\n⟦passage⟧"],
+    ]);
+    expect(parts[1]).toMatchObject({ relationType: "works_for", direction: "outgoing", targetType: "company" });
+  });
+
+  it("leaves the other end out of a group without target fields", () => {
+    const [part] = outlineEntries(definition({ relations: [{ ...employment, target: {} }] }), schema);
+    expect(part!.semanticText).toBe(
+      "Person: ⟦root.name⟧\nEmployment\nRole: ⟦relation.role⟧\nSince: ⟦relation.since⟧",
+    );
+  });
+
+  it("reports template use and the placeholders that never have a value", () => {
+    const parts = outlineEntries(
+      definition({
+        fields: ["name"],
+        semantic: { template: "{name}, {nickname}" },
+        relations: [
+          { ...employment, template: "{name} is {role} at {target.name}, {target.ceo}" },
+          { relationType: "knows", direction: "outgoing", fields: ["since"], template: "{nope}" },
+        ],
+      }),
+      schema,
+    );
+    expect(parts.map((p) => [p.template, p.unresolved, p.semanticText])).toEqual([
+      ["rendered", ["nickname"], "⟦root.name⟧"],
+      ["rendered", ["target.ceo"], "⟦root.name⟧ is ⟦relation.role⟧ at ⟦target.name⟧"],
+      ["fallback", ["nope"], "Person: ⟦root.name⟧\nKnows\nSince: ⟦relation.since⟧"],
+    ]);
+  });
+
+  it("is empty for a missing root and skips groups whose types are gone", () => {
+    expect(outlineEntries(definition({ entityType: "ghost", fields: ["name"] }), schema)).toEqual([]);
+    const parts = outlineEntries(
+      definition({ fields: ["name"], relations: [{ ...employment, relationType: "employs" }] }),
+      schema,
+    );
+    expect(parts.map((p) => p.partKind)).toEqual(["self"]);
   });
 });

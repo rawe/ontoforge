@@ -494,10 +494,26 @@ export const CostEstimateResponse = z.object({
   ),
 });
 
+export const OutlinePartResponse = z.object({
+  partKind: z.enum(["self", "relation", "passage"]),
+  groupNo: z.number().int().nullable(),
+  relationType: z.string().nullable(),
+  direction: z.enum(["outgoing", "incoming"]).nullable(),
+  targetType: z.string().nullable(),
+  keywordText: z.string(),
+  semanticText: z.string(),
+  template: z.enum(["none", "rendered", "fallback"]),
+  unresolved: z.array(z.string()),
+});
+
 export const SearchIndexPreviewResponse = z.object({
   valid: z.boolean(),
   issues: z.array(SchemaValidationErrorItem),
   estimate: CostEstimateResponse.nullable(),
+  /** The entries per entity, composed from the schema; null when the
+   * parts it reads — all but key, name and description — are not
+   * well-shaped. */
+  outline: z.array(OutlinePartResponse).nullable(),
 });
 
 export type LensCreateInput = z.infer<typeof LensCreate>;

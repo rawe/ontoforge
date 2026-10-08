@@ -331,10 +331,22 @@ describe("preview", () => {
         { path: "fields.0", message: "Property 'nope' does not exist on entity type 'person'" },
       ],
       estimate: null,
+      // Well-shaped: outlined as far as it composes — 'nope' reads nothing,
+      // so no self entry.
+      outline: [expect.objectContaining({ partKind: "relation", groupNo: 0 })],
     });
     const shape = await app.inject({ method: "POST", url: `${INDICES}/preview`, payload: { name: 3 } });
     expect(shape.statusCode).toBe(200);
     expect(shape.json().valid).toBe(false);
+    expect(shape.json().outline).toBeNull();
+    // A draft still missing its name and description is outlined.
+    const unnamed = await app.inject({
+      method: "POST",
+      url: `${INDICES}/preview`,
+      payload: { ...EMPLOYMENT, key: undefined, name: "", description: undefined },
+    });
+    expect(unnamed.json().issues.map((i: { path: string }) => i.path)).toEqual(["name", "description"]);
+    expect(unnamed.json().outline.map((p: { partKind: string }) => p.partKind)).toEqual(["self", "relation", "passage"]);
     expect(shape.json().issues.map((i: { path: string }) => i.path)).toContain("name");
   });
 
@@ -353,6 +365,15 @@ describe("preview", () => {
         seconds: 0.1,
         perRepresentation: [{ representation: "keyword", entries: 50, seconds: 0.1, measured: false }],
       },
+      outline: [
+        expect.objectContaining({ partKind: "self", semanticText: "Person: ⟦root.name⟧" }),
+        expect.objectContaining({
+          partKind: "relation",
+          semanticText: "Person: ⟦root.name⟧\nWorks for\nRole: ⟦relation.role⟧\nCompany: ⟦target.name⟧",
+          keywordText: "⟦root.name⟧\n⟦relation.role⟧\n⟦target.name⟧",
+        }),
+        expect.objectContaining({ partKind: "passage", semanticText: "Person: ⟦root.name⟧\n⟦passage⟧" }),
+      ],
     });
     expect(indices.measureIndexContent).toHaveBeenCalledWith({
       entityType: "person",

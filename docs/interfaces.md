@@ -387,7 +387,7 @@ Managed and custom search indices, addressed by index key. Semantics:
 | Method | Path | Purpose | Parameters |
 |---|---|---|---|
 | GET | `/search-indices` | List every index — managed and custom, in key order — with its status | — |
-| POST | `/search-indices/preview` | Validate a draft definition and estimate its build cost, without saving; the key may be omitted | — |
+| POST | `/search-indices/preview` | Validate a draft definition, estimate its build cost and outline its entries, without saving; the key may be omitted | — |
 | POST | `/search-indices` | Create a custom index; 201 | — |
 | GET | `/search-indices/{indexKey}` | Read one index with its status | — |
 | PUT | `/search-indices/{indexKey}` | Replace a custom index's definition | — |
@@ -402,10 +402,14 @@ null), `status` and timestamps. A status carries `state`, `representations` — 
 enabled one with `representation`, `state`, `done`, `total`, `pending` and `failed` —
 and `lastErrors`, each with `entityId`, `partKind`, `message` and `at`.
 
-A preview answers `{valid, issues, estimate}`: `issues` as `{path, message}` by dotted
-path, `estimate` null for an invalid draft, else `entities`, `entries`, `seconds` and
-`perRepresentation` — each with `representation`, `entries`, `seconds` and `measured`.
-An invalid draft is never refused.
+A preview answers `{valid, issues, estimate, outline}`: `issues` as `{path, message}` by
+dotted path, `estimate` null for an invalid draft, else `entities`, `entries`, `seconds`
+and `perRepresentation` — each with `representation`, `entries`, `seconds` and
+`measured`. `outline` is null when the parts it reads are not well-shaped, else the
+[entry outline](capabilities/search-indices.md#entry-outline), one part per entry kind
+with `partKind`, `groupNo`, `relationType`, `direction`, `targetType` (null for the own
+entry and passages), `semanticText`, `keywordText`, `template` (`none`, `rendered` or
+`fallback`) and `unresolved`. An invalid draft is never refused.
 
 Create and replace answer an invalid definition with `VALIDATION_ERROR`, `details.fields`
 keyed by dotted path (`relations.0.target.company`). The wire format is closed: an unknown
@@ -756,7 +760,7 @@ exist; its tools answer not-found tool errors otherwise.
 | `set_search_settings` | Change `keyword_languages` and/or `disabled_indices`, as the REST route does |
 | `list_search_indices` | List every search index, managed and custom, with its status |
 | `get_search_index` | Read one search index with its status |
-| `preview_search_index` | Validate a draft definition and estimate its build cost, without saving |
+| `preview_search_index` | Validate a draft definition, estimate its build cost and outline its entries, without saving |
 | `create_search_index` | Create a custom search index from a `definition` |
 | `update_search_index` | Replace a custom search index's `definition`; the key cannot change |
 | `delete_search_index` | Delete a custom search index |

@@ -355,13 +355,28 @@ follow the [definition](capabilities/search-indices.md#custom-indices):
 - **Entity type** — every hit is an entity of it. Changing it clears fields, header and
   relation groups.
 - **Own fields** — a checklist of the type's text and scalar properties and at most one
-  document property, with a running count against the field limit.
+  document property, with a running count against the field limit, followed by the
+  entry previews of the own entry and, with a document, of its passages.
 - **Header** — the name property (the default), chosen text fields, or none.
 - **Relation groups** — one card per group: a relation type in one direction (each
   combination once), its relation fields, the target type's fields, a label and an
-  optional template. The group count runs against its limit.
+  optional template, followed by the entry preview of the group's entries. The group
+  count runs against its limit.
 - **Search modes** — semantic and keyword switches; semantic takes an optional template of
   the entity's own entry.
+
+An **entry preview** renders the [entry outline](capabilities/search-indices.md#entry-outline)
+of one entry kind, saying how many such entries an entity gets: the semantic text beside
+the keyword text — only those the draft switches on — with each field as a chip coloured
+by the type that owns it, named with its owner where no label tells (keyword text,
+template prose, and the far end of a relation from a type to itself as the "other" one).
+It marks semantic text that comes from the template, says when the template renders
+nothing and which of its placeholders never have a value, and which fields a template
+leaves to keyword matching alone. A relation group's preview warns when none of the
+relation's own properties, or nothing of the entity at the other end, is in its entries.
+Text properties left out are listed under the preview, each added to the draft with one
+click. While a newer draft is being composed, the previous outline stays, dimmed. A
+template field offers the placeholders it can resolve, inserted at the cursor.
 
 Fields the schema no longer has stay visible, marked, so they can be removed; a group
 whose relation no longer connects the type says so. The save bar states whether the draft
@@ -700,13 +715,18 @@ unique in the lens — and opens the editor on a draft that exists only in the c
 its first save. "Import" creates a new agent from an exported JSON, from a file or pasted;
 it never replaces an agent with the same key.
 
-**Editor.** A draft that only a Save writes, in four sections:
+**Editor.** A draft that only a Save writes, in four sections, under a collapsed
+explanation of how a question becomes results — plan, narrow, rank entries, fuse and,
+for chat, answer — naming the settings that steer each step, each a jump to its section:
 
 - **Search indices** — the indices of the lens's
   [search catalog](capabilities/search.md#the-search-catalog), grouped by entity type,
   each with its name, key, kind, description and, unless ready, its build state. A chosen
-  index with relation groups offers all of them or only chosen relation types. An index
-  the lens no longer offers stays listed for removal.
+  index with relation groups offers all of them or only chosen relation types. A chosen
+  index opens on demand what its entries hold — the
+  [entry previews](#index-designer) of its definition, without editing, those of relation
+  groups the agent leaves out dimmed. An index the lens no longer offers stays listed for
+  removal.
 - **Filters** — the exact conditions a question may set: a result type, a path (the
   result's own field, or up to two relation hops away) and a field. Document fields are
   not offered.
@@ -714,8 +734,9 @@ it never replaces an agent with the same key.
   included, passed to the answer model; answer fields for a type no chosen index finds
   are listed for removal.
 - **Answer** — the similarity threshold as a slider from −1 to 1, explained as a cosine
-  cut-off that never removes keyword matches or exact filters, and the maximum characters
-  per answer field.
+  cut-off with its equivalent on the 0–1 similarity scale of index search, applied only
+  to sub-queries no filter or previous reference restricts, never to keyword matches, and dependent on the
+  embedding model; and the maximum characters per answer field.
 
 Name and description sit above. A save bar states whether the agent is new, changed or
 saved and offers Save, Discard and Save as copy — which stores the current state, unsaved

@@ -12,6 +12,7 @@ import {
   useSearchIndices,
 } from '@/api/searchIndexHooks'
 import type {
+  OutlinePart,
   SearchIndexDefinition,
   SearchIndexRecord,
   SearchIndexRelationGroup,
@@ -56,6 +57,15 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
+import { EntryPreview, type LeftOut } from './EntryPreview'
+import {
+  groupPlaceholders,
+  insertAt,
+  notSelected,
+  outlinePart,
+  partTypes,
+  selfPlaceholders,
+} from './entryOutline'
 import { IndexSaveBar, IndexStatusBlock } from './IndexPanels'
 import {
   MAX_INDEX_FIELDS,
@@ -78,6 +88,7 @@ import {
   withEntityType,
   type HeaderMode,
   type IndexSchema,
+  type IndexSchemaEntityType,
   type IndexSchemaProperty,
   type RelationGroupOption,
 } from './searchIndexModel'
@@ -183,6 +194,9 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
   const previewCurrent =
     !preview.isPlaceholderData && JSON.stringify(settledInput) === JSON.stringify(previewInput)
   const previewIssues = previewCurrent ? (preview.data?.issues ?? []) : []
+  // The outline keeps showing while a newer draft is composed, dimmed.
+  const outline = previewInput === null ? null : (preview.data?.outline ?? null)
+  const outlineStale = !previewCurrent || preview.isFetching
   // Key problems are client-only (the key field shows them too); the panel lists them with the rest.
   const keyProblem: ValidationError[] =
     isNew && key !== '' && !isValidKey(key)
@@ -259,6 +273,20 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
 
   const setGroup = (i: number, group: SearchIndexRelationGroup) =>
     edit({ relations: draft.relations.map((g, j) => (j === i ? group : g)) })
+
+  const selfPart = outlinePart(outline, 'self')
+  const passagePart = outlinePart(outline, 'passage')
+  const documentKey = root === undefined ? null : selectedDocument(draft.fields, root)
+  const documentName = root?.properties.find((p) => p.key === documentKey)?.displayName
+  const ownLeftOut: LeftOut[] =
+    root === undefined
+      ? []
+      : notSelected(root.properties, draft.fields).map((p) => ({
+          key: p.key,
+          label: p.displayName,
+          disabledReason: atLimit ? `At most ${MAX_INDEX_FIELDS} fields` : undefined,
+          onAdd: () => edit({ fields: toggleKey(draft.fields, p.key, true) }),
+        }))
 
   const title = draft.name.trim() !== '' ? draft.name.trim() : isNew ? 'New index' : saved.key
 
@@ -396,6 +424,33 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
                   onToggle={(k, on) => edit({ fields: toggleKey(draft.fields, k, on) })}
                 />
                 <IssueList issues={issuesAt(issues, 'fields')} />
+                {outline !== null && (
+                  <EntryPreview
+                    part={selfPart}
+                    types={selfPart && partTypes(schema, root.key, selfPart)}
+                    caption={<>One own entry per {root.displayName}</>}
+                    semantic={draft.semantic.enabled}
+                    keyword={draft.keyword.enabled}
+                    stale={outlineStale}
+                    emptyText={ownEntryAbsence(root.displayName, draft.relations.length > 0, documentKey !== null)}
+                    leftOut={[{ title: root.displayName, fields: ownLeftOut }]}
+                  />
+                )}
+                {outline !== null && documentKey !== null && (
+                  <EntryPreview
+                    part={passagePart}
+                    types={passagePart && partTypes(schema, root.key, passagePart)}
+                    caption={
+                      <>
+                        One passage entry per chunk of {documentName ?? documentKey} — the header,
+                        then the chunk
+                      </>
+                    }
+                    semantic={draft.semantic.enabled}
+                    keyword={draft.keyword.enabled}
+                    stale={outlineStale}
+                  />
+                )}
               </Section>
 
               <Section
@@ -461,6 +516,11 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
                     key={i}
                     index={i}
                     group={g}
+                    draft={draft}
+                    root={root}
+                    part={outlinePart(outline, 'relation', i)}
+                    showPreview={outline !== null}
+                    stale={outlineStale}
                     schema={schema}
                     options={options}
                     used={usedGroups}
@@ -504,17 +564,19 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
                     <Label htmlFor="semantic-template" className="text-xs">
                       Template of the entity's own entry (optional)
                     </Label>
-                    <Textarea
+                    <TemplateField
                       id="semantic-template"
                       rows={2}
-                      className="font-mono text-xs"
                       value={draft.semantic.template ?? ''}
                       placeholder="{name} — {bio}"
-                      onChange={(e) => edit({ semantic: { ...draft.semantic, template: e.target.value } })}
+                      placeholders={selfPlaceholders(draft, root)}
+                      onChange={(template) => edit({ semantic: { ...draft.semantic, template } })}
                     />
                     <p className="text-xs text-muted-foreground">
                       Placeholders are field keys in braces; a placeholder without a value drops
-                      its clause. Without a template the entry is labelled lines.
+                      its clause — the text up to the next <code>,</code> <code>;</code>{' '}
+                      <code>.</code> or line break. Without a template the entry is labelled
+                      lines. The own entry's preview above shows the result.
                     </p>
                   </div>
                 )}
@@ -594,6 +656,14 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
 }
 
 /* ------------------------------- building blocks ------------------------------ */
+
+/** Why a draft has no own entry, and what still finds the entity. */
+function ownEntryAbsence(typeName: string, groups: boolean, passages: boolean): string {
+  const kinds = [groups && 'relation', passages && 'passage'].filter(Boolean).join(' and ')
+  return kinds === ''
+    ? 'No own entry: no own text field is selected.'
+    : `No own entry: no own text field is selected, so a ${typeName} is found only through its ${kinds} entries.`
+}
 
 function Section({
   title,
@@ -707,6 +777,11 @@ function optionLabel(option: RelationGroupOption, schema: IndexSchema) {
 function RelationGroupCard({
   index,
   group,
+  draft,
+  root,
+  part,
+  showPreview,
+  stale,
   schema,
   options,
   used,
@@ -717,6 +792,11 @@ function RelationGroupCard({
 }: {
   index: number
   group: SearchIndexRelationGroup
+  draft: SearchIndexDefinition
+  root: IndexSchemaEntityType
+  part: OutlinePart | undefined
+  showPreview: boolean
+  stale: boolean
   schema: IndexSchema
   options: RelationGroupOption[]
   used: Set<string>
@@ -733,6 +813,53 @@ function RelationGroupCard({
   const targetFields = target === undefined ? [] : (group.target[target.key] ?? [])
   const limitReason = (_: IndexSchemaProperty, checked: boolean) =>
     !checked && atLimit ? `At most ${MAX_INDEX_FIELDS} fields` : undefined
+
+  const relationName = relationType?.displayName ?? group.relationType
+  const relationProps = (relationType?.properties ?? []).filter(isTextProperty)
+  const targetProps = (target?.properties ?? []).filter(isTextProperty)
+  const limit = atLimit ? `At most ${MAX_INDEX_FIELDS} fields` : undefined
+  const warnings: ReactNode[] = []
+  if (group.fields.length === 0 && relationProps.length > 0) {
+    warnings.push(
+      <>
+        None of the relation's own properties ({relationProps.map((p) => p.displayName).join(', ')})
+        is in these entries — a search cannot match on them.
+      </>,
+    )
+  }
+  if (target !== undefined && targetFields.length === 0 && targetProps.length > 0) {
+    warnings.push(
+      <>
+        The {target.displayName} at the other end is not mentioned, not even by name — a search
+        cannot match on it.
+      </>,
+    )
+  }
+  const leftOut = [
+    {
+      title: relationName,
+      fields: notSelected(relationProps, group.fields).map((p) => ({
+        key: p.key,
+        label: p.displayName,
+        disabledReason: limit,
+        onAdd: () => onChange({ ...group, fields: toggleKey(group.fields, p.key, true) }),
+      })),
+    },
+    ...(target === undefined
+      ? []
+      : [
+          {
+            title: target.displayName,
+            fields: notSelected(targetProps, targetFields).map((p) => ({
+              key: p.key,
+              label: p.displayName,
+              disabledReason: limit,
+              onAdd: () =>
+                onChange({ ...group, target: { [target.key]: toggleKey(targetFields, p.key, true) } }),
+            })),
+          },
+        ]),
+  ]
 
   return (
     <div
@@ -837,19 +964,93 @@ function RelationGroupCard({
               <Label htmlFor={`g${index}-template`} className="text-xs">
                 Template (optional)
               </Label>
-              <Textarea
+              <TemplateField
                 id={`g${index}-template`}
                 rows={1}
-                className="min-h-8 font-mono text-xs"
                 value={group.template ?? ''}
-                placeholder="{role} at {target.name}"
-                onChange={(e) => onChange({ ...group, template: e.target.value })}
+                placeholder="Prose with {field} and {target.field} placeholders"
+                placeholders={groupPlaceholders(draft, root, group)}
+                onChange={(template) => onChange({ ...group, template })}
               />
             </div>
           </div>
+          {showPreview && (
+            <EntryPreview
+              part={part}
+              types={part && partTypes(schema, root.key, part)}
+              caption={
+                <>
+                  One entry per {relationName} relation of a {root.displayName} — never two
+                  relations in one entry
+                </>
+              }
+              semantic={draft.semantic.enabled}
+              keyword={draft.keyword.enabled}
+              stale={stale}
+              warnings={warnings}
+              leftOut={leftOut}
+            />
+          )}
         </>
       )}
       <IssueList issues={issues} />
+    </div>
+  )
+}
+
+/** A template textarea with the placeholders it can resolve, inserted at the cursor on click. */
+function TemplateField({
+  id,
+  rows,
+  value,
+  placeholder,
+  placeholders,
+  onChange,
+}: {
+  id: string
+  rows: number
+  value: string
+  placeholder: string
+  placeholders: string[]
+  onChange: (value: string) => void
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  const insert = (token: string) => {
+    const area = ref.current
+    const start = area?.selectionStart ?? value.length
+    const end = area?.selectionEnd ?? value.length
+    onChange(insertAt(value, token, start, end))
+    requestAnimationFrame(() => {
+      area?.focus()
+      area?.setSelectionRange(start + token.length, start + token.length)
+    })
+  }
+  return (
+    <div className="grid gap-1">
+      <Textarea
+        ref={ref}
+        id={id}
+        rows={rows}
+        className="min-h-8 font-mono text-xs"
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      {placeholders.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="text-[11px] text-muted-foreground">Insert</span>
+          {placeholders.map((token) => (
+            <button
+              key={token}
+              type="button"
+              onClick={() => insert(token)}
+              className="rounded border px-1 font-mono text-[10.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              {token}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

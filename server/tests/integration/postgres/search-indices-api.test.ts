@@ -191,6 +191,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("custom search indices throu
     const preview = await post(`${INDICES}/preview`, draft);
     const entries = 2 + 3 + passagesOf(BIO.length);
     expect(preview).toMatchObject({ valid: true, issues: [], estimate: { entities: 2, entries } });
+    expect(preview.outline.map((p: Row) => p.partKind)).toEqual(["self", "relation", "passage"]);
     expect(preview.estimate.perRepresentation.map((r: Row) => [r.representation, r.entries])).toEqual([
       ["keyword", entries],
       ["semantic", entries],
@@ -259,6 +260,8 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("custom search indices throu
       valid: false,
       issues: [{ path: "fields.0", message: "Property 'ghost' does not exist on entity type 'person'" }],
       estimate: null,
+      // Outlined as far as it composes: 'ghost' reads nothing, the group stands.
+      outline: [expect.objectContaining({ partKind: "relation", groupNo: 0, relationType: "works_for" })],
     });
   });
 

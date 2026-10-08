@@ -7,12 +7,17 @@ import type { ToolCall } from '@/api/types'
 import { readJson, storageKeys, writeJson } from '@/lib/storage'
 
 export interface StoredChatMessage {
+  /** Assistant turns of this session: identifies the turn the tool-call panel shows. */
+  id?: string
   role: 'user' | 'assistant'
   content: string
   status?: 'pending' | 'completed' | 'failed'
   error?: string
   /** Only on assistant messages, when the backend reported tool usage. */
   toolCalls?: ToolCall[]
+  /** Client clock (ms) when an assistant turn of this session was sent and answered. */
+  startedAt?: number
+  finishedAt?: number
 }
 
 const CAP = 50

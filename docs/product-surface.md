@@ -644,10 +644,22 @@ provider; see [capabilities/ai-agents.md](capabilities/ai-agents.md).
 
 **Chat** — a conversation with the lens's default assistant or with any configured agent,
 chosen from a picker. Each agent keeps its own persisted thread; switching agents switches
-threads. Assistant answers render once in full as Markdown. Tool calls appear immediately
-with complete arguments and pending/completed states; each completed structured result can
-be expanded while other calls or the answer are still pending. An elapsed-seconds indicator
-shows ongoing work. Failure or interruption preserves completed results, marks unfinished
+threads. Assistant answers render once in full as Markdown. Tool calls stream into a
+**tool-call panel** beside the conversation — stacked below it on a narrow screen — that
+follows the running answer: each call in order, with a readable name, a one-line summary of
+what it asked for, its state, and its time inside the tool. Calls start collapsed and open by
+hand. An open call shows its arguments and its result in a
+form fitting the result — a table for query rows, hits with relative scores and matched
+snippets, entities, neighbours with their relation and direction, document text — linking
+entities to their pages, with the raw result one click away; a tool that answers with an
+error shows it highlighted. The panel heads with the question, the number of calls, the time
+spent inside tools — parallel calls once, said so when calls overlapped, the model's
+thinking not at all — and how long the answer took. Under each answer a tool-calls button with the count shows
+that answer's calls in the panel; sending a question returns the panel to the running answer.
+A "Show tool calls" switch, remembered per browser and on by default, hides the panel; the
+calls then list under each answer, collapsible, with their arguments and expandable results.
+Tool calls live as long as the open chat: answers restored from an earlier session have
+none, and the panel says so. An elapsed-seconds indicator shows ongoing work. Failure or interruption preserves completed results, marks unfinished
 calls interrupted, and clearly labels the turn incomplete. A closed connection without a
 terminal event is a failure. Turns never retry automatically. Leaving chat or switching
 ontology, lens, or agent cancels the active request; late events cannot enter another thread.
@@ -997,6 +1009,7 @@ the address.
 | Recently opened entities | Per ontology + lens | 10 |
 | Recent query texts | Per ontology + lens | 10 |
 | Chat history | Per ontology + lens, then per agent | 50 messages per agent |
+| Chat tool-call panel switch | Global | — |
 | Retriever diagnostics switch (Workbench) | Global | — |
 | Retriever-agent test panel mode (Chat or Retrieve) | Global | — |
 | Retriever for palette questions | Per ontology + lens | — |

@@ -11,6 +11,8 @@
  *   of.chat.{ontologyKey}.{lensKey}    — AI chat history
  *   of.recents.{ontologyKey}.{lensKey} — last 10 opened entities (`lib/recents.ts`)
  *   of.queryHistory.{ontologyKey}.{lensKey} — last 10 run OQL queries
+ *   of.chatToolCalls          — "true" | "false": Workbench agent chat shows its
+ *                               tool calls in a side panel (default true)
  *   of.retrieverDiagnostics   — "true" | "false": Workbench retriever-agent chat
  *                               requests and shows diagnostics
  *   of.retrieverTestMode      — "chat" | "retrieve": the retriever-agent
@@ -30,6 +32,7 @@ export const storageKeys = {
     `of.recents.${ontologyKey}.${lensKey}`,
   queryHistory: (ontologyKey: string, lensKey: string) =>
     `of.queryHistory.${ontologyKey}.${lensKey}`,
+  chatToolCalls: 'of.chatToolCalls',
   retrieverDiagnostics: 'of.retrieverDiagnostics',
   retrieverTestMode: 'of.retrieverTestMode',
   retriever: (ontologyKey: string, lensKey: string) =>

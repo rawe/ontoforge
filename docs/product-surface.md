@@ -220,8 +220,9 @@ Two tabs — Console and Library — which both stay live, so results survive a 
 
 ### AI
 
-Three tabs — Chat, Ask, Retriever. See [AI panel](#ai-panel). Absent entirely when no
-language-model provider is configured.
+Three tabs — Chat, Ask, Retriever. See [AI panel](#ai-panel). Without a language-model
+provider the navigation entry is gone and the screen renders an explanation; see
+[Feature gating](#feature-gating).
 
 ---
 

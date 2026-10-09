@@ -1,13 +1,13 @@
 /**
  * AI runtime routes, mounted at
  * `/api/ontologies/:ontologyKey/runtime/lenses/:lensKey` alongside the
- * runtime router: ask, extract, chat (default and per-agent), agent
+ * runtime router: ask, chat (default and per-agent), agent
  * discovery, the A2A card and task endpoints, and retriever-agent chat
  * (`retrieverAgents/router.ts`). Every request binds a runtime store to
  * the ontology its path names. Routers parse and shape only; every rule
  * lives in `aiService.ts`.
  *
- * There are deliberately NO MCP tools for ask/extract/chat — an MCP
+ * There are deliberately NO MCP tools for ask/chat — an MCP
  * client is itself a language model and gets the underlying tools
  * directly (`docs/interfaces.md`).
  */
@@ -30,15 +30,6 @@ const AgentParams = LensParams.extend({ agentKey: z.string() });
 
 const AiQueryPayload = z.looseObject({
   question: z.string().min(1),
-});
-
-/** Both the camelCase alias and the snake_case field name are accepted —
- * clients send either. */
-const AiExtractPayload = z.looseObject({
-  text: z.string().min(1),
-  entityTypes: z.array(z.string()).nullish(),
-  entity_types: z.array(z.string()).nullish(),
-  create: z.boolean().default(false),
 });
 
 const AiChatMessage = z.object({
@@ -81,19 +72,6 @@ export const aiRouter: FastifyPluginAsyncZod = async (app) => {
         request.params.lensKey,
         request.body.question,
         await getRuntimeStore(request.params.ontologyKey),
-      ),
-  );
-
-  app.post(
-    "/ai/extract",
-    { schema: { tags: ["ai"], params: LensParams, body: AiExtractPayload } },
-    async (request) =>
-      aiService.aiExtract(
-        request.params.lensKey,
-        request.body.text,
-        await getRuntimeStore(request.params.ontologyKey),
-        request.body.entityTypes ?? request.body.entity_types ?? null,
-        request.body.create,
       ),
   );
 

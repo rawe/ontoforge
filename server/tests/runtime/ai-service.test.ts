@@ -2,8 +2,7 @@
  * The AI engine with a scripted model (the "mock the model" unit plan of
  * session 11): toolset computation (allowlist ∩ availability), prompt
  * assembly, the tool-error self-correction loop vs abort, query response
- * with and without a tool call, extract persist rules (same-call matching,
- * silent drop, no dedup), trace shape, history mapping, and the
+ * with and without a tool call, trace shape, history mapping, and the
  * FEATURE_DISABLED rejection without a provider.
  */
 
@@ -17,10 +16,8 @@ import { NotFoundError, ValidationError } from "../../src/core/exceptions.js";
 import {
   CHAT_TOOLS,
   aiChat,
-  aiExtract,
   aiQuery,
   describeSchema,
-  normalizeExtraction,
   runAgentChat,
 } from "../../src/runtime/aiService.js";
 import { invalidateLoadedSchemaCache, loadSchema } from "../../src/runtime/schemaCache.js";
@@ -30,7 +27,6 @@ import {
   createMockRuntimeStore,
   makeEntity,
   makeFullSchema,
-  makeRelation,
   makeUnscopedSchema,
   type MockRuntimeStore,
 } from "./helpers.js";
@@ -544,227 +540,6 @@ describe("aiQuery", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Extract: persist rules
-// ---------------------------------------------------------------------------
-
-const EXTRACTION = {
-  entities: [
-    { entityTypeKey: "person", properties: { name: "Charlie", age: 28 } },
-    { entityTypeKey: "company", properties: { name: "DataFlow" } },
-  ],
-  relations: [
-    {
-      relationTypeKey: "works_for",
-      // A SUBSET of Charlie's properties — the shape a model actually emits,
-      // and the shape a full-property-equality lookup cannot resolve.
-      source: { entityTypeKey: "person", match: { name: "Charlie" } },
-      target: { entityTypeKey: "company", match: { name: "DataFlow" } },
-      properties: {},
-    },
-  ],
-};
-
-function installExtractFake(structuredOutput: unknown): FakeToolCallingModel {
-  const fake = new FakeToolCallingModel([]);
-  fake.structuredOutput = structuredOutput;
-  setAiModel(fake);
-  return fake;
-}
-
-/** Wire the mock store so created entities are echoed back and relation
- * endpoint checks resolve against them. */
-function wireCreation(): Row[] {
-  const created: Row[] = [];
-  store.createEntity.mockImplementation(
-    async (entityTypeKey: string, entityId: string, props: Row) => {
-      const entity = makeEntity(props, entityTypeKey, entityId);
-      created.push(entity);
-      return entity;
-    },
-  );
-  store.getEntityById.mockImplementation(
-    async (id: string) => created.find((e) => e._id === id) ?? null,
-  );
-  store.createRelation.mockImplementation(
-    async (relationTypeKey: string, relationId: string, fromId: string, toId: string) =>
-      makeRelation({}, { relationTypeKey, relationId, fromEntityId: fromId, toEntityId: toId }),
-  );
-  return created;
-}
-
-describe("aiExtract", () => {
-  it("propose-only by default: nothing written, proposals echoed", async () => {
-    installExtractFake(EXTRACTION);
-
-    const result = await aiExtract("full_lens", "Charlie ...", asRuntimeStore(store));
-
-    expect(result.created).toBe(false);
-    expect(result.entities).toEqual(EXTRACTION.entities);
-    expect(result.relations).toEqual(EXTRACTION.relations);
-    expect(store.createEntity).not.toHaveBeenCalled();
-    expect(store.createRelation).not.toHaveBeenCalled();
-  });
-
-  it("persists on request: entities first, relations via same-call match maps", async () => {
-    installExtractFake(EXTRACTION);
-    const created = wireCreation();
-
-    const result = await aiExtract(
-      "full_lens",
-      "Charlie ...",
-      asRuntimeStore(store),
-      null,
-      true,
-    );
-
-    expect(result.created).toBe(true);
-    expect(store.createEntity).toHaveBeenCalledTimes(2);
-    expect(store.createRelation).toHaveBeenCalledTimes(1);
-    const [, , fromId, toId] = store.createRelation.mock.calls[0]! as [
-      string,
-      string,
-      string,
-      string,
-    ];
-    const charlie = created.find((e) => e.name === "Charlie")!;
-    const dataflow = created.find((e) => e.name === "DataFlow")!;
-    expect(fromId).toBe(charlie._id);
-    expect(toId).toBe(dataflow._id);
-  });
-
-  it("drops a relation whose endpoint resolves to nothing, and reports it", async () => {
-    installExtractFake({
-      ...EXTRACTION,
-      relations: [
-        {
-          relationTypeKey: "works_for",
-          source: { entityTypeKey: "person", match: { name: "Nobody" } },
-          target: { entityTypeKey: "company", match: { name: "DataFlow" } },
-          properties: {},
-        },
-      ],
-    });
-    wireCreation();
-
-    const result = await aiExtract(
-      "full_lens",
-      "Charlie ...",
-      asRuntimeStore(store),
-      null,
-      true,
-    );
-
-    // The write still succeeds — a dropped endpoint is not an error.
-    expect(result.created).toBe(true);
-    expect(store.createRelation).not.toHaveBeenCalled();
-
-    const dropped = result.droppedRelations as Row[];
-    expect(dropped).toHaveLength(1);
-    expect(dropped[0]!.relationTypeKey).toBe("works_for");
-    expect(dropped[0]!.reason).toBe("source matched no entity created in this call");
-  });
-
-  it("drops an ambiguous endpoint rather than guessing between candidates", async () => {
-    installExtractFake({
-      entities: [
-        { entityTypeKey: "person", properties: { name: "Charlie", age: 28 } },
-        { entityTypeKey: "person", properties: { name: "Charlie", age: 41 } },
-        { entityTypeKey: "company", properties: { name: "DataFlow" } },
-      ],
-      relations: [
-        {
-          relationTypeKey: "works_for",
-          source: { entityTypeKey: "person", match: { name: "Charlie" } },
-          target: { entityTypeKey: "company", match: { name: "DataFlow" } },
-          properties: {},
-        },
-      ],
-    });
-    wireCreation();
-
-    const result = await aiExtract("full_lens", "two Charlies", asRuntimeStore(store), null, true);
-
-    expect(store.createEntity).toHaveBeenCalledTimes(3);
-    expect(store.createRelation).not.toHaveBeenCalled();
-    const dropped = result.droppedRelations as Row[];
-    expect(dropped[0]!.reason).toBe("source matched 2 entities created in this call");
-  });
-
-  it("an empty match map resolves nothing, even with one candidate of the type", async () => {
-    installExtractFake({
-      entities: [{ entityTypeKey: "person", properties: { name: "Charlie", age: 28 } }],
-      relations: [
-        {
-          relationTypeKey: "works_for",
-          source: { entityTypeKey: "person", match: {} },
-          target: { entityTypeKey: "company", match: {} },
-          properties: {},
-        },
-      ],
-    });
-    wireCreation();
-
-    const result = await aiExtract("full_lens", "vague", asRuntimeStore(store), null, true);
-
-    expect(store.createRelation).not.toHaveBeenCalled();
-    expect((result.droppedRelations as Row[])[0]!.reason).toBe(
-      "source carried no match properties; target carried no match properties",
-    );
-  });
-
-  it("reports no drops when every endpoint resolves", async () => {
-    installExtractFake(EXTRACTION);
-    wireCreation();
-
-    const result = await aiExtract("full_lens", "Charlie ...", asRuntimeStore(store), null, true);
-
-    expect(store.createRelation).toHaveBeenCalledTimes(1);
-    expect(result.droppedRelations).toEqual([]);
-  });
-
-  it("does not deduplicate: the same entity twice is created twice", async () => {
-    installExtractFake({
-      entities: [
-        { entityTypeKey: "person", properties: { name: "Charlie" } },
-        { entityTypeKey: "person", properties: { name: "Charlie" } },
-      ],
-      relations: [],
-    });
-    wireCreation();
-
-    await aiExtract("full_lens", "Charlie twice", asRuntimeStore(store), null, true);
-
-    expect(store.createEntity).toHaveBeenCalledTimes(2);
-  });
-
-  it("entity-type hints are appended to the prompt, not enforced", async () => {
-    const fake = installExtractFake({ entities: [], relations: [] });
-
-    await aiExtract("full_lens", "text", asRuntimeStore(store), ["person", "company"]);
-
-    const system = fake.calls[0]![0]!;
-    expect(String(system.content)).toContain("Focus on these entity types: person, company");
-  });
-
-  it("accepts snake_case field names from the model", () => {
-    const normalized = normalizeExtraction({
-      entities: [{ entity_type_key: "person", properties: { name: "X" } }],
-      relations: [
-        {
-          relation_type_key: "works_for",
-          source: { entity_type_key: "person", match: { name: "X" } },
-          target: { entity_type_key: "company", match: { name: "Y" } },
-        },
-      ],
-    });
-
-    expect(normalized.entities[0]!.entityTypeKey).toBe("person");
-    expect(normalized.relations[0]!.relationTypeKey).toBe("works_for");
-    expect(normalized.relations[0]!.properties).toEqual({});
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Trace shape and history mapping
 // ---------------------------------------------------------------------------
 
@@ -832,10 +607,6 @@ describe("without a language-model provider", () => {
 
   it("query is rejected with FEATURE_DISABLED", async () => {
     await expectDisabled(() => aiQuery("full_lens", "q", asRuntimeStore(store)));
-  });
-
-  it("extract is rejected with FEATURE_DISABLED", async () => {
-    await expectDisabled(() => aiExtract("full_lens", "text", asRuntimeStore(store)));
   });
 
   it("chat is rejected with FEATURE_DISABLED", async () => {

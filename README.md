@@ -278,7 +278,7 @@ Changing `EMBEDDING_MODEL` or `EMBEDDING_DIMENSIONS` on an existing database —
 
 ### AI-Powered Runtime
 
-Natural language query, entity extraction from text, and conversational chat over your knowledge graph. These features use tool calling to interact with the schema and data, so the model must support function/tool calling.
+Natural language query and conversational chat over your knowledge graph. These features use tool calling to interact with the schema and data, so the model must support function/tool calling.
 
 | Variable | Default | Description |
 |----------|---------|-------------|

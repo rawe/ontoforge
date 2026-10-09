@@ -11,7 +11,6 @@ import type {
   ChatMessage,
   DocumentContentResponse,
   EntityInstance,
-  ExtractResponse,
   JsonValue,
   ListResponse,
   NeighborDirection,
@@ -267,16 +266,6 @@ export const aiQuery = (ontologyKey: string, lensKey: string, question: string) 
   request<AiQueryResponse>(`${base(ontologyKey, lensKey)}/ai/query`, {
     method: 'POST',
     body: { question },
-  })
-
-export const aiExtract = (
-  ontologyKey: string,
-  lensKey: string,
-  body: { text: string; entityTypes?: string[]; create?: boolean },
-) =>
-  request<ExtractResponse>(`${base(ontologyKey, lensKey)}/ai/extract`, {
-    method: 'POST',
-    body,
   })
 
 export const aiChat = (

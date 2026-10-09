@@ -78,7 +78,6 @@ export function HomePage() {
           lensKey={lensKey}
           lensName={lens.name}
           entityTypes={entityTypes}
-          aiEnabled={aiEnabled}
         />
       ) : (
         <div className="space-y-8 p-6">

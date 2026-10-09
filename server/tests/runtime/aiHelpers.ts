@@ -10,12 +10,11 @@ import {
 } from "@langchain/core/language_models/chat_models";
 import { AIMessage, type BaseMessage } from "@langchain/core/messages";
 import type { ChatResult } from "@langchain/core/outputs";
-import { Runnable } from "@langchain/core/runnables";
 
 /**
  * A fake chat model for driving agent runs: answers the scripted
  * `responses` in order (the last one repeats), records every batch of
- * messages it is invoked with, and serves a scripted structured output.
+ * messages it is invoked with.
  */
 export class FakeToolCallingModel extends BaseChatModel {
   responses: AIMessage[];
@@ -23,8 +22,6 @@ export class FakeToolCallingModel extends BaseChatModel {
   calls: BaseMessage[][] = [];
   /** Tool batches bound, one per `bindTools` call. */
   boundTools: unknown[][] = [];
-  /** Returned verbatim by `withStructuredOutput(...).invoke(...)`. */
-  structuredOutput: unknown = null;
   private index = 0;
   beforeResponse?: (messages: BaseMessage[], signal?: AbortSignal) => Promise<void>;
 
@@ -48,19 +45,6 @@ export class FakeToolCallingModel extends BaseChatModel {
     const message = this.responses[Math.min(this.index, this.responses.length - 1)]!;
     this.index += 1;
     return { generations: [{ text: "", message }] };
-  }
-
-  override withStructuredOutput(): Runnable<never, unknown> {
-    const output = () => this.structuredOutput;
-    const record = (messages: never) => {
-      this.calls.push(messages as unknown as BaseMessage[]);
-    };
-    return {
-      invoke: async (input: never) => {
-        record(input);
-        return output();
-      },
-    } as unknown as Runnable<never, unknown>;
   }
 }
 

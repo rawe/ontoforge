@@ -375,14 +375,10 @@ Every route here requires a language-model provider.
   Turns a natural-language question into an OQL query and runs it.
   Request body: `question`
 
-- `POST /ai/extract`
-  Extracts entities and relations from free text, optionally writing them.
-  Request body: `text`, optional `entityTypes`, optional `create` (default `false`)
-
 - `POST /ai/chat`
   Converses with the default agent over the lens.
   Request body: `message`, optional `history` (a list of `{role, content}` with `role`
-  either `user` or `assistant`), optional `includeToolCalls`
+  either `user` or `assistant`)
 
 - `GET /ai/agents`
   Lists the agents configured on this lens. The default agent is implicit — it needs no
@@ -391,10 +387,11 @@ Every route here requires a language-model provider.
 - `POST /ai/agents/{agentKey}/chat`
   Converses with one named agent.
 
-An agent may be granted exactly ten runtime tools: `get_schema`, `list_entities`,
-`get_entity`, `list_relations`, `get_neighbors`, `search`, `execute_query`,
-`list_saved_queries`, `run_saved_query`, `search_saved_queries`. Every write tool is
-outside that set, and so are the read-only `get_document` and `get_relation`.
+An agent may be granted exactly twelve runtime tools: `get_schema`, `list_entities`,
+`get_entity`, `get_document`, `list_relations`, `get_neighbors`, `search`,
+`search_documents`, `execute_query`, `list_saved_queries`, `run_saved_query`,
+`search_saved_queries`. Every write tool is outside that set, and so is the read-only
+`get_relation`.
 
 ### Retriever agents
 

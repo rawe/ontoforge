@@ -220,12 +220,18 @@ exist.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/server/features` | Report `semanticSearch`, `searchStrategies`, `ai`, `entityIdentityComparison` and `searchIndices` |
+| GET | `/api/server/features` | Report which optional capabilities this deployment offers |
 
 The one route that concerns neither the ontologies nor their content — it describes the
-deployment. Clients call it before
-offering optional capabilities. `searchStrategies` lists available strategies in preference order.
-`searchIndices` reports whether the storage adapter supports search indices.
+deployment. Clients call it before offering optional capabilities.
+
+| Field | Type | Reports |
+|---|---|---|
+| `semanticSearch` | boolean | An embedding provider is configured |
+| `searchStrategies` | list | The available search strategies, in preference order |
+| `ai` | boolean | A language-model provider is configured; gates the `/ai` routes |
+| `decisions` | boolean | A Decision provider is configured; gates the `/decisions` routes |
+| `searchIndices` | boolean | The storage adapter supports search indices |
 
 ## Modeling REST
 
@@ -663,7 +669,6 @@ requires a language-model provider for execution; agent discovery remains availa
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/ai/query` | Turn a natural-language question into an OQL query and run it |
-| POST | `/ai/extract` | Extract entities and relations from free text, optionally writing them |
 | POST | `/ai/chat` | Converse with the default agent over the lens |
 | GET | `/ai/agents` | List the agents configured on this lens |
 | POST | `/ai/agents/{agentKey}/chat` | Converse with one named agent |

@@ -55,10 +55,6 @@ response contains `decision`, `probabilities` (keys `same`, `different`,
 `insufficient`), `confidence` and `truncatedFields`. See [interfaces](../interfaces.md).
 There is no MCP tool.
 
-The server feature report exposes `entityIdentityComparison`. Without a configured
+The server feature report exposes `decisions`. Without a configured
 Decision provider it is false, and calling the operation returns the ordinary
 `FEATURE_DISABLED` validation error. Disconnection cancels an in-flight comparison.
-
-The web client's extraction review offers an explicit comparison of its edited
-proposal against already retrieved candidates. This is advisory; choosing an
-existing entity remains manual. See [product surface](../product-surface.md#ai-panel).

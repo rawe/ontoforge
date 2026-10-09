@@ -168,7 +168,7 @@ export function searchContract(embedding: boolean, enabled = true) {
       expect((await app.inject({ url: "/api/server/features" })).json()).toEqual({
         semanticSearch: embedding,
         ai: false,
-        entityIdentityComparison: false,
+        decisions: false,
         searchStrategies: defaults,
         searchIndices: settings.DB_BACKEND === "postgres",
       });

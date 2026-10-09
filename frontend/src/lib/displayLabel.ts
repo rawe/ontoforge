@@ -1,4 +1,4 @@
-import type { EntityInstance, JsonValue, RuntimeSchema } from '@/api/types'
+import type { EntityInstance, RuntimeSchema } from '@/api/types'
 
 /**
  * Human-readable label for an entity instance: the value of its type's name
@@ -9,17 +9,8 @@ export function displayLabel(
   entity: EntityInstance,
   nameProperty: string | null | undefined,
 ): string {
-  return nameValue(entity, nameProperty) ?? entity._id.slice(0, 12)
-}
-
-/** The name property's value in a property bag, or null when absent or empty. */
-export function nameValue(
-  properties: Record<string, JsonValue>,
-  nameProperty: string | null | undefined,
-): string | null {
-  if (nameProperty === null || nameProperty === undefined) return null
-  const value = properties[nameProperty]
-  return typeof value === 'string' && value.trim() !== '' ? value : null
+  const value = nameProperty === null || nameProperty === undefined ? undefined : entity[nameProperty]
+  return typeof value === 'string' && value.trim() !== '' ? value : entity._id.slice(0, 12)
 }
 
 /** Entity type key → name property key (null when the lens hides it). */

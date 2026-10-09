@@ -2,8 +2,7 @@
  * AI runtime endpoints against the real docker-compose database and the
  * configured language model, ported from `backend/tests/integration/test_ai.py` plus
  * the session-11 additions: ask over seeded data (OQL present, rows
- * non-empty), extract proposals shaped to the schema, extract-and-persist,
- * chat with a restricted agent whose trace shows only allowlisted tools,
+ * non-empty), chat with a restricted agent whose trace shows only allowlisted tools,
  * and an A2A task round-trip against the default and a named agent.
  *
  * Configuration comes from the suite's own env file (`env/test-ai.env` via
@@ -215,58 +214,6 @@ describe("POST /ai/query", () => {
   ifAvailable("rejects an empty question", async () => {
     const { statusCode } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/query", {
       question: "",
-    });
-    expect(statusCode).toBe(422);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// AI Extract (text → structured entities)
-// ---------------------------------------------------------------------------
-
-describe("POST /ai/extract", () => {
-  ifAvailable("returns proposals shaped to the schema without writing", async () => {
-    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/extract", {
-      text: "Charlie is 28 years old and lives in Hamburg. He works at DataFlow Inc.",
-    });
-    expect(statusCode).toBe(200);
-    const entities = body.entities as Row[];
-    expect(entities.length).toBeGreaterThanOrEqual(1);
-    expect(body.created).toBe(false);
-    const typeKeys = entities.map((e) => e.entityTypeKey as string);
-    expect(typeKeys.some((k) => ["person", "company"].includes(k))).toBe(true);
-    for (const entity of entities) {
-      expect(entity).toHaveProperty("properties");
-    }
-  });
-
-  ifAvailable("honours the entity-type hint list", async () => {
-    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/extract", {
-      text: "Eve works at GlobalTech.",
-      entityTypes: ["person"],
-    });
-    expect(statusCode).toBe(200);
-    expect((body.entities as Row[]).length).toBeGreaterThanOrEqual(1);
-  });
-
-  ifAvailable("persists on request and reports it", async () => {
-    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/extract", {
-      text: "Dave is 35 years old.",
-      entityTypes: ["person"],
-      create: true,
-    });
-    expect(statusCode).toBe(200);
-    expect(body.created).toBe(true);
-
-    const list = await inject("GET", "/api/ontologies/test_ont/runtime/lenses/ai_test/entities/person?q=Dave");
-    expect(list.statusCode).toBe(200);
-    const items = list.body.items as Row[];
-    expect(items.some((item) => String(item.name ?? "").includes("Dave"))).toBe(true);
-  });
-
-  ifAvailable("rejects empty text", async () => {
-    const { statusCode } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/extract", {
-      text: "",
     });
     expect(statusCode).toBe(422);
   });

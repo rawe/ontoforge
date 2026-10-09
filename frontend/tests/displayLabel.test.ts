@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { displayLabel, nameProperties, nameValue } from '../src/lib/displayLabel.ts'
+import { displayLabel, nameProperties } from '../src/lib/displayLabel.ts'
 import type { EntityInstance, RuntimeSchema, SchemaEntityType } from '../src/api/types.ts'
 
 const entity = (props: Record<string, EntityInstance[string]>): EntityInstance => ({
@@ -22,12 +22,6 @@ test('no fallback to other string properties: empty or missing name gives the tr
 test('a hidden or unknown name property gives the truncated _id', () => {
   assert.equal(displayLabel(entity({ name: 'Ada' }), null), '0123456789ab')
   assert.equal(displayLabel(entity({ name: 'Ada' }), undefined), '0123456789ab')
-})
-
-test('nameValue reads a property bag and returns null when there is no name', () => {
-  assert.equal(nameValue({ label: 'Widget' }, 'label'), 'Widget')
-  assert.equal(nameValue({ label: '' }, 'label'), null)
-  assert.equal(nameValue({ label: 'Widget' }, null), null)
 })
 
 test('nameProperties maps entity type keys to their name property', () => {

@@ -18,7 +18,7 @@ const FeaturesResponse = z.object({
   semanticSearch: z.boolean(),
   searchStrategies: z.array(z.string()),
   ai: z.boolean(),
-  entityIdentityComparison: z.boolean(),
+  decisions: z.boolean(),
   searchIndices: z.boolean(),
 });
 
@@ -38,7 +38,7 @@ export const serverRouter: FastifyPluginAsyncZod = async (app) => {
         semanticSearch: Boolean(settings.EMBEDDING_PROVIDER),
         searchStrategies: availableStrategies({ supportsKeywordRanking: () => keyword }),
         ai: Boolean(settings.AI_PROVIDER),
-        entityIdentityComparison: getDecisionModel() !== null,
+        decisions: getDecisionModel() !== null,
         searchIndices: await supportsSearchIndices(),
       };
     },

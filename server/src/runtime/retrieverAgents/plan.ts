@@ -114,7 +114,7 @@ export const PLANNER_RESPONSE_FORMAT = {
               indices: stringArray,
               relations: stringArray,
               query: { type: "string" },
-              variants: { ...stringArray, maxItems: MAX_VARIANTS },
+              variants: stringArray,
               mode: { type: "string", enum: ["semantic", "keyword", "hybrid"] },
               filters: {
                 type: "array",

@@ -220,8 +220,9 @@ export async function planQuestion(planning: Planning): Promise<{ plan: Plan; no
     let response;
     try {
       response = await plannerModel.invoke([new SystemMessage(systemPrompt), new HumanMessage(input)], { signal });
-    } catch {
+    } catch (error) {
       signal.throwIfAborted();
+      console.warn(`Planning model failed: ${error instanceof Error ? error.message : String(error)}`);
       throw new ValidationError("Planning model failed; no automatic retry.");
     }
     const output = text(response.content);

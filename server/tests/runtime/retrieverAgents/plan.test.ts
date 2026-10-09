@@ -280,7 +280,8 @@ describe("planner input", () => {
     };
     inspect(PLANNER_RESPONSE_FORMAT.json_schema.schema);
     const subQuery = PLANNER_RESPONSE_FORMAT.json_schema.schema.properties.subQueries.items.properties;
-    expect(subQuery.variants).toEqual({ type: "array", items: { type: "string" }, maxItems: 3 });
+    expect(subQuery.variants).toEqual({ type: "array", items: { type: "string" } });
+    expect(JSON.stringify(PLANNER_RESPONSE_FORMAT)).not.toContain("maxItems");
   });
 });
 

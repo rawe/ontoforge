@@ -14,16 +14,8 @@ export interface Features {
   searchStrategies: SearchStrategy[]
   semanticSearch: boolean
   ai: boolean
-  entityIdentityComparison: boolean
   /** The storage adapter supports search indices (the Studio Search area). */
   searchIndices: boolean
-}
-
-export interface EntityIdentityComparison {
-  decision: 'same' | 'different' | 'insufficient'
-  probabilities: { same: number; different: number; insufficient: number }
-  confidence: number
-  truncatedFields: string[]
 }
 
 export type DataType =
@@ -269,29 +261,6 @@ export interface AiQueryResponse {
   /** The generated OQL query, when the AI ran one. */
   query: string | null
   results: QueryResult | null
-}
-
-export interface ExtractedEntity {
-  entityTypeKey: string
-  properties: Record<string, JsonValue>
-}
-
-export interface ExtractedRelationEndpoint {
-  entityTypeKey: string
-  match: Record<string, JsonValue>
-}
-
-export interface ExtractedRelation {
-  relationTypeKey: string
-  source: ExtractedRelationEndpoint
-  target: ExtractedRelationEndpoint
-  properties: Record<string, JsonValue>
-}
-
-export interface ExtractResponse {
-  entities: ExtractedEntity[]
-  relations: ExtractedRelation[]
-  created: boolean
 }
 
 export interface ChatMessage {

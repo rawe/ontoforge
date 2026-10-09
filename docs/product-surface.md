@@ -115,9 +115,8 @@ An overview of one lens.
 
 Two dedicated states replace the body: when the lens exposes no entity types at all, an
 explanation pointing at the scope editor; when it exposes types but holds no instances, a
-three-step guide — create the first entity, extract entities from pasted text, or connect
-an AI client. The extraction step stays visible but dimmed with an explanation when AI is
-unavailable.
+two-step guide — create the first entity from the first type's table, or connect an AI
+client through its MCP configuration.
 
 ### Type table
 
@@ -221,9 +220,8 @@ Two tabs — Console and Library — which both stay live, so results survive a 
 
 ### AI
 
-Four tabs — Chat, Ask, Extract, Retriever — preserve long-running extraction across a
-tab switch. See [AI panel](#ai-panel). Absent entirely when no language-model provider is
-configured.
+Three tabs — Chat, Ask, Retriever. See [AI panel](#ai-panel). Absent entirely when no
+language-model provider is configured.
 
 ---
 
@@ -492,11 +490,6 @@ collapsible note; an unsupported reason is the empty state's message; errors sho
 with the server's message. "Show all in Explorer", below the results, adds every result to
 the [working set](#working-set) and opens the Explorer.
 
-Extraction review searches only properties for up to three existing candidates, with no
-score threshold or displayed number; each candidate carries the same matched-via text when
-there is one. “Create new” is the default and the prompt asks whether to use an existing
-entity instead.
-
 ### Matched via
 
 Search results never show a score. Where the server names the entry that found a hit
@@ -509,9 +502,9 @@ relation or a passage carries one short line:
 - a passage entry — `via passage in <property>`, the document property's display name;
 - the entity's own fields — no line.
 
-The line never shows the entry's text. The palette, the relation target picker and the
-extraction review use the [default search](capabilities/search.md#ranked-search), which
-reads only managed indices, so no relation line appears there; relation lines appear in
+The line never shows the entry's text. The palette and the relation target picker use the
+[default search](capabilities/search.md#ranked-search), which reads only managed indices,
+so no relation line appears there; relation lines appear in
 a retriever agent's diagnostics and in the palette's question results, whose searches
 reach custom indices. A server whose hits
 name no entry — one without search indices — shows instead one `in <property>` badge per
@@ -529,9 +522,8 @@ errors collected at once, and server field errors merged onto the matching field
 unsaved input asks for confirmation first. On success a toast offers to open the new
 entity.
 
-The same form primitives back quick add, inline target creation in the relation flow, the
-relation-property steps, and the extraction review, so all of them accept exactly what the
-lens accepts.
+The same form primitives back quick add, inline target creation in the relation flow and
+the relation-property steps, so all of them accept exactly what the lens accepts.
 
 ### Working set
 
@@ -639,7 +631,7 @@ expands automatically, and runs immediately when it has no parameters.
 
 ### AI panel
 
-Four modes over one lens: Chat, Ask, Extract and Retriever. All require a language-model
+Three modes over one lens: Chat, Ask and Retriever. All require a language-model
 provider; see [capabilities/ai-agents.md](capabilities/ai-agents.md).
 
 **Chat** — a conversation with the lens's default assistant or with any configured agent,
@@ -671,41 +663,6 @@ live chat. Empty pending answers and failed assistant turns are excluded from mo
 block holding the query the model generated (copyable, and openable directly in the
 console) and a table of the rows it returned. Earlier questions of the same session stay
 below the newest. This history is in-memory only.
-
-**Extract** — the human-in-the-loop path from unstructured text to graph data, and the one
-place where nothing is written without an explicit second step.
-
-1. *Input.* Paste any text; optionally restrict extraction to a subset of entity types
-   (none selected means all). The extraction request explicitly asks the server *not* to
-   create anything.
-2. *Review.* Proposals arrive as an editable model, entities on one side grouped by type,
-   relations on the other. Every proposed entity is a card with a checkbox and a form
-   holding its proposed values; every field is editable before anything is written.
-   Properties the schema does not define are listed as explicitly ignored rather than
-   silently dropped. A proposal whose type is not in the lens's scope is shown, disabled,
-   and explained. Missing required values are counted on the card.
-   Where ranked search is available, each proposal is checked against up to three existing entities
-   of its own type by their properties; candidates are offered as a "use this existing one instead" choice,
-   which turns that proposal into a link rather than a creation. When entity identity
-   comparison is available, an explicit **Compare identity** action compares the
-   edited scalar drafts with those candidates, up to three sequentially. Drafts use
-   the form's existing scalar conversion; invalid values must be corrected before
-   comparing, and document values are excluded. It shows
-   same, different or insufficient judgments; model probabilities and confidence
-   are expandable, and shortened context is identified. Editing the proposal or
-   changing the candidates discards old assessments and cancels pending comparisons.
-   Results never select an existing entity automatically; a failure is shown without
-   a fallback. See [entity identity comparison](capabilities/entity-identity-comparison.md).
-   A relation is blocked —
-   with the reason spelled out — when its type is out of scope, when an endpoint is not
-   among the proposals, or when an endpoint is neither checked for creation nor mapped to
-   an existing entity. The raw response can be inspected at any point.
-3. *Accept.* Creation runs in two passes: entities first, then relations with their
-   endpoints resolved from the mapping of proposal to created-or-existing identifier.
-   Progress is per item and visible as it happens. Items that fail keep their error, stay
-   editable and stay listed, so accepting again retries only what is left; items that
-   succeeded are marked and skipped. The outcome is reported as counts, and the first
-   created entity can be opened in the Explorer.
 
 **Retriever** — chat with the lens's
 [retriever agents](capabilities/retriever-agents.md). A header picker selects the agent:
@@ -894,10 +851,10 @@ on the API for programmatic callers. See
 
 ## Feature gating
 
-The client asks the server once per session which optional capabilities exist, and treats
-the answer as never going stale. The report contains available search strategies plus
-semantic-search, AI, entity-identity-comparison and search-indices flags. None is
-inferred from a failed call — the client never probes.
+The client asks the server once per session which optional capabilities exist — the
+available search strategies plus the semantic-search, AI and search-indices flags — and
+treats the answer as never going stale. None is inferred from a failed call — the client
+never probes.
 
 Gated areas explain themselves rather than vanishing, except in navigation, where a dead
 entry would be worse than an absent one. Navigation is gated optimistically: the AI entry,
@@ -907,11 +864,10 @@ while the report is loading.
 
 | Off | What changes |
 |---|---|
-| AI | The AI navigation entry, the AI palette action, the palette's question mode and the AI quick action are gone. The AI screen itself renders an explanation. The empty-state extraction step stays visible but dimmed, with an explanation. |
-| No search strategies | Entity search falls back to substring matching — per type in parallel when unscoped. Extraction review skips the duplicate check. |
+| AI | The AI navigation entry, the AI palette action, the palette's question mode and the AI quick action are gone. The AI screen itself renders an explanation. |
+| No search strategies | Entity search falls back to substring matching — per type in parallel when unscoped. |
 | Semantic search | Saved-query search falls back to client-side substring filtering over the full list. With search indices the search-data rebuild is disabled and explains that there is nothing to rebuild; without them it stays available and explains that it will skip the embeddings. |
 | Search indices | The Studio's Search entry, the lens detail's Retriever agents tab and the palette's question mode are gone; their addresses render an explanation, and so does the Workbench's Retriever tab. The entity type editor's Search indices section and the scope editor's Search indices section are absent. Search hits name no entry, so results show document badges instead of [matched-via](#matched-via) lines. |
-| Entity identity comparison | The extraction review's Compare identity action is absent; candidate discovery and manual selection still work. |
 
 Everything else works unchanged. See [capabilities/search.md](capabilities/search.md).
 
@@ -942,8 +898,7 @@ current lens's runtime schema, when it is a non-empty string; otherwise the firs
 characters of the identifier. There is no fallback to other properties, so a lens that
 hides the name property labels its entities by identifier. It is applied everywhere an
 entity is named — tables, detail headers, search results, canvas nodes, relation rows,
-toasts — and the extraction review applies it to a *proposed* property bag, falling back
-to an explicit "unnamed" marker.
+toasts.
 
 **Query rows omit relation endpoints.** A relation read returns its endpoint identifiers; a
 relation inside a query result does not ([capabilities/oql.md](capabilities/oql.md)).
@@ -983,12 +938,11 @@ it — and exactly one final summary carrying the overall processed and failed c
 whether the embeddings were skipped. A stream that ends without a summary is an error,
 not a success.
 
-**Entity search shows no number.** The palette, relation target picker and extraction
-review use the server’s ranking order and ignore relative scores. What found a hit is
-shown only as the [matched-via](#matched-via) line, whose relation-group label the client
-resolves through the lens's search catalog; no passage text is shown. Extraction review
-searches properties only, offers up to three candidates without a floor, and defaults
-to creating a new entity. Saved-query discovery keeps its separate cosine score.
+**Entity search shows no number.** The palette and relation target picker use the
+server’s ranking order and ignore relative scores. What found a hit is shown only as the
+[matched-via](#matched-via) line, whose relation-group label the client resolves through
+the lens's search catalog; no passage text is shown. Saved-query discovery keeps its
+separate cosine score.
 
 **Scoped-versus-unscoped cannot be read from the lens.** The lens's runtime schema does not
 report its own inclusions, so "scoped" and "unscoped" are determined by asking the modeling
@@ -1050,7 +1004,7 @@ Workbench addresses live under `/o/{ontologyKey}/w/{lensKey}`, Studio addresses 
 | `/o/{ontologyKey}/w/{lensKey}/query?tab=library` | The saved-query library |
 | `/o/{ontologyKey}/w/{lensKey}/query?run={queryKey}` | The library with that query expanded, run at once when it has no parameters |
 | `/o/{ontologyKey}/w/{lensKey}/ai` | The AI panel, Chat |
-| `/o/{ontologyKey}/w/{lensKey}/ai?tab=ask` · `?tab=extract` · `?tab=retriever` | The other three AI modes |
+| `/o/{ontologyKey}/w/{lensKey}/ai?tab=ask` · `?tab=retriever` | The other two AI modes |
 | `/o/{ontologyKey}/w/{lensKey}/ai?tab=retriever&agent={agentKey}` | The Retriever tab with that retriever agent — `_default` for the default one; the default agent when the lens has no such agent |
 | `/o/{ontologyKey}/studio` | The ontology's schema overview |
 | `/o/{ontologyKey}/studio/entity-types/{id}` · `.../relation-types/{id}` | A type editor |

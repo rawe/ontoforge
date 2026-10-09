@@ -2,7 +2,7 @@
 
 The OntoForge frontend — a single-page app. The start page (`/`) lists the server's ontologies; each ontology has two surfaces:
 
-- **Workbench** (`/o/:ontologyKey/w/:lensKey`) — work with instance data through one lens: overview dashboard, schema-driven type tables, entity detail, Explorer canvas, OQL query workbench, AI assistant (chat, ask, extract, retriever-agent chat).
+- **Workbench** (`/o/:ontologyKey/w/:lensKey`) — work with instance data through one lens: overview dashboard, schema-driven type tables, entity detail, Explorer canvas, OQL query workbench, AI assistant (chat, ask, retriever-agent chat).
 - **Studio** (`/o/:ontologyKey/studio`) — design one ontology: entity/relation type editors, lenses (scope, agents, retriever agents with a test panel, saved queries, connect), search indices and search settings, export/import.
 
 What the surfaces offer: [../docs/product-surface.md](../docs/product-surface.md).
@@ -47,7 +47,7 @@ src/
 │   ├── table/   # type table building blocks
 │   ├── entity/  # entity detail building blocks
 │   ├── query/   # query console (OQL) + saved-query library
-│   ├── ai/      # chat / ask / extract / retriever tab
+│   ├── ai/      # chat / ask / retriever tab
 │   ├── retrieverAgent/ # retriever-agent editor parts, chat + diagnostics (Studio test panel and Workbench)
 │   ├── search/  # Studio Search area: index list parts, index designer, managed index view
 │   ├── studio/  # Studio editors (types, scope, agents, retriever agents, saved queries, transfer)

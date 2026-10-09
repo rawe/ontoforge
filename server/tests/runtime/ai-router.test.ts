@@ -63,7 +63,6 @@ afterEach(() => {
 describe("FEATURE_DISABLED without a provider", () => {
   const cases: [string, string, Record<string, unknown>][] = [
     ["query", "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/query", { question: "How many?" }],
-    ["extract", "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/extract", { text: "Some text" }],
     ["chat", "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/chat", { message: "Hi" }],
     [
       "agent chat",

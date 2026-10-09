@@ -1,8 +1,7 @@
 # AI and agents
 
-Language-model capabilities over a lens: asking a question in natural language, pulling
-structured knowledge out of free text, holding a conversation, and exposing any of that
-to other systems as an agent.
+Language-model capabilities over a lens: asking a question in natural language, holding a
+conversation, and exposing that conversation to other systems as an agent.
 
 **All of it requires a configured language-model provider.** With none configured, every
 operation that would run a model is rejected. Clients are expected to check the server's
@@ -20,7 +19,7 @@ described to the model in the first place — and nothing of any other ontology 
 
 ## What it does
 
-Three task-shaped operations, plus a way to package them.
+Two task-shaped operations, plus a way to package them.
 
 ### Ask a question
 
@@ -31,46 +30,6 @@ The response is not just prose. It carries **the generated OQL** and **the raw r
 rows** alongside the answer, so a caller can show its work, verify it, or re-run the query
 in a console. If the model answered without ever calling the tool, both are absent — which
 is itself the signal that the answer was not grounded in data.
-
-### Extract from free text
-
-Text in, proposed entities and relations out, shaped to the lens's schema. The model runs
-with no tools at all — only the schema in its prompt — and returns structured output. An
-optional list of entity types narrows what it is asked to look for; that is a hint added
-to the prompt, not a constraint enforced on the result.
-
-Extraction is **propose-then-persist**. By default nothing is written: the caller receives
-proposals and decides. The reason is that the alternative is unreviewable — a language
-model reading prose will invent a plausible property value as readily as it will read one,
-and a write that happens before a human sees it cannot be compared against the source
-text. Persistence is opt-in per call, and the response states whether it happened.
-
-When persistence is requested, entities are created first, then each relation's endpoints
-are resolved. The rules there are narrow and worth stating plainly:
-
-- Endpoints are given as `match` maps of property values. They are resolved **only against
-  the entities created in this same call**, never against data already in the graph.
-- A match map is a **subset** of the entity's properties: an endpoint naming only a name
-  resolves an entity that also carries an age. It is compared against what was written,
-  after coercion, so a value the write pipeline converted still matches.
-- An endpoint that matches **more than one** created entity does not resolve. Neither does
-  an empty match map. Ambiguity is never guessed: a relation attached to the wrong entity
-  is worse than a missing one, because nothing downstream can tell it was wrong.
-- A relation whose endpoints do not both resolve is dropped. The call still succeeds — an
-  unresolvable endpoint is not an error — but the response **lists every dropped relation
-  with the reason**, so a run that wrote entities and no relations says so.
-- Created entities are not deduplicated against anything. Running the same text twice
-  creates two sets of entities.
-
-So the persist path is for bulk ingestion into a known-empty region, not for merging into
-existing data. Reviewing the proposals and creating through the ordinary entity and
-relation operations ([instance-data.md](instance-data.md)) is the path that gives you
-matching, deduplication and error reporting.
-
-The web review can additionally request an advisory
-[entity identity comparison](entity-identity-comparison.md) against existing candidates.
-That optional Decision-provider operation is separate from extraction and does not
-change its persistence rules.
 
 ### Chat
 
@@ -207,11 +166,11 @@ Configuring agents is modeling; running them is runtime. Complete operation inde
 | | Where | Operations |
 |---|---|---|
 | Configure agents | Modeling REST, modeling MCP, the studio's agents tab | List, upsert by key, delete |
-| Ask, extract, chat | Runtime REST only | One operation each; chat also in a per-agent form |
+| Ask, chat | Runtime REST only | One operation each; chat also in a per-agent form |
 | Discover agents | Runtime REST | Lists the default agent and every configured one |
 | A2A | Runtime REST | A card and a task endpoint per agent, including the default |
-| Web UI | The workbench's AI surface | Chat with an agent picker and persisted local threads, one-shot ask with the generated query shown, and extract with a review step that creates through the ordinary write operations |
+| Web UI | The workbench's AI surface | Chat with an agent picker and persisted local threads, and one-shot ask with the generated query shown |
 
-Note the deliberate gap: **there are no MCP tools for ask, extract or chat.** An MCP
+Note the deliberate gap: **there are no MCP tools for ask or chat.** An MCP
 client is itself a language model; wrapping a second one behind a tool call would put a
 model inside a model's tool. An MCP client gets the underlying tools directly instead.

@@ -356,7 +356,6 @@ Saved-query discovery is separate: it retains its absolute cosine score and mini
 score, description-only embedding, and embedding-provider requirement.
 
 The palette and relation picker use ranked search whenever the strategy list is nonempty,
-falling back to literal entity lists otherwise. Extraction review searches properties
-for up to three existing candidates with no score threshold. None of them displays a
-score or passage text; what they show of a hit is in
+falling back to literal entity lists otherwise. Neither displays a score or passage text;
+what they show of a hit is in
 [../product-surface.md](../product-surface.md#matched-via).

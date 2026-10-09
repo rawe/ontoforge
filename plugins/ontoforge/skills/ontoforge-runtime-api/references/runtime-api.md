@@ -375,10 +375,6 @@ Every route here requires a language-model provider.
   Turns a natural-language question into an OQL query and runs it.
   Request body: `question`
 
-- `POST /ai/extract`
-  Extracts entities and relations from free text, optionally writing them.
-  Request body: `text`, optional `entityTypes`, optional `create` (default `false`)
-
 - `POST /ai/chat`
   Converses with the default agent over the lens.
   Request body: `message`, optional `history` (a list of `{role, content}` with `role`

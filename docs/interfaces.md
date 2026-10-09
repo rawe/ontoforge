@@ -663,7 +663,6 @@ requires a language-model provider for execution; agent discovery remains availa
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/ai/query` | Turn a natural-language question into an OQL query and run it |
-| POST | `/ai/extract` | Extract entities and relations from free text, optionally writing them |
 | POST | `/ai/chat` | Converse with the default agent over the lens |
 | GET | `/ai/agents` | List the agents configured on this lens |
 | POST | `/ai/agents/{agentKey}/chat` | Converse with one named agent |

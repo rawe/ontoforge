@@ -264,6 +264,9 @@ export function createEmbeddingProvider(
     }
     return new OpenAIEmbeddingProvider(model, baseUrl, apiKey, dims, fetchFn, batching);
   }
+  if (provider === "anthropic") {
+    throw new Error("EMBEDDING_PROVIDER cannot be anthropic: Anthropic offers no embeddings API");
+  }
   throw new Error(`Unknown embedding provider: '${provider}'`);
 }
 

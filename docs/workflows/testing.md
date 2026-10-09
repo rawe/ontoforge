@@ -116,9 +116,8 @@ ENV_FILE=../env/test-ai.local.env npm run test:integration:ai
 directory is committed. Each `test:integration*` script defaults its `ENV_FILE` with
 `${ENV_FILE:-…}`, so a value from your shell wins over the preset.
 
-The suite probes the OpenAI-compatible model listing below the chat endpoint —
-`{AI_BASE_URL}/models` for `openai`, `{AI_BASE_URL}/v1/models` for an Ollama host — served
-by OpenRouter and by Ollama's compatibility layer, and skips with a message naming the
+The suite probes the provider's model listing — `{AI_BASE_URL}/models` for `openai`,
+`{AI_BASE_URL}/v1/models` for an Ollama or Anthropic host — and skips with a message naming the
 cause when no provider is configured, the endpoint is unreachable, or it does not list
 `AI_MODEL`.
 

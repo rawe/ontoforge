@@ -90,19 +90,23 @@ function optOneOf(
 const DEFAULT_BASE_URLS: Record<string, string> = {
   ollama: "http://localhost:11434",
   openai: "https://api.openai.com/v1",
+  anthropic: "https://api.anthropic.com",
 };
+
+/** The providers whose base URL is a host: the server appends the API path. */
+const HOST_PROVIDERS: Record<string, string> = { ollama: "Ollama", anthropic: "Anthropic API" };
 
 /**
  * A provider's base URL, written as that provider documents it: an
- * OpenAI-compatible API base names its version (`…/v1`), an Ollama host does
- * not, because the server appends Ollama's own paths. Either mistake would
+ * OpenAI-compatible API base names its version (`…/v1`), an Ollama or
+ * Anthropic host does not, because the server appends their own paths. Either mistake would
  * otherwise only surface as a 404 on the first model call, so it fails the
  * boot and names the corrected value.
  */
 function baseUrl(env: NodeJS.ProcessEnv, name: string, provider: string | null): string {
   const value =
     optStr(env, name) ?? DEFAULT_BASE_URLS[provider ?? "ollama"] ?? DEFAULT_BASE_URLS["ollama"]!;
-  if (provider !== "openai" && provider !== "ollama") return value;
+  if (provider === null || (provider !== "openai" && !(provider in HOST_PROVIDERS))) return value;
   let url: URL | null = null;
   try {
     url = new URL(value);
@@ -119,10 +123,10 @@ function baseUrl(env: NodeJS.ProcessEnv, name: string, provider: string | null):
         `version, as the provider documents it — e.g. '${value.replace(/\/+$/, "")}/v1': '${value}'`,
     );
   }
-  if (provider === "ollama" && versioned) {
+  if (provider !== "openai" && versioned) {
     throw new Error(
-      `Environment variable ${name} must be the Ollama host without an API path — ` +
-        `e.g. '${url.origin}': '${value}'`,
+      `Environment variable ${name} must be the ${HOST_PROVIDERS[provider]} host without an ` +
+        `API path — e.g. '${url.origin}': '${value}'`,
     );
   }
   return value;

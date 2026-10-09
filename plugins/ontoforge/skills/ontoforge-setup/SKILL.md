@@ -17,7 +17,7 @@ The Docker Compose stack consists of three core services:
 - **ontoforge-server** — Backend: REST API and MCP servers. All environment variables documented below apply to this service.
 - **ontoforge-ui** — Frontend: web UI served on port 3000. Requires `BACKEND_URL` pointing to the backend's Docker-internal URL so nginx can proxy `/api` and `/mcp` requests.
 
-Semantic search is optional and supports two embedding providers: **Ollama** (local) or an **OpenAI-compatible** API. AI-powered runtime (natural language query, entity extraction, chat) is also optional and requires a model with tool calling support. Both features can use Ollama or an OpenAI-compatible API. When using Ollama, an optional **ollama** service can be added to the compose stack.
+Semantic search is optional and supports two embedding providers: **Ollama** (local) or an **OpenAI-compatible** API. AI-powered runtime (natural language query, entity extraction, chat) is also optional and requires a model with tool calling support. Both features can use Ollama or an OpenAI-compatible API; AI-powered runtime can also use Anthropic's API. When using Ollama, an optional **ollama** service can be added to the compose stack.
 
 ## Templates
 
@@ -42,6 +42,7 @@ Ask the user:
 3. **AI provider** — whether they want AI-powered runtime (NL query, entity extraction, chat), and if so which provider:
    - `ollama` — local Ollama instance (ask which model; suggest `qwen3:8b`, or `qwen3:14b` / `qwen3:32b` for better quality)
    - `openai` — OpenAI-compatible API (requires API key)
+   - `anthropic` — Claude models through Anthropic's API (requires API key; `AI_BASE_URL` can stay unset)
    - None — skip AI configuration
 4. **Ollama deployment** (if ollama chosen for embeddings or AI) — whether Ollama runs on the host machine or should be added as a Docker container in the compose file.
 5. **Database password** — the password for the PostgreSQL database (default: `changeme`).
@@ -132,10 +133,10 @@ These are the **only** environment variables recognized by the `ontoforge-server
 | `SEARCH_MAX_ATTEMPTS` | no | `5` | Failed attempts before a queued search-indexing item counts as failed (positive integer; PostgreSQL only) |
 | `SEARCH_WORKER_BATCH` | no | `64` | Queued search-indexing items the background worker claims per batch (positive integer; PostgreSQL only) |
 | `SEARCH_POLL_MS` | no | `5000` | Milliseconds the background search worker waits between queue checks when no wake-up arrives (positive integer; PostgreSQL only) |
-| `AI_PROVIDER` | no | *(disabled)* | `ollama` or `openai` — omit to disable AI features |
+| `AI_PROVIDER` | no | *(disabled)* | `ollama`, `openai` or `anthropic` — omit to disable AI features |
 | `AI_MODEL` | with `AI_PROVIDER` | *(none)* | AI model name (must support tool calling) |
-| `AI_BASE_URL` | no | `http://localhost:11434` (`ollama`), `https://api.openai.com/v1` (`openai`) | AI API base as the provider documents it — the Ollama host, or the OpenAI-compatible base including its version |
-| `AI_API_KEY` | no | *(none)* | API key — **required** when `AI_PROVIDER=openai` |
+| `AI_BASE_URL` | no | `http://localhost:11434` (`ollama`), `https://api.openai.com/v1` (`openai`), `https://api.anthropic.com` (`anthropic`) | AI API base as the provider documents it — the Ollama or Anthropic host, or the OpenAI-compatible base including its version |
+| `AI_API_KEY` | no | *(none)* | API key — **required** when `AI_PROVIDER` is `openai` or `anthropic` |
 | `AI_REASONING_EFFORT` | no | *(model default)* | `none`, `low`, `medium` or `high` — how hard the model thinks |
 
 ## Container Images

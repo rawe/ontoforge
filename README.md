@@ -249,14 +249,15 @@ In Docker, `DB_URI` is set to `postgresql://postgres:5432/ontoforge` automatical
 
 OntoForge has two optional features — **semantic search** and **AI-powered runtime** — that require an external model provider. Both are disabled by default and all core functionality (schema modeling, entity/relation CRUD, MCP) works without them.
 
-Both features support two provider types:
+Both features support these provider types:
 
 - **`ollama`** — local inference via [Ollama](https://ollama.com). No API key needed, models run on your machine.
 - **`openai`** — any OpenAI-compatible API (OpenAI, Azure, OpenRouter, OVHcloud, LiteLLM, vLLM, etc.). Requires an API key.
+- **`anthropic`** — Claude models through Anthropic's own API. AI-powered runtime only; Anthropic offers no embeddings. Requires an API key.
 
-A base URL is written as the provider documents it: the Ollama host for `ollama`
-(`http://localhost:11434`), the API base including its version for `openai`
-(`https://openrouter.ai/api/v1`). A base URL that breaks this rule stops the server at
+A base URL is written as the provider documents it: the host for `ollama`
+(`http://localhost:11434`) and `anthropic` (`https://api.anthropic.com`), the API base
+including its version for `openai` (`https://openrouter.ai/api/v1`). A base URL that breaks this rule stops the server at
 startup with the corrected value in the message.
 
 ### Semantic Search
@@ -281,10 +282,10 @@ Natural language query, entity extraction from text, and conversational chat ove
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AI_PROVIDER` | *(unset — disabled)* | `ollama` or `openai` |
+| `AI_PROVIDER` | *(unset — disabled)* | `ollama`, `openai` or `anthropic` |
 | `AI_MODEL` | *(required with `AI_PROVIDER`)* | AI model name (must support tool calling) |
-| `AI_BASE_URL` | `http://localhost:11434` (`ollama`), `https://api.openai.com/v1` (`openai`) | AI model API base, as the provider documents it |
-| `AI_API_KEY` | *(unset)* | API key (required for `openai` provider) |
+| `AI_BASE_URL` | `http://localhost:11434` (`ollama`), `https://api.openai.com/v1` (`openai`), `https://api.anthropic.com` (`anthropic`) | AI model API base, as the provider documents it |
+| `AI_API_KEY` | *(unset)* | API key (required for `openai` and `anthropic`) |
 | `AI_REASONING_EFFORT` | *(unset — model default)* | `none`, `low`, `medium` or `high` — how hard the model thinks |
 
 **Recommended Ollama models** by available RAM (Apple Silicon / unified memory):

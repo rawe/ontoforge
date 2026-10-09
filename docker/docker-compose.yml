@@ -75,6 +75,8 @@ services:
       # For OpenAI-compatible providers: set AI_PROVIDER to "openai" and
       # AI_BASE_URL to the API base including its version, e.g.
       # https://api.openai.com/v1 (the default) or https://openrouter.ai/api/v1
+      # For Claude: set AI_PROVIDER to "anthropic" (AI_BASE_URL defaults to
+      # https://api.anthropic.com)
       # AI_API_KEY: sk-...
       # Model thinking effort: none, low, medium or high (unset = model default)
       # AI_REASONING_EFFORT: medium

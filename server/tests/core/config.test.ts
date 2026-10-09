@@ -126,6 +126,9 @@ describe("provider base URLs", () => {
     expect(loadSettings({ EMBEDDING_PROVIDER: "openai" }).EMBEDDING_BASE_URL).toBe(
       "https://api.openai.com/v1",
     );
+    expect(loadSettings({ AI_PROVIDER: "anthropic", AI_MODEL: "m" }).AI_BASE_URL).toBe(
+      "https://api.anthropic.com",
+    );
   });
 
   it("take an OpenAI-compatible base as the provider documents it, version included", () => {
@@ -157,6 +160,12 @@ describe("provider base URLs", () => {
     ).toThrow(/EMBEDDING_BASE_URL/);
   });
 
+  it("reject an Anthropic host given with an API path", () => {
+    expect(() =>
+      loadSettings({ AI_PROVIDER: "anthropic", AI_MODEL: "m", AI_BASE_URL: "https://api.anthropic.com/v1/" }),
+    ).toThrow(/AI_BASE_URL must be the Anthropic API host .*'https:\/\/api\.anthropic\.com'/);
+  });
+
   it("reject a value that is not an http(s) URL", () => {
     expect(() => loadSettings({ AI_PROVIDER: "ollama", AI_MODEL: "m", AI_BASE_URL: "localhost:11434" })).toThrow(
       /AI_BASE_URL is not an http\(s\) URL/,
@@ -173,7 +182,7 @@ describe("provider base URLs", () => {
 
 describe("AI model", () => {
   it("has no default: every configured provider must name its model", () => {
-    for (const provider of ["ollama", "openai"]) {
+    for (const provider of ["ollama", "openai", "anthropic"]) {
       expect(() => loadSettings({ AI_PROVIDER: provider })).toThrow(
         /AI_MODEL is required when AI_PROVIDER is set/,
       );

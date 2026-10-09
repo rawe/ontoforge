@@ -220,12 +220,18 @@ exist.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/server/features` | Report `semanticSearch`, `searchStrategies`, `ai`, `entityIdentityComparison` and `searchIndices` |
+| GET | `/api/server/features` | Report which optional capabilities this deployment offers |
 
 The one route that concerns neither the ontologies nor their content — it describes the
-deployment. Clients call it before
-offering optional capabilities. `searchStrategies` lists available strategies in preference order.
-`searchIndices` reports whether the storage adapter supports search indices.
+deployment. Clients call it before offering optional capabilities.
+
+| Field | Type | Reports |
+|---|---|---|
+| `semanticSearch` | boolean | An embedding provider is configured |
+| `searchStrategies` | list | The available search strategies, in preference order |
+| `ai` | boolean | A language-model provider is configured; gates the `/ai` routes |
+| `decisions` | boolean | A Decision provider is configured; gates the `/decisions` routes |
+| `searchIndices` | boolean | The storage adapter supports search indices |
 
 ## Modeling REST
 

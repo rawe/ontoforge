@@ -37,7 +37,7 @@ describe("identity REST surface", () => {
     expect(settings.AI_PROVIDER).toBeNull();
     expect(settings.EMBEDDING_PROVIDER).toBeNull();
     const features = (await app.inject({ url: "/api/server/features" })).json();
-    expect(features).toMatchObject({ ai: false, semanticSearch: false, entityIdentityComparison: true });
+    expect(features).toMatchObject({ ai: false, semanticSearch: false, decisions: true });
     const result = await app.inject({ method: "POST", url, payload });
     expect(result.statusCode).toBe(200);
     expect(result.json()).toEqual({ decision: "same", probabilities: { same: 0.8, different: 0.1, insufficient: 0.1 },
@@ -46,7 +46,7 @@ describe("identity REST surface", () => {
 
   it("advertises disabled and returns the existing FEATURE_DISABLED envelope", async () => {
     setDecisionModel(null);
-    expect((await app.inject({ url: "/api/server/features" })).json().entityIdentityComparison).toBe(false);
+    expect((await app.inject({ url: "/api/server/features" })).json().decisions).toBe(false);
     const result = await app.inject({ method: "POST", url, payload });
     expect(result.statusCode).toBe(422);
     expect(result.json().error).toMatchObject({ code: "VALIDATION_ERROR", details: { code: "FEATURE_DISABLED" } });

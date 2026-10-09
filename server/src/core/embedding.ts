@@ -55,17 +55,19 @@ const NO_BATCHING: Batching = { batchSize: 1, concurrency: 1 };
 /** Shared request plumbing; subclasses only speak their wire format. */
 abstract class HttpEmbeddingProvider implements EmbeddingProvider {
   readonly modelId: string;
-  protected readonly baseUrl: string;
+  /** The URL every request is sent to: the base URL plus the provider's path. */
+  readonly endpoint: string;
 
   constructor(
     providerName: string,
+    path: string,
     protected readonly model: string,
     baseUrl: string,
     readonly dimensions: number,
     protected readonly fetchFn: FetchFn,
     private readonly batching: Batching,
   ) {
-    this.baseUrl = baseUrl.replace(/\/+$/, "");
+    this.endpoint = `${baseUrl.replace(/\/+$/, "")}${path}`;
     this.modelId = `${providerName}:${model}:${dimensions}`;
   }
 
@@ -160,12 +162,12 @@ export class OllamaEmbeddingProvider extends HttpEmbeddingProvider {
     fetchFn: FetchFn = fetch,
     batching: Batching = NO_BATCHING,
   ) {
-    super("ollama", model, baseUrl, dimensions, fetchFn, batching);
+    super("ollama", "/api/embed", model, baseUrl, dimensions, fetchFn, batching);
   }
 
   protected async request(texts: string[], signal: AbortSignal): Promise<number[][]> {
     const payload = (await this.post(
-      `${this.baseUrl}/api/embed`,
+      this.endpoint,
       {},
       { model: this.model, input: texts },
       signal,
@@ -186,12 +188,12 @@ export class OpenAIEmbeddingProvider extends HttpEmbeddingProvider {
     fetchFn: FetchFn = fetch,
     batching: Batching = NO_BATCHING,
   ) {
-    super("openai", model, baseUrl, dimensions, fetchFn, batching);
+    super("openai", "/v1/embeddings", model, baseUrl, dimensions, fetchFn, batching);
   }
 
   protected async request(texts: string[], signal: AbortSignal): Promise<number[][]> {
     const payload = (await this.post(
-      `${this.baseUrl}/v1/embeddings`,
+      this.endpoint,
       { authorization: `Bearer ${this.apiKey}` },
       { input: texts, model: this.model },
       signal,
@@ -245,7 +247,7 @@ export function createEmbeddingProvider(
   model: string,
   baseUrl: string,
   fetchFn: FetchFn = fetch,
-): EmbeddingProvider {
+): EmbeddingProvider & { readonly endpoint: string } {
   const dims = settings.EMBEDDING_DIMENSIONS;
   const batching: Batching = {
     batchSize: settings.EMBEDDING_BATCH_SIZE,
@@ -272,14 +274,15 @@ export function initEmbeddingProvider(): void {
     console.info("EMBEDDING_PROVIDER not set — semantic search disabled");
     return;
   }
-  provider = createEmbeddingProvider(
+  const created = createEmbeddingProvider(
     settings.EMBEDDING_PROVIDER,
     settings.EMBEDDING_MODEL,
     settings.EMBEDDING_BASE_URL,
   );
+  provider = created;
   console.info(
-    `Embedding provider initialized: ${provider.modelId} ` +
-      `(batch size ${settings.EMBEDDING_BATCH_SIZE}, concurrency ${settings.EMBEDDING_CONCURRENCY})`,
+    `Embedding provider initialized: ${created.modelId} ` +
+      `(via ${created.endpoint}, batch size ${settings.EMBEDDING_BATCH_SIZE}, concurrency ${settings.EMBEDDING_CONCURRENCY})`,
   );
 }
 

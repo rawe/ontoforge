@@ -74,6 +74,12 @@ export const DEFAULT_AGENT_CONFIG: AgentConfig = {
   tools: null,
 };
 
+/** The API base the chat client sends to: the configured base URL with
+ * `/v1` appended. */
+export function aiEndpoint(baseUrl: string): string {
+  return `${baseUrl.replace(/\/+$/, "")}/v1`;
+}
+
 /** Build a chat model from its provider name; throws on unknown names and
  * missing credentials — startup fails loudly rather than serving degraded. */
 export function createAiModel(
@@ -82,7 +88,7 @@ export function createAiModel(
   baseUrl: string,
   options: { maxRetries?: number; maxTokens?: number } = {},
 ): BaseChatModel {
-  const base = baseUrl.replace(/\/+$/, "");
+  const endpoint = aiEndpoint(baseUrl);
   const retries = options.maxRetries === undefined ? {} : { maxRetries: options.maxRetries };
   const tokenLimit = options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens };
   // `reasoning_effort` rides in `modelKwargs`, which is spread verbatim into
@@ -103,7 +109,7 @@ export function createAiModel(
     return new ChatOpenAI({
       model: modelName,
       apiKey: "ollama",
-      configuration: { baseURL: `${base}/v1`, ...retries },
+      configuration: { baseURL: endpoint, ...retries },
       ...retries,
       ...tokenLimit,
       ...reasoning,
@@ -117,7 +123,7 @@ export function createAiModel(
     return new ChatOpenAI({
       model: modelName,
       apiKey,
-      configuration: { baseURL: `${base}/v1`, ...retries },
+      configuration: { baseURL: endpoint, ...retries },
       ...retries,
       ...tokenLimit,
       ...reasoning,
@@ -138,7 +144,7 @@ export function initAiModel(): void {
   const effort = settings.AI_REASONING_EFFORT;
   console.info(
     `AI model initialized: ${settings.AI_MODEL} ` +
-      `(${settings.AI_PROVIDER} via ${settings.AI_BASE_URL}` +
+      `(${settings.AI_PROVIDER} via ${aiEndpoint(settings.AI_BASE_URL)}` +
       `${effort === null ? "" : `, reasoning effort ${effort}`})`,
   );
 }

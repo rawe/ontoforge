@@ -63,8 +63,11 @@ export async function sendChatStream(
     await write({ type: "final", reply: result.reply });
   } catch (error) {
     if (!signal.aborted && !raw.destroyed && !terminal) {
-      reply.log.error(error);
-      try { await write({ type: "error", error: publicError(error) }); }
+      const payload = publicError(error);
+      // Expected errors describe themselves to the client; anything else is
+      // logged here, as the app's error handler does for plain requests.
+      if (payload.code === "INTERNAL_ERROR") console.error("Chat stream failed:", error);
+      try { await write({ type: "error", error: payload }); }
       catch { raw.destroy(); }
     }
   } finally {

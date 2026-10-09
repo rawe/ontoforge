@@ -441,8 +441,9 @@ export async function chat(
               await emit({ type: "delta", text: delta });
             }
           }
-        } catch {
+        } catch (error) {
           signal.throwIfAborted();
+          console.warn(`Response model failed: ${error instanceof Error ? error.message : String(error)}`);
           throw new ValidationError("Response model failed; no automatic retry.");
         }
         io.push({ phase: "answer", ...modelInputTrace(ANSWER, input), output: output.slice(0, OUTPUT_TRACE_CHARACTERS), usage });

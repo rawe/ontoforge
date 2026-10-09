@@ -443,12 +443,15 @@ it("unknown lens and agent are ordinary pre-stream JSON errors", async () => {
   expect(lens.json()).toEqual({ error: { code: "RESOURCE_NOT_FOUND", message: "Lens missing" } });
 });
 
-it("unexpected failures never expose raw exceptions", async () => {
+it("unexpected failures never expose raw exceptions, but are logged", async () => {
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
   holder.store.getEntity.mockRejectedValue(new Error("secret provider details"));
   setAiModel(new FakeToolCallingModel([toolCallMessage("get_entity", { entity_type_key: "person", entity_id: "broken" })]));
   const response = await app.inject({ method: "POST", url: chatPath + "/chat", payload: { message: "Hi" } });
   expect(events(response.body).at(-1)).toEqual({ type: "error", error: { code: "INTERNAL_ERROR", message: "Internal Server Error" } });
   expect(response.body).not.toContain("secret");
+  expect(logged).toHaveBeenCalledWith("Chat stream failed:", expect.objectContaining({ message: "secret provider details" }));
+  logged.mockRestore();
 });
 
 it("disconnect during storage work prevents a follow-up model call and handles late completion", async () => {

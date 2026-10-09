@@ -112,12 +112,17 @@ function parseAnswers(value: unknown, questions: Record<string, DecisionQuestion
   return parsed.data.answers;
 }
 
+/** The URL every decision request is sent to. */
+export function decisionEndpoint(baseUrl: string): string {
+  return `${baseUrl.replace(/\/+$/, "")}/v1/systemone`;
+}
+
 export function createDecisionModel(
   baseUrl: string,
   modelName: string,
   apiKey: string | null,
 ): DecisionModel {
-  const url = `${baseUrl.replace(/\/+$/, "")}/v1/systemone`;
+  const url = decisionEndpoint(baseUrl);
   return {
     async decide(state, questions, signal) {
       const entries = Object.values(questions);
@@ -168,7 +173,9 @@ export function initDecisionModel(): void {
     settings.DECISION_API_KEY,
   );
   console.info(
-    `Decision model initialized: ${settings.DECISION_MODEL} via ${settings.DECISION_BASE_URL}`,
+    `Decision model initialized: ${settings.DECISION_MODEL} ` +
+      `(via ${decisionEndpoint(settings.DECISION_BASE_URL)}, ` +
+      `${settings.DECISION_API_KEY ? "API key set" : "no API key"})`,
   );
 }
 

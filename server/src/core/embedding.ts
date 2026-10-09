@@ -2,9 +2,10 @@
  * Embedding provider seam and implementations (`core/embedding` in the
  * module layout).
  *
- * Two providers: `ollama` (native `/api/embed`) and `openai`
- * (OpenAI-compatible `/v1/embeddings` — works with OpenAI, Azure, vLLM,
- * LM Studio, …). Both send a list of texts per request.
+ * Two providers: `ollama` (native `/api/embed` on the Ollama host) and
+ * `openai` (OpenAI-compatible `/embeddings` below the documented API base,
+ * version included — works with OpenAI, Azure, OVHcloud, vLLM, LM Studio,
+ * …). Both send a list of texts per request.
  *
  * Two ways to call them:
  * - `embed(text)` — one text; a failed call is LOGGED and yields `null`, and
@@ -188,7 +189,7 @@ export class OpenAIEmbeddingProvider extends HttpEmbeddingProvider {
     fetchFn: FetchFn = fetch,
     batching: Batching = NO_BATCHING,
   ) {
-    super("openai", "/v1/embeddings", model, baseUrl, dimensions, fetchFn, batching);
+    super("openai", "/embeddings", model, baseUrl, dimensions, fetchFn, batching);
   }
 
   protected async request(texts: string[], signal: AbortSignal): Promise<number[][]> {

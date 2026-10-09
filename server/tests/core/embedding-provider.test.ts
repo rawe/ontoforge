@@ -144,7 +144,7 @@ describe("OpenAIEmbeddingProvider", () => {
     );
     const provider = new OpenAIEmbeddingProvider(
       "text-embedding-3-small",
-      "https://api.openai.com",
+      "https://api.openai.com/v1",
       "sk-test-key",
       1536,
       fetchFn as FetchFn,
@@ -169,7 +169,7 @@ describe("OpenAIEmbeddingProvider", () => {
     });
     const provider = new OpenAIEmbeddingProvider(
       "text-embedding-3-small",
-      "https://api.openai.com",
+      "https://api.openai.com/v1",
       "sk-test-key",
       1536,
       fetchFn as FetchFn,
@@ -179,7 +179,7 @@ describe("OpenAIEmbeddingProvider", () => {
   });
 
   it("reports the configured dimensions and its model id", () => {
-    const provider = new OpenAIEmbeddingProvider("bge-m3", "https://api.example.com", "k", 1024);
+    const provider = new OpenAIEmbeddingProvider("bge-m3", "https://api.example.com/v1", "k", 1024);
     expect(provider.dimensions).toBe(1024);
     expect(provider.modelId).toBe("openai:bge-m3:1024");
   });
@@ -188,7 +188,7 @@ describe("OpenAIEmbeddingProvider", () => {
     const fetchFn = openAIFetch();
     const provider = new OpenAIEmbeddingProvider(
       "bge-m3",
-      "https://api.example.com",
+      "https://api.example.com/v1",
       "k",
       2,
       fetchFn as FetchFn,
@@ -206,7 +206,7 @@ describe("OpenAIEmbeddingProvider", () => {
     );
     const provider = new OpenAIEmbeddingProvider(
       "bge-m3",
-      "https://api.example.com",
+      "https://api.example.com/v1",
       "k",
       2,
       fetchFn as FetchFn,
@@ -220,7 +220,7 @@ describe("OpenAIEmbeddingProvider", () => {
     const fetchFn = vi.fn(async () => okResponse({ data: [{ embedding: [1, 0], index: 0 }] }));
     const provider = new OpenAIEmbeddingProvider(
       "bge-m3",
-      "https://api.example.com",
+      "https://api.example.com/v1",
       "k",
       2,
       fetchFn as FetchFn,
@@ -303,7 +303,7 @@ describe("embedBatch", () => {
     const fetchFn = vi.fn(async () => {
       throw new Error("Connection refused");
     });
-    const provider = new OpenAIEmbeddingProvider("m", "http://o", "k", 2, fetchFn as FetchFn);
+    const provider = new OpenAIEmbeddingProvider("m", "http://o/v1", "k", 2, fetchFn as FetchFn);
 
     await expect(provider.embedBatch(["a"])).rejects.toThrow(/Connection refused/);
   });
@@ -357,7 +357,7 @@ describe("createEmbeddingProvider factory", () => {
   it("creates an OpenAIEmbeddingProvider for 'openai' with the default width", () => {
     settings.EMBEDDING_DIMENSIONS = defaults.EMBEDDING_DIMENSIONS;
     settings.EMBEDDING_API_KEY = "sk-test";
-    const provider = createEmbeddingProvider("openai", "bge-m3", "https://api.example.com");
+    const provider = createEmbeddingProvider("openai", "bge-m3", "https://api.example.com/v1");
     expect(provider).toBeInstanceOf(OpenAIEmbeddingProvider);
     expect(provider.dimensions).toBe(1024);
     expect(provider.modelId).toBe("openai:bge-m3:1024");
@@ -366,7 +366,7 @@ describe("createEmbeddingProvider factory", () => {
   it("requires EMBEDDING_API_KEY for the openai provider", () => {
     settings.EMBEDDING_API_KEY = null;
     expect(() =>
-      createEmbeddingProvider("openai", "text-embedding-3-small", "https://api.openai.com"),
+      createEmbeddingProvider("openai", "text-embedding-3-small", "https://api.openai.com/v1"),
     ).toThrow(/EMBEDDING_API_KEY is required/);
   });
 
@@ -376,7 +376,7 @@ describe("createEmbeddingProvider factory", () => {
     const provider = createEmbeddingProvider(
       "openai",
       "text-embedding-3-large",
-      "https://api.openai.com",
+      "https://api.openai.com/v1",
     );
     expect(provider.dimensions).toBe(3072);
     expect(provider.modelId).toBe("openai:text-embedding-3-large:3072");

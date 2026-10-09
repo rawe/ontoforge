@@ -14,6 +14,7 @@
  */
 
 import { settings } from "../../../src/config.js";
+import { aiEndpoint } from "../../../src/core/ai.js";
 
 const PROBE_TIMEOUT_MS = 5000;
 
@@ -21,7 +22,7 @@ const PROBE_TIMEOUT_MS = 5000;
  * supports — OpenRouter and Ollama's compatibility layer alike. Probing it
  * keeps the suite free of provider-specific endpoints. */
 function modelsUrl(): string {
-  return `${settings.AI_BASE_URL.replace(/\/+$/, "")}/v1/models`;
+  return `${aiEndpoint(settings.AI_PROVIDER ?? "", settings.AI_BASE_URL)}/models`;
 }
 
 async function probeModel(): Promise<string | null> {
@@ -37,8 +38,9 @@ async function probeModel(): Promise<string | null> {
         `AI integration suite SKIPPED: the configured AI endpoint did not answer.\n` +
         `  Probed GET ${url} — HTTP ${res.status}.\n` +
         `  Provider '${settings.AI_PROVIDER}', model '${model}'.\n` +
-        `  Check that AI_BASE_URL points at the host serving /v1 (without the\n` +
-        `  /v1 itself), and that AI_API_KEY is valid if the endpoint needs one.`
+        `  Check AI_BASE_URL — the Ollama host, or the OpenAI-compatible API base\n` +
+        `  as the provider documents it, version included — and that AI_API_KEY\n` +
+        `  is valid if the endpoint needs one.`
       );
     }
     const payload = (await res.json()) as { data?: { id: string }[] };

@@ -40,7 +40,7 @@ Ask the user:
    - `openai` — OpenAI-compatible API (requires API key)
    - None — skip embedding configuration
 3. **AI provider** — whether they want AI-powered runtime (NL query, entity extraction, chat), and if so which provider:
-   - `ollama` — local Ollama instance (default model: `qwen3:8b`; recommended: `qwen3:14b` or `qwen3:32b` for better quality)
+   - `ollama` — local Ollama instance (ask which model; suggest `qwen3:8b`, or `qwen3:14b` / `qwen3:32b` for better quality)
    - `openai` — OpenAI-compatible API (requires API key)
    - None — skip AI configuration
 4. **Ollama deployment** (if ollama chosen for embeddings or AI) — whether Ollama runs on the host machine or should be added as a Docker container in the compose file.
@@ -55,9 +55,9 @@ Read the template from `templates/docker-compose.yml` and adapt it based on the 
 - If the user wants embeddings, uncomment and configure the `EMBEDDING_*` environment variables on the `ontoforge-server` service.
 - If the user wants Ollama in Docker, uncomment the `ollama` service.
 - If the user wants Ollama on the host (common setup), set `EMBEDDING_BASE_URL` and/or `AI_BASE_URL` to `http://host.docker.internal:11434` (Docker connects to the host's Ollama). The `ollama` service in the compose file is not needed in this case.
-- If the user chose `openai`, set `EMBEDDING_PROVIDER: openai` and note that `EMBEDDING_API_KEY` must be provided (do not write a real key into the file).
-- If the user wants AI, uncomment and configure the `AI_*` environment variables on the `ontoforge-server` service. The same Ollama/host/Docker/OpenAI logic applies as for embeddings.
-- If the user chose `openai` for AI, set `AI_PROVIDER: openai` and note that `AI_API_KEY` must be provided (do not write a real key into the file).
+- If the user chose `openai`, set `EMBEDDING_PROVIDER: openai`, set `EMBEDDING_BASE_URL` to the provider's API base exactly as the provider documents it — including its version, e.g. `https://api.openai.com/v1` (the default) or `https://oai.endpoints.kepler.ai.cloud.ovh.net/v1` — and note that `EMBEDDING_API_KEY` must be provided (do not write a real key into the file). A base URL without its version stops the server at startup.
+- If the user wants AI, uncomment and configure the `AI_*` environment variables on the `ontoforge-server` service, always with the `AI_MODEL` the user chose — it has no default, and the server will not start without it. The same Ollama/host/Docker/OpenAI logic applies as for embeddings.
+- If the user chose `openai` for AI, set `AI_PROVIDER: openai` and `AI_BASE_URL` to the API base including its version (e.g. `https://openrouter.ai/api/v1`), and note that `AI_API_KEY` must be provided (do not write a real key into the file).
 - Adjust port mappings if the user reported conflicts.
 - If the backend service is renamed, update `BACKEND_URL` on the `ontoforge-ui` service to match (e.g. `http://<new-service-name>:8000`).
 
@@ -124,7 +124,7 @@ These are the **only** environment variables recognized by the `ontoforge-server
 | `PORT` | no | `8000` | HTTP server port |
 | `EMBEDDING_PROVIDER` | no | *(disabled)* | `ollama` or `openai` — omit to disable semantic search |
 | `EMBEDDING_MODEL` | no | `bge-m3` | Embedding model name |
-| `EMBEDDING_BASE_URL` | no | `http://localhost:11434` | Embedding provider API base URL |
+| `EMBEDDING_BASE_URL` | no | `http://localhost:11434` (`ollama`), `https://api.openai.com/v1` (`openai`) | Embedding API base as the provider documents it — the Ollama host, or the OpenAI-compatible base including its version |
 | `EMBEDDING_API_KEY` | no | *(none)* | API key — **required** when `EMBEDDING_PROVIDER=openai` |
 | `EMBEDDING_DIMENSIONS` | no | `1024` | Vector dimensions — must match what the model returns |
 | `EMBEDDING_BATCH_SIZE` | no | `1` | Texts per embedding request when many texts are embedded together (positive integer) |
@@ -133,8 +133,8 @@ These are the **only** environment variables recognized by the `ontoforge-server
 | `SEARCH_WORKER_BATCH` | no | `64` | Queued search-indexing items the background worker claims per batch (positive integer; PostgreSQL only) |
 | `SEARCH_POLL_MS` | no | `5000` | Milliseconds the background search worker waits between queue checks when no wake-up arrives (positive integer; PostgreSQL only) |
 | `AI_PROVIDER` | no | *(disabled)* | `ollama` or `openai` — omit to disable AI features |
-| `AI_MODEL` | no | `qwen3:8b` | AI model name (must support tool calling) |
-| `AI_BASE_URL` | no | `http://localhost:11434` | AI provider API base URL |
+| `AI_MODEL` | with `AI_PROVIDER` | *(none)* | AI model name (must support tool calling) |
+| `AI_BASE_URL` | no | `http://localhost:11434` (`ollama`), `https://api.openai.com/v1` (`openai`) | AI API base as the provider documents it — the Ollama host, or the OpenAI-compatible base including its version |
 | `AI_API_KEY` | no | *(none)* | API key — **required** when `AI_PROVIDER=openai` |
 | `AI_REASONING_EFFORT` | no | *(model default)* | `none`, `low`, `medium` or `high` — how hard the model thinks |
 

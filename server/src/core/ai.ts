@@ -3,12 +3,13 @@
  * configurations and saved-query pipelines — plus the language-model
  * provider seam.
  *
- * Two providers, both via OpenAI-compatible chat endpoints at
- * `{AI_BASE_URL}/v1`: `ollama` and `openai`. The value `openai` names the
- * wire protocol, not the vendor — any endpoint speaking it is reachable
- * through it (OpenAI itself, OpenRouter, vLLM, LM Studio, …) by pointing
- * `AI_BASE_URL` at the host that serves `/v1`; it additionally requires
- * `AI_API_KEY`. The engine is LangChain's `ChatOpenAI` (approved stack:
+ * Two providers, both via OpenAI-compatible chat endpoints: `ollama`, whose
+ * `AI_BASE_URL` is the Ollama host (the client appends `/v1`), and `openai`.
+ * The value `openai` names the wire protocol, not the vendor — any endpoint
+ * speaking it is reachable through it (OpenAI itself, OpenRouter, OVHcloud,
+ * vLLM, LM Studio, …) by setting `AI_BASE_URL` to the API base the provider
+ * documents, version included (`https://openrouter.ai/api/v1`); it
+ * additionally requires `AI_API_KEY`. `config.ts` validates both forms. The engine is LangChain's `ChatOpenAI` (approved stack:
  * LangChain.js / LangGraph.js). With no `AI_PROVIDER` configured, no model
  * is installed and every model-running route answers `422 VALIDATION_ERROR`
  * with `details.code: "FEATURE_DISABLED"`; listing agents and serving cards
@@ -74,10 +75,11 @@ export const DEFAULT_AGENT_CONFIG: AgentConfig = {
   tools: null,
 };
 
-/** The API base the chat client sends to: the configured base URL with
- * `/v1` appended. */
-export function aiEndpoint(baseUrl: string): string {
-  return `${baseUrl.replace(/\/+$/, "")}/v1`;
+/** The OpenAI-compatible API base the chat client sends to: an Ollama host
+ * with `/v1` appended, any other base URL as configured. */
+export function aiEndpoint(provider: string, baseUrl: string): string {
+  const base = baseUrl.replace(/\/+$/, "");
+  return provider === "ollama" ? `${base}/v1` : base;
 }
 
 /** Build a chat model from its provider name; throws on unknown names and
@@ -88,7 +90,7 @@ export function createAiModel(
   baseUrl: string,
   options: { maxRetries?: number; maxTokens?: number } = {},
 ): BaseChatModel {
-  const endpoint = aiEndpoint(baseUrl);
+  const endpoint = aiEndpoint(provider, baseUrl);
   const retries = options.maxRetries === undefined ? {} : { maxRetries: options.maxRetries };
   const tokenLimit = options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens };
   // `reasoning_effort` rides in `modelKwargs`, which is spread verbatim into
@@ -144,7 +146,7 @@ export function initAiModel(): void {
   const effort = settings.AI_REASONING_EFFORT;
   console.info(
     `AI model initialized: ${settings.AI_MODEL} ` +
-      `(${settings.AI_PROVIDER} via ${aiEndpoint(settings.AI_BASE_URL)}` +
+      `(${settings.AI_PROVIDER} via ${aiEndpoint(settings.AI_PROVIDER, settings.AI_BASE_URL)}` +
       `${effort === null ? "" : `, reasoning effort ${effort}`})`,
   );
 }

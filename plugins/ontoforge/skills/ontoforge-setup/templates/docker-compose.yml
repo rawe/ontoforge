@@ -31,14 +31,14 @@ services:
       # Semantic search (optional — uncomment to enable)
       # EMBEDDING_PROVIDER: ollama
       # EMBEDDING_MODEL: bge-m3
-      # EMBEDDING_BASE_URL: http://host.docker.internal:11434
+      # EMBEDDING_BASE_URL: http://host.docker.internal:11434  # openai: API base incl. version, e.g. https://api.openai.com/v1
       # EMBEDDING_API_KEY:           # required for openai provider
       # EMBEDDING_DIMENSIONS:        # optional — default 1024; must match the model
       # AI-powered runtime (optional — uncomment to enable)
       # Requires a model with tool calling support.
       # AI_PROVIDER: ollama
       # AI_MODEL: qwen3:8b
-      # AI_BASE_URL: http://host.docker.internal:11434
+      # AI_BASE_URL: http://host.docker.internal:11434  # openai: API base incl. version, e.g. https://openrouter.ai/api/v1
       # AI_API_KEY:              # required for openai provider
       # AI_REASONING_EFFORT:     # none | low | medium | high (unset = model default)
     depends_on:

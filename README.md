@@ -252,7 +252,12 @@ OntoForge has two optional features — **semantic search** and **AI-powered run
 Both features support two provider types:
 
 - **`ollama`** — local inference via [Ollama](https://ollama.com). No API key needed, models run on your machine.
-- **`openai`** — any OpenAI-compatible API (OpenAI, Azure, LiteLLM, vLLM, etc.). Requires an API key.
+- **`openai`** — any OpenAI-compatible API (OpenAI, Azure, OpenRouter, OVHcloud, LiteLLM, vLLM, etc.). Requires an API key.
+
+A base URL is written as the provider documents it: the Ollama host for `ollama`
+(`http://localhost:11434`), the API base including its version for `openai`
+(`https://openrouter.ai/api/v1`). A base URL that breaks this rule stops the server at
+startup with the corrected value in the message.
 
 ### Semantic Search
 
@@ -262,7 +267,7 @@ Find entities by meaning rather than exact keywords — within a single entity t
 |----------|---------|-------------|
 | `EMBEDDING_PROVIDER` | *(unset — disabled)* | `ollama` or `openai` |
 | `EMBEDDING_MODEL` | `bge-m3` | Embedding model name |
-| `EMBEDDING_BASE_URL` | `http://localhost:11434` | Embedding API endpoint |
+| `EMBEDDING_BASE_URL` | `http://localhost:11434` (`ollama`), `https://api.openai.com/v1` (`openai`) | Embedding API base, as the provider documents it |
 | `EMBEDDING_API_KEY` | *(unset)* | API key (required for `openai` provider) |
 | `EMBEDDING_DIMENSIONS` | `1024` | Vector dimensions — must match what the model returns |
 | `EMBEDDING_BATCH_SIZE` | `1` | Texts per embedding request when many texts are embedded together (positive integer; cloud endpoints typically take 16 or more) |
@@ -277,8 +282,8 @@ Natural language query, entity extraction from text, and conversational chat ove
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AI_PROVIDER` | *(unset — disabled)* | `ollama` or `openai` |
-| `AI_MODEL` | `qwen3:8b` | AI model name (must support tool calling) |
-| `AI_BASE_URL` | `http://localhost:11434` | AI model API endpoint |
+| `AI_MODEL` | *(required with `AI_PROVIDER`)* | AI model name (must support tool calling) |
+| `AI_BASE_URL` | `http://localhost:11434` (`ollama`), `https://api.openai.com/v1` (`openai`) | AI model API base, as the provider documents it |
 | `AI_API_KEY` | *(unset)* | API key (required for `openai` provider) |
 | `AI_REASONING_EFFORT` | *(unset — model default)* | `none`, `low`, `medium` or `high` — how hard the model thinks |
 

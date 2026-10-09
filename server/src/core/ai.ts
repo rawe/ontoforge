@@ -3,23 +3,30 @@
  * configurations and saved-query pipelines — plus the language-model
  * provider seam.
  *
- * Two providers, both via OpenAI-compatible chat endpoints at
- * `{AI_BASE_URL}/v1`: `ollama` and `openai`. The value `openai` names the
- * wire protocol, not the vendor — any endpoint speaking it is reachable
- * through it (OpenAI itself, OpenRouter, vLLM, LM Studio, …) by pointing
- * `AI_BASE_URL` at the host that serves `/v1`; it additionally requires
- * `AI_API_KEY`. The engine is LangChain's `ChatOpenAI` (approved stack:
- * LangChain.js / LangGraph.js). With no `AI_PROVIDER` configured, no model
- * is installed and every model-running route answers `422 VALIDATION_ERROR`
- * with `details.code: "FEATURE_DISABLED"`; listing agents and serving cards
- * keep working. Tests inject a fake model via `setAiModel`.
+ * Three providers. Two speak the OpenAI-compatible chat protocol through
+ * LangChain's `ChatOpenAI`: `ollama`, whose `AI_BASE_URL` is the Ollama host
+ * (the client appends `/v1`), and `openai`. The value `openai` names the wire
+ * protocol, not the vendor — any endpoint speaking it is reachable through it
+ * (OpenAI itself, OpenRouter, OVHcloud, vLLM, LM Studio, …) by setting
+ * `AI_BASE_URL` to the API base the provider documents, version included
+ * (`https://openrouter.ai/api/v1`). The third, `anthropic`, speaks
+ * Anthropic's own Messages API through `ChatAnthropic`; its `AI_BASE_URL` is
+ * the API host. `openai` and `anthropic` require `AI_API_KEY`; `config.ts`
+ * validates every base URL (approved stack: LangChain.js / LangGraph.js).
+ * With no `AI_PROVIDER` configured, no model is installed and every
+ * model-running route answers `422 VALIDATION_ERROR` with
+ * `details.code: "FEATURE_DISABLED"`; listing agents and serving cards keep
+ * working. Tests inject a fake model via `setAiModel`.
  *
  * `AI_REASONING_EFFORT` optionally fixes how hard the model thinks — `none`,
- * `low`, `medium` or `high`, validated at config load. It is sent verbatim to
- * both providers; unset sends nothing and leaves the model at its own default.
+ * `low`, `medium` or `high`, validated at config load. The OpenAI-compatible
+ * providers receive it verbatim; `anthropic` receives it as Anthropic's
+ * thinking mode and effort (`anthropicReasoning`). Unset sends nothing and
+ * leaves the model at its own default.
  */
 
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import { ChatAnthropic } from "@langchain/anthropic";
 import { ChatOpenAI } from "@langchain/openai";
 
 import { settings } from "../config.js";
@@ -74,6 +81,13 @@ export const DEFAULT_AGENT_CONFIG: AgentConfig = {
   tools: null,
 };
 
+/** The API base the chat client sends to: an Ollama host with `/v1`
+ * appended, any other base URL as configured. */
+export function aiEndpoint(provider: string, baseUrl: string): string {
+  const base = baseUrl.replace(/\/+$/, "");
+  return provider === "ollama" ? `${base}/v1` : base;
+}
+
 /** Build a chat model from its provider name; throws on unknown names and
  * missing credentials — startup fails loudly rather than serving degraded. */
 export function createAiModel(
@@ -82,7 +96,7 @@ export function createAiModel(
   baseUrl: string,
   options: { maxRetries?: number; maxTokens?: number } = {},
 ): BaseChatModel {
-  const base = baseUrl.replace(/\/+$/, "");
+  const endpoint = aiEndpoint(provider, baseUrl);
   const retries = options.maxRetries === undefined ? {} : { maxRetries: options.maxRetries };
   const tokenLimit = options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens };
   // `reasoning_effort` rides in `modelKwargs`, which is spread verbatim into
@@ -103,7 +117,7 @@ export function createAiModel(
     return new ChatOpenAI({
       model: modelName,
       apiKey: "ollama",
-      configuration: { baseURL: `${base}/v1`, ...retries },
+      configuration: { baseURL: endpoint, ...retries },
       ...retries,
       ...tokenLimit,
       ...reasoning,
@@ -117,13 +131,65 @@ export function createAiModel(
     return new ChatOpenAI({
       model: modelName,
       apiKey,
-      configuration: { baseURL: `${base}/v1`, ...retries },
+      configuration: { baseURL: endpoint, ...retries },
       ...retries,
       ...tokenLimit,
       ...reasoning,
     });
   }
+  if (provider === "anthropic") {
+    const apiKey = settings.AI_API_KEY;
+    if (!apiKey) {
+      throw new Error("AI_API_KEY is required for the anthropic provider");
+    }
+    return new ChatAnthropic({
+      model: modelName,
+      apiKey,
+      anthropicApiUrl: endpoint,
+      maxTokens: options.maxTokens ?? ANTHROPIC_MAX_TOKENS,
+      ...retries,
+      ...anthropicReasoning(modelName, effort),
+    });
+  }
   throw new Error(`Unknown AI provider: '${provider}'`);
+}
+
+/** The Messages API requires an output limit. LangChain's own per-model
+ * table falls back to 4,096 for a model it does not list — too tight once
+ * the model thinks — so every Claude model gets the limit that table gives
+ * the current ones. */
+const ANTHROPIC_MAX_TOKENS = 16_384;
+
+/** Current Claude models that reject `disabled`: thinking stays on. */
+const KEEPS_THINKING = new Set([
+  "claude-opus-5-5",
+  "claude-sonnet-5-5",
+  "claude-fable-5-1",
+  "claude-mythos-5-1",
+]);
+
+/** Whether the model keeps thinking even for `AI_REASONING_EFFORT=none`. */
+export function anthropicKeepsThinking(modelName: string): boolean {
+  return KEEPS_THINKING.has(modelName);
+}
+
+/** `AI_REASONING_EFFORT` in Anthropic's terms: a graded level is adaptive
+ * thinking at that effort, unset sends nothing, and `none` switches thinking
+ * off — or, on a model that keeps thinking, runs it at the lowest effort
+ * instead (startup warns). */
+export function anthropicReasoning(
+  modelName: string,
+  effort: string | null,
+): {
+  thinking?: { type: "adaptive" } | { type: "disabled" };
+  outputConfig?: { effort: "low" | "medium" | "high" };
+} {
+  if (effort === null) return {};
+  if (effort === "none") {
+    if (anthropicKeepsThinking(modelName)) return { thinking: { type: "adaptive" }, outputConfig: { effort: "low" } };
+    return { thinking: { type: "disabled" } };
+  }
+  return { thinking: { type: "adaptive" }, outputConfig: { effort: effort as "low" | "medium" | "high" } };
 }
 
 let model: BaseChatModel | null = null;
@@ -138,9 +204,15 @@ export function initAiModel(): void {
   const effort = settings.AI_REASONING_EFFORT;
   console.info(
     `AI model initialized: ${settings.AI_MODEL} ` +
-      `(${settings.AI_PROVIDER} via ${settings.AI_BASE_URL}` +
+      `(${settings.AI_PROVIDER} via ${aiEndpoint(settings.AI_PROVIDER, settings.AI_BASE_URL)}` +
       `${effort === null ? "" : `, reasoning effort ${effort}`})`,
   );
+  if (settings.AI_PROVIDER === "anthropic" && effort === "none" && anthropicKeepsThinking(settings.AI_MODEL)) {
+    console.warn(
+      `AI_REASONING_EFFORT=none: ${settings.AI_MODEL} does not run without thinking, ` +
+        "so it thinks at effort low instead",
+    );
+  }
 }
 
 export function closeAiModel(): void {

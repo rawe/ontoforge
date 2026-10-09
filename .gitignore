@@ -44,6 +44,9 @@ neo4j/logs/
 .tmp/
 .scratch/
 
+#launcher
+.claude/launch.json
+
 # Default output of the ontoforge-sync export scripts. Anchored to the repo
 # root on purpose: an unanchored pattern would also swallow plugins/ontoforge/.
 /ontoforge/

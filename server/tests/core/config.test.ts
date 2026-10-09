@@ -24,7 +24,7 @@ describe("config defaults", () => {
     expect(settings.DOCUMENT_CHUNK_OVERLAP).toBe(200);
 
     expect(settings.AI_PROVIDER).toBeNull();
-    expect(settings.AI_MODEL).toBe("qwen3:8b");
+    expect(settings.AI_MODEL).toBe("");
     expect(settings.AI_BASE_URL).toBe("http://localhost:11434");
     expect(settings.AI_API_KEY).toBeNull();
     expect(settings.AI_REASONING_EFFORT).toBeNull();
@@ -52,7 +52,7 @@ describe("config env overrides", () => {
       DOCUMENT_CHUNK_OVERLAP: "50",
       AI_PROVIDER: "openai",
       AI_MODEL: "gpt",
-      AI_BASE_URL: "http://ai:4321",
+      AI_BASE_URL: "http://ai:4321/v1",
       AI_API_KEY: "akey",
       AI_REASONING_EFFORT: "high",
       PUBLIC_URL: "https://onto.example.com",
@@ -74,7 +74,7 @@ describe("config env overrides", () => {
     expect(settings.DOCUMENT_CHUNK_OVERLAP).toBe(50);
     expect(settings.AI_PROVIDER).toBe("openai");
     expect(settings.AI_MODEL).toBe("gpt");
-    expect(settings.AI_BASE_URL).toBe("http://ai:4321");
+    expect(settings.AI_BASE_URL).toBe("http://ai:4321/v1");
     expect(settings.AI_API_KEY).toBe("akey");
     expect(settings.AI_REASONING_EFFORT).toBe("high");
     expect(settings.PUBLIC_URL).toBe("https://onto.example.com");
@@ -116,6 +116,79 @@ describe("config env overrides", () => {
   });
 });
 
+
+describe("provider base URLs", () => {
+  it("default to the provider's own endpoint", () => {
+    expect(loadSettings({ AI_PROVIDER: "ollama", AI_MODEL: "m" }).AI_BASE_URL).toBe("http://localhost:11434");
+    expect(loadSettings({ AI_PROVIDER: "openai", AI_MODEL: "gpt" }).AI_BASE_URL).toBe(
+      "https://api.openai.com/v1",
+    );
+    expect(loadSettings({ EMBEDDING_PROVIDER: "openai" }).EMBEDDING_BASE_URL).toBe(
+      "https://api.openai.com/v1",
+    );
+    expect(loadSettings({ AI_PROVIDER: "anthropic", AI_MODEL: "m" }).AI_BASE_URL).toBe(
+      "https://api.anthropic.com",
+    );
+  });
+
+  it("take an OpenAI-compatible base as the provider documents it, version included", () => {
+    for (const url of [
+      "https://openrouter.ai/api/v1",
+      "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/",
+      "https://generativelanguage.googleapis.com/v1beta/openai",
+    ]) {
+      expect(loadSettings({ AI_PROVIDER: "openai", AI_MODEL: "m", AI_BASE_URL: url }).AI_BASE_URL).toBe(url);
+      expect(loadSettings({ EMBEDDING_PROVIDER: "openai", EMBEDDING_BASE_URL: url }).EMBEDDING_BASE_URL).toBe(url);
+    }
+  });
+
+  it("reject an OpenAI-compatible base without its version, naming the corrected value", () => {
+    expect(() =>
+      loadSettings({ AI_PROVIDER: "openai", AI_MODEL: "m", AI_BASE_URL: "https://openrouter.ai/api" }),
+    ).toThrow(/AI_BASE_URL .*'https:\/\/openrouter\.ai\/api\/v1'/);
+    expect(() =>
+      loadSettings({ EMBEDDING_PROVIDER: "openai", EMBEDDING_BASE_URL: "https://oai.endpoints.kepler.ai.cloud.ovh.net/" }),
+    ).toThrow(/EMBEDDING_BASE_URL .*'https:\/\/oai\.endpoints\.kepler\.ai\.cloud\.ovh\.net\/v1'/);
+  });
+
+  it("reject an Ollama host given with an API path", () => {
+    expect(() => loadSettings({ AI_PROVIDER: "ollama", AI_MODEL: "m", AI_BASE_URL: "http://localhost:11434/v1" })).toThrow(
+      /AI_BASE_URL .*'http:\/\/localhost:11434'/,
+    );
+    expect(() =>
+      loadSettings({ EMBEDDING_PROVIDER: "ollama", EMBEDDING_BASE_URL: "http://localhost:11434/v1/" }),
+    ).toThrow(/EMBEDDING_BASE_URL/);
+  });
+
+  it("reject an Anthropic host given with an API path", () => {
+    expect(() =>
+      loadSettings({ AI_PROVIDER: "anthropic", AI_MODEL: "m", AI_BASE_URL: "https://api.anthropic.com/v1/" }),
+    ).toThrow(/AI_BASE_URL must be the Anthropic API host .*'https:\/\/api\.anthropic\.com'/);
+  });
+
+  it("reject a value that is not an http(s) URL", () => {
+    expect(() => loadSettings({ AI_PROVIDER: "ollama", AI_MODEL: "m", AI_BASE_URL: "localhost:11434" })).toThrow(
+      /AI_BASE_URL is not an http\(s\) URL/,
+    );
+    expect(() => loadSettings({ EMBEDDING_PROVIDER: "openai", EMBEDDING_BASE_URL: "not a url" })).toThrow(
+      /EMBEDDING_BASE_URL is not an http\(s\) URL/,
+    );
+  });
+
+  it("are not checked while their provider is unset", () => {
+    expect(loadSettings({ AI_BASE_URL: "https://openrouter.ai/api" }).AI_BASE_URL).toBe("https://openrouter.ai/api");
+  });
+});
+
+describe("AI model", () => {
+  it("has no default: every configured provider must name its model", () => {
+    for (const provider of ["ollama", "openai", "anthropic"]) {
+      expect(() => loadSettings({ AI_PROVIDER: provider })).toThrow(
+        /AI_MODEL is required when AI_PROVIDER is set/,
+      );
+    }
+  });
+});
 
 describe("decision provider configuration", () => {
   it("is optional and has a default model identifier", () => {

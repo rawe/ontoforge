@@ -2,9 +2,10 @@
  * Embedding provider seam and implementations (`core/embedding` in the
  * module layout).
  *
- * Two providers: `ollama` (native `/api/embed`) and `openai`
- * (OpenAI-compatible `/v1/embeddings` — works with OpenAI, Azure, vLLM,
- * LM Studio, …). Both send a list of texts per request.
+ * Two providers: `ollama` (native `/api/embed` on the Ollama host) and
+ * `openai` (OpenAI-compatible `/embeddings` below the documented API base,
+ * version included — works with OpenAI, Azure, OVHcloud, vLLM, LM Studio,
+ * …). Both send a list of texts per request.
  *
  * Two ways to call them:
  * - `embed(text)` — one text; a failed call is LOGGED and yields `null`, and
@@ -55,17 +56,19 @@ const NO_BATCHING: Batching = { batchSize: 1, concurrency: 1 };
 /** Shared request plumbing; subclasses only speak their wire format. */
 abstract class HttpEmbeddingProvider implements EmbeddingProvider {
   readonly modelId: string;
-  protected readonly baseUrl: string;
+  /** The URL every request is sent to: the base URL plus the provider's path. */
+  readonly endpoint: string;
 
   constructor(
     providerName: string,
+    path: string,
     protected readonly model: string,
     baseUrl: string,
     readonly dimensions: number,
     protected readonly fetchFn: FetchFn,
     private readonly batching: Batching,
   ) {
-    this.baseUrl = baseUrl.replace(/\/+$/, "");
+    this.endpoint = `${baseUrl.replace(/\/+$/, "")}${path}`;
     this.modelId = `${providerName}:${model}:${dimensions}`;
   }
 
@@ -160,12 +163,12 @@ export class OllamaEmbeddingProvider extends HttpEmbeddingProvider {
     fetchFn: FetchFn = fetch,
     batching: Batching = NO_BATCHING,
   ) {
-    super("ollama", model, baseUrl, dimensions, fetchFn, batching);
+    super("ollama", "/api/embed", model, baseUrl, dimensions, fetchFn, batching);
   }
 
   protected async request(texts: string[], signal: AbortSignal): Promise<number[][]> {
     const payload = (await this.post(
-      `${this.baseUrl}/api/embed`,
+      this.endpoint,
       {},
       { model: this.model, input: texts },
       signal,
@@ -186,12 +189,12 @@ export class OpenAIEmbeddingProvider extends HttpEmbeddingProvider {
     fetchFn: FetchFn = fetch,
     batching: Batching = NO_BATCHING,
   ) {
-    super("openai", model, baseUrl, dimensions, fetchFn, batching);
+    super("openai", "/embeddings", model, baseUrl, dimensions, fetchFn, batching);
   }
 
   protected async request(texts: string[], signal: AbortSignal): Promise<number[][]> {
     const payload = (await this.post(
-      `${this.baseUrl}/v1/embeddings`,
+      this.endpoint,
       { authorization: `Bearer ${this.apiKey}` },
       { input: texts, model: this.model },
       signal,
@@ -245,7 +248,7 @@ export function createEmbeddingProvider(
   model: string,
   baseUrl: string,
   fetchFn: FetchFn = fetch,
-): EmbeddingProvider {
+): EmbeddingProvider & { readonly endpoint: string } {
   const dims = settings.EMBEDDING_DIMENSIONS;
   const batching: Batching = {
     batchSize: settings.EMBEDDING_BATCH_SIZE,
@@ -261,6 +264,9 @@ export function createEmbeddingProvider(
     }
     return new OpenAIEmbeddingProvider(model, baseUrl, apiKey, dims, fetchFn, batching);
   }
+  if (provider === "anthropic") {
+    throw new Error("EMBEDDING_PROVIDER cannot be anthropic: Anthropic offers no embeddings API");
+  }
   throw new Error(`Unknown embedding provider: '${provider}'`);
 }
 
@@ -272,14 +278,15 @@ export function initEmbeddingProvider(): void {
     console.info("EMBEDDING_PROVIDER not set — semantic search disabled");
     return;
   }
-  provider = createEmbeddingProvider(
+  const created = createEmbeddingProvider(
     settings.EMBEDDING_PROVIDER,
     settings.EMBEDDING_MODEL,
     settings.EMBEDDING_BASE_URL,
   );
+  provider = created;
   console.info(
-    `Embedding provider initialized: ${provider.modelId} ` +
-      `(batch size ${settings.EMBEDDING_BATCH_SIZE}, concurrency ${settings.EMBEDDING_CONCURRENCY})`,
+    `Embedding provider initialized: ${created.modelId} ` +
+      `(via ${created.endpoint}, batch size ${settings.EMBEDDING_BATCH_SIZE}, concurrency ${settings.EMBEDDING_CONCURRENCY})`,
   );
 }
 

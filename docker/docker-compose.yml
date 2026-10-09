@@ -58,7 +58,9 @@ services:
       # EMBEDDING_BASE_URL: http://host.docker.internal:11434
       # If Ollama runs as a container in this compose (see ollama service below):
       # EMBEDDING_BASE_URL: http://ollama:11434
-      # For OpenAI-compatible providers: set EMBEDDING_PROVIDER to "openai"
+      # For OpenAI-compatible providers: set EMBEDDING_PROVIDER to "openai" and
+      # EMBEDDING_BASE_URL to the API base including its version, e.g.
+      # https://api.openai.com/v1 (the default) or https://openrouter.ai/api/v1
       # EMBEDDING_API_KEY: sk-...
       # EMBEDDING_DIMENSIONS: 1024
       # AI-powered runtime (optional — remove comments to enable)
@@ -70,7 +72,11 @@ services:
       # AI_BASE_URL: http://host.docker.internal:11434
       # If Ollama runs as a container in this compose (see ollama service below):
       # AI_BASE_URL: http://ollama:11434
-      # For OpenAI-compatible providers: set AI_PROVIDER to "openai"
+      # For OpenAI-compatible providers: set AI_PROVIDER to "openai" and
+      # AI_BASE_URL to the API base including its version, e.g.
+      # https://api.openai.com/v1 (the default) or https://openrouter.ai/api/v1
+      # For Claude: set AI_PROVIDER to "anthropic" (AI_BASE_URL defaults to
+      # https://api.anthropic.com)
       # AI_API_KEY: sk-...
       # Model thinking effort: none, low, medium or high (unset = model default)
       # AI_REASONING_EFFORT: medium

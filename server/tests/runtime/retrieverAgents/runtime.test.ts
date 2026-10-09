@@ -23,6 +23,7 @@ vi.mock("../../../src/config.js", () => ({
 vi.mock("../../../src/core/ai.js", () => ({ createAiModel: vi.fn(() => fake) }));
 vi.mock("../../../src/runtime/search/indexSearch.js", () => engine);
 
+import { settings } from "../../../src/config.js";
 import { createAiModel } from "../../../src/core/ai.js";
 import type { RuntimeStore, SearchIndexRecord, SearchIndexStore } from "../../../src/core/ports.js";
 import type { LoadedSchema } from "../../../src/runtime/schemaCache.js";
@@ -112,6 +113,18 @@ describe("retriever agent pipeline", () => {
     expect(calls[0]!.input).toBe(fake.invoke.mock.calls[0]![0][1].content);
     expect(calls[1]!.systemPrompt).toBe(fake.stream.mock.calls[0]![0][0].content);
     expect(events.at(-1)).toEqual({ type: "meta", turnToken: expect.any(String) });
+  });
+
+  it("hands Anthropic the plan schema as its own output format", async () => {
+    settings.AI_PROVIDER = "anthropic";
+    try {
+      await run("Everyone in Berlin");
+    } finally {
+      settings.AI_PROVIDER = "fake";
+    }
+    expect(fake.withConfig).toHaveBeenCalledWith({
+      outputConfig: { format: { type: "json_schema", schema: PLANNER_RESPONSE_FORMAT.json_schema.schema } },
+    });
   });
 
   it("without diagnostics streams progress, answer and only the turn token as metadata", async () => {

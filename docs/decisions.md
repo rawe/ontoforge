@@ -629,6 +629,16 @@ for. Development presets are committed under `env/` and passed to `./dev.sh`, so
 launcher script carries configuration values of its own — a value that decides how the
 system runs must be readable in a file, not buried in a script that silently outranks one.
 
+**A provider's base URL is written as the provider documents it, and a wrong form fails
+the boot.** An OpenAI-compatible base names its API version (`https://openrouter.ai/api/v1`)
+and the server appends only the operation; an Ollama or Anthropic base is the host, and
+the server appends that provider's own paths. Each provider has a default base, so a hosted default needs
+none. A base that breaks its provider's form — an OpenAI-compatible one without a version,
+an Ollama or Anthropic one with an API path, a value that is not an http(s) URL — fails the boot with
+the corrected value in the message, instead of answering 404 on the first model call. The chat
+model has no default; every configured provider must name one. Deliberation:
+[adr/0024](adr/0024-provider-base-urls-as-documented.md).
+
 **One embedding model per server; each semantic generation records the model it was
 built with.** Search merges indices by similarity, which is one scale only under one
 model. A changed model builds new semantic generations of every index beside the ready

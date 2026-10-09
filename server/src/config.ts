@@ -86,7 +86,65 @@ function optOneOf(
   return value;
 }
 
+/** Where a provider is reached when no base URL is configured. */
+const DEFAULT_BASE_URLS: Record<string, string> = {
+  ollama: "http://localhost:11434",
+  openai: "https://api.openai.com/v1",
+  anthropic: "https://api.anthropic.com",
+};
+
+/** The providers whose base URL is a host: the server appends the API path. */
+const HOST_PROVIDERS: Record<string, string> = { ollama: "Ollama", anthropic: "Anthropic API" };
+
+/**
+ * A provider's base URL, written as that provider documents it: an
+ * OpenAI-compatible API base names its version (`…/v1`), an Ollama or
+ * Anthropic host does not, because the server appends their own paths. Either mistake would
+ * otherwise only surface as a 404 on the first model call, so it fails the
+ * boot and names the corrected value.
+ */
+function baseUrl(env: NodeJS.ProcessEnv, name: string, provider: string | null): string {
+  const value =
+    optStr(env, name) ?? DEFAULT_BASE_URLS[provider ?? "ollama"] ?? DEFAULT_BASE_URLS["ollama"]!;
+  if (provider === null || (provider !== "openai" && !(provider in HOST_PROVIDERS))) return value;
+  let url: URL | null = null;
+  try {
+    url = new URL(value);
+  } catch {
+    // Reported below.
+  }
+  if (url === null || (url.protocol !== "http:" && url.protocol !== "https:")) {
+    throw new Error(`Environment variable ${name} is not an http(s) URL: '${value}'`);
+  }
+  const versioned = url.pathname.split("/").some((segment) => /^v\d/.test(segment));
+  if (provider === "openai" && !versioned) {
+    throw new Error(
+      `Environment variable ${name} must be the OpenAI-compatible API base including its ` +
+        `version, as the provider documents it — e.g. '${value.replace(/\/+$/, "")}/v1': '${value}'`,
+    );
+  }
+  if (provider !== "openai" && versioned) {
+    throw new Error(
+      `Environment variable ${name} must be the ${HOST_PROVIDERS[provider]} host without an ` +
+        `API path — e.g. '${url.origin}': '${value}'`,
+    );
+  }
+  return value;
+}
+
+/** The chat model has no default: a configured provider must name one.
+ * Empty while no provider is configured, since nothing reads it then. */
+function aiModel(env: NodeJS.ProcessEnv, provider: string | null): string {
+  const value = optStr(env, "AI_MODEL");
+  if (value === null && provider !== null) {
+    throw new Error("Environment variable AI_MODEL is required when AI_PROVIDER is set");
+  }
+  return value ?? "";
+}
+
 export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
+  const embeddingProvider = optStr(env, "EMBEDDING_PROVIDER");
+  const aiProvider = optStr(env, "AI_PROVIDER");
   return {
     DB_BACKEND: str(env, "DB_BACKEND", "postgres"),
     DB_URI: str(env, "DB_URI", "postgresql://localhost:5432/ontoforge"),
@@ -94,9 +152,9 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
     DB_PASSWORD: str(env, "DB_PASSWORD", "ontoforge_dev"),
     PORT: int(env, "PORT", 8000),
 
-    EMBEDDING_PROVIDER: optStr(env, "EMBEDDING_PROVIDER"),
+    EMBEDDING_PROVIDER: embeddingProvider,
     EMBEDDING_MODEL: str(env, "EMBEDDING_MODEL", "bge-m3"),
-    EMBEDDING_BASE_URL: str(env, "EMBEDDING_BASE_URL", "http://localhost:11434"),
+    EMBEDDING_BASE_URL: baseUrl(env, "EMBEDDING_BASE_URL", embeddingProvider),
     EMBEDDING_API_KEY: optStr(env, "EMBEDDING_API_KEY"),
     EMBEDDING_DIMENSIONS: positiveInt(env, "EMBEDDING_DIMENSIONS", 1024),
     // Texts per provider request, and requests in flight at once, when the
@@ -114,9 +172,9 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
     SEARCH_WORKER_BATCH: positiveInt(env, "SEARCH_WORKER_BATCH", 64),
     SEARCH_POLL_MS: positiveInt(env, "SEARCH_POLL_MS", 5000),
 
-    AI_PROVIDER: optStr(env, "AI_PROVIDER"),
-    AI_MODEL: str(env, "AI_MODEL", "qwen3:8b"),
-    AI_BASE_URL: str(env, "AI_BASE_URL", "http://localhost:11434"),
+    AI_PROVIDER: aiProvider,
+    AI_MODEL: aiModel(env, aiProvider),
+    AI_BASE_URL: baseUrl(env, "AI_BASE_URL", aiProvider),
     AI_API_KEY: optStr(env, "AI_API_KEY"),
     AI_REASONING_EFFORT: optOneOf(env, "AI_REASONING_EFFORT", AI_REASONING_EFFORTS),
 

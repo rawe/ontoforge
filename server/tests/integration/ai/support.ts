@@ -14,14 +14,25 @@
  */
 
 import { settings } from "../../../src/config.js";
+import { aiEndpoint } from "../../../src/core/ai.js";
 
 const PROBE_TIMEOUT_MS = 5000;
 
-/** The OpenAI-compatible model listing, served by every provider this suite
- * supports — OpenRouter and Ollama's compatibility layer alike. Probing it
- * keeps the suite free of provider-specific endpoints. */
+/** The model listing: below the chat endpoint for the OpenAI-compatible
+ * providers — OpenRouter and Ollama's compatibility layer alike — and at
+ * `/v1/models` on the Anthropic host. All answer `{ data: [{ id }] }`. */
 function modelsUrl(): string {
-  return `${settings.AI_BASE_URL.replace(/\/+$/, "")}/v1/models`;
+  const endpoint = aiEndpoint(settings.AI_PROVIDER ?? "", settings.AI_BASE_URL);
+  return settings.AI_PROVIDER === "anthropic" ? `${endpoint}/v1/models` : `${endpoint}/models`;
+}
+
+/** Anthropic authenticates with its own header; the others take a bearer token. */
+function authHeaders(): Record<string, string> {
+  const key = settings.AI_API_KEY;
+  if (!key) return {};
+  return settings.AI_PROVIDER === "anthropic"
+    ? { "x-api-key": key, "anthropic-version": "2023-06-01" }
+    : { authorization: `Bearer ${key}` };
 }
 
 async function probeModel(): Promise<string | null> {
@@ -29,7 +40,7 @@ async function probeModel(): Promise<string | null> {
   const model = settings.AI_MODEL;
   try {
     const res = await fetch(url, {
-      headers: settings.AI_API_KEY ? { authorization: `Bearer ${settings.AI_API_KEY}` } : {},
+      headers: authHeaders(),
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
     if (!res.ok) {
@@ -37,8 +48,9 @@ async function probeModel(): Promise<string | null> {
         `AI integration suite SKIPPED: the configured AI endpoint did not answer.\n` +
         `  Probed GET ${url} — HTTP ${res.status}.\n` +
         `  Provider '${settings.AI_PROVIDER}', model '${model}'.\n` +
-        `  Check that AI_BASE_URL points at the host serving /v1 (without the\n` +
-        `  /v1 itself), and that AI_API_KEY is valid if the endpoint needs one.`
+        `  Check AI_BASE_URL — the Ollama or Anthropic host, or the\n` +
+        `  OpenAI-compatible API base as the provider documents it, version\n` +
+        `  included — and that AI_API_KEY is valid if the endpoint needs one.`
       );
     }
     const payload = (await res.json()) as { data?: { id: string }[] };
@@ -76,7 +88,7 @@ export async function aiSuiteSkipReason(): Promise<string | null> {
       `AI integration suite SKIPPED: no AI_PROVIDER is configured.\n` +
       `  The suite reads the env file the npm script names — env/test-ai.env by\n` +
       `  default. Set AI_PROVIDER, AI_MODEL and AI_BASE_URL there (plus\n` +
-      `  AI_API_KEY for the 'openai' provider). The model must support tool\n` +
+      `  AI_API_KEY for 'openai' and 'anthropic'). The model must support tool\n` +
       `  calling. See docs/workflows/testing.md.`
     );
   }

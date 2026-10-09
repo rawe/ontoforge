@@ -16,6 +16,10 @@
  * found entities and calls no answer model.
  */
 
+import type { ChatAnthropic } from "@langchain/anthropic";
+import type { BaseLanguageModelInput } from "@langchain/core/language_models/base";
+import type { AIMessageChunk } from "@langchain/core/messages";
+import type { Runnable } from "@langchain/core/runnables";
 import type { ChatOpenAI } from "@langchain/openai";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
@@ -172,7 +176,14 @@ function models() {
     throw new ValidationError("AI feature is disabled (AI_PROVIDER not configured)", { code: "FEATURE_DISABLED" });
   }
   const model = createAiModel(provider, settings.AI_MODEL, settings.AI_BASE_URL, { maxRetries: 0 });
-  const plannerModel = (model as ChatOpenAI).withConfig({ response_format: PLANNER_RESPONSE_FORMAT });
+  // Anthropic takes the plan schema as its own output format; every other
+  // provider keeps the OpenAI-compatible response format.
+  const plannerModel: Runnable<BaseLanguageModelInput, AIMessageChunk> =
+    provider === "anthropic"
+      ? (model as ChatAnthropic).withConfig({
+          outputConfig: { format: { type: "json_schema", schema: PLANNER_RESPONSE_FORMAT.json_schema.schema } },
+        })
+      : (model as ChatOpenAI).withConfig({ response_format: PLANNER_RESPONSE_FORMAT });
   return { model, plannerModel };
 }
 
@@ -220,8 +231,9 @@ export async function planQuestion(planning: Planning): Promise<{ plan: Plan; no
     let response;
     try {
       response = await plannerModel.invoke([new SystemMessage(systemPrompt), new HumanMessage(input)], { signal });
-    } catch {
+    } catch (error) {
       signal.throwIfAborted();
+      console.warn(`Planning model failed: ${error instanceof Error ? error.message : String(error)}`);
       throw new ValidationError("Planning model failed; no automatic retry.");
     }
     const output = text(response.content);
@@ -440,8 +452,9 @@ export async function chat(
               await emit({ type: "delta", text: delta });
             }
           }
-        } catch {
+        } catch (error) {
           signal.throwIfAborted();
+          console.warn(`Response model failed: ${error instanceof Error ? error.message : String(error)}`);
           throw new ValidationError("Response model failed; no automatic retry.");
         }
         io.push({ phase: "answer", ...modelInputTrace(ANSWER, input), output: output.slice(0, OUTPUT_TRACE_CHARACTERS), usage });

@@ -9,7 +9,7 @@ described in [docs/](../docs/README.md).
 - [Node.js](https://nodejs.org/) ≥ 22 LTS and npm
 - Docker (for the PostgreSQL dev database)
 - Optional: [Ollama](https://ollama.com/) for semantic search and AI capabilities
-  (`bge-m3` and `qwen3:8b` by default)
+  (`bge-m3` by default for embeddings; the chat model is always configured)
 
 ## Quickstart
 

@@ -148,7 +148,7 @@ export function createAiModel(
       anthropicApiUrl: endpoint,
       maxTokens: options.maxTokens ?? ANTHROPIC_MAX_TOKENS,
       ...retries,
-      ...anthropicReasoning(effort),
+      ...anthropicReasoning(modelName, effort),
     });
   }
   throw new Error(`Unknown AI provider: '${provider}'`);
@@ -160,14 +160,35 @@ export function createAiModel(
  * the current ones. */
 const ANTHROPIC_MAX_TOKENS = 16_384;
 
+/** Current Claude models that reject `disabled`: thinking stays on. */
+const KEEPS_THINKING = new Set([
+  "claude-opus-5-5",
+  "claude-sonnet-5-5",
+  "claude-fable-5-1",
+  "claude-mythos-5-1",
+]);
+
+/** Whether the model keeps thinking even for `AI_REASONING_EFFORT=none`. */
+export function anthropicKeepsThinking(modelName: string): boolean {
+  return KEEPS_THINKING.has(modelName);
+}
+
 /** `AI_REASONING_EFFORT` in Anthropic's terms: a graded level is adaptive
- * thinking at that effort, `none` switches thinking off, unset sends nothing. */
-export function anthropicReasoning(effort: string | null): {
+ * thinking at that effort, unset sends nothing, and `none` switches thinking
+ * off — or, on a model that keeps thinking, runs it at the lowest effort
+ * instead (startup warns). */
+export function anthropicReasoning(
+  modelName: string,
+  effort: string | null,
+): {
   thinking?: { type: "adaptive" } | { type: "disabled" };
   outputConfig?: { effort: "low" | "medium" | "high" };
 } {
   if (effort === null) return {};
-  if (effort === "none") return { thinking: { type: "disabled" } };
+  if (effort === "none") {
+    if (anthropicKeepsThinking(modelName)) return { thinking: { type: "adaptive" }, outputConfig: { effort: "low" } };
+    return { thinking: { type: "disabled" } };
+  }
   return { thinking: { type: "adaptive" }, outputConfig: { effort: effort as "low" | "medium" | "high" } };
 }
 
@@ -186,6 +207,12 @@ export function initAiModel(): void {
       `(${settings.AI_PROVIDER} via ${aiEndpoint(settings.AI_PROVIDER, settings.AI_BASE_URL)}` +
       `${effort === null ? "" : `, reasoning effort ${effort}`})`,
   );
+  if (settings.AI_PROVIDER === "anthropic" && effort === "none" && anthropicKeepsThinking(settings.AI_MODEL)) {
+    console.warn(
+      `AI_REASONING_EFFORT=none: ${settings.AI_MODEL} does not run without thinking, ` +
+        "so it thinks at effort low instead",
+    );
+  }
 }
 
 export function closeAiModel(): void {

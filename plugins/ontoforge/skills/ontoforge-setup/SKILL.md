@@ -17,7 +17,7 @@ The Docker Compose stack consists of three core services:
 - **ontoforge-server** — Backend: REST API and MCP servers. All environment variables documented below apply to this service.
 - **ontoforge-ui** — Frontend: web UI served on port 3000. Requires `BACKEND_URL` pointing to the backend's Docker-internal URL so nginx can proxy `/api` and `/mcp` requests.
 
-Semantic search is optional and supports two embedding providers: **Ollama** (local) or an **OpenAI-compatible** API. AI-powered runtime (natural language query, chat) is also optional and requires a model with tool calling support. Both features can use Ollama or an OpenAI-compatible API; AI-powered runtime can also use Anthropic's API. When using Ollama, an optional **ollama** service can be added to the compose stack.
+Semantic search is optional and supports two embedding providers: **Ollama** (local) or an **OpenAI-compatible** API. AI-powered runtime (assistants: chat with agents and retrievers) is also optional and requires a model with tool calling support. Both features can use Ollama or an OpenAI-compatible API; AI-powered runtime can also use Anthropic's API. When using Ollama, an optional **ollama** service can be added to the compose stack.
 
 ## Templates
 
@@ -39,7 +39,7 @@ Ask the user:
    - `ollama` — local Ollama instance (default model: `bge-m3`)
    - `openai` — OpenAI-compatible API (requires API key)
    - None — skip embedding configuration
-3. **AI provider** — whether they want AI-powered runtime (NL query, chat), and if so which provider:
+3. **AI provider** — whether they want AI-powered runtime (assistants), and if so which provider:
    - `ollama` — local Ollama instance (ask which model; suggest `qwen3:8b`, or `qwen3:14b` / `qwen3:32b` for better quality)
    - `openai` — OpenAI-compatible API (requires API key)
    - `anthropic` — Claude models through Anthropic's API (requires API key; `AI_BASE_URL` can stay unset)

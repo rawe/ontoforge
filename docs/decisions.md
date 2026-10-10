@@ -423,7 +423,7 @@ without per-connection state. This rule applies to MCP, as established in
 [the MCP transport deliberation](adr/0005-mcp-transport-streamable-http-embedded-in-fastapi.md).
 
 **REST chat always delivers tool activity and the complete answer as NDJSON.**
-Both default and configured chat use their existing routes and one response contract.
+The default agent and configured agents share one route and one response contract.
 Results retain their JSON structure; only the final answer carries assistant text.
 Failures preserve received results and mark the turn incomplete. Disconnect cancels further
 work, and delivery bounds buffering. Shared execution remains usable by complete-response

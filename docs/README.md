@@ -40,8 +40,8 @@ what rules bind it, and how it is reached from every interface.
 | [search-indices](capabilities/search-indices.md) | What ranked search reads: indices, entries, managed and custom indices, cost preview and entry outline, generations and build status |
 | [oql](capabilities/oql.md) | The query language |
 | [saved-queries](capabilities/saved-queries.md) | Stored, parameterized query pipelines |
-| [ai-agents](capabilities/ai-agents.md) | Chat |
-| [retriever-agents](capabilities/retriever-agents.md) | Lens-local question answering over search indices: configuration, validation, planning, retrieval, retrieve, the default agent, portable JSON |
+| [ai-agents](capabilities/ai-agents.md) | Agents — assistants that answer by working with read-only tools: configuration, tool rules, live tool activity, the default agent |
+| [retriever-agents](capabilities/retriever-agents.md) | Retrievers — assistants that answer from a lens's search indices: configuration, validation, planning, retrieval, retrieve, diagnostics, the default retriever, portable JSON |
 | [threads](capabilities/threads.md) | Server-held assistant conversations: starting, continuing and reading a thread, atomic turns, lifetime |
 | [entity-identity-comparison](capabilities/entity-identity-comparison.md) | Optional judgments about two partial entity snapshots |
 | [transfer](capabilities/transfer.md) | Schema export and import |
@@ -149,7 +149,7 @@ Some capabilities depend on external providers and are absent unless one is conf
 The server reports what is available, and clients hide what is not.
 
 - **Semantic search** needs an embedding provider. Without it, keyword ranking remains available where the adapter supports it.
-- **AI features** need a language-model provider. Without it, chat is unavailable.
+- **AI features** need a language-model provider. Without it, no assistant can answer.
 - **Entity identity comparison** needs a Decision provider. It remains independent of
   language-model and embedding availability; see its [capability](capabilities/entity-identity-comparison.md).
 
@@ -371,16 +371,32 @@ or documents only, with the default strategy.
 Discoverable by listing or by searching descriptions, so a client can find a suitable
 query without composing one.
 
-**Agent** — a named language-model configuration bound to one lens: a system prompt
-plus the set of read-only tools it may use.
+### Assistants
 
-**Retriever agent** — a stored configuration bound to one lens that answers questions over
-search indices: a planning model turns a question into searches of the agent's indices,
-optionally narrowed to relation groups and exact filters, and an answer model replies from
-what they found — or, for a retrieve, the found entities are returned without an answer.
-Every lens also has an implicit **default retriever agent**, derived from its managed
-indices and never stored. Separate from agents. See
+**Assistant** — something on a lens you ask questions and hold a conversation with. Every
+assistant has a kind; the kinds differ in *how an answer is produced*, not in whether they
+converse. Each kind has its own configurations on a lens, keyed per kind, plus a built-in
+default keyed `_default` that is never stored.
+
+**Agent** — the assistant kind in which the model works step by step with tools it
+chooses: a named language-model configuration bound to one lens, a system prompt plus the
+set of read-only tools it may use. Its insight into a run is **tool activity** — which
+tools ran, with what, and what they returned — part of the product for every user. See
+[capabilities/ai-agents.md](capabilities/ai-agents.md).
+
+**Retriever** (also *retriever agent*) — the assistant kind in which a fixed pipeline
+searches the lens's search indices and answers from what it found: a planning model turns
+a question into searches of the retriever's indices, optionally narrowed to relation
+groups and exact filters, and an answer model replies from what they found — or, for a
+retrieve, the found entities are returned without an answer. Every lens also has an
+implicit **default retriever**, derived from its managed indices. Its insight into a run
+is **diagnostics** — plan, results per sub-query, timings, model traces — a debugging
+feature, given only on request. See
 [capabilities/retriever-agents.md](capabilities/retriever-agents.md).
+
+**Thread** — one conversation with one assistant, held by the server: a client sends its
+new message and the thread's id, and the server continues from the turns the thread kept.
+See [capabilities/threads.md](capabilities/threads.md).
 
 ### Internals
 

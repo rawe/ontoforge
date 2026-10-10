@@ -213,9 +213,9 @@ auto-created.
 | PATCH | `/api/ontologies/{ontologyKey}` | Rename — the display name only; the key is immutable |
 | DELETE | `/api/ontologies/{ontologyKey}` | Hard cascade delete of the ontology and everything it contains |
 
-Keys match `^[a-z][a-z0-9_]*$` at up to 59 characters and are unique server-wide, as are
-display names. Delete is a plain request with no API-level guard — the web client adds
-its own confirmation, callers of the API get none.
+Keys follow the schema [key](README.md) rule at up to 59 characters and are unique
+server-wide, as are display names. Delete is a plain request with no API-level guard —
+the web client adds its own confirmation, callers of the API get none.
 
 ## Server
 

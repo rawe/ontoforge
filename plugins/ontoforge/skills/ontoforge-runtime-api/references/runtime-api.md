@@ -369,39 +369,84 @@ Runtime runs them; the modeling surface defines them.
 
 ## AI Endpoints
 
-Every route here requires a language-model provider.
+Assistants live under `/ai/assistants/<kind>`, where `<kind>` is `agents` (the model works
+step by step with read-only tools) or `retrievers` (a fixed pipeline searches the lens's
+search indices and answers from what it found). Every kind has the same three routes;
+retrievers add a fourth. Assistants are configured on the modeling surface; runtime lists
+and runs them.
 
-- `POST /ai/chat`
-  Converses with the default agent over the lens.
-  Request body: `message`, optional `history` (a list of `{role, content}` with `role`
-  either `user` or `assistant`)
+- `GET /ai/assistants/<kind>`
+  Lists the lens's assistants of that kind as `key`, `name`, `description`, `builtIn`.
+  The built-in default comes first: key `_default`, name `Default`, `builtIn: true`. It
+  needs no configuration, exists on every lens and is addressed by its key like any other.
 
-- `GET /ai/agents`
-  Lists the agents configured on this lens. The default agent is implicit — it needs no
-  configuration and exists on every lens.
+- `POST /ai/assistants/<kind>/{assistantKey}/chat`
+  One message to one assistant. Request body: `message` (1–2,000 characters), optional
+  `threadId`; unknown fields are rejected. Without `threadId` the message starts a new
+  thread; with it, the message continues that thread. The client sends only its new
+  message — the server holds the conversation.
 
-- `POST /ai/agents/{agentKey}/chat`
-  Converses with one named agent.
+- `GET /ai/assistants/<kind>/{assistantKey}/threads/{threadId}`
+  Reads a thread back: `threadId` and `messages`, each `role` (`user` or `assistant`) and
+  `content`, in order, without tool payloads. Runs no model.
 
-An agent may be granted exactly twelve runtime tools: `get_schema`, `list_entities`,
+A thread belongs to the assistant that started it. An unknown, expired or other
+assistant's thread answers `404 RESOURCE_NOT_FOUND` with `details.code` `THREAD_NOT_FOUND`
+— start a new thread. A message to a thread whose previous message is still being answered
+answers `409 RESOURCE_CONFLICT` with `details.code` `THREAD_BUSY`; it is never queued.
+Threads are kept only for a limited time and are lost when the server restarts.
+
+### Chat stream
+
+A chat answers `application/x-ndjson`: one JSON object per line, each with a `type`.
+Refusals — unknown assistant, no provider, unknown or busy thread — are ordinary error
+responses before the stream opens.
+
+| Event `type` | Fields | Meaning |
+|---|---|---|
+| `thread` | `threadId` | Always first: the thread this turn runs on; keep it to continue |
+| `delta` | `text` | A fragment of the answer (retrievers only) |
+| `final` | `reply` | Terminal: the complete answer |
+| `error` | `error` | Terminal: the error object with `code`, `message`, optional `details` |
+| `agent.tool_call` | `callId`, `tool`, `args` | An agent's tool invocation begins |
+| `agent.tool_result` | `callId`, `result` | That invocation completes |
+| `retriever.phase` | `phase` (`plan`, `retrieve`, `answer`), `status` (`start`, `end`), `durationMs` on end | Progress |
+| `retriever.diagnostics` | `plan`, `results`, `limitations`, `searchCalls`, `timings`, `modelIO`, `llmCalls` | Only when requested |
+
+Ignore kind events you do not know. A stream ends with exactly one `final` or `error`;
+EOF without one is an incomplete turn. Closing the connection cancels the turn, and a
+cancelled or failed turn leaves nothing in its thread — ask again.
+
+### Agents
+
+An agent answers whole in `final`, never as `delta`; its tool events arrive always. An
+agent may be granted exactly twelve runtime tools: `get_schema`, `list_entities`,
 `get_entity`, `get_document`, `list_relations`, `get_neighbors`, `search`,
 `search_documents`, `execute_query`, `list_saved_queries`, `run_saved_query`,
 `search_saved_queries`. Every write tool is outside that set, and so is the read-only
 `get_relation`.
 
-### Retriever agents
+### Retrievers
 
-A retriever agent is a stored configuration on the lens (managed on the modeling surface)
-that answers questions over chosen search indices.
+A retriever's chat body may add `diagnostics` (default `false`) to receive
+`retriever.diagnostics`; the request cannot change the retriever's configuration. A
+stored retriever the lens can no longer run answers `422 VALIDATION_ERROR` with the
+errors under `details.errors`.
 
-- `POST /retriever-agents/{agentKey}/chat`
-  Streams the answer to one question as newline-delimited events (`phase`, `delta`,
-  `meta`, then one terminal `final` or `error`).
-  Request body: `message` (1–2,000 characters), optional `history` (up to 30
-  `{role, content}` turns), optional `turnToken` (from the previous answer's `meta`
-  event), optional `diagnostics` (default `false`). Unknown fields are rejected; the
-  request cannot change the agent's configuration. Without an embedding provider the
-  agent searches by keyword only.
+- `POST /ai/assistants/retrievers/{assistantKey}/retrieve`
+  The entities one query finds, without an answer. Request body: `query` (1–2,000
+  characters); unknown fields — `threadId` and `diagnostics` among them — are rejected.
+  Answers `200` JSON: `results` (best first, each `entityId`, `entityType`, `label`,
+  `conditions`, `matched`), `limitations`, and `unsupportedReason` when no index can
+  answer. No results is not an error.
+
+Every retriever route needs a storage adapter with search indices (`searchIndices` in the
+feature probe). Without an embedding provider a retriever searches by keyword only.
+
+### What needs a provider
+
+Chat and retrieve need a language-model provider (`ai` in the feature probe). Listing and
+reading a thread run no model and answer normally without one.
 
 ## Feature Discovery
 
@@ -453,8 +498,8 @@ separates it from an ordinary rejected request on the same route:
 ```
 
 Branch on `details.code` to tell a client "this deployment has no AI configured" instead
-of reporting a bad request. Listing agents never runs a model, so it answers normally
-even with no provider.
+of reporting a bad request. Listing assistants and reading a thread never run a model, so
+they answer normally even with no provider.
 
 `CASCADE_REQUIRED` belongs to the modeling surface and is listed here only for
 completeness of the envelope.

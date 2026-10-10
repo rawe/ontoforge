@@ -9,11 +9,11 @@ Vocabulary: [../README.md](../README.md). The schema it looks at:
 ## What a lens is
 
 A lens belongs to exactly one ontology. It has a key, a name and an optional
-description. The key matches `^[a-z][a-z0-9_]*$` at up to 64 characters, is chosen
-at creation, is never updatable, and is what every interface uses to address the
-lens — always together with its ontology, because lens keys are unique only within
-their ontology: every ontology can have its own `default`. The name is unique
-within the ontology too, but purely for display.
+description. The key follows the schema [key](../README.md) rule at up to 64
+characters, is chosen at creation, is never updatable, and is what every interface uses
+to address the lens — always together with its ontology, because lens keys are unique
+only within their ontology: every ontology can have its own `default`. The name is
+unique within the ontology too, but purely for display.
 
 Any number of lenses may exist in an ontology, including any number that expose
 everything — and none at all: an ontology starts with no lens, and runtime access

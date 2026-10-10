@@ -2,11 +2,12 @@
  * The modeling layer's write hooks. Every surface that changes a type or a
  * property goes through these; nothing about it exists twice.
  *
- * Invalidation: structural writes (name property, deletes, anything sent
- * with `cascade=true`) refetch every modeling cache. Field updates and a
+ * Invalidation: structural writes (creating a type, name property, deletes,
+ * anything sent with `cascade=true`) refetch every modeling cache. Field updates and a
  * property added without cascade only mark them stale and refetch the one
  * list they change, so a small edit does not refetch every property list.
- * Deletes leave their errors to the delete dialog (blocked, cascade).
+ * Deletes leave their errors to the delete dialog (blocked, cascade);
+ * creating a type leaves its field errors to the caller.
  */
 
 import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
@@ -15,14 +16,54 @@ import * as model from '@/api/model'
 import { qk } from '@/api/queryKeys'
 import type {
   EntityType,
+  EntityTypeInput,
   PropertyDefinition,
   PropertyInput,
   PropertyUpdate,
   RelationType,
+  RelationTypeInput,
 } from '@/api/types'
 import { invalidateModeling, toastError } from '../lib'
 import { useCascadeGuard } from './cascadeContext'
 import type { TypeKind } from './useModelSchema'
+
+/**
+ * Create an entity type. `create` resolves with the new type; on an error it
+ * toasts and rejects, so the caller can map the field errors. Where to go
+ * next is the caller's choice.
+ */
+export function useCreateEntityType(ontologyKey: string) {
+  const queryClient = useQueryClient()
+  const mutation = useMutation({
+    mutationFn: (body: EntityTypeInput) => model.createEntityType(ontologyKey, body),
+    onSuccess: (created) => {
+      invalidateModeling(queryClient)
+      toast.success(`Entity type "${created.displayName}" created`)
+    },
+    onError: toastError,
+  })
+  return {
+    create: (body: EntityTypeInput) => mutation.mutateAsync(body),
+    isPending: mutation.isPending,
+  }
+}
+
+/** Create a relation type — same contract as `useCreateEntityType`. */
+export function useCreateRelationType(ontologyKey: string) {
+  const queryClient = useQueryClient()
+  const mutation = useMutation({
+    mutationFn: (body: RelationTypeInput) => model.createRelationType(ontologyKey, body),
+    onSuccess: (created) => {
+      invalidateModeling(queryClient)
+      toast.success(`Relation type "${created.displayName}" created`)
+    },
+    onError: toastError,
+  })
+  return {
+    create: (body: RelationTypeInput) => mutation.mutateAsync(body),
+    isPending: mutation.isPending,
+  }
+}
 
 /** Display name and description of either kind, sent sparse. */
 export function useUpdateType(ontologyKey: string, kind: TypeKind, typeId: string) {

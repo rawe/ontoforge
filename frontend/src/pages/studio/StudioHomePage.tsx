@@ -10,7 +10,7 @@ import {
   Waypoints,
   Workflow,
 } from 'lucide-react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import * as model from '@/api/model'
 import type { EntityType, RelationType, ValidationResult } from '@/api/types'
 import { EmptyState } from '@/components/EmptyState'
@@ -114,6 +114,7 @@ function SchemaOverview({ ontologyKey }: { ontologyKey: string }) {
   const [validation, setValidation] = useState<ValidationResult | null>(null)
   const [createEntityOpen, setCreateEntityOpen] = useState(false)
   const [createRelationOpen, setCreateRelationOpen] = useState(false)
+  const navigate = useNavigate()
 
   const { entityTypes, relationTypes, properties, isPending: loading, error } =
     useModelSchema(ontologyKey)
@@ -269,11 +270,17 @@ function SchemaOverview({ ontologyKey }: { ontologyKey: string }) {
         ontologyKey={ontologyKey}
         open={createEntityOpen}
         onOpenChange={setCreateEntityOpen}
+        onCreated={(created) =>
+          void navigate(`/o/${ontologyKey}/studio/entity-types/${created.entityTypeId}`)
+        }
       />
       <RelationTypeCreateDialog
         ontologyKey={ontologyKey}
         open={createRelationOpen}
         onOpenChange={setCreateRelationOpen}
+        onCreated={(created) =>
+          void navigate(`/o/${ontologyKey}/studio/relation-types/${created.relationTypeId}`)
+        }
         entityTypes={entityTypes}
       />
     </div>

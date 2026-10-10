@@ -17,6 +17,10 @@ interface TypedValueInputProps {
   placeholder?: string
   /** Allow clearing a boolean back to "not set". */
   allowEmptyBoolean?: boolean
+  /** Label of the boolean's empty choice. */
+  emptyLabel?: string
+  /** Inline editing: called with the raw value on blur, Enter and a select change. */
+  onCommit?: (raw: string) => void
 }
 
 /** Input matched to a property dataType (number, boolean select, date, …). */
@@ -27,19 +31,25 @@ export function TypedValueInput({
   onChange,
   placeholder,
   allowEmptyBoolean = true,
+  emptyLabel = 'Not set',
+  onCommit,
 }: TypedValueInputProps) {
   if (dataType === 'boolean') {
     const NONE = '__none__'
     return (
       <Select
         value={value === '' ? (allowEmptyBoolean ? NONE : '') : value}
-        onValueChange={(v) => onChange(v === NONE ? '' : v)}
+        onValueChange={(v) => {
+          const raw = v === NONE ? '' : v
+          onChange(raw)
+          onCommit?.(raw)
+        }}
       >
         <SelectTrigger id={id} className="w-full">
           <SelectValue placeholder="Select…" />
         </SelectTrigger>
         <SelectContent>
-          {allowEmptyBoolean && <SelectItem value={NONE}>Not set</SelectItem>}
+          {allowEmptyBoolean && <SelectItem value={NONE}>{emptyLabel}</SelectItem>}
           <SelectItem value="true">true</SelectItem>
           <SelectItem value="false">false</SelectItem>
         </SelectContent>
@@ -62,6 +72,17 @@ export function TypedValueInput({
       value={value}
       placeholder={placeholder}
       onChange={(e) => onChange(e.target.value)}
+      onBlur={onCommit === undefined ? undefined : () => onCommit(value)}
+      onKeyDown={
+        onCommit === undefined
+          ? undefined
+          : (e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                e.currentTarget.blur()
+              }
+            }
+      }
     />
   )
 }

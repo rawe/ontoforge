@@ -549,13 +549,25 @@ export interface RelationTypeUpdate {
   description?: string
 }
 
+/** Create body of a property. The server stores defaults as strings. */
 export interface PropertyInput {
   key?: string
   displayName: string
   description?: string | null
   dataType?: DataType
   required?: boolean
-  defaultValue?: JsonPrimitive | null
+  defaultValue?: string | null
+}
+
+/**
+ * Sparse update: an omitted field stays unchanged. A description can be
+ * replaced, not cleared; `defaultValue: null` clears the default.
+ */
+export interface PropertyUpdate {
+  displayName?: string
+  description?: string
+  required?: boolean
+  defaultValue?: string | null
 }
 
 export interface AgentInput {

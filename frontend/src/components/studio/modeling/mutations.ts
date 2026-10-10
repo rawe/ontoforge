@@ -2,18 +2,26 @@
  * The modeling layer's write hooks. Every surface that changes a type or a
  * property goes through these; nothing about it exists twice.
  *
- * Invalidation: structural writes (name property, deletes) refetch every
- * modeling cache. Field updates only mark them stale and refetch the one list
- * they change, so a small edit does not refetch every property list.
+ * Invalidation: structural writes (name property, deletes, anything sent
+ * with `cascade=true`) refetch every modeling cache. Field updates and a
+ * property added without cascade only mark them stale and refetch the one
+ * list they change, so a small edit does not refetch every property list.
  * Deletes leave their errors to the delete dialog (blocked, cascade).
  */
 
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import * as model from '@/api/model'
 import { qk } from '@/api/queryKeys'
-import type { EntityType, RelationType } from '@/api/types'
+import type {
+  EntityType,
+  PropertyDefinition,
+  PropertyInput,
+  PropertyUpdate,
+  RelationType,
+} from '@/api/types'
 import { invalidateModeling, toastError } from '../lib'
+import { useCascadeGuard } from './cascadeContext'
 import type { TypeKind } from './useModelSchema'
 
 /** Display name and description of either kind, sent sparse. */
@@ -46,6 +54,74 @@ export function useSetNameProperty(ontologyKey: string, entityTypeId: string) {
     onSuccess: (saved) => {
       invalidateModeling(queryClient)
       toast.success(`Name property set to "${saved.nameProperty}"`)
+    },
+    onError: toastError,
+  })
+}
+
+/** Mark every modeling cache stale, then refetch only one type's property list. */
+function refetchProperties(
+  queryClient: QueryClient,
+  ontologyKey: string,
+  kind: TypeKind,
+  typeId: string,
+) {
+  invalidateModeling(queryClient, 'none')
+  void queryClient.refetchQueries({
+    queryKey: qk.model(ontologyKey, kind, typeId, 'properties'),
+    exact: true,
+    type: 'active',
+  })
+}
+
+export interface CreatePropertyCallbacks {
+  /** After the property exists — also after a cascade retry. */
+  onSuccess?: (saved: PropertyDefinition) => void
+  /** Any error but a cascade conflict (already toasted). Cancelling the cascade calls nothing. */
+  onError?: (error: unknown) => void
+}
+
+/**
+ * Add a property to a type of either kind. A `CASCADE_REQUIRED` conflict (a
+ * required property without default, listed by a lens allowlist) opens the
+ * page's cascade dialog, which re-sends it with `cascade=true`. Built on
+ * `mutateAsync`, so the toasts and the cascade dialog do not depend on the
+ * calling component staying mounted.
+ */
+export function useCreateProperty(ontologyKey: string, kind: TypeKind, typeId: string) {
+  const queryClient = useQueryClient()
+  const guard = useCascadeGuard()
+  const mutation = useMutation({
+    mutationFn: ({ body, cascade }: { body: PropertyInput; cascade: boolean }) =>
+      model.createProperty(ontologyKey, kind, typeId, body, cascade),
+    onSuccess: (saved, { cascade }) => {
+      if (cascade) invalidateModeling(queryClient)
+      else refetchProperties(queryClient, ontologyKey, kind, typeId)
+      toast.success(`Property "${saved.key}" added`)
+    },
+  })
+  const create = (body: PropertyInput, callbacks: CreatePropertyCallbacks = {}, cascade = false) => {
+    mutation.mutateAsync({ body, cascade }).then(callbacks.onSuccess, (error: unknown) => {
+      if (guard(error, () => create(body, callbacks, true))) return
+      toastError(error)
+      callbacks.onError?.(error)
+    })
+  }
+  return { create, isPending: mutation.isPending }
+}
+
+/**
+ * Change one property, sent sparse: display name, description, required or
+ * default (`defaultValue: null` clears it). Errors are toasted.
+ */
+export function useUpdateProperty(ontologyKey: string, kind: TypeKind, typeId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ propertyId, patch }: { propertyId: string; patch: PropertyUpdate }) =>
+      model.updateProperty(ontologyKey, kind, typeId, propertyId, patch),
+    onSuccess: (saved) => {
+      refetchProperties(queryClient, ontologyKey, kind, typeId)
+      toast.success(`Property "${saved.key}" updated`)
     },
     onError: toastError,
   })

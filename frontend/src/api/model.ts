@@ -16,6 +16,7 @@ import type {
   LensInput,
   PropertyDefinition,
   PropertyInput,
+  PropertyUpdate,
   RelationType,
   RelationTypeInput,
   RelationTypeUpdate,
@@ -142,7 +143,7 @@ export const updateProperty = (
   kind: TypeKind,
   typeId: string,
   propertyId: string,
-  body: PropertyInput,
+  body: PropertyUpdate,
 ) =>
   request<PropertyDefinition>(
     `${base(ontologyKey)}/${kind}/${typeId}/properties/${propertyId}`,

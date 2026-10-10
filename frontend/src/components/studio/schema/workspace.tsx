@@ -6,15 +6,20 @@
  *
  * The one-shot property request rides on top: it is renewed whenever the
  * address names another property, and when the same property is selected
- * again (the address does not change, the nonce does).
+ * again (the address does not change, the nonce does). The add-property
+ * request is plain state, dropped by the next selection or view switch.
  */
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { findTypeByKey, useModelSchema } from '../modeling/useModelSchema'
 import { buildSchemaUrl, parseSchemaUrl, type SchemaView } from './schemaUrl'
-import { SchemaWorkspaceContext, type SchemaWorkspace } from './workspaceContext'
+import {
+  SchemaWorkspaceContext,
+  type AddPropertyRequest,
+  type SchemaWorkspace,
+} from './workspaceContext'
 
 interface SchemaWorkspaceProviderProps {
   ontologyKey: string
@@ -40,20 +45,40 @@ export function SchemaWorkspaceProvider({ ontologyKey, children }: SchemaWorkspa
     [prop, nonce],
   )
 
+  // The address a `select` has already replaced. Until the router has moved
+  // on, it is not checked for an unknown key: deleting the selected type drops
+  // it from the cache a moment before the cleared selection reaches the address.
+  const leaving = useRef<string | null>(null)
+  const [addPropertyRequest, setAddPropertyRequest] = useState<AddPropertyRequest | null>(null)
+  const addNonce = useRef(0)
+
   const select = useCallback<SchemaWorkspace['select']>(
     (next, options) => {
       if (options?.propertyKey !== undefined) setNonce((n) => n + 1)
+      setAddPropertyRequest(null)
       const to = buildSchemaUrl(ontologyKey, view, next, options?.propertyKey ?? null)
-      if (to !== here) void navigate(to, { replace: true })
+      if (to === here) return
+      leaving.current = here
+      void navigate(to, { replace: true })
     },
     [navigate, ontologyKey, view, here],
   )
 
   const switchView = useCallback(
     (next: SchemaView) => {
+      setAddPropertyRequest(null)
       if (next !== view) void navigate(buildSchemaUrl(ontologyKey, next, sel, prop))
     },
     [navigate, ontologyKey, view, sel, prop],
+  )
+
+  const requestAddProperty = useCallback<SchemaWorkspace['requestAddProperty']>(
+    (selection) => {
+      select(selection)
+      addNonce.current += 1
+      setAddPropertyRequest({ selection, nonce: addNonce.current })
+    },
+    [select],
   )
 
   // An unknown key in the graph leaves the address (the classic page shows not-found instead).
@@ -65,15 +90,25 @@ export function SchemaWorkspaceProvider({ ontologyKey, children }: SchemaWorkspa
     schema.error === null &&
     findTypeByKey(schema, sel.kind, sel.key) === undefined
   useEffect(() => {
-    if (!unknown || sel === null) return
+    if (leaving.current !== here) leaving.current = null
+    if (!unknown || sel === null || leaving.current !== null) return
     const kind = sel.kind === 'entity-types' ? 'entity' : 'relation'
     toast.error(`No ${kind} type "${sel.key}"`, { id: 'schema-unknown-selection' })
     void navigate(buildSchemaUrl(ontologyKey, 'graph', null), { replace: true })
-  }, [unknown, sel, navigate, ontologyKey])
+  }, [unknown, sel, here, navigate, ontologyKey])
 
   const value = useMemo<SchemaWorkspace>(
-    () => ({ ontologyKey, view, selection: sel, propertyRequest, select, switchView }),
-    [ontologyKey, view, sel, propertyRequest, select, switchView],
+    () => ({
+      ontologyKey,
+      view,
+      selection: sel,
+      propertyRequest,
+      select,
+      switchView,
+      addPropertyRequest,
+      requestAddProperty,
+    }),
+    [ontologyKey, view, sel, propertyRequest, select, switchView, addPropertyRequest, requestAddProperty],
   )
   return <SchemaWorkspaceContext.Provider value={value}>{children}</SchemaWorkspaceContext.Provider>
 }

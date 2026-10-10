@@ -17,6 +17,7 @@ import { DeleteProvider } from '@/components/studio/modeling/DeleteDialog'
 import { useModelSchema } from '@/components/studio/modeling/useModelSchema'
 import { ClassicList } from '@/components/studio/schema/ClassicList'
 import { ClassicTypePage } from '@/components/studio/schema/ClassicTypePage'
+import { Inspector } from '@/components/studio/schema/Inspector'
 import type { SchemaView } from '@/components/studio/schema/schemaUrl'
 import { SchemaWorkspaceProvider } from '@/components/studio/schema/workspace'
 import { useSchemaWorkspace } from '@/components/studio/schema/workspaceContext'
@@ -168,6 +169,7 @@ function SchemaShell({ ontologyKey }: { ontologyKey: string }) {
           <div className={view === 'classic' ? 'min-w-0 flex-1 overflow-y-auto' : 'min-w-0 flex-1'}>
             {body}
           </div>
+          {view === 'graph' && loaded && <Inspector />}
         </div>
       </div>
 

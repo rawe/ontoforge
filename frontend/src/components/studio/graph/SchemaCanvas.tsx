@@ -32,6 +32,7 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { isPlainKey, isTyping, overlayOpen } from '@/lib/shortcuts'
 import { cn } from '@/lib/utils'
+import { useRequestDelete } from '../modeling/deleteContext'
 import { useModelSchema, type ModelSchema } from '../modeling/useModelSchema'
 import type { SchemaSelection } from '../schema/schemaUrl'
 import { useSchemaWorkspace, type SelectOptions } from '../schema/workspaceContext'
@@ -128,6 +129,7 @@ const isMoveOrResize = (c: NodeChange<EntityFlowNode>): c is NodePositionChange 
 function Canvas() {
   const { ontologyKey, selection, select } = useSchemaWorkspace()
   const schema = useModelSchema(ontologyKey)
+  const requestDelete = useRequestDelete()
   const collapsed = useCollapsed(ontologyKey)
   const { resolvedTheme } = useTheme()
   const { fitView, setCenter, getZoom, getInternalNode, getViewport } = useReactFlow()
@@ -318,18 +320,34 @@ function Canvas() {
 
   const allCollapsed = allCollapsedOf(collapsed, entityIds)
 
-  // H hides or shows the properties of every node, ⇧H only of the selected one.
+  // The selected type's id, for the delete dialog.
+  const selectedId =
+    selection?.kind === 'relation-types'
+      ? (relationTypes.find((r) => r.key === selection.key)?.relationTypeId ?? null)
+      : selectedEntityId
+
+  // H hides or shows the properties of every node, ⇧H only of the selected
+  // one. Del / Backspace deletes the selected type (with the dialog's preview),
+  // Esc clears the selection.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.key !== 'h' && e.key !== 'H') || e.repeat || !isPlainKey(e)) return
-      if (e.defaultPrevented || isTyping() || overlayOpen(e)) return
-      e.preventDefault()
-      if (!e.shiftKey) toggleAllCollapsed(ontologyKey, entityIds)
-      else if (selectedEntityId !== null) toggleCollapsed(ontologyKey, selectedEntityId)
+      if (e.repeat || !isPlainKey(e)) return
+      if (e.defaultPrevented || isTyping(e) || overlayOpen(e)) return
+      if (e.key === 'h' || e.key === 'H') {
+        e.preventDefault()
+        if (!e.shiftKey) toggleAllCollapsed(ontologyKey, entityIds)
+        else if (selectedEntityId !== null) toggleCollapsed(ontologyKey, selectedEntityId)
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && selection !== null && selectedId !== null) {
+        e.preventDefault()
+        requestDelete({ what: 'type', kind: selection.kind, id: selectedId })
+      } else if (e.key === 'Escape' && selection !== null) {
+        e.preventDefault()
+        selectHere(null)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [ontologyKey, entityIds, selectedEntityId])
+  }, [ontologyKey, entityIds, selectedEntityId, selection, selectedId, requestDelete, selectHere])
 
   /* -------------------------------- render -------------------------------- */
 
@@ -379,7 +397,8 @@ function Canvas() {
       <div className="pointer-events-none absolute right-3 bottom-3 left-14 z-10 flex justify-center">
         <div className="rounded-xl border bg-card/90 px-3 py-1 text-center text-[11px] text-muted-foreground shadow-sm backdrop-blur-sm">
           Click a type or relation: select · drag a type: move · <Kbd>H</Kbd> hide/show properties ·{' '}
-          <Kbd>⇧H</Kbd> selected type only · <Kbd>V</Kbd> Graph/Classic
+          <Kbd>⇧H</Kbd> selected type only · <Kbd>Del</Kbd> delete selected · <Kbd>Esc</Kbd> clear
+          selection · <Kbd>V</Kbd> Graph/Classic
         </div>
       </div>
     </div>

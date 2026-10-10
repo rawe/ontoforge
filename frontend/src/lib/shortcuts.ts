@@ -5,8 +5,14 @@
  * `data-state="closed"` for a moment, focus still inside) counts as neither.
  */
 
-/** Focus is in a visible input, textarea, select or contenteditable. */
-export function isTyping(): boolean {
+/**
+ * Focus is in a visible input, textarea, select or contenteditable. Given the
+ * key event, also when the key's target left the page while the key was
+ * handled: an inline edit that closes itself on Esc has removed its field
+ * before the key reaches a window listener.
+ */
+export function isTyping(e?: KeyboardEvent): boolean {
+  if (e?.target instanceof Node && !e.target.isConnected) return true
   const el = document.activeElement as HTMLElement | null
   if (el === null || el === document.body || !el.isConnected) return false
   if (el.getClientRects().length === 0) return false // hidden

@@ -19,7 +19,7 @@ import { TypeHeader } from '../modeling/TypeHeader'
 import { TypeRelations } from '../modeling/TypeRelations'
 import { findTypeByKey, useModelSchema, type TypeKind } from '../modeling/useModelSchema'
 import { buildSchemaUrl } from './schemaUrl'
-import { useSchemaWorkspace } from './workspaceContext'
+import { addRequestOf, openRequestOf, useSchemaWorkspace } from './workspaceContext'
 
 interface ClassicTypePageProps {
   kind: TypeKind
@@ -27,7 +27,7 @@ interface ClassicTypePageProps {
 }
 
 export function ClassicTypePage({ kind, typeKey }: ClassicTypePageProps) {
-  const { ontologyKey, propertyRequest, select } = useSchemaWorkspace()
+  const { ontologyKey, propertyRequest, addPropertyRequest, select } = useSchemaWorkspace()
   const schema = useModelSchema(ontologyKey)
   const type = findTypeByKey(schema, kind, typeKey)
   const listPath = buildSchemaUrl(ontologyKey, 'classic', null)
@@ -49,14 +49,6 @@ export function ClassicTypePage({ kind, typeKey }: ClassicTypePageProps) {
   if (type === undefined) return <TypeNotFound ontologyKey={ontologyKey} kind={kind} />
 
   const typeId = 'entityTypeId' in type ? type.entityTypeId : type.relationTypeId
-  const property =
-    propertyRequest === null
-      ? undefined
-      : schema.properties[typeId]?.find((p) => p.key === propertyRequest.propertyKey)
-  const openRequest =
-    property === undefined || propertyRequest === null
-      ? undefined
-      : { propertyId: property.propertyId, nonce: propertyRequest.nonce }
 
   return (
     <div>
@@ -84,7 +76,8 @@ export function ClassicTypePage({ kind, typeKey }: ClassicTypePageProps) {
           kind={kind}
           typeId={typeId}
           density="comfortable"
-          openRequest={openRequest}
+          openRequest={openRequestOf(propertyRequest, schema.properties[typeId])}
+          addRequest={addRequestOf(addPropertyRequest, { kind, key: typeKey })}
         />
         {kind === 'entity-types' && (
           <TypeRelations

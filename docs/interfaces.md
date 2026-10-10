@@ -191,6 +191,11 @@ language-model provider; execution requirements are listed with the routes below
 chat requires a language-model provider
 ([capabilities/ai-agents.md](capabilities/ai-agents.md)).
 
+An assistant thread that is unknown, expired or bound to another assistant answers
+`RESOURCE_NOT_FOUND` with `details.code` of `THREAD_NOT_FOUND`; a message to a thread whose
+previous message is still being answered answers `RESOURCE_CONFLICT` with `details.code`
+of `THREAD_BUSY` ([assistant chat and threads](#assistant-chat-and-threads)).
+
 Call `GET /api/server/features` first all the same. Probing lets a client hide what is
 unavailable, rather than offering it and explaining the refusal afterwards.
 
@@ -609,6 +614,50 @@ Requires a Decision provider, independently of AI and search.
 |---|---|---|
 | POST | `/decisions/compare-entities` | Judge the identity of two supplied partial snapshots of one scoped entity type |
 
+### Assistant chat and threads
+
+Every assistant kind — `agents`, `retrievers` — converses through the same request, the
+same stream frame and the same threads. Semantics:
+[capabilities/threads.md](capabilities/threads.md). The kind's own section below lists its
+routes, its extra request fields and its own events.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/ai/assistants/<kind>/{assistantKey}/chat` | One message: a new thread, or a turn on an existing one |
+| GET | `/ai/assistants/<kind>/{assistantKey}/threads/{threadId}` | Read a thread back |
+
+**Request.** `message` (1 to 2,000 characters) and optionally `threadId`; a kind may add
+fields, and unknown fields are rejected. Without `threadId` the message starts a new
+thread bound to the addressed assistant; with it, the message continues that thread. A
+thread that is unknown, expired or bound to another assistant answers
+`RESOURCE_NOT_FOUND` with `details.code` `THREAD_NOT_FOUND`; a thread whose previous
+message is still being answered answers `RESOURCE_CONFLICT` with `details.code`
+`THREAD_BUSY`. Both are plain error responses before the stream opens, like every other
+refusal the kind lists; a busy message is never queued.
+
+**Stream.** Successful responses use `application/x-ndjson`: one complete JSON object per
+line, each with a `type`. The shared events mean the same for every kind:
+
+| Event `type` | Fields | Meaning |
+|---|---|---|
+| `thread` | `threadId` | Always first: the thread this turn runs on |
+| `delta` | `text` | A fragment of the answer, for kinds that stream their answer |
+| `final` | `reply` | Terminal: the complete answer |
+| `error` | `error` | Terminal: the public error object with `code`, `message` and optional `details` |
+
+A kind's own events are named `<kind>.<event>` — `agent.…`, `retriever.…`; a client may
+ignore those it does not know. A writable stream has exactly one terminal `final` or
+`error`; EOF without one means an incomplete turn. A closed connection cancels the turn,
+and a cancelled or failed turn leaves nothing in its thread. Unexpected failures after
+streaming begins have the generic `INTERNAL_ERROR` message `Internal Server Error`.
+Delivery bounds buffering and terminates stalled or oversized streams.
+
+**Read a thread.** `200` with `threadId` and `messages` — the user messages and the
+assistant's answers in order, each `role` (`user` or `assistant`) and `content`, at most
+the turns a thread keeps, without tool payloads. Unknown, expired or another assistant's
+thread: `THREAD_NOT_FOUND`. Reading needs no language-model provider and does not count as
+use; it is gated like the kind's list.
+
 ### Retriever-agent list, chat and retrieve
 
 The stored agent runs — or, under the key `_default`, the lens's
@@ -621,6 +670,7 @@ and [retrieve](capabilities/retriever-agents.md#retrieve).
 |---|---|---|
 | GET | `/ai/assistants/retrievers` | List the lens's retriever agents, the default first |
 | POST | `/ai/assistants/retrievers/{assistantKey}/chat` | Stream the answer to one question |
+| GET | `/ai/assistants/retrievers/{assistantKey}/threads/{threadId}` | Read a thread back |
 | POST | `/ai/assistants/retrievers/{assistantKey}/retrieve` | The entities one query finds, without an answer |
 
 **List.** Every retriever agent of the lens, runnable or not, as `key`, `name`,
@@ -629,19 +679,19 @@ with `builtIn` true. The list carries no configuration and no validation, and ne
 language-model provider; on an adapter without search indices it answers
 `FEATURE_DISABLED`.
 
-**Chat.** The body carries `message` (1 to 2,000 characters) and optionally `history` (up to 30
-user/assistant turns), the previous answer's `turnToken` and `diagnostics`; unknown
-fields are rejected. Without a language-model provider the route answers
+**Chat.** The [shared request](#assistant-chat-and-threads) plus `diagnostics` (boolean,
+default false). Without a language-model provider the route answers
 `FEATURE_DISABLED`, as the AI routes do. An unknown agent answers not found, an agent its
 lens can no longer run `VALIDATION_ERROR` with the errors under `details.errors`, a
 default agent with nothing to search `VALIDATION_ERROR`, an adapter without search
-indices `FEATURE_DISABLED` — each before the stream opens.
+indices `FEATURE_DISABLED`, an unknown or busy thread as shared — each before the stream
+opens.
 
-The response streams newline-delimited events: `phase` (`plan`, `retrieve` and `answer`,
-each with `status` `start` or `end`, an end with `durationMs`), `delta` (answer text),
-`meta`, then one terminal `final` or `error`. With `diagnostics` false, the default, the
-only `meta` event carries the `turnToken` for a follow-up question. With `diagnostics`
-true, earlier `meta` events carry:
+The response streams the [shared frame](#assistant-chat-and-threads): `thread`, the answer
+as `delta` events, then one terminal `final` or `error`. Its own events:
+`retriever.phase` (`phase` `plan`, `retrieve` or `answer`, `status` `start` or `end`, an
+end with `durationMs`), and — only with `diagnostics` true — `retriever.diagnostics`
+events, which carry:
 
 | Field | Content |
 |---|---|
@@ -655,8 +705,11 @@ true, earlier `meta` events carry:
 
 `matched` has the form of a search hit's ([capabilities/search.md](capabilities/search.md#response)).
 
-**Retrieve.** The body carries `query` (1 to 2,000 characters); unknown fields — a
-history, a follow-up token or `diagnostics` among them — are rejected.
+**Read a thread.** As [shared](#assistant-chat-and-threads); on an adapter without search
+indices it answers `FEATURE_DISABLED`, as the list does.
+
+**Retrieve.** The body carries `query` (1 to 2,000 characters); unknown fields — a thread
+id or `diagnostics` among them — are rejected.
 It is refused exactly as chat is, with plain error responses: `FEATURE_DISABLED` without
 a language-model provider or on an adapter without search indices, not found for an
 unknown agent, `VALIDATION_ERROR` for an agent its lens can no longer run (errors under
@@ -680,31 +733,28 @@ language-model provider; the list remains available without one.
 |---|---|---|
 | GET | `/ai/assistants/agents` | List the lens's agents, the default first |
 | POST | `/ai/assistants/agents/{assistantKey}/chat` | Converse with one agent |
+| GET | `/ai/assistants/agents/{assistantKey}/threads/{threadId}` | Read a thread back |
 
 The default agent is implicit — it needs no configuration, exists on every lens and is
 addressed by the key `_default` like any configured agent. The list names every agent as
 `key`, `name`, `description` and `builtIn`; the default comes first, named `Default`, with
 `builtIn` true.
 
-Chat accepts `message` and optional user/assistant text `history`.
-Successful responses always use `application/x-ndjson`: one complete JSON object per line.
-Tool events are unconditional; there is no response-mode option.
+Chat takes the [shared request](#assistant-chat-and-threads) and streams the shared frame:
+`thread`, then the agent's tool events, then one terminal `final` or `error`; the answer
+arrives whole in `final`, never as `delta`. Tool events are unconditional; there is no
+response-mode option.
 
 | Event `type` | Fields | Meaning |
 |---|---|---|
-| `tool_call` | `callId`, `tool`, `args` | One invocation begins, including schema-invalid arguments |
-| `tool_result` | `callId`, `result` | That invocation completes; result retains its native JSON structure |
-| `final` | `reply` | The complete assistant answer, with no repeated tool payloads |
-| `error` | `error` | Terminal public error object with `code`, `message`, and optional `details` |
+| `agent.tool_call` | `callId`, `tool`, `args` | One invocation begins, including schema-invalid arguments |
+| `agent.tool_result` | `callId`, `result` | That invocation completes; result retains its native JSON structure |
 
 Call IDs are unique within a turn. Calls precede their results, and parallel results arrive
-as each completes. A writable stream has exactly one terminal `final` or `error` event;
-there are no assistant text fragments. EOF without a terminal event means an incomplete
-turn. Invalid requests, unknown selections, and unavailable providers are rejected before
-streaming where possible, using the ordinary HTTP error response. Unexpected failures
-after streaming begins have the generic `INTERNAL_ERROR` message `Internal Server Error`.
-Disconnect cancels further agent work, with best-effort cancellation of running operations.
-Delivery bounds buffering and terminates stalled or oversized streams.
+as each completes. An unknown agent, an unavailable provider and an unknown or busy thread
+are rejected before streaming, using the ordinary HTTP error response. Disconnect cancels
+further agent work, with best-effort cancellation of running operations. Reading a thread
+needs no provider, as the list does.
 
 ## MCP
 

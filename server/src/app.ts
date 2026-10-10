@@ -32,6 +32,7 @@ import { registryRouter } from "./registry/router.js";
 import { aiRouter } from "./runtime/aiRouter.js";
 import { decisionRouter } from "./runtime/decisionRouter.js";
 import { runtimeRouter } from "./runtime/router.js";
+import { MemoryThreadStore } from "./runtime/threads/memoryThreadStore.js";
 import { serverRouter } from "./server/router.js";
 
 function sendError(
@@ -114,10 +115,10 @@ export async function createApp(): Promise<FastifyInstance> {
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof NotFoundError) {
-      return sendError(reply, 404, "RESOURCE_NOT_FOUND", error.message);
+      return sendError(reply, 404, "RESOURCE_NOT_FOUND", error.message, error.details);
     }
     if (error instanceof ConflictError) {
-      return sendError(reply, 409, "RESOURCE_CONFLICT", error.message);
+      return sendError(reply, 409, "RESOURCE_CONFLICT", error.message, error.details);
     }
     if (error instanceof ValidationError) {
       return sendError(reply, 422, "VALIDATION_ERROR", error.message, error.details);
@@ -169,7 +170,8 @@ export async function createApp(): Promise<FastifyInstance> {
   await app.register(modelingRouter, { prefix: "/api/ontologies/:ontologyKey/model" });
   const runtimePrefix = "/api/ontologies/:ontologyKey/runtime/lenses/:lensKey";
   await app.register(runtimeRouter, { prefix: runtimePrefix });
-  await app.register(aiRouter, { prefix: runtimePrefix });
+  // One thread store per server: every assistant conversation lives in it.
+  await app.register(aiRouter, { prefix: runtimePrefix, threads: new MemoryThreadStore() });
   await app.register(decisionRouter, { prefix: runtimePrefix });
 
   // Startup step 6: both MCP servers share the process and call the same

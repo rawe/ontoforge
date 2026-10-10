@@ -13,11 +13,27 @@ export class OntoForgeError extends Error {
   }
 }
 
-/** A requested resource does not exist. -> 404 RESOURCE_NOT_FOUND */
-export class NotFoundError extends OntoForgeError {}
+/** A requested resource does not exist. -> 404 RESOURCE_NOT_FOUND;
+ * `details.code` may narrow it. */
+export class NotFoundError extends OntoForgeError {
+  details: Record<string, unknown> | null;
 
-/** An operation conflicts with existing state. -> 409 RESOURCE_CONFLICT */
-export class ConflictError extends OntoForgeError {}
+  constructor(message: string, details: Record<string, unknown> | null = null) {
+    super(message);
+    this.details = details;
+  }
+}
+
+/** An operation conflicts with existing state. -> 409 RESOURCE_CONFLICT;
+ * `details.code` may narrow it. */
+export class ConflictError extends OntoForgeError {
+  details: Record<string, unknown> | null;
+
+  constructor(message: string, details: Record<string, unknown> | null = null) {
+    super(message);
+    this.details = details;
+  }
+}
 
 /** Request or business-logic validation failed. -> 422 VALIDATION_ERROR */
 export class ValidationError extends OntoForgeError {

@@ -42,6 +42,7 @@ what rules bind it, and how it is reached from every interface.
 | [saved-queries](capabilities/saved-queries.md) | Stored, parameterized query pipelines |
 | [ai-agents](capabilities/ai-agents.md) | Chat |
 | [retriever-agents](capabilities/retriever-agents.md) | Lens-local question answering over search indices: configuration, validation, planning, retrieval, retrieve, the default agent, portable JSON |
+| [threads](capabilities/threads.md) | Server-held assistant conversations: starting, continuing and reading a thread, atomic turns, lifetime |
 | [entity-identity-comparison](capabilities/entity-identity-comparison.md) | Optional judgments about two partial entity snapshots |
 | [transfer](capabilities/transfer.md) | Schema export and import |
 

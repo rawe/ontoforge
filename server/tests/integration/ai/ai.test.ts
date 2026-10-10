@@ -58,6 +58,7 @@ async function inject(
     if (res.headers["content-type"]?.includes("application/x-ndjson")) {
       const events = res.body.trim().split("\n").map((line) => JSON.parse(line) as Row);
       expect(events.filter((event) => ["final", "error"].includes(String(event.type)))).toHaveLength(1);
+      expect(events[0]?.type).toBe("thread");
       expect(events.at(-1)?.type).toBe("final");
       body = { events };
     } else body = res.json() as Row;
@@ -210,22 +211,31 @@ describe("chat with the default agent", () => {
     expect(statusCode).toBe(200);
     expect((body.events as Row[]).at(-1)).toHaveProperty("reply");
     expect(Array.isArray(body.events)).toBe(true);
-    for (const call of (body.events as Row[]).filter((event) => event.type === "tool_call")) {
+    for (const call of (body.events as Row[]).filter((event) => event.type === "agent.tool_call")) {
       expect(call).toHaveProperty("tool");
       expect(call).toHaveProperty("args");
     }
   });
 
-  ifAvailable("accepts caller-supplied history", async () => {
-    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/assistants/agents/_default/chat", {
-      message: "And how old is she?",
-      history: [
-        { role: "user", content: "How many persons are there?" },
-        { role: "assistant", content: "There are 2 persons: Alice and Bob." },
-      ],
-    });
-    expect(statusCode).toBe(200);
-    expect(typeof (body.events as Row[]).at(-1)!.reply).toBe("string");
+  ifAvailable("continues a conversation by its thread id, the second turn answering from the first's tool results", async () => {
+    const chat = "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/assistants/agents/_default/chat";
+    const first = await inject("POST", chat, { message: "List all persons with their name, age and location." });
+    expect(first.statusCode).toBe(200);
+    const firstEvents = first.body.events as Row[];
+    expect(firstEvents.some((event) => event.type === "agent.tool_call")).toBe(true);
+    const threadId = firstEvents[0]!.threadId as string;
+
+    const second = await inject("POST", chat, { message: "Of those, who is the oldest? Answer with the name only.", threadId });
+    expect(second.statusCode).toBe(200);
+    const secondEvents = second.body.events as Row[];
+    expect(secondEvents[0]).toEqual({ type: "thread", threadId });
+    expect(String(secondEvents.at(-1)!.reply)).toContain("Alice");
+
+    const read = await inject("GET", `/api/ontologies/test_ont/runtime/lenses/ai_test/ai/assistants/agents/_default/threads/${threadId}`);
+    expect(read.statusCode).toBe(200);
+    const messages = read.body.messages as Row[];
+    expect(messages.map((message) => message.role)).toEqual(["user", "assistant", "user", "assistant"]);
+    expect(messages[2]!.content).toBe("Of those, who is the oldest? Answer with the name only.");
   });
 
   ifAvailable("rejects an empty message", async () => {
@@ -260,7 +270,7 @@ describe("agents", () => {
     );
     expect(statusCode).toBe(200);
     expect(typeof (body.events as Row[]).at(-1)!.reply).toBe("string");
-    const calls = (body.events as Row[]).filter((event) => event.type === "tool_call");
+    const calls = (body.events as Row[]).filter((event) => event.type === "agent.tool_call");
     expect(Array.isArray(calls)).toBe(true);
     for (const call of calls) {
       expect(call.tool).toBe("execute_query");

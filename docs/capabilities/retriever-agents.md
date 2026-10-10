@@ -4,7 +4,8 @@ A retriever agent answers questions over one lens's [search indices](search-indi
 It is a stored configuration: which indices it searches, which exact filters a question
 may set, which fields the answer may cite and how strict semantic matching is. A question
 runs a fixed pipeline — a planning model turns it into searches, the index search runs
-them, an answer model writes the reply from what they found. A question can also be
+them, an answer model writes the reply from what they found. Questions form a
+conversation held by the server as a [thread](threads.md). A question can also be
 [retrieved](#retrieve) instead: planned and searched, returning the found entities
 without an answer. Saving an agent stores the configuration only: no vectors, no graph
 data, no conversation. Every lens also has a
@@ -240,15 +241,18 @@ result fits ([../decisions.md](../decisions.md#interfaces)).
 
 ### Follow-up questions
 
-Each answered turn returns a `turnToken`. Passed with the next question, it lets the plan
-restrict a sub-query to the previous turn's results — "these", "their stands" — directly
-or through a filter whose path leads to them. Only results the server verified can be
-referred to: the previous turn must have listed by filters and references alone, with
-every result reaching the answer model; only then does the planner see them, after they
-are checked against the current data again. The reference must rest on the user's own
-referring words, and a singular one needs exactly one result. A turn that searched by
-text yields candidates, not verified results: a reference to them is ignored with a
-limitation.
+A question continues its [thread](threads.md); the thread keeps each answered turn's
+results, so the next question may restrict a sub-query to the previous turn's results —
+"these", "their stands" — directly or through a filter whose path leads to them. The
+client sends nothing but its question and the thread's id. Only results the server
+verified can be referred to: the previous turn must have listed by filters and references
+alone, with every result reaching the answer model; only then does the planner see them,
+after they are checked against the current data again. The reference must rest on the
+user's own referring words, and a singular one needs exactly one result. A turn that
+searched by text yields candidates, not verified results: a reference to them is ignored
+with a limitation. So are results the agent found under another configuration: each turn
+runs the agent's current configuration, and results found before it was saved are not
+offered to the planner.
 
 A reference the planner cannot restrict by — to such candidates, or with no verified
 results at all — is never answered as unsupported: the planner restates the earlier
@@ -259,27 +263,26 @@ message named, or, when that message named none, the one the answer to it named 
 from an earlier exchange; the query names that entity. A follow-up the planner still
 answers as unsupported is planned once more ([above](#planning)).
 
-A token is bound to the ontology, lens, agent and configuration, lives ten minutes, and
-is kept for at most the last hundred turns of one server process. An expired token, or
-one whose agent configuration changed, refuses the question with a request to state it in
-full. The conversation itself is the client's: the request carries its history, of which
-the server uses the last eight turns.
+The planning and answer models see the thread's recent turns, as its user messages and
+answers; how many: [../architecture.md](../architecture.md#thread-store).
 
 ### Diagnostics
 
 On request, the stream also reports what the agent did: the validated plan, one result
 row per entity and sub-query with what matched and its answer fields, the limitations,
 the number of index searches, phase timings and bounded traces of every model call —
-the plan, a repeated plan, the answer. The event format is in [../interfaces.md](../interfaces.md#retriever-agent-list-chat-and-retrieve).
+the plan, a repeated plan, the answer. Diagnostics are for debugging: they are sent only
+when a question asks for them, and any question may. Progress — which phase runs — and
+the answer text are always streamed. The event format is in [../interfaces.md](../interfaces.md#retriever-agent-list-chat-and-retrieve).
 
 ## Retrieve
 
 Retrieve answers one query with the entities the agent finds — no answer text: a
 question's run without the answer step. It runs
 exactly the first two phases of [answering a question](#answering-a-question), unchanged:
-[planning](#planning) and [retrieval](#retrieval). There is no conversation: no history,
-no follow-up token, no reference to earlier results, so planning is never repeated and a
-retrieve makes exactly **one model call**. No answer model runs, and answer fields are
+[planning](#planning) and [retrieval](#retrieval). There is no conversation: no thread,
+no reference to earlier results, so planning is never repeated and a retrieve makes
+exactly **one model call**. No answer model runs, and answer fields are
 not read into the response; the caller reads the entities it needs through the runtime
 interfaces. The agent is loaded and checked as for a question, a request can never supply
 a configuration, the planner input cap and the plan checks apply, and every refusal is
@@ -320,8 +323,8 @@ built in. It exists wherever the adapter stores search indices, and both
 [answering a question](#answering-a-question) and [retrieve](#retrieve) serve it.
 
 Its configuration is derived from the lens for every question, deterministically — the
-same lens and schema give the same configuration, so a follow-up token stays bound to it
-and expires when the schema changes:
+same lens and schema give the same configuration, so a follow-up may refer to the previous
+turn's results until the schema changes:
 
 | Field | Derived as |
 |---|---|
@@ -377,10 +380,11 @@ export carries no `retrieverAgents`, and import checks them and keeps none.
 
 Retriever agents are managed through modeling REST, addressed by lens key and agent key. At
 runtime a list names every agent of the lens — runnable or not, without configuration or
-validation, the default first; a question runs by agent key and streams its progress,
-answer and follow-up token, and a retrieve answers it with one plain response
-([../interfaces.md](../interfaces.md)). Both address the default agent by its key.
-Management, the runtime list, copy, move, export and import call no model. A question or a retrieve needs a
+validation, the default first; a question runs by agent key on a thread and streams its
+progress and answer, a thread reads back, and a retrieve answers one query with one plain
+response ([../interfaces.md](../interfaces.md)). All address the default agent by its key.
+Management, the runtime list, reading a thread, copy, move, export and import call no
+model. A question or a retrieve needs a
 language-model provider — without one it is refused as a disabled feature before anything
 is read or streamed; without an embedding provider it searches by keyword only. No MCP
 tool manages or runs an agent; the modeling MCP server's whole-schema read and export

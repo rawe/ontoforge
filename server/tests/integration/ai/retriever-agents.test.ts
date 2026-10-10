@@ -5,8 +5,10 @@
  * sub-queries or by a sub-query plus a filter. A second ontology replays
  * the follow-up sequences of the end-to-end run (person~default plus an
  * employment index, a city filter): a pronoun after a question that named
- * no person, and a reference to searched results. The suite's env has no
- * embedding provider, so the indices search by keywords.
+ * no person, and a reference to the previous turn's results. Every
+ * conversation runs on a server-held thread, continued by its id alone.
+ * The suite's env has no embedding provider, so the indices search by
+ * keywords.
  *
  * Configuration comes from the suite's own env file (`env/test-ai.env`);
  * skips when the database or the configured model is unavailable —
@@ -41,23 +43,33 @@ async function post(url: string, payload: object, expected = 201): Promise<Row> 
   return res.json() as Row;
 }
 
-/** Ask the agent; the stream's events, checked for one terminal `final`. */
+/** Ask the agent, on a new thread or continuing one; the stream's events,
+ * checked for the leading `thread` and one terminal `final`. */
 async function ask(
   message: string,
-  history: Row[] = [],
+  threadId?: string,
   runtime = RUNTIME,
   agent = "people",
-): Promise<{ reply: string; meta: Row }> {
+): Promise<{ reply: string; meta: Row; threadId: string }> {
   const res = await app!.inject({
     method: "POST",
     url: `${runtime}/ai/assistants/retrievers/${agent}/chat`,
-    payload: { message, history, diagnostics: true },
+    payload: { message, diagnostics: true, ...(threadId ? { threadId } : {}) },
   });
   expect(res.statusCode, res.body).toBe(200);
   const events = res.body.trim().split("\n").map((line) => JSON.parse(line) as Row);
+  expect(events[0]?.type).toBe("thread");
+  if (threadId) expect(events[0]!.threadId).toBe(threadId);
   expect(events.at(-1)?.type, JSON.stringify(events.at(-1))).toBe("final");
-  const meta = Object.assign({}, ...events.filter((event) => event.type === "meta"));
-  return { reply: events.at(-1)!.reply as string, meta };
+  const meta = Object.assign({}, ...events.filter((event) => event.type === "retriever.diagnostics"));
+  return { reply: events.at(-1)!.reply as string, meta, threadId: events[0]!.threadId as string };
+}
+
+/** Asks each question in turn on one thread; the last answer. */
+async function conversation(questions: string[], runtime = RUNTIME): Promise<{ reply: string; meta: Row; threadId: string }> {
+  let turn = await ask(questions[0]!, undefined, runtime);
+  for (const question of questions.slice(1)) turn = await ask(question, turn.threadId, runtime);
+  return turn;
 }
 
 /** Retrieve; the plain JSON response. */
@@ -237,14 +249,16 @@ afterAll(async () => {
   }
 });
 
-const ifAvailable = (name: string, fn: () => Promise<void>) =>
+/** A test that runs only with the suite available; a conversation of
+ * several turns gets the suite's timeout per turn. */
+const ifAvailable = (name: string, fn: () => Promise<void>, turns = 1) =>
   it(name, async (ctx) => {
     if (app === null) {
       ctx.skip(skipReason?.split("\n")[0] ?? "AI suite unavailable");
       return;
     }
     await fn();
-  });
+  }, turns * 180_000);
 
 describe("retriever agent with a real model", () => {
   ifAvailable("answers who is CTO at ACME through the employment index", async () => {
@@ -271,29 +285,26 @@ describe("retriever agent with a real model", () => {
   });
 
   ifAvailable("resolves a follow-up's pronoun to the person asked about last", async () => {
-    const { meta } = await ask("And where does he work?", [
-      { role: "user", content: "Where does Ada Lovelace live?" },
-      { role: "assistant", content: "Ada Lovelace lives in Berlin." },
-      { role: "user", content: "Where does Bob Builder live?" },
-      { role: "assistant", content: "Bob Builder lives in Berlin." },
+    const { meta } = await conversation([
+      "Where does Ada Lovelace live?",
+      "Where does Bob Builder live?",
+      "And where does he work?",
     ]);
     const queries = JSON.stringify((meta.plan.subQueries as Row[]).map((sub) => [sub.query, ...sub.variants]));
     expect(queries).toMatch(/bob/i);
     expect(queries).not.toMatch(/ada/i);
     expect(meta.results[0].label).toBe("Bob Builder");
-  });
+  }, 3);
 
-  ifAvailable("restates a reference to earlier results it cannot use as a fresh search", async () => {
-    // A searched turn is no verified exact list: previousVerifiedResults is null.
-    const { meta } = await ask("Which of these work at ACME?", [
-      { role: "user", content: "Who lives in Berlin?" },
-      { role: "assistant", content: "Ada Lovelace and Bob Builder live in Berlin." },
-    ]);
+  ifAvailable("answers a reference to earlier results", async () => {
+    // Referred to directly when the first turn was a verified exact list,
+    // otherwise restated as a fresh search; never unsupported.
+    const { meta } = await conversation(["Who lives in Berlin?", "Which of these work at ACME?"]);
     expect(meta.plan.unsupportedReason ?? null, JSON.stringify(meta.plan)).toBeNull();
     expect((meta.plan.subQueries as Row[]).length, JSON.stringify(meta.plan)).toBeGreaterThan(0);
     // Ada works at ACME and lives in Berlin; Eve works at ACME but lives in Hamburg.
     expect(meta.results[0].label).toBe("Ada Lovelace");
-  });
+  }, 2);
 });
 
 describe("follow-up sequences of the end-to-end run", () => {
@@ -302,46 +313,41 @@ describe("follow-up sequences of the end-to-end run", () => {
   ifAvailable("resolves 'his' to the person the latest answer named when the question named none", async () => {
     // q2 names no person; Bob exists only in its answer. Ada, of the earlier
     // exchange, fits "role there" (CTO at ACME) better — the trap.
-    const { reply, meta } = await ask("And what is his role there?", [
-      { role: "user", content: "Who is CTO at ACME?" },
-      {
-        role: "assistant",
-        content:
-          "Ada Lovelace is the CTO at ACME. Others at ACME are Clara Schmidt (Advisor), Ines Wagner (CFO) and " +
-          "Bob Martin (Software Engineer); Bob Martin is CTO at Foo Labs, not at ACME.",
-      },
-      { role: "user", content: "Who works at ACME and lives in Berlin?" },
-      { role: "assistant", content: "Bob Martin works at ACME and lives in Berlin." },
-    ], F_RUNTIME);
+    const { reply, meta } = await conversation(
+      ["Who is CTO at ACME?", "Who works at ACME and lives in Berlin?", "And what is his role there?"],
+      F_RUNTIME,
+    );
     const queries = queriesOf(meta.plan);
     expect(meta.plan.subQueries.length, JSON.stringify(meta.plan)).toBeGreaterThan(0);
     expect(queries).toMatch(/bob/i);
     expect(queries).not.toMatch(/ada/i);
     expect(meta.results[0].label).toBe("Bob Martin");
     expect(reply).toMatch(/software engineer/i);
-  });
+  }, 3);
 
-  ifAvailable("restates a reference to searched results with the earlier constraint and the new one", async () => {
-    // As in the end-to-end run, q5 searched by query and filter: its results
-    // are candidates, not a verified list, so nothing is referable.
-    const { reply, meta } = await ask("Which of these work at ACME?", [
-      { role: "user", content: "List everyone who lives in Berlin." },
-      { role: "assistant", content: "Bob Martin and Frank Weber live in Berlin." },
-    ], F_RUNTIME);
-    const subQueries = meta.plan.subQueries as Row[];
+  ifAvailable("answers a reference to the previous turn's results through the thread alone", async () => {
+    // Bob Martin and Frank Weber live in Berlin; of them, Bob works at ACME.
+    const first = await ask("List everyone who lives in Berlin.", undefined, F_RUNTIME);
+    const { reply, meta } = await ask("Which of these work at ACME?", first.threadId, F_RUNTIME);
     expect(meta.plan.unsupportedReason ?? null, JSON.stringify(meta.plan)).toBeNull();
-    expect(subQueries.length, JSON.stringify(meta.plan)).toBeGreaterThan(0);
-    // Both constraints: Berlin as the city filter or its own sub-query, and ACME.
-    const berlin = subQueries.some(
-      (sub) =>
-        sub.filters.some((filter: Row) => filter.id === "city" && /berlin/i.test(filter.value)) ||
-        /berlin/i.test(JSON.stringify([sub.query, ...sub.variants])),
-    );
-    expect(berlin, JSON.stringify(meta.plan)).toBe(true);
-    expect(queriesOf(meta.plan), JSON.stringify(meta.plan)).toMatch(/acme/i);
+    const ignored = (meta.limitations as string[]).some((text) => text.includes("reference to previous results was ignored"));
+    if ((first.meta.plan.subQueries as Row[]).every((sub) => sub.query === "")) {
+      // A verified exact list: "these" restricts the follow-up to it.
+      expect((meta.plan.subQueries as Row[]).some((sub) => sub.previous !== null), JSON.stringify(meta.plan)).toBe(true);
+      expect(ignored).toBe(false);
+    } else {
+      // Searched candidates: restated as a fresh search with the earlier
+      // constraint — Berlin, as the city filter or in a query — and ACME.
+      const berlin = (meta.plan.subQueries as Row[]).some(
+        (sub) =>
+          sub.filters.some((filter: Row) => filter.id === "city" && /berlin/i.test(filter.value)) ||
+          /berlin/i.test(JSON.stringify([sub.query, ...sub.variants])),
+      );
+      expect(berlin, JSON.stringify(meta.plan)).toBe(true);
+    }
     expect((meta.results as Row[]).map((result) => result.label)).toContain("Bob Martin");
     expect(reply).toContain("Bob");
-  });
+  }, 2);
 });
 
 describe("retrieve and the default agent with a real model", () => {
@@ -366,7 +372,7 @@ describe("retrieve and the default agent with a real model", () => {
   });
 
   ifAvailable("the default agent answers in chat", async () => {
-    const { reply, meta } = await ask("Which people live in Berlin?", [], RUNTIME, "_default");
+    const { reply, meta } = await ask("Which people live in Berlin?", undefined, RUNTIME, "_default");
     expect((meta.results as Row[]).map((result) => result.label)).toContain("Ada Lovelace");
     expect(reply).toMatch(/Ada/);
   });

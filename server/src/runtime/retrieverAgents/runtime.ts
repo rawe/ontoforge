@@ -7,9 +7,13 @@
  * alone, streamed. A follow-up whose plan searches nothing is planned once
  * more (a third model call).
  *
- * Chat stream events: `phase` (start/end of plan, retrieve, answer),
- * `delta` (answer text), `meta` (diagnostics on request; the follow-up
- * `turnToken` always), then the transport's `final` or `error`.
+ * A question is one turn on a thread (`docs/capabilities/threads.md`):
+ * the thread's state holds the conversation and the last answered turn's
+ * verified results, which a follow-up may refer to.
+ *
+ * Chat stream events: `retriever.phase` (start/end of plan, retrieve,
+ * answer), `delta` (answer text), `retriever.diagnostics` (on request),
+ * then the transport's `final` or `error`.
  *
  * Retrieve runs the first two phases only (`retrieveQuestion`): one
  * planning call without a conversation, then retrieval; it returns the
@@ -19,13 +23,22 @@
  * runnable or not, the default first.
  */
 
+import { createHash } from "node:crypto";
+
 import type { ChatAnthropic } from "@langchain/anthropic";
 import type { BaseLanguageModelInput } from "@langchain/core/language_models/base";
-import type { AIMessageChunk } from "@langchain/core/messages";
+import type { AIMessageChunk, BaseMessage } from "@langchain/core/messages";
 import type { Runnable } from "@langchain/core/runnables";
 import type { ChatOpenAI } from "@langchain/openai";
-import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
+import { AIMessage, HumanMessage, SystemMessage } from "@langchain/core/messages";
+import {
+  Annotation,
+  END,
+  MessagesAnnotation,
+  START,
+  StateGraph,
+  UntrackedValueChannel,
+} from "@langchain/langgraph";
 
 import { settings } from "../../config.js";
 import { createAiModel, getAiModel } from "../../core/ai.js";
@@ -48,6 +61,8 @@ import {
   DEFAULT_RETRIEVER_AGENT_NAME,
   defaultAgentConfig,
 } from "./defaultAgent.js";
+import { TURNS_THE_MODEL_SEES, type GraphThread } from "../threads/threadStore.js";
+import { lastTurns, trimTurns } from "../threads/turns.js";
 import { modelInputTrace } from "./modelTrace.js";
 import {
   PLANNER,
@@ -61,7 +76,6 @@ import {
   type Previous,
 } from "./plan.js";
 import { parsePlannerOutput } from "./plannerOutput.js";
-import { recall, remember } from "./references.js";
 import {
   answerSearches,
   boundContext,
@@ -143,9 +157,24 @@ export function requireLanguageModel(): void {
   }
 }
 
-/** The last 8 turns, each at most 2,000 characters. */
-export function historyBounded(history: History[]): History[] {
-  return history.slice(-8).map((h) => ({ role: h.role, content: h.content.slice(0, 2000) }));
+/** The feature and the lens the retriever routes need — what the list
+ * needs, so reading a thread needs no language model. An adapter without
+ * search indices → disabled feature; an unknown lens → not found. */
+export async function requireRetrievers(lensKey: string, store: RuntimeStore): Promise<void> {
+  indexStoreOf(store);
+  await loadSchema(lensKey, store);
+}
+
+/** The conversation before the question that the models see: the
+ * thread's last turns, the question's own counted, each message at most
+ * 2,000 characters. */
+export function historyOf(messages: BaseMessage[]): History[] {
+  return lastTurns(messages, TURNS_THE_MODEL_SEES)
+    .slice(0, -1)
+    .map((message) => ({
+      role: message.getType() === "human" ? "user" : "assistant",
+      content: message.text.slice(0, 2000),
+    }));
 }
 
 function text(content: unknown): string {
@@ -180,13 +209,28 @@ interface ModelCall {
   outputTruncated?: boolean;
 }
 
+/** What a follow-up may refer to: the last answered turn's results and
+ * the configuration that found them. */
+interface Verified {
+  configHash: string;
+  previous: Previous;
+}
+
+const configHash = (config: unknown) => createHash("sha256").update(JSON.stringify(config)).digest("hex");
+
 const State = Annotation.Root({
-  reply: Annotation<string>({ reducer: (_, b) => b, default: () => "" }),
-  previous: Annotation<Previous | undefined>(),
-  plan: Annotation<Plan>(),
-  notes: Annotation<string[]>(),
-  retrieval: Annotation<Retrieval>(),
-  context: Annotation<ResponseContext>(),
+  // The thread, kept between turns: the user's questions and the answers,
+  // and what the next question may refer to.
+  ...MessagesAnnotation.spec,
+  verified: Annotation<Verified | undefined>(),
+  // One turn's working values, never kept with the thread.
+  history: new UntrackedValueChannel<History[]>(),
+  previous: new UntrackedValueChannel<Previous | undefined>(),
+  plan: new UntrackedValueChannel<Plan>(),
+  notes: new UntrackedValueChannel<string[]>(),
+  retrieval: new UntrackedValueChannel<Retrieval>(),
+  context: new UntrackedValueChannel<ResponseContext>(),
+  reply: new UntrackedValueChannel<string>(),
 });
 
 /** The configured model, never retried, and its JSON-mode planning view:
@@ -349,45 +393,51 @@ export async function retrieveQuestion(
   };
 }
 
+/**
+ * Answer one question on its thread. A follow-up may refer to the
+ * previous turn's verified results, re-checked against the current data;
+ * results found with another configuration are not offered, so a
+ * reference to them is ignored with a limitation.
+ */
 export async function chat(
-  lensKey: string,
   agent: RunnableAgent,
   message: string,
-  rawHistory: History[],
+  thread: GraphThread,
   execution: StreamExecution,
-  turnToken: string | undefined,
   diagnostics: boolean,
 ): Promise<Record<string, unknown>> {
   const { signal, onToolEvent: emit } = execution;
-  // Without diagnostics the stream carries progress, answer and the follow-up token only.
-  const meta = async (payload: Record<string, unknown>) => {
-    if (diagnostics) await emit({ type: "meta", ...payload });
+  // Without diagnostics the stream carries progress and the answer only.
+  const report = async (payload: Record<string, unknown>) => {
+    if (diagnostics) await emit({ type: "retriever.diagnostics", ...payload });
   };
   const started = performance.now();
   const timings: Record<string, number> = {};
   const io: ModelCall[] = [];
-  const history = historyBounded(rawHistory);
   const scope: RetrievalScope = { ...agent.scope, signal };
-  const turnScope = `${scope.store.ontologyKey}/${lensKey}/${agent.key}`;
   const modes = availableModes();
   let firstDelta = false;
+  let searchCalls = 0;
   const { model, plannerModel } = models();
+  const hash = configHash(agent.config);
 
   async function phase<T>(name: string, run: () => Promise<T>): Promise<T> {
     signal.throwIfAborted();
-    await emit({ type: "phase", phase: name, status: "start" });
+    await emit({ type: "retriever.phase", phase: name, status: "start" });
     const start = performance.now();
     try {
       return await run();
     } finally {
       timings[name] = performance.now() - start;
-      if (!signal.aborted) await emit({ type: "phase", phase: name, status: "end", durationMs: timings[name] });
+      if (!signal.aborted) {
+        await emit({ type: "retriever.phase", phase: name, status: "end", durationMs: timings[name] });
+      }
     }
   }
 
   const graph = new StateGraph(State)
-    .addNode("prepare", async () => {
-      const previous = recall(turnScope, agent.config, turnToken);
+    .addNode("prepare", async (state) => {
+      const previous = state.verified?.configHash === hash ? structuredClone(state.verified.previous) : undefined;
       // Only an exact (query-less) turn may be referred to; its results are
       // re-verified against the current data: only ids its plan still
       // finds remain referable.
@@ -404,12 +454,12 @@ export async function chat(
           result.ids = result.ids.filter((id) => valid.has(id));
         }
       }
-      return { previous };
+      return { previous, history: historyOf(state.messages) };
     })
     .addNode("planning", async (state) => {
-      const { previous } = state;
+      const { previous, history } = state;
       const { plan, notes } = await phase("plan", () =>
-        planQuestion({ agent, scope, modes, message, history, previous, plannerModel, timings, io, report: meta }),
+        planQuestion({ agent, scope, modes, message, history, previous, plannerModel, timings, io, report }),
       );
       return { plan, notes };
     })
@@ -421,7 +471,8 @@ export async function chat(
       const context = boundContext(retrieval, plan, scope.lens, agent.config);
       timings.context = performance.now() - t;
       timings.search = retrieval.searchMs;
-      await meta({
+      searchCalls = retrieval.searchCalls;
+      await report({
         results: diagnosticResults(retrieval),
         limitations: context.limitations,
         searchCalls: retrieval.searchCalls,
@@ -430,7 +481,7 @@ export async function chat(
       return { retrieval, context };
     })
     .addNode("answer", async (state) => {
-      const { plan, context } = state;
+      const { plan, context, history } = state;
       const reply = await phase("answer", async () => {
         const input = JSON.stringify({
           question: message,
@@ -467,25 +518,34 @@ export async function chat(
       });
       return { reply };
     })
+    // The turn joins the thread, which keeps its last turns, and its
+    // results become what the next question may refer to.
+    .addNode("remember", async (state) => ({
+      messages: [...trimTurns(state.messages), new AIMessage(state.reply)],
+      verified: {
+        configHash: hash,
+        previous: {
+          plan: state.plan,
+          complete: state.context.omitted === 0,
+          results: resultIds(state.retrieval),
+          ...(state.previous ? { referencedResults: state.previous.results } : {}),
+        },
+      },
+    }))
     .addEdge(START, "prepare")
     .addEdge("prepare", "planning")
     .addEdge("planning", "retrieve")
     .addEdge("retrieve", "answer")
-    .addEdge("answer", END)
-    .compile();
+    .addEdge("answer", "remember")
+    .addEdge("remember", END)
+    .compile({ checkpointer: thread.checkpointer });
 
-  const result = await graph.invoke({}, { signal });
+  const result = await graph.invoke(
+    { messages: [new HumanMessage(message)] },
+    { signal, configurable: { thread_id: thread.threadId } },
+  );
   timings.total = performance.now() - started;
   timings.answerModel = timings.answer ?? 0;
-  const nextToken = remember(
-    turnScope,
-    agent.config,
-    result.plan,
-    resultIds(result.retrieval),
-    result.context.omitted === 0,
-    result.previous,
-  );
-  await meta({ timings, modelIO: io, searchCalls: result.retrieval.searchCalls, llmCalls: io.length });
-  await emit({ type: "meta", turnToken: nextToken });
+  await report({ timings, modelIO: io, searchCalls, llmCalls: io.length });
   return { reply: result.reply };
 }

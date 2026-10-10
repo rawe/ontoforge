@@ -1,8 +1,10 @@
 /**
- * The retriever-agent runtime routes: the list, and chat and retrieve,
- * where the saved agent is resolved on the server before the stream opens,
- * a request cannot carry a configuration, the stream keeps its contract,
- * and retrieve answers one plain JSON body. Removed routes are gone.
+ * The retriever-agent runtime routes: the list, chat, its threads and
+ * retrieve, where the saved agent is resolved on the server before the
+ * stream opens, a request cannot carry a configuration, the stream keeps
+ * its contract, a thread is started, continued or refused before the
+ * stream opens, and retrieve answers one plain JSON body. Removed routes
+ * are gone.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -16,6 +18,7 @@ const pipeline = vi.hoisted(() => ({
   chat: vi.fn(),
   retrieveQuestion: vi.fn(),
   requireLanguageModel: vi.fn(),
+  requireRetrievers: vi.fn(),
   listRuntimeRetrievers: vi.fn(),
 }));
 vi.mock("../../../src/core/ports.js", async (original) => ({
@@ -57,25 +60,35 @@ describe("retriever agent list route", () => {
 describe("retriever agent chat route", () => {
   it("runs the saved agent and keeps the stream contract", async () => {
     pipeline.chat.mockImplementationOnce(async (...args: unknown[]) => {
-      const execution = args[4] as { onToolEvent(event: Record<string, unknown>): Promise<void> };
+      const execution = args[3] as { onToolEvent(event: Record<string, unknown>): Promise<void> };
       await execution.onToolEvent({ type: "delta", text: "Answer" });
       return { reply: "Answer" };
     });
-    const response = await app.inject({ method: "POST", url: `${BASE}/ai/assistants/retrievers/find/chat`, payload: { message: "Who?", history: [] } });
+    const response = await app.inject({ method: "POST", url: `${BASE}/ai/assistants/retrievers/find/chat`, payload: { message: "Who?", diagnostics: true } });
     expect(response.headers["content-type"]).toBe("application/x-ndjson");
-    expect(response.body.trim().split("\n").map((line) => JSON.parse(line))).toEqual([
+    const events = response.body.trim().split("\n").map((line) => JSON.parse(line));
+    expect(events).toEqual([
+      { type: "thread", threadId: expect.any(String) },
       { type: "delta", text: "Answer" },
       { type: "final", reply: "Answer" },
     ]);
     expect(pipeline.loadRunnableAgent).toHaveBeenCalledWith("main", "find", runtime);
-    expect(pipeline.chat.mock.calls[0]!.slice(0, 4)).toEqual(["main", agent, "Who?", []]);
+    const [ran, message, thread, , diagnostics] = pipeline.chat.mock.calls[0]!;
+    expect([ran, message, diagnostics]).toEqual([agent, "Who?", true]);
+    expect(thread).toMatchObject({ threadId: events[0].threadId });
   });
 
-  it("refuses a request that carries a configuration", async () => {
-    const response = await app.inject({
-      method: "POST", url: `${BASE}/ai/assistants/retrievers/find/chat`, payload: { message: "Who?", config: { indices: [] } },
-    });
-    expect(response.statusCode).toBe(422);
+  it("refuses a configuration, a history, a follow-up token, unknown fields and a message over 2,000 characters", async () => {
+    for (const payload of [
+      { message: "Who?", config: { indices: [] } },
+      { message: "Who?", history: [] },
+      { message: "Who?", turnToken: "t" },
+      { message: "Who?", diagnostics: "yes" },
+      { message: "x".repeat(2001) },
+    ]) {
+      const response = await app.inject({ method: "POST", url: `${BASE}/ai/assistants/retrievers/find/chat`, payload });
+      expect(response.statusCode, JSON.stringify(payload)).toBe(422);
+    }
     expect(pipeline.chat).not.toHaveBeenCalled();
   });
 
@@ -113,6 +126,64 @@ describe("retriever agent chat route", () => {
       // The router's own 404, not an unknown ontology or lens.
       expect(response.json().error.message).toBe("Not Found");
     }
+  });
+});
+
+describe("retriever agent threads", () => {
+  const chatUrl = (key: string) => `${BASE}/ai/assistants/retrievers/${key}/chat`;
+  const started = async (key = "find") => {
+    pipeline.chat.mockResolvedValueOnce({ reply: "Answer" });
+    const response = await app.inject({ method: "POST", url: chatUrl(key), payload: { message: "Who?" } });
+    return JSON.parse(response.body.split("\n")[0]!).threadId as string;
+  };
+
+  it("continues a thread by its id, and refuses an unknown or foreign one with THREAD_NOT_FOUND before streaming", async () => {
+    const threadId = await started();
+    pipeline.chat.mockResolvedValueOnce({ reply: "Again" });
+    const again = await app.inject({ method: "POST", url: chatUrl("find"), payload: { message: "And?", threadId } });
+    expect(JSON.parse(again.body.split("\n")[0]!)).toEqual({ type: "thread", threadId });
+    for (const [key, id] of [["find", "no-such-thread"], ["_default", threadId]] as const) {
+      const response = await app.inject({ method: "POST", url: chatUrl(key), payload: { message: "And?", threadId: id } });
+      expect(response.statusCode).toBe(404);
+      expect(response.json().error.details).toEqual({ code: "THREAD_NOT_FOUND" });
+    }
+    expect(pipeline.chat).toHaveBeenCalledTimes(2);
+  });
+
+  it("refuses a message to a thread still running with THREAD_BUSY before streaming", async () => {
+    const threadId = await started();
+    let finish!: () => void;
+    pipeline.chat.mockImplementationOnce(() => new Promise((resolve) => { finish = () => resolve({ reply: "Done" }); }));
+    const running = app.inject({ method: "POST", url: chatUrl("find"), payload: { message: "Slow", threadId } });
+    await vi.waitFor(() => expect(pipeline.chat).toHaveBeenCalledTimes(2));
+    const busy = await app.inject({ method: "POST", url: chatUrl("find"), payload: { message: "Meanwhile", threadId } });
+    expect(busy.statusCode).toBe(409);
+    expect(busy.json().error).toMatchObject({ code: "RESOURCE_CONFLICT", details: { code: "THREAD_BUSY" } });
+    finish();
+    expect((await running).body).toContain('"type":"final"');
+    expect(pipeline.chat).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads a thread without a language model, and refuses an unknown one with THREAD_NOT_FOUND", async () => {
+    const threadId = await started();
+    pipeline.requireLanguageModel.mockClear();
+    const response = await app.inject({ method: "GET", url: `${BASE}/ai/assistants/retrievers/find/threads/${threadId}` });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ threadId, messages: [] });
+    expect(pipeline.requireRetrievers).toHaveBeenCalledWith("main", runtime);
+    expect(pipeline.requireLanguageModel).not.toHaveBeenCalled();
+    const missing = await app.inject({ method: "GET", url: `${BASE}/ai/assistants/retrievers/_default/threads/${threadId}` });
+    expect(missing.statusCode).toBe(404);
+    expect(missing.json().error.details).toEqual({ code: "THREAD_NOT_FOUND" });
+  });
+
+  it("reading answers FEATURE_DISABLED on an adapter without search indices", async () => {
+    pipeline.requireRetrievers.mockRejectedValueOnce(
+      new ValidationError("Search indices are not supported by the active storage adapter", { code: "FEATURE_DISABLED" }),
+    );
+    const response = await app.inject({ method: "GET", url: `${BASE}/ai/assistants/retrievers/find/threads/any` });
+    expect(response.statusCode).toBe(422);
+    expect(response.json().error.details).toEqual({ code: "FEATURE_DISABLED" });
   });
 });
 

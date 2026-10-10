@@ -6,8 +6,9 @@ as agents.
 **All of it requires a configured language-model provider.** With none configured, every
 operation that would run a model is rejected. Clients are expected to check the server's
 feature flags first and hide what is unavailable — see [../README.md](../README.md). One
-asymmetry to know when reimplementing: listing agents does not run a model, so it keeps
-answering normally on a server with no provider. Only a chat with an agent fails.
+asymmetry to know when reimplementing: listing agents and reading a thread back do not
+run a model, so they keep answering normally on a server with no provider. Only a chat
+with an agent fails.
 
 Everything here is runtime, and everything is scoped to one lens of one ontology
 ([ontology-lenses.md](ontology-lenses.md)). A model is given the lens's schema — the
@@ -22,9 +23,9 @@ One task-shaped operation, plus a way to package it.
 
 ### Chat
 
-Multi-turn conversation with tools. The model reads the schema, decides which tools to
-call, and answers from what they return. Which tools it may call is what an agent
-configures.
+Multi-turn conversation with tools, held by the server as a
+[thread](threads.md). The model reads the schema, decides which tools to call, and
+answers from what they return. Which tools it may call is what an agent configures.
 
 ## Agents
 
@@ -76,30 +77,31 @@ know it: it is not listed, read or written there.
 ### Live tool activity
 
 REST chat reports every tool invocation as it starts, with complete arguments, and attaches
-its structured result as soon as it completes. Repeated calls remain distinguishable, and
-one slow parallel call does not hide another's result. Schema-invalid arguments and
-recoverable validation/not-found failures remain visible while the model corrects them.
-The assistant answer appears once, complete, after tool work finishes; a turn using no tools
-still produces an answer. The wire contract lives in [interfaces](../interfaces.md#ai).
+its structured result as soon as it completes — always, with no switch: tool activity is
+part of the product, not diagnostics. Repeated calls remain distinguishable, and one slow
+parallel call does not hide another's result. Schema-invalid arguments and recoverable
+validation/not-found failures remain visible while the model corrects them. The assistant
+answer appears once, complete, after tool work finishes; a turn using no tools still
+produces an answer. The wire contract lives in [interfaces](../interfaces.md#ai).
 
-A fatal failure retains earlier results and marks the turn incomplete. Disconnect cancels
-further model and tool work; cancellation of already-running operations is best effort.
-Abandoned turns do not continue in the background or automatically restart.
+A fatal failure keeps the results already reported in the stream, ends the turn with an
+error, and leaves nothing of the turn in its thread. Disconnect cancels further model and
+tool work, and the turn with it; cancellation of already-running operations is best
+effort. Abandoned turns do not continue in the background or automatically restart.
 
-### Conversation history
+### Conversation
 
-The server holds none. Chat is stateless: a caller that wants a multi-turn conversation
-sends the prior turns with each request, as an ordered list of role-and-content pairs with
-roles limited to user and assistant.
+A conversation is a [thread](threads.md): the client sends its new message and the
+thread's id, and the server continues from what the thread kept. What an agent's thread
+adds to the rules there:
 
-Consequences a reimplementer should not have to discover:
-
-- Only text is carried back. Tool calls and their results from earlier turns are not part
-  of history, so the model sees what it *said*, not what it *found*.
-- Nothing is truncated, summarized or windowed. The caller owns the transcript and its
-  growth, and is the only thing standing between a long conversation and the model's
-  context limit.
-- History is per caller. Two clients chatting with the same agent share nothing.
+- **The model sees what it found, not only what it said.** A thread keeps each turn's tool
+  calls and their results, and the model sees them for the recent turns — a follow-up can
+  build on an earlier result without querying again.
+- **Each turn runs the agent's current configuration** — its prompt, its tools — against
+  the conversation so far, so a saved change applies from the next turn on.
+- **Threads are per conversation, not per agent.** Two clients chatting with the same
+  agent share nothing unless they share a thread id.
 
 ## Through the interfaces
 
@@ -109,7 +111,7 @@ Configuring agents is modeling; running them is runtime. Complete operation inde
 | | Where | Operations |
 |---|---|---|
 | Configure agents | Modeling REST, modeling MCP, the studio's agents tab | List, read one (REST), upsert by key, delete |
-| Chat | Runtime REST only | One operation per agent, the default addressed by its key |
+| Chat | Runtime REST only | One operation per agent, the default addressed by its key; reading a thread back |
 | List agents | Runtime REST | Every agent of the lens — key, name, description, whether built in — the default first |
 | Web UI | The workbench's AI surface | Chat with an agent picker and persisted local threads |
 

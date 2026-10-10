@@ -56,6 +56,12 @@ export interface Thread {
   lastUsedAt: number;
 }
 
+/** What a graph run needs of its thread: the id and the saver to run on. */
+export interface GraphThread {
+  checkpointer: BaseCheckpointSaver;
+  threadId: string;
+}
+
 /** The store's clock, injectable so expiry is testable without waiting. */
 export type Clock = () => number;
 

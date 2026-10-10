@@ -1,35 +1,30 @@
 /** Retriever agents at runtime, under `/ai/assistants/retrievers`: the
- * list, chat and retrieve. The saved agent (or the lens's derived default
- * agent, `_default`) runs; a request can never supply a configuration. */
+ * list, chat, its threads and retrieve. The saved agent (or the lens's
+ * derived default agent, `_default`) runs; a request can never supply a
+ * configuration. */
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 
 import { getRuntimeStore } from "../../core/ports.js";
-import { sendChatStream } from "../chatStream.js";
+import { ChatPayload, sendChatStream, threadBinding } from "../chatStream.js";
+import { openThread, readThread } from "../threads/access.js";
+import type { ThreadStore } from "../threads/threadStore.js";
 import {
   chat,
   listRuntimeRetrievers,
   loadRunnableAgent,
   requireLanguageModel,
+  requireRetrievers,
   retrieveQuestion,
 } from "./runtime.js";
 
 const LensParams = z.object({ ontologyKey: z.string(), lensKey: z.string() });
 const Params = LensParams.extend({ assistantKey: z.string() });
-const Chat = z
-  .object({
-    message: z.string().min(1).max(2000),
-    turnToken: z.string().max(100).optional(),
-    diagnostics: z.boolean().default(false),
-    history: z
-      .array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(12000) }))
-      .max(30)
-      .default([]),
-  })
-  .strict();
+const ThreadParams = Params.extend({ threadId: z.string() });
+const Chat = ChatPayload.extend({ diagnostics: z.boolean().default(false) }).strict();
 const Retrieve = z.object({ query: z.string().min(1).max(2000) }).strict();
 
-export const retrieverAgentRuntimeRouter: FastifyPluginAsyncZod = async (app) => {
+export const retrieverAgentRuntimeRouter: FastifyPluginAsyncZod<{ threads: ThreadStore }> = async (app, { threads }) => {
   app.get(
     "/ai/assistants/retrievers",
     { schema: { tags: ["ai"], params: LensParams } },
@@ -46,17 +41,26 @@ export const retrieverAgentRuntimeRouter: FastifyPluginAsyncZod = async (app) =>
       // Resolved before the stream opens: unknown and invalid agents answer
       // with a plain error response.
       const agent = await loadRunnableAgent(request.params.lensKey, request.params.assistantKey, store);
-      return sendChatStream(reply, (execution) =>
+      const threadId = await openThread(threads, threadBinding(request.params, "retrievers"), request.body.threadId);
+      return sendChatStream(reply, { threads, threadId }, (execution) =>
         chat(
-          request.params.lensKey,
           agent,
           request.body.message,
-          request.body.history,
+          { checkpointer: threads.checkpointer, threadId },
           execution,
-          request.body.turnToken,
           request.body.diagnostics,
         ),
       );
+    },
+  );
+
+  // Reading, like listing, needs no language model.
+  app.get(
+    "/ai/assistants/retrievers/:assistantKey/threads/:threadId",
+    { schema: { tags: ["ai"], params: ThreadParams } },
+    async (request) => {
+      await requireRetrievers(request.params.lensKey, await getRuntimeStore(request.params.ontologyKey));
+      return readThread(threads, threadBinding(request.params, "retrievers"), request.params.threadId);
     },
   );
 

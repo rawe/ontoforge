@@ -3,12 +3,15 @@
  * chat and the agent list. The engine is
  * LangChain.js / LangGraph.js (approved stack).
  *
- * Each operation builds a fresh agent per request with a scoped tool
- * subset. Tools invoke the same runtime service functions the MCP tools
- * use — no HTTP hop. A tool failure that is a not-found or validation
- * error is returned to the model as the tool's result so it can correct
- * itself and retry (`docs/capabilities/oql.md#self-correction-hints`);
- * any other error aborts the run.
+ * Each turn builds a fresh agent with the agent's current configuration
+ * and a scoped tool subset, and runs it on its thread
+ * (`docs/capabilities/threads.md`): the thread's state holds the
+ * conversation with every tool call and result. Tools invoke the same
+ * runtime service functions the MCP tools use — no HTTP hop. A tool
+ * failure that is a not-found or validation error is returned to the
+ * model as the tool's result so it can correct itself and retry
+ * (`docs/capabilities/oql.md#self-correction-hints`); any other error
+ * aborts the run.
  */
 
 import {
@@ -23,7 +26,6 @@ import { randomUUID } from "node:crypto";
 
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import {
-  AIMessage,
   HumanMessage,
   SystemMessage,
   ToolMessage,
@@ -43,6 +45,8 @@ import { NotFoundError, ValidationError } from "../core/exceptions.js";
 import type { RuntimeStore } from "../core/ports.js";
 import { loadSchema, type SchemaCacheValue } from "./schemaCache.js";
 import * as service from "./service.js";
+import { TURNS_THE_MODEL_SEES, type GraphThread } from "./threads/threadStore.js";
+import { lastTurns, trimTurns } from "./threads/turns.js";
 import {
   TOOL_EXECUTE_QUERY,
   TOOL_GET_DOCUMENT,
@@ -407,8 +411,8 @@ export const ALL_TOOL_NAMES: ReadonlySet<string> = new Set(AGENT_TOOL_DEFS_BY_NA
  * Anything else is rethrown and aborts the run.
  */
 export type ToolEvent =
-  | { type: "tool_call"; callId: string; tool: string; args: Row }
-  | { type: "tool_result"; callId: string; result: unknown };
+  | { type: "agent.tool_call"; callId: string; tool: string; args: Row }
+  | { type: "agent.tool_result"; callId: string; result: unknown };
 
 export interface ChatExecution {
   signal?: AbortSignal;
@@ -451,7 +455,7 @@ export function buildTools(
       const callId = randomUUID();
       const record: ToolCallRecord = { tool: name, args };
       recorder.push(record);
-      await execution.onToolEvent?.({ type: "tool_call", callId, tool: name, args });
+      await execution.onToolEvent?.({ type: "agent.tool_call", callId, tool: name, args });
       execution.signal?.throwIfAborted();
       let output: ToolMessage;
       try {
@@ -468,7 +472,7 @@ export function buildTools(
         });
       }
       execution.signal?.throwIfAborted();
-      await execution.onToolEvent?.({ type: "tool_result", callId, result: record.result });
+      await execution.onToolEvent?.({ type: "agent.tool_result", callId, result: record.result });
       return isToolCall ? output : output.content;
     };
     return [structured];
@@ -534,31 +538,44 @@ const ABORT_ON_TOOL_ERROR = createMiddleware({
 });
 
 /**
- * One ReAct-style run: system prompt, the given messages, the given tools.
- * Tool errors outside the self-correction paths abort (the wrappers in
- * `buildTools` already feed domain and argument errors back). Returns the
- * final reply text.
+ * One ReAct-style turn on a thread: system prompt, the thread's
+ * conversation plus the new message, the given tools. The thread keeps at
+ * most `TURNS_PER_THREAD` turns; the model sees the last
+ * `TURNS_THE_MODEL_SEES`, tool calls and results included. Tool errors
+ * outside the self-correction paths abort (the wrappers in `buildTools`
+ * already feed domain and argument errors back). Returns the final reply
+ * text.
  */
 async function runReactAgent(
   model: BaseChatModel,
   systemPrompt: string,
   tools: StructuredToolInterface[],
-  messages: BaseMessage[],
+  message: string,
+  thread: GraphThread,
   signal?: AbortSignal,
 ): Promise<string> {
   signal?.throwIfAborted();
-  if (tools.length === 0) {
-    // No tools: a plain model call is the same conversation without the
-    // tool loop (binding an empty toolset is rejected by providers).
-    const response = await model.invoke([new SystemMessage(systemPrompt), ...messages], { signal });
-    return messageText(response);
-  }
+  const turns = createMiddleware({
+    name: "ThreadTurns",
+    beforeAgent: (state) => ({ messages: trimTurns(state.messages) }),
+    wrapModelCall: async (request, handler) => {
+      const messages = lastTurns(request.messages, TURNS_THE_MODEL_SEES);
+      // No tools: a plain model call is the same conversation without the
+      // tool loop (binding an empty toolset is rejected by providers).
+      if (tools.length === 0) return model.invoke([request.systemMessage, ...messages], { signal });
+      return handler({ ...request, messages });
+    },
+  });
   // A SystemMessage keeps the prompt as plain string content; a string
   // would be turned into a content-block array.
   const agent = createAgent({
-    model, tools, systemPrompt: new SystemMessage(systemPrompt), middleware: [ABORT_ON_TOOL_ERROR],
+    model, tools, systemPrompt: new SystemMessage(systemPrompt),
+    middleware: [turns, ABORT_ON_TOOL_ERROR], checkpointer: thread.checkpointer,
   });
-  const state = await agent.invoke({ messages }, { recursionLimit: RECURSION_LIMIT, signal });
+  const state = await agent.invoke(
+    { messages: [new HumanMessage(message)] },
+    { recursionLimit: RECURSION_LIMIT, signal, configurable: { thread_id: thread.threadId } },
+  );
   const finalMessages = state.messages as BaseMessage[];
   return messageText(finalMessages[finalMessages.length - 1]);
 }
@@ -588,11 +605,6 @@ STRATEGY — use the exact keys from the schema as tool arguments (e.g. entity_t
 Never make up answers — only use data from tool results. If the data doesn't contain the answer, say so. Be concise.
 `;
 
-export interface ChatHistoryEntry {
-  role: string;
-  content: string;
-}
-
 /** Effective toolset: allowlist ∩ available. Embedding-dependent tools are
  * dropped without an embedding provider — for the default agent and
  * explicit allowlists alike. */
@@ -607,13 +619,13 @@ export function resolveChatToolNames(agentConfig: AgentConfig, store: RuntimeSto
   );
 }
 
-/** Unified engine function for agent-powered chat. */
+/** One turn of agent chat on a thread. */
 export async function runAgentChat(
   agentConfig: AgentConfig,
   lensKey: string,
   message: string,
   store: RuntimeStore,
-  history: ChatHistoryEntry[] | null = null,
+  thread: GraphThread,
   includeToolCalls = false,
   execution: ChatExecution = {},
 ): Promise<Row> {
@@ -633,18 +645,7 @@ export async function runAgentChat(
   const recorder: ToolCallRecord[] = [];
   const tools = buildTools(lensKey, store, toolNames, recorder, execution);
 
-  // Stateless history: caller-supplied user/assistant turns, text only.
-  const messages: BaseMessage[] = [];
-  for (const entry of history ?? []) {
-    if (entry.role === "user") {
-      messages.push(new HumanMessage(entry.content));
-    } else if (entry.role === "assistant") {
-      messages.push(new AIMessage(entry.content));
-    }
-  }
-  messages.push(new HumanMessage(message));
-
-  const reply = await runReactAgent(model, systemPrompt, tools, messages, execution.signal);
+  const reply = await runReactAgent(model, systemPrompt, tools, message, thread, execution.signal);
   execution.signal?.throwIfAborted();
 
   const response: Row = { reply, toolCalls: null };

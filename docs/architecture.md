@@ -358,8 +358,8 @@ There are exactly six top-level codes:
 
 | Condition | Status | Code | `details` |
 |---|---|---|---|
-| Resource does not exist | 404 | `RESOURCE_NOT_FOUND` | — |
-| Uniqueness or referential conflict | 409 | `RESOURCE_CONFLICT` | — |
+| Resource does not exist | 404 | `RESOURCE_NOT_FOUND` | — or `code` |
+| Uniqueness or referential conflict | 409 | `RESOURCE_CONFLICT` | — or `code` |
 | Input rejected | 422 | `VALIDATION_ERROR` | `fields` map or `errors` list |
 | Change requires explicit cascade | 409 | `CASCADE_REQUIRED` | `affectedLenses`, `affectedIndices` |
 | Unexpected storage failure | 500 | `STORAGE_ERROR` | `errorId` |
@@ -372,6 +372,10 @@ stays one of the six. A request for an unavailable search strategy, search with 
 saved-query discovery with no embedding provider, an AI request with no
 language-model provider configured — or a search-settings, search-index or retriever-agent
 request to a storage adapter without search indices — answers `422 VALIDATION_ERROR` with `details.code` of `FEATURE_DISABLED`.
+An assistant thread that is unknown, expired or bound to another assistant answers
+`404 RESOURCE_NOT_FOUND` with `details.code` of `THREAD_NOT_FOUND`, and a message to a
+thread still running `409 RESOURCE_CONFLICT` with `details.code` of `THREAD_BUSY`
+([thread store](#thread-store)).
 
 **`STORAGE_ERROR` carries an id, not a cause.** A driver message names the vendor and its
 physical objects, which must not reach a client. The adapter logs the original against a

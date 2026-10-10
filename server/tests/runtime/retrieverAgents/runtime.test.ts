@@ -1,9 +1,10 @@
 /**
  * The retriever-agent pipeline with a fake model and a mocked search
  * engine: exactly planner + answer model, the stream's events and
- * diagnostics `meta` shapes (contract), the follow-up token, planner
- * failures before any answer, cancellation, follow-up references, and the
- * one repeated plan for a follow-up whose first plan searched nothing.
+ * diagnostics shapes (contract), planner failures before any answer,
+ * cancellation, turns on a thread (what the models see, what the thread
+ * keeps), follow-up references, and the one repeated plan for a follow-up
+ * whose first plan searched nothing.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -28,7 +29,13 @@ import { createAiModel } from "../../../src/core/ai.js";
 import type { RuntimeStore, SearchIndexRecord, SearchIndexStore } from "../../../src/core/ports.js";
 import type { LoadedSchema } from "../../../src/runtime/schemaCache.js";
 import { PLANNER, PLANNER_RESPONSE_FORMAT, REPLAN } from "../../../src/runtime/retrieverAgents/plan.js";
-import { chat, retrieveQuestion, type RunnableAgent } from "../../../src/runtime/retrieverAgents/runtime.js";
+import {
+  chat,
+  retrieveQuestion,
+  type RunnableAgent,
+} from "../../../src/runtime/retrieverAgents/runtime.js";
+import { MemoryThreadStore } from "../../../src/runtime/threads/memoryThreadStore.js";
+import { TURNS_PER_THREAD, TURNS_THE_MODEL_SEES, type GraphThread } from "../../../src/runtime/threads/threadStore.js";
 import { CONFIG, LENS, SCHEMA } from "./fixture.js";
 
 const store = {
@@ -64,11 +71,30 @@ const sub = (overrides: Record<string, unknown> = {}) => ({
 });
 const planned = (subQueries: unknown[]) => ({ content: JSON.stringify({ subQueries, unsupportedReason: null }), usage_metadata: { input_tokens: 1, output_tokens: 2 } });
 
-async function run(message: string, diagnostics = true, turnToken?: string, signal = new AbortController().signal) {
-  const events: Record<string, unknown>[] = [];
-  const result = await chat("all", agent, message, [], { signal, onToolEvent: async (event) => { events.push(event); } }, turnToken, diagnostics);
-  return { events, result };
+const threads = new MemoryThreadStore();
+
+/** A new thread of the agent, as a chat without a thread id starts one. */
+async function newThread(): Promise<GraphThread> {
+  const { threadId } = await threads.create({ ontologyKey: "o", lensKey: "all", kind: "retrievers", assistantKey: "people" });
+  return { checkpointer: threads.checkpointer, threadId };
 }
+
+/** One question, on a new thread unless one is given. */
+async function run(
+  message: string,
+  diagnostics = true,
+  thread?: GraphThread,
+  signal = new AbortController().signal,
+  asked: RunnableAgent = agent,
+) {
+  const events: Record<string, unknown>[] = [];
+  const on = thread ?? (await newThread());
+  const result = await chat(asked, message, on, { signal, onToolEvent: async (event) => { events.push(event); } }, diagnostics);
+  return { events, result, thread: on };
+}
+
+const diagnosticsWith = (events: Record<string, unknown>[], field: string) =>
+  events.find((e) => e.type === "retriever.diagnostics" && e[field] !== undefined)!;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -90,20 +116,20 @@ describe("retriever agent pipeline", () => {
     expect(fake.stream).toHaveBeenCalledTimes(1);
     expect(createAiModel).toHaveBeenCalledWith("fake", "test", "http://unused", { maxRetries: 0 });
     expect(result.reply).toBe(events.filter((e) => e.type === "delta").map((e) => e.text).join(""));
-    expect(events.filter((e) => e.type === "phase").map((e) => `${e.phase}:${e.status}`)).toEqual([
+    expect(events.filter((e) => e.type === "retriever.phase").map((e) => `${e.phase}:${e.status}`)).toEqual([
       "plan:start", "plan:end", "retrieve:start", "retrieve:end", "answer:start", "answer:end",
     ]);
-    const plan = events.find((e) => e.type === "meta" && e.plan)!.plan as { subQueries: Record<string, unknown>[] };
+    const plan = diagnosticsWith(events, "plan").plan as { subQueries: Record<string, unknown>[] };
     expect(plan.subQueries).toEqual([
       { indices: ["person~default"], relations: [], query: "", variants: [], mode: "keyword", filters: [{ id: "city", value: "Berlin", quote: "Berlin" }], previous: null },
     ]);
-    const retrieved = events.find((e) => e.type === "meta" && e.results)!;
+    const retrieved = diagnosticsWith(events, "results");
     expect(retrieved.results).toEqual([
       { entityId: "ada", entityType: "person", label: "Ada", subQuery: 0, answerFields: { name: "Ada", email: "a@x" } },
     ]);
     expect(retrieved.searchCalls).toBe(0);
     expect(retrieved.limitations).toEqual([]);
-    const summary = events.find((e) => e.type === "meta" && e.llmCalls !== undefined)!;
+    const summary = diagnosticsWith(events, "llmCalls");
     expect(summary.llmCalls).toBe(2);
     expect(Object.keys(summary.timings as object)).toEqual(
       expect.arrayContaining(["plan", "planModel", "validation", "retrieve", "search", "context", "answer", "firstDelta", "answerModel", "total"]),
@@ -112,7 +138,7 @@ describe("retriever agent pipeline", () => {
     expect(calls.map((c) => c.phase)).toEqual(["plan", "answer"]);
     expect(calls[0]!.input).toBe(fake.invoke.mock.calls[0]![0][1].content);
     expect(calls[1]!.systemPrompt).toBe(fake.stream.mock.calls[0]![0][0].content);
-    expect(events.at(-1)).toEqual({ type: "meta", turnToken: expect.any(String) });
+    expect(events.at(-1)).toBe(summary);
   });
 
   it("hands Anthropic the plan schema as its own output format", async () => {
@@ -127,18 +153,16 @@ describe("retriever agent pipeline", () => {
     });
   });
 
-  it("without diagnostics streams progress, answer and only the turn token as metadata", async () => {
+  it("without diagnostics streams progress and the answer only", async () => {
     const { events } = await run("Everyone in Berlin", false);
-    expect(events.filter((e) => e.type === "meta")).toEqual([{ type: "meta", turnToken: expect.any(String) }]);
-    expect(events.some((e) => e.type === "phase")).toBe(true);
-    expect(events.some((e) => e.type === "delta")).toBe(true);
+    expect(new Set(events.map((e) => e.type))).toEqual(new Set(["retriever.phase", "delta"]));
   });
 
   it("shows the planner's output before a parse failure and never calls the answer model", async () => {
     fake.invoke.mockResolvedValue({ content: '{"subQueries":[', usage_metadata: { output_tokens: 1800 }, response_metadata: { finish_reason: "length" } });
     const events: Record<string, unknown>[] = [];
-    await expect(chat("all", agent, "Who?", [], { signal: new AbortController().signal, onToolEvent: async (e) => { events.push(e); } }, undefined, true)).rejects.toThrow("token limit");
-    expect(events.find((e) => e.type === "meta" && e.modelIO)?.modelIO).toEqual([
+    await expect(chat(agent, "Who?", await newThread(), { signal: new AbortController().signal, onToolEvent: async (e) => { events.push(e); } }, true)).rejects.toThrow("token limit");
+    expect(diagnosticsWith(events, "modelIO")?.modelIO).toEqual([
       expect.objectContaining({ output: '{"subQueries":[', finishReason: "length", usage: { output_tokens: 1800 } }),
     ]);
     expect(fake.stream).not.toHaveBeenCalled();
@@ -150,11 +174,10 @@ describe("retriever agent pipeline", () => {
       sub({ query: "events about artificial intelligence", filters: [{ id: "city", value: "Paris", quote: "Paris" }] }),
     ]));
     const { events } = await run("Which events are about artificial intelligence?");
-    expect(events.at(-1)).toEqual({ type: "meta", turnToken: expect.any(String) });
     expect(engine.rankThroughIndices.mock.calls[0]![2].query).toBe("events about artificial intelligence");
     // No filter applied: no restriction.
     expect(engine.rankThroughIndices.mock.calls[0]![2].targets[0].entityIds).toBeNull();
-    const limitations = events.find((e) => e.type === "meta" && e.results)!.limitations as string[];
+    const limitations = diagnosticsWith(events, "results").limitations as string[];
     expect(limitations).toContain(
       'The condition "lives in City Name: Paris" was not applied: the value is not stated verbatim in a user message.',
     );
@@ -165,34 +188,34 @@ describe("retriever agent pipeline", () => {
     engine.rankThroughIndices.mockResolvedValue([]);
     fake.invoke.mockResolvedValue(planned([sub({ query: "CTO at ACME", filters: [] })]));
     const first = await run("Who is CTO at ACME?", false);
-    const token = (first.events.at(-1) as { turnToken: string }).turnToken;
-    // The planner points at the previous (searched) results with assistant words.
-    fake.invoke.mockResolvedValue(planned([sub({ query: "CTO at ACME since", filters: [], previous: { filterId: null, quote: "that person" } })]));
-    const events: Record<string, unknown>[] = [];
-    const history = [{ role: "user" as const, content: "Who is CTO at ACME?" }, { role: "assistant" as const, content: "Ada is CTO at ACME — that person joined in 2020." }];
-    await chat("all", agent, "Since when?", history, { signal: new AbortController().signal, onToolEvent: async (e) => { events.push(e); } }, token, true);
+    // The planner points at the previous (searched) results.
+    fake.invoke.mockResolvedValue(planned([sub({ query: "CTO at ACME since", filters: [], previous: { filterId: null, quote: "these" } })]));
+    const { events } = await run("Since when are these at ACME?", true, first.thread);
     const plannerInput = JSON.parse(fake.invoke.mock.calls.at(-1)![0][1].content);
-    expect(plannerInput.history).toEqual(history);
+    expect(plannerInput.history).toEqual([
+      { role: "user", content: "Who is CTO at ACME?" },
+      { role: "assistant", content: "Ada." },
+    ]);
     expect(plannerInput.previousVerifiedResults).toBeNull();
     const second = engine.rankThroughIndices.mock.calls.at(-1)![2];
     expect(second.query).toBe("CTO at ACME since");
     expect(second.targets[0].entityIds).toBeNull();
-    const limitations = events.find((e) => e.type === "meta" && e.results)!.limitations as string[];
+    const limitations = diagnosticsWith(events, "results").limitations as string[];
     expect(limitations.some((text) => text.includes("reference to previous results was ignored"))).toBe(true);
-    expect(events.at(-1)).toEqual({ type: "meta", turnToken: expect.any(String) });
   });
 
   describe("a follow-up whose first plan searched nothing", () => {
     const unsupported = { content: JSON.stringify({ subQueries: [], unsupportedReason: "already answered" }) };
-    const history = [
-      { role: "user" as const, content: "Who works at ACME and lives in Berlin?" },
-      { role: "assistant" as const, content: "Bob works at ACME and lives in Berlin." },
-    ];
+    let thread: GraphThread;
+    // The conversation before: one answered question.
+    beforeEach(async () => {
+      thread = (await run("Who works at ACME and lives in Berlin?", false)).thread;
+      vi.clearAllMocks();
+    });
     async function followUp() {
-      const events: Record<string, unknown>[] = [];
-      await chat("all", agent, "And what is his role there?", history, { signal: new AbortController().signal, onToolEvent: async (e) => { events.push(e); } }, undefined, true);
-      const summary = events.find((e) => e.type === "meta" && e.llmCalls !== undefined)!;
-      const limitations = events.find((e) => e.type === "meta" && e.results)!.limitations as string[];
+      const { events } = await run("And what is his role there?", true, thread);
+      const summary = diagnosticsWith(events, "llmCalls");
+      const limitations = diagnosticsWith(events, "results").limitations as string[];
       return { events, summary, limitations };
     }
 
@@ -238,7 +261,7 @@ describe("retriever agent pipeline", () => {
       fake.invoke.mockResolvedValue(unsupported);
       const { events } = await run("What is Ada's salary?");
       expect(fake.invoke).toHaveBeenCalledTimes(1);
-      expect(events.find((e) => e.type === "meta" && e.llmCalls !== undefined)!.llmCalls).toBe(2);
+      expect(diagnosticsWith(events, "llmCalls").llmCalls).toBe(2);
     });
   });
 
@@ -282,15 +305,59 @@ describe("retriever agent pipeline", () => {
     expect(fake.invoke).not.toHaveBeenCalled();
   });
 
-  it("a follow-up refers to the previous exact results through its token", async () => {
+  it("a follow-up refers to the previous exact results kept in its thread", async () => {
     const first = await run("Everyone in Berlin", false);
-    const token = (first.events.at(-1) as { turnToken: string }).turnToken;
     engine.rankThroughIndices.mockResolvedValue([]);
     fake.invoke.mockResolvedValue(planned([sub({ query: "CTO", filters: [], previous: { filterId: null, quote: "these people" } })]));
-    await run("Which of these people is CTO?", false, token);
+    await run("Which of these people is CTO?", false, first.thread);
     // The search is restricted to the previous result.
     expect(engine.rankThroughIndices.mock.calls[0]![2].targets[0].entityIds).toEqual(["ada"]);
-    await expect(run("Which of these people is CTO?", false, "unknown-token")).rejects.toThrow("expired");
+    // Another thread has nothing to refer to.
+    const { events } = await run("Which of these people is CTO?", true);
+    expect(diagnosticsWith(events, "results").limitations).toContain(
+      "The reference to previous results was ignored (there are no verified previous results); it ran as a fresh search.",
+    );
+  });
+
+  it("results found with another configuration are not offered; a reference to them is ignored with a limitation", async () => {
+    const first = await run("Everyone in Berlin", false);
+    const saved = { ...CONFIG, threshold: 0.5 };
+    const changed: RunnableAgent = { ...agent, config: saved, scope: { ...agent.scope, config: saved } };
+    engine.rankThroughIndices.mockResolvedValue([]);
+    fake.invoke.mockResolvedValue(planned([sub({ query: "CTO", filters: [], previous: { filterId: null, quote: "these people" } })]));
+    const { events } = await run("Which of these people is CTO?", true, first.thread, undefined, changed);
+    expect(JSON.parse(fake.invoke.mock.calls.at(-1)![0][1].content).previousVerifiedResults).toBeNull();
+    expect(engine.rankThroughIndices.mock.calls[0]![2].targets[0].entityIds).toBeNull();
+    expect(diagnosticsWith(events, "results").limitations).toContain(
+      "The reference to previous results was ignored (there are no verified previous results); it ran as a fresh search.",
+    );
+  });
+
+  it("the thread keeps the questions, the answers and what a follow-up may refer to — no working values", async () => {
+    const { thread } = await run("Everyone in Berlin", false);
+    const values = (await threads.values(thread.threadId))!;
+    // Working values are not kept; keys of the graph's own start with "__".
+    const kept = Object.entries(values).filter(([key, value]) => value !== undefined && !key.startsWith("__"));
+    expect(kept.map(([key]) => key).sort()).toEqual(["messages", "verified"]);
+    expect((values.messages as { text: string }[]).map((m) => m.text)).toEqual(["Everyone in Berlin", "Ada."]);
+    expect(values.verified).toMatchObject({ previous: { complete: true, results: [{ entityType: "person", ids: ["ada"] }] } });
+  });
+
+  it(`the models see the last ${TURNS_THE_MODEL_SEES} turns`, async () => {
+    const thread = await newThread();
+    for (let i = 1; i <= TURNS_THE_MODEL_SEES + 2; i++) await run(`Everyone in Berlin ${i}`, false, thread);
+    const history = JSON.parse(fake.invoke.mock.calls.at(-1)![0][1].content).history as { content: string }[];
+    expect(history).toHaveLength(2 * (TURNS_THE_MODEL_SEES - 1));
+    expect(history[0]!.content).toBe("Everyone in Berlin 3");
+    expect(JSON.parse(fake.stream.mock.calls.at(-1)![0][1].content).history).toEqual(history);
+  });
+
+  it(`a thread keeps at most ${TURNS_PER_THREAD} turns`, async () => {
+    const thread = await newThread();
+    for (let i = 1; i <= TURNS_PER_THREAD + 2; i++) await run(`Everyone in Berlin ${i}`, false, thread);
+    const messages = (await threads.values(thread.threadId))!.messages as { text: string }[];
+    expect(messages).toHaveLength(2 * TURNS_PER_THREAD);
+    expect(messages[0]!.text).toBe("Everyone in Berlin 3");
   });
 });
 
@@ -300,7 +367,7 @@ describe("retrieve", () => {
   it("makes exactly one planning call, no answer call, and returns chat's results in chat's order", async () => {
     engine.rankThroughIndices.mockResolvedValue([]);
     const { events } = await run("Everyone in Berlin");
-    const chatRows = events.find((e) => e.type === "meta" && e.results)!.results as { entityId: string }[];
+    const chatRows = diagnosticsWith(events, "results").results as { entityId: string }[];
     vi.clearAllMocks();
     fake.withConfig.mockReturnValue({ invoke: fake.invoke });
     fake.invoke.mockResolvedValue(planned([sub()]));

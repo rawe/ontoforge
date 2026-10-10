@@ -14,6 +14,10 @@ export interface EntityNodeData extends Record<string, unknown> {
   onToggleCollapsed: () => void
   /** A property row was clicked: select the type with that property. */
   onSelectProperty: (propertyKey: string) => void
+  /** Outside the focus set, or not a search match. */
+  dim: boolean
+  /** Matches the outline search. */
+  match: boolean
 }
 
 export type EntityFlowNode = Node<EntityNodeData, 'entityType'>
@@ -50,8 +54,10 @@ function EntityTypeNodeInner({ id, data, selected }: NodeProps<EntityFlowNode>) 
   return (
     <div
       className={cn(
-        'group relative rounded-lg border bg-card shadow-sm transition-shadow',
+        'group relative rounded-lg border bg-card shadow-sm transition-[box-shadow,opacity]',
         selected && 'ring-2 ring-primary/70',
+        data.match && !selected && 'ring-2 ring-(--tc-amber)/70',
+        data.dim && 'opacity-[0.18]',
         dropTarget && 'ring-2 ring-(--tc-emerald)',
       )}
       style={{ width: NODE_WIDTH, borderColor: color.borderVar }}

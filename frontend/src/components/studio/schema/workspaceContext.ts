@@ -7,11 +7,19 @@ import type { SchemaSelection, SchemaView } from './schemaUrl'
 export interface SelectOptions {
   /** Open, highlight and scroll to this property of the selected type. */
   propertyKey?: string
+  /** Pan the graph to the selection, also when it is already selected. */
+  reveal?: boolean
 }
 
 /** Open, highlight and scroll to a property of the selected type; a new nonce repeats it. */
 export interface PropertyRequest {
   propertyKey: string
+  nonce: number
+}
+
+/** Pan the graph to this selection; a new nonce repeats it. */
+export interface RevealRequest {
+  selection: SchemaSelection
   nonce: number
 }
 
@@ -35,6 +43,16 @@ export interface SchemaWorkspace {
   addPropertyRequest: AddPropertyRequest | null
   /** Select a type and open its add-property form. */
   requestAddProperty: (selection: SchemaSelection) => void
+  /** Set by `select(…, { reveal: true })`. A changed selection is revealed without it. */
+  revealRequest: RevealRequest | null
+  /** Graph focus mode: the selection and its one-hop neighbours stay, the rest dims. */
+  focusMode: boolean
+  /** Turn focus mode on or off; turning it on without a selection shows a hint. */
+  toggleFocus: () => void
+  exitFocus: () => void
+  /** The outline search; the outline filters by it, the graph highlights by it. */
+  search: string
+  setSearch: (query: string) => void
 }
 
 export const SchemaWorkspaceContext = createContext<SchemaWorkspace | null>(null)

@@ -17,6 +17,10 @@ export interface RelationEdgeData extends EdgeShape, Record<string, unknown> {
   labelT: number
   /** The dashed edge of a relation type still being named; not selectable. */
   pending?: boolean
+  /** Outside the focus set, or not a search match. */
+  dim?: boolean
+  /** Matches the outline search. */
+  match?: boolean
   onSelect?: () => void
 }
 
@@ -55,9 +59,10 @@ function RelationTypeEdgeInner({ id, source, target, data, selected, markerEnd }
         interactionWidth={18}
         className="of-edge-path"
         style={{
-          stroke: selected || pending ? 'var(--primary)' : EDGE_COLOR,
+          stroke: selected || pending ? 'var(--primary)' : data.match === true ? 'var(--tc-amber)' : EDGE_COLOR,
           strokeWidth: selected ? 2 : 1.5,
           strokeDasharray: pending ? '5 4' : undefined,
+          opacity: data.dim === true ? 0.12 : 1,
         }}
       />
       <EdgeLabelRenderer>
@@ -70,6 +75,8 @@ function RelationTypeEdgeInner({ id, source, target, data, selected, markerEnd }
               : pending
                 ? 'cursor-default border-dashed border-primary/60 bg-background text-primary'
                 : 'border-border bg-background text-muted-foreground hover:z-10 hover:text-foreground',
+            data.match === true && !selected && 'border-(--tc-amber)/70',
+            data.dim === true && 'opacity-15',
           )}
           style={{
             transform: `translate(-50%, -50%) translate(${geo.label.x}px, ${geo.label.y}px)`,

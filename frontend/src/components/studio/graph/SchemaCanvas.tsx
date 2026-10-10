@@ -8,9 +8,11 @@
  * view, a selection made anywhere else is revealed. Types are created here by
  * double-click, `N` or the toolbar; relation types by dragging a node's "+"
  * onto a node, itself or empty canvas. A naming popover asks for the names.
+ * The outline search rings matching nodes and dims the rest; focus mode (`F`)
+ * keeps the selection and its one-hop neighbours and dims everything else.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Background,
   ConnectionLineType,
@@ -30,7 +32,7 @@ import {
   type NodePositionChange,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { ChevronsDownUp, ChevronsUpDown, LayoutGrid, Maximize, Plus } from 'lucide-react'
+import { ChevronsDownUp, ChevronsUpDown, Crosshair, LayoutGrid, Maximize, Plus } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -39,7 +41,9 @@ import { isPlainKey, isTyping, overlayOpen } from '@/lib/shortcuts'
 import { cn } from '@/lib/utils'
 import { useRequestDelete } from '../modeling/deleteContext'
 import { useCreateEntityType, useCreateRelationType } from '../modeling/mutations'
+import { searchSchema } from '../modeling/search'
 import { useModelSchema, type ModelSchema } from '../modeling/useModelSchema'
+import { focusSet } from '../schema/focus'
 import type { SchemaSelection } from '../schema/schemaUrl'
 import { useSchemaWorkspace, type SelectOptions } from '../schema/workspaceContext'
 import {
@@ -167,7 +171,8 @@ const isMoveOrResize = (c: NodeChange<AppNode>): c is NodePositionChange | NodeD
   c.type === 'position' || c.type === 'dimensions'
 
 function Canvas() {
-  const { ontologyKey, selection, select } = useSchemaWorkspace()
+  const { ontologyKey, selection, select, revealRequest, focusMode, toggleFocus, exitFocus, search } =
+    useSchemaWorkspace()
   const schema = useModelSchema(ontologyKey)
   const requestDelete = useRequestDelete()
   const { create: createEntityType } = useCreateEntityType(ontologyKey)
@@ -194,6 +199,16 @@ function Canvas() {
   const idOfKey = useMemo(() => new Map(entityTypes.map((t) => [t.key, t.entityTypeId])), [entityTypes])
   const selectedEntityId =
     selection?.kind === 'entity-types' ? (idOfKey.get(selection.key) ?? null) : null
+
+  // The outline search and focus mode both dim what they leave out.
+  const matches = useMemo(
+    () => searchSchema({ entityTypes, relationTypes, properties }, search),
+    [entityTypes, relationTypes, properties, search],
+  )
+  const focus = useMemo(
+    () => (focusMode ? focusSet({ entityTypes, relationTypes }, selection) : null),
+    [focusMode, entityTypes, relationTypes, selection],
+  )
 
   // Merge the schema into the nodes whenever the entity types change. The
   // first time waits for the property lists (dagre needs node heights) and
@@ -250,16 +265,45 @@ function Canvas() {
     [idOfKey, relationTypes, getInternalNode, setCenter, getZoom, fitView],
   )
 
+  const fitFocus = useCallback(
+    (ids: Iterable<string>) =>
+      void fitView({ nodes: [...ids].map((id) => ({ id })), padding: 0.15, duration: 400, maxZoom: 1.2 }),
+    [fitView],
+  )
+
   // Reveal every selection that did not come from a click here: outline,
-  // palette, address, back/forward, or a different one when coming back from Classic.
+  // palette, address, back/forward, or a different one when coming back from
+  // Classic. A reveal request (outline) also reveals an unchanged selection.
+  // In focus mode the focus set is framed instead (the effect below follows
+  // a changed selection).
   const seenSelection = useRef(keptAtMount?.selection ?? null)
+  const seenReveal = useRef(revealRequest?.nonce ?? 0)
   useEffect(() => {
-    if (!nodesInitialized || sameSelection(selection, seenSelection.current)) return
-    const own = sameSelection(selection, ownSelection.current)
-    seenSelection.current = selection
-    ownSelection.current = null
-    if (selection !== null && !own) reveal(selection)
-  }, [selection, nodesInitialized, reveal])
+    if (!nodesInitialized) return
+    const requested =
+      revealRequest !== null && revealRequest.nonce !== seenReveal.current ? revealRequest.selection : null
+    const changed = !sameSelection(selection, seenSelection.current)
+    if (requested === null && !changed) return
+    if (revealRequest !== null) seenReveal.current = revealRequest.nonce
+    let own = false
+    if (changed) {
+      own = sameSelection(selection, ownSelection.current)
+      seenSelection.current = selection
+      ownSelection.current = null
+    }
+    if (focus !== null) {
+      if (requested !== null) fitFocus(focus)
+    } else {
+      const target = requested ?? (own ? null : selection)
+      if (target !== null) reveal(target)
+    }
+  }, [selection, revealRequest, nodesInitialized, focus, reveal, fitFocus])
+
+  // Frame the focus set when focus mode turns on or follows another selection.
+  const focusKey = focus === null ? '' : [...focus].sort().join(',')
+  useEffect(() => {
+    if (focusKey !== '' && nodesInitialized) fitFocus(focusKey.split(','))
+  }, [focusKey, nodesInitialized, fitFocus])
 
   // Fit once, after the first nodes are measured — unless restoring a kept view or revealing.
   const fitted = useRef(false)
@@ -309,11 +353,13 @@ function Canvas() {
               onToggleCollapsed: () => toggleCollapsed(ontologyKey, n.id),
               onSelectProperty: (propertyKey) =>
                 selectHere({ kind: 'entity-types', key: et.key }, { propertyKey }),
+              dim: (focus !== null && !focus.has(n.id)) || (matches.active && !matches.entityIds.has(n.id)),
+              match: matches.active && matches.entityIds.has(n.id),
             },
           },
         ]
       }),
-    [nodes, entityTypes, properties, collapsed, selectedEntityId, ontologyKey, selectHere],
+    [nodes, entityTypes, properties, collapsed, selectedEntityId, ontologyKey, selectHere, focus, matches],
   )
   const flowNodes = useMemo<AppNode[]>(
     () => (ghost === null ? entityNodes : [...entityNodes, ghost]),
@@ -345,6 +391,12 @@ function Canvas() {
     return shaped.map((e) => {
       const pending = e.id === PENDING_EDGE_ID
       const isSelected = !pending && selection?.kind === 'relation-types' && selection.key === e.label
+      // Dimmed unless both endpoints are in focus, and (searching) unless it or both endpoints match.
+      const match = !pending && matches.active && matches.relationIds.has(e.id)
+      const dim =
+        !pending &&
+        ((focus !== null && !(focus.has(e.source) && focus.has(e.target))) ||
+          (matches.active && !match && !(matches.entityIds.has(e.source) && matches.entityIds.has(e.target))))
       return {
         id: e.id,
         source: e.source,
@@ -356,7 +408,7 @@ function Canvas() {
           type: MarkerType.ArrowClosed,
           width: 16,
           height: 16,
-          color: isSelected || pending ? 'var(--primary)' : EDGE_COLOR,
+          color: isSelected || pending ? 'var(--primary)' : match ? 'var(--tc-amber)' : EDGE_COLOR,
         },
         data: {
           label: e.label,
@@ -364,11 +416,13 @@ function Canvas() {
           loopIndex: e.loopIndex,
           labelT: labelT.get(e.id) ?? 0.5,
           pending,
+          dim,
+          match,
           onSelect: pending ? undefined : () => selectHere({ kind: 'relation-types', key: e.label }),
         },
       }
     })
-  }, [nodes, ghost, popover, relationTypes, idOfKey, selection, selectHere])
+  }, [nodes, ghost, popover, relationTypes, idOfKey, selection, selectHere, focus, matches])
 
   /* -------------------------------- actions -------------------------------- */
 
@@ -515,53 +569,62 @@ function Canvas() {
       : selectedEntityId
 
   // H hides or shows the properties of every node, ⇧H only of the selected
-  // one. N names a new entity type at the viewport centre. Del / Backspace
-  // deletes the selected type (with the dialog's preview). Esc cancels a
-  // connection drag, else closes the popover, else clears the selection (the
-  // popover's own fields handle Esc themselves).
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && connecting) {
-        // React Flow ends the drag on mouseup; its end event is then ignored.
-        e.preventDefault()
-        dragCancelled.current = true
-        document.dispatchEvent(new MouseEvent('mouseup'))
-        return
-      }
-      if (e.repeat || !isPlainKey(e)) return
-      if (e.defaultPrevented || isTyping(e) || overlayOpen(e)) return
-      if (e.key === 'h' || e.key === 'H') {
-        e.preventDefault()
-        if (!e.shiftKey) toggleAllCollapsed(ontologyKey, entityIds)
-        else if (selectedEntityId !== null) toggleCollapsed(ontologyKey, selectedEntityId)
-      } else if ((e.key === 'Delete' || e.key === 'Backspace') && selection !== null && selectedId !== null) {
-        e.preventDefault()
-        requestDelete({ what: 'type', kind: selection.kind, id: selectedId })
-      } else if (e.key === 'n' || e.key === 'N') {
-        e.preventDefault()
-        newEntityAtCentre()
-      } else if (e.key === 'Escape' && popover !== null) {
-        e.preventDefault()
-        setPopover(null)
-      } else if (e.key === 'Escape' && selection !== null) {
-        e.preventDefault()
-        selectHere(null)
-      }
+  // one. N names a new entity type at the viewport centre. F toggles focus
+  // mode. Del / Backspace deletes the selected type (with the dialog's
+  // preview). Esc cancels a connection drag, else closes the popover, else
+  // exits focus mode, else clears the selection (the popover's own fields
+  // handle Esc themselves). An effect event, so the listener always sees the
+  // latest render, never the one before it.
+  const onKey = useEffectEvent((e: KeyboardEvent) => {
+    if (e.key === 'Escape' && connecting) {
+      // React Flow ends the drag on mouseup; its end event is then ignored.
+      e.preventDefault()
+      dragCancelled.current = true
+      document.dispatchEvent(new MouseEvent('mouseup'))
+      return
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [
-    connecting,
-    popover,
-    ontologyKey,
-    entityIds,
-    selectedEntityId,
-    selection,
-    selectedId,
-    requestDelete,
-    selectHere,
-    newEntityAtCentre,
-  ])
+    if (e.repeat || !isPlainKey(e)) return
+    if (e.defaultPrevented || isTyping(e) || overlayOpen(e)) return
+    if (e.key === 'h' || e.key === 'H') {
+      e.preventDefault()
+      if (!e.shiftKey) toggleAllCollapsed(ontologyKey, entityIds)
+      else if (selectedEntityId !== null) toggleCollapsed(ontologyKey, selectedEntityId)
+    } else if ((e.key === 'Delete' || e.key === 'Backspace') && selection !== null && selectedId !== null) {
+      e.preventDefault()
+      requestDelete({ what: 'type', kind: selection.kind, id: selectedId })
+    } else if (e.key === 'n' || e.key === 'N') {
+      e.preventDefault()
+      newEntityAtCentre()
+    } else if ((e.key === 'f' || e.key === 'F') && !e.shiftKey) {
+      e.preventDefault()
+      toggleFocus()
+    } else if (e.key === 'Escape' && popover !== null) {
+      e.preventDefault()
+      setPopover(null)
+    } else if (e.key === 'Escape' && focusMode) {
+      e.preventDefault()
+      exitFocus()
+    } else if (e.key === 'Escape' && selection !== null) {
+      e.preventDefault()
+      selectHere(null)
+    }
+  })
+  useEffect(() => {
+    const listener = (e: KeyboardEvent) => onKey(e)
+    window.addEventListener('keydown', listener)
+    return () => window.removeEventListener('keydown', listener)
+  }, [])
+
+  const focusLabel = () => {
+    if (focus === null || selection === null) return 'Focus — select a type'
+    if (selection.kind === 'relation-types') {
+      const r = relationTypes.find((t) => t.key === selection.key)
+      return `Focus: ${selection.key} (${r?.sourceEntityTypeKey} → ${r?.targetEntityTypeKey})`
+    }
+    const name = entityTypes.find((t) => t.key === selection.key)?.displayName ?? selection.key
+    const n = focus.size - 1
+    return `Focus: ${name} + ${n} ${n === 1 ? 'neighbour' : 'neighbours'}`
+  }
 
   /* -------------------------------- render -------------------------------- */
 
@@ -636,15 +699,39 @@ function Canvas() {
         >
           {allCollapsed ? <ChevronsUpDown /> : <ChevronsDownUp />}
         </ToolButton>
+        <ToolButton
+          label={focusMode ? 'Exit focus (F)' : 'Focus on selection (F)'}
+          active={focusMode}
+          onClick={toggleFocus}
+        >
+          <Crosshair />
+        </ToolButton>
       </div>
+
+      {focusMode ? (
+        <div className="absolute top-14 left-3 z-10 flex max-w-[calc(100%-1.5rem)] items-center gap-1 rounded-full border border-primary/40 bg-card/95 px-3 py-1 text-[11.5px] shadow-sm backdrop-blur-sm">
+          <span className="truncate">{focusLabel()}</span>
+          <span className="text-muted-foreground">·</span>
+          <button type="button" className="shrink-0 cursor-pointer text-primary hover:underline" onClick={exitFocus}>
+            exit <Kbd>F</Kbd>
+          </button>
+        </div>
+      ) : (
+        matches.active && (
+          <div className="absolute top-14 left-3 z-10 max-w-[calc(100%-1.5rem)] truncate rounded-full border border-(--tc-amber-border) bg-card/95 px-3 py-1 text-[11.5px] shadow-sm backdrop-blur-sm">
+            “{search.trim()}” — {matches.entityIds.size} entity / {matches.relationIds.size} relation types
+          </div>
+        )
+      )}
 
       {/* Inside the canvas (it clips), clear of the zoom controls; wraps when narrow. */}
       <div className="pointer-events-none absolute right-3 bottom-3 left-14 z-10 flex justify-center">
         <div className="rounded-xl border bg-card/90 px-3 py-1 text-center text-[11px] text-muted-foreground shadow-sm backdrop-blur-sm">
           Click: select · drag a type: move · double-click or <Kbd>N</Kbd>: new type · drag{' '}
           <b className="font-semibold">+</b> onto a type, itself or empty space: relation ·{' '}
-          <Kbd>H</Kbd> hide/show properties · <Kbd>⇧H</Kbd> selected type only · <Kbd>Del</Kbd> delete
-          selected · <Kbd>Esc</Kbd> cancel / clear selection · <Kbd>V</Kbd> Graph/Classic
+          <Kbd>F</Kbd> focus · <Kbd>/</Kbd> search · <Kbd>H</Kbd> hide/show properties · <Kbd>⇧H</Kbd>{' '}
+          selected type only · <Kbd>Del</Kbd> delete selected · <Kbd>Esc</Kbd> cancel / exit focus / clear
+          selection · <Kbd>V</Kbd> Graph/Classic
         </div>
       </div>
 
@@ -669,19 +756,28 @@ function Kbd({ children }: { children: ReactNode }) {
 function ToolButton({
   label,
   text = false,
+  active = false,
   onClick,
   children,
 }: {
   label: string
   /** A button with a text label rather than an icon only. */
   text?: boolean
+  /** A toggle that is on. */
+  active?: boolean
   onClick: () => void
   children: ReactNode
 }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button variant="ghost" size={text ? 'sm' : 'icon-sm'} onClick={onClick} aria-label={text ? undefined : label}>
+        <Button
+          variant={active ? 'secondary' : 'ghost'}
+          size={text ? 'sm' : 'icon-sm'}
+          onClick={onClick}
+          aria-label={text ? undefined : label}
+          aria-pressed={text ? undefined : active}
+        >
           {children}
         </Button>
       </TooltipTrigger>

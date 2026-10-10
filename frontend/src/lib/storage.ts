@@ -25,6 +25,8 @@
  *                               `{ [entityTypeId]: { x, y } }`
  *   of.schema.{ontologyKey}.collapsed — schema graph nodes whose property
  *                               list is collapsed, `{ [entityTypeId]: true }`
+ *   of.schema.{ontologyKey}.outline — "collapsed" | "expanded": the schema
+ *                               page's outline (default expanded)
  */
 
 export const storageKeys = {
@@ -46,6 +48,7 @@ export const storageKeys = {
     `of.retriever.${ontologyKey}.${lensKey}`,
   schemaPositions: (ontologyKey: string) => `of.schema.${ontologyKey}.positions`,
   schemaCollapsed: (ontologyKey: string) => `of.schema.${ontologyKey}.collapsed`,
+  schemaOutline: (ontologyKey: string) => `of.schema.${ontologyKey}.outline`,
 } as const
 
 export function readString(key: string): string | null {

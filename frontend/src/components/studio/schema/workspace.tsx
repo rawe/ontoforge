@@ -6,8 +6,10 @@
  *
  * The one-shot property request rides on top: it is renewed whenever the
  * address names another property, and when the same property is selected
- * again (the address does not change, the nonce does). The add-property
- * request is plain state, dropped by the next selection or view switch.
+ * again (the address does not change, the nonce does). The reveal request
+ * works the same way for the graph. The add-property request is plain state,
+ * dropped by the next selection or view switch. Focus mode and the outline
+ * search are plain state too, per ontology for the session.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -18,6 +20,7 @@ import { buildSchemaUrl, parseSchemaUrl, type SchemaView } from './schemaUrl'
 import {
   SchemaWorkspaceContext,
   type AddPropertyRequest,
+  type RevealRequest,
   type SchemaWorkspace,
 } from './workspaceContext'
 
@@ -51,10 +54,16 @@ export function SchemaWorkspaceProvider({ ontologyKey, children }: SchemaWorkspa
   const leaving = useRef<string | null>(null)
   const [addPropertyRequest, setAddPropertyRequest] = useState<AddPropertyRequest | null>(null)
   const addNonce = useRef(0)
+  const [revealRequest, setRevealRequest] = useState<RevealRequest | null>(null)
+  const [focusMode, setFocusMode] = useState(false)
+  const [query, setQuery] = useState('')
 
   const select = useCallback<SchemaWorkspace['select']>(
     (next, options) => {
       if (options?.propertyKey !== undefined) setNonce((n) => n + 1)
+      if (options?.reveal === true && next !== null) {
+        setRevealRequest((r) => ({ selection: next, nonce: (r?.nonce ?? 0) + 1 }))
+      }
       setAddPropertyRequest(null)
       const to = buildSchemaUrl(ontologyKey, view, next, options?.propertyKey ?? null)
       if (to === here) return
@@ -80,6 +89,14 @@ export function SchemaWorkspaceProvider({ ontologyKey, children }: SchemaWorkspa
     },
     [select],
   )
+
+  const toggleFocus = useCallback(() => {
+    if (!focusMode && sel === null) {
+      toast('Select a type first — focus shows it with its one-hop neighbours.', { id: 'schema-focus-hint' })
+    }
+    setFocusMode((on) => !on)
+  }, [focusMode, sel])
+  const exitFocus = useCallback(() => setFocusMode(false), [])
 
   // An unknown key in the graph leaves the address (the classic page shows not-found instead).
   const schema = useModelSchema(ontologyKey)
@@ -107,8 +124,28 @@ export function SchemaWorkspaceProvider({ ontologyKey, children }: SchemaWorkspa
       switchView,
       addPropertyRequest,
       requestAddProperty,
+      revealRequest,
+      focusMode,
+      toggleFocus,
+      exitFocus,
+      search: query,
+      setSearch: setQuery,
     }),
-    [ontologyKey, view, sel, propertyRequest, select, switchView, addPropertyRequest, requestAddProperty],
+    [
+      ontologyKey,
+      view,
+      sel,
+      propertyRequest,
+      select,
+      switchView,
+      addPropertyRequest,
+      requestAddProperty,
+      revealRequest,
+      focusMode,
+      toggleFocus,
+      exitFocus,
+      query,
+    ],
   )
   return <SchemaWorkspaceContext.Provider value={value}>{children}</SchemaWorkspaceContext.Provider>
 }

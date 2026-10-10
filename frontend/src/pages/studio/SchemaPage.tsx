@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useEffectEvent, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { Box, PanelTop, Plus, SearchX, ShieldCheck, Waypoints } from 'lucide-react'
 import { useParams } from 'react-router-dom'
@@ -18,6 +18,7 @@ import { useModelSchema } from '@/components/studio/modeling/useModelSchema'
 import { ClassicList } from '@/components/studio/schema/ClassicList'
 import { ClassicTypePage } from '@/components/studio/schema/ClassicTypePage'
 import { Inspector } from '@/components/studio/schema/Inspector'
+import { Outline } from '@/components/studio/schema/Outline'
 import type { SchemaView } from '@/components/studio/schema/schemaUrl'
 import { SchemaWorkspaceProvider } from '@/components/studio/schema/workspace'
 import { useSchemaWorkspace } from '@/components/studio/schema/workspaceContext'
@@ -62,17 +63,19 @@ function SchemaShell({ ontologyKey }: { ontologyKey: string }) {
     onError: toastError,
   })
 
-  // `V` switches Graph ⇄ Classic from either view, like the tabs.
+  // `V` switches Graph ⇄ Classic from either view, like the tabs. An effect
+  // event, so the listener always sees the latest render's view and selection.
+  const onKey = useEffectEvent((e: KeyboardEvent) => {
+    if ((e.key !== 'v' && e.key !== 'V') || e.shiftKey || e.repeat || !isPlainKey(e)) return
+    if (e.defaultPrevented || isTyping() || overlayOpen(e)) return
+    e.preventDefault()
+    switchView(view === 'graph' ? 'classic' : 'graph')
+  })
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.key !== 'v' && e.key !== 'V') || e.shiftKey || e.repeat || !isPlainKey(e)) return
-      if (e.defaultPrevented || isTyping() || overlayOpen(e)) return
-      e.preventDefault()
-      switchView(view === 'graph' ? 'classic' : 'graph')
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [view, switchView])
+    const listener = (e: KeyboardEvent) => onKey(e)
+    window.addEventListener('keydown', listener)
+    return () => window.removeEventListener('keydown', listener)
+  }, [])
 
   const loaded = !schema.isPending && schema.error === null
   // Classic shows an empty state; the graph shows its own hint (double-click or N).
@@ -167,6 +170,7 @@ function SchemaShell({ ontologyKey }: { ontologyKey: string }) {
           </div>
         )}
         <div className="flex min-h-0 flex-1">
+          {loaded && <Outline />}
           <div className={view === 'classic' ? 'min-w-0 flex-1 overflow-y-auto' : 'min-w-0 flex-1'}>
             {body}
           </div>

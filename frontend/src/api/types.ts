@@ -127,10 +127,6 @@ export interface SchemaLens {
   key: string
   name: string
   description: string | null
-  /** null = unscoped (full schema visible) */
-  includes: { entityTypes?: unknown; relationTypes?: unknown } | null
-  aiAgents: Agent[]
-  savedQueries: SavedQuery[]
 }
 
 export interface RuntimeSchema {

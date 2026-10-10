@@ -39,8 +39,8 @@ export function useLenses(ontologyKey: string | undefined) {
 
 /**
  * Scope includes of a lens (modeling API). `scoped` is true when any
- * include exists. NOTE: the runtime schema's `lens.includes` field is not
- * populated by the backend — use this hook for scoped/unscoped decisions.
+ * include exists. The runtime schema carries no scope information — use
+ * this hook for scoped/unscoped decisions.
  */
 export function useLensScope(ontologyKey: string | undefined, lensId: string | undefined) {
   return useQuery({

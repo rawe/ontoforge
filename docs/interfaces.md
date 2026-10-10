@@ -476,7 +476,9 @@ answers not found within the ontology.
 
 ### Schema introspection
 
-Read-only, and already filtered to the lens.
+Read-only, and already filtered to the lens. `/schema` returns the lens's key, name and
+description together with the entity types and relation types it exposes, each with its
+visible properties.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -854,7 +856,7 @@ Everything a client can do to instance data through one lens.
 
 | Tool | Purpose |
 |---|---|
-| `get_schema` | The scoped schema — types, properties, required flags, name properties |
+| `get_schema` | The scoped schema, as REST `/schema` returns it — the lens's key, name and description; types, properties, required flags, name properties |
 | `create_entity` | Create an entity |
 | `list_entities` | List entities with search, filters, sorting, paging and projection |
 | `get_entity` | Read one entity by id |

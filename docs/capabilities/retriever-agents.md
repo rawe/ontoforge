@@ -378,7 +378,9 @@ export carries no `retrieverAgents`, and import checks them and keeps none.
 
 ## Through the interfaces
 
-Retriever agents are managed through modeling REST, addressed by lens key and agent key. At
+Retriever agents are managed through modeling REST, addressed by lens key and agent key,
+and through the modeling MCP server's tools to list, read, create or replace and delete
+one; copy, move, export and import are REST only. At
 runtime a list names every agent of the lens — runnable or not, without configuration or
 validation, the default first; a question runs by agent key on a thread and streams its
 progress and answer, a thread reads back, and a retrieve answers one query with one plain
@@ -387,5 +389,5 @@ Management, the runtime list, reading a thread, copy, move, export and import ca
 model. A question or a retrieve needs a
 language-model provider — without one it is refused as a disabled feature before anything
 is read or streamed; without an embedding provider it searches by keyword only. No MCP
-tool manages or runs an agent; the modeling MCP server's whole-schema read and export
-carry them like REST.
+tool runs an agent; the modeling MCP server's whole-schema read and export carry them
+like REST.

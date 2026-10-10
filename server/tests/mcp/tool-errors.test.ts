@@ -32,6 +32,13 @@ describe("formatToolError", () => {
     expect(formatToolError(error)).toBe("Validation failed — first problem; second problem");
   });
 
+  it("details.errors a message already carries are not repeated", () => {
+    const error = new ValidationError("Invalid configuration: first problem; second problem", {
+      errors: ["first problem", "second problem"],
+    });
+    expect(formatToolError(error)).toBe("Invalid configuration: first problem; second problem");
+  });
+
   it("a multi-field zod failure surfaces every offending field in one string", () => {
     const result = PropertyDefinitionCreate.safeParse({
       key: "Bad Key",

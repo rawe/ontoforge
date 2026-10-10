@@ -6,7 +6,7 @@ import { settings } from "../../src/config.js";
  * pipeline containing a search step fails at run time; deleting
  * the lens cascades to both configuration kinds; and the runtime listing
  * (served from the schema cache) reflects every modeling upsert. Includes
- * all six modeling MCP tools and the three runtime MCP tools.
+ * the seven agent and saved-query modeling MCP tools and the three runtime MCP tools.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -485,10 +485,10 @@ describe("runtime run (no provider)", () => {
 });
 
 describe("modeling MCP tools", () => {
-  it("set/list/delete an agent config, reporting created vs updated", async () => {
+  it("set/get/list/delete an agent, reporting created vs updated", async () => {
     const client = await connectClient(`${baseUrl}/mcp/ontologies/test_ont/model`);
     try {
-      const created = await call(client, "set_ai_agent", {
+      const created = await call(client, "set_agent", {
         lens_key: "test_lens",
         key: "mcp-agent",
         name: "MCP Agent",
@@ -500,7 +500,7 @@ describe("modeling MCP tools", () => {
       expect(json(created).created).toBe(true);
       expect(json(created).key).toBe("mcp-agent");
 
-      const updated = await call(client, "set_ai_agent", {
+      const updated = await call(client, "set_agent", {
         lens_key: "test_lens",
         key: "mcp-agent",
         name: "MCP Agent v2",
@@ -508,11 +508,16 @@ describe("modeling MCP tools", () => {
       expect(json(updated).created).toBe(false);
       expect(json(updated).name).toBe("MCP Agent v2");
 
-      const list = await call(client, "list_ai_agents", { lens_key: "test_lens" });
+      const read = await call(client, "get_agent", { lens_key: "test_lens", agent_key: "mcp-agent" });
+      expect(json(read)).toMatchObject({ key: "mcp-agent", name: "MCP Agent v2" });
+      // `_default` is runtime only: modeling does not know it.
+      expect((await call(client, "get_agent", { lens_key: "test_lens", agent_key: "_default" })).isError).toBe(true);
+
+      const list = await call(client, "list_agents", { lens_key: "test_lens" });
       const keys = (JSON.parse(text(list)) as Row[]).map((a) => a.key);
       expect(keys).toContain("mcp-agent");
 
-      const refused = await call(client, "set_ai_agent", {
+      const refused = await call(client, "set_agent", {
         lens_key: "test_lens",
         key: "mcp-agent",
         name: "X",
@@ -521,11 +526,12 @@ describe("modeling MCP tools", () => {
       expect(refused.isError).toBe(true);
       expect(text(refused)).toContain("Unknown tool(s)");
 
-      const deleted = await call(client, "delete_ai_agent", {
+      const deleted = await call(client, "delete_agent", {
         lens_key: "test_lens",
         agent_key: "mcp-agent",
       });
-      expect(text(deleted)).toBe("AI agent 'mcp-agent' deleted from lens 'test_lens'.");
+      expect(text(deleted)).toBe("Agent 'mcp-agent' deleted from lens 'test_lens'.");
+      expect((await call(client, "get_agent", { lens_key: "test_lens", agent_key: "mcp-agent" })).isError).toBe(true);
     } finally {
       await client.close();
     }

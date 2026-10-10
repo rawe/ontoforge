@@ -87,9 +87,9 @@ beforeEach(async () => {
 });
 
 describe("tool surface", () => {
-  it("lists exactly the forty modeling tools — and NO update-inclusion tool", async () => {
+  it("lists exactly the forty-five modeling tools — and NO update-inclusion tool", async () => {
     const tools = await client.listTools();
-    expect(tools.tools).toHaveLength(40);
+    expect(tools.tools).toHaveLength(45);
     expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
       "add_entity_type_to_lens",
       "add_property",
@@ -99,21 +99,25 @@ describe("tool surface", () => {
       "create_lens",
       "create_relation_type",
       "create_search_index",
-      "delete_ai_agent",
+      "delete_agent",
       "delete_entity_type",
       "delete_lens",
       "delete_property",
       "delete_relation_type",
+      "delete_retriever",
       "delete_saved_query",
       "delete_search_index",
       "ensure_ontology",
       "export_schema",
+      "get_agent",
+      "get_retriever",
       "get_schema",
       "get_search_index",
       "get_search_index_status",
       "get_search_settings",
       "import_schema",
-      "list_ai_agents",
+      "list_agents",
+      "list_retrievers",
       "list_saved_queries",
       "list_search_indices",
       "preview_search_index",
@@ -121,7 +125,8 @@ describe("tool surface", () => {
       "remove_entity_type_from_lens",
       "remove_relation_type_from_lens",
       "remove_search_index_from_lens",
-      "set_ai_agent",
+      "set_agent",
+      "set_retriever",
       "set_saved_query",
       "set_search_settings",
       "update_entity_type",
@@ -466,6 +471,112 @@ describe("search indices over MCP", () => {
     const included = await call(client, "add_search_index_to_lens", { lens_key: "hr", index_key: "x" });
     expect(included.isError).toBe(true);
     expect(text(included)).toContain("not supported");
+  });
+});
+
+describe("retrievers over MCP", () => {
+  const CONFIG = {
+    indices: [{ index: "person~default" }],
+    filters: [{ id: "city", entityType: "person", path: [{ relationTypeKey: "lives_in", direction: "outgoing" }], field: "name" }],
+    answerFields: { person: ["name", "email"] },
+  };
+
+  async function schema(): Promise<void> {
+    await call(client, "create_entity_type", { key: "person", display_name: "Person" });
+    await call(client, "add_property", {
+      type_kind: "entity_type", type_key: "person", key: "email", display_name: "Email", data_type: "string",
+    });
+    await call(client, "create_entity_type", { key: "city", display_name: "City" });
+    await call(client, "create_relation_type", {
+      key: "lives_in",
+      display_name: "Lives in",
+      source_entity_type_key: "person",
+      target_entity_type_key: "city",
+    });
+    await call(client, "create_lens", { key: "hr", name: "HR" });
+  }
+
+  it.skipIf(settings.DB_BACKEND !== "postgres")("creates, reads, lists, replaces and deletes a retriever", async () => {
+    await schema();
+    const created = await call(client, "set_retriever", { lens_key: "hr", key: "people-finder", name: "People", config: CONFIG });
+    expect(created.isError, text(created)).toBeUndefined();
+    expect(json(created)).toMatchObject({
+      key: "people-finder",
+      lensKey: "hr",
+      name: "People",
+      description: null,
+      configVersion: 2,
+      config: { ...CONFIG, threshold: 0.35, answerFieldCharacters: 800 },
+      validation: { valid: true, errors: [], warnings: [] },
+      created: true,
+    });
+    const replaced = await call(client, "set_retriever", {
+      lens_key: "hr", key: "people-finder", name: "People v2", description: "By home", config: CONFIG,
+    });
+    expect(json(replaced)).toMatchObject({ name: "People v2", description: "By home", created: false });
+
+    expect(json(await call(client, "get_retriever", { lens_key: "hr", retriever_key: "people-finder" }))).toMatchObject({
+      key: "people-finder",
+      name: "People v2",
+    });
+    const listed = json(await call(client, "list_retrievers", { lens_key: "hr" })) as unknown as { key: string }[];
+    expect(listed.map((r) => r.key)).toEqual(["people-finder"]);
+    // `_default` is runtime only: modeling neither lists nor reads it.
+    expect((await call(client, "get_retriever", { lens_key: "hr", retriever_key: "_default" })).isError).toBe(true);
+
+    expect(text(await call(client, "delete_retriever", { lens_key: "hr", retriever_key: "people-finder" }))).toBe(
+      "Retriever 'people-finder' deleted from lens 'hr'.",
+    );
+    const missing = await call(client, "get_retriever", { lens_key: "hr", retriever_key: "people-finder" });
+    expect(missing.isError).toBe(true);
+    expect(text(missing)).toContain("not found");
+  });
+
+  it.skipIf(settings.DB_BACKEND !== "postgres")("an invalid configuration answers every error at once and saves nothing", async () => {
+    await schema();
+    const refused = await call(client, "set_retriever", {
+      lens_key: "hr",
+      key: "broken",
+      name: "Broken",
+      config: {
+        indices: [{ index: "person~default" }, { index: "ghost" }],
+        filters: [{ id: "zip", entityType: "person", path: [], field: "zip" }],
+        answerFields: { person: ["name", "nope"] },
+      },
+    });
+    expect(refused.isError).toBe(true);
+    const message = text(refused);
+    expect(message).toContain("Search index 'ghost'");
+    expect(message).toContain("field 'zip'");
+    expect(message).toContain("Answer field 'nope'");
+    // Each error is named once, not repeated by the flattening.
+    expect(message.split("Search index 'ghost'")).toHaveLength(2);
+
+    const shape = await call(client, "set_retriever", {
+      lens_key: "hr", key: "broken", name: "Broken", config: { indices: [], answerFields: {}, threshold: 5 },
+    });
+    expect(shape.isError).toBe(true);
+    expect(text(shape)).toContain("indices");
+    expect(text(shape)).toContain("threshold");
+
+    const badKey = await call(client, "set_retriever", { lens_key: "hr", key: "Bad Key", name: "X", config: CONFIG });
+    expect(badKey.isError).toBe(true);
+    expect(text(badKey)).toContain("Must match pattern");
+    expect(json(await call(client, "list_retrievers", { lens_key: "hr" }))).toEqual([]);
+  });
+
+  it.skipIf(settings.DB_BACKEND === "postgres")("every retriever tool is refused without search indices", async () => {
+    await schema();
+    for (const [name, args] of [
+      ["list_retrievers", { lens_key: "hr" }],
+      ["get_retriever", { lens_key: "hr", retriever_key: "people" }],
+      ["set_retriever", { lens_key: "hr", key: "people", name: "People", config: CONFIG }],
+      ["delete_retriever", { lens_key: "hr", retriever_key: "people" }],
+    ] as const) {
+      const result = await call(client, name, args);
+      expect(result.isError, name).toBe(true);
+      expect(text(result), name).toContain("not supported");
+    }
   });
 });
 

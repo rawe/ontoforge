@@ -767,7 +767,7 @@ connection carries state.
 |---|---|---|
 | Mount | `/mcp/ontologies/{ontologyKey}/model` | `/mcp/ontologies/{ontologyKey}/runtime/lenses/{lensKey}` |
 | Bound to | One ontology | One ontology and one lens |
-| Tools | 40 | 22 |
+| Tools | 45 | 22 |
 
 ### How a mount is bound
 
@@ -826,9 +826,14 @@ exist; its tools answer not-found tool errors otherwise.
 | `add_search_index_to_lens` | Include a search index in a lens, by `index_key` |
 | `remove_search_index_from_lens` | Drop a search index from a lens, by `index_key` |
 | `validate_lens` | Check one lens's inclusions against the schema; warnings name what limits its search indices |
-| `list_ai_agents` | List a lens's agent configurations |
-| `set_ai_agent` | Create or replace an agent configuration |
-| `delete_ai_agent` | Delete an agent configuration |
+| `list_agents` | List a lens's agents |
+| `get_agent` | Read one agent, by `agent_key` |
+| `set_agent` | Create or replace an agent |
+| `delete_agent` | Delete an agent, by `agent_key` |
+| `list_retrievers` | List a lens's retriever agents, each with its validation |
+| `get_retriever` | Read one retriever agent with its validation, by `retriever_key` |
+| `set_retriever` | Create or replace a retriever agent from a `config` in the REST wire format; an invalid configuration is refused with every error in one message |
+| `delete_retriever` | Delete a retriever agent, by `retriever_key` |
 | `list_saved_queries` | List a lens's saved queries |
 | `set_saved_query` | Create or replace a saved query pipeline |
 | `delete_saved_query` | Delete a saved query |
@@ -838,6 +843,9 @@ The per-lens tools take a `lens_key` naming a lens of the bound ontology.
 `delete_relation_type` and `delete_search_index` take a `cascade` flag with the same
 meaning as the REST parameter. The search-index tools take the index key as
 `index_key` and a definition in the same wire format as REST, camelCase included.
+`set_retriever` writes the current configuration version, so it takes no version argument;
+the retriever tools are refused as a disabled feature where the adapter has no search
+indices. Copying, moving, exporting and importing a single retriever agent are REST only.
 There is no modeling tool for the search-data rebuild (`rebuild-search-data`).
 
 ### Runtime tools

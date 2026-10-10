@@ -110,7 +110,7 @@ Configuring agents is modeling; running them is runtime. Complete operation inde
 
 | | Where | Operations |
 |---|---|---|
-| Configure agents | Modeling REST, modeling MCP, the studio's agents tab | List, read one (REST), upsert by key, delete |
+| Configure agents | Modeling REST, modeling MCP, the studio's agents tab | List, read one, upsert by key, delete |
 | Chat | Runtime REST only | One operation per agent, the default addressed by its key; reading a thread back |
 | List agents | Runtime REST | Every agent of the lens — key, name, description, whether built in — the default first |
 | Web UI | The workbench's AI surface | Chat with an agent picker and persisted local threads |

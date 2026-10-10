@@ -25,6 +25,15 @@ import { z, ZodError } from "zod";
 import { NotFoundError, ValidationError } from "../core/exceptions.js";
 import { getModelingStore, getOntologyRegistry, getRuntimeStore } from "../core/ports.js";
 import type { ModelingStore } from "../core/ports.js";
+import {
+  DEFAULT_ANSWER_FIELD_CHARACTERS,
+  DEFAULT_THRESHOLD,
+  MAX_AGENT_FILTERS,
+  MAX_AGENT_INDICES,
+  MAX_ANSWER_FIELDS,
+  MAX_FILTER_HOPS,
+  RETRIEVER_AGENT_CONFIG_VERSION,
+} from "../core/retrieverAgent.js";
 import { LENS_RESOURCE_KEY_PATTERN, MAX_KEY_LENGTH, type TypeKind } from "../core/schemas.js";
 import { OntologyCreate } from "../registry/schemas.js";
 import * as registryService from "../registry/service.js";
@@ -45,6 +54,7 @@ import {
   SearchSettingsUpdate,
   TRANSFER_FORMAT_VERSION,
 } from "../modeling/schemas.js";
+import * as retrieverAgents from "../modeling/retrieverAgents.js";
 import * as searchIndices from "../modeling/searchIndices.js";
 import * as service from "../modeling/service.js";
 import { VALID_AGENT_TOOLS_CSV } from "../runtime/toolNames.js";
@@ -79,8 +89,9 @@ export function formatToolError(error: unknown): string {
       return `${message} — ${fieldErrors}`;
     }
     if ("errors" in details) {
-      const errors = details.errors as unknown[];
-      return `${message} — ${errors.map(String).join("; ")}`;
+      const errors = (details.errors as unknown[]).map(String).join("; ");
+      // Some messages already carry their errors; never repeat them.
+      return message.includes(errors) ? message : `${message} — ${errors}`;
     }
     return message;
   }
@@ -1047,31 +1058,50 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     }),
   );
 
-  // --- AI Agent Config Tools ---
+  // --- Assistants: the base set per kind (agents, retrievers) ---
+  // Copy, move, export and import of a retriever stay REST-only.
 
   server.registerTool(
-    "list_ai_agents",
+    "list_agents",
     {
-      description: "List all AI agent configurations for a lens.",
+      description: "List a lens's agents (tool-using chat assistants).",
       inputSchema: {
         lens_key: z.string(),
       },
     },
-    wrap("list_ai_agents", async (args: { lens_key: string }) => {
+    wrap("list_agents", async (args: { lens_key: string }) => {
       const results = await service.listAiAgents(args.lens_key, await getModelingStore(ontologyKey));
       return jsonResult(results);
     }),
   );
 
   server.registerTool(
-    "set_ai_agent",
+    "get_agent",
+    {
+      description: "Read one agent of a lens by key.",
+      inputSchema: {
+        lens_key: z.string(),
+        agent_key: z.string(),
+      },
+    },
+    wrap("get_agent", async (args: { lens_key: string; agent_key: string }) => {
+      const result = await service.getAiAgent(
+        args.lens_key,
+        args.agent_key,
+        await getModelingStore(ontologyKey),
+      );
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "set_agent",
     {
       description:
-        "Create or update an AI agent configuration for a lens. " +
-        `Key must match pattern ${LENS_RESOURCE_KEY_PATTERN.source}, be at most ${MAX_KEY_LENGTH} characters, ` +
-        "and cannot be '_default'. " +
+        "Create or replace an agent of a lens. " +
+        `Key must match pattern ${LENS_RESOURCE_KEY_PATTERN.source} and be at most ${MAX_KEY_LENGTH} characters. ` +
         `Tools must be valid tool names (${VALID_AGENT_TOOLS_CSV}). ` +
-        "Set tools=null to allow all tools.",
+        "Omit tools to allow all tools.",
       inputSchema: {
         lens_key: z.string(),
         key: z.string(),
@@ -1081,7 +1111,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
         tools: z.array(z.string()).optional(),
       },
     },
-    wrap("set_ai_agent", async (args: {
+    wrap("set_agent", async (args: {
       lens_key: string;
       key: string;
       name: string;
@@ -1106,19 +1136,141 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
   );
 
   server.registerTool(
-    "delete_ai_agent",
+    "delete_agent",
     {
-      description: "Delete an AI agent configuration from a lens.",
+      description: "Delete an agent from a lens.",
       inputSchema: {
         lens_key: z.string(),
         agent_key: z.string(),
       },
     },
-    wrap("delete_ai_agent", async (args: { lens_key: string; agent_key: string }) => {
+    wrap("delete_agent", async (args: { lens_key: string; agent_key: string }) => {
       await service.deleteAiAgent(args.lens_key, args.agent_key, await getModelingStore(ontologyKey));
-      return textResult(
-        `AI agent '${args.agent_key}' deleted from lens '${args.lens_key}'.`,
+      return textResult(`Agent '${args.agent_key}' deleted from lens '${args.lens_key}'.`);
+    }),
+  );
+
+  // Retrievers search search indices: without them (an adapter that has
+  // none) every retriever tool is refused as a disabled feature, by the
+  // same service check as REST.
+
+  server.registerTool(
+    "list_retrievers",
+    {
+      description:
+        "List a lens's retrievers (assistants that answer questions over search indices), " +
+        "each with its configuration and its current validation against the lens.",
+      inputSchema: {
+        lens_key: z.string(),
+      },
+    },
+    wrap("list_retrievers", async (args: { lens_key: string }) => {
+      const results = await retrieverAgents.listRetrieverAgents(
+        args.lens_key,
+        await getModelingStore(ontologyKey),
+        await getRuntimeStore(ontologyKey),
       );
+      return jsonResult(results);
+    }),
+  );
+
+  server.registerTool(
+    "get_retriever",
+    {
+      description:
+        "Read one retriever of a lens by key, with its configuration and its current " +
+        "validation against the lens ({valid, errors, warnings}).",
+      inputSchema: {
+        lens_key: z.string(),
+        retriever_key: z.string(),
+      },
+    },
+    wrap("get_retriever", async (args: { lens_key: string; retriever_key: string }) => {
+      const result = await retrieverAgents.getRetrieverAgent(
+        args.lens_key,
+        args.retriever_key,
+        await getModelingStore(ontologyKey),
+        await getRuntimeStore(ontologyKey),
+      );
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "set_retriever",
+    {
+      description:
+        "Create or replace a retriever of a lens: an assistant that answers questions over the " +
+        "lens's search indices. " +
+        `Key must match pattern ${LENS_RESOURCE_KEY_PATTERN.source} and be at most ${MAX_KEY_LENGTH} characters. ` +
+        `config is a configuration version ${RETRIEVER_AGENT_CONFIG_VERSION} object (camelCase): ` +
+        `indices — 1 to ${MAX_AGENT_INDICES} search indices it searches, each once, as {index, relations?}: ` +
+        "index is a key from list_search_indices (managed '<entityType>~default' or " +
+        "'<entityType>~<documentProperty>', or custom) that the lens can search — a scoped lens " +
+        "must include it and expose its root entity type; a switched-off managed index is not " +
+        "searchable. relations optionally narrows to relation types of the index's relation " +
+        "groups (omit for every group the lens shows). The root entity types of the chosen " +
+        "indices are the result types: the retriever finds entities of those types only. " +
+        `filters (optional, default []) — up to ${MAX_AGENT_FILTERS} exact conditions a question may set, ` +
+        "as {id, entityType, path, field}: id unique in the retriever, entityType a result type, " +
+        `path 0 to ${MAX_FILTER_HOPS} hops [{relationTypeKey, direction: 'outgoing'|'incoming'}] from it ` +
+        "through relation types the lens shows, field a property visible on the entity type the " +
+        "path reaches. answerFields — {<resultType>: [property keys]}: for every result type, " +
+        `and no other type, 1 to ${MAX_ANSWER_FIELDS} properties visible on it that the answer model ` +
+        "receives. threshold (optional) — the cosine similarity a semantic match must reach, " +
+        `-1 to 1, default ${DEFAULT_THRESHOLD}. answerFieldCharacters (optional) — characters of one ` +
+        `answer field passed to the answer model, 100 to 2000, default ${DEFAULT_ANSWER_FIELD_CHARACTERS}. ` +
+        "Example: {indices: [{index: 'person~default'}], filters: [{id: 'city', entityType: " +
+        "'person', path: [{relationTypeKey: 'lives_in', direction: 'outgoing'}], field: 'name'}], " +
+        "answerFields: {person: ['name', 'email']}}. The configuration is checked against the " +
+        "lens; an invalid one is refused with every error at once and nothing is saved.",
+      inputSchema: {
+        lens_key: z.string(),
+        key: z.string(),
+        name: z.string(),
+        description: z.string().optional(),
+        config: z.record(z.string(), z.unknown()),
+      },
+    },
+    wrap("set_retriever", async (args: {
+      lens_key: string;
+      key: string;
+      name: string;
+      description?: string | undefined;
+      config: Record<string, unknown>;
+    }) => {
+      const [result, created] = await retrieverAgents.saveRetrieverAgent(
+        args.lens_key,
+        args.key,
+        {
+          name: args.name,
+          description: args.description ?? null,
+          configVersion: RETRIEVER_AGENT_CONFIG_VERSION,
+          config: args.config,
+        },
+        await getModelingStore(ontologyKey),
+        await getRuntimeStore(ontologyKey),
+      );
+      return jsonResult({ ...result, created });
+    }),
+  );
+
+  server.registerTool(
+    "delete_retriever",
+    {
+      description: "Delete a retriever from a lens.",
+      inputSchema: {
+        lens_key: z.string(),
+        retriever_key: z.string(),
+      },
+    },
+    wrap("delete_retriever", async (args: { lens_key: string; retriever_key: string }) => {
+      await retrieverAgents.deleteRetrieverAgent(
+        args.lens_key,
+        args.retriever_key,
+        await getModelingStore(ontologyKey),
+      );
+      return textResult(`Retriever '${args.retriever_key}' deleted from lens '${args.lens_key}'.`);
     }),
   );
 

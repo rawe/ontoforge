@@ -79,7 +79,7 @@ definitions and settings, cascade rules, schema validation, transfer, search-dat
 
 **Runtime** owns one ontology's instance data: entity and relation lifecycle, traversal,
 documents, search, search indexing, query execution, saved-query pipelines, agents and
-retriever agents.
+retriever agents, and the [thread store](#thread-store) holding their conversations.
 
 **Server** carries the deployment's capability report — which optional providers this
 deployment has. It belongs to neither modeling nor runtime and is the only surface that
@@ -242,6 +242,37 @@ any change of the ontology's index definitions.
 It is **per process**. Multiple server instances against one database will not see each
 other's schema changes until each rebuilds — a real constraint on horizontal scaling that
 no interface currently exposes.
+
+## Thread store
+
+Assistants converse in threads the server holds: a client sends a new message and, to
+continue, a thread id; the server continues from the state it kept. Every thread of a
+server lives in one thread store — one per server, not per ontology — behind an interface
+of its own, beside the persistence port rather than behind it
+([decisions.md](decisions.md#storage)).
+
+**Registry.** Each thread has a random, unguessable id — knowing it is what lets a client
+continue the thread — and a binding to exactly one assistant: ontology, lens, kind and key.
+A thread is found only through its own assistant; through any other it is unknown. Nothing
+cascades: a deleted ontology, lens or assistant leaves its threads to retention.
+
+**State.** The store keeps a thread's conversation state after the latest step of its last
+run, never earlier steps, plus — while a turn runs — the state the turn started from. A
+thread keeps at most 25 turns; older ones are removed. The model sees the last 8.
+
+**One run per thread, atomic turns.** A run holds the thread's run lock; a run on a thread
+that is still running is refused, never queued. A cancelled or failed turn returns the
+thread to the state the turn started from; a successful one drops it. A thread only ever
+holds complete turns, and an interrupted turn is asked again, never resumed.
+
+**Retention.** A thread expires 2 hours after its last turn; expiry removes its state and
+its registry entry, and reading a thread does not count as use. The store holds at most
+100 threads; reaching the cap removes the thread unused the longest. Retention is applied
+on every read and write of the store — no background job.
+
+Like the schema cache, the thread store is **per process**: threads live in the server's
+memory, a restart loses them all, and multiple instances do not share them. A client
+continuing a lost thread is told it is not found and starts a new one.
 
 ## Request lifecycle
 
@@ -410,7 +441,7 @@ Stated plainly, because their absence is a design position and not an oversight:
   network.
 - **No multi-tenancy.** An ontology isolates data but is not a tenant — the rule and
   its reason are in [decisions.md](decisions.md#scope).
-- **No cross-process cache coherence**, as described above.
+- **No cross-process cache coherence and no shared threads**, as described above.
 
 Absences in the API surface itself — no health probe, no bulk write, no instance-data
 export — are listed with their consequences in

@@ -101,6 +101,17 @@ exactly one ontology; registry operations live on a separate registry port. The
 physical isolation mechanism is each adapter's private business, behind the
 technology-neutral contract.
 
+**Conversations live in one thread store per server, beside the persistence port.**
+Assistant conversations are held by the server in a thread store — one per server, not per
+ontology — behind an interface of its own, separate from the storage adapter. A turn is
+atomic: a cancelled or failed turn leaves nothing in the thread. One run per thread: a run
+on a thread that is still running is refused, never queued. Conversation state is not
+ontology data — it is never exported, never cascades and expires on its own — so it stays
+out of the port, and its own interface lets the store move out of memory as a second
+implementation. Atomic turns and one run per thread keep a thread a sequence of complete
+turns; otherwise an interrupted step leaves a tool call without its result and two runs
+fork the conversation.
+
 **PostgreSQL layout** — one PG namespace per ontology, named `ont_<key>`; ontology
 keys are capped at 59 characters. `public` holds everything server-wide, starting
 with the ontology registry (table `ontology`). Ontology-scoped DDL runs at ontology

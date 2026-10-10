@@ -5,7 +5,8 @@
  * the viewport centre for one created elsewhere), then only the user moves
  * them; schema edits merge into the nodes by id and never re-lay out.
  * Selection comes from the address: a click here selects without moving the
- * view, a selection made anywhere else is revealed. Types are created here by
+ * view (beyond keeping the selected node visible when the canvas narrows), a
+ * selection made anywhere else is revealed. Types are created here by
  * double-click, `N` or the toolbar; relation types by dragging a node's "+"
  * onto a node, itself or empty canvas. A naming popover asks for the names.
  * The outline search rings matching nodes and dims the rest; focus mode (`F`)
@@ -22,6 +23,7 @@ import {
   ReactFlow,
   ReactFlowProvider,
   applyNodeChanges,
+  getViewportForBounds,
   useNodesInitialized,
   useReactFlow,
   useStore,
@@ -31,6 +33,7 @@ import {
   type NodeChange,
   type NodeDimensionChange,
   type NodePositionChange,
+  type Viewport,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { ChevronsDownUp, ChevronsUpDown, Crosshair, LayoutGrid, Maximize, Plus } from 'lucide-react'
@@ -52,7 +55,6 @@ import {
   CreatePopover,
   COMBINED_POPOVER_HEIGHT,
   POPOVER_HEIGHT,
-  POPOVER_WIDTH,
   type PopoverAnchor,
   type PopoverState,
   type PopoverValues,
@@ -85,6 +87,9 @@ const edgeTypes = { relation: RelationTypeEdge }
 const GHOST_ID = '__ghost'
 const PENDING_EDGE_ID = '__pending'
 const CONNECTION_LINE_STYLE = { stroke: 'var(--primary)', strokeWidth: 1.5, strokeDasharray: '5 4' }
+const MIN_ZOOM = 0.2
+/** How far from the canvas edge a node kept in view stays (pixels). */
+const IN_VIEW_MARGIN = 16
 
 type AppNode = EntityFlowNode | GhostFlowNode
 
@@ -94,7 +99,13 @@ interface Placement {
   at: XY
 }
 
-const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(v, max))
+/** How far to move the span [lo, hi] into [margin, size - margin]; its start wins when it does not fit. */
+const shiftInto = (lo: number, hi: number, size: number) =>
+  lo < IN_VIEW_MARGIN
+    ? IN_VIEW_MARGIN - lo
+    : hi > size - IN_VIEW_MARGIN
+      ? Math.max(size - IN_VIEW_MARGIN - hi, IN_VIEW_MARGIN - lo)
+      : 0
 
 const sameSelection = (a: SchemaSelection | null, b: SchemaSelection | null) =>
   a === b || (a !== null && b !== null && a.kind === b.kind && a.key === b.key)
@@ -191,9 +202,12 @@ function Canvas() {
   const { create: createRelationType } = useCreateRelationType(ontologyKey)
   const collapsed = useCollapsed(ontologyKey)
   const { resolvedTheme } = useTheme()
-  const { fitView, setCenter, getZoom, getInternalNode, getViewport, screenToFlowPosition } = useReactFlow()
+  const { fitView, setViewport, getZoom, getInternalNode, getNodesBounds, getViewport, screenToFlowPosition } =
+    useReactFlow()
   const storeApi = useStoreApi()
-  const paneReady = useStore((s) => s.width > 0 && s.height > 0)
+  const paneWidth = useStore((s) => s.width)
+  const paneHeight = useStore((s) => s.height)
+  const paneReady = paneWidth > 0 && paneHeight > 0
   const connecting = useStore((s) => s.connection.inProgress)
   const nodesInitialized = useNodesInitialized()
 
@@ -256,32 +270,94 @@ function Canvas() {
     [select],
   )
 
+  /* ------------------------------- viewport ------------------------------- */
+
+  // The canvas's size now. React Flow learns a new size (the inspector opened
+  // with the selection) only a frame later, so moves for a selection use this.
+  const paneSize = useCallback(
+    () => ({ width: wrapperRef.current?.clientWidth ?? 0, height: wrapperRef.current?.clientHeight ?? 0 }),
+    [],
+  )
+
+  // An animated move is remembered until it ends: a move computed meanwhile
+  // starts from where it is going, not from where it is.
+  const moving = useRef<{ to: Viewport; until: number } | null>(null)
+  const moveTo = useCallback(
+    (to: Viewport, duration: number, interpolate?: 'linear') => {
+      moving.current = { to, until: performance.now() + duration }
+      void setViewport(to, { duration, interpolate })
+    },
+    [setViewport],
+  )
+
+  const fitNodes = useCallback(
+    (ids: string[], maxZoom: number) => {
+      const { width, height } = paneSize()
+      if (ids.length === 0 || width === 0) return
+      moveTo(getViewportForBounds(getNodesBounds(ids), width, height, MIN_ZOOM, maxZoom, 0.15), 400)
+    },
+    [paneSize, moveTo, getNodesBounds],
+  )
+
   const reveal = useCallback(
     (sel: SchemaSelection) => {
       if (sel.kind === 'entity-types') {
         const id = idOfKey.get(sel.key)
         const n = id === undefined ? undefined : getInternalNode(id)
-        if (n === undefined) return
+        const { width, height } = paneSize()
+        if (n === undefined || width === 0) return
         const x = n.internals.positionAbsolute.x + (n.measured.width ?? NODE_WIDTH) / 2
         const y = n.internals.positionAbsolute.y + (n.measured.height ?? 80) / 2
-        void setCenter(x, y, { zoom: Math.max(getZoom(), 0.9), duration: 400 })
+        const zoom = Math.max(getZoom(), 0.9)
+        moveTo({ x: width / 2 - x * zoom, y: height / 2 - y * zoom, zoom }, 400)
       } else {
         const r = relationTypes.find((t) => t.key === sel.key)
         const ends = [r?.sourceEntityTypeKey, r?.targetEntityTypeKey].flatMap((key) => {
           const id = key === undefined ? undefined : idOfKey.get(key)
-          return id === undefined ? [] : [{ id }]
+          return id === undefined ? [] : [id]
         })
-        if (ends.length > 0) void fitView({ nodes: ends, padding: 0.15, duration: 400, maxZoom: 1.1 })
+        fitNodes(ends, 1.1)
       }
     },
-    [idOfKey, relationTypes, getInternalNode, setCenter, getZoom, fitView],
+    [idOfKey, relationTypes, getInternalNode, getZoom, paneSize, moveTo, fitNodes],
   )
 
-  const fitFocus = useCallback(
-    (ids: Iterable<string>) =>
-      void fitView({ nodes: [...ids].map((id) => ({ id })), padding: 0.15, duration: 400, maxZoom: 1.2 }),
-    [fitView],
-  )
+  const fitFocus = useCallback((ids: Iterable<string>) => fitNodes([...ids], 1.2), [fitNodes])
+
+  // The selected node stays in view when the canvas changes size (the
+  // inspector opens) and after a type is created here: the view pans just
+  // enough, and not at all when the node is fully visible. `keepInView` holds
+  // the type's key until it is selected and measured.
+  const keepInView = useRef<string | null>(null)
+  const lastPaneSize = useRef({ width: 0, height: 0 })
+  const onPaneResize = useEffectEvent(() => {
+    if (selection?.kind === 'entity-types') keepInView.current = selection.key
+  })
+  useEffect(() => {
+    const was = lastPaneSize.current
+    lastPaneSize.current = { width: paneWidth, height: paneHeight }
+    if (was.width > 0 && was.height > 0) onPaneResize()
+  }, [paneWidth, paneHeight])
+
+  const panIntoView = useEffectEvent(() => {
+    const key = keepInView.current
+    if (key === null || selection?.kind !== 'entity-types' || selection.key !== key) return
+    const id = idOfKey.get(key)
+    const n = id === undefined ? undefined : getInternalNode(id)
+    const { width, height } = paneSize()
+    if (n?.measured.width === undefined || n.measured.height === undefined || width === 0) return
+    keepInView.current = null
+    const m = moving.current
+    const v = m !== null && performance.now() < m.until ? m.to : getViewport()
+    const left = n.internals.positionAbsolute.x * v.zoom + v.x
+    const top = n.internals.positionAbsolute.y * v.zoom + v.y
+    const dx = shiftInto(left, left + n.measured.width * v.zoom, width)
+    const dy = shiftInto(top, top + n.measured.height * v.zoom, height)
+    // Linear, so a short pan does not zoom out on the way.
+    if (dx !== 0 || dy !== 0) moveTo({ x: v.x + dx, y: v.y + dy, zoom: v.zoom }, 200, 'linear')
+  })
+  // After every commit: the selection and the node's measurements arrive in their own time.
+  useEffect(() => panIntoView())
 
   // Reveal every selection that did not come from a click here: outline,
   // palette, address, back/forward, or a different one when coming back from
@@ -292,11 +368,17 @@ function Canvas() {
   const seenReveal = useRef(revealRequest?.nonce ?? 0)
   useEffect(() => {
     if (!nodesInitialized) return
+    // A request waits until the address names its selection (a navigation, a
+    // moment later), so the reveal sees the canvas beside the inspector it opens.
     const requested =
-      revealRequest !== null && revealRequest.nonce !== seenReveal.current ? revealRequest.selection : null
+      revealRequest !== null &&
+      revealRequest.nonce !== seenReveal.current &&
+      sameSelection(revealRequest.selection, selection)
+        ? revealRequest.selection
+        : null
     const changed = !sameSelection(selection, seenSelection.current)
     if (requested === null && !changed) return
-    if (revealRequest !== null) seenReveal.current = revealRequest.nonce
+    if (requested !== null && revealRequest !== null) seenReveal.current = revealRequest.nonce
     let own = false
     if (changed) {
       own = sameSelection(selection, ownSelection.current)
@@ -472,7 +554,7 @@ function Canvas() {
   // Where the popover for a gesture at `client` (pixels) goes. A ghost is
   // centred on the point, with the popover below it, or above it when there
   // is no room below; after a drop on a node the popover sits at the pointer.
-  // It stays inside the canvas.
+  // The popover clamps itself into the canvas.
   const placePopover = useCallback(
     (client: XY, mode: PopoverState['mode']) => {
       const rect = wrapperRef.current?.getBoundingClientRect()
@@ -484,11 +566,11 @@ function Canvas() {
       const y = client.y - rect.top
       const half = mode === 'relation' ? 0 : (GHOST_HEIGHT / 2) * zoom
       const height = mode === 'entity+relation' ? COMBINED_POPOVER_HEIGHT : POPOVER_HEIGHT
-      const left = clamp(mode === 'relation' ? x + 8 : x - (NODE_WIDTH / 2) * zoom, 8, rect.width - POPOVER_WIDTH - 8)
+      const left = mode === 'relation' ? x + 8 : x - (NODE_WIDTH / 2) * zoom
       const top = y + half + 8
       const at: PopoverAnchor =
         top + height + 8 <= rect.height || y - half - 8 - height < 8
-          ? { left, top: clamp(top, 8, rect.height - height - 8) }
+          ? { left, top }
           : { left, bottom: rect.height - (y - half - 8) }
       return { at, ghost }
     },
@@ -529,6 +611,7 @@ function Canvas() {
       }
       if (state.mode === 'entity') {
         setPopover(null)
+        keepInView.current = target.key
         selectHere({ kind: 'entity-types', key: target.key })
         return null
       }
@@ -686,7 +769,7 @@ function Canvas() {
         deleteKeyCode={null}
         selectionKeyCode={null}
         multiSelectionKeyCode={null}
-        minZoom={0.2}
+        minZoom={MIN_ZOOM}
         maxZoom={2}
         defaultViewport={keptAtMount?.viewport}
         colorMode={resolvedTheme === 'dark' ? 'dark' : 'light'}

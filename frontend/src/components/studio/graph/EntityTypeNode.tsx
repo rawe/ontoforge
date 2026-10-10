@@ -136,6 +136,8 @@ function EntityTypeNodeInner({ id, data, selected }: NodeProps<EntityFlowNode>) 
           {sorted.length > TRUNCATE_AFTER && (
             <button
               type="button"
+              aria-label={hidden > 0 ? `+${hidden} more properties` : 'Show less'}
+              aria-expanded={expanded}
               className="nodrag mt-0.5 cursor-pointer px-1.5 text-[10.5px] text-muted-foreground hover:text-foreground"
               onClick={(e) => {
                 e.stopPropagation()

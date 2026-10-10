@@ -296,9 +296,10 @@ clears the default), description and the required flag, each saved as it changes
 the key and data type stated as permanent. The name property's row carries a "Name" badge
 and its delete action is disabled, explaining that another name property must be chosen
 first. "Add property" opens an inline form — display name with a derived key, data type,
-required flag and default — which stays open with cleared fields after each add; Escape
-closes it. Document is offered as a data type on entity types only. Adding a required
-property without a default may trigger the [cascade flow](#cascade-confirmation). See
+required flag and default — which stays open after each add, clearing the name, key,
+required flag and default but keeping the data type; Escape closes it. Document is offered
+as a data type on entity types only. Adding a required property without a default may
+trigger the [cascade flow](#cascade-confirmation). See
 [capabilities/schema-modeling.md](capabilities/schema-modeling.md).
 
 On an entity type, a list of the relation types that touch it follows — direction, key
@@ -310,7 +311,7 @@ why: it has no string or document property and no custom index.
 
 **Deleting.** One dialog serves types and properties, wherever deletion starts — the type
 page, the inspector, a property's delete action, `Del` on the graph, or the palette. For a
-type it states how many property definitions go with it, that stored entities or
+type it states how many property definitions go with it, if any, that stored entities or
 relations under its key stay in the database but become unreachable
 ([capabilities/schema-modeling.md](capabilities/schema-modeling.md#deletion)), and that the
 server reports what it would change in lens scopes and search indices on confirmation;
@@ -852,10 +853,12 @@ left. With nothing to restore or reveal, the first view fits all nodes.
 
 **Selection.** Clicking a node selects its entity type, clicking an edge or its label the
 relation type, and clicking the empty canvas clears the selection; clicking a property row
-on a node selects the type with that property opened. A selection made on the canvas never
-moves the view. One made anywhere else — outline, palette, issues, the address, a jump
-link, a return from the classic view with another selection — pans to the node or frames
-the relation type's two endpoints.
+on a node selects the type with that property opened. A selection made on the canvas does
+not move the view, except to keep the selected node fully visible: when the canvas narrows
+— the inspector opens — or a type is created on it, the view pans just enough to show the
+node. One made anywhere else — outline, palette, issues, the address, a jump link, a
+return from the classic view with another selection — pans to the node or frames the
+relation type's two endpoints.
 
 **Creating and connecting.** Double-clicking the empty canvas, the toolbar's
 "+ Entity type", or `N` (at the centre of the view) shows a placeholder node and a naming
@@ -895,8 +898,8 @@ focus mode, then the selection.
 
 On the left of the [Schema](#schema) screen in both views: a search box, then the entity
 types (colour, display name, key, issue count, property count) and the relation types
-(display name, key, source → target), each row expandable to its properties — key,
-name-property tag, required marker, issue marker and data type. Clicking a type selects
+(display name, key, source → target, issue count, property count), each row expandable to
+its properties — key, name-property tag, required marker, issue marker and data type. Clicking a type selects
 and reveals it; clicking a property selects its owner with that property opened. The
 selected row scrolls into view, and a property opened elsewhere expands its owner here.
 

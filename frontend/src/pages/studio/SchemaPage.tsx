@@ -182,7 +182,8 @@ function SchemaShell({ ontologyKey }: { ontologyKey: string }) {
         )}
         <div className="flex min-h-0 flex-1">
           {loaded && <Outline />}
-          <div className={view === 'classic' ? 'min-w-0 flex-1 overflow-y-auto' : 'min-w-0 flex-1'}>
+          {/* relative: hidden form controls stay inside the scroll area, so the page never scrolls. */}
+          <div className={view === 'classic' ? 'relative min-w-0 flex-1 overflow-y-auto' : 'min-w-0 flex-1'}>
             {body}
           </div>
           {view === 'graph' && loaded && <Inspector />}

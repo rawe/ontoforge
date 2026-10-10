@@ -18,7 +18,10 @@ import type { XY } from './geometry'
 
 export const POPOVER_WIDTH = 320
 
-/** Where the popover sits in the canvas (pixels): below a point, or above it. */
+/**
+ * Where the popover sits in the canvas (pixels): below a point, or above it.
+ * The popover clamps it into the canvas, also when the canvas narrows later.
+ */
 export type PopoverAnchor = { left: number; top: number } | { left: number; bottom: number }
 
 /** `ghost` is the ghost node's flow position. */
@@ -72,6 +75,7 @@ export function CreatePopover({
     state.mode === 'relation' ? (state.failure ?? null) : null,
   )
 
+  const height = state.mode === 'entity+relation' ? COMBINED_POPOVER_HEIGHT : POPOVER_HEIGHT
   const needsEntity = state.mode !== 'relation'
   const needsRelation = state.mode !== 'entity'
   const valid = (!needsEntity || nameKeyValid(entity)) && (!needsRelation || nameKeyValid(relation))
@@ -109,7 +113,7 @@ export function CreatePopover({
     <form
       aria-label="Name the new type"
       className="absolute z-20 grid gap-3 rounded-xl border bg-popover p-3 text-popover-foreground shadow-lg"
-      style={{ ...state.at, width: POPOVER_WIDTH }}
+      style={{ ...clampedAnchor(state.at, height), width: POPOVER_WIDTH }}
       onSubmit={(e) => {
         e.preventDefault()
         void submit()
@@ -185,6 +189,14 @@ export function CreatePopover({
       </div>
     </form>
   )
+}
+
+/** CSS keeps the popover 8 px inside the canvas, whatever the canvas's size is now. */
+const within = (px: number, size: number) => `clamp(8px, ${px}px, calc(100% - ${size + 8}px))`
+
+function clampedAnchor(at: PopoverAnchor, height: number) {
+  const left = within(at.left, POPOVER_WIDTH)
+  return 'top' in at ? { left, top: within(at.top, height) } : { left, bottom: within(at.bottom, height) }
 }
 
 function Part({ label, line, children }: { label?: string; line?: string; children: ReactNode }) {

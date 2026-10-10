@@ -58,7 +58,10 @@ type Page =
   | { id: 'new-entity' }
   | { id: 'new-relation' }
   | { id: 'pick-owner' }
-  | { id: 'add-property'; owner: TypeRef }
+  | { id: 'add-property'; owner: Owner }
+
+/** A type that gets a property, with its display name for the labels. */
+type Owner = TypeRef & { name: string }
 
 const PLACEHOLDER: Record<Page['id'], string> = {
   root: 'Type a command, a type to go to, or  person -mentors-> intern',
@@ -135,7 +138,7 @@ function PaletteBody({ close }: { close: () => void }) {
   const graphKey = (key: string) => (graph ? key : undefined)
 
   const selectedType = selection === null ? undefined : findTypeByKey(schema, selection.kind, selection.key)
-  const selected: (TypeRef & { name: string }) | null =
+  const selected: Owner | null =
     selection === null || selectedType === undefined
       ? null
       : {
@@ -208,7 +211,7 @@ function PaletteBody({ close }: { close: () => void }) {
       ? [
           {
             id: 'add-property-selected',
-            label: `Add property to ${selected.key}…`,
+            label: `Add property to ${selected.name}…`,
             icon: <ListPlus />,
             run: () => setPage({ id: 'add-property', owner: selected }),
           },
@@ -260,7 +263,7 @@ function PaletteBody({ close }: { close: () => void }) {
       ? [
           {
             id: 'delete',
-            label: `Delete ${selected.key}…`,
+            label: `Delete ${selected.name}…`,
             search: `delete remove ${selected.key} ${selected.name}`,
             icon: <Trash2 />,
             shortcut: graphKey('Del'),
@@ -311,7 +314,7 @@ function PaletteBody({ close }: { close: () => void }) {
         autoFocus
         value={query}
         onValueChange={setQuery}
-        placeholder={page.id === 'add-property' ? `${PLACEHOLDER['add-property']} — on ${page.owner.key}` : PLACEHOLDER[page.id]}
+        placeholder={page.id === 'add-property' ? `${PLACEHOLDER['add-property']} — on ${page.owner.name}` : PLACEHOLDER[page.id]}
         onKeyDown={(e) => {
           if (e.key === 'Backspace' && query === '' && page.id !== 'root') {
             e.preventDefault()
@@ -332,10 +335,10 @@ function PaletteBody({ close }: { close: () => void }) {
                 query={query}
                 items={owners.map((o) => ({
                   id: `add-${o.ref.id}`,
-                  label: `Add property to ${o.ref.key}…`,
+                  label: `Add property to ${o.name}…`,
                   search: `add property ${o.ref.key} ${o.name}`,
                   icon: <ListPlus />,
-                  run: () => setPage({ id: 'add-property', owner: o.ref }),
+                  run: () => setPage({ id: 'add-property', owner: { ...o.ref, name: o.name } }),
                 }))}
               />
             )}
@@ -376,7 +379,7 @@ function PaletteBody({ close }: { close: () => void }) {
               search: `${o.ref.key} ${o.name}`,
               icon: o.ref.kind === 'entity-types' ? <TypeDot typeKey={o.ref.key} className="mx-1" /> : <Workflow />,
               hint: o.ref.key,
-              run: () => setPage({ id: 'add-property', owner: o.ref }),
+              run: () => setPage({ id: 'add-property', owner: { ...o.ref, name: o.name } }),
             }))}
           />
         )}
@@ -533,7 +536,7 @@ function AddPropertyItems({
   taken,
   close,
 }: {
-  owner: TypeRef
+  owner: Owner
   input: string
   taken: string[]
   close: () => void
@@ -556,7 +559,7 @@ function AddPropertyItems({
   return (
     <>
       {displayName !== '' && (
-        <CommandGroup heading={`Add “${displayName}” to ${owner.key}`}>
+        <CommandGroup heading={`Add “${displayName}” to ${owner.name}`}>
           {problem !== null ? (
             <p className="px-2 py-1.5 text-[12px] text-destructive">{problem}</p>
           ) : types.length === 0 ? (

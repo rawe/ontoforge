@@ -233,7 +233,7 @@ function DeleteBody({ ontologyKey, target, onClose, onDeleted, onShowType }: Del
       )}
 
       <ul className="grid gap-2 text-[13px]">
-        {target.what === 'type' && (
+        {target.what === 'type' && propertyCount > 0 && (
           <Impact icon={ListTree}>
             Removes {propertyCount} property definition{propertyCount === 1 ? '' : 's'} with it.
           </Impact>

@@ -199,6 +199,9 @@ describe.skipIf(!postgres)("retriever agents", () => {
       expect(refused.json().error.code).toBe("VALIDATION_ERROR");
     }
     expect((await request("PUT", `${AGENTS}/Bad-Key`, BODY)).statusCode).toBe(422);
+    // Lens-resource keys allow '-', unlike schema keys.
+    expect((await request("PUT", `${AGENTS}/support-bot`, BODY)).statusCode).toBe(201);
+    expect((await request("DELETE", `${AGENTS}/support-bot`)).statusCode).toBe(204);
     expect((await request("PUT", `${AGENTS}/v1`, { ...BODY, configVersion: 1 })).statusCode).toBe(422);
     expect((await request("GET", `${AGENTS}/broken`)).statusCode).toBe(404);
     expect((await request("GET", `${MODEL}/lenses/nope/retriever-agents`)).statusCode).toBe(404);

@@ -33,7 +33,7 @@ import {
   coerceTypedValue,
   deriveKey,
   invalidateModeling,
-  isValidKey,
+  isValidSchemaKey,
   toastError,
 } from './lib'
 import { KeyField } from './shared'
@@ -121,7 +121,7 @@ export function PropertyDialog({
     },
   })
 
-  const valid = (isEdit || isValidKey(key)) && displayName.trim() !== ''
+  const valid = (isEdit || isValidSchemaKey(key)) && displayName.trim() !== ''
 
   // Document properties exist only on entity types (backend rejects them on
   // relation types).

@@ -6,10 +6,10 @@
 
 import { z } from "zod";
 
-import { KEY_PATTERN, MAX_ONTOLOGY_KEY_LENGTH } from "../core/schemas.js";
+import { SCHEMA_KEY_PATTERN, MAX_ONTOLOGY_KEY_LENGTH } from "../core/schemas.js";
 
 export const OntologyCreate = z.object({
-  key: z.string().regex(KEY_PATTERN).max(MAX_ONTOLOGY_KEY_LENGTH),
+  key: z.string().regex(SCHEMA_KEY_PATTERN).max(MAX_ONTOLOGY_KEY_LENGTH),
   // Absent means no display name — an ontology starts nameless unless
   // one is chosen at creation.
   displayName: z.string().nullable().optional(),

@@ -11,9 +11,25 @@ import type { DataType, JsonPrimitive } from '@/api/types'
 
 /* ---------------------------------- keys ----------------------------------- */
 
-export const KEY_PATTERN = /^[a-z][a-z0-9_]*$/
+/**
+ * Key rule of the schema level — ontologies, entity and relation types,
+ * properties, lenses, search indices: lower snake case, starting with a
+ * letter. No hyphen, because these keys appear as OQL identifiers (`-` reads
+ * as minus) and in storage names. Mirrors the server's `SCHEMA_KEY_PATTERN`.
+ */
+export const SCHEMA_KEY_PATTERN = /^[a-z][a-z0-9_]*$/
 
-export const isValidKey = (key: string) => KEY_PATTERN.test(key)
+/**
+ * Key rule of the lens-resource level — saved queries and assistants of every
+ * kind: the schema rule plus `-`. These keys travel only in URLs, JSON and
+ * tool arguments, never into OQL or storage names, so a hyphen is harmless.
+ * Mirrors the server's `LENS_RESOURCE_KEY_PATTERN`.
+ */
+export const LENS_RESOURCE_KEY_PATTERN = /^[a-z][a-z0-9_-]*$/
+
+export const isValidSchemaKey = (key: string) => SCHEMA_KEY_PATTERN.test(key)
+
+export const isValidLensResourceKey = (key: string) => LENS_RESOURCE_KEY_PATTERN.test(key)
 
 /** Derive a snake_case key suggestion from a display name. */
 export function deriveKey(name: string): string {

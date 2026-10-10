@@ -10,7 +10,7 @@ import {
   deleteRetrieverAgent, exportRetrieverAgent, importRetrieverAgent, transferRetrieverAgent,
   type RetrieverAgent, type RetrieverAgentConfig, type RetrieverAgentExport,
 } from '@/api/retrieverAgents'
-import { deriveKey, isValidKey } from '@/components/studio/lib'
+import { deriveKey, isValidLensResourceKey } from '@/components/studio/lib'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -31,7 +31,7 @@ export function NameKeyDialog({ open, title, description, confirmLabel, initialN
   const [name, setName] = useState(initialName)
   const [key, setKey] = useState(deriveKey(initialName))
   const [keyEdited, setKeyEdited] = useState(false)
-  const keyProblem = !key ? 'Enter a key.' : !isValidKey(key) ? 'Use lowercase letters, digits or _, starting with a letter.'
+  const keyProblem = !key ? 'Enter a key.' : !isValidLensResourceKey(key) ? 'Use lowercase letters, digits, _ or -, starting with a letter.'
     : key.length > MAX_KEY_LENGTH ? `At most ${MAX_KEY_LENGTH} characters.` : existingKeys.includes(key) ? 'This key already exists in this lens.' : ''
   return <Dialog open={open} onOpenChange={(next) => { if (!next && !busy) onCancel() }}>
     <DialogContent>

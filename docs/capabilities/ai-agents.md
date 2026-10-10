@@ -32,7 +32,7 @@ An **agent** is a named language-model configuration belonging to one lens:
 
 | Field | Meaning |
 |---|---|
-| Key | Addresses the agent within its lens. Matches `^[a-z][a-z0-9_-]*$`, at most 64 characters |
+| Key | Addresses the agent within its lens. A lens-resource [key](../README.md), at most 64 characters |
 | Name | Human-readable label |
 | Description | What it is for |
 | System prompt | Replaces the built-in chat prompt |

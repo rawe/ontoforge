@@ -26,7 +26,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { deriveKey, invalidateModeling, isValidKey, toastError } from './lib'
+import { deriveKey, invalidateModeling, isValidSchemaKey, toastError } from './lib'
 import { KeyField } from './shared'
 
 /** Form state shared by both create dialogs. */
@@ -68,7 +68,7 @@ function useTypeForm(open: boolean) {
     onDisplayNameChange,
     onKeyChange,
     setDescription,
-    valid: isValidKey(key) && displayName.trim() !== '',
+    valid: isValidSchemaKey(key) && displayName.trim() !== '',
   }
 }
 
@@ -125,7 +125,7 @@ export function EntityTypeCreateDialog({
     onError: (error) => applyApiError(error, form.setFieldErrors),
   })
 
-  const valid = form.valid && isValidKey(nameProperty)
+  const valid = form.valid && isValidSchemaKey(nameProperty)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

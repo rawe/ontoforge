@@ -71,6 +71,16 @@ keeps adapter-derived physical names legible and rejects absurd input at the
 boundary rather than deep inside an adapter. Ontology keys carry a tighter cap of
 their own — see the PostgreSQL layout rule under Storage.
 
+**One key rule per level, never per resource.** Schema keys — ontologies, types,
+properties, lenses, search indices — are lower snake case without `-`, because they appear
+as OQL identifiers, where `-` reads as minus, and in storage names. Lens-resource keys —
+saved queries, agents and retriever agents — also allow `-`, because they travel only in
+URLs, JSON and tool arguments. A new keyed resource takes the rule of its level; no
+resource gets a rule of its own. Each rule is defined once in the server
+(`SCHEMA_KEY_PATTERN`, `LENS_RESOURCE_KEY_PATTERN`) and mirrored once in the client; every
+check, error message and tool description refers to it. The patterns: the glossary's *Key*
+in [README.md](README.md).
+
 **No vendor or implementation-language vocabulary anywhere a caller can see.**
 Not in route names, field names, tool names or error messages. The query endpoint takes a
 `query`; the query language is OQL; storage errors name no database. A rejected value is
@@ -580,8 +590,8 @@ returned: hits are projected through it, and a match whose index reads a hidden 
 carries no snippet of the entry's text.
 
 **Retriever agents are a lens-local resource that searches search indices.** Each has a
-key, name, description, configuration version and configuration; keys follow the shared
-key rules and are unique within the lens. A save is validated against the lens and
+key, name, description, configuration version and configuration; keys follow the
+lens-resource key rule and are unique within the lens. A save is validated against the lens and
 refused when invalid; a stored agent that later becomes invalid stays readable and
 exportable, nothing cascades to it, and a question to it is refused. Copying creates an
 independent identity; moving within the same ontology keeps it and is atomic. Neither

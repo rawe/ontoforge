@@ -768,7 +768,7 @@ describe("retriever agents", () => {
     expect(res.json().error.details.errors).toEqual([
       "Import error: retriever agent 'finder' has no valid configuration of version 2",
       "Import error: retriever agent 'empty' has no valid configuration of version 2",
-      "Import error: invalid retriever agent key 'Bad-Key'. Must match pattern: ^[a-z][a-z0-9_]*$",
+      "Import error: invalid retriever agent key 'Bad-Key'. Must match pattern: ^[a-z][a-z0-9_-]*$",
     ]);
     expect(holder.store.createEntityType).not.toHaveBeenCalled();
     expect(indices.saveRetrieverAgent).not.toHaveBeenCalled();

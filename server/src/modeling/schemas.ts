@@ -8,13 +8,13 @@ import { KeywordLanguage, KeywordLanguageSetSchema } from "../core/keywordLangua
 
 import { z } from "zod";
 
-import { DATA_TYPES, DEFAULT_NAME_PROPERTY, KEY_PATTERN, MAX_KEY_LENGTH } from "../core/schemas.js";
+import { DATA_TYPES, DEFAULT_NAME_PROPERTY, SCHEMA_KEY_PATTERN, MAX_KEY_LENGTH } from "../core/schemas.js";
 import { SearchIndexDefinition } from "../core/searchIndex.js";
 
 // --- Lens ---
 
 export const LensCreate = z.object({
-  key: z.string().regex(KEY_PATTERN).max(MAX_KEY_LENGTH),
+  key: z.string().regex(SCHEMA_KEY_PATTERN).max(MAX_KEY_LENGTH),
   name: z.string(),
   description: z.string().nullable().optional(),
 });
@@ -77,10 +77,10 @@ export const ValidationResult = z.object({
 /** Creating an entity type creates its name property too: a non-required
  * `string` property under `nameProperty` (default `name`). */
 export const EntityTypeCreate = z.object({
-  key: z.string().regex(KEY_PATTERN).max(MAX_KEY_LENGTH),
+  key: z.string().regex(SCHEMA_KEY_PATTERN).max(MAX_KEY_LENGTH),
   displayName: z.string(),
   description: z.string().nullable().optional(),
-  nameProperty: z.string().regex(KEY_PATTERN).max(MAX_KEY_LENGTH).default(DEFAULT_NAME_PROPERTY),
+  nameProperty: z.string().regex(SCHEMA_KEY_PATTERN).max(MAX_KEY_LENGTH).default(DEFAULT_NAME_PROPERTY),
 });
 
 /** `nameProperty` reassigns the name property to another `string` property
@@ -105,7 +105,7 @@ export const EntityTypeResponse = z.object({
 // --- Relation Type ---
 
 export const RelationTypeCreate = z.object({
-  key: z.string().regex(KEY_PATTERN).max(MAX_KEY_LENGTH),
+  key: z.string().regex(SCHEMA_KEY_PATTERN).max(MAX_KEY_LENGTH),
   displayName: z.string(),
   description: z.string().nullable().optional(),
   sourceEntityTypeKey: z.string(),
@@ -131,7 +131,7 @@ export const RelationTypeResponse = z.object({
 // --- Property Definition ---
 
 export const PropertyDefinitionCreate = z.object({
-  key: z.string().regex(KEY_PATTERN).max(MAX_KEY_LENGTH),
+  key: z.string().regex(SCHEMA_KEY_PATTERN).max(MAX_KEY_LENGTH),
   displayName: z.string(),
   description: z.string().nullable().optional(),
   dataType: z.enum(DATA_TYPES),
@@ -166,13 +166,6 @@ export const PropertyDefinitionResponse = z.object({
 });
 
 // --- AI Agent Config ---
-
-/**
- * Agent and saved-query keys: hyphens allowed, unlike type and property
- * keys. Kept as a STRING so validation-error messages can interpolate the
- * exact pattern text.
- */
-export const AGENT_KEY_PATTERN = "^[a-z][a-z0-9_-]*$";
 
 export const AiAgentConfigUpsert = z.object({
   name: z.string(),

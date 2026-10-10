@@ -27,14 +27,14 @@ import {
   RETRIEVER_AGENT_CONFIG_VERSION,
   type RetrieverAgentRecord,
 } from "../core/retrieverAgent.js";
-import { KEY_PATTERN, MAX_KEY_LENGTH } from "../core/schemas.js";
+import { LENS_RESOURCE_KEY_PATTERN, MAX_KEY_LENGTH } from "../core/schemas.js";
 import { checkAgentConfig, type AgentLens } from "../runtime/retrieverAgents/config.js";
 import { loadSchema } from "../runtime/schemaCache.js";
 import { searchIndexCatalog } from "../runtime/search/indexSearch.js";
 import { ExportRetrieverAgent, type ExportRetrieverAgentInput } from "./schemas.js";
 import { requireSearchIndices } from "./searchIndices.js";
 
-const Key = z.string().regex(KEY_PATTERN).max(MAX_KEY_LENGTH);
+const Key = z.string().regex(LENS_RESOURCE_KEY_PATTERN).max(MAX_KEY_LENGTH);
 
 /** The write body of `PUT`. */
 export const RetrieverAgentWriteBody = z
@@ -105,7 +105,7 @@ function toResponse(agent: RetrieverAgentRecord, lensKey: string, lens: AgentLen
 function checkKey(key: string): void {
   if (!Key.safeParse(key).success) {
     throw new ValidationError(
-      `Invalid retriever agent key '${key}'. Must match pattern ${KEY_PATTERN.source} ` +
+      `Invalid retriever agent key '${key}'. Must match pattern ${LENS_RESOURCE_KEY_PATTERN.source} ` +
         `and be at most ${MAX_KEY_LENGTH} characters`,
     );
   }

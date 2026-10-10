@@ -40,10 +40,11 @@ import {
 import type { ModelingStore, RuntimeStore } from "../core/ports.js";
 import {
   DATA_TYPES,
-  KEY_PATTERN,
+  LENS_RESOURCE_KEY_PATTERN,
   MAX_KEY_LENGTH,
   NAME_PROPERTY_DATA_TYPE,
   namePropertyDisplayName,
+  SCHEMA_KEY_PATTERN,
   type NewPropertyDef,
   type PropertyDef,
   type TypeKind,
@@ -69,7 +70,6 @@ import { invalidateLoadedSchemaCache, loadSchemaUncached, buildSchemaCacheFromRa
 import { syncDocumentChunks } from "../runtime/service.js";
 import { VALID_AGENT_TOOLS } from "../runtime/toolNames.js";
 import {
-  AGENT_KEY_PATTERN,
   ExportIndexInclusions,
   ExportRetrieverAgents,
   ExportSearchIndices,
@@ -1734,7 +1734,8 @@ export async function importSchema(
   const longKey = (kind: string, key: string): string =>
     `Import error: invalid ${kind} key '${key}'. ` +
     `Maximum length is ${MAX_KEY_LENGTH} characters`;
-  const typeKeyPattern = KEY_PATTERN.source;
+  const schemaKeyPattern = SCHEMA_KEY_PATTERN.source;
+  const resourceKeyPattern = LENS_RESOURCE_KEY_PATTERN.source;
 
   // Each payload entity type's name property: its key, plus the property
   // to create for it when a 5.0 type has no string property.
@@ -1771,18 +1772,18 @@ export async function importSchema(
     } else {
       namePropertyOf.set(et, { key: et.nameProperty, created: null });
     }
-    if (!KEY_PATTERN.test(et.key)) {
-      errors.push(badKey("entity type", et.key, typeKeyPattern));
+    if (!SCHEMA_KEY_PATTERN.test(et.key)) {
+      errors.push(badKey("entity type", et.key, schemaKeyPattern));
     }
     if (et.key.length > MAX_KEY_LENGTH) {
       errors.push(longKey("entity type", et.key));
     }
     pushReserved(() => rejectReservedEntityTypeKey(store, et.key, "Import error: "));
     for (const prop of et.properties) {
-      if (!KEY_PATTERN.test(prop.key)) {
+      if (!SCHEMA_KEY_PATTERN.test(prop.key)) {
         errors.push(
           `Import error: invalid property key '${prop.key}' on entity type ` +
-            `'${et.key}'. Must match pattern: ${typeKeyPattern}`,
+            `'${et.key}'. Must match pattern: ${schemaKeyPattern}`,
         );
       }
       if (prop.key.length > MAX_KEY_LENGTH) {
@@ -1796,8 +1797,8 @@ export async function importSchema(
 
   const payloadEtKeys = new Set(payload.entityTypes.map((et) => et.key));
   for (const rt of payload.relationTypes) {
-    if (!KEY_PATTERN.test(rt.key)) {
-      errors.push(badKey("relation type", rt.key, typeKeyPattern));
+    if (!SCHEMA_KEY_PATTERN.test(rt.key)) {
+      errors.push(badKey("relation type", rt.key, schemaKeyPattern));
     }
     if (rt.key.length > MAX_KEY_LENGTH) {
       errors.push(longKey("relation type", rt.key));
@@ -1816,10 +1817,10 @@ export async function importSchema(
       );
     }
     for (const prop of rt.properties) {
-      if (!KEY_PATTERN.test(prop.key)) {
+      if (!SCHEMA_KEY_PATTERN.test(prop.key)) {
         errors.push(
           `Import error: invalid property key '${prop.key}' on relation type ` +
-            `'${rt.key}'. Must match pattern: ${typeKeyPattern}`,
+            `'${rt.key}'. Must match pattern: ${schemaKeyPattern}`,
         );
       }
       if (prop.key.length > MAX_KEY_LENGTH) {
@@ -1862,7 +1863,7 @@ export async function importSchema(
       const key = agentKeys.get(agent)!.key;
       if (seen.has(key)) errors.push(`Import error: duplicate retriever agent '${key}' in lens '${lens.key}'`);
       seen.add(key);
-      if (!KEY_PATTERN.test(key)) errors.push(badKey("retriever agent", key, typeKeyPattern));
+      if (!LENS_RESOURCE_KEY_PATTERN.test(key)) errors.push(badKey("retriever agent", key, resourceKeyPattern));
       if (key.length > MAX_KEY_LENGTH) errors.push(longKey("retriever agent", key));
       if (agent.name.length === 0 || agent.name.length > 200) {
         errors.push(`Import error: retriever agent '${agent.key}' needs a name of 1 to 200 characters`);
@@ -1884,15 +1885,15 @@ export async function importSchema(
   }
 
   for (const lens of payload.lenses) {
-    if (!KEY_PATTERN.test(lens.key)) {
-      errors.push(badKey("lens", lens.key, typeKeyPattern));
+    if (!SCHEMA_KEY_PATTERN.test(lens.key)) {
+      errors.push(badKey("lens", lens.key, schemaKeyPattern));
     }
     if (lens.key.length > MAX_KEY_LENGTH) {
       errors.push(longKey("lens", lens.key));
     }
     for (const ag of lens.aiAgents) {
-      if (!AGENT_KEY_REGEX.test(ag.key)) {
-        errors.push(badKey("agent", ag.key, AGENT_KEY_PATTERN));
+      if (!LENS_RESOURCE_KEY_PATTERN.test(ag.key)) {
+        errors.push(badKey("agent", ag.key, resourceKeyPattern));
       }
       if (ag.key.length > MAX_KEY_LENGTH) {
         errors.push(longKey("agent", ag.key));
@@ -1910,8 +1911,8 @@ export async function importSchema(
       }
     }
     for (const sq of lens.savedQueries) {
-      if (!AGENT_KEY_REGEX.test(sq.key)) {
-        errors.push(badKey("saved query", sq.key, AGENT_KEY_PATTERN));
+      if (!LENS_RESOURCE_KEY_PATTERN.test(sq.key)) {
+        errors.push(badKey("saved query", sq.key, resourceKeyPattern));
       }
       if (sq.key.length > MAX_KEY_LENGTH) {
         errors.push(longKey("saved query", sq.key));
@@ -2266,8 +2267,6 @@ export async function updateSearchSettings(
 
 // --- AI Agent Config ---
 
-const AGENT_KEY_REGEX = new RegExp(AGENT_KEY_PATTERN);
-
 /** Render a list the way error messages spell one: `['a', 'b']`. */
 function pyList(items: string[]): string {
   return `[${items.map((item) => `'${item}'`).join(", ")}]`;
@@ -2309,9 +2308,9 @@ export async function upsertAiAgent(
   body: AiAgentConfigUpsertInput,
   store: ModelingStore,
 ): Promise<[AiAgentConfigResponseBody, boolean]> {
-  if (!AGENT_KEY_REGEX.test(agentKey)) {
+  if (!LENS_RESOURCE_KEY_PATTERN.test(agentKey)) {
     throw new ValidationError(
-      `Invalid agent key '${agentKey}'. Must match pattern: ${AGENT_KEY_PATTERN}`,
+      `Invalid agent key '${agentKey}'. Must match pattern: ${LENS_RESOURCE_KEY_PATTERN.source}`,
     );
   }
   if (agentKey.length > MAX_KEY_LENGTH) {
@@ -2526,9 +2525,9 @@ export async function upsertSavedQuery(
   store: ModelingStore,
   runtimeStore: RuntimeStore,
 ): Promise<[SavedQueryResponseBody, boolean]> {
-  if (!AGENT_KEY_REGEX.test(queryKey)) {
+  if (!LENS_RESOURCE_KEY_PATTERN.test(queryKey)) {
     throw new ValidationError(
-      `Invalid query key '${queryKey}'. Must match pattern: ${AGENT_KEY_PATTERN}`,
+      `Invalid query key '${queryKey}'. Must match pattern: ${LENS_RESOURCE_KEY_PATTERN.source}`,
     );
   }
   if (queryKey.length > MAX_KEY_LENGTH) {

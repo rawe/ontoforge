@@ -175,6 +175,29 @@ describe("agent configurations (modeling REST)", () => {
   });
 });
 
+describe("key rule by level", () => {
+  it("an agent and a saved query take 'support-bot'; a type key 'order-date' is refused", async () => {
+    const lens = "/api/ontologies/test_ont/model/lenses/test_lens";
+    const agent = await inject("PUT", `${lens}/ai-agents/support-bot`, { name: "Support" });
+    expect(agent.statusCode).toBe(201);
+    const query = await inject("PUT", `${lens}/saved-queries/support-bot`, {
+      name: "Support",
+      description: "Lists people",
+      steps: [{ name: "main", type: "oql", oql: "MATCH (p:person) RETURN p.name AS name" }],
+      parameters: [],
+    });
+    expect(query.statusCode).toBe(201);
+    const type = await inject("POST", "/api/ontologies/test_ont/model/entity-types", {
+      key: "order-date",
+      displayName: "Order date",
+    });
+    expect(type.statusCode).toBe(422);
+
+    expect((await inject("DELETE", `${lens}/ai-agents/support-bot`)).statusCode).toBe(204);
+    expect((await inject("DELETE", `${lens}/saved-queries/support-bot`)).statusCode).toBe(204);
+  });
+});
+
 describe("saved queries (modeling REST, no provider)", () => {
   it("defines, replaces, lists and deletes an oql-only pipeline", async () => {
     const created = await inject(

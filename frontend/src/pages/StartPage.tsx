@@ -10,7 +10,7 @@ import { qk } from '@/api/queryKeys'
 import type { Ontology } from '@/api/types'
 import { EmptyState } from '@/components/EmptyState'
 import { Logo } from '@/components/Logo'
-import { deriveKey, isValidKey, toastError } from '@/components/studio/lib'
+import { deriveKey, isValidSchemaKey, toastError } from '@/components/studio/lib'
 import { KeyField } from '@/components/studio/shared'
 import {
   AlertDialog,
@@ -91,7 +91,7 @@ function CreateOntologyDialog({
 
   // Pattern-checked client-side like every key form; the server enforces
   // the ontology key length cap and answers 422, surfaced via toast.
-  const valid = isValidKey(key)
+  const valid = isValidSchemaKey(key)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

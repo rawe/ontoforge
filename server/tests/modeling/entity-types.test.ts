@@ -268,7 +268,7 @@ describe("deletion protections", () => {
 });
 
 describe("key pattern", () => {
-  it.each([["Person"], ["_person"], ["1person"], ["per-son"]])(
+  it.each([["Person"], ["_person"], ["1person"], ["order-date"]])(
     "rejects the invalid key %s with 422 VALIDATION_ERROR in the envelope",
     async (key) => {
       const res = await app.inject({

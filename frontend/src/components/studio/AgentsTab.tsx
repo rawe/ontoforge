@@ -33,7 +33,7 @@ import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { deriveKey, invalidateModeling, isValidKey, toastError } from './lib'
+import { deriveKey, invalidateModeling, isValidLensResourceKey, toastError } from './lib'
 import { KeyField } from './shared'
 
 interface AgentDialogProps {
@@ -102,7 +102,7 @@ function AgentDialog({
   })
 
   const valid =
-    isValidKey(key) && name.trim() !== '' && (allTools || tools.size > 0)
+    isValidLensResourceKey(key) && name.trim() !== '' && (allTools || tools.size > 0)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -139,6 +139,7 @@ function AgentDialog({
           </div>
           <KeyField
             id="agent-key"
+            lensResource
             value={key}
             onChange={(v) => {
               setKeyTouched(true)

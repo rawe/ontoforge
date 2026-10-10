@@ -25,7 +25,7 @@ import { z, ZodError } from "zod";
 import { NotFoundError, ValidationError } from "../core/exceptions.js";
 import { getModelingStore, getOntologyRegistry, getRuntimeStore } from "../core/ports.js";
 import type { ModelingStore } from "../core/ports.js";
-import type { TypeKind } from "../core/schemas.js";
+import { LENS_RESOURCE_KEY_PATTERN, MAX_KEY_LENGTH, type TypeKind } from "../core/schemas.js";
 import { OntologyCreate } from "../registry/schemas.js";
 import * as registryService from "../registry/service.js";
 import {
@@ -1068,7 +1068,8 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     {
       description:
         "Create or update an AI agent configuration for a lens. " +
-        "Key must match pattern ^[a-z][a-z0-9_-]*$, be at most 64 characters, and cannot be '_default'. " +
+        `Key must match pattern ${LENS_RESOURCE_KEY_PATTERN.source}, be at most ${MAX_KEY_LENGTH} characters, ` +
+        "and cannot be '_default'. " +
         `Tools must be valid tool names (${VALID_AGENT_TOOLS_CSV}). ` +
         "Set tools=null to allow all tools.",
       inputSchema: {
@@ -1142,7 +1143,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     {
       description:
         "Create or update a saved query pipeline for a lens. " +
-        "Key must match pattern ^[a-z][a-z0-9_-]*$ and be at most 64 characters. " +
+        `Key must match pattern ${LENS_RESOURCE_KEY_PATTERN.source} and be at most ${MAX_KEY_LENGTH} characters. ` +
         "Steps is an ordered array of pipeline steps. Each step requires a unique 'name' and a 'type'. " +
         "Step types: " +
         "'oql' — needs 'oql' field with a read-only OQL query (OQL-style " +

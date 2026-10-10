@@ -17,7 +17,7 @@ Vocabulary: [../README.md](../README.md#glossary). The rules these follow:
 ## Ownership and persistence
 
 An agent belongs to exactly one lens of one ontology. Its key is unique in that lens and
-follows the shared key rules — `^[a-z][a-z0-9_]*$`, at most 64 characters. It carries a
+follows the lens-resource [key](../README.md) rule, at most 64 characters. It carries a
 name (1 to 200 characters), an optional description, a configuration version, the
 configuration, the warnings of a conversion ([below](#converting-version-1-configurations))
 and timestamps. This release writes and runs configuration version 2.
@@ -99,10 +99,9 @@ single-agent import, and in a `5.0` [transfer](transfer.md) payload.
   relation group — and are dropped, each with a warning naming the relation path the
   group would need.
 - Threshold and answer-field characters carry over.
-- Version 1 allowed `-` in keys. A key with `-` follows the shared key rules with each `-`
-  replaced by `_`; when that key is already taken in the lens, it gets the first free
-  suffix of `_2`, `_3`, … A key without `-` stays as it is. Each rename leaves the
-  warning `Key renamed from '<old>' to '<new>'.`
+- A key with `-` has each `-` replaced by `_`; when that key is already taken in the
+  lens, it gets the first free suffix of `_2`, `_3`, … A key without `-` stays as it is.
+  Each rename leaves the warning `Key renamed from '<old>' to '<new>'.`
 
 The converted configuration is then validated like any other: a single-agent import
 refuses it if the lens cannot run it, while storage and transfer keep it and reads report

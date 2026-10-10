@@ -1,6 +1,6 @@
 /**
  * Core schema vocabulary shared by modeling and runtime: the data-type
- * enumeration, the key pattern, the owner-kind discriminator, and the
+ * enumeration, the key patterns, the owner-kind discriminator, and the
  * property-definition shape.
  */
 
@@ -18,11 +18,21 @@ export const DATA_TYPES = [
 export type DataType = (typeof DATA_TYPES)[number];
 
 /**
- * Type keys and property keys: lower snake case, starting with a letter.
- * The leading-letter requirement is load-bearing — system properties carry
- * a leading underscore, so no user key can ever collide with one.
+ * Key rule of the schema level — ontologies, entity and relation types,
+ * properties, lenses, search indices: lower snake case, starting with a
+ * letter. No hyphen, because these keys appear as OQL identifiers (`-` reads
+ * as minus) and in storage names. The leading-letter requirement is
+ * load-bearing — system properties carry a leading underscore, so no user key
+ * can ever collide with one.
  */
-export const KEY_PATTERN = /^[a-z][a-z0-9_]*$/;
+export const SCHEMA_KEY_PATTERN = /^[a-z][a-z0-9_]*$/;
+
+/**
+ * Key rule of the lens-resource level — saved queries and assistants of every
+ * kind: the schema rule plus `-`. These keys travel only in URLs, JSON and
+ * tool arguments, never into OQL or storage names, so a hyphen is harmless.
+ */
+export const LENS_RESOURCE_KEY_PATTERN = /^[a-z][a-z0-9_-]*$/;
 
 /**
  * Maximum length for every key kind — entity type, relation type, lens,

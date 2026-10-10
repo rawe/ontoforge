@@ -1,28 +1,28 @@
-/** Lens-local retriever agents, REST, under `assistants/retrievers`. Every rule lives in `retrieverAgents.ts`. */
+/** Lens-local retrievers, REST, under `assistants/retrievers`. Every rule lives in `retrievers.ts`. */
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 
 import { getModelingStore, getRuntimeStore } from "../core/ports.js";
-import * as agents from "./retrieverAgents.js";
+import * as retrievers from "./retrievers.js";
 
 const Lens = z.object({ ontologyKey: z.string(), lensKey: z.string() });
-const Agent = Lens.extend({ assistantKey: z.string() });
+const Retriever = Lens.extend({ assistantKey: z.string() });
 
-export const retrieverAgentModelingRouter: FastifyPluginAsyncZod = async (app) => {
+export const retrieverModelingRouter: FastifyPluginAsyncZod = async (app) => {
   const stores = async (ontologyKey: string) =>
     [await getModelingStore(ontologyKey), await getRuntimeStore(ontologyKey)] as const;
 
   app.get(
     "/lenses/:lensKey/assistants/retrievers",
-    { schema: { tags: ["modeling"], params: Lens, response: { 200: z.array(agents.RetrieverAgentResponse) } } },
+    { schema: { tags: ["modeling"], params: Lens, response: { 200: z.array(retrievers.RetrieverResponse) } } },
     async (request) =>
-      agents.listRetrieverAgents(request.params.lensKey, ...(await stores(request.params.ontologyKey))),
+      retrievers.listRetrievers(request.params.lensKey, ...(await stores(request.params.ontologyKey))),
   );
   app.get(
     "/lenses/:lensKey/assistants/retrievers/:assistantKey",
-    { schema: { tags: ["modeling"], params: Agent, response: { 200: agents.RetrieverAgentResponse } } },
+    { schema: { tags: ["modeling"], params: Retriever, response: { 200: retrievers.RetrieverResponse } } },
     async (request) =>
-      agents.getRetrieverAgent(
+      retrievers.getRetriever(
         request.params.lensKey,
         request.params.assistantKey,
         ...(await stores(request.params.ontologyKey)),
@@ -33,13 +33,13 @@ export const retrieverAgentModelingRouter: FastifyPluginAsyncZod = async (app) =
     {
       schema: {
         tags: ["modeling"],
-        params: Agent,
-        body: agents.RetrieverAgentWriteBody,
-        response: { 200: agents.RetrieverAgentResponse, 201: agents.RetrieverAgentResponse },
+        params: Retriever,
+        body: retrievers.RetrieverWriteBody,
+        response: { 200: retrievers.RetrieverResponse, 201: retrievers.RetrieverResponse },
       },
     },
     async (request, reply) => {
-      const [result, created] = await agents.saveRetrieverAgent(
+      const [result, created] = await retrievers.saveRetriever(
         request.params.lensKey,
         request.params.assistantKey,
         request.body,
@@ -50,9 +50,9 @@ export const retrieverAgentModelingRouter: FastifyPluginAsyncZod = async (app) =
   );
   app.delete(
     "/lenses/:lensKey/assistants/retrievers/:assistantKey",
-    { schema: { tags: ["modeling"], params: Agent } },
+    { schema: { tags: ["modeling"], params: Retriever } },
     async (request, reply) => {
-      await agents.deleteRetrieverAgent(
+      await retrievers.deleteRetriever(
         request.params.lensKey,
         request.params.assistantKey,
         await getModelingStore(request.params.ontologyKey),
@@ -66,13 +66,13 @@ export const retrieverAgentModelingRouter: FastifyPluginAsyncZod = async (app) =
       {
         schema: {
           tags: ["modeling"],
-          params: Agent,
-          body: agents.RetrieverAgentTransferBody,
-          response: { [operation === "copy" ? 201 : 200]: agents.RetrieverAgentResponse },
+          params: Retriever,
+          body: retrievers.RetrieverTransferBody,
+          response: { [operation === "copy" ? 201 : 200]: retrievers.RetrieverResponse },
         },
       },
       async (request, reply) => {
-        const result = await agents.transferRetrieverAgent(
+        const result = await retrievers.transferRetriever(
           request.params.lensKey,
           request.params.assistantKey,
           request.body,
@@ -85,9 +85,9 @@ export const retrieverAgentModelingRouter: FastifyPluginAsyncZod = async (app) =
   }
   app.get(
     "/lenses/:lensKey/assistants/retrievers/:assistantKey/export",
-    { schema: { tags: ["modeling"], params: Agent, response: { 200: agents.PortableRetrieverAgent } } },
+    { schema: { tags: ["modeling"], params: Retriever, response: { 200: retrievers.PortableRetriever } } },
     async (request) =>
-      agents.exportRetrieverAgent(
+      retrievers.exportRetriever(
         request.params.lensKey,
         request.params.assistantKey,
         await getModelingStore(request.params.ontologyKey),
@@ -99,12 +99,12 @@ export const retrieverAgentModelingRouter: FastifyPluginAsyncZod = async (app) =
       schema: {
         tags: ["modeling"],
         params: Lens,
-        body: agents.RetrieverAgentImportBody,
-        response: { 201: agents.RetrieverAgentResponse },
+        body: retrievers.RetrieverImportBody,
+        response: { 201: retrievers.RetrieverResponse },
       },
     },
     async (request, reply) => {
-      const result = await agents.importRetrieverAgent(
+      const result = await retrievers.importRetriever(
         request.params.lensKey,
         request.body,
         ...(await stores(request.params.ontologyKey)),

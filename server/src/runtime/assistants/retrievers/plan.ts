@@ -1,10 +1,10 @@
 /**
- * The planner's side of a retriever agent: what it is told (the agent's
+ * The planner's side of a retriever: what it is told (the retriever's
  * indices from the lens's catalog, its filters, the search modes), the
  * plan it must return, and the checks the plan must pass before anything
  * is searched.
  *
- * A plan is a list of sub-queries, each searching some of the agent's
+ * A plan is a list of sub-queries, each searching some of the retriever's
  * indices with one query (plus up to three variants) in one mode,
  * restricted to some relation groups, exact filters and previous results.
  * A question about facts of two relations becomes two sub-queries, whose
@@ -24,11 +24,11 @@
 
 import { z } from "zod";
 
-import { ValidationError } from "../../core/exceptions.js";
-import type { SearchIndexRecord } from "../../core/ports.js";
-import type { RetrieverAgentConfig } from "../../core/retrieverAgent.js";
-import type { SearchMode } from "../search/indexSearch.js";
-import { filterCondition, groupRelationTypes, pathTarget, type AgentLens } from "./config.js";
+import { ValidationError } from "../../../core/exceptions.js";
+import type { SearchIndexRecord } from "../../../core/ports.js";
+import type { RetrieverConfig } from "../../../core/retriever.js";
+import type { SearchMode } from "../../search/indexSearch.js";
+import { filterCondition, groupRelationTypes, pathTarget, type RetrieverLens } from "./config.js";
 
 /** Most sub-queries of one plan. */
 export const MAX_SUB_QUERIES = 4;
@@ -96,7 +96,7 @@ const stringArray = { type: "array", items: { type: "string" } };
 export const PLANNER_RESPONSE_FORMAT = {
   type: "json_schema" as const,
   json_schema: {
-    name: "retriever_agent_plan",
+    name: "retriever_plan",
     strict: true,
     schema: {
       type: "object",
@@ -185,12 +185,12 @@ export interface Previous {
   referencedResults?: { entityType: string; ids: string[] }[];
 }
 
-/** The planner's input: question, history, the agent's indices and
+/** The planner's input: question, history, the retriever's indices and
  * filters as the lens shows them — with the stored values of a filter's
  * field when it holds few — and the modes the server can run. */
 export function plannerInput(
-  config: RetrieverAgentConfig,
-  lens: AgentLens,
+  config: RetrieverConfig,
+  lens: RetrieverLens,
   records: readonly SearchIndexRecord[],
   modes: readonly SearchMode[],
   message: string,
@@ -288,8 +288,8 @@ function evidenced(quote: string, sources: string[]): boolean {
 function previousProblem(
   reference: { filterId: string | null; quote: string },
   roots: string[],
-  config: RetrieverAgentConfig,
-  lens: AgentLens,
+  config: RetrieverConfig,
+  lens: RetrieverLens,
   sources: string[],
   previous: Previous | undefined,
 ): string | null {
@@ -315,9 +315,9 @@ function previousProblem(
 }
 
 /**
- * Check a parsed planner output against the agent and the conversation.
+ * Check a parsed planner output against the retriever and the conversation.
  * What cannot be honoured is left out and named in `notes` (limitations):
- * an index or relation the agent does not allow, an unavailable mode
+ * an index or relation the retriever does not allow, an unavailable mode
  * (the first available one runs), a filter without a verbatim user quote,
  * an invalid previous reference (the sub-query runs as a fresh search),
  * and a query-less sub-query left without restriction. A listed value the
@@ -328,8 +328,8 @@ function previousProblem(
  */
 export function validatePlan(
   raw: unknown,
-  config: RetrieverAgentConfig,
-  lens: AgentLens,
+  config: RetrieverConfig,
+  lens: RetrieverLens,
   modes: readonly SearchMode[],
   message: string,
   history: History[],
@@ -352,15 +352,15 @@ export function validatePlan(
       if (reference === undefined || entry === undefined) {
         notes.push(
           entry === undefined
-            ? "An index this agent does not search was left out of a search."
-            : `The index ${entry.name} is not one this agent searches; it was left out of a search.`,
+            ? "An index this retriever does not search was left out of a search."
+            : `The index ${entry.name} is not one this retriever searches; it was left out of a search.`,
         );
         return [];
       }
       return [{ reference, entry }];
     });
     if (entries.length === 0) {
-      notes.push("A search was dropped: it named no index of this agent.");
+      notes.push("A search was dropped: it named no index of this retriever.");
       return;
     }
     sub.indices = entries.map(({ entry }) => entry.key);
@@ -390,7 +390,7 @@ export function validatePlan(
     sub.filters = sub.filters.filter((filter) => {
       const configured = config.filters.find((candidate) => candidate.id === filter.id);
       if (configured === undefined || !roots.includes(configured.entityType)) {
-        notes.push("A filter this agent does not allow for the searched type was not applied.");
+        notes.push("A filter this retriever does not allow for the searched type was not applied.");
         return false;
       }
       const stated = norm(filter.quote).includes(norm(filter.value));

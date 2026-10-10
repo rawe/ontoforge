@@ -54,7 +54,7 @@
  */
 
 import type { KeywordLanguageSet } from "./keywordLanguage.js";
-import type { RetrieverAgentRecord, RetrieverAgentWrite } from "./retrieverAgent.js";
+import type { RetrieverRecord, RetrieverWrite } from "./retriever.js";
 
 import { settings } from "../config.js";
 import { NotFoundError } from "./exceptions.js";
@@ -379,12 +379,12 @@ export interface ModelingStore {
   getFullSchema(): Promise<Row>;
 
   // ------------------------------------------------------------------
-  // AI agent configs
+  // Agent configs
   // ------------------------------------------------------------------
 
-  listAiAgents(lensId: string): Promise<Row[]>;
+  listAgents(lensId: string): Promise<Row[]>;
 
-  upsertAiAgent(
+  upsertAgent(
     lensId: string,
     agentConfigId: string,
     key: string,
@@ -394,9 +394,9 @@ export interface ModelingStore {
     tools: string[] | null,
   ): Promise<[Row, boolean]>;
 
-  listAiAgentsForExport(lensId: string): Promise<Row[]>;
+  listAgentsForExport(lensId: string): Promise<Row[]>;
 
-  deleteAiAgent(lensId: string, agentKey: string): Promise<boolean>;
+  deleteAgent(lensId: string, agentKey: string): Promise<boolean>;
 
   // ------------------------------------------------------------------
   // Saved query configs
@@ -548,7 +548,7 @@ export interface RuntimeStore {
    * the keys of the indices the lens includes. */
   getFullSchemaWithLensInclusions(lensKey: string): Promise<Row | null>;
 
-  getAiAgentConfigs(lensKey: string): Promise<Row[]>;
+  getAgentConfigs(lensKey: string): Promise<Row[]>;
 
   getSavedQueries(lensKey: string): Promise<Row[]>;
 
@@ -1032,42 +1032,42 @@ export interface SearchIndexStore {
   excludeIndexFromLens(lensId: string, key: string): Promise<boolean>;
 
   // ------------------------------------------------------------------
-  // Retriever agents (lens-local; they search this store's indices)
+  // Retrievers (lens-local; they search this store's indices)
   //
   // Keyed by lens and agent key; deleted with their lens. A transfer
   // never overwrites a target.
   // ------------------------------------------------------------------
 
   /** The lens's agents, by name then key. */
-  listRetrieverAgents(lensId: string): Promise<RetrieverAgentRecord[]>;
+  listRetrievers(lensId: string): Promise<RetrieverRecord[]>;
 
-  getRetrieverAgent(lensId: string, key: string): Promise<RetrieverAgentRecord | null>;
+  getRetriever(lensId: string, key: string): Promise<RetrieverRecord | null>;
 
   /** Create, or replace name, description, configuration and warnings of
    * the agent with this key (its id and creation time stay). `createOnly`:
    * an existing key is a `ConflictError`. The lens missing is a
    * `NotFoundError`. True in the pair when the agent was created. */
-  saveRetrieverAgent(
+  saveRetriever(
     lensId: string,
-    agent: RetrieverAgentWrite,
+    agent: RetrieverWrite,
     createOnly: boolean,
-  ): Promise<[RetrieverAgentRecord, boolean]>;
+  ): Promise<[RetrieverRecord, boolean]>;
 
   /** False when the lens has no agent with this key. */
-  deleteRetrieverAgent(lensId: string, key: string): Promise<boolean>;
+  deleteRetriever(lensId: string, key: string): Promise<boolean>;
 
   /** Copy (`copyId`: the copy's id) or move (`copyId` null: identity kept)
    * an agent to another lens and key, atomically. The source must still
    * hold `expectedConfig` (JSON of `[configVersion, config]`) — else a
    * `ConflictError`; a taken target key is a `ConflictError`. */
-  transferRetrieverAgent(
+  transferRetriever(
     sourceLensId: string,
     sourceKey: string,
     targetLensId: string,
     targetKey: string,
     copyId: string | null,
     expectedConfig: string,
-  ): Promise<RetrieverAgentRecord>;
+  ): Promise<RetrieverRecord>;
 
   // ------------------------------------------------------------------
   // Generations

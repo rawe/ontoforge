@@ -1,5 +1,5 @@
 /**
- * The default retriever agent: every lens's implicit agent, keyed
+ * The default retriever: every lens's implicit one, keyed
  * `_default` (no configurable key may begin with an underscore, so it can
  * never be shadowed). It is never stored; its configuration is derived
  * per question from the lens, deterministically — the same lens and
@@ -18,17 +18,17 @@ import {
   DEFAULT_ANSWER_FIELD_CHARACTERS,
   DEFAULT_THRESHOLD,
   MAX_ANSWER_FIELDS,
-  type RetrieverAgentConfig,
-  type RetrieverAgentFilter,
-} from "../../core/retrieverAgent.js";
-import { resultTypes, type AgentLens } from "./config.js";
+  type RetrieverConfig,
+  type RetrieverFilter,
+} from "../../../core/retriever.js";
+import { resultTypes, type RetrieverLens } from "./config.js";
 
-export const DEFAULT_RETRIEVER_AGENT_KEY = "_default";
+export const DEFAULT_RETRIEVER_KEY = "_default";
 /** The name the runtime list gives it, the same as the default agent's. */
-export const DEFAULT_RETRIEVER_AGENT_NAME = "Default";
+export const DEFAULT_RETRIEVER_NAME = "Default";
 
-/** The default agent's configuration in a lens. */
-export function defaultAgentConfig(lens: AgentLens): RetrieverAgentConfig {
+/** The default retriever's configuration in a lens. */
+export function defaultRetrieverConfig(lens: RetrieverLens): RetrieverConfig {
   const { scoped, catalog } = lens;
   // A passage index whose document the lens hides searches nothing visible.
   const indices = catalog
@@ -37,7 +37,7 @@ export function defaultAgentConfig(lens: AgentLens): RetrieverAgentConfig {
   const types = resultTypes({ indices }, catalog);
   const relationKeys = Object.keys(scoped.relationTypes).sort();
 
-  const filters: RetrieverAgentFilter[] = [];
+  const filters: RetrieverFilter[] = [];
   for (const type of types) {
     const name = scoped.entityTypes[type]?.nameProperty ?? null;
     if (name === null) continue;

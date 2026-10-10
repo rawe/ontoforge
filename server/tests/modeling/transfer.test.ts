@@ -143,8 +143,8 @@ function withSearchIndices() {
     listLensIndexInclusions: vi.fn(async (_lensId: string): Promise<string[]> => []),
     includeIndexInLens: vi.fn(async () => true),
     excludeIndexFromLens: vi.fn(async () => true),
-    listRetrieverAgents: vi.fn(async (_lensId: string): Promise<unknown[]> => []),
-    saveRetrieverAgent: vi.fn(async () => [{}, true]),
+    listRetrievers: vi.fn(async (_lensId: string): Promise<unknown[]> => []),
+    saveRetriever: vi.fn(async () => [{}, true]),
   };
   (holder.store as unknown as { searchIndices: () => unknown }).searchIndices = () => indices;
   return indices;
@@ -234,7 +234,7 @@ describe("export", () => {
     expect(res.statusCode).toBe(200);
     const lens = res.json().lenses[0];
     expect("includes" in lens).toBe(false);
-    // An adapter without search indices has no retriever agents.
+    // An adapter without search indices has no retrievers.
     expect(lens.assistants).toEqual({ agents: [] });
     expect(lens.savedQueries).toEqual([]);
   });
@@ -254,7 +254,7 @@ describe("export", () => {
         },
       ],
     });
-    holder.store.listAiAgentsForExport.mockResolvedValue([
+    holder.store.listAgentsForExport.mockResolvedValue([
       {
         key: "assistant",
         name: "Assistant",
@@ -307,7 +307,7 @@ describe("export", () => {
         parameters: [{ name: "q", description: "Query", dataType: "string" }],
       },
     ]);
-    expect(holder.store.listAiAgentsForExport).toHaveBeenCalledWith("lens-1");
+    expect(holder.store.listAgentsForExport).toHaveBeenCalledWith("lens-1");
     expect(holder.store.listSavedQueriesForExport).toHaveBeenCalledWith("lens-1");
   });
 });
@@ -663,7 +663,7 @@ describe("lens index inclusions", () => {
   });
 });
 
-describe("retriever agents", () => {
+describe("retrievers", () => {
   const person = entityType("person", "Person", [{ key: "bio", displayName: "Bio", dataType: "document", required: false }]);
   const CONFIG = {
     indices: [{ index: "person~default" }],
@@ -696,8 +696,8 @@ describe("retriever agents", () => {
   it("export carries each lens's agents in their portable form; an adapter without search indices none", async () => {
     const indices = withSearchIndices();
     const now = new Date("2026-10-06T00:00:00Z");
-    indices.listRetrieverAgents.mockResolvedValue([
-      { retrieverAgentId: "id", ...agent(2, CONFIG), warnings: ["note"], createdAt: now, updatedAt: now },
+    indices.listRetrievers.mockResolvedValue([
+      { retrieverId: "id", ...agent(2, CONFIG), warnings: ["note"], createdAt: now, updatedAt: now },
     ]);
     holder.store.getFullSchema.mockResolvedValue({
       entityTypes: [],
@@ -718,24 +718,24 @@ describe("retriever agents", () => {
     const res = await postImport(payload(retrievers(agent(2, CONFIG), agent(2, unknownIndex, "ghostly"))));
     expect(res.statusCode, res.body).toBe(201);
     const lensId = holder.store.createLens.mock.calls[0]![0] as string;
-    expect(indices.saveRetrieverAgent.mock.calls.map((call) => [call[0], (call[1] as { key: string }).key, call[2]])).toEqual([
+    expect(indices.saveRetriever.mock.calls.map((call) => [call[0], (call[1] as { key: string }).key, call[2]])).toEqual([
       [lensId, "finder", true],
       [lensId, "ghostly", true],
     ]);
-    const saved = indices.saveRetrieverAgent.mock.calls[0]![1] as { configVersion: number; warnings: string[] };
+    const saved = indices.saveRetriever.mock.calls[0]![1] as { configVersion: number; warnings: string[] };
     expect(saved.configVersion).toBe(2);
     expect(saved.warnings).toEqual([]);
   });
 
-  it("6.0: a lens's agents and retriever agents import as its assistants", async () => {
+  it("6.0: a lens's agents and retrievers import as its assistants", async () => {
     const indices = withSearchIndices();
     holder.store.createLens.mockResolvedValue(LENS_DATA);
     const res = await postImport(
       payload({ aiAgents: [{ key: "helper", name: "Helper" }], retrieverAgents: [agent(2, CONFIG)] }, "6.0"),
     );
     expect(res.statusCode, res.body).toBe(201);
-    expect(holder.store.upsertAiAgent.mock.calls.map((call) => call[2])).toEqual(["helper"]);
-    expect(indices.saveRetrieverAgent.mock.calls.map((call) => (call[1] as { key: string }).key)).toEqual(["finder"]);
+    expect(holder.store.upsertAgent.mock.calls.map((call) => call[2])).toEqual(["helper"]);
+    expect(indices.saveRetriever.mock.calls.map((call) => (call[1] as { key: string }).key)).toEqual(["finder"]);
   });
 
   it("5.0: converts each retriever, keeping the conversion's warnings", async () => {
@@ -743,7 +743,7 @@ describe("retriever agents", () => {
     holder.store.createLens.mockResolvedValue(LENS_DATA);
     const res = await postImport(payload({ retrievers: [agent(1, LEGACY)] }, "5.0"));
     expect(res.statusCode, res.body).toBe(201);
-    const saved = indices.saveRetrieverAgent.mock.calls[0]![1] as Record<string, unknown>;
+    const saved = indices.saveRetriever.mock.calls[0]![1] as Record<string, unknown>;
     expect(saved.configVersion).toBe(2);
     expect(saved.config).toMatchObject({ indices: [{ index: "person~default" }, { index: "person~bio" }] });
     expect(saved.warnings).toEqual([
@@ -758,7 +758,7 @@ describe("retriever agents", () => {
       payload({ retrievers: [agent(1, LEGACY, "fair-search"), agent(1, LEGACY, "fair_search")] }, "5.0"),
     );
     expect(res.statusCode, res.body).toBe(201);
-    const saved = indices.saveRetrieverAgent.mock.calls.map((call) => call[1] as { key: string; warnings: string[] });
+    const saved = indices.saveRetriever.mock.calls.map((call) => call[1] as { key: string; warnings: string[] });
     expect(saved.map((agent) => agent.key)).toEqual(["fair_search_2", "fair_search"]);
     expect(saved[0]!.warnings.at(-1)).toBe("Key renamed from 'fair-search' to 'fair_search_2'.");
     expect(saved[1]!.warnings).toHaveLength(1);
@@ -771,7 +771,7 @@ describe("retriever agents", () => {
     expect((await postImport(payload(older))).statusCode).toBe(201);
     expect((await postImport(payload({ retrievers: [agent(1, LEGACY)], ...retrievers(agent(2, CONFIG)) }, "6.0"))).statusCode).toBe(201);
     expect((await postImport(payload({ retrieverAgents: [agent(2, CONFIG)], ...retrievers(agent(2, CONFIG)) }, "5.0"))).statusCode).toBe(201);
-    expect(indices.saveRetrieverAgent).not.toHaveBeenCalled();
+    expect(indices.saveRetriever).not.toHaveBeenCalled();
   });
 
   it("rejects a wrong version, a bad shape and a bad key; writes nothing", async () => {
@@ -781,12 +781,12 @@ describe("retriever agents", () => {
     );
     expect(res.statusCode).toBe(422);
     expect(res.json().error.details.errors).toEqual([
-      "Import error: retriever agent 'finder' has no valid configuration of version 2",
-      "Import error: retriever agent 'empty' has no valid configuration of version 2",
-      "Import error: invalid retriever agent key 'Bad-Key'. Must match pattern: ^[a-z][a-z0-9_-]*$",
+      "Import error: retriever 'finder' has no valid configuration of version 2",
+      "Import error: retriever 'empty' has no valid configuration of version 2",
+      "Import error: invalid retriever key 'Bad-Key'. Must match pattern: ^[a-z][a-z0-9_-]*$",
     ]);
     expect(holder.store.createEntityType).not.toHaveBeenCalled();
-    expect(indices.saveRetrieverAgent).not.toHaveBeenCalled();
+    expect(indices.saveRetriever).not.toHaveBeenCalled();
   });
 
   it("5.0: a retriever without a readable version-1 configuration fails at its 5.0 path; writes nothing", async () => {
@@ -797,7 +797,7 @@ describe("retriever agents", () => {
       { path: "/lenses/0/retrievers/1", message: "No valid configuration of version 1" },
     ]);
     expect(holder.store.createEntityType).not.toHaveBeenCalled();
-    expect(indices.saveRetrieverAgent).not.toHaveBeenCalled();
+    expect(indices.saveRetriever).not.toHaveBeenCalled();
   });
 
   it("an adapter without search indices checks the agents and keeps none", async () => {
@@ -845,7 +845,7 @@ describe("version-specific fields", () => {
     expect(indices.setSearchSettings.mock.calls[0]![0]).toMatchObject({ keywordLanguages: ["german"] });
     expect(indices.createIndex).not.toHaveBeenCalled();
     expect(indices.includeIndexInLens).not.toHaveBeenCalled();
-    expect(indices.saveRetrieverAgent).not.toHaveBeenCalled();
+    expect(indices.saveRetriever).not.toHaveBeenCalled();
   });
 
   it("6.0 ignores the 5.0 and 7.0 fields unchecked", async () => {
@@ -1145,7 +1145,7 @@ describe("import validations", () => {
     expect(message).toContain("not_a_tool");
     expect(message).toContain("Available tools:");
     expect(holder.store.createLens).not.toHaveBeenCalled();
-    expect(holder.store.upsertAiAgent).not.toHaveBeenCalled();
+    expect(holder.store.upsertAgent).not.toHaveBeenCalled();
   });
 
   it("rejects a document saved-query parameter", async () => {

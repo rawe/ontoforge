@@ -1,5 +1,5 @@
 /**
- * Retrieval of a retriever agent's plan: each sub-query searches its
+ * Retrieval of a retriever's plan: each sub-query searches its
  * indices through the search engine (`runtime/search/indexSearch.ts`) —
  * in process, never over HTTP — and the sub-queries' rankings are fused
  * per entity by reciprocal rank (k = 60). An entity found by several
@@ -11,22 +11,22 @@
  * of the filter's path whose field equals the value (normalized compare,
  * as `sameValue`), walked back to the result type. A sub-query without a
  * query lists the restricted entities instead of searching. Semantic
- * matches below the agent's threshold never count (A5: the cosine
+ * matches below the retriever's threshold never count (A5: the cosine
  * threshold `t` is the search's `(1 + t) / 2` floor).
  */
 
-import type { Row, RuntimeStore, SearchIndexRecord, SearchIndexStore } from "../../core/ports.js";
+import type { Row, RuntimeStore, SearchIndexRecord, SearchIndexStore } from "../../../core/ports.js";
 import {
   similarityFloor,
-  type RetrieverAgentConfig,
-  type RetrieverAgentFilter,
+  type RetrieverConfig,
+  type RetrieverFilter,
   type FilterHop,
-} from "../../core/retrieverAgent.js";
-import { readsHiddenProperties, RRF_K } from "../../core/searchQuery.js";
-import { filterEntityProperties } from "../readHelpers.js";
-import type { LoadedSchema } from "../schemaCache.js";
-import { describeMatches, rankThroughIndices, type EngineHit, type Matched } from "../search/indexSearch.js";
-import { filterCondition, relationName, type AgentLens } from "./config.js";
+} from "../../../core/retriever.js";
+import { readsHiddenProperties, RRF_K } from "../../../core/searchQuery.js";
+import { filterEntityProperties } from "../../readHelpers.js";
+import type { LoadedSchema } from "../../schemaCache.js";
+import { describeMatches, rankThroughIndices, type EngineHit, type Matched } from "../../search/indexSearch.js";
+import { filterCondition, relationName, type RetrieverLens } from "./config.js";
 import { MAX_LISTED_VALUES, sameValue, type FilterValues, type Plan, type Previous, type SubQuery } from "./plan.js";
 
 /** Entities one search of a sub-query ranks. */
@@ -46,8 +46,8 @@ const PAGE = 500;
 
 /** Everything retrieval reads through. */
 export interface RetrievalScope {
-  config: RetrieverAgentConfig;
-  lens: AgentLens;
+  config: RetrieverConfig;
+  lens: RetrieverLens;
   loaded: LoadedSchema;
   store: RuntimeStore;
   indexStore: SearchIndexStore;
@@ -57,7 +57,7 @@ export interface RetrievalScope {
 }
 
 /** An exact filter a sub-query applied, which its results satisfy: the
- * agent's filter id, the compared value and the condition in plain words
+ * retriever's filter id, the compared value and the condition in plain words
  * (`filterCondition`): "lives in City Name: Berlin". */
 export interface Condition {
   filter: string;
@@ -81,7 +81,7 @@ export interface RetrievedItem {
   entityId: string;
   entityType: string;
   label: string | null;
-  /** The agent's answer fields of the entity's type, cut to length. */
+  /** The retriever's answer fields of the entity's type, cut to length. */
   fields: Row;
   matches: SubQueryMatch[];
 }
@@ -245,7 +245,7 @@ async function restrictionsOf(
     intersect(restrictions, filter.entityType, await walkBack(scope, filter.path, matches, limitations, what));
   }
   if (sub.previous !== null && previous !== undefined) {
-    const filter: RetrieverAgentFilter | null =
+    const filter: RetrieverFilter | null =
       sub.previous.filterId === null
         ? null
         : scope.config.filters.find((candidate) => candidate.id === sub.previous!.filterId)!;
@@ -289,8 +289,8 @@ export function fuseRankings<T extends { entityId: string }>(rankings: readonly 
 }
 
 /** The relation types whose entries of an index count for a sub-query:
- * the planner's choice within the agent's, else the agent's (null: all). */
-function relationsFor(config: RetrieverAgentConfig, index: string, sub: SubQuery): string[] | null {
+ * the planner's choice within the retriever's, else the retriever's (null: all). */
+function relationsFor(config: RetrieverConfig, index: string, sub: SubQuery): string[] | null {
   const allowed = config.indices.find((reference) => reference.index === index)?.relations ?? null;
   if (sub.relations.length === 0) return allowed;
   return allowed === null ? sub.relations : sub.relations.filter((relation) => allowed.includes(relation));
@@ -298,7 +298,7 @@ function relationsFor(config: RetrieverAgentConfig, index: string, sub: SubQuery
 
 /**
  * One sub-query's ranking. Without restrictions: the search, cut by the
- * agent's similarity threshold. With restrictions (filters, previous
+ * retriever's similarity threshold. With restrictions (filters, previous
  * results) the candidates are exact: the search only orders them — no
  * threshold — and the restricted entities it did not rank follow, so none
  * is lost to a query that does not describe it. Without a query the
@@ -501,7 +501,7 @@ export interface ResponseContext {
 }
 
 /** What a matched index entry is, in plain words. */
-function entryName(lens: AgentLens, matched: Matched): string {
+function entryName(lens: RetrieverLens, matched: Matched): string {
   if (matched.partKind === "self") return "own fields";
   if (matched.partKind === "relation") return relationName(lens, [matched.index], matched.relationType ?? "");
   const entry = lens.catalog.find((candidate) => candidate.key === matched.index);
@@ -511,7 +511,7 @@ function entryName(lens: AgentLens, matched: Matched): string {
 }
 
 /** Answer fields keyed by their display names (a clash keeps the key). */
-function namedFields(lens: AgentLens, entityType: string, fields: Row): Row {
+function namedFields(lens: RetrieverLens, entityType: string, fields: Row): Row {
   const properties = lens.scoped.entityTypes[entityType]?.properties ?? {};
   const named: Row = {};
   for (const [key, value] of Object.entries(fields)) {
@@ -526,8 +526,8 @@ function namedFields(lens: AgentLens, entityType: string, fields: Row): Row {
 export function boundContext(
   retrieval: Retrieval,
   plan: Plan,
-  lens: AgentLens,
-  config: Pick<RetrieverAgentConfig, "answerFieldCharacters">,
+  lens: RetrieverLens,
+  config: Pick<RetrieverConfig, "answerFieldCharacters">,
 ): ResponseContext {
   const context: ResponseContext = { results: [], omitted: 0, limitations: [...retrieval.limitations] };
   if (retrieval.cutFields.length > 0) {
@@ -575,7 +575,7 @@ export function boundContext(
 /** The plan's searches as the answer model gets them: each query ("" for
  * an exact list), the relation groups it was restricted to and its exact
  * conditions, in display names. */
-export function answerSearches(plan: Plan, config: RetrieverAgentConfig, lens: AgentLens) {
+export function answerSearches(plan: Plan, config: RetrieverConfig, lens: RetrieverLens) {
   return plan.subQueries.map((sub) => ({
     query: sub.query,
     relations: sub.relations.map((relation) => relationName(lens, sub.indices, relation)),

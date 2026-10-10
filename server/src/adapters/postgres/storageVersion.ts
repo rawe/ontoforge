@@ -26,7 +26,7 @@
  * ended unversioned — version 1 — so its major step starts there. Version
  * 2 was never released: development storage recorded at it differs from
  * version 1 only by the retriever table, which the same step takes over
- * (`createRetrieverAgents`).
+ * (`createRetrievers`).
  */
 
 import { randomUUID } from "node:crypto";
@@ -38,7 +38,7 @@ import {
   legacyRetrieverKey,
 } from "../../core/legacyRetrieverConfig.js";
 import type { Row } from "../../core/ports.js";
-import { RETRIEVER_AGENT_CONFIG_VERSION } from "../../core/retrieverAgent.js";
+import { RETRIEVER_CONFIG_VERSION } from "../../core/retriever.js";
 import { namePropertyDisplayName } from "../../core/schemas.js";
 import { deriveManagedIndices, type SearchIndexSchema } from "../../core/searchIndex.js";
 import type { Querier } from "./errors.js";
@@ -182,13 +182,13 @@ async function writeManagedSearchIndices(querier: Querier): Promise<void> {
 }
 
 /**
- * Give the namespace its retriever-agent table. 5.x storage has no
+ * Give the namespace its retriever table. 5.x storage has no
  * retrievers, so the table starts empty. Storage recorded at the
  * unreleased version 2 keeps them in `retriever_config`: that table is
  * renamed instead and its configurations converted. The table's presence
  * decides, not the recorded version.
  */
-async function createRetrieverAgents(querier: Querier): Promise<void> {
+async function createRetrievers(querier: Querier): Promise<void> {
   const found = await querier.query(
     `SELECT to_regclass(format('%I.retriever_config', current_schema())) IS NOT NULL AS present`,
   );
@@ -232,18 +232,18 @@ async function createRetrieverAgents(querier: Querier): Promise<void> {
         quoteIdent(name.replaceAll("retriever_config", "retriever_agent")),
     );
   }
-  await convertRetrieverAgents(querier);
+  await convertRetrievers(querier);
 }
 
 /**
  * Convert every stored version-1 retriever configuration into a
- * retriever-agent configuration of version 2
+ * retriever configuration of version 2
  * (`core/legacyRetrieverConfig.ts`), keeping the conversion's warnings
  * with it. One that is no readable version-1 shape stays as it is — reads
  * report it invalid. A key with `-` is renamed under the shared key rules
  * (`legacyRetrieverKey`), unique within its lens, with a warning.
  */
-async function convertRetrieverAgents(querier: Querier): Promise<void> {
+async function convertRetrievers(querier: Querier): Promise<void> {
   const agents = (
     await querier.query(
       `SELECT retriever_agent_id, lens_id, key, config_version, config FROM retriever_agent ORDER BY lens_id, key`,
@@ -278,7 +278,7 @@ async function convertRetrieverAgents(querier: Querier): Promise<void> {
       [
         agent["retriever_agent_id"],
         renamed.key,
-        converted === null ? agent["config_version"] : RETRIEVER_AGENT_CONFIG_VERSION,
+        converted === null ? agent["config_version"] : RETRIEVER_CONFIG_VERSION,
         JSON.stringify(converted === null ? agent["config"] : converted.config),
         JSON.stringify(warnings),
       ],
@@ -389,9 +389,9 @@ const STEPS: Step[] = [
       // 6.0: the managed indices of the existing schema, searchable in the
       // scoped lenses that show their types.
       writeManagedSearchIndices,
-      // 6.0: retriever agents, which search the indices; retrievers of
-      // the unreleased version 2 become agents of configuration version 2.
-      createRetrieverAgents,
+      // 6.0: retrievers, which search the indices; the retrievers of
+      // the unreleased version 2 get configuration version 2.
+      createRetrievers,
       // 6.0: the per-entity search storage they replace goes — the
       // entities' search columns with their keyword and per-type vector
       // indexes, and the document chunks with theirs. The worker's start

@@ -1,8 +1,8 @@
 /**
- * A retriever agent's configuration checked against its lens. Every save
+ * A retriever's configuration checked against its lens. Every save
  * checks it (an invalid one is refused), every read reports it, and every
  * question checks it again before running: what the lens offers changes
- * underneath a stored agent — a schema change, a scope change, an index
+ * underneath a stored retriever — a schema change, a scope change, an index
  * deleted or switched off.
  *
  * The rules: the configuration version is the current one; every index
@@ -17,24 +17,24 @@
 
 import {
   configIssues,
-  RETRIEVER_AGENT_CONFIG_VERSION,
-  RetrieverAgentConfig,
+  RETRIEVER_CONFIG_VERSION,
+  RetrieverConfig,
   type FilterHop,
-  type RetrieverAgentFilter,
-} from "../../core/retrieverAgent.js";
-import type { SchemaCacheValue } from "../schemaCache.js";
-import type { SearchIndexCatalogEntry } from "../search/indexSearch.js";
+  type RetrieverFilter,
+} from "../../../core/retriever.js";
+import type { SchemaCacheValue } from "../../schemaCache.js";
+import type { SearchIndexCatalogEntry } from "../../search/indexSearch.js";
 
 /** What a configuration is checked against: the lens schema and the
  * indices the lens may search. */
-export interface AgentLens {
+export interface RetrieverLens {
   scoped: SchemaCacheValue;
   catalog: readonly SearchIndexCatalogEntry[];
 }
 
-export interface AgentCheck {
+export interface RetrieverCheck {
   /** The parsed configuration when it is valid, else null. */
-  config: RetrieverAgentConfig | null;
+  config: RetrieverConfig | null;
   errors: string[];
 }
 
@@ -65,7 +65,7 @@ export function pathTarget(
  * answer model and the limitations get this, never filter ids or paths. */
 export function filterCondition(
   schema: Pick<SchemaCacheValue, "entityTypes" | "relationTypes">,
-  filter: Pick<RetrieverAgentFilter, "entityType" | "path" | "field">,
+  filter: Pick<RetrieverFilter, "entityType" | "path" | "field">,
   value: string,
 ): string {
   const relations = filter.path.map((hop) => schema.relationTypes[hop.relationTypeKey]?.displayName ?? "related");
@@ -78,7 +78,7 @@ export function filterCondition(
 
 /** A relation type by the name the lens shows for it in one of `indices`:
  * its group's label there, else its display name. */
-export function relationName(lens: AgentLens, indices: readonly string[], relationType: string): string {
+export function relationName(lens: RetrieverLens, indices: readonly string[], relationType: string): string {
   for (const key of indices) {
     const group = lens.catalog
       .find((entry) => entry.key === key)
@@ -96,7 +96,7 @@ export function groupRelationTypes(entry: SearchIndexCatalogEntry): string[] {
 /** The result types of a configuration: the root types of its indices the
  * lens offers, in configuration order. */
 export function resultTypes(
-  config: Pick<RetrieverAgentConfig, "indices">,
+  config: Pick<RetrieverConfig, "indices">,
   catalog: readonly SearchIndexCatalogEntry[],
 ): string[] {
   const types: string[] = [];
@@ -108,17 +108,17 @@ export function resultTypes(
 }
 
 /** Check a stored or submitted configuration against the lens. */
-export function checkAgentConfig(version: unknown, raw: unknown, lens: AgentLens): AgentCheck {
-  if (version !== RETRIEVER_AGENT_CONFIG_VERSION) {
+export function checkRetrieverConfig(version: unknown, raw: unknown, lens: RetrieverLens): RetrieverCheck {
+  if (version !== RETRIEVER_CONFIG_VERSION) {
     return {
       config: null,
       errors: [
         `Configuration version ${String(version)} is not supported; ` +
-          `retriever agents run version ${RETRIEVER_AGENT_CONFIG_VERSION}`,
+          `retrievers run version ${RETRIEVER_CONFIG_VERSION}`,
       ],
     };
   }
-  const parsed = RetrieverAgentConfig.safeParse(raw);
+  const parsed = RetrieverConfig.safeParse(raw);
   if (!parsed.success) return { config: null, errors: configIssues(parsed.error) };
   const config = parsed.data;
   const errors: string[] = [];

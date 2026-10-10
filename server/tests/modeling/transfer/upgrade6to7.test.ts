@@ -27,13 +27,13 @@ const PAYLOAD_6 = {
       savedQueries: [],
       retrieverAgents: [RETRIEVER],
     },
-    // An adapter without search indices exported no retriever agents.
+    // An adapter without search indices exported no retrievers.
     { key: "bare", name: "Bare", aiAgents: [] },
   ],
 };
 
 describe("upgrade 6.0 → 7.0", () => {
-  it("moves each lens's agents and retriever agents under assistants", () => {
+  it("moves each lens's agents and retrievers under assistants", () => {
     const { payload, retrieverWarnings } = upgrade6to7(PAYLOAD_6);
     expect(payload).toEqual({
       ...PAYLOAD_6,

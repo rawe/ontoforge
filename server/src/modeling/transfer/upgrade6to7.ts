@@ -7,15 +7,15 @@
 
 import { z } from "zod";
 
-import { ExportAiAgent, ExportRetrieverAgent } from "../schemas.js";
+import { ExportAgent, ExportRetriever } from "../schemas.js";
 import { readFields, type Upgrader } from "./upgrader.js";
 
 /** What this upgrader reads of a 6.0 payload. */
 const Payload6 = z.looseObject({
   lenses: z.array(
     z.looseObject({
-      aiAgents: z.array(ExportAiAgent).default([]),
-      retrieverAgents: z.array(ExportRetrieverAgent).optional(),
+      aiAgents: z.array(ExportAgent).default([]),
+      retrieverAgents: z.array(ExportRetriever).optional(),
     }),
   ),
 });
@@ -28,7 +28,7 @@ export const upgrade6to7: Upgrader = (raw) => {
       formatVersion: "7.0",
       lenses: payload.lenses.map(({ aiAgents, retrieverAgents, ...lens }) => ({
         ...lens,
-        // An adapter without search indices exported no retriever agents.
+        // An adapter without search indices exported no retrievers.
         assistants: retrieverAgents === undefined
           ? { agents: aiAgents }
           : { agents: aiAgents, retrievers: retrieverAgents },

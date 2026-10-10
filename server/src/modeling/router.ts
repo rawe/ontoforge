@@ -16,10 +16,10 @@ import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 
 import { getModelingStore, getRuntimeStore } from "../core/ports.js";
-import { retrieverAgentModelingRouter } from "./retrieverAgentRouter.js";
+import { retrieverModelingRouter } from "./retrieverRouter.js";
 import {
-  AiAgentConfigResponse,
-  AiAgentConfigUpsert,
+  AgentConfigResponse,
+  AgentConfigUpsert,
   EntityTypeCreate,
   EntityTypeResponse,
   EntityTypeUpdate,
@@ -86,7 +86,7 @@ const CascadeQuery = z.object({
 
 /** Routes mounted at `/api/ontologies/:ontologyKey/model`. */
 export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
-  await app.register(retrieverAgentModelingRouter);
+  await app.register(retrieverModelingRouter);
   // --- Lenses ---
 
   app.post(
@@ -962,11 +962,11 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
       schema: {
         tags: ["modeling"],
         params: LensKeyParams,
-        response: { 200: z.array(AiAgentConfigResponse) },
+        response: { 200: z.array(AgentConfigResponse) },
       },
     },
     async (request) =>
-      service.listAiAgents(
+      service.listAgents(
         request.params.lensKey,
         await getModelingStore(request.params.ontologyKey),
       ),
@@ -978,11 +978,11 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
       schema: {
         tags: ["modeling"],
         params: AssistantKeyParams,
-        response: { 200: AiAgentConfigResponse },
+        response: { 200: AgentConfigResponse },
       },
     },
     async (request) =>
-      service.getAiAgent(
+      service.getAgent(
         request.params.lensKey,
         request.params.assistantKey,
         await getModelingStore(request.params.ontologyKey),
@@ -995,12 +995,12 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
       schema: {
         tags: ["modeling"],
         params: AssistantKeyParams,
-        body: AiAgentConfigUpsert,
-        response: { 200: AiAgentConfigResponse, 201: AiAgentConfigResponse },
+        body: AgentConfigUpsert,
+        response: { 200: AgentConfigResponse, 201: AgentConfigResponse },
       },
     },
     async (request, reply) => {
-      const [result, created] = await service.upsertAiAgent(
+      const [result, created] = await service.upsertAgent(
         request.params.lensKey,
         request.params.assistantKey,
         request.body,
@@ -1016,7 +1016,7 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
       schema: { tags: ["modeling"], params: AssistantKeyParams },
     },
     async (request, reply) => {
-      await service.deleteAiAgent(
+      await service.deleteAgent(
         request.params.lensKey,
         request.params.assistantKey,
         await getModelingStore(request.params.ontologyKey),

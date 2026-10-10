@@ -1,5 +1,5 @@
 /**
- * AI agent configuration modeling endpoints over a mocked store, including
+ * Agent configuration modeling endpoints over a mocked store, including
  * the allowlist assertions: an unknown tool name is rejected and the error
  * names the exact twelve-name grantable set.
  */
@@ -56,7 +56,7 @@ beforeEach(() => {
 describe("list", () => {
   it("answers an empty list", async () => {
     holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
-    holder.store.listAiAgents.mockResolvedValue([]);
+    holder.store.listAgents.mockResolvedValue([]);
     const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/lenses/test_lens/assistants/agents" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual([]);
@@ -64,7 +64,7 @@ describe("list", () => {
 
   it("returns the full agent wire shape", async () => {
     holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
-    holder.store.listAiAgents.mockResolvedValue([MOCK_AGENT]);
+    holder.store.listAgents.mockResolvedValue([MOCK_AGENT]);
     const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/lenses/test_lens/assistants/agents" });
     expect(res.statusCode).toBe(200);
     const body = res.json() as Record<string, unknown>[];
@@ -91,7 +91,7 @@ describe("list", () => {
 describe("read one", () => {
   it("returns the agent's wire shape", async () => {
     holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
-    holder.store.listAiAgents.mockResolvedValue([MOCK_AGENT]);
+    holder.store.listAgents.mockResolvedValue([MOCK_AGENT]);
     const res = await app.inject({
       method: "GET",
       url: "/api/ontologies/onto/model/lenses/test_lens/assistants/agents/my-agent",
@@ -102,7 +102,7 @@ describe("read one", () => {
 
   it("an unknown agent key answers 404", async () => {
     holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
-    holder.store.listAiAgents.mockResolvedValue([MOCK_AGENT]);
+    holder.store.listAgents.mockResolvedValue([MOCK_AGENT]);
     const res = await app.inject({
       method: "GET",
       url: "/api/ontologies/onto/model/lenses/test_lens/assistants/agents/other",
@@ -112,7 +112,7 @@ describe("read one", () => {
 
   it("the built-in default is unknown to modeling", async () => {
     holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
-    holder.store.listAiAgents.mockResolvedValue([]);
+    holder.store.listAgents.mockResolvedValue([]);
     const res = await app.inject({
       method: "GET",
       url: "/api/ontologies/onto/model/lenses/test_lens/assistants/agents/_default",
@@ -126,20 +126,20 @@ describe("old paths", () => {
     ["GET", "/api/ontologies/onto/model/lenses/test_lens/ai-agents"],
     ["PUT", "/api/ontologies/onto/model/lenses/test_lens/ai-agents/my-agent"],
     ["DELETE", "/api/ontologies/onto/model/lenses/test_lens/ai-agents/my-agent"],
-    ["GET", "/api/ontologies/onto/model/lenses/test_lens/retriever-agents"],
-    ["GET", "/api/ontologies/onto/model/lenses/test_lens/retriever-agents/finder"],
+    ["GET", "/api/ontologies/onto/model/lenses/test_lens/retrievers"],
+    ["GET", "/api/ontologies/onto/model/lenses/test_lens/retrievers/finder"],
   ] as const)("%s %s answers 404", async (method, url) => {
     holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     const res = await app.inject({ method, url, payload: method === "PUT" ? { name: "Test" } : undefined });
     expect(res.statusCode).toBe(404);
-    expect(holder.store.upsertAiAgent).not.toHaveBeenCalled();
+    expect(holder.store.upsertAgent).not.toHaveBeenCalled();
   });
 });
 
 describe("upsert", () => {
   it("create answers 201", async () => {
     holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
-    holder.store.upsertAiAgent.mockResolvedValue([MOCK_AGENT, true]);
+    holder.store.upsertAgent.mockResolvedValue([MOCK_AGENT, true]);
     const res = await app.inject({
       method: "PUT",
       url: "/api/ontologies/onto/model/lenses/test_lens/assistants/agents/my-agent",
@@ -158,7 +158,7 @@ describe("upsert", () => {
 
   it("replace answers 200", async () => {
     holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
-    holder.store.upsertAiAgent.mockResolvedValue([MOCK_AGENT, false]);
+    holder.store.upsertAgent.mockResolvedValue([MOCK_AGENT, false]);
     const res = await app.inject({
       method: "PUT",
       url: "/api/ontologies/onto/model/lenses/test_lens/assistants/agents/my-agent",
@@ -181,7 +181,7 @@ describe("upsert", () => {
 describe("delete", () => {
   it("answers 204", async () => {
     holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
-    holder.store.deleteAiAgent.mockResolvedValue(true);
+    holder.store.deleteAgent.mockResolvedValue(true);
     const res = await app.inject({
       method: "DELETE",
       url: "/api/ontologies/onto/model/lenses/test_lens/assistants/agents/my-agent",
@@ -191,7 +191,7 @@ describe("delete", () => {
 
   it("an unknown agent key answers 404", async () => {
     holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
-    holder.store.deleteAiAgent.mockResolvedValue(false);
+    holder.store.deleteAgent.mockResolvedValue(false);
     const res = await app.inject({
       method: "DELETE",
       url: "/api/ontologies/onto/model/lenses/test_lens/assistants/agents/nonexistent",
@@ -214,7 +214,7 @@ describe("key validation", () => {
 
   it("hyphens ARE allowed, unlike type keys", async () => {
     holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
-    holder.store.upsertAiAgent.mockResolvedValue([MOCK_AGENT, true]);
+    holder.store.upsertAgent.mockResolvedValue([MOCK_AGENT, true]);
     const res = await app.inject({
       method: "PUT",
       url: "/api/ontologies/onto/model/lenses/test_lens/assistants/agents/my-agent",
@@ -233,12 +233,12 @@ describe("key validation", () => {
     });
     expect(res.statusCode).toBe(422);
     expect(res.json().error.message).toContain("64");
-    expect(holder.store.upsertAiAgent).not.toHaveBeenCalled();
+    expect(holder.store.upsertAgent).not.toHaveBeenCalled();
   });
 
   it("a key of exactly 64 characters is accepted", async () => {
     holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
-    holder.store.upsertAiAgent.mockResolvedValue([
+    holder.store.upsertAgent.mockResolvedValue([
       { ...MOCK_AGENT, key: "k".repeat(64) },
       true,
     ]);
@@ -275,7 +275,7 @@ describe("tool allowlist validation", () => {
     for (const tool of VALID_AGENT_TOOLS) {
       expect(message).toContain(`'${tool}'`);
     }
-    expect(holder.store.upsertAiAgent).not.toHaveBeenCalled();
+    expect(holder.store.upsertAgent).not.toHaveBeenCalled();
   });
 
   it("every write tool and the non-grantable read are OUTSIDE the set", () => {
@@ -303,7 +303,7 @@ describe("tool allowlist validation", () => {
 
   it("a valid tool name is accepted", async () => {
     holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
-    holder.store.upsertAiAgent.mockResolvedValue([MOCK_AGENT, true]);
+    holder.store.upsertAgent.mockResolvedValue([MOCK_AGENT, true]);
     const res = await app.inject({
       method: "PUT",
       url: "/api/ontologies/onto/model/lenses/test_lens/assistants/agents/my-agent",
@@ -314,7 +314,7 @@ describe("tool allowlist validation", () => {
 
   it("tools=null means 'all available tools' and is accepted", async () => {
     holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
-    holder.store.upsertAiAgent.mockResolvedValue([{ ...MOCK_AGENT, tools: null }, true]);
+    holder.store.upsertAgent.mockResolvedValue([{ ...MOCK_AGENT, tools: null }, true]);
     const res = await app.inject({
       method: "PUT",
       url: "/api/ontologies/onto/model/lenses/test_lens/assistants/agents/my-agent",

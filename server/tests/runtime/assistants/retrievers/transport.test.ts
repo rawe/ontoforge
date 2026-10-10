@@ -1,8 +1,8 @@
-import { PLANNER_RESPONSE_FORMAT } from '../../../src/runtime/retrieverAgents/plan.js';
+import { PLANNER_RESPONSE_FORMAT } from '../../../../src/runtime/assistants/retrievers/plan.js';
 import { describe, it, expect, vi } from 'vitest';
 import type { ChatOpenAI } from '@langchain/openai';
-import { createAiModel } from '../../../src/core/ai.js';
-import { parsePlannerOutput } from '../../../src/runtime/retrieverAgents/plannerOutput.js';
+import { createAiModel } from '../../../../src/core/ai.js';
+import { parsePlannerOutput } from '../../../../src/runtime/assistants/retrievers/plannerOutput.js';
 
 function transport(model: unknown, fetchFn: typeof fetch) {
   (model as unknown as { completions: { clientConfig: { fetch?: typeof fetch } } }).completions.clientConfig.fetch = fetchFn;

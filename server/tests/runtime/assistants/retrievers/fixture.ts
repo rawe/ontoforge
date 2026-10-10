@@ -1,11 +1,11 @@
 /**
- * A lens for retriever-agent unit tests: people working for companies and
+ * A lens for retriever unit tests: people working for companies and
  * living in cities, with the search catalog of its indices.
  */
 
-import type { SchemaCacheValue } from "../../../src/runtime/schemaCache.js";
-import type { SearchIndexCatalogEntry } from "../../../src/runtime/search/indexSearch.js";
-import type { AgentLens } from "../../../src/runtime/retrieverAgents/config.js";
+import type { SchemaCacheValue } from "../../../../src/runtime/schemaCache.js";
+import type { SearchIndexCatalogEntry } from "../../../../src/runtime/search/indexSearch.js";
+import type { RetrieverLens } from "../../../../src/runtime/assistants/retrievers/config.js";
 
 const property = (key: string, dataType = "string") => ({
   key,
@@ -73,7 +73,7 @@ export const CATALOG: SearchIndexCatalogEntry[] = [
   entry("person~default", "person"),
 ];
 
-export const LENS: AgentLens = { scoped: SCHEMA, catalog: CATALOG };
+export const LENS: RetrieverLens = { scoped: SCHEMA, catalog: CATALOG };
 
 export const CONFIG = {
   indices: [

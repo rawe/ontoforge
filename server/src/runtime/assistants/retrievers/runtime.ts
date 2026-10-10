@@ -1,7 +1,7 @@
 /**
- * A retriever agent answering one question: a fixed pipeline of two
+ * A retriever answering one question: a fixed pipeline of two
  * model calls — plan, retrieve, answer (LangGraph). The planner picks the
- * agent's indices, relation groups, filters and modes per sub-query
+ * retriever's indices, relation groups, filters and modes per sub-query
  * (`plan.ts`); retrieval runs them on the search engine and fuses them
  * (`retrieve.ts`); the answer model writes the reply from the evidence
  * alone, streamed. A follow-up whose plan searches nothing is planned once
@@ -19,7 +19,7 @@
  * planning call without a conversation, then retrieval; it returns the
  * found entities and calls no answer model.
  *
- * The runtime list (`listRuntimeRetrievers`) names every agent of a lens,
+ * The runtime list (`listRuntimeRetrievers`) names every retriever of a lens,
  * runnable or not, the default first.
  */
 
@@ -40,29 +40,29 @@ import {
   UntrackedValueChannel,
 } from "@langchain/langgraph";
 
-import { settings } from "../../config.js";
-import { createAiModel, getAiModel } from "../../core/ai.js";
-import { NotFoundError, ValidationError } from "../../core/exceptions.js";
-import type { RuntimeStore } from "../../core/ports.js";
-import type { RetrieverAgentConfig } from "../../core/retrieverAgent.js";
-import type { RuntimeAssistant } from "../aiService.js";
-import type { StreamExecution } from "../chatStream.js";
-import { loadSchema } from "../schemaCache.js";
+import { settings } from "../../../config.js";
+import { createAiModel, getAiModel } from "../../../core/ai.js";
+import { NotFoundError, ValidationError } from "../../../core/exceptions.js";
+import type { RuntimeStore } from "../../../core/ports.js";
+import type { RetrieverConfig } from "../../../core/retriever.js";
+import type { RuntimeAssistant } from "../agents/runtime.js";
+import type { StreamExecution } from "../../chatStream.js";
+import { loadSchema } from "../../schemaCache.js";
 import {
   availableModes,
   indexStoreOf,
   searchableIndices,
   searchIndexCatalog,
   type SearchMode,
-} from "../search/indexSearch.js";
-import { checkAgentConfig } from "./config.js";
+} from "../../search/indexSearch.js";
+import { checkRetrieverConfig } from "./config.js";
 import {
-  DEFAULT_RETRIEVER_AGENT_KEY,
-  DEFAULT_RETRIEVER_AGENT_NAME,
-  defaultAgentConfig,
-} from "./defaultAgent.js";
-import { TURNS_THE_MODEL_SEES, type GraphThread } from "../threads/threadStore.js";
-import { lastTurns, trimTurns } from "../threads/turns.js";
+  DEFAULT_RETRIEVER_KEY,
+  DEFAULT_RETRIEVER_NAME,
+  defaultRetrieverConfig,
+} from "./defaultRetriever.js";
+import { TURNS_THE_MODEL_SEES, type GraphThread } from "../../threads/threadStore.js";
+import { lastTurns, trimTurns } from "../../threads/turns.js";
 import { modelInputTrace } from "./modelTrace.js";
 import {
   PLANNER,
@@ -93,56 +93,56 @@ import {
 /** Characters of model output kept in diagnostics. */
 const OUTPUT_TRACE_CHARACTERS = 12_000;
 
-/** A stored agent, valid in its lens, ready to answer. */
-export interface RunnableAgent {
+/** A stored retriever, valid in its lens, ready to answer. */
+export interface RunnableRetriever {
   key: string;
-  config: RetrieverAgentConfig;
+  config: RetrieverConfig;
   scope: Omit<RetrievalScope, "signal">;
 }
 
 /**
- * Load a stored agent and check it against its lens, or derive the
- * default agent (`defaultAgent.ts`) — refused when it has nothing to
- * search. Unknown agent → not
- * found; an agent the lens can no longer run → validation error; an
+ * Load a stored retriever and check it against its lens, or derive the
+ * default retriever (`defaultRetriever.ts`) — refused when it has nothing to
+ * search. Unknown retriever → not
+ * found; a retriever the lens can no longer run → validation error; an
  * adapter without search indices → disabled feature.
  */
-export async function loadRunnableAgent(lensKey: string, key: string, store: RuntimeStore): Promise<RunnableAgent> {
+export async function loadRunnableRetriever(lensKey: string, key: string, store: RuntimeStore): Promise<RunnableRetriever> {
   const indexStore = indexStoreOf(store);
   const loaded = await loadSchema(lensKey, store);
   const [stored, catalog, records] = await Promise.all([
-    key === DEFAULT_RETRIEVER_AGENT_KEY ? null : indexStore.getRetrieverAgent(loaded.scoped.lensId, key),
+    key === DEFAULT_RETRIEVER_KEY ? null : indexStore.getRetriever(loaded.scoped.lensId, key),
     searchIndexCatalog(lensKey, store),
     searchableIndices(loaded, indexStore),
   ]);
   const lens = { scoped: loaded.scoped, catalog };
-  if (key === DEFAULT_RETRIEVER_AGENT_KEY) {
-    const config = defaultAgentConfig(lens);
+  if (key === DEFAULT_RETRIEVER_KEY) {
+    const config = defaultRetrieverConfig(lens);
     if (config.indices.length === 0) {
       throw new ValidationError(
-        "The default retriever agent has nothing to search in this lens: no managed search index is switched on " +
+        "The default retriever has nothing to search in this lens: no managed search index is switched on " +
           "for a type the lens shows.",
       );
     }
     return { key, config, scope: { config, lens, loaded, store, indexStore, records } };
   }
-  if (stored === null) throw new NotFoundError(`Retriever agent '${key}' not found`);
-  const { config, errors } = checkAgentConfig(stored.configVersion, stored.config, lens);
+  if (stored === null) throw new NotFoundError(`Retriever '${key}' not found`);
+  const { config, errors } = checkRetrieverConfig(stored.configVersion, stored.config, lens);
   if (config === null) {
-    throw new ValidationError(`Retriever agent '${key}' is invalid in this lens: ${errors.join("; ")}`, { errors });
+    throw new ValidationError(`Retriever '${key}' is invalid in this lens: ${errors.join("; ")}`, { errors });
   }
   return { key, config, scope: { config, lens, loaded, store, indexStore, records } };
 }
 
-/** Every retriever agent of a lens, the built-in default first; no
+/** Every retriever of a lens, the built-in default first; no
  * configuration, no validation, no model. An adapter without search
  * indices → disabled feature. */
 export async function listRuntimeRetrievers(lensKey: string, store: RuntimeStore): Promise<RuntimeAssistant[]> {
   const indexStore = indexStoreOf(store);
   const loaded = await loadSchema(lensKey, store);
-  const stored = await indexStore.listRetrieverAgents(loaded.scoped.lensId);
+  const stored = await indexStore.listRetrievers(loaded.scoped.lensId);
   return [
-    { key: DEFAULT_RETRIEVER_AGENT_KEY, name: DEFAULT_RETRIEVER_AGENT_NAME, description: null, builtIn: true },
+    { key: DEFAULT_RETRIEVER_KEY, name: DEFAULT_RETRIEVER_NAME, description: null, builtIn: true },
     ...stored.map((agent) => ({ key: agent.key, name: agent.name, description: agent.description, builtIn: false })),
   ];
 }
@@ -255,7 +255,7 @@ function models() {
 type PlannerModel = ReturnType<typeof models>["plannerModel"];
 
 interface Planning {
-  agent: RunnableAgent;
+  agent: RunnableRetriever;
   scope: RetrievalScope;
   modes: SearchMode[];
   message: string;
@@ -285,9 +285,9 @@ export async function planQuestion(planning: Planning): Promise<{ plan: Plan; no
   const input = plannerInput(agent.config, scope.lens, scope.records, modes, message, history, previous, values);
   if (input.length > PLANNER_INPUT_CHARACTERS) {
     throw new ValidationError(
-      agent.key === DEFAULT_RETRIEVER_AGENT_KEY
-        ? "This lens is too large for the default retriever agent: its planning context exceeds the limit. " +
-            "Configure a retriever agent with fewer indices or filters."
+      agent.key === DEFAULT_RETRIEVER_KEY
+        ? "This lens is too large for the default retriever: its planning context exceeds the limit. " +
+            "Configure a retriever with fewer indices or filters."
         : "Planning context exceeds the limit; choose fewer indices or filters.",
     );
   }
@@ -361,7 +361,7 @@ export interface RetrieveResponse {
  * match.
  */
 export async function retrieveQuestion(
-  agent: RunnableAgent,
+  agent: RunnableRetriever,
   query: string,
   signal: AbortSignal,
 ): Promise<RetrieveResponse> {
@@ -400,7 +400,7 @@ export async function retrieveQuestion(
  * reference to them is ignored with a limitation.
  */
 export async function chat(
-  agent: RunnableAgent,
+  agent: RunnableRetriever,
   message: string,
   thread: GraphThread,
   execution: StreamExecution,

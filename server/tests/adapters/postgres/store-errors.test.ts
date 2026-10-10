@@ -328,7 +328,7 @@ describe("bypass prevention", () => {
 });
 
 
-describe("retriever agent constraints preserve domain errors", () => {
+describe("retriever constraints preserve domain errors", () => {
   it("maps concurrent target-key collisions to ConflictError", async () => {
     expect(await translated(dbError("23505", "retriever_agent_key_unique"))).toBeInstanceOf(ConflictError);
   });

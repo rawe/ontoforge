@@ -1,7 +1,7 @@
 /**
  * The conversion of version-1 retriever configurations — the 5.x
  * retrievers with result buckets, search fields and hard or soft
- * conditions — into retriever-agent configurations of version 2. It exists
+ * conditions — into retriever configurations of version 2. It exists
  * for 5.x data only: the storage upgrade, the 5.0 transfer import and the
  * import of a version-1 portable export call it, nothing else — remove it
  * with them.
@@ -18,7 +18,7 @@
 
 import { z } from "zod";
 
-import type { RetrieverAgentConfig } from "./retrieverAgent.js";
+import type { RetrieverConfig } from "./retriever.js";
 import { MAX_KEY_LENGTH } from "./schemas.js";
 import { DEFAULT_INDEX_SUFFIX, MANAGED_KEY_SEPARATOR } from "./searchIndex.js";
 
@@ -54,7 +54,7 @@ const LegacyConfig = z.object({
 });
 
 export interface ConvertedRetrieverConfig {
-  config: RetrieverAgentConfig;
+  config: RetrieverConfig;
   warnings: string[];
 }
 
@@ -71,9 +71,9 @@ export function convertLegacyRetrieverConfig(
   const parsed = LegacyConfig.safeParse(raw);
   if (!parsed.success) return null;
   const legacy = parsed.data;
-  const indices: RetrieverAgentConfig["indices"] = [];
-  const filters: RetrieverAgentConfig["filters"] = [];
-  const answerFields: RetrieverAgentConfig["answerFields"] = {};
+  const indices: RetrieverConfig["indices"] = [];
+  const filters: RetrieverConfig["filters"] = [];
+  const answerFields: RetrieverConfig["answerFields"] = {};
   const warnings: string[] = [];
   const add = (index: string) => {
     if (!indices.some((ref) => ref.index === index)) indices.push({ index });

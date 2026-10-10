@@ -768,10 +768,10 @@ export class PostgresModelingStore implements ModelingStore {
   }
 
   // ------------------------------------------------------------------
-  // AI agent configs
+  // Agent configs
   // ------------------------------------------------------------------
 
-  async listAiAgents(lensId: string): Promise<Row[]> {
+  async listAgents(lensId: string): Promise<Row[]> {
     if (!isUuid(lensId)) {
       return [];
     }
@@ -784,7 +784,7 @@ export class PostgresModelingStore implements ModelingStore {
 
   /** Upsert on the `(lens_id, key)` arbiter. `created` is detected
    * by whether the insert stamped this call's fresh id onto the row. */
-  async upsertAiAgent(
+  async upsertAgent(
     lensId: string,
     agentConfigId: string,
     key: string,
@@ -811,7 +811,7 @@ export class PostgresModelingStore implements ModelingStore {
   }
 
   /** Agents in the transfer shape — no ids, no timestamps. */
-  async listAiAgentsForExport(lensId: string): Promise<Row[]> {
+  async listAgentsForExport(lensId: string): Promise<Row[]> {
     if (!isUuid(lensId)) {
       return [];
     }
@@ -823,7 +823,7 @@ export class PostgresModelingStore implements ModelingStore {
     return camelizeRows(result.rows);
   }
 
-  async deleteAiAgent(lensId: string, agentKey: string): Promise<boolean> {
+  async deleteAgent(lensId: string, agentKey: string): Promise<boolean> {
     if (!isUuid(lensId)) {
       return false;
     }

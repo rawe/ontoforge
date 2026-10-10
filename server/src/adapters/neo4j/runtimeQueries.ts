@@ -110,8 +110,8 @@ export async function getFullSchemaWithLensInclusions(session: Session, lensKey:
   return { lens, entityTypes, relationTypes, entityInclusions, relationInclusions };
 }
 
-/** AiAgentConfig rows for one lens, by key. */
-export async function getAiAgentConfigs(session: Session, lensKey: string): Promise<Row[]> {
+/** AgentConfig rows for one lens, by key. */
+export async function getAgentConfigs(session: Session, lensKey: string): Promise<Row[]> {
   const result = await session.run(
     `
     MATCH (o:Ontology {key: $lensKey})-[:HAS_AI_AGENT]->(ac:AiAgentConfig)

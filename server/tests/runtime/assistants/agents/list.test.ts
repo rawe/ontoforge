@@ -6,10 +6,10 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { DEFAULT_AGENT_CONFIG } from "../../src/core/ai.js";
-import { listRuntimeAgents } from "../../src/runtime/aiService.js";
-import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
-import { asRuntimeStore, createMockRuntimeStore, makeFullSchema } from "./helpers.js";
+import { DEFAULT_AGENT_CONFIG } from "../../../../src/core/ai.js";
+import { listRuntimeAgents } from "../../../../src/runtime/assistants/agents/runtime.js";
+import { invalidateLoadedSchemaCache } from "../../../../src/runtime/schemaCache.js";
+import { asRuntimeStore, createMockRuntimeStore, makeFullSchema } from "../../helpers.js";
 
 beforeEach(() => {
   invalidateLoadedSchemaCache();
@@ -19,7 +19,7 @@ describe("listRuntimeAgents", () => {
   it("returns the default agent plus any configured agents", async () => {
     const store = createMockRuntimeStore();
     store.getFullSchemaWithLensInclusions.mockResolvedValue(makeFullSchema({ lensKey: "test_lens" }));
-    store.getAiAgentConfigs.mockResolvedValue([
+    store.getAgentConfigs.mockResolvedValue([
       {
         key: "my-agent",
         name: "My Agent",

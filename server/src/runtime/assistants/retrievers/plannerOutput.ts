@@ -1,4 +1,4 @@
-import { ValidationError } from '../../core/exceptions.js';
+import { ValidationError } from '../../../core/exceptions.js';
 
 /** Accept a JSON value or one whole JSON code fence, never extract JSON from prose. */
 export function parsePlannerOutput(output: string, finishReason?: string): unknown {

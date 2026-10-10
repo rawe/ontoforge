@@ -1,6 +1,6 @@
 /**
- * The retriever-agent runtime routes: the list, chat, its threads and
- * retrieve, where the saved agent is resolved on the server before the
+ * The retriever runtime routes: the list, chat, its threads and
+ * retrieve, where the saved retriever is resolved on the server before the
  * stream opens, a request cannot carry a configuration, the stream keeps
  * its contract, a thread is started, continued or refused before the
  * stream opens, and retrieve answers one plain JSON body. Removed routes
@@ -10,39 +10,39 @@
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ValidationError } from "../../../src/core/exceptions.js";
+import { ValidationError } from "../../../../src/core/exceptions.js";
 
 const runtime = { ontologyKey: "one" };
 const pipeline = vi.hoisted(() => ({
-  loadRunnableAgent: vi.fn(),
+  loadRunnableRetriever: vi.fn(),
   chat: vi.fn(),
   retrieveQuestion: vi.fn(),
   requireLanguageModel: vi.fn(),
   requireRetrievers: vi.fn(),
   listRuntimeRetrievers: vi.fn(),
 }));
-vi.mock("../../../src/core/ports.js", async (original) => ({
+vi.mock("../../../../src/core/ports.js", async (original) => ({
   ...(await original<Record<string, unknown>>()),
   getRuntimeStore: async () => runtime,
 }));
-vi.mock("../../../src/runtime/retrieverAgents/runtime.js", () => pipeline);
+vi.mock("../../../../src/runtime/assistants/retrievers/runtime.js", () => pipeline);
 
 const BASE = "/api/ontologies/one/runtime/lenses/main";
 const agent = { key: "find", config: { indices: [] } };
 let app: FastifyInstance;
 
 beforeAll(async () => {
-  const { createApp } = await import("../../../src/app.js");
+  const { createApp } = await import("../../../../src/app.js");
   app = await createApp();
   await app.ready();
 });
 afterAll(async () => app.close());
 beforeEach(() => {
   vi.clearAllMocks();
-  pipeline.loadRunnableAgent.mockResolvedValue(agent);
+  pipeline.loadRunnableRetriever.mockResolvedValue(agent);
 });
 
-describe("retriever agent list route", () => {
+describe("retriever list route", () => {
   it("answers the list without a language model", async () => {
     const list = [
       { key: "_default", name: "Default", description: null, builtIn: true },
@@ -57,8 +57,8 @@ describe("retriever agent list route", () => {
   });
 });
 
-describe("retriever agent chat route", () => {
-  it("runs the saved agent and keeps the stream contract", async () => {
+describe("retriever chat route", () => {
+  it("runs the saved retriever and keeps the stream contract", async () => {
     pipeline.chat.mockImplementationOnce(async (...args: unknown[]) => {
       const execution = args[3] as { onToolEvent(event: Record<string, unknown>): Promise<void> };
       await execution.onToolEvent({ type: "delta", text: "Answer" });
@@ -72,7 +72,7 @@ describe("retriever agent chat route", () => {
       { type: "delta", text: "Answer" },
       { type: "final", reply: "Answer" },
     ]);
-    expect(pipeline.loadRunnableAgent).toHaveBeenCalledWith("main", "find", runtime);
+    expect(pipeline.loadRunnableRetriever).toHaveBeenCalledWith("main", "find", runtime);
     const [ran, message, thread, , diagnostics] = pipeline.chat.mock.calls[0]!;
     expect([ran, message, diagnostics]).toEqual([agent, "Who?", true]);
     expect(thread).toMatchObject({ threadId: events[0].threadId });
@@ -92,15 +92,15 @@ describe("retriever agent chat route", () => {
     expect(pipeline.chat).not.toHaveBeenCalled();
   });
 
-  it("answers an agent the lens cannot run with a plain 422 before streaming", async () => {
-    pipeline.loadRunnableAgent.mockRejectedValueOnce(new ValidationError("Retriever agent 'find' is invalid in this lens"));
+  it("answers a retriever the lens cannot run with a plain 422 before streaming", async () => {
+    pipeline.loadRunnableRetriever.mockRejectedValueOnce(new ValidationError("Retriever 'find' is invalid in this lens"));
     const response = await app.inject({ method: "POST", url: `${BASE}/ai/assistants/retrievers/find/chat`, payload: { message: "Who?" } });
     expect(response.statusCode).toBe(422);
     expect(response.json().error.message).toContain("invalid in this lens");
     expect(pipeline.chat).not.toHaveBeenCalled();
   });
 
-  it("without a language model answers FEATURE_DISABLED before reading the agent or streaming", async () => {
+  it("without a language model answers FEATURE_DISABLED before reading the retriever or streaming", async () => {
     pipeline.requireLanguageModel.mockImplementationOnce(() => {
       throw new ValidationError("AI feature is disabled (AI_PROVIDER not configured)", { code: "FEATURE_DISABLED" });
     });
@@ -108,7 +108,7 @@ describe("retriever agent chat route", () => {
     expect(response.statusCode).toBe(422);
     expect(response.headers["content-type"]).toContain("application/json");
     expect(response.json().error.details.code).toBe("FEATURE_DISABLED");
-    expect(pipeline.loadRunnableAgent).not.toHaveBeenCalled();
+    expect(pipeline.loadRunnableRetriever).not.toHaveBeenCalled();
     expect(pipeline.chat).not.toHaveBeenCalled();
   });
 
@@ -118,8 +118,8 @@ describe("retriever agent chat route", () => {
       ["POST", `${BASE}/retrievers/find/chat`],
       ["GET", `${BASE}/ai/retriever/catalog`],
       ["GET", "/api/ontologies/one/model/lenses/main/retrievers"],
-      ["POST", `${BASE}/retriever-agents/find/chat`],
-      ["POST", `${BASE}/retriever-agents/find/retrieve`],
+      ["POST", `${BASE}/retrievers/find/chat`],
+      ["POST", `${BASE}/retrievers/find/retrieve`],
     ] as const) {
       const response = await app.inject({ method, url, ...(method === "POST" ? { payload: {} } : {}) });
       expect(response.statusCode, url).toBe(404);
@@ -129,7 +129,7 @@ describe("retriever agent chat route", () => {
   });
 });
 
-describe("retriever agent threads", () => {
+describe("retriever threads", () => {
   const chatUrl = (key: string) => `${BASE}/ai/assistants/retrievers/${key}/chat`;
   const started = async (key = "find") => {
     pipeline.chat.mockResolvedValueOnce({ reply: "Answer" });
@@ -187,25 +187,25 @@ describe("retriever agent threads", () => {
   });
 });
 
-describe("retriever agent retrieve route", () => {
+describe("retriever retrieve route", () => {
   const url = `${BASE}/ai/assistants/retrievers/find/retrieve`;
 
-  it("runs the saved agent once and answers its results as JSON", async () => {
+  it("runs the saved retriever once and answers its results as JSON", async () => {
     const body = { results: [], limitations: [], unsupportedReason: "No salaries." };
     pipeline.retrieveQuestion.mockResolvedValueOnce(body);
     const response = await app.inject({ method: "POST", url, payload: { query: "Salaries?" } });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual(body);
-    expect(pipeline.loadRunnableAgent).toHaveBeenCalledWith("main", "find", runtime);
+    expect(pipeline.loadRunnableRetriever).toHaveBeenCalledWith("main", "find", runtime);
     expect(pipeline.retrieveQuestion.mock.calls[0]!.slice(0, 2)).toEqual([agent, "Salaries?"]);
     expect(pipeline.retrieveQuestion.mock.calls[0]![2]).toBeInstanceOf(AbortSignal);
   });
 
-  it("serves the default agent's key", async () => {
+  it("serves the default retriever's key", async () => {
     pipeline.retrieveQuestion.mockResolvedValueOnce({ results: [], limitations: [] });
     const response = await app.inject({ method: "POST", url: `${BASE}/ai/assistants/retrievers/_default/retrieve`, payload: { query: "Who?" } });
     expect(response.statusCode).toBe(200);
-    expect(pipeline.loadRunnableAgent).toHaveBeenCalledWith("main", "_default", runtime);
+    expect(pipeline.loadRunnableRetriever).toHaveBeenCalledWith("main", "_default", runtime);
   });
 
   it("rejects unknown fields, history, diagnostics and an empty or long query", async () => {
@@ -225,8 +225,8 @@ describe("retriever agent retrieve route", () => {
     expect(pipeline.retrieveQuestion).not.toHaveBeenCalled();
   });
 
-  it("answers errors as chat does: invalid agent, no language model", async () => {
-    pipeline.loadRunnableAgent.mockRejectedValueOnce(new ValidationError("Retriever agent 'find' is invalid in this lens", { errors: ["x"] }));
+  it("answers errors as chat does: invalid retriever, no language model", async () => {
+    pipeline.loadRunnableRetriever.mockRejectedValueOnce(new ValidationError("Retriever 'find' is invalid in this lens", { errors: ["x"] }));
     const invalid = await app.inject({ method: "POST", url, payload: { query: "Who?" } });
     expect(invalid.statusCode).toBe(422);
     expect(invalid.json().error.details.errors).toEqual(["x"]);

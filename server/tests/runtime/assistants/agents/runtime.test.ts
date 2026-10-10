@@ -9,19 +9,19 @@
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { DEFAULT_AGENT_CONFIG, setAiModel, type AgentConfig } from "../../src/core/ai.js";
-import { RELATIVE_SCORE_PROMISE, TOOL_MIN_SIMILARITY } from "../../src/runtime/search/strategies.js";
-import { setEmbeddingProvider } from "../../src/core/embedding.js";
-import { NotFoundError, ValidationError } from "../../src/core/exceptions.js";
+import { DEFAULT_AGENT_CONFIG, setAiModel, type AgentConfig } from "../../../../src/core/ai.js";
+import { RELATIVE_SCORE_PROMISE, TOOL_MIN_SIMILARITY } from "../../../../src/runtime/search/strategies.js";
+import { setEmbeddingProvider } from "../../../../src/core/embedding.js";
+import { NotFoundError, ValidationError } from "../../../../src/core/exceptions.js";
 import {
   CHAT_TOOLS,
   describeSchema,
   runAgentChat,
-} from "../../src/runtime/aiService.js";
-import { MemoryThreadStore } from "../../src/runtime/threads/memoryThreadStore.js";
-import { TURNS_PER_THREAD, TURNS_THE_MODEL_SEES, type GraphThread } from "../../src/runtime/threads/threadStore.js";
-import { invalidateLoadedSchemaCache, loadSchema } from "../../src/runtime/schemaCache.js";
-import { FakeToolCallingModel, toolCallMessage } from "./aiHelpers.js";
+} from "../../../../src/runtime/assistants/agents/runtime.js";
+import { MemoryThreadStore } from "../../../../src/runtime/threads/memoryThreadStore.js";
+import { TURNS_PER_THREAD, TURNS_THE_MODEL_SEES, type GraphThread } from "../../../../src/runtime/threads/threadStore.js";
+import { invalidateLoadedSchemaCache, loadSchema } from "../../../../src/runtime/schemaCache.js";
+import { FakeToolCallingModel, toolCallMessage } from "../../aiHelpers.js";
 import {
   asRuntimeStore,
   createMockRuntimeStore,
@@ -29,7 +29,7 @@ import {
   makeFullSchema,
   makeUnscopedSchema,
   type MockRuntimeStore,
-} from "./helpers.js";
+} from "../../helpers.js";
 
 type Row = Record<string, unknown>;
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { modelInputTrace, MODEL_INPUT_TRACE_CHARACTERS } from '../../../src/runtime/retrieverAgents/modelTrace.js';
+import { modelInputTrace, MODEL_INPUT_TRACE_CHARACTERS } from '../../../../src/runtime/assistants/retrievers/modelTrace.js';
 
 describe('bounded model input diagnostics', () => {
   it('preserves separate system instructions and human input when within the shared trace budget', () => {

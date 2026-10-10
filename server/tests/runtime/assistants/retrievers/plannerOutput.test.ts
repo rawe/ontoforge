@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parsePlannerOutput } from '../../../src/runtime/retrieverAgents/plannerOutput.js';
+import { parsePlannerOutput } from '../../../../src/runtime/assistants/retrievers/plannerOutput.js';
 
 describe('visible planner output parsing', () => {
   it('accepts plain JSON and a single whole JSON fence', () => {

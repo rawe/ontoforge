@@ -22,7 +22,7 @@ import {
   StoreError,
   ValidationError,
 } from "../core/exceptions.js";
-import { RETRIEVER_AGENT_CONFIG_VERSION, RetrieverAgentConfig } from "../core/retrieverAgent.js";
+import { RETRIEVER_CONFIG_VERSION, RetrieverConfig } from "../core/retriever.js";
 import { parseAndValidate } from "../core/oql/index.js";
 import {
   keepsOwnSearch,
@@ -57,7 +57,7 @@ import {
   planIndexCascade,
   requireSearchIndices,
 } from "./searchIndices.js";
-import { portable as portableRetrieverAgent } from "./retrieverAgents.js";
+import { portable as portableRetriever } from "./retrievers.js";
 import { readSearchSettings, updateSearchSettings as changeSearchSettings } from "../runtime/indexing/settings.js";
 import { invalidateLoadedSchemaCache, loadSchemaUncached, buildSchemaCacheFromRaw, applyScopeFiltering } from "../runtime/schemaCache.js";
 import { syncDocumentChunks } from "../runtime/service.js";
@@ -73,8 +73,8 @@ import type {
   ExportLensInput,
   SearchSettingsResponseBody,
   SearchSettingsUpdateInput,
-  AiAgentConfigResponseBody,
-  AiAgentConfigUpsertInput,
+  AgentConfigResponseBody,
+  AgentConfigUpsertInput,
   EntityTypeCreateInput,
   EntityTypeResponseBody,
   EntityTypeUpdateInput,
@@ -1526,7 +1526,7 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
       exported.indexInclusions = await indices.listLensIndexInclusions(lens.lensId as string);
     }
 
-    const agentRows = await store.listAiAgentsForExport(lens.lensId as string);
+    const agentRows = await store.listAgentsForExport(lens.lensId as string);
     const assistants: Row = {
       agents: agentRows.map((ag) => ({
         key: ag.key,
@@ -1536,10 +1536,10 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
         tools: (ag.tools as string[] | null | undefined) ?? null,
       })),
     };
-    // Retriever agents search indices: an adapter without them has none.
+    // Retrievers search indices: an adapter without them has none.
     if (indices !== undefined) {
-      assistants.retrievers = (await indices.listRetrieverAgents(lens.lensId as string)).map(
-        portableRetrieverAgent,
+      assistants.retrievers = (await indices.listRetrievers(lens.lensId as string)).map(
+        portableRetriever,
       );
     }
     exported.assistants = assistants;
@@ -1730,26 +1730,26 @@ export async function importSchema(
     }
   }
 
-  // Retriever agents: only the shape is checked here — what an agent
-  // references is reported invalid on read, so an export of an agent that
+  // Retrievers: only the shape is checked here — what a retriever
+  // references is reported invalid on read, so an export of a retriever that
   // became invalid still imports.
   for (const lens of payload.lenses) {
     const seen = new Set<string>();
     for (const agent of lens.assistants.retrievers) {
-      if (seen.has(agent.key)) errors.push(`Import error: duplicate retriever agent '${agent.key}' in lens '${lens.key}'`);
+      if (seen.has(agent.key)) errors.push(`Import error: duplicate retriever '${agent.key}' in lens '${lens.key}'`);
       seen.add(agent.key);
-      if (!LENS_RESOURCE_KEY_PATTERN.test(agent.key)) errors.push(badKey("retriever agent", agent.key, resourceKeyPattern));
-      if (agent.key.length > MAX_KEY_LENGTH) errors.push(longKey("retriever agent", agent.key));
+      if (!LENS_RESOURCE_KEY_PATTERN.test(agent.key)) errors.push(badKey("retriever", agent.key, resourceKeyPattern));
+      if (agent.key.length > MAX_KEY_LENGTH) errors.push(longKey("retriever", agent.key));
       if (agent.name.length === 0 || agent.name.length > 200) {
-        errors.push(`Import error: retriever agent '${agent.key}' needs a name of 1 to 200 characters`);
+        errors.push(`Import error: retriever '${agent.key}' needs a name of 1 to 200 characters`);
       }
       if (
-        agent.configVersion !== RETRIEVER_AGENT_CONFIG_VERSION ||
-        !RetrieverAgentConfig.safeParse(agent.config).success
+        agent.configVersion !== RETRIEVER_CONFIG_VERSION ||
+        !RetrieverConfig.safeParse(agent.config).success
       ) {
         errors.push(
-          `Import error: retriever agent '${agent.key}' has no valid configuration of version ` +
-            `${RETRIEVER_AGENT_CONFIG_VERSION}`,
+          `Import error: retriever '${agent.key}' has no valid configuration of version ` +
+            `${RETRIEVER_CONFIG_VERSION}`,
         );
       }
     }
@@ -1997,7 +1997,7 @@ export async function importSchema(
     }
 
     for (const ag of lens.assistants.agents) {
-      await store.upsertAiAgent(
+      await store.upsertAgent(
         lensId,
         randomUUID(),
         ag.key,
@@ -2076,20 +2076,20 @@ export async function importSchema(
     }
   }
   invalidateLoadedSchemaCache();
-  // Retriever agents last, once their indices exist; an adapter without
+  // Retrievers last, once their indices exist; an adapter without
   // search indices keeps none.
   if (indices !== undefined) {
     for (const lens of payload.lenses) {
       for (const agent of lens.assistants.retrievers) {
-        await indices.saveRetrieverAgent(
+        await indices.saveRetriever(
           lensIds.get(lens)!,
           {
-            retrieverAgentId: randomUUID(),
+            retrieverId: randomUUID(),
             key: agent.key,
             name: agent.name,
             description: agent.description,
-            configVersion: RETRIEVER_AGENT_CONFIG_VERSION,
-            config: RetrieverAgentConfig.parse(agent.config),
+            configVersion: RETRIEVER_CONFIG_VERSION,
+            config: RetrieverConfig.parse(agent.config),
             // An upgraded agent keeps its conversion's warnings.
             warnings: retrieverWarnings.get(retrieverWarningKey(lens.key, agent.key)) ?? [],
           },
@@ -2122,7 +2122,7 @@ export async function updateSearchSettings(
   return result;
 }
 
-// --- AI Agent Config ---
+// --- Agent Config ---
 
 /** Render a list the way error messages spell one: `['a', 'b']`. */
 function pyList(items: string[]): string {
@@ -2137,7 +2137,7 @@ async function resolveLensByKey(store: ModelingStore, lensKey: string): Promise<
   return lens;
 }
 
-function toAiAgentResponse(data: Row): AiAgentConfigResponseBody {
+function toAgentResponse(data: Row): AgentConfigResponseBody {
   return {
     key: data.key as string,
     name: data.name as string,
@@ -2149,35 +2149,35 @@ function toAiAgentResponse(data: Row): AiAgentConfigResponseBody {
   };
 }
 
-export async function listAiAgents(
+export async function listAgents(
   lensKey: string,
   store: ModelingStore,
-): Promise<AiAgentConfigResponseBody[]> {
+): Promise<AgentConfigResponseBody[]> {
   const lens = await resolveLensByKey(store, lensKey);
-  const rows = await store.listAiAgents(lens.lensId as string);
-  return rows.map(toAiAgentResponse);
+  const rows = await store.listAgents(lens.lensId as string);
+  return rows.map(toAgentResponse);
 }
 
-export async function getAiAgent(
+export async function getAgent(
   lensKey: string,
   agentKey: string,
   store: ModelingStore,
-): Promise<AiAgentConfigResponseBody> {
+): Promise<AgentConfigResponseBody> {
   const lens = await resolveLensByKey(store, lensKey);
-  const row = (await store.listAiAgents(lens.lensId as string)).find((data) => data.key === agentKey);
+  const row = (await store.listAgents(lens.lensId as string)).find((data) => data.key === agentKey);
   if (!row) {
-    throw new NotFoundError(`AI agent '${agentKey}' not found`);
+    throw new NotFoundError(`Agent '${agentKey}' not found`);
   }
-  return toAiAgentResponse(row);
+  return toAgentResponse(row);
 }
 
 /** Upsert by key. Returns `[response, created]`. */
-export async function upsertAiAgent(
+export async function upsertAgent(
   lensKey: string,
   agentKey: string,
-  body: AiAgentConfigUpsertInput,
+  body: AgentConfigUpsertInput,
   store: ModelingStore,
-): Promise<[AiAgentConfigResponseBody, boolean]> {
+): Promise<[AgentConfigResponseBody, boolean]> {
   if (!LENS_RESOURCE_KEY_PATTERN.test(agentKey)) {
     throw new ValidationError(
       `Invalid agent key '${agentKey}'. Must match pattern: ${LENS_RESOURCE_KEY_PATTERN.source}`,
@@ -2207,7 +2207,7 @@ export async function upsertAiAgent(
 
   const lens = await resolveLensByKey(store, lensKey);
   const agentConfigId = randomUUID();
-  const [data, created] = await store.upsertAiAgent(
+  const [data, created] = await store.upsertAgent(
     lens.lensId as string,
     agentConfigId,
     agentKey,
@@ -2217,18 +2217,18 @@ export async function upsertAiAgent(
     tools,
   );
   invalidateLoadedSchemaCache();
-  return [toAiAgentResponse(data), created];
+  return [toAgentResponse(data), created];
 }
 
-export async function deleteAiAgent(
+export async function deleteAgent(
   lensKey: string,
   agentKey: string,
   store: ModelingStore,
 ): Promise<void> {
   const lens = await resolveLensByKey(store, lensKey);
-  const deleted = await store.deleteAiAgent(lens.lensId as string, agentKey);
+  const deleted = await store.deleteAgent(lens.lensId as string, agentKey);
   if (!deleted) {
-    throw new NotFoundError(`AI agent '${agentKey}' not found`);
+    throw new NotFoundError(`Agent '${agentKey}' not found`);
   }
   invalidateLoadedSchemaCache();
 }

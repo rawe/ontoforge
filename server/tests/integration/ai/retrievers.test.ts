@@ -1,5 +1,5 @@
 /**
- * Retriever agents with a real planner and answer model (spec §15, AI
+ * Retrievers with a real planner and answer model (spec §15, AI
  * row): the planner picks the index whose relation group holds the asked
  * fact, and a question about two relations is answered by fusing two
  * sub-queries or by a sub-query plus a filter. A second ontology replays
@@ -43,7 +43,7 @@ async function post(url: string, payload: object, expected = 201): Promise<Row> 
   return res.json() as Row;
 }
 
-/** Ask the agent, on a new thread or continuing one; the stream's events,
+/** Ask the retriever, on a new thread or continuing one; the stream's events,
  * checked for the leading `thread` and one terminal `final`. */
 async function ask(
   message: string,
@@ -260,7 +260,7 @@ const ifAvailable = (name: string, fn: () => Promise<void>, turns = 1) =>
     await fn();
   }, turns * 180_000);
 
-describe("retriever agent with a real model", () => {
+describe("retriever with a real model", () => {
   ifAvailable("answers who is CTO at ACME through the employment index", async () => {
     const { reply, meta } = await ask("Who is CTO at ACME?");
     const subQueries = meta.plan.subQueries as Row[];
@@ -350,7 +350,7 @@ describe("follow-up sequences of the end-to-end run", () => {
   }, 2);
 });
 
-describe("retrieve and the default agent with a real model", () => {
+describe("retrieve and the default retriever with a real model", () => {
   ifAvailable("retrieve plans once and returns the found people in order, without an answer", async () => {
     const response = await retrieveFrom("people", "Who is CTO at ACME?");
     expect(response.results[0]).toMatchObject({ label: "Ada Lovelace", entityType: "person" });
@@ -358,7 +358,7 @@ describe("retrieve and the default agent with a real model", () => {
     expect(Object.keys(response).sort()).toEqual(["limitations", "results"]);
   });
 
-  ifAvailable("the default agent finds people by a derived relation filter, proven", async () => {
+  ifAvailable("the default retriever finds people by a derived relation filter, proven", async () => {
     const response = await retrieveFrom("_default", "Which people live in Berlin?");
     const people = (response.results as Row[]).filter((result) => result.entityType === "person");
     expect(people.map((result) => result.label).sort()).toEqual(["Ada Lovelace", "Bob Builder"]);
@@ -371,7 +371,7 @@ describe("retrieve and the default agent with a real model", () => {
     }
   });
 
-  ifAvailable("the default agent answers in chat", async () => {
+  ifAvailable("the default retriever answers in chat", async () => {
     const { reply, meta } = await ask("Which people live in Berlin?", undefined, RUNTIME, "_default");
     expect((meta.results as Row[]).map((result) => result.label)).toContain("Ada Lovelace");
     expect(reply).toMatch(/Ada/);

@@ -1,7 +1,7 @@
 /**
- * The planner's contract: its input (the agent's catalog entries, its
+ * The planner's contract: its input (the retriever's catalog entries, its
  * filters, the modes) and the checks on its sub-queries before anything
- * is searched — verbatim evidence, the agent's indices and relations,
+ * is searched — verbatim evidence, the retriever's indices and relations,
  * filters on the sub-query's result types, previous-result references.
  */
 
@@ -14,8 +14,8 @@ import {
   validatePlan,
   type Plan,
   type Previous,
-} from "../../../src/runtime/retrieverAgents/plan.js";
-import { parsePlannerOutput } from "../../../src/runtime/retrieverAgents/plannerOutput.js";
+} from "../../../../src/runtime/assistants/retrievers/plan.js";
+import { parsePlannerOutput } from "../../../../src/runtime/assistants/retrievers/plannerOutput.js";
 import { CONFIG, LENS } from "./fixture.js";
 
 const sub = (overrides: Record<string, unknown> = {}) => ({
@@ -62,7 +62,7 @@ describe("planner output", () => {
     expect(() => validatePlan({ steps: [] }, CONFIG, LENS, ["keyword"], QUESTION, [], undefined)).toThrow("invalid format");
   });
 
-  it("leaves out an index or relation the agent does not allow, and drops a sub-query left without index", () => {
+  it("leaves out an index or relation the retriever does not allow, and drops a sub-query left without index", () => {
     const { plan, notes } = check([
       sub({ indices: ["person_employment", "company~default"], relations: ["works_for", "lives_in"] }),
       sub({ indices: ["ghost"] }),
@@ -70,10 +70,10 @@ describe("planner output", () => {
     expect(plan.subQueries).toHaveLength(1);
     expect(plan.subQueries[0]).toMatchObject({ indices: ["person_employment"], relations: ["works_for"] });
     expect(notes).toEqual([
-      "The index company~default is not one this agent searches; it was left out of a search.",
+      "The index company~default is not one this retriever searches; it was left out of a search.",
       "The relation lives in is not allowed for the chosen indices; it was left out of a search.",
-      "An index this agent does not search was left out of a search.",
-      "A search was dropped: it named no index of this agent.",
+      "An index this retriever does not search was left out of a search.",
+      "A search was dropped: it named no index of this retriever.",
     ]);
   });
 
@@ -105,10 +105,10 @@ describe("planner output", () => {
     expect(check([sub({ filters: [{ id: "city", value: "berlin", quote: "LIVES  in berlin" }] })]).plan.subQueries[0]!.filters).toHaveLength(1);
   });
 
-  it("does not apply a filter the agent lacks or one on another result type", () => {
+  it("does not apply a filter the retriever lacks or one on another result type", () => {
     const { plan, notes } = check([sub({ filters: [{ id: "ghost", value: "Berlin", quote: "Berlin" }] })]);
     expect(plan.subQueries[0]!.filters).toEqual([]);
-    expect(notes).toEqual(["A filter this agent does not allow for the searched type was not applied."]);
+    expect(notes).toEqual(["A filter this retriever does not allow for the searched type was not applied."]);
   });
 
   it("an empty query needs an applied filter or previous reference and drops variants", () => {
@@ -232,7 +232,7 @@ describe("a reference to earlier results without verified previous results", () 
 });
 
 describe("planner input", () => {
-  it("lists the agent's indices from the catalog, limited to the agent's relation groups, and its filters", () => {
+  it("lists the retriever's indices from the catalog, limited to the retriever's relation groups, and its filters", () => {
     const config = { ...CONFIG, indices: [{ index: "person_employment", relations: ["works_for"] }, { index: "ghost" }] };
     const input = JSON.parse(plannerInput(config, LENS, [], ["hybrid", "keyword"], "Who?", [], undefined));
     expect(input.availableModes).toEqual(["hybrid", "keyword"]);

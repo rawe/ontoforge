@@ -399,14 +399,14 @@ export class Neo4jModelingStore implements ModelingStore {
   }
 
   // ------------------------------------------------------------------
-  // AI agent configs
+  // Agent configs
   // ------------------------------------------------------------------
 
-  async listAiAgents(lensId: string): Promise<Row[]> {
-    return runSession(this.driver, (session) => queries.listAiAgents(session, lensId));
+  async listAgents(lensId: string): Promise<Row[]> {
+    return runSession(this.driver, (session) => queries.listAgents(session, lensId));
   }
 
-  async upsertAiAgent(
+  async upsertAgent(
     lensId: string,
     agentConfigId: string,
     key: string,
@@ -416,7 +416,7 @@ export class Neo4jModelingStore implements ModelingStore {
     tools: string[] | null,
   ): Promise<[Row, boolean]> {
     return runSession(this.driver, (session) =>
-      queries.upsertAiAgent(
+      queries.upsertAgent(
         session,
         lensId,
         agentConfigId,
@@ -429,15 +429,15 @@ export class Neo4jModelingStore implements ModelingStore {
     );
   }
 
-  async listAiAgentsForExport(lensId: string): Promise<Row[]> {
+  async listAgentsForExport(lensId: string): Promise<Row[]> {
     return runSession(this.driver, (session) =>
-      queries.listAiAgentsForExport(session, lensId),
+      queries.listAgentsForExport(session, lensId),
     );
   }
 
-  async deleteAiAgent(lensId: string, agentKey: string): Promise<boolean> {
+  async deleteAgent(lensId: string, agentKey: string): Promise<boolean> {
     return runSession(this.driver, (session) =>
-      queries.deleteAiAgent(session, lensId, agentKey),
+      queries.deleteAgent(session, lensId, agentKey),
     );
   }
 

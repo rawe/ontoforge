@@ -14,13 +14,13 @@ import type { TransferEnvelope } from "../schemas.js";
 export type Payload = z.infer<typeof TransferEnvelope>;
 
 /**
- * Warnings for the retriever agents an upgrade converted, by
+ * Warnings for the retrievers an upgrade converted, by
  * `retrieverWarningKey` — they travel beside the payload, which has no
  * place for them, until import stores them with each agent.
  */
 export type RetrieverWarnings = Map<string, string[]>;
 
-/** The key a converted retriever agent's warnings go by. */
+/** The key a converted retriever's warnings go by. */
 export function retrieverWarningKey(lensKey: string, retrieverKey: string): string {
   return `${lensKey}/${retrieverKey}`;
 }

@@ -165,16 +165,16 @@ export const PropertyDefinitionResponse = z.object({
   updatedAt: z.iso.datetime(),
 });
 
-// --- AI Agent Config ---
+// --- Agent Config ---
 
-export const AiAgentConfigUpsert = z.object({
+export const AgentConfigUpsert = z.object({
   name: z.string(),
   description: z.string().nullable().optional(),
   systemPrompt: z.string().nullable().optional(),
   tools: z.array(z.string()).nullable().optional(),
 });
 
-export const AiAgentConfigResponse = z.object({
+export const AgentConfigResponse = z.object({
   key: z.string(),
   name: z.string(),
   description: z.string().nullable(),
@@ -293,7 +293,7 @@ export const ExportLensInclusions = z.object({
   relationTypes: z.array(ExportLensInclusion).default([]),
 });
 
-export const ExportAiAgent = z.object({
+export const ExportAgent = z.object({
   key: z.string(),
   name: z.string(),
   description: z.string().nullable().optional(),
@@ -328,21 +328,21 @@ export const ExportSavedQuery = z.object({
   parameters: z.array(ExportSavedQueryParameter).default([]),
 });
 
-/** One retriever agent in its portable form — also the single-agent
+/** One retriever in its portable form — also the single-agent
  * export. Kept as stored: a version this release cannot run travels too. */
-export const ExportRetrieverAgent = z.object({
+export const ExportRetriever = z.object({
   key: z.string(),
   name: z.string(),
   description: z.string().nullable(),
   configVersion: z.number(),
   config: z.unknown(),
 });
-export type ExportRetrieverAgentInput = z.infer<typeof ExportRetrieverAgent>;
+export type ExportRetrieverInput = z.infer<typeof ExportRetriever>;
 
 /** A lens's assistants, one list per kind; each entry in its portable form. */
 export const ExportAssistants = z.object({
-  agents: z.array(ExportAiAgent).default([]),
-  retrievers: z.array(ExportRetrieverAgent).default([]),
+  agents: z.array(ExportAgent).default([]),
+  retrievers: z.array(ExportRetriever).default([]),
 });
 
 export const ExportLens = z.object({
@@ -513,8 +513,8 @@ export type RelationTypeResponseBody = z.infer<typeof RelationTypeResponse>;
 export type PropertyDefinitionCreateInput = z.infer<typeof PropertyDefinitionCreate>;
 export type PropertyDefinitionUpdateInput = z.infer<typeof PropertyDefinitionUpdate>;
 export type PropertyDefinitionResponseBody = z.infer<typeof PropertyDefinitionResponse>;
-export type AiAgentConfigUpsertInput = z.infer<typeof AiAgentConfigUpsert>;
-export type AiAgentConfigResponseBody = z.infer<typeof AiAgentConfigResponse>;
+export type AgentConfigUpsertInput = z.infer<typeof AgentConfigUpsert>;
+export type AgentConfigResponseBody = z.infer<typeof AgentConfigResponse>;
 export type StepInput = z.infer<typeof StepSchema>;
 export type SavedQueryParameterInput = z.infer<typeof SavedQueryParameterSchema>;
 export type SavedQueryUpsertInput = z.infer<typeof SavedQueryUpsert>;

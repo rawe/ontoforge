@@ -1,18 +1,18 @@
-/** Retriever agents at runtime, under `/ai/assistants/retrievers`: the
- * list, chat, its threads and retrieve. The saved agent (or the lens's
- * derived default agent, `_default`) runs; a request can never supply a
+/** Retrievers at runtime, under `/ai/assistants/retrievers`: the
+ * list, chat, its threads and retrieve. The saved retriever (or the lens's
+ * derived default retriever, `_default`) runs; a request can never supply a
  * configuration. */
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 
-import { getRuntimeStore } from "../../core/ports.js";
-import { ChatPayload, sendChatStream, threadBinding } from "../chatStream.js";
-import { openThread, readThread } from "../threads/access.js";
-import type { ThreadStore } from "../threads/threadStore.js";
+import { getRuntimeStore } from "../../../core/ports.js";
+import { ChatPayload, sendChatStream, threadBinding } from "../../chatStream.js";
+import { openThread, readThread } from "../../threads/access.js";
+import type { ThreadStore } from "../../threads/threadStore.js";
 import {
   chat,
   listRuntimeRetrievers,
-  loadRunnableAgent,
+  loadRunnableRetriever,
   requireLanguageModel,
   requireRetrievers,
   retrieveQuestion,
@@ -24,7 +24,7 @@ const ThreadParams = Params.extend({ threadId: z.string() });
 const Chat = ChatPayload.extend({ diagnostics: z.boolean().default(false) }).strict();
 const Retrieve = z.object({ query: z.string().min(1).max(2000) }).strict();
 
-export const retrieverAgentRuntimeRouter: FastifyPluginAsyncZod<{ threads: ThreadStore }> = async (app, { threads }) => {
+export const retrieverRuntimeRouter: FastifyPluginAsyncZod<{ threads: ThreadStore }> = async (app, { threads }) => {
   app.get(
     "/ai/assistants/retrievers",
     { schema: { tags: ["ai"], params: LensParams } },
@@ -38,9 +38,9 @@ export const retrieverAgentRuntimeRouter: FastifyPluginAsyncZod<{ threads: Threa
     async (request, reply) => {
       requireLanguageModel();
       const store = await getRuntimeStore(request.params.ontologyKey);
-      // Resolved before the stream opens: unknown and invalid agents answer
+      // Resolved before the stream opens: unknown and invalid retrievers answer
       // with a plain error response.
-      const agent = await loadRunnableAgent(request.params.lensKey, request.params.assistantKey, store);
+      const agent = await loadRunnableRetriever(request.params.lensKey, request.params.assistantKey, store);
       const threadId = await openThread(threads, threadBinding(request.params, "retrievers"), request.body.threadId);
       return sendChatStream(reply, { threads, threadId }, (execution) =>
         chat(
@@ -78,7 +78,7 @@ export const retrieverAgentRuntimeRouter: FastifyPluginAsyncZod<{ threads: Threa
       if (request.raw.aborted || reply.raw.destroyed) controller.abort();
       try {
         const store = await getRuntimeStore(request.params.ontologyKey);
-        const agent = await loadRunnableAgent(request.params.lensKey, request.params.assistantKey, store);
+        const agent = await loadRunnableRetriever(request.params.lensKey, request.params.assistantKey, store);
         return await retrieveQuestion(agent, request.body.query, controller.signal);
       } finally {
         request.raw.removeListener("aborted", disconnect);

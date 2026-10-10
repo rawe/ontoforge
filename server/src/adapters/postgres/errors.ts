@@ -377,7 +377,7 @@ function translateConstraint(exc: pg.DatabaseError): OntoForgeError | null {
     case "23505":
       switch (constraint) {
         case "retriever_agent_key_unique":
-          return new ConflictError("Retriever agent key already exists in the target lens");
+          return new ConflictError("Retriever key already exists in the target lens");
         case "ontology_key_unique":
           return new ConflictError(`Ontology with key '${value}' already exists`);
         case "ontology_display_name_unique":

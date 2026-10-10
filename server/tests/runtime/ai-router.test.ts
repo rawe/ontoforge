@@ -42,7 +42,7 @@ afterAll(async () => {
 beforeEach(() => {
   holder.store = createMockRuntimeStore();
   holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeFullSchema({ lensKey: "test_lens" }));
-  holder.store.getAiAgentConfigs.mockResolvedValue([
+  holder.store.getAgentConfigs.mockResolvedValue([
     {
       key: "my-agent",
       name: "My Agent",
@@ -98,8 +98,8 @@ describe("removed routes", () => {
     ["GET", "/ai/agents"],
     ["POST", "/ai/agents/my-agent/chat"],
     ["POST", "/ai/agents/_default/chat"],
-    ["POST", "/retriever-agents/find/chat"],
-    ["POST", "/retriever-agents/find/retrieve"],
+    ["POST", "/retrievers/find/chat"],
+    ["POST", "/retrievers/find/retrieve"],
   ] as const)("%s %s answers 404", async (method, path) => {
     setAiModel(new FakeToolCallingModel([new AIMessage("Unused")]));
     const res = await app.inject({

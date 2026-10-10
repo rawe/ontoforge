@@ -28,17 +28,17 @@ import type { ModelingStore } from "../core/ports.js";
 import {
   DEFAULT_ANSWER_FIELD_CHARACTERS,
   DEFAULT_THRESHOLD,
-  MAX_AGENT_FILTERS,
-  MAX_AGENT_INDICES,
+  MAX_RETRIEVER_FILTERS,
+  MAX_RETRIEVER_INDICES,
   MAX_ANSWER_FIELDS,
   MAX_FILTER_HOPS,
-  RETRIEVER_AGENT_CONFIG_VERSION,
-} from "../core/retrieverAgent.js";
+  RETRIEVER_CONFIG_VERSION,
+} from "../core/retriever.js";
 import { LENS_RESOURCE_KEY_PATTERN, MAX_KEY_LENGTH, type TypeKind } from "../core/schemas.js";
 import { OntologyCreate } from "../registry/schemas.js";
 import * as registryService from "../registry/service.js";
 import {
-  AiAgentConfigUpsert,
+  AgentConfigUpsert,
   EntityTypeCreate,
   EntityTypeUpdate,
   IncludeTypeRequest,
@@ -52,7 +52,7 @@ import {
   SearchSettingsUpdate,
   TRANSFER_FORMAT_VERSION,
 } from "../modeling/schemas.js";
-import * as retrieverAgents from "../modeling/retrieverAgents.js";
+import * as retrievers from "../modeling/retrievers.js";
 import { IMPORTABLE_FORMAT_VERSIONS } from "../modeling/transfer/upgrades.js";
 import * as searchIndices from "../modeling/searchIndices.js";
 import * as service from "../modeling/service.js";
@@ -1070,7 +1070,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
       },
     },
     wrap("list_agents", async (args: { lens_key: string }) => {
-      const results = await service.listAiAgents(args.lens_key, await getModelingStore(ontologyKey));
+      const results = await service.listAgents(args.lens_key, await getModelingStore(ontologyKey));
       return jsonResult(results);
     }),
   );
@@ -1085,7 +1085,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
       },
     },
     wrap("get_agent", async (args: { lens_key: string; agent_key: string }) => {
-      const result = await service.getAiAgent(
+      const result = await service.getAgent(
         args.lens_key,
         args.agent_key,
         await getModelingStore(ontologyKey),
@@ -1119,13 +1119,13 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
       system_prompt?: string | undefined;
       tools?: string[] | undefined;
     }) => {
-      const body = AiAgentConfigUpsert.parse({
+      const body = AgentConfigUpsert.parse({
         name: args.name,
         description: args.description ?? null,
         systemPrompt: args.system_prompt ?? null,
         tools: args.tools ?? null,
       });
-      const [result, created] = await service.upsertAiAgent(
+      const [result, created] = await service.upsertAgent(
         args.lens_key,
         args.key,
         body,
@@ -1145,7 +1145,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
       },
     },
     wrap("delete_agent", async (args: { lens_key: string; agent_key: string }) => {
-      await service.deleteAiAgent(args.lens_key, args.agent_key, await getModelingStore(ontologyKey));
+      await service.deleteAgent(args.lens_key, args.agent_key, await getModelingStore(ontologyKey));
       return textResult(`Agent '${args.agent_key}' deleted from lens '${args.lens_key}'.`);
     }),
   );
@@ -1165,7 +1165,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
       },
     },
     wrap("list_retrievers", async (args: { lens_key: string }) => {
-      const results = await retrieverAgents.listRetrieverAgents(
+      const results = await retrievers.listRetrievers(
         args.lens_key,
         await getModelingStore(ontologyKey),
         await getRuntimeStore(ontologyKey),
@@ -1186,7 +1186,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
       },
     },
     wrap("get_retriever", async (args: { lens_key: string; retriever_key: string }) => {
-      const result = await retrieverAgents.getRetrieverAgent(
+      const result = await retrievers.getRetriever(
         args.lens_key,
         args.retriever_key,
         await getModelingStore(ontologyKey),
@@ -1203,15 +1203,15 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
         "Create or replace a retriever of a lens: an assistant that answers questions over the " +
         "lens's search indices. " +
         `Key must match pattern ${LENS_RESOURCE_KEY_PATTERN.source} and be at most ${MAX_KEY_LENGTH} characters. ` +
-        `config is a configuration version ${RETRIEVER_AGENT_CONFIG_VERSION} object (camelCase): ` +
-        `indices — 1 to ${MAX_AGENT_INDICES} search indices it searches, each once, as {index, relations?}: ` +
+        `config is a configuration version ${RETRIEVER_CONFIG_VERSION} object (camelCase): ` +
+        `indices — 1 to ${MAX_RETRIEVER_INDICES} search indices it searches, each once, as {index, relations?}: ` +
         "index is a key from list_search_indices (managed '<entityType>~default' or " +
         "'<entityType>~<documentProperty>', or custom) that the lens can search — a scoped lens " +
         "must include it and expose its root entity type; a switched-off managed index is not " +
         "searchable. relations optionally narrows to relation types of the index's relation " +
         "groups (omit for every group the lens shows). The root entity types of the chosen " +
         "indices are the result types: the retriever finds entities of those types only. " +
-        `filters (optional, default []) — up to ${MAX_AGENT_FILTERS} exact conditions a question may set, ` +
+        `filters (optional, default []) — up to ${MAX_RETRIEVER_FILTERS} exact conditions a question may set, ` +
         "as {id, entityType, path, field}: id unique in the retriever, entityType a result type, " +
         `path 0 to ${MAX_FILTER_HOPS} hops [{relationTypeKey, direction: 'outgoing'|'incoming'}] from it ` +
         "through relation types the lens shows, field a property visible on the entity type the " +
@@ -1239,13 +1239,13 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
       description?: string | undefined;
       config: Record<string, unknown>;
     }) => {
-      const [result, created] = await retrieverAgents.saveRetrieverAgent(
+      const [result, created] = await retrievers.saveRetriever(
         args.lens_key,
         args.key,
         {
           name: args.name,
           description: args.description ?? null,
-          configVersion: RETRIEVER_AGENT_CONFIG_VERSION,
+          configVersion: RETRIEVER_CONFIG_VERSION,
           config: args.config,
         },
         await getModelingStore(ontologyKey),
@@ -1265,7 +1265,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
       },
     },
     wrap("delete_retriever", async (args: { lens_key: string; retriever_key: string }) => {
-      await retrieverAgents.deleteRetrieverAgent(
+      await retrievers.deleteRetriever(
         args.lens_key,
         args.retriever_key,
         await getModelingStore(ontologyKey),

@@ -57,7 +57,7 @@ function normalize(payload: Row): Row {
   }
   for (const lens of (clone.lenses as Row[]) ?? []) {
     // An adapter without search indices exports neither inclusions nor
-    // retriever agents.
+    // retrievers.
     if (keepsOwnSearchStorage) {
       delete lens.indexInclusions;
       delete (lens.assistants as Row).retrievers;

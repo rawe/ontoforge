@@ -68,7 +68,7 @@ describe("off-format ids short-circuit to the not-found shape, database untouche
     expect(await store.deleteRelationType("nope")).toBe(false);
     expect(await store.deleteProperty("nope", "EntityType", VALID)).toBe(false);
     expect(await store.deleteProperty(VALID, "RelationType", "nope")).toBe(false);
-    expect(await store.deleteAiAgent("nope", "agent")).toBe(false);
+    expect(await store.deleteAgent("nope", "agent")).toBe(false);
     expect(await store.deleteSavedQuery("nope", "query")).toBe(false);
     expect(fakeDb.queries).toEqual([]);
   });
@@ -77,8 +77,8 @@ describe("off-format ids short-circuit to the not-found shape, database untouche
     expect(await store.listProperties("nope", "EntityType")).toEqual([]);
     expect(await store.getPropertyByKey("nope", "EntityType", "name")).toBeNull();
     expect(await store.isEntityTypeReferenced("nope")).toBe(false);
-    expect(await store.listAiAgents("nope")).toEqual([]);
-    expect(await store.listAiAgentsForExport("nope")).toEqual([]);
+    expect(await store.listAgents("nope")).toEqual([]);
+    expect(await store.listAgentsForExport("nope")).toEqual([]);
     expect(await store.listSavedQueries("nope")).toEqual([]);
     expect(await store.listSavedQueriesForExport("nope")).toEqual([]);
     expect(fakeDb.queries).toEqual([]);

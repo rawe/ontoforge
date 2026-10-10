@@ -1,7 +1,7 @@
 /**
  * The 5.0 → 6.0 upgrader alone: a 5.0 payload in, a 6.0 payload out —
  * the one language becomes the set, search indices are dropped unread,
- * name properties are derived, retrievers become retriever agents with
+ * name properties are derived, retrievers become `retrieverAgents` with
  * their conversion warnings beside the payload — and malformed 5.0
  * fields reported at their 5.0 paths.
  */

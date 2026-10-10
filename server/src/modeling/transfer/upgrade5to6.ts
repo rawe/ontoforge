@@ -28,9 +28,9 @@ import {
   LEGACY_RETRIEVER_CONFIG_VERSION,
   legacyRetrieverKey,
 } from "../../core/legacyRetrieverConfig.js";
-import { RETRIEVER_AGENT_CONFIG_VERSION } from "../../core/retrieverAgent.js";
+import { RETRIEVER_CONFIG_VERSION } from "../../core/retriever.js";
 import { NAME_PROPERTY_DATA_TYPE, namePropertyDisplayName } from "../../core/schemas.js";
-import { ExportRetrieverAgent } from "../schemas.js";
+import { ExportRetriever } from "../schemas.js";
 import {
   readFields,
   retrieverWarningKey,
@@ -52,7 +52,7 @@ const Payload5 = z.looseObject({
   lenses: z.array(
     z.looseObject({
       key: z.string(),
-      retrievers: z.array(ExportRetrieverAgent).default([]),
+      retrievers: z.array(ExportRetriever).default([]),
     }),
   ),
 });
@@ -95,7 +95,7 @@ export const upgrade5to6: Upgrader = (raw) => {
       return {
         ...retriever,
         key: renamed.key,
-        configVersion: RETRIEVER_AGENT_CONFIG_VERSION,
+        configVersion: RETRIEVER_CONFIG_VERSION,
         config: converted.config,
       };
     });

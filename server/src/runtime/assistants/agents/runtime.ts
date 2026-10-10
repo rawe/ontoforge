@@ -1,5 +1,5 @@
 /**
- * AI-powered runtime operations (`docs/capabilities/ai-agents.md`): agent
+ * Agents at runtime (`docs/capabilities/agents.md`): agent
  * chat and the agent list. The engine is
  * LangChain.js / LangGraph.js (approved stack).
  *
@@ -20,7 +20,7 @@ import {
   SEARCH_EVIDENCE_GUIDANCE,
   TOOL_MIN_SIMILARITY_GUIDANCE,
   toolMinSimilarity,
-} from "./search/strategies.js";
+} from "../../search/strategies.js";
 
 import { randomUUID } from "node:crypto";
 
@@ -39,14 +39,14 @@ import {
 import { createAgent, createMiddleware } from "langchain";
 import { z } from "zod";
 
-import { DEFAULT_AGENT_CONFIG, getAiModel, type AgentConfig } from "../core/ai.js";
-import { getEmbeddingProvider } from "../core/embedding.js";
-import { NotFoundError, ValidationError } from "../core/exceptions.js";
-import type { RuntimeStore } from "../core/ports.js";
-import { loadSchema, type SchemaCacheValue } from "./schemaCache.js";
-import * as service from "./service.js";
-import { TURNS_THE_MODEL_SEES, type GraphThread } from "./threads/threadStore.js";
-import { lastTurns, trimTurns } from "./threads/turns.js";
+import { DEFAULT_AGENT_CONFIG, getAiModel, type AgentConfig } from "../../../core/ai.js";
+import { getEmbeddingProvider } from "../../../core/embedding.js";
+import { NotFoundError, ValidationError } from "../../../core/exceptions.js";
+import type { RuntimeStore } from "../../../core/ports.js";
+import { loadSchema, type SchemaCacheValue } from "../../schemaCache.js";
+import * as service from "../../service.js";
+import { TURNS_THE_MODEL_SEES, type GraphThread } from "../../threads/threadStore.js";
+import { lastTurns, trimTurns } from "../../threads/turns.js";
 import {
   TOOL_EXECUTE_QUERY,
   TOOL_GET_DOCUMENT,
@@ -60,7 +60,7 @@ import {
   TOOL_SEARCH_DOCUMENTS,
   TOOL_SEARCH_SAVED_QUERIES,
   TOOL_SEARCH,
-} from "./toolNames.js";
+} from "../../toolNames.js";
 
 type Row = Record<string, unknown>;
 
@@ -645,7 +645,7 @@ export async function runAgentChat(
 export async function prepareChat(lensKey: string, store: RuntimeStore, agentKey: string): Promise<AgentConfig> {
   const loaded = await loadSchema(lensKey, store);
   const config = agentKey === DEFAULT_AGENT_CONFIG.key ? DEFAULT_AGENT_CONFIG : loaded.agentConfigs[agentKey];
-  if (!config) throw new NotFoundError(`AI agent '${agentKey}' not found`);
+  if (!config) throw new NotFoundError(`Agent '${agentKey}' not found`);
   requireModel();
   return config;
 }

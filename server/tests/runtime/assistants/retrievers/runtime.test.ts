@@ -1,5 +1,5 @@
 /**
- * The retriever-agent pipeline with a fake model and a mocked search
+ * The retriever pipeline with a fake model and a mocked search
  * engine: exactly planner + answer model, the stream's events and
  * diagnostics shapes (contract), planner failures before any answer,
  * cancellation, turns on a thread (what the models see, what the thread
@@ -18,24 +18,24 @@ const engine = vi.hoisted(() => ({
   searchableIndices: vi.fn(),
   searchIndexCatalog: vi.fn(),
 }));
-vi.mock("../../../src/config.js", () => ({
+vi.mock("../../../../src/config.js", () => ({
   settings: { AI_PROVIDER: "fake", AI_MODEL: "test", AI_BASE_URL: "http://unused" },
 }));
-vi.mock("../../../src/core/ai.js", () => ({ createAiModel: vi.fn(() => fake) }));
-vi.mock("../../../src/runtime/search/indexSearch.js", () => engine);
+vi.mock("../../../../src/core/ai.js", () => ({ createAiModel: vi.fn(() => fake) }));
+vi.mock("../../../../src/runtime/search/indexSearch.js", () => engine);
 
-import { settings } from "../../../src/config.js";
-import { createAiModel } from "../../../src/core/ai.js";
-import type { RuntimeStore, SearchIndexRecord, SearchIndexStore } from "../../../src/core/ports.js";
-import type { LoadedSchema } from "../../../src/runtime/schemaCache.js";
-import { PLANNER, PLANNER_RESPONSE_FORMAT, REPLAN } from "../../../src/runtime/retrieverAgents/plan.js";
+import { settings } from "../../../../src/config.js";
+import { createAiModel } from "../../../../src/core/ai.js";
+import type { RuntimeStore, SearchIndexRecord, SearchIndexStore } from "../../../../src/core/ports.js";
+import type { LoadedSchema } from "../../../../src/runtime/schemaCache.js";
+import { PLANNER, PLANNER_RESPONSE_FORMAT, REPLAN } from "../../../../src/runtime/assistants/retrievers/plan.js";
 import {
   chat,
   retrieveQuestion,
-  type RunnableAgent,
-} from "../../../src/runtime/retrieverAgents/runtime.js";
-import { MemoryThreadStore } from "../../../src/runtime/threads/memoryThreadStore.js";
-import { TURNS_PER_THREAD, TURNS_THE_MODEL_SEES, type GraphThread } from "../../../src/runtime/threads/threadStore.js";
+  type RunnableRetriever,
+} from "../../../../src/runtime/assistants/retrievers/runtime.js";
+import { MemoryThreadStore } from "../../../../src/runtime/threads/memoryThreadStore.js";
+import { TURNS_PER_THREAD, TURNS_THE_MODEL_SEES, type GraphThread } from "../../../../src/runtime/threads/threadStore.js";
 import { CONFIG, LENS, SCHEMA } from "./fixture.js";
 
 const store = {
@@ -46,7 +46,7 @@ const store = {
   distinctEntityValues: vi.fn(async (): Promise<string[]> => []),
 } as unknown as RuntimeStore;
 
-const agent: RunnableAgent = {
+const agent: RunnableRetriever = {
   key: "people",
   config: CONFIG,
   scope: {
@@ -73,7 +73,7 @@ const planned = (subQueries: unknown[]) => ({ content: JSON.stringify({ subQueri
 
 const threads = new MemoryThreadStore();
 
-/** A new thread of the agent, as a chat without a thread id starts one. */
+/** A new thread of the retriever, as a chat without a thread id starts one. */
 async function newThread(): Promise<GraphThread> {
   const { threadId } = await threads.create({ ontologyKey: "o", lensKey: "all", kind: "retrievers", assistantKey: "people" });
   return { checkpointer: threads.checkpointer, threadId };
@@ -85,7 +85,7 @@ async function run(
   diagnostics = true,
   thread?: GraphThread,
   signal = new AbortController().signal,
-  asked: RunnableAgent = agent,
+  asked: RunnableRetriever = agent,
 ) {
   const events: Record<string, unknown>[] = [];
   const on = thread ?? (await newThread());
@@ -108,7 +108,7 @@ beforeEach(() => {
   );
 });
 
-describe("retriever agent pipeline", () => {
+describe("retriever pipeline", () => {
   it("performs exactly planner + answer, streams the reply and emits the contract's diagnostics", async () => {
     const { events, result } = await run("Everyone in Berlin");
     expect(fake.invoke).toHaveBeenCalledTimes(1);
@@ -322,7 +322,7 @@ describe("retriever agent pipeline", () => {
   it("results found with another configuration are not offered; a reference to them is ignored with a limitation", async () => {
     const first = await run("Everyone in Berlin", false);
     const saved = { ...CONFIG, threshold: 0.5 };
-    const changed: RunnableAgent = { ...agent, config: saved, scope: { ...agent.scope, config: saved } };
+    const changed: RunnableRetriever = { ...agent, config: saved, scope: { ...agent.scope, config: saved } };
     engine.rankThroughIndices.mockResolvedValue([]);
     fake.invoke.mockResolvedValue(planned([sub({ query: "CTO", filters: [], previous: { filterId: null, quote: "these people" } })]));
     const { events } = await run("Which of these people is CTO?", true, first.thread, undefined, changed);
@@ -417,12 +417,12 @@ describe("retrieve", () => {
     expect(fake.invoke).toHaveBeenCalledTimes(2);
   });
 
-  it("refuses a planner input over the cap; the default agent's refusal says a configured agent is needed", async () => {
+  it("refuses a planner input over the cap; the default retriever's refusal says a configured retriever is needed", async () => {
     const big = "x".repeat(25_000);
     await expect(retrieveQuestion(agent, big, signal())).rejects.toThrow("Planning context exceeds the limit");
     const fallback = { ...agent, key: "_default" };
     await expect(retrieveQuestion(fallback, big, signal())).rejects.toThrow(
-      "This lens is too large for the default retriever agent",
+      "This lens is too large for the default retriever",
     );
     expect(fake.invoke).not.toHaveBeenCalled();
   });

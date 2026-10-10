@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 
 import { convertLegacyRetrieverConfig, legacyRetrieverKey } from "../../src/core/legacyRetrieverConfig.js";
-import { RetrieverAgentConfig, similarityFloor } from "../../src/core/retrieverAgent.js";
+import { RetrieverConfig, similarityFloor } from "../../src/core/retriever.js";
 
 const DATA_TYPES: Record<string, string> = {
   "aussteller.name": "string",
@@ -78,7 +78,7 @@ describe("version-1 retriever conversion", () => {
         "aussteller_hat_produkt (incoming) → aussteller_in_halle (outgoing).",
     ]);
     // The result is a version-2 shape.
-    expect(RetrieverAgentConfig.safeParse(converted.config).success).toBe(true);
+    expect(RetrieverConfig.safeParse(converted.config).success).toBe(true);
   });
 
   it("a bucket searching only documents gets only passage indices; defaults fill threshold and characters", () => {
@@ -130,7 +130,7 @@ describe("version-1 retriever keys", () => {
   });
 });
 
-describe("retriever agent threshold", () => {
+describe("retriever threshold", () => {
   it("maps the cosine threshold onto the search's (1 + cosine) / 2 scale (A5)", () => {
     expect(similarityFloor(0.35)).toBeCloseTo(0.675);
     expect(similarityFloor(-1)).toBe(0);
@@ -138,7 +138,7 @@ describe("retriever agent threshold", () => {
   });
 
   it("defaults threshold and answer characters", () => {
-    const parsed = RetrieverAgentConfig.parse({ indices: [{ index: "a~default" }], answerFields: { a: ["name"] } });
+    const parsed = RetrieverConfig.parse({ indices: [{ index: "a~default" }], answerFields: { a: ["name"] } });
     expect(parsed).toEqual({
       indices: [{ index: "a~default" }],
       filters: [],

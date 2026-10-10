@@ -1,8 +1,8 @@
 /**
- * Retriever agents through the modeling and runtime REST surface on
+ * Retrievers through the modeling and runtime REST surface on
  * PostgreSQL: CRUD, copy and move, single export and import (version 2,
  * and a 5.x version-1 export converted with warnings), refusal of an
- * invalid configuration on save, agents that become invalid later (index
+ * invalid configuration on save, retrievers that become invalid later (index
  * deleted, managed index switched off) and are refused at execution, the
  * design transfer — 6.0 round trip and 5.0 conversion — and retrieval of
  * a two-relation question on the real search engine (keyword mode, no
@@ -22,9 +22,9 @@ import { setAiModel } from "../../src/core/ai.js";
 import { setEmbeddingProvider } from "../../src/core/embedding.js";
 import { closeStores, getRuntimeStore, initStores } from "../../src/core/ports.js";
 import { drainSearchWork } from "../../src/runtime/indexing/worker.js";
-import { loadRunnableAgent } from "../../src/runtime/retrieverAgents/runtime.js";
-import { retrieve, retrievedResults } from "../../src/runtime/retrieverAgents/retrieve.js";
-import type { Plan } from "../../src/runtime/retrieverAgents/plan.js";
+import { loadRunnableRetriever } from "../../src/runtime/assistants/retrievers/runtime.js";
+import { retrieve, retrievedResults } from "../../src/runtime/assistants/retrievers/retrieve.js";
+import type { Plan } from "../../src/runtime/assistants/retrievers/plan.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { fakeEmbeddingProvider } from "../fakeEmbedding.js";
 import { wipeDatabase } from "./reset.js";
@@ -94,7 +94,7 @@ beforeEach(async () => {
   setEmbeddingProvider(null);
 });
 
-it.skipIf(postgres)("an adapter without search indices answers FEATURE_DISABLED for every retriever-agent route", async () => {
+it.skipIf(postgres)("an adapter without search indices answers FEATURE_DISABLED for every retriever route", async () => {
   await post("/api/ontologies", { key: O });
   await post(`${MODEL}/lenses`, { key: "all", name: "All" });
   for (const res of [
@@ -110,7 +110,7 @@ it.skipIf(postgres)("an adapter without search indices answers FEATURE_DISABLED 
   }
 });
 
-describe.skipIf(!postgres)("retriever agents", () => {
+describe.skipIf(!postgres)("retrievers", () => {
   /** person (name, email, bio) —works_for (role)→ company; —lives_in→ city; lenses all and people (person only). */
   async function schema(o = O): Promise<{ peopleLensId: string }> {
     const model = `/api/ontologies/${o}/model`;
@@ -166,7 +166,7 @@ describe.skipIf(!postgres)("retriever agents", () => {
     return ids;
   }
 
-  it("creates, lists, reads, replaces and deletes an agent; a save is checked against the lens", async () => {
+  it("creates, lists, reads, replaces and deletes a retriever; a save is checked against the lens", async () => {
     await schema();
     const created = await request("PUT", `${AGENTS}/people`, BODY);
     expect(created.statusCode, created.body).toBe(201);
@@ -206,7 +206,7 @@ describe.skipIf(!postgres)("retriever agents", () => {
     expect((await request("PUT", `${AGENTS}/v1`, { ...BODY, configVersion: 1 })).statusCode).toBe(422);
     expect((await request("GET", `${AGENTS}/broken`)).statusCode).toBe(404);
     expect((await request("GET", `${MODEL}/lenses/nope/assistants/retrievers`)).statusCode).toBe(404);
-    expect((await request("GET", `${MODEL}/lenses/all/retriever-agents`)).statusCode).toBe(404);
+    expect((await request("GET", `${MODEL}/lenses/all/retrievers`)).statusCode).toBe(404);
 
     expect((await request("DELETE", `${AGENTS}/people`)).statusCode).toBe(204);
     expect((await request("DELETE", `${AGENTS}/people`)).statusCode).toBe(404);
@@ -293,7 +293,7 @@ describe.skipIf(!postgres)("retriever agents", () => {
     expect(saved.validation.warnings).toEqual([]);
   });
 
-  it("an agent that becomes invalid is reported on read and refused at execution", async () => {
+  it("a retriever that becomes invalid is reported on read and refused at execution", async () => {
     await schema();
     await ok("PUT", `${AGENTS}/people`, BODY);
     const chat = (key = "people") => request("POST", `${RUNTIME}/ai/assistants/retrievers/${key}/chat`, { message: "Who is CTO at ACME?" });
@@ -302,7 +302,7 @@ describe.skipIf(!postgres)("retriever agents", () => {
     const unavailable = await chat();
     expect(unavailable.statusCode).toBe(422);
     expect(unavailable.json().error.details.code).toBe("FEATURE_DISABLED");
-    // With a model (never called here), the agent itself is checked first.
+    // With a model (never called here), the retriever itself is checked first.
     const withModel = async (key?: string) => {
       setAiModel({} as BaseChatModel);
       try {
@@ -340,7 +340,7 @@ describe.skipIf(!postgres)("retriever agents", () => {
     ]);
   });
 
-  it("design transfer carries agents into a fresh ontology; 5.0 retrievers convert", async () => {
+  it("design transfer carries retrievers into a fresh ontology; 5.0 retrievers convert", async () => {
     await schema();
     await ok("PUT", `${AGENTS}/people`, BODY);
     const payload = await ok("GET", `${MODEL}/export`);
@@ -393,7 +393,7 @@ describe.skipIf(!postgres)("retriever agents", () => {
     await schema();
     const ids = await data();
     await ok("PUT", `${AGENTS}/people`, BODY);
-    const agent = await loadRunnableAgent("all", "people", await getRuntimeStore(O));
+    const agent = await loadRunnableRetriever("all", "people", await getRuntimeStore(O));
     const scope = { ...agent.scope, signal: new AbortController().signal };
     const sub = (overrides: Partial<Plan["subQueries"][number]>): Plan["subQueries"][number] => ({
       indices: ["person_employment"], relations: ["works_for"], query: "works at ACME", variants: [], mode: "semantic",
@@ -418,7 +418,7 @@ describe.skipIf(!postgres)("retriever agents", () => {
     await schema();
     const ids = await data();
     await ok("PUT", `${AGENTS}/people`, BODY);
-    const agent = await loadRunnableAgent("all", "people", await getRuntimeStore(O));
+    const agent = await loadRunnableRetriever("all", "people", await getRuntimeStore(O));
     const scope = { ...agent.scope, signal: new AbortController().signal };
     const sub = (overrides: Partial<Plan["subQueries"][number]>): Plan["subQueries"][number] => ({
       indices: ["person_employment"], relations: ["works_for"], query: "CTO ACME", variants: [], mode: "keyword",
@@ -466,11 +466,11 @@ describe.skipIf(!postgres)("retriever agents", () => {
     expect(listed.items.map((item) => item.label).sort()).toEqual(["Ada", "Eve"]);
   });
 
-  it("the default agent derives its configuration from the lens and runs without being stored", async () => {
+  it("the default retriever derives its configuration from the lens and runs without being stored", async () => {
     await schema();
     const ids = await data();
     const store = await getRuntimeStore(O);
-    const fallback = await loadRunnableAgent("all", "_default", store);
+    const fallback = await loadRunnableRetriever("all", "_default", store);
     expect(fallback.config.indices.map((reference) => reference.index)).toEqual([
       "city~default", "company~default", "person~bio", "person~default",
     ]);
@@ -501,7 +501,7 @@ describe.skipIf(!postgres)("retriever agents", () => {
     // It follows switch-off and the lens scope.
     await ok("PUT", `${MODEL}/search-settings`, { disabledIndices: ["person~bio"] });
     invalidateLoadedSchemaCache();
-    expect((await loadRunnableAgent("all", "_default", store)).config.indices.map((r) => r.index)).not.toContain("person~bio");
+    expect((await loadRunnableRetriever("all", "_default", store)).config.indices.map((r) => r.index)).not.toContain("person~bio");
     const solo = await post(`${MODEL}/lenses`, { key: "solo", name: "Solo" });
     await post(`${MODEL}/lenses/${solo.lensId}/includes/entity-types`, { key: "person" });
     // A scoped lens searches the indices it includes.
@@ -509,12 +509,12 @@ describe.skipIf(!postgres)("retriever agents", () => {
       await post(`${MODEL}/lenses/${solo.lensId}/includes/search-indices`, { key });
     }
     invalidateLoadedSchemaCache();
-    const scoped = await loadRunnableAgent("solo", "_default", store);
+    const scoped = await loadRunnableRetriever("solo", "_default", store);
     expect(scoped.config.indices.map((r) => r.index)).toEqual(["person~default"]);
     expect(scoped.config.filters.map((filter) => filter.id)).toEqual(["person"]);
   });
 
-  it("the default agent with nothing to search refuses a question before any model call", async () => {
+  it("the default retriever with nothing to search refuses a question before any model call", async () => {
     await schema();
     // A lens that shows only cities, whose one managed index is switched off.
     const bare = await post(`${MODEL}/lenses`, { key: "bare", name: "Bare" });

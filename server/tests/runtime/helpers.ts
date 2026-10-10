@@ -176,7 +176,7 @@ export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeSto
     supportsKeywordRanking: vi.fn(() => false),
     supportsSearchPathConditions: vi.fn(() => false),
     getFullSchemaWithLensInclusions: vi.fn(async () => null),
-    getAiAgentConfigs: vi.fn(async () => []),
+    getAgentConfigs: vi.fn(async () => []),
     getSavedQueries: vi.fn(async () => []),
     createEntity: vi.fn(),
     listEntities: vi.fn(async () => [[], 0]),

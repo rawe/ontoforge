@@ -8,11 +8,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const engine = vi.hoisted(() => ({ rankThroughIndices: vi.fn(), describeMatches: vi.fn() }));
-vi.mock("../../../src/runtime/search/indexSearch.js", () => engine);
+vi.mock("../../../../src/runtime/search/indexSearch.js", () => engine);
 
-import type { RuntimeStore, SearchIndexRecord, SearchIndexStore } from "../../../src/core/ports.js";
-import type { LoadedSchema } from "../../../src/runtime/schemaCache.js";
-import type { Plan } from "../../../src/runtime/retrieverAgents/plan.js";
+import type { RuntimeStore, SearchIndexRecord, SearchIndexStore } from "../../../../src/core/ports.js";
+import type { LoadedSchema } from "../../../../src/runtime/schemaCache.js";
+import type { Plan } from "../../../../src/runtime/assistants/retrievers/plan.js";
 import {
   answerSearches,
   boundContext,
@@ -23,7 +23,7 @@ import {
   retrieve,
   retrievedResults,
   type RetrievalScope,
-} from "../../../src/runtime/retrieverAgents/retrieve.js";
+} from "../../../../src/runtime/assistants/retrievers/retrieve.js";
 import { CATALOG, CONFIG, LENS, SCHEMA } from "./fixture.js";
 
 const record = (key: string): SearchIndexRecord => {
@@ -123,7 +123,7 @@ beforeEach(() => {
 });
 
 describe("sub-query search", () => {
-  it("asks the engine with the agent's relations, the threshold floor and one call per query text", async () => {
+  it("asks the engine with the retriever's relations, the threshold floor and one call per query text", async () => {
     engine.rankThroughIndices.mockResolvedValue([hit("ada", "person_employment", "Employment Role: CTO Company: ACME")]);
     const plan: Plan = { subQueries: [subQuery({ indices: ["person_employment", "person_home"], variants: ["chief technology officer ACME"] })], unsupportedReason: null };
     const retrieval = await retrieve(scope(), plan);
@@ -131,7 +131,7 @@ describe("sub-query search", () => {
     const request = engine.rankThroughIndices.mock.calls[0]![2];
     expect(request).toMatchObject({ query: "CTO at ACME", mode: "hybrid", matching: "any", relations: null, limit: 30 });
     expect(request.minScore).toBeCloseTo(0.675);
-    // Per index: the agent's relation subset (works_for), all groups (null) for person_home.
+    // Per index: the retriever's relation subset (works_for), all groups (null) for person_home.
     expect(request.targets.map((t: { index: { key: string }; relations: unknown; entityIds: unknown }) => [t.index.key, t.relations, t.entityIds])).toEqual([
       ["person_employment", ["works_for"], null],
       ["person_home", null, null],
@@ -148,7 +148,7 @@ describe("sub-query search", () => {
     ]);
   });
 
-  it("keyword mode passes no floor; the planner's relations narrow within the agent's", async () => {
+  it("keyword mode passes no floor; the planner's relations narrow within the retriever's", async () => {
     engine.rankThroughIndices.mockResolvedValue([]);
     await retrieve(scope(), { subQueries: [subQuery({ mode: "keyword", indices: ["person_home"], relations: ["lives_in"] })], unsupportedReason: null });
     const request = engine.rankThroughIndices.mock.calls[0]![2];
@@ -228,7 +228,7 @@ describe("sub-query search", () => {
       [0, "CTO at ACME"],
       [1, "Home Berlin"],
     ]);
-    // Bob's long email is cut to the agent's characters, and the answer model is told.
+    // Bob's long email is cut to the retriever's characters, and the answer model is told.
     expect(String(retrieval.items[1]!.fields.email)).toHaveLength(800 + " [truncated]".length);
     expect(retrieval.cutFields).toEqual(["Email"]);
     expect(retrieval.limitations).toEqual([]);

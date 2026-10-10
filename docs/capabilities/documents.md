@@ -194,7 +194,7 @@ obey the identical rules.
 
 An agent reads documents too, and only reads them: `get_document` is grantable to one,
 alongside the same document-search tool that MCP exposes. The rules
-are in [ai-agents.md](ai-agents.md). Declaring the property at all is
+are in [agents.md](agents.md). Declaring the property at all is
 [schema modeling](schema-modeling.md), over its own routes and tools.
 
 In the web UI, document properties appear as a compact size badge in tables and as a

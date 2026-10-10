@@ -194,4 +194,4 @@ answers it.
 A model reaching this capability over MCP or as an agent tool sees three tools that
 compose into one workflow: search or list to find a key and its parameters, then run it.
 An agent restricted to exactly those three can query a graph usefully while being unable
-to write a query at all — see [ai-agents.md](ai-agents.md).
+to write a query at all — see [agents.md](agents.md).

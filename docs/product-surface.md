@@ -294,11 +294,11 @@ instance data stay. Five tabs — Retrievers only on a server with search indice
 **Agents** — create, edit and delete the lens's agents: name, derived-and-then-immutable
 key, description, system prompt, and either all tools or an explicit checklist of the
 read-only runtime tools (at least one required). The list shows each agent's tool posture
-at a glance. See [capabilities/ai-agents.md](capabilities/ai-agents.md).
+at a glance. See [capabilities/agents.md](capabilities/agents.md).
 
 **Retrievers** — the authoring surface for the lens's
-[retriever agents](capabilities/retriever-agents.md), with a test panel beside the
-editor; see [Retriever-agent editor](#retriever-agent-editor). Chatting with a saved agent
+[retrievers](capabilities/retrievers.md), with a test panel beside the
+editor; see [Retriever editor](#retriever-editor). Chatting with a saved retriever
 happens in the Workbench ([Assistants panel](#assistants-panel)).
 
 **Saved queries** — the authoring surface for the lens's stored pipelines, and the only
@@ -349,7 +349,7 @@ follow the [definition](capabilities/search-indices.md#custom-indices):
 
 - **Name and description**, with the key proposed from the name until the key field is
   touched, validated live against the key pattern and permanent; the description is
-  explained as the text agents choose the index by. The key `new` is refused, because the
+  explained as the text retrievers choose the index by. The key `new` is refused, because the
   designer's own address for a new index ends in it.
 - **Entity type** — every hit is an entity of it. Changing it clears fields, header and
   relation groups.
@@ -416,7 +416,7 @@ Three operations, each with its own explanation. See
 [capabilities/transfer.md](capabilities/transfer.md).
 
 - **Export** — downloads the ontology's whole design — entity types, relation types,
-  properties, search indices, keyword languages, lenses, agents, retriever agents and saved
+  properties, search indices, keyword languages, lenses, agents, retrievers and saved
   queries — as a JSON file named after the ontology key ("Download `<ontologyKey>`.json").
 - **Import** — takes a JSON file and writes it into the current ontology. It reports
   malformed JSON before sending anything, and on a
@@ -453,7 +453,7 @@ for questions, which is remembered.
 | `#` | Types | Filter the exposed entity types; choosing one *scopes* the palette to that type rather than navigating. |
 | `?` | Saved queries | Semantic search over query descriptions when available, substring filtering over the full list otherwise. An empty query lists everything. |
 | `>` | Actions | Navigation to each Workbench area, the Studio, and a theme toggle. |
-| `!` | Question | A question to a [retriever agent](capabilities/retriever-agents.md#retrieve), answered with the entities it finds. Sent on purpose, never as you type — see [Question mode](#question-mode). Only on a server with search indices and a language-model provider. |
+| `!` | Question | A question to a [retriever](capabilities/retrievers.md#retrieve), answered with the entities it finds. Sent on purpose, never as you type — see [Question mode](#question-mode). Only on a server with search indices and a language-model provider. |
 
 Scoping to a type replaces the prefix with a persistent type chip; the search then runs
 within that type, an empty query lists that type's first entities, and Backspace on an
@@ -477,11 +477,11 @@ Once results arrive, the arrow keys move through them, Enter opens the entity's 
 Cmd/Ctrl+Enter focuses it in the Explorer, as in entities mode; Enter on the unchanged
 question does not resend it.
 
-A chip beside the prefix names the retriever; clicking it lists the lens's retriever
-agents as the server lists them: `Default` — the lens's
-[default retriever agent](capabilities/retriever-agents.md#the-default-retriever-agent) —
+A chip beside the prefix names the retriever; clicking it lists the lens's retrievers
+as the server lists them: `Default` — the lens's
+[default retriever](capabilities/retrievers.md#the-default-retriever) —
 first, then the stored ones. The choice is remembered per ontology and lens and falls back
-to `Default` when the remembered agent is no longer listed. A question to an agent the
+to `Default` when the remembered retriever is no longer listed. A question to a retriever the
 lens cannot run shows the server's refusal with its reasons as the error.
 
 Results come in the server's order, with no number or score. A row is the entity row —
@@ -507,7 +507,7 @@ relation or a passage carries one short line:
 The line never shows the entry's text. The palette and the relation target picker use the
 [default search](capabilities/search.md#ranked-search), which reads only managed indices,
 so no relation line appears there; relation lines appear in
-a retriever agent's diagnostics and in the palette's question results, whose searches
+a retriever's diagnostics and in the palette's question results, whose searches
 reach custom indices. A server whose hits
 name no entry — one without search indices — shows instead one `in <property>` badge per
 document match, in match order.
@@ -634,7 +634,7 @@ expands automatically, and runs immediately when it has no parameters.
 ### Assistants panel
 
 Two tabs over one lens, one per assistant kind: Agents and Retrievers. Both require a language-model
-provider; see [capabilities/ai-agents.md](capabilities/ai-agents.md).
+provider; see [capabilities/agents.md](capabilities/agents.md).
 
 **Agents** — a conversation with one of the lens's agents, chosen from a picker that lists
 them as the server does: `Default`, the built-in agent, first. Each conversation is a
@@ -670,36 +670,36 @@ conversation; the browser forgets the old thread, which the server removes when 
 expires. Storage failure does not break live chat.
 
 **Retrievers** — chat with the lens's
-[retriever agents](capabilities/retriever-agents.md). A header picker selects the agent:
+[retrievers](capabilities/retrievers.md). A header picker selects the retriever:
 `Default` — the lens's
-[default retriever agent](capabilities/retriever-agents.md#the-default-retriever-agent) —
+[default retriever](capabilities/retrievers.md#the-default-retriever) —
 first, then the saved ones, as the server lists them. The address names it, and without
 one — or with one the lens does not have — `Default` is shown and the address updated to
-name it. A question to an agent the lens cannot run shows the server's refusal with its
-reasons. "Edit in Studio" opens a saved agent in the lens's
-[retriever-agent editor](#retriever-agent-editor), which is where agents are created and
-changed; the default agent has no editor, and with no saved agents the tab links there to
+name it. A question to a retriever the lens cannot run shows the server's refusal with its
+reasons. "Edit in Studio" opens a saved retriever in the lens's
+[retriever editor](#retriever-editor), which is where retrievers are created and
+changed; the default retriever has no editor, and with no saved retrievers the tab links there to
 create one. A
 "Show diagnostics" switch, off by default and remembered, requests diagnostics with every
 answer and shows them beside the conversation. The conversation itself is the
-[retriever-agent chat](#retriever-agent-chat); here it is remembered and restored like
-the Agents tab's — per ontology, lens and agent, from the server, with the same expiry
-and busy handling. On a server without search indices the tab explains that retriever
-agents are not available.
+[retriever chat](#retriever-chat); here it is remembered and restored like
+the Agents tab's — per ontology, lens and retriever, from the server, with the same expiry
+and busy handling. On a server without search indices the tab explains that retrievers
+are not available.
 
-### Retriever-agent editor
+### Retriever editor
 
 The Studio lens detail's Retrievers tab, absent on a server without search indices.
 Its configuration semantics are owned by
-[capabilities/retriever-agents.md](capabilities/retriever-agents.md).
+[capabilities/retrievers.md](capabilities/retrievers.md).
 
-**List.** A card per agent: name, key, a badge for valid, invalid or unsupported, the
+**List.** A card per retriever: name, key, a badge for valid, invalid or unsupported, the
 number of warnings, the description, and which indices it searches with its filter count.
-A card opens the agent's editor; the address names the open agent, so it can be linked.
+A card opens the retriever's editor; the address names the open retriever, so it can be linked.
 "New retriever" asks for a name and a derived-but-editable key — permanent and
 unique in the lens — and opens the editor on a draft that exists only in the client until
-its first save. "Import" creates a new agent from an exported JSON, from a file or pasted;
-it never replaces an agent with the same key.
+its first save. "Import" creates a new retriever from an exported JSON, from a file or pasted;
+it never replaces a retriever with the same key.
 
 **Editor.** A draft that only a Save writes, in four sections, under a collapsed
 explanation of how a question becomes results — plan, narrow, rank entries, fuse and,
@@ -711,7 +711,7 @@ for chat, answer — naming the settings that steer each step, each a jump to it
   index with relation groups offers all of them or only chosen relation types. A chosen
   index opens on demand what its entries hold — the
   [entry previews](#index-designer) of its definition, without editing, those of relation
-  groups the agent leaves out dimmed. An index the lens no longer offers stays listed for
+  groups the retriever leaves out dimmed. An index the lens no longer offers stays listed for
   removal.
 - **Filters** — the exact conditions a question may set: a result type, a path (the
   result's own field, or up to two relation hops away) and a field. Document fields are
@@ -724,34 +724,34 @@ for chat, answer — naming the settings that steer each step, each a jump to it
   to sub-queries no filter or previous reference restricts, never to keyword matches, and dependent on the
   embedding model; and the maximum characters per answer field.
 
-Name and description sit above. A save bar states whether the agent is new, changed or
+Name and description sit above. A save bar states whether the retriever is new, changed or
 saved and offers Save, Discard and Save as copy — which stores the current state, unsaved
-changes included, as a new agent under a new name and key while the original stays as
-last saved. The saved agent's validation errors and warnings appear in a validation panel,
+changes included, as a new retriever under a new name and key while the original stays as
+last saved. The saved retriever's validation errors and warnings appear in a validation panel,
 the draft's own problems next to their section. Leaving the editor with unsaved changes —
 by the back action, another tab or another page — asks first. Rarer operations sit under
 More: export of the saved version as JSON, copy or move to another lens of the ontology
 under the same key, the configuration as editable JSON applied to the draft, and
-deletion. An agent whose configuration has an unsupported version or shape opens with
+deletion. A retriever whose configuration has an unsupported version or shape opens with
 More expanded, where it can be exported or replaced by a version 2 configuration.
 
 **Test panel.** Beside the editor, with a Chat / Retrieve switch whose position is
-remembered. Chat is a [retriever-agent chat](#retriever-agent-chat) with diagnostics
+remembered. Chat is a [retriever chat](#retriever-chat) with diagnostics
 always on; saving starts a new conversation, and none is restored. Retrieve asks one
 question, sent on Enter or with Ask, and shows only the found entities, as the palette's
 [question mode](#question-mode) does, without "Show all in Explorer"; saving clears the
-result. Both ask the saved version: a new, changed, invalid or unsupported agent
+result. Both ask the saved version: a new, changed, invalid or unsupported retriever
 blocks questions and says why. Without a language-model provider the panel says that the
-agent cannot answer.
+retriever cannot answer.
 
-### Retriever-agent chat
+### Retriever chat
 
-One conversation with one retriever agent on a server-held
+One conversation with one retriever on a server-held
 [thread](capabilities/threads.md), shared by the editor's test panel and the Workbench's
 Retrievers tab. A status line names the running step; a running question can be
 cancelled, and "New conversation" starts a new thread. Answers render as Markdown.
 Questions are at most 2,000 characters. Follow-up questions refer to earlier completed
-answers of the thread; a failed or cancelled turn leaves nothing in it. Another agent has
+answers of the thread; a failed or cancelled turn leaves nothing in it. Another retriever has
 its own conversation. Answers restored from the server have no diagnostics.
 
 With diagnostics, each answer offers a Diagnostics action, and a side panel shows the
@@ -770,7 +770,7 @@ selected answer (the latest by default) in four tabs, filling while the question
   instructions, input and output, marked where the trace is truncated.
 
 No score is shown anywhere. See
-[capabilities/retriever-agents.md](capabilities/retriever-agents.md#diagnostics).
+[capabilities/retrievers.md](capabilities/retrievers.md#diagnostics).
 
 ### Schema diagram
 
@@ -967,10 +967,10 @@ the address.
 | Explorer working set | Per ontology + lens | Bounded by the hard node cap |
 | Recently opened entities | Per ontology + lens | 10 |
 | Recent query texts | Per ontology + lens | 10 |
-| Current conversation thread id (Workbench Agents and Retrievers tabs) | Per ontology + lens + agent | One |
+| Current conversation thread id (Workbench Agents and Retrievers tabs) | Per ontology + lens + assistant | One |
 | Chat tool-call panel switch | Global | — |
 | Retriever diagnostics switch (Workbench) | Global | — |
-| Retriever-agent test panel mode (Chat or Retrieve) | Global | — |
+| Retriever test panel mode (Chat or Retrieve) | Global | — |
 | Retriever for palette questions | Per ontology + lens | — |
 
 Per-lens state is keyed by ontology **and** lens because lens keys are unique only
@@ -983,7 +983,7 @@ relations are re-fetched on restore, so a stale canvas can never display stale p
 values. Conversations themselves are held by the server; the browser keeps only the
 current thread's id and restores the messages from the server. Question results are
 in-memory for the session and deliberately not persisted; the Workbench's selected
-retriever agent lives in the address.
+retriever lives in the address.
 Persistence failures are swallowed: with storage unavailable the product works exactly the
 same, minus the memory.
 
@@ -1011,13 +1011,13 @@ Workbench addresses live under `/o/{ontologyKey}/w/{lensKey}`, Studio addresses 
 | `/o/{ontologyKey}/w/{lensKey}/query?run={queryKey}` | The library with that query expanded, run at once when it has no parameters |
 | `/o/{ontologyKey}/w/{lensKey}/ai` | The Assistants panel, Agents tab; an unknown `tab` shows Agents as well |
 | `/o/{ontologyKey}/w/{lensKey}/ai?tab=retriever` | The Retrievers tab |
-| `/o/{ontologyKey}/w/{lensKey}/ai?tab=retriever&agent={agentKey}` | The Retrievers tab with that retriever agent — `_default` for the default one; the default agent when the lens has no such agent |
+| `/o/{ontologyKey}/w/{lensKey}/ai?tab=retriever&agent={agentKey}` | The Retrievers tab with that retriever — `_default` for the default one; the default retriever when the lens has no such retriever |
 | `/o/{ontologyKey}/studio` | The ontology's schema overview |
 | `/o/{ontologyKey}/studio/entity-types/{id}` · `.../relation-types/{id}` | A type editor |
 | `/o/{ontologyKey}/studio/lenses` | The lens list |
 | `/o/{ontologyKey}/studio/lenses/{id}` | A lens, Scope tab |
 | `/o/{ontologyKey}/studio/lenses/{id}?tab=agents` · `?tab=retriever-agents` · `?tab=queries` · `?tab=connect` | The other lens tabs |
-| `/o/{ontologyKey}/studio/lenses/{id}?tab=retriever-agents&agent={agentKey}` | That retriever agent's editor and test panel |
+| `/o/{ontologyKey}/studio/lenses/{id}?tab=retriever-agents&agent={agentKey}` | That retriever's editor and test panel |
 | `/o/{ontologyKey}/studio/search` | The search index list |
 | `/o/{ontologyKey}/studio/search?tab=settings` | The search settings |
 | `/o/{ontologyKey}/studio/search/new` | The index designer on a new custom index |
@@ -1058,9 +1058,9 @@ Any unrecognised address returns to the root.
 | Explorer | Shift or Cmd while clicking | Extend the selection |
 | Chat | Enter | Send |
 | Chat | Shift+Enter | Newline |
-| Retriever-agent chat | Enter | Send |
-| Retriever-agent chat | Shift+Enter | Newline |
-| Retriever-agent test panel, Retrieve | Enter | Ask |
+| Retriever chat | Enter | Send |
+| Retriever chat | Shift+Enter | Newline |
+| Retriever test panel, Retrieve | Enter | Ask |
 | Forms | Enter | Submit the form |
 
 Single-letter shortcuts are suppressed inside text inputs and while a dialog or popover

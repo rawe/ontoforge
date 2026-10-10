@@ -24,9 +24,9 @@ data. It cannot define a type, override a property, or rename anything. Its enti
 content is a set of declarations about types that exist independently of it.
 
 Three things do belong to a lens, keyed within it, exported with it and deleted with
-it: **agent configurations** ([ai-agents.md](ai-agents.md)) and **saved queries**
-([saved-queries.md](saved-queries.md)) and **retriever agents**
-([retriever-agents.md](retriever-agents.md)). They are lens-local because they are
+it: **agent configurations** ([agents.md](agents.md)) and **saved queries**
+([saved-queries.md](saved-queries.md)) and **retrievers**
+([retrievers.md](retrievers.md)). They are lens-local because they are
 written in terms of what that lens exposes.
 
 Deleting a lens deletes those configurations and nothing else. Types, property definitions

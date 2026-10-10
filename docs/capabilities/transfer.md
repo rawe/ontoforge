@@ -17,14 +17,14 @@ ontologies, transfer included.
 | Relation types | The same, plus the keys of the source and target entity types |
 | Property definitions | Key, display name, description, data type, required flag, default |
 | Lenses | Key, name, description, their type inclusions — absent entirely for an unscoped lens — and the keys of the search indices they include |
-| Assistants | Every assistant of every lens, one list per kind under the lens's `assistants`: its agents under `agents` — key, name, description, system prompt, tool allowlist — and its retriever agents under `retrievers`, in their portable form — key, name, description, configVersion, config |
+| Assistants | Every assistant of every lens, one list per kind under the lens's `assistants`: its agents under `agents` — key, name, description, system prompt, tool allowlist — and its retrievers under `retrievers`, in their portable form — key, name, description, configVersion, config |
 | Saved queries | Every saved query of every lens: key, name, description, steps, parameters |
 | Keyword language set | The languages keyword search stems in, at the top level of the payload |
 | Search indices | The custom index definitions and the managed indices switched off, at the top level of the payload |
 
 Assistants and saved queries are nested inside the lens they belong to, because that
-is where they belong ([ai-agents.md](ai-agents.md), [saved-queries.md](saved-queries.md),
-[retriever-agents.md](retriever-agents.md)).
+is where they belong ([agents.md](agents.md), [saved-queries.md](saved-queries.md),
+[retrievers.md](retrievers.md)).
 
 > **Instance data is not part of the format.** No entities, no relations, no document
 > content, no chunks, no embedding vectors. Exporting a design and importing it elsewhere
@@ -87,7 +87,7 @@ error on the version naming the three it accepts:
 | `5.0` | Upgraded to `6.0`, then to `7.0` |
 
 A `6.0` payload differs from `7.0` in one way: its lenses carry their agents under
-`aiAgents` and their retriever agents under `retrieverAgents`, in place of `assistants`.
+`aiAgents` and their retrievers under `retrieverAgents`, in place of `assistants`.
 The upgrade moves both lists under `assistants`, as `agents` and `retrievers`; each entry
 stays as it is.
 
@@ -96,8 +96,8 @@ A `5.0` payload differs from `6.0` in four ways. It carries no search indices �
 lens includes the managed indices the import includes on its own
 ([above](#what-the-format-carries)). Its lenses carry retrievers of
 configuration version 1 under `retrievers`, in place of `retrieverAgents`; the upgrade
-converts each into a retriever agent
-([retriever-agents.md](retriever-agents.md#converting-version-1-configurations)) —
+converts each into a retriever
+([retrievers.md](retrievers.md#converting-version-1-configurations)) —
 renaming a key with `-`, which version 1 allowed, unique among its lens's agents — and
 the agent keeps the conversion's warnings, the rename among them. It carries one
 `textSearchLanguage`, `english` or `german`, in place of `keywordLanguages`; the upgrade
@@ -170,7 +170,7 @@ or deleting and recreating the whole ontology and importing into it bare.
 
 ### Identifiers are regenerated, keys are preserved
 
-Every imported object — type, property, lens, agent, saved query, retriever agent,
+Every imported object — type, property, lens, agent, saved query, retriever,
 search index — receives a freshly generated internal identifier. Nothing in the payload carries
 one, and nothing from the source ontology's identifiers survives.
 
@@ -221,13 +221,13 @@ One difference from definition time is worth knowing: an imported saved query's 
 is **not** parsed and checked against the lens. A pipeline that is structurally sound but
 names a type the lens does not expose imports successfully and fails when it is first run.
 
-Retriever agents are checked for shape only: a key following the key rules and unique in
+Retrievers are checked for shape only: a key following the key rules and unique in
 its lens — a `5.0` key once renamed — a name of 1 to 200 characters, and a configuration
 of version 2 that has its shape and limits — a `5.0` one once converted. A violation fails
 the import. What
 an agent references is not checked: export carries every agent as stored, including one
 that became invalid, and it imports and is reported invalid on read, like any agent its
-lens cannot run ([retriever-agents.md](retriever-agents.md#validation-and-warnings)).
+lens cannot run ([retrievers.md](retrievers.md#validation-and-warnings)).
 Omitting `assistants`, or either of its lists, is valid. An adapter without search
 indices exports no `retrievers`; its import checks them and keeps none.
 
@@ -253,7 +253,7 @@ artefacts and computes embeddings, all within the target ontology.
   the queries are semantically discoverable immediately. Nothing else is embedded — there
   is no instance data to embed.
 - **Cache invalidation.** Import clears the schema cache, as any modeling change does.
-- **Retriever agents** are written last, once the indices exist. They embed nothing; a
+- **Retrievers** are written last, once the indices exist. They embed nothing; a
   `5.0` payload's converted agents keep their conversion warnings, key renames among them
   ([above](#the-format-version)).
 

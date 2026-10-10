@@ -53,8 +53,8 @@ All paths below are relative to this skill directory (`scripts/`).
 ### Export Schema
 
 Export one ontology's design — entity types, relation types, properties, the keyword
-language set, custom search indices, lenses with their inclusions, AI agents, retriever
-agents and saved queries — to a single JSON file.
+language set, custom search indices, lenses with their inclusions, agents, retrievers
+and saved queries — to a single JSON file.
 
 ```bash
 node scripts/export-schema.mjs [-o <output>] [--ontology <key>] [--base-url <url>]
@@ -321,8 +321,8 @@ Produced by `GET /api/ontologies/{ontologyKey}/model/export`:
   `indexInclusions` lists the search indices a scoped lens searches, by key; an unscoped
   lens searches every index and lists none.
 - `assistants` — the lens's assistants, one list per kind: `agents`, each with `key`,
-  `name`, `description`, `systemPrompt` and `tools`, and `retrievers`, the retriever
-  agents, each with `key`, `name`, `description`, `configVersion` (2) and `config`.
+  `name`, `description`, `systemPrompt` and `tools`, and `retrievers`, the retrievers,
+  each with `key`, `name`, `description`, `configVersion` (2) and `config`.
   Optional, and so is each list.
 
 The format version decides how import reads the file: `7.0` (or none) is the current
@@ -330,7 +330,7 @@ format. Two older versions are upgraded on the way in: `6.0` — lens `aiAgents`
 `retrieverAgents` instead of `assistants` — and `5.0` — additionally one
 `textSearchLanguage` instead of `keywordLanguages`, no search indices, no name properties,
 and lens `retrievers` of configuration version 1 instead of `retrieverAgents`, each
-converted into a retriever agent that lists what the conversion dropped as warnings. Any
+converted into a retriever that lists what the conversion dropped as warnings. Any
 other version is refused. Import
 provisions no search entries: each index is built in the background once data exists.
 

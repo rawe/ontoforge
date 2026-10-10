@@ -4,7 +4,7 @@ OntoForge is a graph-native ontology studio. You design a graph schema, then use
 through generic, schema-driven APIs — no per-schema code is written or generated.
 
 One server holds many **ontologies** — totally isolated units, each with its own schema,
-lenses, saved queries, agents, retriever agents and instance data. Within an ontology the system has two
+lenses, saved queries, agents, retrievers and instance data. Within an ontology the system has two
 halves. **Modeling** designs that ontology's schema. **Runtime** reads and writes its
 instance data through one lens. Both run in one server, over one database, and are
 reachable over REST, over MCP, and through a web UI.
@@ -40,8 +40,8 @@ what rules bind it, and how it is reached from every interface.
 | [search-indices](capabilities/search-indices.md) | What ranked search reads: indices, entries, managed and custom indices, cost preview and entry outline, generations and build status |
 | [oql](capabilities/oql.md) | The query language |
 | [saved-queries](capabilities/saved-queries.md) | Stored, parameterized query pipelines |
-| [ai-agents](capabilities/ai-agents.md) | Agents — assistants that answer by working with read-only tools: configuration, tool rules, live tool activity, the default agent |
-| [retriever-agents](capabilities/retriever-agents.md) | Retrievers — assistants that answer from a lens's search indices: configuration, validation, planning, retrieval, retrieve, diagnostics, the default retriever, portable JSON |
+| [agents](capabilities/agents.md) | Agents — assistants that answer by working with read-only tools: configuration, tool rules, live tool activity, the default agent |
+| [retrievers](capabilities/retrievers.md) | Retrievers — assistants that answer from a lens's search indices: configuration, validation, planning, retrieval, retrieve, diagnostics, the default retriever, portable JSON |
 | [threads](capabilities/threads.md) | Server-held assistant conversations: starting, continuing and reading a thread, atomic turns, lifetime |
 | [entity-identity-comparison](capabilities/entity-identity-comparison.md) | Optional judgments about two partial entity snapshots |
 | [transfer](capabilities/transfer.md) | Schema export and import |
@@ -164,7 +164,7 @@ Terms are used in exactly this sense throughout the documentation and the API.
 ### Schema and design
 
 **Ontology** — the independent, isolated unit: one domain's schema, its lenses, saved
-queries, agents, retriever agents, and all instance data. A server holds many; nothing spans two.
+queries, agents, retrievers, and all instance data. A server holds many; nothing spans two.
 Addressed by an immutable key, unique server-wide, with a mutable display name.
 
 **Registry** — the server's flat, listable set of ontologies, addressed by key. The
@@ -196,7 +196,7 @@ only. Reads return a size stub rather than the content, so that listing entities
 cheap. See [capabilities/documents.md](capabilities/documents.md).
 
 **Key** — the stable, human-readable identifier of an ontology, type, property, lens,
-search index, saved query, agent or retriever agent. Keys are what every interface speaks.
+search index, saved query, agent or retriever. Keys are what every interface speaks.
 They are never database identifiers, and they are never exposed as UUIDs. Every key is
 unique within its owner; only ontology keys are unique server-wide. A key follows the rule
 of its level:
@@ -204,7 +204,7 @@ of its level:
 - **Schema keys** — ontologies, types, properties, lenses, search indices — match
   `^[a-z][a-z0-9_]*$`: lower snake case, starting with a letter. They appear as OQL
   identifiers, where `-` would read as minus, and in storage names.
-- **Lens-resource keys** — saved queries, agents and retriever agents — match
+- **Lens-resource keys** — saved queries, agents and retrievers — match
   `^[a-z][a-z0-9_-]*$`: the schema rule plus `-`. They travel only in URLs, JSON and tool
   arguments.
 
@@ -382,17 +382,17 @@ default keyed `_default` that is never stored.
 chooses: a named language-model configuration bound to one lens, a system prompt plus the
 set of read-only tools it may use. Its insight into a run is **tool activity** — which
 tools ran, with what, and what they returned — part of the product for every user. See
-[capabilities/ai-agents.md](capabilities/ai-agents.md).
+[capabilities/agents.md](capabilities/agents.md).
 
-**Retriever** (also *retriever agent*) — the assistant kind in which a fixed pipeline
-searches the lens's search indices and answers from what it found: a planning model turns
+**Retriever** — the assistant kind in which a fixed pipeline searches the lens's search
+indices and answers from what it found: a planning model turns
 a question into searches of the retriever's indices, optionally narrowed to relation
 groups and exact filters, and an answer model replies from what they found — or, for a
 retrieve, the found entities are returned without an answer. Every lens also has an
 implicit **default retriever**, derived from its managed indices. Its insight into a run
 is **diagnostics** — plan, results per sub-query, timings, model traces — a debugging
 feature, given only on request. See
-[capabilities/retriever-agents.md](capabilities/retriever-agents.md).
+[capabilities/retrievers.md](capabilities/retrievers.md).
 
 **Thread** — one conversation with one assistant, held by the server: a client sends its
 new message and the thread's id, and the server continues from the turns the thread kept.
@@ -410,7 +410,7 @@ compilation, index management, error translation, and the physical isolation bet
 ontologies. Exactly one is active.
 
 **Transfer format** — the versioned JSON representation of one ontology's design, used
-for export and import. Carries schema, lenses, agents, saved queries, retriever agents, the
+for export and import. Carries schema, lenses, agents, saved queries, retrievers, the
 keyword language set, custom search indices and managed-index switches only — no
 instance data and no ontology identity. See
 [capabilities/transfer.md](capabilities/transfer.md).

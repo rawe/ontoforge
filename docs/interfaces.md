@@ -38,7 +38,7 @@ data through one lens — never both.
 
 Modeling REST does **not** nest types under a lens. Entity types, relation types and
 their properties are resources of the ontology, at the top level of its modeling
-surface. Scope inclusions, agent configurations, saved queries and retriever agents
+surface. Scope inclusions, agent configurations, saved queries and retrievers
 are addressed per lens.
 
 ### What a path segment identifies
@@ -50,7 +50,7 @@ This is the single most common source of mistakes against the modeling surface.
 | Registry | Ontology key |
 | Runtime REST, everywhere | Keys — ontology key, lens key, type key, property key; instance ids for entities and relations |
 | Modeling REST — lenses, entity types, relation types, properties, inclusions | **Internal identifiers**, not keys |
-| Modeling REST — agent configs, saved queries, retriever agents | Lens key and the resource key |
+| Modeling REST — agent configs, saved queries, retrievers | Lens key and the resource key |
 | Modeling REST — search indices | Index key — managed keys included, which carry `~` |
 | Both MCP servers | Keys only |
 
@@ -183,13 +183,13 @@ Requesting an unavailable search strategy, a capability whose provider is not co
 or one the storage adapter does not support answers `VALIDATION_ERROR` with
 `details.code` of `FEATURE_DISABLED` — on the two routes that need an embedding provider,
 semantic search and saved-query search, on AI execution and entity identity
-comparison alike, and on the search settings, search-index and retriever-agent operations
+comparison alike, and on the search settings, search-index and retriever operations
 of an adapter without search indices. A client can therefore
 tell a switched-off capability from a rejected request. Model-free operations remain
-available: agent discovery and retriever-agent management do not require a
+available: agent discovery and retriever management do not require a
 language-model provider; execution requirements are listed with the routes below. Agent
 chat requires a language-model provider
-([capabilities/ai-agents.md](capabilities/ai-agents.md)).
+([capabilities/agents.md](capabilities/agents.md)).
 
 An assistant thread that is unknown, expired or bound to another assistant answers
 `RESOURCE_NOT_FOUND` with `details.code` of `THREAD_NOT_FOUND`; a message to a thread whose
@@ -330,7 +330,7 @@ The three routes answer `FEATURE_DISABLED` on an adapter without search indices.
 ### Agent configurations
 
 Per-lens, addressed by lens key and assistant key. Semantics:
-[capabilities/ai-agents.md](capabilities/ai-agents.md).
+[capabilities/agents.md](capabilities/agents.md).
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -353,20 +353,20 @@ Per-lens, addressed by lens key. Semantics:
 | PUT | `/lenses/{lensKey}/saved-queries/{queryKey}` | Create or replace one; answers 201 on create, 200 on replace |
 | DELETE | `/lenses/{lensKey}/saved-queries/{queryKey}` | Delete a saved query |
 
-### Retriever agents
+### Retrievers
 
 Per-lens, addressed by lens key and assistant key. Semantics, configuration and validation:
-[capabilities/retriever-agents.md](capabilities/retriever-agents.md).
+[capabilities/retrievers.md](capabilities/retrievers.md).
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/lenses/{lensKey}/assistants/retrievers` | List the lens's agents, by name, each with its current validation |
-| GET | `/lenses/{lensKey}/assistants/retrievers/{assistantKey}` | Read one agent as stored, with its current validation |
+| GET | `/lenses/{lensKey}/assistants/retrievers` | List the lens's retrievers, by name, each with its current validation |
+| GET | `/lenses/{lensKey}/assistants/retrievers/{assistantKey}` | Read one retriever as stored, with its current validation |
 | PUT | `/lenses/{lensKey}/assistants/retrievers/{assistantKey}` | Create or replace; 201 on create, 200 on replace |
-| DELETE | `/lenses/{lensKey}/assistants/retrievers/{assistantKey}` | Delete the agent; 204 |
+| DELETE | `/lenses/{lensKey}/assistants/retrievers/{assistantKey}` | Delete the retriever; 204 |
 | POST | `/lenses/{lensKey}/assistants/retrievers/{assistantKey}/copy` | Independent copy to `targetLensKey`/`targetKey` in this ontology; 201 |
 | POST | `/lenses/{lensKey}/assistants/retrievers/{assistantKey}/move` | Move to `targetLensKey`/`targetKey` in this ontology, identity kept; 200 |
-| GET | `/lenses/{lensKey}/assistants/retrievers/{assistantKey}/export` | The agent's portable JSON |
+| GET | `/lenses/{lensKey}/assistants/retrievers/{assistantKey}/export` | The retriever's portable JSON |
 | POST | `/lenses/{lensKey}/assistants/retrievers/import` | Create from portable JSON; 201, never replaces a key |
 
 A write carries `name`, optional `description`, `configVersion: 2` and `config`; unknown
@@ -378,7 +378,7 @@ run — on write, import, or copy or move into the target lens — is refused wi
 `VALIDATION_ERROR` and the errors under `details.errors`; a taken target key, or a source
 changed since it was read, is a conflict. Management calls no model. Every route answers
 `FEATURE_DISABLED` on an adapter without search indices. The built-in default retriever
-agent is not a modeling resource, as for agents.
+is not a modeling resource, as for agents.
 
 ### Search settings
 
@@ -462,7 +462,7 @@ provider: without one it skips the vector work and says so in its summary. It do
 touch search indices. After an embedding-provider switch it is run once per ontology. See
 [capabilities/search.md](capabilities/search.md#rebuild).
 
-Transfer carries the design only — schema, lenses, agents, saved queries, retriever agents,
+Transfer carries the design only — schema, lenses, agents, saved queries, retrievers,
 search indices; no instance
 data and no ontology identity — see
 [capabilities/transfer.md](capabilities/transfer.md) and
@@ -658,22 +658,22 @@ the turns a thread keeps, without tool payloads. Unknown, expired or another ass
 thread: `THREAD_NOT_FOUND`. Reading needs no language-model provider and does not count as
 use; it is gated like the kind's list.
 
-### Retriever-agent list, chat and retrieve
+### Retriever list, chat and retrieve
 
-The stored agent runs — or, under the key `_default`, the lens's
-[default retriever agent](capabilities/retriever-agents.md#the-default-retriever-agent);
+The stored retriever runs — or, under the key `_default`, the lens's
+[default retriever](capabilities/retrievers.md#the-default-retriever);
 a request can never supply or override its configuration. Semantics:
-[capabilities/retriever-agents.md](capabilities/retriever-agents.md#answering-a-question)
-and [retrieve](capabilities/retriever-agents.md#retrieve).
+[capabilities/retrievers.md](capabilities/retrievers.md#answering-a-question)
+and [retrieve](capabilities/retrievers.md#retrieve).
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/ai/assistants/retrievers` | List the lens's retriever agents, the default first |
+| GET | `/ai/assistants/retrievers` | List the lens's retrievers, the default first |
 | POST | `/ai/assistants/retrievers/{assistantKey}/chat` | Stream the answer to one question |
 | GET | `/ai/assistants/retrievers/{assistantKey}/threads/{threadId}` | Read a thread back |
 | POST | `/ai/assistants/retrievers/{assistantKey}/retrieve` | The entities one query finds, without an answer |
 
-**List.** Every retriever agent of the lens, runnable or not, as `key`, `name`,
+**List.** Every retriever of the lens, runnable or not, as `key`, `name`,
 `description` and `builtIn`; the default comes first, keyed `_default`, named `Default`,
 with `builtIn` true. The list carries no configuration and no validation, and needs no
 language-model provider; on an adapter without search indices it answers
@@ -681,9 +681,9 @@ language-model provider; on an adapter without search indices it answers
 
 **Chat.** The [shared request](#assistant-chat-and-threads) plus `diagnostics` (boolean,
 default false). Without a language-model provider the route answers
-`FEATURE_DISABLED`, as the AI routes do. An unknown agent answers not found, an agent its
+`FEATURE_DISABLED`, as the AI routes do. An unknown retriever answers not found, a retriever its
 lens can no longer run `VALIDATION_ERROR` with the errors under `details.errors`, a
-default agent with nothing to search `VALIDATION_ERROR`, an adapter without search
+default retriever with nothing to search `VALIDATION_ERROR`, an adapter without search
 indices `FEATURE_DISABLED`, an unknown or busy thread as shared — each before the stream
 opens.
 
@@ -712,8 +712,8 @@ indices it answers `FEATURE_DISABLED`, as the list does.
 id or `diagnostics` among them — are rejected.
 It is refused exactly as chat is, with plain error responses: `FEATURE_DISABLED` without
 a language-model provider or on an adapter without search indices, not found for an
-unknown agent, `VALIDATION_ERROR` for an agent its lens can no longer run (errors under
-`details.errors`), a default agent with nothing to search, a planner input over the cap,
+unknown retriever, `VALIDATION_ERROR` for a retriever its lens can no longer run (errors under
+`details.errors`), a default retriever with nothing to search, a planner input over the cap,
 a failed planning call or a malformed plan. A closed connection cancels the work.
 
 The response is `200` with `results` — best first, each `entityId`, `entityType`,
@@ -726,7 +726,7 @@ searches by keyword only. Neither route has an MCP equivalent.
 
 ### AI
 
-Semantics: [capabilities/ai-agents.md](capabilities/ai-agents.md). Chat requires a
+Semantics: [capabilities/agents.md](capabilities/agents.md). Chat requires a
 language-model provider; the list remains available without one.
 
 | Method | Path | Purpose |
@@ -793,7 +793,7 @@ exist; its tools answer not-found tool errors otherwise.
 | Tool | Purpose |
 |---|---|
 | `ensure_ontology` | Create the ontology this mount is bound to if it does not exist yet; no-op if it does. Argument-less — it acts only on the mount's own ontology — and reports the key and whether it created. A created ontology starts bare and without a display name; naming is a REST/UI operation |
-| `get_schema` | The ontology's whole design — types, relation types, properties, the keyword language set, the custom search indices and the switched-off managed ones, and every lens with its type inclusions, its search-index inclusions (`indexInclusions`), agents, saved queries and retriever agents. Identical to `export_schema`, and the only way to enumerate lenses: there is no `list_lenses` |
+| `get_schema` | The ontology's whole design — types, relation types, properties, the keyword language set, the custom search indices and the switched-off managed ones, and every lens with its type inclusions, its search-index inclusions (`indexInclusions`), agents, saved queries and retrievers. Identical to `export_schema`, and the only way to enumerate lenses: there is no `list_lenses` |
 | `create_entity_type` | Add an entity type together with its name property (`name_property`, default `name`) |
 | `update_entity_type` | Change display name, description or name property (`name_property`); the key is immutable |
 | `delete_entity_type` | Remove an entity type and its properties |
@@ -830,10 +830,10 @@ exist; its tools answer not-found tool errors otherwise.
 | `get_agent` | Read one agent, by `agent_key` |
 | `set_agent` | Create or replace an agent |
 | `delete_agent` | Delete an agent, by `agent_key` |
-| `list_retrievers` | List a lens's retriever agents, each with its validation |
-| `get_retriever` | Read one retriever agent with its validation, by `retriever_key` |
-| `set_retriever` | Create or replace a retriever agent from a `config` in the REST wire format; an invalid configuration is refused with every error in one message |
-| `delete_retriever` | Delete a retriever agent, by `retriever_key` |
+| `list_retrievers` | List a lens's retrievers, each with its validation |
+| `get_retriever` | Read one retriever with its validation, by `retriever_key` |
+| `set_retriever` | Create or replace a retriever from a `config` in the REST wire format; an invalid configuration is refused with every error in one message |
+| `delete_retriever` | Delete a retriever, by `retriever_key` |
 | `list_saved_queries` | List a lens's saved queries |
 | `set_saved_query` | Create or replace a saved query pipeline |
 | `delete_saved_query` | Delete a saved query |
@@ -845,7 +845,7 @@ meaning as the REST parameter. The search-index tools take the index key as
 `index_key` and a definition in the same wire format as REST, camelCase included.
 `set_retriever` writes the current configuration version, so it takes no version argument;
 the retriever tools are refused as a disabled feature where the adapter has no search
-indices. Copying, moving, exporting and importing a single retriever agent are REST only.
+indices. Copying, moving, exporting and importing a single retriever are REST only.
 There is no modeling tool for the search-data rebuild (`rebuild-search-data`).
 
 ### Runtime tools
@@ -886,7 +886,7 @@ An agent configuration may grant twelve tools: `get_schema`, `list_entities`,
 return the REST envelope and take no strategy and no `min_similarity`; they apply the
 fixed floor of [capabilities/search.md](capabilities/search.md#similarity-floor) whenever
 the default strategy ranks semantically, echoed as `minSimilarity`. MCP also accepts
-filters and fields. See [capabilities/ai-agents.md](capabilities/ai-agents.md).
+filters and fields. See [capabilities/agents.md](capabilities/agents.md).
 
 `search_by_index` is the index search of `POST /search`, on MCP only. It takes `query`,
 `index` — one index key or a list, absent for every index the lens can search —

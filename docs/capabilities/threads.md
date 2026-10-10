@@ -1,6 +1,6 @@
 # Threads
 
-Every assistant — an [agent](ai-agents.md) or a [retriever agent](retriever-agents.md) —
+Every assistant — an [agent](agents.md) or a [retriever](retrievers.md) —
 converses in **threads** the server holds. A client sends only its new message and, to
 continue, the thread's id; the server continues from what the thread kept. How the server
 stores threads, and the numbers below (turns kept, turns the model sees, lifetime, how
@@ -36,8 +36,8 @@ work is its tool calls and their results; they stay in the thread with the turn.
   turns' tool calls and results. A thread keeps a bounded number of turns; older ones are
   removed.
 
-A retriever agent's thread also keeps what a follow-up question may refer to
-([retriever-agents.md](retriever-agents.md#follow-up-questions)).
+A retriever's thread also keeps what a follow-up question may refer to
+([retrievers.md](retrievers.md#follow-up-questions)).
 
 ## Lifetime
 

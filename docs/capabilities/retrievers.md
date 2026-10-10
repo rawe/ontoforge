@@ -1,15 +1,15 @@
-# Retriever agents
+# Retrievers
 
-A retriever agent answers questions over one lens's [search indices](search-indices.md).
+A retriever answers questions over one lens's [search indices](search-indices.md).
 It is a stored configuration: which indices it searches, which exact filters a question
 may set, which fields the answer may cite and how strict semantic matching is. A question
 runs a fixed pipeline — a planning model turns it into searches, the index search runs
 them, an answer model writes the reply from what they found. Questions form a
 conversation held by the server as a [thread](threads.md). A question can also be
 [retrieved](#retrieve) instead: planned and searched, returning the found entities
-without an answer. Saving an agent stores the configuration only: no vectors, no graph
+without an answer. Saving a retriever stores the configuration only: no vectors, no graph
 data, no conversation. Every lens also has a
-[default retriever agent](#the-default-retriever-agent), derived from its managed indices
+[default retriever](#the-default-retriever), derived from its managed indices
 and never stored.
 
 Vocabulary: [../README.md](../README.md#glossary). The rules these follow:
@@ -17,29 +17,29 @@ Vocabulary: [../README.md](../README.md#glossary). The rules these follow:
 
 ## Ownership and persistence
 
-An agent belongs to exactly one lens of one ontology. Its key is unique in that lens and
+A retriever belongs to exactly one lens of one ontology. Its key is unique in that lens and
 follows the lens-resource [key](../README.md) rule, at most 64 characters. It carries a
 name (1 to 200 characters), an optional description, a configuration version, the
 configuration, the warnings of a conversion ([below](#converting-version-1-configurations))
 and timestamps. This release writes and runs configuration version 2.
 
-Saving an agent changes nothing else: no schema, no instance, no index, no other lens.
-A save creates the agent or replaces its name, description and configuration; its identity
-and creation time stay, and its conversion warnings are cleared. Deleting an agent removes
-it alone; deleting its lens deletes its agents. Retriever agents are separate from the
-tool-using [agents](ai-agents.md).
+Saving a retriever changes nothing else: no schema, no instance, no index, no other lens.
+A save creates the retriever or replaces its name, description and configuration; its identity
+and creation time stay, and its conversion warnings are cleared. Deleting a retriever removes
+it alone; deleting its lens deletes its retrievers. Retrievers are separate from the
+tool-using [agents](agents.md).
 
 ## The configuration
 
 | Field | Meaning |
 |---|---|
-| `indices` | The search indices the agent searches, 1 to 12, each once: `{index}` by key, managed or custom, optionally with `relations` — the relation types of the index's relation groups the agent may use. Without `relations` every relation group the lens shows counts |
-| `filters` | Up to 12 exact conditions a question may set: `{id, entityType, path, field}`. `entityType` is a result type, `path` 0 to 2 relation hops (`relationTypeKey`, `direction` `outgoing` or `incoming`) from it, `field` a property of the entity the path reaches. Ids are unique within the agent |
+| `indices` | The search indices the retriever searches, 1 to 12, each once: `{index}` by key, managed or custom, optionally with `relations` — the relation types of the index's relation groups the retriever may use. Without `relations` every relation group the lens shows counts |
+| `filters` | Up to 12 exact conditions a question may set: `{id, entityType, path, field}`. `entityType` is a result type, `path` 0 to 2 relation hops (`relationTypeKey`, `direction` `outgoing` or `incoming`) from it, `field` a property of the entity the path reaches. Ids are unique within the retriever |
 | `answerFields` | Per result type, 1 to 12 of its properties the answer model receives |
 | `threshold` | The cosine similarity a semantic match must reach, −1 to 1, default 0.35 |
 | `answerFieldCharacters` | The characters of one answer field, and of one matched entry text, passed to the answer model; 100 to 2,000, default 800 |
 
-The **result types** are the root entity types of the chosen indices; an agent finds
+The **result types** are the root entity types of the chosen indices; a retriever finds
 entities of those types and no others. A fact about an entity's relation is found through
 a custom index with a relation group for it, which a question uses by searching that
 index ([search-indices.md](search-indices.md#relation-groups)). A filter is the exact,
@@ -47,7 +47,7 @@ structural counterpart: it compares a stored value and reaches up to two hops, f
 than a relation group's one.
 
 The threshold is the cosine of the embedding model; the index search measures similarity
-as `(1 + cosine) / 2`, so the agent searches with that floor
+as `(1 + cosine) / 2`, so the retriever searches with that floor
 ([search.md](search.md#similarity-floor)). It removes semantic matches below it, never a
 keyword match, and only in a search that no filter or previous reference restricts
 ([below](#retrieval)). It is a model-specific cut-off, not a confidence.
@@ -70,17 +70,17 @@ A configuration is checked against its lens — its schema and its
   other type has answer fields.
 
 Every error is collected. **A save refuses an invalid configuration** — a create, a
-replace, a copy or move into its target lens, a single-agent import. **A stored agent
+replace, a copy or move into its target lens, a single-retriever import. **A stored retriever
 can still become invalid**, because what its lens offers changes underneath it: a schema
 or scope change, an index deleted, excluded from the lens or switched off. Nothing
-cascades to agents. Every read reports the current result as
-`validation: {valid, errors, warnings}`; an invalid agent stays readable and exportable,
+cascades to retrievers. Every read reports the current result as
+`validation: {valid, errors, warnings}`; an invalid retriever stays readable and exportable,
 and a question to it is refused until it is valid again. A stored configuration of
 another version or shape stays as stored: it is reported invalid, never converted or
 replaced with defaults on read.
 
 **Warnings** are notes a conversion left — soft conditions it dropped, a key it renamed.
-They never make an agent invalid or block a save; they stay with the agent, through copy
+They never make a retriever invalid or block a save; they stay with the retriever, through copy
 and move, until its next save.
 
 ## Converting version-1 configurations
@@ -88,7 +88,7 @@ and move, until its next save.
 Version 1 configured retrievers by result buckets with search fields and hard or soft
 conditions. A version-1 configuration is converted to version 2 wherever one arrives: in
 storage brought up to date ([../storage-adapters.md](../storage-adapters.md)), in a
-single-agent import, and in a `5.0` [transfer](transfer.md) payload.
+single-retriever import, and in a `5.0` [transfer](transfer.md) payload.
 
 - Each bucket searches its type's default index when it searched a non-document field,
   and the passage index of every document property it searched
@@ -104,7 +104,7 @@ single-agent import, and in a `5.0` [transfer](transfer.md) payload.
   lens, it gets the first free suffix of `_2`, `_3`, … A key without `-` stays as it is.
   Each rename leaves the warning `Key renamed from '<old>' to '<new>'.`
 
-The converted configuration is then validated like any other: a single-agent import
+The converted configuration is then validated like any other: a single-retriever import
 refuses it if the lens cannot run it, while storage and transfer keep it and reads report
 it invalid.
 A configuration that is no readable version-1 shape is refused by import and left as it
@@ -112,8 +112,8 @@ is in storage, where reads report it invalid.
 
 ## Answering a question
 
-The agent is loaded from storage by lens and key — or derived, for the
-[default agent](#the-default-retriever-agent) — and checked against the lens again; a
+The retriever is loaded from storage by lens and key — or derived, for the
+[default retriever](#the-default-retriever) — and checked against the lens again; a
 request can never supply or override a configuration, so changes run once saved. A
 question makes two model calls — plan and answer — with retrieval between them, or three
 when a follow-up's planning is repeated once ([below](#planning)); no other model call is
@@ -123,10 +123,10 @@ Cancelling the request stops further work.
 ### Planning
 
 The planning model receives the question, the recent conversation, the search modes the
-server can run and, from the lens's catalog, each of the agent's indices: its name,
-description and root type, what its own entry holds, the relation groups the agent may
+server can run and, from the lens's catalog, each of the retriever's indices: its name,
+description and root type, what its own entry holds, the relation groups the retriever may
 use with what one relation entry holds, the document it reads passages of, and its
-modes. It also receives the agent's filters, with what each compares — and, where the
+modes. It also receives the retriever's filters, with what each compares — and, where the
 compared field holds at most 50 distinct stored values, those values, listed once per
 compared type and field — and — only when they may be referred to
 ([below](#follow-up-questions)) — the previous turn's results.
@@ -134,7 +134,7 @@ A planning input over 24,000 characters refuses the question;
 fewer indices or filters fix it.
 
 It returns up to four **sub-queries** and an optional `unsupportedReason`. A sub-query
-names some of the agent's indices, optionally relation types among those the agent
+names some of the retriever's indices, optionally relation types among those the retriever
 allows for them, a `query` with up to three `variants` — further ones and empty ones are
 dropped and long ones cut to 200 characters, never failing the plan — a `mode` —
 `semantic`, `keyword` or `hybrid` — exact `filters` with values, and an optional
@@ -166,8 +166,8 @@ Before anything is searched, the server checks the plan and leaves out what it c
 honour, naming each omission in the limitations the answer model receives — in plain
 words from the lens's display names, never by sub-query number, key or id, and in the
 same text the diagnostics report: an index the
-agent does not search, a relation it does not allow for the sub-query's indices, a filter
-that is not the agent's or not for the sub-query's result types, a filter value without
+retriever does not search, a relation it does not allow for the sub-query's indices, a filter
+that is not the retriever's or not for the sub-query's result types, a filter value without
 that quote and not a listed value it names, and an invalid previous-result reference — the sub-query then runs as a fresh
 search. A mode the server cannot run is replaced by its first available one. A sub-query
 left with no index, or without a query and with neither an applied filter nor a previous
@@ -187,7 +187,7 @@ planned twice.
 
 Each sub-query runs its query and each variant as one index search over its indices, in
 the server, at most 30 entities each. Own-field and passage entries always count; of the
-relation entries only those of the chosen relation types — the agent's subset when the
+relation entries only those of the chosen relation types — the retriever's subset when the
 plan names none. In a sub-query without filters or a previous reference, semantic
 matches below the threshold do not count. The rankings of the query and its variants,
 and then of all sub-queries, are fused per entity by reciprocal rank
@@ -250,8 +250,8 @@ alone, with every result reaching the answer model; only then does the planner s
 after they are checked against the current data again. The reference must rest on the
 user's own referring words, and a singular one needs exactly one result. A turn that
 searched by text yields candidates, not verified results: a reference to them is ignored
-with a limitation. So are results the agent found under another configuration: each turn
-runs the agent's current configuration, and results found before it was saved are not
+with a limitation. So are results the retriever found under another configuration: each turn
+runs the retriever's current configuration, and results found before it was saved are not
 offered to the planner.
 
 A reference the planner cannot restrict by — to such candidates, or with no verified
@@ -268,23 +268,23 @@ answers; how many: [../architecture.md](../architecture.md#thread-store).
 
 ### Diagnostics
 
-On request, the stream also reports what the agent did: the validated plan, one result
+On request, the stream also reports what the retriever did: the validated plan, one result
 row per entity and sub-query with what matched and its answer fields, the limitations,
 the number of index searches, phase timings and bounded traces of every model call —
 the plan, a repeated plan, the answer. Diagnostics are for debugging: they are sent only
 when a question asks for them, and any question may. Progress — which phase runs — and
-the answer text are always streamed. The event format is in [../interfaces.md](../interfaces.md#retriever-agent-list-chat-and-retrieve).
+the answer text are always streamed. The event format is in [../interfaces.md](../interfaces.md#retriever-list-chat-and-retrieve).
 
 ## Retrieve
 
-Retrieve answers one query with the entities the agent finds — no answer text: a
+Retrieve answers one query with the entities the retriever finds — no answer text: a
 question's run without the answer step. It runs
 exactly the first two phases of [answering a question](#answering-a-question), unchanged:
 [planning](#planning) and [retrieval](#retrieval). There is no conversation: no thread,
 no reference to earlier results, so planning is never repeated and a retrieve makes
 exactly **one model call**. No answer model runs, and answer fields are
 not read into the response; the caller reads the entities it needs through the runtime
-interfaces. The agent is loaded and checked as for a question, a request can never supply
+interfaces. The retriever is loaded and checked as for a question, a request can never supply
 a configuration, the planner input cap and the plan checks apply, and every refusal is
 the question's. Cancelling the request stops further work.
 
@@ -293,7 +293,7 @@ The response is the fused result list, best first. The order is the match grade:
 property's value, or none — and two independent facts:
 
 - **Conditions** — the exact conditions it is proven to satisfy: the union, over every
-  sub-query that returned it, of the agent's filters that sub-query applied for its type,
+  sub-query that returned it, of the retriever's filters that sub-query applied for its type,
   each once. A condition names the filter, the compared value and the condition in plain
   words from the lens's display names, as the answer model receives it ("reported by
   Customer Name: Acme"). The server compared the stored value.
@@ -313,9 +313,9 @@ receive, and the planner's unsupported reason when no index can answer. No resul
 match, or an unsupported question — is not an error. A retrieve carries no
 diagnostics; they belong to the question's stream only.
 
-## The default retriever agent
+## The default retriever
 
-Every lens has an implicit retriever agent, keyed `_default`. It is not stored and cannot
+Every lens has an implicit retriever, keyed `_default`. It is not stored and cannot
 be created, replaced, deleted, copied, moved, exported or imported; no stored key can
 begin with an underscore, so it can never be shadowed. Modeling does not know it: it is
 not listed, read or written there. The runtime list names it first, as `Default`, marked
@@ -340,55 +340,55 @@ a retrieve's conditions name.
 The stored limits of twelve indices and twelve filters do not apply; the derived
 configuration is valid by construction. The planner input cap applies unchanged: a lens
 whose derived configuration exceeds it refuses the question, saying the lens is too
-large for the default agent and a configured agent is needed. Nothing is trimmed. A lens
+large for the default retriever and a configured retriever is needed. Nothing is trimmed. A lens
 with no managed index switched on for a type it shows has nothing to search, and a
-question to its default agent is refused.
+question to its default retriever is refused.
 
 ## Copy, move and portable JSON
 
 Copy and move address a target lens and key **in the same ontology**. The configuration
 must be valid in the target lens, and the target key must be free — an existing one is a
-conflict, never overwritten. Copy creates an independent agent and keeps the source; move
-keeps the agent's identity and changes its lens and key in one step. A source changed
+conflict, never overwritten. Copy creates an independent retriever and keeps the source; move
+keeps the retriever's identity and changes its lens and key in one step. A source changed
 since it was read refuses the operation instead of transferring a different
 configuration from the one validated.
 
 Validation of the target precedes the storage transfer, which does not lock the schema:
-a concurrent schema or lens change can leave the transferred agent invalid, which its
+a concurrent schema or lens change can leave the transferred retriever invalid, which its
 next read reports.
 
-The portable form of one agent is `{key, name, description, configVersion, config}` — no
-lens, identity, timestamps, warnings, vectors or conversation. Import creates the agent in
+The portable form of one retriever is `{key, name, description, configVersion, config}` — no
+lens, identity, timestamps, warnings, vectors or conversation. Import creates the retriever in
 the addressed lens, validates it there, and refuses an existing key. A version-1 export
-is converted first, its key renamed if needed among the keys the lens already holds. This is the way to take an agent to another ontology.
+is converted first, its key renamed if needed among the keys the lens already holds. This is the way to take a retriever to another ontology.
 
 ## Transfer
 
-Whole-design [transfer](transfer.md) nests each lens's agents in their portable form
+Whole-design [transfer](transfer.md) nests each lens's retrievers in their portable form
 under its `assistants`, as `retrievers`. Import checks their keys, names and
-configuration shape — not what they reference, so an exported agent that became invalid
+configuration shape — not what they reference, so an exported retriever that became invalid
 still imports and is reported invalid there — and writes them last, once the indices
 exist. A `5.0` payload's
 `retrievers` are converted.
 
 ## Adapters without search indices
 
-Retriever agents search search indices, so they exist only where the storage adapter
-stores them. Elsewhere every retriever-agent operation is refused as a disabled feature,
+Retrievers search search indices, so they exist only where the storage adapter
+stores them. Elsewhere every retriever operation is refused as a disabled feature,
 export carries no `retrievers`, and import checks them and keeps none.
 
 ## Through the interfaces
 
-Retriever agents are managed through modeling REST, addressed by lens key and agent key,
+Retrievers are managed through modeling REST, addressed by lens key and retriever key,
 and through the modeling MCP server's tools to list, read, create or replace and delete
 one; copy, move, export and import are REST only. At
-runtime a list names every agent of the lens — runnable or not, without configuration or
-validation, the default first; a question runs by agent key on a thread and streams its
+runtime a list names every retriever of the lens — runnable or not, without configuration or
+validation, the default first; a question runs by retriever key on a thread and streams its
 progress and answer, a thread reads back, and a retrieve answers one query with one plain
-response ([../interfaces.md](../interfaces.md)). All address the default agent by its key.
+response ([../interfaces.md](../interfaces.md)). All address the default retriever by its key.
 Management, the runtime list, reading a thread, copy, move, export and import call no
 model. A question or a retrieve needs a
 language-model provider — without one it is refused as a disabled feature before anything
 is read or streamed; without an embedding provider it searches by keyword only. No MCP
-tool runs an agent; the modeling MCP server's whole-schema read and export carry them
+tool runs a retriever; the modeling MCP server's whole-schema read and export carry them
 like REST.

@@ -171,4 +171,4 @@ Complete operation and tool index: [../interfaces.md](../interfaces.md).
 Two capabilities are built on this same validated path rather than beside it: saved
 queries store parameterized OQL steps ([saved-queries.md](saved-queries.md)), and an
 agent's query tool submits the OQL a model writes for the same validation
-([ai-agents.md](ai-agents.md)). Neither can express anything an ad-hoc query cannot.
+([agents.md](agents.md)). Neither can express anything an ad-hoc query cannot.

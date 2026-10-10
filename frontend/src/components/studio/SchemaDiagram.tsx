@@ -1,7 +1,6 @@
 import { useMemo } from 'react'
 import dagre from 'dagre'
 import { useTheme } from 'next-themes'
-import { useNavigate } from 'react-router-dom'
 import {
   Background,
   Controls,
@@ -20,7 +19,7 @@ import { getTypeColor } from '@/lib/typeColors'
 const NODE_WIDTH = 168
 const NODE_HEIGHT = 52
 
-type TypeNodeData = { typeKey: string; displayName: string; entityTypeId: string }
+type TypeNodeData = { typeKey: string; displayName: string }
 type TypeNode = Node<TypeNodeData, 'schemaType'>
 
 function SchemaTypeNode({ data }: NodeProps<TypeNode>) {
@@ -72,7 +71,7 @@ function layout(entityTypes: EntityType[], relationTypes: RelationType[]) {
       id: t.key,
       type: 'schemaType',
       position: { x: pos.x - NODE_WIDTH / 2, y: pos.y - NODE_HEIGHT / 2 },
-      data: { typeKey: t.key, displayName: t.displayName, entityTypeId: t.entityTypeId },
+      data: { typeKey: t.key, displayName: t.displayName },
     }
   })
 
@@ -102,9 +101,10 @@ function layout(entityTypes: EntityType[], relationTypes: RelationType[]) {
 }
 
 interface SchemaDiagramProps {
-  ontologyKey: string
   entityTypes: EntityType[]
   relationTypes: RelationType[]
+  /** Double-click on an entity type node: open its editor. */
+  onOpenEntityType: (key: string) => void
 }
 
 /**
@@ -112,9 +112,8 @@ interface SchemaDiagramProps {
  * labeled edges, dagre left-to-right layout. Pan/zoom/drag only; double-click
  * a node to open its editor.
  */
-export function SchemaDiagram({ ontologyKey, entityTypes, relationTypes }: SchemaDiagramProps) {
+export function SchemaDiagram({ entityTypes, relationTypes, onOpenEntityType }: SchemaDiagramProps) {
   const { resolvedTheme } = useTheme()
-  const navigate = useNavigate()
   const { nodes, edges } = useMemo(
     () => layout(entityTypes, relationTypes),
     [entityTypes, relationTypes],
@@ -146,11 +145,7 @@ export function SchemaDiagram({ ontologyKey, entityTypes, relationTypes }: Schem
         edgesFocusable={false}
         elementsSelectable={false}
         deleteKeyCode={null}
-        onNodeDoubleClick={(_, node) => {
-          void navigate(
-            `/o/${ontologyKey}/studio/entity-types/${(node.data as TypeNodeData).entityTypeId}`,
-          )
-        }}
+        onNodeDoubleClick={(_, node) => onOpenEntityType((node.data as TypeNodeData).typeKey)}
         style={{ background: 'transparent' }}
       >
         <Background gap={20} size={1} />

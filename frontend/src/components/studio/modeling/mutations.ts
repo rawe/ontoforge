@@ -37,6 +37,10 @@ export function useCreateEntityType(ontologyKey: string) {
   const mutation = useMutation({
     mutationFn: (body: EntityTypeInput) => model.createEntityType(ontologyKey, body),
     onSuccess: (created) => {
+      // In the list at once, so selecting it does not meet a stale list (not found).
+      queryClient.setQueryData<EntityType[]>(qk.model(ontologyKey, 'entity-types'), (old) =>
+        old === undefined ? old : [...old, created],
+      )
       invalidateModeling(queryClient)
       toast.success(`Entity type "${created.displayName}" created`)
     },
@@ -54,6 +58,9 @@ export function useCreateRelationType(ontologyKey: string) {
   const mutation = useMutation({
     mutationFn: (body: RelationTypeInput) => model.createRelationType(ontologyKey, body),
     onSuccess: (created) => {
+      queryClient.setQueryData<RelationType[]>(qk.model(ontologyKey, 'relation-types'), (old) =>
+        old === undefined ? old : [...old, created],
+      )
       invalidateModeling(queryClient)
       toast.success(`Relation type "${created.displayName}" created`)
     },

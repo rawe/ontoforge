@@ -19,8 +19,8 @@ const QueryPage = lazy(() =>
 const AiPage = lazy(() =>
   import('@/pages/workbench/AiPage').then((m) => ({ default: m.AiPage })),
 )
-const StudioHomePage = lazy(() =>
-  import('@/pages/studio/StudioHomePage').then((m) => ({ default: m.StudioHomePage })),
+const SchemaPage = lazy(() =>
+  import('@/pages/studio/SchemaPage').then((m) => ({ default: m.SchemaPage })),
 )
 const EntityTypePage = lazy(() =>
   import('@/pages/studio/EntityTypePage').then((m) => ({ default: m.EntityTypePage })),
@@ -71,7 +71,12 @@ export const router = createBrowserRouter([
     path: '/o/:ontologyKey/studio',
     element: <StudioLayout />,
     children: [
-      { index: true, element: suspended(<StudioHomePage />) },
+      { index: true, element: <Navigate to="schema/graph" replace /> },
+      { path: 'schema', element: <Navigate to="graph" replace /> },
+      // One page element for every schema address: switching views keeps it mounted.
+      { path: 'schema/graph', element: suspended(<SchemaPage />) },
+      { path: 'schema/types', element: suspended(<SchemaPage />) },
+      { path: 'schema/types/:kind/:key', element: suspended(<SchemaPage />) },
       { path: 'entity-types/:id', element: suspended(<EntityTypePage />) },
       { path: 'relation-types/:id', element: suspended(<RelationTypePage />) },
       { path: 'lenses', element: suspended(<LensesPage />) },

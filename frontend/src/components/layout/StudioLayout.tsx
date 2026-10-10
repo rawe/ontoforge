@@ -14,17 +14,14 @@ function StudioNavItem({
   to,
   label,
   icon: Icon,
-  end,
 }: {
   to: string
   label: string
   icon: ComponentType<{ className?: string }>
-  end?: boolean
 }) {
   return (
     <NavLink
       to={to}
-      end={end}
       className={({ isActive }) =>
         cn(
           'flex h-7 items-center gap-2.5 rounded-md px-2 text-[13px] font-medium',
@@ -90,7 +87,7 @@ export function StudioLayout() {
           Studio
         </div>
         <nav className="flex flex-col gap-0.5 px-2 pt-1" aria-label="Studio">
-          <StudioNavItem to={base} end label="Schema" icon={Shapes} />
+          <StudioNavItem to={`${base}/schema`} label="Schema" icon={Shapes} />
           <StudioNavItem to={`${base}/lenses`} label="Lenses" icon={Layers} />
           {/* Optimistic: hidden only once the server reports no search indices. */}
           {features?.searchIndices !== false && (

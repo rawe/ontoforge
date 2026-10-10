@@ -869,7 +869,7 @@ while the report is loading.
 
 | Off | What changes |
 |---|---|
-| AI | The Assistants navigation entry, the Assistants palette action, the palette's question mode and the Ask AI quick action are gone. The Assistants screen itself renders an explanation. |
+| AI | The Assistants navigation entry, the Assistants palette action, the palette's question mode and the Ask an assistant quick action are gone. The Assistants screen itself renders an explanation. |
 | No search strategies | Entity search falls back to substring matching — per type in parallel when unscoped. |
 | Semantic search | Saved-query search falls back to client-side substring filtering over the full list. With search indices the search-data rebuild is disabled and explains that there is nothing to rebuild; without them it stays available and explains that it will skip the embeddings. |
 | Search indices | The Studio's Search entry, the lens detail's Retrievers tab and the palette's question mode are gone; their addresses render an explanation, and so does the Workbench's Retrievers tab. The entity type editor's Search indices section and the scope editor's Search indices section are absent. Search hits name no entry, so results show document badges instead of [matched-via](#matched-via) lines. |

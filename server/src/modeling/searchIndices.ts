@@ -92,8 +92,7 @@ function toStatusBody(status: SearchIndexStatus): IndexStatusResponseBody {
       .map((r) => ({
         representation: r.representation,
         state: r.state as Exclude<typeof r.state, "disabled">,
-        done: r.done,
-        total: r.total,
+        build: r.build,
         pending: r.pending,
         failed: r.failed,
       })),

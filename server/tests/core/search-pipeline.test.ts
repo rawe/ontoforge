@@ -74,17 +74,17 @@ function input(parts: Partial<RepresentationStatusInput>): RepresentationStatusI
 describe("deriveRepresentationStatus", () => {
   it("ready: an active generation with nothing queued", () => {
     const status = deriveRepresentationStatus(input({ generations: [generation("g1", "ready")] }));
-    expect(status).toMatchObject({ state: "ready", pending: 0, failed: 0, activeGenerationId: "g1" });
+    expect(status).toMatchObject({ state: "ready", build: null, pending: 0, failed: 0, activeGenerationId: "g1" });
   });
 
   it("stale: the active generation has pending work", () => {
     const status = deriveRepresentationStatus(
       input({ generations: [generation("g1", "ready")], queue: [queue("g1", 3)] }),
     );
-    expect(status).toMatchObject({ state: "stale", pending: 3 });
+    expect(status).toMatchObject({ state: "stale", build: null, pending: 3 });
   });
 
-  it("building: done/total from the backfill and what is still queued", () => {
+  it("building: build progress from the backfill and what is still queued", () => {
     const status = deriveRepresentationStatus(
       input({
         generations: [generation("g1", "ready"), generation("g2", "building", 10)],
@@ -93,8 +93,7 @@ describe("deriveRepresentationStatus", () => {
     );
     expect(status).toMatchObject({
       state: "building",
-      done: 6,
-      total: 10,
+      build: { done: 6, total: 10 },
       activeGenerationId: "g1",
       buildingGenerationId: "g2",
     });
@@ -108,7 +107,7 @@ describe("deriveRepresentationStatus", () => {
     const build = deriveRepresentationStatus(
       input({ generations: [generation("g2", "building", 5)], queue: [queue("g2", 0, 1, ["timeout"])] }),
     );
-    expect(build).toMatchObject({ state: "failed", failed: 1, done: 4, total: 5 });
+    expect(build).toMatchObject({ state: "failed", failed: 1, build: { done: 4, total: 5 } });
   });
 
   it("a build still retrying is building, not failed", () => {

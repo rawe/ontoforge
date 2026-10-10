@@ -432,8 +432,7 @@ export const IndexStatusResponse = z.object({
     z.object({
       representation: RepresentationSchema,
       state: z.enum(["ready", "building", "stale", "failed", "unavailable"]),
-      done: z.number().int(),
-      total: z.number().int(),
+      build: z.object({ done: z.number().int(), total: z.number().int() }).nullable(),
       pending: z.number().int(),
       failed: z.number().int(),
     }),

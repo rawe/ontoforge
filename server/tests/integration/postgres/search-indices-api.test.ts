@@ -223,8 +223,8 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("custom search indices throu
     expect(status).toEqual({
       state: "ready",
       representations: [
-        { representation: "keyword", state: "ready", done: 0, total: 0, pending: 0, failed: 0 },
-        { representation: "semantic", state: "ready", done: 0, total: 0, pending: 0, failed: 0 },
+        { representation: "keyword", state: "ready", build: null, pending: 0, failed: 0 },
+        { representation: "semantic", state: "ready", build: null, pending: 0, failed: 0 },
       ],
       lastErrors: [],
     });
@@ -321,7 +321,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("custom search indices throu
     const status = await ok("GET", `${INDICES}/person_employment/status`);
     expect(status.state).toBe("failed");
     expect(status.representations).toEqual([
-      { representation: "semantic", state: "failed", done: 0, total: 2, pending: 0, failed: 2 },
+      { representation: "semantic", state: "failed", build: { done: 0, total: 2 }, pending: 0, failed: 2 },
     ]);
     expect(status.lastErrors).toHaveLength(1);
     expect(status.lastErrors[0]).toMatchObject({ partKind: "entity", message: expect.stringContaining("provider down") });

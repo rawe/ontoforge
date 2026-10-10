@@ -304,9 +304,9 @@ export function statusChip(status: IndexStatus): { label: string; tone: StatusTo
     case 'ready':
       return { label: 'ready', tone: 'ok' }
     case 'building': {
-      const building = status.representations.filter((r) => r.state === 'building')
-      const done = building.reduce((n, r) => n + r.done, 0)
-      const total = building.reduce((n, r) => n + r.total, 0)
+      const builds = status.representations.filter((r) => r.state === 'building')
+      const done = builds.reduce((n, r) => n + (r.build?.done ?? 0), 0)
+      const total = builds.reduce((n, r) => n + (r.build?.total ?? 0), 0)
       return { label: total > 0 ? `building ${done}/${total}` : 'building', tone: 'busy' }
     }
     case 'stale':
@@ -324,7 +324,7 @@ export function statusChip(status: IndexStatus): { label: string; tone: StatusTo
 export function representationLine(r: IndexStatus['representations'][number]): string {
   switch (r.state) {
     case 'building':
-      return `building ${r.done}/${r.total}`
+      return r.build ? `building ${r.build.done}/${r.build.total}` : 'building'
     case 'stale':
       return `stale · ${r.pending} pending`
     case 'failed':

@@ -415,8 +415,8 @@ A request body is a definition in the index wire format. An index reads as `key`
 `kind` (`default`, `passage` or `custom`), `enabled` (false for a switched-off managed
 index), `definition`, `documentProperty` (the document field it cuts into passages, or
 null), `status` and timestamps. A status carries `state`, `representations` — each
-enabled one with `representation`, `state`, `done`, `total`, `pending` and `failed` —
-and `lastErrors`, each with `entityId`, `partKind`, `message` and `at`.
+enabled one with `representation`, `state`, `build` (`{done, total}`, null while no
+generation is filling), `pending` and `failed` — and `lastErrors`, each with `entityId`, `partKind`, `message` and `at`.
 
 A preview answers `{valid, issues, estimate, outline}`: `issues` as `{path, message}` by
 dotted path, `estimate` null for an invalid draft, else `entities`, `entries`, `seconds`

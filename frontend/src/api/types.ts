@@ -411,9 +411,8 @@ export interface RepresentationStatus {
   representation: Representation
   /** `unavailable` = semantic without an embedding provider. */
   state: Exclude<IndexState, 'disabled'>
-  /** Progress of a building generation (0/0 when ready). */
-  done: number
-  total: number
+  /** Progress of the build filling a new generation; `null` when none is. */
+  build: { done: number; total: number } | null
   /** Queued items on the active generation (stale when > 0). */
   pending: number
   /** Items that exhausted their retries. */

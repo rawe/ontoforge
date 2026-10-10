@@ -657,7 +657,8 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     {
       description:
         "List the ontology's search index definitions — managed (default and passage, " +
-        "keys with '~', switched in search settings) and custom — with their build status.",
+        "keys with '~', switched in search settings) and custom — with their build status " +
+        "(fields as get_search_index_status describes).",
       inputSchema: {},
     },
     wrap("list_search_indices", async () => {
@@ -669,7 +670,9 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
   server.registerTool(
     "get_search_index",
     {
-      description: "Get one search index definition with its build status.",
+      description:
+        "Get one search index definition with its build status (fields as " +
+        "get_search_index_status describes).",
       inputSchema: { index_key: z.string() },
     },
     wrap("get_search_index", async (args: { index_key: string }) => {
@@ -765,8 +768,11 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     "get_search_index_status",
     {
       description:
-        "Get a search index's build status: ready, building (done/total), stale (pending), " +
-        "failed (with the last errors), disabled or unavailable, per representation.",
+        "Get a search index's build status, per representation: state (ready, building, " +
+        "stale, failed, disabled or unavailable); build — {done, total} of the build filling " +
+        "a new generation, null when none is; pending — queued changes not yet indexed; " +
+        "failed — items whose retries are used up, retried by a rebuild or a new write of " +
+        "their entity; and the last errors.",
       inputSchema: { index_key: z.string() },
     },
     wrap("get_search_index_status", async (args: { index_key: string }) => {

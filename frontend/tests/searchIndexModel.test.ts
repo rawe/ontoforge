@@ -133,13 +133,14 @@ test('issuesAt matches a path and everything below it, not siblings with a share
   assert.deepEqual(issuesAt(issues, 'fields').map((i) => i.message), ['d'])
 })
 
-const rep = (representation: 'semantic' | 'keyword', state: IndexStatus['representations'][number]['state'], n: Partial<{ done: number; total: number; pending: number; failed: number }> = {}) =>
-  ({ representation, state, done: 0, total: 0, pending: 0, failed: 0, ...n })
+type Rep = IndexStatus['representations'][number]
+const rep = (representation: 'semantic' | 'keyword', state: Rep['state'], n: Partial<Pick<Rep, 'build' | 'pending' | 'failed'>> = {}): Rep =>
+  ({ representation, state, build: null, pending: 0, failed: 0, ...n })
 
 test('status chip text per state', () => {
   const status = (state: IndexStatus['state'], representations: IndexStatus['representations']): IndexStatus => ({ state, representations, lastErrors: [] })
   assert.deepEqual(statusChip(status('ready', [rep('keyword', 'ready')])), { label: 'ready', tone: 'ok' })
-  assert.equal(statusChip(status('building', [rep('keyword', 'ready'), rep('semantic', 'building', { done: 3, total: 10 })])).label, 'building 3/10')
+  assert.equal(statusChip(status('building', [rep('keyword', 'ready'), rep('semantic', 'building', { build: { done: 3, total: 10 } })])).label, 'building 3/10')
   assert.equal(statusChip(status('building', [])).label, 'building')
   assert.equal(statusChip(status('stale', [rep('keyword', 'stale', { pending: 2 }), rep('semantic', 'stale', { pending: 5 })])).label, 'stale · 7 pending')
   assert.equal(statusChip(status('failed', [rep('semantic', 'failed', { failed: 4 })])).label, 'failed · 4')

@@ -10,6 +10,7 @@
  * onto a node, itself or empty canvas. A naming popover asks for the names.
  * The outline search rings matching nodes and dims the rest; focus mode (`F`)
  * keeps the selection and its one-hop neighbours and dims everything else.
+ * Nodes carry their lint issue count.
  */
 
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -42,6 +43,7 @@ import { cn } from '@/lib/utils'
 import { useRequestDelete } from '../modeling/deleteContext'
 import { useCreateEntityType, useCreateRelationType } from '../modeling/mutations'
 import { searchSchema } from '../modeling/search'
+import { useIssues } from '../modeling/useIssues'
 import { useModelSchema, type ModelSchema } from '../modeling/useModelSchema'
 import { focusSet } from '../schema/focus'
 import type { SchemaSelection } from '../schema/schemaUrl'
@@ -171,9 +173,19 @@ const isMoveOrResize = (c: NodeChange<AppNode>): c is NodePositionChange | NodeD
   c.type === 'position' || c.type === 'dimensions'
 
 function Canvas() {
-  const { ontologyKey, selection, select, revealRequest, focusMode, toggleFocus, exitFocus, search } =
-    useSchemaWorkspace()
+  const {
+    ontologyKey,
+    selection,
+    select,
+    revealRequest,
+    focusMode,
+    toggleFocus,
+    exitFocus,
+    search,
+    tidyRequest,
+  } = useSchemaWorkspace()
   const schema = useModelSchema(ontologyKey)
+  const { countByType } = useIssues(ontologyKey)
   const requestDelete = useRequestDelete()
   const { create: createEntityType } = useCreateEntityType(ontologyKey)
   const { create: createRelationType } = useCreateRelationType(ontologyKey)
@@ -355,11 +367,12 @@ function Canvas() {
                 selectHere({ kind: 'entity-types', key: et.key }, { propertyKey }),
               dim: (focus !== null && !focus.has(n.id)) || (matches.active && !matches.entityIds.has(n.id)),
               match: matches.active && matches.entityIds.has(n.id),
+              issues: countByType.get(n.id) ?? 0,
             },
           },
         ]
       }),
-    [nodes, entityTypes, properties, collapsed, selectedEntityId, ontologyKey, selectHere, focus, matches],
+    [nodes, entityTypes, properties, collapsed, selectedEntityId, ontologyKey, selectHere, focus, matches, countByType],
   )
   const flowNodes = useMemo<AppNode[]>(
     () => (ghost === null ? entityNodes : [...entityNodes, ghost]),
@@ -442,6 +455,15 @@ function Canvas() {
       void fitView({ padding: 0.25, duration: 300 })
     }, 420)
   }
+
+  // The palette's "Tidy layout"; a request made before this mount is not repeated.
+  const seenTidy = useRef(tidyRequest)
+  const onTidyRequest = useEffectEvent(tidy)
+  useEffect(() => {
+    if (tidyRequest === seenTidy.current) return
+    seenTidy.current = tidyRequest
+    onTidyRequest()
+  }, [tidyRequest])
 
   const allCollapsed = allCollapsedOf(collapsed, entityIds)
 
@@ -727,7 +749,7 @@ function Canvas() {
       {/* Inside the canvas (it clips), clear of the zoom controls; wraps when narrow. */}
       <div className="pointer-events-none absolute right-3 bottom-3 left-14 z-10 flex justify-center">
         <div className="rounded-xl border bg-card/90 px-3 py-1 text-center text-[11px] text-muted-foreground shadow-sm backdrop-blur-sm">
-          Click: select · drag a type: move · double-click or <Kbd>N</Kbd>: new type · drag{' '}
+          <Kbd>⌘K</Kbd> commands · click: select · drag a type: move · double-click or <Kbd>N</Kbd>: new type · drag{' '}
           <b className="font-semibold">+</b> onto a type, itself or empty space: relation ·{' '}
           <Kbd>F</Kbd> focus · <Kbd>/</Kbd> search · <Kbd>H</Kbd> hide/show properties · <Kbd>⇧H</Kbd>{' '}
           selected type only · <Kbd>Del</Kbd> delete selected · <Kbd>Esc</Kbd> cancel / exit focus / clear

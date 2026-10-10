@@ -6,10 +6,11 @@
  *
  * The one-shot property request rides on top: it is renewed whenever the
  * address names another property, and when the same property is selected
- * again (the address does not change, the nonce does). The reveal request
- * works the same way for the graph. The add-property request is plain state,
- * dropped by the next selection or view switch. Focus mode and the outline
- * search are plain state too, per ontology for the session.
+ * again (the address does not change, the nonce does). The reveal and tidy
+ * requests work the same way for the graph. The add-property request is plain
+ * state, dropped by the next selection or view switch. Focus mode, the outline
+ * search and the command palette are plain state too, per ontology for the
+ * session.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -57,6 +58,9 @@ export function SchemaWorkspaceProvider({ ontologyKey, children }: SchemaWorkspa
   const [revealRequest, setRevealRequest] = useState<RevealRequest | null>(null)
   const [focusMode, setFocusMode] = useState(false)
   const [query, setQuery] = useState('')
+  const [tidyRequest, setTidyRequest] = useState(0)
+  const requestTidy = useCallback(() => setTidyRequest((n) => n + 1), [])
+  const [paletteOpen, setPaletteOpen] = useState(false)
 
   const select = useCallback<SchemaWorkspace['select']>(
     (next, options) => {
@@ -130,6 +134,10 @@ export function SchemaWorkspaceProvider({ ontologyKey, children }: SchemaWorkspa
       exitFocus,
       search: query,
       setSearch: setQuery,
+      tidyRequest,
+      requestTidy,
+      paletteOpen,
+      setPaletteOpen,
     }),
     [
       ontologyKey,
@@ -145,6 +153,9 @@ export function SchemaWorkspaceProvider({ ontologyKey, children }: SchemaWorkspa
       toggleFocus,
       exitFocus,
       query,
+      tidyRequest,
+      requestTidy,
+      paletteOpen,
     ],
   )
   return <SchemaWorkspaceContext.Provider value={value}>{children}</SchemaWorkspaceContext.Provider>

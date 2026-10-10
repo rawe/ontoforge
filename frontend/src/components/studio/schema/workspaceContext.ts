@@ -53,6 +53,12 @@ export interface SchemaWorkspace {
   /** The outline search; the outline filters by it, the graph highlights by it. */
   search: string
   setSearch: (query: string) => void
+  /** Bumped by `requestTidy`; the graph re-lays out on each new value. */
+  tidyRequest: number
+  requestTidy: () => void
+  /** The schema command palette (`⌘K`). */
+  paletteOpen: boolean
+  setPaletteOpen: (open: boolean) => void
 }
 
 export const SchemaWorkspaceContext = createContext<SchemaWorkspace | null>(null)

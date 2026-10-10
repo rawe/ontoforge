@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useEffectEvent, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { Box, PanelTop, Plus, SearchX, ShieldCheck, Waypoints } from 'lucide-react'
+import { Box, Command, PanelTop, Plus, SearchX, ShieldCheck, Waypoints } from 'lucide-react'
 import { useParams } from 'react-router-dom'
 import * as model from '@/api/model'
 import type { ValidationResult } from '@/api/types'
@@ -18,7 +18,9 @@ import { useModelSchema } from '@/components/studio/modeling/useModelSchema'
 import { ClassicList } from '@/components/studio/schema/ClassicList'
 import { ClassicTypePage } from '@/components/studio/schema/ClassicTypePage'
 import { Inspector } from '@/components/studio/schema/Inspector'
+import { IssuesPopover } from '@/components/studio/schema/IssuesPopover'
 import { Outline } from '@/components/studio/schema/Outline'
+import { SchemaCommandPalette } from '@/components/studio/schema/SchemaCommandPalette'
 import type { SchemaView } from '@/components/studio/schema/schemaUrl'
 import { SchemaWorkspaceProvider } from '@/components/studio/schema/workspace'
 import { useSchemaWorkspace } from '@/components/studio/schema/workspaceContext'
@@ -51,7 +53,7 @@ export function SchemaPage() {
 }
 
 function SchemaShell({ ontologyKey }: { ontologyKey: string }) {
-  const { view, selection, select, switchView } = useSchemaWorkspace()
+  const { view, selection, select, switchView, setPaletteOpen } = useSchemaWorkspace()
   const schema = useModelSchema(ontologyKey)
   const [validation, setValidation] = useState<ValidationResult | null>(null)
   const [createEntityOpen, setCreateEntityOpen] = useState(false)
@@ -160,6 +162,15 @@ function SchemaShell({ ontologyKey }: { ontologyKey: string }) {
                 <ShieldCheck className="size-3.5" />
                 {validate.isPending ? 'Validating…' : 'Validate'}
               </Button>
+              {loaded && <IssuesPopover />}
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-muted-foreground"
+                onClick={() => setPaletteOpen(true)}
+              >
+                <Command className="size-3.5" /> Commands <kbd className="font-mono text-[10.5px]">⌘K</kbd>
+              </Button>
               <ViewTabs view={view} onChange={switchView} />
             </>
           }
@@ -191,6 +202,7 @@ function SchemaShell({ ontologyKey }: { ontologyKey: string }) {
         onCreated={(created) => select({ kind: 'relation-types', key: created.key })}
         entityTypes={schema.entityTypes}
       />
+      <SchemaCommandPalette />
     </DeleteProvider>
   )
 }

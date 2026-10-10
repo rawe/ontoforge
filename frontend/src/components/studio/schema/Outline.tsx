@@ -4,7 +4,8 @@
  * that filters the list (and highlights matches on the graph). Clicking a
  * type selects and reveals it; clicking a property also opens and flashes its
  * row in the inspector or on the classic page. `/` focuses the search from
- * anywhere on the page. Collapses to a thin rail, stored per ontology.
+ * anywhere on the page. Type rows show their lint issue count, property rows
+ * an amber dot. Collapses to a thin rail, stored per ontology.
  */
 
 import { useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
@@ -27,7 +28,9 @@ import { isPlainKey, isTyping, overlayOpen } from '@/lib/shortcuts'
 import { readString, storageKeys, writeString } from '@/lib/storage'
 import { cn } from '@/lib/utils'
 import { searchSchema } from '../modeling/search'
+import { useIssues } from '../modeling/useIssues'
 import { useModelSchema, type TypeKind } from '../modeling/useModelSchema'
+import { WarnDot } from '../modeling/WarnDot'
 import type { SchemaSelection } from './schemaUrl'
 import { useSchemaWorkspace, type PropertyRequest } from './workspaceContext'
 
@@ -103,6 +106,7 @@ function OutlinePanel({
 }) {
   const { ontologyKey, selection, select, propertyRequest, search, setSearch } = useSchemaWorkspace()
   const { entityTypes, relationTypes, properties } = useModelSchema(ontologyKey)
+  const { countByType, propertyIds: flagged } = useIssues(ontologyKey)
   const matches = useMemo(
     () => searchSchema({ entityTypes, relationTypes, properties }, search),
     [entityTypes, relationTypes, properties, search],
@@ -161,6 +165,8 @@ function OutlinePanel({
         properties={props}
         nameProperty={nameProperty}
         matches={matches.propertyIds}
+        issues={countByType.get(ownerId) ?? 0}
+        flagged={flagged}
         activeProperty={selected ? propertyRequest?.propertyKey : undefined}
         onSelectProperty={(propertyKey) => selectType(sel, propertyKey)}
         twoLine={kind === 'relation-types'}
@@ -271,6 +277,8 @@ function TypeItem({
   properties,
   nameProperty,
   matches,
+  issues,
+  flagged,
   activeProperty,
   onSelectProperty,
   twoLine,
@@ -287,6 +295,10 @@ function TypeItem({
   nameProperty: string | undefined
   /** Property ids that match the search. */
   matches: ReadonlySet<string>
+  /** Lint issues of the type and its properties. */
+  issues: number
+  /** Property ids with a lint issue. */
+  flagged: ReadonlySet<string>
   /** Key of the property opened in the address, when this type is selected. */
   activeProperty: string | undefined
   onSelectProperty: (propertyKey: string) => void
@@ -328,7 +340,10 @@ function TypeItem({
           <ChevronRight className={cn('size-3 transition-transform', open && 'rotate-90')} />
         </button>
         {children}
-        <span className="ml-auto shrink-0 pl-1 text-[10px] text-muted-foreground/70">{properties?.length ?? ''}</span>
+        <WarnDot count={issues} className="ml-auto" />
+        <span className={cn('shrink-0 pl-1 text-[10px] text-muted-foreground/70', issues === 0 && 'ml-auto')}>
+          {properties?.length ?? ''}
+        </span>
       </div>
       {open && (
         <ul className="mb-1 ml-[11px] border-l pl-2">
@@ -356,6 +371,9 @@ function TypeItem({
                 <span className="text-(--tc-rose)" title="Required">
                   *
                 </span>
+              )}
+              {flagged.has(p.propertyId) && (
+                <span className="size-1.5 shrink-0 rounded-full bg-(--tc-amber)" title="No description — see Issues" />
               )}
               <span className="ml-auto pl-2 font-mono text-[10px] text-muted-foreground">{p.dataType}</span>
             </li>

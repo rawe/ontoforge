@@ -4,6 +4,7 @@ import { ChevronDown, Plus, Tag } from 'lucide-react'
 import type { EntityType, PropertyDefinition } from '@/api/types'
 import { getTypeColor } from '@/lib/typeColors'
 import { cn } from '@/lib/utils'
+import { WarnDot } from '../modeling/WarnDot'
 import { NODE_WIDTH, TRUNCATE_AFTER } from './layout'
 
 export interface EntityNodeData extends Record<string, unknown> {
@@ -18,6 +19,8 @@ export interface EntityNodeData extends Record<string, unknown> {
   dim: boolean
   /** Matches the outline search. */
   match: boolean
+  /** Lint issues of the type and its properties. */
+  issues: number
 }
 
 export type EntityFlowNode = Node<EntityNodeData, 'entityType'>
@@ -73,6 +76,7 @@ function EntityTypeNodeInner({ id, data, selected }: NodeProps<EntityFlowNode>) 
           <div className="flex items-center gap-1.5">
             <span className={cn('size-2 shrink-0 rounded-full', color.dot)} aria-hidden />
             <span className="truncate text-[13px] font-medium">{et.displayName}</span>
+            <WarnDot count={data.issues} className="ml-auto" />
           </div>
           <div className="truncate pl-3.5 font-mono text-[10.5px] text-muted-foreground">{et.key}</div>
         </div>

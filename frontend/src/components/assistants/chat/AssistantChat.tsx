@@ -1,4 +1,4 @@
-import { AlertCircle, Bot, LoaderCircle, MessageSquarePlus, SendHorizonal, Square, type LucideIcon } from 'lucide-react'
+import { AlertCircle, LoaderCircle, MessageSquarePlus, SendHorizonal, Square, type LucideIcon } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { chatErrorText, threadError, type ChatRequest, type SharedEvent } from '@/api/chatStream'
@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
+import { ASSISTANT_KINDS } from '../kinds'
 import {
   EXPIRED_TEXT,
   MAX_MESSAGE,
@@ -108,6 +109,7 @@ export function AssistantChat<E extends { type: string }, I>({
   const running = turns.some((t) => t.status === 'pending')
   const canAsk = assistantKey !== null && blockedReason === null && !restoring
   const panel = insight.panel
+  const icon = ASSISTANT_KINDS[kind].icon
   const shown = inspectedTurn(turns, selected, model.hasInsight)
 
   useEffect(() => () => {
@@ -244,13 +246,14 @@ export function AssistantChat<E extends { type: string }, I>({
                     <LoaderCircle className="size-3.5 animate-spin" /> Restoring the conversation …
                   </p>
                 ) : turns.length === 0 ? (
-                  <Intro name={name} description={description} intro={intro} />
+                  <Intro icon={icon} name={name} description={description} intro={intro} />
                 ) : (
                   <div className="space-y-6">
                     {turns.map((turn) => (
                       <TurnView
                         key={turn.id}
                         turn={turn}
+                        icon={icon}
                         progress={turn.status === 'pending' ? model.progress(turn.insight) : undefined}
                         insight={panel !== null && (
                           <InsightButton spec={insight.button(turn)} selected={turn.id === shown?.id} onSelect={() => setSelected(turn.id)} />
@@ -332,10 +335,10 @@ export function AssistantChat<E extends { type: string }, I>({
 }
 
 /** The empty conversation: who answers and what it does. */
-function Intro({ name, description, intro }: { name: string; description?: string | null; intro: string }) {
+function Intro({ icon, name, description, intro }: { icon: LucideIcon; name: string; description?: string | null; intro: string }) {
   return (
     <div className="flex flex-col items-center gap-3 py-12 text-center">
-      <AssistantIcon className="size-11 rounded-xl [&_svg]:size-5" />
+      <AssistantIcon icon={icon} className="size-11 rounded-xl [&_svg]:size-5" />
       <div className="max-w-md space-y-1.5">
         <h2 className="text-sm font-medium">{name}</h2>
         {description && <p className="text-[13px] text-foreground/80">{description}</p>}
@@ -345,16 +348,16 @@ function Intro({ name, description, intro }: { name: string; description?: strin
   )
 }
 
-function AssistantIcon({ className }: { className?: string }) {
+function AssistantIcon({ icon: Icon, className }: { icon: LucideIcon; className?: string }) {
   return (
     <div className={cn('flex size-6 shrink-0 items-center justify-center rounded-md border bg-muted/40', className)}>
-      <Bot className="size-3.5 text-muted-foreground" />
+      <Icon className="size-3.5 text-muted-foreground" />
     </div>
   )
 }
 
 /** One question and its answer. */
-function TurnView<I>({ turn, progress, insight }: { turn: Turn<I>; progress: string | undefined; insight: ReactNode }) {
+function TurnView<I>({ turn, icon, progress, insight }: { turn: Turn<I>; icon: LucideIcon; progress: string | undefined; insight: ReactNode }) {
   const ended = endText(turn)
   return (
     <article className="space-y-3">
@@ -364,7 +367,7 @@ function TurnView<I>({ turn, progress, insight }: { turn: Turn<I>; progress: str
         </div>
       </div>
       <div className="flex gap-2.5">
-        <AssistantIcon className="mt-0.5" />
+        <AssistantIcon icon={icon} className="mt-0.5" />
         <div className="min-w-0 flex-1 space-y-2 pt-0.5">
           {turn.reply && <Markdown>{turn.reply}</Markdown>}
           {turn.status === 'pending' && turn.startedAt !== undefined && <Working since={turn.startedAt} detail={progress} />}

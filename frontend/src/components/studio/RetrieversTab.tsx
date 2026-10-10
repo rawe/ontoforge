@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { BotMessageSquare, ChevronLeft, FileUp, Plus, SearchX } from 'lucide-react'
+import { ChevronLeft, FileUp, Plus, SearchX } from 'lucide-react'
 import { useBlocker, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useFeatures, useRetrievers, useRuntimeSchema, useSearchCatalog } from '@/api/hooks'
@@ -9,6 +9,7 @@ import { qk } from '@/api/queryKeys'
 import { importRetriever, saveRetriever, type Retriever } from '@/api/retrievers'
 import type { Lens, RuntimeSchema, SearchCatalogEntry, ValidationError } from '@/api/types'
 import { EmptyState } from '@/components/EmptyState'
+import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
 import { RetrieverChat } from '@/components/assistants/retrievers/RetrieverChat'
 import { RetrieverConfigEditor } from '@/components/assistants/retrievers/RetrieverConfigEditor'
 import { RetrieverRetrieve } from '@/components/assistants/retrievers/RetrieverRetrieve'
@@ -78,7 +79,7 @@ export function RetrieversTab({ ontologyKey, lens }: { ontologyKey: string; lens
   if (selectedKey !== null) {
     const agent = agents.data.find((a) => a.key === selectedKey)
     if (agent === undefined) {
-      return <EmptyState icon={BotMessageSquare} title="Retriever not found" description={`This lens has no retriever ${selectedKey}. It may have been deleted or moved.`}
+      return <EmptyState icon={ASSISTANT_KINDS.retrievers.icon} title="Retriever not found" description={`This lens has no retriever ${selectedKey}. It may have been deleted or moved.`}
         action={<Button variant="outline" onClick={() => select(null)}>All retrievers</Button>} />
     }
     return <RetrieverEditor key={`${agent.key}:${agent.updatedAt}`} {...common} agent={agent} identity={null}
@@ -95,7 +96,7 @@ export function RetrieversTab({ ontologyKey, lens }: { ontologyKey: string; lens
         <Button size="sm" onClick={() => setDialog('new')}><Plus className="size-3.5" /> New retriever</Button>
       </div>
     </div>
-    {agents.data.length === 0 ? <EmptyState icon={BotMessageSquare} title="No retrievers yet" description="Create one, choose the indices it searches, save it and test it here." />
+    {agents.data.length === 0 ? <EmptyState icon={ASSISTANT_KINDS.retrievers.icon} title="No retrievers yet" description="Create one, choose the indices it searches, save it and test it here." />
       : <div className="grid gap-3 lg:grid-cols-2">{agents.data.map((agent) => <RetrieverCard key={agent.key} agent={agent} catalog={catalog.data} onOpen={() => select(agent.key)} />)}</div>}
     {dialog === 'new' && <NameKeyDialog open title="New retriever" description="Name and key; then choose its indices and save it." confirmLabel="Continue"
       initialName="" existingKeys={existingKeys} busy={false} error="" onCancel={() => setDialog(null)} onConfirm={(name, key) => { setDialog(null); setCreating({ name, key }) }} />}

@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bot, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Pencil, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import * as model from '@/api/model'
 import { ApiError } from '@/api/http'
 import { qk } from '@/api/queryKeys'
 import { AGENT_TOOL_NAMES, type Agent, type Lens } from '@/api/types'
+import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
 import { EmptyState } from '@/components/EmptyState'
 import {
   AlertDialog,
@@ -259,7 +260,7 @@ export function AgentsTab({ ontologyKey, lens }: { ontologyKey: string; lens: Le
 
       {agents !== undefined && agents.length === 0 && (
         <EmptyState
-          icon={Bot}
+          icon={ASSISTANT_KINDS.agents.icon}
           title="No agents defined"
           description="Agents give the AI assistant a persona, a system prompt and a restricted tool set."
           action={
@@ -282,7 +283,7 @@ export function AgentsTab({ ontologyKey, lens }: { ontologyKey: string; lens: Le
               key={agent.key}
               className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3"
             >
-              <Bot className="size-4 shrink-0 text-muted-foreground" />
+              <ASSISTANT_KINDS.agents.icon className="size-4 shrink-0 text-muted-foreground" />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="truncate text-[13px] font-medium">{agent.name}</span>

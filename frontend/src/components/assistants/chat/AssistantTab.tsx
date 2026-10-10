@@ -1,4 +1,3 @@
-import { Bot } from 'lucide-react'
 import { useCallback, useEffect, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { chatErrorText } from '@/api/chatStream'
@@ -7,13 +6,10 @@ import type { AssistantKind, RuntimeAssistant } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ASSISTANT_KINDS } from '../kinds'
 import { DEFAULT_ASSISTANT } from './chatModel'
 
 const PARAM = 'assistant'
-const NOUN: Record<AssistantKind, { one: string; many: string }> = {
-  agents: { one: 'Agent', many: 'agents' },
-  retrievers: { one: 'Retriever', many: 'retrievers' },
-}
 
 /**
  * A Workbench Assistants tab: the kind's runtime list (the built-in
@@ -62,20 +58,21 @@ export function AssistantTab({
   if (assistants.error || list === undefined) {
     return (
       <div className="p-6 text-sm">
-        <p role="alert">Could not load {NOUN[kind].many}: {chatErrorText(assistants.error, 'request failed')}</p>
+        <p role="alert">Could not load {ASSISTANT_KINDS[kind].many}: {chatErrorText(assistants.error, 'request failed')}</p>
         <Button variant="outline" size="sm" className="mt-3" onClick={() => void assistants.refetch()}>Reload</Button>
       </div>
     )
   }
   if (assistant === undefined) {
-    return <p className="p-6 text-sm text-muted-foreground">This lens has no {NOUN[kind].many}.</p>
+    return <p className="p-6 text-sm text-muted-foreground">This lens has no {ASSISTANT_KINDS[kind].many}.</p>
   }
 
+  const { one, icon: Icon } = ASSISTANT_KINDS[kind]
   const picker = (
     <div className="flex min-w-0 items-center gap-2">
-      <Bot className="size-4 shrink-0 text-muted-foreground" />
+      <Icon className="size-4 shrink-0 text-muted-foreground" />
       <Select value={assistant.key} onValueChange={choose}>
-        <SelectTrigger size="sm" aria-label={NOUN[kind].one} className="h-7 max-w-72 min-w-40 text-[13px]">
+        <SelectTrigger size="sm" aria-label={one} className="h-7 max-w-72 min-w-40 text-[13px]">
           <SelectValue>{assistant.name}</SelectValue>
         </SelectTrigger>
         <SelectContent position="popper" align="start">

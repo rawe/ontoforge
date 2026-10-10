@@ -1,9 +1,10 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Bot, BotMessageSquare, ChevronLeft, ExternalLink, Layers, Plug, SquareTerminal, Trash2 } from 'lucide-react'
+import { ChevronLeft, ExternalLink, Layers, Plug, SquareTerminal, Trash2 } from 'lucide-react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import * as model from '@/api/model'
 import { useFeatures, useLenses } from '@/api/hooks'
+import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
 import { EmptyState } from '@/components/EmptyState'
 import { AgentsTab } from '@/components/studio/AgentsTab'
 import { ConnectTab } from '@/components/studio/ConnectTab'
@@ -172,11 +173,11 @@ export function LensDetailPage() {
               <Layers className="size-3.5" /> Scope
             </TabsTrigger>
             <TabsTrigger value="agents">
-              <Bot className="size-3.5" /> Agents
+              <ASSISTANT_KINDS.agents.icon className="size-3.5" /> Agents
             </TabsTrigger>
             {retrievers && (
               <TabsTrigger value="retriever-agents">
-                <BotMessageSquare className="size-3.5" /> Retrievers
+                <ASSISTANT_KINDS.retrievers.icon className="size-3.5" /> Retrievers
               </TabsTrigger>
             )}
             <TabsTrigger value="queries">

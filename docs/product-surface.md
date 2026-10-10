@@ -731,7 +731,7 @@ kind and assistant (not in the test panel) and restores its messages from the se
 
 - **Empty conversation** — the assistant's name and description, and one line on what
   its kind does.
-- **Messages** — the question in a bubble, the answer beside the assistant's icon,
+- **Messages** — the question in a bubble, the answer beside its kind's icon,
   rendered as Markdown; answer text appears as it streams. While an answer runs it shows
   the elapsed seconds and what it is doing now: an agent's running tool, a retriever's
   current step. This is its only progress sign.

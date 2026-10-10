@@ -1,10 +1,9 @@
 import { useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowRight, Box, Check, ChevronLeft, Pencil, Plus, Trash2 } from 'lucide-react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { ArrowRight, Box, Check, ChevronLeft, Pencil, Plus, SearchX, Trash2 } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import * as model from '@/api/model'
-import { qk } from '@/api/queryKeys'
 import type { EntityType, PropertyDefinition, RelationType } from '@/api/types'
 import { EmptyState } from '@/components/EmptyState'
 import { TypeChip, TypeDot } from '@/components/TypeChip'
@@ -43,12 +42,11 @@ import { useCascade } from './useCascade'
 import { PropertyDialog } from './PropertyDialog'
 import { invalidateModeling, leaveAfterDelete, toastError } from './lib'
 import { InlineText } from './shared'
-
-type Kind = 'entity-types' | 'relation-types'
+import { findType, useModelSchema, type TypeKind } from './modeling/useModelSchema'
 
 interface TypeEditorProps {
   ontologyKey: string
-  kind: Kind
+  kind: TypeKind
   typeId: string
 }
 
@@ -68,24 +66,9 @@ export function TypeEditor({ ontologyKey, kind, typeId }: TypeEditorProps) {
   const [deleteTypeOpen, setDeleteTypeOpen] = useState(false)
   const [propertyToDelete, setPropertyToDelete] = useState<PropertyDefinition | null>(null)
 
-  const typesQuery = useQuery<(EntityType | RelationType)[]>({
-    queryKey: qk.model(ontologyKey, kind),
-    queryFn: () =>
-      isEntity
-        ? (model.listEntityTypes(ontologyKey) as Promise<(EntityType | RelationType)[]>)
-        : (model.listRelationTypes(ontologyKey) as Promise<(EntityType | RelationType)[]>),
-  })
-  const type = typesQuery.data?.find((t) =>
-    isEntity
-      ? (t as EntityType).entityTypeId === typeId
-      : (t as RelationType).relationTypeId === typeId,
-  )
-
-  const propertiesQuery = useQuery({
-    queryKey: qk.model(ontologyKey, kind, typeId, 'properties'),
-    queryFn: () => model.listProperties(ontologyKey, kind, typeId),
-  })
-  const properties = propertiesQuery.data
+  const schema = useModelSchema(ontologyKey)
+  const type = findType(schema, kind, typeId)
+  const properties = schema.properties[typeId]
 
   const update = useMutation({
     mutationFn: (patch: { displayName: string; description: string | null }): Promise<unknown> =>
@@ -147,12 +130,23 @@ export function TypeEditor({ ontologyKey, kind, typeId }: TypeEditorProps) {
     },
   })
 
-  if (typesQuery.isPending) {
+  if (schema.isPending) {
     return (
       <div className="space-y-4 p-6">
         <Skeleton className="h-8 w-64" />
         <Skeleton className="h-40 rounded-xl" />
       </div>
+    )
+  }
+
+  if (type === undefined && schema.error !== null) {
+    return (
+      <EmptyState
+        icon={SearchX}
+        title="Failed to load schema"
+        description={schema.error.message}
+        className="py-24"
+      />
     )
   }
 
@@ -274,7 +268,14 @@ export function TypeEditor({ ontologyKey, kind, typeId }: TypeEditorProps) {
           </Button>
         </div>
 
-        {propertiesQuery.isPending && <Skeleton className="h-32 rounded-xl" />}
+        {properties === undefined &&
+          (schema.error === null ? (
+            <Skeleton className="h-32 rounded-xl" />
+          ) : (
+            <p className="rounded-xl border border-dashed p-6 text-center text-[13px] text-muted-foreground">
+              Failed to load: {schema.error.message}
+            </p>
+          ))}
 
         {properties !== undefined && properties.length === 0 && (
           <p className="rounded-xl border border-dashed p-6 text-center text-[13px] text-muted-foreground">

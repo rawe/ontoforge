@@ -1,17 +1,17 @@
-import { useMemo, useState } from 'react'
-import { useMutation, useQueries, useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useMutation } from '@tanstack/react-query'
 import {
   ArrowRight,
   Box,
   List,
   Plus,
+  SearchX,
   ShieldCheck,
   Waypoints,
   Workflow,
 } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
 import * as model from '@/api/model'
-import { qk } from '@/api/queryKeys'
 import type { EntityType, RelationType, ValidationResult } from '@/api/types'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
@@ -23,31 +23,10 @@ import {
 } from '@/components/studio/TypeCreateDialogs'
 import { ValidationPanel } from '@/components/studio/ValidationPanel'
 import { toastError } from '@/components/studio/lib'
+import { useModelSchema } from '@/components/studio/modeling/useModelSchema'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-
-function usePropertyCounts(
-  ontologyKey: string | undefined,
-  kind: 'entity-types' | 'relation-types',
-  ids: string[],
-) {
-  return useQueries({
-    queries: ids.map((id) => ({
-      queryKey: qk.model(ontologyKey ?? '', kind, id, 'properties'),
-      queryFn: () => model.listProperties(ontologyKey!, kind, id),
-      enabled: ontologyKey !== undefined,
-    })),
-    combine: (results) => {
-      const counts: Record<string, number> = {}
-      results.forEach((r, i) => {
-        const id = ids[i]
-        if (r.data !== undefined && id !== undefined) counts[id] = r.data.length
-      })
-      return counts
-    },
-  })
-}
 
 function propCountLabel(count: number | undefined) {
   if (count === undefined) return null
@@ -126,49 +105,27 @@ function RelationTypeCard({
 /** `/o/:ontologyKey/studio` — schema overview: type lists, diagram toggle, validation. */
 export function StudioHomePage() {
   const { ontologyKey } = useParams<{ ontologyKey: string }>()
+  if (ontologyKey === undefined) return null
+  return <SchemaOverview ontologyKey={ontologyKey} />
+}
+
+function SchemaOverview({ ontologyKey }: { ontologyKey: string }) {
   const [view, setView] = useState<'list' | 'diagram'>('list')
   const [validation, setValidation] = useState<ValidationResult | null>(null)
   const [createEntityOpen, setCreateEntityOpen] = useState(false)
   const [createRelationOpen, setCreateRelationOpen] = useState(false)
 
-  const entityTypesQuery = useQuery({
-    queryKey: qk.model(ontologyKey ?? '', 'entity-types'),
-    queryFn: () => model.listEntityTypes(ontologyKey!),
-    enabled: ontologyKey !== undefined,
-  })
-  const relationTypesQuery = useQuery({
-    queryKey: qk.model(ontologyKey ?? '', 'relation-types'),
-    queryFn: () => model.listRelationTypes(ontologyKey!),
-    enabled: ontologyKey !== undefined,
-  })
-  const entityTypes = entityTypesQuery.data
-  const relationTypes = relationTypesQuery.data
-
-  const entityIds = useMemo(
-    () => (entityTypes ?? []).map((t) => t.entityTypeId),
-    [entityTypes],
-  )
-  const relationIds = useMemo(
-    () => (relationTypes ?? []).map((t) => t.relationTypeId),
-    [relationTypes],
-  )
-  const entityPropCounts = usePropertyCounts(ontologyKey, 'entity-types', entityIds)
-  const relationPropCounts = usePropertyCounts(ontologyKey, 'relation-types', relationIds)
+  const { entityTypes, relationTypes, properties, isPending: loading, error } =
+    useModelSchema(ontologyKey)
 
   const validate = useMutation({
-    mutationFn: () => model.validateSchema(ontologyKey!),
+    mutationFn: () => model.validateSchema(ontologyKey),
     onSuccess: setValidation,
     onError: toastError,
   })
 
-  if (ontologyKey === undefined) return null
-
-  const loading = entityTypesQuery.isPending || relationTypesQuery.isPending
-  const empty =
-    entityTypes !== undefined &&
-    relationTypes !== undefined &&
-    entityTypes.length === 0 &&
-    relationTypes.length === 0
+  const failed = !loading && error !== null
+  const empty = !loading && !failed && entityTypes.length === 0 && relationTypes.length === 0
 
   return (
     <div className="flex h-full flex-col">
@@ -226,6 +183,15 @@ export function StudioHomePage() {
           </div>
         )}
 
+        {failed && (
+          <EmptyState
+            icon={SearchX}
+            title="Failed to load schema"
+            description={error.message}
+            className="py-24"
+          />
+        )}
+
         {!loading && empty && (
           <EmptyState
             icon={Box}
@@ -239,35 +205,35 @@ export function StudioHomePage() {
           />
         )}
 
-        {!loading && !empty && view === 'diagram' && (
+        {!loading && !failed && !empty && view === 'diagram' && (
           <div className="min-h-0 flex-1">
             <SchemaDiagram
               ontologyKey={ontologyKey}
-              entityTypes={entityTypes ?? []}
-              relationTypes={relationTypes ?? []}
+              entityTypes={entityTypes}
+              relationTypes={relationTypes}
             />
           </div>
         )}
 
-        {!loading && !empty && view === 'list' && (
+        {!loading && !failed && !empty && view === 'list' && (
           <div className="grid items-start gap-6 lg:grid-cols-2">
             <section className="space-y-2.5">
               <h2 className="flex items-center gap-2 text-[13px] font-semibold">
                 <Box className="size-4 text-muted-foreground" />
                 Entity types
                 <span className="font-normal text-muted-foreground">
-                  {entityTypes?.length ?? 0}
+                  {entityTypes.length}
                 </span>
               </h2>
-              {(entityTypes ?? []).map((t) => (
+              {entityTypes.map((t) => (
                 <EntityTypeCard
                   key={t.entityTypeId}
                   ontologyKey={ontologyKey}
                   type={t}
-                  propCount={entityPropCounts[t.entityTypeId]}
+                  propCount={properties[t.entityTypeId]?.length}
                 />
               ))}
-              {entityTypes !== undefined && entityTypes.length === 0 && (
+              {entityTypes.length === 0 && (
                 <p className="rounded-xl border border-dashed p-4 text-[13px] text-muted-foreground">
                   No entity types yet.
                 </p>
@@ -278,18 +244,18 @@ export function StudioHomePage() {
                 <Workflow className="size-4 text-muted-foreground" />
                 Relation types
                 <span className="font-normal text-muted-foreground">
-                  {relationTypes?.length ?? 0}
+                  {relationTypes.length}
                 </span>
               </h2>
-              {(relationTypes ?? []).map((t) => (
+              {relationTypes.map((t) => (
                 <RelationTypeCard
                   key={t.relationTypeId}
                   ontologyKey={ontologyKey}
                   type={t}
-                  propCount={relationPropCounts[t.relationTypeId]}
+                  propCount={properties[t.relationTypeId]?.length}
                 />
               ))}
-              {relationTypes !== undefined && relationTypes.length === 0 && (
+              {relationTypes.length === 0 && (
                 <p className="rounded-xl border border-dashed p-4 text-[13px] text-muted-foreground">
                   No relation types yet. Relations connect two entity types.
                 </p>
@@ -308,7 +274,7 @@ export function StudioHomePage() {
         ontologyKey={ontologyKey}
         open={createRelationOpen}
         onOpenChange={setCreateRelationOpen}
-        entityTypes={entityTypes ?? []}
+        entityTypes={entityTypes}
       />
     </div>
   )

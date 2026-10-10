@@ -1,23 +1,10 @@
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowRight, Box, Check, ChevronLeft, Pencil, Plus, SearchX, Trash2 } from 'lucide-react'
-import { Link, useNavigate } from 'react-router-dom'
-import { toast } from 'sonner'
-import * as model from '@/api/model'
+import { Link } from 'react-router-dom'
 import type { EntityType, PropertyDefinition, RelationType } from '@/api/types'
 import { EmptyState } from '@/components/EmptyState'
 import { TypeChip, TypeDot } from '@/components/TypeChip'
 import { EntityTypeIndices } from '@/components/search/EntityTypeIndices'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -37,11 +24,11 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { CascadeDialog } from './CascadeDialog'
-import { useCascade } from './useCascade'
 import { PropertyDialog } from './PropertyDialog'
-import { invalidateModeling, leaveAfterDelete, toastError } from './lib'
 import { InlineText } from './shared'
+import { DeleteTypeButton } from './modeling/DeleteDialog'
+import { useRequestDelete } from './modeling/deleteContext'
+import { useSetNameProperty, useUpdateType } from './modeling/mutations'
 import { findType, useModelSchema, type TypeKind } from './modeling/useModelSchema'
 
 interface TypeEditorProps {
@@ -52,83 +39,23 @@ interface TypeEditorProps {
 
 /**
  * Shared editor for entity and relation types: editable display name and
- * description, immutable key, delete with cascade flow, properties table.
- * Entity types also pick their name property among their string properties.
+ * description, immutable key, delete, properties table. Entity types also
+ * pick their name property among their string properties. Needs a
+ * `DeleteProvider` above it.
  */
 export function TypeEditor({ ontologyKey, kind, typeId }: TypeEditorProps) {
   const isEntity = kind === 'entity-types'
-  const queryClient = useQueryClient()
-  const navigate = useNavigate()
-  const { cascade, guard, clear } = useCascade()
+  const requestDelete = useRequestDelete()
 
   const [propertyDialogOpen, setPropertyDialogOpen] = useState(false)
   const [editingProperty, setEditingProperty] = useState<PropertyDefinition | null>(null)
-  const [deleteTypeOpen, setDeleteTypeOpen] = useState(false)
-  const [propertyToDelete, setPropertyToDelete] = useState<PropertyDefinition | null>(null)
 
   const schema = useModelSchema(ontologyKey)
   const type = findType(schema, kind, typeId)
   const properties = schema.properties[typeId]
 
-  const update = useMutation({
-    mutationFn: (patch: { displayName: string; description: string | null }): Promise<unknown> =>
-      isEntity
-        ? model.updateEntityType(ontologyKey, typeId, patch)
-        : model.updateRelationType(ontologyKey, typeId, patch),
-    onSuccess: () => {
-      invalidateModeling(queryClient)
-      toast.success('Saved')
-    },
-    onError: toastError,
-  })
-
-  const setNameProperty = useMutation({
-    mutationFn: (nameProperty: string) =>
-      model.updateEntityType(ontologyKey, typeId, {
-        displayName: type!.displayName,
-        description: type!.description,
-        nameProperty,
-      }),
-    onSuccess: (saved) => {
-      invalidateModeling(queryClient)
-      toast.success(`Name property set to "${saved.nameProperty}"`)
-    },
-    onError: toastError,
-  })
-
-  const deleteType = useMutation({
-    mutationFn: (cascadeFlag: boolean) =>
-      isEntity
-        ? model.deleteEntityType(ontologyKey, typeId, cascadeFlag)
-        : model.deleteRelationType(ontologyKey, typeId, cascadeFlag),
-    onSuccess: () => {
-      toast.success(`${isEntity ? 'Entity' : 'Relation'} type deleted`)
-      leaveAfterDelete(navigate, `/o/${ontologyKey}/studio`, queryClient)
-    },
-    onError: (error) => {
-      if (guard(error, () => deleteType.mutate(true))) return
-      toastError(error)
-    },
-  })
-
-  const deleteProperty = useMutation({
-    mutationFn: ({ propertyId, cascadeFlag }: { propertyId: string; cascadeFlag: boolean }) =>
-      model.deleteProperty(ontologyKey, kind, typeId, propertyId, cascadeFlag),
-    onSuccess: () => {
-      invalidateModeling(queryClient)
-      toast.success('Property deleted')
-    },
-    onError: (error, variables) => {
-      if (
-        guard(error, () =>
-          deleteProperty.mutate({ propertyId: variables.propertyId, cascadeFlag: true }),
-        )
-      ) {
-        return
-      }
-      toastError(error)
-    },
-  })
+  const update = useUpdateType(ontologyKey, kind, typeId)
+  const setNameProperty = useSetNameProperty(ontologyKey, typeId)
 
   if (schema.isPending) {
     return (
@@ -184,7 +111,7 @@ export function TypeEditor({ ontologyKey, kind, typeId }: TypeEditorProps) {
             aria-label="Display name"
             value={type.displayName}
             onSave={(v) => {
-              if (v !== '') update.mutate({ displayName: v, description: type.description })
+              if (v !== '') update.mutate({ displayName: v })
             }}
             className="text-[15px] font-semibold tracking-tight"
             inputClassName="h-8 w-64 text-[15px] font-semibold"
@@ -206,11 +133,7 @@ export function TypeEditor({ ontologyKey, kind, typeId }: TypeEditorProps) {
               <span className="ml-1 text-[11px] text-muted-foreground/70">(immutable)</span>
             </span>
           )}
-          <div className="ml-auto">
-            <Button variant="destructive" size="sm" onClick={() => setDeleteTypeOpen(true)}>
-              <Trash2 className="size-3.5" /> Delete
-            </Button>
-          </div>
+          <DeleteTypeButton kind={kind} id={typeId} className="ml-auto" />
         </div>
         <div className="mt-1 max-w-2xl">
           <InlineText
@@ -218,12 +141,10 @@ export function TypeEditor({ ontologyKey, kind, typeId }: TypeEditorProps) {
             value={type.description ?? ''}
             placeholder="Add a description…"
             multiline
-            onSave={(v) =>
-              update.mutate({
-                displayName: type.displayName,
-                description: v === '' ? null : v,
-              })
-            }
+            onSave={(v) => {
+              // The API cannot clear a description, only replace it.
+              if (v !== '') update.mutate({ description: v })
+            }}
             className="block w-full text-[13px] text-muted-foreground"
           />
         </div>
@@ -368,7 +289,14 @@ export function TypeEditor({ ontologyKey, kind, typeId }: TypeEditorProps) {
                             variant="ghost"
                             size="icon-sm"
                             aria-label={`Delete ${p.key}`}
-                            onClick={() => setPropertyToDelete(p)}
+                            onClick={() =>
+                              requestDelete({
+                                what: 'property',
+                                kind,
+                                typeId,
+                                propertyId: p.propertyId,
+                              })
+                            }
                           >
                             <Trash2 className="size-3.5 text-destructive" />
                           </Button>
@@ -393,62 +321,6 @@ export function TypeEditor({ ontologyKey, kind, typeId }: TypeEditorProps) {
         open={propertyDialogOpen}
         onOpenChange={setPropertyDialogOpen}
       />
-
-      <AlertDialog open={deleteTypeOpen} onOpenChange={setDeleteTypeOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete "{type.displayName}"?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This removes the {isEntity ? 'entity' : 'relation'} type and its properties
-              from this ontology's schema. This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={() => deleteType.mutate(false)}
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog
-        open={propertyToDelete !== null}
-        onOpenChange={(open) => !open && setPropertyToDelete(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              Delete property "{propertyToDelete?.key ?? ''}"?
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              Existing instance data for this property stays in the database but is no
-              longer part of the schema.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={() => {
-                if (propertyToDelete !== null) {
-                  deleteProperty.mutate({
-                    propertyId: propertyToDelete.propertyId,
-                    cascadeFlag: false,
-                  })
-                }
-              }}
-            >
-              Delete property
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <CascadeDialog cascade={cascade} onClose={clear} />
     </div>
   )
 }

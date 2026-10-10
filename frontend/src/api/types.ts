@@ -535,6 +535,20 @@ export interface RelationTypeInput {
   targetEntityTypeKey?: string
 }
 
+/** Sparse update: an omitted field stays unchanged. A description can be replaced, not cleared. */
+export interface EntityTypeUpdate {
+  displayName?: string
+  description?: string
+  /** Reassign to another string property of the type. */
+  nameProperty?: string
+}
+
+/** Sparse update: an omitted field stays unchanged. */
+export interface RelationTypeUpdate {
+  displayName?: string
+  description?: string
+}
+
 export interface PropertyInput {
   key?: string
   displayName: string

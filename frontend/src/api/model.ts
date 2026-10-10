@@ -10,6 +10,7 @@ import type {
   AgentInput,
   EntityType,
   EntityTypeInput,
+  EntityTypeUpdate,
   JsonValue,
   Lens,
   LensInput,
@@ -17,6 +18,7 @@ import type {
   PropertyInput,
   RelationType,
   RelationTypeInput,
+  RelationTypeUpdate,
   SavedQuery,
   SavedQueryInput,
   ScopeInclude,
@@ -63,7 +65,7 @@ export const getEntityType = (ontologyKey: string, entityTypeId: string) =>
 export const updateEntityType = (
   ontologyKey: string,
   entityTypeId: string,
-  body: EntityTypeInput,
+  body: EntityTypeUpdate,
 ) =>
   request<EntityType>(`${base(ontologyKey)}/entity-types/${entityTypeId}`, {
     method: 'PUT',
@@ -98,7 +100,7 @@ export const getRelationType = (ontologyKey: string, relationTypeId: string) =>
 export const updateRelationType = (
   ontologyKey: string,
   relationTypeId: string,
-  body: RelationTypeInput,
+  body: RelationTypeUpdate,
 ) =>
   request<RelationType>(`${base(ontologyKey)}/relation-types/${relationTypeId}`, {
     method: 'PUT',

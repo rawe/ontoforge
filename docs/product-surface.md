@@ -48,7 +48,7 @@ screen; there is no separate settings area.
 | | Workbench | Studio |
 |---|---|---|
 | Subject | Instance data seen through one lens | One ontology's schema and its lenses |
-| Addressed by | Ontology key and lens key, then type keys | Ontology key, then type and lens identifiers |
+| Addressed by | Ontology key and lens key, then type keys | Ontology key, then type keys and lens identifiers |
 | Answers | "What is in the graph?" | "What can be in the graph?" |
 
 The two never mix. Nothing in the Workbench edits the schema; nothing in the Studio
@@ -96,8 +96,8 @@ interface anywhere, so adding an entity type immediately produces a table, a for
 detail page, palette coverage and canvas support for it.
 
 Each type key is assigned a colour deterministically from a fixed palette, so a given type
-looks the same in the sidebar, chips, table badges, canvas nodes, diagrams and search
-results. Colour is derived from the key alone and needs no server support.
+looks the same in the sidebar, chips, table badges, canvas nodes, the
+[schema graph](#schema-graph) and search results. Colour is derived from the key alone and needs no server support.
 
 ### Home
 
@@ -234,45 +234,93 @@ reads and writes belongs to the current ontology.
 
 ### Schema
 
-The ontology's schema, in two interchangeable views: a two-column list of entity types and
-relation types, and a [diagram](#schema-diagram). Each card shows the type's key, display
-name, property count and description; a relation type card also shows its endpoints.
-From here: create an entity type, create a relation type, and validate the whole schema.
-Validation results appear inline as a pass marker or a list of path-and-message issues.
+One page for the ontology's schema, in two views of the same types: the
+[schema graph](#schema-graph), which is the default, and the classic view — a two-column
+list of entity types and relation types, each section with its count, plus a
+[type page](#type-page-classic-view) per type. A list card shows the type's key, display
+name, property count and description; a relation type card also shows its endpoints. The
+Studio sidebar's Schema entry is active on every schema address.
 
-Creating a type asks for a display name, a key and a description. The key is proposed from
-the display name (lower-cased, non-alphanumerics collapsed to underscores, leading digits
-dropped), validated live against the key pattern, and permanent — the form says so.
-Creating an entity type additionally asks for the key of its name property, `name` by
-default and validated against the same pattern; its dialog explains that the type belongs
-to this ontology, where every lens can include it, and that the name property's value
-labels instances. Creating a relation type additionally asks
-for source and target entity types, which are permanent too.
+Both views share one selection: at most one entity type or relation type, optionally with
+one opened property, held in the address ([Deep links](#deep-links)). Selecting anywhere —
+on the graph, in the [outline](#schema-outline), the
+[command palette](#schema-command-palette), the [issues list](#schema-issues) or a jump
+link — replaces the address; switching views adds a history entry, so back and forward
+restore view and selection. Switching is instant and keeps the selection and the opened
+property in both directions. In the classic view a selected type is shown as its type page
+and the list when nothing is selected. An opened property's row opens, is highlighted
+briefly and scrolls into view — in the graph's inspector or on the type page. A type key
+the schema does not have shows a not-found state with a link to the list in the classic
+view; on the graph it is dropped from the address with a message naming it.
 
-### Type editor
+The header carries Validate, the issues button, a Commands button opening the schema
+command palette, and the Graph | Classic switch; in the classic view it adds
+"+ Entity type" and "+ Relation type", which open the create dialogs — the graph creates
+in place. Validation results appear inline as a pass marker or a list of path-and-message
+issues. Below the header sit the outline and the current view; the page itself never
+scrolls. Every change is written the moment it is made — there is no draft and no save
+step — and the header says so. An empty ontology shows, on the graph, a hint to
+double-click or press `N` for the first entity type, and in the classic view "No types
+yet" with a create action.
 
-One screen for both entity types and relation types.
+The create dialogs ask for a display name, a key and a description; the graph's naming
+popover and the palette ask for a display name and a key. The key is proposed from the
+display name (lower-cased, non-alphanumerics collapsed to underscores, leading digits and
+underscores dropped, cut to the maximum key length), validated live against the key
+pattern, and permanent — the form says so. The entity type dialog additionally asks for
+the key of its name property, `name` by default and validated against the same pattern;
+it explains that the type belongs to this ontology, where every lens can include it, and
+that the name property's value labels instances. Created anywhere else, an entity type
+gets the default name property. Creating a relation type additionally asks for source and
+target entity types, which are permanent too.
 
-Editable in place: display name and description. Immutable and labelled as such: the key,
-and a relation type's endpoints. Deletion is offered behind a confirmation and may trigger
-the [cascade flow](#cascade-confirmation).
+### Type page (classic view)
 
-A properties table lists key, display name, data type, required flag, default and
-description, with add, edit and delete per row. On an entity type the name property's row
-carries a "Name" badge and its delete action is disabled, explaining that another name
-property must be chosen first; a "Name property" select above the table offers the type's
-`string` properties and reassigns the name property on change. In the property dialog the key and the data
-type are immutable once created; display name, description, required flag and default may
-change. The default is entered with an input matched to the data type. Document is offered
-as a data type on entity types only. Creating a required property may trigger the cascade
-flow. Deleting a property warns that existing stored values remain in the database but
-leave the schema. See [capabilities/schema-modeling.md](capabilities/schema-modeling.md).
+One page for both entity types and relation types, built from the same parts as the
+graph's [inspector](#schema-graph) in page density, so both edit alike. A back link leads
+to the classic list.
 
-On an entity type, a **Search indices** section below the properties lists every search
-index rooted on the type — managed and custom — with its name, key, kind and
+The header edits the display name and the description in place. An empty display name is
+refused; a description can be changed but not emptied — an emptied one is not sent, and
+the stored text returns with a hint saying so
+([capabilities/schema-modeling.md](capabilities/schema-modeling.md#keys-and-immutability)).
+Immutable and labelled as such: the key, and a relation type's endpoints, shown as chips
+that jump to those entity types. On an entity type the header holds a "Name property"
+select offering the type's `string` properties, which reassigns the name property on
+change.
+
+The properties list puts the name property first, then the rest by key, with key, display
+name, data type, required flag, default and description per row. Clicking a row opens its
+details in place: display name, default (an input matched to the data type; emptying it
+clears the default), description and the required flag, each saved as it changes, with
+the key and data type stated as permanent. The name property's row carries a "Name" badge
+and its delete action is disabled, explaining that another name property must be chosen
+first. "Add property" opens an inline form — display name with a derived key, data type,
+required flag and default — which stays open with cleared fields after each add; Escape
+closes it. Document is offered as a data type on entity types only. Adding a required
+property without a default may trigger the [cascade flow](#cascade-confirmation). See
+[capabilities/schema-modeling.md](capabilities/schema-modeling.md).
+
+On an entity type, a list of the relation types that touch it follows — direction, key
+and the entity type at the other end — each selecting that relation type. Below it, a
+**Search indices** section lists every search index rooted on the type — managed and custom — with its name, key, kind and
 [status](#search), each linking to the index; "New index" opens the
 [index designer](#index-designer) with the type pre-selected. A type with no index says
 why: it has no string or document property and no custom index.
+
+**Deleting.** One dialog serves types and properties, wherever deletion starts — the type
+page, the inspector, a property's delete action, `Del` on the graph, or the palette. For a
+type it states how many property definitions go with it, that stored entities or
+relations under its key stay in the database but become unreachable
+([capabilities/schema-modeling.md](capabilities/schema-modeling.md#deletion)), and that the
+server reports what it would change in lens scopes and search indices on confirmation;
+the key must be typed to enable Delete. An entity type still used by relation types is
+blocked up front: the dialog lists them, each with a Show action that selects it, and
+sends nothing. A property asks once and says that its stored values remain in the database
+but leave the schema; the name property is blocked. When the server asks for consent, the
+dialog turns into the [cascade confirmation](#cascade-confirmation). A target that no
+longer exists is reported as already gone. After a deletion the selection is cleared if
+it was the deleted type, so the classic view returns to the list.
 
 ### Lenses
 
@@ -773,13 +821,134 @@ on its button, in four tabs, filling while the question runs:
 No score is shown anywhere. See
 [capabilities/retrievers.md](capabilities/retrievers.md#diagnostics).
 
-### Schema diagram
+### Schema graph
 
-A read-only picture of the ontology's schema: one node per entity type in its colour, one
-labelled edge per relation type, laid out left to right. Pan, zoom and drag are available;
-nothing can be created, connected or deleted here. Double-clicking a node opens that type's
-editor. The layout is recomputed when the schema itself changes, not when a node is
-dragged. Relation types with a missing endpoint are omitted rather than drawn dangling.
+The default view of the [Schema](#schema) screen and the place where the schema is edited
+visually. Every gesture writes at once, through the same operations, confirmations and
+cascade flow as the classic view.
+
+**Nodes and edges.** One node per entity type in its colour, with display name, key and
+its property list — the name property first, then the rest by key, each row showing the
+key, a required marker, a tag on the name property and the data type. After six rows the
+rest folds behind "+N more". A node's chevron collapses its list to a property count;
+`H` collapses or expands every node, Shift+H only the selected one, and the collapsed
+lists are remembered per ontology. One edge per relation type, with an arrowhead at the
+target and the key as its label. Relation types between the same two entity types, in
+either direction, curve apart so none overlap; self-relations are loops above their node,
+nesting outward; a label slides along its edge to stay clear of nodes and earlier labels.
+A relation type whose endpoint type is missing is not drawn. The canvas follows the app's
+theme, and each node carries its [issue](#schema-issues) count.
+
+**Layout — computed once, then kept.** The first open lays the graph out automatically,
+left to right, and remembers the positions. After that only the user moves nodes:
+dragging is remembered, and schema edits never re-lay out. A type created on the canvas
+stays where it was created; one created elsewhere — the palette, the classic view,
+another client — goes to the free spot nearest the centre of the view. *Tidy layout*
+re-runs the automatic layout, animates once, fits the view and remembers the result.
+Positions are remembered per ontology in the browser only ([Local state](#local-state)):
+the server never sees them, and they are not part of export or import. Pan and zoom are
+kept for the session, so coming back from the classic view shows the graph as it was
+left. With nothing to restore or reveal, the first view fits all nodes.
+
+**Selection.** Clicking a node selects its entity type, clicking an edge or its label the
+relation type, and clicking the empty canvas clears the selection; clicking a property row
+on a node selects the type with that property opened. A selection made on the canvas never
+moves the view. One made anywhere else — outline, palette, issues, the address, a jump
+link, a return from the classic view with another selection — pans to the node or frames
+the relation type's two endpoints.
+
+**Creating and connecting.** Double-clicking the empty canvas, the toolbar's
+"+ Entity type", or `N` (at the centre of the view) shows a placeholder node and a naming
+popover; Enter creates the entity type where the placeholder stood and selects it, while
+Escape, Cancel or a click on the canvas closes the popover with nothing sent. Hovering or
+selecting a node shows a "+" handle; dragging it draws a connection line, and the whole of
+every node becomes a drop target, the one under the pointer marked. Dropping on another
+node opens "New relation type" with source and target shown and a pending edge; dropping
+on the same node opens "New self-relation"; dropping on empty canvas opens "New relation
+to a new entity type", which creates the entity type at the drop point first and then the
+relation type. If the relation type then fails, the entity type stays and the popover
+switches to the relation type against it, keeping the typed name and showing the error.
+Escape during a drag ends it with no popover. Nothing reaches the server before Enter.
+Keys and endpoints are permanent: there is no reverse or retarget.
+
+**Inspector.** While a type is selected, a panel docks beside the canvas, which stays
+usable: the type's header, properties and — for an entity type — relation types, then
+delete; the same parts as the [type page](#type-page-classic-view), in compact form. Its
+top row switches to the classic view or closes the panel, clearing the selection. With no
+relation type yet, it says to drag the node's "+" onto another type. `Del` or Backspace
+deletes the selected type through the [delete dialog](#type-page-classic-view).
+
+**Focus and search.** Focus mode — `F`, the toolbar or the palette — keeps the selected
+entity type and its one-hop neighbours, or a selected relation type's two endpoints, and
+dims the rest; the view fits them, and a pill names what is in focus. It follows the
+selection; with nothing selected it hints to select a type first; `F` or Escape leaves it.
+While the [outline](#schema-outline)'s search is active, matching nodes are ringed, edges
+stay lit when they or both their endpoints match, the rest dims, and a pill counts the
+matching entity and relation types.
+
+**Toolbar and hints.** The toolbar offers "+ Entity type", tidy layout, fit view, hide or
+show all properties, and focus; zoom controls sit at the bottom, and a hint bar inside the
+canvas lists the gestures and keys. Escape steps back in order: the drag or popover, then
+focus mode, then the selection.
+
+### Schema outline
+
+On the left of the [Schema](#schema) screen in both views: a search box, then the entity
+types (colour, display name, key, issue count, property count) and the relation types
+(display name, key, source → target), each row expandable to its properties — key,
+name-property tag, required marker, issue marker and data type. Clicking a type selects
+and reveals it; clicking a property selects its owner with that property opened. The
+selected row scrolls into view, and a property opened elsewhere expands its owner here.
+
+Search matches the keys and display names of types and properties, case-insensitively,
+anywhere in the text. The outline narrows to matching types, matching properties are
+highlighted with their owners expanded, and the [graph](#schema-graph) highlights the
+matches. Enter selects the first match; Escape clears the search and leaves the box; when
+nothing matches the outline says so. `/` from anywhere on the page focuses the search.
+The outline collapses to a narrow rail, remembered per ontology; `/` opens it again.
+
+### Schema command palette
+
+The Schema screen's own palette, distinct from the Workbench's
+[command palette](#command-palette). Cmd/Ctrl+K, also while typing, or the header's
+Commands button opens it in both views; each open starts at the root with an empty input.
+
+- **Actions** — new entity type, new relation type, add a property to the selected type
+  or to a chosen one, focus, switch view, hide or show all properties and those of the
+  selected entity type, tidy layout, delete the selected type, and a theme toggle. Focus,
+  the property toggles and tidy layout are offered on the graph only. Every command whose
+  key works in the current view shows it.
+- **Go to** — every type with its key, a relation type also with its endpoints; choosing
+  one selects and reveals it.
+- **Quick create** — a line `source -name-> target` or `source name target` creates a
+  relation type. An endpoint matches an entity type's key or display name,
+  case-insensitively, or the key derived from it; unknown endpoints are named and created
+  as new entity types first, each once. An invalid or taken relation key, or an invalid
+  key for a new entity type, disables the entry and says why. Running it selects and reveals the new relation type; types created before a
+  failure stay.
+- **Add property** — one entry per type, once something is typed.
+
+New entity type takes a display name, derives and checks the key, and creates the type.
+Adding a property takes "Name" or "Name : type" and lists the matching data types,
+`string` first and document only for entity types; Enter adds it as an optional property
+and selects its owner. "Open the full property form…" opens the owner's add form in the
+inspector or on the type page instead. Backspace on an empty input returns to the root,
+and a footer names the keys. Single-key shortcuts work straight after the palette closes.
+
+### Schema issues
+
+Quality hints computed in the client from the loaded schema — warnings only, never in the
+way of a change, and costing no request:
+
+- an entity type, relation type or property without a description;
+- an isolated entity type, which no relation type uses as source or target (a
+  self-relation counts as use);
+- an entity type with no property besides its name property.
+
+The header's Issues button shows the count, marked amber when there are any. Its popover
+groups them by kind and states that nothing there blocks a change; clicking one selects and
+reveals its type and, for a property, opens that property. Graph nodes and outline type
+rows carry an amber count, outline property rows an amber dot.
 
 ### Scope editor
 
@@ -833,7 +1002,8 @@ the affected search indices. It offers to apply the change *with* the cascade, w
 re-runs the identical operation with explicit consent. Cancelling leaves nothing changed.
 The flow is attached wherever such a change can originate: deleting an entity or relation
 type, deleting a property, adding a required property, and deleting a custom search
-index. See
+index. For a schema deletion, the [delete dialog](#type-page-classic-view) itself turns
+into this confirmation. See
 [capabilities/schema-modeling.md](capabilities/schema-modeling.md#the-cascade-protocol).
 
 ### Document viewer and editor
@@ -873,7 +1043,7 @@ while the report is loading.
 | AI | The Assistants navigation entry, the Assistants palette action, the palette's question mode and the Ask an assistant quick action are gone. The Assistants screen itself renders an explanation. |
 | No search strategies | Entity search falls back to substring matching — per type in parallel when unscoped. |
 | Semantic search | Saved-query search falls back to client-side substring filtering over the full list. With search indices the search-data rebuild is disabled and explains that there is nothing to rebuild; without them it stays available and explains that it will skip the embeddings. |
-| Search indices | The Studio's Search entry, the lens detail's Retrievers tab and the palette's question mode are gone; their addresses render an explanation, and so does the Workbench's Retrievers tab. The entity type editor's Search indices section and the scope editor's Search indices section are absent. Search hits name no entry, so results show document badges instead of [matched-via](#matched-via) lines. |
+| Search indices | The Studio's Search entry, the lens detail's Retrievers tab and the palette's question mode are gone; their addresses render an explanation, and so does the Workbench's Retrievers tab. The entity type page's Search indices section and the scope editor's Search indices section are absent. Search hits name no entry, so results show document badges instead of [matched-via](#matched-via) lines. |
 
 Everything else works unchanged. See [capabilities/search.md](capabilities/search.md).
 
@@ -973,6 +1143,9 @@ the address.
 | Retriever diagnostics switch (Workbench) | Global | — |
 | Retriever test panel mode (Chat or Retrieve) | Global | — |
 | Retriever for palette questions | Per ontology + lens | — |
+| Schema graph node positions | Per ontology | — |
+| Schema graph collapsed property lists | Per ontology | — |
+| Schema outline collapsed | Per ontology | — |
 
 Per-lens state is keyed by ontology **and** lens because lens keys are unique only
 within their ontology — two ontologies' `default` lenses must never share a canvas or a
@@ -1013,8 +1186,14 @@ Workbench addresses live under `/o/{ontologyKey}/w/{lensKey}`, Studio addresses 
 | `/o/{ontologyKey}/w/{lensKey}/ai` | The Assistants panel, Agents tab; an unknown `tab` shows Agents as well |
 | `/o/{ontologyKey}/w/{lensKey}/ai?tab=retriever` | The Retrievers tab |
 | `/o/{ontologyKey}/w/{lensKey}/ai?assistant={key}` · `?tab=retriever&assistant={key}` | That tab with that assistant — `_default` for the default one; the default one when the lens has no such assistant |
-| `/o/{ontologyKey}/studio` | The ontology's schema overview |
-| `/o/{ontologyKey}/studio/entity-types/{id}` · `.../relation-types/{id}` | A type editor |
+| `/o/{ontologyKey}/studio` · `/o/{ontologyKey}/studio/schema` | Redirects to the schema graph |
+| `/o/{ontologyKey}/studio/schema/graph` | The [schema graph](#schema-graph), nothing selected |
+| `/o/{ontologyKey}/studio/schema/graph?sel=entity:{typeKey}` · `?sel=relation:{typeKey}` | The graph with that type selected and revealed, its inspector open |
+| `/o/{ontologyKey}/studio/schema/graph?sel=…&prop={propertyKey}` | The same, with that property opened and highlighted |
+| `/o/{ontologyKey}/studio/schema/types` | The classic list |
+| `/o/{ontologyKey}/studio/schema/types/entity/{typeKey}` · `.../types/relation/{typeKey}` | A [type page](#type-page-classic-view) |
+| `/o/{ontologyKey}/studio/schema/types/entity/{typeKey}?prop={propertyKey}` · `.../types/relation/{typeKey}?prop={propertyKey}` | The type page with that property opened and highlighted |
+| `/o/{ontologyKey}/studio/entity-types/{id}` · `.../relation-types/{id}` | Redirects to that type's page in the classic view; an unknown identifier shows the not-found state |
 | `/o/{ontologyKey}/studio/lenses` | The lens list |
 | `/o/{ontologyKey}/studio/lenses/{id}` | A lens, Scope tab |
 | `/o/{ontologyKey}/studio/lenses/{id}?tab=agents` · `?tab=retriever-agents` · `?tab=queries` · `?tab=connect` | The other lens tabs |
@@ -1028,6 +1207,7 @@ Workbench addresses live under `/o/{ontologyKey}/w/{lensKey}`, Studio addresses 
 
 Two consumed parameters are stripped from the address as soon as they are acted on, so that
 a reload does not repeat the action: the quick-add trigger and the Explorer focus target.
+A schema address's `prop` without a selected type is ignored.
 Any unrecognised address returns to the root.
 
 ## Keyboard surface
@@ -1052,6 +1232,22 @@ Any unrecognised address returns to the root.
 | Inline property edit (multi-line) | Shift+Enter | Newline |
 | Studio inline text | Enter (Cmd/Ctrl+Enter when multi-line) | Save |
 | Studio inline text | Escape | Cancel without saving |
+| Schema screen, both views | Cmd/Ctrl+K | Toggle the [schema command palette](#schema-command-palette), also while typing |
+| Schema screen, both views | `V` | Switch Graph ⇄ Classic, keeping the selection and the opened property |
+| Schema screen, both views | `/` | Expand the outline and focus its search |
+| Schema graph | `N` | New entity type at the centre of the view |
+| Schema graph | `F` | Toggle focus mode on the selection |
+| Schema graph | `H` | Hide or show the properties on every node |
+| Schema graph | Shift+H | Hide or show the selected entity type's properties |
+| Schema graph | Delete / Backspace | Delete the selected type, through the delete dialog |
+| Schema graph | Escape | Cancel the drag or the popover, else leave focus mode, else clear the selection |
+| Schema naming popover | Enter / Escape | Create / cancel |
+| Schema outline search | Enter | Select the first match |
+| Schema outline search | Escape | Clear the search and leave the box |
+| Add-property form | Enter | Add, keeping the form open for the next one |
+| Add-property form | Escape | Close the form, even when focus has left it |
+| Schema delete dialog | Enter | Delete, once the key is typed |
+| Schema command palette | ↑ / ↓ · Enter · Backspace on empty input · Escape | Move · run · back to the root · close |
 | Query editor | Cmd/Ctrl+Enter | Run |
 | Explorer | `F` | Fit the view |
 | Explorer | `P` | Pin or unpin the selection |

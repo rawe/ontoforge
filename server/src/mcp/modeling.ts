@@ -41,7 +41,6 @@ import {
   AiAgentConfigUpsert,
   EntityTypeCreate,
   EntityTypeUpdate,
-  ExportPayload,
   IncludeTypeRequest,
   LensCreate,
   LensUpdate,
@@ -49,12 +48,12 @@ import {
   PropertyDefinitionUpdate,
   RelationTypeCreate,
   RelationTypeUpdate,
-  LEGACY_TRANSFER_FORMAT_VERSION,
   SavedQueryUpsert,
   SearchSettingsUpdate,
   TRANSFER_FORMAT_VERSION,
 } from "../modeling/schemas.js";
 import * as retrieverAgents from "../modeling/retrieverAgents.js";
+import { IMPORTABLE_FORMAT_VERSIONS } from "../modeling/transfer/upgrades.js";
 import * as searchIndices from "../modeling/searchIndices.js";
 import * as service from "../modeling/service.js";
 import { VALID_AGENT_TOOLS_CSV } from "../runtime/toolNames.js";
@@ -253,7 +252,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
         "Get the current state of the ontology's schema. Returns all entity types, " +
         "relation types, and their properties, the keyword language set, the search " +
         "indices (custom definitions and switched-off managed indices) and the lenses with " +
-        "their type and search-index inclusions and retriever agents.",
+        "their type and search-index inclusions, assistants (agents and retrievers) and saved queries.",
       inputSchema: {},
     },
     wrap("get_schema", async () => {
@@ -580,8 +579,8 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     {
       description:
         `Export the full schema in the OntoForge v${TRANSFER_FORMAT_VERSION} transfer format ` +
-        "(JSON), including the keyword language set, the search indices and the lenses' " +
-        "retriever agents.",
+        "(JSON), including the keyword language set, the search indices and each lens's " +
+        "assistants (agents and retrievers) and saved queries.",
       inputSchema: {},
     },
     wrap("export_schema", async () => {
@@ -594,15 +593,16 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     "import_schema",
     {
       description:
-        `Import a v${TRANSFER_FORMAT_VERSION} schema payload (v${LEGACY_TRANSFER_FORMAT_VERSION} ` +
-        "is accepted too). Creates entity types, relation types, and lenses with scope configuration.",
+        `Import a v${TRANSFER_FORMAT_VERSION} schema payload (also accepted, upgraded on the way in: ` +
+        IMPORTABLE_FORMAT_VERSIONS.filter((v) => v !== TRANSFER_FORMAT_VERSION).map((v) => `v${v}`).join(", ") +
+        "). Creates entity types, relation types, and lenses with scope configuration, " +
+        "assistants and saved queries.",
       inputSchema: {
         payload: z.record(z.string(), z.unknown()),
       },
     },
     wrap("import_schema", async (args: { payload: Record<string, unknown> }) => {
-      const parsed = ExportPayload.parse(args.payload);
-      const result = await service.importSchema(parsed, await getModelingStore(ontologyKey));
+      const result = await service.importSchema(args.payload, await getModelingStore(ontologyKey));
       return jsonResult(result);
     }),
   );

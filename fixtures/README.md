@@ -61,8 +61,8 @@ The server is `--base-url`, else `ONTOFORGE_BASE_URL`, else `http://localhost:80
 ## Repairing after a format change
 
 When OntoForge changes its design or data format, `load` then `save` rewrites the files
-in the current format — `schema.json` in transfer format 6.0. The server still imports a
-5.0 file, converting it on the way in, so an old fixture loads as it is. If `load` fails
+in the current format — `schema.json` in transfer format 7.0. The server still imports
+6.0 and 5.0 files, upgrading them on the way in, so an old fixture loads as it is. If `load` fails
 on an old file, fix the JSON by hand once, then load and save.
 
 ## Safety

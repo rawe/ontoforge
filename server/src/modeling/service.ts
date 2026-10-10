@@ -22,8 +22,6 @@ import {
   StoreError,
   ValidationError,
 } from "../core/exceptions.js";
-import { legacyNameProperty } from "../core/legacyNameProperty.js";
-import { convertLegacyRetrieverConfig, legacyRetrieverKey } from "../core/legacyRetrieverConfig.js";
 import { RETRIEVER_AGENT_CONFIG_VERSION, RetrieverAgentConfig } from "../core/retrieverAgent.js";
 import { parseAndValidate } from "../core/oql/index.js";
 import {
@@ -31,12 +29,7 @@ import {
   type OwnSearchModelingStore,
   type OwnSearchRuntimeStore,
 } from "../core/ownSearch.js";
-import {
-  DEFAULT_KEYWORD_LANGUAGES,
-  KeywordLanguage,
-  KeywordLanguageSetSchema,
-  type KeywordLanguageSet,
-} from "../core/keywordLanguage.js";
+import { DEFAULT_KEYWORD_LANGUAGES } from "../core/keywordLanguage.js";
 import type { ModelingStore, RuntimeStore } from "../core/ports.js";
 import {
   DATA_TYPES,
@@ -70,23 +63,16 @@ import { invalidateLoadedSchemaCache, loadSchemaUncached, buildSchemaCacheFromRa
 import { syncDocumentChunks } from "../runtime/service.js";
 import { VALID_AGENT_TOOLS } from "../runtime/toolNames.js";
 import {
-  ExportIndexInclusions,
-  ExportRetrieverAgents,
-  ExportSearchIndices,
-  IMPORTABLE_FORMAT_VERSIONS,
-  LEGACY_TRANSFER_FORMAT_VERSION,
+  ExportPayload,
   StepSchema as StepZodSchema,
   TRANSFER_FORMAT_VERSION,
 } from "./schemas.js";
+import { readFields, retrieverWarningKey } from "./transfer/upgrader.js";
+import { upgradeToCurrent } from "./transfer/upgrades.js";
 import type {
-  ExportEntityTypeInput,
   ExportLensInput,
-  ExportPayloadInput,
-  ExportRetrieverAgentInput,
-  ExportSearchIndicesInput,
   SearchSettingsResponseBody,
   SearchSettingsUpdateInput,
-  ExportPropertyInput,
   AiAgentConfigResponseBody,
   AiAgentConfigUpsertInput,
   EntityTypeCreateInput,
@@ -1475,7 +1461,7 @@ function parseStoredJsonList(raw: unknown): Row[] {
  * (`docs/capabilities/transfer.md`): the keyword language set, the search
  * indices (custom definitions and switched-off managed indices), entity
  * types, relation types, lenses with their inclusions, and each lens's
- * agents and saved queries — no timestamps, no internal ids, no instance
+ * assistants and saved queries — no timestamps, no internal ids, no instance
  * data. This is both
  * the REST export payload and what the modeling MCP `get_schema` and
  * `export_schema` tools return.
@@ -1541,13 +1527,22 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
     }
 
     const agentRows = await store.listAiAgentsForExport(lens.lensId as string);
-    exported.aiAgents = agentRows.map((ag) => ({
-      key: ag.key,
-      name: ag.name,
-      description: optString(ag.description),
-      systemPrompt: optString(ag.systemPrompt),
-      tools: (ag.tools as string[] | null | undefined) ?? null,
-    }));
+    const assistants: Row = {
+      agents: agentRows.map((ag) => ({
+        key: ag.key,
+        name: ag.name,
+        description: optString(ag.description),
+        systemPrompt: optString(ag.systemPrompt),
+        tools: (ag.tools as string[] | null | undefined) ?? null,
+      })),
+    };
+    // Retriever agents search indices: an adapter without them has none.
+    if (indices !== undefined) {
+      assistants.retrievers = (await indices.listRetrieverAgents(lens.lensId as string)).map(
+        portableRetrieverAgent,
+      );
+    }
+    exported.assistants = assistants;
 
     const queryRows = await store.listSavedQueriesForExport(lens.lensId as string);
     exported.savedQueries = queryRows.map((sq) => ({
@@ -1563,13 +1558,6 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
         dataType: p.dataType,
       })),
     }));
-
-    // Retriever agents search indices: an adapter without them has none.
-    if (indices !== undefined) {
-      exported.retrieverAgents = (await indices.listRetrieverAgents(lens.lensId as string)).map(
-        portableRetrieverAgent,
-      );
-    }
     lenses.push(exported);
   }
 
@@ -1593,7 +1581,7 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
 
 /**
  * Import a transfer payload: create the types, then the lenses
- * with their inclusions, agents and saved queries.
+ * with their inclusions, assistants and saved queries.
  *
  * Validate-then-write: the ENTIRE payload is
  * validated before anything is written — every rule violation collected
@@ -1610,110 +1598,35 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
  * NOT checked against the enum — the schema-validation operation catches
  * that later (`docs/capabilities/transfer.md`).
  *
- * The payload version selects how entity types get their name property:
- * 6.0 (also an absent version) names it per type and import checks it is
- * a string property of that type; 5.0 has none, so it is derived by the
- * legacy fallback (`core/legacyNameProperty.ts`), creating a `name`
- * property where a type has no string property. Any other version is
- * rejected.
+ * The importer reads the current format version only: an older payload
+ * is brought up to it by the upgrade chain first
+ * (`transfer/upgrades.ts`), which checks the fields each version reads
+ * in that version's terms. Each entity type names its name property,
+ * which must be a string property of that type.
  *
- * The payload's keyword language set becomes the target's (6.0
- * `keywordLanguages`; 5.0 carries one `textSearchLanguage`, which becomes
- * a set of that language alone). A 6.0 payload's `searchIndices` — custom
- * definitions, each validated against the payload's own schema, and the
- * switched-off managed indices — join the target's; a 5.0 payload has
- * none (any it carries are ignored), its managed indices derive. A 6.0 lens's `indexInclusions` name
- * indices of either kind and are written as they come once the indices
- * exist; a lens without them (every 5.0 lens) includes the managed
- * indices of the types it exposes — a passage index only when it exposes
- * the document property too — as the storage step's upgrade does.
- * Import provisions no entries: the generations it reconciles are built
- * by the worker. An adapter without search indices checks all of it and
- * keeps nothing of it.
+ * The payload's `keywordLanguages` become the target's set. Its
+ * `searchIndices` — custom definitions, each validated against the
+ * payload's own schema, and the switched-off managed indices — join the
+ * target's. A lens's `indexInclusions` name indices of either kind and
+ * are written as they come once the indices exist; a lens without them
+ * includes the managed indices of the types it exposes — a passage index
+ * only when it exposes the document property too — as the storage step's
+ * upgrade does. Import provisions no entries: the generations it
+ * reconciles are built by the worker. An adapter without search indices
+ * checks all of it and keeps nothing of it.
  */
-/** The data type of a payload property, by entity type and key — what
- * the version-1 retriever conversion tells document fields by. */
-function legacyDataTypes(
-  entityTypes: readonly ExportEntityTypeInput[],
-): (entityType: string, field: string) => string | undefined {
-  return (entityType, field) =>
-    entityTypes.find((et) => et.key === entityType)?.properties.find((p) => p.key === field)?.dataType;
-}
-
-/** What import reads of a payload's version-specific fields. */
-interface VersionFields {
-  keywordLanguages: KeywordLanguageSet;
-  searchIndices: ExportSearchIndicesInput | undefined;
-  lensFields: Map<
-    ExportLensInput,
-    { indexInclusions: string[] | undefined; agents: ExportRetrieverAgentInput[] }
-  >;
-}
-
-/**
- * Read the payload's version-specific fields, each with its own schema
- * and only in the version that carries it — the other version's fields
- * are ignored unchecked (`docs/capabilities/transfer.md#the-format-version`).
- * 6.0 reads `keywordLanguages`, `searchIndices` and each lens's
- * `indexInclusions` and `retrieverAgents`; 5.0 reads `textSearchLanguage`
- * (the one language becomes the whole set) and each lens's `retrievers`.
- * A missing language field is a field error; a malformed field fails like
- * the request shape does, naming every offending path.
- */
-function readVersionFields(payload: ExportPayloadInput, legacy: boolean): VersionFields {
-  const issues: { path: string; message: string }[] = [];
-  function read<T>(schema: z.ZodType<T>, value: unknown, path: (string | number)[]): T | undefined {
-    if (value === undefined) return undefined;
-    const parsed = schema.safeParse(value);
-    if (parsed.success) return parsed.data;
-    for (const issue of parsed.error.issues) {
-      issues.push({ path: "/" + [...path, ...issue.path.map(String)].join("/"), message: issue.message });
-    }
-    return undefined;
-  }
-
-  const languageField = legacy ? "textSearchLanguage" : "keywordLanguages";
-  if (payload[languageField] === undefined) {
-    throw new ValidationError(`The payload carries no ${languageField}`, {
-      fields: { [languageField]: "Required" },
-    });
-  }
-  const keywordLanguages = legacy
-    ? read(KeywordLanguage, payload.textSearchLanguage, ["textSearchLanguage"])
-    : read(KeywordLanguageSetSchema, payload.keywordLanguages, ["keywordLanguages"]);
-  const searchIndices = legacy ? undefined : read(ExportSearchIndices, payload.searchIndices, ["searchIndices"]);
-  const lensFields: VersionFields["lensFields"] = new Map();
-  payload.lenses.forEach((lens, i) => {
-    const agentsField = legacy ? "retrievers" : "retrieverAgents";
-    lensFields.set(lens, {
-      indexInclusions: legacy
-        ? undefined
-        : read(ExportIndexInclusions, lens.indexInclusions, ["lenses", i, "indexInclusions"]),
-      agents: read(ExportRetrieverAgents, lens[agentsField], ["lenses", i, agentsField]) ?? [],
-    });
-  });
-  if (issues.length > 0 || keywordLanguages === undefined) {
-    throw new ValidationError("Request validation failed", { errors: issues });
-  }
-  return {
-    keywordLanguages: typeof keywordLanguages === "string" ? [keywordLanguages] : keywordLanguages,
-    searchIndices,
-    lensFields,
-  };
-}
-
 export async function importSchema(
-  payload: ExportPayloadInput,
+  body: unknown,
   store: ModelingStore,
 ): Promise<Row> {
-  if (!IMPORTABLE_FORMAT_VERSIONS.includes(payload.formatVersion)) {
-    throw new ValidationError(
-      `Unsupported transfer format version '${payload.formatVersion}'`,
-      { fields: { formatVersion: `Expected one of ${IMPORTABLE_FORMAT_VERSIONS.join(", ")}` } },
-    );
+  const { payload: upgraded, retrieverWarnings } = upgradeToCurrent(body);
+  if (upgraded.keywordLanguages === undefined) {
+    throw new ValidationError("The payload carries no keywordLanguages", {
+      fields: { keywordLanguages: "Required" },
+    });
   }
-  const legacy = payload.formatVersion === LEGACY_TRANSFER_FORMAT_VERSION;
-  const { keywordLanguages, searchIndices: payloadIndices, lensFields } = readVersionFields(payload, legacy);
+  const payload = readFields(ExportPayload, upgraded);
+  const { keywordLanguages, searchIndices: payloadIndices } = payload;
 
   // ---- Phase 1: payload-intrinsic validation (collect everything) ----
   const errors: string[] = [];
@@ -1737,28 +1650,8 @@ export async function importSchema(
   const schemaKeyPattern = SCHEMA_KEY_PATTERN.source;
   const resourceKeyPattern = LENS_RESOURCE_KEY_PATTERN.source;
 
-  // Each payload entity type's name property: its key, plus the property
-  // to create for it when a 5.0 type has no string property.
-  const namePropertyOf = new Map<
-    ExportEntityTypeInput,
-    { key: string; created: ExportPropertyInput | null }
-  >();
-
   for (const et of payload.entityTypes) {
-    if (legacy) {
-      const { key, create } = legacyNameProperty(et.properties);
-      const created = create
-        ? {
-            key,
-            displayName: namePropertyDisplayName(key),
-            description: null,
-            dataType: NAME_PROPERTY_DATA_TYPE,
-            required: false,
-            defaultValue: null,
-          }
-        : null;
-      namePropertyOf.set(et, { key, created });
-    } else if (et.nameProperty === undefined) {
+    if (et.nameProperty === undefined) {
       errors.push(`Import error: entity type '${et.key}' has no nameProperty`);
     } else if (
       !et.properties.some(
@@ -1769,8 +1662,6 @@ export async function importSchema(
         `Import error: name property '${et.nameProperty}' of entity type '${et.key}' ` +
           `is not a ${NAME_PROPERTY_DATA_TYPE} property of that type`,
       );
-    } else {
-      namePropertyOf.set(et, { key: et.nameProperty, created: null });
     }
     if (!SCHEMA_KEY_PATTERN.test(et.key)) {
       errors.push(badKey("entity type", et.key, schemaKeyPattern));
@@ -1839,46 +1730,26 @@ export async function importSchema(
     }
   }
 
-  // Retriever agents: 6.0 lenses carry `retrieverAgents` (version 2),
-  // 5.0 lenses `retrievers` (version 1, converted); each version reads
-  // only its own field, like every version-specific field. Only the shape
-  // is checked here — what an agent references is reported invalid on
-  // read, so an export of an agent that became invalid still imports.
-  // A 5.0 key with `-` is renamed under the shared key rules, unique in
-  // its lens (`legacyRetrieverKey`); the rename becomes a warning.
-  const legacyDataType = legacyDataTypes(payload.entityTypes);
-  const agentKeys = new Map<object, { key: string; warning: string | null }>();
-  for (const lens of payload.lenses) {
-    const agents = lensFields.get(lens)!.agents;
-    const taken = new Set(agents.map((agent) => agent.key));
-    for (const agent of agents) {
-      const renamed = legacy ? legacyRetrieverKey(agent.key, taken) : { key: agent.key, warning: null };
-      taken.add(renamed.key);
-      agentKeys.set(agent, renamed);
-    }
-  }
+  // Retriever agents: only the shape is checked here — what an agent
+  // references is reported invalid on read, so an export of an agent that
+  // became invalid still imports.
   for (const lens of payload.lenses) {
     const seen = new Set<string>();
-    for (const agent of lensFields.get(lens)!.agents) {
-      const key = agentKeys.get(agent)!.key;
-      if (seen.has(key)) errors.push(`Import error: duplicate retriever agent '${key}' in lens '${lens.key}'`);
-      seen.add(key);
-      if (!LENS_RESOURCE_KEY_PATTERN.test(key)) errors.push(badKey("retriever agent", key, resourceKeyPattern));
-      if (key.length > MAX_KEY_LENGTH) errors.push(longKey("retriever agent", key));
+    for (const agent of lens.assistants.retrievers) {
+      if (seen.has(agent.key)) errors.push(`Import error: duplicate retriever agent '${agent.key}' in lens '${lens.key}'`);
+      seen.add(agent.key);
+      if (!LENS_RESOURCE_KEY_PATTERN.test(agent.key)) errors.push(badKey("retriever agent", agent.key, resourceKeyPattern));
+      if (agent.key.length > MAX_KEY_LENGTH) errors.push(longKey("retriever agent", agent.key));
       if (agent.name.length === 0 || agent.name.length > 200) {
         errors.push(`Import error: retriever agent '${agent.key}' needs a name of 1 to 200 characters`);
       }
-      const config = legacy
-        ? agent.configVersion === 1
-          ? convertLegacyRetrieverConfig(agent.config, legacyDataType)?.config
-          : undefined
-        : agent.configVersion === RETRIEVER_AGENT_CONFIG_VERSION
-          ? agent.config
-          : undefined;
-      if (config === undefined || !RetrieverAgentConfig.safeParse(config).success) {
+      if (
+        agent.configVersion !== RETRIEVER_AGENT_CONFIG_VERSION ||
+        !RetrieverAgentConfig.safeParse(agent.config).success
+      ) {
         errors.push(
           `Import error: retriever agent '${agent.key}' has no valid configuration of version ` +
-            `${legacy ? 1 : RETRIEVER_AGENT_CONFIG_VERSION}`,
+            `${RETRIEVER_AGENT_CONFIG_VERSION}`,
         );
       }
     }
@@ -1891,7 +1762,7 @@ export async function importSchema(
     if (lens.key.length > MAX_KEY_LENGTH) {
       errors.push(longKey("lens", lens.key));
     }
-    for (const ag of lens.aiAgents) {
+    for (const ag of lens.assistants.agents) {
       if (!LENS_RESOURCE_KEY_PATTERN.test(ag.key)) {
         errors.push(badKey("agent", ag.key, resourceKeyPattern));
       }
@@ -1970,32 +1841,28 @@ export async function importSchema(
     }
   }
 
-  // Search indices (6.0): each custom definition valid against the
-  // payload's own schema, each switch naming a managed index it derives,
-  // each lens's index inclusion naming an index of either kind. A 5.0
-  // payload carries none — its managed indices derive on import, and its
-  // lenses include those of the types they expose.
-  if (!legacy) {
-    const indexSchema = buildSchemaCacheFromRaw(
-      { lensId: "import", key: "import", name: "import" },
-      payload.entityTypes as unknown as Row[],
-      payload.relationTypes.map((rt) => ({
-        ...rt,
-        sourceKey: rt.fromEntityTypeKey,
-        targetKey: rt.toEntityTypeKey,
-      })) as unknown as Row[],
-    );
-    if (payloadIndices !== undefined) {
-      errors.push(...importedIndexErrors(payloadIndices, indexSchema));
-    }
-    errors.push(
-      ...importedInclusionErrors(
-        payload.lenses.map((lens) => ({ key: lens.key, indexInclusions: lensFields.get(lens)!.indexInclusions })),
-        payloadIndices,
-        indexSchema,
-      ),
-    );
+  // Search indices: each custom definition valid against the payload's
+  // own schema, each switch naming a managed index it derives, each lens's
+  // index inclusion naming an index of either kind.
+  const indexSchema = buildSchemaCacheFromRaw(
+    { lensId: "import", key: "import", name: "import" },
+    payload.entityTypes as unknown as Row[],
+    payload.relationTypes.map((rt) => ({
+      ...rt,
+      sourceKey: rt.fromEntityTypeKey,
+      targetKey: rt.toEntityTypeKey,
+    })) as unknown as Row[],
+  );
+  if (payloadIndices !== undefined) {
+    errors.push(...importedIndexErrors(payloadIndices, indexSchema));
   }
+  errors.push(
+    ...importedInclusionErrors(
+      payload.lenses.map((lens) => ({ key: lens.key, indexInclusions: lens.indexInclusions })),
+      payloadIndices,
+      indexSchema,
+    ),
+  );
 
   if (errors.length > 0) {
     throw new ValidationError(errors.join("; "), { errors });
@@ -2041,12 +1908,9 @@ export async function importSchema(
 
   for (const et of payload.entityTypes) {
     const etId = randomUUID();
-    const nameProperty = namePropertyOf.get(et)!;
-    const properties = nameProperty.created
-      ? [...et.properties, nameProperty.created]
-      : et.properties;
+    const properties = et.properties;
     // Validated above: the name property is among the properties.
-    const named = properties.find((prop) => prop.key === nameProperty.key)!;
+    const named = properties.find((prop) => prop.key === et.nameProperty)!;
     await store.createEntityType(etId, et.key, et.displayName, et.description ?? null, {
       propertyId: randomUUID(),
       key: named.key,
@@ -2132,7 +1996,7 @@ export async function importSchema(
       }
     }
 
-    for (const ag of lens.aiAgents) {
+    for (const ag of lens.assistants.agents) {
       await store.upsertAiAgent(
         lensId,
         randomUUID(),
@@ -2204,37 +2068,30 @@ export async function importSchema(
   await syncSearchIndices(store);
   // The sync included each new managed index in the scoped lenses that
   // expose its root type (a passage index: its document property too) —
-  // what a lens without index inclusions (5.0, or a 6.0 lens without the
-  // field) keeps. A 6.0 lens's own list replaces that, now that every
-  // index exists.
-  if (!legacy) {
-    for (const lens of payload.lenses) {
-      const { indexInclusions } = lensFields.get(lens)!;
-      if (indexInclusions !== undefined) {
-        await importLensIndexInclusions(store, lensIds.get(lens)!, indexInclusions);
-      }
+  // what a lens without index inclusions keeps. A lens's own list replaces
+  // that, now that every index exists.
+  for (const lens of payload.lenses) {
+    if (lens.indexInclusions !== undefined) {
+      await importLensIndexInclusions(store, lensIds.get(lens)!, lens.indexInclusions);
     }
-    invalidateLoadedSchemaCache();
   }
+  invalidateLoadedSchemaCache();
   // Retriever agents last, once their indices exist; an adapter without
   // search indices keeps none.
   if (indices !== undefined) {
     for (const lens of payload.lenses) {
-      for (const agent of lensFields.get(lens)!.agents) {
-        const converted = legacy
-          ? convertLegacyRetrieverConfig(agent.config, legacyDataType)!
-          : { config: RetrieverAgentConfig.parse(agent.config), warnings: [] };
-        const { key, warning } = agentKeys.get(agent)!;
+      for (const agent of lens.assistants.retrievers) {
         await indices.saveRetrieverAgent(
           lensIds.get(lens)!,
           {
             retrieverAgentId: randomUUID(),
-            key,
+            key: agent.key,
             name: agent.name,
             description: agent.description,
             configVersion: RETRIEVER_AGENT_CONFIG_VERSION,
-            config: converted.config,
-            warnings: warning === null ? converted.warnings : [...converted.warnings, warning],
+            config: RetrieverAgentConfig.parse(agent.config),
+            // An upgraded agent keeps its conversion's warnings.
+            warnings: retrieverWarnings.get(retrieverWarningKey(lens.key, agent.key)) ?? [],
           },
           true,
         );

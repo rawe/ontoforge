@@ -23,7 +23,6 @@ import {
   EntityTypeCreate,
   EntityTypeResponse,
   EntityTypeUpdate,
-  ExportPayload,
   IncludeSearchIndex,
   IncludeTypeRequest,
   IncludeTypeResponse,
@@ -45,6 +44,7 @@ import {
   SearchIndexResponse,
   SearchSettingsResponse,
   SearchSettingsUpdate,
+  TransferEnvelope,
   ValidationResult,
 } from "./schemas.js";
 import * as searchIndices from "./searchIndices.js";
@@ -425,7 +425,8 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
       schema: {
         tags: ["modeling"],
         params: OntologyParams,
-        body: ExportPayload,
+        // The version's own fields are checked by the import itself.
+        body: TransferEnvelope,
       },
     },
     async (request, reply) => {

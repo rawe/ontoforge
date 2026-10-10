@@ -1,5 +1,5 @@
 {
-  "formatVersion": "6.0",
+  "formatVersion": "7.0",
   "keywordLanguages": [
     "english"
   ],
@@ -349,21 +349,24 @@
       "name": "All",
       "description": "Unscoped lens over the whole organisation graph: people, teams, projects, skills and policy documents with every relation.",
       "indexInclusions": [],
-      "aiAgents": [
-        {
-          "key": "org_analyst",
-          "name": "Org Analyst",
-          "description": "Answers questions about people, teams, projects and skills of Corvane Engineering using saved queries and read-only OQL.",
-          "systemPrompt": "You answer questions about the organisation of Corvane Engineering: reporting lines, team membership, project staffing, skills and policy versions. Prefer a saved query: find it with search_saved_queries or list_saved_queries and run it with run_saved_query. When no saved query fits, read the schema with get_schema and write one read-only OQL query with execute_query, using type keys and labelled node patterns. Name the people, teams and projects your answer is based on.",
-          "tools": [
-            "list_saved_queries",
-            "run_saved_query",
-            "search_saved_queries",
-            "execute_query",
-            "get_schema"
-          ]
-        }
-      ],
+      "assistants": {
+        "agents": [
+          {
+            "key": "org_analyst",
+            "name": "Org Analyst",
+            "description": "Answers questions about people, teams, projects and skills of Corvane Engineering using saved queries and read-only OQL.",
+            "systemPrompt": "You answer questions about the organisation of Corvane Engineering: reporting lines, team membership, project staffing, skills and policy versions. Prefer a saved query: find it with search_saved_queries or list_saved_queries and run it with run_saved_query. When no saved query fits, read the schema with get_schema and write one read-only OQL query with execute_query, using type keys and labelled node patterns. Name the people, teams and projects your answer is based on.",
+            "tools": [
+              "list_saved_queries",
+              "run_saved_query",
+              "search_saved_queries",
+              "execute_query",
+              "get_schema"
+            ]
+          }
+        ],
+        "retrievers": []
+      },
       "savedQueries": [
         {
           "key": "average-salary-per-team",
@@ -530,8 +533,7 @@
             }
           ]
         }
-      ],
-      "retrieverAgents": []
+      ]
     },
     {
       "key": "directory",
@@ -561,9 +563,11 @@
         "person~default",
         "team~default"
       ],
-      "aiAgents": [],
-      "savedQueries": [],
-      "retrieverAgents": []
+      "assistants": {
+        "agents": [],
+        "retrievers": []
+      },
+      "savedQueries": []
     },
     {
       "key": "management",
@@ -597,9 +601,11 @@
         "person~default",
         "team~default"
       ],
-      "aiAgents": [],
-      "savedQueries": [],
-      "retrieverAgents": []
+      "assistants": {
+        "agents": [],
+        "retrievers": []
+      },
+      "savedQueries": []
     },
     {
       "key": "staffing",
@@ -630,9 +636,11 @@
         "skill~default",
         "team~default"
       ],
-      "aiAgents": [],
-      "savedQueries": [],
-      "retrieverAgents": []
+      "assistants": {
+        "agents": [],
+        "retrievers": []
+      },
+      "savedQueries": []
     }
   ]
 }

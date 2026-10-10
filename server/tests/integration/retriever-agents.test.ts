@@ -340,11 +340,11 @@ describe.skipIf(!postgres)("retriever agents", () => {
     ]);
   });
 
-  it("design transfer 6.0 carries agents into a fresh ontology; 5.0 retrievers convert", async () => {
+  it("design transfer carries agents into a fresh ontology; 5.0 retrievers convert", async () => {
     await schema();
     await ok("PUT", `${AGENTS}/people`, BODY);
     const payload = await ok("GET", `${MODEL}/export`);
-    expect(payload.lenses.find((lens: Row) => lens.key === "all").retrieverAgents).toEqual([
+    expect(payload.lenses.find((lens: Row) => lens.key === "all").assistants.retrievers).toEqual([
       { key: "people", name: "People", description: BODY.description, configVersion: 2, config: CONFIG },
     ]);
 

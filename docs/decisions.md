@@ -725,11 +725,13 @@ against the target ontology's keys.
 
 **Transfer format version** — the format version is the format's own line,
 independent of the project version, bumped only when the payload shape changes
-incompatibly. Export writes the current version. Import dispatches on it: it accepts the
-current version, an absent version as the current one, and the previous major version,
-which it converts on the way in; every other version is refused. Supporting exactly one
-previous version lets a design exported before a format change move to a server after it
-without a conversion tool.
+incompatibly. Export writes the current version, and import reads only the current
+version — an absent version is the current one. An older version import still accepts is
+brought up to the current one by a chain of upgraders, one per older version, each
+turning a payload of its version into one of the next; every other version is refused.
+The importable versions are exactly those the chain covers, so a design exported before a
+format change moves to a server after it without a conversion tool, and dropping a
+version removes its upgrader and nothing else.
 
 **No authentication, authorization or multi-tenancy.**
 OntoForge assumes it is deployed behind something that provides them, or on a trusted

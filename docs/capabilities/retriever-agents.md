@@ -365,16 +365,17 @@ is converted first, its key renamed if needed among the keys the lens already ho
 ## Transfer
 
 Whole-design [transfer](transfer.md) nests each lens's agents in their portable form
-under `retrieverAgents`. Import checks their keys, names and configuration shape — not
-what they reference, so an exported agent that became invalid still imports and is
-reported invalid there — and writes them last, once the indices exist. A `5.0` payload's
+under its `assistants`, as `retrievers`. Import checks their keys, names and
+configuration shape — not what they reference, so an exported agent that became invalid
+still imports and is reported invalid there — and writes them last, once the indices
+exist. A `5.0` payload's
 `retrievers` are converted.
 
 ## Adapters without search indices
 
 Retriever agents search search indices, so they exist only where the storage adapter
 stores them. Elsewhere every retriever-agent operation is refused as a disabled feature,
-export carries no `retrieverAgents`, and import checks them and keeps none.
+export carries no `retrievers`, and import checks them and keeps none.
 
 ## Through the interfaces
 

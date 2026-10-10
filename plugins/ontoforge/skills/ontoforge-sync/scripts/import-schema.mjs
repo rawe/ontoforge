@@ -25,14 +25,14 @@ try {
 }
 
 // Reject incomplete transfer payloads before sending them to the server.
-// Format 6.0 carries "keywordLanguages"; the server still imports 5.0, which
-// carries one "textSearchLanguage" instead. The server validates the rest.
+// Formats 7.0 and 6.0 carry "keywordLanguages"; the server still imports 5.0,
+// which carries one "textSearchLanguage" instead. The server validates the rest.
 const hasLanguage = Array.isArray(payload.keywordLanguages) ||
   ['english', 'german'].includes(payload.textSearchLanguage);
 if (!Array.isArray(payload.lenses) || !hasLanguage) {
   die(
     `${file} is not an OntoForge transfer payload: expected a "lenses" array and ` +
-      '"keywordLanguages" (format 6.0) or a supported "textSearchLanguage" (format 5.0).',
+      '"keywordLanguages" (format 7.0 or 6.0) or a supported "textSearchLanguage" (format 5.0).',
   );
 }
 

@@ -156,7 +156,7 @@ describe("export", () => {
     const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.formatVersion).toBe("6.0");
+    expect(body.formatVersion).toBe("7.0");
     expect(body.entityTypes).toHaveLength(2);
     expect(body.relationTypes).toHaveLength(1);
     expect(body.lenses).toHaveLength(1);
@@ -190,7 +190,7 @@ describe("export", () => {
     // An adapter without search indices exports the set a new ontology
     // starts with, and no search-index part.
     expect(res.json()).toEqual({
-      formatVersion: "6.0",
+      formatVersion: "7.0",
       keywordLanguages: ["german", "english"],
       entityTypes: [],
       relationTypes: [],
@@ -234,7 +234,8 @@ describe("export", () => {
     expect(res.statusCode).toBe(200);
     const lens = res.json().lenses[0];
     expect("includes" in lens).toBe(false);
-    expect(lens.aiAgents).toEqual([]);
+    // An adapter without search indices has no retriever agents.
+    expect(lens.assistants).toEqual({ agents: [] });
     expect(lens.savedQueries).toEqual([]);
   });
 
@@ -278,7 +279,7 @@ describe("export", () => {
     const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
     expect(res.statusCode).toBe(200);
     const lens = res.json().lenses[0];
-    expect(lens.aiAgents).toEqual([
+    expect(lens.assistants.agents).toEqual([
       {
         key: "assistant",
         name: "Assistant",
@@ -326,7 +327,7 @@ const LENS_DATA = {
 
 function importPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    formatVersion: "6.0",
+    formatVersion: "7.0",
     entityTypes: [
       {
         key: "person",
@@ -360,7 +361,7 @@ function importPayload(overrides: Record<string, unknown> = {}): Record<string, 
   };
 }
 
-/** A 6.0 entity type whose name property is a `name` string property. */
+/** An entity type whose name property is a `name` string property. */
 function entityType(
   key: string,
   displayName: string,
@@ -426,12 +427,12 @@ describe("import", () => {
     expect(holder.store.createEntityType.mock.calls[0]![4]).toMatchObject({ key: "full_name" });
   });
 
-  it("rejects a format version other than 6.0 and 5.0 and writes nothing", async () => {
+  it("rejects a format version other than 7.0, 6.0 and 5.0, naming those; writes nothing", async () => {
     for (const version of ["2.0", "4.0", "unknown-version"]) {
       holder.store = createMockModelingStore();
       const res = await postImport(importPayload({ formatVersion: version }));
       expect(res.statusCode, `version ${version}`).toBe(422);
-      expect(res.json().error.details.fields.formatVersion).toContain("6.0, 5.0");
+      expect(res.json().error.details.fields.formatVersion).toBe("Expected one of 7.0, 6.0, 5.0");
       expect(holder.store.createEntityType).not.toHaveBeenCalled();
     }
   });
@@ -477,7 +478,7 @@ describe("import", () => {
 describe("import keyword languages", () => {
   const empty = { entityTypes: [], relationTypes: [], lenses: [] };
 
-  it("6.0: the payload's set becomes the target's, in canonical order", async () => {
+  it("the payload's set becomes the target's, in canonical order", async () => {
     const indices = withSearchIndices();
     const res = await postImport({ ...empty, keywordLanguages: ["english", "german"] });
     expect(res.statusCode, res.body).toBe(201);
@@ -522,7 +523,7 @@ describe("import keyword languages", () => {
 
 describe("import search indices", () => {
   const person = entityType("person", "Person", [{ key: "bio", displayName: "Bio", dataType: "document", required: false }]);
-  const payload = (searchIndices: unknown, formatVersion = "6.0") => ({
+  const payload = (searchIndices: unknown, formatVersion = "7.0") => ({
     formatVersion,
     entityTypes: [person],
     relationTypes: [],
@@ -531,7 +532,7 @@ describe("import search indices", () => {
     ...(formatVersion === "5.0" ? { textSearchLanguage: "german" } : {}),
   });
 
-  it("6.0: creates the custom definitions and adds the switches to the target's", async () => {
+  it("creates the custom definitions and adds the switches to the target's", async () => {
     const indices = withSearchIndices();
     const res = await postImport(payload({ custom: [PEOPLE_INDEX], disabled: ["person~bio"] }));
     expect(res.statusCode, res.body).toBe(201);
@@ -591,7 +592,7 @@ describe("lens index inclusions", () => {
     includes: { entityTypes: [{ key: "company" }], relationTypes: [] },
     ...(indexInclusions === undefined ? {} : { indexInclusions }),
   });
-  const payload = (lenses: unknown[], formatVersion = "6.0") => ({
+  const payload = (lenses: unknown[], formatVersion = "7.0") => ({
     formatVersion,
     entityTypes: [person, company],
     relationTypes: [],
@@ -619,7 +620,7 @@ describe("lens index inclusions", () => {
     expect(plain.json().lenses[0]).not.toHaveProperty("indexInclusions");
   });
 
-  it("6.0: writes each lens's list exactly, once the indices exist — the root rule is not checked", async () => {
+  it("writes each lens's list exactly, once the indices exist — the root rule is not checked", async () => {
     const indices = withSearchIndices();
     holder.store.createLens.mockResolvedValue(LENS_DATA);
     // The schema sync included the managed indices of the exposed types.
@@ -638,7 +639,7 @@ describe("lens index inclusions", () => {
     );
   });
 
-  it("6.0 without the field, and 5.0, keep what the schema sync included", async () => {
+  it("a lens without the field, and 5.0, keep what the schema sync included", async () => {
     const indices = withSearchIndices();
     holder.store.createLens.mockResolvedValue(LENS_DATA);
     expect((await postImport(payload([lens()]))).statusCode).toBe(201);
@@ -683,13 +684,14 @@ describe("retriever agents", () => {
       },
     ],
   };
-  const payload = (lens: Record<string, unknown>, formatVersion = "6.0") => ({
+  const payload = (lens: Record<string, unknown>, formatVersion = "7.0") => ({
     formatVersion,
     entityTypes: [person],
     relationTypes: [],
     lenses: [{ key: "all", name: "All", ...lens }],
     ...(formatVersion === "5.0" ? { textSearchLanguage: "german" } : { keywordLanguages: ["german"] }),
   });
+  const retrievers = (...agents: unknown[]) => ({ assistants: { retrievers: agents } });
 
   it("export carries each lens's agents in their portable form; an adapter without search indices none", async () => {
     const indices = withSearchIndices();
@@ -703,24 +705,37 @@ describe("retriever agents", () => {
       lenses: [{ lensId: "lens-1", key: "all", name: "All", entityInclusions: [], relationInclusions: [] }],
     });
     const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
-    expect(res.json().lenses[0].retrieverAgents).toEqual([agent(2, CONFIG)]);
+    expect(res.json().lenses[0].assistants).toEqual({ agents: [], retrievers: [agent(2, CONFIG)] });
     delete (holder.store as unknown as { searchIndices?: unknown }).searchIndices;
     const plain = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
-    expect(plain.json().lenses[0]).not.toHaveProperty("retrieverAgents");
+    expect(plain.json().lenses[0].assistants).toEqual({ agents: [] });
   });
 
-  it("6.0: stores each agent create-only after the indices; references are not checked", async () => {
+  it("stores each agent create-only after the indices; references are not checked", async () => {
     const indices = withSearchIndices();
     holder.store.createLens.mockResolvedValue(LENS_DATA);
     const unknownIndex = { ...CONFIG, indices: [{ index: "ghost" }] };
-    const res = await postImport(payload({ retrieverAgents: [agent(2, CONFIG), agent(2, unknownIndex, "ghostly")] }));
+    const res = await postImport(payload(retrievers(agent(2, CONFIG), agent(2, unknownIndex, "ghostly"))));
     expect(res.statusCode, res.body).toBe(201);
     const lensId = holder.store.createLens.mock.calls[0]![0] as string;
     expect(indices.saveRetrieverAgent.mock.calls.map((call) => [call[0], (call[1] as { key: string }).key, call[2]])).toEqual([
       [lensId, "finder", true],
       [lensId, "ghostly", true],
     ]);
-    expect((indices.saveRetrieverAgent.mock.calls[0]![1] as { configVersion: number }).configVersion).toBe(2);
+    const saved = indices.saveRetrieverAgent.mock.calls[0]![1] as { configVersion: number; warnings: string[] };
+    expect(saved.configVersion).toBe(2);
+    expect(saved.warnings).toEqual([]);
+  });
+
+  it("6.0: a lens's agents and retriever agents import as its assistants", async () => {
+    const indices = withSearchIndices();
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    const res = await postImport(
+      payload({ aiAgents: [{ key: "helper", name: "Helper" }], retrieverAgents: [agent(2, CONFIG)] }, "6.0"),
+    );
+    expect(res.statusCode, res.body).toBe(201);
+    expect(holder.store.upsertAiAgent.mock.calls.map((call) => call[2])).toEqual(["helper"]);
+    expect(indices.saveRetrieverAgent.mock.calls.map((call) => (call[1] as { key: string }).key)).toEqual(["finder"]);
   });
 
   it("5.0: converts each retriever, keeping the conversion's warnings", async () => {
@@ -752,17 +767,17 @@ describe("retriever agents", () => {
   it("each version reads only its own field", async () => {
     const indices = withSearchIndices();
     holder.store.createLens.mockResolvedValue(LENS_DATA);
-    expect((await postImport(payload({ retrievers: [agent(1, LEGACY)] }))).statusCode).toBe(201);
-    expect((await postImport(payload({ retrieverAgents: [agent(2, CONFIG)] }, "5.0"))).statusCode).toBe(201);
+    const older = { retrievers: [agent(1, LEGACY)], retrieverAgents: [agent(2, CONFIG)] };
+    expect((await postImport(payload(older))).statusCode).toBe(201);
+    expect((await postImport(payload({ retrievers: [agent(1, LEGACY)], ...retrievers(agent(2, CONFIG)) }, "6.0"))).statusCode).toBe(201);
+    expect((await postImport(payload({ retrieverAgents: [agent(2, CONFIG)], ...retrievers(agent(2, CONFIG)) }, "5.0"))).statusCode).toBe(201);
     expect(indices.saveRetrieverAgent).not.toHaveBeenCalled();
   });
 
   it("rejects a wrong version, a bad shape and a bad key; writes nothing", async () => {
     const indices = withSearchIndices();
     const res = await postImport(
-      payload({
-        retrieverAgents: [agent(1, LEGACY), agent(2, { indices: [] }, "empty"), agent(2, CONFIG, "Bad-Key")],
-      }),
+      payload(retrievers(agent(1, LEGACY), agent(2, { indices: [] }, "empty"), agent(2, CONFIG, "Bad-Key"))),
     );
     expect(res.statusCode).toBe(422);
     expect(res.json().error.details.errors).toEqual([
@@ -774,11 +789,22 @@ describe("retriever agents", () => {
     expect(indices.saveRetrieverAgent).not.toHaveBeenCalled();
   });
 
+  it("5.0: a retriever without a readable version-1 configuration fails at its 5.0 path; writes nothing", async () => {
+    const indices = withSearchIndices();
+    const res = await postImport(payload({ retrievers: [agent(1, LEGACY), agent(2, CONFIG, "newer")] }, "5.0"));
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details.errors).toEqual([
+      { path: "/lenses/0/retrievers/1", message: "No valid configuration of version 1" },
+    ]);
+    expect(holder.store.createEntityType).not.toHaveBeenCalled();
+    expect(indices.saveRetrieverAgent).not.toHaveBeenCalled();
+  });
+
   it("an adapter without search indices checks the agents and keeps none", async () => {
     holder.store.createLens.mockResolvedValue(LENS_DATA);
-    const res = await postImport(payload({ retrieverAgents: [agent(2, CONFIG)] }));
+    const res = await postImport(payload(retrievers(agent(2, CONFIG))));
     expect(res.statusCode, res.body).toBe(201);
-    const invalid = await postImport(payload({ retrieverAgents: [agent(2, { indices: [] })] }));
+    const invalid = await postImport(payload(retrievers(agent(2, { indices: [] }))));
     expect(invalid.statusCode).toBe(422);
   });
 });
@@ -787,15 +813,28 @@ describe("version-specific fields", () => {
   const person = entityType("person", "Person");
   const malformed = {
     searchIndices: { custom: [{ key: 5 }], disabled: "all" },
-    lenses: [{ key: "all", name: "All", indexInclusions: "people", retrieverAgents: [{ key: "x" }], retrievers: [{ key: "y" }] }],
+    lenses: [
+      {
+        key: "all",
+        name: "All",
+        indexInclusions: "people",
+        assistants: { retrievers: [{ key: "w" }] },
+        aiAgents: "none",
+        retrieverAgents: [{ key: "x" }],
+        retrievers: [{ key: "y" }],
+      },
+    ],
   };
+  const paths = (res: { json: () => { error: { details: { errors: { path: string }[] } } } }) =>
+    res.json().error.details.errors.map((issue) => issue.path);
 
-  it("5.0 ignores the 6.0 fields unchecked, however malformed", async () => {
+  it("5.0 ignores the 6.0 and 7.0 fields unchecked, however malformed", async () => {
     const indices = withSearchIndices();
     holder.store.createLens.mockResolvedValue(LENS_DATA);
     const res = await postImport({
       ...malformed,
-      lenses: [{ ...malformed.lenses[0], retrievers: [] }],
+      // `aiAgents` is a 5.0 field too.
+      lenses: [{ ...malformed.lenses[0], retrievers: [], aiAgents: [] }],
       formatVersion: "5.0",
       textSearchLanguage: "german",
       keywordLanguages: ["french"],
@@ -809,14 +848,27 @@ describe("version-specific fields", () => {
     expect(indices.saveRetrieverAgent).not.toHaveBeenCalled();
   });
 
-  it("6.0 ignores the 5.0 fields unchecked", async () => {
+  it("6.0 ignores the 5.0 and 7.0 fields unchecked", async () => {
+    withSearchIndices();
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    const res = await postImport({
+      formatVersion: "6.0",
+      textSearchLanguage: "french",
+      entityTypes: [person],
+      relationTypes: [],
+      lenses: [{ key: "all", name: "All", retrievers: "nope", assistants: "nope" }],
+    });
+    expect(res.statusCode, res.body).toBe(201);
+  });
+
+  it("7.0 ignores the older fields unchecked", async () => {
     withSearchIndices();
     holder.store.createLens.mockResolvedValue(LENS_DATA);
     const res = await postImport({
       textSearchLanguage: "french",
       entityTypes: [person],
       relationTypes: [],
-      lenses: [{ key: "all", name: "All", retrievers: "nope" }],
+      lenses: [{ key: "all", name: "All", retrievers: "nope", retrieverAgents: "nope", aiAgents: "nope" }],
     });
     expect(res.statusCode, res.body).toBe(201);
   });
@@ -826,11 +878,20 @@ describe("version-specific fields", () => {
     const current = await postImport({ ...malformed, entityTypes: [person], relationTypes: [] });
     expect(current.statusCode).toBe(422);
     expect(current.json().error.message).toBe("Request validation failed");
-    const paths = (current.json().error.details.errors as { path: string }[]).map((issue) => issue.path);
-    expect(paths).toEqual(
-      expect.arrayContaining(["/searchIndices/custom/0/key", "/searchIndices/disabled", "/lenses/0/indexInclusions", "/lenses/0/retrieverAgents/0/name"]),
+    expect(paths(current)).toEqual(
+      expect.arrayContaining([
+        "/searchIndices/custom/0/key",
+        "/searchIndices/disabled",
+        "/lenses/0/indexInclusions",
+        "/lenses/0/assistants/retrievers/0/name",
+      ]),
     );
-    expect(paths.some((path) => path.startsWith("/lenses/0/retrievers"))).toBe(false);
+    expect(paths(current).some((path) => /^\/lenses\/0\/(retrievers|retrieverAgents|aiAgents)/.test(path))).toBe(false);
+
+    const previous = await postImport({ ...malformed, formatVersion: "6.0", entityTypes: [person], relationTypes: [] });
+    expect(previous.statusCode).toBe(422);
+    expect(paths(previous)).toEqual(expect.arrayContaining(["/lenses/0/aiAgents", "/lenses/0/retrieverAgents/0/name"]));
+    expect(paths(previous).some((path) => /^\/lenses\/0\/(retrievers|assistants)/.test(path))).toBe(false);
 
     const legacy = await postImport({
       formatVersion: "5.0",
@@ -840,15 +901,14 @@ describe("version-specific fields", () => {
       lenses: [{ key: "all", name: "All", retrievers: [{ key: "y" }] }],
     });
     expect(legacy.statusCode).toBe(422);
-    const legacyPaths = (legacy.json().error.details.errors as { path: string }[]).map((issue) => issue.path);
-    expect(legacyPaths).toEqual(expect.arrayContaining(["/textSearchLanguage", "/lenses/0/retrievers/0/name"]));
+    expect(paths(legacy)).toEqual(expect.arrayContaining(["/textSearchLanguage", "/lenses/0/retrievers/0/name"]));
     expect(holder.store.createEntityType).not.toHaveBeenCalled();
     expect(indices.setSearchSettings).not.toHaveBeenCalled();
   });
 });
 
 describe("import name properties", () => {
-  it("6.0: rejects an entity type without a name property, or one that is not a string property of it", async () => {
+  it("rejects an entity type without a name property, or one that is not a string property of it", async () => {
     const res = await postImport({
       entityTypes: [
         {
@@ -1074,9 +1134,9 @@ describe("import validations", () => {
         {
           key: "lens",
           name: "Lens",
-          aiAgents: [
-            { key: "helper", name: "Helper", tools: ["query", "not_a_tool"] },
-          ],
+          assistants: {
+            agents: [{ key: "helper", name: "Helper", tools: ["query", "not_a_tool"] }],
+          },
         },
       ],
     });
@@ -1246,7 +1306,7 @@ describe("import key patterns", () => {
         {
           key: "lens",
           name: "Lens",
-          aiAgents: [{ key: "Bad Agent", name: "Bad" }],
+          assistants: { agents: [{ key: "Bad Agent", name: "Bad" }] },
           savedQueries: [
             {
               key: "9bad",
@@ -1301,7 +1361,7 @@ describe("import key patterns", () => {
         {
           key: long("lens"),
           name: "Long Lens",
-          aiAgents: [{ key: long("agent"), name: "Long Agent" }],
+          assistants: { agents: [{ key: long("agent"), name: "Long Agent" }] },
           savedQueries: [
             {
               key: long("sq"),
@@ -1356,7 +1416,7 @@ describe("import key patterns", () => {
         {
           key: "lens",
           name: "Lens",
-          aiAgents: [{ key: "helper", name: "Helper", tools: ["nope"] }],
+          assistants: { agents: [{ key: "helper", name: "Helper", tools: ["nope"] }] },
         },
       ],
     });

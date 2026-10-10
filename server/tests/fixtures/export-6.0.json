@@ -1,5 +1,5 @@
 {
-    "formatVersion": "7.0",
+    "formatVersion": "6.0",
     "entityTypes": [
         {
             "key": "company",
@@ -135,34 +135,27 @@
                     }
                 ]
             },
-            "indexInclusions": [
-                "company~default",
-                "person~bio",
-                "person~default"
+            "indexInclusions": ["company~default", "person~bio", "person~default"],
+            "aiAgents": [
+                {
+                    "key": "assistant",
+                    "name": "HR Assistant",
+                    "description": "Answers HR questions",
+                    "systemPrompt": "You are an HR assistant.",
+                    "tools": [
+                        "execute_query",
+                        "get_entity",
+                        "search"
+                    ]
+                },
+                {
+                    "key": "unrestricted",
+                    "name": "Unrestricted",
+                    "description": null,
+                    "systemPrompt": null,
+                    "tools": null
+                }
             ],
-            "assistants": {
-                "agents": [
-                    {
-                        "key": "assistant",
-                        "name": "HR Assistant",
-                        "description": "Answers HR questions",
-                        "systemPrompt": "You are an HR assistant.",
-                        "tools": [
-                            "execute_query",
-                            "get_entity",
-                            "search"
-                        ]
-                    },
-                    {
-                        "key": "unrestricted",
-                        "name": "Unrestricted",
-                        "description": null,
-                        "systemPrompt": null,
-                        "tools": null
-                    }
-                ],
-                "retrievers": []
-            },
             "savedQueries": [
                 {
                     "key": "people-by-name",
@@ -221,7 +214,8 @@
                         }
                     ]
                 }
-            ]
+            ],
+            "retrieverAgents": []
         },
         {
             "key": "test_lens",
@@ -229,19 +223,11 @@
             "description": "Person/Company lens for testing",
             "includes": null,
             "indexInclusions": [],
-            "assistants": {
-                "agents": [],
-                "retrievers": []
-            },
-            "savedQueries": []
+            "aiAgents": [],
+            "savedQueries": [],
+            "retrieverAgents": []
         }
     ],
-    "keywordLanguages": [
-        "german",
-        "english"
-    ],
-    "searchIndices": {
-        "custom": [],
-        "disabled": []
-    }
+    "keywordLanguages": ["german", "english"],
+    "searchIndices": { "custom": [], "disabled": [] }
 }

@@ -195,10 +195,10 @@ describe("runtime schema reads", () => {
 });
 
 describe("transfer", () => {
-  it("exports 6.0 with the name property and imports it back identically", async () => {
+  it("exports 7.0 with the name property and imports it back identically", async () => {
     await request("PUT", `${model}/entity-types/${fixture.personId}`, { nameProperty: "email" });
     const exported = (await request("GET", `${model}/export`)).json() as Row;
-    expect(exported.formatVersion).toBe("6.0");
+    expect(exported.formatVersion).toBe("7.0");
     expect((exported.entityTypes as Row[]).map((et) => [et.key, et.nameProperty])).toEqual([
       ["company", "name"],
       ["person", "email"],
@@ -215,9 +215,9 @@ describe("transfer", () => {
     ]);
   });
 
-  it("rejects a 6.0 entity type whose name property is not one of its string properties", async () => {
+  it("rejects an entity type whose name property is not one of its string properties", async () => {
     const res = await request("POST", `${model}/import`, {
-      formatVersion: "6.0",
+      formatVersion: "7.0",
       keywordLanguages: ["english"],
       entityTypes: [
         {

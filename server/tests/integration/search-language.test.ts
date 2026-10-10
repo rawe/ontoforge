@@ -54,7 +54,7 @@ it("the registry takes no language and answers none; export carries the keyword 
     "textSearchLanguage",
   );
   const exported = (await app.inject({ url: `${model}/export` })).json();
-  expect(exported).toMatchObject({ formatVersion: "6.0", keywordLanguages: ["german", "english"] });
+  expect(exported).toMatchObject({ formatVersion: "7.0", keywordLanguages: ["german", "english"] });
   expect(exported).not.toHaveProperty("textSearchLanguage");
 });
 

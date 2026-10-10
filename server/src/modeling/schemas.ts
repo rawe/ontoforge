@@ -243,18 +243,17 @@ export const SavedQueryResponse = z.object({
 // (`docs/capabilities/transfer.md`) — the schema-validation operation is
 // what catches those later.
 
-/** Current transfer format version — what export writes. */
-export const TRANSFER_FORMAT_VERSION = "6.0";
+/** Current transfer format version — what export writes and the only one
+ * import reads; older versions reach it through the upgrade chain
+ * (`modeling/transfer/upgrades.ts`). */
+export const TRANSFER_FORMAT_VERSION = "7.0";
 
-/** The previous format, still imported: entity types carry no
- * `nameProperty`, so import derives it (`core/legacyNameProperty.ts`). */
-export const LEGACY_TRANSFER_FORMAT_VERSION = "5.0";
-
-/** Every format version import accepts; an absent version is the current one. */
-export const IMPORTABLE_FORMAT_VERSIONS: readonly string[] = [
-  TRANSFER_FORMAT_VERSION,
-  LEGACY_TRANSFER_FORMAT_VERSION,
-];
+/** What import accepts as the request shape: an object with an optional
+ * version string. The rest belongs to the version — its upgrader, then
+ * import, check it (`ExportPayload`). */
+export const TransferEnvelope = z.looseObject({
+  formatVersion: z.string().optional(),
+});
 
 export const ExportProperty = z.object({
   key: z.string(),
@@ -269,8 +268,8 @@ export const ExportEntityType = z.object({
   key: z.string(),
   displayName: z.string(),
   description: z.string().nullable().optional(),
-  // Required from 6.0 on — import checks it itself, so a 5.0 payload
-  // (which has none) still parses.
+  // Required — import checks it itself, collecting a missing one with the
+  // other rule violations.
   nameProperty: z.string().optional(),
   properties: z.array(ExportProperty).default([]),
 });
@@ -340,24 +339,22 @@ export const ExportRetrieverAgent = z.object({
 });
 export type ExportRetrieverAgentInput = z.infer<typeof ExportRetrieverAgent>;
 
+/** A lens's assistants, one list per kind; each entry in its portable form. */
+export const ExportAssistants = z.object({
+  agents: z.array(ExportAiAgent).default([]),
+  retrievers: z.array(ExportRetrieverAgent).default([]),
+});
+
 export const ExportLens = z.object({
   key: z.string(),
   name: z.string(),
   description: z.string().nullable().optional(),
   includes: ExportLensInclusions.nullable().optional(),
-  // Version-specific fields are unchecked here: import reads each only in
-  // the version that carries it, with the schema below, and ignores it in
-  // the other (`docs/capabilities/transfer.md#the-format-version`).
-  // 6.0: `ExportIndexInclusions`. Absent (and in 5.0): the lens includes
+  // The keys of the indices the lens includes. Absent: the lens includes
   // the managed indices of the types it exposes, as a lens upgraded by
   // the storage step does.
-  indexInclusions: z.unknown().optional(),
-  // 6.0: `ExportRetrieverAgents` (configuration version 2).
-  retrieverAgents: z.unknown().optional(),
-  // 5.0 only: `ExportRetrieverAgents` (configuration version 1),
-  // converted on import.
-  retrievers: z.unknown().optional(),
-  aiAgents: z.array(ExportAiAgent).default([]),
+  indexInclusions: z.array(z.string()).optional(),
+  assistants: ExportAssistants.default({ agents: [], retrievers: [] }),
   savedQueries: z.array(ExportSavedQuery).default([]),
 });
 
@@ -369,27 +366,17 @@ export const ExportSearchIndices = z.object({
   disabled: z.array(z.string()).default([]),
 });
 
-/** A 6.0 lens's index inclusions: the keys of the indices it includes. */
-export const ExportIndexInclusions = z.array(z.string());
-
-/** A lens's retriever agents — 6.0 `retrieverAgents`, 5.0 `retrievers`. */
-export const ExportRetrieverAgents = z.array(ExportRetrieverAgent);
-
+/** The current version's payload, as import reads it once the upgrade
+ * chain has brought it here. The keyword language set is required; import
+ * reports its absence as a field error before this shape. */
 export const ExportPayload = z.object({
-  formatVersion: z.string().optional().default(TRANSFER_FORMAT_VERSION),
-  // Version-specific, so unchecked here like a lens's: each required by
-  // its own version and read with its schema by import only — 6.0 the
-  // keyword language set (`KeywordLanguageSetSchema`), 5.0 its one
-  // text-search language (`KeywordLanguage`).
-  keywordLanguages: z.unknown().optional(),
-  textSearchLanguage: z.unknown().optional(),
-  // 6.0 only: `ExportSearchIndices`; absent = no custom index, every
-  // managed index on.
-  searchIndices: z.unknown().optional(),
+  keywordLanguages: KeywordLanguageSetSchema,
+  // Absent: no custom index, every managed index on.
+  searchIndices: ExportSearchIndices.optional(),
   entityTypes: z.array(ExportEntityType).default([]),
   relationTypes: z.array(ExportRelationType).default([]),
-  // Required, no default: a pre-4.0 document (`ontologies[]`) must fail
-  // plain shape validation — the intended, final rejection of old payloads.
+  // Required, no default: a document without lenses (a pre-4.0
+  // `ontologies[]` one) is no transfer payload.
   lenses: z.array(ExportLens),
 });
 

@@ -13,15 +13,15 @@ import {
   toolTime,
   turnDuration,
 } from '../src/components/ai/chatTurnModel.ts'
-import type { StoredChatMessage } from '../src/components/ai/chatStore.ts'
+import type { ChatEntry } from '../src/components/ai/chatStore.ts'
 import type { ToolCall } from '../src/api/types.ts'
 
 test('applyChatEvent times calls and matches results out of order by callId', () => {
   let turn = pendingTurn('t1', 0)
-  turn = applyChatEvent(turn, { type: 'tool_call', callId: 'a', tool: 'get_entity', args: { entity_id: 'x' } }, 100)
-  turn = applyChatEvent(turn, { type: 'tool_call', callId: 'b', tool: 'search', args: { query: 'q' } }, 110)
-  turn = applyChatEvent(turn, { type: 'tool_result', callId: 'b', result: { hits: [] } }, 150)
-  turn = applyChatEvent(turn, { type: 'tool_result', callId: 'a', result: { _id: 'x' } }, 400)
+  turn = applyChatEvent(turn, { type: 'agent.tool_call', callId: 'a', tool: 'get_entity', args: { entity_id: 'x' } }, 100)
+  turn = applyChatEvent(turn, { type: 'agent.tool_call', callId: 'b', tool: 'search', args: { query: 'q' } }, 110)
+  turn = applyChatEvent(turn, { type: 'agent.tool_result', callId: 'b', result: { hits: [] } }, 150)
+  turn = applyChatEvent(turn, { type: 'agent.tool_result', callId: 'a', result: { _id: 'x' } }, 400)
   turn = applyChatEvent(turn, { type: 'final', reply: 'done' }, 410)
   assert.equal(turn.status, 'completed')
   assert.equal(turn.content, 'done')
@@ -31,7 +31,7 @@ test('applyChatEvent times calls and matches results out of order by callId', ()
 })
 
 test('a failed turn interrupts running calls and has no span', () => {
-  let turn = applyChatEvent(pendingTurn('t', 0), { type: 'tool_call', callId: 'a', tool: 'search', args: {} }, 1)
+  let turn = applyChatEvent(pendingTurn('t', 0), { type: 'agent.tool_call', callId: 'a', tool: 'search', args: {} }, 1)
   turn = failTurn(turn, 'boom', 5)
   assert.equal(turn.status, 'failed')
   assert.equal(turn.toolCalls![0]!.status, 'interrupted')
@@ -42,7 +42,7 @@ test('a failed turn interrupts running calls and has no span', () => {
 
 test('inspectedTurn picks the chosen turn, else the latest with tool calls; questionOf finds its question', () => {
   const call: ToolCall = { callId: 'c', tool: 'search', args: {}, status: 'completed' }
-  const messages: StoredChatMessage[] = [
+  const messages: ChatEntry[] = [
     { role: 'user', content: 'first' },
     { id: 'a', role: 'assistant', content: 'A', toolCalls: [call] },
     { role: 'user', content: 'second' },

@@ -8,17 +8,21 @@
 
 import type { ChatEvent } from '@/api/chatStream'
 import type { ToolCall } from '@/api/types'
-import type { StoredChatMessage } from './chatStore.ts'
+import type { ChatEntry } from './chatStore.ts'
 
 /** A new, pending assistant turn, started at `now`. */
-export function pendingTurn(id: string, now: number): StoredChatMessage {
+export function pendingTurn(id: string, now: number): ChatEntry {
   return { id, role: 'assistant', content: '', status: 'pending', toolCalls: [], startedAt: now }
 }
 
 /** The turn after one stream event, `now` the client clock in ms. */
-export function applyChatEvent(turn: StoredChatMessage, event: ChatEvent, now: number): StoredChatMessage {
+export function applyChatEvent(turn: ChatEntry, event: ChatEvent, now: number): ChatEntry {
   switch (event.type) {
-    case 'tool_call':
+    case 'thread':
+      return turn
+    case 'delta':
+      return { ...turn, content: turn.content + event.text }
+    case 'agent.tool_call':
       return {
         ...turn,
         toolCalls: [
@@ -26,7 +30,7 @@ export function applyChatEvent(turn: StoredChatMessage, event: ChatEvent, now: n
           { callId: event.callId, tool: event.tool, args: event.args, status: 'pending', startedAt: now },
         ],
       }
-    case 'tool_result':
+    case 'agent.tool_result':
       return {
         ...turn,
         toolCalls: turn.toolCalls?.map((call) =>
@@ -43,7 +47,7 @@ export function applyChatEvent(turn: StoredChatMessage, event: ChatEvent, now: n
 }
 
 /** The turn failed at `now`: calls still running count as interrupted. */
-export function failTurn(turn: StoredChatMessage, message: string, now: number): StoredChatMessage {
+export function failTurn(turn: ChatEntry, message: string, now: number): ChatEntry {
   return {
     ...turn,
     status: 'failed',
@@ -57,15 +61,15 @@ export function failTurn(turn: StoredChatMessage, message: string, now: number):
 
 /** The assistant turn the panel shows: the chosen one, else the latest with tool calls. */
 export function inspectedTurn(
-  messages: readonly StoredChatMessage[],
+  messages: readonly ChatEntry[],
   selectedId: string | null,
-): StoredChatMessage | undefined {
+): ChatEntry | undefined {
   const withCalls = messages.filter((m) => m.role === 'assistant' && m.id !== undefined && (m.toolCalls?.length ?? 0) > 0)
   return withCalls.find((m) => m.id === selectedId) ?? withCalls.at(-1)
 }
 
 /** The user message a turn answers. */
-export function questionOf(messages: readonly StoredChatMessage[], turn: StoredChatMessage): string | undefined {
+export function questionOf(messages: readonly ChatEntry[], turn: ChatEntry): string | undefined {
   const at = messages.indexOf(turn)
   for (let i = at - 1; i >= 0; i -= 1) if (messages[i]!.role === 'user') return messages[i]!.content
   return undefined
@@ -99,7 +103,7 @@ export function toolTime(calls: readonly ToolCall[]): number | undefined {
 }
 
 /** How long the answer took, from sending to the reply, in ms. */
-export function turnDuration(turn: StoredChatMessage): number | undefined {
+export function turnDuration(turn: ChatEntry): number | undefined {
   return turn.startedAt !== undefined && turn.finishedAt !== undefined ? turn.finishedAt - turn.startedAt : undefined
 }
 

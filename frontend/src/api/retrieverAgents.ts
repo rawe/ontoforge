@@ -1,15 +1,18 @@
 /**
  * Retriever agents: lens-local saved configurations (config v2) that answer
  * questions over the lens's search indices with a planner and an answer
- * model. Modeling CRUD by lens key + agent key, the runtime chat stream and
- * its reader, and retrieve — the found entities without an answer. Every
- * lens also has the implicit default agent `_default`, derived from its
- * managed indices, never stored or listed. The editor reads the runtime index catalog and lens schema
- * (`runtime.ts`), not a catalog of its own.
+ * model. Modeling CRUD by lens key + agent key under
+ * `assistants/retrievers`, the runtime chat on a thread with the
+ * retriever's own stream events, and retrieve — the found entities without
+ * an answer. Every lens also has the implicit default agent `_default`,
+ * derived from its managed indices: first in the runtime list
+ * (`runtime.ts` → `listAssistants`), never a modeling resource. The editor
+ * reads the runtime index catalog and lens schema (`runtime.ts`), not a
+ * catalog of its own.
  */
-import { readNdjsonStream } from './chatStream.ts'
+import { assistantPath, postChat, readAssistantStream, type ChatRequest, type KindReader, type SharedEvent } from './chatStream.ts'
 import { request } from './http.ts'
-import type { ChatMessage, Matched, RelationDirection } from './types'
+import type { Matched, RelationDirection } from './types'
 
 export type SearchMode = 'semantic' | 'keyword' | 'hybrid'
 
@@ -91,8 +94,8 @@ export interface ModelCall {
   inputTruncated?: boolean
   outputTruncated?: boolean
 }
-export interface RetrieverAgentMeta {
-  turnToken?: string
+/** What `retriever.diagnostics` events report about one answer, merged as they arrive. */
+export interface RetrieverDiagnostics {
   llmCalls?: number
   searchCalls?: number
   plan?: { subQueries?: PlanSubQuery[] } & Record<string, unknown>
@@ -122,30 +125,24 @@ export interface RetrieveResponse {
   results: RetrieveResult[]
   limitations: string[]
   unsupportedReason?: string
-  diagnostics?: {
-    plan: { subQueries?: PlanSubQuery[] } & Record<string, unknown>
-    searchCalls: number
-    timings: Record<string, number>
-    modelIO: ModelCall[]
-  }
 }
 
-export type RetrieverAgentEvent =
-  | { type: 'phase'; phase: string; status: 'start' | 'end'; durationMs?: number }
-  | { type: 'delta'; text: string }
-  | ({ type: 'meta' } & RetrieverAgentMeta)
-  | { type: 'final'; reply: string }
-  | { type: 'error'; error: { code: string; message: string } }
+/** A retriever's own stream events. */
+export type RetrieverKindEvent =
+  | { type: 'retriever.phase'; phase: string; status: 'start' | 'end'; durationMs?: number }
+  | ({ type: 'retriever.diagnostics' } & RetrieverDiagnostics)
+
+/** A retriever's turn: the shared events plus its own. */
+export type RetrieverAgentEvent = SharedEvent | RetrieverKindEvent
 
 /* ---------------------------------- routes --------------------------------- */
 
 const modelBase = (ontologyKey: string, lensKey: string) =>
-  `/api/ontologies/${encodeURIComponent(ontologyKey)}/model/lenses/${encodeURIComponent(lensKey)}/retriever-agents`
+  `/api/ontologies/${encodeURIComponent(ontologyKey)}/model/lenses/${encodeURIComponent(lensKey)}/assistants/retrievers`
 const modelAgent = (ontologyKey: string, lensKey: string, key: string) =>
   `${modelBase(ontologyKey, lensKey)}/${encodeURIComponent(key)}`
-const runtimeAgent = (ontologyKey: string, lensKey: string, key: string) =>
-  `/api/ontologies/${encodeURIComponent(ontologyKey)}/runtime/lenses/${encodeURIComponent(lensKey)}/retriever-agents/${encodeURIComponent(key)}`
 
+/** The modeling list: stored agents with configuration and validation (Studio). */
 export const listRetrieverAgents = (ontologyKey: string, lensKey: string) =>
   request<RetrieverAgent[]>(modelBase(ontologyKey, lensKey))
 /** Create (201) or replace (200). Sends exactly the write fields — never an export's `key`. */
@@ -164,23 +161,20 @@ export const exportRetrieverAgent = (ontologyKey: string, lensKey: string, key: 
 export const importRetrieverAgent = (ontologyKey: string, lensKey: string, body: RetrieverAgentExport, signal?: AbortSignal) =>
   request<RetrieverAgent>(`${modelBase(ontologyKey, lensKey)}/import`, { method: 'POST', body, signal })
 
-/** Ask the saved agent; the browser never sends a configuration. */
+/** One message to the saved (or default) agent on a thread; the browser never sends a configuration. */
 export async function chatRetrieverAgent(
   ontologyKey: string, lensKey: string, key: string,
-  body: { message: string; history: ChatMessage[]; turnToken?: string; diagnostics?: boolean },
+  body: ChatRequest & { diagnostics: boolean },
   onEvent: (event: RetrieverAgentEvent) => void, signal: AbortSignal,
 ) {
-  const response = await fetch(`${runtimeAgent(ontologyKey, lensKey, key)}/chat`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal,
-  })
-  await readRetrieverAgentStream(response, onEvent, signal)
+  await postChat(assistantPath(ontologyKey, lensKey, 'retrievers', key), body, retrieverReader, onEvent, signal)
 }
 
-/** One question to the saved (or default) agent: its planning and retrieval, no answer. */
+/** One query to the saved (or default) agent: its planning and retrieval, no answer. */
 export const retrieveWithAgent = (
   ontologyKey: string, lensKey: string, key: string,
-  body: { question: string; diagnostics?: boolean }, signal?: AbortSignal,
-) => request<RetrieveResponse>(`${runtimeAgent(ontologyKey, lensKey, key)}/retrieve`, { method: 'POST', body, signal })
+  body: { query: string }, signal?: AbortSignal,
+) => request<RetrieveResponse>(`${assistantPath(ontologyKey, lensKey, 'retrievers', key)}/retrieve`, { method: 'POST', body, signal })
 
 /* ------------------------------- stream reader ------------------------------ */
 
@@ -189,8 +183,7 @@ function record(value: unknown): value is Record<string, unknown> {
 }
 const strings = (value: unknown) => Array.isArray(value) && value.every((item) => typeof item === 'string')
 
-function validMeta(event: Record<string, unknown>): boolean {
-  if (event.turnToken !== undefined && typeof event.turnToken !== 'string') return false
+function validDiagnostics(event: Record<string, unknown>): boolean {
   if (event.timings !== undefined && (!record(event.timings) || Object.values(event.timings).some((x) => typeof x !== 'number' || !Number.isFinite(x)))) return false
   // Preserve additional bounded metadata, including finishReason from a failed plan parse.
   if (event.modelIO !== undefined && (!Array.isArray(event.modelIO) || event.modelIO.some((x) => !record(x) || typeof x.phase !== 'string' || typeof x.input !== 'string' || typeof x.output !== 'string'))) return false
@@ -204,31 +197,20 @@ function validMeta(event: Record<string, unknown>): boolean {
   return true
 }
 
-/** Validate the stream envelope before updating UI; an unknown event fails the turn. */
-function parseEvent(event: Record<string, unknown>): RetrieverAgentEvent {
-  switch (event.type) {
-    case 'phase':
-      if (typeof event.phase === 'string' && ['start', 'end'].includes(String(event.status)) &&
-          (event.durationMs === undefined || typeof event.durationMs === 'number')) return event as RetrieverAgentEvent
-      break
-    case 'delta': if (typeof event.text === 'string') return event as RetrieverAgentEvent; break
-    case 'final': if (typeof event.reply === 'string') return event as RetrieverAgentEvent; break
-    case 'error':
-      if (record(event.error) && typeof event.error.code === 'string' && typeof event.error.message === 'string') return event as RetrieverAgentEvent
-      break
-    case 'meta': if (validMeta(event)) return event as RetrieverAgentEvent; break
-  }
-  throw new Error('Invalid event in the retriever agent stream.')
+/** The retriever's own events, validated before they reach the UI; kind events it does not know are ignored. */
+const retrieverReader: KindReader<RetrieverKindEvent> = {
+  parse(event) {
+    switch (event.type) {
+      case 'retriever.phase':
+        if (typeof event.phase === 'string' && ['start', 'end'].includes(String(event.status)) &&
+            (event.durationMs === undefined || typeof event.durationMs === 'number')) return event as RetrieverKindEvent
+        break
+      case 'retriever.diagnostics': if (validDiagnostics(event)) return event as RetrieverKindEvent; break
+      default: if (typeof event.type === 'string' && event.type.includes('.')) return null
+    }
+    throw new Error('Invalid event in the retriever agent stream.')
+  },
 }
 
-export async function readRetrieverAgentStream(response: Response, onEvent: (event: RetrieverAgentEvent) => void, signal: AbortSignal) {
-  let streamed = ''
-  await readNdjsonStream(response, (raw) => {
-    signal.throwIfAborted()
-    const event = parseEvent(raw)
-    if (event.type === 'delta') streamed += event.text
-    if (event.type === 'final' && streamed && streamed !== event.reply) throw new Error('The final answer does not match the streamed text.')
-    onEvent(event)
-    return event.type === 'final' || event.type === 'error'
-  })
-}
+export const readRetrieverAgentStream = (response: Response, onEvent: (event: RetrieverAgentEvent) => void, signal: AbortSignal) =>
+  readAssistantStream(response, retrieverReader, onEvent, signal)

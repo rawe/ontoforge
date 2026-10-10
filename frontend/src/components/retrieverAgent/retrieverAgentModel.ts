@@ -9,7 +9,7 @@ import type {
   RetrieverAgent,
   RetrieverAgentConfig,
   RetrieverAgentFilter,
-  RetrieverAgentMeta,
+  RetrieverDiagnostics,
   RetrieverAgentPathStep,
   RetrieverAgentResult,
   SearchMode,
@@ -83,7 +83,7 @@ export function toInput(draft: AgentDraft) {
 
 /**
  * An agent runs only from its saved, unchanged, valid version 2 configuration.
- * The test panel and the Workbench chat both ask this.
+ * The editor's test panel asks this; elsewhere the server's refusal says why.
  */
 export function agentExecution(agent: Pick<RetrieverAgent, 'key' | 'configVersion' | 'config' | 'validation'> | null, dirty: boolean):
   { mode: 'saved'; key: string } | { mode: 'blocked'; reason: string } {
@@ -311,7 +311,7 @@ export function stepText(timings: Record<string, number>, step: (typeof STEPS)[n
 }
 
 /** Model and search call counts; model calls fall back to the traced calls, a finished turn without searches made none. */
-export function callCounts(meta: RetrieverAgentMeta, status: TurnStatus): { model: number | null; search: number | null } {
+export function callCounts(meta: RetrieverDiagnostics, status: TurnStatus): { model: number | null; search: number | null } {
   return {
     model: meta.llmCalls ?? (meta.modelIO !== undefined || status !== 'pending' ? (meta.modelIO?.length ?? 0) : null),
     search: meta.searchCalls ?? (status === 'pending' ? null : 0),
@@ -322,8 +322,8 @@ export const formatMs = (ms: number) => ms < 1000 ? `${ms.toFixed(ms < 10 ? 1 : 
 
 export const MODE_LABEL: Record<SearchMode, string> = { semantic: 'by meaning', keyword: 'by keywords', hybrid: 'by meaning and keywords' }
 
-/** Merge one `meta` event into a turn's diagnostics: timings and model calls accumulate, limitations dedupe. */
-export function mergeMeta(current: RetrieverAgentMeta, data: Omit<RetrieverAgentMeta, 'turnToken'>): RetrieverAgentMeta {
+/** Merge one `retriever.diagnostics` event into a turn's diagnostics: timings and model calls accumulate, limitations dedupe. */
+export function mergeDiagnostics(current: RetrieverDiagnostics, data: RetrieverDiagnostics): RetrieverDiagnostics {
   return {
     ...current, ...data,
     timings: { ...current.timings, ...data.timings },
@@ -343,7 +343,7 @@ export function relationName(key: string, indices: readonly string[], catalog: r
 }
 
 /** Results per planned sub-query, in plan order; results of an unknown sub-query come last. */
-export function resultsBySubQuery(meta: RetrieverAgentMeta): { subQuery: number; plan: PlanSubQuery | null; results: RetrieverAgentResult[] }[] {
+export function resultsBySubQuery(meta: RetrieverDiagnostics): { subQuery: number; plan: PlanSubQuery | null; results: RetrieverAgentResult[] }[] {
   const planned = meta.plan?.subQueries ?? []
   const groups = new Map<number, RetrieverAgentResult[]>()
   for (const result of meta.results ?? []) groups.set(result.subQuery, [...(groups.get(result.subQuery) ?? []), result])

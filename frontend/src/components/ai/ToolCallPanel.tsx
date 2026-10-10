@@ -7,7 +7,7 @@ import { TypeChip } from '@/components/TypeChip'
 import { ResultsTable } from '@/components/query/ResultsTable'
 import { isEntityObject } from '@/components/query/resultUtils'
 import { cn } from '@/lib/utils'
-import type { StoredChatMessage } from './chatStore'
+import type { ChatEntry } from './chatStore'
 import {
   callDuration,
   formatDuration,
@@ -22,7 +22,7 @@ interface ToolCallPanelProps {
   ontologyKey: string
   lensKey: string
   /** The assistant turn shown; undefined when no turn of this session made tool calls. */
-  turn: StoredChatMessage | undefined
+  turn: ChatEntry | undefined
   question: string | undefined
   /** The conversation has answers restored from an earlier session, which keep no tool calls. */
   hasRestoredTurns: boolean

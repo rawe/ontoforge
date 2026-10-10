@@ -1,13 +1,19 @@
-import { requestChat, type ChatEvent } from './chatStream'
 /**
  * Runtime API client — `/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/...`,
  * addressed by ontology, lens and type KEY.
  */
 
+import {
+  agentReader,
+  assistantPath,
+  postChat,
+  readThread,
+  type ChatEvent,
+  type ChatRequest,
+} from './chatStream'
 import { buildQuery, request, type FilterMap } from './http'
 import type {
-  AiAgent,
-  ChatMessage,
+  AssistantKind,
   DocumentContentResponse,
   EntityInstance,
   JsonValue,
@@ -16,6 +22,7 @@ import type {
   NeighborsResponse,
   QueryResult,
   RelationInstance,
+  RuntimeAssistant,
   RuntimeSchema,
   SavedQuery,
   SavedQuerySearchHit,
@@ -261,24 +268,27 @@ export const runSavedQuery = (
 
 /* ------------------------------------- AI ------------------------------------ */
 
-export const aiChat = (
-  ontologyKey: string,
-  lensKey: string,
-  body: { message: string; history?: ChatMessage[] },
-  onEvent: (event: ChatEvent) => void,
-  signal: AbortSignal,
-) =>
-  requestChat(`${base(ontologyKey, lensKey)}/ai/chat`, body, onEvent, signal)
+/** A kind's runtime list: every assistant of the lens, the built-in default (`_default`) first. */
+export const listAssistants = (ontologyKey: string, lensKey: string, kind: AssistantKind) =>
+  request<RuntimeAssistant[]>(assistantPath(ontologyKey, lensKey, kind))
 
-export const listAiAgents = (ontologyKey: string, lensKey: string) =>
-  request<AiAgent[]>(`${base(ontologyKey, lensKey)}/ai/agents`)
-
-export const aiAgentChat = (
+/** One message to an agent (`_default` included); without `threadId` it starts a new thread. */
+export const agentChat = (
   ontologyKey: string,
   lensKey: string,
   agentKey: string,
-  body: { message: string; history?: ChatMessage[] },
+  body: ChatRequest,
   onEvent: (event: ChatEvent) => void,
   signal: AbortSignal,
 ) =>
-  requestChat(`${base(ontologyKey, lensKey)}/ai/agents/${agentKey}/chat`, body, onEvent, signal)
+  postChat(assistantPath(ontologyKey, lensKey, 'agents', agentKey), body, agentReader(), onEvent, signal)
+
+/** A thread of one assistant read back. */
+export const readAssistantThread = (
+  ontologyKey: string,
+  lensKey: string,
+  kind: AssistantKind,
+  assistantKey: string,
+  threadId: string,
+  signal?: AbortSignal,
+) => readThread(assistantPath(ontologyKey, lensKey, kind, assistantKey), threadId, signal)

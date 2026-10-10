@@ -256,9 +256,26 @@ export interface QueryResult {
 
 /* -------------------------------- runtime — AI ------------------------------- */
 
+/** An assistant kind, as it appears in `/ai/assistants/<kind>`. */
+export type AssistantKind = 'agents' | 'retrievers'
+
+/** One entry of a kind's runtime list; the built-in default (`_default`) comes first. */
+export interface RuntimeAssistant {
+  key: string
+  name: string
+  description: string | null
+  builtIn: boolean
+}
+
+/** One message of a thread read back: user messages and the assistant's answers, no tool payloads. */
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
+}
+
+export interface AssistantThread {
+  threadId: string
+  messages: ChatMessage[]
 }
 
 export interface ToolCall {

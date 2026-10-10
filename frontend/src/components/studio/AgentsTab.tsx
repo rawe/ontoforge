@@ -224,7 +224,7 @@ export function AgentsTab({ ontologyKey, lens }: { ontologyKey: string; lens: Le
   // NOTE: modeling agent routes are key-addressed, unlike the other
   // /api/ontologies/{key}/model/lenses/{id}/... routes.
   const agentsQuery = useQuery({
-    queryKey: qk.model(ontologyKey, 'lenses', lens.key, 'ai-agents'),
+    queryKey: qk.model(ontologyKey, 'lenses', lens.key, 'assistants', 'agents'),
     queryFn: () => model.listAiAgents(ontologyKey, lens.key),
   })
   const agents = agentsQuery.data

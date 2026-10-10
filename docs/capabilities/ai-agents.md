@@ -113,7 +113,7 @@ Configuring agents is modeling; running them is runtime. Complete operation inde
 | Configure agents | Modeling REST, modeling MCP, the studio's agents tab | List, read one, upsert by key, delete |
 | Chat | Runtime REST only | One operation per agent, the default addressed by its key; reading a thread back |
 | List agents | Runtime REST | Every agent of the lens — key, name, description, whether built in — the default first |
-| Web UI | The workbench's AI surface | Chat with an agent picker and persisted local threads |
+| Web UI | The workbench's AI surface | Chat with an agent picker; conversations restored from their server threads |
 
 Note the deliberate gap: **there are no MCP tools for chat.** An MCP
 client is itself a language model; wrapping a second one behind a tool call would put a

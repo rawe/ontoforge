@@ -1,10 +1,8 @@
-import { useQuery } from '@tanstack/react-query'
 import { AlertCircle, Bot, LoaderCircle, SendHorizonal, Trash2, Wrench } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { qk } from '@/api/queryKeys'
-import { aiAgentChat, aiChat, listAiAgents } from '@/api/runtime'
-import type { ChatMessage } from '@/api/types'
-import type { ChatEvent } from '@/api/chatStream'
+import { chatErrorText, threadError, type ChatEvent } from '@/api/chatStream'
+import { useAssistants } from '@/api/hooks'
+import { agentChat } from '@/api/runtime'
 import { EmptyState } from '@/components/EmptyState'
 import { ElapsedIndicator } from '@/components/ai/ElapsedIndicator'
 import { Markdown } from '@/components/ai/Markdown'
@@ -19,10 +17,12 @@ import {
   toolError,
 } from '@/components/ai/chatTurnModel'
 import {
-  clearChatHistory,
-  readChatHistory,
-  writeChatHistory,
-  type StoredChatMessage,
+  EXPIRED_TEXT,
+  forgetThread,
+  rememberThread,
+  rememberedThread,
+  restoreThread,
+  type ChatEntry,
 } from '@/components/ai/chatStore'
 import {
   AlertDialog,
@@ -49,33 +49,34 @@ import { cn } from '@/lib/utils'
 
 const DEFAULT_AGENT = '_default'
 
+/** One agent's conversation of this session: its thread and what the view shows. */
+interface Conversation { threadId: string | null; messages: ChatEntry[] }
+
 /**
- * Chat tab: agent picker in the header, markdown message list, Enter-to-send
- * input, elapsed-seconds pending state and per-lens+agent persisted history.
- * Tool calls stream into a panel on the right — each answer's "tool calls"
- * button shows its own there; with the panel switched off they list inline.
+ * Chat tab: agent picker in the header (the runtime list, the built-in
+ * default first), markdown message list, Enter-to-send input and
+ * elapsed-seconds pending state. Each agent's conversation is a server
+ * thread; the browser remembers its id per lens + agent and restores the
+ * messages on open. Tool calls stream into a panel on the right — each
+ * answer's "tool calls" button shows its own there; with the panel switched
+ * off they list inline.
  */
 export function ChatTab({ ontologyKey, lensKey }: { ontologyKey: string; lensKey: string }) {
-  const agents = useQuery({
-    queryKey: qk.agents(ontologyKey, lensKey),
-    queryFn: () => listAiAgents(ontologyKey, lensKey),
-  })
-  const agentOptions = useMemo(() => {
-    const list = agents.data ?? []
-    return list.some((a) => a.key === DEFAULT_AGENT)
-      ? list
-      : [{ key: DEFAULT_AGENT, name: 'Default assistant', description: null }, ...list]
-  }, [agents.data])
+  const agents = useAssistants(ontologyKey, lensKey, 'agents')
 
   const [agentKey, setAgentKey] = useState(DEFAULT_AGENT)
-  const [messages, setMessages] = useState<StoredChatMessage[]>(() =>
-    readChatHistory(ontologyKey, lensKey, DEFAULT_AGENT),
-  )
+  const owner = useMemo(() => ({ ontologyKey, lensKey, kind: 'agents' as const, assistantKey: agentKey }), [ontologyKey, lensKey, agentKey])
+  const [messages, setMessages] = useState<ChatEntry[]>([])
+  // Until the remembered thread is read back, nothing can be sent.
+  const [restoring, setRestoring] = useState(true)
+  const [notice, setNotice] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [confirmClear, setConfirmClear] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
-  const conversations = useRef(new Map<string, StoredChatMessage[]>())
+  const threadId = useRef<string | null>(null)
+  // Conversations of this session, per agent: switching back keeps the tool calls.
+  const conversations = useRef(new Map<string, Conversation>())
   const active = useRef<{ interrupt: () => void } | null>(null)
   const isPending = messages.some((m) => m.status === 'pending')
   const [showToolCalls, setShowToolCalls] = useState(() => readString(storageKeys.chatToolCalls) !== 'false')
@@ -89,20 +90,55 @@ export function ChatTab({ ontologyKey, lensKey }: { ontologyKey: string; lensKey
     if (el !== null) el.scrollTop = el.scrollHeight
   }, [messages])
 
+  // Restore the agent's remembered thread from the server, once per session.
+  useEffect(() => {
+    if (conversations.current.has(owner.assistantKey)) return
+    const controller = new AbortController()
+    restoreThread(owner, controller.signal).then(
+      (restored) => {
+        if (controller.signal.aborted) return
+        const entries: ChatEntry[] = restored.messages.map(({ role, content }) =>
+          role === 'assistant' ? { role, content, status: 'completed' } : { role, content })
+        threadId.current = restored.threadId
+        conversations.current.set(owner.assistantKey, { threadId: restored.threadId, messages: entries })
+        setMessages(entries)
+        setNotice(restored.expired ? EXPIRED_TEXT : null)
+        setRestoring(false)
+      },
+      (error: unknown) => {
+        if (controller.signal.aborted) return
+        // Keep the remembered thread: the next message continues it.
+        threadId.current = rememberedThread(owner)
+        setNotice(`Could not restore the conversation: ${chatErrorText(error, 'request failed')}`)
+        setRestoring(false)
+      },
+    )
+    return () => controller.abort()
+  }, [owner])
+
+  const switchAgent = (key: string) => {
+    active.current?.interrupt()
+    const cached = conversations.current.get(key)
+    threadId.current = cached?.threadId ?? null
+    setMessages(cached?.messages ?? [])
+    setRestoring(cached === undefined)
+    setNotice(null)
+    setSelectedTurn(null)
+    setAgentKey(key)
+  }
+
   const submit = async (text: string) => {
     const trimmed = text.trim()
-    if (!trimmed || active.current) return
-    const history: ChatMessage[] = messages
-      .filter((m) => m.content && (m.role === 'user' || !m.status || m.status === 'completed'))
-      .map(({ role, content }) => ({ role, content }))
+    if (!trimmed || active.current || restoring) return
+    const key = agentKey
+    const thread = owner
     const controller = new AbortController()
     let turn = pendingTurn(crypto.randomUUID(), Date.now())
-    const preceding = [...messages, { role: 'user' as const, content: trimmed }].slice(-49)
+    const preceding = [...messages, { role: 'user' as const, content: trimmed }]
     const save = () => {
       const next = [...preceding, turn]
       setMessages(next)
-      conversations.current.set(agentKey, next)
-      writeChatHistory(ontologyKey, lensKey, agentKey, next)
+      conversations.current.set(key, { threadId: threadId.current, messages: next })
     }
     const fail = (message: string) => {
       turn = failTurn(turn, message, Date.now())
@@ -116,19 +152,34 @@ export function ChatTab({ ontologyKey, lensKey }: { ontologyKey: string; lensKey
     } }
     active.current = request
     setInput('')
+    setNotice(null)
     setSelectedTurn(null)
     save()
     const onEvent = (event: ChatEvent) => {
       if (active.current !== request) return
+      if (event.type === 'thread') {
+        threadId.current = event.threadId
+        rememberThread(thread, event.threadId)
+      }
       turn = applyChatEvent(turn, event, Date.now())
       save()
     }
     try {
-      const body = { message: trimmed, history }
-      if (agentKey === DEFAULT_AGENT) await aiChat(ontologyKey, lensKey, body, onEvent, controller.signal)
-      else await aiAgentChat(ontologyKey, lensKey, agentKey, body, onEvent, controller.signal)
+      await agentChat(ontologyKey, lensKey, key, { message: trimmed, threadId: threadId.current ?? undefined }, onEvent, controller.signal)
     } catch (error) {
-      if (active.current === request) fail(error instanceof Error ? error.message : 'Chat failed')
+      if (active.current !== request) return
+      if (threadError(error) === 'THREAD_NOT_FOUND') {
+        // The thread expired: start over, the question back in the input.
+        active.current = null
+        forgetThread(thread)
+        threadId.current = null
+        conversations.current.set(key, { threadId: null, messages: [] })
+        setMessages([])
+        setNotice(EXPIRED_TEXT)
+        setInput(trimmed)
+        return
+      }
+      fail(chatErrorText(error, 'Chat failed'))
     } finally {
       if (active.current === request) active.current = null
     }
@@ -148,18 +199,13 @@ export function ChatTab({ ontologyKey, lensKey }: { ontologyKey: string; lensKey
         <Bot className="size-4 text-muted-foreground" />
         <Select
           value={agentKey}
-          onValueChange={(key) => {
-            // Each agent keeps its own persisted thread.
-            active.current?.interrupt()
-            setAgentKey(key)
-            setMessages(conversations.current.get(key) ?? readChatHistory(ontologyKey, lensKey, key))
-          }}
+          onValueChange={switchAgent}
         >
           <SelectTrigger size="sm" className="h-7 w-56 text-[13px]">
             <SelectValue placeholder="Agent" />
           </SelectTrigger>
           <SelectContent>
-            {agentOptions.map((a) => (
+            {(agents.data ?? []).map((a) => (
               <SelectItem key={a.key} value={a.key} className="text-[13px]">
                 <span className="flex items-center gap-2">
                   {a.name}
@@ -205,7 +251,16 @@ export function ChatTab({ ontologyKey, lensKey }: { ontologyKey: string; lensKey
           <section className="flex min-h-[320px] min-w-0 flex-1 flex-col">
             {/* Messages */}
             <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-              {messages.length === 0 ? (
+              {notice !== null && (
+                <p role="status" className="mx-auto mb-4 max-w-2xl rounded border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
+                  {notice}
+                </p>
+              )}
+              {restoring ? (
+                <p role="status" className="flex items-center justify-center gap-2 py-12 text-xs text-muted-foreground">
+                  <LoaderCircle className="size-3.5 animate-spin" /> Restoring the conversation …
+                </p>
+              ) : messages.length === 0 ? (
                 <EmptyState
                   icon={Bot}
                   title="Chat with your knowledge graph"
@@ -265,13 +320,13 @@ export function ChatTab({ ontologyKey, lensKey }: { ontologyKey: string; lensKey
                   placeholder="Ask about your data… (Enter to send, Shift+Enter for a new line)"
                   rows={2}
                   className="min-h-9 resize-none text-[13px]"
-                  disabled={isPending}
+                  disabled={isPending || restoring}
                 />
                 <Button
                   size="icon"
                   className="size-9 shrink-0"
                   aria-label="Send message"
-                  disabled={input.trim() === '' || isPending}
+                  disabled={input.trim() === '' || isPending || restoring}
                   onClick={() => submit(input)}
                 >
                   <SendHorizonal className="size-4" />
@@ -310,8 +365,8 @@ export function ChatTab({ ontologyKey, lensKey }: { ontologyKey: string; lensKey
           <AlertDialogHeader>
             <AlertDialogTitle>Clear this chat?</AlertDialogTitle>
             <AlertDialogDescription>
-              Removes the stored history for this agent in this lens. This cannot be
-              undone.
+              Starts a new conversation with this agent in this lens. The current one
+              can no longer be opened.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -319,9 +374,11 @@ export function ChatTab({ ontologyKey, lensKey }: { ontologyKey: string; lensKey
             <AlertDialogAction
               onClick={() => {
                 active.current?.interrupt()
-                conversations.current.delete(agentKey)
-                clearChatHistory(ontologyKey, lensKey, agentKey)
+                forgetThread(owner)
+                threadId.current = null
+                conversations.current.set(agentKey, { threadId: null, messages: [] })
                 setMessages([])
+                setNotice(null)
               }}
             >
               Clear
@@ -339,7 +396,7 @@ function ToolCallsButton({
   selected,
   onSelect,
 }: {
-  message: StoredChatMessage
+  message: ChatEntry
   selected: boolean
   onSelect: () => void
 }) {

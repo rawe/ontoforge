@@ -54,7 +54,9 @@ export function RetrieverAgentsTab({ ontologyKey, lens }: { ontologyKey: string;
     setCreating(null)
     setSearchParams(key === null ? { tab: TAB } : { tab: TAB, agent: key }, { replace: true })
   }
-  const refresh = () => queryClient.invalidateQueries({ queryKey: qk.retrieverAgents(ontologyKey, lens.key) })
+  // The Workbench's runtime list follows the modeling list.
+  const refresh = () => Promise.all([qk.retrieverAgents(ontologyKey, lens.key), qk.assistants(ontologyKey, lens.key, 'retrievers')]
+    .map((queryKey) => queryClient.invalidateQueries({ queryKey })))
 
   if (features?.searchIndices === false) {
     return <EmptyState icon={SearchX} title="Retriever agents are not available" description="Retriever agents answer over search indices, which this server's storage adapter does not support." />
@@ -242,7 +244,7 @@ function AgentEditor({ ontologyKey, lensKey, existingKeys, catalog, schema, aiEn
         {!aiEnabled ? <p className="p-4 text-xs text-muted-foreground">This server has no AI provider configured; retriever agents cannot answer here.</p>
           : testMode === 'retrieve' ? <RetrieverAgentRetrieve key={agent ? `${agent.key}:${agent.updatedAt}` : 'new'} ontologyKey={ontologyKey} lensKey={lensKey}
             agentKey={agent?.key ?? null} blockedReason={execution.mode === 'blocked' ? execution.reason : null}
-            config={agent && isSupportedAgent(agent) ? agent.config : null} catalog={catalog} schema={schema} />
+            catalog={catalog} schema={schema} />
           : <RetrieverAgentChat key={agent ? `${agent.key}:${agent.updatedAt}` : 'new'} ontologyKey={ontologyKey} lensKey={lensKey}
             agentKey={agent?.key ?? null} blockedReason={execution.mode === 'blocked' ? execution.reason : null} diagnostics
             config={agent && isSupportedAgent(agent) ? agent.config : null} catalog={catalog} schema={schema}

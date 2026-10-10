@@ -8,7 +8,9 @@
  *   of.theme                  — managed by next-themes (light|dark|system)
  *   of.sidebar                — "expanded" | "collapsed"
  *   of.explore.{ontologyKey}.{lensKey} — Explorer canvas working set
- *   of.chat.{ontologyKey}.{lensKey}    — AI chat history
+ *   of.thread.{ontologyKey}.{lensKey}.{kind}.{assistantKey} — id of the
+ *                               Workbench's current conversation thread with
+ *                               that assistant (the messages stay on the server)
  *   of.recents.{ontologyKey}.{lensKey} — last 10 opened entities (`lib/recents.ts`)
  *   of.queryHistory.{ontologyKey}.{lensKey} — last 10 run OQL queries
  *   of.chatToolCalls          — "true" | "false": Workbench agent chat shows its
@@ -27,7 +29,8 @@ export const storageKeys = {
   sidebar: 'of.sidebar',
   explore: (ontologyKey: string, lensKey: string) =>
     `of.explore.${ontologyKey}.${lensKey}`,
-  chat: (ontologyKey: string, lensKey: string) => `of.chat.${ontologyKey}.${lensKey}`,
+  thread: (ontologyKey: string, lensKey: string, kind: string, assistantKey: string) =>
+    `of.thread.${ontologyKey}.${lensKey}.${kind}.${assistantKey}`,
   recents: (ontologyKey: string, lensKey: string) =>
     `of.recents.${ontologyKey}.${lensKey}`,
   queryHistory: (ontologyKey: string, lensKey: string) =>

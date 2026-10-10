@@ -477,11 +477,12 @@ Once results arrive, the arrow keys move through them, Enter opens the entity's 
 Cmd/Ctrl+Enter focuses it in the Explorer, as in entities mode; Enter on the unchanged
 question does not resend it.
 
-A chip beside the prefix names the retriever; clicking it lists `Default` — the lens's
+A chip beside the prefix names the retriever; clicking it lists the lens's retriever
+agents as the server lists them: `Default` — the lens's
 [default retriever agent](capabilities/retriever-agents.md#the-default-retriever-agent) —
-first, then the lens's stored retriever agents by name, with those the lens cannot run
-marked and not selectable. The choice is remembered per ontology and lens and falls back
-to `Default` when the remembered agent is gone or invalid.
+first, then the stored ones. The choice is remembered per ontology and lens and falls back
+to `Default` when the remembered agent is no longer listed. A question to an agent the
+lens cannot run shows the server's refusal with its reasons as the error.
 
 Results come in the server's order, with no number or score. A row is the entity row —
 type chip, label, the [matched via](#matched-via) line when a relation or passage
@@ -635,9 +636,12 @@ expands automatically, and runs immediately when it has no parameters.
 Two modes over one lens: Chat and Retriever. Both require a language-model
 provider; see [capabilities/ai-agents.md](capabilities/ai-agents.md).
 
-**Chat** — a conversation with the lens's default assistant or with any configured agent,
-chosen from a picker. Each agent keeps its own persisted thread; switching agents switches
-threads. Assistant answers render once in full as Markdown. Tool calls stream into a
+**Chat** — a conversation with one of the lens's agents, chosen from a picker that lists
+them as the server does: `Default`, the built-in agent, first. Each conversation is a
+server-held [thread](capabilities/threads.md); the browser remembers only the current
+thread per ontology, lens and agent, and opening the chat restores its messages from the
+server — switching agents switches threads. Assistant answers render once in full as
+Markdown. Tool calls stream into a
 **tool-call panel** beside the conversation — stacked below it on a narrow screen — that
 follows the running answer: each call in order, with a readable name, a one-line summary of
 what it asked for, its state, and its time inside the tool. Calls start collapsed and open by
@@ -651,30 +655,37 @@ thinking not at all — and how long the answer took. Under each answer a tool-c
 that answer's calls in the panel; sending a question returns the panel to the running answer.
 A "Show tool calls" switch, remembered per browser and on by default, hides the panel; the
 calls then list under each answer, collapsible, with their arguments and expandable results.
-Tool calls live as long as the open chat: answers restored from an earlier session have
+Tool calls live as long as the open chat: answers restored from the server have
 none, and the panel says so. An elapsed-seconds indicator shows ongoing work. Failure or interruption preserves completed results, marks unfinished
-calls interrupted, and clearly labels the turn incomplete. A closed connection without a
-terminal event is a failure. Turns never retry automatically. Leaving chat or switching
-ontology, lens, or agent cancels the active request; late events cannot enter another thread.
-Clearing the thread is confirmed and cancels active work. Browser persistence keeps bounded
-text history and turn outcomes, without full tool payloads; storage failure does not break
-live chat. Empty pending answers and failed assistant turns are excluded from model history.
+calls interrupted, and clearly labels the turn incomplete; the thread keeps nothing of a
+failed or interrupted turn, so a restored conversation does not show it. A closed
+connection without a terminal event is a failure. Turns never retry automatically. A
+message to a thread still answering an earlier one is refused and shown as the turn's
+error. When the thread has expired — found on opening, or when a message is refused for
+it — the chat says so and starts a new conversation; a refused message goes back into the
+input. Leaving chat or
+switching ontology, lens, or agent cancels the active request; late events cannot enter
+another thread. Clearing the chat is confirmed, cancels active work and starts a new
+conversation; the browser forgets the old thread, which the server removes when it
+expires. Storage failure does not break live chat.
 
 **Retriever** — chat with the lens's
 [retriever agents](capabilities/retriever-agents.md). A header picker selects the agent:
 `Default` — the lens's
 [default retriever agent](capabilities/retriever-agents.md#the-default-retriever-agent) —
-first, then the saved ones. The address names it, and without one — or with one the lens
-does not have — `Default` is shown and the address updated to name it. Agents that are
-invalid in the lens are marked in the picker, and questions to them are blocked with the
-reason. "Edit in Studio" opens a saved agent in the lens's
+first, then the saved ones, as the server lists them. The address names it, and without
+one — or with one the lens does not have — `Default` is shown and the address updated to
+name it. A question to an agent the lens cannot run shows the server's refusal with its
+reasons. "Edit in Studio" opens a saved agent in the lens's
 [retriever-agent editor](#retriever-agent-editor), which is where agents are created and
 changed; the default agent has no editor, and with no saved agents the tab links there to
 create one. A
 "Show diagnostics" switch, off by default and remembered, requests diagnostics with every
 answer and shows them beside the conversation. The conversation itself is the
-[retriever-agent chat](#retriever-agent-chat). On a server without search indices the tab
-explains that retriever agents are not available.
+[retriever-agent chat](#retriever-agent-chat); here it is remembered and restored like
+the Chat mode's — per ontology, lens and agent, from the server, with the same expiry
+and busy handling. On a server without search indices the tab explains that retriever
+agents are not available.
 
 ### Retriever-agent editor
 
@@ -726,24 +737,22 @@ More expanded, where it can be exported or replaced by a version 2 configuration
 
 **Test panel.** Beside the editor, with a Chat / Retrieve switch whose position is
 remembered. Chat is a [retriever-agent chat](#retriever-agent-chat) with diagnostics
-always on; saving starts a new conversation. Retrieve asks one question, sent on Enter or
-with Ask, and shows the found entities as the palette's
-[question mode](#question-mode) does, without "Show all in Explorer", beside the
-diagnostics that apply — Overview with its two steps, Plan and Model calls; saving clears
-the result. Both ask the saved version: a new, changed, invalid or unsupported agent
+always on; saving starts a new conversation, and none is restored. Retrieve asks one
+question, sent on Enter or with Ask, and shows only the found entities, as the palette's
+[question mode](#question-mode) does, without "Show all in Explorer"; saving clears the
+result. Both ask the saved version: a new, changed, invalid or unsupported agent
 blocks questions and says why. Without a language-model provider the panel says that the
 agent cannot answer.
 
 ### Retriever-agent chat
 
-One conversation with one saved retriever agent, shared by the editor's test panel and the
-Workbench's Retriever tab. A status line names the running step; a running question can
-be cancelled, and "New conversation" clears the thread. Answers render as Markdown.
-Follow-up questions refer to earlier completed answers: each question sends the last four
-completed question-and-answer pairs, at most 2,000 characters per message; a failed or
-cancelled turn is never used as context. The conversation lives in memory only and
-belongs to one saved version of the agent — a newer save, or another agent, starts a new
-one.
+One conversation with one retriever agent on a server-held
+[thread](capabilities/threads.md), shared by the editor's test panel and the Workbench's
+Retriever tab. A status line names the running step; a running question can be
+cancelled, and "New conversation" starts a new thread. Answers render as Markdown.
+Questions are at most 2,000 characters. Follow-up questions refer to earlier completed
+answers of the thread; a failed or cancelled turn leaves nothing in it. Another agent has
+its own conversation. Answers restored from the server have no diagnostics.
 
 With diagnostics, each answer offers a Diagnostics action, and a side panel shows the
 selected answer (the latest by default) in four tabs, filling while the question runs:
@@ -958,7 +967,7 @@ the address.
 | Explorer working set | Per ontology + lens | Bounded by the hard node cap |
 | Recently opened entities | Per ontology + lens | 10 |
 | Recent query texts | Per ontology + lens | 10 |
-| Chat history | Per ontology + lens, then per agent | 50 messages per agent |
+| Current conversation thread id (Workbench Chat and Retriever) | Per ontology + lens + agent | One |
 | Chat tool-call panel switch | Global | — |
 | Retriever diagnostics switch (Workbench) | Global | — |
 | Retriever-agent test panel mode (Chat or Retrieve) | Global | — |
@@ -971,9 +980,10 @@ switcher's Workbench landing and the Studio's way back; nothing at the root cons
 
 The working set stores only identifiers, type keys, positions and pin flags — entities and
 relations are re-fetched on restore, so a stale canvas can never display stale property
-values. Retriever-agent conversations and question results are in-memory for
-the session and deliberately not persisted; the Workbench's selected retriever agent lives
-in the address.
+values. Conversations themselves are held by the server; the browser keeps only the
+current thread's id and restores the messages from the server. Question results are
+in-memory for the session and deliberately not persisted; the Workbench's selected
+retriever agent lives in the address.
 Persistence failures are swallowed: with storage unavailable the product works exactly the
 same, minus the memory.
 

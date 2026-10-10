@@ -99,7 +99,7 @@ export function invalidateModeling(
   /** `'none'`: only mark stale — mounted queries refetch on their next mount. */
   refetchType: 'active' | 'none' = 'active',
 ) {
-  for (const key of ['model', 'lenses', 'schema', 'agents', 'savedQueries']) {
+  for (const key of ['model', 'lenses', 'schema', 'assistants', 'savedQueries']) {
     void queryClient.invalidateQueries({ queryKey: [key], refetchType })
   }
 }

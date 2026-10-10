@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { chatErrorText } from '@/api/chatStream'
 import { retrieveWithAgent, type RetrieveResponse } from '@/api/retrieverAgents'
 import { isStale, questionToSend, type Asked } from './retrieveModel'
 
 /**
- * One retrieve at a time against one agent: `send` asks a question unless
+ * One retrieve at a time against one agent, results only: `send` asks a question unless
  * it is the one already running or answered, `cancel` aborts a running
  * request. The last results stay until the next ones arrive; they are
  * stale for another question or another agent. Changing the agent while a
  * question runs is the caller's to cancel.
  */
-export function useRetrieve(ontologyKey: string, lensKey: string, agentKey: string | null, diagnostics: boolean) {
+export function useRetrieve(ontologyKey: string, lensKey: string, agentKey: string | null) {
   // What was asked, and of which agent: another agent may be asked the same question.
   const [asked, setAsked] = useState<(Asked & { agentKey: string }) | null>(null)
   const askedHere = asked !== null && asked.agentKey === agentKey ? asked : null
@@ -38,7 +39,7 @@ export function useRetrieve(ontologyKey: string, lensKey: string, agentKey: stri
       active.current = controller
       setAsked({ question, status: 'running', agentKey })
       setError(null)
-      retrieveWithAgent(ontologyKey, lensKey, agentKey, { question, diagnostics }, controller.signal).then(
+      retrieveWithAgent(ontologyKey, lensKey, agentKey, { query: question }, controller.signal).then(
         (response) => {
           if (controller.signal.aborted) return
           active.current = null
@@ -49,12 +50,13 @@ export function useRetrieve(ontologyKey: string, lensKey: string, agentKey: stri
           if (controller.signal.aborted) return
           active.current = null
           setAsked({ question, status: 'failed', agentKey })
-          setError(err instanceof Error ? err.message : 'Retrieve failed.')
+          // A refused question names the server's reasons.
+          setError(chatErrorText(err, 'Retrieve failed.'))
         },
       )
       return true
     },
-    [agentKey, askedHere, diagnostics, lensKey, ontologyKey],
+    [agentKey, askedHere, lensKey, ontologyKey],
   )
 
   return {

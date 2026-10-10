@@ -278,11 +278,11 @@ export const importSchema = (ontologyKey: string, data: Record<string, JsonValue
   })
 
 /* ---------------------------------- AI agents -------------------------------- */
-/* Unlike the routes above, ai-agent and saved-query routes address the lens
-   by its KEY, not its UUID. */
+/* Unlike the routes above, assistant and saved-query routes address the lens
+   by its KEY, not its UUID. The built-in default agent is no modeling resource. */
 
 export const listAiAgents = (ontologyKey: string, lensKey: string) =>
-  request<AiAgent[]>(`${base(ontologyKey)}/lenses/${lensKey}/ai-agents`)
+  request<AiAgent[]>(`${base(ontologyKey)}/lenses/${lensKey}/assistants/agents`)
 
 /** Upsert — 201 created / 200 updated. */
 export const upsertAiAgent = (
@@ -291,13 +291,13 @@ export const upsertAiAgent = (
   agentKey: string,
   body: AiAgentInput,
 ) =>
-  request<AiAgent>(`${base(ontologyKey)}/lenses/${lensKey}/ai-agents/${agentKey}`, {
+  request<AiAgent>(`${base(ontologyKey)}/lenses/${lensKey}/assistants/agents/${agentKey}`, {
     method: 'PUT',
     body,
   })
 
 export const deleteAiAgent = (ontologyKey: string, lensKey: string, agentKey: string) =>
-  request<undefined>(`${base(ontologyKey)}/lenses/${lensKey}/ai-agents/${agentKey}`, {
+  request<undefined>(`${base(ontologyKey)}/lenses/${lensKey}/assistants/agents/${agentKey}`, {
     method: 'DELETE',
   })
 

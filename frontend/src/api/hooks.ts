@@ -9,7 +9,7 @@ import * as server from './server'
 import * as runtime from './runtime'
 import { listRetrieverAgents } from './retrieverAgents'
 import { qk } from './queryKeys'
-import type { EntityInstance, Matched } from './types'
+import type { AssistantKind, EntityInstance, Matched } from './types'
 
 /** Global feature flags — fetched once, never stale. */
 export function useFeatures() {
@@ -112,11 +112,24 @@ export function useSearchCatalog(ontologyKey: string, lensKey: string, enabled: 
   })
 }
 
-/** Retriever agents of a lens (modeling API, by lens key) — Studio editor and Workbench chat share the cache. */
+/** Retriever agents of a lens (modeling API, by lens key) with configuration and validation — the Studio's list. */
 export function useRetrieverAgents(ontologyKey: string, lensKey: string, enabled = true) {
   return useQuery({
     queryKey: qk.retrieverAgents(ontologyKey, lensKey),
     queryFn: () => listRetrieverAgents(ontologyKey, lensKey),
+    enabled: enabled && ontologyKey !== '' && lensKey !== '',
+    retry: false,
+  })
+}
+
+/**
+ * A kind's runtime assistant list of a lens — the built-in default first,
+ * no configuration or validation. The Workbench pickers and the palette.
+ */
+export function useAssistants(ontologyKey: string, lensKey: string, kind: AssistantKind, enabled = true) {
+  return useQuery({
+    queryKey: qk.assistants(ontologyKey, lensKey, kind),
+    queryFn: () => runtime.listAssistants(ontologyKey, lensKey, kind),
     enabled: enabled && ontologyKey !== '' && lensKey !== '',
     retry: false,
   })

@@ -29,30 +29,31 @@ createServer((req, res) => {
     res.end('ok')
     return
   }
-  if (url.pathname.endsWith('/ai/agents')) {
+  if (url.pathname.endsWith('/ai/assistants/agents')) {
     res.setHeader('content-type', 'application/json')
     res.end(JSON.stringify([
-      { key: '_default', name: 'Default assistant', description: null },
-      { key: 'fixture-agent', name: 'Fixture agent', description: 'Controlled browser test' },
+      { key: '_default', name: 'Default', description: null, builtIn: true },
+      { key: 'fixture-agent', name: 'Fixture agent', description: 'Controlled browser test', builtIn: false },
     ]))
     return
   }
-  if (/\/ai\/(?:agents\/[^/]+\/)?chat$/.test(url.pathname) && req.method === 'POST') {
+  if (/\/ai\/assistants\/agents\/[^/]+\/chat$/.test(url.pathname) && req.method === 'POST') {
     req.resume()
     res.writeHead(200, { 'content-type': 'application/x-ndjson' })
     disconnected = false
     const send = (event) => { if (!res.destroyed) res.write(JSON.stringify(event) + '\n') }
     const turn = { res, send, stages: [
-      [{ type: 'tool_result', callId: 'one', result: { people: [{ name: 'Zoë', active: true }], cursor: null } },
-        { type: 'tool_call', callId: 'two', tool: 'get_entity', args: { entity_type_key: 'person', entity_id: 'second' } }],
-      [{ type: 'tool_result', callId: 'two', result: ['second', null, 42] }],
+      [{ type: 'agent.tool_result', callId: 'one', result: { people: [{ name: 'Zoë', active: true }], cursor: null } },
+        { type: 'agent.tool_call', callId: 'two', tool: 'get_entity', args: { entity_type_key: 'person', entity_id: 'second' } }],
+      [{ type: 'agent.tool_result', callId: 'two', result: ['second', null, 42] }],
       [{ type: 'final', reply: 'Complete fixture answer.' }],
     ] }
     current = turn
     res.on('close', () => {
       if (current === turn) { disconnected = true; current = undefined }
     })
-    send({ type: 'tool_call', callId: 'one', tool: 'get_entity', args: { entity_type_key: 'person', entity_id: 'first' } })
+    send({ type: 'thread', threadId: 'fixture-thread' })
+    send({ type: 'agent.tool_call', callId: 'one', tool: 'get_entity', args: { entity_type_key: 'person', entity_id: 'first' } })
     return
   }
   const upstream = request({ hostname: 'localhost', port: 5173, method: req.method,

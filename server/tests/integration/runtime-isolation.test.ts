@@ -282,14 +282,17 @@ describe("the runtime surface itself", () => {
   it("AI routes answer under the new prefix (FEATURE_DISABLED without a provider)", async () => {
     const res = await app.inject({
       method: "POST",
-      url: `${crm}/ai/chat`,
+      url: `${crm}/ai/assistants/agents/_default/chat`,
       payload: { message: "How many people?" },
     });
     expect(res.statusCode).toBe(422);
     expect(res.json().error.details.code).toBe("FEATURE_DISABLED");
 
-    const agents = await getJson(`${crm}/ai/agents`);
-    expect((agents as unknown as Row[])[0]!.key).toBe("_default");
+    const agents = await getJson(`${crm}/ai/assistants/agents`);
+    expect((agents as unknown as Row[])[0]).toEqual({ key: "_default", name: "Default", description: null, builtIn: true });
+    for (const [method, url] of [["POST", `${crm}/ai/chat`], ["GET", `${crm}/ai/agents`]] as const) {
+      expect((await app.inject({ method, url, payload: { message: "Hi" } })).statusCode, url).toBe(404);
+    }
   });
 
   it("an unknown ontology answers 404 on every runtime shape", async () => {
@@ -297,7 +300,8 @@ describe("the runtime surface itself", () => {
       `${runtimePrefix("ghost", "default")}/schema`,
       `${runtimePrefix("ghost", "default")}/entities/person`,
       `${runtimePrefix("ghost", "default")}/saved-queries`,
-      `${runtimePrefix("ghost", "default")}/ai/agents`,
+      `${runtimePrefix("ghost", "default")}/ai/assistants/agents`,
+      `${runtimePrefix("ghost", "default")}/ai/assistants/retrievers`,
     ]) {
       const res = await app.inject({ method: "GET", url });
       expect(res.statusCode, url).toBe(404);

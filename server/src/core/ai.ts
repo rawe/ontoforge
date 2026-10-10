@@ -75,7 +75,7 @@ export interface SavedQueryConfig {
  * no prompt of its own, unrestricted tools. */
 export const DEFAULT_AGENT_CONFIG: AgentConfig = {
   key: "_default",
-  name: "Knowledge Assistant",
+  name: "Default",
   description: null,
   systemPrompt: null,
   tools: null,

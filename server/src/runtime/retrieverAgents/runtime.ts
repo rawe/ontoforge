@@ -14,6 +14,9 @@
  * Retrieve runs the first two phases only (`retrieveQuestion`): one
  * planning call without a conversation, then retrieval; it returns the
  * found entities and calls no answer model.
+ *
+ * The runtime list (`listRuntimeRetrievers`) names every agent of a lens,
+ * runnable or not, the default first.
  */
 
 import type { ChatAnthropic } from "@langchain/anthropic";
@@ -29,6 +32,7 @@ import { createAiModel, getAiModel } from "../../core/ai.js";
 import { NotFoundError, ValidationError } from "../../core/exceptions.js";
 import type { RuntimeStore } from "../../core/ports.js";
 import type { RetrieverAgentConfig } from "../../core/retrieverAgent.js";
+import type { RuntimeAssistant } from "../aiService.js";
 import type { StreamExecution } from "../chatStream.js";
 import { loadSchema } from "../schemaCache.js";
 import {
@@ -39,7 +43,11 @@ import {
   type SearchMode,
 } from "../search/indexSearch.js";
 import { checkAgentConfig } from "./config.js";
-import { DEFAULT_RETRIEVER_AGENT_KEY, defaultAgentConfig } from "./defaultAgent.js";
+import {
+  DEFAULT_RETRIEVER_AGENT_KEY,
+  DEFAULT_RETRIEVER_AGENT_NAME,
+  defaultAgentConfig,
+} from "./defaultAgent.js";
 import { modelInputTrace } from "./modelTrace.js";
 import {
   PLANNER,
@@ -110,6 +118,19 @@ export async function loadRunnableAgent(lensKey: string, key: string, store: Run
     throw new ValidationError(`Retriever agent '${key}' is invalid in this lens: ${errors.join("; ")}`, { errors });
   }
   return { key, config, scope: { config, lens, loaded, store, indexStore, records } };
+}
+
+/** Every retriever agent of a lens, the built-in default first; no
+ * configuration, no validation, no model. An adapter without search
+ * indices → disabled feature. */
+export async function listRuntimeRetrievers(lensKey: string, store: RuntimeStore): Promise<RuntimeAssistant[]> {
+  const indexStore = indexStoreOf(store);
+  const loaded = await loadSchema(lensKey, store);
+  const stored = await indexStore.listRetrieverAgents(loaded.scoped.lensId);
+  return [
+    { key: DEFAULT_RETRIEVER_AGENT_KEY, name: DEFAULT_RETRIEVER_AGENT_NAME, description: null, builtIn: true },
+    ...stored.map((agent) => ({ key: agent.key, name: agent.name, description: agent.description, builtIn: false })),
+  ];
 }
 
 /** A configured language model, else the FEATURE_DISABLED refusal — as on
@@ -287,52 +308,37 @@ export interface RetrieveResponse {
   results: RetrievedResult[];
   limitations: string[];
   unsupportedReason?: string;
-  diagnostics?: {
-    plan: Plan;
-    searchCalls: number;
-    timings: Record<string, number>;
-    modelIO: ModelCall[];
-  };
 }
 
 /**
- * Retrieve: chat's planning and retrieval for one question without a
+ * Retrieve: chat's planning and retrieval for one query without a
  * conversation — exactly one model call, no answer model — returning the
  * found entities in fused order with their proven conditions and text
  * match.
  */
 export async function retrieveQuestion(
   agent: RunnableAgent,
-  question: string,
-  diagnostics: boolean,
+  query: string,
   signal: AbortSignal,
 ): Promise<RetrieveResponse> {
   signal.throwIfAborted();
-  const started = performance.now();
-  const timings: Record<string, number> = {};
-  const io: ModelCall[] = [];
   const scope: RetrievalScope = { ...agent.scope, signal };
   const { plannerModel } = models();
-  const planStart = performance.now();
+  // Timings and model calls are recorded for diagnostics, which only chat reports.
   const { plan, notes } = await planQuestion({
     agent,
     scope,
     modes: availableModes(),
-    message: question,
+    message: query,
     history: [],
     previous: undefined,
     plannerModel,
-    timings,
-    io,
+    timings: {},
+    io: [],
     report: async () => {},
   });
-  timings.plan = performance.now() - planStart;
   signal.throwIfAborted();
-  const retrieveStart = performance.now();
   const retrieval = await retrieve(scope, plan);
-  timings.retrieve = performance.now() - retrieveStart;
-  timings.search = retrieval.searchMs;
-  timings.total = performance.now() - started;
   // Retrieval lists the unsupported reason first among its limitations,
   // for the answer model; here it has a field of its own.
   const limitations = [...retrieval.limitations.slice(plan.unsupportedReason ? 1 : 0), ...notes];
@@ -340,7 +346,6 @@ export async function retrieveQuestion(
     results: retrievedResults(retrieval),
     limitations,
     ...(plan.unsupportedReason ? { unsupportedReason: plan.unsupportedReason } : {}),
-    ...(diagnostics ? { diagnostics: { plan, searchCalls: retrieval.searchCalls, timings, modelIO: io } } : {}),
   };
 }
 

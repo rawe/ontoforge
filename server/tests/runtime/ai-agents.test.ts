@@ -1,7 +1,6 @@
 /**
- * Runtime AI agent functions (service-level), ported from
- * `tests/runtime/test_ai_agents.py`: agent discovery lists the implicit
- * default agent alongside configured ones. It runs no model, so it works
+ * The runtime agent list (service-level): the built-in default agent
+ * first, named "Default" and marked built in, then the configured ones. It runs no model, so it works
  * with no provider installed.
  */
 
@@ -32,14 +31,11 @@ describe("listRuntimeAgents", () => {
 
     const agents = await listRuntimeAgents("test_lens", asRuntimeStore(store));
 
-    expect(agents).toHaveLength(2);
-    // First should be the default agent.
-    expect(agents[0]!.key).toBe("_default");
+    expect(agents).toEqual([
+      { key: "_default", name: "Default", description: null, builtIn: true },
+      { key: "my-agent", name: "My Agent", description: "A custom agent", builtIn: false },
+    ]);
     expect(agents[0]!.name).toBe(DEFAULT_AGENT_CONFIG.name);
-    // Second should be the configured agent.
-    expect(agents[1]!.key).toBe("my-agent");
-    expect(agents[1]!.name).toBe("My Agent");
-    expect(agents[1]!.description).toBe("A custom agent");
   });
 
   it("with no configured agents, returns only the default", async () => {

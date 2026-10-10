@@ -305,7 +305,7 @@ describe("retrieve", () => {
     fake.withConfig.mockReturnValue({ invoke: fake.invoke });
     fake.invoke.mockResolvedValue(planned([sub()]));
 
-    const response = await retrieveQuestion(agent, "Everyone in Berlin", false, signal());
+    const response = await retrieveQuestion(agent, "Everyone in Berlin", signal());
     expect(fake.invoke).toHaveBeenCalledTimes(1);
     expect(fake.stream).not.toHaveBeenCalled();
     expect(response.results.map((r) => r.entityId)).toEqual([...new Set(chatRows.map((r) => r.entityId))]);
@@ -327,26 +327,16 @@ describe("retrieve", () => {
     expect(input.previousVerifiedResults).toBeNull();
   });
 
-  it("reports diagnostics only on request: the plan, search calls, timings and the one planning call", async () => {
-    const response = await retrieveQuestion(agent, "Everyone in Berlin", true, signal());
-    const diagnostics = response.diagnostics!;
-    expect(diagnostics.plan.subQueries).toHaveLength(1);
-    expect(diagnostics.searchCalls).toBe(0);
-    expect(Object.keys(diagnostics.timings).sort()).toEqual(["plan", "planModel", "retrieve", "search", "total", "validation"]);
-    expect(diagnostics.modelIO.map((call) => call.phase)).toEqual(["plan"]);
-    expect(diagnostics.modelIO[0]!.input).toBe(fake.invoke.mock.calls[0]![0][1].content);
-  });
-
   it("answers an unsupported question with no results and its reason, not as an error", async () => {
     fake.invoke.mockResolvedValue({ content: JSON.stringify({ subQueries: [], unsupportedReason: "No salaries are stored." }) });
-    const response = await retrieveQuestion(agent, "What is Ada's salary?", false, signal());
+    const response = await retrieveQuestion(agent, "What is Ada's salary?", signal());
     expect(response).toEqual({ results: [], limitations: [], unsupportedReason: "No salaries are stored." });
     expect(fake.invoke).toHaveBeenCalledTimes(1);
   });
 
   it("names plan omissions as limitations", async () => {
     fake.invoke.mockResolvedValue(planned([sub({ filters: [{ id: "city", value: "Paris", quote: "Paris" }] })]));
-    const response = await retrieveQuestion(agent, "Everyone in Berlin", false, signal());
+    const response = await retrieveQuestion(agent, "Everyone in Berlin", signal());
     expect(response.limitations).toContain(
       'The condition "lives in City Name: Paris" was not applied: the value is not stated verbatim in a user message.',
     );
@@ -354,17 +344,17 @@ describe("retrieve", () => {
 
   it("refuses as chat does: a failed or malformed plan, no retry", async () => {
     fake.invoke.mockRejectedValueOnce(new Error("boom"));
-    await expect(retrieveQuestion(agent, "Who?", false, signal())).rejects.toThrow("Planning model failed; no automatic retry.");
+    await expect(retrieveQuestion(agent, "Who?", signal())).rejects.toThrow("Planning model failed; no automatic retry.");
     fake.invoke.mockResolvedValueOnce({ content: "not json" });
-    await expect(retrieveQuestion(agent, "Who?", false, signal())).rejects.toThrow();
+    await expect(retrieveQuestion(agent, "Who?", signal())).rejects.toThrow();
     expect(fake.invoke).toHaveBeenCalledTimes(2);
   });
 
   it("refuses a planner input over the cap; the default agent's refusal says a configured agent is needed", async () => {
     const big = "x".repeat(25_000);
-    await expect(retrieveQuestion(agent, big, false, signal())).rejects.toThrow("Planning context exceeds the limit");
+    await expect(retrieveQuestion(agent, big, signal())).rejects.toThrow("Planning context exceeds the limit");
     const fallback = { ...agent, key: "_default" };
-    await expect(retrieveQuestion(fallback, big, false, signal())).rejects.toThrow(
+    await expect(retrieveQuestion(fallback, big, signal())).rejects.toThrow(
       "This lens is too large for the default retriever agent",
     );
     expect(fake.invoke).not.toHaveBeenCalled();
@@ -374,7 +364,7 @@ describe("retrieve", () => {
     (store.distinctEntityValues as ReturnType<typeof vi.fn>).mockResolvedValueOnce(["Berlin-Mitte", "Hamburg"]);
     (store.listEntities as ReturnType<typeof vi.fn>).mockResolvedValueOnce([[{ _id: "ada", name: "Berlin-Mitte" }], 1]);
     fake.invoke.mockResolvedValue(planned([sub({ filters: [{ id: "city", value: "Berlin-Mitte", quote: "Mitte" }] })]));
-    const response = await retrieveQuestion(agent, "Everyone in Mitte", false, signal());
+    const response = await retrieveQuestion(agent, "Everyone in Mitte", signal());
     const input = JSON.parse(fake.invoke.mock.calls[0]![0][1].content);
     expect(input.filters[0].valuesIn).toBe("city.name");
     expect(input.storedValues["city.name"]).toEqual(["Berlin-Mitte", "Hamburg"]);
@@ -387,7 +377,7 @@ describe("retrieve", () => {
   it("stops on cancellation", async () => {
     const controller = new AbortController();
     controller.abort();
-    await expect(retrieveQuestion(agent, "Who?", false, controller.signal)).rejects.toBeDefined();
+    await expect(retrieveQuestion(agent, "Who?", controller.signal)).rejects.toBeDefined();
     expect(fake.invoke).not.toHaveBeenCalled();
   });
 });

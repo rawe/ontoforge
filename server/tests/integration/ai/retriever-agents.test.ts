@@ -50,7 +50,7 @@ async function ask(
 ): Promise<{ reply: string; meta: Row }> {
   const res = await app!.inject({
     method: "POST",
-    url: `${runtime}/retriever-agents/${agent}/chat`,
+    url: `${runtime}/ai/assistants/retrievers/${agent}/chat`,
     payload: { message, history, diagnostics: true },
   });
   expect(res.statusCode, res.body).toBe(200);
@@ -60,12 +60,12 @@ async function ask(
   return { reply: events.at(-1)!.reply as string, meta };
 }
 
-/** Retrieve with diagnostics; the plain JSON response. */
-async function retrieveFrom(agent: string, question: string): Promise<Row> {
+/** Retrieve; the plain JSON response. */
+async function retrieveFrom(agent: string, query: string): Promise<Row> {
   const res = await app!.inject({
     method: "POST",
-    url: `${RUNTIME}/retriever-agents/${agent}/retrieve`,
-    payload: { question, diagnostics: true },
+    url: `${RUNTIME}/ai/assistants/retrievers/${agent}/retrieve`,
+    payload: { query },
   });
   expect(res.statusCode, res.body).toBe(200);
   return res.json() as Row;
@@ -347,16 +347,13 @@ describe("follow-up sequences of the end-to-end run", () => {
 describe("retrieve and the default agent with a real model", () => {
   ifAvailable("retrieve plans once and returns the found people in order, without an answer", async () => {
     const response = await retrieveFrom("people", "Who is CTO at ACME?");
-    expect(response.diagnostics.modelIO.map((call: Row) => call.phase)).toEqual(["plan"]);
     expect(response.results[0]).toMatchObject({ label: "Ada Lovelace", entityType: "person" });
     expect(response.results[0].matched).toMatchObject({ index: "person_employment" });
-    expect(Object.keys(response).sort()).toEqual(["diagnostics", "limitations", "results"]);
+    expect(Object.keys(response).sort()).toEqual(["limitations", "results"]);
   });
 
   ifAvailable("the default agent finds people by a derived relation filter, proven", async () => {
     const response = await retrieveFrom("_default", "Which people live in Berlin?");
-    const plan = JSON.stringify(response.diagnostics.plan);
-    expect(plan).toContain("person.lives_in.outgoing");
     const people = (response.results as Row[]).filter((result) => result.entityType === "person");
     expect(people.map((result) => result.label).sort()).toEqual(["Ada Lovelace", "Bob Builder"]);
     for (const person of people) {

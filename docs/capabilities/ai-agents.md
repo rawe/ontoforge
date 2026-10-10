@@ -40,9 +40,9 @@ An **agent** is a named language-model configuration belonging to one lens:
 
 Every lens also has an **implicit default agent**. It is not stored, cannot be configured
 or deleted, has no system prompt of its own and no tool restriction. Its key begins with
-an underscore, which no configurable key may, so it can never be shadowed. It appears in
-agent listings alongside the configured ones. Plain chat without naming an agent is a
-run of this default agent.
+an underscore, which no configurable key may, so it can never be shadowed. It is
+addressed by that key like any configured agent, and is named `Default`. Modeling does not
+know it: it is not listed, read or written there.
 
 ### Rules
 
@@ -108,9 +108,9 @@ Configuring agents is modeling; running them is runtime. Complete operation inde
 
 | | Where | Operations |
 |---|---|---|
-| Configure agents | Modeling REST, modeling MCP, the studio's agents tab | List, upsert by key, delete |
-| Chat | Runtime REST only | One operation, also in a per-agent form |
-| Discover agents | Runtime REST | Lists the default agent and every configured one |
+| Configure agents | Modeling REST, modeling MCP, the studio's agents tab | List, read one (REST), upsert by key, delete |
+| Chat | Runtime REST only | One operation per agent, the default addressed by its key |
+| List agents | Runtime REST | Every agent of the lens — key, name, description, whether built in — the default first |
 | Web UI | The workbench's AI surface | Chat with an agent picker and persisted local threads |
 
 Note the deliberate gap: **there are no MCP tools for chat.** An MCP

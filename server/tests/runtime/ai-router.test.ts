@@ -1,8 +1,8 @@
 /**
- * The AI routes over HTTP with a mocked store: the FEATURE_DISABLED
- * envelope (approved divergence #2: `details.code` alongside 422
- * VALIDATION_ERROR), the asymmetry that discovery answers without a
- * provider, and the chat stream.
+ * The agent routes over HTTP with a mocked store: the FEATURE_DISABLED
+ * envelope (`details.code` alongside 422 VALIDATION_ERROR), the list
+ * answering without a provider, the built-in default addressed by its key,
+ * and the chat stream.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -59,10 +59,10 @@ afterEach(() => {
 
 describe("FEATURE_DISABLED without a provider", () => {
   const cases: [string, string, Record<string, unknown>][] = [
-    ["chat", "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/chat", { message: "Hi" }],
+    ["default chat", "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/assistants/agents/_default/chat", { message: "Hi" }],
     [
       "agent chat",
-      "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/agents/my-agent/chat",
+      "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/assistants/agents/my-agent/chat",
       { message: "Hi" },
     ],
   ];
@@ -82,12 +82,32 @@ describe("FEATURE_DISABLED without a provider", () => {
   }
 
   it("listing agents still works", async () => {
-    const res = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/agents" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/assistants/agents" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual([
-      { key: "_default", name: "Knowledge Assistant", description: null },
-      { key: "my-agent", name: "My Agent", description: "A custom agent" },
+      { key: "_default", name: "Default", description: null, builtIn: true },
+      { key: "my-agent", name: "My Agent", description: "A custom agent", builtIn: false },
     ]);
+  });
+});
+
+describe("removed routes", () => {
+  it.each([
+    ["POST", "/ai/chat"],
+    ["GET", "/ai/agents"],
+    ["POST", "/ai/agents/my-agent/chat"],
+    ["POST", "/ai/agents/_default/chat"],
+    ["POST", "/retriever-agents/find/chat"],
+    ["POST", "/retriever-agents/find/retrieve"],
+  ] as const)("%s %s answers 404", async (method, path) => {
+    setAiModel(new FakeToolCallingModel([new AIMessage("Unused")]));
+    const res = await app.inject({
+      method,
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens${path}`,
+      ...(method === "POST" ? { payload: { message: "Hi" } } : {}),
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error.message).toBe("Not Found");
   });
 });
 
@@ -96,7 +116,7 @@ describe("chat wire shape", () => {
     setAiModel(new FakeToolCallingModel([new AIMessage("Hello!")]));
     const res = await app.inject({
       method: "POST",
-      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/chat",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/assistants/agents/_default/chat",
       payload: { message: "Hi" },
     });
     expect(res.statusCode).toBe(200);
@@ -107,7 +127,7 @@ describe("chat wire shape", () => {
   it("an empty message is rejected with 422", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/chat",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/assistants/agents/_default/chat",
       payload: { message: "" },
     });
     expect(res.statusCode).toBe(422);
@@ -116,26 +136,26 @@ describe("chat wire shape", () => {
   it("a history role outside user/assistant is rejected with 422", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/chat",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/assistants/agents/_default/chat",
       payload: { message: "Hi", history: [{ role: "system", content: "x" }] },
     });
     expect(res.statusCode).toBe(422);
   });
 });
 
-const chatPath = "/api/ontologies/test_ont/runtime/lenses/test_lens/ai";
+const chatPath = "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/assistants/agents";
 const events = (body: string) => body.trim().split("\n").map((line) => JSON.parse(line));
 
 it("does not expose the removed decision-search endpoint", async () => {
   setAiModel(new FakeToolCallingModel([new AIMessage("Unused")]));
   const response = await app.inject({
-    method: "POST", url: chatPath + "/decide", payload: { question: "Find something" },
+    method: "POST", url: "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/decide", payload: { question: "Find something" },
   });
   expect(response.statusCode).toBe(404);
   expect(holder.store.getFullSchemaWithLensInclusions).not.toHaveBeenCalled();
 });
 
-for (const route of ["/chat", "/agents/my-agent/chat"]) {
+for (const route of ["/_default/chat", "/my-agent/chat"]) {
   describe(`streaming lifecycle ${route}`, () => {
     it("correlates repeated tools and retains native results and invalid attempts", async () => {
       setAiModel(new FakeToolCallingModel([
@@ -207,7 +227,7 @@ async function connectChat(route: string, signal?: AbortSignal) {
   };
 }
 
-for (const route of ["/chat", "/agents/my-agent/chat"]) {
+for (const route of ["/_default/chat", "/my-agent/chat"]) {
   it(`delivers parallel results independently before the final answer: ${route}`, async () => {
     const slow = gate<Record<string, unknown>>();
     const final = gate();
@@ -276,12 +296,12 @@ for (const route of ["/chat", "/agents/my-agent/chat"]) {
 
 it("unknown lens and agent are ordinary pre-stream JSON errors", async () => {
   setAiModel(new FakeToolCallingModel([new AIMessage("No")]));
-  const ghost = await app.inject({ method: "POST", url: chatPath + "/agents/ghost/chat", payload: { message: "Hi" } });
+  const ghost = await app.inject({ method: "POST", url: chatPath + "/ghost/chat", payload: { message: "Hi" } });
   expect(ghost.statusCode).toBe(404);
   expect(ghost.json().error.code).toBe("RESOURCE_NOT_FOUND");
   holder.store.getFullSchemaWithLensInclusions.mockRejectedValue(new NotFoundError("Lens missing"));
   invalidateLoadedSchemaCache();
-  const lens = await app.inject({ method: "POST", url: chatPath + "/chat", payload: { message: "Hi" } });
+  const lens = await app.inject({ method: "POST", url: chatPath + "/_default/chat", payload: { message: "Hi" } });
   expect(lens.statusCode).toBe(404);
   expect(lens.json()).toEqual({ error: { code: "RESOURCE_NOT_FOUND", message: "Lens missing" } });
 });
@@ -290,7 +310,7 @@ it("unexpected failures never expose raw exceptions, but are logged", async () =
   const logged = vi.spyOn(console, "error").mockImplementation(() => {});
   holder.store.getEntity.mockRejectedValue(new Error("secret provider details"));
   setAiModel(new FakeToolCallingModel([toolCallMessage("get_entity", { entity_type_key: "person", entity_id: "broken" })]));
-  const response = await app.inject({ method: "POST", url: chatPath + "/chat", payload: { message: "Hi" } });
+  const response = await app.inject({ method: "POST", url: chatPath + "/_default/chat", payload: { message: "Hi" } });
   expect(events(response.body).at(-1)).toEqual({ type: "error", error: { code: "INTERNAL_ERROR", message: "Internal Server Error" } });
   expect(response.body).not.toContain("secret");
   expect(logged).toHaveBeenCalledWith("Chat stream failed:", expect.objectContaining({ message: "secret provider details" }));
@@ -317,7 +337,7 @@ it("disconnect during storage work prevents a follow-up model call and handles l
   };
   setAiModel(model);
   const controller = new AbortController();
-  const client = await connectChat("/chat", controller.signal);
+  const client = await connectChat("/_default/chat", controller.signal);
   expect((await client.next()).type).toBe("tool_call");
   await entered.promise;
   controller.abort();
@@ -332,7 +352,7 @@ it("delivers a root string result without JSON double encoding", async () => {
   setAiModel(new FakeToolCallingModel([
     toolCallMessage("get_schema", {}), new AIMessage("Schema ready"),
   ]));
-  const res = await app.inject({ method: "POST", url: chatPath + "/chat", payload: { message: "Schema" } });
+  const res = await app.inject({ method: "POST", url: chatPath + "/_default/chat", payload: { message: "Schema" } });
   const stream = events(res.body);
   expect(stream[1].result).toMatch(/^Lens: HR View/);
   expect(stream[1].result).toContain("\nEntity types:\n");
@@ -345,7 +365,7 @@ it("terminates an oversized result with one public error instead of buffering it
     toolCallMessage("get_entity", { entity_type_key: "person", entity_id: "huge" }),
     new AIMessage("Must not appear"),
   ]));
-  const res = await app.inject({ method: "POST", url: chatPath + "/chat", payload: { message: "Go" } });
+  const res = await app.inject({ method: "POST", url: chatPath + "/_default/chat", payload: { message: "Go" } });
   const stream = events(res.body);
   expect(stream.map((event) => event.type)).toEqual(["tool_call", "error"]);
   expect(stream[1].error).toEqual({ code: "VALIDATION_ERROR", message: "Chat stream exceeded its buffer limit" });

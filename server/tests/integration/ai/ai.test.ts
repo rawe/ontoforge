@@ -192,9 +192,9 @@ describe("features", () => {
 // AI Chat (conversational Q&A with tools)
 // ---------------------------------------------------------------------------
 
-describe("POST /ai/chat", () => {
+describe("chat with the default agent", () => {
   ifAvailable("returns one complete final reply", async () => {
-    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/chat", {
+    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/assistants/agents/_default/chat", {
       message: "How many companies are in the database?",
     });
     expect(statusCode).toBe(200);
@@ -204,7 +204,7 @@ describe("POST /ai/chat", () => {
   });
 
   ifAvailable("always includes tool activity", async () => {
-    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/chat", {
+    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/assistants/agents/_default/chat", {
       message: "List all persons",
     });
     expect(statusCode).toBe(200);
@@ -217,7 +217,7 @@ describe("POST /ai/chat", () => {
   });
 
   ifAvailable("accepts caller-supplied history", async () => {
-    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/chat", {
+    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/assistants/agents/_default/chat", {
       message: "And how old is she?",
       history: [
         { role: "user", content: "How many persons are there?" },
@@ -229,7 +229,7 @@ describe("POST /ai/chat", () => {
   });
 
   ifAvailable("rejects an empty message", async () => {
-    const { statusCode } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/chat", {
+    const { statusCode } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/assistants/agents/_default/chat", {
       message: "",
     });
     expect(statusCode).toBe(422);
@@ -242,7 +242,7 @@ describe("POST /ai/chat", () => {
 
 describe("agents", () => {
   ifAvailable("lists the default agent alongside the configured one", async () => {
-    const { statusCode, body } = await inject("GET", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/agents");
+    const { statusCode, body } = await inject("GET", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/assistants/agents");
     expect(statusCode).toBe(200);
     const agents = body as unknown as Row[];
     const keys = agents.map((a) => a.key);
@@ -253,7 +253,7 @@ describe("agents", () => {
   ifAvailable("a restricted agent's trace shows only allowlisted tools", async () => {
     const { statusCode, body } = await inject(
       "POST",
-      "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/agents/analyst/chat",
+      "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/assistants/agents/analyst/chat",
       {
         message: "How many persons are stored? Answer using your tools.",
         },
@@ -268,7 +268,7 @@ describe("agents", () => {
   });
 
   ifAvailable("chat with an unknown agent answers 404", async () => {
-    const { statusCode } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/agents/ghost/chat", {
+    const { statusCode } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/assistants/agents/ghost/chat", {
       message: "Hi",
     });
     expect(statusCode).toBe(404);

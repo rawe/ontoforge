@@ -101,8 +101,9 @@ it.skipIf(postgres)("an adapter without search indices answers FEATURE_DISABLED 
     await request("GET", AGENTS),
     await request("PUT", `${AGENTS}/people`, BODY),
     await request("POST", `${AGENTS}/import`, { key: "people", ...BODY }),
-    await request("POST", `${RUNTIME}/retriever-agents/people/chat`, { message: "Who?" }),
-    await request("POST", `${RUNTIME}/retriever-agents/_default/retrieve`, { question: "Who?" }),
+    await request("GET", `${RUNTIME}/ai/assistants/retrievers`),
+    await request("POST", `${RUNTIME}/ai/assistants/retrievers/people/chat`, { message: "Who?" }),
+    await request("POST", `${RUNTIME}/ai/assistants/retrievers/_default/retrieve`, { query: "Who?" }),
   ]) {
     expect(res.statusCode, res.body).toBe(422);
     expect(res.json().error.details.code).toBe("FEATURE_DISABLED");
@@ -295,7 +296,7 @@ describe.skipIf(!postgres)("retriever agents", () => {
   it("an agent that becomes invalid is reported on read and refused at execution", async () => {
     await schema();
     await ok("PUT", `${AGENTS}/people`, BODY);
-    const chat = (key = "people") => request("POST", `${RUNTIME}/retriever-agents/${key}/chat`, { message: "Who is CTO at ACME?" });
+    const chat = (key = "people") => request("POST", `${RUNTIME}/ai/assistants/retrievers/${key}/chat`, { message: "Who is CTO at ACME?" });
     // No language model in this suite: refused like the other AI routes,
     // before any stream opens.
     const unavailable = await chat();
@@ -324,6 +325,12 @@ describe.skipIf(!postgres)("retriever agents", () => {
     expect(refused.json().error.message).toContain("is invalid in this lens");
     // Still exportable as stored.
     expect((await ok("GET", `${AGENTS}/people/export`)).config).toEqual(CONFIG);
+    // Still listed at runtime, without configuration or validation, after the default.
+    expect(await ok("GET", `${RUNTIME}/ai/assistants/retrievers`)).toEqual([
+      { key: "_default", name: "Default", description: null, builtIn: true },
+      { key: "people", name: BODY.name, description: BODY.description, builtIn: false },
+    ]);
+    expect((await request("GET", `/api/ontologies/${O}/runtime/lenses/nope/ai/assistants/retrievers`)).statusCode).toBe(404);
 
     // A switched-off managed index is not in the catalog either.
     await ok("PUT", `${AGENTS}/bio`, { name: "Bio", configVersion: 2, config: { indices: [{ index: "person~bio" }], answerFields: { person: ["name"] } } });
@@ -515,8 +522,8 @@ describe.skipIf(!postgres)("retriever agents", () => {
     await ok("PUT", `${MODEL}/search-settings`, { disabledIndices: ["city~default"] });
     setAiModel({} as BaseChatModel);
     try {
-      for (const [route, payload] of [["retrieve", { question: "Who?" }], ["chat", { message: "Who?" }]] as const) {
-        const res = await request("POST", `/api/ontologies/${O}/runtime/lenses/bare/retriever-agents/_default/${route}`, payload);
+      for (const [route, payload] of [["retrieve", { query: "Who?" }], ["chat", { message: "Who?" }]] as const) {
+        const res = await request("POST", `/api/ontologies/${O}/runtime/lenses/bare/ai/assistants/retrievers/_default/${route}`, payload);
         expect(res.statusCode, res.body).toBe(422);
         expect(res.json().error.code).toBe("VALIDATION_ERROR");
         expect(res.json().error.message).toContain("nothing to search");

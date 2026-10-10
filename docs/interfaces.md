@@ -609,7 +609,7 @@ Requires a Decision provider, independently of AI and search.
 |---|---|---|
 | POST | `/decisions/compare-entities` | Judge the identity of two supplied partial snapshots of one scoped entity type |
 
-### Retriever-agent chat and retrieve
+### Retriever-agent list, chat and retrieve
 
 The stored agent runs — or, under the key `_default`, the lens's
 [default retriever agent](capabilities/retriever-agents.md#the-default-retriever-agent);
@@ -619,8 +619,15 @@ and [retrieve](capabilities/retriever-agents.md#retrieve).
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/retriever-agents/{agentKey}/chat` | Stream the answer to one question |
-| POST | `/retriever-agents/{agentKey}/retrieve` | The entities one question finds, without an answer |
+| GET | `/ai/assistants/retrievers` | List the lens's retriever agents, the default first |
+| POST | `/ai/assistants/retrievers/{assistantKey}/chat` | Stream the answer to one question |
+| POST | `/ai/assistants/retrievers/{assistantKey}/retrieve` | The entities one query finds, without an answer |
+
+**List.** Every retriever agent of the lens, runnable or not, as `key`, `name`,
+`description` and `builtIn`; the default comes first, keyed `_default`, named `Default`,
+with `builtIn` true. The list carries no configuration and no validation, and needs no
+language-model provider; on an adapter without search indices it answers
+`FEATURE_DISABLED`.
 
 **Chat.** The body carries `message` (1 to 2,000 characters) and optionally `history` (up to 30
 user/assistant turns), the previous answer's `turnToken` and `diagnostics`; unknown
@@ -648,8 +655,8 @@ true, earlier `meta` events carry:
 
 `matched` has the form of a search hit's ([capabilities/search.md](capabilities/search.md#response)).
 
-**Retrieve.** The body carries `question` (1 to 2,000 characters) and optionally
-`diagnostics`; unknown fields — a history or follow-up token among them — are rejected.
+**Retrieve.** The body carries `query` (1 to 2,000 characters); unknown fields — a
+history, a follow-up token or `diagnostics` among them — are rejected.
 It is refused exactly as chat is, with plain error responses: `FEATURE_DISABLED` without
 a language-model provider or on an adapter without search indices, not found for an
 unknown agent, `VALIDATION_ERROR` for an agent its lens can no longer run (errors under
@@ -658,28 +665,28 @@ a failed planning call or a malformed plan. A closed connection cancels the work
 
 The response is `200` with `results` — best first, each `entityId`, `entityType`,
 `label`, `conditions` (`filter`, `value`, `text`) and `matched` (a search hit's form, or
-null) — `limitations`, `unsupportedReason` when no index can answer, and with
-`diagnostics` true a `diagnostics` object: `plan`, `searchCalls`, `timings` in
-milliseconds (`plan`, `planModel`, `validation`, `retrieve`, `search`, `total`) and
-`modelIO`, the one planning call's trace. No results is not an error.
+null) — `limitations` and `unsupportedReason` when no index can answer. No results is not
+an error.
 
 A question or a retrieve needs a language-model provider; without an embedding provider it
 searches by keyword only. Neither route has an MCP equivalent.
 
 ### AI
 
-Semantics: [capabilities/ai-agents.md](capabilities/ai-agents.md). Every route here
-requires a language-model provider for execution; agent discovery remains available without one.
+Semantics: [capabilities/ai-agents.md](capabilities/ai-agents.md). Chat requires a
+language-model provider; the list remains available without one.
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/ai/chat` | Converse with the default agent over the lens |
-| GET | `/ai/agents` | List the agents configured on this lens |
-| POST | `/ai/agents/{agentKey}/chat` | Converse with one named agent |
+| GET | `/ai/assistants/agents` | List the lens's agents, the default first |
+| POST | `/ai/assistants/agents/{assistantKey}/chat` | Converse with one agent |
 
-The default agent is implicit — it needs no configuration and exists on every lens.
+The default agent is implicit — it needs no configuration, exists on every lens and is
+addressed by the key `_default` like any configured agent. The list names every agent as
+`key`, `name`, `description` and `builtIn`; the default comes first, named `Default`, with
+`builtIn` true.
 
-Both chat POST routes accept `message` and optional user/assistant text `history`.
+Chat accepts `message` and optional user/assistant text `history`.
 Successful responses always use `application/x-ndjson`: one complete JSON object per line.
 Tool events are unconditional; there is no response-mode option.
 

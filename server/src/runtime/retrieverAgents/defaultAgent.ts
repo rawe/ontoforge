@@ -24,6 +24,8 @@ import {
 import { resultTypes, type AgentLens } from "./config.js";
 
 export const DEFAULT_RETRIEVER_AGENT_KEY = "_default";
+/** The name the runtime list gives it, the same as the default agent's. */
+export const DEFAULT_RETRIEVER_AGENT_NAME = "Default";
 
 /** The default agent's configuration in a lens. */
 export function defaultAgentConfig(lens: AgentLens): RetrieverAgentConfig {

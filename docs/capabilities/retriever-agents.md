@@ -270,11 +270,12 @@ the server uses the last eight turns.
 On request, the stream also reports what the agent did: the validated plan, one result
 row per entity and sub-query with what matched and its answer fields, the limitations,
 the number of index searches, phase timings and bounded traces of every model call —
-the plan, a repeated plan, the answer. The event format is in [../interfaces.md](../interfaces.md#retriever-agent-chat-and-retrieve).
+the plan, a repeated plan, the answer. The event format is in [../interfaces.md](../interfaces.md#retriever-agent-list-chat-and-retrieve).
 
 ## Retrieve
 
-Retrieve answers one question with the entities the agent finds — no answer text. It runs
+Retrieve answers one query with the entities the agent finds — no answer text: a
+question's run without the answer step. It runs
 exactly the first two phases of [answering a question](#answering-a-question), unchanged:
 [planning](#planning) and [retrieval](#retrieval). There is no conversation: no history,
 no follow-up token, no reference to earlier results, so planning is never repeated and a
@@ -306,16 +307,16 @@ property's value, or none — and two independent facts:
 
 Beside the results come the limitations, in the plain words the answer model would
 receive, and the planner's unsupported reason when no index can answer. No result — no
-match, or an unsupported question — is not an error. On request the response also
-carries diagnostics: the validated plan, the number of index searches, phase timings and
-the trace of the one planning call.
+match, or an unsupported question — is not an error. A retrieve carries no
+diagnostics; they belong to the question's stream only.
 
 ## The default retriever agent
 
 Every lens has an implicit retriever agent, keyed `_default`. It is not stored and cannot
 be created, replaced, deleted, copied, moved, exported or imported; no stored key can
-begin with an underscore, so it can never be shadowed. It is not listed with the stored
-agents. It exists wherever the adapter stores search indices, and both
+begin with an underscore, so it can never be shadowed. Modeling does not know it: it is
+not listed, read or written there. The runtime list names it first, as `Default`, marked
+built in. It exists wherever the adapter stores search indices, and both
 [answering a question](#answering-a-question) and [retrieve](#retrieve) serve it.
 
 Its configuration is derived from the lens for every question, deterministically — the
@@ -374,11 +375,12 @@ export carries no `retrieverAgents`, and import checks them and keeps none.
 
 ## Through the interfaces
 
-Retriever agents are managed through modeling REST, addressed by lens key and agent key; a question
-runs through runtime REST by agent key and streams its progress, answer and follow-up
-token, and a retrieve answers it with one plain response
+Retriever agents are managed through modeling REST, addressed by lens key and agent key. At
+runtime a list names every agent of the lens — runnable or not, without configuration or
+validation, the default first; a question runs by agent key and streams its progress,
+answer and follow-up token, and a retrieve answers it with one plain response
 ([../interfaces.md](../interfaces.md)). Both address the default agent by its key.
-Management, copy, move, export and import call no model. A question or a retrieve needs a
+Management, the runtime list, copy, move, export and import call no model. A question or a retrieve needs a
 language-model provider — without one it is refused as a disabled feature before anything
 is read or streamed; without an embedding provider it searches by keyword only. No MCP
 tool manages or runs an agent; the modeling MCP server's whole-schema read and export

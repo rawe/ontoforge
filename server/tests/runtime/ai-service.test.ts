@@ -8,15 +8,15 @@
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { setAiModel, type AgentConfig } from "../../src/core/ai.js";
+import { DEFAULT_AGENT_CONFIG, setAiModel, type AgentConfig } from "../../src/core/ai.js";
 import { RELATIVE_SCORE_PROMISE, TOOL_MIN_SIMILARITY } from "../../src/runtime/search/strategies.js";
 import { setEmbeddingProvider } from "../../src/core/embedding.js";
 import { NotFoundError, ValidationError } from "../../src/core/exceptions.js";
 import {
   CHAT_TOOLS,
-  aiChat,
   describeSchema,
   runAgentChat,
+  type ChatHistoryEntry,
 } from "../../src/runtime/aiService.js";
 import { invalidateLoadedSchemaCache, loadSchema } from "../../src/runtime/schemaCache.js";
 import { FakeToolCallingModel, toolCallMessage } from "./aiHelpers.js";
@@ -30,6 +30,15 @@ import {
 } from "./helpers.js";
 
 type Row = Record<string, unknown>;
+
+/** Chat with the built-in default agent. */
+const aiChat = (
+  lensKey: string,
+  message: string,
+  runtime: Parameters<typeof runAgentChat>[3],
+  history: ChatHistoryEntry[] | null = null,
+  includeToolCalls = false,
+) => runAgentChat(DEFAULT_AGENT_CONFIG, lensKey, message, runtime, history, includeToolCalls);
 
 let store: MockRuntimeStore;
 

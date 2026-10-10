@@ -1,10 +1,10 @@
 /**
  * AI runtime routes, mounted at
  * `/api/ontologies/:ontologyKey/runtime/lenses/:lensKey` alongside the
- * runtime router: chat (default and per-agent), agent discovery, and
- * retriever-agent chat (`retrieverAgents/router.ts`). Every request binds a
- * runtime store to the ontology its path names. Routers parse and shape
- * only; every rule lives in `aiService.ts`.
+ * runtime router: the agent list and agent chat, and the retriever routes
+ * (`retrieverAgents/router.ts`), each under `/ai/assistants/<kind>`. Every
+ * request binds a runtime store to the ontology its path names. Routers
+ * parse and shape only; every rule lives in `aiService.ts`.
  *
  * There are deliberately NO MCP tools for chat — an MCP
  * client is itself a language model and gets the underlying tools
@@ -20,7 +20,7 @@ import { sendChatStream } from "./chatStream.js";
 import { retrieverAgentRuntimeRouter } from "./retrieverAgents/router.js";
 
 const LensParams = z.object({ ontologyKey: z.string(), lensKey: z.string() });
-const AgentParams = LensParams.extend({ agentKey: z.string() });
+const AssistantParams = LensParams.extend({ assistantKey: z.string() });
 
 const AiChatMessage = z.object({
   role: z.string().regex(/^(user|assistant)$/),
@@ -35,23 +35,11 @@ const AiChatPayload = z.looseObject({
 /** AI routes mounted at `/api/ontologies/:ontologyKey/runtime/lenses/:lensKey`. */
 export const aiRouter: FastifyPluginAsyncZod = async (app) => {
   await app.register(retrieverAgentRuntimeRouter);
-  app.post(
-    "/ai/chat",
-    { schema: { tags: ["ai"], params: LensParams, body: AiChatPayload } },
-    async (request, reply) => {
-      const store = await getRuntimeStore(request.params.ontologyKey);
-      const config = await aiService.prepareChat(request.params.lensKey, store);
-      return sendChatStream(reply, (execution) => aiService.runAgentChat(
-        config, request.params.lensKey, request.body.message, store,
-        request.body.history ?? null, false, execution,
-      ));
-    },
-  );
 
-  // --- Agent discovery and per-agent chat ---
+  // --- Agents: the list and chat (the built-in default is `_default`) ---
 
   app.get(
-    "/ai/agents",
+    "/ai/assistants/agents",
     { schema: { tags: ["ai"], params: LensParams } },
     async (request) =>
       aiService.listRuntimeAgents(
@@ -61,11 +49,11 @@ export const aiRouter: FastifyPluginAsyncZod = async (app) => {
   );
 
   app.post(
-    "/ai/agents/:agentKey/chat",
-    { schema: { tags: ["ai"], params: AgentParams, body: AiChatPayload } },
+    "/ai/assistants/agents/:assistantKey/chat",
+    { schema: { tags: ["ai"], params: AssistantParams, body: AiChatPayload } },
     async (request, reply) => {
       const store = await getRuntimeStore(request.params.ontologyKey);
-      const config = await aiService.prepareChat(request.params.lensKey, store, request.params.agentKey);
+      const config = await aiService.prepareChat(request.params.lensKey, store, request.params.assistantKey);
       return sendChatStream(reply, (execution) => aiService.runAgentChat(
         config, request.params.lensKey, request.body.message, store,
         request.body.history ?? null, false, execution,

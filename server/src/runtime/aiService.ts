@@ -1,6 +1,6 @@
 /**
- * AI-powered runtime operations (`docs/capabilities/ai-agents.md`): chat
- * and agent discovery. The engine is
+ * AI-powered runtime operations (`docs/capabilities/ai-agents.md`): agent
+ * chat and the agent list. The engine is
  * LangChain.js / LangGraph.js (approved stack).
  *
  * Each operation builds a fresh agent per request with a scoped tool
@@ -654,63 +654,35 @@ export async function runAgentChat(
   return response;
 }
 
-/** Resolve all chat prerequisites before the REST response starts. */
-export async function prepareChat(lensKey: string, store: RuntimeStore, agentKey?: string) {
+/** Resolve all chat prerequisites before the REST response starts: the
+ * agent (`_default` is the built-in default) and the model. */
+export async function prepareChat(lensKey: string, store: RuntimeStore, agentKey: string): Promise<AgentConfig> {
   const loaded = await loadSchema(lensKey, store);
-  const config = agentKey === undefined ? DEFAULT_AGENT_CONFIG : loaded.agentConfigs[agentKey];
+  const config = agentKey === DEFAULT_AGENT_CONFIG.key ? DEFAULT_AGENT_CONFIG : loaded.agentConfigs[agentKey];
   if (!config) throw new NotFoundError(`AI agent '${agentKey}' not found`);
   requireModel();
   return config;
 }
 
-/** Chat with the knowledge graph using AI and tools (default agent). */
-export async function aiChat(
-  lensKey: string,
-  message: string,
-  store: RuntimeStore,
-  history: ChatHistoryEntry[] | null = null,
-  includeToolCalls = false,
-): Promise<Row> {
-  return runAgentChat(DEFAULT_AGENT_CONFIG, lensKey, message, store, history, includeToolCalls);
-}
-
-/** Chat using a configured agent. */
-export async function aiAgentChat(
-  lensKey: string,
-  agentKey: string,
-  message: string,
-  store: RuntimeStore,
-  history: ChatHistoryEntry[] | null = null,
-  includeToolCalls = false,
-): Promise<Row> {
-  const loaded = await loadSchema(lensKey, store);
-  const config = loaded.agentConfigs[agentKey];
-  if (!config) {
-    throw new NotFoundError(`AI agent '${agentKey}' not found`);
-  }
-  return runAgentChat(config, lensKey, message, store, history, includeToolCalls);
-}
-
 // ---------------------------------------------------------------------------
-// Agent discovery
+// Agent list
 // ---------------------------------------------------------------------------
 
-/** List all agents (default + configured) for a lens. */
-export async function listRuntimeAgents(lensKey: string, store: RuntimeStore): Promise<Row[]> {
+/** One runtime list item, the same for every assistant kind. */
+export interface RuntimeAssistant {
+  key: string;
+  name: string;
+  description: string | null;
+  builtIn: boolean;
+}
+
+/** Every agent of a lens, the built-in default first. Needs no model. */
+export async function listRuntimeAgents(lensKey: string, store: RuntimeStore): Promise<RuntimeAssistant[]> {
   const loaded = await loadSchema(lensKey, store);
-  const agents: Row[] = [
-    {
-      key: DEFAULT_AGENT_CONFIG.key,
-      name: DEFAULT_AGENT_CONFIG.name,
-      description: DEFAULT_AGENT_CONFIG.description,
-    },
-  ];
-  for (const config of Object.values(loaded.agentConfigs)) {
-    agents.push({
-      key: config.key,
-      name: config.name,
-      description: config.description,
-    });
-  }
-  return agents;
+  return [DEFAULT_AGENT_CONFIG, ...Object.values(loaded.agentConfigs)].map((config) => ({
+    key: config.key,
+    name: config.name,
+    description: config.description,
+    builtIn: config === DEFAULT_AGENT_CONFIG,
+  }));
 }

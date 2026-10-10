@@ -5,6 +5,7 @@
  * with `node --test`.
  */
 import type {
+  PlannedFilter,
   PlanSubQuery,
   Retriever,
   RetrieverConfig,
@@ -350,11 +351,9 @@ export function resultsBySubQuery(meta: RetrieverDiagnostics): { subQuery: numbe
   return [...groups.keys()].sort((a, b) => a - b).map((subQuery) => ({ subQuery, plan: planned[subQuery] ?? null, results: groups.get(subQuery) ?? [] }))
 }
 
-/** "City = Berlin (from “in Berlin”)" for one planned filter. */
-export function plannedFilterText(filter: PlanSubQuery['filters'][number], config: RetrieverConfig | null, schema: RetrieverSchema | undefined): string {
-  const configured = config?.filters.find((f) => f.id === filter.id)
-  const label = configured === undefined ? filter.id : filterLabel(configured, schema)
-  return `${label} = ${filter.value}${filter.quote ? ` (from “${filter.quote}”)` : ''}`
+/** "Person · City = Berlin (from “in Berlin”)" for one planned filter, from the definition it carries. */
+export function plannedFilterText(filter: PlannedFilter, schema: RetrieverSchema | undefined): string {
+  return `${filterLabel(filter, schema)} = ${filter.value}${filter.quote ? ` (from “${filter.quote}”)` : ''}`
 }
 
 /** A result's display label: its label, else the truncated id. */

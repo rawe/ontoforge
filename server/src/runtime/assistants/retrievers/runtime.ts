@@ -65,6 +65,7 @@ import { TURNS_THE_MODEL_SEES, type GraphThread } from "../../threads/threadStor
 import { lastTurns, trimTurns } from "../../threads/turns.js";
 import { modelInputTrace } from "./modelTrace.js";
 import {
+  diagnosticPlan,
   PLANNER,
   PLANNER_INPUT_CHARACTERS,
   PLANNER_RESPONSE_FORMAT,
@@ -328,7 +329,7 @@ export async function planQuestion(planning: Planning): Promise<{ plan: Plan; no
       values,
     );
     timings.validation = (timings.validation ?? 0) + performance.now() - validation;
-    await report({ plan: checked.plan, modelIO: [call] });
+    await report({ plan: diagnosticPlan(checked.plan, agent.config), modelIO: [call] });
     return checked;
   };
   const first = await planWith(PLANNER, "plan");

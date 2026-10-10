@@ -268,7 +268,8 @@ answers; how many: [../architecture.md](../architecture.md#thread-store).
 
 ### Diagnostics
 
-On request, the stream also reports what the retriever did: the validated plan, one result
+On request, the stream also reports what the retriever did: the validated plan — each
+planned filter with its definition, so the plan reads without the configuration — one result
 row per entity and sub-query with what matched and its answer fields, the limitations,
 the number of index searches, phase timings and bounded traces of every model call —
 the plan, a repeated plan, the answer. Diagnostics are for debugging: they are sent only

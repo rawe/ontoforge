@@ -427,3 +427,21 @@ export function validatePlan(
   plan.subQueries = kept;
   return { plan, notes };
 }
+
+/** The plan as diagnostics show it: each planned filter with its
+ * definition from the configuration that ran the turn (`entityType`,
+ * `path`, `field`), so the plan reads without that configuration. */
+export function diagnosticPlan(plan: Plan, config: Pick<RetrieverConfig, "filters">) {
+  return {
+    ...plan,
+    subQueries: plan.subQueries.map((sub) => ({
+      ...sub,
+      filters: sub.filters.map((applied) => {
+        const filter = config.filters.find((candidate) => candidate.id === applied.id);
+        return filter === undefined
+          ? applied
+          : { ...applied, entityType: filter.entityType, path: filter.path, field: filter.field };
+      }),
+    })),
+  };
+}

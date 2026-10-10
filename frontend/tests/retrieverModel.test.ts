@@ -127,7 +127,7 @@ test('imports need a version 2 export whose key is free', () => {
   assert.match(importProblem({ ...body, configVersion: 1 }, []) ?? '', /version 2/)
 })
 
-test('diagnostics: events merge, results group per sub-query, planned filters read as configured', () => {
+test('diagnostics: events merge, results group per sub-query, planned filters read from their carried definition', () => {
   const merged = mergeDiagnostics({ timings: { plan: 5 }, limitations: ['a'], modelIO: [{ phase: 'plan', input: 'i', output: 'o' }] },
     { timings: { answer: 7 }, limitations: ['a', 'b'], modelIO: [{ phase: 'plan', input: 'i2', output: 'o2' }] })
   assert.deepEqual(merged.timings, { plan: 5, answer: 7 })
@@ -139,9 +139,11 @@ test('diagnostics: events merge, results group per sub-query, planned filters re
     results: [result(1, 'b'), result(0, 'a'), result(0, 'c')],
   })
   assert.deepEqual(groups.map((g) => [g.subQuery, g.plan?.query ?? null, g.results.map((r) => r.entityId)]), [[0, 'q0', ['a', 'c']], [1, null, ['b']]])
-  const filtered = { ...config, filters: [{ id: 'own', entityType: 'person', path: [], field: 'email' }] }
-  assert.equal(plannedFilterText({ id: 'own', value: 'a@b.c', quote: 'a@b.c' }, filtered, schema), 'Person · Email = a@b.c (from “a@b.c”)')
-  assert.equal(plannedFilterText({ id: 'unknown', value: 'x', quote: '' }, filtered, schema), 'unknown = x')
+  // The label comes from the definition the planned filter carries, not from a configuration.
+  assert.equal(plannedFilterText({ id: 'own', entityType: 'person', path: [], field: 'email', value: 'a@b.c', quote: 'a@b.c' }, schema), 'Person · Email = a@b.c (from “a@b.c”)')
+  const hop = { relationTypeKey: 'works_for', direction: 'outgoing' as const }
+  assert.equal(plannedFilterText({ id: 'employer', entityType: 'person', path: [hop], field: 'title', value: 'ACME', quote: 'at ACME' }, schema), 'Person · works for → Company · Title = ACME (from “at ACME”)')
+  assert.equal(plannedFilterText({ id: 'gone', entityType: 'unknown', path: [], field: 'x', value: 'x', quote: '' }, schema), 'gone = x')
   assert.equal(relationName('works_for', ['person_employment'], catalog, schema), 'Employment')
   assert.equal(relationName('works_for', ['person~default'], catalog, schema), 'works for')
 })

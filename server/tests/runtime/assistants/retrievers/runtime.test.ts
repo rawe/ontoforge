@@ -28,6 +28,7 @@ import { settings } from "../../../../src/config.js";
 import { createAiModel } from "../../../../src/core/ai.js";
 import type { RuntimeStore, SearchIndexRecord, SearchIndexStore } from "../../../../src/core/ports.js";
 import type { LoadedSchema } from "../../../../src/runtime/schemaCache.js";
+import { DEFAULT_RETRIEVER_KEY, defaultRetrieverConfig } from "../../../../src/runtime/assistants/retrievers/defaultRetriever.js";
 import { PLANNER, PLANNER_RESPONSE_FORMAT, REPLAN } from "../../../../src/runtime/assistants/retrievers/plan.js";
 import {
   chat,
@@ -121,7 +122,11 @@ describe("retriever pipeline", () => {
     ]);
     const plan = diagnosticsWith(events, "plan").plan as { subQueries: Record<string, unknown>[] };
     expect(plan.subQueries).toEqual([
-      { indices: ["person~default"], relations: [], query: "", variants: [], mode: "keyword", filters: [{ id: "city", value: "Berlin", quote: "Berlin" }], previous: null },
+      {
+        indices: ["person~default"], relations: [], query: "", variants: [], mode: "keyword", previous: null,
+        // Each planned filter carries its definition, so the plan reads without the configuration.
+        filters: [{ id: "city", value: "Berlin", quote: "Berlin", entityType: "person", path: [{ relationTypeKey: "lives_in", direction: "outgoing" }], field: "name" }],
+      },
     ]);
     const retrieved = diagnosticsWith(events, "results");
     expect(retrieved.results).toEqual([
@@ -139,6 +144,17 @@ describe("retriever pipeline", () => {
     expect(calls[0]!.input).toBe(fake.invoke.mock.calls[0]![0][1].content);
     expect(calls[1]!.systemPrompt).toBe(fake.stream.mock.calls[0]![0][0].content);
     expect(events.at(-1)).toBe(summary);
+  });
+
+  it("the default retriever's diagnostics plan carries its derived filter definitions", async () => {
+    const config = defaultRetrieverConfig(LENS);
+    const fallback: RunnableRetriever = { key: DEFAULT_RETRIEVER_KEY, config, scope: { ...agent.scope, config } };
+    fake.invoke.mockResolvedValue(planned([sub({ filters: [{ id: "person.lives_in.outgoing", value: "Berlin", quote: "Berlin" }] })]));
+    const { events } = await run("Everyone in Berlin", true, undefined, undefined, fallback);
+    const plan = diagnosticsWith(events, "plan").plan as { subQueries: { filters: unknown[] }[] };
+    expect(plan.subQueries[0]!.filters).toEqual([
+      { id: "person.lives_in.outgoing", value: "Berlin", quote: "Berlin", entityType: "person", path: [{ relationTypeKey: "lives_in", direction: "outgoing" }], field: "name" },
+    ]);
   });
 
   it("hands Anthropic the plan schema as its own output format", async () => {

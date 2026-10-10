@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { RetrieverConfig, RetrieverDiagnostics, RetrieverResult } from '@/api/retrievers'
+import type { RetrieverDiagnostics, RetrieverResult } from '@/api/retrievers'
 import type { RuntimeSchema, SearchCatalogEntry } from '@/api/types'
 import { TypeChip } from '@/components/TypeChip'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -8,7 +8,7 @@ import {
   MODE_LABEL, STEPS, callCounts, formatMs, indexName, stepText, type TurnStatus, modelCallName, phaseName, plannedFilterText, relationName, resultLabel, resultsBySubQuery,
 } from './retrieverModel'
 
-interface Context { config: RetrieverConfig | null; catalog: SearchCatalogEntry[] | undefined; schema: RuntimeSchema | undefined }
+interface Context { catalog: SearchCatalogEntry[] | undefined; schema: RuntimeSchema | undefined }
 
 function Value({ value, depth = 0 }: { value: unknown; depth?: number }) {
   if (value === null || value === undefined) return <span className="text-muted-foreground">–</span>
@@ -59,7 +59,7 @@ function Overview({ meta, status }: { meta: RetrieverDiagnostics; status: TurnSt
   </div>
 }
 
-function Plan({ meta, config, catalog, schema }: { meta: RetrieverDiagnostics } & Context) {
+function Plan({ meta, catalog, schema }: { meta: RetrieverDiagnostics } & Context) {
   const plan = meta.plan
   if (!plan) return <Intro>No plan yet.</Intro>
   const unsupported = typeof plan.unsupportedReason === 'string' ? plan.unsupportedReason : null
@@ -71,7 +71,7 @@ function Plan({ meta, config, catalog, schema }: { meta: RetrieverDiagnostics } 
       <div><dt className="text-muted-foreground">Sub-query {i + 1} · searches</dt><dd className="font-medium">{sub.indices.map((key) => indexName(key, catalog)).join(', ') || '–'}</dd></div>
       <div><dt className="text-muted-foreground">Relations</dt><dd>{sub.relations?.length ? sub.relations.map((key) => relationName(key, sub.indices, catalog, schema)).join(', ') : 'all relation groups of these indices'}</dd></div>
       <div><dt className="text-muted-foreground">Query, {MODE_LABEL[sub.mode] ?? sub.mode}</dt><dd>{sub.query ? <span className="rounded bg-muted px-1.5 py-0.5 font-medium">“{sub.query}”</span> : 'none — exact filters only'}{!!sub.variants?.length && <span className="text-muted-foreground"> · also {sub.variants.map((v) => `“${v}”`).join(', ')}</span>}</dd></div>
-      <div><dt className="text-muted-foreground">Exact filters</dt><dd>{sub.filters?.length ? sub.filters.map((f, j) => <div key={j}>{plannedFilterText(f, config, schema)}</div>) : 'none'}</dd></div>
+      <div><dt className="text-muted-foreground">Exact filters</dt><dd>{sub.filters?.length ? sub.filters.map((f, j) => <div key={j}>{plannedFilterText(f, schema)}</div>) : 'none'}</dd></div>
     </dl>)}
     <details><summary className="cursor-pointer">Raw plan</summary><div className="mt-2"><Value value={plan} /></div></details>
   </div>
@@ -130,7 +130,7 @@ function ModelCalls({ meta }: { meta: RetrieverDiagnostics }) {
  * Diagnostics of one answer, split along the pipeline so each tab answers
  * one question. No scores.
  */
-export function RetrieverDiagnosticsPanel({ meta, question, status, config, catalog, schema }: { meta: RetrieverDiagnostics; question: string; status: TurnStatus } & Context) {
+export function RetrieverDiagnosticsPanel({ meta, question, status, catalog, schema }: { meta: RetrieverDiagnostics; question: string; status: TurnStatus } & Context) {
   const [tab, setTab] = useState('overview')
   const tabs = [['overview', 'Overview'], ['plan', 'Plan'], ['results', `Results${meta.results ? ` (${meta.results.length})` : ''}`], ['models', 'Model calls']]
   return <div className="flex min-h-0 flex-1 flex-col text-xs">
@@ -142,8 +142,8 @@ export function RetrieverDiagnosticsPanel({ meta, question, status, config, cata
       </TabsList>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         <TabsContent value="overview"><Overview meta={meta} status={status} /></TabsContent>
-        <TabsContent value="plan"><Plan meta={meta} config={config} catalog={catalog} schema={schema} /></TabsContent>
-        <TabsContent value="results"><Results meta={meta} config={config} catalog={catalog} schema={schema} /></TabsContent>
+        <TabsContent value="plan"><Plan meta={meta} catalog={catalog} schema={schema} /></TabsContent>
+        <TabsContent value="results"><Results meta={meta} catalog={catalog} schema={schema} /></TabsContent>
         <TabsContent value="models"><ModelCalls meta={meta} /></TabsContent>
       </div>
     </Tabs>

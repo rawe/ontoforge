@@ -1,7 +1,7 @@
 import { Activity, LoaderCircle, RotateCcw, SendHorizonal, Square } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { chatErrorText, threadError } from '@/api/chatStream'
-import { chatRetriever, type RetrieverConfig, type RetrieverEvent, type RetrieverDiagnostics } from '@/api/retrievers'
+import { chatRetriever, type RetrieverEvent, type RetrieverDiagnostics } from '@/api/retrievers'
 import type { ChatMessage, RuntimeSchema, SearchCatalogEntry } from '@/api/types'
 import { EXPIRED_TEXT, forgetThread, rememberThread, rememberedThread, restoreThread } from '@/components/ai/chatStore'
 import { Markdown } from '@/components/ai/Markdown'
@@ -24,8 +24,6 @@ interface RetrieverChatProps {
   diagnostics: boolean
   /** Remember the thread in the browser and restore it on open (the Workbench); else each mount starts a new one. */
   remember?: boolean
-  /** The saved configuration, for readable filter names in the plan; null shows filter ids. */
-  config: RetrieverConfig | null
   catalog: SearchCatalogEntry[] | undefined
   schema: RuntimeSchema | undefined
   /** Shown above the input while there is no turn yet. */
@@ -49,7 +47,7 @@ function restoredTurns(messages: readonly ChatMessage[]): Turn[] {
  * Workbench chat; remount it (React `key`) to start a new thread, as the
  * test panel does after every save.
  */
-export function RetrieverChat({ ontologyKey, lensKey, agentKey, blockedReason, diagnostics, remember = false, config, catalog, schema, intro, className }: RetrieverChatProps) {
+export function RetrieverChat({ ontologyKey, lensKey, agentKey, blockedReason, diagnostics, remember = false, catalog, schema, intro, className }: RetrieverChatProps) {
   const owner = useMemo(() => (remember && agentKey !== null ? { ontologyKey, lensKey, kind: 'retrievers' as const, assistantKey: agentKey } : null), [remember, ontologyKey, lensKey, agentKey])
   const [turns, setTurns] = useState<Turn[]>([])
   const [restoring, setRestoring] = useState(owner !== null)
@@ -166,7 +164,7 @@ export function RetrieverChat({ ontologyKey, lensKey, agentKey, blockedReason, d
       </section>
       {diagnostics && <aside aria-label="Diagnostics" className="flex max-h-[60vh] min-h-[320px] w-full shrink-0 flex-col border-t @3xl:max-h-none @3xl:w-[340px] @3xl:border-t-0 @3xl:border-l @5xl:w-[420px] @7xl:w-[460px]">
         <div className="border-b px-4 py-3"><h2 className="text-sm font-medium">Diagnostics</h2><p className="mt-1 text-xs text-muted-foreground">How the selected answer was found. Pick another answer with its Diagnostics button.</p></div>
-        {inspectedTurn ? <RetrieverDiagnosticsPanel key={inspectedTurn.id} meta={inspectedTurn.diagnostics} question={inspectedTurn.question} status={inspectedTurn.status} config={config} catalog={catalog} schema={schema} />
+        {inspectedTurn ? <RetrieverDiagnosticsPanel key={inspectedTurn.id} meta={inspectedTurn.diagnostics} question={inspectedTurn.question} status={inspectedTurn.status} catalog={catalog} schema={schema} />
           : <p className="p-4 text-xs text-muted-foreground">Ask a question. Its plan, results, timings and model calls appear here while it runs.</p>}
       </aside>}
     </div>

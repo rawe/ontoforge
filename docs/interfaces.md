@@ -697,7 +697,7 @@ events, which carry:
 
 | Field | Content |
 |---|---|
-| `plan` | `subQueries` — each `indices`, `relations`, `query`, `variants`, `mode`, `filters` (`id`, `value`, `quote`) and `previous` — and `unsupportedReason` |
+| `plan` | `subQueries` — each `indices`, `relations`, `query`, `variants`, `mode`, `filters` (`id`, `value`, `quote`, and the filter's definition from the retriever's configuration: `entityType`, `path`, `field`) and `previous` — and `unsupportedReason` |
 | `results` | One row per entity and sub-query that found it, in fused order: `entityId`, `entityType`, `label`, `subQuery`, `matched` when the search ranked the entity, `answerFields` |
 | `limitations` | What the answer model was told limits the results |
 | `searchCalls` | The number of index searches run |

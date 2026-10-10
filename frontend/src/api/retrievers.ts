@@ -67,13 +67,18 @@ export interface Retriever {
 
 /* ------------------------------- diagnostics ------------------------------- */
 
+/** A planned filter: the planner's value and quote, with the filter's definition from the configuration that ran the turn. */
+export interface PlannedFilter extends RetrieverFilter {
+  value: string
+  quote: string
+}
 export interface PlanSubQuery {
   indices: string[]
   relations: string[]
   query: string
   variants: string[]
   mode: SearchMode
-  filters: { id: string; value: string; quote: string }[]
+  filters: PlannedFilter[]
 }
 export interface RetrieverResult {
   entityId: string

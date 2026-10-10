@@ -70,7 +70,7 @@ export function RetrieverTab({ ontologyKey, lensKey }: { ontologyKey: string; le
     </div>
     <RetrieverChat key={agent?.key ?? 'none'} ontologyKey={ontologyKey} lensKey={lensKey}
       agentKey={agent?.key ?? null} blockedReason={null} diagnostics={diagnostics} remember
-      config={null} catalog={catalog.data} schema={schema.data}
+      catalog={catalog.data} schema={schema.data}
       intro={<div className="mx-auto max-w-lg py-12 text-sm text-muted-foreground">{isDefault
         ? <><h3 className="mb-2 text-base font-medium text-foreground">Ask the default retriever</h3><p>It searches every switched-on managed index of this lens and may filter by the names of entities and of their direct neighbours. Ask about a topic, an exact name, or both.</p>
           <p className="mt-2">{stored.length === 0 ? 'For a tailored retriever, create one in the Studio.' : 'The lens\'s own retrievers are in the picker above.'}</p>

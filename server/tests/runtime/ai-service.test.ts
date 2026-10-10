@@ -488,6 +488,17 @@ describe("tool failures", () => {
 
     await expect(aiChat("full_lens", "list", asRuntimeStore(store))).rejects.toThrow("boom");
   });
+
+  it("a tool name outside the toolset aborts the run", async () => {
+    installFake([
+      toolCallMessage("drop_everything", {}),
+      new AIMessage("never reached"),
+    ]);
+
+    await expect(aiChat("full_lens", "go", asRuntimeStore(store))).rejects.toThrow(
+      'Tool "drop_everything" not found.',
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -34,7 +34,7 @@ import {
   ToolInputParsingException,
   type StructuredToolInterface,
 } from "@langchain/core/tools";
-import { ToolNode, createReactAgent } from "@langchain/langgraph/prebuilt";
+import { createAgent, createMiddleware } from "langchain";
 import { z } from "zod";
 
 import { DEFAULT_AGENT_CONFIG, getAiModel, type AgentConfig } from "../core/ai.js";
@@ -520,10 +520,24 @@ function messageText(message: BaseMessage | undefined): string {
 const RECURSION_LIMIT = 100;
 
 /**
+ * Tool errors abort the run. `createAgent` hands every tool error back to
+ * the model unless a `wrapToolCall` middleware is present, whose errors it
+ * rethrows; this pass-through is that middleware. A tool name the model
+ * made up fails the same way.
+ */
+const ABORT_ON_TOOL_ERROR = createMiddleware({
+  name: "AbortOnToolError",
+  wrapToolCall: async (request, handler) => {
+    if (request.tool === undefined) throw new Error(`Tool "${request.toolCall.name}" not found.`);
+    return handler(request);
+  },
+});
+
+/**
  * One ReAct-style run: system prompt, the given messages, the given tools.
- * Tool errors outside the self-correction paths abort (`handleToolErrors`
- * off — the wrappers in `buildTools` already feed domain and argument
- * errors back). Returns the final reply text.
+ * Tool errors outside the self-correction paths abort (the wrappers in
+ * `buildTools` already feed domain and argument errors back). Returns the
+ * final reply text.
  */
 async function runReactAgent(
   model: BaseChatModel,
@@ -539,10 +553,10 @@ async function runReactAgent(
     const response = await model.invoke([new SystemMessage(systemPrompt), ...messages], { signal });
     return messageText(response);
   }
-  const agent = createReactAgent({
-    llm: model,
-    tools: new ToolNode(tools, { handleToolErrors: false }),
-    prompt: systemPrompt,
+  // A SystemMessage keeps the prompt as plain string content; a string
+  // would be turned into a content-block array.
+  const agent = createAgent({
+    model, tools, systemPrompt: new SystemMessage(systemPrompt), middleware: [ABORT_ON_TOOL_ERROR],
   });
   const state = await agent.invoke({ messages }, { recursionLimit: RECURSION_LIMIT, signal });
   const finalMessages = state.messages as BaseMessage[];

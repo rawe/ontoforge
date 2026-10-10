@@ -15,7 +15,9 @@ export interface RelationEdgeData extends EdgeShape, Record<string, unknown> {
   label: string
   /** Curve parameter of the label (0.5 = middle), chosen by the canvas to keep labels apart. */
   labelT: number
-  onSelect: () => void
+  /** The dashed edge of a relation type still being named; not selectable. */
+  pending?: boolean
+  onSelect?: () => void
 }
 
 export type RelationFlowEdge = Edge<RelationEdgeData, 'relation'>
@@ -42,6 +44,7 @@ function RelationTypeEdgeInner({ id, source, target, data, selected, markerEnd }
   if (s === undefined || t === undefined || data === undefined) return null
 
   const geo = edgeGeometry(boxOf(s), boxOf(t), source === target, data, data.labelT)
+  const pending = data.pending === true
 
   return (
     <>
@@ -51,7 +54,11 @@ function RelationTypeEdgeInner({ id, source, target, data, selected, markerEnd }
         markerEnd={markerEnd}
         interactionWidth={18}
         className="of-edge-path"
-        style={{ stroke: selected ? 'var(--primary)' : EDGE_COLOR, strokeWidth: selected ? 2 : 1.5 }}
+        style={{
+          stroke: selected || pending ? 'var(--primary)' : EDGE_COLOR,
+          strokeWidth: selected ? 2 : 1.5,
+          strokeDasharray: pending ? '5 4' : undefined,
+        }}
       />
       <EdgeLabelRenderer>
         <button
@@ -60,7 +67,9 @@ function RelationTypeEdgeInner({ id, source, target, data, selected, markerEnd }
             'nodrag nopan absolute cursor-pointer rounded border px-1 font-mono text-[10px] leading-4 shadow-xs transition-colors',
             selected
               ? 'z-10 border-primary bg-primary text-primary-foreground'
-              : 'border-border bg-background text-muted-foreground hover:z-10 hover:text-foreground',
+              : pending
+                ? 'cursor-default border-dashed border-primary/60 bg-background text-primary'
+                : 'border-border bg-background text-muted-foreground hover:z-10 hover:text-foreground',
           )}
           style={{
             transform: `translate(-50%, -50%) translate(${geo.label.x}px, ${geo.label.y}px)`,
@@ -68,7 +77,7 @@ function RelationTypeEdgeInner({ id, source, target, data, selected, markerEnd }
           }}
           onClick={(e) => {
             e.stopPropagation()
-            data.onSelect()
+            data.onSelect?.()
           }}
         >
           {data.label}

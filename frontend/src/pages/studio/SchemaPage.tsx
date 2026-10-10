@@ -75,6 +75,7 @@ function SchemaShell({ ontologyKey }: { ontologyKey: string }) {
   }, [view, switchView])
 
   const loaded = !schema.isPending && schema.error === null
+  // Classic shows an empty state; the graph shows its own hint (double-click or N).
   const empty = loaded && schema.entityTypes.length === 0 && schema.relationTypes.length === 0
   // A type page reports its own loading and not-found states.
   const typePage = view === 'classic' && selection !== null
@@ -93,7 +94,7 @@ function SchemaShell({ ontologyKey }: { ontologyKey: string }) {
         className="py-24"
       />
     )
-  } else if (empty) {
+  } else if (empty && view === 'classic') {
     body = (
       <EmptyState
         icon={Box}

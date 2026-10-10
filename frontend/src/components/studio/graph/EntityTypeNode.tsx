@@ -1,6 +1,6 @@
 import { memo, useState } from 'react'
-import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
-import { ChevronDown, Tag } from 'lucide-react'
+import { Handle, Position, useConnection, type Node, type NodeProps } from '@xyflow/react'
+import { ChevronDown, Plus, Tag } from 'lucide-react'
 import type { EntityType, PropertyDefinition } from '@/api/types'
 import { getTypeColor } from '@/lib/typeColors'
 import { cn } from '@/lib/utils'
@@ -17,18 +17,23 @@ export interface EntityNodeData extends Record<string, unknown> {
 }
 
 export type EntityFlowNode = Node<EntityNodeData, 'entityType'>
+export type GhostFlowNode = Node<Record<string, never>, 'ghost'>
 
-/** Edges float (they are drawn from node boxes), but React Flow needs a handle on each end. */
-const hiddenHandle = 'pointer-events-none! opacity-0!'
+/** Height of the ghost node; the canvas centres it on the gesture point. */
+export const GHOST_HEIGHT = 56
 
 /**
  * Entity type node: type-colour accent, display name, mono key and a compact
  * property list (name property first, then by key), truncated after six rows.
  * The header chevron collapses the list to "N properties"; the flag is
- * stored per ontology (`graphStore.ts`).
+ * stored per ontology (`graphStore.ts`). Hovering or selecting shows the "+"
+ * handle that starts a connection; while one is dragged the whole card is
+ * the drop target.
  */
-function EntityTypeNodeInner({ data, selected }: NodeProps<EntityFlowNode>) {
+function EntityTypeNodeInner({ id, data, selected }: NodeProps<EntityFlowNode>) {
   const [expanded, setExpanded] = useState(false)
+  const connecting = useConnection((c) => c.inProgress)
+  const dropTarget = useConnection((c) => c.inProgress && c.toNode?.id === id)
   const { entityType: et, properties, collapsed } = data
   const color = getTypeColor(et.key)
 
@@ -45,8 +50,9 @@ function EntityTypeNodeInner({ data, selected }: NodeProps<EntityFlowNode>) {
   return (
     <div
       className={cn(
-        'relative rounded-lg border bg-card shadow-sm transition-shadow',
+        'group relative rounded-lg border bg-card shadow-sm transition-shadow',
         selected && 'ring-2 ring-primary/70',
+        dropTarget && 'ring-2 ring-(--tc-emerald)',
       )}
       style={{ width: NODE_WIDTH, borderColor: color.borderVar }}
     >
@@ -132,10 +138,46 @@ function EntityTypeNodeInner({ data, selected }: NodeProps<EntityFlowNode>) {
         </div>
       )}
 
-      <Handle type="target" position={Position.Left} isConnectable={false} className={hiddenHandle} />
-      <Handle type="source" position={Position.Right} isConnectable={false} className={hiddenHandle} />
+      {/* Drag from "+" onto a type, onto this type, or onto empty canvas. */}
+      <Handle
+        type="source"
+        position={Position.Right}
+        title="Drag to create a relation type"
+        aria-label="Drag to create a relation type"
+        className={cn(
+          'flex! size-5! items-center! justify-center! rounded-full! border! border-border! bg-card! text-muted-foreground shadow-sm',
+          'opacity-0 transition-opacity group-hover:opacity-100 hover:border-primary! hover:text-primary',
+          selected && 'opacity-100',
+          connecting && 'pointer-events-none opacity-0!',
+        )}
+      >
+        <Plus className="pointer-events-none size-3" />
+      </Handle>
+      {/* Invisible; covers the whole card while a connection is dragged. */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        isConnectableStart={false}
+        className={connecting ? 'of-drop-target' : 'of-hidden-handle'}
+      />
+    </div>
+  )
+}
+
+/** Where a new entity type will appear while it is being named. */
+function GhostNodeInner() {
+  return (
+    <div
+      className="flex items-center justify-center rounded-lg border border-dashed border-primary/60 bg-card/60 text-[12px] text-primary"
+      style={{ width: NODE_WIDTH, height: GHOST_HEIGHT }}
+    >
+      New entity type…
+      {/* React Flow needs a handle on each end of the pending edge. */}
+      <Handle type="target" position={Position.Left} isConnectable={false} className="of-hidden-handle" />
+      <Handle type="source" position={Position.Right} isConnectable={false} className="of-hidden-handle" />
     </div>
   )
 }
 
 export const EntityTypeNode = memo(EntityTypeNodeInner)
+export const GhostNode = memo(GhostNodeInner)

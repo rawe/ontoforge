@@ -1,16 +1,19 @@
 /**
  * The schema graph: one node per entity type, one edge per relation type.
  * React Flow is controlled. Node positions are computed once (dagre on the
- * first open, a free spot near the viewport centre for a type created
- * elsewhere), then only the user moves them; schema edits merge into the
- * nodes by id and never re-lay out. Selection comes from the address: a
- * click here selects without moving the view, a selection made anywhere else
- * is revealed.
+ * first open, the gesture point for a type created here, a free spot near
+ * the viewport centre for one created elsewhere), then only the user moves
+ * them; schema edits merge into the nodes by id and never re-lay out.
+ * Selection comes from the address: a click here selects without moving the
+ * view, a selection made anywhere else is revealed. Types are created here by
+ * double-click, `N` or the toolbar; relation types by dragging a node's "+"
+ * onto a node, itself or empty canvas. A naming popover asks for the names.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Background,
+  ConnectionLineType,
   Controls,
   MarkerType,
   ReactFlow,
@@ -20,23 +23,42 @@ import {
   useReactFlow,
   useStore,
   useStoreApi,
+  type FinalConnectionState,
   type Node,
   type NodeChange,
   type NodeDimensionChange,
   type NodePositionChange,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { ChevronsDownUp, ChevronsUpDown, LayoutGrid, Maximize } from 'lucide-react'
+import { ChevronsDownUp, ChevronsUpDown, LayoutGrid, Maximize, Plus } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { Button } from '@/components/ui/button'
+import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { isPlainKey, isTyping, overlayOpen } from '@/lib/shortcuts'
 import { cn } from '@/lib/utils'
 import { useRequestDelete } from '../modeling/deleteContext'
+import { useCreateEntityType, useCreateRelationType } from '../modeling/mutations'
 import { useModelSchema, type ModelSchema } from '../modeling/useModelSchema'
 import type { SchemaSelection } from '../schema/schemaUrl'
 import { useSchemaWorkspace, type SelectOptions } from '../schema/workspaceContext'
-import { EntityTypeNode, type EntityFlowNode } from './EntityTypeNode'
+import {
+  CreatePopover,
+  COMBINED_POPOVER_HEIGHT,
+  POPOVER_HEIGHT,
+  POPOVER_WIDTH,
+  type PopoverAnchor,
+  type PopoverState,
+  type PopoverValues,
+  type SubmitError,
+} from './CreatePopover'
+import {
+  EntityTypeNode,
+  GHOST_HEIGHT,
+  GhostNode,
+  type EntityFlowNode,
+  type GhostFlowNode,
+} from './EntityTypeNode'
 import { edgeSpecs, freeSpot, placeLabels, type Box, type XY } from './geometry'
 import {
   allCollapsedOf,
@@ -52,8 +74,21 @@ import {
 import { dagreLayout, estimateHeight, NODE_WIDTH, type Positions } from './layout'
 import { EDGE_COLOR, RelationTypeEdge, type RelationFlowEdge } from './RelationTypeEdge'
 
-const nodeTypes = { entityType: EntityTypeNode }
+const nodeTypes = { entityType: EntityTypeNode, ghost: GhostNode }
 const edgeTypes = { relation: RelationTypeEdge }
+const GHOST_ID = '__ghost'
+const PENDING_EDGE_ID = '__pending'
+const CONNECTION_LINE_STYLE = { stroke: 'var(--primary)', strokeWidth: 1.5, strokeDasharray: '5 4' }
+
+type AppNode = EntityFlowNode | GhostFlowNode
+
+/** A type created by a gesture here, to be placed at the gesture point. */
+interface Placement {
+  key: string
+  at: XY
+}
+
+const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(v, max))
 
 const sameSelection = (a: SchemaSelection | null, b: SchemaSelection | null) =>
   a === b || (a !== null && b !== null && a.kind === b.kind && a.key === b.key)
@@ -68,21 +103,26 @@ export function SchemaCanvas() {
 
 /**
  * The nodes for the current entity types: existing nodes keep their position
- * (and React Flow's measurements), stored positions are restored, and the
- * rest is placed — dagre for everything when nothing is placed yet, else the
- * free spot nearest the viewport centre.
+ * (and React Flow's measurements), stored positions are restored, a type
+ * created by a gesture here goes to its gesture point, and the rest is
+ * placed — dagre for everything when nothing is placed yet, else the free
+ * spot nearest the viewport centre.
  */
 function syncNodes(
   prev: Node[],
   schema: ModelSchema,
   stored: Positions,
   collapsed: Collapsed,
+  placement: Placement | null,
   viewportCentre: () => XY,
 ): Node[] {
   const prevById = new Map(prev.map((n) => [n.id, n]))
   const placed: Positions = {}
   for (const t of schema.entityTypes) {
-    const p = prevById.get(t.entityTypeId)?.position ?? stored[t.entityTypeId]
+    const p =
+      prevById.get(t.entityTypeId)?.position ??
+      stored[t.entityTypeId] ??
+      (placement?.key === t.key ? placement.at : undefined)
     if (p !== undefined) placed[t.entityTypeId] = p
   }
   const missing = schema.entityTypes.filter((t) => placed[t.entityTypeId] === undefined)
@@ -123,24 +163,31 @@ function syncNodes(
   return next.length === prev.length && next.every((n, i) => n === prev[i]) ? prev : next
 }
 
-const isMoveOrResize = (c: NodeChange<EntityFlowNode>): c is NodePositionChange | NodeDimensionChange =>
+const isMoveOrResize = (c: NodeChange<AppNode>): c is NodePositionChange | NodeDimensionChange =>
   c.type === 'position' || c.type === 'dimensions'
 
 function Canvas() {
   const { ontologyKey, selection, select } = useSchemaWorkspace()
   const schema = useModelSchema(ontologyKey)
   const requestDelete = useRequestDelete()
+  const { create: createEntityType } = useCreateEntityType(ontologyKey)
+  const { create: createRelationType } = useCreateRelationType(ontologyKey)
   const collapsed = useCollapsed(ontologyKey)
   const { resolvedTheme } = useTheme()
-  const { fitView, setCenter, getZoom, getInternalNode, getViewport } = useReactFlow()
+  const { fitView, setCenter, getZoom, getInternalNode, getViewport, screenToFlowPosition } = useReactFlow()
   const storeApi = useStoreApi()
   const paneReady = useStore((s) => s.width > 0 && s.height > 0)
+  const connecting = useStore((s) => s.connection.inProgress)
   const nodesInitialized = useNodesInitialized()
 
+  const wrapperRef = useRef<HTMLDivElement>(null)
   const [stored] = useState(() => loadPositions(ontologyKey))
   const [keptAtMount] = useState(() => keptView(ontologyKey))
   const [nodes, setNodes] = useState<Node[]>([])
   const [relayout, setRelayout] = useState(false)
+  const [popover, setPopover] = useState<PopoverState | null>(null)
+  // Kept after the create: the type may reach the cache before or after the request resolves.
+  const [placement, setPlacement] = useState<Placement | null>(null)
 
   const { entityTypes, relationTypes, properties } = schema
   const entityIds = useMemo(() => entityTypes.map((t) => t.entityTypeId), [entityTypes])
@@ -156,7 +203,7 @@ function Canvas() {
   if (ready && !schema.isPending && syncedTypes !== entityTypes) {
     setSyncedTypes(entityTypes)
     setNodes((prev) =>
-      syncNodes(prev, schema, stored, collapsed, () => {
+      syncNodes(prev, schema, stored, collapsed, placement, () => {
         const { width, height, transform } = storeApi.getState()
         const [tx, ty, zoom] = transform
         return { x: (width / 2 - tx) / zoom, y: (height / 2 - ty) / zoom }
@@ -234,7 +281,18 @@ function Canvas() {
 
   /* ------------------------------ nodes, edges ------------------------------ */
 
-  const flowNodes = useMemo(
+  // Where the type being named will appear. One object per popover, so React
+  // Flow keeps its measurements (it is not part of `nodes`).
+  const ghostAt = popover !== null && popover.mode !== 'relation' ? popover.ghost : null
+  const ghost = useMemo<GhostFlowNode | null>(
+    () =>
+      ghostAt === null
+        ? null
+        : { id: GHOST_ID, type: 'ghost', position: ghostAt, data: {}, selectable: false, draggable: false },
+    [ghostAt],
+  )
+
+  const entityNodes = useMemo(
     () =>
       nodes.flatMap((n): EntityFlowNode[] => {
         const et = entityTypes.find((t) => t.entityTypeId === n.id)
@@ -257,6 +315,10 @@ function Canvas() {
       }),
     [nodes, entityTypes, properties, collapsed, selectedEntityId, ontologyKey, selectHere],
   )
+  const flowNodes = useMemo<AppNode[]>(
+    () => (ghost === null ? entityNodes : [...entityNodes, ghost]),
+    [entityNodes, ghost],
+  )
 
   const edges = useMemo<RelationFlowEdge[]>(() => {
     const boxes = new Map<string, Box>(
@@ -265,39 +327,48 @@ function Canvas() {
         { ...n.position, w: n.measured?.width ?? NODE_WIDTH, h: n.measured?.height ?? 80 },
       ]),
     )
+    if (ghost !== null) boxes.set(GHOST_ID, { ...ghost.position, w: NODE_WIDTH, h: GHOST_HEIGHT })
     const ends = relationTypes.flatMap((r) => {
       const source = idOfKey.get(r.sourceEntityTypeKey)
       const target = idOfKey.get(r.targetEntityTypeKey)
       if (source === undefined || target === undefined || !boxes.has(source) || !boxes.has(target)) return []
       return [{ id: r.relationTypeId, source, target, label: r.key }]
     })
+    // The relation type being named, dashed, to its target or the ghost.
+    if (popover !== null && popover.mode !== 'entity' && boxes.has(popover.sourceId)) {
+      const target = popover.mode === 'relation' ? popover.targetId : GHOST_ID
+      if (boxes.has(target)) ends.push({ id: PENDING_EDGE_ID, source: popover.sourceId, target, label: '…' })
+    }
     const shapes = edgeSpecs(ends)
     const shaped = ends.map((e) => ({ ...e, ...shapes.get(e.id)! }))
     const labelT = placeLabels(shaped, boxes)
     return shaped.map((e) => {
-      const isSelected = selection?.kind === 'relation-types' && selection.key === e.label
+      const pending = e.id === PENDING_EDGE_ID
+      const isSelected = !pending && selection?.kind === 'relation-types' && selection.key === e.label
       return {
         id: e.id,
         source: e.source,
         target: e.target,
         type: 'relation' as const,
         selected: isSelected,
+        selectable: !pending,
         markerEnd: {
           type: MarkerType.ArrowClosed,
           width: 16,
           height: 16,
-          color: isSelected ? 'var(--primary)' : EDGE_COLOR,
+          color: isSelected || pending ? 'var(--primary)' : EDGE_COLOR,
         },
         data: {
           label: e.label,
           offset: e.offset,
           loopIndex: e.loopIndex,
           labelT: labelT.get(e.id) ?? 0.5,
-          onSelect: () => selectHere({ kind: 'relation-types', key: e.label }),
+          pending,
+          onSelect: pending ? undefined : () => selectHere({ kind: 'relation-types', key: e.label }),
         },
       }
     })
-  }, [nodes, relationTypes, idOfKey, selection, selectHere])
+  }, [nodes, ghost, popover, relationTypes, idOfKey, selection, selectHere])
 
   /* -------------------------------- actions -------------------------------- */
 
@@ -308,7 +379,7 @@ function Canvas() {
         width: n.measured?.width ?? NODE_WIDTH,
         height: n.measured?.height ?? 80,
       })),
-      edges,
+      edges.filter((e) => e.data?.pending !== true),
     )
     setRelayout(true)
     setNodes((nds) => nds.map((n) => ({ ...n, position: positions[n.id] ?? n.position })))
@@ -320,6 +391,123 @@ function Canvas() {
 
   const allCollapsed = allCollapsedOf(collapsed, entityIds)
 
+  /* ----------------------------- create gestures ----------------------------- */
+
+  // Where the popover for a gesture at `client` (pixels) goes. A ghost is
+  // centred on the point, with the popover below it, or above it when there
+  // is no room below; after a drop on a node the popover sits at the pointer.
+  // It stays inside the canvas.
+  const placePopover = useCallback(
+    (client: XY, mode: PopoverState['mode']) => {
+      const rect = wrapperRef.current?.getBoundingClientRect()
+      if (rect === undefined) return null
+      const flow = screenToFlowPosition(client)
+      const ghost = { x: flow.x - NODE_WIDTH / 2, y: flow.y - GHOST_HEIGHT / 2 }
+      const zoom = getZoom()
+      const x = client.x - rect.left
+      const y = client.y - rect.top
+      const half = mode === 'relation' ? 0 : (GHOST_HEIGHT / 2) * zoom
+      const height = mode === 'entity+relation' ? COMBINED_POPOVER_HEIGHT : POPOVER_HEIGHT
+      const left = clamp(mode === 'relation' ? x + 8 : x - (NODE_WIDTH / 2) * zoom, 8, rect.width - POPOVER_WIDTH - 8)
+      const top = y + half + 8
+      const at: PopoverAnchor =
+        top + height + 8 <= rect.height || y - half - 8 - height < 8
+          ? { left, top: clamp(top, 8, rect.height - height - 8) }
+          : { left, bottom: rect.height - (y - half - 8) }
+      return { at, ghost }
+    },
+    [screenToFlowPosition, getZoom],
+  )
+
+  const newEntityAt = useCallback(
+    (client: XY) => {
+      const place = placePopover(client, 'entity')
+      if (place !== null) setPopover({ mode: 'entity', ...place })
+    },
+    [placePopover],
+  )
+
+  const newEntityAtCentre = useCallback(() => {
+    const rect = wrapperRef.current?.getBoundingClientRect()
+    if (rect !== undefined) newEntityAt({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
+  }, [newEntityAt])
+
+  const typeById = (id: string) => entityTypes.find((t) => t.entityTypeId === id)
+
+  // Entity type first (placed at the ghost), then the relation type. When the
+  // relation fails after a new type was created, the popover stays, in
+  // relation mode against that type, with the typed name and the error.
+  const submitPopover = async (values: PopoverValues): Promise<SubmitError | null> => {
+    if (popover === null) return null
+    const state = popover
+    const source = state.mode === 'entity' ? undefined : typeById(state.sourceId)
+    let target = state.mode === 'relation' ? typeById(state.targetId) : undefined
+
+    if (state.mode !== 'relation' && values.entity !== undefined) {
+      setPlacement({ key: values.entity.key, at: state.ghost })
+      fitted.current = true // the first type of an empty graph must not trigger the initial fit
+      try {
+        target = await createEntityType({ key: values.entity.key, displayName: values.entity.name.trim() })
+      } catch (error) {
+        return { part: 'entity', error }
+      }
+      if (state.mode === 'entity') {
+        setPopover(null)
+        selectHere({ kind: 'entity-types', key: target.key })
+        return null
+      }
+    }
+
+    if (values.relation === undefined || source === undefined || target === undefined) return null
+    try {
+      const created = await createRelationType({
+        key: values.relation.key,
+        displayName: values.relation.name.trim(),
+        sourceEntityTypeKey: source.key,
+        targetEntityTypeKey: target.key,
+      })
+      setPopover(null)
+      selectHere({ kind: 'relation-types', key: created.key })
+      return null
+    } catch (error) {
+      if (state.mode !== 'entity+relation') return { part: 'relation', error }
+      setPopover({
+        mode: 'relation',
+        at: state.at,
+        sourceId: state.sourceId,
+        targetId: target.entityTypeId,
+        initial: values.relation,
+        failure: { part: 'relation', error },
+      })
+      return null
+    }
+  }
+
+  // Esc during a connection drag ends it here, and its end event is ignored.
+  const dragCancelled = useRef(false)
+
+  const onConnectEnd = useCallback(
+    (event: MouseEvent | TouchEvent, state: FinalConnectionState) => {
+      if (dragCancelled.current) {
+        dragCancelled.current = false
+        return
+      }
+      const sourceId = state.fromNode?.id
+      if (sourceId === undefined || sourceId === GHOST_ID) return
+      const point = 'changedTouches' in event ? event.changedTouches[0] : event
+      if (point === undefined) return
+      const client = { x: point.clientX, y: point.clientY }
+      if (state.isValid === true && state.toNode !== null && state.toNode.id !== GHOST_ID) {
+        const place = placePopover(client, 'relation')
+        if (place !== null) setPopover({ mode: 'relation', at: place.at, sourceId, targetId: state.toNode.id })
+      } else if ((event.target as Element | null)?.classList.contains('react-flow__pane') === true) {
+        const place = placePopover(client, 'entity+relation')
+        if (place !== null) setPopover({ mode: 'entity+relation', ...place, sourceId })
+      }
+    },
+    [placePopover],
+  )
+
   // The selected type's id, for the delete dialog.
   const selectedId =
     selection?.kind === 'relation-types'
@@ -327,10 +515,19 @@ function Canvas() {
       : selectedEntityId
 
   // H hides or shows the properties of every node, ⇧H only of the selected
-  // one. Del / Backspace deletes the selected type (with the dialog's preview),
-  // Esc clears the selection.
+  // one. N names a new entity type at the viewport centre. Del / Backspace
+  // deletes the selected type (with the dialog's preview). Esc cancels a
+  // connection drag, else closes the popover, else clears the selection (the
+  // popover's own fields handle Esc themselves).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && connecting) {
+        // React Flow ends the drag on mouseup; its end event is then ignored.
+        e.preventDefault()
+        dragCancelled.current = true
+        document.dispatchEvent(new MouseEvent('mouseup'))
+        return
+      }
       if (e.repeat || !isPlainKey(e)) return
       if (e.defaultPrevented || isTyping(e) || overlayOpen(e)) return
       if (e.key === 'h' || e.key === 'H') {
@@ -340,6 +537,12 @@ function Canvas() {
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && selection !== null && selectedId !== null) {
         e.preventDefault()
         requestDelete({ what: 'type', kind: selection.kind, id: selectedId })
+      } else if (e.key === 'n' || e.key === 'N') {
+        e.preventDefault()
+        newEntityAtCentre()
+      } else if (e.key === 'Escape' && popover !== null) {
+        e.preventDefault()
+        setPopover(null)
       } else if (e.key === 'Escape' && selection !== null) {
         e.preventDefault()
         selectHere(null)
@@ -347,23 +550,53 @@ function Canvas() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [ontologyKey, entityIds, selectedEntityId, selection, selectedId, requestDelete, selectHere])
+  }, [
+    connecting,
+    popover,
+    ontologyKey,
+    entityIds,
+    selectedEntityId,
+    selection,
+    selectedId,
+    requestDelete,
+    selectHere,
+    newEntityAtCentre,
+  ])
 
   /* -------------------------------- render -------------------------------- */
 
+  const popoverSource = popover !== null && popover.mode !== 'entity' ? typeById(popover.sourceId) : undefined
+  const popoverTarget = popover?.mode === 'relation' ? typeById(popover.targetId) : undefined
+
   return (
-    <div className="relative h-full w-full overflow-hidden">
-      <ReactFlow<EntityFlowNode, RelationFlowEdge>
+    <div
+      ref={wrapperRef}
+      className="relative h-full w-full overflow-hidden"
+      onDoubleClick={(e) => {
+        if ((e.target as Element).classList.contains('react-flow__pane')) newEntityAt({ x: e.clientX, y: e.clientY })
+      }}
+    >
+      <ReactFlow<AppNode, RelationFlowEdge>
         className={cn(relayout && 'of-relayout')}
         nodes={flowNodes}
         edges={edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodesChange={(changes) => setNodes((nds) => applyNodeChanges(changes.filter(isMoveOrResize), nds))}
-        onNodeClick={(_, node) => selectHere({ kind: 'entity-types', key: node.data.entityType.key })}
-        onEdgeClick={(_, edge) => edge.data !== undefined && edge.data.onSelect()}
-        onPaneClick={() => selectHere(null)}
-        nodesConnectable={false}
+        onNodeClick={(_, node) =>
+          node.type === 'entityType' && selectHere({ kind: 'entity-types', key: node.data.entityType.key })
+        }
+        onEdgeClick={(_, edge) => edge.data?.onSelect?.()}
+        onPaneClick={() => {
+          setPopover(null)
+          selectHere(null)
+        }}
+        onConnectStart={() => setPopover(null)}
+        onConnectEnd={onConnectEnd}
+        connectOnClick={false}
+        connectionLineType={ConnectionLineType.Straight}
+        connectionLineStyle={CONNECTION_LINE_STYLE}
+        zoomOnDoubleClick={false}
         selectNodesOnDrag={false}
         deleteKeyCode={null}
         selectionKeyCode={null}
@@ -378,7 +611,19 @@ function Canvas() {
         <Controls showInteractive={false} position="bottom-left" />
       </ReactFlow>
 
+      {!schema.isPending && entityTypes.length === 0 && popover === null && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <p className="rounded-xl border bg-card/90 px-4 py-2 text-sm text-muted-foreground shadow-sm">
+            Double-click or press <Kbd>N</Kbd> to create the first entity type
+          </p>
+        </div>
+      )}
+
       <div className="absolute top-3 left-3 z-10 flex items-center gap-0.5 rounded-xl border bg-card/95 p-1 shadow-md backdrop-blur-sm">
+        <ToolButton label="New entity type (N)" text onClick={newEntityAtCentre}>
+          <Plus /> Entity type
+        </ToolButton>
+        <Separator orientation="vertical" className="mx-0.5 h-5!" />
         <ToolButton label="Tidy layout" onClick={tidy}>
           <LayoutGrid />
         </ToolButton>
@@ -396,11 +641,23 @@ function Canvas() {
       {/* Inside the canvas (it clips), clear of the zoom controls; wraps when narrow. */}
       <div className="pointer-events-none absolute right-3 bottom-3 left-14 z-10 flex justify-center">
         <div className="rounded-xl border bg-card/90 px-3 py-1 text-center text-[11px] text-muted-foreground shadow-sm backdrop-blur-sm">
-          Click a type or relation: select · drag a type: move · <Kbd>H</Kbd> hide/show properties ·{' '}
-          <Kbd>⇧H</Kbd> selected type only · <Kbd>Del</Kbd> delete selected · <Kbd>Esc</Kbd> clear
-          selection · <Kbd>V</Kbd> Graph/Classic
+          Click: select · drag a type: move · double-click or <Kbd>N</Kbd>: new type · drag{' '}
+          <b className="font-semibold">+</b> onto a type, itself or empty space: relation ·{' '}
+          <Kbd>H</Kbd> hide/show properties · <Kbd>⇧H</Kbd> selected type only · <Kbd>Del</Kbd> delete
+          selected · <Kbd>Esc</Kbd> cancel / clear selection · <Kbd>V</Kbd> Graph/Classic
         </div>
       </div>
+
+      {popover !== null && (
+        <CreatePopover
+          key={`${popover.mode}:${JSON.stringify(popover.at)}:${popover.mode === 'relation' ? popover.targetId : ''}`}
+          state={popover}
+          source={popoverSource}
+          target={popoverTarget}
+          onSubmit={submitPopover}
+          onCancel={() => setPopover(null)}
+        />
+      )}
     </div>
   )
 }
@@ -409,11 +666,22 @@ function Kbd({ children }: { children: ReactNode }) {
   return <kbd className="font-mono">{children}</kbd>
 }
 
-function ToolButton({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
+function ToolButton({
+  label,
+  text = false,
+  onClick,
+  children,
+}: {
+  label: string
+  /** A button with a text label rather than an icon only. */
+  text?: boolean
+  onClick: () => void
+  children: ReactNode
+}) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button variant="ghost" size="icon-sm" onClick={onClick} aria-label={label}>
+        <Button variant="ghost" size={text ? 'sm' : 'icon-sm'} onClick={onClick} aria-label={text ? undefined : label}>
           {children}
         </Button>
       </TooltipTrigger>

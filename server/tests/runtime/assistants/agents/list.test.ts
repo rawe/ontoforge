@@ -32,7 +32,7 @@ describe("listRuntimeAgents", () => {
     const agents = await listRuntimeAgents("test_lens", asRuntimeStore(store));
 
     expect(agents).toEqual([
-      { key: "_default", name: "Default", description: null, builtIn: true },
+      { key: "_default", name: "Default", description: DEFAULT_AGENT_CONFIG.description, builtIn: true },
       { key: "my-agent", name: "My Agent", description: "A custom agent", builtIn: false },
     ]);
     expect(agents[0]!.name).toBe(DEFAULT_AGENT_CONFIG.name);

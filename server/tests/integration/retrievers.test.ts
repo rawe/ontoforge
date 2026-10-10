@@ -22,6 +22,7 @@ import { setAiModel } from "../../src/core/ai.js";
 import { setEmbeddingProvider } from "../../src/core/embedding.js";
 import { closeStores, getRuntimeStore, initStores } from "../../src/core/ports.js";
 import { drainSearchWork } from "../../src/runtime/indexing/worker.js";
+import { DEFAULT_RETRIEVER_DESCRIPTION } from "../../src/runtime/assistants/retrievers/defaultRetriever.js";
 import { loadRunnableRetriever } from "../../src/runtime/assistants/retrievers/runtime.js";
 import { retrieve, retrievedResults } from "../../src/runtime/assistants/retrievers/retrieve.js";
 import type { Plan } from "../../src/runtime/assistants/retrievers/plan.js";
@@ -327,7 +328,7 @@ describe.skipIf(!postgres)("retrievers", () => {
     expect((await ok("GET", `${AGENTS}/people/export`)).config).toEqual(CONFIG);
     // Still listed at runtime, without configuration or validation, after the default.
     expect(await ok("GET", `${RUNTIME}/ai/assistants/retrievers`)).toEqual([
-      { key: "_default", name: "Default", description: null, builtIn: true },
+      { key: "_default", name: "Default", description: DEFAULT_RETRIEVER_DESCRIPTION, builtIn: true },
       { key: "people", name: BODY.name, description: BODY.description, builtIn: false },
     ]);
     expect((await request("GET", `/api/ontologies/${O}/runtime/lenses/nope/ai/assistants/retrievers`)).statusCode).toBe(404);

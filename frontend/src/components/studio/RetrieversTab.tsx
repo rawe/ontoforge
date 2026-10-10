@@ -151,6 +151,8 @@ function RetrieverEditor({ ontologyKey, lensKey, existingKeys, catalog, schema, 
   const [saveIssues, setSaveIssues] = useState<ValidationError[]>([])
   const [copyOpen, setCopyOpen] = useState(false)
   const [copyError, setCopyError] = useState('')
+  // The test chat's "New conversation" goes into the Test header.
+  const [chatActions, setChatActions] = useState<HTMLElement | null>(null)
   const unsupported = agent !== null && !isSupportedRetriever(agent)
   const showEditor = !unsupported || repairApplied
   const dirty = !sameDraft(draft, baseline) || repairApplied
@@ -234,10 +236,11 @@ function RetrieverEditor({ ontologyKey, lensKey, existingKeys, catalog, schema, 
 
       <section aria-label="Test" className="flex h-[85dvh] min-h-[640px] min-w-0 flex-col overflow-hidden rounded-xl border bg-card xl:sticky xl:top-4">
         <div className="border-b px-4 py-3"><div className="flex items-center justify-between gap-3"><h3 className="text-[13px] font-semibold">Test</h3>
+          <div className="flex items-center gap-2"><div ref={setChatActions} className="flex items-center" />
           <div role="radiogroup" aria-label="Test mode" className="inline-flex rounded-md border p-0.5 text-xs">
             {(['chat', 'retrieve'] as const).map((mode) => <button key={mode} type="button" role="radio" aria-checked={testMode === mode} onClick={() => chooseTestMode(mode)}
               className={cn('rounded px-2 py-0.5', testMode === mode ? 'bg-muted font-medium' : 'text-muted-foreground hover:text-foreground')}>{mode === 'chat' ? 'Chat' : 'Retrieve'}</button>)}
-          </div></div>
+          </div></div></div>
           <p className="mt-0.5 text-xs text-muted-foreground">{testMode === 'chat'
             ? 'Ask the saved version and inspect how each answer was found. Saving starts a new conversation.'
             : 'Ask the saved version for the entities it finds, without an answer. Saving clears the result.'}</p></div>
@@ -248,7 +251,7 @@ function RetrieverEditor({ ontologyKey, lensKey, existingKeys, catalog, schema, 
           : <RetrieverChat key={agent ? `${agent.key}:${agent.updatedAt}` : 'new'} ontologyKey={ontologyKey} lensKey={lensKey}
             retrieverKey={agent?.key ?? null} name={agent?.name ?? title} description={agent?.description ?? null}
             blockedReason={execution.mode === 'blocked' ? execution.reason : null} diagnostics="always" remember={false}
-            catalog={catalog} schema={schema} />}
+            catalog={catalog} schema={schema} actions={chatActions} />}
       </section>
     </div>
 

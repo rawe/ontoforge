@@ -57,6 +57,7 @@ import {
 } from "../../search/indexSearch.js";
 import { checkRetrieverConfig } from "./config.js";
 import {
+  DEFAULT_RETRIEVER_DESCRIPTION,
   DEFAULT_RETRIEVER_KEY,
   DEFAULT_RETRIEVER_NAME,
   defaultRetrieverConfig,
@@ -143,7 +144,7 @@ export async function listRuntimeRetrievers(lensKey: string, store: RuntimeStore
   const loaded = await loadSchema(lensKey, store);
   const stored = await indexStore.listRetrievers(loaded.scoped.lensId);
   return [
-    { key: DEFAULT_RETRIEVER_KEY, name: DEFAULT_RETRIEVER_NAME, description: null, builtIn: true },
+    { key: DEFAULT_RETRIEVER_KEY, name: DEFAULT_RETRIEVER_NAME, description: DEFAULT_RETRIEVER_DESCRIPTION, builtIn: true },
     ...stored.map((agent) => ({ key: agent.key, name: agent.name, description: agent.description, builtIn: false })),
   ];
 }

@@ -72,11 +72,11 @@ export interface SavedQueryConfig {
 
 /** The implicit default agent: `_default`-keyed (no configurable key may
  * begin with an underscore, so it can never be shadowed), undeletable,
- * no prompt of its own, unrestricted tools. */
+ * no prompt of its own, unrestricted tools; its description is fixed. */
 export const DEFAULT_AGENT_CONFIG: AgentConfig = {
   key: "_default",
   name: "Default",
-  description: null,
+  description: "Uses every read-only tool on this lens to answer.",
   systemPrompt: null,
   tools: null,
 };

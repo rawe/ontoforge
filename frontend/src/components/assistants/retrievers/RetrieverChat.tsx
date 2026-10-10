@@ -29,6 +29,8 @@ interface RetrieverChatProps {
   catalog: SearchCatalogEntry[] | undefined
   schema: RuntimeSchema | undefined
   picker?: ReactNode
+  /** Where "New conversation" goes instead of a toolbar (the Studio test panel's header). */
+  actions?: HTMLElement | null
 }
 
 /**
@@ -36,7 +38,7 @@ interface RetrieverChatProps {
  * and the Studio test panel: the running phase as live detail, each
  * answer's diagnostics in the side panel.
  */
-export function RetrieverChat({ ontologyKey, lensKey, retrieverKey, name, description, blockedReason, diagnostics, remember, catalog, schema, picker }: RetrieverChatProps) {
+export function RetrieverChat({ ontologyKey, lensKey, retrieverKey, name, description, blockedReason, diagnostics, remember, catalog, schema, picker, actions }: RetrieverChatProps) {
   const [switchedOn, setSwitchedOn] = useState(() => readString(storageKeys.retrieverDiagnostics) === 'true')
   const withDiagnostics = diagnostics === 'always' || switchedOn
   return (
@@ -56,6 +58,7 @@ export function RetrieverChat({ ontologyKey, lensKey, retrieverKey, name, descri
         retrieverKey === null ? Promise.resolve()
           : chatRetriever(ontologyKey, lensKey, retrieverKey, { ...body, diagnostics: withDiagnostics }, onEvent, signal)}
       picker={picker}
+      actions={actions}
       toggle={diagnostics === 'toggle'
         ? <InsightToggle
             label="Show diagnostics"
@@ -81,7 +84,7 @@ export function RetrieverChat({ ontologyKey, lensKey, retrieverKey, name, descri
         button: (turn) => {
           if (!retrieverTurns.hasInsight(turn.insight)) return null
           const total = turn.insight.diagnostics.timings?.total
-          return { icon: Activity, running: turn.status === 'pending', label: <>Diagnostics{total !== undefined && ` · ${formatDuration(total)}`}</> }
+          return { icon: Activity, label: <>Diagnostics{total !== undefined && ` · ${formatDuration(total)}`}</> }
         },
       }}
     />

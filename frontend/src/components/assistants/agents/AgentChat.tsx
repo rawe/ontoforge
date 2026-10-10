@@ -63,7 +63,6 @@ export function AgentChat({ ontologyKey, lensKey, agent, picker }: {
           const errors = calls.filter((c) => toolError(c) !== null).length
           return {
             icon: Wrench,
-            running: calls.some((c) => c.status === 'pending'),
             label: <>
               {calls.length} tool {calls.length === 1 ? 'call' : 'calls'}
               {errors > 0 && <span className="text-(--tc-amber)">· {errors} with error</span>}

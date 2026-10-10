@@ -1,5 +1,6 @@
 import { AlertCircle, Bot, LoaderCircle, MessageSquarePlus, SendHorizonal, Square, type LucideIcon } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { chatErrorText, threadError, type ChatRequest, type SharedEvent } from '@/api/chatStream'
 import type { AssistantKind } from '@/api/types'
 import { Markdown } from '@/components/ai/Markdown'
@@ -44,7 +45,7 @@ export interface InsightView<I> {
     content: (turn: Turn<I> | undefined, turns: readonly Turn<I>[]) => ReactNode
   }
   /** The button under an answer that shows it in the panel; null when it has nothing to show. */
-  button: (turn: Turn<I>) => { icon: LucideIcon; label: ReactNode; running: boolean } | null
+  button: (turn: Turn<I>) => { icon: LucideIcon; label: ReactNode } | null
 }
 
 interface AssistantChatProps<E extends { type: string }, I> {
@@ -70,6 +71,11 @@ interface AssistantChatProps<E extends { type: string }, I> {
   picker?: ReactNode
   /** Toolbar, right: the side-panel switch. */
   toggle?: ReactNode
+  /**
+   * Where "New conversation" goes instead of the toolbar, which is then
+   * never shown (the Studio test panel's header); null until it is mounted.
+   */
+  actions?: HTMLElement | null
 }
 
 /**
@@ -82,7 +88,7 @@ interface AssistantChatProps<E extends { type: string }, I> {
  */
 export function AssistantChat<E extends { type: string }, I>({
   ontologyKey, lensKey, kind, assistantKey, name, description, intro, placeholder, remember,
-  blockedReason = null, model, send, insight, picker, toggle,
+  blockedReason = null, model, send, insight, picker, toggle, actions,
 }: AssistantChatProps<E, I>) {
   const owner = useMemo<ThreadOwner | null>(
     () => (remember && assistantKey !== null ? { ontologyKey, lensKey, kind, assistantKey } : null),
@@ -196,29 +202,31 @@ export function AssistantChat<E extends { type: string }, I>({
     }
   }
 
-  const hasToolbar = picker !== undefined || toggle !== undefined || turns.length > 0
+  const newConversation = turns.length > 0 && (
+    <Button
+      variant="ghost"
+      size="sm"
+      className={cn('gap-1.5 text-xs text-muted-foreground', actions === undefined ? 'h-7' : 'h-6')}
+      disabled={running}
+      onClick={() => setConfirmNew(true)}
+    >
+      <MessageSquarePlus className="size-3.5" />
+      New conversation
+    </Button>
+  )
+  const hasToolbar = actions === undefined && (picker !== undefined || toggle !== undefined || turns.length > 0)
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {hasToolbar && (
         <div className="flex min-h-11 flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-2">
           {picker}
-          <div className="ml-auto flex items-center gap-3">
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
             {toggle}
-            {turns.length > 0 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 gap-1.5 text-xs text-muted-foreground"
-                disabled={running}
-                onClick={() => setConfirmNew(true)}
-              >
-                <MessageSquarePlus className="size-3.5" />
-                New conversation
-              </Button>
-            )}
+            {newConversation}
           </div>
         </div>
       )}
+      {actions && createPortal(newConversation, actions)}
 
       {/* Container queries: the layout follows the width the chat really has (Studio column or Workbench page). */}
       <div className="@container flex min-h-0 flex-1 flex-col">
@@ -283,7 +291,7 @@ export function AssistantChat<E extends { type: string }, I>({
                     </Button>
                   )}
                 </form>
-                <p className="mt-1.5 text-[11px] text-muted-foreground">Enter sends · Shift+Enter adds a line</p>
+                <p className="mt-1.5 text-[11px] text-muted-foreground">Enter sends · Shift+Enter adds a line · Follow-ups refer to earlier answers</p>
               </div>
             </div>
           </section>
@@ -405,7 +413,6 @@ function InsightButton({
   onSelect: () => void
 }) {
   if (spec === null) return null
-  const Icon = spec.running ? LoaderCircle : spec.icon
   return (
     <Button
       size="sm"
@@ -414,7 +421,7 @@ function InsightButton({
       onClick={onSelect}
       className={cn('-ml-2 flex h-6 w-fit gap-1.5 px-2 text-xs text-muted-foreground', selected && 'text-foreground')}
     >
-      <Icon className={cn('size-3', spec.running && 'animate-spin')} />
+      <spec.icon className="size-3" />
       {spec.label}
     </Button>
   )
@@ -423,7 +430,7 @@ function InsightButton({
 /** The side-panel switch in the toolbar. */
 export function InsightToggle({ label, title, checked, onChange }: { label: string; title: string; checked: boolean; onChange: (checked: boolean) => void }) {
   return (
-    <label className="flex cursor-pointer items-center gap-2 text-xs" title={title}>
+    <label className="flex cursor-pointer items-center gap-2 text-xs whitespace-nowrap" title={title}>
       <Checkbox aria-label={label} checked={checked} onCheckedChange={(value) => onChange(value === true)} />
       {label}
     </label>

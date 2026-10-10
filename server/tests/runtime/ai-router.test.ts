@@ -10,7 +10,7 @@ import type { FastifyInstance } from "fastify";
 import { AIMessage } from "@langchain/core/messages";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setAiModel } from "../../src/core/ai.js";
+import { DEFAULT_AGENT_CONFIG, setAiModel } from "../../src/core/ai.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { NotFoundError, StoreError } from "../../src/core/exceptions.js";
 import { FakeToolCallingModel, toolCallMessage } from "./aiHelpers.js";
@@ -86,7 +86,7 @@ describe("FEATURE_DISABLED without a provider", () => {
     const res = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/assistants/agents" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual([
-      { key: "_default", name: "Default", description: null, builtIn: true },
+      { key: "_default", name: "Default", description: DEFAULT_AGENT_CONFIG.description, builtIn: true },
       { key: "my-agent", name: "My Agent", description: "A custom agent", builtIn: false },
     ]);
   });

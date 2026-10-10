@@ -734,12 +734,13 @@ kind and assistant (not in the test panel) and restores its messages from the se
 - **Messages** — the question in a bubble, the answer beside the assistant's icon,
   rendered as Markdown; answer text appears as it streams. While an answer runs it shows
   the elapsed seconds and what it is doing now: an agent's running tool, a retriever's
-  current step.
+  current step. This is its only progress sign.
 - **Input** — at most 2,000 characters, growing to a few lines; Enter sends, Shift+Enter
-  adds a line. While an answer runs, Send becomes Stop.
-- **New conversation** — in the toolbar once there are messages, not while an answer
-  runs; confirmed, it starts a new thread. The browser forgets the old one, which the
-  server removes when it expires.
+  adds a line, and a hint below says so and that follow-ups refer to earlier answers.
+  While an answer runs, Send becomes Stop.
+- **New conversation** — in the toolbar (in the test panel, in its header) once there
+  are messages, not while an answer runs; confirmed, it starts a new thread. The browser
+  forgets the old one, which the server removes when it expires.
 - **Side panel** — beside the conversation, stacked below it on a narrow screen, showing
   the kind's insight into one answer. A button under each answer selects it; by default,
   and after every new question, the panel follows the latest answer that has any.

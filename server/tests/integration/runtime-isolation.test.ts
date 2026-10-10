@@ -18,6 +18,7 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../../src/app.js";
+import { DEFAULT_AGENT_CONFIG } from "../../src/core/ai.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { createOntology, defineEntityProperty, modelPrefix, runtimePrefix } from "./fixture.js";
@@ -289,7 +290,7 @@ describe("the runtime surface itself", () => {
     expect(res.json().error.details.code).toBe("FEATURE_DISABLED");
 
     const agents = await getJson(`${crm}/ai/assistants/agents`);
-    expect((agents as unknown as Row[])[0]).toEqual({ key: "_default", name: "Default", description: null, builtIn: true });
+    expect((agents as unknown as Row[])[0]).toEqual({ key: "_default", name: "Default", description: DEFAULT_AGENT_CONFIG.description, builtIn: true });
     for (const [method, url] of [["POST", `${crm}/ai/chat`], ["GET", `${crm}/ai/agents`]] as const) {
       expect((await app.inject({ method, url, payload: { message: "Hi" } })).statusCode, url).toBe(404);
     }

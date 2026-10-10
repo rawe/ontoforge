@@ -26,6 +26,9 @@ import { resultTypes, type RetrieverLens } from "./config.js";
 export const DEFAULT_RETRIEVER_KEY = "_default";
 /** The name the runtime list gives it, the same as the default agent's. */
 export const DEFAULT_RETRIEVER_NAME = "Default";
+/** The description the runtime list gives it. */
+export const DEFAULT_RETRIEVER_DESCRIPTION =
+  "Searches the switched-on managed indices of this lens and filters exactly on the names of entities and their direct neighbours.";
 
 /** The default retriever's configuration in a lens. */
 export function defaultRetrieverConfig(lens: RetrieverLens): RetrieverConfig {

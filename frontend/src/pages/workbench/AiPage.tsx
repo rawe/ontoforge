@@ -1,21 +1,20 @@
-import { MessageCircleQuestion, MessagesSquare, Sparkles } from 'lucide-react'
+import { MessagesSquare, Sparkles } from 'lucide-react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { useFeatures, useRuntimeSchema } from '@/api/hooks'
-import { AskTab } from '@/components/ai/AskTab'
 import { ChatTab } from '@/components/ai/ChatTab'
 import { RetrieverAgentTab } from '@/components/ai/RetrieverAgentTab'
 import { EmptyState } from '@/components/EmptyState'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
-const TABS = ['chat', 'ask', 'retriever'] as const
+const TABS = ['chat', 'retriever'] as const
 type TabKey = (typeof TABS)[number]
 
 /**
- * `/o/:ontologyKey/w/:lensKey/ai` — AI assistant with tabs Chat | Ask |
- * Retriever. The active tab lives in `?tab=` so ask/retriever can be
- * deep-linked (the retriever tab also takes `&agent=<key>`); leaving chat or
- * the retriever cancels its turn.
+ * `/o/:ontologyKey/w/:lensKey/ai` — AI assistant with tabs Chat | Retriever.
+ * The active tab lives in `?tab=` so the retriever can be deep-linked (it
+ * also takes `&agent=<key>`); an unknown tab falls back to chat. Leaving chat
+ * or the retriever cancels its turn.
  */
 export function AiPage() {
   const { ontologyKey, lensKey } = useParams<{ ontologyKey: string; lensKey: string }>()
@@ -37,7 +36,7 @@ export function AiPage() {
         <EmptyState
           icon={Sparkles}
           title="AI is not enabled"
-          description="This server has no AI provider configured. Set one up on the backend to unlock chat, one-shot questions and retriever agents."
+          description="This server has no AI provider configured. Set one up on the backend to unlock chat and retriever agents."
         />
       </div>
     )
@@ -64,10 +63,6 @@ export function AiPage() {
           <TabsTrigger value="chat" className="gap-1.5 px-2.5 text-[13px]">
             <MessagesSquare className="size-3.5" />
             Chat
-          </TabsTrigger>
-          <TabsTrigger value="ask" className="gap-1.5 px-2.5 text-[13px]">
-            <MessageCircleQuestion className="size-3.5" />
-            Ask
           </TabsTrigger>
           <TabsTrigger value="retriever" className="gap-1.5 px-2.5 text-[13px]">
             <Sparkles className="size-3.5" />
@@ -96,17 +91,6 @@ export function AiPage() {
               ontologyKey={ontologyKey}
               lensKey={lensKey}
             />}
-          </TabsContent>
-          <TabsContent
-            value="ask"
-            forceMount
-            className="min-h-0 flex-1 overflow-y-auto data-[state=inactive]:hidden"
-          >
-            <AskTab
-              key={`${ontologyKey}/${lensKey}`}
-              ontologyKey={ontologyKey}
-              lensKey={lensKey}
-            />
           </TabsContent>
         </>
       )}

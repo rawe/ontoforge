@@ -282,8 +282,8 @@ describe("the runtime surface itself", () => {
   it("AI routes answer under the new prefix (FEATURE_DISABLED without a provider)", async () => {
     const res = await app.inject({
       method: "POST",
-      url: `${crm}/ai/query`,
-      payload: { question: "How many people?" },
+      url: `${crm}/ai/chat`,
+      payload: { message: "How many people?" },
     });
     expect(res.statusCode).toBe(422);
     expect(res.json().error.details.code).toBe("FEATURE_DISABLED");

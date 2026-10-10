@@ -1,7 +1,7 @@
 # AI and agents
 
-Language-model capabilities over a lens: asking a question in natural language, holding a
-conversation, and exposing that conversation to other systems as an agent.
+Language-model capabilities over a lens: holding a conversation, and exposing that
+conversation to other systems as an agent.
 
 **All of it requires a configured language-model provider.** With none configured, every
 operation that would run a model is rejected. Clients are expected to check the server's
@@ -19,17 +19,7 @@ described to the model in the first place — and nothing of any other ontology 
 
 ## What it does
 
-Two task-shaped operations, plus a way to package them.
-
-### Ask a question
-
-One question in, one answer out. The model is given the schema and exactly one tool:
-OQL execution. It composes a query, runs it, and writes an answer from the rows.
-
-The response is not just prose. It carries **the generated OQL** and **the raw result
-rows** alongside the answer, so a caller can show its work, verify it, or re-run the query
-in a console. If the model answered without ever calling the tool, both are absent — which
-is itself the signal that the answer was not grounded in data.
+One task-shaped operation, plus a way to package it.
 
 ### Chat
 
@@ -166,11 +156,11 @@ Configuring agents is modeling; running them is runtime. Complete operation inde
 | | Where | Operations |
 |---|---|---|
 | Configure agents | Modeling REST, modeling MCP, the studio's agents tab | List, upsert by key, delete |
-| Ask, chat | Runtime REST only | One operation each; chat also in a per-agent form |
+| Chat | Runtime REST only | One operation, also in a per-agent form |
 | Discover agents | Runtime REST | Lists the default agent and every configured one |
 | A2A | Runtime REST | A card and a task endpoint per agent, including the default |
-| Web UI | The workbench's AI surface | Chat with an agent picker and persisted local threads, and one-shot ask with the generated query shown |
+| Web UI | The workbench's AI surface | Chat with an agent picker and persisted local threads |
 
-Note the deliberate gap: **there are no MCP tools for ask or chat.** An MCP
+Note the deliberate gap: **there are no MCP tools for chat.** An MCP
 client is itself a language model; wrapping a second one behind a tool call would put a
 model inside a model's tool. An MCP client gets the underlying tools directly instead.

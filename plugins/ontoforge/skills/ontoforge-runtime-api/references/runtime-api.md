@@ -371,10 +371,6 @@ Runtime runs them; the modeling surface defines them.
 
 Every route here requires a language-model provider.
 
-- `POST /ai/query`
-  Turns a natural-language question into an OQL query and runs it.
-  Request body: `question`
-
 - `POST /ai/chat`
   Converses with the default agent over the lens.
   Request body: `message`, optional `history` (a list of `{role, content}` with `role`

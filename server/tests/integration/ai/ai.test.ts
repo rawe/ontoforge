@@ -1,9 +1,9 @@
 /**
  * AI runtime endpoints against the real docker-compose database and the
  * configured language model, ported from `backend/tests/integration/test_ai.py` plus
- * the session-11 additions: ask over seeded data (OQL present, rows
- * non-empty), chat with a restricted agent whose trace shows only allowlisted tools,
- * and an A2A task round-trip against the default and a named agent.
+ * the session-11 additions: chat with a restricted agent whose trace shows
+ * only allowlisted tools, and an A2A task round-trip against the default and
+ * a named agent.
  *
  * Configuration comes from the suite's own env file (`env/test-ai.env` via
  * the npm script), never `server/.env`. Skips when the database is down or
@@ -186,36 +186,6 @@ describe("features", () => {
     const { statusCode, body } = await inject("GET", "/api/server/features");
     expect(statusCode).toBe(200);
     expect(body.ai).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// AI Query (NL → OQL)
-// ---------------------------------------------------------------------------
-
-describe("POST /ai/query", () => {
-  ifAvailable("answers a question over seeded data with OQL and rows", async () => {
-    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/query", {
-      question: "How many persons are there? Use the execute_query tool.",
-    });
-    expect(statusCode).toBe(200);
-    expect(typeof body.answer).toBe("string");
-    expect((body.answer as string).length).toBeGreaterThan(0);
-    // Session-11 spec: the generated OQL and the raw rows must be present.
-    expect(typeof body.query).toBe("string");
-    expect((body.query as string).toUpperCase()).toContain("MATCH");
-    const results = body.results as Row;
-    expect(results).toHaveProperty("columns");
-    expect(results).toHaveProperty("results");
-    expect((results.results as Row[]).length).toBeGreaterThan(0);
-    expect(body).not.toHaveProperty("cypher");
-  });
-
-  ifAvailable("rejects an empty question", async () => {
-    const { statusCode } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/query", {
-      question: "",
-    });
-    expect(statusCode).toBe(422);
   });
 });
 

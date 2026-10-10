@@ -40,7 +40,7 @@ what rules bind it, and how it is reached from every interface.
 | [search-indices](capabilities/search-indices.md) | What ranked search reads: indices, entries, managed and custom indices, cost preview and entry outline, generations and build status |
 | [oql](capabilities/oql.md) | The query language |
 | [saved-queries](capabilities/saved-queries.md) | Stored, parameterized query pipelines |
-| [ai-agents](capabilities/ai-agents.md) | Natural-language querying, chat, A2A |
+| [ai-agents](capabilities/ai-agents.md) | Chat, A2A |
 | [retriever-agents](capabilities/retriever-agents.md) | Lens-local question answering over search indices: configuration, validation, planning, retrieval, retrieve, the default agent, portable JSON |
 | [entity-identity-comparison](capabilities/entity-identity-comparison.md) | Optional judgments about two partial entity snapshots |
 | [transfer](capabilities/transfer.md) | Schema export and import |
@@ -148,8 +148,8 @@ Some capabilities depend on external providers and are absent unless one is conf
 The server reports what is available, and clients hide what is not.
 
 - **Semantic search** needs an embedding provider. Without it, keyword ranking remains available where the adapter supports it.
-- **AI features** need a language-model provider. Without it, natural-language querying,
-  chat and the agent protocol are unavailable.
+- **AI features** need a language-model provider. Without it, chat and the agent
+  protocol are unavailable.
 - **Entity identity comparison** needs a Decision provider. It remains independent of
   language-model and embedding availability; see its [capability](capabilities/entity-identity-comparison.md).
 

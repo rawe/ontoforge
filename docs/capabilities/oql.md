@@ -169,6 +169,6 @@ Complete operation and tool index: [../interfaces.md](../interfaces.md).
 | Web client | A query console: an editor with a schema sidebar for click-to-insert patterns, per-lens history, and results as either a table or a derived graph |
 
 Two capabilities are built on this same validated path rather than beside it: saved
-queries store parameterized OQL steps ([saved-queries.md](saved-queries.md)), and
-natural-language querying generates OQL and submits it for the same validation
+queries store parameterized OQL steps ([saved-queries.md](saved-queries.md)), and an
+agent's query tool submits the OQL a model writes for the same validation
 ([ai-agents.md](ai-agents.md)). Neither can express anything an ad-hoc query cannot.

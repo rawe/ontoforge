@@ -220,7 +220,7 @@ Two tabs — Console and Library — which both stay live, so results survive a 
 
 ### AI
 
-Three tabs — Chat, Ask, Retriever. See [AI panel](#ai-panel). Without a language-model
+Two tabs — Chat and Retriever. See [AI panel](#ai-panel). Without a language-model
 provider the navigation entry is gone and the screen renders an explanation; see
 [Feature gating](#feature-gating).
 
@@ -632,7 +632,7 @@ expands automatically, and runs immediately when it has no parameters.
 
 ### AI panel
 
-Three modes over one lens: Chat, Ask and Retriever. All require a language-model
+Two modes over one lens: Chat and Retriever. Both require a language-model
 provider; see [capabilities/ai-agents.md](capabilities/ai-agents.md).
 
 **Chat** — a conversation with the lens's default assistant or with any configured agent,
@@ -659,11 +659,6 @@ ontology, lens, or agent cancels the active request; late events cannot enter an
 Clearing the thread is confirmed and cancels active work. Browser persistence keeps bounded
 text history and turn outcomes, without full tool payloads; storage failure does not break
 live chat. Empty pending answers and failed assistant turns are excluded from model history.
-
-**Ask** — one question, one answer. The response is Markdown, accompanied by a collapsible
-block holding the query the model generated (copyable, and openable directly in the
-console) and a table of the rows it returned. Earlier questions of the same session stay
-below the newest. This history is in-memory only.
 
 **Retriever** — chat with the lens's
 [retriever agents](capabilities/retriever-agents.md). A header picker selects the agent:
@@ -976,7 +971,7 @@ switcher's Workbench landing and the Studio's way back; nothing at the root cons
 
 The working set stores only identifiers, type keys, positions and pin flags — entities and
 relations are re-fetched on restore, so a stale canvas can never display stale property
-values. Ask history, retriever-agent conversations and question results are in-memory for
+values. Retriever-agent conversations and question results are in-memory for
 the session and deliberately not persisted; the Workbench's selected retriever agent lives
 in the address.
 Persistence failures are swallowed: with storage unavailable the product works exactly the
@@ -1004,8 +999,8 @@ Workbench addresses live under `/o/{ontologyKey}/w/{lensKey}`, Studio addresses 
 | `/o/{ontologyKey}/w/{lensKey}/query?query={text}` | The console with the query prefilled |
 | `/o/{ontologyKey}/w/{lensKey}/query?tab=library` | The saved-query library |
 | `/o/{ontologyKey}/w/{lensKey}/query?run={queryKey}` | The library with that query expanded, run at once when it has no parameters |
-| `/o/{ontologyKey}/w/{lensKey}/ai` | The AI panel, Chat |
-| `/o/{ontologyKey}/w/{lensKey}/ai?tab=ask` · `?tab=retriever` | The other two AI modes |
+| `/o/{ontologyKey}/w/{lensKey}/ai` | The AI panel, Chat; an unknown `tab` shows Chat as well |
+| `/o/{ontologyKey}/w/{lensKey}/ai?tab=retriever` | The Retriever mode |
 | `/o/{ontologyKey}/w/{lensKey}/ai?tab=retriever&agent={agentKey}` | The Retriever tab with that retriever agent — `_default` for the default one; the default agent when the lens has no such agent |
 | `/o/{ontologyKey}/studio` | The ontology's schema overview |
 | `/o/{ontologyKey}/studio/entity-types/{id}` · `.../relation-types/{id}` | A type editor |
@@ -1053,7 +1048,6 @@ Any unrecognised address returns to the root.
 | Explorer | Shift or Cmd while clicking | Extend the selection |
 | Chat | Enter | Send |
 | Chat | Shift+Enter | Newline |
-| Ask | Enter | Submit |
 | Retriever-agent chat | Enter | Send |
 | Retriever-agent chat | Shift+Enter | Newline |
 | Retriever-agent test panel, Retrieve | Enter | Ask |

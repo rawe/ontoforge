@@ -256,13 +256,6 @@ export interface QueryResult {
 
 /* -------------------------------- runtime — AI ------------------------------- */
 
-export interface AiQueryResponse {
-  answer: string
-  /** The generated OQL query, when the AI ran one. */
-  query: string | null
-  results: QueryResult | null
-}
-
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string

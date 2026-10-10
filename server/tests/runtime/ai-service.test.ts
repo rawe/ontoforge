@@ -1,9 +1,8 @@
 /**
  * The AI engine with a scripted model (the "mock the model" unit plan of
  * session 11): toolset computation (allowlist ∩ availability), prompt
- * assembly, the tool-error self-correction loop vs abort, query response
- * with and without a tool call, trace shape, history mapping, and the
- * FEATURE_DISABLED rejection without a provider.
+ * assembly, the tool-error self-correction loop vs abort, trace shape,
+ * history mapping, and the FEATURE_DISABLED rejection without a provider.
  */
 
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
@@ -16,7 +15,6 @@ import { NotFoundError, ValidationError } from "../../src/core/exceptions.js";
 import {
   CHAT_TOOLS,
   aiChat,
-  aiQuery,
   describeSchema,
   runAgentChat,
 } from "../../src/runtime/aiService.js";
@@ -493,53 +491,6 @@ describe("tool failures", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Query: response with and without a tool call
-// ---------------------------------------------------------------------------
-
-describe("aiQuery", () => {
-  it("carries the generated OQL and the raw rows when the tool was called", async () => {
-    const fake = installFake([
-      toolCallMessage("execute_query", { query: "MATCH (p:person) RETURN p.name" }),
-      new AIMessage("There are two people."),
-    ]);
-    store.executeOql.mockResolvedValue([["p.name"], [{ "p.name": "Alice" }, { "p.name": "Bob" }]]);
-
-    const result = await aiQuery("full_lens", "How many people?", asRuntimeStore(store));
-
-    expect(result.answer).toBe("There are two people.");
-    expect(result.query).toBe("MATCH (p:person) RETURN p.name");
-    expect(result.results).toEqual({
-      columns: ["p.name"],
-      results: [{ "p.name": "Alice" }, { "p.name": "Bob" }],
-    });
-    // The query agent binds exactly one tool.
-    expect(boundToolNames(fake)).toEqual(["execute_query"]);
-  });
-
-  it("query and results are absent when the tool was never called", async () => {
-    installFake([new AIMessage("I answered from thin air.")]);
-
-    const result = await aiQuery("full_lens", "Anything?", asRuntimeStore(store));
-
-    expect(result.answer).toBe("I answered from thin air.");
-    expect(result.query).toBeNull();
-    expect(result.results).toBeNull();
-  });
-
-  it("a failed query yields the error object as results", async () => {
-    installFake([
-      toolCallMessage("execute_query", { query: "MATCH (x:unknown_type) RETURN x" }),
-      new AIMessage("That failed."),
-    ]);
-
-    const result = await aiQuery("full_lens", "Bad question", asRuntimeStore(store));
-
-    expect(result.query).toBe("MATCH (x:unknown_type) RETURN x");
-    expect(result.results).toHaveProperty("error");
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Trace shape and history mapping
 // ---------------------------------------------------------------------------
 
@@ -605,16 +556,12 @@ describe("without a language-model provider", () => {
     }
   };
 
-  it("query is rejected with FEATURE_DISABLED", async () => {
-    await expectDisabled(() => aiQuery("full_lens", "q", asRuntimeStore(store)));
-  });
-
   it("chat is rejected with FEATURE_DISABLED", async () => {
     await expectDisabled(() => aiChat("full_lens", "hi", asRuntimeStore(store)));
   });
 
   it("an unknown lens still answers not-found before the provider check", async () => {
     store.getFullSchemaWithLensInclusions.mockResolvedValue(null);
-    await expect(aiQuery("missing", "q", asRuntimeStore(store))).rejects.toThrow(NotFoundError);
+    await expect(aiChat("missing", "hi", asRuntimeStore(store))).rejects.toThrow(NotFoundError);
   });
 });

@@ -1,6 +1,6 @@
 /**
- * AI-powered runtime operations (`docs/capabilities/ai-agents.md`): ask,
- * chat, agent discovery, and A2A cards and tasks. The engine is
+ * AI-powered runtime operations (`docs/capabilities/ai-agents.md`): chat,
+ * agent discovery, and A2A cards and tasks. The engine is
  * LangChain.js / LangGraph.js (approved stack).
  *
  * Each operation builds a fresh agent per request with a scoped tool
@@ -64,7 +64,6 @@ type Row = Record<string, unknown>;
 // Tool allowlists — controls which tools each AI feature can use
 // ---------------------------------------------------------------------------
 
-export const QUERY_TOOLS = [TOOL_EXECUTE_QUERY];
 export const CHAT_TOOLS = [
   TOOL_GET_SCHEMA,
   TOOL_LIST_ENTITIES,
@@ -551,63 +550,6 @@ async function runReactAgent(
 }
 
 // ---------------------------------------------------------------------------
-// Feature: NL → OQL Query
-// ---------------------------------------------------------------------------
-
-const QUERY_SYSTEM_PROMPT = `You are a query assistant for a knowledge graph.
-You translate natural language questions into read-only OQL queries (openCypher-style graph pattern syntax).
-
-RULES:
-- Use entity type keys (snake_case) as node labels: e.g., person, company
-- Use relation type keys (snake_case) as relationship types: e.g., works_for
-- ALL node patterns MUST have a label — never use bare (n) patterns
-- Only generate read queries (MATCH/RETURN) — no writes
-- Use the execute_query tool to run your query
-- After getting results, provide a clear natural language answer
-
-{schema}
-`;
-
-function isPlainObject(value: unknown): value is Row {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-/** Translate a natural language question to OQL, execute it, and summarize. */
-export async function aiQuery(
-  lensKey: string,
-  question: string,
-  store: RuntimeStore,
-): Promise<Row> {
-  const loaded = await loadSchema(lensKey, store);
-  const schemaDesc = describeSchema(loaded.scoped);
-  const model = requireModel();
-
-  const recorder: ToolCallRecord[] = [];
-  const tools = buildTools(lensKey, store, QUERY_TOOLS, recorder);
-  const answer = await runReactAgent(
-    model,
-    QUERY_SYSTEM_PROMPT.replace("{schema}", schemaDesc),
-    tools,
-    [new HumanMessage(question)],
-  );
-
-  // Extract the executed query and results from the recorded tool calls —
-  // the last call wins.
-  let queryUsed: unknown = null;
-  let queryResults: unknown = null;
-  for (const record of recorder) {
-    if (record.tool.includes(TOOL_EXECUTE_QUERY)) {
-      queryUsed = record.args.query ?? null;
-      if (isPlainObject(record.result)) {
-        queryResults = record.result;
-      }
-    }
-  }
-
-  return { answer, query: queryUsed, results: queryResults };
-}
-
-// ---------------------------------------------------------------------------
 // Feature: Schema-Aware Chat
 // ---------------------------------------------------------------------------
 
@@ -800,6 +742,10 @@ export function buildAgentCard(
       },
     ],
   };
+}
+
+function isPlainObject(value: unknown): value is Row {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 /** Handle an A2A JSON-RPC `tasks/send` request. */

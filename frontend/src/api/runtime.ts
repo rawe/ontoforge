@@ -7,7 +7,6 @@ import { requestChat, type ChatEvent } from './chatStream'
 import { buildQuery, request, type FilterMap } from './http'
 import type {
   AiAgent,
-  AiQueryResponse,
   ChatMessage,
   DocumentContentResponse,
   EntityInstance,
@@ -261,12 +260,6 @@ export const runSavedQuery = (
   })
 
 /* ------------------------------------- AI ------------------------------------ */
-
-export const aiQuery = (ontologyKey: string, lensKey: string, question: string) =>
-  request<AiQueryResponse>(`${base(ontologyKey, lensKey)}/ai/query`, {
-    method: 'POST',
-    body: { question },
-  })
 
 export const aiChat = (
   ontologyKey: string,

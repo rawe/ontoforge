@@ -2301,6 +2301,19 @@ export async function listAiAgents(
   return rows.map(toAiAgentResponse);
 }
 
+export async function getAiAgent(
+  lensKey: string,
+  agentKey: string,
+  store: ModelingStore,
+): Promise<AiAgentConfigResponseBody> {
+  const lens = await resolveLensByKey(store, lensKey);
+  const row = (await store.listAiAgents(lens.lensId as string)).find((data) => data.key === agentKey);
+  if (!row) {
+    throw new NotFoundError(`AI agent '${agentKey}' not found`);
+  }
+  return toAiAgentResponse(row);
+}
+
 /** Upsert by key. Returns `[response, created]`. */
 export async function upsertAiAgent(
   lensKey: string,

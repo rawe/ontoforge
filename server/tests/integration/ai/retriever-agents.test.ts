@@ -143,7 +143,7 @@ beforeAll(async () => {
 
   const saved = await app.inject({
     method: "PUT",
-    url: `${MODEL}/lenses/all/retriever-agents/people`,
+    url: `${MODEL}/lenses/all/assistants/retrievers/people`,
     payload: {
       name: "People",
       description: "Finds people by their jobs and homes.",
@@ -213,7 +213,7 @@ beforeAll(async () => {
   await drainSearchWork({ ontologyKey: F });
   const followAgent = await app.inject({
     method: "PUT",
-    url: `${F_MODEL}/lenses/all/retriever-agents/people`,
+    url: `${F_MODEL}/lenses/all/assistants/retrievers/people`,
     payload: {
       name: "People",
       description: "Finds people by their jobs and homes.",

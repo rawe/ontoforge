@@ -261,7 +261,7 @@ it("rejects the old tool and step names, and strips minScore from a search step"
   await post(`${model}/entity-types`, { key: "paper", displayName: "Paper" });
   const put = (path: string, payload: object) =>
     app.inject({ method: "PUT", url: `${model}/lenses/all/${path}`, payload });
-  const agent = await put("ai-agents/old", { name: "Old", tools: ["semantic_search"] });
+  const agent = await put("assistants/agents/old", { name: "Old", tools: ["semantic_search"] });
   expect(agent.statusCode, agent.body).toBe(422);
   expect(agent.body).toContain("search_documents");
   const query = {

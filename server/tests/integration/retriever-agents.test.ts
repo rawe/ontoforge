@@ -35,7 +35,7 @@ const postgres = settings.DB_BACKEND === "postgres";
 const O = "agents";
 const MODEL = `/api/ontologies/${O}/model`;
 const RUNTIME = `/api/ontologies/${O}/runtime/lenses/all`;
-const AGENTS = `${MODEL}/lenses/all/retriever-agents`;
+const AGENTS = `${MODEL}/lenses/all/assistants/retrievers`;
 
 const EMPLOYMENT = {
   key: "person_employment",
@@ -204,7 +204,8 @@ describe.skipIf(!postgres)("retriever agents", () => {
     expect((await request("DELETE", `${AGENTS}/support-bot`)).statusCode).toBe(204);
     expect((await request("PUT", `${AGENTS}/v1`, { ...BODY, configVersion: 1 })).statusCode).toBe(422);
     expect((await request("GET", `${AGENTS}/broken`)).statusCode).toBe(404);
-    expect((await request("GET", `${MODEL}/lenses/nope/retriever-agents`)).statusCode).toBe(404);
+    expect((await request("GET", `${MODEL}/lenses/nope/assistants/retrievers`)).statusCode).toBe(404);
+    expect((await request("GET", `${MODEL}/lenses/all/retriever-agents`)).statusCode).toBe(404);
 
     expect((await request("DELETE", `${AGENTS}/people`)).statusCode).toBe(204);
     expect((await request("DELETE", `${AGENTS}/people`)).statusCode).toBe(404);
@@ -342,7 +343,7 @@ describe.skipIf(!postgres)("retriever agents", () => {
 
     await post("/api/ontologies", { key: "agents_copy" });
     await post("/api/ontologies/agents_copy/model/import", payload);
-    const copied = await ok("GET", "/api/ontologies/agents_copy/model/lenses/all/retriever-agents");
+    const copied = await ok("GET", "/api/ontologies/agents_copy/model/lenses/all/assistants/retrievers");
     expect(copied.map((agent: Row) => [agent.key, agent.validation.valid])).toEqual([["people", true]]);
 
 
@@ -371,7 +372,7 @@ describe.skipIf(!postgres)("retriever agents", () => {
     };
     await post("/api/ontologies", { key: "agents_legacy" });
     await post("/api/ontologies/agents_legacy/model/import", legacy);
-    const converted = await ok("GET", "/api/ontologies/agents_legacy/model/lenses/all/retriever-agents/finder");
+    const converted = await ok("GET", "/api/ontologies/agents_legacy/model/lenses/all/assistants/retrievers/finder");
     expect(converted).toMatchObject({
       configVersion: 2,
       config: { indices: [{ index: "person~default" }], filters: [], answerFields: { person: ["name"] } },

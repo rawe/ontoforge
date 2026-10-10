@@ -133,7 +133,7 @@ beforeAll(async () => {
   // A restricted agent for the trace scenario.
   const res = await app.inject({
     method: "PUT",
-    url: "/api/ontologies/test_ont/model/lenses/ai_test/ai-agents/analyst",
+    url: "/api/ontologies/test_ont/model/lenses/ai_test/assistants/agents/analyst",
     payload: {
       name: "Analyst",
       description: "Answers only via OQL queries",

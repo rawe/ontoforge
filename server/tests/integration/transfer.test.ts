@@ -140,7 +140,7 @@ describe("round-trip against a stored export document", () => {
 
     const agents = await app.inject({
       method: "GET",
-      url: "/api/ontologies/test_ont/model/lenses/hr_view/ai-agents",
+      url: "/api/ontologies/test_ont/model/lenses/hr_view/assistants/agents",
     });
     expect(agents.statusCode).toBe(200);
     const agentRows = agents.json() as Row[];

@@ -55,7 +55,7 @@ This is the single most common source of mistakes against the modeling surface.
 | Both MCP servers | Keys only |
 
 So `PUT .../model/lenses/{lensId}` takes an identifier while
-`PUT .../model/lenses/{lensKey}/ai-agents/{agentKey}` takes a key, even though the two
+`PUT .../model/lenses/{lensKey}/assistants/agents/{assistantKey}` takes a key, even though the two
 routes share a prefix. Identifiers are obtained from the response of the create call or
 from a list call. A key is never accepted where an identifier is expected.
 
@@ -324,14 +324,18 @@ The three routes answer `FEATURE_DISABLED` on an adapter without search indices.
 
 ### Agent configurations
 
-Per-lens, addressed by lens key. Semantics:
+Per-lens, addressed by lens key and assistant key. Semantics:
 [capabilities/ai-agents.md](capabilities/ai-agents.md).
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/lenses/{lensKey}/ai-agents` | List the lens's agent configurations |
-| PUT | `/lenses/{lensKey}/ai-agents/{agentKey}` | Create or replace one; answers 201 on create, 200 on replace |
-| DELETE | `/lenses/{lensKey}/ai-agents/{agentKey}` | Delete an agent configuration |
+| GET | `/lenses/{lensKey}/assistants/agents` | List the lens's agent configurations |
+| GET | `/lenses/{lensKey}/assistants/agents/{assistantKey}` | Read one agent configuration |
+| PUT | `/lenses/{lensKey}/assistants/agents/{assistantKey}` | Create or replace one; answers 201 on create, 200 on replace |
+| DELETE | `/lenses/{lensKey}/assistants/agents/{assistantKey}` | Delete an agent configuration |
+
+The built-in default agent is not a modeling resource: it is not listed, and `_default`
+can be neither read nor written here.
 
 ### Saved queries
 
@@ -346,19 +350,19 @@ Per-lens, addressed by lens key. Semantics:
 
 ### Retriever agents
 
-Per-lens, addressed by lens key and agent key. Semantics, configuration and validation:
+Per-lens, addressed by lens key and assistant key. Semantics, configuration and validation:
 [capabilities/retriever-agents.md](capabilities/retriever-agents.md).
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/lenses/{lensKey}/retriever-agents` | List the lens's agents, by name, each with its current validation |
-| GET | `/lenses/{lensKey}/retriever-agents/{agentKey}` | Read one agent as stored, with its current validation |
-| PUT | `/lenses/{lensKey}/retriever-agents/{agentKey}` | Create or replace; 201 on create, 200 on replace |
-| DELETE | `/lenses/{lensKey}/retriever-agents/{agentKey}` | Delete the agent; 204 |
-| POST | `/lenses/{lensKey}/retriever-agents/{agentKey}/copy` | Independent copy to `targetLensKey`/`targetKey` in this ontology; 201 |
-| POST | `/lenses/{lensKey}/retriever-agents/{agentKey}/move` | Move to `targetLensKey`/`targetKey` in this ontology, identity kept; 200 |
-| GET | `/lenses/{lensKey}/retriever-agents/{agentKey}/export` | The agent's portable JSON |
-| POST | `/lenses/{lensKey}/retriever-agents/import` | Create from portable JSON; 201, never replaces a key |
+| GET | `/lenses/{lensKey}/assistants/retrievers` | List the lens's agents, by name, each with its current validation |
+| GET | `/lenses/{lensKey}/assistants/retrievers/{assistantKey}` | Read one agent as stored, with its current validation |
+| PUT | `/lenses/{lensKey}/assistants/retrievers/{assistantKey}` | Create or replace; 201 on create, 200 on replace |
+| DELETE | `/lenses/{lensKey}/assistants/retrievers/{assistantKey}` | Delete the agent; 204 |
+| POST | `/lenses/{lensKey}/assistants/retrievers/{assistantKey}/copy` | Independent copy to `targetLensKey`/`targetKey` in this ontology; 201 |
+| POST | `/lenses/{lensKey}/assistants/retrievers/{assistantKey}/move` | Move to `targetLensKey`/`targetKey` in this ontology, identity kept; 200 |
+| GET | `/lenses/{lensKey}/assistants/retrievers/{assistantKey}/export` | The agent's portable JSON |
+| POST | `/lenses/{lensKey}/assistants/retrievers/import` | Create from portable JSON; 201, never replaces a key |
 
 A write carries `name`, optional `description`, `configVersion: 2` and `config`; unknown
 fields are rejected. A read carries `key`, `lensKey`, `name`, `description`,
@@ -368,7 +372,8 @@ import also accepts `configVersion: 1`, converted first. A configuration the len
 run — on write, import, or copy or move into the target lens — is refused with
 `VALIDATION_ERROR` and the errors under `details.errors`; a taken target key, or a source
 changed since it was read, is a conflict. Management calls no model. Every route answers
-`FEATURE_DISABLED` on an adapter without search indices.
+`FEATURE_DISABLED` on an adapter without search indices. The built-in default retriever
+agent is not a modeling resource, as for agents.
 
 ### Search settings
 

@@ -177,6 +177,11 @@ test('thread refusals and refused questions read from the error details', () => 
   assert.equal(threadError(new ApiError(404, 'RESOURCE_NOT_FOUND', 'no agent')), null)
   assert.equal(threadError(new Error('x')), null)
   assert.equal(chatErrorText(new ApiError(400, 'VALIDATION_ERROR', 'Agent cannot run.', { errors: ['Index x is gone.'] })), 'Agent cannot run. Index x is gone.')
+  assert.equal(chatErrorText(new ApiError(400, 'VALIDATION_ERROR',
+    "Retriever agent 'r' is invalid in this lens: Index x is gone.", { errors: ['Index x is gone.'] })),
+  "Retriever agent 'r' is invalid in this lens: Index x is gone.")
+  assert.equal(chatErrorText(new ApiError(400, 'VALIDATION_ERROR', 'Agent cannot run: A.', { errors: ['A.', 'B.'] })),
+    'Agent cannot run: A. B.')
   assert.equal(chatErrorText(new Error('Plain')), 'Plain')
   assert.equal(chatErrorText('nope', 'Fallback'), 'Fallback')
 })

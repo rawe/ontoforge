@@ -201,11 +201,14 @@ export function threadError(error: unknown): 'THREAD_NOT_FOUND' | 'THREAD_BUSY' 
   return code === 'THREAD_NOT_FOUND' || code === 'THREAD_BUSY' ? code : null
 }
 
-/** A failed request in words; a refused question adds the server's reasons (`details.errors`). */
+/**
+ * A failed request in words; a refused question adds the server's reasons
+ * (`details.errors`) its message does not already carry.
+ */
 export function chatErrorText(error: unknown, fallback = 'The question failed.'): string {
   if (!(error instanceof Error)) return fallback
   const errors = error instanceof ApiError ? error.details?.errors : undefined
-  return Array.isArray(errors) && errors.length > 0 && errors.every((item) => typeof item === 'string')
-    ? `${error.message} ${errors.join(' ')}`
-    : error.message
+  if (!Array.isArray(errors) || !errors.every((item) => typeof item === 'string')) return error.message
+  const missing = errors.filter((item) => !error.message.includes(item))
+  return missing.length > 0 ? `${error.message} ${missing.join(' ')}` : error.message
 }

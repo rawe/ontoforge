@@ -426,8 +426,7 @@ without per-connection state. This rule applies to MCP, as established in
 The default agent and configured agents share one route and one response contract.
 Results retain their JSON structure; only the final answer carries assistant text.
 Failures preserve received results and mark the turn incomplete. Disconnect cancels further
-work, and delivery bounds buffering. Shared execution remains usable by complete-response
-callers; MCP retains its own transport contract. The wire details live in
+work, and delivery bounds buffering. MCP retains its own transport contract. The wire details live in
 [interfaces](interfaces.md#ai); the delivery alternatives are weighed in
 [the chat transport deliberation](adr/0021-rest-chat-tool-streaming.md).
 

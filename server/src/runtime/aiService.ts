@@ -137,14 +137,6 @@ export function describeSchema(schema: SchemaCacheValue): string {
 // Tool definitions — instantiated selectively per run
 // ---------------------------------------------------------------------------
 
-/** One recorded tool invocation: the call as the model made it, plus the
- * value handed back (a domain error becomes an `{error}` result). */
-export interface ToolCallRecord {
-  tool: string;
-  args: Row;
-  result?: unknown;
-}
-
 interface AgentToolDef {
   name: string;
   description: string;
@@ -404,7 +396,7 @@ const AGENT_TOOL_DEFS_BY_NAME: ReadonlyMap<string, AgentToolDef> = new Map(
 export const ALL_TOOL_NAMES: ReadonlySet<string> = new Set(AGENT_TOOL_DEFS_BY_NAME.keys());
 
 /**
- * Instantiate the named tools bound to one lens and one recorder. A tool
+ * Instantiate the named tools bound to one lens. A tool
  * failure that is a not-found or validation error becomes the tool's
  * result (`{"error": message}`) so the model self-corrects; model-supplied
  * arguments that fail the tool's schema are fed back the same way.
@@ -423,7 +415,6 @@ export function buildTools(
   lensKey: string,
   store: RuntimeStore,
   toolNames: string[],
-  recorder: ToolCallRecord[],
   execution: ChatExecution = {},
 ): StructuredToolInterface[] {
   return toolNames.flatMap((name) => {
@@ -453,8 +444,8 @@ export function buildTools(
       const isToolCall = input !== null && typeof input === "object" && "args" in input;
       const args = ((isToolCall ? input.args : input) ?? {}) as Row;
       const callId = randomUUID();
-      const record: ToolCallRecord = { tool: name, args };
-      recorder.push(record);
+      // The value handed back; a domain error becomes an `{error}` result.
+      let result: unknown;
       await execution.onToolEvent?.({ type: "agent.tool_call", callId, tool: name, args });
       execution.signal?.throwIfAborted();
       let output: ToolMessage;
@@ -462,17 +453,17 @@ export function buildTools(
         output = await baseInvoke(isToolCall ? input : {
           type: "tool_call", name, args, id: callId,
         }, config) as ToolMessage;
-        record.result = output.artifact;
+        result = output.artifact;
       } catch (error) {
         if (!(error instanceof ToolInputParsingException)) throw error;
-        record.result = { error: `Invalid arguments for ${name}: ${error.message}` };
+        result = { error: `Invalid arguments for ${name}: ${error.message}` };
         output = new ToolMessage({
-          content: JSON.stringify(record.result), name,
+          content: JSON.stringify(result), name,
           tool_call_id: isToolCall ? String(input.id ?? "") : callId,
         });
       }
       execution.signal?.throwIfAborted();
-      await execution.onToolEvent?.({ type: "agent.tool_result", callId, result: record.result });
+      await execution.onToolEvent?.({ type: "agent.tool_result", callId, result });
       return isToolCall ? output : output.content;
     };
     return [structured];
@@ -626,7 +617,6 @@ export async function runAgentChat(
   message: string,
   store: RuntimeStore,
   thread: GraphThread,
-  includeToolCalls = false,
   execution: ChatExecution = {},
 ): Promise<Row> {
   execution.signal?.throwIfAborted();
@@ -642,17 +632,12 @@ export async function runAgentChat(
 
   const toolNames = resolveChatToolNames(agentConfig, store);
   const model = requireModel();
-  const recorder: ToolCallRecord[] = [];
-  const tools = buildTools(lensKey, store, toolNames, recorder, execution);
+  const tools = buildTools(lensKey, store, toolNames, execution);
 
   const reply = await runReactAgent(model, systemPrompt, tools, message, thread, execution.signal);
   execution.signal?.throwIfAborted();
 
-  const response: Row = { reply, toolCalls: null };
-  if (includeToolCalls) {
-    response.toolCalls = recorder.map((record) => ({ tool: record.tool, args: record.args }));
-  }
-  return response;
+  return { reply };
 }
 
 /** Resolve all chat prerequisites before the REST response starts: the

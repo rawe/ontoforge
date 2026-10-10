@@ -46,9 +46,19 @@ const aiChat = async (
   lensKey: string,
   message: string,
   runtime: Parameters<typeof runAgentChat>[3],
-  includeToolCalls = false,
   thread?: GraphThread,
-) => runAgentChat(DEFAULT_AGENT_CONFIG, lensKey, message, runtime, thread ?? (await newThread()), includeToolCalls);
+) => runAgentChat(DEFAULT_AGENT_CONFIG, lensKey, message, runtime, thread ?? (await newThread()));
+
+/** The same turn on a new thread, with the tool calls its events announced, in order. */
+async function tracedChat(lensKey: string, message: string, runtime: Parameters<typeof runAgentChat>[3]) {
+  const toolCalls: Row[] = [];
+  const result = await runAgentChat(DEFAULT_AGENT_CONFIG, lensKey, message, runtime, await newThread(), {
+    onToolEvent: async (event) => {
+      if (event.type === "agent.tool_call") toolCalls.push({ tool: event.tool, args: event.args });
+    },
+  });
+  return { ...result, toolCalls };
+}
 
 let store: MockRuntimeStore;
 
@@ -405,7 +415,7 @@ describe("document reads", () => {
       "ent-1": makeEntity({ name: "Alice", bio: BIO }),
     });
 
-    const result = await aiChat("full_lens", "when did Alice join?", asRuntimeStore(store), true);
+    const result = await tracedChat("full_lens", "when did Alice join?", asRuntimeStore(store));
 
     expect(result.reply).toBe("In 2019.");
     const toolMessages = fake.calls[1]!.filter((m) => m instanceof ToolMessage);
@@ -447,7 +457,7 @@ describe("tool failures", () => {
       new AIMessage("recovered"),
     ]);
 
-    const result = await aiChat("full_lens", "list them", asRuntimeStore(store), true);
+    const result = await tracedChat("full_lens", "list them", asRuntimeStore(store));
 
     expect(result.reply).toBe("recovered");
     // The second model call sees the error as the tool's result.
@@ -482,7 +492,7 @@ describe("tool failures", () => {
       new AIMessage("recovered"),
     ]);
 
-    const result = await aiChat("full_lens", "find Alice", asRuntimeStore(store), true);
+    const result = await tracedChat("full_lens", "find Alice", asRuntimeStore(store));
 
     expect(result.reply).toBe("recovered");
     // The second model call sees the parse failure as the tool's result.
@@ -525,15 +535,7 @@ describe("tool failures", () => {
 // ---------------------------------------------------------------------------
 
 describe("chat trace and turns on a thread", () => {
-  it("trace off by default: toolCalls is null", async () => {
-    installFake([new AIMessage("hi")]);
-
-    const result = await aiChat("full_lens", "hello", asRuntimeStore(store));
-
-    expect(result.toolCalls).toBeNull();
-  });
-
-  it("trace on request: ordered tool names with arguments, no results", async () => {
+  it("trace: ordered tool names with arguments", async () => {
     store.listEntities.mockResolvedValue([[makeEntity({ name: "Alice" })], 1]);
     store.executeOql.mockResolvedValue([["c"], [{ c: 2 }]]);
     installFake([
@@ -542,7 +544,7 @@ describe("chat trace and turns on a thread", () => {
       new AIMessage("done"),
     ]);
 
-    const result = await aiChat("full_lens", "explore", asRuntimeStore(store), true);
+    const result = await tracedChat("full_lens", "explore", asRuntimeStore(store));
 
     expect(result.toolCalls).toEqual([
       { tool: "list_entities", args: { entity_type_key: "person" } },
@@ -559,8 +561,8 @@ describe("chat trace and turns on a thread", () => {
     ]);
     const thread = await newThread();
 
-    await aiChat("full_lens", "Who is there?", asRuntimeStore(store), false, thread);
-    const result = await aiChat("full_lens", "And how old is she?", asRuntimeStore(store), false, thread);
+    await aiChat("full_lens", "Who is there?", asRuntimeStore(store), thread);
+    const result = await aiChat("full_lens", "And how old is she?", asRuntimeStore(store), thread);
 
     expect(result.reply).toBe("She is 30.");
     const messages = fake.calls[2]!;
@@ -576,7 +578,7 @@ describe("chat trace and turns on a thread", () => {
     const fake = installFake([new AIMessage("ok")]);
     const thread = await newThread();
     for (let i = 1; i <= TURNS_THE_MODEL_SEES + 2; i++) {
-      await aiChat("full_lens", `question ${i}`, asRuntimeStore(store), false, thread);
+      await aiChat("full_lens", `question ${i}`, asRuntimeStore(store), thread);
     }
 
     const questions = fake.calls.at(-1)!.filter((m) => m.getType() === "human").map((m) => String(m.content));
@@ -589,7 +591,7 @@ describe("chat trace and turns on a thread", () => {
     installFake(Array.from({ length: TURNS_PER_THREAD + 2 }, (_, i) => new AIMessage(`answer ${i + 1}`)));
     const thread = await newThread();
     for (let i = 1; i <= TURNS_PER_THREAD + 2; i++) {
-      await aiChat("full_lens", `question ${i}`, asRuntimeStore(store), false, thread);
+      await aiChat("full_lens", `question ${i}`, asRuntimeStore(store), thread);
     }
 
     const messages = (await threads.values(thread.threadId))!.messages as HumanMessage[];

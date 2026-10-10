@@ -634,58 +634,36 @@ expands automatically, and runs immediately when it has no parameters.
 ### Assistants panel
 
 Two tabs over one lens, one per assistant kind: Agents and Retrievers. Both require a language-model
-provider; see [capabilities/agents.md](capabilities/agents.md).
+provider; see [capabilities/agents.md](capabilities/agents.md). Retrievers are only on a server
+with search indices; without them the tab explains that retrievers are not available. Both tabs
+are the same [assistant chat](#assistant-chat).
 
-**Agents** — a conversation with one of the lens's agents, chosen from a picker that lists
-them as the server does: `Default`, the built-in agent, first. Each conversation is a
-server-held [thread](capabilities/threads.md); the browser remembers only the current
-thread per ontology, lens and agent, and opening the chat restores its messages from the
-server — switching agents switches threads. Assistant answers render once in full as
-Markdown. Tool calls stream into a
-**tool-call panel** beside the conversation — stacked below it on a narrow screen — that
-follows the running answer: each call in order, with a readable name, a one-line summary of
-what it asked for, its state, and its time inside the tool. Calls start collapsed and open by
-hand. An open call shows its arguments and its result in a
-form fitting the result — a table for query rows, hits with relative scores and matched
-snippets, entities, neighbours with their relation and direction, document text — linking
-entities to their pages, with the raw result one click away; a tool that answers with an
-error shows it highlighted. The panel heads with the question, the number of calls, the time
-spent inside tools — parallel calls once, said so when calls overlapped, the model's
-thinking not at all — and how long the answer took. Under each answer a tool-calls button with the count shows
-that answer's calls in the panel; sending a question returns the panel to the running answer.
-A "Show tool calls" switch, remembered per browser and on by default, hides the panel; the
-calls then list under each answer, collapsible, with their arguments and expandable results.
-Tool calls live as long as the open chat: answers restored from the server have
-none, and the panel says so. An elapsed-seconds indicator shows ongoing work. Failure or interruption preserves completed results, marks unfinished
-calls interrupted, and clearly labels the turn incomplete; the thread keeps nothing of a
-failed or interrupted turn, so a restored conversation does not show it. A closed
-connection without a terminal event is a failure. Turns never retry automatically. A
-message to a thread still answering an earlier one is refused and shown as the turn's
-error. When the thread has expired — found on opening, or when a message is refused for
-it — the chat says so and starts a new conversation; a refused message goes back into the
-input. Leaving chat or
-switching ontology, lens, or agent cancels the active request; late events cannot enter
-another thread. Clearing the chat is confirmed, cancels active work and starts a new
-conversation; the browser forgets the old thread, which the server removes when it
-expires. Storage failure does not break live chat.
+A toolbar picker selects the assistant: the kind's assistants as the server lists them —
+`Default`, the built-in one, first — each with its key. The address names the chosen
+assistant, so it survives a reload; without one — or with one the lens does not have —
+`Default` is shown and the address updated to name it. Each assistant has its own
+conversation, restored from the server when it is picked.
 
-**Retrievers** — chat with the lens's
-[retrievers](capabilities/retrievers.md). A header picker selects the retriever:
-`Default` — the lens's
-[default retriever](capabilities/retrievers.md#the-default-retriever) —
-first, then the saved ones, as the server lists them. The address names it, and without
-one — or with one the lens does not have — `Default` is shown and the address updated to
-name it. A question to a retriever the lens cannot run shows the server's refusal with its
-reasons. "Edit in Studio" opens a saved retriever in the lens's
-[retriever editor](#retriever-editor), which is where retrievers are created and
-changed; the default retriever has no editor, and with no saved retrievers the tab links there to
-create one. A
-"Show diagnostics" switch, off by default and remembered, requests diagnostics with every
-answer and shows them beside the conversation. The conversation itself is the
-[retriever chat](#retriever-chat); here it is remembered and restored like
-the Agents tab's — per ontology, lens and retriever, from the server, with the same expiry
-and busy handling. On a server without search indices the tab explains that retrievers
-are not available.
+**Agents** — tool calls stream into a **tool-call panel** that follows the running answer:
+each call in order, with a readable name, a one-line summary of what it asked for, its
+state, and its time inside the tool. Calls start collapsed and open by hand. An open call
+shows its arguments and its result in a form fitting the result — a table for query rows,
+hits with relative scores and matched snippets, entities, neighbours with their relation
+and direction, document text — linking entities to their pages, with the raw result one
+click away; a tool that answers with an error shows it highlighted. The panel heads with
+the question, the number of calls, the time spent inside tools — parallel calls once, said
+so when calls overlapped, the model's thinking not at all — and how long the answer took.
+Each answer's tool-calls button shows the count. A "Show tool calls" switch, remembered per
+browser and on by default, shows the panel and the buttons; off hides both. Tool calls live
+as long as the open chat: answers restored from the server have none, and the panel says
+so. A failed or stopped answer marks its unfinished calls interrupted.
+
+**Retrievers** — chat with the lens's [retrievers](capabilities/retrievers.md); `Default`
+is the lens's [default retriever](capabilities/retrievers.md#the-default-retriever). A
+"Show diagnostics" switch, off by default and remembered, requests
+diagnostics with every answer and shows them in the
+[diagnostics panel](#assistant-chat); off, none are requested. A question to a retriever
+the lens cannot run shows the server's refusal with its reasons.
 
 ### Retriever editor
 
@@ -736,26 +714,48 @@ deletion. A retriever whose configuration has an unsupported version or shape op
 More expanded, where it can be exported or replaced by a version 2 configuration.
 
 **Test panel.** Beside the editor, with a Chat / Retrieve switch whose position is
-remembered. Chat is a [retriever chat](#retriever-chat) with diagnostics
-always on; saving starts a new conversation, and none is restored. Retrieve asks one
+remembered. Chat is the [assistant chat](#assistant-chat) with diagnostics
+always on and no picker; saving starts a new conversation, and none is restored. Retrieve asks one
 question, sent on Enter or with Ask, and shows only the found entities, as the palette's
 [question mode](#question-mode) does, without "Show all in Explorer"; saving clears the
 result. Both ask the saved version: a new, changed, invalid or unsupported retriever
 blocks questions and says why. Without a language-model provider the panel says that the
 retriever cannot answer.
 
-### Retriever chat
+### Assistant chat
 
-One conversation with one retriever on a server-held
-[thread](capabilities/threads.md), shared by the editor's test panel and the Workbench's
-Retrievers tab. A status line names the running step; a running question can be
-cancelled, and "New conversation" starts a new thread. Answers render as Markdown.
-Questions are at most 2,000 characters. Follow-up questions refer to earlier completed
-answers of the thread; a failed or cancelled turn leaves nothing in it. Another retriever has
-its own conversation. Answers restored from the server have no diagnostics.
+One conversation with one assistant on a server-held [thread](capabilities/threads.md),
+the same for every assistant kind — the Workbench's Assistants tabs and the retriever
+editor's test panel. The browser remembers only the current thread per ontology, lens,
+kind and assistant (not in the test panel) and restores its messages from the server.
 
-With diagnostics, each answer offers a Diagnostics action, and a side panel shows the
-selected answer (the latest by default) in four tabs, filling while the question runs:
+- **Empty conversation** — the assistant's name and description, and one line on what
+  its kind does.
+- **Messages** — the question in a bubble, the answer beside the assistant's icon,
+  rendered as Markdown; answer text appears as it streams. While an answer runs it shows
+  the elapsed seconds and what it is doing now: an agent's running tool, a retriever's
+  current step.
+- **Input** — at most 2,000 characters, growing to a few lines; Enter sends, Shift+Enter
+  adds a line. While an answer runs, Send becomes Stop.
+- **New conversation** — in the toolbar once there are messages, not while an answer
+  runs; confirmed, it starts a new thread. The browser forgets the old one, which the
+  server removes when it expires.
+- **Side panel** — beside the conversation, stacked below it on a narrow screen, showing
+  the kind's insight into one answer. A button under each answer selects it; by default,
+  and after every new question, the panel follows the latest answer that has any.
+
+Follow-up questions refer to earlier completed answers of the thread. A failed answer
+keeps what arrived and says "Incomplete" with the reason; a stopped one says it is not
+part of the conversation. The thread keeps nothing of either, so a restored conversation
+does not show them. A closed connection without a terminal event is a failure; turns
+never retry. A message to a thread still answering an earlier one is refused and shown as
+the answer's error. When the thread has expired — found on opening, or when a message is
+refused for it — the chat says so and starts a new conversation; a refused message goes
+back into the input. Switching assistant, tab, ontology or lens cancels the active request;
+late events cannot enter another thread. Storage failure does not break live chat.
+
+A retriever's **diagnostics panel** shows the selected answer, with the answer's total time
+on its button, in four tabs, filling while the question runs:
 
 - **Overview** — time spent in each of the three steps and in total, the number of model
   and search calls, the limitations the run reported, and detailed timings.
@@ -967,8 +967,8 @@ the address.
 | Explorer working set | Per ontology + lens | Bounded by the hard node cap |
 | Recently opened entities | Per ontology + lens | 10 |
 | Recent query texts | Per ontology + lens | 10 |
-| Current conversation thread id (Workbench Agents and Retrievers tabs) | Per ontology + lens + assistant | One |
-| Chat tool-call panel switch | Global | — |
+| Current conversation thread id (Workbench Agents and Retrievers tabs) | Per ontology + lens + kind + assistant | One |
+| Agent tool-call panel switch | Global | — |
 | Retriever diagnostics switch (Workbench) | Global | — |
 | Retriever test panel mode (Chat or Retrieve) | Global | — |
 | Retriever for palette questions | Per ontology + lens | — |
@@ -983,7 +983,7 @@ relations are re-fetched on restore, so a stale canvas can never display stale p
 values. Conversations themselves are held by the server; the browser keeps only the
 current thread's id and restores the messages from the server. Question results are
 in-memory for the session and deliberately not persisted; the Workbench's selected
-retriever lives in the address.
+assistant lives in the address.
 Persistence failures are swallowed: with storage unavailable the product works exactly the
 same, minus the memory.
 
@@ -1011,7 +1011,7 @@ Workbench addresses live under `/o/{ontologyKey}/w/{lensKey}`, Studio addresses 
 | `/o/{ontologyKey}/w/{lensKey}/query?run={queryKey}` | The library with that query expanded, run at once when it has no parameters |
 | `/o/{ontologyKey}/w/{lensKey}/ai` | The Assistants panel, Agents tab; an unknown `tab` shows Agents as well |
 | `/o/{ontologyKey}/w/{lensKey}/ai?tab=retriever` | The Retrievers tab |
-| `/o/{ontologyKey}/w/{lensKey}/ai?tab=retriever&agent={agentKey}` | The Retrievers tab with that retriever — `_default` for the default one; the default retriever when the lens has no such retriever |
+| `/o/{ontologyKey}/w/{lensKey}/ai?assistant={key}` · `?tab=retriever&assistant={key}` | That tab with that assistant — `_default` for the default one; the default one when the lens has no such assistant |
 | `/o/{ontologyKey}/studio` | The ontology's schema overview |
 | `/o/{ontologyKey}/studio/entity-types/{id}` · `.../relation-types/{id}` | A type editor |
 | `/o/{ontologyKey}/studio/lenses` | The lens list |
@@ -1056,10 +1056,8 @@ Any unrecognised address returns to the root.
 | Explorer | `P` | Pin or unpin the selection |
 | Explorer | Delete / Backspace | Remove selected nodes from the canvas |
 | Explorer | Shift or Cmd while clicking | Extend the selection |
-| Chat | Enter | Send |
-| Chat | Shift+Enter | Newline |
-| Retriever chat | Enter | Send |
-| Retriever chat | Shift+Enter | Newline |
+| Assistant chat | Enter | Send |
+| Assistant chat | Shift+Enter | Newline |
 | Retriever test panel, Retrieve | Enter | Ask |
 | Forms | Enter | Submit the form |
 

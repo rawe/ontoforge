@@ -7,23 +7,20 @@ import { TypeChip } from '@/components/TypeChip'
 import { ResultsTable } from '@/components/query/ResultsTable'
 import { isEntityObject } from '@/components/query/resultUtils'
 import { cn } from '@/lib/utils'
-import type { ChatEntry } from './chatStore'
+import { formatDuration, turnDuration, type Turn } from '../chat/chatModel'
 import {
   callDuration,
-  formatDuration,
   toolCallSummary,
   toolError,
   toolLabel,
   toolTime,
-  turnDuration,
-} from './chatTurnModel'
+} from './toolCallModel'
 
 interface ToolCallPanelProps {
   ontologyKey: string
   lensKey: string
   /** The assistant turn shown; undefined when no turn of this session made tool calls. */
-  turn: ChatEntry | undefined
-  question: string | undefined
+  turn: Turn<ToolCall[]> | undefined
   /** The conversation has answers restored from an earlier session, which keep no tool calls. */
   hasRestoredTurns: boolean
 }
@@ -33,8 +30,8 @@ interface ToolCallPanelProps {
  * what each asked for, how long it took and what it answered — readable
  * per tool, raw JSON one click away. Follows a running turn as calls arrive.
  */
-export function ToolCallPanel({ ontologyKey, lensKey, turn, question, hasRestoredTurns }: ToolCallPanelProps) {
-  const calls = turn?.toolCalls ?? []
+export function ToolCallPanel({ ontologyKey, lensKey, turn, hasRestoredTurns }: ToolCallPanelProps) {
+  const calls = turn?.insight ?? []
   const scroll = useRef<HTMLDivElement>(null)
   const running = turn?.status === 'pending'
   // Calls start collapsed; only the ones opened by hand show their details.
@@ -62,11 +59,9 @@ export function ToolCallPanel({ ontologyKey, lensKey, turn, question, hasRestore
   return (
     <div className="flex min-h-0 flex-1 flex-col text-xs">
       <div className="space-y-0.5 border-b px-4 py-2.5">
-        {question !== undefined && (
-          <p className="truncate text-muted-foreground" title={question}>
-            For: <span className="text-foreground">{question}</span>
-          </p>
-        )}
+        <p className="truncate text-muted-foreground" title={turn.question}>
+          For: <span className="text-foreground">{turn.question}</span>
+        </p>
         <p className="text-muted-foreground">
           {calls.length} {calls.length === 1 ? 'call' : 'calls'}
           {time !== undefined && (

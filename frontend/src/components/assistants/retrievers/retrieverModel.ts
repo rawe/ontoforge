@@ -11,11 +11,13 @@ import type {
   RetrieverConfig,
   RetrieverFilter,
   RetrieverDiagnostics,
+  RetrieverKindEvent,
   RetrieverPathStep,
   RetrieverResult,
   SearchMode,
 } from '@/api/retrievers'
 import type { SearchCatalogEntry, ValidationError } from '@/api/types'
+import type { TurnModel, TurnStatus } from '../chat/chatModel.ts'
 
 /** Client defaults (the server has no catalog endpoint for them). */
 export const DEFAULT_THRESHOLD = 0.35
@@ -295,7 +297,7 @@ export const modelCallName = (phase: string) =>
 /** The sequential steps of one question; every other timing is a part of one of them. */
 export const STEPS = ['plan', 'retrieve', 'answer'] as const
 
-export type TurnStatus = 'pending' | 'complete' | 'failed'
+export type { TurnStatus }
 
 /**
  * One step's timing cell: its duration; while the turn runs, "…"; in a
@@ -322,6 +324,24 @@ export function callCounts(meta: RetrieverDiagnostics, status: TurnStatus): { mo
 export const formatMs = (ms: number) => ms < 1000 ? `${ms.toFixed(ms < 10 ? 1 : 0)} ms` : `${(ms / 1000).toFixed(2)} s`
 
 export const MODE_LABEL: Record<SearchMode, string> = { semantic: 'by meaning', keyword: 'by keywords', hybrid: 'by meaning and keywords' }
+
+/** A retriever answer's insight: its diagnostics, and the phase it is in while it runs. */
+export interface RetrieverInsight { diagnostics: RetrieverDiagnostics; phase?: string }
+
+/** How the retriever's own events build an answer's insight. */
+export const retrieverTurns: TurnModel<RetrieverKindEvent, RetrieverInsight> = {
+  empty: () => ({ diagnostics: {} }),
+  apply(insight, event) {
+    switch (event.type) {
+      case 'retriever.phase':
+        return event.status === 'start' ? { ...insight, phase: event.phase } : insight
+      case 'retriever.diagnostics':
+        return { ...insight, diagnostics: mergeDiagnostics(insight.diagnostics, event) }
+    }
+  },
+  hasInsight: (insight) => Object.keys(insight.diagnostics).length > 0,
+  progress: (insight) => (insight.phase === undefined ? undefined : phaseName(insight.phase)),
+}
 
 /** Merge one `retriever.diagnostics` event into a turn's diagnostics: timings and model calls accumulate, limitations dedupe. */
 export function mergeDiagnostics(current: RetrieverDiagnostics, data: RetrieverDiagnostics): RetrieverDiagnostics {

@@ -1,78 +1,37 @@
 /**
- * Pure helpers for the agent chat: how stream events build an assistant
- * turn (with client-side timing — the stream carries none), which turn the
- * tool-call panel shows, and a short description of each tool call.
+ * Pure helpers of the agent chat: how the agent's tool events build an
+ * answer's tool calls (with client-side timing — the stream carries none),
+ * what the running answer is doing, and a short description of each call.
  *
  * No React, no I/O — unit-tested with `node --test`.
  */
 
-import type { ChatEvent } from '@/api/chatStream'
+import type { ChatEvent, SharedEvent } from '@/api/chatStream'
 import type { ToolCall } from '@/api/types'
-import type { ChatEntry } from './chatStore.ts'
+import type { TurnModel } from '../chat/chatModel.ts'
 
-/** A new, pending assistant turn, started at `now`. */
-export function pendingTurn(id: string, now: number): ChatEntry {
-  return { id, role: 'assistant', content: '', status: 'pending', toolCalls: [], startedAt: now }
-}
+/** The agent's own stream events. */
+export type AgentEvent = Exclude<ChatEvent, SharedEvent>
 
-/** The turn after one stream event, `now` the client clock in ms. */
-export function applyChatEvent(turn: ChatEntry, event: ChatEvent, now: number): ChatEntry {
-  switch (event.type) {
-    case 'thread':
-      return turn
-    case 'delta':
-      return { ...turn, content: turn.content + event.text }
-    case 'agent.tool_call':
-      return {
-        ...turn,
-        toolCalls: [
-          ...(turn.toolCalls ?? []),
-          { callId: event.callId, tool: event.tool, args: event.args, status: 'pending', startedAt: now },
-        ],
-      }
-    case 'agent.tool_result':
-      return {
-        ...turn,
-        toolCalls: turn.toolCalls?.map((call) =>
-          call.callId === event.callId
-            ? { ...call, result: event.result, status: 'completed', finishedAt: now }
-            : call,
-        ),
-      }
-    case 'final':
-      return { ...turn, content: event.reply, status: 'completed', finishedAt: now }
-    case 'error':
-      return failTurn(turn, event.error.message, now)
-  }
-}
-
-/** The turn failed at `now`: calls still running count as interrupted. */
-export function failTurn(turn: ChatEntry, message: string, now: number): ChatEntry {
-  return {
-    ...turn,
-    status: 'failed',
-    error: message,
-    finishedAt: now,
-    toolCalls: turn.toolCalls?.map((call) =>
-      call.status === 'pending' ? { ...call, status: 'interrupted' } : call,
-    ),
-  }
-}
-
-/** The assistant turn the panel shows: the chosen one, else the latest with tool calls. */
-export function inspectedTurn(
-  messages: readonly ChatEntry[],
-  selectedId: string | null,
-): ChatEntry | undefined {
-  const withCalls = messages.filter((m) => m.role === 'assistant' && m.id !== undefined && (m.toolCalls?.length ?? 0) > 0)
-  return withCalls.find((m) => m.id === selectedId) ?? withCalls.at(-1)
-}
-
-/** The user message a turn answers. */
-export function questionOf(messages: readonly ChatEntry[], turn: ChatEntry): string | undefined {
-  const at = messages.indexOf(turn)
-  for (let i = at - 1; i >= 0; i -= 1) if (messages[i]!.role === 'user') return messages[i]!.content
-  return undefined
+/** An agent answer's insight is its tool calls, in the order they were made. */
+export const agentTurns: TurnModel<AgentEvent, ToolCall[]> = {
+  empty: () => [],
+  apply(calls, event, now) {
+    switch (event.type) {
+      case 'agent.tool_call':
+        return [...calls, { callId: event.callId, tool: event.tool, args: event.args, status: 'pending', startedAt: now }]
+      case 'agent.tool_result':
+        return calls.map((call) =>
+          call.callId === event.callId ? { ...call, result: event.result, status: 'completed', finishedAt: now } : call)
+    }
+  },
+  // Calls still running when the turn ends count as interrupted.
+  end: (calls) => calls.map((call) => (call.status === 'pending' ? { ...call, status: 'interrupted' } : call)),
+  hasInsight: (calls) => calls.length > 0,
+  progress(calls) {
+    const running = [...new Set(calls.filter((c) => c.status === 'pending').map((c) => toolLabel(c.tool)))]
+    return running.length > 0 ? running.join(', ') : undefined
+  },
 }
 
 /** How long a call ran, in ms; undefined while running or when not timed. */
@@ -100,11 +59,6 @@ export function toolTime(calls: readonly ToolCall[]): number | undefined {
     end = Math.max(end, e)
   }
   return total + end - start
-}
-
-/** How long the answer took, from sending to the reply, in ms. */
-export function turnDuration(turn: ChatEntry): number | undefined {
-  return turn.startedAt !== undefined && turn.finishedAt !== undefined ? turn.finishedAt - turn.startedAt : undefined
 }
 
 /** The error a tool answered with (`{error}`), if any. */
@@ -175,9 +129,4 @@ export function toolCallSummary(call: ToolCall): string | undefined {
     default:
       return undefined
   }
-}
-
-/** `412 ms`, `2.4 s`. */
-export function formatDuration(ms: number): string {
-  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`
 }

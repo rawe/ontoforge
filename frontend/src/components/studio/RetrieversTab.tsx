@@ -246,9 +246,9 @@ function RetrieverEditor({ ontologyKey, lensKey, existingKeys, catalog, schema, 
             agentKey={agent?.key ?? null} blockedReason={execution.mode === 'blocked' ? execution.reason : null}
             catalog={catalog} schema={schema} />
           : <RetrieverChat key={agent ? `${agent.key}:${agent.updatedAt}` : 'new'} ontologyKey={ontologyKey} lensKey={lensKey}
-            agentKey={agent?.key ?? null} blockedReason={execution.mode === 'blocked' ? execution.reason : null} diagnostics
-            catalog={catalog} schema={schema}
-            intro={<div className="mx-auto max-w-md py-8 text-sm text-muted-foreground">{agent === null ? 'Save this retriever to test it.' : <><h4 className="mb-2 text-base font-medium text-foreground">Ask {agent.name}</h4><p>Ask about a topic, an exact value, or both. Follow-up questions refer to completed answers in this conversation.</p></>}</div>} />}
+            retrieverKey={agent?.key ?? null} name={agent?.name ?? title} description={agent?.description ?? null}
+            blockedReason={execution.mode === 'blocked' ? execution.reason : null} diagnostics="always" remember={false}
+            catalog={catalog} schema={schema} />}
       </section>
     </div>
 
